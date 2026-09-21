@@ -421,6 +421,7 @@ export class SubContainerEager<
   private destroyed = false
   private destroyPending = false
   private holdCount = 0
+  private teardown: Promise<void> | null = null
 
   private leader: cp.ChildProcess
   private leaderExited: boolean = false
@@ -634,13 +635,14 @@ export class SubContainerEager<
     unregisterFromContextCleanup(this.effects, this)
   }
 
-  private async _destroyImmediate(): Promise<void> {
-    if (this.destroyed) return
-    this.destroyed = true
-    unregisterFromContextCleanup(this.effects, this)
-    const guid = this.guid
-    await this.killLeader()
-    await this.effects.subcontainer.destroyFs({ guid })
+  private _destroyImmediate(): Promise<void> {
+    return (this.teardown ??= (async () => {
+      this.destroyed = true
+      unregisterFromContextCleanup(this.effects, this)
+      const guid = this.guid
+      await this.killLeader()
+      await this.effects.subcontainer.destroyFs({ guid })
+    })())
   }
 
   private async killLeader(): Promise<null> {
@@ -1020,28 +1022,14 @@ export class SubContainerLazy<
         logErrorOnce(e)
         throw e
       })
-      .then(async eager => {
+      .then(eager => {
         for (const hold of this.holds) {
           if (!hold.release) hold.release = eager.hold()
         }
-        if (this.destroyPending) await eager.destroy()
+        if (this.destroyPending) eager.destroy().catch(logErrorOnce)
         else if (this.detachPending) eager.detach()
         return eager
       }))
-  }
-
-  /** The eager subcontainer once any attempt in flight settles; null when not materialized. */
-  private async ifMaterialized(): Promise<SubContainerEager<
-    Manifest,
-    Effects
-  > | null> {
-    const attempt = this.materialized
-    if (!attempt) return null
-    return attempt.catch(e => {
-      // Still cached after rejecting: the subcontainer exists.
-      if (this.materialized === attempt) throw e
-      return null
-    })
   }
 
   /** Absolute path to the materialized subcontainer's rootfs. Triggers materialization on first access. */
@@ -1111,7 +1099,8 @@ export class SubContainerLazy<
    */
   async destroy(): Promise<void> {
     this.destroyPending = true
-    await (await this.ifMaterialized())?.destroy()
+    const eager = await this.materialized?.catch(logErrorOnce)
+    await eager?.destroy()
   }
 
   /**
@@ -1121,9 +1110,7 @@ export class SubContainerLazy<
    */
   detach(): void {
     this.detachPending = true
-    this.ifMaterialized()
-      .then(e => e?.detach())
-      .catch(e => console.error(e))
+    this.materialized?.then(e => e.detach()).catch(logErrorOnce)
   }
 
   /**
@@ -1210,9 +1197,7 @@ export class SubContainerLazy<
   }
 
   onDrop(): void {
-    this.ifMaterialized()
-      .then(e => e?.destroy())
-      .catch(e => console.error(e))
+    this.materialized?.then(e => e.destroy()).catch(logErrorOnce)
   }
 }
 

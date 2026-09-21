@@ -29,6 +29,28 @@ const fakeEffects = (): T.Effects =>
     },
   }) as any
 
+/** A SubContainerEager with its own hold and destroy logic and no runtime behind it. */
+const bareEager = (destroyFs: () => Promise<null>) =>
+  Object.assign(Object.create(SubContainerEager.prototype), {
+    destroyed: false,
+    destroyPending: false,
+    holdCount: 0,
+    teardown: null,
+    leaderExited: true,
+    guid: 'guid',
+    effects: { subcontainer: { destroyFs } },
+  }) as SubContainerEager<T.SDKManifest>
+
+const slowDestroyFs = () => {
+  const state = { done: false }
+  const destroyFs = async () => {
+    await new Promise(resolve => setTimeout(resolve, 20))
+    state.done = true
+    return null
+  }
+  return { state, destroyFs }
+}
+
 const baseReady = {
   display: 'Reg',
   fn: () => ({ result: 'success' as const, message: null }),
@@ -518,6 +540,18 @@ describe('SubContainerLazy.detach', () => {
   })
 })
 
+describe('SubContainerEager.destroy', () => {
+  it('shares one teardown between concurrent callers', async () => {
+    const { state, destroyFs } = slowDestroyFs()
+    const eager = bareEager(destroyFs)
+
+    const first = eager.destroy()
+    await eager.destroy()
+    expect(state.done).toBe(true)
+    await first
+  })
+})
+
 describe('SubContainerLazy.eager', () => {
   let logged: jest.SpyInstance
   beforeEach(() => {
@@ -598,11 +632,28 @@ describe('SubContainerLazy.eager', () => {
     )
 
     await sub.destroy()
-    const failed = sub.eager()
-    await expect(failed).rejects.toBe(failure)
-    expect(sub.eager()).toBe(failed)
+    await expect(sub.eager()).resolves.toBe(eager)
     await expect(sub.destroy()).rejects.toBe(failure)
     expect(materialize).toHaveBeenCalledTimes(1)
+    expect(logged.mock.calls).toEqual([[failure]])
+  })
+
+  it('resolves without waiting for a pending destroy, which destroy() joins', async () => {
+    const { state, destroyFs } = slowDestroyFs()
+    jest.spyOn(SubContainerEager, '_of').mockResolvedValue(bareEager(destroyFs))
+    const sub = SubContainer.of<Manifest>(
+      fakeEffects(),
+      { imageId: 'reg' },
+      null,
+      'name',
+    )
+
+    const materialized = sub.eager()
+    const destroyed = sub.destroy()
+    await materialized
+    expect(state.done).toBe(false)
+    await destroyed
+    expect(state.done).toBe(true)
   })
 
   it('has nothing to destroy after a failed materialization', async () => {
@@ -622,10 +673,12 @@ describe('SubContainerLazy.eager', () => {
     )
 
     const failed = sub.eager()
+    sub.detach()
     const destroyed = sub.destroy()
     await expect(failed).rejects.toBe(failure)
     await expect(destroyed).resolves.toBeUndefined()
     expect(eager.destroy).not.toHaveBeenCalled()
+    expect(logged.mock.calls).toEqual([[failure]])
 
     await expect(sub.eager()).resolves.toBe(eager)
     expect(eager.destroy).toHaveBeenCalledTimes(1)
