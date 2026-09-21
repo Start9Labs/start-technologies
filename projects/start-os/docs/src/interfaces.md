@@ -26,7 +26,7 @@ Open the **Interfaces** tab to see every interface the service exposes. Each int
 
 ### Gateway Tables
 
-Each inbound gateway on your server has its own table. The rows in each table are the addresses available through that gateway. Addresses can be individually enabled or disabled. A LAN IP address you have not switched yourself follows the interface's `.local` address, so an address your server is assigned later starts out the way `.local` is set. On an interface served without TLS the two go together: switching on a LAN IP address switches `.local` on, and switching `.local` off switches its LAN IP addresses off. The `.local` address stays in the table while the gateway is disconnected.
+Each inbound gateway on your server has its own table. The rows in each table are the addresses available through that gateway. Addresses can be individually enabled or disabled. A LAN IP address you have not switched yourself follows the interface's `.local` address, so an address your server is assigned later starts out the way `.local` is set. On an interface served without TLS the two go together: switching on a LAN IP address switches `.local` on, and switching `.local` off switches its LAN IP addresses off. A `.local` address that is on while every IP address in its table is off shows a warning, since those are the addresses the name resolves to. The `.local` address stays in the table while the gateway is disconnected.
 
 Each table has the following columns:
 

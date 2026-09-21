@@ -820,4 +820,5 @@ export default {
   928: 'Aufsteigend',
   929: 'Absteigend',
   930: 'Dienste in diesem Register werden von der Start9-Community gepflegt und befinden sich in der Betaphase. Fehler sind zu erwarten. Die Installation erfolgt auf eigenes Risiko.',
+  931: 'Jede IP-Adresse, zu der dieser Name auf diesem Gateway aufgelöst wird, ist deaktiviert',
 } satisfies i18n

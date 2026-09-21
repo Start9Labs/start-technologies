@@ -28,6 +28,11 @@ function isGua(h: T.HostnameInfo): boolean {
   return !isUla && !isLinkLocal
 }
 
+// A public IPv6 row is a GUA, which the name resolves to like any LAN IP.
+function servesMdns(h: T.HostnameInfo): boolean {
+  return h.metadata.kind === 'ipv6' || (h.metadata.kind === 'ipv4' && !h.public)
+}
+
 function getGatewayIds(h: T.HostnameInfo): string[] {
   switch (h.metadata.kind) {
     case 'ipv4':
@@ -270,6 +275,7 @@ export class InterfaceService {
         if (!list) continue
         list.push({
           enabled: utils.isAddressEnabled(addr, h),
+          allIpsDisabled: false,
           gua: isGua(h),
           type: getAddressType(h),
           access: h.public ? 'public' : 'private',
@@ -297,6 +303,17 @@ export class InterfaceService {
       .filter(g => (groupMap.get(g.id)?.length ?? 0) > 0)
       .map(g => {
         const addresses = groupMap.get(g.id)!.sort(sortDomainsFirst)
+
+        for (const mdns of addresses) {
+          if (mdns.enabled && mdns.hostnameInfo.metadata.kind === 'mdns') {
+            const ips = addresses.filter(
+              a =>
+                a.hostnameInfo.port === mdns.hostnameInfo.port &&
+                servesMdns(a.hostnameInfo),
+            )
+            mdns.allIpsDisabled = !!ips.length && ips.every(a => !a.enabled)
+          }
+        }
 
         return {
           gatewayId: g.id,
@@ -394,6 +411,8 @@ export class InterfaceService {
 
 export type GatewayAddress = {
   enabled: boolean
+  // An enabled mDNS address whose gateway has IPs, none of them enabled.
+  allIpsDisabled: boolean
   // An IPv6 GUA gets a Local/Public dropdown in the access column (its WAN
   // opt-in, carried by `hostnameInfo.public`); other addresses are read-only.
   gua: boolean

@@ -820,4 +820,5 @@ export default {
   928: 'Ascendente',
   929: 'Descendente',
   930: 'Los servicios de este registro están mantenidos por la comunidad Start9 y están en fase de prueba beta. Se esperan errores. Instálalos bajo tu propio riesgo.',
+  931: 'Todas las direcciones IP a las que se resuelve este nombre en esta puerta de enlace están deshabilitadas',
 } satisfies i18n

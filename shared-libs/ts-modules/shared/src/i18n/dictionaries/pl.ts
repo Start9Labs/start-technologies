@@ -820,4 +820,5 @@ export default {
   928: 'Rosnąco',
   929: 'Malejąco',
   930: 'Serwisy z tego katalogu są utrzymywane przez społeczność Start9 i są w fazie testów beta. Należy spodziewać się błędów. Instalujesz je na własne ryzyko.',
+  931: 'Wszystkie adresy IP, na które ta nazwa jest rozwiązywana na tej bramie, są wyłączone',
 } satisfies i18n

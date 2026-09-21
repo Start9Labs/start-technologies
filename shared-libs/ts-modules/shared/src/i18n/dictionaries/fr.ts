@@ -820,4 +820,5 @@ export default {
   928: 'Croissant',
   929: 'Décroissant',
   930: 'Les services de cette bibliothèque sont maintenus par la communauté Start9 et sont en phase de test bêta. Des bugs sont à prévoir. Installez-les à vos risques et périls.',
+  931: 'Toutes les adresses IP vers lesquelles ce nom se résout sur cette passerelle sont désactivées',
 } satisfies i18n
