@@ -57,6 +57,8 @@ Each table has the following columns:
 > - **Local** (default) — reachable on the local network only; traffic from outside your subnet is rejected.
 > - **Public** — also reachable from the Internet. StartOS attempts to open the matching pinhole on your gateway automatically (via PCP); if your gateway doesn't support it you may need to allow inbound traffic to that address and port manually.
 >
+> A **Public** GUA stays on when you switch `.local` off. On an interface served without TLS, `.local` resolves to that address, so it still reaches the service from your local network while its switch reads off.
+>
 > This only applies to IPv6 GUAs. IPv6 ULAs (private) are always local, and IPv4 keeps its separate LAN and WAN address rows.
 
 ### Adding Domains

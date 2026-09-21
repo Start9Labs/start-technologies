@@ -367,6 +367,7 @@ export function isAddressEnabled(
       .every(mdns => !overridden(addr.disabled, mdns))
   }
   if (!overridden(addr.disabled, h)) return true
+  // An enabled public GUA serves the name too; the switch stays off beside one.
   return (
     h.metadata.kind === 'mdns' &&
     !h.ssl &&

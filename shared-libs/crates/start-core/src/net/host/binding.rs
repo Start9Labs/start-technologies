@@ -119,7 +119,8 @@ impl DerivedAddressInfo {
             .all(|mdns| !self.disabled.contains(&override_key(mdns)))
     }
 
-    /// On a non-SSL port an enabled LAN IP serves the name.
+    /// On a non-SSL port an enabled LAN IP serves the name. An enabled public
+    /// GUA serves it too, and the switch stays off beside one.
     fn mdns_on(&self, mdns: &HostnameInfo) -> bool {
         !self.disabled.contains(&override_key(mdns))
             || (!mdns.ssl
