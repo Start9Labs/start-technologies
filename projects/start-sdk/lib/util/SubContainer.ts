@@ -5,6 +5,7 @@ import { promisify } from 'util'
 import { Buffer } from 'node:buffer'
 import { once } from '@start9labs/start-core/util/once'
 import { Drop } from '@start9labs/start-core/util/Drop'
+import { logErrorOnce } from '@start9labs/start-core/util/logErrorOnce'
 import { Mounts } from '../mainFn/Mounts'
 
 export const execFile = promisify(cp.execFile)
@@ -1001,33 +1002,46 @@ export class SubContainerLazy<
   /**
    * Materialize the underlying eager subcontainer and return it. Concurrent
    * calls share one attempt; successful materialization is cached, while a
-   * failed attempt is retried by the next call. Useful when you need the
-   * synchronous `SubContainerEager` interface (e.g. sync `rootfs` /
+   * failed attempt is logged and retried by the next call. Useful when you
+   * need the synchronous `SubContainerEager` interface (e.g. sync `rootfs` /
    * `subpath()`) — for ordinary command execution, just call `.exec()` /
    * `.writeFile()` directly and the lazy handle materializes internally.
    */
   eager(): Promise<SubContainerEager<Manifest, Effects>> {
-    if (this.materialized) return this.materialized
-
-    const materialized = SubContainerEager._of<Manifest, Effects>(
+    return (this.materialized ??= SubContainerEager._of<Manifest, Effects>(
       this.effects,
       { imageId: this.imageId, sharedRun: this.sharedRun },
       this.mounts,
       this.name,
       this.identity,
-    ).then(async eager => {
-      for (const hold of this.holds) {
-        if (!hold.release) hold.release = eager.hold()
-      }
-      if (this.destroyPending) await eager.destroy()
-      else if (this.detachPending) eager.detach()
-      return eager
+    )
+      .catch(e => {
+        this.materialized = null
+        logErrorOnce(e)
+        throw e
+      })
+      .then(async eager => {
+        for (const hold of this.holds) {
+          if (!hold.release) hold.release = eager.hold()
+        }
+        if (this.destroyPending) await eager.destroy()
+        else if (this.detachPending) eager.detach()
+        return eager
+      }))
+  }
+
+  /** The eager subcontainer once any attempt in flight settles; null when not materialized. */
+  private async ifMaterialized(): Promise<SubContainerEager<
+    Manifest,
+    Effects
+  > | null> {
+    const attempt = this.materialized
+    if (!attempt) return null
+    return attempt.catch(e => {
+      // Still cached after rejecting: the subcontainer exists.
+      if (this.materialized === attempt) throw e
+      return null
     })
-    this.materialized = materialized
-    materialized.catch(() => {
-      if (this.materialized === materialized) this.materialized = null
-    })
-    return materialized
   }
 
   /** Absolute path to the materialized subcontainer's rootfs. Triggers materialization on first access. */
@@ -1082,7 +1096,7 @@ export class SubContainerLazy<
           hold.release = eager.hold()
         }
       })
-      .catch(() => {})
+      .catch(logErrorOnce)
     return async () => {
       if (!this.holds.delete(hold)) return
       if (hold.release) await hold.release()
@@ -1097,7 +1111,7 @@ export class SubContainerLazy<
    */
   async destroy(): Promise<void> {
     this.destroyPending = true
-    if (this.materialized) await (await this.materialized).destroy()
+    await (await this.ifMaterialized())?.destroy()
   }
 
   /**
@@ -1107,9 +1121,9 @@ export class SubContainerLazy<
    */
   detach(): void {
     this.detachPending = true
-    if (this.materialized) {
-      this.materialized.then(e => e.detach()).catch(e => console.error(e))
-    }
+    this.ifMaterialized()
+      .then(e => e?.detach())
+      .catch(e => console.error(e))
   }
 
   /**
@@ -1196,9 +1210,9 @@ export class SubContainerLazy<
   }
 
   onDrop(): void {
-    if (this.materialized) {
-      this.materialized.then(e => e.destroy()).catch(e => console.error(e))
-    }
+    this.ifMaterialized()
+      .then(e => e?.destroy())
+      .catch(e => console.error(e))
   }
 }
 
