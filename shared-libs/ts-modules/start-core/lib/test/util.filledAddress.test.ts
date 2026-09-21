@@ -1,6 +1,6 @@
 import { Host } from '../osBindings'
 import { deepEqual } from '../util'
-import { fillHost } from '../util/filledAddress'
+import { fillHost, isAddressEnabled } from '../util/filledAddress'
 
 const host = (fingerprint: string): Host => ({
   bindings: {
@@ -31,7 +31,7 @@ const host = (fingerprint: string): Host => ({
             public: false,
             hostname: 'relay.local',
             port: 5223,
-            metadata: { kind: 'mdns', gateways: [] },
+            metadata: { kind: 'mdns', gateways: ['eth0'] },
           },
         ],
       },
@@ -100,6 +100,48 @@ describe('fillHost', () => {
     ])
     expect(address.nonLocal.hostnames.map(h => h.hostname)).toEqual([
       'relay.onion',
+      'relay.local',
     ])
+  })
+
+  test('an enabled mDNS address remains enabled without a LAN IP', () => {
+    expect(addressOf(host('AAAA=')).hostnames.map(h => h.hostname)).toContain(
+      'relay.local',
+    )
+  })
+
+  test('an explicitly disabled mDNS address disables its LAN IPs', () => {
+    const disabled = host('AAAA=')
+    disabled.bindings[5223].addresses.available.push({
+      ssl: true,
+      public: false,
+      hostname: '192.0.2.10',
+      port: 5223,
+      metadata: { kind: 'ipv4', gateway: 'eth0' },
+    })
+    disabled.bindings[5223].addresses.disabled = [['relay.local', 5223]]
+
+    expect(addressOf(disabled).hostnames.map(h => h.hostname)).toEqual([
+      'relay.onion',
+    ])
+  })
+
+  test('disabled LAN IPs make mDNS unreachable without changing its setting', () => {
+    const enabled = host('AAAA=')
+    const addresses = enabled.bindings[5223].addresses
+    addresses.available.push({
+      ssl: true,
+      public: false,
+      hostname: '192.0.2.10',
+      port: 5223,
+      metadata: { kind: 'ipv4', gateway: 'eth0' },
+    })
+    addresses.disabled = [['192.0.2.10', 5223]]
+    const mdns = addresses.available.find(h => h.metadata.kind === 'mdns')!
+
+    expect(isAddressEnabled(addresses, mdns)).toBe(true)
+    expect(addressOf(enabled).hostnames.map(h => h.hostname)).not.toContain(
+      'relay.local',
+    )
   })
 })

@@ -144,6 +144,10 @@ for the detail behind its highlights.
   reading its own addresses as it starts sees the server's LAN addresses.
   Startup waits up to 30 seconds for NetworkManager to finish connecting.
 
+- **A service's `.local` address stays enabled while its LAN gateways are
+  disconnected.** Its switch records the user's LAN-access choice: disabling
+  it disables the service's LAN IP addresses on those gateways too.
+
 - **The Raspberry Pi 4 image includes the Broadcom firmware needed for its
   built-in WiFi interface.**
 

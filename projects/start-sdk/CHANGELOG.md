@@ -137,6 +137,10 @@
 
 ### Fixed
 
+- **Filled addresses preserve the user's `.local` setting while its gateways
+  are disconnected.** The `.local` switch controls the LAN IP addresses on
+  those gateways as one persistent LAN-access choice.
+
 - **`Backups.withMariadbDump` works against MariaDB 11 images**, official or
   packaged from a distribution
 

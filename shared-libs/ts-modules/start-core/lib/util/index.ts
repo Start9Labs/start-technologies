@@ -3,6 +3,7 @@ export {
   mdnsResolvable,
   filledAddress,
   filterNonLocal,
+  isAddressEnabled,
 } from './filledAddress'
 export type {
   Filter,

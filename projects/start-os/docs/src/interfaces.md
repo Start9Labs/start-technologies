@@ -26,7 +26,7 @@ Open the **Interfaces** tab to see every interface the service exposes. Each int
 
 ### Gateway Tables
 
-Each inbound gateway on your server has its own table. The rows in each table are the addresses available through that gateway. Addresses can be individually enabled or disabled.
+Each inbound gateway on your server has its own table. The rows in each table are the addresses available through that gateway. Addresses can be individually enabled or disabled. Your `.local` switch is your persistent LAN-access choice: it remains enabled while the gateways are disconnected, and disabling it disables the interface's LAN IP addresses on those gateways too.
 
 Each table has the following columns:
 

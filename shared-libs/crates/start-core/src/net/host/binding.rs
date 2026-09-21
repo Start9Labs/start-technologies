@@ -76,9 +76,30 @@ pub struct DerivedAddressInfo {
 }
 
 impl DerivedAddressInfo {
+    fn disabled_by_mdns(&self, address: &HostnameInfo) -> bool {
+        if address.public {
+            return false;
+        }
+        let gateway = match &address.metadata {
+            HostnameMetadata::Ipv4 { gateway } | HostnameMetadata::Ipv6 { gateway, .. } => gateway,
+            _ => return false,
+        };
+        self.available.iter().any(|mdns| {
+            mdns.ssl == address.ssl
+                && mdns.port == address.port
+                && matches!(
+                    &mdns.metadata,
+                    HostnameMetadata::Mdns { gateways } if gateways.contains(gateway)
+                )
+                && self
+                    .disabled
+                    .contains(&(mdns.hostname.clone(), mdns.port.unwrap_or_default()))
+        })
+    }
+
     /// Returns addresses that are currently enabled after applying overrides.
-    /// Default: public IPs (including WAN-exposed GUAs) are opt-in via `enabled`,
-    /// everything else is on unless in `disabled`.
+    /// Default: public IPs (including WAN-exposed GUAs) are opt-in via `enabled`;
+    /// everything else is on unless it or its controlling mDNS address is in `disabled`.
     pub fn enabled(&self) -> BTreeSet<&HostnameInfo> {
         self.available
             .iter()
@@ -96,6 +117,7 @@ impl DerivedAddressInfo {
                     !self
                         .disabled
                         .contains(&(h.hostname.clone(), h.port.unwrap_or_default())) // disablable addresses will always have a port
+                        && !self.disabled_by_mdns(h)
                 }
             })
             .collect()
@@ -784,6 +806,35 @@ pub(crate) fn has_nonssl_private_domain(
     })
 }
 
+fn enable_mdns_for_lan_address(
+    addresses: &mut DerivedAddressInfo,
+    address: &HostnameInfo,
+    port: u16,
+) {
+    if address.public {
+        return;
+    }
+    let gateway = match &address.metadata {
+        HostnameMetadata::Ipv4 { gateway } | HostnameMetadata::Ipv6 { gateway, .. } => gateway,
+        _ => return,
+    };
+    let mdns_keys: Vec<_> = addresses
+        .available
+        .iter()
+        .filter(|candidate| candidate.ssl == address.ssl && candidate.port == Some(port))
+        .filter(|candidate| {
+            matches!(
+                &candidate.metadata,
+                HostnameMetadata::Mdns { gateways } if gateways.contains(gateway)
+            )
+        })
+        .map(|candidate| (candidate.hostname.clone(), port))
+        .collect();
+    for key in mdns_keys {
+        addresses.disabled.remove(&key);
+    }
+}
+
 /// Is the LAN level (private domain or bare LAN IPv4) currently on at
 /// `gateway`+`port`? LAN addresses are opt-out (on by default). Excludes the GUA.
 fn nonssl_lan_on(addresses: &DerivedAddressInfo, gateway: &GatewayId, port: u16) -> bool {
@@ -943,8 +994,10 @@ pub(crate) fn set_nonssl_lan_group(
 
 /// Toggle one address on/off for a binding's `DerivedAddressInfo`. Public IPs
 /// live in the `enabled` set (keyed by `SocketAddr`); domains and private IPs
-/// live in the `disabled` set (keyed by `(hostname, port)`). On a non-SSL port a
-/// dual-stack public domain links the WAN IPv4 and IPv6 GUA, so toggling any one
+/// live in the `disabled` set (keyed by `(hostname, port)`). A disabled mDNS
+/// address masks same-port, same-TLS LAN IPs on its gateways; enabling one of
+/// those IPs re-enables the mDNS group. On a non-SSL port a dual-stack public
+/// domain links the WAN IPv4 and IPv6 GUA, so toggling any one
 /// of {IPv4, domain, GUA} moves the whole group ([`set_nonssl_wan_group`]).
 /// Shared by single-port bindings and port ranges (whose addresses all use
 /// `external_start_port` as their port, so the same keying applies).
@@ -983,6 +1036,7 @@ fn set_address_enabled_on(
         let key = (address.hostname.clone(), port);
         if enabled {
             addresses.disabled.remove(&key);
+            enable_mdns_for_lan_address(addresses, address, port);
         } else {
             addresses.disabled.insert(key);
         }
@@ -1968,6 +2022,75 @@ mod test {
                 .contains(&"[2001:db8::1]:42000".parse().unwrap()),
             "GUA is local, not public"
         );
+    }
+
+    #[test]
+    fn mdns_toggle_controls_its_lan_ips() {
+        let eth = GatewayId::from(InternedString::intern("eth0"));
+        let wifi = GatewayId::from(InternedString::intern("wlan0"));
+        let other = GatewayId::from(InternedString::intern("wg0"));
+        let mk = |host: &str, metadata| HostnameInfo {
+            ssl: true,
+            public: false,
+            hostname: InternedString::intern(host),
+            port: Some(443),
+            metadata,
+        };
+        let mdns = mk(
+            "server.local",
+            HostnameMetadata::Mdns {
+                gateways: BTreeSet::from([eth.clone(), wifi.clone()]),
+            },
+        );
+        let lan = [
+            mk(
+                "192.0.2.10",
+                HostnameMetadata::Ipv4 {
+                    gateway: eth.clone(),
+                },
+            ),
+            mk(
+                "2001:db8::10",
+                HostnameMetadata::Ipv6 {
+                    gateway: wifi.clone(),
+                    scope_id: 0,
+                },
+            ),
+        ];
+        let unrelated = mk("192.0.2.20", HostnameMetadata::Ipv4 { gateway: other });
+        let mut info = DerivedAddressInfo::default();
+        info.available.insert(mdns.clone());
+        info.available.extend(lan.iter().cloned());
+        info.available.insert(unrelated.clone());
+
+        set_address_enabled_on(&mut info, &mdns, false).unwrap();
+        assert!(!info.enabled().contains(&mdns));
+        assert!(lan.iter().all(|address| !info.enabled().contains(address)));
+        assert!(info.enabled().contains(&unrelated));
+
+        info.available.clear();
+        let reassigned = mk(
+            "192.0.2.11",
+            HostnameMetadata::Ipv4 {
+                gateway: eth.clone(),
+            },
+        );
+        info.available
+            .extend([mdns.clone(), reassigned.clone(), unrelated.clone()]);
+        assert!(!info.enabled().contains(&mdns));
+        assert!(!info.enabled().contains(&reassigned));
+        assert!(info.enabled().contains(&unrelated));
+
+        set_address_enabled_on(&mut info, &reassigned, true).unwrap();
+        assert!(info.enabled().contains(&mdns));
+        assert!(info.enabled().contains(&reassigned));
+        assert!(info.enabled().contains(&unrelated));
+
+        info.available.extend(lan.iter().cloned());
+        set_address_enabled_on(&mut info, &mdns, false).unwrap();
+        set_address_enabled_on(&mut info, &mdns, true).unwrap();
+        assert!(info.enabled().contains(&mdns));
+        assert!(lan.iter().all(|address| info.enabled().contains(address)));
     }
 
     #[test]
