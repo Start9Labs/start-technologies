@@ -139,10 +139,10 @@ for the detail behind its highlights.
 
 ### Fixed
 
-- **Service addresses stay listed while StartOS detects the network at boot,
-  and an interface that loses its connection drops its addresses right
-  away.** A service watching its own addresses sees the last-known set until
-  its interface reports, and the table then follows the link.
+- **Services start once StartOS has detected the network, and an interface
+  that loses its connection drops its addresses right away.** A service
+  reading its own addresses as it starts sees the server's LAN addresses.
+  Startup waits up to 30 seconds for NetworkManager to finish connecting.
 
 - **The Raspberry Pi 4 image includes the Broadcom firmware needed for its
   built-in WiFi interface.**

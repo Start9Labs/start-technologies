@@ -2101,6 +2101,13 @@ net.gateway.error-syncing-ip-info:
   fr_FR: "Erreur de synchronisation des infos IP vers la BDD : %{error}"
   pl_PL: "Błąd synchronizacji informacji IP z bazą danych: %{error}"
 
+net.gateway.network-settle-timeout:
+  en_US: "Timed out waiting for the network to settle. Starting services anyway..."
+  de_DE: "Zeitüberschreitung beim Warten auf ein stabiles Netzwerk. Dienste werden trotzdem gestartet..."
+  es_ES: "Se agotó el tiempo de espera para que la red se estabilizara. Iniciando los servicios de todos modos..."
+  fr_FR: "Délai d'attente dépassé pour la stabilisation du réseau. Démarrage des services malgré tout..."
+  pl_PL: "Przekroczono czas oczekiwania na ustabilizowanie sieci. Usługi zostaną uruchomione mimo to..."
+
 net.gateway.cannot-forget-connected-interface:
   en_US: "Cannot forget currently connected interface"
   de_DE: "Aktuell verbundene Schnittstelle kann nicht vergessen werden"
