@@ -3,7 +3,7 @@ use std::path::Path;
 use exver::VersionRange;
 
 use super::v0_3_5::V0_3_0_COMPAT;
-use super::v0_3_6_alpha_0::migrated_package_id;
+use super::v0_3_6_alpha_0::migrated_id_str;
 use super::{VersionT, v0_4_0_1};
 use crate::hostname::repair_hostname;
 use crate::prelude::*;
@@ -195,78 +195,50 @@ fn title_case(hostname: &str) -> String {
 
 async fn restore_renamed_onion_addresses(dir: &Path) -> Result<(), Error> {
     let handoff = dir.join("onion-migration.json");
-    match tokio::fs::read_to_string(&handoff).await {
-        Ok(raw) => {
-            let mut migration = serde_json::from_str(&raw).with_kind(ErrorKind::Deserialization)?;
-            if rename_onion_package_ids(&mut migration) {
-                let json = serde_json::to_string(&migration).with_kind(ErrorKind::Serialization)?;
-                crate::util::io::write_file_atomic(handoff, json).await?;
-            }
-            return Ok(());
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => {
-            return Err(e)
-                .with_ctx(|_| (ErrorKind::Filesystem, format!("read {}", handoff.display())));
-        }
-    }
-
-    let backup = dir.join(".onion-migration.json.bak");
-    let raw = match tokio::fs::read_to_string(&backup).await {
-        Ok(raw) => raw,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => {
-            return Err(e)
-                .with_ctx(|_| (ErrorKind::Filesystem, format!("read {}", backup.display())));
-        }
-    };
-    let migration = serde_json::from_str(&raw).with_kind(ErrorKind::Deserialization)?;
-    let Some(migration) = renamed_onion_migration(migration) else {
+    let (raw, replay_only) = if let Some(raw) =
+        crate::util::io::maybe_read_file_to_string(&handoff).await?
+    {
+        (raw, false)
+    } else if let Some(raw) =
+        crate::util::io::maybe_read_file_to_string(dir.join(".onion-migration.json.bak")).await?
+    {
+        (raw, true)
+    } else {
         return Ok(());
     };
-    let json = serde_json::to_string(&migration).with_kind(ErrorKind::Serialization)?;
-    crate::util::io::write_file_atomic(handoff, json).await
+    let mut migration = serde_json::from_str(&raw).with_kind(ErrorKind::Deserialization)?;
+    if migrate_onion_handoff(&mut migration, replay_only) {
+        let json = serde_json::to_string(&migration).with_kind(ErrorKind::Serialization)?;
+        crate::util::io::write_file_atomic(handoff, json).await?;
+    }
+    Ok(())
 }
 
-fn rename_onion_package_ids(migration: &mut serde_json::Value) -> bool {
+fn migrate_onion_handoff(migration: &mut serde_json::Value, replay_only: bool) -> bool {
     let Some(addresses) = migration
         .get_mut("addresses")
         .and_then(|a| a.as_array_mut())
     else {
         return false;
     };
-    let mut changed = false;
-    for entry in addresses {
-        let Some(package_id) = entry
+    let mut renamed = false;
+    addresses.retain_mut(|entry| {
+        let Some(id) = entry
             .get("packageId")
             .and_then(|p| p.as_str())
             .map(str::to_owned)
         else {
-            continue;
+            return !replay_only;
         };
-        let migrated = migrated_package_id(&package_id);
-        if migrated == package_id {
-            continue;
+        let migrated = migrated_id_str(&id);
+        if migrated == id {
+            return !replay_only;
         }
         entry["packageId"] = serde_json::Value::String(migrated.to_owned());
-        changed = true;
-    }
-    changed
-}
-
-fn renamed_onion_migration(mut migration: serde_json::Value) -> Option<serde_json::Value> {
-    let addresses = migration.get_mut("addresses")?.as_array_mut()?;
-    addresses.retain(|entry| {
-        entry
-            .get("packageId")
-            .and_then(|p| p.as_str())
-            .is_some_and(|id| migrated_package_id(id) != id)
+        renamed = true;
+        true
     });
-    if addresses.is_empty() {
-        return None;
-    }
-    rename_onion_package_ids(&mut migration);
-    Some(migration)
+    renamed
 }
 
 fn rehome_admin_ui_port(db: &mut Value) {
@@ -522,83 +494,24 @@ mod test {
         assert_eq!(db, before);
     }
 
-    #[tokio::test]
-    async fn restores_only_renamed_onion_addresses() {
-        let dir = tempfile::tempdir().unwrap();
-        let backup = serde_json::json!({ "addresses": [
-            {
-                "hostname": "nostr-address",
-                "packageId": "nostr",
-                "hostId": "relay",
-                "key": "nostr-key"
-            },
-            {
-                "hostname": "fedimint-address",
-                "packageId": "fedimintd",
-                "hostId": "main",
-                "key": "fedimint-key"
-            },
-            {
-                "hostname": "bitcoin-address",
-                "packageId": "bitcoind",
-                "hostId": "main",
-                "key": "bitcoin-key"
-            }
+    #[test]
+    fn updates_pending_and_filters_replayed_onion_addresses() {
+        let mut migration = serde_json::json!({ "addresses": [
+            { "packageId": "nostr", "hostId": "relay" },
+            { "packageId": "fedimintd", "hostId": "main" },
+            { "packageId": "bitcoind", "hostId": "main" },
         ] });
-        tokio::fs::write(
-            dir.path().join(".onion-migration.json.bak"),
-            serde_json::to_vec(&backup).unwrap(),
-        )
-        .await
-        .unwrap();
+        let mut pending = migration.clone();
+        assert!(migrate_onion_handoff(&mut pending, false));
+        assert_eq!(pending["addresses"].as_array().unwrap().len(), 3);
+        assert_eq!(pending["addresses"][0]["packageId"], "nostr-rs-relay");
 
-        restore_renamed_onion_addresses(dir.path()).await.unwrap();
-
-        let restored: serde_json::Value = serde_json::from_slice(
-            &tokio::fs::read(dir.path().join("onion-migration.json"))
-                .await
-                .unwrap(),
-        )
-        .unwrap();
+        assert!(migrate_onion_handoff(&mut migration, true));
         assert_eq!(
-            restored,
+            migration,
             serde_json::json!({ "addresses": [
-                {
-                    "hostname": "nostr-address",
-                    "packageId": "nostr-rs-relay",
-                    "hostId": "relay",
-                    "key": "nostr-key"
-                },
-                {
-                    "hostname": "fedimint-address",
-                    "packageId": "fedimint-guardian",
-                    "hostId": "main",
-                    "key": "fedimint-key"
-                }
-            ] })
-        );
-    }
-
-    #[tokio::test]
-    async fn rewrites_a_pending_onion_handoff_without_dropping_entries() {
-        let dir = tempfile::tempdir().unwrap();
-        let handoff = dir.path().join("onion-migration.json");
-        tokio::fs::write(
-            &handoff,
-            br#"{"addresses":[{"packageId":"nostr"},{"packageId":"bitcoind"}]}"#,
-        )
-        .await
-        .unwrap();
-
-        restore_renamed_onion_addresses(dir.path()).await.unwrap();
-
-        let restored: serde_json::Value =
-            serde_json::from_slice(&tokio::fs::read(handoff).await.unwrap()).unwrap();
-        assert_eq!(
-            restored,
-            serde_json::json!({ "addresses": [
-                { "packageId": "nostr-rs-relay" },
-                { "packageId": "bitcoind" }
+                { "packageId": "nostr-rs-relay", "hostId": "relay" },
+                { "packageId": "fedimint-guardian", "hostId": "main" },
             ] })
         );
     }

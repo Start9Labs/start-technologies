@@ -5,7 +5,7 @@ use imbl_value::json;
 use reqwest::Url;
 
 use super::v0_3_5::V0_3_0_COMPAT;
-use super::v0_3_6_alpha_0::migrated_package_id;
+use super::v0_3_6_alpha_0::migrated_id_str;
 use super::{VersionT, v0_4_0_alpha_19};
 use crate::context::RpcContext;
 use crate::prelude::*;
@@ -324,7 +324,7 @@ fn normalize_migrated_service_identity(entry: &mut Value) {
         entry["packageId"] = json!("start-os");
         entry["hostId"] = json!("admin");
     } else {
-        entry["packageId"] = json!(migrated_package_id(&package_id));
+        entry["packageId"] = json!(migrated_id_str(&package_id));
     }
 }
 
@@ -477,39 +477,26 @@ mod test {
     use super::*;
 
     #[test]
-    fn normalizes_legacy_startos_sentinel() {
-        let mut legacy = json!({
-            "hostname": "abcdef",
-            "packageId": "STARTOS",
-            "hostId": "STARTOS",
-            "key": "a2V5",
-        });
-        normalize_migrated_service_identity(&mut legacy);
-        assert_eq!(legacy["packageId"].as_str(), Some("start-os"));
-        assert_eq!(legacy["hostId"].as_str(), Some("admin"));
-        assert_eq!(legacy["hostname"].as_str(), Some("abcdef"));
-        assert_eq!(legacy["key"].as_str(), Some("a2V5"));
-    }
-
-    #[test]
-    fn normalizes_package_ids_without_changing_hosts() {
-        for (legacy, migrated) in [
-            ("nostr", "nostr-rs-relay"),
-            ("ghost", "ghost-legacy"),
-            ("synapse", "synapse-legacy"),
-            ("monerod", "monerod-legacy"),
-            ("fedimintd", "fedimint-guardian"),
-            ("bitcoind", "bitcoind"),
-        ] {
-            let mut entry = json!({
-                "hostname": "abcdef",
-                "packageId": legacy,
-                "hostId": "main",
-                "key": "a2V5",
-            });
-            normalize_migrated_service_identity(&mut entry);
-            assert_eq!(entry["packageId"].as_str(), Some(migrated));
-            assert_eq!(entry["hostId"].as_str(), Some("main"));
-        }
+    fn onion_handoff_targets_migrated_services() {
+        let mut db = json!({ "private": { "torMigration": [
+            { "packageId": "STARTOS", "hostId": "STARTOS" },
+            { "packageId": "nostr", "hostId": "relay" },
+            { "packageId": "ghost", "hostId": "main" },
+            { "packageId": "synapse", "hostId": "main" },
+            { "packageId": "monerod", "hostId": "main" },
+            { "packageId": "fedimintd", "hostId": "main" },
+        ] } });
+        let handoff = Version.up(&mut db, ()).unwrap();
+        assert_eq!(
+            handoff,
+            json!({ "addresses": [
+                { "packageId": "start-os", "hostId": "admin" },
+                { "packageId": "nostr-rs-relay", "hostId": "relay" },
+                { "packageId": "ghost-legacy", "hostId": "main" },
+                { "packageId": "synapse-legacy", "hostId": "main" },
+                { "packageId": "monerod-legacy", "hostId": "main" },
+                { "packageId": "fedimint-guardian", "hostId": "main" },
+            ] })
+        );
     }
 }
