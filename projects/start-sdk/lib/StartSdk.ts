@@ -700,7 +700,7 @@ export class StartSdk<Manifest extends T.SDKManifest> {
       /**
        * @description Let the user choose which of an interface's URLs the service advertises as its own — the one it puts in the links, invites and callbacks it generates. The package stores the choice; `get` and `set` read and write it.
        *
-       *    Returns `action` (add it to `sdk.Actions.of()`), `effective(effects)`, the URL the service should use, and `createTask(effects, severity, options)`, which raises a task while the stored URL is unset or no longer one of the interface's addresses.
+       *    Returns `action` (add it to `sdk.Actions.of()`), `bestUsable(effects)`, the URL the service should use, and `createTask(effects, severity, options)`, which raises a task while the stored URL is unset or no longer one of the interface's addresses.
        * @example
        * ```
         import { sdk } from './sdk'
@@ -732,7 +732,7 @@ export class StartSdk<Manifest extends T.SDKManifest> {
         )
 
         // main.ts, and interfaces.ts for `preferredLauncherAddress`
-        const url = await primaryUrl.effective(effects)
+        const url = await primaryUrl.bestUsable(effects)
        * ```
        */
       setupPrimaryUrl: <Id extends T.ActionId>(

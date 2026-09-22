@@ -315,7 +315,7 @@ Health checks are paired with **triggers** that control polling behavior:
 
 ### Primary URL (`lib/primaryUrl/`)
 
-`setupPrimaryUrl.ts` builds the action behind `sdk.setupPrimaryUrl` over the package's `get`/`set`, plus `effective` and `createTask`. Both judge the stored URL against the interface's `nonLocal` addresses. `effective` resolves it when read, leaving the store as the user set it; `createTask` passes those addresses to StartOS as an `input-not-matches` task's accepted input, and StartOS decides when the task is active.
+`setupPrimaryUrl.ts` builds the action behind `sdk.setupPrimaryUrl` over the package's `get`/`set`, plus `bestUsable` and `createTask`. Both judge the stored URL against the interface's `nonLocal` addresses. `bestUsable` resolves it when read, leaving the store as the user set it; `createTask` passes those addresses to StartOS as an `input-not-matches` task's accepted input, and StartOS decides when the task is active.
 
 ### Backup System (`lib/backup/`)
 

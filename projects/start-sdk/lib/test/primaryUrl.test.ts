@@ -171,57 +171,57 @@ describe('setupPrimaryUrl', () => {
     })
   })
 
-  describe('effective', () => {
+  describe('bestUsable', () => {
     test('is the stored URL while it is an address', async () => {
       const p = setup([lan, local, onion], 'http://abc.onion:8080')
-      expect(await p.primaryUrl.effective(p.effects)).toBe(
+      expect(await p.primaryUrl.bestUsable(p.effects)).toBe(
         'http://abc.onion:8080',
       )
     })
 
     test('follows the stored hostname to its current port', async () => {
       const p = setup([lan, local], 'http://box.local:9090')
-      expect(await p.primaryUrl.effective(p.effects)).toBe(
+      expect(await p.primaryUrl.bestUsable(p.effects)).toBe(
         'http://box.local:8080',
       )
     })
 
     test('is the .local address when the stored hostname is gone', async () => {
       const p = setup([lan, local, onion], 'https://app.example.com')
-      expect(await p.primaryUrl.effective(p.effects)).toBe(
+      expect(await p.primaryUrl.bestUsable(p.effects)).toBe(
         'http://box.local:8080',
       )
     })
 
     test('is the .local address when nothing is stored', async () => {
       const p = setup([onion, lan, local])
-      expect(await p.primaryUrl.effective(p.effects)).toBe(
+      expect(await p.primaryUrl.bestUsable(p.effects)).toBe(
         'http://box.local:8080',
       )
     })
 
     test('is the first address when there is no .local one', async () => {
       const p = setup([onion, lan])
-      expect(await p.primaryUrl.effective(p.effects)).toBe(
+      expect(await p.primaryUrl.bestUsable(p.effects)).toBe(
         'http://abc.onion:8080',
       )
     })
 
     test('is the stored URL while the host has no addresses', async () => {
       const p = setup(null, 'https://app.example.com')
-      expect(await p.primaryUrl.effective(p.effects)).toBe(
+      expect(await p.primaryUrl.bestUsable(p.effects)).toBe(
         'https://app.example.com',
       )
     })
 
     test('is null with nothing stored and no addresses', async () => {
       const p = setup([])
-      expect(await p.primaryUrl.effective(p.effects)).toBeNull()
+      expect(await p.primaryUrl.bestUsable(p.effects)).toBeNull()
     })
 
     test('leaves the store as it is', async () => {
       const p = setup([lan, local], 'https://app.example.com')
-      await p.primaryUrl.effective(p.effects)
+      await p.primaryUrl.bestUsable(p.effects)
       expect(p.set).not.toHaveBeenCalled()
       expect(p.stored()).toBe('https://app.example.com')
     })
@@ -230,13 +230,13 @@ describe('setupPrimaryUrl', () => {
       const p = setup([lan, local], 'http://192.168.1.10:8080')
       const constRetry = jest.fn()
       const effects = Object.assign(Object.create(p.effects), { constRetry })
-      expect(await p.primaryUrl.effective(effects)).toBe(
+      expect(await p.primaryUrl.bestUsable(effects)).toBe(
         'http://192.168.1.10:8080',
       )
       p.changeRows([local, onion])
       await new Promise(r => setTimeout(r, 10))
       expect(constRetry).toHaveBeenCalled()
-      expect(await p.primaryUrl.effective(p.effects)).toBe(
+      expect(await p.primaryUrl.bestUsable(p.effects)).toBe(
         'http://box.local:8080',
       )
     })

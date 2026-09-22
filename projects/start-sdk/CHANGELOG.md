@@ -132,7 +132,7 @@
 - **`sdk.setupPrimaryUrl()` replaces the hand-rolled "Set Primary URL" action
   and watcher.** Give it the interface the URL belongs to and `get`/`set`
   functions over the package's own storage. It returns the action to register;
-  `effective(effects)`, the stored URL while its hostname is one of the
+  `bestUsable(effects)`, the stored URL while its hostname is one of the
   interface's addresses and the `.local` address otherwise; and
   `createTask(effects, severity, options)`, which raises a task while the stored
   URL is unset or gone and which StartOS clears once it is back. See

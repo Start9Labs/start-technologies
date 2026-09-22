@@ -21,7 +21,7 @@ export type SetupPrimaryUrlParams<Id extends T.ActionId> = {
   metadata: MaybeFn<Omit<T.ActionMetadata, 'hasInput'>>
   /** The label and description of the URL select. */
   field: { name: string; description: string | null }
-  /** Reads the stored URL. Read it with `.const(effects)` so `effective` re-runs when it changes. */
+  /** Reads the stored URL. Read it with `.const(effects)` so `bestUsable` re-runs when it changes. */
   get: (effects: T.Effects) => Promise<string | null | undefined>
   /** Stores the URL the user chose. */
   set: (effects: T.Effects, url: string) => Promise<unknown>
@@ -35,7 +35,7 @@ export type PrimaryUrl<Id extends T.ActionId> = {
    * current port and scheme; else the `.local` address, else the first. Re-runs
    * the calling context when either changes.
    */
-  effective: (effects: T.Effects) => Promise<string | null>
+  bestUsable: (effects: T.Effects) => Promise<string | null>
   /**
    * Raises a task for `action` while the stored URL is unset or no longer one
    * of the interface's addresses, pre-filled with the `.local` address. StartOS
@@ -120,7 +120,7 @@ export function setupPrimaryUrl<Id extends T.ActionId>(
 
   return {
     action,
-    effective: async effects => {
+    bestUsable: async effects => {
       const [stored, offered] = await Promise.all([
         get(effects),
         urls(effects).const(),

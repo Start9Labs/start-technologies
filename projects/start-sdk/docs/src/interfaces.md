@@ -272,7 +272,7 @@ Read the user's choice reactively, so re-running the action re-runs `setupInterf
 import { primaryUrl } from './primaryUrl'
 
 export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
-  const url = await primaryUrl.effective(effects)
+  const url = await primaryUrl.bestUsable(effects)
 
   const uiMulti = sdk.MultiHost.of(effects, 'ui-multi')
   const uiOrigin = await uiMulti.bindPort(uiPort, { protocol: 'http' })
@@ -308,7 +308,7 @@ Some addresses are left out of the comparison, in the cases where StartOS can te
 > Nominate an address the people who use the service can actually reach, because StartOS opens it rather than second-guessing them. A public domain nominated on a home network needs the router to loop LAN traffic back to it, and a `.local` name nominated for a service reached from outside resolves for nobody who is away.
 
 > [!NOTE]
-> Only the origin has to match. The path and query of the opened URL come from this interface's own `path` and `query`, so changing either leaves the nomination standing — what pins it is the scheme, hostname and port, which is the part an origin-sensitive app checks. That also means reassigning the interface's external port unseats the nomination, which is correct: the origin the app was configured for changed too. A nomination read from `primaryUrl.effective` follows the chosen hostname to its new port; a service whose URL is permanent has nothing to follow it.
+> Only the origin has to match. The path and query of the opened URL come from this interface's own `path` and `query`, so changing either leaves the nomination standing — what pins it is the scheme, hostname and port, which is the part an origin-sensitive app checks. That also means reassigning the interface's external port unseats the nomination, which is correct: the origin the app was configured for changed too. A nomination read from `primaryUrl.bestUsable` follows the chosen hostname to its new port; a service whose URL is permanent has nothing to follow it.
 
 ## Choosing a Primary URL
 
@@ -345,9 +345,9 @@ export const primaryUrlTask = sdk.setupOnInit(effects =>
 )
 ```
 
-Register `primaryUrl.action` with `sdk.Actions.of()`. It offers the interface's addresses (the `nonLocal` view, so loopback, link-local and the container bridge are left out), pre-selects the `.local` one, and pre-fills the stored URL. Read the stored URL in `get` with `.const(effects)`, so a caller of `effective` re-runs when the user changes it.
+Register `primaryUrl.action` with `sdk.Actions.of()`. It offers the interface's addresses (the `nonLocal` view, so loopback, link-local and the container bridge are left out), pre-selects the `.local` one, and pre-fills the stored URL. Read the stored URL in `get` with `.const(effects)`, so a caller of `bestUsable` re-runs when the user changes it.
 
-`await primaryUrl.effective(effects)` is the URL to give the service, in `setupMain` and for **Open UI** above: the stored URL at its hostname's current port and scheme; the `.local` address when that hostname is not one of the interface's addresses or nothing is stored; the first address when there is no `.local` one. It re-runs its caller when the stored URL or the addresses change, and leaves the store as the user set it, so a chosen address that comes back is used again.
+`await primaryUrl.bestUsable(effects)` is the URL to give the service, in `setupMain` and for **Open UI** above: the stored URL at its hostname's current port and scheme; the `.local` address when that hostname is not one of the interface's addresses or nothing is stored; the first address when there is no `.local` one. It re-runs its caller when the stored URL or the addresses change, and leaves the store as the user set it, so a chosen address that comes back is used again.
 
 `primaryUrl.createTask(effects, severity, options)` raises a task on the action while the stored URL is unset or its hostname is not one of the interface's addresses, pre-filled with the `.local` address. It declares the addresses as the task's accepted input (`input-not-matches`, see [Options](tasks.md#options)), so StartOS clears the task when the user picks one or the stored address returns. An IP address leaves the interface's addresses while its network link is down, so an IP choice raises the task then too. `important` suits most services: a `critical` task stops the service while it is active, which is right only for a service that cannot run without a valid URL. Keep `id` equal to the id of an action the package already ships, so its tasks' replay key survives (see [Retiring a replay key](tasks.md#retiring-a-replay-key)).
 
