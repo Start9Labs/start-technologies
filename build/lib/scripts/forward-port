@@ -94,8 +94,15 @@ delete_tagged() {
 } | nft -f -
 
 # Tracked flows keep the NAT they started with.
+# A daemon restart reinstalls forwards whose flows are still live.
+# Install clears only the flows the host answers itself.
+if [ "${UNDO:-0}" = 1 ]; then
+    match=(-d "$sip" --dport)
+else
+    match=(-r "$sip" --reply-port-src)
+fi
 # conntrack -D takes a single port and exits 1 when nothing matches.
 for ((p = sport; p <= sport_end; p++)); do
-    conntrack -D -p tcp -d "$sip" --dport "$p" 2> /dev/null || true
-    conntrack -D -p udp -d "$sip" --dport "$p" 2> /dev/null || true
+    conntrack -D -p tcp "${match[@]}" "$p" 2> /dev/null || true
+    conntrack -D -p udp "${match[@]}" "$p" 2> /dev/null || true
 done
