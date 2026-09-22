@@ -5,7 +5,8 @@
 //!
 //! [`redirect_public_http`] serves the UI to a client on a connected subnet
 //! off the WAN, at an address that is not the WAN's. Every other IPv4 request
-//! gets a 307 to the same authority over HTTPS. Port control admits WAN-side
+//! gets a 307 to the same authority over HTTPS, or a 400 without one. Port
+//! control admits WAN-side
 //! tcp/80 with an ACCEPT rule in the SNI admission set. That rule matches the
 //! zone, not the destination.
 
@@ -14,10 +15,9 @@ use std::path::PathBuf;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
-use axum::body::Body;
 use axum::extract::Request;
 use axum::middleware::Next;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::Router;
 use ipnet::Ipv4Net;
 use startos::net::http::{https_redirect_uri, request_authority};
@@ -221,23 +221,26 @@ fn respond(gate: &Gate, req: &Request) -> Option<Response> {
         tcp.map(|tcp| tcp.local_addr.ip()),
     )
     .then(|| redirect(req))
-    .flatten()
 }
 
-/// Mirrors start-core's `handle_http_on_https`.
-fn redirect(req: &Request) -> Option<Response> {
-    let authority = request_authority(req)?;
-    let target = https_redirect_uri(req.uri(), authority).ok()?;
-    Response::builder()
-        .status(http::StatusCode::TEMPORARY_REDIRECT)
-        .header(http::header::LOCATION, target.to_string())
-        .body(Body::empty())
-        .ok()
+/// Mirrors start-core's `handle_http_on_https`. Never falls through.
+fn redirect(req: &Request) -> Response {
+    match request_authority(req).and_then(|authority| https_redirect_uri(req.uri(), authority).ok())
+    {
+        Some(target) => (
+            http::StatusCode::TEMPORARY_REDIRECT,
+            [(http::header::LOCATION, target.to_string())],
+        )
+            .into_response(),
+        None => (http::StatusCode::BAD_REQUEST, "Host header required").into_response(),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddrV4;
+
+    use axum::body::Body;
 
     use super::*;
 
@@ -494,9 +497,15 @@ mod tests {
     }
 
     fn request(listener: WebserverListener, peer: IpAddr, dst: IpAddr) -> Request {
+        let mut req = request_without_host(listener, peer, dst);
+        req.headers_mut()
+            .insert(http::header::HOST, "nas.example.com".parse().unwrap());
+        req
+    }
+
+    fn request_without_host(listener: WebserverListener, peer: IpAddr, dst: IpAddr) -> Request {
         let mut req = Request::builder()
             .uri("/luci?x=1")
-            .header(http::header::HOST, "nas.example.com")
             .body(Body::empty())
             .unwrap();
         req.extensions_mut().insert(listener);
@@ -519,5 +528,24 @@ mod tests {
         );
         assert!(respond(&gate, &request(WebserverListener::Http, CLIENT, LAN)).is_none());
         assert!(respond(&gate, &request(WebserverListener::Https, INTERNET, wan)).is_none());
+    }
+
+    #[test]
+    fn a_request_without_a_host_never_reaches_the_ui() {
+        let gate = open_gate();
+        let wan = IpAddr::V4(gate.wan[0]);
+        for (peer, dst) in [(INTERNET, wan), (INTERNET, LAN), (CLIENT, wan)] {
+            let response = respond(
+                &gate,
+                &request_without_host(WebserverListener::Http, peer, dst),
+            )
+            .unwrap();
+            assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
+        }
+        assert!(respond(
+            &gate,
+            &request_without_host(WebserverListener::Http, CLIENT, LAN)
+        )
+        .is_none());
     }
 }
