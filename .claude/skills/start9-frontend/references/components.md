@@ -38,7 +38,11 @@ export class ThingComponent {
   fine (a dialog + its `PolymorpheusComponent` const; a toast component inside a service file).
 - **Member conventions:** injected deps `private readonly`; template-facing members
   `protected readonly`; signal inputs/outputs `readonly` (public only when a parent binds them).
-  No `public` keyword noise otherwise.
+  No `public` keyword noise otherwise. A dependency the template reads is itself
+  `protected readonly` — `verification.loading()`, `verification.resend()`,
+  `breakpoint() === 'mobile'` in the template — not re-aliased into fields
+  (`loading = this.verification.loading`), wrapped in methods, or reshaped into a one-use
+  `computed` (`mobile = computed(() => this.breakpoint() === 'mobile')`).
 - **Routed and dialog components have no selector** (instantiated by router/Polymorpheus) and
   routed ones are `export default class` so `loadComponent: () => import('./x')` needs no `.then`.
 
@@ -64,7 +68,15 @@ A component that **is** a control (button, link, badge, row, card, shell chrome)
 **Stamp the host directive's own attribute** (`host: { tuiButton: '' }`) — Taiga's CSS is keyed
 on `[tuiButton]`, `[tuiChip]`, `[tuiBadge]`, and a host directive does not add its selector to
 the element. Skip it and the directive runs with none of its styling, silently: no chrome, no
-`iconStart`. `TuiCell` and `TuiCardLarge` stamp theirs; `TuiButton`, `TuiChip`, `TuiBadge` don't.
+`iconStart`. `TuiCell`, `TuiCardLarge` and `TuiAvatar` stamp theirs; `TuiButton`, `TuiChip`,
+`TuiBadge` don't.
+
+**A component that dresses up one Taiga primitive becomes it.** An avatar wrapper is
+`hostDirectives: [{ directive: TuiAvatar, inputs: ['size'] }]` with the picture or
+`{{ name | tuiInitials }}` as its content — never `:host { display: contents }` around an inner
+`<span tuiAvatar [size]="size()">`. Forward the primitive's inputs through `inputs: [...]` rather
+than redeclaring them, and drive the rest from signals in the class:
+`tuiAppearance(computed(() => …))`, `tuiIconStart(computed(() => …))` (`@taiga-ui/core`).
 
 Real fleet examples: `header[appHeader]`, `footer[appFooter]`, `button[marketplaceTile]`
 (+`TuiCardLarge`), `button[server]` (+`TuiCell`), `table[appTable]`
@@ -160,6 +172,8 @@ validation`).
   `(click.self)="close()"`, `.stop`, `.capture`, `.once`, `.passive`.
 - **Template reference variables replace trivial state**: `#input` +
   `(input)="onQuery(input.value)"`; `#carousel` + `carousel.next()`.
+- **Object literals take shorthand**: `fill(message, { email })`, and
+  `@for ($implicit of items(); track $implicit.key)` feeds `context: { $implicit }`.
 - **Attribute order** on an element: `*structuralDirective`, `#templateRef`, `booleanAttr`,
   `stringAttr="value"`, `[input]="value"`, `[(twoWay)]="value"`, `(output)="handler($event)"`.
 - **The URL is component state** for anything shareable: drawers open when query params match

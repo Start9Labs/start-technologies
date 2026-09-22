@@ -39,9 +39,11 @@ single table whose cells self-label (`<td [attr.data-label]="'Type' | i18n">`) r
 **5. Wrapper elements → attribute components on semantic hosts.** `selector: 'app-footer'`
 wrapping `<footer>` becomes `selector: 'footer[appFooter]'`; a `.shell` wrapper div is deleted
 in favor of semantic elements directly inside `tui-root`; an element component wrapping
-`<a tuiButton>` becomes `selector: 'a[marketplacePackageLink]'` + `hostDirectives: [TuiButton]`
-
-- static `host` attrs + option providers.
+`<a tuiButton>` becomes `selector: 'a[marketplacePackageLink]'` with `hostDirectives:
+[TuiButton]`, static `host` attrs and option providers; an avatar component that was
+`:host { display: contents }` around `<span tuiAvatar [size]="size()">` becomes
+`hostDirectives: [{ directive: TuiAvatar, inputs: ['size'] }]` with its own `size` input
+deleted.
 
 **6. Semantic-HTML repair.** `<h3>` abused for body text (with CSS undoing it) → plain text +
 `font: var(--tui-typography-body-l)`; `<h2>` for dialog sections → `<h3 tuiHeader="h6">`
@@ -67,7 +69,10 @@ fields inlined into the group literal.
 
 **10. Single-use names, wrapper methods, multi-branch returns → inlined expressions.**
 `select(type) { this.context.completeWith(type) }` + `(click)="select('public')"` →
-`(click)="context.completeWith('public')"`. `if`-ladders → one boolean expression or ternary;
+`(click)="context.completeWith('public')"`; `sentTo = this.verification.sentTo` plus
+`resend() { return this.verification.resend() }` → `protected readonly verification` and
+`verification.sentTo()` / `(click)="verification.resend()"` in the template.
+`if`-ladders → one boolean expression or ternary;
 `p.length > 0` → `!!p.length`; flag parameters → default parameters; `try/catch` around a
 subscribe callback → deleted.
 
@@ -113,6 +118,11 @@ dropdown; `/`-prefix discriminates routerLink vs external href.
 
 **20. Copy is sentence case.** `'Beginning Backup'` → `'Beginning backup'`. Title Case only
 for proper nouns and page titles.
+
+**21. Hand-built kit pieces → the kit.** An `initial(name)` util → `| tuiInitials`; three
+`label tuiBlock` + `input tuiRadio` rows in a `tuiGroup` → one `tui-radio-list`; a
+`[tuiDropdown]="tpl"` menu with an `open` signal reset in every handler → `tuiDropdownAuto` +
+`*tuiDropdown="let close"`; `section > [tuiCell] { inline-size: 100% }` → `tuiCellStretch`.
 
 ### Review quotes (verbatim, from actual PRs)
 

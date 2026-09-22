@@ -29,5 +29,6 @@ utils, zod re-export. **Never hand-edit `osBindings/*.ts`** — change the Rust 
 Library authoring (when you add to `shared`/`marketplace`): configurability layers in order —
 signal inputs → content projection/`contentChild(TemplateRef)`/`PolymorpheusContent` → abstract
 class as DI contract → optional hook tokens → `provide*` factories → Taiga option providers.
-Style with `--tui-*` vars, `:host { display: contents }` for pure-composition components; no
-theme definitions inside components.
+Style with `--tui-*` vars, `:host { display: contents }` for a component composing several
+siblings (one wrapping a single Taiga primitive becomes it via `hostDirectives`); no theme
+definitions inside components.

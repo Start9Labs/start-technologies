@@ -27,7 +27,8 @@ nothing may import it. When in doubt: the official MCP
 - **DI**: `tuiProvide(TOKEN, UseExisting)`; `tuiProvideOptions(token, partial, fallback)`;
   `tuiCreateOptions(defaults)` → `[TOKEN, tuiXOptionsProvider]` pair (build your own
   configurable components exactly like Taiga's); `tuiFallbackValueProvider`;
-  `tuiDirectiveBinding` (drive a host directive's input from a wrapper).
+  `tuiDirectiveBinding` (drive a host directive's input from a wrapper; core ships ready ones
+  such as `tuiAppearance(signal)` and `tuiIconStart(signal)`).
 - **Custom form controls**: extend **`TuiControl<T>`** + provide with `tuiAsControl(MyControl)`
   — signal-based CVA base (`value()`, `disabled()`, `invalid()`, `readOnly` input) that
   replaces 40 lines of boilerplate; `TuiValueTransformer` translates stored ↔ view values.
@@ -72,13 +73,16 @@ nothing may import it. When in doubt: the official MCP
 - **Breakpoints**: `TUI_BREAKPOINT` signal emits `'mobile' | 'desktopSmall' | 'desktopLarge'`
   (thresholds from `TUI_MEDIA`, overridable); CSS mixins `@tui-mobile`/`@tui-tablet`/
   `@tui-desktop` in `@taiga-ui/styles/utils` (boundaries ≈ 767.4 / 1023.4 / 1279.4 px).
-- `[tuiSkeleton]="loadingOrLineCount"` on any element; `tuiFade` / `tui-line-clamp` for
-  truncation; `<tui-scrollbar>` for themed scrollbars (`provideTaiga({ scrollbars: 'native' })`
-  opts out — the fleet's embedded UIs do). `tui-scrollbar`'s inner `.t-content` is
-  `min-inline-size: fit-content`, so one `white-space: nowrap` descendant widens the whole
-  scroll area and pushes a row's trailing content out of view — pair `tuiFade` truncation
-  inside a scrollbar with `:host ::ng-deep tui-scrollbar > .t-content { min-inline-size: 0 }`
-  (`.t-content` alone ties on specificity and loses).
+- `[tuiSkeleton]="loadingOrLineCount"` on any element — on a `<span>` around the words for
+  line-shaped placeholders, since on a block it paints the whole box; `tuiFade` /
+  `tui-line-clamp` for truncation, and `tuiFade="vertical"` on a scroll container fades the
+  edges its content overflows; `<tui-scrollbar>` for themed scrollbars
+  (`provideTaiga({ scrollbars: 'native' })` opts out — the fleet's embedded UIs do).
+  `tui-scrollbar`'s inner `.t-content` is `min-inline-size: fit-content`, so one
+  `white-space: nowrap` descendant widens the whole scroll area and pushes a row's trailing
+  content out of view — pair `tuiFade` truncation inside a scrollbar with
+  `:host ::ng-deep tui-scrollbar > .t-content { min-inline-size: 0 }` (`.t-content` alone ties
+  on specificity and loses).
 
 ### Overlay facts
 
@@ -143,28 +147,31 @@ Handles paste/drop/autofill/predictive keyboards; SSR-safe. Never keydown-regex 
 
 ### Need → wrong instinct → right primitive
 
-| Need                                                             | Agent instinct                          | House answer                                                                                                    |
-| ---------------------------------------------------------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| Close on click-outside/Esc                                       | `document.addEventListener`             | `[tuiDropdown]`, or `TuiActiveZone` + `TuiObscured`                                                             |
-| Tooltip                                                          | CSS `::after` bubble                    | `[tuiHint]` / `tui-icon[tuiTooltip]`                                                                            |
-| Toast                                                            | fixed-position div + timeout            | `TuiNotificationService` (queued, positioned)                                                                   |
-| Blocking "working…"                                              | full-screen spinner div                 | `TuiNotificationMiddleService` (hold subscription, `unsubscribe()` to close)                                    |
-| Modal with typed result                                          | `@if` overlay / CDK overlay             | `TuiResponsiveDialogService` + Polymorpheus + `injectContext`                                                   |
-| Confirm prompt                                                   | custom dialog component                 | `TUI_CONFIRM` + `TuiConfirmData`                                                                                |
-| Input mask                                                       | keydown regex                           | Maskito                                                                                                         |
-| Custom form control                                              | 40-line CVA                             | `TuiControl<T>` + `tuiAsControl`                                                                                |
-| Validation messages                                              | `@if (control.errors?.required)` chains | `<tui-error formControlName>` + `tuiValidationErrorsProvider`                                                   |
-| Dark mode                                                        | theme service + class toggle            | `TUI_DARK_MODE` signal (+ `[tuiTheme]` scoping)                                                                 |
-| Colors/spacing                                                   | hex + magic paddings                    | `--tui-*` tokens                                                                                                |
-| Responsive TS logic                                              | `window.innerWidth`                     | `TUI_BREAKPOINT` / `WA_IS_MOBILE`                                                                               |
-| Responsive CSS                                                   | `@media (max-width: 768px)`             | `tui-root._mobile &` / styles-utils mixins                                                                      |
-| Skeleton                                                         | hand-rolled shimmer CSS                 | `[tuiSkeleton]`                                                                                                 |
-| Truncation                                                       | `text-overflow` fights                  | `tuiFade` / `tui-line-clamp`                                                                                    |
-| Page scaffolding                                                 | bespoke flex/grid                       | `tuiCardLarge`+`tuiSurface`, `tuiHeader`+`tuiTitle`, `tuiCell`, `tuiForm`, `tuiNavigation*`, `tui-block-status` |
-| Select/autocomplete                                              | hand-built dropdown                     | `tui-textfield` + `tuiSelect`/`tuiComboBox` + `*tuiDropdown` + `tui-data-list-wrapper` + `tuiFilterByInput`     |
-| Browser globals                                                  | `window.` / `localStorage.`             | `WA_*` tokens                                                                                                   |
-| High-frequency events                                            | melting change detection                | `.zoneless` / `.debounce~` / `.throttle~` modifiers                                                             |
-| `preventDefault`                                                 | `$event.preventDefault()` in TS         | `(event.prevent)` modifier                                                                                      |
-| Configurable content slot                                        | fork the component                      | `PolymorpheusContent` input                                                                                     |
-| Copy button, rating, pagination, PIN, carousel, avatar-initials… | write it                                | it's in kit — check the docs first                                                                              |
-| Empty state                                                      | custom illustration div                 | `tui-block-status`                                                                                              |
+| Need                                            | Agent instinct                          | House answer                                                                                                    |
+| ----------------------------------------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Close on click-outside/Esc                      | `document.addEventListener`             | `[tuiDropdown]`, or `TuiActiveZone` + `TuiObscured`                                                             |
+| Tooltip                                         | CSS `::after` bubble                    | `[tuiHint]` / `tui-icon[tuiTooltip]`                                                                            |
+| Toast                                           | fixed-position div + timeout            | `TuiNotificationService` (queued, positioned)                                                                   |
+| Blocking "working…"                             | full-screen spinner div                 | `TuiNotificationMiddleService` (hold subscription, `unsubscribe()` to close)                                    |
+| Modal with typed result                         | `@if` overlay / CDK overlay             | `TuiResponsiveDialogService` + Polymorpheus + `injectContext`                                                   |
+| Confirm prompt                                  | custom dialog component                 | `TUI_CONFIRM` + `TuiConfirmData`                                                                                |
+| Input mask                                      | keydown regex                           | Maskito                                                                                                         |
+| Custom form control                             | 40-line CVA                             | `TuiControl<T>` + `tuiAsControl`                                                                                |
+| Validation messages                             | `@if (control.errors?.required)` chains | `<tui-error formControlName>` + `tuiValidationErrorsProvider`                                                   |
+| Dark mode                                       | theme service + class toggle            | `TUI_DARK_MODE` signal (+ `[tuiTheme]` scoping)                                                                 |
+| Colors/spacing                                  | hex + magic paddings                    | `--tui-*` tokens                                                                                                |
+| Responsive TS logic                             | `window.innerWidth`                     | `TUI_BREAKPOINT` / `WA_IS_MOBILE`                                                                               |
+| Responsive CSS                                  | `@media (max-width: 768px)`             | `tui-root._mobile &` / styles-utils mixins                                                                      |
+| Skeleton                                        | hand-rolled shimmer CSS                 | `[tuiSkeleton]`                                                                                                 |
+| Truncation                                      | `text-overflow` fights                  | `tuiFade` / `tui-line-clamp`                                                                                    |
+| Page scaffolding                                | bespoke flex/grid                       | `tuiCardLarge`+`tuiSurface`, `tuiHeader`+`tuiTitle`, `tuiCell`, `tuiForm`, `tuiNavigation*`, `tui-block-status` |
+| Select/autocomplete                             | hand-built dropdown                     | `tui-textfield` + `tuiSelect`/`tuiComboBox` + `*tuiDropdown` + `tui-data-list-wrapper` + `tuiFilterByInput`     |
+| Browser globals                                 | `window.` / `localStorage.`             | `WA_*` tokens                                                                                                   |
+| High-frequency events                           | melting change detection                | `.zoneless` / `.debounce~` / `.throttle~` modifiers                                                             |
+| `preventDefault`                                | `$event.preventDefault()` in TS         | `(event.prevent)` modifier                                                                                      |
+| Configurable content slot                       | fork the component                      | `PolymorpheusContent` input                                                                                     |
+| Initials avatar                                 | `initial(name)` util                    | `name \| tuiInitials` (kit) as `tuiAvatar` content; an `<img>` beside it falls back to them when it fails       |
+| Radio group                                     | `tuiGroup` of `tuiRadio` rows           | `tui-radio-list` + `[items]` + `[itemContent]`                                                                  |
+| Full-width row in a dialog/card                 | `inline-size: 100%` + padding CSS       | `tuiCell` + `tuiCellStretch`                                                                                    |
+| Copy button, rating, pagination, PIN, carousel… | write it                                | it's in kit — check the docs first                                                                              |
+| Empty state                                     | custom illustration div                 | `tui-block-status`                                                                                              |
