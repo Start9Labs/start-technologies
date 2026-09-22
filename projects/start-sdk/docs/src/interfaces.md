@@ -272,7 +272,7 @@ Read the user's choice reactively, so re-running the action re-runs `setupInterf
 import { primaryUrl } from './primaryUrl'
 
 export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
-  const url = await primaryUrl.read().const(effects)
+  const url = await primaryUrl.effective(effects)
 
   const uiMulti = sdk.MultiHost.of(effects, 'ui-multi')
   const uiOrigin = await uiMulti.bindPort(uiPort, { protocol: 'http' })
@@ -308,11 +308,11 @@ Some addresses are left out of the comparison, in the cases where StartOS can te
 > Nominate an address the people who use the service can actually reach, because StartOS opens it rather than second-guessing them. A public domain nominated on a home network needs the router to loop LAN traffic back to it, and a `.local` name nominated for a service reached from outside resolves for nobody who is away.
 
 > [!NOTE]
-> Only the origin has to match. The path and query of the opened URL come from this interface's own `path` and `query`, so changing either leaves the nomination standing — what pins it is the scheme, hostname and port, which is the part an origin-sensitive app checks. That also means reassigning the interface's external port unseats the nomination, which is correct: the origin the app was configured for changed too. `setupPrimaryUrl`'s hook follows the chosen hostname to its new port, so the nomination moves with it; a service whose URL is permanent has no hook to do that.
+> Only the origin has to match. The path and query of the opened URL come from this interface's own `path` and `query`, so changing either leaves the nomination standing — what pins it is the scheme, hostname and port, which is the part an origin-sensitive app checks. That also means reassigning the interface's external port unseats the nomination, which is correct: the origin the app was configured for changed too. A nomination read from `primaryUrl.effective` follows the chosen hostname to its new port; a service whose URL is permanent has nothing to follow it.
 
 ## Choosing a Primary URL
 
-A service that builds links, invites or callbacks from one URL asks the user which of its addresses that is. `sdk.setupPrimaryUrl()` supplies the whole exchange — the "Set Primary URL" action, the init hook that seeds and guards the choice, and a reactive reader for it — against a field of one of the package's file models:
+A service that builds links, invites or callbacks from one URL asks the user which of its addresses that is. `sdk.setupPrimaryUrl()` builds the "Set Primary URL" action over `get` and `set` functions that read and write the choice wherever the package keeps it — a field of `store.json`, or the service's own config file:
 
 ```typescript
 // primaryUrl.ts
@@ -321,23 +321,35 @@ import { i18n } from './i18n'
 import { storeJson } from './fileModels/store.json'
 
 export const primaryUrl = sdk.setupPrimaryUrl({
+  id: 'set-primary-url',
   hostId: 'ui-multi',
   interfaceId: 'ui',
-  store: {
-    file: storeJson,
-    get: s => s.primaryUrl,
-    set: url => ({ primaryUrl: url }),
+  metadata: {
+    name: i18n('Set Primary URL'),
+    description: i18n('Choose the URL Ghost puts in the links it generates. Ghost restarts to apply the change.'),
+    warning: null,
+    allowedStatuses: 'any',
+    group: null,
+    visibility: 'enabled',
   },
-  name: i18n('Set Primary URL'),
-  description: i18n('Choose the URL Ghost puts in the links it generates. Ghost restarts to apply the change.'),
-  fieldName: i18n('URL'),
-  reason: i18n('The primary URL is no longer one of Ghost’s addresses. Choose a new one.'),
+  field: { name: i18n('URL'), description: null },
+  get: effects => storeJson.read(s => s.primaryUrl).const(effects),
+  set: (effects, url) => storeJson.merge(effects, { primaryUrl: url }),
 })
+
+// init/primaryUrlTask.ts — list it after `actions` in setupInit
+export const primaryUrlTask = sdk.setupOnInit(effects =>
+  primaryUrl.createTask(effects, 'important', {
+    reason: i18n('The primary URL is no longer one of Ghost’s addresses. Choose a new one.'),
+  }),
+)
 ```
 
-Register `primaryUrl.action` with `sdk.Actions.of()`, add `primaryUrl.init` to `sdk.setupInit()`, and read the choice wherever the service needs it — `await primaryUrl.read().const(effects)` in `setupMain` restarts the service when it changes, and the same read nominates it for **Open UI** above.
+Register `primaryUrl.action` with `sdk.Actions.of()`. It offers the interface's addresses (the `nonLocal` view, so loopback, link-local and the container bridge are left out), pre-selects the `.local` one, and pre-fills the stored URL. Read the stored URL in `get` with `.const(effects)`, so a caller of `effective` re-runs when the user changes it.
 
-The action lists the interface's addresses whether or not they are reachable from where the admin sits — every address the user has not disabled, loopback, link-local and the container bridge excluded. The hook stores the `.local` address when nothing is chosen yet (`defaultUrl` picks otherwise), follows the chosen hostname through a port or scheme change, and when that hostname is no longer among its addresses stores `defaultUrl`'s pick in its place, or with `onRemoved: 'task'` raises a task. A `.local` choice is judged only while some LAN interface is up, an IP choice only while the interface it came from is up, and a domain or Tor choice at once, so a link that is down leaves it standing. The hook keeps which interface a chosen IP came from in a file beside the store file, named after it and the action id (`store.json.set-primary-url.json`). The task, raised on `onRemoved: 'task'` or when nothing is left to fall back to, is `important` unless `severity` says otherwise; a critical one stops the service, which a stale link is rarely worth. `actionId` defaults to `set-primary-url`; keep it when adopting the helper in a package that already ships an action of that id, so the task's replay key survives (see [Retiring a replay key](tasks.md#retiring-a-replay-key)).
+`await primaryUrl.effective(effects)` is the URL to give the service, in `setupMain` and for **Open UI** above: the stored URL at its hostname's current port and scheme; the `.local` address when that hostname is not one of the interface's addresses or nothing is stored; the first address when there is no `.local` one. It re-runs its caller when the stored URL or the addresses change, and leaves the store as the user set it, so a chosen address that comes back is used again.
+
+`primaryUrl.createTask(effects, severity, options)` raises a task on the action while the stored URL is unset or its hostname is not one of the interface's addresses, pre-filled with the `.local` address. It declares the addresses as the task's accepted input (`input-not-matches`, see [Options](tasks.md#options)), so StartOS clears the task when the user picks one or the stored address returns. An IP address leaves the interface's addresses while its network link is down, so an IP choice raises the task then too. `important` suits most services: a `critical` task stops the service while it is active, which is right only for a service that cannot run without a valid URL. Keep `id` equal to the id of an action the package already ships, so its tasks' replay key survives (see [Retiring a replay key](tasks.md#retiring-a-replay-key)).
 
 ## Port Ranges
 

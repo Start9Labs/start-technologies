@@ -315,7 +315,7 @@ Health checks are paired with **triggers** that control polling behavior:
 
 ### Primary URL (`lib/primaryUrl/`)
 
-`setupPrimaryUrl.ts` builds the action, init hook and reactive reader behind `sdk.setupPrimaryUrl`. The hook judges the stored choice against the interface's configured addresses (`addressInfo.configured`), not the reachable ones, and judges a `.local` choice only while some LAN interface is up and an IP choice only while the interface it came from is up, which it records beside the store file in a file named after it and the action id. A choice judged gone is replaced by `defaultUrl`'s pick, or reported as a task under `onRemoved: 'task'`.
+`setupPrimaryUrl.ts` builds the action behind `sdk.setupPrimaryUrl` over the package's `get`/`set`, plus `effective` and `createTask`. Both judge the stored URL against the interface's `nonLocal` addresses. `effective` resolves it when read, leaving the store as the user set it; `createTask` passes those addresses to StartOS as an `input-not-matches` task's accepted input, and StartOS decides when the task is active.
 
 ### Backup System (`lib/backup/`)
 
