@@ -90,12 +90,13 @@ async fn read_addrs() {
         .and_then(|out| String::from_utf8(out).ok())
         .map(|json| parse_connected(&json))
         .unwrap_or_default();
-    let wan = tokio::task::spawn_blocking(crate::system::wan_ipv4_addrs)
+    let wan = tokio::task::spawn_blocking(crate::system::read_wan_ipv4_addrs)
         .await
-        .unwrap_or_default();
-    let local = off_wan(connected, &wan);
+        .ok()
+        .flatten();
+    let local = off_wan(connected, wan.as_deref());
     let mut gate = GATE.write().unwrap_or_else(|e| e.into_inner());
-    gate.wan = wan;
+    gate.wan = wan.unwrap_or_default();
     gate.local = local;
 }
 
@@ -117,7 +118,11 @@ fn parse_connected(json: &str) -> Vec<Ipv4Net> {
         .collect()
 }
 
-fn off_wan(connected: Vec<Ipv4Net>, wan: &[Ipv4Addr]) -> Vec<Ipv4Net> {
+/// Unread WAN addresses trust no subnet.
+fn off_wan(connected: Vec<Ipv4Net>, wan: Option<&[Ipv4Addr]>) -> Vec<Ipv4Net> {
+    let Some(wan) = wan else {
+        return Vec::new();
+    };
     connected
         .into_iter()
         .filter(|net| !wan.contains(&net.addr()))
@@ -399,7 +404,7 @@ mod tests {
                     "192.168.1.1/24".parse().unwrap(),
                     "10.59.0.1/24".parse().unwrap(),
                 ],
-                &[wan],
+                Some(&[wan]),
             ),
         }
     }
@@ -491,9 +496,12 @@ mod tests {
             {"ifname":"br-lan","addr_info":[{"family":"inet","local":"192.168.1.1","prefixlen":24}]},
             {"ifname":"wg0","addr_info":[{"family":"inet","local":"10.59.0.1","prefixlen":24}]}
         ]"#;
-        let local = off_wan(parse_connected(json), &[Ipv4Addr::new(192, 168, 0, 2)]);
+        let connected = parse_connected(json);
+        let local = off_wan(connected.clone(), Some(&[Ipv4Addr::new(192, 168, 0, 2)]));
         assert_eq!(local, open_gate().local);
         assert!(parse_connected("").is_empty());
+        // ubus down, `ip addr` up: the WAN subnet must not be trusted.
+        assert!(off_wan(connected, None).is_empty());
     }
 
     fn request(listener: WebserverListener, peer: IpAddr, dst: IpAddr) -> Request {
