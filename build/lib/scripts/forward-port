@@ -93,11 +93,9 @@ delete_tagged() {
     fi
 } | nft -f -
 
-if [ "${UNDO:-0}" = 1 ]; then
-    # conntrack returns 1 when no flows match; ignore. -D takes no port range,
-    # so iterate (a 500-port range still completes well under a second).
-    for ((p = sport; p <= sport_end; p++)); do
-        conntrack -D -p tcp -d "$sip" --dport "$p" 2> /dev/null || true
-        conntrack -D -p udp -d "$sip" --dport "$p" 2> /dev/null || true
-    done
-fi
+# Tracked flows keep the NAT they started with.
+# conntrack -D takes a single port and exits 1 when nothing matches.
+for ((p = sport; p <= sport_end; p++)); do
+    conntrack -D -p tcp -d "$sip" --dport "$p" 2> /dev/null || true
+    conntrack -D -p udp -d "$sip" --dport "$p" 2> /dev/null || true
+done
