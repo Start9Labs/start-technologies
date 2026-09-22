@@ -6,9 +6,8 @@
 //! [`redirect_public_http`] serves the UI to a client on a connected subnet
 //! off the WAN, at an address that is not the WAN's. Every other IPv4 request
 //! gets a 307 to the same authority over HTTPS, or a 400 without one. Port
-//! control admits WAN-side
-//! tcp/80 with an ACCEPT rule in the SNI admission set. That rule matches the
-//! zone, not the destination.
+//! control admits WAN-side tcp/80 at the WAN address with an ACCEPT rule in
+//! the SNI admission set.
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
@@ -278,6 +277,7 @@ mod tests {
         \toption name 'HTTP to HTTPS redirect'\n\
         \toption src 'wan'\n\
         \tlist proto 'tcp'\n\
+        \toption dest_ip '192.168.0.2'\n\
         \toption dest_port '80'\n\
         \toption target 'ACCEPT'\n\
         \toption family 'ipv4'\n\
