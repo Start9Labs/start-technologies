@@ -795,9 +795,8 @@ struct Device {
     /// VPN peers (no MAC to authorize).
     allow_auto_port_forward: bool,
     /// Whether this device may publish DNS records into the router's resolver
-    /// via RFC 2136 (default off; toggled via `devices.set-dns-injection`).
-    /// Always false for VPN peers: they hold a WireGuard PSK instead of a
-    /// toggle, and their signed UPDATEs are admitted on the TSIG signature.
+    /// (`devices.set-dns-injection`). Always false for a VPN peer, which is
+    /// admitted on its TSIG signature.
     allow_dns_injection: bool,
     security_profile: Option<String>,
     /// Live throughput (MB/s, 1 decimal), computed from conntrack byte deltas
@@ -875,13 +874,10 @@ struct SetDnsInjectionRequest {
     allow: bool,
 }
 // Response: null
-// Backend: stores the flag on the device's DHCP host section
-// (`_allow_dns_inject`), creating one if needed, rewrites the per-profile
-// dnsmasq instances (the first grant creates them; the last revocation removes
-// them), and wakes the injection service so the change applies immediately.
-// Default is off: a device with no flag gets Refused on every RFC 2136 UPDATE.
-// Setting `allow: false` also drops the records the device already published
-// and withdraws them from every profile's hosts file.
+// Backend: stores `_allow_dns_inject` on the device's DHCP host section,
+// creating one if needed, rewrites the per-profile dnsmasq instances, and
+// applies the change immediately. `allow: false` also drops the records the
+// device has published.
 ```
 
 ### `devices.forget`
@@ -1928,12 +1924,10 @@ struct DiagnosticsCreateRes {
 
 ### `dns.injected-list`
 
-Read-only view of the DNS records permitted devices have published into the
-router's resolver via RFC 2136 (see `devices.set-dns-injection` for the
-permission). There is deliberately no manual add/remove counterpart: records
-are client-managed — the device re-asserts every few minutes and the router
-drops a record whose owner loses the address it points at — and a manual
-router-side name already exists as a static DHCP lease with a hostname.
+The DNS records permitted devices have published into the router's resolver
+(see `devices.set-dns-injection`). Read-only: the device re-asserts or
+withdraws its own records, and the router drops a record whose owner loses the
+address it points at.
 
 ```rust
 // Request: {}
@@ -1957,9 +1951,8 @@ struct InjectedDnsRecord {
     profile: Option<String>,
 }
 // Response: Vec<InjectedDnsRecord>
-// Backend: the daemon's in-memory record store plus its injector directory
-// (nothing is persisted; an empty list is normal right after a restart until
-// devices re-assert).
+// Backend: the daemon's in-memory record store. Empty after a restart until
+// devices re-assert.
 ```
 
 ---

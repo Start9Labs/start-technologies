@@ -50,12 +50,9 @@ start_service() {
 INITEOF
 chmod +x "${FILES_DIR}/etc/init.d/startwrt"
 
-# Pre-create the DNS-injection addn-hosts files before dnsmasq starts.
-# dnsmasq's ujail bind-mounts each addn-hosts file when an instance starts,
-# and a file that does not exist is silently left unmounted — that instance
-# can then never see it, SIGHUP or not. startwrt-ctrld (START=99) renders
-# these files long after dnsmasq (START=19), so this creates them empty first;
-# the daemon only ever rewrites them in place, keeping the mounted inode.
+# Pre-creates the DNS-injection addn-hosts files before dnsmasq (START=19)
+# bind-mounts them into its ujail; a file missing at that point is never
+# mounted. startwrt-ctrld (START=99) rewrites them in place.
 cat > "${FILES_DIR}/etc/init.d/startwrt-dnsinject" << 'DNSINJEOF'
 #!/bin/sh /etc/rc.common
 

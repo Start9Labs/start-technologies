@@ -1,51 +1,19 @@
 //! DNS injection: RFC 2136 UPDATE ingress for the router's resolver.
 //!
-//! A device the user has granted the per-device permission (a StartOS server
-//! publishing its private domains) pushes `A`/`AAAA` records to the gateway
-//! address on port 53; an nftables include diverts only UPDATE-opcode packets
-//! to this module's per-profile listeners
-//! (`backend/nftables/13-startwrt-dns-update-divert.nft`), so dnsmasq keeps
-//! owning the query dataplane and a daemon restart cannot take LAN name
-//! resolution down. Answers reach other devices through per-profile
-//! addn-hosts files in tmpfs that dnsmasq re-reads on SIGHUP — `on_change`
-//! here is the dataplane, not a display cache.
+//! The nft include `13-startwrt-dns-update-divert.nft` redirects UPDATE
+//! packets arriving on a gateway's port 53 to the per-profile listeners here;
+//! dnsmasq keeps every query. Accepted records are rendered into per-profile
+//! addn-hosts files that dnsmasq re-reads on SIGHUP.
 //!
-//! # The trust tiers
+//! `policy` decides two tiers. A TSIG-signed UPDATE (an inbound WireGuard
+//! peer, key derived from its PSK) may publish any A/AAAA/CNAME/TXT record.
+//! An unsigned one (a LAN device with the permission) may publish A/AAAA
+//! records pointing at its own source address. Both refuse names under
+//! `lan.`, and a name belongs to the first owner that claims it.
 //!
-//! The shared [`DnsInjector`] verifies TSIG and hands the verdict to this
-//! module's `pre_update` policy:
-//!
-//! - **Signed** (an inbound WireGuard peer; the key derives from its PSK):
-//!   any name, any rdata, A/AAAA/CNAME/TXT — the StartTunnel posture.
-//! - **Unsigned** (a plain LAN device with the toggle on): A/AAAA only, and
-//!   the rdata must equal the UPDATE's source address. That reduces the
-//!   capability from "point any name anywhere" to "publish a name for
-//!   yourself" — the same blast radius as the accepted PCP exposure, and
-//!   strictly narrower than the DHCP-hostname injection every OpenWrt box
-//!   performs for every device by default.
-//!
-//! Both tiers refuse names under `lan.` (dnsmasq is authoritative there) and
-//! enforce first-come name ownership, so an authorized device in a low-trust
-//! profile cannot hijack a name a trusted server already holds. Ownership is
-//! in-memory like the records themselves: after a restart every client
-//! re-asserts within 180s, and a claim in that window requires the injection
-//! permission — the same trust boundary already accepted for PCP.
-//!
-//! # Arrival scoping
-//!
-//! Cross-segment source spoofing is closed structurally rather than checked:
-//! each profile gets listeners `SO_BINDTODEVICE`-bound to that profile's
-//! bridge (and, when an inbound VPN exists, its WireGuard interface), so the
-//! kernel guarantees the arrival interface and a `br-lan` host cannot present
-//! a `br-lan.101` address. Within one segment spoofing stays open — the same
-//! honestly-documented boundary as PCP (`port_control.rs`), except that here
-//! rdata-equals-source caps a spoofer at name-squatting for its victim.
-//!
-//! Records are bound to the address assignment behind them: a periodic sweep
-//! drops a record whose owning MAC no longer holds the address it points at
-//! (profile moves, DHCP recycling), mirroring the port-control sweep. Nothing
-//! is persisted — a cold store self-heals from client re-assertion within
-//! three minutes, so flash is never written in the steady state.
+//! Listeners are `SO_BINDTODEVICE`-bound per profile, so the arrival
+//! interface is the kernel's fact. Records, ownership and the directory live
+//! in memory; clients re-assert within 180 s of a restart.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -73,16 +41,13 @@ use crate::prelude::*;
 use crate::utils::{DeserializeStdin, HandlerExtSerde};
 use crate::{CliContext, CtrlContext, Error, ServerContext};
 
-/// Where the nft include (`13-startwrt-dns-update-divert.nft`) redirects
-/// UPDATEs arriving on a LAN bridge / an inbound WireGuard interface. Two
-/// ports so each listener can stay `SO_BINDTODEVICE`-bound to exactly one
-/// device without sharing a (addr, port) pair; both sit above SmartDNS's
-/// per-profile namespace (5300 + vlan tag, so 5300–9394).
+/// Redirect targets of the nft include. LAN bridges and inbound WireGuard
+/// interfaces take separate ports so no two device-bound sockets share an
+/// (addr, port). Both sit above SmartDNS's 5300–9394 range.
 pub(crate) const DNS_UPDATE_PORT_LAN: u16 = 9553;
 pub(crate) const DNS_UPDATE_PORT_WG: u16 = 9554;
 
-/// Directory + sweep cadence. The client re-asserts every 180s, so a device
-/// that appears between ticks converges within one refresh either way.
+/// Directory rebuild and sweep cadence.
 const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const FORWARD_TIMEOUT: Duration = Duration::from_secs(30);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -91,22 +56,15 @@ const INJECT_FILE_PREFIX: &str = "startwrt-dns-inject.dns_";
 /// The daemon's DNS-injection service; unset in CLI / `--configs-only` mode.
 pub static DNS_INJECT: OnceLock<Arc<DnsInject>> = OnceLock::new();
 
-/// The tmpfs addn-hosts file rendered for a profile's dnsmasq instance.
-/// Referenced from that instance's `addnhosts` UCI option; records live only
-/// in memory, so the daemon purges these files at startup.
-///
-/// dnsmasq's ujail bind-mounts the file at instance start, which pins the
-/// inode: the file must exist before dnsmasq boots (the `startwrt-dnsinject`
-/// init script staged by `build/stage-files.sh` pre-creates it) and must only
-/// ever be rewritten in place — replacing it would orphan the mount and leave
-/// dnsmasq reading the old inode forever.
+/// The tmpfs addn-hosts file of a profile's dnsmasq instance. dnsmasq's ujail
+/// bind-mounts it at instance start, so it must exist before dnsmasq starts
+/// (the `startwrt-dnsinject` init script creates it) and is only ever
+/// rewritten in place.
 pub(crate) fn inject_hosts_path(interface: &str) -> String {
     format!("/tmp/{INJECT_FILE_PREFIX}{interface}")
 }
 
-/// Who injected a record. A MAC on the LAN, a public key over inbound
-/// WireGuard — a peer has no MAC, so keying ownership on MAC alone would
-/// leave every VPN-injected name unowned.
+/// Who injected a record: a LAN MAC, or an inbound WireGuard peer's public key.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Owner {
     Mac(String),
@@ -135,23 +93,18 @@ struct ProfileNet {
     wg_device: Option<String>,
 }
 
-/// Everything the closures peek synchronously: hickory's `tsig_key` /
-/// `pre_update` run on the DNS request task and cannot await, so
-/// a refresher task maintains this from UCI, the DHCP leases, and the
-/// neighbor table (the same shape as StartTunnel's `dns_allowed` set, with a
-/// refresher instead of a DB write).
+/// State the injector's synchronous hooks read. A refresher task rebuilds it
+/// from UCI, the DHCP leases and the neighbor table.
 #[derive(Default)]
 struct Directory {
     by_ip: BTreeMap<IpAddr, Injector>,
     /// Derived TSIG keys for inbound WireGuard peers, by tunnel address.
     wg_keys: BTreeMap<IpAddr, [u8; 32]>,
-    /// First-come name ownership; in-memory deliberately (see module doc).
+    /// First-come name ownership.
     owners: BTreeMap<(LowerName, RecordType), Owner>,
     profiles: Vec<ProfileNet>,
-    /// `(viewer zone, source zone)` pairs the firewall forwards — the
-    /// `lan_access` relation records must follow: resolving a name you are
-    /// firewalled away from is a hang instead of a fast failure, and a leak
-    /// of the trusted subnet's name map.
+    /// `(viewer zone, source zone)` pairs the firewall forwards. A record is
+    /// served only to zones that can reach its source.
     reach: BTreeSet<(String, String)>,
 }
 
@@ -173,24 +126,18 @@ pub struct DnsInject {
     uci_root: PathBuf,
     injector: Arc<DnsInjector>,
     directory: Arc<SyncMutex<Directory>>,
-    /// Latest full record snapshot for the render task — a watch channel so
-    /// two rapid updates cannot race their file writes (the loser would
-    /// silently win); the single consumer always renders the newest state.
+    /// Latest record snapshot; the renderer always writes the newest one.
     render_rx: tokio::sync::watch::Receiver<Vec<InjectedRecord>>,
-    /// Sender half, shared with the injector's `on_change`: the refresher
-    /// nudges it because the rendered files encode the directory (profiles,
-    /// `reach` visibility) as well as the records, and a profile edit must
-    /// re-render without waiting for a record to change.
+    /// Shared with the injector's `on_change`. The refresher sends on it too:
+    /// the rendered files encode the directory as well as the records.
     render_tx: tokio::sync::watch::Sender<Vec<InjectedRecord>>,
-    /// Wakes the refresher immediately (permission toggled) instead of
-    /// waiting out the interval.
+    /// Wakes the refresher without waiting out the interval.
     poke: Arc<tokio::sync::Notify>,
     listeners: tokio::sync::Mutex<Vec<Listener>>,
 }
 
-/// A running per-profile UPDATE listener. Shutdown must go through the token
-/// and then *wait*: aborting the task only schedules the abort of hickory's
-/// socket tasks, so a rebind of the same address can hit EADDRINUSE.
+/// A running per-profile UPDATE listener. Shut down by cancelling `shutdown`
+/// and then awaiting `task`; an abort alone leaves the socket bound.
 struct Listener {
     net: ProfileNet,
     shutdown: CancellationToken,
@@ -207,9 +154,7 @@ impl DnsInject {
             let policy_dir = directory.clone();
             DnsInjector::new(
                 Vec::new(),
-                // `policy` is the one gate: it refuses an unknown source
-                // itself, and logs why, where the injector's own gate would
-                // refuse silently.
+                // `policy` is the one gate; it logs its refusals.
                 |_| true,
                 move |src| key_dir.peek(|d| d.wg_keys.get(&src).copied()),
                 move |records| {
@@ -229,9 +174,8 @@ impl DnsInject {
         })
     }
 
-    /// Wake the refresher now (a permission toggle must apply immediately —
-    /// in particular a revocation must drop the device's records, not honor
-    /// them for another interval).
+    /// Wakes the refresher now; a revocation drops the device's records on
+    /// this pass.
     pub fn invalidate(&self) {
         self.poke.notify_one();
     }
@@ -239,9 +183,7 @@ impl DnsInject {
 
 /// Run the service for the life of the daemon.
 pub async fn run(di: Arc<DnsInject>) {
-    // Records live in memory and died with the last daemon; the rendered
-    // files did not, so dnsmasq would keep answering from them — including
-    // for devices whose permission was revoked while the daemon was down.
+    // The rendered files outlived the last daemon; the records did not.
     purge_rendered_files().await;
     tokio::join!(
         supervise("dns-inject refresh", di.clone(), run_refresh),
@@ -261,8 +203,8 @@ async fn run_refresh(di: Arc<DnsInject>) {
     }
 }
 
-/// One refresher pass: rebuild the directory from UCI + leases + neighbors,
-/// reap stale records, and (re)bind listeners to the current profile set.
+/// One refresher pass: rebuild the directory, sweep stale records, rebind
+/// listeners to the current profile set.
 async fn refresh(di: &Arc<DnsInject>) -> Result<(), Error> {
     let uci_root = di.uci_root.clone();
     let snapshot = uci_task(move || async move {
@@ -289,9 +231,7 @@ async fn refresh(di: &Arc<DnsInject>) -> Result<(), Error> {
         .unwrap_or_default();
     let neighbors = crate::devices::parse_neigh_output(&neigh);
 
-    // Candidate addresses per allowed MAC: static reservation, current
-    // lease, live neighbor entry. Attribution to a profile is by subnet
-    // (every profile subnet is a /24 on its gateway).
+    // Candidate addresses per allowed MAC: reservation, lease, neighbor entry.
     let mut by_ip: BTreeMap<IpAddr, Injector> = BTreeMap::new();
     let mut wg_keys = BTreeMap::new();
     for mac in &snapshot.allowed_macs {
@@ -332,8 +272,7 @@ async fn refresh(di: &Arc<DnsInject>) -> Result<(), Error> {
         wg_keys.insert(IpAddr::V4(*ip), *key);
     }
 
-    // Reap before publishing the new directory: ownership decisions must not
-    // race the sweep that prunes them.
+    // The sweep runs under the same lock that publishes the directory.
     let stale = di.directory.mutate(|d| {
         d.by_ip = by_ip;
         d.wg_keys = wg_keys;
@@ -341,8 +280,7 @@ async fn refresh(di: &Arc<DnsInject>) -> Result<(), Error> {
         d.reach = snapshot.reach.clone();
         sweep_owners(d, &snapshot, &leases, &neighbors, &di.injector.list())
     });
-    // `warn`, not `info`: the daemon's default filter is `warn`, and a
-    // reaped record is a name that silently stopped resolving.
+    // The daemon's default filter is `warn`.
     for (name, rtype) in stale {
         tracing::warn!(
             "DNS-inject sweep dropped {name} {rtype}: its owner no longer holds \
@@ -351,22 +289,16 @@ async fn refresh(di: &Arc<DnsInject>) -> Result<(), Error> {
         di.injector.delete(&Name::from(name), Some(rtype));
     }
 
-    // Wake the renderer even when no record changed: the rendered files also
-    // encode the directory just published (profile set, `reach` visibility,
-    // source attribution), so a profile edit must re-render without waiting
-    // for a record change. The renderer's content diff makes a quiet pass
-    // free, and the wake after the first refresh is what writes the (empty)
-    // baseline files the freshly-purged /tmp is missing.
+    // The rendered files encode the directory too; the renderer's content
+    // diff keeps a quiet pass free.
     di.render_tx.send_replace(di.injector.list());
 
     sync_listeners(di, &snapshot.profiles).await;
     Ok(())
 }
 
-/// The (name, rtype) rrsets whose owner no longer justifies them: permission
-/// revoked, WG peer removed, or — the address-assignment invariant — an A
-/// record whose owning MAC no longer holds the address it points at. Whole
-/// rrsets, because ownership guarantees a single owner per (name, rtype).
+/// The (name, rtype) rrsets whose owner lost the permission, the peer entry,
+/// or the address an A record points at.
 fn sweep_owners(
     d: &mut Directory,
     snapshot: &NetSnapshot,
@@ -374,10 +306,7 @@ fn sweep_owners(
     neighbors: &[crate::devices::ArpEntry],
     records: &[InjectedRecord],
 ) -> Vec<(LowerName, RecordType)> {
-    // The same three address sources the directory build admits. A neighbor
-    // entry must count here too: a device with no DHCP lease (static IP) is
-    // accepted on its neighbor entry, and a sweep consulting only
-    // reservations and leases would reap every record it publishes.
+    // The same three address sources the directory build admits.
     let mac_holds = |mac: &str, ip: Ipv4Addr| {
         snapshot.reserved.get(mac) == Some(&ip)
             || leases.get(mac).and_then(|l| l.parse().ok()) == Some(ip)
@@ -407,8 +336,7 @@ fn sweep_owners(
     for key in &stale {
         d.owners.remove(key);
     }
-    // Ownership can also outlive its records (a client withdrew a name):
-    // release those claims so the name is free again.
+    // A withdrawn name releases its claim.
     d.owners.retain(|(name, rtype), _| {
         records
             .iter()
@@ -417,9 +345,8 @@ fn sweep_owners(
     stale
 }
 
-/// Which profile's /24 contains `ip`. Every profile subnet is a /24 by
-/// construction (`profiles.rs` writes 255.255.255.0), and inbound-VPN peers
-/// are allocated inside their profile's /24, so this attributes both.
+/// Which profile's /24 contains `ip`. Every profile subnet is a /24, and
+/// inbound-VPN peers are allocated inside their profile's.
 fn profile_for(profiles: &[ProfileNet], ip: Ipv4Addr) -> Option<&ProfileNet> {
     profiles
         .iter()
@@ -429,8 +356,7 @@ fn profile_for(profiles: &[ProfileNet], ip: Ipv4Addr) -> Option<&ProfileNet> {
 fn read_snapshot(cfgs: &Configs) -> Result<NetSnapshot, Error> {
     let mut snapshot = NetSnapshot::default();
 
-    // Profiles: UCI profile → its interface section (gateway + bridge), its
-    // zone, and whether an inbound VPN interface exists for it.
+    // Profile → interface section, zone, inbound-VPN interface.
     let mut zones: Vec<(String, Vec<String>)> = Vec::new();
     cfgs["firewall"].each::<FirewallZone, Error>(|_, zone| {
         zones.push((zone.name.clone(), zone.network.clone()));
@@ -479,8 +405,7 @@ fn read_snapshot(cfgs: &Configs) -> Result<NetSnapshot, Error> {
         }
     })?;
 
-    // Inbound WireGuard peers: `wireguard_wg_<iface>` sections carry the
-    // public key, the PSK the TSIG key derives from, and the tunnel /32.
+    // `wireguard_wg_<iface>` peer sections: public key, PSK, tunnel /32.
     for p in &snapshot.profiles {
         let Some(wg) = &p.wg_device else { continue };
         let peer_ty = format!("wireguard_{wg}");
@@ -529,8 +454,8 @@ fn read_snapshot(cfgs: &Configs) -> Result<NetSnapshot, Error> {
     Ok(snapshot)
 }
 
-/// The tiered `pre_update` policy (see module doc). Validates every record in
-/// the message before claiming any ownership, so a refusal leaves no trace.
+/// The tiered `pre_update` policy. Every record is validated before any
+/// ownership is claimed.
 fn policy(
     directory: &SyncMutex<Directory>,
     src: IpAddr,
@@ -538,10 +463,8 @@ fn policy(
     tsig_ok: bool,
 ) -> ResponseCode {
     directory.mutate(|d| {
-        // A refusal is otherwise invisible on both ends (the client shows only
-        // a generic capability failure), so name the reason at `warn`, the
-        // daemon's default filter level. The divert chain rate-limits ingress
-        // to 20/s, which bounds this log under a flood.
+        // The client sees only a generic failure; the divert's 20/s limit
+        // bounds this log.
         let refuse = |why: String| {
             tracing::warn!("DNS UPDATE from {src} refused: {why}");
             ResponseCode::Refused
@@ -555,8 +478,7 @@ fn policy(
         };
         for rec in updates {
             let name = LowerName::from(&rec.name);
-            // dnsmasq is authoritative for `lan.` (DHCP-derived hostnames);
-            // an injected record there would fight it.
+            // dnsmasq is authoritative for `lan.`.
             if lan_zone().zone_of(&name) {
                 return refuse(format!("{name} is inside the reserved `lan.` zone"));
             }
@@ -564,7 +486,7 @@ fn policy(
             match rec.dns_class {
                 DNSClass::IN => {
                     if tsig_ok {
-                        // Signed tier: the record types the admin path allows.
+                        // Signed tier.
                         if !matches!(
                             rtype,
                             RecordType::A | RecordType::AAAA | RecordType::CNAME | RecordType::TXT
@@ -572,10 +494,7 @@ fn policy(
                             return refuse(format!("record type {rtype} is not injectable"));
                         }
                     } else {
-                        // Unsigned tier: "publish a name for yourself" only.
-                        // rdata-equals-source is the load-bearing mitigation —
-                        // a same-segment spoofer can squat a name for its
-                        // victim, never point one at itself.
+                        // Unsigned tier: a name may point only at its source.
                         let rdata_is_src = match &rec.data {
                             RData::A(a) => IpAddr::V4((*a).into()) == src,
                             RData::AAAA(a) => IpAddr::V6((*a).into()) == src,
@@ -595,8 +514,7 @@ fn policy(
                         return refuse(format!("{name} is owned by another device"));
                     }
                 }
-                // Deletions: only of names you own (an unheld name is a no-op
-                // the store ignores, so admitting it is harmless).
+                // Deleting an unheld name is a no-op the store ignores.
                 DNSClass::ANY if rtype == RecordType::ANY => {
                     if d.owners.iter().any(|((n, _), o)| *n == name && *o != owner) {
                         return refuse(format!("{name} is owned by another device"));
@@ -613,9 +531,8 @@ fn policy(
                 _ => {}
             }
         }
-        // Accepted: claim additions, release full-rrset deletions. A
-        // DNSClass::NONE delete removes single rdatas and may leave the rrset
-        // populated, so its claim stays until the sweep sees it empty.
+        // A `NONE`-class delete may leave the rrset populated; its claim
+        // stays until the sweep sees it empty.
         for rec in updates {
             let name = LowerName::from(&rec.name);
             let rtype = rec.record_type();
@@ -642,9 +559,8 @@ fn lan_zone() -> LowerName {
 
 // ── Listeners ──────────────────────────────────────────────
 
-/// Rebind listeners to the current profile set: tear down (cancel *and*
-/// await) any listener whose profile identity changed or vanished, then bind
-/// the missing ones. Bind failures are logged and retried next refresh.
+/// Rebinds listeners to the current profile set. A failed bind is retried
+/// next refresh.
 async fn sync_listeners(di: &Arc<DnsInject>, profiles: &[ProfileNet]) {
     let mut listeners = di.listeners.lock().await;
     let (keep, drop): (Vec<_>, Vec<_>) = std::mem::take(&mut *listeners)
@@ -677,9 +593,7 @@ async fn sync_listeners(di: &Arc<DnsInject>, profiles: &[ProfileNet]) {
 }
 
 fn bind_listener(injector: Arc<DnsInjector>, p: &ProfileNet) -> Result<Listener, Error> {
-    // The miss path (an UPDATE-shaped probe that turns out to be a query, or
-    // anything unauthorized) still gets sane answers from the profile's own
-    // dnsmasq.
+    // The miss path forwards to the profile's own dnsmasq.
     let catalog = forwarding_catalog(vec![SocketAddr::from((p.gateway, 53))], FORWARD_TIMEOUT)?;
     let mut server = Server::new(InjectingHandler::new(injector, catalog));
     server.register_socket(bind_device_udp(p.gateway, DNS_UPDATE_PORT_LAN, &p.device)?);
@@ -705,9 +619,7 @@ fn bind_listener(injector: Arc<DnsInjector>, p: &ProfileNet) -> Result<Listener,
     })
 }
 
-/// A UDP socket bound to `addr:port` on exactly one kernel device, so the
-/// arrival interface is guaranteed structurally — the closest a LAN can come
-/// to StartTunnel's peer-key-binds-address property.
+/// A UDP socket bound to exactly one kernel device.
 fn bind_device_udp(
     addr: Ipv4Addr,
     port: u16,
@@ -733,10 +645,7 @@ fn bind_device_udp(
 
 async fn run_render(di: Arc<DnsInject>) {
     let mut rx = di.render_rx.clone();
-    // Baseline: freshly-purged files. The first pass usually precedes the
-    // first refresh (no profiles known yet, so nothing is written); the
-    // refresher's wake right after that refresh rewrites every profile's
-    // (empty) file and signals, clearing anything dnsmasq still holds.
+    // The refresher's wake after its first pass writes the baseline files.
     let mut last: HashMap<String, String> = HashMap::new();
     loop {
         let records = rx.borrow_and_update().clone();
@@ -749,9 +658,8 @@ async fn run_render(di: Arc<DnsInject>) {
     }
 }
 
-/// Render every profile's addn-hosts file and SIGHUP the instances whose
-/// content changed. Diffing is load-bearing: without it, each client's 180s
-/// re-assert would rewrite files and signal dnsmasq forever.
+/// Renders every profile's addn-hosts file. Unchanged content is neither
+/// written nor signalled.
 async fn render_all(
     di: &Arc<DnsInject>,
     records: &[InjectedRecord],
@@ -773,12 +681,8 @@ async fn render_all(
             continue;
         }
         let path = inject_hosts_path(&p.interface);
-        // In place, never tmp + rename: procd bind-mounts this file into the
-        // dnsmasq instance's ujail when the instance starts, and a rename
-        // swaps the inode out from under that mount — dnsmasq would then
-        // re-read the stale mounted inode forever. dnsmasq only reads on the
-        // SIGHUP sent after the write completes, so the non-atomic write is
-        // never observed.
+        // In place, never tmp + rename: dnsmasq's ujail holds a bind mount on
+        // this inode.
         tokio::fs::write(&path, &content)
             .await
             .with_kind(ErrorKind::Filesystem)?;
@@ -799,12 +703,8 @@ async fn render_all(
     Ok(())
 }
 
-/// The addn-hosts content viewer profile `p` may see: A/AAAA records only
-/// (a hosts file cannot express anything else), and only from source
-/// profiles `p`'s firewall may reach — `lan_access` visibility. Resolving a
-/// name you are firewalled away from would hang instead of failing fast, and
-/// leak the trusted subnet's name map. Deterministic (sorted, deduped) so
-/// the renderer's change diff is meaningful.
+/// The addn-hosts content profile `p` may see: A/AAAA records whose source
+/// profile `p`'s zone can reach. Sorted and deduped.
 fn profile_hosts_content(
     p: &ProfileNet,
     profiles: &[ProfileNet],
@@ -812,8 +712,7 @@ fn profile_hosts_content(
     by_ip: &BTreeMap<IpAddr, String>,
     records: &[InjectedRecord],
 ) -> String {
-    // A record belongs to the profile whose subnet its source sits in; fall
-    // back to the directory for a source the subnet match cannot place.
+    // By the source's subnet, else by the directory.
     let source_profile = |r: &InjectedRecord| -> Option<String> {
         match r.source {
             IpAddr::V4(v4) => profile_for(profiles, v4)
@@ -842,9 +741,8 @@ fn profile_hosts_content(
     lines.concat()
 }
 
-/// SIGHUP one dnsmasq instance through procd. Never the pidfile: dnsmasq runs
-/// under ujail in its own PID namespace, so the pidfile holds `1` and a HUP
-/// from the host would signal init and silently do nothing.
+/// SIGHUPs one dnsmasq instance through procd. dnsmasq runs in its own PID
+/// namespace, so its pidfile holds `1`.
 async fn signal_dnsmasq_instance(instance: &str) {
     if let Err(e) = tokio::process::Command::new("ubus")
         .args([
@@ -860,9 +758,8 @@ async fn signal_dnsmasq_instance(instance: &str) {
     }
 }
 
-/// Truncate, never remove: a running dnsmasq instance holds a ujail bind
-/// mount on each file (see `render_all`), and removing + recreating would
-/// strand that mount on a deleted inode until dnsmasq restarts.
+/// Truncates, never removes: a running dnsmasq instance holds a bind mount on
+/// each file.
 async fn purge_rendered_files() {
     let Ok(mut dir) = tokio::fs::read_dir("/tmp").await else {
         return;
@@ -907,10 +804,7 @@ pub struct InjectedDnsRecord {
     pub profile: Option<String>,
 }
 
-/// Read-only view of the injected records, for the UI. Deliberately no
-/// manual add/remove counterpart: the shared store's admin path bypasses
-/// authorization, TSIG, and ownership, and the router's manual equivalent
-/// already exists as a static DHCP lease with a hostname.
+/// The injected records, for the UI.
 #[instrument(skip_all)]
 pub async fn injected_list(ctx: ServerContext) -> Result<Vec<InjectedDnsRecord>, Error> {
     let Some(di) = DNS_INJECT.get() else {
@@ -959,17 +853,14 @@ pub struct SetDnsInjectionReq {
     pub allow: bool,
 }
 
-/// Set a device's "may inject DNS records" toggle (default off). Stored on
-/// the device's DHCP host entry like `_allow_pcp`; also rewrites the
-/// per-profile dnsmasq instances, because the first grant creates them (and
-/// the last revocation removes them).
+/// Sets a device's DNS-injection permission on its DHCP host entry and
+/// rewrites the per-profile dnsmasq instances.
 #[instrument(skip_all)]
 pub async fn set_dns_injection<C: CtrlContext>(
     ctx: C,
     DeserializeStdin(req): DeserializeStdin<SetDnsInjectionReq>,
 ) -> Result<(), Error> {
-    // A bad MAC would otherwise be written into a new `config host` section
-    // that dnsmasq may refuse to load — taking the rest of the file with it.
+    // A bad MAC in a `config host` section can stop dnsmasq loading the file.
     if !crate::published_ports::validate_mac(&req.mac) {
         return Err(Error::new(
             eyre!("invalid mac: {}", req.mac),
@@ -1009,15 +900,11 @@ pub async fn set_dns_injection<C: CtrlContext>(
             ),
             None,
         );
-        // A full reload, not a SIGHUP: the rewrite may have created or
-        // removed per-profile instances, which changes generated command
-        // lines — exactly what procd's reload handles.
+        // A reload, not a SIGHUP: instances may have been created or removed.
         if ctx.effectful() {
             crate::devices::reload_dnsmasq();
         }
-        // Apply immediately: the refresher re-derives who may inject, and on
-        // a revocation its sweep drops the device's records and the renderer
-        // withdraws them from the hosts files.
+        // A revocation drops the device's records on this pass.
         if let Some(di) = DNS_INJECT.get() {
             di.invalidate();
         }
@@ -1025,8 +912,8 @@ pub async fn set_dns_injection<C: CtrlContext>(
     Ok(())
 }
 
-/// Re-run the per-profile dnsmasq section rewrite so instances (and their
-/// `addnhosts` references) match the current set of inject-permitted devices.
+/// Rewrites the per-profile dnsmasq sections to match the inject-permitted
+/// set.
 async fn rewrite_instances<C: CtrlContext>(ctx: &C) -> Result<(), Error> {
     let uci_root = ctx.uci_root();
     let mut retries = 4;
@@ -1352,10 +1239,8 @@ mod tests {
         );
     }
 
-    /// A device with no DHCP lease (a static IP) is admitted into the
-    /// directory on its neighbor-table entry, so the sweep must count that
-    /// entry as holding the address — otherwise every record such a device
-    /// publishes is accepted and then reaped on the next refresh, forever.
+    /// A static-IP device is admitted on its neighbor entry alone; the sweep
+    /// counts that entry too.
     #[tokio::test]
     async fn sweep_keeps_owner_known_only_from_neighbors() {
         let mac = "AA:BB:CC:DD:EE:FF";
@@ -1410,13 +1295,8 @@ mod tests {
         }
     }
 
-    /// The signed tier's key glue: a `wireguard_wg_<iface>` peer section must
-    /// yield a directory entry keyed by the peer's tunnel /32 and carrying the
-    /// TSIG key derived from its PSK — the same shared derivation the StartOS
-    /// client signs with, so key agreement is structural once this parse is
-    /// right. (The byte-level sign→verify round-trip lives in start-core's
-    /// `tsig_gates_updates`; the signed policy arm in
-    /// `signed_tier_allows_any_rdata_and_more_types`.)
+    /// A `wireguard_wg_<iface>` peer section yields a directory entry keyed
+    /// by its tunnel /32, carrying the TSIG key derived from its PSK.
     #[tokio::test]
     async fn snapshot_derives_wg_peer_tsig_keys() {
         use base64::Engine;
@@ -1515,11 +1395,8 @@ mod tests {
         );
     }
 
-    /// The rendered files encode the directory (profiles, `reach`) as well as
-    /// the records, so every refresh must wake the renderer — a re-assert that
-    /// changes no record deliberately doesn't, and without the refresh-side
-    /// wake a visibility change (a profile's LAN access edited) would leave
-    /// stale hosts files serving names the firewall no longer reaches.
+    /// The rendered files encode the directory, so a refresh wakes the
+    /// renderer even when no record changed.
     #[tokio::test]
     async fn refresh_wakes_render_without_record_change() {
         let dir = tempfile::tempdir().unwrap();

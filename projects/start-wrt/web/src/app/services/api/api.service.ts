@@ -713,11 +713,7 @@ export interface AutomaticPortUseFromApi {
   hostname: string | null
 }
 
-/**
- * A DNS record a permitted device published into the router's resolver.
- * Read-only: the device re-asserts or withdraws its own records, and the
- * router drops them when the device loses the address they point at.
- */
+/** A DNS record a permitted device published into the router's resolver. */
 export interface InjectedDnsRecordFromApi {
   name: string
   rtype: string

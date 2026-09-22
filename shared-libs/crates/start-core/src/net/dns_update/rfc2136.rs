@@ -1,23 +1,17 @@
 //! Shared server-side RFC 2136 (DNS UPDATE) handling, used by both StartTunnel
 //! (in this crate) and StartWRT's `startwrt-ctrld` (which imports this crate).
 //!
-//! [`DnsInjector`] is an in-memory store of injected DNS records plus per-gateway
-//! policy plug-ins: an authorizer (does this source IP's "allow DNS injection"
-//! toggle permit it?), a TSIG key lookup (the per-device key derived from that
-//! device's WireGuard PSK), a `pre_update` policy hook (inspects an UPDATE's
-//! records — together with the TSIG verdict — before they mutate the store),
-//! and an `on_change` hook (persist the records — to PatchDb on the tunnel, an
-//! addn-hosts file on StartWRT). [`InjectingHandler`] wraps a forwarding
+//! [`DnsInjector`] is an in-memory store of injected DNS records with four
+//! hooks: an authorizer per source IP, a TSIG key lookup (the per-device key
+//! derived from its WireGuard PSK), a `pre_update` policy that sees an
+//! UPDATE's records and its TSIG verdict before they mutate the store, and an
+//! `on_change` notifier. [`InjectingHandler`] wraps a forwarding
 //! `RequestHandler`: an injected-name `Query` is answered locally, an
-//! authorized `Update` mutates the store, everything else is forwarded
-//! unchanged.
+//! authorized `Update` mutates the store, everything else is forwarded.
 //!
-//! UPDATE authentication is **TSIG** (RFC 8945): the source IP alone is
-//! forgeable by any co-located service that can emit on the tunnel interface,
-//! so the handler verifies the HMAC keyed off the device's root-only WG PSK
-//! and hands the verdict to `pre_update`, which decides what an unsigned
-//! UPDATE may do (StartTunnel refuses it outright; StartWRT restricts it to
-//! publishing the sender's own address).
+//! UPDATE authentication is **TSIG** (RFC 8945), HMAC keyed off the device's
+//! root-only WG PSK. The handler hands the verdict to `pre_update`, which
+//! decides what an unsigned UPDATE may do.
 //! TSIG proves the signer holds that PSK (no forgery) but not freshness: there's
 //! no anti-replay state, so a captured signature replays within `TSIG_FUDGE`.
 //! That's bounded to records the sending device may already mutate and is
@@ -137,12 +131,10 @@ type Authorizer = Box<dyn Fn(IpAddr) -> bool + Send + Sync>;
 /// The per-device derived TSIG key for a source IP, or `None` if it isn't an
 /// allowed DNS-injection device.
 type KeyLookup = Box<dyn Fn(IpAddr) -> Option<[u8; 32]> + Send + Sync>;
-/// Fired with a full snapshot after a mutation that actually changed the
-/// store; a no-op UPDATE (the client's periodic re-assert) does not fire it.
+/// Fired with a full snapshot after a mutation that changed the store.
 type OnChange = Box<dyn Fn(Vec<InjectedRecord>) + Send + Sync>;
-/// Policy hook run on an authorized UPDATE's records — with whether the
-/// message carried a valid TSIG — before they mutate the store. Returning
-/// anything but `NoError` refuses the whole message with that code.
+/// Runs on an authorized UPDATE's records, with its TSIG verdict, before they
+/// mutate the store. Anything but `NoError` refuses the whole message.
 type PreUpdate = Box<dyn Fn(IpAddr, &[Record], bool) -> ResponseCode + Send + Sync>;
 
 pub struct DnsInjector {
@@ -259,8 +251,8 @@ impl DnsInjector {
         self.records.peek(|m| m.contains_key(name))
     }
 
-    /// Apply an UPDATE's records (RFC 2136 §2.5) from `src`, after authorizing
-    /// and consulting the `pre_update` policy hook.
+    /// Applies an UPDATE's records (RFC 2136 §2.5) once the authorizer and
+    /// `pre_update` admit them.
     fn apply_update(&self, src: IpAddr, updates: &[Record], tsig_verified: bool) -> ResponseCode {
         if !(self.authorize)(src) {
             return ResponseCode::Refused;
@@ -369,11 +361,10 @@ impl RequestHandler for InjectingHandler {
         match request.metadata.op_code {
             OpCode::Update => {
                 let src = request.src().ip();
-                // The TSIG verdict is not enforced here: the injector's
-                // `pre_update` policy decides what an unsigned UPDATE may do.
+                // `pre_update` decides what an unsigned UPDATE may do.
                 let tsig_ok = self.injector.verify_tsig(src, request.as_slice());
-                // Re-decode the raw message: MessageRequest hides the
-                // authority section where the update RRs live.
+                // MessageRequest hides the authority section the update RRs
+                // live in.
                 let code = match hickory_server::proto::op::Message::from_vec(request.as_slice()) {
                     Ok(msg) => self.injector.apply_update(src, &msg.authorities, tsig_ok),
                     Err(_) => ResponseCode::FormErr,
@@ -581,9 +572,7 @@ mod tests {
         Record::from_rdata(n, 300, RData::A(A::from(Ipv4Addr::from(addr))))
     }
 
-    /// The client re-asserts its records every few minutes; an UPDATE that
-    /// changes nothing must not fire `on_change` (on StartWRT that hook is the
-    /// dataplane — a rewrite plus a dnsmasq signal per no-op would be forever).
+    /// An UPDATE that changes nothing does not fire `on_change`.
     #[tokio::test]
     async fn noop_updates_do_not_notify() {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -631,7 +620,7 @@ mod tests {
         assert_eq!(fired.load(Ordering::SeqCst), 3, "a real delete notifies");
     }
 
-    /// A `pre_update` refusal must reach the client as that code and leave the
+    /// A `pre_update` refusal reaches the client as that code and leaves the
     /// store untouched and un-notified.
     #[tokio::test]
     async fn pre_update_refusal_leaves_store_untouched() {
@@ -654,9 +643,8 @@ mod tests {
         assert_eq!(fired.load(Ordering::SeqCst), 0, "no notify");
     }
 
-    /// Regression for moving the TSIG requirement out of `handle_request` and
-    /// into the policy hook: with StartTunnel's policy installed, every
-    /// src × signed combination yields the same response code as before.
+    /// With StartTunnel's policy installed, every src × signed combination
+    /// yields the response code `handle_request` used to.
     #[tokio::test]
     async fn tunnel_policy_matches_old_tsig_refusal() {
         let src = IpAddr::V4(Ipv4Addr::new(10, 59, 0, 2));

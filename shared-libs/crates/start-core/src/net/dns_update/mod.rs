@@ -60,10 +60,8 @@ pub(crate) fn tsig_key_name() -> Name {
     Name::from_ascii("startos-dns-update.").expect("static valid name")
 }
 
-/// Per-device TSIG HMAC key derived from the WireGuard PSK. Both sides derive it
-/// identically; a sandboxed service can't read the root-only PSK, so it can't
-/// forge a valid signature. `pub` for StartWRT's gateway, which derives keys
-/// for its own inbound WireGuard peers.
+/// Per-device TSIG HMAC key derived from the WireGuard PSK; both ends derive
+/// it identically.
 pub fn derive_tsig_key(psk: &[u8; 32]) -> [u8; 32] {
     let mut out = [0u8; 32];
     Hkdf::<Sha256>::new(None, psk)
@@ -83,11 +81,8 @@ pub(crate) fn tsig_signer(key: [u8; 32]) -> TSigner {
     .expect("HmacSha256 supported; static name valid")
 }
 
-/// A `Catalog` whose root zone is a single `ForwardAuthority` pointed at
-/// `upstreams` (UDP + TCP per server). `Catalog` itself implements
-/// `RequestHandler`, so no custom handler is needed for a pure forwarder.
-/// The miss path of every [`rfc2136::InjectingHandler`] deployment (the
-/// tunnel's per-subnet proxies, StartWRT's per-profile UPDATE listeners).
+/// A `Catalog` whose root zone forwards to `upstreams` (UDP + TCP per
+/// server): the miss path of an [`rfc2136::InjectingHandler`].
 pub fn forwarding_catalog(
     upstreams: Vec<SocketAddr>,
     forward_timeout: Duration,

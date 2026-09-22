@@ -69,7 +69,7 @@ pub struct Device {
     /// (default off; set via `devices set-auto-forward`).
     pub allow_auto_port_forward: bool,
     /// Whether this device may publish DNS records into the router's resolver
-    /// (default off; set via `devices set-dns-injection`).
+    /// (`devices set-dns-injection`).
     pub allow_dns_injection: bool,
     pub security_profile: Option<String>,
     pub speed: Option<SpeedData>,
@@ -1697,8 +1697,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 ipv4_static: true,
                 // No MAC to authorize, so a VPN peer can never be auto-forward capable.
                 allow_auto_port_forward: false,
-                // A VPN peer holds a PSK instead of a toggle: its UPDATEs are
-                // admitted on a valid TSIG signature (the signed tier).
+                // A VPN peer is admitted on its TSIG signature, not a toggle.
                 allow_dns_injection: false,
                 security_profile: Some(server.profile_fullname.clone()),
                 speed,
@@ -1876,9 +1875,8 @@ pub async fn update<C: CtrlContext>(
             if ctx.effectful() {
                 reload_dnsmasq();
             }
-            // A moved reservation must reach the DNS-injection directory
-            // before the device's next UPDATE arrives from its new address;
-            // a refusal there costs the client a five-minute back-off.
+            // A refused UPDATE from the new address costs the client a
+            // five-minute back-off.
             if let Some(di) = crate::dns_inject::DNS_INJECT.get() {
                 di.invalidate();
             }
@@ -2003,9 +2001,7 @@ pub async fn forget<C: CtrlContext>(
                 );
                 crate::device_names::forget(&mac_upper).await;
                 crate::port_control::close_device_forwards(&mac_upper, &removed_static_ips).await;
-                // Same for `_allow_dns_inject`: the refresher's sweep drops
-                // the device's published DNS records now instead of on its
-                // next interval.
+                // The sweep drops the device's published DNS records now.
                 if let Some(di) = crate::dns_inject::DNS_INJECT.get() {
                     di.invalidate();
                 }

@@ -1,33 +1,15 @@
-# DNS UPDATE ingress for DNS injection. dnsmasq owns every gateway's :53 and
-# does not implement RFC 2136, so this diverts only UPDATE-opcode packets to
-# the daemon's per-profile listeners and leaves the query dataplane untouched
-# — if the daemon is down, UPDATEs fail and nothing else does.
+# Diverts DNS UPDATE packets addressed to the router to the daemon's
+# per-profile listeners; queries stay with dnsmasq.
 #
-# The UDP header is 64 bits, the DNS flags byte starts at bit 80, so the
-# 4-bit opcode is `@th,81,4`; 5 is UPDATE. The client is UDP-only, so there
-# is no TCP variant (TCP DNS's length prefix makes the offset non-constant).
+# `@th,81,4` is the DNS opcode (UDP header 64 bits, flags at bit 80); 5 is
+# UPDATE. UDP only. `fib daddr type local` leaves transiting UPDATEs alone.
+# `redirect` keeps the destination address. Priority -101 runs before fw4's
+# dstnat (-100), so the per-profile DNS-Override DNAT never sees these.
+# Inbound WireGuard arrivals take their own port: each listener is bound to
+# one kernel device, and no two may share an (addr, port).
 #
-# `fib daddr type local` confines the divert to UPDATEs addressed to the
-# router itself: without it the rule also catches UPDATEs merely transiting
-# to an external authoritative server — ddns-scripts' nsupdate backend does
-# exactly that. `redirect` (not `dnat`) preserves the destination address and
-# rewrites only the port, so one static ruleset serves every profile gateway
-# and replies un-NAT through conntrack. Priority -101 beats fw4's own dstnat
-# chain (-100) — netfilter orders base chains by declared priority — so the
-# per-profile DNS-Override DNAT never sees a diverted packet, and stays above
-# conntrack (-200). The rate limits shed an UPDATE flood before the daemon
-# pays for parse + TSIG + directory lookup per packet.
-#
-# Two target ports because the daemon binds each listener to exactly one
-# kernel device (that is what closes cross-segment source spoofing): inbound
-# WireGuard arrivals go to the wg-bound listeners on one port, everything
-# else to the bridge-bound listeners on another, so no two sockets ever share
-# an (addr, port) pair. `redirect` is terminal, so the first matching rule
-# wins.
-#
-# `redirect` needs kmod-nft-nat; without that package fw4 fails to load the
-# ENTIRE ruleset, so this file and the kmod-nft-nat entry in
-# build/openwrt.diffconfig must ship together.
+# `redirect` needs kmod-nft-nat (build/openwrt.diffconfig); without it fw4
+# loads no ruleset at all.
 chain startwrt_dns_update_divert {
 	type nat hook prerouting priority -101; policy accept;
 	iifname "wg_*" meta nfproto ipv4 fib daddr type local udp dport 53 @th,81,4 == 5 limit rate 20/second burst 50 packets counter redirect to :9554

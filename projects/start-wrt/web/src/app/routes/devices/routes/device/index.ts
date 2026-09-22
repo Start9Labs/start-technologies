@@ -224,9 +224,7 @@ export default class DeviceDetail {
     { requireSync: true },
   )
 
-  // Re-read on every device poll so the table follows records as they arrive
-  // and expire, and empties right after the permission is turned off. A failed
-  // read keeps the last list; the device poll already reports unreachability.
+  // Re-read on every device poll. A failed read keeps the last list.
   private readonly allRecords = toSignal(
     toObservable(this.service.data).pipe(
       switchMap(() =>
@@ -271,9 +269,7 @@ export default class DeviceDetail {
     })
   }
 
-  // Publishing DNS names is a trust grant with network-wide effect, so
-  // enabling asks first; the control only flips on confirmation. Disabling
-  // needs no ceremony.
+  // Enabling asks first; the control flips only on confirmation.
   protected onDnsInjectionToggle(event: Event) {
     const control = this.form.controls.allowDnsInjection
     if (control.value) return
@@ -292,8 +288,7 @@ export default class DeviceDetail {
       .pipe(filter(Boolean))
       .subscribe(() => {
         control.setValue(true)
-        // The pristine-gated reset effect must not undo the choice before
-        // Save.
+        // Keeps the pristine-gated reset effect from undoing the choice.
         control.markAsDirty()
       })
   }
@@ -320,8 +315,8 @@ export default class DeviceDetail {
     const ipv4Changed =
       formValue.ip.ipv4Static && formValue.ip.ipv4 !== (this.data()?.ipv4 ?? '')
 
-    // Only send a permission when it actually changed — each is a separate
-    // endpoint, and revoking one tears down what the device created with it.
+    // A permission is sent only when it changed; revoking one tears down what
+    // the device created with it.
     const allowAutoForward =
       formValue.allowAutoPortForward !== this.data()?.allowAutoPortForward
         ? formValue.allowAutoPortForward

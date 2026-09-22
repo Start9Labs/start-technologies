@@ -3,12 +3,7 @@ import { TuiTable, TuiTableDirective } from '@taiga-ui/addon-table'
 import { InjectedDnsRecordFromApi } from 'src/app/services/api/api.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 
-/**
- * Read-only table of DNS records this device published into the router.
- * There are no actions: the device re-asserts or withdraws its own records,
- * and the router drops them when the device loses the address they point at.
- * To stop a device publishing, turn off its toggle above.
- */
+/** Read-only table of the DNS records this device published into the router. */
 @Component({
   selector: '[injectedRecords]',
   template: `

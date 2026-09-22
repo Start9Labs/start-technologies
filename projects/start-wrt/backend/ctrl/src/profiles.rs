@@ -252,14 +252,9 @@ fn has_effective_dns(cfgs: &Configs, profile: &Profile) -> bool {
         || (profile.outbound != "wan" && !get_vpn_dns(cfgs, &profile.outbound).is_empty())
 }
 
-/// True when any device may inject DNS records via RFC 2136. Deliberately
-/// separate from `has_effective_dns`: that predicate also gates the
-/// `DNS-Override` redirect, and enabling injection must not start hijacking
-/// the profile's port-53 traffic. Box-wide rather than per-profile because a
-/// device's profile is a runtime fact (the neighbor table), not something
-/// `Configs` can answer; every profile therefore gets its own dnsmasq
-/// instance and addn-hosts file, and per-profile visibility is enforced when
-/// those files are rendered.
+/// Whether any device may inject DNS records. Box-wide: a device's profile is
+/// a runtime fact. Separate from `has_effective_dns`, which also gates the
+/// `DNS-Override` redirect.
 fn has_dns_injection(cfgs: &Configs) -> bool {
     cfgs["dhcp"].sections.iter().any(|s| {
         s.get::<DhcpHost>()
@@ -411,27 +406,20 @@ pub(crate) fn rewrite_dns_forwarding(cfgs: &mut Configs, profile: &Profile) -> R
         }
     };
 
-    // DNS injection needs an instance (and its addn-hosts file) even for a
-    // profile in ISP mode, which otherwise shares the main dnsmasq. With no
-    // `server` list and `noresolv` unset the instance falls back to
-    // resolv.conf.auto — the same upstreams the main instance uses.
+    // Injection needs an instance even in ISP mode; with no `server` list and
+    // `noresolv` unset it forwards to resolv.conf.auto like the main one.
     let inject = has_dns_injection(cfgs);
     if !servers.is_empty() || inject {
         let noresolv = (!servers.is_empty()).then(|| "1".to_string());
         let mut server = servers;
-        // Firefox probes this canary domain at startup and disables its
-        // default-enabled DNS-over-HTTPS when the network's resolver refuses
-        // it, so published DNS records and DNS overrides take effect there
-        // too. The empty domain-scoped entry makes dnsmasq answer NXDOMAIN
-        // locally; DoH a user enabled explicitly is deliberately untouched.
+        // Firefox's DoH canary: an NXDOMAIN here turns off its default-enabled
+        // DNS-over-HTTPS on this network.
         server.push("/use-application-dns.net/".to_string());
         cfgs["dhcp"].append(
             &ProfileDnsmasq {
                 noresolv,
                 server,
-                // Scoped to its own bridge: a `config dhcp` pool with no
-                // `instance` option is picked up by every dnsmasq instance,
-                // so an unscoped instance would serve every profile's DHCP.
+                // An unscoped instance serves every profile's DHCP pool.
                 interface: vec![profile.id.interface.clone()],
                 localservice: Some("1".to_string()),
                 nonwildcard: Some("1".to_string()),

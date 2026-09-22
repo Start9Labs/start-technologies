@@ -1081,7 +1081,6 @@ impl GatewayBackend for Via {
 }
 
 /// Runs !Send uciedit work on a dedicated current-thread runtime.
-/// `pub(crate)` so `dns_inject` shares the same boundary.
 pub(crate) async fn uci_task<T, F, Fut>(f: F) -> Result<T, Error>
 where
     T: Send + 'static,
@@ -1653,7 +1652,6 @@ pub async fn run(pc: Arc<PortControl>) {
 /// errors internally, so the only way out is a panic — and sharing one task
 /// would let that panic take the others with it. Losing the sweep is the
 /// case that matters: forwards would stay open with nothing left to close them.
-/// Generic over the shared state so `dns_inject`'s tasks reuse it.
 pub(crate) async fn supervise<S, F, Fut>(name: &'static str, state: S, start: F)
 where
     S: Clone,

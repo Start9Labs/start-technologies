@@ -16,29 +16,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (DFS) channels, which take a minute or more to come up. With no country selected the router runs on a conservative
   worldwide subset (2.4 GHz channels 1–11, 5 GHz channels 36–48, 20 dBm), so
   select yours after setup.
-- DNS record publishing (RFC 2136). A LAN device can now publish DNS names
-  for itself into the router, so every device on the network resolves them —
-  StartOS servers use this to make their private domains reachable from the
-  whole network instead of only from the server itself, including domains
-  served through SNI hostname routes. Like automatic port forwarding, the
-  permission is per-device and **off by default** ("Allow DNS record
-  publishing" on the device's detail page, with a confirmation naming the
-  trust granted), and a device can only publish names pointing at its own
-  address — while a StartOS server joined over the inbound VPN authenticates
-  with the tunnel's own credentials and may publish freely, which also fixes
-  `.local` resolution for VPN devices automatically. Names are first-come
-  per device, never override the router's own `.lan` names, and are only
-  served to networks whose Security Profile can reach the publishing device,
-  so a guest network never learns names it cannot connect to. dnsmasq stays
-  in charge of all ordinary DNS: published records ride alongside it, the
-  device renews or withdraws its own, the router drops a record whose owner
-  loses the address it points at, and revoking the permission removes the
-  device's names immediately. A read-only table on the device page shows
-  what a device has published.
-  Each network's DNS also answers Firefox's DNS-over-HTTPS canary domain, so
+- DNS record publishing (RFC 2136). A device with the new **Allow DNS record
+  publishing** permission (off by default, on its device page) can publish
+  DNS names for itself into the router, and every device on the network
+  resolves them. A StartOS server uses it for its private domains, and one
+  joined over the inbound VPN publishes without the toggle, which also makes
+  its `.local` name resolve for VPN devices. A device can only publish names
+  pointing at its own address, names under `.lan` are refused, and a name is
+  served only to networks whose Security Profile can reach the publishing
+  device. The router drops a record whose device loses the address it points
+  at, and revoking the permission removes the device's names immediately. A
+  read-only table on the device page shows what a device has published.
+- Each network's DNS answers Firefox's DNS-over-HTTPS canary domain, so
   Firefox's default-enabled DoH steps aside on these networks and published
-  names — and DNS overrides — resolve there too; DoH a user turned on
-  explicitly is left untouched.
+  names and DNS overrides resolve there too. DoH a user turned on explicitly
+  is untouched.
 
 ### Fixed
 

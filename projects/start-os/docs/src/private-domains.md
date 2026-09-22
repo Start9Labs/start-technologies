@@ -28,7 +28,7 @@ A private domain resolves only when the gateway's DNS serves its record. StartOS
 
 ### Ethernet & WiFi gateways
 
-On a [StartWRT](/start-wrt/) router, enable **Allow DNS record publishing** for this server on its device page — StartOS then publishes the domain's record to the router automatically, the same way DNS Injection works on StartTunnel, and there is nothing else to configure. Enable the toggle **before** adding the domain, and note that StartWRT refuses names ending in `.lan` (that zone is reserved for device hostnames).
+On a [StartWRT](/start-wrt/) router, enable **Allow DNS record publishing** for this server on its device page; StartOS then publishes the domain's record to the router automatically. Enable the toggle **before** adding the domain. StartWRT refuses names ending in `.lan`.
 
 On any other router, set StartOS as the router's primary DNS server. All routers support this feature. Refer to your router's user manual for detailed instructions.
 

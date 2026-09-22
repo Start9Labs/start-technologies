@@ -86,10 +86,8 @@ export class DevicesService extends FormService<Device[]> {
     // List doesn't have a single store operation
   }
 
-  // Update device settings. The permissions are separate endpoints but the
-  // same Save, so they ride along in one action — otherwise one click would
-  // raise several loaders and success toasts. A permission argument is
-  // undefined when it didn't change.
+  // One action for the whole Save: one loader, one toast. A permission
+  // argument is undefined when it didn't change.
   update(
     mac: string,
     data: DeviceUpdateData,

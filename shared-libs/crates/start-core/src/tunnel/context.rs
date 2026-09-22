@@ -309,8 +309,7 @@ impl TunnelContext {
                             .log_err();
                     });
                 },
-                // Every tunnel client shares a PSK with us, so an unsigned
-                // UPDATE is never legitimate here.
+                // Every tunnel client holds a PSK; an unsigned UPDATE is refused.
                 |_, _, tsig_ok| {
                     if tsig_ok {
                         hickory_server::proto::op::ResponseCode::NoError

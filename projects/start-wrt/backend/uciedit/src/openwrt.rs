@@ -499,8 +499,7 @@ pub struct ProfileDnsmasq {
     pub local: Option<String>,
     #[uci(default)]
     pub dhcpscript: Option<String>,
-    /// Extra hosts files (the tmpfs files DNS injection renders); dnsmasq
-    /// re-reads them on SIGHUP without restarting.
+    /// Extra hosts files; dnsmasq re-reads them on SIGHUP.
     #[uci(default)]
     pub addnhosts: Vec<String>,
 }
@@ -523,8 +522,8 @@ pub struct DhcpHost {
     #[uci(default)]
     pub _allow_pcp: Option<String>,
     /// "1" when this device may publish DNS records into the router's
-    /// resolver via RFC 2136 (startwrt metadata; dnsmasq ignores unknown
-    /// options). Absent = denied.
+    /// resolver (startwrt metadata; dnsmasq ignores unknown options). Absent =
+    /// denied.
     #[uci(default)]
     pub _allow_dns_inject: Option<String>,
 }
