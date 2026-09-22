@@ -23,7 +23,7 @@ impl VersionT for Version {
     type PreUpRes = ();
 
     async fn pre_up(self) -> Result<Self::PreUpRes, Error> {
-        restore_renamed_onion_addresses(Path::new(TOR_MIGRATION_DIR)).await
+        recover_renamed_onion_addresses(Path::new(TOR_MIGRATION_DIR)).await
     }
     fn semver(self) -> exver::Version {
         V0_4_0_2.clone()
@@ -32,7 +32,7 @@ impl VersionT for Version {
         &V0_3_0_COMPAT
     }
     fn migration_revision(self) -> usize {
-        3
+        4
     }
     #[instrument(skip_all)]
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
@@ -193,9 +193,9 @@ fn title_case(hostname: &str) -> String {
         .collect()
 }
 
-async fn restore_renamed_onion_addresses(dir: &Path) -> Result<(), Error> {
+async fn recover_renamed_onion_addresses(dir: &Path) -> Result<(), Error> {
     let handoff = dir.join("onion-migration.json");
-    let (raw, replay_only) = if let Some(raw) =
+    let (raw, imported) = if let Some(raw) =
         crate::util::io::maybe_read_file_to_string(&handoff).await?
     {
         (raw, false)
@@ -207,14 +207,15 @@ async fn restore_renamed_onion_addresses(dir: &Path) -> Result<(), Error> {
         return Ok(());
     };
     let mut migration = serde_json::from_str(&raw).with_kind(ErrorKind::Deserialization)?;
-    if migrate_onion_handoff(&mut migration, replay_only) {
-        let json = serde_json::to_string(&migration).with_kind(ErrorKind::Serialization)?;
-        crate::util::io::write_file_atomic(handoff, json).await?;
+    if !rename_onion_packages(&mut migration, imported) {
+        return Ok(());
     }
-    Ok(())
+    let json = serde_json::to_string(&migration).with_kind(ErrorKind::Serialization)?;
+    crate::util::io::write_file_atomic(handoff, json).await
 }
 
-fn migrate_onion_handoff(migration: &mut serde_json::Value, replay_only: bool) -> bool {
+/// An imported handoff keeps only the entries under an old id, which Tor skipped.
+fn rename_onion_packages(migration: &mut serde_json::Value, imported: bool) -> bool {
     let Some(addresses) = migration
         .get_mut("addresses")
         .and_then(|a| a.as_array_mut())
@@ -228,13 +229,13 @@ fn migrate_onion_handoff(migration: &mut serde_json::Value, replay_only: bool) -
             .and_then(|p| p.as_str())
             .map(str::to_owned)
         else {
-            return !replay_only;
+            return !imported;
         };
         let migrated = migrated_id_str(&id);
         if migrated == id {
-            return !replay_only;
+            return !imported;
         }
-        entry["packageId"] = serde_json::Value::String(migrated.to_owned());
+        entry["packageId"] = migrated.into();
         renamed = true;
         true
     });
@@ -495,25 +496,31 @@ mod test {
     }
 
     #[test]
-    fn updates_pending_and_filters_replayed_onion_addresses() {
-        let mut migration = serde_json::json!({ "addresses": [
+    fn renames_pending_entries_and_reissues_only_skipped_ones() {
+        let handoff = serde_json::json!({ "addresses": [
             { "packageId": "nostr", "hostId": "relay" },
-            { "packageId": "fedimintd", "hostId": "main" },
             { "packageId": "bitcoind", "hostId": "main" },
         ] });
-        let mut pending = migration.clone();
-        assert!(migrate_onion_handoff(&mut pending, false));
-        assert_eq!(pending["addresses"].as_array().unwrap().len(), 3);
-        assert_eq!(pending["addresses"][0]["packageId"], "nostr-rs-relay");
 
-        assert!(migrate_onion_handoff(&mut migration, true));
+        let mut pending = handoff.clone();
+        assert!(rename_onion_packages(&mut pending, false));
         assert_eq!(
-            migration,
+            pending,
             serde_json::json!({ "addresses": [
                 { "packageId": "nostr-rs-relay", "hostId": "relay" },
-                { "packageId": "fedimint-guardian", "hostId": "main" },
+                { "packageId": "bitcoind", "hostId": "main" },
             ] })
         );
+
+        let mut imported = handoff;
+        assert!(rename_onion_packages(&mut imported, true));
+        assert_eq!(
+            imported,
+            serde_json::json!({ "addresses": [
+                { "packageId": "nostr-rs-relay", "hostId": "relay" },
+            ] })
+        );
+        assert!(!rename_onion_packages(&mut imported, true));
     }
 
     #[test]

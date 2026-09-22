@@ -679,6 +679,7 @@ fn migrated_id(id: &PackageId) -> Result<PackageId, Error> {
     Ok(migrated_id_str(id).parse()?)
 }
 
+/// Mirrors the renames `s9pk::v2::compat` applies.
 pub(super) fn migrated_id_str(id: &str) -> &str {
     match id {
         "nostr" => "nostr-rs-relay",

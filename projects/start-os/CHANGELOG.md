@@ -160,11 +160,10 @@ for the detail behind its highlights.
   The address left the service's list whenever the network dropped, and a
   service that checks the URL you chose for it could stop and ask for it again.
 
-- **Services whose package ids changed while updating from 0.3.5.1 keep their
-  onion addresses.** Tor associates the carried-over addresses with Nostr
-  Relay, Fedimint Guardian, and the Legacy Ghost, Synapse, and Monero services.
-  Servers that already completed the update recover these addresses from Tor's
-  migration backup.
+- **Services the 0.3.5.1 update renames keep their onion addresses.** Nostr,
+  Ghost, Synapse, Monero and Fedimint addresses carry over under the services'
+  new package ids. A server that already updated recovers them on its next
+  start.
 
 - **Services start once StartOS has detected the network, and an interface
   that loses its connection drops its addresses right away.** A service
