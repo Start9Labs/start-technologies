@@ -372,6 +372,8 @@ async fn inner_main() -> Result<(), Error> {
                 ErrorKind::Network,
             )
         })?;
+        // Seeded before port control raises the gate.
+        crate::http_redirect::seed("/etc/config".into()).await;
         let pc = crate::port_control::PortControl::new("/etc/config".into());
         if crate::port_control::PORT_CONTROL.set(pc.clone()).is_ok() {
             tokio::spawn(crate::port_control::run(pc));
@@ -458,11 +460,6 @@ async fn inner_main() -> Result<(), Error> {
 
     // Must stay outermost.
     let app = crate::http_redirect::redirect_public_http(app);
-
-    // Seeded before the bind: the admission rule outlives the daemon.
-    if !setup_mode {
-        crate::http_redirect::seed("/etc/config".into()).await;
-    }
 
     // WAN-specific demux listeners require every wildcard listener to use SO_REUSEPORT.
     let http_addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 80));
