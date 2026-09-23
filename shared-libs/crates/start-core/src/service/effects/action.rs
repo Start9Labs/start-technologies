@@ -115,13 +115,13 @@ async fn clear_actions(
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct GetActionInputParams {
-    #[serde(flatten)]
-    #[ts(skip)]
-    #[arg(skip)]
-    event: EventId,
     #[ts(optional)]
     #[arg(short, long, help = "help.arg.package-id")]
     package_id: Option<PackageId>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    #[command(flatten)]
+    event: EventId,
     #[arg(help = "help.arg.action-id")]
     action_id: ActionId,
     #[ts(type = "Record<string, unknown> | null")]
@@ -132,13 +132,14 @@ pub struct GetActionInputParams {
 async fn get_action_input(
     context: EffectContext,
     GetActionInputParams {
-        event: EventId { event_id },
+        event,
         package_id,
         action_id,
         prefill,
     }: GetActionInputParams,
 ) -> Result<Option<ActionInput>, Error> {
     let context = context.deref()?;
+    let event_id = event.or_new();
     let prefill = prefill.unwrap_or(Value::Null);
     let caller = Some(context.seed.id.clone());
 
@@ -165,13 +166,13 @@ async fn get_action_input(
 #[serde(rename_all = "camelCase")]
 #[ts(export, rename = "EffectsRunActionParams")]
 pub struct RunActionParams {
-    #[serde(flatten)]
-    #[ts(skip)]
-    #[arg(skip)]
-    event: EventId,
     #[ts(optional)]
     #[arg(short, long, help = "help.arg.package-id")]
     package_id: Option<PackageId>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    #[command(flatten)]
+    event: EventId,
     #[arg(help = "help.arg.action-id")]
     action_id: ActionId,
     #[ts(type = "any")]
@@ -181,13 +182,14 @@ pub struct RunActionParams {
 async fn run_action(
     context: EffectContext,
     RunActionParams {
-        event: EventId { event_id },
+        event,
         package_id,
         action_id,
         input,
     }: RunActionParams,
 ) -> Result<Option<ActionResult>, Error> {
     let context = context.deref()?;
+    let event_id = event.or_new();
     let caller = Some(context.seed.id.clone());
 
     let package_id = package_id.as_ref().unwrap_or(&context.seed.id);
@@ -274,12 +276,13 @@ pub struct CreateTaskParams {
 async fn create_task(
     context: EffectContext,
     CreateTaskParams {
-        event: EventId { event_id },
+        event,
         replay_id,
         task,
     }: CreateTaskParams,
 ) -> Result<(), Error> {
     let context = context.deref()?;
+    let event_id = event.or_new();
 
     let src_id = &context.seed.id;
     let active = match &task.when {
@@ -428,11 +431,11 @@ mod test {
     fn effect_params_take_the_calling_procedures_event_id() {
         let (id, params) = envelope(json!({ "actionId": "attach", "prefill": null }));
         let get: GetActionInputParams = imbl_value::from_value(params).unwrap();
-        assert_eq!(get.event.event_id, id);
+        assert_eq!(get.event.or_new(), id);
 
         let (id, params) = envelope(json!({ "actionId": "attach", "input": { "a": 1 } }));
         let run: RunActionParams = imbl_value::from_value(params).unwrap();
-        assert_eq!(run.event.event_id, id);
+        assert_eq!(run.event.or_new(), id);
         assert_eq!(run.input, json!({ "a": 1 }));
 
         let (id, params) = envelope(json!({
@@ -441,7 +444,38 @@ mod test {
             "actionId": "attach",
         }));
         let task: CreateTaskParams = imbl_value::from_value(params).unwrap();
-        assert_eq!(task.event.event_id, id);
+        assert_eq!(task.event.or_new(), id);
         assert_eq!(AsRef::<str>::as_ref(&task.task.action_id), "attach");
+    }
+
+    #[test]
+    fn cli_event_id_reaches_the_request() {
+        let id = Guid::new();
+
+        let run =
+            RunActionParams::try_parse_from(["run", "--event-id", id.as_ref(), "attach", "{}"])
+                .unwrap();
+        let sent = imbl_value::to_value(&run).unwrap();
+        assert_eq!(sent["eventId"], json!(id.as_ref()));
+        assert_eq!(
+            imbl_value::from_value::<RunActionParams>(sent)
+                .unwrap()
+                .event
+                .or_new(),
+            id
+        );
+
+        let get = GetActionInputParams::try_parse_from([
+            "get-input",
+            "--event-id",
+            id.as_ref(),
+            "attach",
+        ])
+        .unwrap();
+        assert_eq!(get.event.or_new(), id);
+
+        let unnamed = RunActionParams::try_parse_from(["run", "attach", "{}"]).unwrap();
+        assert!(unnamed.event.event_id.is_none());
+        assert!(imbl_value::to_value(&unnamed).unwrap()["eventId"].is_null());
     }
 }
