@@ -9,9 +9,9 @@
 //! `policy` decides two tiers. A TSIG-signed UPDATE (an inbound WireGuard
 //! peer, key derived from its PSK) may publish any A/AAAA/CNAME/TXT record.
 //! An unsigned one (a LAN device with the permission) must arrive over TCP
-//! and may publish A/AAAA records pointing at its own source address. Both
-//! refuse names under `lan.`, and a name belongs to the first owner that
-//! claims it.
+//! and may publish A/AAAA records. Both are refused a name under `lan.` and
+//! a name public DNS resolves anywhere but this router's WAN address. A name
+//! belongs to the first owner that claims it.
 //!
 //! Listeners are `SO_BINDTODEVICE`-bound per profile, so the arrival
 //! interface is the kernel's fact. Records, ownership and the directory live
@@ -23,8 +23,16 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use futures::future::BoxFuture;
+use futures::FutureExt;
+use hickory_server::net::runtime::TokioRuntimeProvider;
 use hickory_server::proto::op::ResponseCode;
 use hickory_server::proto::rr::{DNSClass, LowerName, Name, RData, Record, RecordType};
+use hickory_server::resolver::config::{
+    ConnectionConfig, LookupIpStrategy, NameServerConfig, ResolveHosts, ResolverConfig,
+    ResolverOpts,
+};
+use hickory_server::resolver::Resolver;
 use hickory_server::server::Server;
 use rpc_toolkit::{from_fn_async_local, HandlerExt as _, ParentHandler};
 use serde::{Deserialize, Serialize};
@@ -65,6 +73,17 @@ const TCP_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
 const TCP_MAX_CLIENTS: usize = 16;
 /// Refusal log lines per second, box-wide.
 const REFUSAL_LOG_RATE: u32 = 20;
+const PUBLIC_LOOKUP_TIMEOUT: Duration = Duration::from_secs(3);
+/// Special-use zones, which public DNS never delegates.
+const PRIVATE_ZONES: &[&str] = &[
+    "local.",
+    "home.arpa.",
+    "internal.",
+    "test.",
+    "invalid.",
+    "localhost.",
+    "example.",
+];
 const INJECT_FILE_PREFIX: &str = "startwrt-dns-inject.dns_";
 
 /// The daemon's DNS-injection service; unset in CLI / `--configs-only` mode.
@@ -120,7 +139,20 @@ struct Directory {
     /// `(viewer zone, source zone)` pairs the firewall forwards. A record is
     /// served only to zones that can reach its source.
     reach: BTreeSet<(String, String)>,
+    /// The router's WAN addresses.
+    wan: BTreeSet<IpAddr>,
 }
+
+/// A name's standing in public DNS.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum PublicAnswer {
+    /// NXDOMAIN, or no address records.
+    Absent,
+    Addrs(Vec<IpAddr>),
+    Failed(String),
+}
+
+type PublicLookup = Arc<dyn Fn(Name) -> BoxFuture<'static, PublicAnswer> + Send + Sync>;
 
 /// What the refresher learns from one UCI pass, before live lease/neighbor
 /// data joins it.
@@ -163,6 +195,11 @@ impl DnsInject {
         let directory = Arc::new(SyncMutex::new(Directory::default()));
         let (tx, rx) = tokio::sync::watch::channel(Vec::new());
         let render_tx = tx.clone();
+        let public = upstream_lookup().unwrap_or_else(|e| {
+            tracing::warn!("dns-inject public resolver unavailable: {e}");
+            let e = e.to_string();
+            Arc::new(move |_| futures::future::ready(PublicAnswer::Failed(e.clone())).boxed())
+        });
         let injector = {
             let key_dir = directory.clone();
             let policy_dir = directory.clone();
@@ -174,7 +211,11 @@ impl DnsInject {
                 move |records| {
                     let _ = tx.send(records);
                 },
-                move |src, updates, auth| policy(&policy_dir, src, updates, auth),
+                move |src, updates: Vec<Record>, auth| {
+                    let directory = policy_dir.clone();
+                    let public = public.clone();
+                    async move { policy(&directory, &public, src, &updates, auth).await }
+                },
             )
         };
         Arc::new(Self {
@@ -244,6 +285,20 @@ async fn refresh(di: &Arc<DnsInject>) -> Result<(), Error> {
         .and_then(|out| String::from_utf8(out).ok())
         .unwrap_or_default();
     let neighbors = crate::devices::parse_neigh_output(&neigh);
+    let mut wan: BTreeSet<IpAddr> = crate::system::get_wan_ipv4()
+        .await
+        .ok()
+        .flatten()
+        .map(IpAddr::V4)
+        .into_iter()
+        .collect();
+    wan.extend(
+        crate::system::get_wan_ipv6s()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(IpAddr::V6),
+    );
 
     // Candidate addresses per allowed MAC: reservation, lease, neighbor entry.
     let mut by_ip: BTreeMap<IpAddr, Injector> = BTreeMap::new();
@@ -292,13 +347,14 @@ async fn refresh(di: &Arc<DnsInject>) -> Result<(), Error> {
         d.wg_keys = wg_keys;
         d.profiles = snapshot.profiles.clone();
         d.reach = snapshot.reach.clone();
+        d.wan = wan;
         sweep_owners(d, &snapshot, &leases, &neighbors, &di.injector.list())
     });
     // The daemon's default filter is `warn`.
     for (name, rtype) in stale {
         tracing::warn!(
             "DNS-inject sweep dropped {name} {rtype}: its owner no longer holds \
-             the permission or the address the record points at"
+             the permission or the address it published from"
         );
         di.injector.delete(&Name::from(name), Some(rtype));
     }
@@ -312,7 +368,7 @@ async fn refresh(di: &Arc<DnsInject>) -> Result<(), Error> {
 }
 
 /// The (name, rtype) rrsets whose owner lost the permission, the peer entry,
-/// or the address an A record points at.
+/// or the address it published from.
 fn sweep_owners(
     d: &mut Directory,
     snapshot: &NetSnapshot,
@@ -330,15 +386,15 @@ fn sweep_owners(
     };
     let mut stale = Vec::new();
     for ((name, rtype), owner) in &d.owners {
-        let rdatas = records
+        let mut published = records
             .iter()
             .filter(|r| &LowerName::from(&r.name) == name && r.rtype == *rtype);
         let live = match owner {
             Owner::Mac(mac) => {
                 snapshot.allowed_macs.contains(mac)
-                    && rdatas.clone().all(|r| match &r.rdata {
-                        RData::A(a) => mac_holds(mac, (*a).into()),
-                        _ => true,
+                    && published.all(|r| match r.source {
+                        IpAddr::V4(source) => mac_holds(mac, source),
+                        IpAddr::V6(_) => true,
                     })
             }
             Owner::WgPeer(pubkey) => snapshot.wg_peers.values().any(|(pk, _, _)| pk == pubkey),
@@ -470,103 +526,170 @@ fn read_snapshot(cfgs: &Configs) -> Result<NetSnapshot, Error> {
 
 /// The tiered `pre_update` policy. Every record is validated before any
 /// ownership is claimed.
-fn policy(
+async fn policy(
     directory: &SyncMutex<Directory>,
+    public: &PublicLookup,
     src: IpAddr,
     updates: &[Record],
     auth: UpdateAuth,
 ) -> ResponseCode {
-    directory.mutate(|d| {
-        // The client sees only a generic failure.
-        let refuse = |why: String| {
-            log_refusal(src, &why);
-            ResponseCode::Refused
-        };
-        let Some(owner) = d.by_ip.get(&src).map(|i| i.owner.clone()) else {
-            return refuse(
-                "source holds no known address assignment with the DNS-injection \
-                 permission"
-                    .into(),
-            );
-        };
-        if !auth.tsig && !auth.tcp {
-            return refuse("an unsigned update must arrive over TCP".into());
+    // The client sees only a generic failure.
+    let refuse = |why: String| {
+        log_refusal(src, &why);
+        ResponseCode::Refused
+    };
+    let wan = match directory.peek(|d| check(d, src, updates, auth).map(|_| d.wan.clone())) {
+        Ok(wan) => wan,
+        Err(why) => return refuse(why),
+    };
+    let added: BTreeMap<LowerName, &Name> = updates
+        .iter()
+        .filter(|r| r.dns_class == DNSClass::IN)
+        .map(|r| (LowerName::from(&r.name), &r.name))
+        .collect();
+    for (lower, name) in added {
+        if let Err(why) = publicly_claimable(public, &lower, name, &wan).await {
+            return refuse(why);
         }
-        for rec in updates {
-            let name = LowerName::from(&rec.name);
-            // dnsmasq is authoritative for `lan.`.
-            if lan_zone().zone_of(&name) {
-                return refuse(format!("{name} is inside the reserved `lan.` zone"));
-            }
-            let rtype = rec.record_type();
-            match rec.dns_class {
-                DNSClass::IN => {
-                    if auth.tsig {
-                        // Signed tier.
-                        if !matches!(
-                            rtype,
-                            RecordType::A | RecordType::AAAA | RecordType::CNAME | RecordType::TXT
-                        ) {
-                            return refuse(format!("record type {rtype} is not injectable"));
-                        }
-                    } else {
-                        // Unsigned tier: a name may point only at its source.
-                        let rdata_is_src = match &rec.data {
-                            RData::A(a) => IpAddr::V4((*a).into()) == src,
-                            RData::AAAA(a) => IpAddr::V6((*a).into()) == src,
-                            _ => false,
-                        };
-                        if !rdata_is_src {
-                            return refuse(format!(
-                                "{name}: an unsigned update may only point a name at \
-                                 its own source address"
-                            ));
-                        }
-                    }
-                    if d.owners
-                        .get(&(name.clone(), rtype))
-                        .is_some_and(|o| *o != owner)
-                    {
-                        return refuse(format!("{name} is owned by another device"));
-                    }
-                }
-                // Deleting an unheld name is a no-op the store ignores.
-                DNSClass::ANY if rtype == RecordType::ANY => {
-                    if d.owners.iter().any(|((n, _), o)| *n == name && *o != owner) {
-                        return refuse(format!("{name} is owned by another device"));
-                    }
-                }
-                DNSClass::ANY | DNSClass::NONE => {
-                    if d.owners
-                        .get(&(name.clone(), rtype))
-                        .is_some_and(|o| *o != owner)
-                    {
-                        return refuse(format!("{name} is owned by another device"));
-                    }
-                }
-                _ => {}
-            }
+    }
+    directory.mutate(|d| match check(d, src, updates, auth) {
+        Ok(owner) => {
+            claim(d, &owner, updates);
+            ResponseCode::NoError
         }
-        // A `NONE`-class delete may leave the rrset populated; its claim
-        // stays until the sweep sees it empty.
-        for rec in updates {
-            let name = LowerName::from(&rec.name);
-            let rtype = rec.record_type();
-            match rec.dns_class {
-                DNSClass::IN => {
-                    d.owners.insert((name, rtype), owner.clone());
-                }
-                DNSClass::ANY if rtype == RecordType::ANY => {
-                    d.owners.retain(|(n, _), _| *n != name);
-                }
-                DNSClass::ANY => {
-                    d.owners.remove(&(name, rtype));
-                }
-                _ => {}
-            }
-        }
-        ResponseCode::NoError
+        Err(why) => refuse(why),
     })
+}
+
+/// The update's owner, when the directory admits every record.
+fn check(
+    d: &Directory,
+    src: IpAddr,
+    updates: &[Record],
+    auth: UpdateAuth,
+) -> Result<Owner, String> {
+    let owner = d.by_ip.get(&src).map(|i| i.owner.clone()).ok_or_else(|| {
+        "source holds no known address assignment with the DNS-injection permission".to_string()
+    })?;
+    if !auth.tsig && !auth.tcp {
+        return Err("an unsigned update must arrive over TCP".into());
+    }
+    let held_by_other = |name: &LowerName, rtype: RecordType| {
+        d.owners
+            .get(&(name.clone(), rtype))
+            .is_some_and(|o| *o != owner)
+    };
+    for rec in updates {
+        let name = LowerName::from(&rec.name);
+        // dnsmasq is authoritative for `lan.`.
+        if lan_zone().zone_of(&name) {
+            return Err(format!("{name} is inside the reserved `lan.` zone"));
+        }
+        let rtype = rec.record_type();
+        let held = match rec.dns_class {
+            DNSClass::IN => {
+                if !matches!(
+                    rtype,
+                    RecordType::A | RecordType::AAAA | RecordType::CNAME | RecordType::TXT
+                ) {
+                    return Err(format!("record type {rtype} is not injectable"));
+                }
+                if !auth.tsig && !matches!(rtype, RecordType::A | RecordType::AAAA) {
+                    return Err(format!("record type {rtype} needs a signed update"));
+                }
+                held_by_other(&name, rtype)
+            }
+            // Deleting an unheld name is a no-op the store ignores.
+            DNSClass::ANY if rtype == RecordType::ANY => {
+                d.owners.iter().any(|((n, _), o)| *n == name && *o != owner)
+            }
+            DNSClass::ANY | DNSClass::NONE => held_by_other(&name, rtype),
+            _ => false,
+        };
+        if held {
+            return Err(format!("{name} is owned by another device"));
+        }
+    }
+    Ok(owner)
+}
+
+/// Records what an admitted update claims and releases. A `NONE`-class delete
+/// may leave the rrset populated; its claim stays until the sweep sees it
+/// empty.
+fn claim(d: &mut Directory, owner: &Owner, updates: &[Record]) {
+    for rec in updates {
+        let name = LowerName::from(&rec.name);
+        let rtype = rec.record_type();
+        match rec.dns_class {
+            DNSClass::IN => {
+                d.owners.insert((name, rtype), owner.clone());
+            }
+            DNSClass::ANY if rtype == RecordType::ANY => {
+                d.owners.retain(|(n, _), _| *n != name);
+            }
+            DNSClass::ANY => {
+                d.owners.remove(&(name, rtype));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Refuses a name public DNS resolves to anything but a WAN address. A failed
+/// lookup refuses too.
+async fn publicly_claimable(
+    public: &PublicLookup,
+    lower: &LowerName,
+    name: &Name,
+    wan: &BTreeSet<IpAddr>,
+) -> Result<(), String> {
+    if PRIVATE_ZONES
+        .iter()
+        .any(|z| LowerName::from(Name::from_ascii(z).expect("static valid name")).zone_of(lower))
+    {
+        return Ok(());
+    }
+    match public(name.clone()).await {
+        PublicAnswer::Absent => Ok(()),
+        PublicAnswer::Addrs(addrs) => match addrs.iter().find(|a| !wan.contains(a)) {
+            None => Ok(()),
+            Some(addr) => Err(format!(
+                "{name} publicly resolves to {addr}, not this router"
+            )),
+        },
+        PublicAnswer::Failed(e) => Err(format!("{name}: public lookup failed: {e}")),
+    }
+}
+
+/// Resolves through the main dnsmasq instance, which serves no injected
+/// records.
+fn upstream_lookup() -> Result<PublicLookup, Error> {
+    let mut config = ResolverConfig::from_parts(None, Vec::new(), Vec::new());
+    config.add_name_server(NameServerConfig::new(
+        Ipv4Addr::LOCALHOST.into(),
+        true,
+        vec![ConnectionConfig::udp(), ConnectionConfig::tcp()],
+    ));
+    let mut opts = ResolverOpts::default();
+    opts.timeout = PUBLIC_LOOKUP_TIMEOUT;
+    opts.attempts = 1;
+    opts.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
+    opts.use_hosts_file = ResolveHosts::Never;
+    let resolver = Resolver::builder_with_config(config, TokioRuntimeProvider::default())
+        .with_options(opts)
+        .build()
+        .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Network))?;
+    Ok(Arc::new(move |name| {
+        let resolver = resolver.clone();
+        async move {
+            match resolver.lookup_ip(name).await {
+                Ok(lookup) => PublicAnswer::Addrs(lookup.iter().collect()),
+                Err(e) if e.is_nx_domain() || e.is_no_records_found() => PublicAnswer::Absent,
+                Err(e) => PublicAnswer::Failed(e.to_string()),
+            }
+        }
+        .boxed()
+    }))
 }
 
 fn lan_zone() -> LowerName {
@@ -737,6 +860,7 @@ async fn serve_tcp_client(
         let response = if is_update(&request) {
             injector
                 .answer_update(src, &request, true)
+                .await
                 .map_err(|e| std::io::Error::other(e.to_string()))?
         } else {
             relay(&mut dnsmasq, upstream, &request).await?
@@ -1176,6 +1300,20 @@ mod tests {
         tcp: false,
     };
 
+    fn public(answer: PublicAnswer) -> PublicLookup {
+        Arc::new(move |_| futures::future::ready(answer.clone()).boxed())
+    }
+
+    /// `policy` with public DNS answering nothing.
+    async fn admit(
+        dir: &SyncMutex<Directory>,
+        src: IpAddr,
+        updates: &[Record],
+        auth: UpdateAuth,
+    ) -> ResponseCode {
+        policy(dir, &public(PublicAnswer::Absent), src, updates, auth).await
+    }
+
     fn lan_ip(host: u8) -> Ipv4Addr {
         Ipv4Addr::new(192, 168, 1, host)
     }
@@ -1208,18 +1346,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unsigned_tier_is_publish_yourself_only() {
+    async fn unsigned_tier_publishes_addresses_only() {
         let dir = directory();
         let src = IpAddr::V4(lan_ip(50));
         assert_eq!(
-            policy(&dir, src, &[a_record("nas.example.com", lan_ip(50))], TCP),
+            admit(&dir, src, &[a_record("nas.example.com", lan_ip(99))], TCP).await,
             ResponseCode::NoError,
-            "rdata == source is the permitted shape"
-        );
-        assert_eq!(
-            policy(&dir, src, &[a_record("nas.example.com", lan_ip(99))], TCP),
-            ResponseCode::Refused,
-            "pointing a name at someone else needs a signature"
+            "any address"
         );
         let cname = Record::from_rdata(
             fqdn("alias.example.com"),
@@ -1227,10 +1360,94 @@ mod tests {
             RData::CNAME(CNAME(fqdn("nas.example.com"))),
         );
         assert_eq!(
-            policy(&dir, src, &[cname], TCP),
+            admit(&dir, src, &[cname], TCP).await,
             ResponseCode::Refused,
             "unsigned tier is A/AAAA only"
         );
+    }
+
+    /// A name public DNS answers is claimable only where it points at the
+    /// router's WAN. Special-use zones and deletes skip the lookup.
+    #[tokio::test]
+    async fn public_names_must_point_at_this_router() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let dir = directory();
+        let wan = Ipv4Addr::new(203, 0, 113, 5);
+        dir.mutate(|d| {
+            d.wan.insert(IpAddr::V4(wan));
+        });
+        let src = IpAddr::V4(lan_ip(50));
+        let publish = |name: &str| [a_record(name, lan_ip(50))];
+        let run = |answer: PublicAnswer, updates: Vec<Record>| {
+            let dir = &dir;
+            async move { policy(dir, &public(answer), src, &updates, TCP).await }
+        };
+
+        assert_eq!(
+            run(
+                PublicAnswer::Addrs(vec![IpAddr::V4(Ipv4Addr::new(142, 250, 0, 1))]),
+                publish("www.google.com").to_vec()
+            )
+            .await,
+            ResponseCode::Refused,
+            "a name that resolves elsewhere cannot be hijacked"
+        );
+        assert_eq!(
+            run(
+                PublicAnswer::Addrs(vec![IpAddr::V4(wan), IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4))]),
+                publish("mixed.example.com").to_vec()
+            )
+            .await,
+            ResponseCode::Refused,
+            "every public address must be the router's"
+        );
+        assert_eq!(
+            run(
+                PublicAnswer::Failed("timeout".into()),
+                publish("unknown.example.com").to_vec()
+            )
+            .await,
+            ResponseCode::Refused,
+            "an unanswered lookup refuses"
+        );
+        assert_eq!(
+            run(
+                PublicAnswer::Addrs(vec![IpAddr::V4(wan)]),
+                publish("home.example.com").to_vec()
+            )
+            .await,
+            ResponseCode::NoError,
+            "a name already routed to this router"
+        );
+        assert_eq!(
+            run(PublicAnswer::Absent, publish("nextcloud.server").to_vec()).await,
+            ResponseCode::NoError,
+            "a name with no public records"
+        );
+
+        let asked = Arc::new(AtomicUsize::new(0));
+        let counting: PublicLookup = {
+            let asked = asked.clone();
+            Arc::new(move |_| {
+                asked.fetch_add(1, Ordering::SeqCst);
+                futures::future::ready(PublicAnswer::Failed("offline".into())).boxed()
+            })
+        };
+        for name in ["nas.local", "nas.home.arpa", "nas.internal"] {
+            assert_eq!(
+                policy(&dir, &counting, src, &publish(name), TCP).await,
+                ResponseCode::NoError,
+                "{name} never resolves publicly"
+            );
+        }
+        let mut delete = Record::update0(fqdn("www.google.com"), 0, RecordType::ANY);
+        delete.dns_class = DNSClass::ANY;
+        assert_eq!(
+            policy(&dir, &counting, src, &[delete], TCP).await,
+            ResponseCode::NoError
+        );
+        assert_eq!(asked.load(Ordering::SeqCst), 0);
     }
 
     /// An unsigned UDP source is unproven, even one naming a WireGuard peer.
@@ -1239,12 +1456,13 @@ mod tests {
         let dir = directory();
         for host in [50, 200] {
             assert_eq!(
-                policy(
+                admit(
                     &dir,
                     IpAddr::V4(lan_ip(host)),
                     &[a_record("nas.example.com", lan_ip(host))],
                     UpdateAuth::default()
-                ),
+                )
+                .await,
                 ResponseCode::Refused
             );
         }
@@ -1282,7 +1500,7 @@ mod tests {
             |_| {},
             move |_, _, auth| {
                 *record_auth.lock().unwrap() = Some(auth);
-                ResponseCode::NoError
+                async { ResponseCode::NoError }
             },
         );
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1335,7 +1553,7 @@ mod tests {
         let dir = directory();
         let src = IpAddr::V4(lan_ip(200));
         assert_eq!(
-            policy(&dir, src, &[a_record("svc.example.com", lan_ip(7))], SIGNED),
+            admit(&dir, src, &[a_record("svc.example.com", lan_ip(7))], SIGNED).await,
             ResponseCode::NoError,
             "signed: any rdata"
         );
@@ -1344,7 +1562,10 @@ mod tests {
             300,
             RData::CNAME(CNAME(fqdn("svc.example.com"))),
         );
-        assert_eq!(policy(&dir, src, &[cname], SIGNED), ResponseCode::NoError);
+        assert_eq!(
+            admit(&dir, src, &[cname], SIGNED).await,
+            ResponseCode::NoError
+        );
         let srv = Record::from_rdata(
             fqdn("_x._tcp.example.com"),
             300,
@@ -1356,7 +1577,7 @@ mod tests {
             )),
         );
         assert_eq!(
-            policy(&dir, src, &[srv], SIGNED),
+            admit(&dir, src, &[srv], SIGNED).await,
             ResponseCode::Refused,
             "even signed injection is limited to the admin-path types"
         );
@@ -1366,12 +1587,13 @@ mod tests {
     async fn unknown_source_is_refused() {
         let dir = directory();
         assert_eq!(
-            policy(
+            admit(
                 &dir,
                 IpAddr::V4(lan_ip(9)),
                 &[a_record("nas.example.com", lan_ip(9))],
                 TCP
-            ),
+            )
+            .await,
             ResponseCode::Refused
         );
     }
@@ -1380,22 +1602,24 @@ mod tests {
     async fn lan_names_are_reserved() {
         let dir = directory();
         assert_eq!(
-            policy(
+            admit(
                 &dir,
                 IpAddr::V4(lan_ip(50)),
                 &[a_record("nas.lan", lan_ip(50))],
                 TCP
-            ),
+            )
+            .await,
             ResponseCode::Refused,
             "dnsmasq is authoritative for lan."
         );
         assert_eq!(
-            policy(
+            admit(
                 &dir,
                 IpAddr::V4(lan_ip(200)),
                 &[a_record("nas.lan", lan_ip(7))],
                 SIGNED
-            ),
+            )
+            .await,
             ResponseCode::Refused,
             "reserved even for the signed tier"
         );
@@ -1407,21 +1631,22 @@ mod tests {
         let first = IpAddr::V4(lan_ip(50));
         let second = IpAddr::V4(lan_ip(51));
         assert_eq!(
-            policy(&dir, first, &[a_record("nas.example.com", lan_ip(50))], TCP),
+            admit(&dir, first, &[a_record("nas.example.com", lan_ip(50))], TCP).await,
             ResponseCode::NoError
         );
         assert_eq!(
-            policy(
+            admit(
                 &dir,
                 second,
                 &[a_record("nas.example.com", lan_ip(51))],
                 TCP
-            ),
+            )
+            .await,
             ResponseCode::Refused,
             "a held name refuses a different identity"
         );
         assert_eq!(
-            policy(&dir, first, &[a_record("nas.example.com", lan_ip(50))], TCP),
+            admit(&dir, first, &[a_record("nas.example.com", lan_ip(50))], TCP).await,
             ResponseCode::NoError,
             "the owner may re-assert"
         );
@@ -1433,20 +1658,21 @@ mod tests {
             r
         };
         assert_eq!(
-            policy(&dir, second, &[delete("nas.example.com")], TCP),
+            admit(&dir, second, &[delete("nas.example.com")], TCP).await,
             ResponseCode::Refused
         );
         assert_eq!(
-            policy(&dir, first, &[delete("nas.example.com")], TCP),
+            admit(&dir, first, &[delete("nas.example.com")], TCP).await,
             ResponseCode::NoError
         );
         assert_eq!(
-            policy(
+            admit(
                 &dir,
                 second,
                 &[a_record("nas.example.com", lan_ip(51))],
                 TCP
-            ),
+            )
+            .await,
             ResponseCode::NoError,
             "released name is claimable again"
         );
@@ -1456,13 +1682,17 @@ mod tests {
     async fn refused_message_claims_nothing() {
         let dir = directory();
         let src = IpAddr::V4(lan_ip(50));
-        // Second record invalid (rdata != src), so the whole message refuses
-        // — and the valid first record must not have claimed its name.
+        // Second record invalid (unsigned CNAME), so the whole message
+        // refuses — and the valid first record must not have claimed its name.
         let updates = [
             a_record("good.example.com", lan_ip(50)),
-            a_record("bad.example.com", lan_ip(99)),
+            Record::from_rdata(
+                fqdn("bad.example.com"),
+                300,
+                RData::CNAME(CNAME(fqdn("good.example.com"))),
+            ),
         ];
-        assert_eq!(policy(&dir, src, &updates, TCP), ResponseCode::Refused);
+        assert_eq!(admit(&dir, src, &updates, TCP).await, ResponseCode::Refused);
         assert!(
             dir.peek(|d| d.owners.is_empty()),
             "refusal leaves no ownership trace"
@@ -1524,6 +1754,26 @@ mod tests {
                 &wg_records
             ),
             vec![(name, RecordType::A)]
+        );
+    }
+
+    /// A record lives as long as its owner holds the address it published
+    /// from, wherever the record points.
+    #[tokio::test]
+    async fn sweep_follows_the_publishing_address() {
+        let mac = "AA:BB:CC:DD:EE:FF";
+        let mut d = Directory::default();
+        let name = LowerName::from(&fqdn("nas.example.com"));
+        d.owners
+            .insert((name.clone(), RecordType::A), Owner::Mac(mac.into()));
+        let records = vec![injected("nas.example.com", lan_ip(99), lan_ip(50))];
+        let holds = HashMap::from([(mac.to_string(), lan_ip(50).to_string())]);
+        assert!(sweep_owners(&mut d, &snapshot_with(&[mac]), &holds, &[], &records).is_empty());
+        let moved = HashMap::from([(mac.to_string(), lan_ip(99).to_string())]);
+        assert_eq!(
+            sweep_owners(&mut d, &snapshot_with(&[mac]), &moved, &[], &records),
+            vec![(name, RecordType::A)],
+            "holding the target address is not holding the source"
         );
     }
 

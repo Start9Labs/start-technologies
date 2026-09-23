@@ -1927,7 +1927,7 @@ struct DiagnosticsCreateRes {
 The DNS records permitted devices have published into the router's resolver
 (see `devices.set-dns-injection`). Read-only: the device re-asserts or
 withdraws its own records, and the router drops a record whose owner loses the
-address it points at.
+address it published from.
 
 ```rust
 // Request: {}

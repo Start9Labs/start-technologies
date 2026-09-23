@@ -21,9 +21,12 @@
 //! TSIG.
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use hickory_server::net::runtime::Time;
 use hickory_server::net::xfer::Protocol;
 use hickory_server::proto::op::{Header, HeaderCounts, Message, Metadata, OpCode, ResponseCode};
@@ -145,7 +148,8 @@ type KeyLookup = Box<dyn Fn(IpAddr) -> Option<[u8; 32]> + Send + Sync>;
 type OnChange = Box<dyn Fn(Vec<InjectedRecord>) + Send + Sync>;
 /// Runs on an authorized UPDATE's records before they mutate the store.
 /// Anything but `NoError` refuses the whole message.
-type PreUpdate = Box<dyn Fn(IpAddr, &[Record], UpdateAuth) -> ResponseCode + Send + Sync>;
+type PreUpdate =
+    Box<dyn Fn(IpAddr, Vec<Record>, UpdateAuth) -> BoxFuture<'static, ResponseCode> + Send + Sync>;
 
 pub struct DnsInjector {
     records: SyncMutex<BTreeMap<LowerName, Vec<InjectedRecord>>>,
@@ -156,13 +160,16 @@ pub struct DnsInjector {
 }
 
 impl DnsInjector {
-    pub fn new(
+    pub fn new<F>(
         initial: Vec<InjectedRecord>,
         authorize: impl Fn(IpAddr) -> bool + Send + Sync + 'static,
         tsig_key: impl Fn(IpAddr) -> Option<[u8; 32]> + Send + Sync + 'static,
         on_change: impl Fn(Vec<InjectedRecord>) + Send + Sync + 'static,
-        pre_update: impl Fn(IpAddr, &[Record], UpdateAuth) -> ResponseCode + Send + Sync + 'static,
-    ) -> Arc<Self> {
+        pre_update: impl Fn(IpAddr, Vec<Record>, UpdateAuth) -> F + Send + Sync + 'static,
+    ) -> Arc<Self>
+    where
+        F: Future<Output = ResponseCode> + Send + 'static,
+    {
         let mut records: BTreeMap<LowerName, Vec<InjectedRecord>> = BTreeMap::new();
         for r in initial {
             records.entry(LowerName::from(&r.name)).or_default().push(r);
@@ -172,7 +179,7 @@ impl DnsInjector {
             authorize: Box::new(authorize),
             tsig_key: Box::new(tsig_key),
             on_change: Box::new(on_change),
-            pre_update: Box::new(pre_update),
+            pre_update: Box::new(move |src, updates, auth| pre_update(src, updates, auth).boxed()),
         })
     }
 
@@ -262,19 +269,24 @@ impl DnsInjector {
     }
 
     /// Verifies and applies a raw UPDATE message; `msg` is its parse.
-    fn update(&self, src: IpAddr, request: &[u8], msg: &Message, tcp: bool) -> ResponseCode {
+    async fn update(&self, src: IpAddr, request: &[u8], msg: &Message, tcp: bool) -> ResponseCode {
         let auth = UpdateAuth {
             tsig: self.verify_tsig(src, request),
             tcp,
         };
-        self.apply_update(src, &msg.authorities, auth)
+        self.apply_update(src, &msg.authorities, auth).await
     }
 
     /// The wire response to a raw UPDATE message from `src`.
-    pub fn answer_update(&self, src: IpAddr, request: &[u8], tcp: bool) -> Result<Vec<u8>, Error> {
+    pub async fn answer_update(
+        &self,
+        src: IpAddr,
+        request: &[u8],
+        tcp: bool,
+    ) -> Result<Vec<u8>, Error> {
         let response = match Message::from_vec(request) {
             Ok(msg) => {
-                let code = self.update(src, request, &msg, tcp);
+                let code = self.update(src, request, &msg, tcp).await;
                 let mut response = Message::error_msg(msg.metadata.id, OpCode::Update, code);
                 response.queries = msg.queries;
                 response
@@ -294,11 +306,16 @@ impl DnsInjector {
 
     /// Applies an UPDATE's records (RFC 2136 §2.5) once the authorizer and
     /// `pre_update` admit them.
-    fn apply_update(&self, src: IpAddr, updates: &[Record], auth: UpdateAuth) -> ResponseCode {
+    async fn apply_update(
+        &self,
+        src: IpAddr,
+        updates: &[Record],
+        auth: UpdateAuth,
+    ) -> ResponseCode {
         if !(self.authorize)(src) {
             return ResponseCode::Refused;
         }
-        let code = (self.pre_update)(src, updates, auth);
+        let code = (self.pre_update)(src, updates.to_vec(), auth).await;
         if code != ResponseCode::NoError {
             return code;
         }
@@ -404,12 +421,16 @@ impl RequestHandler for InjectingHandler {
                 // MessageRequest hides the authority section the update RRs
                 // live in.
                 let code = match Message::from_vec(request.as_slice()) {
-                    Ok(msg) => self.injector.update(
-                        request.src().ip(),
-                        request.as_slice(),
-                        &msg,
-                        request.protocol() != Protocol::Udp,
-                    ),
+                    Ok(msg) => {
+                        self.injector
+                            .update(
+                                request.src().ip(),
+                                request.as_slice(),
+                                &msg,
+                                request.protocol() != Protocol::Udp,
+                            )
+                            .await
+                    }
                     Err(_) => ResponseCode::FormErr,
                 };
                 let header = header_with_code(request, code);
@@ -485,12 +506,12 @@ mod tests {
             |_| true,
             |_| None,
             |_| {},
-            |_, _, _| ResponseCode::NoError,
+            |_, _, _| async { ResponseCode::NoError },
         )
     }
 
     /// The policy StartTunnel installs: a valid TSIG or nothing.
-    fn tsig_required(_: IpAddr, _: &[Record], auth: UpdateAuth) -> ResponseCode {
+    async fn tsig_required(_: IpAddr, _: Vec<Record>, auth: UpdateAuth) -> ResponseCode {
         if auth.tsig {
             ResponseCode::NoError
         } else {
@@ -633,25 +654,27 @@ mod tests {
             move |_| {
                 count.fetch_add(1, Ordering::SeqCst);
             },
-            |_, _, _| ResponseCode::NoError,
+            |_, _, _| async { ResponseCode::NoError },
         );
         let src = IpAddr::V4(Ipv4Addr::new(10, 59, 0, 2));
         let rec = a_record("host.example.com", [10, 59, 0, 2]);
 
         assert_eq!(
-            inj.apply_update(src, std::slice::from_ref(&rec), UpdateAuth::default()),
+            inj.apply_update(src, std::slice::from_ref(&rec), UpdateAuth::default())
+                .await,
             ResponseCode::NoError
         );
         assert_eq!(fired.load(Ordering::SeqCst), 1, "first assert notifies");
         assert_eq!(
-            inj.apply_update(src, std::slice::from_ref(&rec), UpdateAuth::default()),
+            inj.apply_update(src, std::slice::from_ref(&rec), UpdateAuth::default())
+                .await,
             ResponseCode::NoError
         );
         assert_eq!(fired.load(Ordering::SeqCst), 1, "re-assert is a no-op");
 
         let other = a_record("host.example.com", [10, 59, 0, 3]);
         assert_eq!(
-            inj.apply_update(src, &[other], UpdateAuth::default()),
+            inj.apply_update(src, &[other], UpdateAuth::default()).await,
             ResponseCode::NoError
         );
         assert_eq!(fired.load(Ordering::SeqCst), 2, "a real change notifies");
@@ -680,7 +703,7 @@ mod tests {
             |_| true,
             |_| None,
             |_| {},
-            |_, _, auth: UpdateAuth| {
+            |_, _, auth: UpdateAuth| async move {
                 if auth.tcp {
                     ResponseCode::NoError
                 } else {
@@ -696,18 +719,24 @@ mod tests {
         let bytes = request.to_vec().unwrap();
         let src = IpAddr::V4(Ipv4Addr::new(10, 59, 0, 2));
 
-        let reply = Message::from_vec(&inj.answer_update(src, &bytes, true).unwrap()).unwrap();
+        let reply =
+            Message::from_vec(&inj.answer_update(src, &bytes, true).await.unwrap()).unwrap();
         assert_eq!(reply.metadata.id, request.metadata.id);
         assert_eq!(reply.metadata.op_code, OpCode::Update);
         assert_eq!(reply.metadata.response_code, ResponseCode::NoError);
         assert_eq!(reply.queries, request.queries, "zone section echoed");
         assert_eq!(inj.list().len(), 1);
 
-        let reply = Message::from_vec(&inj.answer_update(src, &bytes, false).unwrap()).unwrap();
+        let reply =
+            Message::from_vec(&inj.answer_update(src, &bytes, false).await.unwrap()).unwrap();
         assert_eq!(reply.metadata.response_code, ResponseCode::Refused);
 
-        let reply =
-            Message::from_vec(&inj.answer_update(src, &[0x12, 0x34, 0xff], true).unwrap()).unwrap();
+        let reply = Message::from_vec(
+            &inj.answer_update(src, &[0x12, 0x34, 0xff], true)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
         assert_eq!(reply.metadata.id, 0x1234);
         assert_eq!(reply.metadata.response_code, ResponseCode::FormErr);
     }
@@ -726,11 +755,14 @@ mod tests {
             move |_| {
                 count.fetch_add(1, Ordering::SeqCst);
             },
-            |_, _, _| ResponseCode::Refused,
+            |_, _, _| async { ResponseCode::Refused },
         );
         let src = IpAddr::V4(Ipv4Addr::new(10, 59, 0, 2));
         let rec = a_record("host.example.com", [10, 59, 0, 2]);
-        assert_eq!(inj.apply_update(src, &[rec], SIGNED), ResponseCode::Refused);
+        assert_eq!(
+            inj.apply_update(src, &[rec], SIGNED).await,
+            ResponseCode::Refused
+        );
         assert!(inj.list().is_empty(), "store untouched");
         assert_eq!(fired.load(Ordering::SeqCst), 0, "no notify");
     }
@@ -749,7 +781,8 @@ mod tests {
         );
         let rec = a_record("host.example.com", [10, 59, 0, 2]);
         assert_eq!(
-            inj.apply_update(src, std::slice::from_ref(&rec), UpdateAuth::default()),
+            inj.apply_update(src, std::slice::from_ref(&rec), UpdateAuth::default())
+                .await,
             ResponseCode::Refused,
             "authorized but unsigned -> refused"
         );
@@ -759,12 +792,14 @@ mod tests {
                 IpAddr::V4(Ipv4Addr::new(10, 59, 0, 9)),
                 std::slice::from_ref(&rec),
                 SIGNED
-            ),
+            )
+            .await,
             ResponseCode::Refused,
             "unauthorized -> refused even when signed"
         );
         assert_eq!(
-            inj.apply_update(src, std::slice::from_ref(&rec), SIGNED),
+            inj.apply_update(src, std::slice::from_ref(&rec), SIGNED)
+                .await,
             ResponseCode::NoError,
             "authorized and signed -> applied"
         );

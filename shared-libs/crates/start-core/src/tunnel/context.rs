@@ -310,7 +310,7 @@ impl TunnelContext {
                     });
                 },
                 // Every tunnel client holds a PSK; an unsigned UPDATE is refused.
-                |_, _, auth: UpdateAuth| {
+                |_, _, auth: UpdateAuth| async move {
                     if auth.tsig {
                         hickory_server::proto::op::ResponseCode::NoError
                     } else {

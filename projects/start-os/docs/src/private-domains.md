@@ -16,7 +16,7 @@ Private domains can be added to any gateway: wired (Ethernet), wireless (WiFi), 
 1. Enter a fully qualified domain name. It can be _anything_. For example: `domain.com`, `private.domain.internal`, `nextcloud.private`, `nextcloud.fake-tld`, or `facebook.com`.
 
    > [!TIP]
-   > Any name works, but the choice has consequences. A subdomain of a domain you own (`nextcloud.example.com`) is the most forgiving: a lookup that escapes to public DNS before your setup is finished is forgotten within minutes, and the name can never collide with a real website. If you would rather not own a domain, prefer an ending under `.internal` (reserved worldwide for exactly this) or `home.arpa` over an invented ending like `.private` — an invented ending can become a real TLD later (`.dev` did, breaking private setups everywhere), and a public lookup of a nonexistent ending is cached as "no such domain" for up to a day on some devices (see [If a device still can't resolve the domain](#if-a-device-still-cant-resolve-the-domain)). A domain someone else controls resolves privately only on devices that use this network's DNS — anything else, such as a browser with DNS-over-HTTPS enabled or a device that leaves the network, reaches the real site instead. If the router is a StartWRT router, names ending in `.lan` cannot be used — StartWRT reserves that zone for device hostnames.
+   > Any name works, but the choice has consequences. A subdomain of a domain you own (`nextcloud.example.com`) is the most forgiving: a lookup that escapes to public DNS before your setup is finished is forgotten within minutes, and the name can never collide with a real website. If you would rather not own a domain, prefer an ending under `.internal` (reserved worldwide for exactly this) or `home.arpa` over an invented ending like `.private` — an invented ending can become a real TLD later (`.dev` did, breaking private setups everywhere), and a public lookup of a nonexistent ending is cached as "no such domain" for up to a day on some devices (see [If a device still can't resolve the domain](#if-a-device-still-cant-resolve-the-domain)). A domain someone else controls resolves privately only on devices that use this network's DNS — anything else, such as a browser with DNS-over-HTTPS enabled or a device that leaves the network, reaches the real site instead. If the router is a StartWRT router, names ending in `.lan` cannot be used — StartWRT reserves that zone for device hostnames — and neither can a domain that already resolves on the Internet to anywhere but that router.
 
 1. Click "Save".
 
@@ -28,7 +28,7 @@ A private domain resolves only when the gateway's DNS serves its record. StartOS
 
 ### Ethernet & WiFi gateways
 
-On a [StartWRT](/start-wrt/) router, enable **Allow DNS record publishing** for this server on its device page; StartOS then publishes the domain's record to the router automatically. Enable the toggle **before** adding the domain. StartWRT refuses names ending in `.lan`.
+On a [StartWRT](/start-wrt/) router, enable **Allow DNS record publishing** for this server on its device page; StartOS then publishes the domain's record to the router automatically. Enable the toggle **before** adding the domain. StartWRT refuses names ending in `.lan`, and a domain that already resolves on the Internet to anywhere but the router.
 
 On any other router, set StartOS as the router's primary DNS server. All routers support this feature. Refer to your router's user manual for detailed instructions.
 
@@ -63,6 +63,8 @@ You can add the _same_ domain as both a [clearnet](clearnet.md) (public) domain 
 
 - When you are on your LAN or connected over [VPN](inbound-vpn.md), StartOS resolves the domain to your server's local IP address, so traffic stays on your network at full LAN speed.
 - When you are away, the same domain resolves through public DNS to your StartTunnel gateway, so the service is reachable over the internet.
+
+A [StartWRT](/start-wrt/) router refuses to publish the private side, since public DNS already resolves the domain to the StartTunnel gateway; set StartOS as the router's DNS server instead.
 
 It's the same domain and the same TLS certificate either way, with no [hairpin routing](https://en.wikipedia.org/wiki/Hairpinning) (LAN traffic looping out to the gateway and back). The two sides are served separately, so the local side keeps working on your server's Root CA certificate while a public certificate for the same domain has yet to be issued.
 
