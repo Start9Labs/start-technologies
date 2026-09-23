@@ -376,6 +376,10 @@ async fn inner_main() -> Result<(), Error> {
         if crate::port_control::PORT_CONTROL.set(pc.clone()).is_ok() {
             tokio::spawn(crate::port_control::run(pc));
         }
+        let di = crate::dns_inject::DnsInject::new("/etc/config".into());
+        if crate::dns_inject::DNS_INJECT.set(di.clone()).is_ok() {
+            tokio::spawn(crate::dns_inject::run(di));
+        }
     }
 
     let ctx = ServerContext {

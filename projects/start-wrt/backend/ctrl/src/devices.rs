@@ -27,6 +27,10 @@ pub fn devices<C: CtrlContext>() -> ParentHandler<C> {
             "set-auto-forward",
             from_fn_async_local(crate::port_control::set_auto_forward::<C>).no_display(),
         )
+        .subcommand(
+            "set-dns-injection",
+            from_fn_async_local(crate::dns_inject::set_dns_injection::<C>).no_display(),
+        )
         .subcommand("forget", from_fn_async_local(forget::<C>).no_display())
         .subcommand(
             "data-usage",
@@ -64,6 +68,9 @@ pub struct Device {
     /// Whether this device may auto-create port forwards via PCP/UPnP
     /// (default off; set via `devices set-auto-forward`).
     pub allow_auto_port_forward: bool,
+    /// Whether this device may publish DNS records into the router's resolver
+    /// (`devices set-dns-injection`).
+    pub allow_dns_injection: bool,
     pub security_profile: Option<String>,
     pub speed: Option<SpeedData>,
     pub data_usage: Option<f64>,
@@ -1582,6 +1589,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             ipv6,
             ipv4_static: host.map(|h| h.ip.is_some()).unwrap_or(false),
             allow_auto_port_forward: host.is_some_and(|h| h._allow_pcp.as_deref() == Some("1")),
+            allow_dns_injection: host.is_some_and(|h| h._allow_dns_inject.as_deref() == Some("1")),
             security_profile,
             speed,
             data_usage,
@@ -1689,6 +1697,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 ipv4_static: true,
                 // No MAC to authorize, so a VPN peer can never be auto-forward capable.
                 allow_auto_port_forward: false,
+                // A VPN peer is admitted on its TSIG signature, not a toggle.
+                allow_dns_injection: false,
                 security_profile: Some(server.profile_fullname.clone()),
                 speed,
                 data_usage,
@@ -1865,6 +1875,11 @@ pub async fn update<C: CtrlContext>(
             if ctx.effectful() {
                 reload_dnsmasq();
             }
+            // A refused UPDATE from the new address costs the client a
+            // five-minute back-off.
+            if let Some(di) = crate::dns_inject::DNS_INJECT.get() {
+                di.invalidate();
+            }
             Ok(())
         }
     }
@@ -1986,6 +2001,10 @@ pub async fn forget<C: CtrlContext>(
                 );
                 crate::device_names::forget(&mac_upper).await;
                 crate::port_control::close_device_forwards(&mac_upper, &removed_static_ips).await;
+                // The sweep drops the device's published DNS records now.
+                if let Some(di) = crate::dns_inject::DNS_INJECT.get() {
+                    di.invalidate();
+                }
                 // Drop the mDNS attempt history too: a forgotten device that
                 // reconnects "appears as a new entry" (per the user docs), so
                 // it starts a fresh retry schedule.

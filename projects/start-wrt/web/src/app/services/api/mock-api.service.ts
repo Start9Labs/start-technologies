@@ -39,6 +39,7 @@ import {
   LogsResponse,
   DeviceFromApi,
   DeviceUpdateReq,
+  InjectedDnsRecordFromApi,
   DeviceDataUsageReq,
   DataUsagePointFromApi,
   LanIpv4Response,
@@ -970,6 +971,7 @@ export class MockApiService extends ApiService {
         ipv6: device.ipv6,
         ipv4_static: !!host?.options.ip,
         allow_auto_port_forward: this.autoForwardAllowed.has(mac),
+        allow_dns_injection: this.dnsInjectionAllowed.has(mac),
         security_profile: profile?.fullname ?? null,
         speed: def.status === 'online' ? def.speed : null,
         data_usage: def.dataUsage,
@@ -1030,6 +1032,59 @@ export class MockApiService extends ApiService {
       `${params.allow ? 'Enabled' : 'Disabled'} automatic port forwarding for ${macUpper}`,
     )
     return null
+  }
+
+  /** MACs allowed to publish DNS records into the router's resolver. */
+  private dnsInjectionAllowed = new Set<string>()
+
+  async devicesSetDnsInjection(params: {
+    mac: string
+    allow: boolean
+  }): Promise<null> {
+    await pauseFor(250)
+    const macUpper = params.mac.toUpperCase()
+    if (params.allow) {
+      this.dnsInjectionAllowed.add(macUpper)
+    } else {
+      this.dnsInjectionAllowed.delete(macUpper)
+    }
+    this.logActivity(
+      'device',
+      'dns-injection',
+      `${params.allow ? 'Enabled' : 'Disabled'} DNS injection for ${macUpper}`,
+    )
+    return null
+  }
+
+  async dnsInjectedList(): Promise<InjectedDnsRecordFromApi[]> {
+    await pauseFor(250)
+    const mac = '00:1A:2B:3C:4D:5E'
+    if (!this.dnsInjectionAllowed.has(mac)) return []
+    const device = this.lookupDeviceByMac(mac)
+    return [
+      {
+        name: 'nextcloud.example.com',
+        rtype: 'A',
+        value: device.ipv4 ?? '192.168.1.50',
+        ttl: 300,
+        source: device.ipv4,
+        owner_mac: mac,
+        owner_peer: null,
+        device_name: device.name,
+        profile: 'lan',
+      },
+      {
+        name: 'vault.example.com',
+        rtype: 'A',
+        value: device.ipv4 ?? '192.168.1.50',
+        ttl: 300,
+        source: device.ipv4,
+        owner_mac: mac,
+        owner_peer: null,
+        device_name: device.name,
+        profile: 'lan',
+      },
+    ]
   }
 
   async devicesForget(params: { mac: string }): Promise<null> {

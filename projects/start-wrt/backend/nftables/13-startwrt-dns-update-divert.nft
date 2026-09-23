@@ -1,0 +1,17 @@
+# Diverts DNS UPDATE packets addressed to the router to the daemon's
+# per-profile listeners; queries stay with dnsmasq.
+#
+# `@th,81,4` is the DNS opcode (UDP header 64 bits, flags at bit 80); 5 is
+# UPDATE. UDP only. `fib daddr type local` leaves transiting UPDATEs alone.
+# `redirect` keeps the destination address. Priority -101 runs before fw4's
+# dstnat (-100), so the per-profile DNS-Override DNAT never sees these.
+# Inbound WireGuard arrivals take their own port: each listener is bound to
+# one kernel device, and no two may share an (addr, port).
+#
+# `redirect` needs kmod-nft-nat (build/openwrt.diffconfig); without it fw4
+# loads no ruleset at all.
+chain startwrt_dns_update_divert {
+	type nat hook prerouting priority -101; policy accept;
+	iifname "wg_*" meta nfproto ipv4 fib daddr type local udp dport 53 @th,81,4 == 5 limit rate 20/second burst 50 packets counter redirect to :9554
+	meta nfproto ipv4 fib daddr type local udp dport 53 @th,81,4 == 5 limit rate 20/second burst 50 packets counter redirect to :9553
+}

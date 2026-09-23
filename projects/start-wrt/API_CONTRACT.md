@@ -794,6 +794,10 @@ struct Device {
     /// (default off; toggled via `devices.set-auto-forward`). Always false for
     /// VPN peers (no MAC to authorize).
     allow_auto_port_forward: bool,
+    /// Whether this device may publish DNS records into the router's resolver
+    /// (`devices.set-dns-injection`). Always false for a VPN peer, which is
+    /// admitted on its TSIG signature.
+    allow_dns_injection: bool,
     security_profile: Option<String>,
     /// Live throughput (MB/s, 1 decimal), computed from conntrack byte deltas
     /// between polls. Only set for online devices with a previous sample.
@@ -859,6 +863,21 @@ struct SetAutoForwardRequest {
 // never create forwards via PCP/UPnP. Setting `allow: false` also closes the
 // forwards the device already holds, rather than leaving them open until their
 // leases lapse (up to a week).
+```
+
+### `devices.set-dns-injection`
+
+```rust
+#[derive(Deserialize)]
+struct SetDnsInjectionRequest {
+    mac: String,
+    allow: bool,
+}
+// Response: null
+// Backend: stores `_allow_dns_inject` on the device's DHCP host section,
+// creating one if needed, rewrites the per-profile dnsmasq instances, and
+// applies the change immediately. `allow: false` also drops the records the
+// device has published.
 ```
 
 ### `devices.forget`
@@ -1901,6 +1920,43 @@ struct DiagnosticsCreateRes {
 
 ---
 
+## 17. DNS Injection
+
+### `dns.injected-list`
+
+The DNS records permitted devices have published into the router's resolver
+(see `devices.set-dns-injection`). Read-only: the device re-asserts or
+withdraws its own records, and the router drops a record whose owner loses the
+address it points at.
+
+```rust
+// Request: {}
+
+#[derive(Serialize)]
+struct InjectedDnsRecord {
+    name: String,
+    /// "A", "AAAA", "CNAME", or "TXT".
+    rtype: String,
+    value: String,
+    ttl: u32,
+    /// The injecting device's address, when known.
+    source: Option<String>,
+    /// Owning LAN device MAC (uppercase); absent for a WireGuard peer.
+    owner_mac: Option<String>,
+    /// Owning inbound-VPN peer public key; absent for a LAN device.
+    owner_peer: Option<String>,
+    /// Display name of the owning LAN device, when one is known.
+    device_name: Option<String>,
+    /// Profile interface whose subnet the record was injected from.
+    profile: Option<String>,
+}
+// Response: Vec<InjectedDnsRecord>
+// Backend: the daemon's in-memory record store. Empty after a restart until
+// devices re-assert.
+```
+
+---
+
 ## HTTP Routes
 
 Every RPC method above is a JSON-RPC 2.0 call to a single endpoint: **`POST /rpc/v1`**.
@@ -1960,6 +2016,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `devices.list`                 | Devices         |                             |
 | `devices.update`               | Devices         |                             |
 | `devices.set-auto-forward`     | Devices         |                             |
+| `devices.set-dns-injection`    | Devices         |                             |
 | `devices.forget`               | Devices         |                             |
 | `devices.data-usage`           | Devices         |                             |
 | `published-ports.list`         | Published Ports |                             |
@@ -2002,8 +2059,9 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `backup.create`                | Backup          |                             |
 | `backup.restore`               | Backup          |                             |
 | `diagnostics.create`           | Diagnostics     |                             |
+| `dns.injected-list`            | DNS Injection   |                             |
 
-**Totals:** 77 RPC methods across 16 categories, plus the HTTP/WebSocket routes
+**Totals:** 79 RPC methods across 17 categories, plus the HTTP/WebSocket routes
 table above and the deprecated generic endpoints below.
 
 ---

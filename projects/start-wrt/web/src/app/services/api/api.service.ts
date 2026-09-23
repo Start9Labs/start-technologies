@@ -58,10 +58,15 @@ export abstract class ApiService {
     mac: string
     allow: boolean
   }): Promise<null>
+  abstract devicesSetDnsInjection(params: {
+    mac: string
+    allow: boolean
+  }): Promise<null>
   abstract devicesForget(params: { mac: string }): Promise<null>
   abstract devicesDataUsage(
     params: DeviceDataUsageReq,
   ): Promise<DataUsagePointFromApi[]>
+  abstract dnsInjectedList(): Promise<InjectedDnsRecordFromApi[]>
   abstract lanIpv4Get(): Promise<LanIpv4Response>
   abstract lanIpv4Set(params: LanIpv4SetRequest): Promise<null>
   abstract lanIpv6Get(): Promise<LanIpv6Response>
@@ -493,6 +498,8 @@ export interface DeviceFromApi {
   ipv4_static: boolean
   /** May auto-create port forwards via PCP/UPnP (default off). */
   allow_auto_port_forward: boolean
+  /** May publish DNS records into the router's resolver (default off). */
+  allow_dns_injection: boolean
   security_profile: string | null
   speed: { up: number; down: number } | null
   data_usage: number | null
@@ -704,6 +711,23 @@ export interface AutomaticPortUseFromApi {
   public_ports: string
   expires_secs: number | null
   hostname: string | null
+}
+
+/** A DNS record a permitted device published into the router's resolver. */
+export interface InjectedDnsRecordFromApi {
+  name: string
+  rtype: string
+  value: string
+  ttl: number
+  /** The injecting device's address, when known. */
+  source: string | null
+  /** Owning LAN device MAC (uppercase); null for a WireGuard peer. */
+  owner_mac: string | null
+  /** Owning inbound-VPN peer public key; null for a LAN device. */
+  owner_peer: string | null
+  device_name: string | null
+  /** Profile interface whose subnet the record was injected from. */
+  profile: string | null
 }
 
 // Outbound VPN (WireGuard Client) types

@@ -50,6 +50,23 @@ start_service() {
 INITEOF
 chmod +x "${FILES_DIR}/etc/init.d/startwrt"
 
+# Pre-creates the DNS-injection addn-hosts files before dnsmasq (START=19)
+# bind-mounts them into its ujail; a file missing at that point is never
+# mounted. startwrt-ctrld (START=99) rewrites them in place.
+cat > "${FILES_DIR}/etc/init.d/startwrt-dnsinject" << 'DNSINJEOF'
+#!/bin/sh /etc/rc.common
+
+START=18
+
+start() {
+    uci -q show dhcp | sed -n "s/.*'\(\/tmp\/startwrt-dns-inject\.[^']*\)'.*/\1/p" \
+        | while read -r f; do
+        [ -e "$f" ] || : > "$f"
+    done
+}
+DNSINJEOF
+chmod +x "${FILES_DIR}/etc/init.d/startwrt-dnsinject"
+
 # Custom SmartDNS init script — uses our generated config instead of the
 # stock UCI-generated one. The stock init script generates its own config
 # from UCI at /var/etc/smartdns/smartdns.conf, ignoring ours.

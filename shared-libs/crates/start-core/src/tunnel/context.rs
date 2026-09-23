@@ -309,6 +309,14 @@ impl TunnelContext {
                             .log_err();
                     });
                 },
+                // Every tunnel client holds a PSK; an unsigned UPDATE is refused.
+                |_, _, tsig_ok| {
+                    if tsig_ok {
+                        hickory_server::proto::op::ResponseCode::NoError
+                    } else {
+                        hickory_server::proto::op::ResponseCode::Refused
+                    }
+                },
             )
         };
         wg.sync().await?;

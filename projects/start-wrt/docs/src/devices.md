@@ -29,7 +29,11 @@ Click a device name to open its detail page:
 
 - **Allow automatic port forwarding** — Under **Permissions**. Off by default. Toggle on to let this device open and renew its own port forwards using the standard UPnP and PCP protocols. Used by StartOS servers (which configure themselves automatically), game consoles, and similar devices. See [Automatic port forwarding](published-ports.md#automatic-port-forwarding).
 
-- **Forget** — Remove an offline device from the list. Custom name, reserved IP settings, and the device's cached name are lost, and any automatic port forwards it holds are closed. If the device reconnects, it will appear as a new entry.
+- **Allow DNS record publishing** — Off by default. Toggle on to let this device publish DNS names for itself into the router, so every device on your network can resolve them. Any device that speaks RFC 2136 (`nsupdate`, for example) can publish; a StartOS server does it automatically for its **private domains**. A device can only publish names that point at its own address, and a name is served only to networks whose Security Profile can reach that device. Enabling asks for confirmation; grant it only to a device you trust. Published names appear in a read-only table below the toggle. The device renews or withdraws its own records, a record lapses when the device loses the address it points at, and turning the toggle off removes them immediately.
+
+  Names ending in `.lan` cannot be published; that zone is the router's own. Enable this toggle **before** adding the private domain on the server: while publishing is refused, other devices may cache a "no such domain" answer for a while. See [Private Domains](/start-os/private-domains.html) in the StartOS book for choosing a domain and clearing a cached miss.
+
+- **Forget** — Remove an offline device from the list. Custom name, reserved IP settings, granted permissions, and the device's cached name are lost; any automatic port forwards it holds are closed and any DNS records it published are removed. If the device reconnects, it will appear as a new entry.
 
 > [!TIP]
 > Reserve an IPv4 address for any device you plan to use with [Published Ports](published-ports.md). IPv4 port forwarding rules require a stable address to ensure traffic always reaches the correct device (publishing a port reserves one automatically).

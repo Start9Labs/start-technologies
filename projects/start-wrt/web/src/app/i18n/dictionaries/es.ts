@@ -547,4 +547,13 @@ export default {
   555: 'País',
   556: 'Seleccione el país en el que funciona este router para habilitar los canales Wi-Fi y la potencia de transmisión permitidos allí. Hasta entonces se usa un subconjunto conservador válido en todo el mundo.',
   557: 'Sin establecer',
+  558: 'Permitir publicación de registros DNS',
+  559: 'Permite a este dispositivo publicar nombres DNS para sí mismo en el router, de modo que todos los dispositivos de su red puedan resolverlos (lo usan los servidores StartOS para dominios privados). Desactivado por defecto; los nombres publicados aparecen abajo.',
+  560: '¿Permitir la publicación de registros DNS?',
+  561: 'Este dispositivo podrá publicar nombres DNS que se resuelven en toda su red. Conceda esto solo a un dispositivo de confianza, como su propio servidor StartOS.',
+  562: 'Permitir',
+  563: 'Registros DNS publicados',
+  564: 'Nombres que este dispositivo ha publicado en el router. Caducan por sí solos cuando el dispositivo deja de publicarlos; al desactivar el permiso se eliminan de inmediato.',
+  565: 'Tipo',
+  566: 'Resuelve a',
 } satisfies i18n
