@@ -223,7 +223,10 @@ impl SignatureAuthContext for RpcContext {
             .map_ok(|a| {
                 a.enabled()
                     .into_iter()
-                    .map(|a| a.hostname.clone())
+                    .map(|a| match a.hostname.parse() {
+                        Ok(ip) => url_host_str(ip),
+                        Err(_) => a.hostname.clone(),
+                    })
                     .collect::<BTreeSet<_>>()
             })
             .flatten_ok()

@@ -151,6 +151,9 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **You can sign in to the StartOS UI, and log in with `start-cli`, at one of
+  your server's IPv6 addresses**, such as `https://[2001:db8::1]`.
+
 - **A port forward takes effect for peers that were already sending to it.**
   A peer that sent to a port while it had no forward, such as after a
   gateway's public address changed or during a service update, kept reaching
