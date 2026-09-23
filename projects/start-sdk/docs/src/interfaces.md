@@ -221,7 +221,7 @@ The handler then re-runs when the new value lands, updating the interface in pla
 | `addSsl.addXForwardedHeaders`   | `boolean`                                             | Whether to add `X-Forwarded-*` headers.                                                                                                                                                                                     |
 | `addSsl.auth`                   | `ProxyAuth` \| `null`                                 | Optional auth gate enforced by the OS reverse proxy. See [Authenticating at the Proxy](#authenticating-at-the-proxy).                                                                                                       |
 | `addSsl.upstreamCertValidation` | `'disable'` \| `{ certificate: string }` \| _omitted_ | How the OS validates your container's TLS cert when it [rewraps SSL](#rewrapping-ssl-to-a-tls-container). Omit to validate against the StartOS root CA (default). See [Rewrapping SSL](#rewrapping-ssl-to-a-tls-container). |
-| `secure`                        | `{ ssl: boolean }` \| `null`                          | For non-HTTP protocols, whether the connection is secure. `{ ssl: true }` with `addSsl: null` serves your container's own TLS end to end — see [Serving Your Own TLS](#serving-your-own-tls-passthrough).                   |
+| `secure`                        | `{ ssl: boolean }` \| `null`                          | Whether the port is safe to expose on networks StartOS does not trust, and whether it speaks TLS itself. See [Choosing `secure`](#choosing-secure).                                                                         |
 
 ## Interface Options
 
@@ -363,7 +363,7 @@ const origin = await multi.bindPort(10009, {
 })
 ```
 
-StartOS still fronts the port with one of its TLS listeners, but that listener pipes the raw TLS stream through instead of terminating it, so nothing about the handshake is rewritten. The container sees the client's real source address rather than the proxy's — except for a client on the box itself, which appears as the bridge IP.
+StartOS still fronts the port with one of its TLS listeners, but that listener pipes the raw TLS stream through instead of terminating it, so nothing about the handshake is rewritten. The container sees the client's real source address rather than the proxy's — except for a client on the box itself, which appears as the bridge IP. The listener routes on the client's TLS ClientHello, so the first bytes a client sends must be one: a protocol that opens in plaintext and upgrades in-band is dropped here, and its port is `ssl: false`.
 
 ### When to use it
 
@@ -434,6 +434,16 @@ Most daemons read their TLS pair once at startup, so reissuing the file is only 
 > Do **not** add a `<package-id>.startos` DNS name to the SANs. That overlay DNS is deprecated and slated for removal, and it resolves to the container IP rather than the bridge — so it bypasses the platform entirely. Dependents reach you through the bridge; see [Service-to-Service Networking](service-to-service.md).
 
 A passthrough port carries its external port in `net.assignedSslPort`, the same as an `addSsl` port — which of the two fields is populated says whether the port speaks TLS, not who terminates it. Dependents should read neither field directly; `sdk.host.getBridgeAddress` resolves the binding's derived address and is correct under every arrangement on this page.
+
+## Choosing `secure`
+
+On a raw-TCP binding (`protocol: null`), `secure` says whether the protocol is safe to expose, as it is, on networks StartOS does not trust — the LAN and the internet — and `ssl` says whether it does that with TLS from its first byte:
+
+| `secure`         | The protocol                                                                                                                                                                                            | Where StartOS publishes the port                                                                                                                                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `null`           | Is not safe to expose on its own                                                                                                                                                                        | Only where StartOS trusts the path: the server itself — your subcontainers and other services — and a gateway marked secure, which none is by default. Never on the internet, so off-box clients reach the service through `addSsl`. |
+| `{ ssl: false }` | Is secure without TLS from its first byte: it encrypts some other way (SSH, LND's peer protocol, or TLS negotiated after a plaintext opening, like Postgres), or it is safe to expose unencrypted (DNS) | As a plain port, on every address the user enables — LAN and public alike.                                                                                                                                                           |
+| `{ ssl: true }`  | Speaks TLS from its first byte                                                                                                                                                                          | On every address the user enables, as a TLS port. With `addSsl: null`, StartOS passes the TLS through to your container — see [Serving Your Own TLS](#serving-your-own-tls-passthrough).                                             |
 
 ## Authenticating at the Proxy
 
