@@ -8,9 +8,19 @@ import {
 } from '@start9labs/start-core/actions/setupActions'
 import { InitScript, setupOnInit } from '@start9labs/start-core/inits'
 import * as T from '@start9labs/start-core/types'
-import { getOwnHost } from '@start9labs/start-core/util/GetHostInfo'
+import {
+  GetHostInfo,
+  getOwnHost,
+} from '@start9labs/start-core/util/GetHostInfo'
+import { AbortedError } from '@start9labs/start-core/util/AbortedError'
 import { Watchable } from '@start9labs/start-core/util/Watchable'
 import { FilledHost } from '@start9labs/start-core/util/filledAddress'
+
+/** A reader in the shape `FileHelper.read()` returns. */
+export type Reader<A> = {
+  once(): Promise<A>
+  watch(effects: T.Effects, abort?: AbortSignal): AsyncGenerator<A, unknown>
+}
 
 export type SetupPrimaryUrlParams<Id extends T.ActionId> = {
   /** The id of the action that sets the URL. */
@@ -23,8 +33,8 @@ export type SetupPrimaryUrlParams<Id extends T.ActionId> = {
   metadata: MaybeFn<Omit<T.ActionMetadata, 'hasInput'>>
   /** The label and description of the URL select. */
   field: { name: string; description: string | null }
-  /** Reads the stored URL with `.const(effects)`, so `bestUsable` sees it change. */
-  get: (effects: T.Effects) => Promise<string | null | undefined>
+  /** Reads the stored URL, e.g. `storeJson.read(s => s.primaryUrl)`. */
+  get: Reader<string | null | undefined>
   /** Stores the URL the user chose. */
   set: (effects: T.Effects, url: string) => Promise<unknown>
 }
@@ -80,20 +90,58 @@ function fallback(urls: string[]) {
   return urls.find(u => parse(u)?.hostname.endsWith('.local')) ?? urls[0]
 }
 
+type Stored = string | null | undefined
+
+const resolve = (stored: Stored, urls: string[]) =>
+  follow(stored, urls) ?? fallback(urls) ?? stored ?? null
+
 class BestUsable extends Watchable<string | null> {
   protected readonly label = 'PrimaryUrl.bestUsable'
 
   constructor(
     effects: T.Effects,
-    private readonly resolve: (effects: T.Effects) => Promise<string | null>,
+    private readonly stored: Reader<Stored>,
+    private readonly urls: GetHostInfo<string[]>,
   ) {
     super(effects)
   }
 
-  protected fetch(callback?: () => void) {
-    const child = this.effects.child('primaryUrl.bestUsable')
-    child.constRetry = callback
-    return this.resolve(child)
+  protected async fetch() {
+    const [stored, urls] = await Promise.all([
+      this.stored.once(),
+      this.urls.once(),
+    ])
+    return resolve(stored, urls)
+  }
+
+  protected async *produce(abort: AbortSignal) {
+    const storedGen = this.stored.watch(this.effects, abort)
+    const urlsGen = this.urls.watch(abort)
+    const next = <A>(gen: AsyncGenerator<A, unknown>) =>
+      gen.next().then(
+        r => (r.done ? null : { value: r.value }),
+        e => {
+          if (e instanceof AbortedError) return null
+          throw e
+        },
+      )
+    let [stored, urls] = await Promise.all([next(storedGen), next(urlsGen)])
+    let nextStored = next(storedGen)
+    let nextUrls = next(urlsGen)
+    while (stored && urls && !abort.aborted) {
+      yield resolve(stored.value, urls.value)
+      const changed = await Promise.race([
+        nextStored.then(stored => ({ stored })),
+        nextUrls.then(urls => ({ urls })),
+      ])
+      if ('stored' in changed) {
+        stored = changed.stored
+        nextStored = next(storedGen)
+      } else {
+        urls = changed.urls
+        nextUrls = next(urlsGen)
+      }
+    }
   }
 }
 
@@ -126,7 +174,7 @@ export function setupPrimaryUrl<Id extends T.ActionId>(
       }),
     }),
     async ({ effects }) => {
-      const stored = await get(effects)
+      const stored = await get.once()
       return {
         url: follow(stored, await urls(effects).once()) ?? stored ?? undefined,
       }
@@ -138,14 +186,7 @@ export function setupPrimaryUrl<Id extends T.ActionId>(
 
   return {
     action,
-    bestUsable: effects =>
-      new BestUsable(effects, async child => {
-        const [stored, offered] = await Promise.all([
-          get(child),
-          urls(child).const(),
-        ])
-        return follow(stored, offered) ?? fallback(offered) ?? stored ?? null
-      }),
+    bestUsable: effects => new BestUsable(effects, get, urls(effects)),
     setupTask: (severity, options) =>
       setupOnInit(async effects => {
         const offered = await urls(effects).const()

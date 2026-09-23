@@ -130,8 +130,9 @@
   [Hardware Virtualization (KVM)](https://docs.start9.com/packaging/manifest.html#hardware-virtualization-kvm)
 
 - **`sdk.setupPrimaryUrl()` replaces the hand-rolled "Set Primary URL" action
-  and watcher.** Give it the interface the URL belongs to and `get`/`set`
-  functions over the package's own storage. It returns the action to register;
+  and watcher.** Give it the interface the URL belongs to, a reader for the
+  stored choice (`storeJson.read(s => s.primaryUrl)`) and a function that
+  writes it. It returns the action to register;
   `bestUsable(effects)`, a reader for the stored URL while its hostname is one
   of the interface's addresses and the `.local` address otherwise; and
   `setupTask(severity, options)`, an init script that keeps a task raised while

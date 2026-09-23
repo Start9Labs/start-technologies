@@ -66,6 +66,26 @@ const host = (available: T.HostnameInfo[]): T.Host => ({
   portForwards: [],
 })
 
+/** The container runtime's `CallbackHolder`: a same-named child replaces its predecessor, and a holder that left context has its callbacks dropped. */
+class Holder {
+  children = new Map<string, Holder>()
+  leaveFns: (() => void)[] = []
+  left = false
+  child(name: string) {
+    this.children.get(name)?.leave()
+    const child = new Holder()
+    this.children.set(name, child)
+    return child
+  }
+  leave() {
+    for (const child of this.children.values()) child.leave()
+    this.children = new Map()
+    this.left = true
+    for (const fn of this.leaveFns) fn()
+    this.leaveFns = []
+  }
+}
+
 const setup = (available: T.HostnameInfo[] | null, chosen?: string) => {
   const file = FileHelper.json(
     join(mkdtempSync(join(dir, 'case-')), 'store.json'),
@@ -73,24 +93,31 @@ const setup = (available: T.HostnameInfo[] | null, chosen?: string) => {
   )
   if (chosen) writeFileSync(file.path, JSON.stringify({ primaryUrl: chosen }))
   let rows = available
-  let onHostChange = () => {}
+  const hostCallbacks: { holder: Holder; callback: () => void }[] = []
   const createTask = jest.fn(async (_: unknown) => null)
   const set = jest.fn((effects: T.Effects, url: string) =>
     file.merge(effects, { primaryUrl: url }),
   )
-  const makeEffects = (constRetry?: () => void): Effects => {
+  const makeEffects = (
+    constRetry?: () => void,
+    holder = new Holder(),
+  ): Effects => {
     const effects = {
       eventId: 'event',
       isInContext: true,
-      onLeaveContext: () => {},
+      onLeaveContext: (fn: () => void) => holder.leaveFns.push(fn),
       constRetry,
-      child: () => makeEffects(effects.constRetry),
+      child: (name: string) => makeEffects(constRetry, holder.child(name)),
       getHostInfo: async ({ callback }: { callback?: () => void }) => {
-        if (callback) onHostChange = callback
+        if (callback) hostCallbacks.push({ holder, callback })
         return rows && host(rows)
       },
       action: { createTask },
     }
+    holder.leaveFns.push(() => {
+      effects.constRetry = undefined
+      effects.isInContext = false
+    })
     return effects as unknown as Effects
   }
   const effects = makeEffects()
@@ -107,7 +134,7 @@ const setup = (available: T.HostnameInfo[] | null, chosen?: string) => {
       visibility: 'enabled',
     },
     field: { name: 'URL', description: null },
-    get: e => file.read(s => s.primaryUrl).const(e),
+    get: file.read(s => s.primaryUrl),
     set,
   })
   const stored = () =>
@@ -116,7 +143,8 @@ const setup = (available: T.HostnameInfo[] | null, chosen?: string) => {
       : undefined
   const changeRows = (r: T.HostnameInfo[]) => {
     rows = r
-    onHostChange()
+    for (const { holder, callback } of hostCallbacks.splice(0))
+      if (!holder.left) callback()
   }
   return {
     effects,
@@ -273,6 +301,18 @@ describe('setupPrimaryUrl', () => {
       p.changeRows([lan, local, onion])
       await tick()
       expect(constRetry).not.toHaveBeenCalled()
+    })
+
+    test('a second read on the same effects keeps the first subscription', async () => {
+      const p = setup([lan, local], 'http://192.168.1.10:8080')
+      const constRetry = jest.fn()
+      const effects = p.makeEffects(constRetry)
+      await p.primaryUrl.bestUsable(effects).const()
+      await p.primaryUrl.bestUsable(effects).once()
+      await p.primaryUrl.bestUsable(effects).const()
+      p.changeRows([local, onion])
+      await tick()
+      expect(constRetry).toHaveBeenCalledTimes(2)
     })
 
     test('once() leaves the caller alone when the addresses change', async () => {

@@ -312,7 +312,7 @@ Some addresses are left out of the comparison, in the cases where StartOS can te
 
 ## Choosing a Primary URL
 
-A service that builds links, invites or callbacks from one URL asks the user which of its addresses that is. `sdk.setupPrimaryUrl()` builds the "Set Primary URL" action over `get` and `set` functions that read and write the choice wherever the package keeps it — a field of `store.json`, or the service's own config file:
+A service that builds links, invites or callbacks from one URL asks the user which of its addresses that is. `sdk.setupPrimaryUrl()` builds the "Set Primary URL" action over a reader and a writer for the choice, wherever the package keeps it — a field of `store.json`, or the service's own config file:
 
 ```typescript
 // primaryUrl.ts
@@ -333,7 +333,7 @@ export const primaryUrl = sdk.setupPrimaryUrl({
     visibility: 'enabled',
   },
   field: { name: i18n('URL'), description: null },
-  get: effects => storeJson.read(s => s.primaryUrl).const(effects),
+  get: storeJson.read(s => s.primaryUrl),
   set: (effects, url) => storeJson.merge(effects, { primaryUrl: url }),
 })
 
@@ -343,7 +343,7 @@ export const primaryUrlTask = primaryUrl.setupTask('important', {
 })
 ```
 
-Register `primaryUrl.action` with `sdk.Actions.of()`. It offers the interface's addresses (the `nonLocal` view, so loopback, link-local and the container bridge are left out), pre-selects the `.local` one, and pre-fills the stored URL. Read the stored URL in `get` with `.const(effects)`, so `bestUsable` sees the user change it.
+Register `primaryUrl.action` with `sdk.Actions.of()`. It offers the interface's addresses (the `nonLocal` view, so loopback, link-local and the container bridge are left out), pre-selects the `.local` one, and pre-fills the stored URL. `get` takes a file model's reader as-is; any object with the same `once()` and `watch()` works.
 
 `primaryUrl.bestUsable(effects)` reads the URL to give the service, with the usual `const()`, `once()`, `watch()`, `onChange()` and `waitFor()` — `await primaryUrl.bestUsable(effects).const()` in `setupMain` and for **Open UI** above. It resolves to the stored URL at its hostname's current port and scheme; the `.local` address when that hostname is not one of the interface's addresses or nothing is stored; the first address when there is no `.local` one. It leaves the store as the user set it, so a chosen address that comes back is used again.
 

@@ -4,7 +4,7 @@ Some services need to know which URL they're hosted at — for generating links,
 
 ## Solution
 
-Call `sdk.setupPrimaryUrl()` with the interface the URL belongs to and `get`/`set` functions over the file model that stores the choice. Register the `action` it returns, and in `setupMain()` pass `await primaryUrl.bestUsable(effects).const()` to the service as an env var or config value. That is the stored URL while its hostname is one of the interface's addresses, and the `.local` address otherwise, so the service keeps running while the chosen address is gone and returns to it when it comes back.
+Call `sdk.setupPrimaryUrl()` with the interface the URL belongs to, the file model's reader for the stored choice (`get`), and a function that writes it (`set`). Register the `action` it returns, and in `setupMain()` pass `await primaryUrl.bestUsable(effects).const()` to the service as an env var or config value. That is the stored URL while its hostname is one of the interface's addresses, and the `.local` address otherwise, so the service keeps running while the chosen address is gone and returns to it when it comes back.
 
 Where the URL is an address of the service's own web UI, pass the same read to `createInterface`'s `preferredLauncherAddress` in `setupInterfaces` as well, so StartOS's **Open UI** control opens the address the service is configured for instead of the one that suits the admin's connection. See [Choosing a Primary URL](interfaces.md#choosing-a-primary-url) for the code, and [Nominating an Address to Open](interfaces.md#nominating-an-address-to-open) for what a nomination does.
 

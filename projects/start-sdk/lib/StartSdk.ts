@@ -698,7 +698,7 @@ export class StartSdk<Manifest extends T.SDKManifest> {
       setupBackups: (options: SetupBackupsParams<Manifest>) =>
         setupBackups<Manifest>(options),
       /**
-       * @description Let the user choose which of an interface's URLs the service advertises as its own — the one it puts in the links, invites and callbacks it generates. The package stores the choice; `get` and `set` read and write it.
+       * @description Let the user choose which of an interface's URLs the service advertises as its own — the one it puts in the links, invites and callbacks it generates. The package stores the choice: `get` is its reader, in the shape `FileHelper.read()` returns, and `set` writes it.
        *
        *    Returns `action` (add it to `sdk.Actions.of()`); `bestUsable(effects)`, a reader for the URL the service should use; and `setupTask(severity, options)`, an init script (add it to `sdk.setupInit()`) that keeps a task raised while the stored URL is unset or no longer one of the interface's addresses.
        * @example
@@ -720,7 +720,7 @@ export class StartSdk<Manifest extends T.SDKManifest> {
             visibility: 'enabled',
           },
           field: { name: i18n('URL'), description: null },
-          get: effects => storeJson.read(s => s.primaryUrl).const(effects),
+          get: storeJson.read(s => s.primaryUrl),
           set: (effects, url) => storeJson.merge(effects, { primaryUrl: url }),
         })
 
