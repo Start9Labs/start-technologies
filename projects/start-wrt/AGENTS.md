@@ -57,24 +57,37 @@ it holds the router's password hash and private keys, so it never leaves that di
 
 ### Protocol
 
-1. **Preflight.** `bench.sh preflight`, then `bench.sh console start`. Pass `--with-os` when
+1. **Map the regression surface** from the diff before touching the bench. List everything
+   the change can reach beyond its own feature: other callers of what it changed, each UCI
+   config it writes and each service it reloads, the nft chains and include files it touches,
+   shared `start-core` code (StartOS and StartTunnel run it too), boot and init paths (test
+   across a reboot), and anything staged into the image — `build/stage-files.sh`,
+   `firstboot_config/`, the diffconfig, the OpenWrt delta — which only a flashed image
+   exercises, upgraded with settings kept: a config file such as `/etc/inittab` survives the
+   upgrade and shadows the new one. Every item gets a live test in step 6 or a line in the
+   report saying why it was only reasoned about.
+2. **Preflight.** `bench.sh preflight`, then `bench.sh console start`. Pass `--with-os` when
    the change touches anything StartOS and StartWRT negotiate; without it an unreachable
    `os-bench` is only noted. A failed check you cannot fix is the first thing you report, not
    something to work around.
-2. **Snapshot** before changing any router config: `bench.sh snapshot save <branch-topic>`.
-3. **Deploy.** `make start-wrt-update STARTWRT_REMOTE=wrt-bench`, then `bench.sh deployed` —
+3. **Snapshot** before changing any router config: `bench.sh snapshot save <branch-topic>`.
+4. **Deploy.** `make start-wrt-update STARTWRT_REMOTE=wrt-bench`, then `bench.sh deployed` —
    a test run against a binary you did not confirm is not evidence.
-4. **Drive the scenario** a user would meet, from the side they would meet it: inbound from
+5. **Drive the scenario** a user would meet, from the side they would meet it: inbound from
    this machine, outbound and LAN-side from `os-bench` or a synthetic client, the UI from a
    headless browser against the router's address. Reproduce a bug on the old binary first
    when you can; a fix that passes a test which never failed has proven nothing.
-5. **Collect evidence** from the router, not only from the client: `nft list ruleset`,
+6. **Test for regressions.** Drive each item from step 1, then `bench.sh smoke` — the standing
+   checks every deploy must pass whatever it changed. Run `smoke` again after a reboot when
+   the change touches boot, init, or anything written at startup.
+7. **Collect evidence** from the router, not only from the client: `nft list ruleset`,
    `uci show <config>`, `logread -e startwrt`, `ubus call …`, the console log across reboots.
-6. **Clean up.** `bench.sh lan-client down --all`; `bench.sh snapshot restore <label>` if the
+8. **Clean up.** `bench.sh lan-client down --all`; `bench.sh snapshot restore <label>` if the
    test changed config the next session should not inherit; undo anything you registered on
    `os-bench` (a domain, a port forward, an installed package).
-7. **Report** what you verified and how, what you did not and why, and the **physical actions
-   left for the developer** — nothing else is handed back.
+9. **Report** what you verified and how, the regression surface and which of it you drove
+   live, what you did not verify and why, and the **physical actions left for the
+   developer** — nothing else is handed back.
 
 ### Rules
 

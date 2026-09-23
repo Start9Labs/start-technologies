@@ -21,6 +21,7 @@ Usage: bench.sh <command> [args]
   preflight [--with-os]             check the bench hosts, the console, and router capabilities;
                                     os-bench fails the check only with --with-os
   deployed                          compare the local startwrt build with the router's binary
+  smoke                             run the standing regression checks (LAN client, UI both sides, log)
   wait-ssh [timeout]                wait until the router answers SSH (default 180s)
 
   console start|stop|status         run a background reader that logs the serial console (read-only)
@@ -62,9 +63,9 @@ bad() {
 }
 note() { printf '  --    %s\n' "$*"; }
 
-ssh_alias_configured() {
-	[ "$(ssh -G "$1" 2>/dev/null | awk '$1 == "hostname" { print $2 }')" != "$1" ]
-}
+ssh_option() { ssh -G "$1" 2>/dev/null | awk -v k="$2" '$1 == k { print $2 }'; }
+
+ssh_alias_configured() { [ "$(ssh_option "$1" hostname)" != "$1" ]; }
 
 cmd_preflight() {
 	local need_os=0
@@ -108,7 +109,7 @@ EOF
 	local os_bad=bad
 	[ "$need_os" = 1 ] || os_bad=note
 	if os true 2>/dev/null; then
-		ok "ssh (via $(ssh -G "$OS_HOST" | awk '$1 == "proxyjump" { print $2 }'))"
+		ok "ssh (via $(ssh_option "$OS_HOST" proxyjump))"
 		note "default route: $(os 'ip route show default' | head -1)"
 		if os 'sudo -n start-cli git-info' >/dev/null 2>&1; then
 			ok "sudo start-cli"
@@ -359,12 +360,58 @@ cmd_lan_client() {
 	wrt "sh /tmp/bench/lan-client.sh$args"
 }
 
+cmd_smoke() {
+	PREFLIGHT_FAILED=0
+	local name=smoke gw wan
+	echo "LAN (synthetic client)"
+	cmd_lan_client down "$name" >/dev/null
+	if cmd_lan_client up "$name" >/dev/null 2>&1; then
+		ok "DHCP lease $(cmd_lan_client exec "$name" ip -4 -br addr show dev eth0 | awk '{print $3}')"
+		gw=$(cmd_lan_client exec "$name" ip route show default | awk '{print $3; exit}')
+		cmd_lan_client exec "$name" nslookup start9.com >/dev/null 2>&1 && ok "DNS" || bad "DNS lookup failed"
+		[ "$(cmd_lan_client exec "$name" curl -s -o /dev/null -m 10 -w '%{http_code}' https://start9.com)" = 200 ] &&
+			ok "HTTPS to the internet" || bad "HTTPS to the internet failed"
+		[ "$(cmd_lan_client exec "$name" curl -sk -o /dev/null -m 10 -w '%{http_code}' "https://$gw/")" = 200 ] &&
+			ok "router UI from LAN ($gw)" || bad "router UI from LAN ($gw) failed"
+	else
+		bad "synthetic client got no lease"
+	fi
+	cmd_lan_client down "$name" >/dev/null
+
+	echo "WAN (this machine)"
+	wan=$(ssh_option "$WRT_HOST" hostname)
+	[ "$(curl -sk -o /dev/null -m 10 -w '%{http_code}' "https://$wan/")" = 200 ] &&
+		ok "router UI from WAN" || bad "router UI from WAN failed"
+	wrt true && ok "SSH through Remote Access" || bad "SSH to $WRT_HOST failed"
+
+	echo "router log"
+	local errors
+	errors=$(wrt "logread -e startwrt | grep -E ' ERROR |panicked'" || true)
+	if [ -z "$errors" ]; then
+		ok "no startwrt errors since boot"
+	else
+		bad "startwrt errors since boot:"
+		sed 's/^/          /' <<<"$errors"
+	fi
+
+	echo "StartOS client ($OS_HOST)"
+	if os true 2>/dev/null; then
+		[ "$(os "curl -s -o /dev/null -m 10 -w '%{http_code}' https://start9.com")" = 200 ] &&
+			ok "HTTPS to the internet" || bad "HTTPS to the internet failed"
+	else
+		note "unreachable; skipped"
+	fi
+
+	[ "$PREFLIGHT_FAILED" = 0 ] || exit 1
+}
+
 main() {
 	local cmd=${1:-}
 	shift || true
 	case $cmd in
 	preflight) cmd_preflight "$@" ;;
 	deployed) cmd_deployed ;;
+	smoke) cmd_smoke ;;
 	wait-ssh) cmd_wait_ssh "$@" ;;
 	console) cmd_console "$@" ;;
 	snapshot) cmd_snapshot "$@" ;;
