@@ -46,6 +46,14 @@ export type EffectContext = {
   constRetry?: () => void
 }
 
+/** The effect call's params, tagged with the calling procedure's event id. An `eventId` the effect names itself wins. */
+export function effectParams(
+  params: Record<string, unknown>,
+  eventId: string | null,
+): Record<string, unknown> {
+  return { eventId: eventId ?? undefined, ...params }
+}
+
 const rpcRoundFor =
   (eventId: string | null) =>
   <K extends T.EffectMethod | 'clearCallbacks'>(
@@ -58,7 +66,7 @@ const rpcRoundFor =
         JSON.stringify({
           id,
           method,
-          params: { ...params, eventId: eventId ?? undefined },
+          params: effectParams(params, eventId),
         }) + '\n',
       )
     })
