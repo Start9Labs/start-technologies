@@ -7,6 +7,7 @@ WRT_HOST=${WRT_HOST:-wrt-bench}
 OS_HOST=${OS_HOST:-os-bench}
 WRT_CONSOLE=${WRT_CONSOLE:-/dev/wrt-console}
 WRT_CONSOLE_BAUD=${WRT_CONSOLE_BAUD:-115200}
+MGMT_PORT=${MGMT_PORT:-2222}
 BENCH_STATE_DIR=${BENCH_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/startwrt-bench}
 CONSOLE_SESSION=wrt-console
 CONSOLE_LOG=$BENCH_STATE_DIR/console.log
@@ -18,6 +19,7 @@ usage() {
 	cat <<'EOF'
 Usage: bench.sh <command> [args]
 
+  mgmt install|status|remove        the bench's own SSH port on the router, independent of Remote Access
   preflight [--with-os]             check the bench hosts, the console, and router capabilities;
                                     os-bench fails the check only with --with-os
   deployed                          compare the local startwrt build with the router's binary
@@ -39,7 +41,7 @@ Usage: bench.sh <command> [args]
   lan-client down <name>|--all
   lan-client list
 
-Environment: WRT_HOST, OS_HOST, WRT_CONSOLE, WRT_CONSOLE_BAUD, BENCH_STATE_DIR, PROFILE
+Environment: WRT_HOST, OS_HOST, WRT_CONSOLE, WRT_CONSOLE_BAUD, MGMT_PORT, BENCH_STATE_DIR, PROFILE
 EOF
 }
 
@@ -49,6 +51,7 @@ die() {
 }
 
 wrt() { ssh -o BatchMode=yes -o ConnectTimeout=5 "$WRT_HOST" "$@"; }
+wrt22() { ssh -p 22 -o BatchMode=yes -o ConnectTimeout=5 "$WRT_HOST" "$@"; }
 os() { ssh -o BatchMode=yes -o ConnectTimeout=10 "$OS_HOST" "$@"; }
 
 state_dir() {
@@ -82,6 +85,12 @@ cmd_preflight() {
 	for host in "$WRT_HOST" "$OS_HOST"; do
 		ssh_alias_configured "$host" && ok "ssh alias $host" || bad "ssh alias $host has no HostName in ~/.ssh/config"
 	done
+
+	if [ "$(ssh_option "$WRT_HOST" port)" = "$MGMT_PORT" ]; then
+		ok "$WRT_HOST on management port $MGMT_PORT"
+	else
+		bad "$WRT_HOST is not on management port $MGMT_PORT (bench.sh mgmt install)"
+	fi
 
 	echo "router ($WRT_HOST)"
 	if wrt true 2>/dev/null; then
@@ -360,6 +369,57 @@ cmd_lan_client() {
 	wrt "sh /tmp/bench/lan-client.sh$args"
 }
 
+is_rfc1918() {
+	case $1 in
+	10.* | 192.168.* | 172.1[6-9].* | 172.2[0-9].* | 172.3[01].*) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+cmd_mgmt() {
+	case ${1:-status} in
+	install)
+		local me
+		me=$(wrt22 'echo "${SSH_CLIENT%% *}"') || die "install needs SSH on port 22, which Remote Access opens"
+		wrt22 "set -e
+uci -q delete dropbear.bench || true
+uci set dropbear.bench=dropbear
+uci set dropbear.bench.enable=1
+uci set dropbear.bench.Port=$MGMT_PORT
+uci set dropbear.bench.PasswordAuth=off
+uci set dropbear.bench.RootPasswordAuth=off
+uci commit dropbear
+uci -q delete firewall.bench_mgmt || true
+uci set firewall.bench_mgmt=rule
+uci set firewall.bench_mgmt.name=bench_mgmt_ssh
+uci set firewall.bench_mgmt.src=wan
+uci set firewall.bench_mgmt.family=ipv4
+uci set firewall.bench_mgmt.src_ip=$me
+uci set firewall.bench_mgmt.proto=tcp
+uci set firewall.bench_mgmt.dest_port=$MGMT_PORT
+uci set firewall.bench_mgmt.target=ACCEPT
+uci commit firewall
+/etc/init.d/dropbear reload
+/etc/init.d/firewall reload >/dev/null 2>&1"
+		sleep 2
+		ssh -p "$MGMT_PORT" -o BatchMode=yes -o ConnectTimeout=5 "$WRT_HOST" true ||
+			die "management port $MGMT_PORT does not answer"
+		echo "management SSH on port $MGMT_PORT, admitted from $me only"
+		[ "$(ssh_option "$WRT_HOST" port)" = "$MGMT_PORT" ] ||
+			echo "set 'Port $MGMT_PORT' under 'Host $WRT_HOST' in ~/.ssh/config"
+		;;
+	status)
+		wrt "uci -q show dropbear.bench; uci -q show firewall.bench_mgmt" || die "no management SSH"
+		;;
+	remove)
+		wrt22 "uci -q delete dropbear.bench; uci -q delete firewall.bench_mgmt; uci commit dropbear; uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1; /etc/init.d/dropbear reload" ||
+			die "remove needs SSH on port 22, which Remote Access opens"
+		echo "management SSH removed; point $WRT_HOST back at port 22"
+		;;
+	*) die "unknown mgmt command: $1" ;;
+	esac
+}
+
 cmd_smoke() {
 	PREFLIGHT_FAILED=0
 	local name=smoke gw wan
@@ -379,10 +439,22 @@ cmd_smoke() {
 	cmd_lan_client down "$name" >/dev/null
 
 	echo "WAN (this machine)"
+	local mode expect ui ssh22
 	wan=$(ssh_option "$WRT_HOST" hostname)
-	[ "$(curl -sk -o /dev/null -m 10 -w '%{http_code}' "https://$wan/")" = 200 ] &&
-		ok "router UI from WAN" || bad "router UI from WAN failed"
-	wrt true && ok "SSH through Remote Access" || bad "SSH to $WRT_HOST failed"
+	mode=$(wrt 'uci -q get startwrt.preferences.remote_access' || echo default)
+	case $mode in
+	always) expect=open ;;
+	never) expect=closed ;;
+	*) is_rfc1918 "$wan" && expect=open || expect=closed ;;
+	esac
+	ui=$(curl -sk -o /dev/null -m 10 -w '%{http_code}' "https://$wan/" || true)
+	wrt22 true 2>/dev/null && ssh22=open || ssh22=closed
+	[ "$ui" = 200 ] && ui=open || ui=closed
+	if [ "$ui" = "$expect" ] && [ "$ssh22" = "$expect" ]; then
+		ok "Remote Access $mode: UI and SSH on port 22 $expect from WAN"
+	else
+		bad "Remote Access $mode: expected $expect from WAN, UI $ui, SSH on port 22 $ssh22"
+	fi
 
 	echo "router log"
 	local errors
@@ -411,6 +483,7 @@ main() {
 	case $cmd in
 	preflight) cmd_preflight "$@" ;;
 	deployed) cmd_deployed ;;
+	mgmt) cmd_mgmt "$@" ;;
 	smoke) cmd_smoke ;;
 	wait-ssh) cmd_wait_ssh "$@" ;;
 	console) cmd_console "$@" ;;

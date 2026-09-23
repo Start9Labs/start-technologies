@@ -34,9 +34,11 @@ have tested and stop.
 ### Topology
 
 - **`wrt-bench`** — an SSH alias for the router under test, reached as `root` at its WAN
-  address. The router sits behind an upstream NAT whose LAN this machine is on, so Remote
-  Access (on by default behind another NAT) admits SSH from here, and **this machine is the
-  WAN-side client** for every inbound test.
+  address on the bench's own management port (`bench.sh mgmt`, 2222 by default): a second
+  dropbear plus a `bench_mgmt_ssh` firewall rule admitting this machine alone. Remote Access
+  never governs that port, so ports 22, 80, and 443 behave exactly as the product sets them
+  and every Remote Access mode is testable. The router sits behind an upstream NAT whose LAN
+  this machine is on, and **this machine is the WAN-side client** for every inbound test.
 - **`os-bench`** — an SSH alias for a StartOS server wired to a router LAN port, reached as
   `start9` through `ProxyJump wrt-bench`. It is the real LAN client for anything StartOS and
   StartWRT negotiate (PCP/UPnP, DNS injection, SNI, port-check probes, hairpin to published
@@ -92,8 +94,14 @@ it holds the router's password hash and private keys, so it never leaves that di
 ### Rules
 
 - **Keep the console running** before any change that can cut SSH: WAN, firewall input,
-  Remote Access, dropbear, a reboot. If SSH does not come back, report what the console shows
-  and hand recovery to the developer.
+  dropbear, a reboot. If SSH does not come back, report what the console shows and hand
+  recovery to the developer.
+- **The management port is not under test.** Never remove `dropbear.bench` or
+  `firewall.bench_mgmt`, and never use its port in a test. A scan of the WAN shows it open to
+  this machine; that is the bench, not the product.
+- **A bench router's backups stay with it.** They carry the management port and the bench
+  key; never restore one onto another router. `bench.sh mgmt remove` strips the port before
+  the router leaves the bench.
 - **Ask first** for anything that flashes firmware (`sysupgrade` of an image, eMMC or boot
   partitions), installs packages on the router (it alters the image under test), or touches a
   host other than `wrt-bench` and `os-bench`.
@@ -116,6 +124,7 @@ it holds the router's password hash and private keys, so it never leaves that di
    ```
    Host wrt-bench
      HostName <router WAN address>
+     Port 2222
      User root
      IdentityFile ~/.ssh/id_ed25519_wrtbench
      IdentitiesOnly yes
@@ -128,6 +137,10 @@ it holds the router's password hash and private keys, so it never leaves that di
      IdentityFile ~/.ssh/id_ed25519_wrtbench
      IdentitiesOnly yes
    ```
+
+   Then run `bench.sh mgmt install`, which reaches the router on port 22 while Remote Access
+   is on and adds the management port. Run it again after a fresh reflash, or when this
+   machine's address changes.
 
 3. **Console access**, scoped to one adapter rather than the `dialout` group. Read the
    adapter's IDs with `udevadm info -a -n /dev/ttyUSB0 | grep -m3 -E 'idVendor|idProduct|serial'`,
