@@ -455,7 +455,7 @@ function rawTransformed<A extends Transformed, Raw, Transformed>(
     path,
     inData => {
       if (transformers) {
-        return toFile(transformers.onWrite(inData))
+        return toFile(filterUndefined(transformers.onWrite(inData)))
       }
       return toFile(inData as any as Raw)
     },

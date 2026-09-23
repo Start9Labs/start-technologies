@@ -51,4 +51,27 @@ describe('FileHelper.merge', () => {
       expect(readFileSync(path, 'utf-8')).toContain('old')
     },
   )
+
+  // A transformer can leave a key undefined that the data never named, the
+  // way a form-to-file mapping does for an unset setting.
+  test.each(['env', 'ini', 'yaml', 'toml'])(
+    '%s drops a key its onWrite leaves undefined',
+    async kind => {
+      const path = seeded(`transformed.${kind}`, '')
+      const file = (FileHelper as any)[kind](
+        path,
+        shape,
+        ...(kind === 'ini' || kind === 'yaml' ? [undefined] : []),
+        {
+          onRead: (raw: Record<string, unknown>) => raw,
+          onWrite: (data: { A: string }) => ({ A: data.A, K: undefined }),
+        },
+      )
+
+      await file.write(effects, { A: 'keep' })
+
+      expect(readFileSync(path, 'utf-8')).not.toContain('undefined')
+      expect(readFileSync(path, 'utf-8')).toContain('keep')
+    },
+  )
 })
