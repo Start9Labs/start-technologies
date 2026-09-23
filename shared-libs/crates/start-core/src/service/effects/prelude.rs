@@ -6,12 +6,13 @@ pub use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 pub(super) use crate::service::effects::context::EffectContext;
 
-// The event id of the procedure making an effect call, which the container
-// runtime sets on every call. `action run` takes it as `--event-id` to answer
-// the form an earlier `get-input` opened.
-// A message sent to a service under the id of a handler that service is
-// running skips that handler's conflicts. A doc comment here becomes the
-// about text of every command that flattens this.
+// Identifies the procedure an effect call belongs to. The container runtime
+// sets it to the calling procedure's id; `action run --event-id` sets it to
+// the id `get-input` returned.
+// A service treats a call carrying the id of a procedure it is running as part
+// of that procedure, exempt from its conflicts.
+// Not a doc comment: clap prints one as the about text of every command that
+// flattens this.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
