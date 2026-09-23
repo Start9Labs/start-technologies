@@ -9,7 +9,6 @@ use std::net::SocketAddr;
 use tokio::net::TcpSocket;
 use tokio::net::TcpStream;
 use tokio::process::Command;
-use tokio::sync::OnceCell;
 
 #[cfg(target_os = "linux")]
 use crate::net::utils::default_keepalive;
@@ -74,7 +73,7 @@ fn divert_families(ipv6_enabled: bool) -> &'static [(&'static str, &'static str,
 fn loopback_ipv6_enabled() -> bool {
     std::fs::read_to_string("/proc/sys/net/ipv6/conf/lo/disable_ipv6")
         .map(|disabled| disabled.trim() != "1")
-        .unwrap_or(true)
+        .unwrap_or(false)
 }
 
 /// Nftables rules marking transparent-socket replies for local delivery.
@@ -141,14 +140,17 @@ pub async fn transparent_connect(
     ))
 }
 
-static DIVERT_INFRA: OnceCell<()> = OnceCell::const_new();
+static DIVERT_INFRA_IPV6: tokio::sync::Mutex<Option<bool>> = tokio::sync::Mutex::const_new(None);
 
-/// Initializes diversion once, retrying after failures.
+/// Initializes diversion once, again when loopback IPv6 appears, and retries after failures.
 pub async fn ensure_divert_infra_once() -> Result<(), Error> {
-    DIVERT_INFRA
-        .get_or_try_init(|| async { ensure_divert_infra().await.map(|_| ()) })
-        .await
-        .map(|_| ())
+    let ipv6 = loopback_ipv6_enabled();
+    let mut installed = DIVERT_INFRA_IPV6.lock().await;
+    if installed.is_none_or(|v6| ipv6 && !v6) {
+        ensure_divert_infra().await?;
+        *installed = Some(ipv6);
+    }
+    Ok(())
 }
 
 static DIVERT_ASSERT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
