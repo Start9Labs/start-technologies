@@ -18,7 +18,8 @@ usage() {
 	cat <<'EOF'
 Usage: bench.sh <command> [args]
 
-  preflight                         check every bench host, the console, and router capabilities
+  preflight [--with-os]             check the bench hosts, the console, and router capabilities;
+                                    os-bench fails the check only with --with-os
   deployed                          compare the local startwrt build with the router's binary
   wait-ssh [timeout]                wait until the router answers SSH (default 180s)
 
@@ -66,6 +67,12 @@ ssh_alias_configured() {
 }
 
 cmd_preflight() {
+	local need_os=0
+	case ${1:-} in
+	--with-os) need_os=1 ;;
+	"") ;;
+	*) die "unknown preflight option: $1" ;;
+	esac
 	PREFLIGHT_FAILED=0
 	echo "local"
 	for tool in ssh tmux stty awk; do
@@ -98,16 +105,18 @@ EOF
 	fi
 
 	echo "LAN client ($OS_HOST)"
+	local os_bad=bad
+	[ "$need_os" = 1 ] || os_bad=note
 	if os true 2>/dev/null; then
 		ok "ssh (via $(ssh -G "$OS_HOST" | awk '$1 == "proxyjump" { print $2 }'))"
 		note "default route: $(os 'ip route show default' | head -1)"
 		if os 'sudo -n start-cli git-info' >/dev/null 2>&1; then
 			ok "sudo start-cli"
 		else
-			bad "sudo start-cli failed on $OS_HOST"
+			$os_bad "sudo start-cli failed on $OS_HOST"
 		fi
 	else
-		bad "ssh $OS_HOST unreachable"
+		$os_bad "ssh $OS_HOST unreachable"
 	fi
 
 	echo "console ($WRT_CONSOLE)"
@@ -354,7 +363,7 @@ main() {
 	local cmd=${1:-}
 	shift || true
 	case $cmd in
-	preflight) cmd_preflight ;;
+	preflight) cmd_preflight "$@" ;;
 	deployed) cmd_deployed ;;
 	wait-ssh) cmd_wait_ssh "$@" ;;
 	console) cmd_console "$@" ;;

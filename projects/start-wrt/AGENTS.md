@@ -39,8 +39,9 @@ have tested and stop.
   WAN-side client** for every inbound test.
 - **`os-bench`** — an SSH alias for a StartOS server wired to a router LAN port, reached as
   `start9` through `ProxyJump wrt-bench`. It is the real LAN client for anything StartOS and
-  StartWRT negotiate (PCP/UPnP, DNS injection, SNI, hairpin to published domains). Run
-  `start-cli` on it as `ssh os-bench 'sudo start-cli …'`.
+  StartWRT negotiate (PCP/UPnP, DNS injection, SNI, port-check probes, hairpin to published
+  domains), and optional for anything else. Run `start-cli` on it as
+  `ssh os-bench 'sudo start-cli …'`.
 - **Synthetic LAN clients** — network namespaces _on the router_, each a veth port on `br-lan`
   with its own MAC and profile VLAN, leasing from the router's own dnsmasq. Use them for
   anything needing more than one client or a specific profile. They carry only the router's
@@ -56,8 +57,10 @@ it holds the router's password hash and private keys, so it never leaves that di
 
 ### Protocol
 
-1. **Preflight.** `bench.sh preflight`, then `bench.sh console start`. A failed check you
-   cannot fix is the first thing you report, not something to work around.
+1. **Preflight.** `bench.sh preflight`, then `bench.sh console start`. Pass `--with-os` when
+   the change touches anything StartOS and StartWRT negotiate; without it an unreachable
+   `os-bench` is only noted. A failed check you cannot fix is the first thing you report, not
+   something to work around.
 2. **Snapshot** before changing any router config: `bench.sh snapshot save <branch-topic>`.
 3. **Deploy.** `make start-wrt-update STARTWRT_REMOTE=wrt-bench`, then `bench.sh deployed` —
    a test run against a binary you did not confirm is not evidence.
