@@ -65,7 +65,7 @@ StartOS tests DNS automatically when you add or enable a public domain, and will
 
 ## Configure Port Forwarding
 
-To expose a public domain to the Internet, the appropriate port must be forwarded in the corresponding gateway. IPv4 public domains also work on servers with IPv6 disabled. StartOS tests port forwarding automatically when you add or enable a public domain, and will guide you through the setup if the test fails.
+To expose a public domain to the Internet, the appropriate port must be forwarded in the corresponding gateway. StartOS tests port forwarding automatically when you add or enable a public domain, and will guide you through the setup if the test fails.
 
 When a public address is enabled, StartOS first **attempts to open the port automatically** on the corresponding gateway, using PCP (preferred), then NAT-PMP, then UPnP. If the gateway supports one of these (and it is enabled), no manual step is required — and when the address is later disabled or deleted, StartOS removes the port forward it created. This is best-effort: if the gateway supports none of them, the automatic test will fail and you create the rule manually as described below.
 

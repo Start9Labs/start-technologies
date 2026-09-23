@@ -65,15 +65,10 @@ fn fwmark_arg(cfg: &DivertConfig) -> String {
     }
 }
 
-fn divert_families(ipv6_enabled: bool) -> &'static [(&'static str, &'static str, &'static str)] {
-    const FAMILIES: [(&str, &str, &str); 2] = [("-4", "0.0.0.0/0", "ip"), ("-6", "::/0", "ip6")];
-    &FAMILIES[..if ipv6_enabled { 2 } else { 1 }]
-}
-
+/// False when the kernel lacks IPv6.
 fn loopback_ipv6_enabled() -> bool {
     std::fs::read_to_string("/proc/sys/net/ipv6/conf/lo/disable_ipv6")
-        .map(|disabled| disabled.trim() != "1")
-        .unwrap_or(false)
+        .is_ok_and(|disabled| disabled.trim() != "1")
 }
 
 /// Nftables rules marking transparent-socket replies for local delivery.
@@ -140,15 +135,18 @@ pub async fn transparent_connect(
     ))
 }
 
+/// Whether installed diversion covers IPv6. `None` until installed.
 static DIVERT_INFRA_IPV6: tokio::sync::Mutex<Option<bool>> = tokio::sync::Mutex::const_new(None);
 
-/// Initializes diversion once, again when loopback IPv6 appears, and retries after failures.
+/// Installs diversion unless it already covers every enabled family.
 pub async fn ensure_divert_infra_once() -> Result<(), Error> {
-    let ipv6 = loopback_ipv6_enabled();
-    let mut installed = DIVERT_INFRA_IPV6.lock().await;
-    if installed.is_none_or(|v6| ipv6 && !v6) {
-        ensure_divert_infra().await?;
-        *installed = Some(ipv6);
+    let mut covers_ipv6 = DIVERT_INFRA_IPV6.lock().await;
+    if *covers_ipv6 != Some(true) {
+        let ipv6 = loopback_ipv6_enabled();
+        if *covers_ipv6 != Some(ipv6) {
+            divert_infra(ipv6).await?;
+            *covers_ipv6 = Some(ipv6);
+        }
     }
     Ok(())
 }
@@ -158,6 +156,10 @@ static DIVERT_ASSERT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(())
 /// Reconciles policy-routing and optional nftables rules.
 /// Returns whether any missing rule was restored.
 pub async fn ensure_divert_infra() -> Result<bool, Error> {
+    divert_infra(loopback_ipv6_enabled()).await
+}
+
+async fn divert_infra(ipv6: bool) -> Result<bool, Error> {
     let _guard = DIVERT_ASSERT.lock().await;
     let cfg = divert_config();
     let mut repaired = false;
@@ -165,7 +167,10 @@ pub async fn ensure_divert_infra() -> Result<bool, Error> {
     let priority = cfg.rule_priority.to_string();
     let fwmark = fwmark_arg(cfg);
 
-    for &(flag, default_route, family) in divert_families(loopback_ipv6_enabled()) {
+    let families = [("-4", "0.0.0.0/0", "ip")]
+        .into_iter()
+        .chain(ipv6.then_some(("-6", "::/0", "ip6")));
+    for (flag, default_route, family) in families {
         Command::new("ip")
             .args([
                 flag,
@@ -208,32 +213,16 @@ pub async fn ensure_divert_infra() -> Result<bool, Error> {
             .unwrap_or_default();
         if !String::from_utf8_lossy(&chain).contains("sni-divert") {
             Command::new("nft")
-                .args([
-                    "add",
-                    "rule",
+                .args(["-f", "-"])
+                .input(Some(&mut std::io::Cursor::new(divert_mark_rule_family(
                     family,
-                    "startos",
-                    "mangle_prerouting",
-                    "meta",
-                    "l4proto",
-                    "tcp",
-                    "socket",
-                    "transparent",
-                    "1",
-                    "meta",
-                    "mark",
-                    "set",
-                    &format!("{DIVERT_MARK:#010x}"),
-                    "comment",
-                    "sni-divert",
-                ])
+                ))))
                 .invoke(ErrorKind::Network)
                 .await?;
             repaired = true;
         }
     }
 
-    // Strict reverse-path filtering accepts backend-routable reply sources.
     Ok(repaired)
 }
 
@@ -248,15 +237,6 @@ mod tests {
         assert_eq!(cfg.rule_priority, 49);
         assert_eq!(fwmark_arg(&cfg), format!("{DIVERT_MARK:#x}"));
         assert!(cfg.manage_nft);
-    }
-
-    #[test]
-    fn diversion_uses_available_families() {
-        assert_eq!(divert_families(false), &[("-4", "0.0.0.0/0", "ip")]);
-        assert_eq!(
-            divert_families(true),
-            &[("-4", "0.0.0.0/0", "ip"), ("-6", "::/0", "ip6")]
-        );
     }
 
     #[test]
