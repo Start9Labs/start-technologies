@@ -74,4 +74,21 @@ describe('FileHelper.merge', () => {
       expect(readFileSync(path, 'utf-8')).toContain('keep')
     },
   )
+
+  test('raw hands its writer no key merged as undefined', async () => {
+    const path = seeded('undefined.raw', 'A=keep\nK=old\n')
+    const file = FileHelper.raw(
+      path,
+      (data: { A: string; K?: string }) =>
+        Object.entries(data)
+          .map(([k, v]) => `${k}=${v}`)
+          .join('\n'),
+      raw => Object.fromEntries(raw.split('\n').map(line => line.split('='))),
+      data => shape.parse(data),
+    )
+
+    await file.merge(effects, { K: undefined })
+
+    expect(readFileSync(path, 'utf-8')).toBe('A=keep')
+  })
 })
