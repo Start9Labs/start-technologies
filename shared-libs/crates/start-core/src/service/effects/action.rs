@@ -173,6 +173,10 @@ pub struct RunActionParams {
     #[ts(optional)]
     #[arg(short, long, help = "help.arg.package-id")]
     package_id: Option<PackageId>,
+    /// The `eventId` from the `get-input` whose form this input answers.
+    #[ts(optional)]
+    #[arg(long, help = "help.arg.event-id")]
+    event_id: Option<Guid>,
     #[arg(help = "help.arg.action-id")]
     action_id: ActionId,
     #[ts(type = "any")]
@@ -184,11 +188,13 @@ async fn run_action(
     RunActionParams {
         procedure_id,
         package_id,
+        event_id,
         action_id,
         input,
     }: RunActionParams,
 ) -> Result<Option<ActionResult>, Error> {
     let context = context.deref()?;
+    let procedure_id = event_id.unwrap_or(procedure_id);
     let caller = Some(context.seed.id.clone());
 
     let package_id = package_id.as_ref().unwrap_or(&context.seed.id);

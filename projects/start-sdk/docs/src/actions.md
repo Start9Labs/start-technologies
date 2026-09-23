@@ -72,7 +72,7 @@ The action is paired with a `setupOnInit` watcher that surfaces a critical task 
 
 ### Controlling Access
 
-The optional **`access`** field on the metadata controls who may invoke the action **directly** via `effects.action.run({ packageId, actionId, input })`:
+The optional **`access`** field on the metadata controls who may invoke the action **directly**, with `sdk.action.run` (see [Running Another Service's Action](#running-another-services-action)):
 
 - `'user'` (default) — only the user; another service must request it through a task (`effects.action.createTask(...)`).
 - `'dependent'` — only services that declare this package as a current dependency.
@@ -110,6 +110,21 @@ export const registerEndpoint = sdk.Action.withInput(
   },
 )
 ```
+
+### Running Another Service's Action
+
+`sdk.action.run` runs one of this service's own actions, or another service's that its `access` admits. An action that takes input is run the way the user runs it: its form is opened first, and the input is checked against that form. So `input` is a function. It receives the opened form — its `spec`, and the `value` the action's prefill function supplied — and returns the input to submit. `prefill` seeds the form, including the values its dynamic fields are computed from.
+
+```typescript
+await sdk.action.run({
+  effects,
+  packageId: 'directory',
+  actionId: 'register-endpoint',
+  input: ({ value }) => ({ ...value, hostId: 'api' }),
+})
+```
+
+An action without input takes no `input`, and runs without a form. Calling the effects directly works the same way: `effects.action.run` answers a form only when it carries the `eventId` that `effects.action.getInput` returned, and an action with input refuses a run that names none.
 
 ## Registering Actions
 

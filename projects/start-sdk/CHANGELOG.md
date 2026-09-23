@@ -4,6 +4,14 @@
 
 ### Changed
 
+- **Breaking — `sdk.action.run` opens the action's form and passes it to
+  `input`.** `input` is a function from the opened form to the input to submit;
+  a plain value is no longer accepted. The run then answers that form, which is
+  what lets a service run an action that takes input — another service's that
+  `access` admits, via the new `packageId`, or its own. `prefill` seeds the
+  form. Underneath, `effects.action.getInput` accepts `prefill` and
+  `effects.action.run` accepts the `eventId` the form was opened under
+
 - **Breaking — a filled address lists the server's `.local` name whenever the
   user has it enabled, and `utils.mdnsResolvable` is removed.** `.local` was
   left out while no LAN IP on its gateways was enabled, which dropped it
@@ -151,10 +159,6 @@
   See [Result Types](https://docs.start9.com/packaging/actions.html#result-types)
 
 ### Fixed
-
-- **`effects.action.getInput` accepts `prefill`**, so a service can open
-  another package's action form for a particular target — the interface an
-  add-address action works on, for instance — the way the user's form is opened
 
 - **Lazy subcontainers retry filesystem materialization after a transient
   failure**, allowing daemons to recover without a service restart
