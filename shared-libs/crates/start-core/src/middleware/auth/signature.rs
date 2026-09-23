@@ -19,6 +19,7 @@ use url::Url;
 use crate::auth::AuthKeys;
 use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::DbContext;
+use crate::net::http::request_authority;
 use crate::prelude::*;
 use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::commitment::Commitment;
@@ -90,6 +91,10 @@ pub trait SignatureAuthContext: DbContext {
     /// context supports them.
     fn ephemeral_auth_keys(&self) -> Option<&SyncMutex<AuthKeys>> {
         None
+    }
+    /// Accepts a request signed for whichever loopback IP it was addressed to.
+    fn accepts_loopback_identity(&self) -> bool {
+        false
     }
     /// Remove `keys` from this context's persisted signer store. Store
     /// removal only — never call directly: unenrollment goes through
@@ -196,6 +201,9 @@ impl SignatureAuthContext for RpcContext {
     fn ephemeral_auth_keys(&self) -> Option<&SyncMutex<AuthKeys>> {
         Some(&self.ephemeral_auth_keys)
     }
+    fn accepts_loopback_identity(&self) -> bool {
+        true
+    }
     fn remove_enrolled_keys(
         db: &mut Model<Self::Database>,
         keys: &BTreeSet<InternedString>,
@@ -282,6 +290,17 @@ pub(crate) fn url_host_str(ip: IpAddr) -> InternedString {
         IpAddr::V4(ip) => InternedString::from_display(&ip),
         IpAddr::V6(ip) => InternedString::from_display(&lazy_format!("[{ip}]")),
     }
+}
+
+/// The loopback IP a request was addressed to, formatted as a signing identity.
+fn loopback_identity(request: &Request) -> Option<InternedString> {
+    let ip: IpAddr = request_authority(request)?
+        .host()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse()
+        .ok()?;
+    ip.is_loopback().then(|| url_host_str(ip))
 }
 
 pub trait SigningContext {
@@ -392,9 +411,14 @@ pub async fn verify_request_signature<C: SignatureAuthContext>(
         .await
         .into_iter()
         .collect::<Result<Vec<_>, _>>()?;
-    let verified = sig_contexts.iter().any(|sig_context| {
-        verify_request(&signer, &commitment, sig_context.as_ref(), &signature).is_ok()
-    });
+    let loopback = context
+        .accepts_loopback_identity()
+        .then(|| loopback_identity(request))
+        .flatten();
+    let verify =
+        |sig_context: &str| verify_request(&signer, &commitment, sig_context, &signature).is_ok();
+    let verified =
+        sig_contexts.iter().any(|c| verify(c.as_ref())) || loopback.as_deref().is_some_and(verify);
     if !verified {
         tracing::debug!(
             ?signer,
@@ -677,6 +701,25 @@ mod tests {
             &header.signature,
         )
         .expect_err("signature does not verify under a different context");
+    }
+
+    #[test]
+    fn loopback_identity_is_the_addressed_loopback_ip() {
+        let addressed_to = |host: &str| {
+            loopback_identity(
+                &http::Request::builder()
+                    .header(http::header::HOST, host)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+        };
+        assert_eq!(
+            addressed_to("127.1.1.19:8989").as_deref(),
+            Some("127.1.1.19")
+        );
+        assert_eq!(addressed_to("[::1]:8080").as_deref(), Some("[::1]"));
+        assert_eq!(addressed_to("192.168.1.50:8989"), None);
+        assert_eq!(addressed_to("localhost:8989"), None);
     }
 
     /// The compact wire form (bare base64 DER, no PEM armor) round-trips and

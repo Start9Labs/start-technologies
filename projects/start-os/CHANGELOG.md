@@ -158,6 +158,9 @@ for the detail behind its highlights.
   peer could leave from a different port. Services on raw UDP ports were the
   most affected.
 
+- **You can sign in to the StartOS UI at any loopback address**, such as
+  `http://127.1.1.19:8989` through a Holesail tunnel.
+
 - **Switching off a service's LAN IP address closes it.** The address kept
   answering for as long as the service's `.local` address was on. On an
   interface served over TLS, `.local` and the service's domains still answer
