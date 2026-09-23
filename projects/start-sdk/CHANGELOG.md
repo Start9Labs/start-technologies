@@ -152,6 +152,10 @@
 
 ### Fixed
 
+- **`effects.action.getInput` accepts `prefill`**, so a service can open
+  another package's action form for a particular target — the interface an
+  add-address action works on, for instance — the way the user's form is opened
+
 - **Lazy subcontainers retry filesystem materialization after a transient
   failure**, allowing daemons to recover without a service restart
 
