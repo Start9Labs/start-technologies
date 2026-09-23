@@ -92,10 +92,6 @@ pub trait SignatureAuthContext: DbContext {
     fn ephemeral_auth_keys(&self) -> Option<&SyncMutex<AuthKeys>> {
         None
     }
-    /// Accepts a request signed for whichever loopback IP it was addressed to.
-    fn accepts_loopback_identity(&self) -> bool {
-        false
-    }
     /// Remove `keys` from this context's persisted signer store. Store
     /// removal only — never call directly: unenrollment goes through
     /// [`Self::unenroll`] or [`HasUnenrolledKeys::unenroll`] so the keys'
@@ -200,9 +196,6 @@ impl SignatureAuthContext for RpcContext {
     }
     fn ephemeral_auth_keys(&self) -> Option<&SyncMutex<AuthKeys>> {
         Some(&self.ephemeral_auth_keys)
-    }
-    fn accepts_loopback_identity(&self) -> bool {
-        true
     }
     fn remove_enrolled_keys(
         db: &mut Model<Self::Database>,
@@ -411,10 +404,7 @@ pub async fn verify_request_signature<C: SignatureAuthContext>(
         .await
         .into_iter()
         .collect::<Result<Vec<_>, _>>()?;
-    let loopback = context
-        .accepts_loopback_identity()
-        .then(|| loopback_identity(request))
-        .flatten();
+    let loopback = loopback_identity(request);
     let verify =
         |sig_context: &str| verify_request(&signer, &commitment, sig_context, &signature).is_ok();
     let verified =
