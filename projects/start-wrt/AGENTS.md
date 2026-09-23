@@ -63,6 +63,25 @@ it holds the router's password hash and private keys, so it never leaves that di
 The router's root password — the UI and console login — lives in
 `~/.config/startwrt-bench/root-password` (mode 600), which the script reads.
 
+### Out of reach
+
+The bench cannot exercise these. `CLAUDE.local.md` adds what a particular bench lacks, such
+as what its upstream router offers.
+
+- **Wi-Fi** — no Wi-Fi client: association, password-to-profile assignment, schedules, RF.
+- **Sources on the public Internet** — the only WAN-side client sits on a private upstream
+  network: global-source Remote Access, port forwards and hostname routes reached from the
+  Internet, ACME and DDNS against a real zone.
+- **A second WAN-side client or an inbound VPN peer** — either needs root on this machine.
+- **Upstream conditions** — PPPoE, static WAN, CGNAT, a lost WAN link, prefix delegation;
+  `ifdown wan` on the router stands in only partly.
+- **Outbound VPN** — needs a server off the bench.
+- **Flashing and release** — the setup wizard's flash, eMMC and boot-partition provisioning,
+  OTA from a registry, buttons and LEDs.
+- **Per-port profiles** — one LAN port; synthetic clients stand in for the others.
+- **Real clients** — phones, browsers other than headless Chromium, real-OS DHCP
+  fingerprints.
+
 ### Protocol
 
 1. **Map the regression surface** from the diff before touching the bench. List everything
@@ -73,7 +92,8 @@ The router's root password — the UI and console login — lives in
    `firstboot_config/`, the diffconfig, the OpenWrt delta — which only a flashed image
    exercises, upgraded with settings kept: a config file such as `/etc/inittab` survives the
    upgrade and shadows the new one. Every item gets a live test in step 6 or a line in the
-   report saying why it was only reasoned about.
+   report saying why it was only reasoned about. An item under [Out of reach](#out-of-reach)
+   is named as untested, with the manual test or setup that would cover it.
 2. **Preflight.** `bench.sh preflight`, then `bench.sh console start`. Pass `--with-os` when
    the change touches anything StartOS and StartWRT negotiate; without it an unreachable
    `os-bench` is only noted. A failed check you cannot fix is the first thing you report, not
