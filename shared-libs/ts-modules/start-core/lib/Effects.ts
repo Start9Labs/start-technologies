@@ -23,7 +23,6 @@ import {
   Manifest,
   HostnameInfo,
   Progress,
-  Guid,
 } from './osBindings'
 import {
   PackageId,
@@ -61,8 +60,6 @@ export type Effects = {
     run<Input extends Record<string, unknown>>(options: {
       packageId?: PackageId
       actionId: ActionId
-      /** The `eventId` from the `getInput` whose form this input answers. Required by an action with input. */
-      eventId?: Guid
       input?: Input
     }): Promise<ActionResult | null>
     createTask(options: CreateTaskParams): Promise<null>

@@ -12,7 +12,8 @@ export type RunActionInput<Input> = (form: {
 /**
  * Runs an action of this service, or of another one whose `access` admits it.
  * An action with input opens its form first, so the input is checked against
- * the form it answers.
+ * the form it answers. The target keys that form by the calling procedure's
+ * event id, so one procedure runs one such action at a time.
  */
 export const runAction = async <
   Input extends Record<string, unknown>,
@@ -39,7 +40,6 @@ export const runAction = async <
   return effects.action.run({
     packageId,
     actionId,
-    eventId: form.eventId,
     input: options.input({
       spec: form.spec as IST.InputSpec,
       value: form.value as T.DeepPartial<Input> | null,

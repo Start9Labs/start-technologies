@@ -27,7 +27,7 @@ impl Handler<GetActionInput> for ServiceActor {
     }
     async fn handle(
         &mut self,
-        id: Guid,
+        event_id: Guid,
         GetActionInput {
             id: action_id,
             prefill,
@@ -38,7 +38,7 @@ impl Handler<GetActionInput> for ServiceActor {
         let container = &self.0.persistent_container;
         container
             .execute::<Option<ActionInput>>(
-                id,
+                event_id,
                 ProcedureName::GetActionInput(action_id),
                 json!({ "prefill": prefill, "caller": caller }),
                 Some(Duration::from_secs(30)),
@@ -53,7 +53,7 @@ impl Service {
     /// user and for the OS evaluating a task.
     pub async fn get_action_input(
         &self,
-        id: Guid,
+        event_id: Guid,
         action_id: ActionId,
         prefill: Value,
         caller: Option<PackageId>,
@@ -78,7 +78,7 @@ impl Service {
         }
         self.actor
             .send(
-                id,
+                event_id,
                 GetActionInput {
                     id: action_id,
                     prefill,
@@ -165,7 +165,7 @@ impl Handler<RunAction> for ServiceActor {
     }
     async fn handle(
         &mut self,
-        id: Guid,
+        event_id: Guid,
         RunAction {
             ref action_id,
             input,
@@ -218,7 +218,7 @@ impl Handler<RunAction> for ServiceActor {
         }
         let result = container
             .execute::<Option<ActionResult>>(
-                id.clone(),
+                event_id.clone(),
                 ProcedureName::RunAction(action_id.clone()),
                 json!({
                     "input": input,
@@ -253,14 +253,14 @@ impl Service {
     /// `None` for the user.
     pub async fn run_action(
         &self,
-        id: Guid,
+        event_id: Guid,
         action_id: ActionId,
         input: Value,
         caller: Option<PackageId>,
     ) -> Result<Option<ActionResult>, Error> {
         self.actor
             .send(
-                id,
+                event_id,
                 RunAction {
                     action_id,
                     input,

@@ -9,8 +9,8 @@
   a plain value is no longer accepted. The run then answers that form, which is
   what lets a service run an action that takes input — another service's that
   `access` admits, via the new `packageId`, or its own. `prefill` seeds the
-  form. Underneath, `effects.action.getInput` accepts `prefill` and
-  `effects.action.run` accepts the `eventId` the form was opened under
+  form. Underneath, `effects.action.getInput` accepts `prefill`, and the form
+  and the run that answers it share the calling procedure's event id
 
 - **Breaking — a filled address lists the server's `.local` name whenever the
   user has it enabled, and `utils.mdnsResolvable` is removed.** `.local` was

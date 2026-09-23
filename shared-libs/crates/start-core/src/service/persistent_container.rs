@@ -366,7 +366,7 @@ impl PersistentContainer {
     pub async fn init(
         &self,
         seed: Weak<Service>,
-        procedure_id: Guid,
+        event_id: Guid,
         kind: Option<InitKind>,
     ) -> Result<(), Error> {
         let socket_server_context = EffectContext::new(seed);
@@ -434,13 +434,7 @@ impl PersistentContainer {
         }
 
         self.rpc_client
-            .request(
-                rpc::Init,
-                InitParams {
-                    id: procedure_id,
-                    kind,
-                },
-            )
+            .request(rpc::Init, InitParams { id: event_id, kind })
             .await?;
 
         self.state.send_modify(|s| s.rt_initialized = true);
