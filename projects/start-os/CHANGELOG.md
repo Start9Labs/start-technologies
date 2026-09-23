@@ -156,6 +156,13 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **A port forward takes effect for peers that were already sending to it.**
+  A peer that sent to a port while it had no forward, such as after a
+  gateway's public address changed or during a service update, kept reaching
+  the server instead of the service, and the service's own connections to that
+  peer could leave from a different port. Services on raw UDP ports were the
+  most affected.
+
 - **Switching off a service's LAN IP address closes it.** The address kept
   answering for as long as the service's `.local` address was on. On an
   interface served over TLS, `.local` and the service's domains still answer

@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SNI hostname routes work on IPv4-only tunnel hosts.** The reply path for
   IPv4 routes is set up when IPv6 is disabled on the host.
 
+- **A port forward takes effect for peers that were already sending to it.**
+  A peer that sent to a port while it had no forward kept reaching StartTunnel
+  itself instead of the forward's target.
+
 - **Published-port controls remain authoritative during device refreshes.** A
   device renewing or deleting an automatic mapping leaves manual mappings
   intact, and a disabled mapping stays disabled while its lease is renewed.
