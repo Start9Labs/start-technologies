@@ -272,7 +272,7 @@ Read the user's choice reactively, so re-running the action re-runs `setupInterf
 import { primaryUrl } from './primaryUrl'
 
 export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
-  const url = await primaryUrl.bestUsable(effects)
+  const url = await primaryUrl.bestUsable(effects).const()
 
   const uiMulti = sdk.MultiHost.of(effects, 'ui-multi')
   const uiOrigin = await uiMulti.bindPort(uiPort, { protocol: 'http' })
@@ -338,18 +338,16 @@ export const primaryUrl = sdk.setupPrimaryUrl({
 })
 
 // init/primaryUrlTask.ts — list it after `actions` in setupInit
-export const primaryUrlTask = sdk.setupOnInit(effects =>
-  primaryUrl.createTask(effects, 'important', {
-    reason: i18n('The primary URL is no longer one of Ghost’s addresses. Choose a new one.'),
-  }),
-)
+export const primaryUrlTask = primaryUrl.setupTask('important', {
+  reason: i18n('The primary URL is no longer one of Ghost’s addresses. Choose a new one.'),
+})
 ```
 
-Register `primaryUrl.action` with `sdk.Actions.of()`. It offers the interface's addresses (the `nonLocal` view, so loopback, link-local and the container bridge are left out), pre-selects the `.local` one, and pre-fills the stored URL. Read the stored URL in `get` with `.const(effects)`, so a caller of `bestUsable` re-runs when the user changes it.
+Register `primaryUrl.action` with `sdk.Actions.of()`. It offers the interface's addresses (the `nonLocal` view, so loopback, link-local and the container bridge are left out), pre-selects the `.local` one, and pre-fills the stored URL. Read the stored URL in `get` with `.const(effects)`, so `bestUsable` sees the user change it.
 
-`await primaryUrl.bestUsable(effects)` is the URL to give the service, in `setupMain` and for **Open UI** above: the stored URL at its hostname's current port and scheme; the `.local` address when that hostname is not one of the interface's addresses or nothing is stored; the first address when there is no `.local` one. It re-runs its caller when the stored URL or the addresses change, and leaves the store as the user set it, so a chosen address that comes back is used again.
+`primaryUrl.bestUsable(effects)` reads the URL to give the service, with the usual `const()`, `once()`, `watch()`, `onChange()` and `waitFor()` — `await primaryUrl.bestUsable(effects).const()` in `setupMain` and for **Open UI** above. It resolves to the stored URL at its hostname's current port and scheme; the `.local` address when that hostname is not one of the interface's addresses or nothing is stored; the first address when there is no `.local` one. It leaves the store as the user set it, so a chosen address that comes back is used again.
 
-`primaryUrl.createTask(effects, severity, options)` raises a task on the action while the stored URL is unset or its hostname is not one of the interface's addresses, pre-filled with the `.local` address. It declares the addresses as the task's accepted input (`input-not-matches`, see [Options](tasks.md#options)), so StartOS clears the task when the user picks one or the stored address returns. An IP address leaves the interface's addresses while its network link is down, so an IP choice raises the task then too. `important` suits most services: a `critical` task stops the service while it is active, which is right only for a service that cannot run without a valid URL. Keep `id` equal to the id of an action the package already ships, so its tasks' replay key survives (see [Retiring a replay key](tasks.md#retiring-a-replay-key)).
+`primaryUrl.setupTask(severity, options)` is an init script that keeps a task on the action raised while the stored URL is unset or its hostname is not one of the interface's addresses, pre-filled with the `.local` address. It re-runs when the addresses change and declares the addresses as the task's accepted input (`input-not-matches`, see [Options](tasks.md#options)), so StartOS clears the task when the user picks one or the stored address returns. An IP address leaves the interface's addresses while its network link is down, so an IP choice raises the task then too. `important` suits most services: a `critical` task stops the service while it is active, which is right only for a service that cannot run without a valid URL. Keep `id` equal to the id of an action the package already ships, so its tasks' replay key survives (see [Retiring a replay key](tasks.md#retiring-a-replay-key)).
 
 ## Port Ranges
 

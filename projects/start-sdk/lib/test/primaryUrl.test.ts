@@ -8,6 +8,7 @@ import { FileHelper } from '../util/fileHelper'
 import { sdk } from './output.sdk'
 
 const dir = mkdtempSync(join(tmpdir(), 'primary-url-'))
+const tick = () => new Promise(r => setTimeout(r, 50))
 const shape = z.looseObject({ primaryUrl: z.string().optional() })
 
 const row = (
@@ -77,17 +78,22 @@ const setup = (available: T.HostnameInfo[] | null, chosen?: string) => {
   const set = jest.fn((effects: T.Effects, url: string) =>
     file.merge(effects, { primaryUrl: url }),
   )
-  const effects = {
-    eventId: 'event',
-    isInContext: true,
-    onLeaveContext: () => {},
-    child: () => effects,
-    getHostInfo: async ({ callback }: { callback?: () => void }) => {
-      if (callback) onHostChange = callback
-      return rows && host(rows)
-    },
-    action: { createTask },
-  } as unknown as Effects
+  const makeEffects = (constRetry?: () => void): Effects => {
+    const effects = {
+      eventId: 'event',
+      isInContext: true,
+      onLeaveContext: () => {},
+      constRetry,
+      child: () => makeEffects(effects.constRetry),
+      getHostInfo: async ({ callback }: { callback?: () => void }) => {
+        if (callback) onHostChange = callback
+        return rows && host(rows)
+      },
+      action: { createTask },
+    }
+    return effects as unknown as Effects
+  }
+  const effects = makeEffects()
   const primaryUrl = sdk.setupPrimaryUrl({
     id: 'set-primary-url',
     hostId: 'ui-multi',
@@ -112,7 +118,15 @@ const setup = (available: T.HostnameInfo[] | null, chosen?: string) => {
     rows = r
     onHostChange()
   }
-  return { effects, createTask, set, primaryUrl, stored, changeRows }
+  return {
+    effects,
+    makeEffects,
+    createTask,
+    set,
+    primaryUrl,
+    stored,
+    changeRows,
+  }
 }
 
 describe('setupPrimaryUrl', () => {
@@ -174,80 +188,112 @@ describe('setupPrimaryUrl', () => {
   describe('bestUsable', () => {
     test('is the stored URL while it is an address', async () => {
       const p = setup([lan, local, onion], 'http://abc.onion:8080')
-      expect(await p.primaryUrl.bestUsable(p.effects)).toBe(
+      expect(await p.primaryUrl.bestUsable(p.effects).once()).toBe(
         'http://abc.onion:8080',
       )
     })
 
     test('follows the stored hostname to its current port', async () => {
       const p = setup([lan, local], 'http://box.local:9090')
-      expect(await p.primaryUrl.bestUsable(p.effects)).toBe(
+      expect(await p.primaryUrl.bestUsable(p.effects).once()).toBe(
         'http://box.local:8080',
       )
     })
 
     test('is the .local address when the stored hostname is gone', async () => {
       const p = setup([lan, local, onion], 'https://app.example.com')
-      expect(await p.primaryUrl.bestUsable(p.effects)).toBe(
+      expect(await p.primaryUrl.bestUsable(p.effects).once()).toBe(
         'http://box.local:8080',
       )
     })
 
     test('is the .local address when nothing is stored', async () => {
       const p = setup([onion, lan, local])
-      expect(await p.primaryUrl.bestUsable(p.effects)).toBe(
+      expect(await p.primaryUrl.bestUsable(p.effects).once()).toBe(
         'http://box.local:8080',
       )
     })
 
     test('is the first address when there is no .local one', async () => {
       const p = setup([onion, lan])
-      expect(await p.primaryUrl.bestUsable(p.effects)).toBe(
+      expect(await p.primaryUrl.bestUsable(p.effects).once()).toBe(
         'http://abc.onion:8080',
       )
     })
 
     test('is the stored URL while the host has no addresses', async () => {
       const p = setup(null, 'https://app.example.com')
-      expect(await p.primaryUrl.bestUsable(p.effects)).toBe(
+      expect(await p.primaryUrl.bestUsable(p.effects).once()).toBe(
         'https://app.example.com',
       )
     })
 
     test('is null with nothing stored and no addresses', async () => {
       const p = setup([])
-      expect(await p.primaryUrl.bestUsable(p.effects)).toBeNull()
+      expect(await p.primaryUrl.bestUsable(p.effects).once()).toBeNull()
     })
 
     test('leaves the store as it is', async () => {
       const p = setup([lan, local], 'https://app.example.com')
-      await p.primaryUrl.bestUsable(p.effects)
+      await p.primaryUrl.bestUsable(p.effects).once()
       expect(p.set).not.toHaveBeenCalled()
       expect(p.stored()).toBe('https://app.example.com')
     })
 
-    test('re-runs the caller when the addresses change', async () => {
+    test('const() re-runs the caller when the addresses change', async () => {
       const p = setup([lan, local], 'http://192.168.1.10:8080')
       const constRetry = jest.fn()
-      const effects = Object.assign(Object.create(p.effects), { constRetry })
-      expect(await p.primaryUrl.bestUsable(effects)).toBe(
+      const effects = p.makeEffects(constRetry)
+      expect(await p.primaryUrl.bestUsable(effects).const()).toBe(
         'http://192.168.1.10:8080',
       )
       p.changeRows([local, onion])
-      await new Promise(r => setTimeout(r, 10))
-      expect(constRetry).toHaveBeenCalled()
-      expect(await p.primaryUrl.bestUsable(p.effects)).toBe(
+      await tick()
+      expect(constRetry).toHaveBeenCalledTimes(1)
+      expect(await p.primaryUrl.bestUsable(p.effects).once()).toBe(
         'http://box.local:8080',
       )
     })
+
+    test('const() re-runs the caller when the stored URL changes', async () => {
+      const p = setup([lan, local, onion], 'http://box.local:8080')
+      const constRetry = jest.fn()
+      expect(
+        await p.primaryUrl.bestUsable(p.makeEffects(constRetry)).const(),
+      ).toBe('http://box.local:8080')
+      await p.set(p.effects, 'http://abc.onion:8080')
+      await tick()
+      expect(constRetry).toHaveBeenCalledTimes(1)
+    })
+
+    test('const() leaves the caller alone while the URL it resolves to holds', async () => {
+      const p = setup([lan, local], 'http://box.local:8080')
+      const constRetry = jest.fn()
+      await p.primaryUrl.bestUsable(p.makeEffects(constRetry)).const()
+      p.changeRows([lan, local, onion])
+      await tick()
+      expect(constRetry).not.toHaveBeenCalled()
+    })
+
+    test('once() leaves the caller alone when the addresses change', async () => {
+      const p = setup([lan, local], 'http://192.168.1.10:8080')
+      const constRetry = jest.fn()
+      await p.primaryUrl.bestUsable(p.makeEffects(constRetry)).once()
+      p.changeRows([local, onion])
+      await tick()
+      expect(constRetry).not.toHaveBeenCalled()
+    })
   })
 
-  describe('createTask', () => {
+  describe('setupTask', () => {
+    const run = (
+      p: ReturnType<typeof setup>,
+      ...args: Parameters<ReturnType<typeof setup>['primaryUrl']['setupTask']>
+    ) => p.primaryUrl.setupTask(...args).init(p.effects, null)
+
     test('declares the addresses the stored URL must be one of', async () => {
       const p = setup([lan, local, onion], 'http://box.local:8080')
-      await p.primaryUrl.createTask(p.effects, 'important', {
-        reason: 'Choose a URL',
-      })
+      await run(p, 'important', { reason: 'Choose a URL' })
       expect(p.createTask).toHaveBeenCalledWith({
         actionId: 'set-primary-url',
         packageId: 'testOutput',
@@ -270,9 +316,7 @@ describe('setupPrimaryUrl', () => {
 
     test('passes the severity and replay id through', async () => {
       const p = setup([lan, local])
-      await p.primaryUrl.createTask(p.effects, 'critical', {
-        replayId: 'primary-url',
-      })
+      await run(p, 'critical', { replayId: 'primary-url' })
       expect(p.createTask).toHaveBeenCalledWith(
         expect.objectContaining({
           severity: 'critical',
@@ -283,8 +327,19 @@ describe('setupPrimaryUrl', () => {
 
     test('raises nothing while the interface has no addresses', async () => {
       const p = setup(null, 'http://box.local:8080')
-      await p.primaryUrl.createTask(p.effects, 'important')
+      await run(p, 'important')
       expect(p.createTask).not.toHaveBeenCalled()
+    })
+
+    test('re-runs when the addresses change', async () => {
+      const p = setup([lan, local], 'http://box.local:8080')
+      const constRetry = jest.fn()
+      await p.primaryUrl
+        .setupTask('important')
+        .init(p.makeEffects(constRetry), null)
+      p.changeRows([local, onion])
+      await tick()
+      expect(constRetry).toHaveBeenCalledTimes(1)
     })
   })
 })
