@@ -66,6 +66,17 @@ fn fwmark_arg(cfg: &DivertConfig) -> String {
     }
 }
 
+fn divert_families(ipv6_enabled: bool) -> &'static [(&'static str, &'static str, &'static str)] {
+    const FAMILIES: [(&str, &str, &str); 2] = [("-4", "0.0.0.0/0", "ip"), ("-6", "::/0", "ip6")];
+    &FAMILIES[..if ipv6_enabled { 2 } else { 1 }]
+}
+
+fn loopback_ipv6_enabled() -> bool {
+    std::fs::read_to_string("/proc/sys/net/ipv6/conf/lo/disable_ipv6")
+        .map(|disabled| disabled.trim() != "1")
+        .unwrap_or(true)
+}
+
 /// Nftables rules marking transparent-socket replies for local delivery.
 pub fn divert_mark_rule() -> String {
     [
@@ -152,7 +163,7 @@ pub async fn ensure_divert_infra() -> Result<bool, Error> {
     let priority = cfg.rule_priority.to_string();
     let fwmark = fwmark_arg(cfg);
 
-    for (flag, default_route, family) in [("-4", "0.0.0.0/0", "ip"), ("-6", "::/0", "ip6")] {
+    for &(flag, default_route, family) in divert_families(loopback_ipv6_enabled()) {
         Command::new("ip")
             .args([
                 flag,
@@ -235,6 +246,15 @@ mod tests {
         assert_eq!(cfg.rule_priority, 49);
         assert_eq!(fwmark_arg(&cfg), format!("{DIVERT_MARK:#x}"));
         assert!(cfg.manage_nft);
+    }
+
+    #[test]
+    fn diversion_uses_available_families() {
+        assert_eq!(divert_families(false), &[("-4", "0.0.0.0/0", "ip")]);
+        assert_eq!(
+            divert_families(true),
+            &[("-4", "0.0.0.0/0", "ip"), ("-6", "::/0", "ip6")]
+        );
     }
 
     #[test]

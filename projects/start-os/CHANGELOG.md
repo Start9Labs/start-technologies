@@ -10,6 +10,11 @@ for the detail behind its highlights.
 
 ## [0.4.0.2]
 
+### Fixed
+
+- **IPv4 public domains work on servers with IPv6 disabled.** StartOS sets up
+  the IPv4 reply path for source-preserving TLS routing on those servers.
+
 ### Added
 
 - **UEFI installations carry a standard fallback bootloader.** StartOS remains

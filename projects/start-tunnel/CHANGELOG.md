@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **SNI hostname routes work on IPv4-only tunnel hosts.** The reply path for
+  IPv4 routes is set up when IPv6 is disabled on the host.
+
 - **Published-port controls remain authoritative during device refreshes.** A
   device renewing or deleting an automatic mapping leaves manual mappings
   intact, and a disabled mapping stays disabled while its lease is renewed.
