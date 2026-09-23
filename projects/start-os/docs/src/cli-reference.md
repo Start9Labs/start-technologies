@@ -24,7 +24,7 @@ Log in, log out, manage enrolled device keys, and reset the master password.
 
 ### `start-cli auth login`
 
-Log in and enroll this device's signing key. A command run at a terminal before that prompts for the password itself; a script runs this first.
+Log in and enroll this device's signing key. Required before running any commands against a remote server.
 
 ### `start-cli auth logout <SESSION>`
 
@@ -104,6 +104,27 @@ Display hardware and device information.
 
 Tear down and rebuild all service containers.
 
+### `start-cli server trust-ca <CERTIFICATE>`
+
+Add a PEM-encoded CA root to the StartOS host trust store. The certificate can be read from a
+local file or from standard input by passing `-`:
+
+```sh
+start-cli --host https://server.local server trust-ca company-root.crt
+cat company-root.crt | start-cli --host https://server.local server trust-ca -
+```
+
+The command requires authentication and reports the certificate subject and SHA-256 fingerprint.
+StartOS identifies the root by that fingerprint, so installing the same certificate again keeps a
+single copy. StartOS's own HTTPS connections, such as registry, update, and package downloads, trust
+the root immediately, and it persists across reboots and OS updates. It is added alongside the
+StartOS local Root CA and the distribution trust bundle.
+
+This command changes the host trust store. Services use the trust store provided by their package,
+so configure custom roots within a service separately when supported.
+
+- `--format` — Output format
+
 ### `start-cli server set-hostname <HOSTNAME>`
 
 Set the server's name, which is its `.local` address without the `.local` on the end.
@@ -162,7 +183,7 @@ on Librem Mini v2 systems when no preference is saved and the setting is availab
 
 ### `start-cli server experimental zram`
 
-Enable or disable ZRAM compressed swap. ZRAM is disabled by default.
+Enable or disable ZRAM compressed swap.
 
 - `--enable` — Enable zram
 
@@ -805,7 +826,7 @@ Add a container image to the s9pk.
 - `--workdir <PATH>` — Build context directory
 - `--docker-tag <TAG>` — Docker image tag
 - `--arch <ARCH>` — CPU architecture filter
-- `--no-emulation` — Require a native image for the requested architecture
+- `--emulate-missing-as <ARCH>` — Emulate missing arch
 - `--nvidia-container` — Enable NVIDIA support
 
 ## Registry
@@ -1111,10 +1132,6 @@ Display initialization kernel logs. Same log options as `server logs`.
 Create a new developer signing key.
 
 ## Utilities
-
-### `start-cli completions <SHELL>`
-
-Print a completion script for `bash`, `zsh`, `fish`, `elvish` or `powershell`. `eval "$(start-cli completions bash)"` in a shell profile enables tab completion.
 
 ### `start-cli echo <MESSAGE>`
 

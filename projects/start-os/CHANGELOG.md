@@ -12,6 +12,11 @@ for the detail behind its highlights.
 
 ### Added
 
+- **Administrators can add a custom CA root to the host trust store with
+  `start-cli server trust-ca`.** The root takes effect immediately and persists
+  across reboots and OS updates. Services keep the trust store their package
+  provides.
+
 - **UEFI installations carry a standard fallback bootloader.** StartOS remains
   bootable if firmware loses its saved boot entry while retaining the normal
   entry and StartOS's automatic priority for a plugged-in installer.

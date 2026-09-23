@@ -46,6 +46,20 @@ use crate::net::web_server::{Accept, ExtractVisitor, TcpMetadata, extract};
 use crate::prelude::*;
 use crate::util::serde::{HandlerExtSerde, Pem};
 
+pub(crate) fn x509_sha256_fingerprint(cert: &X509Ref) -> Result<String, ErrorStack> {
+    Ok(format_x509_fingerprint(
+        cert.digest(MessageDigest::sha256())?.as_ref(),
+    ))
+}
+
+fn format_x509_fingerprint(digest: &[u8]) -> String {
+    digest
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
 pub fn should_use_cert(cert: &X509Ref) -> Result<bool, ErrorStack> {
     Ok(cert
         .not_before()
@@ -836,6 +850,16 @@ where
         }
         .log_err()
         .map(TlsHandlerAction::Tls)
+    }
+}
+
+#[cfg(test)]
+mod fingerprint_tests {
+    use super::*;
+
+    #[test]
+    fn fingerprint_bytes_are_uppercase_zero_padded_and_colon_separated() {
+        assert_eq!(format_x509_fingerprint(&[0, 1, 10, 255]), "00:01:0A:FF");
     }
 }
 

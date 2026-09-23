@@ -1,0 +1,19 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-server-trust-ca 1  "trust-ca "
+.SH NAME
+start\-cli\-server\-trust\-ca \- Trust a custom CA root for StartOS host processes
+.SH SYNOPSIS
+\fBstart\-cli server trust\-ca\fR [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fICERTIFICATE\fR>
+.SH DESCRIPTION
+Trust a custom CA root for StartOS host processes
+.SH OPTIONS
+.TP
+\fB\-\-format\fR
+
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fICERTIFICATE\fR>
+Path to a PEM\-encoded CA certificate, or \*(Aq\-\*(Aq to read from stdin
