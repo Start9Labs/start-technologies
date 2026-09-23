@@ -120,7 +120,7 @@ pub struct GetActionInputParams {
     package_id: Option<PackageId>,
     #[serde(flatten)]
     #[ts(skip)]
-    #[command(flatten)]
+    #[arg(skip)]
     event: EventId,
     #[arg(help = "help.arg.action-id")]
     action_id: ActionId,
@@ -465,14 +465,15 @@ mod test {
             id
         );
 
-        let get = GetActionInputParams::try_parse_from([
-            "get-input",
-            "--event-id",
-            id.as_ref(),
-            "attach",
-        ])
-        .unwrap();
-        assert_eq!(get.event.or_new(), id);
+        assert!(
+            GetActionInputParams::try_parse_from([
+                "get-input",
+                "--event-id",
+                id.as_ref(),
+                "attach",
+            ])
+            .is_err()
+        );
 
         let unnamed = RunActionParams::try_parse_from(["run", "attach", "{}"]).unwrap();
         assert!(unnamed.event.event_id.is_none());
