@@ -9,6 +9,8 @@ WRT_CONSOLE=${WRT_CONSOLE:-/dev/wrt-console}
 WRT_CONSOLE_BAUD=${WRT_CONSOLE_BAUD:-115200}
 MGMT_PORT=${MGMT_PORT:-2222}
 BENCH_STATE_DIR=${BENCH_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/startwrt-bench}
+BENCH_PASSWORD_FILE=${BENCH_PASSWORD_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/startwrt-bench/root-password}
+UI_TUNNEL_SESSION=wrt-ui-tunnel
 CONSOLE_SESSION=wrt-console
 CONSOLE_LOG=$BENCH_STATE_DIR/console.log
 SNAPSHOT_DIR=$BENCH_STATE_DIR/snapshots
@@ -26,9 +28,16 @@ Usage: bench.sh <command> [args]
   smoke                             run the standing regression checks (LAN client, UI both sides, log)
   wait-ssh [timeout]                wait until the router answers SSH (default 180s)
 
-  console start|stop|status         run a background reader that logs the serial console (read-only)
+  console start|stop|status         run a background reader that logs the serial console
+  console login                     log in as root at the console's login prompt
+  console run <cmd> [timeout]       run a shell command on the console, print its output, exit with its status
+  console send <line>               write one line to the console without waiting
   console log [lines]               print the tail of the console log (default 100)
   console wait <regex> [timeout]    wait for new console output matching a regex (default 180s)
+
+  ui rpc <method> [params-json]     call an RPC method through the daemon's login, as the web UI does
+  ui login                          start a fresh UI session
+  ui tunnel [port]|stop             forward a local port to the router UI for a browser (default 8443)
 
   snapshot save [label]             copy a sysupgrade config backup of the router to local state
   snapshot restore <label>          restore a saved backup onto the router and reboot it
@@ -41,7 +50,8 @@ Usage: bench.sh <command> [args]
   lan-client down <name>|--all
   lan-client list
 
-Environment: WRT_HOST, OS_HOST, WRT_CONSOLE, WRT_CONSOLE_BAUD, MGMT_PORT, BENCH_STATE_DIR, PROFILE
+Environment: WRT_HOST, OS_HOST, WRT_CONSOLE, WRT_CONSOLE_BAUD, MGMT_PORT, BENCH_STATE_DIR,
+             BENCH_PASSWORD_FILE, PROFILE
 EOF
 }
 
@@ -130,14 +140,26 @@ EOF
 	fi
 
 	echo "console ($WRT_CONSOLE)"
-	if [ -r "$WRT_CONSOLE" ]; then
-		ok "device readable"
+	if [ -r "$WRT_CONSOLE" ] && [ -w "$WRT_CONSOLE" ]; then
+		ok "device read/write"
 	elif [ -e "$WRT_CONSOLE" ]; then
-		bad "no read access to $WRT_CONSOLE (see the udev rule in AGENTS.md)"
+		bad "no read/write access to $WRT_CONSOLE (see the udev rule in AGENTS.md)"
 	else
 		bad "$WRT_CONSOLE missing (adapter unplugged, or udev rule not installed)"
 	fi
 	console_running && ok "reader running, log $CONSOLE_LOG" || note "reader stopped (bench.sh console start)"
+
+	echo "router password ($BENCH_PASSWORD_FILE)"
+	if (router_password >/dev/null) 2>/dev/null; then
+		ok "present, mode 600"
+		if ui_rpc wan.ipv4-get 2>/dev/null | grep -q '"result"'; then
+			ok "UI session through the daemon's login"
+		else
+			bad "UI login failed (wrong password in $BENCH_PASSWORD_FILE?)"
+		fi
+	else
+		bad "missing or not mode 600: UI and console login unavailable"
+	fi
 
 	[ "$PREFLIGHT_FAILED" = 0 ] || exit 1
 }
@@ -171,6 +193,31 @@ console_size() { stat -c %s "$CONSOLE_LOG" 2>/dev/null || echo 0; }
 
 console_since() { tail -c +"$(($1 + 1))" "$CONSOLE_LOG" | tr -d '\r'; }
 
+# Prints the output since the given log offset; fails when the regex has not matched in time.
+console_expect() {
+	local from=$1 regex=$2 timeout=$3 out start=$SECONDS
+	until out=$(console_since "$from") && grep -Eq -- "$regex" <<<"$out"; do
+		((SECONDS - start < timeout)) || {
+			echo "$out"
+			return 1
+		}
+		sleep 0.5
+	done
+	echo "$out"
+}
+
+console_write() {
+	console_running || die "console reader not running (bench.sh console start)"
+	[ -w "$WRT_CONSOLE" ] || die "no write access to $WRT_CONSOLE"
+	printf '%s\r' "$1" >"$WRT_CONSOLE"
+}
+
+router_password() {
+	[ -r "$BENCH_PASSWORD_FILE" ] || die "no router password at $BENCH_PASSWORD_FILE (see AGENTS.md)"
+	[ "$(stat -c %a "$BENCH_PASSWORD_FILE")" = 600 ] || die "$BENCH_PASSWORD_FILE must be mode 600"
+	head -n 1 "$BENCH_PASSWORD_FILE"
+}
+
 cmd_console() {
 	local sub=${1:-status}
 	shift || true
@@ -180,7 +227,7 @@ cmd_console() {
 			echo "console reader already running"
 			return
 		}
-		[ -r "$WRT_CONSOLE" ] || die "no read access to $WRT_CONSOLE"
+		[ -r "$WRT_CONSOLE" ] && [ -w "$WRT_CONSOLE" ] || die "no read/write access to $WRT_CONSOLE"
 		state_dir
 		tmux new-session -d -s "$CONSOLE_SESSION" \
 			"stty -F '$WRT_CONSOLE' $WRT_CONSOLE_BAUD raw -echo -crtscts -ixon -hupcl && exec cat '$WRT_CONSOLE' >>'$CONSOLE_LOG'"
@@ -198,14 +245,41 @@ cmd_console() {
 		tail -n "${1:-100}" "$CONSOLE_LOG" | tr -d '\r'
 		;;
 	wait)
-		local regex=${1:?regex required} timeout=${2:-180} from out start=$SECONDS
+		local regex=${1:?regex required} timeout=${2:-180}
 		console_running || die "console reader not running"
+		console_expect "$(console_size)" "$regex" "$timeout" ||
+			die "no console output matching /$regex/ within ${timeout}s"
+		;;
+	send)
+		console_write "$*"
+		;;
+	login)
+		local from out
 		from=$(console_size)
-		until out=$(console_since "$from") && grep -Eq -- "$regex" <<<"$out"; do
-			((SECONDS - start < timeout)) || die "no console output matching /$regex/ within ${timeout}s"
-			sleep 1
-		done
-		echo "$out"
+		console_write ""
+		out=$(console_expect "$from" 'login: *$|# *$' 15) || die "console shows neither a login prompt nor a shell"
+		if grep -Eq 'login: *$' <<<"$out"; then
+			from=$(console_size)
+			console_write root
+			console_expect "$from" 'Password: *$' 15 >/dev/null || die "console asked for no password"
+			from=$(console_size)
+			console_write "$(router_password)"
+			console_expect "$from" '# *$' 20 >/dev/null || die "console login failed"
+		fi
+		echo "console logged in"
+		;;
+	run)
+		local cmd=${1:?command required} timeout=${2:-60} tag from out status
+		tag=$RANDOM$RANDOM
+		from=$(console_size)
+		console_write "$cmd; echo __BENCH_\"$tag\"__\$?"
+		out=$(console_expect "$from" "__BENCH_${tag}__[0-9]+" "$timeout") || {
+			echo "$out"
+			die "console command did not finish within ${timeout}s (bench.sh console login first)"
+		}
+		status=$(grep -Eo "__BENCH_${tag}__[0-9]+" <<<"$out" | tail -1 | sed 's/.*__//')
+		sed -e '0,/__\$?$/d' -e '${/# *$/d}' -e "/__BENCH_${tag}__/d" <<<"$out"
+		return "$status"
 		;;
 	*) die "unknown console command: $sub" ;;
 	esac
@@ -420,6 +494,68 @@ uci commit firewall
 	esac
 }
 
+# Runs on the router: logs in against its LAN address, where the daemon's auth applies
+# (loopback bypasses it). Reads the login request, then the call, from stdin.
+UI_REMOTE=$(
+	cat <<'EOF'
+read -r login
+read -r req
+ip=$(uci -q get network.lan.ipaddr)
+jar=/tmp/bench/ui-cookies
+mkdir -p /tmp/bench
+umask 077
+call() {
+	curl -sk -m 60 -b "$jar" -c "$jar" "https://${ip%/*}/rpc/v1" \
+		-H 'Content-Type: application/json' --data-binary "$1"
+}
+out=$(call "$req")
+case $out in *'"code":34'*)
+	call "$login" >/dev/null
+	out=$(call "$req")
+	;;
+esac
+echo "$out"
+EOF
+)
+
+ui_rpc() {
+	local method=$1 params=${2:-'{}'} login req
+	login=$(router_password | python3 -c 'import json, sys
+print(json.dumps({"jsonrpc": "2.0", "id": 0, "method": "auth.login",
+                  "params": {"password": sys.stdin.readline().rstrip("\n")}}))')
+	req=$(python3 -c 'import json, sys
+print(json.dumps({"jsonrpc": "2.0", "id": 1, "method": sys.argv[1], "params": json.loads(sys.argv[2])}))' \
+		"$method" "$params") || die "params must be JSON"
+	printf '%s\n%s\n' "$login" "$req" | wrt "sh -c $(sq "$UI_REMOTE")"
+}
+
+cmd_ui() {
+	case ${1:-} in
+	rpc)
+		ui_rpc "${2:?method required}" "${3:-}"
+		;;
+	login)
+		wrt 'rm -f /tmp/bench/ui-cookies'
+		ui_rpc wan.ipv4-get | grep -q '"result"' && echo "UI session started" || die "UI login failed"
+		;;
+	tunnel)
+		if [ "${2:-}" = stop ]; then
+			tmux kill-session -t "$UI_TUNNEL_SESSION" 2>/dev/null && echo "UI tunnel stopped" || echo "UI tunnel not running"
+			return
+		fi
+		local port=${2:-8443} lan
+		lan=$(wrt 'uci -q get network.lan.ipaddr')
+		tmux kill-session -t "$UI_TUNNEL_SESSION" 2>/dev/null || true
+		tmux new-session -d -s "$UI_TUNNEL_SESSION" \
+			"exec ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -L 127.0.0.1:$port:${lan%/*}:443 $WRT_HOST"
+		sleep 2
+		tmux has-session -t "$UI_TUNNEL_SESSION" 2>/dev/null || die "UI tunnel failed to start"
+		echo "router UI at https://127.0.0.1:$port/ (login password: $BENCH_PASSWORD_FILE)"
+		;;
+	*) die "ui needs rpc, login, or tunnel" ;;
+	esac
+}
+
 cmd_smoke() {
 	PREFLIGHT_FAILED=0
 	local name=smoke gw wan
@@ -484,6 +620,7 @@ main() {
 	preflight) cmd_preflight "$@" ;;
 	deployed) cmd_deployed ;;
 	mgmt) cmd_mgmt "$@" ;;
+	ui) cmd_ui "$@" ;;
 	smoke) cmd_smoke ;;
 	wait-ssh) cmd_wait_ssh "$@" ;;
 	console) cmd_console "$@" ;;

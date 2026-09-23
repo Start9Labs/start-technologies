@@ -48,14 +48,20 @@ have tested and stop.
   with its own MAC and profile VLAN, leasing from the router's own dnsmasq. Use them for
   anything needing more than one client or a specific profile. They carry only the router's
   BusyBox tools, and a `network` restart detaches them — re-run `lan-client up` after one.
-- **Serial console** — `/dev/wrt-console` on this machine, **read-only**: boot output,
-  panics, and hangs. It ends at a password `login` you are never given, so it witnesses a lost
-  router but does not recover one.
+- **Serial console** — `/dev/wrt-console` on this machine: boot output, panics, and hangs, and
+  a root shell once `bench.sh console login` answers its `login` prompt. It is the recovery
+  path whenever SSH is gone.
+- **Web UI and RPC** — `bench.sh ui rpc <method>` calls through the daemon's login and session
+  layer exactly as the web UI does, against the router's LAN address (loopback bypasses
+  auth). `bench.sh ui tunnel` puts the UI at `https://127.0.0.1:8443/` for a headless browser.
+  Both work whatever Remote Access is set to.
 
 [`bench/bench.sh`](bench/bench.sh) drives all of it; `bench.sh --help` lists the commands.
 Its state — the console log and config snapshots — lives in
 `~/.local/state/startwrt-bench/`, outside the repo. A snapshot is a `sysupgrade` backup:
 it holds the router's password hash and private keys, so it never leaves that directory.
+The router's root password — the UI and console login — lives in
+`~/.config/startwrt-bench/root-password` (mode 600), which the script reads.
 
 ### Protocol
 
@@ -77,8 +83,10 @@ it holds the router's password hash and private keys, so it never leaves that di
    a test run against a binary you did not confirm is not evidence.
 5. **Drive the scenario** a user would meet, from the side they would meet it: inbound from
    this machine, outbound and LAN-side from `os-bench` or a synthetic client, the UI from a
-   headless browser against the router's address. Reproduce a bug on the old binary first
-   when you can; a fix that passes a test which never failed has proven nothing.
+   headless browser through `bench.sh ui tunnel`. Drive an RPC handler through
+   `bench.sh ui rpc` as well as `startwrt-cli`: the CLI runs the handler in its own
+   short-lived process, the UI in the daemon. Reproduce a bug on the old binary first when
+   you can; a fix that passes a test which never failed has proven nothing.
 6. **Test for regressions.** Drive each item from step 1, then `bench.sh smoke` — the standing
    checks every deploy must pass whatever it changed. Run `smoke` again after a reboot when
    the change touches boot, init, or anything written at startup.
@@ -94,8 +102,10 @@ it holds the router's password hash and private keys, so it never leaves that di
 ### Rules
 
 - **Keep the console running** before any change that can cut SSH: WAN, firewall input,
-  dropbear, a reboot. If SSH does not come back, report what the console shows and hand
-  recovery to the developer.
+  dropbear, a reboot. If SSH does not come back, recover over the console (`console login`,
+  then `console run`).
+- **The router password stays in its file.** Never print it, put it on a command line, or
+  write it anywhere else — not in a log, a report, `CLAUDE.local.md`, or a commit.
 - **The management port is not under test.** Never remove `dropbear.bench` or
   `firewall.bench_mgmt`, and never use its port in a test. A scan of the WAN shows it open to
   this machine; that is the bench, not the product.
@@ -109,9 +119,9 @@ it holds the router's password hash and private keys, so it never leaves that di
   just did, which regenerates it: then clear the stale entry with `ssh-keygen -R`.
 - **Nothing about the bench enters git** — no addresses, hostnames, MACs, keys, or captures in
   code, commits, PR bodies, or issues. Refer to the aliases.
-- **Stays manual:** recovering a router SSH cannot reach, reflashing and the setup wizard's
-  flash, Wi-Fi association from real devices and RF behaviour, anything board-physical
-  (buttons, LEDs, cabling).
+- **Stays manual:** a router neither SSH nor the console can reach, reflashing and the
+  setup wizard's flash, Wi-Fi association from real devices and RF behaviour, anything
+  board-physical (buttons, LEDs, cabling).
 
 ### One-time setup (developer)
 
@@ -155,7 +165,14 @@ it holds the router's password hash and private keys, so it never leaves that di
    which ties it to that USB port. Every process running as you then reaches the router's
    `login` prompt and, during boot, the U-Boot prompt, which can write flash.
 
-4. **`CLAUDE.local.md`** at the repo root (gitignored by `*.local.md`), loaded by every Claude
+4. **Router password** for the UI and console login, typed where no transcript records it:
+
+   ```sh
+   install -d -m 700 ~/.config/startwrt-bench
+   (umask 077; read -rsp 'Router password: ' p; echo; printf '%s\n' "$p" >~/.config/startwrt-bench/root-password)
+   ```
+
+5. **`CLAUDE.local.md`** at the repo root (gitignored by `*.local.md`), loaded by every Claude
    Code session in that checkout. A worktree needs its own copy.
 
    ```markdown
@@ -168,7 +185,7 @@ it holds the router's password hash and private keys, so it never leaves that di
    - Upstream: <what the upstream router can and cannot do — IPv6, PCP/UPnP, hairpin>
    ```
 
-5. **Permissions** in `.claude/settings.local.json` (gitignored), so a session is not stopped
+6. **Permissions** in `.claude/settings.local.json` (gitignored), so a session is not stopped
    at every command. This grants unprompted root on the bench router and sudo on the bench
    server:
 
