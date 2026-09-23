@@ -1,8 +1,8 @@
 use std::collections::HashSet;
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::fs;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::Path;
 use std::process::Command as StdCommand;
-use std::{fs, io};
 
 use chrono::Utc;
 use imbl_value::Value;
@@ -402,78 +402,70 @@ fn apply_remote_access_config(
     }
 }
 
-/// Convert an IPv6 address to the hex format used in `/proc/net/tcp6`.
-/// Each 32-bit group is stored in little-endian byte order.
-fn ipv6_to_proc_hex(addr: Ipv6Addr) -> String {
-    let octets = addr.octets();
-    let mut hex = String::with_capacity(32);
-    // /proc/net/tcp6 stores the address as 4 little-endian 32-bit words
-    for chunk in octets.chunks(4) {
-        for &byte in chunk.iter().rev() {
-            hex.push_str(&format!("{byte:02X}"));
-        }
+/// Decodes an address from `/proc/net/tcp{,6}`: hex 32-bit words in host (little-endian)
+/// byte order, then a hex port. An IPv4-mapped IPv6 address decodes as IPv4.
+fn parse_proc_addr(field: &str) -> Option<(IpAddr, u16)> {
+    let (addr, port) = field.split_once(':')?;
+    let port = u16::from_str_radix(port, 16).ok()?;
+    let mut octets = (0..addr.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(addr.get(i..i + 2)?, 16).ok())
+        .collect::<Option<Vec<u8>>>()?;
+    for word in octets.chunks_mut(4) {
+        word.reverse();
     }
-    hex
-}
-
-/// Parse `/proc/net/tcp` and collect socket inodes for ESTABLISHED connections
-/// on port 22 where the local address matches the given WAN IPv4.
-fn collect_tcp4_ssh_inodes(wan_ip: Ipv4Addr, inodes: &mut HashSet<u64>) -> io::Result<()> {
-    let content = fs::read_to_string("/proc/net/tcp")?;
-    let wan_hex = {
-        let octets = wan_ip.octets();
-        format!(
-            "{:02X}{:02X}{:02X}{:02X}",
-            octets[3], octets[2], octets[1], octets[0]
-        )
+    let ip = match octets.len() {
+        4 => IpAddr::from(<[u8; 4]>::try_from(octets).ok()?),
+        16 => IpAddr::from(<[u8; 16]>::try_from(octets).ok()?),
+        _ => return None,
     };
-    let local_match = format!("{wan_hex}:0016"); // port 22 in hex
-
-    for line in content.lines().skip(1) {
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        if fields.len() < 10 {
-            continue;
-        }
-        // fields[1] = local_address:port, fields[3] = connection state
-        // state "01" = ESTABLISHED
-        if fields[3] != "01" {
-            continue;
-        }
-        if fields[1].eq_ignore_ascii_case(&local_match) {
-            if let Ok(inode) = fields[9].parse::<u64>() {
-                if inode != 0 {
-                    inodes.insert(inode);
-                }
-            }
-        }
-    }
-    Ok(())
+    Some((ip.to_canonical(), port))
 }
 
-/// Parse `/proc/net/tcp6` and collect socket inodes for ESTABLISHED connections
-/// on port 22 where the local address matches the given WAN IPv6.
-fn collect_tcp6_ssh_inodes(wan_ip: Ipv6Addr, inodes: &mut HashSet<u64>) -> io::Result<()> {
-    let content = fs::read_to_string("/proc/net/tcp6")?;
-    let wan_hex = ipv6_to_proc_hex(wan_ip);
-    let local_match = format!("{wan_hex}:0016"); // port 22 in hex
-
-    for line in content.lines().skip(1) {
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        if fields.len() < 10 {
-            continue;
+/// Whether a Remote Access mode admits a WAN-side source, matching the rules
+/// `apply_remote_access_config` writes for it.
+fn remote_access_admits(
+    mode: &str,
+    source: IpAddr,
+    wan_ipv4: Option<Ipv4Addr>,
+    wan_ipv6s: &[Ipv6Addr],
+) -> bool {
+    match (mode, source) {
+        ("always", _) => true,
+        ("default", IpAddr::V4(ip)) => {
+            wan_ipv4.is_some_and(|wan| is_private_ipv4(&wan)) && is_private_ipv4(&ip)
         }
-        if fields[3] != "01" {
-            continue;
+        ("default", IpAddr::V6(ip)) => {
+            !wan_ipv6s.is_empty()
+                && !has_global_ipv6(wan_ipv6s)
+                && (ip.segments()[0] & 0xfe00) == 0xfc00
         }
-        if fields[1].eq_ignore_ascii_case(&local_match) {
-            if let Ok(inode) = fields[9].parse::<u64>() {
-                if inode != 0 {
-                    inodes.insert(inode);
-                }
-            }
-        }
+        _ => false,
     }
-    Ok(())
+}
+
+/// Socket inodes of established SSH sessions to a WAN address from a source `admits` rejects.
+fn rejected_wan_ssh_inodes(
+    table: &str,
+    wan: &[IpAddr],
+    admits: impl Fn(IpAddr) -> bool,
+) -> HashSet<u64> {
+    table
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() < 10 || fields[3] != "01" {
+                return None;
+            }
+            let (local, port) = parse_proc_addr(fields[1])?;
+            let (remote, _) = parse_proc_addr(fields[2])?;
+            if port != 22 || !wan.contains(&local) || admits(remote) {
+                return None;
+            }
+            fields[9].parse::<u64>().ok().filter(|&inode| inode != 0)
+        })
+        .collect()
 }
 
 /// Scan all `/proc/<pid>/fd/` entries for socket inodes matching the given set.
@@ -529,37 +521,35 @@ fn kill_dropbear_by_inodes(inodes: &HashSet<u64>) {
     }
 }
 
-/// Kill WAN-side SSH (dropbear) sessions by finding their socket inodes in
-/// `/proc/net/tcp{,6}` and matching them to process FDs.
-fn kill_wan_ssh_sessions(wan_ipv4: Option<Ipv4Addr>, wan_ipv6s: &[Ipv6Addr]) {
-    if wan_ipv4.is_none() && wan_ipv6s.is_empty() {
+/// Ends WAN-side SSH sessions from sources the Remote Access mode no longer admits.
+fn kill_rejected_wan_ssh_sessions(mode: &str, wan_ipv4: Option<Ipv4Addr>, wan_ipv6s: &[Ipv6Addr]) {
+    let wan: Vec<IpAddr> = wan_ipv4
+        .map(IpAddr::V4)
+        .into_iter()
+        .chain(wan_ipv6s.iter().copied().map(IpAddr::V6))
+        .collect();
+    if wan.is_empty() {
         return;
     }
-
+    let admits = |source| remote_access_admits(mode, source, wan_ipv4, wan_ipv6s);
     let mut inodes = HashSet::new();
-    if let Some(ip) = wan_ipv4 {
-        let _ = collect_tcp4_ssh_inodes(ip, &mut inodes);
+    for table in ["/proc/net/tcp", "/proc/net/tcp6"] {
+        if let Ok(content) = fs::read_to_string(table) {
+            inodes.extend(rejected_wan_ssh_inodes(&content, &wan, &admits));
+        }
     }
-    for &ip in wan_ipv6s {
-        let _ = collect_tcp6_ssh_inodes(ip, &mut inodes);
-    }
-
     if !inodes.is_empty() {
         kill_dropbear_by_inodes(&inodes);
     }
 }
 
-fn reload_firewall(wan_ipv4: Option<Ipv4Addr>, wan_ipv6s: Vec<Ipv6Addr>) {
-    tokio::spawn(async move {
-        let _ = crate::run_quiet_async(
-            tokio::process::Command::new("/etc/init.d/firewall").arg("reload"),
-        )
-        .await;
-        // Kill WAN-side SSH sessions so they don't survive firewall changes
-        // via conntrack ESTABLISHED state. HTTP sessions disconnect naturally
-        // on the next request. Only dropbear processes are killed.
-        kill_wan_ssh_sessions(wan_ipv4, &wan_ipv6s);
-    });
+/// Completes before returning: a CLI caller exits once its handler does.
+async fn reload_firewall(mode: &str, wan_ipv4: Option<Ipv4Addr>, wan_ipv6s: &[Ipv6Addr]) {
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("reload"))
+            .await;
+    // Established sessions outlive the reload through conntrack.
+    kill_rejected_wan_ssh_sessions(mode, wan_ipv4, wan_ipv6s);
 }
 
 #[instrument(skip_all)]
@@ -589,7 +579,7 @@ pub async fn apply_remote_access<C: CtrlContext>(ctx: C) -> Result<Value, Error>
             }
             Ok(()) => {
                 if ctx.effectful() {
-                    reload_firewall(wan_ipv4, wan_ipv6s);
+                    reload_firewall(&prefs.remote_access, wan_ipv4, &wan_ipv6s).await;
                     // Apply mode changes to the shared SNI fallback.
                     if let (Some(pc), Some(wan)) =
                         (crate::port_control::PORT_CONTROL.get(), wan_ipv4)
@@ -716,20 +706,17 @@ async fn set_preferences<C: CtrlContext>(
                 return Err(err.into());
             }
             Ok(()) => {
-                if new_mode.is_some() {
+                if let Some(mode) = &new_mode {
                     crate::activity::log(
                         "system",
                         "remote-access",
                         true,
-                        &format!(
-                            "Updated remote access to '{}'",
-                            new_mode.as_deref().unwrap_or("unknown")
-                        ),
+                        &format!("Updated remote access to '{}'", mode),
                         None,
                     );
                     if ctx.effectful() {
                         let (wan_ipv4, wan_ipv6s) = (get_wan_ipv4().await?, get_wan_ipv6s().await?);
-                        reload_firewall(wan_ipv4, wan_ipv6s);
+                        reload_firewall(mode, wan_ipv4, &wan_ipv6s).await;
                     }
                 }
                 return Ok(Value::Null);
@@ -1055,6 +1042,116 @@ mod tests {
         assert!(!is_private_ipv4(&"100.64.0.1".parse().unwrap())); // CGNAT
         assert!(!is_private_ipv4(&"172.32.0.1".parse().unwrap()));
         assert!(!is_private_ipv4(&"1.2.3.4".parse().unwrap()));
+    }
+
+    fn proc_addr(ip: &str, port: u16) -> String {
+        let octets: Vec<u8> = match ip.parse::<IpAddr>().unwrap() {
+            IpAddr::V4(ip) => ip.octets().to_vec(),
+            IpAddr::V6(ip) => ip.octets().to_vec(),
+        };
+        let hex: String = octets
+            .chunks(4)
+            .flat_map(|word| word.iter().rev())
+            .map(|byte| format!("{byte:02X}"))
+            .collect();
+        format!("{hex}:{port:04X}")
+    }
+
+    fn proc_table(rows: &[(&str, u16, &str, &str, u64)]) -> String {
+        let mut table = String::from("  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n");
+        for (i, (local, port, remote, state, inode)) in rows.iter().enumerate() {
+            table.push_str(&format!(
+                "{i:4}: {} {} {state} 00000000:00000000 00:00000000 00000000     0        0 {inode} 1 0000000000000000 20 4 30 10 -1\n",
+                proc_addr(local, *port),
+                proc_addr(remote, 50000),
+            ));
+        }
+        table
+    }
+
+    #[test]
+    fn test_parse_proc_addr() {
+        assert_eq!(
+            parse_proc_addr("0100007F:0016"),
+            Some(("127.0.0.1".parse().unwrap(), 22))
+        );
+        assert_eq!(
+            parse_proc_addr(&proc_addr("2001:db8::1", 22)),
+            Some(("2001:db8::1".parse().unwrap(), 22))
+        );
+        assert_eq!(
+            parse_proc_addr(&proc_addr("::ffff:10.20.0.2", 22)),
+            Some(("10.20.0.2".parse().unwrap(), 22))
+        );
+        assert_eq!(parse_proc_addr("0100007F"), None);
+        assert_eq!(parse_proc_addr("01007F:0016"), None);
+    }
+
+    #[test]
+    fn test_rejected_wan_ssh_inodes_ipv4() {
+        let table = proc_table(&[
+            ("10.20.0.2", 22, "10.20.0.50", "01", 1),
+            ("10.20.0.2", 22, "8.8.8.8", "01", 2),
+            ("10.20.0.2", 443, "8.8.8.8", "01", 3),
+            ("192.168.1.1", 22, "192.168.1.25", "01", 4),
+            ("10.20.0.2", 22, "8.8.4.4", "06", 5),
+        ]);
+        let rejected = |mode: &str, wan: &str| {
+            let wan_ip: Ipv4Addr = wan.parse().unwrap();
+            let mut inodes: Vec<u64> =
+                rejected_wan_ssh_inodes(&table, &[IpAddr::V4(wan_ip)], |src| {
+                    remote_access_admits(mode, src, Some(wan_ip), &[])
+                })
+                .into_iter()
+                .collect();
+            inodes.sort();
+            inodes
+        };
+        assert_eq!(rejected("never", "10.20.0.2"), vec![1, 2]);
+        let dual_stack = proc_table(&[
+            ("::ffff:10.20.0.2", 22, "::ffff:10.20.0.50", "01", 7),
+            ("::ffff:10.20.0.2", 22, "::ffff:8.8.8.8", "01", 8),
+        ]);
+        let wan_ip: Ipv4Addr = "10.20.0.2".parse().unwrap();
+        assert_eq!(
+            rejected_wan_ssh_inodes(&dual_stack, &[IpAddr::V4(wan_ip)], |src| {
+                remote_access_admits("default", src, Some(wan_ip), &[])
+            }),
+            HashSet::from([8])
+        );
+        assert_eq!(rejected("default", "10.20.0.2"), vec![2]);
+        assert_eq!(rejected("always", "10.20.0.2"), Vec::<u64>::new());
+        let public_wan = proc_table(&[("203.0.113.5", 22, "10.20.0.50", "01", 6)]);
+        let wan_ip: Ipv4Addr = "203.0.113.5".parse().unwrap();
+        assert_eq!(
+            rejected_wan_ssh_inodes(&public_wan, &[IpAddr::V4(wan_ip)], |src| {
+                remote_access_admits("default", src, Some(wan_ip), &[])
+            }),
+            HashSet::from([6])
+        );
+    }
+
+    #[test]
+    fn test_rejected_wan_ssh_inodes_ipv6() {
+        let table = proc_table(&[
+            ("fd00::1", 22, "fd12::5", "01", 1),
+            ("fd00::1", 22, "2001:db8::5", "01", 2),
+        ]);
+        let rejected = |wan_ipv6s: &[Ipv6Addr]| {
+            let wan: Vec<IpAddr> = vec!["fd00::1".parse().unwrap()];
+            let mut inodes: Vec<u64> = rejected_wan_ssh_inodes(&table, &wan, |src| {
+                remote_access_admits("default", src, None, wan_ipv6s)
+            })
+            .into_iter()
+            .collect();
+            inodes.sort();
+            inodes
+        };
+        assert_eq!(rejected(&["fd00::1".parse().unwrap()]), vec![2]);
+        assert_eq!(
+            rejected(&["fd00::1".parse().unwrap(), "2001:db8::9".parse().unwrap()]),
+            vec![1, 2]
+        );
     }
 
     #[test]
