@@ -104,6 +104,7 @@ startos_managed_env_vars:
 dependencies: [list or "none"]
 interfaces:
   interface_id: { type: ui | api | p2p, port: number }
+  range_interface_id: { type: api, port: number, port_range: number } # first port, number of ports
 actions:
   - action-id
 tasks:
@@ -172,7 +173,7 @@ Do **not** restate the version range — `setupDependencies()` declares it, and 
 
 ### Network Access and Interfaces
 
-What the service exposes. For each interface: its id, type (`ui`/`api`/`p2p`), port, protocol, and purpose.
+What the service exposes. For each interface: its id, type (`ui`/`api`/`p2p`), port (the full span, for a port range), protocol, and purpose.
 
 Describe what the interface serves, not how StartOS interface controls work — LAN/Tor/domain addressing is a platform feature documented once, not per package.
 
