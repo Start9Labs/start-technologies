@@ -4,8 +4,8 @@
 //! [`DnsInjector`] is an in-memory store of injected DNS records with four
 //! hooks: an authorizer per source IP, a TSIG key lookup (the per-device key
 //! derived from its WireGuard PSK), a `pre_update` policy that sees an
-//! UPDATE's records and its TSIG verdict before they mutate the store, and an
-//! `on_change` notifier. [`InjectingHandler`] wraps a forwarding
+//! UPDATE's records and its [`UpdateAuth`] before they mutate the store, and
+//! an `on_change` notifier. [`InjectingHandler`] wraps a forwarding
 //! `RequestHandler`: an injected-name `Query` is answered locally, an
 //! authorized `Update` mutates the store, everything else is forwarded.
 //!
@@ -25,7 +25,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 
 use hickory_server::net::runtime::Time;
-use hickory_server::proto::op::{Header, HeaderCounts, Metadata, OpCode, ResponseCode};
+use hickory_server::net::xfer::Protocol;
+use hickory_server::proto::op::{Header, HeaderCounts, Message, Metadata, OpCode, ResponseCode};
 use hickory_server::proto::rr::rdata::{CNAME, TXT};
 use hickory_server::proto::rr::{DNSClass, LowerName, Name, RData, Record, RecordType};
 use hickory_server::server::{Request, RequestHandler, ResponseHandler, ResponseInfo};
@@ -127,15 +128,24 @@ fn parse_rdata(rtype: &str, value: &str) -> Result<(RecordType, RData), Error> {
     })
 }
 
+/// What vouches for an UPDATE's source.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UpdateAuth {
+    /// A valid TSIG from the source's key.
+    pub tsig: bool,
+    /// Arrived over TCP, whose handshake proves the source address.
+    pub tcp: bool,
+}
+
 type Authorizer = Box<dyn Fn(IpAddr) -> bool + Send + Sync>;
 /// The per-device derived TSIG key for a source IP, or `None` if it isn't an
 /// allowed DNS-injection device.
 type KeyLookup = Box<dyn Fn(IpAddr) -> Option<[u8; 32]> + Send + Sync>;
 /// Fired with a full snapshot after a mutation that changed the store.
 type OnChange = Box<dyn Fn(Vec<InjectedRecord>) + Send + Sync>;
-/// Runs on an authorized UPDATE's records, with its TSIG verdict, before they
-/// mutate the store. Anything but `NoError` refuses the whole message.
-type PreUpdate = Box<dyn Fn(IpAddr, &[Record], bool) -> ResponseCode + Send + Sync>;
+/// Runs on an authorized UPDATE's records before they mutate the store.
+/// Anything but `NoError` refuses the whole message.
+type PreUpdate = Box<dyn Fn(IpAddr, &[Record], UpdateAuth) -> ResponseCode + Send + Sync>;
 
 pub struct DnsInjector {
     records: SyncMutex<BTreeMap<LowerName, Vec<InjectedRecord>>>,
@@ -151,7 +161,7 @@ impl DnsInjector {
         authorize: impl Fn(IpAddr) -> bool + Send + Sync + 'static,
         tsig_key: impl Fn(IpAddr) -> Option<[u8; 32]> + Send + Sync + 'static,
         on_change: impl Fn(Vec<InjectedRecord>) + Send + Sync + 'static,
-        pre_update: impl Fn(IpAddr, &[Record], bool) -> ResponseCode + Send + Sync + 'static,
+        pre_update: impl Fn(IpAddr, &[Record], UpdateAuth) -> ResponseCode + Send + Sync + 'static,
     ) -> Arc<Self> {
         let mut records: BTreeMap<LowerName, Vec<InjectedRecord>> = BTreeMap::new();
         for r in initial {
@@ -251,13 +261,44 @@ impl DnsInjector {
         self.records.peek(|m| m.contains_key(name))
     }
 
+    /// Verifies and applies a raw UPDATE message; `msg` is its parse.
+    fn update(&self, src: IpAddr, request: &[u8], msg: &Message, tcp: bool) -> ResponseCode {
+        let auth = UpdateAuth {
+            tsig: self.verify_tsig(src, request),
+            tcp,
+        };
+        self.apply_update(src, &msg.authorities, auth)
+    }
+
+    /// The wire response to a raw UPDATE message from `src`.
+    pub fn answer_update(&self, src: IpAddr, request: &[u8], tcp: bool) -> Result<Vec<u8>, Error> {
+        let response = match Message::from_vec(request) {
+            Ok(msg) => {
+                let code = self.update(src, request, &msg, tcp);
+                let mut response = Message::error_msg(msg.metadata.id, OpCode::Update, code);
+                response.queries = msg.queries;
+                response
+            }
+            Err(_) => Message::error_msg(
+                request
+                    .get(..2)
+                    .map_or(0, |b| u16::from_be_bytes([b[0], b[1]])),
+                OpCode::Update,
+                ResponseCode::FormErr,
+            ),
+        };
+        response
+            .to_vec()
+            .map_err(|e| Error::new(eyre!("encode DNS UPDATE response: {e}"), ErrorKind::Network))
+    }
+
     /// Applies an UPDATE's records (RFC 2136 §2.5) once the authorizer and
     /// `pre_update` admit them.
-    fn apply_update(&self, src: IpAddr, updates: &[Record], tsig_verified: bool) -> ResponseCode {
+    fn apply_update(&self, src: IpAddr, updates: &[Record], auth: UpdateAuth) -> ResponseCode {
         if !(self.authorize)(src) {
             return ResponseCode::Refused;
         }
-        let code = (self.pre_update)(src, updates, tsig_verified);
+        let code = (self.pre_update)(src, updates, auth);
         if code != ResponseCode::NoError {
             return code;
         }
@@ -360,13 +401,15 @@ impl RequestHandler for InjectingHandler {
     ) -> ResponseInfo {
         match request.metadata.op_code {
             OpCode::Update => {
-                let src = request.src().ip();
-                // `pre_update` decides what an unsigned UPDATE may do.
-                let tsig_ok = self.injector.verify_tsig(src, request.as_slice());
                 // MessageRequest hides the authority section the update RRs
                 // live in.
-                let code = match hickory_server::proto::op::Message::from_vec(request.as_slice()) {
-                    Ok(msg) => self.injector.apply_update(src, &msg.authorities, tsig_ok),
+                let code = match Message::from_vec(request.as_slice()) {
+                    Ok(msg) => self.injector.update(
+                        request.src().ip(),
+                        request.as_slice(),
+                        &msg,
+                        request.protocol() != Protocol::Udp,
+                    ),
                     Err(_) => ResponseCode::FormErr,
                 };
                 let header = header_with_code(request, code);
@@ -431,6 +474,11 @@ impl RequestHandler for InjectingHandler {
 mod tests {
     use super::*;
 
+    const SIGNED: UpdateAuth = UpdateAuth {
+        tsig: true,
+        tcp: false,
+    };
+
     fn injector() -> Arc<DnsInjector> {
         DnsInjector::new(
             Vec::new(),
@@ -442,8 +490,8 @@ mod tests {
     }
 
     /// The policy StartTunnel installs: a valid TSIG or nothing.
-    fn tsig_required(_: IpAddr, _: &[Record], tsig_ok: bool) -> ResponseCode {
-        if tsig_ok {
+    fn tsig_required(_: IpAddr, _: &[Record], auth: UpdateAuth) -> ResponseCode {
+        if auth.tsig {
             ResponseCode::NoError
         } else {
             ResponseCode::Refused
@@ -591,19 +639,19 @@ mod tests {
         let rec = a_record("host.example.com", [10, 59, 0, 2]);
 
         assert_eq!(
-            inj.apply_update(src, std::slice::from_ref(&rec), false),
+            inj.apply_update(src, std::slice::from_ref(&rec), UpdateAuth::default()),
             ResponseCode::NoError
         );
         assert_eq!(fired.load(Ordering::SeqCst), 1, "first assert notifies");
         assert_eq!(
-            inj.apply_update(src, std::slice::from_ref(&rec), false),
+            inj.apply_update(src, std::slice::from_ref(&rec), UpdateAuth::default()),
             ResponseCode::NoError
         );
         assert_eq!(fired.load(Ordering::SeqCst), 1, "re-assert is a no-op");
 
         let other = a_record("host.example.com", [10, 59, 0, 3]);
         assert_eq!(
-            inj.apply_update(src, &[other], false),
+            inj.apply_update(src, &[other], UpdateAuth::default()),
             ResponseCode::NoError
         );
         assert_eq!(fired.load(Ordering::SeqCst), 2, "a real change notifies");
@@ -618,6 +666,50 @@ mod tests {
         );
         inj.delete(&name, None);
         assert_eq!(fired.load(Ordering::SeqCst), 3, "a real delete notifies");
+    }
+
+    /// The response carries the request's id, zone and verdict; garbage gets
+    /// FORMERR under the id it starts with.
+    #[tokio::test]
+    async fn answer_update_echoes_id_and_zone() {
+        use hickory_server::proto::op::update_message::append;
+        use hickory_server::proto::rr::RecordSet;
+
+        let inj = DnsInjector::new(
+            Vec::new(),
+            |_| true,
+            |_| None,
+            |_| {},
+            |_, _, auth: UpdateAuth| {
+                if auth.tcp {
+                    ResponseCode::NoError
+                } else {
+                    ResponseCode::Refused
+                }
+            },
+        );
+        let mut name = Name::from_utf8("host.example.com").unwrap();
+        name.set_fqdn(true);
+        let mut rrset = RecordSet::new(name.clone(), RecordType::A, 0);
+        rrset.insert(a_record("host.example.com", [10, 59, 0, 2]), 0);
+        let request = append(rrset, name.base_name(), false, false);
+        let bytes = request.to_vec().unwrap();
+        let src = IpAddr::V4(Ipv4Addr::new(10, 59, 0, 2));
+
+        let reply = Message::from_vec(&inj.answer_update(src, &bytes, true).unwrap()).unwrap();
+        assert_eq!(reply.metadata.id, request.metadata.id);
+        assert_eq!(reply.metadata.op_code, OpCode::Update);
+        assert_eq!(reply.metadata.response_code, ResponseCode::NoError);
+        assert_eq!(reply.queries, request.queries, "zone section echoed");
+        assert_eq!(inj.list().len(), 1);
+
+        let reply = Message::from_vec(&inj.answer_update(src, &bytes, false).unwrap()).unwrap();
+        assert_eq!(reply.metadata.response_code, ResponseCode::Refused);
+
+        let reply =
+            Message::from_vec(&inj.answer_update(src, &[0x12, 0x34, 0xff], true).unwrap()).unwrap();
+        assert_eq!(reply.metadata.id, 0x1234);
+        assert_eq!(reply.metadata.response_code, ResponseCode::FormErr);
     }
 
     /// A `pre_update` refusal reaches the client as that code and leaves the
@@ -638,7 +730,7 @@ mod tests {
         );
         let src = IpAddr::V4(Ipv4Addr::new(10, 59, 0, 2));
         let rec = a_record("host.example.com", [10, 59, 0, 2]);
-        assert_eq!(inj.apply_update(src, &[rec], true), ResponseCode::Refused);
+        assert_eq!(inj.apply_update(src, &[rec], SIGNED), ResponseCode::Refused);
         assert!(inj.list().is_empty(), "store untouched");
         assert_eq!(fired.load(Ordering::SeqCst), 0, "no notify");
     }
@@ -657,7 +749,7 @@ mod tests {
         );
         let rec = a_record("host.example.com", [10, 59, 0, 2]);
         assert_eq!(
-            inj.apply_update(src, std::slice::from_ref(&rec), false),
+            inj.apply_update(src, std::slice::from_ref(&rec), UpdateAuth::default()),
             ResponseCode::Refused,
             "authorized but unsigned -> refused"
         );
@@ -666,13 +758,13 @@ mod tests {
             inj.apply_update(
                 IpAddr::V4(Ipv4Addr::new(10, 59, 0, 9)),
                 std::slice::from_ref(&rec),
-                true
+                SIGNED
             ),
             ResponseCode::Refused,
             "unauthorized -> refused even when signed"
         );
         assert_eq!(
-            inj.apply_update(src, std::slice::from_ref(&rec), true),
+            inj.apply_update(src, std::slice::from_ref(&rec), SIGNED),
             ResponseCode::NoError,
             "authorized and signed -> applied"
         );

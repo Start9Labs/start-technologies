@@ -419,6 +419,14 @@ is left with name-squatting and denial of service against a specific neighbor â€
 the same blast radius as Phase 1's accepted PCP exposure, no longer worse. It
 costs one comparison and is worth stating as an invariant in the module doc.
 
+> **Amended in review: unsigned updates arrive over TCP.** A spoofed UDP
+> source could still delete a victim's records, since a delete carries no
+> rdata to compare. A TCP handshake proves the source address, so the unsigned
+> tier requires TCP. The divert takes every TCP connection to the router's
+> port 53; the daemon answers UPDATEs and relays everything else to the
+> profile's dnsmasq. `pre_update` receives the transport alongside the TSIG
+> verdict.
+
 **Enforce it inside `apply_update`, not in the `authorize` closure.** The
 handler verifies TSIG _before_ calling into the store (`rfc2136.rs:332-336`), and
 `authorize` receives only an `IpAddr` â€” it never sees the records. `apply_update`

@@ -29,7 +29,7 @@ use crate::middleware::auth::Auth;
 use crate::middleware::auth::local::{LocalAuthContext, dial_addr, local_auth_header};
 use crate::middleware::auth::signature::{NonceCache, url_host_str};
 use crate::middleware::cors::Cors;
-use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord};
+use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord, UpdateAuth};
 use crate::net::forward::{PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6};
 use crate::net::static_server::{EMPTY_DIR, UiContext};
 use crate::prelude::*;
@@ -310,8 +310,8 @@ impl TunnelContext {
                     });
                 },
                 // Every tunnel client holds a PSK; an unsigned UPDATE is refused.
-                |_, _, tsig_ok| {
-                    if tsig_ok {
+                |_, _, auth: UpdateAuth| {
+                    if auth.tsig {
                         hickory_server::proto::op::ResponseCode::NoError
                     } else {
                         hickory_server::proto::op::ResponseCode::Refused

@@ -1,15 +1,17 @@
 //! DNS injection: RFC 2136 UPDATE ingress for the router's resolver.
 //!
-//! The nft include `13-startwrt-dns-update-divert.nft` redirects UPDATE
-//! packets arriving on a gateway's port 53 to the per-profile listeners here;
-//! dnsmasq keeps every query. Accepted records are rendered into per-profile
-//! addn-hosts files that dnsmasq re-reads on SIGHUP.
+//! The nft include `13-startwrt-dns-update-divert.nft` redirects UDP UPDATE
+//! packets and every TCP connection arriving on a gateway's port 53 to the
+//! per-profile listeners here. UDP queries stay with dnsmasq; a TCP
+//! connection's queries pass through to it. Accepted records are rendered
+//! into per-profile addn-hosts files that dnsmasq re-reads on SIGHUP.
 //!
 //! `policy` decides two tiers. A TSIG-signed UPDATE (an inbound WireGuard
 //! peer, key derived from its PSK) may publish any A/AAAA/CNAME/TXT record.
-//! An unsigned one (a LAN device with the permission) may publish A/AAAA
-//! records pointing at its own source address. Both refuse names under
-//! `lan.`, and a name belongs to the first owner that claims it.
+//! An unsigned one (a LAN device with the permission) must arrive over TCP
+//! and may publish A/AAAA records pointing at its own source address. Both
+//! refuse names under `lan.`, and a name belongs to the first owner that
+//! claims it.
 //!
 //! Listeners are `SO_BINDTODEVICE`-bound per profile, so the arrival
 //! interface is the kernel's fact. Records, ownership and the directory live
@@ -18,18 +20,24 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use hickory_server::proto::op::ResponseCode;
 use hickory_server::proto::rr::{DNSClass, LowerName, Name, RData, Record, RecordType};
 use hickory_server::server::Server;
 use rpc_toolkit::{from_fn_async_local, HandlerExt as _, ParentHandler};
 use serde::{Deserialize, Serialize};
-use startos::net::dns_update::rfc2136::{DnsInjector, InjectedRecord, InjectingHandler};
+use startos::net::dns_update::rfc2136::{
+    DnsInjector, InjectedRecord, InjectingHandler, UpdateAuth,
+};
 use startos::net::dns_update::{derive_tsig_key, forwarding_catalog};
 use startos::util::future::NonDetachingJoinHandle;
 use startos::util::sync::SyncMutex;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use uciedit::openwrt::{DhcpHost, FirewallForwarding, FirewallZone, NetworkInterface};
 use uciedit::{dump_all, parse_all, Arena, Configs, Line};
@@ -51,6 +59,12 @@ pub(crate) const DNS_UPDATE_PORT_WG: u16 = 9554;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const FORWARD_TIMEOUT: Duration = Duration::from_secs(30);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+/// Idle limit on a TCP client, and on each exchange with dnsmasq.
+const TCP_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Concurrent TCP clients per listening socket; more are closed on accept.
+const TCP_MAX_CLIENTS: usize = 16;
+/// Refusal log lines per second, box-wide.
+const REFUSAL_LOG_RATE: u32 = 20;
 const INJECT_FILE_PREFIX: &str = "startwrt-dns-inject.dns_";
 
 /// The daemon's DNS-injection service; unset in CLI / `--configs-only` mode.
@@ -160,7 +174,7 @@ impl DnsInject {
                 move |records| {
                     let _ = tx.send(records);
                 },
-                move |src, updates, tsig_ok| policy(&policy_dir, src, updates, tsig_ok),
+                move |src, updates, auth| policy(&policy_dir, src, updates, auth),
             )
         };
         Arc::new(Self {
@@ -460,13 +474,12 @@ fn policy(
     directory: &SyncMutex<Directory>,
     src: IpAddr,
     updates: &[Record],
-    tsig_ok: bool,
+    auth: UpdateAuth,
 ) -> ResponseCode {
     directory.mutate(|d| {
-        // The client sees only a generic failure; the divert's 20/s limit
-        // bounds this log.
+        // The client sees only a generic failure.
         let refuse = |why: String| {
-            tracing::warn!("DNS UPDATE from {src} refused: {why}");
+            log_refusal(src, &why);
             ResponseCode::Refused
         };
         let Some(owner) = d.by_ip.get(&src).map(|i| i.owner.clone()) else {
@@ -476,6 +489,9 @@ fn policy(
                     .into(),
             );
         };
+        if !auth.tsig && !auth.tcp {
+            return refuse("an unsigned update must arrive over TCP".into());
+        }
         for rec in updates {
             let name = LowerName::from(&rec.name);
             // dnsmasq is authoritative for `lan.`.
@@ -485,7 +501,7 @@ fn policy(
             let rtype = rec.record_type();
             match rec.dns_class {
                 DNSClass::IN => {
-                    if tsig_ok {
+                    if auth.tsig {
                         // Signed tier.
                         if !matches!(
                             rtype,
@@ -557,6 +573,20 @@ fn lan_zone() -> LowerName {
     LowerName::from(Name::from_ascii("lan.").expect("static valid name"))
 }
 
+fn log_refusal(src: IpAddr, why: &str) {
+    static WINDOW: Mutex<Option<(Instant, u32)>> = Mutex::new(None);
+    let mut window = WINDOW.lock().unwrap_or_else(|e| e.into_inner());
+    let now = Instant::now();
+    let (start, count) = window.get_or_insert((now, 0));
+    if now.duration_since(*start) >= Duration::from_secs(1) {
+        (*start, *count) = (now, 0);
+    }
+    if *count < REFUSAL_LOG_RATE {
+        *count += 1;
+        tracing::warn!("DNS UPDATE from {src} refused: {why}");
+    }
+}
+
 // ── Listeners ──────────────────────────────────────────────
 
 /// Rebinds listeners to the current profile set. A failed bind is retried
@@ -593,21 +623,34 @@ async fn sync_listeners(di: &Arc<DnsInject>, profiles: &[ProfileNet]) {
 }
 
 fn bind_listener(injector: Arc<DnsInjector>, p: &ProfileNet) -> Result<Listener, Error> {
-    // The miss path forwards to the profile's own dnsmasq.
-    let catalog = forwarding_catalog(vec![SocketAddr::from((p.gateway, 53))], FORWARD_TIMEOUT)?;
-    let mut server = Server::new(InjectingHandler::new(injector, catalog));
+    // The profile's own dnsmasq.
+    let upstream = SocketAddr::from((p.gateway, 53));
+    let catalog = forwarding_catalog(vec![upstream], FORWARD_TIMEOUT)?;
+    let mut server = Server::new(InjectingHandler::new(injector.clone(), catalog));
     server.register_socket(bind_device_udp(p.gateway, DNS_UPDATE_PORT_LAN, &p.device)?);
+    let mut tcp = vec![bind_device_tcp(p.gateway, DNS_UPDATE_PORT_LAN, &p.device)?];
     if let Some(wg) = &p.wg_device {
         // Best-effort: the wg interface can lag its UCI section.
-        match bind_device_udp(p.gateway, DNS_UPDATE_PORT_WG, wg) {
-            Ok(socket) => server.register_socket(socket),
+        let bound = bind_device_udp(p.gateway, DNS_UPDATE_PORT_WG, wg)
+            .and_then(|udp| Ok((udp, bind_device_tcp(p.gateway, DNS_UPDATE_PORT_WG, wg)?)));
+        match bound {
+            Ok((udp, listener)) => {
+                server.register_socket(udp);
+                tcp.push(listener);
+            }
             Err(e) => tracing::warn!("dns-inject wg bind on {wg} failed: {e}"),
         }
     }
     let shutdown = server.shutdown_token().clone();
+    let tcp_shutdown = shutdown.clone();
     let iface = p.interface.clone();
     let task = tokio::spawn(async move {
-        if let Err(e) = server.block_until_done().await {
+        let tcp = futures::future::join_all(
+            tcp.into_iter()
+                .map(|l| serve_tcp(l, injector.clone(), upstream, tcp_shutdown.clone())),
+        );
+        let (udp, _) = tokio::join!(server.block_until_done(), tcp);
+        if let Err(e) = udp {
             tracing::warn!("dns-inject listener for {iface} exited: {e}");
         }
     })
@@ -617,6 +660,155 @@ fn bind_listener(injector: Arc<DnsInjector>, p: &ProfileNet) -> Result<Listener,
         shutdown,
         task,
     })
+}
+
+/// A TCP listener bound to exactly one kernel device.
+fn bind_device_tcp(addr: Ipv4Addr, port: u16, device: &str) -> Result<TcpListener, Error> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::IPV4,
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )
+    .with_kind(ErrorKind::Network)?;
+    // A rebind must not wait out the last listener's TIME_WAIT connections.
+    socket
+        .set_reuse_address(true)
+        .with_kind(ErrorKind::Network)?;
+    socket
+        .bind_device(Some(device.as_bytes()))
+        .with_kind(ErrorKind::Network)?;
+    socket.set_nonblocking(true).with_kind(ErrorKind::Network)?;
+    socket
+        .bind(&SocketAddrV4::new(addr, port).into())
+        .with_kind(ErrorKind::Network)?;
+    socket.listen(128).with_kind(ErrorKind::Network)?;
+    TcpListener::from_std(socket.into()).with_kind(ErrorKind::Network)
+}
+
+/// Serves DNS-over-TCP clients until `shutdown`.
+async fn serve_tcp(
+    listener: TcpListener,
+    injector: Arc<DnsInjector>,
+    upstream: SocketAddr,
+    shutdown: CancellationToken,
+) {
+    let slots = Arc::new(Semaphore::new(TCP_MAX_CLIENTS));
+    // Dropping the set on shutdown aborts every client.
+    let mut clients = JoinSet::new();
+    loop {
+        let accepted = tokio::select! {
+            _ = shutdown.cancelled() => return,
+            Some(_) = clients.join_next(), if !clients.is_empty() => continue,
+            accepted = listener.accept() => accepted,
+        };
+        let (stream, peer) = match accepted {
+            Ok(accepted) => accepted,
+            Err(e) => {
+                tracing::warn!("dns-inject TCP accept failed: {e}");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+        };
+        let Ok(slot) = slots.clone().try_acquire_owned() else {
+            continue;
+        };
+        let injector = injector.clone();
+        clients.spawn(async move {
+            let _slot = slot;
+            if let Err(e) = serve_tcp_client(stream, peer.ip(), &injector, upstream).await {
+                tracing::debug!("dns-inject TCP client {peer}: {e}");
+            }
+        });
+    }
+}
+
+/// Answers UPDATEs itself and relays every other message to `upstream`.
+async fn serve_tcp_client(
+    mut client: TcpStream,
+    src: IpAddr,
+    injector: &DnsInjector,
+    upstream: SocketAddr,
+) -> std::io::Result<()> {
+    let mut dnsmasq: Option<TcpStream> = None;
+    loop {
+        let Some(request) = with_timeout(read_frame(&mut client)).await? else {
+            return Ok(());
+        };
+        let response = if is_update(&request) {
+            injector
+                .answer_update(src, &request, true)
+                .map_err(|e| std::io::Error::other(e.to_string()))?
+        } else {
+            relay(&mut dnsmasq, upstream, &request).await?
+        };
+        with_timeout(write_frame(&mut client, &response)).await?;
+    }
+}
+
+/// One exchange with `upstream`, reusing the open connection. A reused one
+/// that fails is replaced once.
+async fn relay(
+    conn: &mut Option<TcpStream>,
+    upstream: SocketAddr,
+    request: &[u8],
+) -> std::io::Result<Vec<u8>> {
+    let reused = conn.is_some();
+    match relay_once(conn, upstream, request).await {
+        Err(_) if reused => relay_once(conn, upstream, request).await,
+        result => result,
+    }
+}
+
+async fn relay_once(
+    conn: &mut Option<TcpStream>,
+    upstream: SocketAddr,
+    request: &[u8],
+) -> std::io::Result<Vec<u8>> {
+    let mut stream = match conn.take() {
+        Some(stream) => stream,
+        None => with_timeout(TcpStream::connect(upstream)).await?,
+    };
+    with_timeout(write_frame(&mut stream, request)).await?;
+    let response = with_timeout(read_frame(&mut stream))
+        .await?
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::UnexpectedEof))?;
+    *conn = Some(stream);
+    Ok(response)
+}
+
+async fn with_timeout<T>(
+    fut: impl std::future::Future<Output = std::io::Result<T>>,
+) -> std::io::Result<T> {
+    tokio::time::timeout(TCP_IDLE_TIMEOUT, fut)
+        .await
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::TimedOut))?
+}
+
+/// A DNS message's opcode is UPDATE.
+fn is_update(message: &[u8]) -> bool {
+    message.get(2).is_some_and(|flags| (flags >> 3) & 0x0f == 5)
+}
+
+/// One length-prefixed DNS message; `None` on a clean close between messages.
+async fn read_frame(stream: &mut TcpStream) -> std::io::Result<Option<Vec<u8>>> {
+    let mut len = [0u8; 2];
+    match stream.read_exact(&mut len).await {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(e) => return Err(e),
+    }
+    let mut message = vec![0u8; usize::from(u16::from_be_bytes(len))];
+    stream.read_exact(&mut message).await?;
+    Ok(Some(message))
+}
+
+async fn write_frame(stream: &mut TcpStream, message: &[u8]) -> std::io::Result<()> {
+    let len = u16::try_from(message.len())
+        .map_err(|_| std::io::Error::other("DNS message exceeds 65535 bytes"))?;
+    let mut framed = Vec::with_capacity(2 + message.len());
+    framed.extend_from_slice(&len.to_be_bytes());
+    framed.extend_from_slice(message);
+    stream.write_all(&framed).await
 }
 
 /// A UDP socket bound to exactly one kernel device.
@@ -975,6 +1167,15 @@ mod tests {
         }
     }
 
+    const TCP: UpdateAuth = UpdateAuth {
+        tsig: false,
+        tcp: true,
+    };
+    const SIGNED: UpdateAuth = UpdateAuth {
+        tsig: true,
+        tcp: false,
+    };
+
     fn lan_ip(host: u8) -> Ipv4Addr {
         Ipv4Addr::new(192, 168, 1, host)
     }
@@ -1011,12 +1212,12 @@ mod tests {
         let dir = directory();
         let src = IpAddr::V4(lan_ip(50));
         assert_eq!(
-            policy(&dir, src, &[a_record("nas.example.com", lan_ip(50))], false),
+            policy(&dir, src, &[a_record("nas.example.com", lan_ip(50))], TCP),
             ResponseCode::NoError,
             "rdata == source is the permitted shape"
         );
         assert_eq!(
-            policy(&dir, src, &[a_record("nas.example.com", lan_ip(99))], false),
+            policy(&dir, src, &[a_record("nas.example.com", lan_ip(99))], TCP),
             ResponseCode::Refused,
             "pointing a name at someone else needs a signature"
         );
@@ -1026,10 +1227,107 @@ mod tests {
             RData::CNAME(CNAME(fqdn("nas.example.com"))),
         );
         assert_eq!(
-            policy(&dir, src, &[cname], false),
+            policy(&dir, src, &[cname], TCP),
             ResponseCode::Refused,
             "unsigned tier is A/AAAA only"
         );
+    }
+
+    /// An unsigned UDP source is unproven, even one naming a WireGuard peer.
+    #[tokio::test]
+    async fn unsigned_udp_is_refused() {
+        let dir = directory();
+        for host in [50, 200] {
+            assert_eq!(
+                policy(
+                    &dir,
+                    IpAddr::V4(lan_ip(host)),
+                    &[a_record("nas.example.com", lan_ip(host))],
+                    UpdateAuth::default()
+                ),
+                ResponseCode::Refused
+            );
+        }
+        assert!(dir.peek(|d| d.owners.is_empty()));
+    }
+
+    /// A TCP client's UPDATE is answered here with `tcp` set; its queries
+    /// reach the upstream unchanged.
+    #[tokio::test]
+    async fn tcp_client_updates_locally_and_relays_queries() {
+        use hickory_server::proto::op::update_message::append;
+        use hickory_server::proto::op::{Message, Query};
+        use hickory_server::proto::rr::RecordSet;
+
+        let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream_addr = upstream.local_addr().unwrap();
+        let canned = b"upstream-answer".to_vec();
+        let upstream_reply = canned.clone();
+        let upstream_task = tokio::spawn(async move {
+            let (mut conn, _) = upstream.accept().await.unwrap();
+            let mut seen = Vec::new();
+            while let Some(request) = read_frame(&mut conn).await.unwrap() {
+                seen.push(request);
+                write_frame(&mut conn, &upstream_reply).await.unwrap();
+            }
+            seen
+        });
+
+        let seen_auth = Arc::new(Mutex::new(None));
+        let record_auth = seen_auth.clone();
+        let injector = DnsInjector::new(
+            Vec::new(),
+            |_| true,
+            |_| None,
+            |_| {},
+            move |_, _, auth| {
+                *record_auth.lock().unwrap() = Some(auth);
+                ResponseCode::NoError
+            },
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let shutdown = CancellationToken::new();
+        let server = tokio::spawn(serve_tcp(
+            listener,
+            injector.clone(),
+            upstream_addr,
+            shutdown.clone(),
+        ));
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        let mut query = Message::query();
+        query.add_query(Query::query(fqdn("other.example.com"), RecordType::A));
+        let query = query.to_vec().unwrap();
+        write_frame(&mut client, &query).await.unwrap();
+        assert_eq!(read_frame(&mut client).await.unwrap().unwrap(), canned);
+
+        let mut rrset = RecordSet::new(fqdn("nas.example.com"), RecordType::A, 0);
+        rrset.insert(a_record("nas.example.com", lan_ip(50)), 0);
+        let update = append(rrset, fqdn("example.com"), false, false);
+        write_frame(&mut client, &update.to_vec().unwrap())
+            .await
+            .unwrap();
+        let reply = Message::from_vec(&read_frame(&mut client).await.unwrap().unwrap()).unwrap();
+        assert_eq!(reply.metadata.id, update.metadata.id);
+        assert_eq!(reply.metadata.response_code, ResponseCode::NoError);
+        assert_eq!(injector.list().len(), 1);
+        assert_eq!(
+            *seen_auth.lock().unwrap(),
+            Some(UpdateAuth {
+                tsig: false,
+                tcp: true
+            })
+        );
+
+        drop(client);
+        assert_eq!(
+            upstream_task.await.unwrap(),
+            vec![query],
+            "only the query reached the upstream"
+        );
+        shutdown.cancel();
+        server.await.unwrap();
     }
 
     #[tokio::test]
@@ -1037,7 +1335,7 @@ mod tests {
         let dir = directory();
         let src = IpAddr::V4(lan_ip(200));
         assert_eq!(
-            policy(&dir, src, &[a_record("svc.example.com", lan_ip(7))], true),
+            policy(&dir, src, &[a_record("svc.example.com", lan_ip(7))], SIGNED),
             ResponseCode::NoError,
             "signed: any rdata"
         );
@@ -1046,7 +1344,7 @@ mod tests {
             300,
             RData::CNAME(CNAME(fqdn("svc.example.com"))),
         );
-        assert_eq!(policy(&dir, src, &[cname], true), ResponseCode::NoError);
+        assert_eq!(policy(&dir, src, &[cname], SIGNED), ResponseCode::NoError);
         let srv = Record::from_rdata(
             fqdn("_x._tcp.example.com"),
             300,
@@ -1058,7 +1356,7 @@ mod tests {
             )),
         );
         assert_eq!(
-            policy(&dir, src, &[srv], true),
+            policy(&dir, src, &[srv], SIGNED),
             ResponseCode::Refused,
             "even signed injection is limited to the admin-path types"
         );
@@ -1072,7 +1370,7 @@ mod tests {
                 &dir,
                 IpAddr::V4(lan_ip(9)),
                 &[a_record("nas.example.com", lan_ip(9))],
-                false
+                TCP
             ),
             ResponseCode::Refused
         );
@@ -1086,7 +1384,7 @@ mod tests {
                 &dir,
                 IpAddr::V4(lan_ip(50)),
                 &[a_record("nas.lan", lan_ip(50))],
-                false
+                TCP
             ),
             ResponseCode::Refused,
             "dnsmasq is authoritative for lan."
@@ -1096,7 +1394,7 @@ mod tests {
                 &dir,
                 IpAddr::V4(lan_ip(200)),
                 &[a_record("nas.lan", lan_ip(7))],
-                true
+                SIGNED
             ),
             ResponseCode::Refused,
             "reserved even for the signed tier"
@@ -1109,12 +1407,7 @@ mod tests {
         let first = IpAddr::V4(lan_ip(50));
         let second = IpAddr::V4(lan_ip(51));
         assert_eq!(
-            policy(
-                &dir,
-                first,
-                &[a_record("nas.example.com", lan_ip(50))],
-                false
-            ),
+            policy(&dir, first, &[a_record("nas.example.com", lan_ip(50))], TCP),
             ResponseCode::NoError
         );
         assert_eq!(
@@ -1122,18 +1415,13 @@ mod tests {
                 &dir,
                 second,
                 &[a_record("nas.example.com", lan_ip(51))],
-                false
+                TCP
             ),
             ResponseCode::Refused,
             "a held name refuses a different identity"
         );
         assert_eq!(
-            policy(
-                &dir,
-                first,
-                &[a_record("nas.example.com", lan_ip(50))],
-                false
-            ),
+            policy(&dir, first, &[a_record("nas.example.com", lan_ip(50))], TCP),
             ResponseCode::NoError,
             "the owner may re-assert"
         );
@@ -1145,11 +1433,11 @@ mod tests {
             r
         };
         assert_eq!(
-            policy(&dir, second, &[delete("nas.example.com")], false),
+            policy(&dir, second, &[delete("nas.example.com")], TCP),
             ResponseCode::Refused
         );
         assert_eq!(
-            policy(&dir, first, &[delete("nas.example.com")], false),
+            policy(&dir, first, &[delete("nas.example.com")], TCP),
             ResponseCode::NoError
         );
         assert_eq!(
@@ -1157,7 +1445,7 @@ mod tests {
                 &dir,
                 second,
                 &[a_record("nas.example.com", lan_ip(51))],
-                false
+                TCP
             ),
             ResponseCode::NoError,
             "released name is claimable again"
@@ -1174,7 +1462,7 @@ mod tests {
             a_record("good.example.com", lan_ip(50)),
             a_record("bad.example.com", lan_ip(99)),
         ];
-        assert_eq!(policy(&dir, src, &updates, false), ResponseCode::Refused);
+        assert_eq!(policy(&dir, src, &updates, TCP), ResponseCode::Refused);
         assert!(
             dir.peek(|d| d.owners.is_empty()),
             "refusal leaves no ownership trace"

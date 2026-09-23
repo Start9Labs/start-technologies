@@ -96,6 +96,10 @@ for the detail behind its highlights.
 
 ### Changed
 
+- **StartOS publishes a private domain's record to a router over TCP when it
+  has no WireGuard key to sign the update with.** A router that accepts DNS
+  UPDATE only over UDP no longer receives these records.
+
 - **ZRAM compressed swap is now off by default, and updating turns it off on
   your server.** With it on, services under heavy memory load could take the RAM
   StartOS reserves for itself and leave the server unreachable. A server that

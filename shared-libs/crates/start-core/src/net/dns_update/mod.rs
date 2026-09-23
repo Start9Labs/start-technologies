@@ -7,7 +7,7 @@
 //! NetworkManager holds for that gateway's interface and bound to our address on
 //! it. A gateway that doesn't accept RFC 2136 just means the domain only
 //! resolves on StartOS's own resolver, as before; a gateway with no PSK (e.g. a
-//! plain router) gets an unsigned, best-effort update.
+//! plain router) gets an unsigned, best-effort update over TCP.
 
 pub mod rfc2136;
 
@@ -30,7 +30,8 @@ use hkdf::Hkdf;
 use imbl::OrdMap;
 use imbl_value::InternedString;
 use sha2::Sha256;
-use tokio::net::UdpSocket;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpSocket, UdpSocket};
 use tokio::sync::mpsc;
 use tokio::time::{interval, timeout};
 
@@ -495,21 +496,22 @@ async fn send(
         None => message.to_vec(),
     }
     .map_err(|e| Error::new(eyre!("encode DNS UPDATE: {e}"), ErrorKind::Network))?;
-    // Bind to our address on the gateway so the server authorizes us by source IP.
-    let socket = UdpSocket::bind(SocketAddr::new(local_ip, 0))
-        .await
-        .with_kind(ErrorKind::Network)?;
-    socket
-        .connect(SocketAddr::new(server, DNS_PORT))
-        .await
-        .with_kind(ErrorKind::Network)?;
-    socket.send(&bytes).await.with_kind(ErrorKind::Network)?;
-    let mut buf = [0u8; 1232];
-    let n = timeout(QUERY_TIMEOUT, socket.recv(&mut buf))
+    // Bound to our address on the gateway so the server authorizes us by
+    // source IP. Unsigned goes over TCP, whose handshake proves that address.
+    let local = SocketAddr::new(local_ip, 0);
+    let server = SocketAddr::new(server, DNS_PORT);
+    let exchange = async {
+        if signer.is_some() {
+            exchange_udp(local, server, &bytes).await
+        } else {
+            exchange_tcp(local, server, &bytes).await
+        }
+    };
+    let reply = timeout(QUERY_TIMEOUT, exchange)
         .await
         .map_err(|_| Error::new(eyre!("timed out"), ErrorKind::Network))?
         .with_kind(ErrorKind::Network)?;
-    let resp = Message::from_vec(&buf[..n])
+    let resp = Message::from_vec(&reply)
         .map_err(|e| Error::new(eyre!("decode DNS response: {e}"), ErrorKind::Network))?;
     match resp.metadata.response_code {
         // NXRRSet on a delete (nothing to remove) is fine.
@@ -521,8 +523,70 @@ async fn send(
     }
 }
 
+async fn exchange_udp(
+    local: SocketAddr,
+    server: SocketAddr,
+    request: &[u8],
+) -> std::io::Result<Vec<u8>> {
+    let socket = UdpSocket::bind(local).await?;
+    socket.connect(server).await?;
+    socket.send(request).await?;
+    let mut buf = [0u8; 1232];
+    let n = socket.recv(&mut buf).await?;
+    Ok(buf[..n].to_vec())
+}
+
+async fn exchange_tcp(
+    local: SocketAddr,
+    server: SocketAddr,
+    request: &[u8],
+) -> std::io::Result<Vec<u8>> {
+    let socket = match local {
+        SocketAddr::V4(_) => TcpSocket::new_v4()?,
+        SocketAddr::V6(_) => TcpSocket::new_v6()?,
+    };
+    socket.bind(local)?;
+    let mut stream = socket.connect(server).await?;
+    let len = u16::try_from(request.len())
+        .map_err(|_| std::io::Error::other("DNS message exceeds 65535 bytes"))?;
+    let mut framed = Vec::with_capacity(2 + request.len());
+    framed.extend_from_slice(&len.to_be_bytes());
+    framed.extend_from_slice(request);
+    stream.write_all(&framed).await?;
+    let mut len = [0u8; 2];
+    stream.read_exact(&mut len).await?;
+    let mut reply = vec![0u8; usize::from(u16::from_be_bytes(len))];
+    stream.read_exact(&mut reply).await?;
+    Ok(reply)
+}
+
 #[cfg(test)]
 mod tests {
+    /// The TCP exchange frames the request with its length and reads back one
+    /// framed reply.
+    #[tokio::test]
+    async fn tcp_exchange_is_length_framed() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let server = listener.local_addr().unwrap();
+        let peer = tokio::spawn(async move {
+            let (mut conn, from) = listener.accept().await.unwrap();
+            let mut len = [0u8; 2];
+            conn.read_exact(&mut len).await.unwrap();
+            let mut request = vec![0u8; usize::from(u16::from_be_bytes(len))];
+            conn.read_exact(&mut request).await.unwrap();
+            conn.write_all(&[0, 3, b'a', b'c', b'k']).await.unwrap();
+            (request, from.ip())
+        });
+        let local = std::net::SocketAddr::from(([127, 0, 0, 1], 0));
+        let reply = super::exchange_tcp(local, server, b"update").await.unwrap();
+        assert_eq!(reply, b"ack");
+        let (request, from) = peer.await.unwrap();
+        assert_eq!(request, b"update");
+        assert_eq!(from, local.ip(), "sent from the bound address");
+    }
+
     use std::sync::Arc;
 
     use imbl::OrdMap;
