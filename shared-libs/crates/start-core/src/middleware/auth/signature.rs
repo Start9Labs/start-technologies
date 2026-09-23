@@ -19,7 +19,6 @@ use url::Url;
 use crate::auth::AuthKeys;
 use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::DbContext;
-use crate::net::service_interface::HostnameMetadata;
 use crate::prelude::*;
 use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::commitment::Commitment;
@@ -225,7 +224,7 @@ impl SignatureAuthContext for RpcContext {
                 a.enabled()
                     .into_iter()
                     .map(|a| match a.metadata {
-                        HostnameMetadata::Ipv6 { .. } => {
+                        crate::net::service_interface::HostnameMetadata::Ipv6 { .. } => {
                             InternedString::from_display(&lazy_format!("[{}]", a.hostname))
                         }
                         _ => a.hostname.clone(),
