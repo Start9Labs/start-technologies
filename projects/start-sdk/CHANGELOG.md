@@ -129,6 +129,11 @@
   so handle its absence. See
   [Hardware Virtualization (KVM)](https://docs.start9.com/packaging/manifest.html#hardware-virtualization-kvm)
 
+- **`Watchable.combine(effects, [a, b], fn)` builds one reader from several**,
+  re-evaluating `fn` when any source changes, with the usual `const`, `once`,
+  `watch`, `onChange` and `waitFor`. Any `Watchable` is a source, as is any
+  object with `once()` and `watch(abort)`
+
 - **`sdk.setupPrimaryUrl()` replaces the hand-rolled "Set Primary URL" action
   and watcher.** Give it the interface the URL belongs to, a reader for the
   stored choice (`storeJson.read(s => s.primaryUrl)`) and a function that

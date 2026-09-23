@@ -3,7 +3,27 @@ import { AbortedError } from './AbortedError'
 import { deepEqual } from './deepEqual'
 import { DropGenerator, DropPromise } from './Drop'
 
+/** A reader that `Watchable.combine` can follow. */
+export type WatchSource<A> = {
+  once(): Promise<A>
+  watch(abort?: AbortSignal): AsyncGenerator<A, unknown, unknown>
+}
+
+type WatchSources<V extends unknown[]> = { [K in keyof V]: WatchSource<V[K]> }
+
 export abstract class Watchable<Raw, Mapped = Raw> {
+  /**
+   * A reader over several sources, re-evaluating `fn` when any of them changes.
+   * Its `watch`es end with this reader's.
+   */
+  static combine<V extends unknown[], R>(
+    effects: Effects,
+    sources: readonly [...WatchSources<V>],
+    fn: (...values: V) => R,
+  ): Watchable<R> {
+    return new Combined(effects, sources, fn)
+  }
+
   protected readonly mapFn: (value: Raw) => Mapped
   protected readonly eqFn: (a: Mapped, b: Mapped) => boolean
 
@@ -178,5 +198,51 @@ export abstract class Watchable<Raw, Mapped = Raw> {
       }),
       () => ctrl.abort(),
     )
+  }
+}
+
+class Combined<V extends unknown[], R> extends Watchable<R> {
+  protected readonly label = 'Watchable.combine'
+
+  constructor(
+    effects: Effects,
+    private readonly sources: readonly [...WatchSources<V>],
+    private readonly fn: (...values: V) => R,
+  ) {
+    super(effects)
+  }
+
+  private apply(values: unknown[]) {
+    return this.fn(...(values as V))
+  }
+
+  protected async fetch() {
+    return this.apply(await Promise.all(this.sources.map(s => s.once())))
+  }
+
+  protected async *produce(abort: AbortSignal): AsyncGenerator<R, void> {
+    const gens = this.sources.map(s => s.watch(abort))
+    const next = (i: number) =>
+      gens[i].next().then(
+        r => ({ i, r }),
+        e => {
+          if (e instanceof AbortedError) return { i, r: null }
+          throw e
+        },
+      )
+    const first = await Promise.all(gens.map((_, i) => next(i)))
+    const values: unknown[] = []
+    for (const { i, r } of first) {
+      if (!r || r.done) return
+      values[i] = r.value
+    }
+    const pending = gens.map((_, i) => next(i))
+    while (!abort.aborted) {
+      yield this.apply(values)
+      const { i, r } = await Promise.race(pending)
+      if (!r || r.done) return
+      values[i] = r.value
+      pending[i] = next(i)
+    }
   }
 }

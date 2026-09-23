@@ -8,11 +8,7 @@ import {
 } from '@start9labs/start-core/actions/setupActions'
 import { InitScript, setupOnInit } from '@start9labs/start-core/inits'
 import * as T from '@start9labs/start-core/types'
-import {
-  GetHostInfo,
-  getOwnHost,
-} from '@start9labs/start-core/util/GetHostInfo'
-import { AbortedError } from '@start9labs/start-core/util/AbortedError'
+import { getOwnHost } from '@start9labs/start-core/util/GetHostInfo'
 import { Watchable } from '@start9labs/start-core/util/Watchable'
 import { FilledHost } from '@start9labs/start-core/util/filledAddress'
 
@@ -92,58 +88,8 @@ function fallback(urls: string[]) {
 
 type Stored = string | null | undefined
 
-const resolve = (stored: Stored, urls: string[]) =>
+const resolve = (stored: Stored, urls: string[]): string | null =>
   follow(stored, urls) ?? fallback(urls) ?? stored ?? null
-
-class BestUsable extends Watchable<string | null> {
-  protected readonly label = 'PrimaryUrl.bestUsable'
-
-  constructor(
-    effects: T.Effects,
-    private readonly stored: Reader<Stored>,
-    private readonly urls: GetHostInfo<string[]>,
-  ) {
-    super(effects)
-  }
-
-  protected async fetch() {
-    const [stored, urls] = await Promise.all([
-      this.stored.once(),
-      this.urls.once(),
-    ])
-    return resolve(stored, urls)
-  }
-
-  protected async *produce(abort: AbortSignal) {
-    const storedGen = this.stored.watch(this.effects, abort)
-    const urlsGen = this.urls.watch(abort)
-    const next = <A>(gen: AsyncGenerator<A, unknown>) =>
-      gen.next().then(
-        r => (r.done ? null : { value: r.value }),
-        e => {
-          if (e instanceof AbortedError) return null
-          throw e
-        },
-      )
-    let [stored, urls] = await Promise.all([next(storedGen), next(urlsGen)])
-    let nextStored = next(storedGen)
-    let nextUrls = next(urlsGen)
-    while (stored && urls && !abort.aborted) {
-      yield resolve(stored.value, urls.value)
-      const changed = await Promise.race([
-        nextStored.then(stored => ({ stored })),
-        nextUrls.then(urls => ({ urls })),
-      ])
-      if ('stored' in changed) {
-        stored = changed.stored
-        nextStored = next(storedGen)
-      } else {
-        urls = changed.urls
-        nextUrls = next(urlsGen)
-      }
-    }
-  }
-}
 
 export function setupPrimaryUrl<Id extends T.ActionId>(
   packageId: T.PackageId,
@@ -186,7 +132,15 @@ export function setupPrimaryUrl<Id extends T.ActionId>(
 
   return {
     action,
-    bestUsable: effects => new BestUsable(effects, get, urls(effects)),
+    bestUsable: effects =>
+      Watchable.combine(
+        effects,
+        [
+          { once: () => get.once(), watch: abort => get.watch(effects, abort) },
+          urls(effects),
+        ],
+        resolve,
+      ),
     setupTask: (severity, options) =>
       setupOnInit(async effects => {
         const offered = await urls(effects).const()
