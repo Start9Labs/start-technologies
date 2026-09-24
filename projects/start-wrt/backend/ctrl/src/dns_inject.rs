@@ -73,6 +73,8 @@ const TCP_MAX_CLIENTS: usize = 16;
 /// Refusal log lines per second, box-wide.
 const REFUSAL_LOG_RATE: u32 = 20;
 const PUBLIC_LOOKUP_TIMEOUT: Duration = Duration::from_secs(3);
+/// The WAN resolvers the main dnsmasq reads in ISP mode.
+const RESOLV_AUTO: &str = "/tmp/resolv.conf.d/resolv.conf.auto";
 /// Special-use zones, which public DNS never delegates.
 const PRIVATE_ZONES: &[&str] = &[
     "local.",
@@ -192,11 +194,10 @@ impl DnsInject {
         let directory = Arc::new(SyncMutex::new(Directory::default()));
         let (tx, rx) = tokio::sync::watch::channel(Vec::new());
         let render_tx = tx.clone();
-        let public = upstream_lookup().unwrap_or_else(|e| {
-            tracing::warn!("dns-inject public resolver unavailable: {e}");
-            let e = e.to_string();
-            Arc::new(move |_| futures::future::ready(PublicAnswer::Failed(e.clone())).boxed())
-        });
+        let public: PublicLookup = {
+            let uci_root = uci_root.clone();
+            Arc::new(move |name| upstream_lookup(uci_root.clone(), name))
+        };
         let injector = {
             let key_dir = directory.clone();
             let policy_dir = directory.clone();
@@ -656,35 +657,70 @@ async fn publicly_claimable(
     }
 }
 
-/// Resolves through the main dnsmasq instance, which serves no injected
-/// records.
-fn upstream_lookup() -> Result<PublicLookup, Error> {
-    let mut config = ResolverConfig::from_parts(None, Vec::new(), Vec::new());
-    config.add_name_server(NameServerConfig::new(
-        Ipv4Addr::LOCALHOST.into(),
-        true,
-        vec![ConnectionConfig::udp(), ConnectionConfig::tcp()],
-    ));
-    let mut opts = ResolverOpts::default();
-    opts.timeout = PUBLIC_LOOKUP_TIMEOUT;
-    opts.attempts = 1;
-    opts.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
-    opts.use_hosts_file = ResolveHosts::Never;
-    let resolver = Resolver::builder_with_config(config, TokioRuntimeProvider::default())
-        .with_options(opts)
-        .build()
-        .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Network))?;
-    Ok(Arc::new(move |name| {
-        let resolver = resolver.clone();
-        async move {
-            match resolver.lookup_ip(name).await {
-                Ok(lookup) => PublicAnswer::Addrs(lookup.iter().collect()),
-                Err(e) if e.is_nx_domain() || e.is_no_records_found() => PublicAnswer::Absent,
-                Err(e) => PublicAnswer::Failed(e.to_string()),
-            }
+/// SmartDNS's system group when system DNS is set, else the WAN resolvers.
+fn main_upstreams(system_dns: bool, resolv_auto: &str) -> Vec<SocketAddr> {
+    if system_dns {
+        return vec![SocketAddr::from((
+            Ipv4Addr::LOCALHOST,
+            crate::dns::SMARTDNS_SYSTEM_PORT,
+        ))];
+    }
+    resolv_auto
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("nameserver"))
+        .filter_map(|ip| ip.trim().parse::<IpAddr>().ok())
+        .map(|ip| SocketAddr::new(ip, 53))
+        .collect()
+}
+
+/// Asks the main dnsmasq's current upstreams directly: dnsmasq's rebind
+/// filter drops public answers that name private addresses.
+fn upstream_lookup(uci_root: PathBuf, name: Name) -> BoxFuture<'static, PublicAnswer> {
+    async move {
+        let system_dns = uci_task(move || async move {
+            let arena = Arena::new();
+            let cfgs = parse_all(&uci_root, &arena, &["startwrt"]).await?;
+            Ok(!crate::dns::get_system_dns_servers(&cfgs).is_empty())
+        })
+        .await;
+        let system_dns = match system_dns {
+            Ok(system_dns) => system_dns,
+            Err(e) => return PublicAnswer::Failed(e.to_string()),
+        };
+        let resolv_auto = tokio::fs::read_to_string(RESOLV_AUTO)
+            .await
+            .unwrap_or_default();
+        let upstreams = main_upstreams(system_dns, &resolv_auto);
+        if upstreams.is_empty() {
+            return PublicAnswer::Failed("no upstream DNS server".into());
         }
-        .boxed()
-    }))
+        let mut config = ResolverConfig::from_parts(None, Vec::new(), Vec::new());
+        for upstream in upstreams {
+            let mut udp = ConnectionConfig::udp();
+            udp.port = upstream.port();
+            let mut tcp = ConnectionConfig::tcp();
+            tcp.port = upstream.port();
+            config.add_name_server(NameServerConfig::new(upstream.ip(), true, vec![udp, tcp]));
+        }
+        let mut opts = ResolverOpts::default();
+        opts.timeout = PUBLIC_LOOKUP_TIMEOUT;
+        opts.attempts = 1;
+        opts.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
+        opts.use_hosts_file = ResolveHosts::Never;
+        let resolver = match Resolver::builder_with_config(config, TokioRuntimeProvider::default())
+            .with_options(opts)
+            .build()
+        {
+            Ok(resolver) => resolver,
+            Err(e) => return PublicAnswer::Failed(e.to_string()),
+        };
+        match resolver.lookup_ip(name).await {
+            Ok(lookup) => PublicAnswer::Addrs(lookup.iter().collect()),
+            Err(e) if e.is_nx_domain() || e.is_no_records_found() => PublicAnswer::Absent,
+            Err(e) => PublicAnswer::Failed(e.to_string()),
+        }
+    }
+    .boxed()
 }
 
 fn lan_zone() -> LowerName {
@@ -1425,6 +1461,25 @@ mod tests {
             ResponseCode::NoError
         );
         assert_eq!(asked.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn main_upstreams_follow_the_system_dns_mode() {
+        let auto = "# Interface wan\nnameserver 192.0.2.53\nsearch lan\n# Interface wan6\nnameserver fd00::1\n";
+        assert_eq!(
+            main_upstreams(false, auto),
+            vec![
+                "192.0.2.53:53".parse().unwrap(),
+                "[fd00::1]:53".parse().unwrap()
+            ]
+        );
+        assert_eq!(
+            main_upstreams(true, auto),
+            vec![SocketAddr::from((
+                Ipv4Addr::LOCALHOST,
+                crate::dns::SMARTDNS_SYSTEM_PORT
+            ))]
+        );
     }
 
     /// Serving an address the interface does not hold yet.

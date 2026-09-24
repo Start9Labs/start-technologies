@@ -433,7 +433,9 @@ costs one comparison and is worth stating as an invariant in the module doc.
 > the rule allows. The dangerous names are ones that already resolve
 > publicly. Both tiers are now refused a name the router's upstream DNS
 > resolves to anything but its own WAN address, and a failed lookup refuses
-> too. Special-use zones (`local.`, `home.arpa.`, `internal.` and the RFC 6761
+> too. The lookup goes to the main dnsmasq's upstreams directly, since
+> dnsmasq's rebind protection would hide a public answer naming a private
+> address. Special-use zones (`local.`, `home.arpa.`, `internal.` and the RFC 6761
 > names) skip the lookup. The unsigned tier stays A/AAAA-only but may point
 > at any address, and the sweep keys a record's life to the address it was
 > published from. The private half of a StartOS split-DNS domain is refused
