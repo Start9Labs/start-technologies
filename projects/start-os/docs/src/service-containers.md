@@ -15,6 +15,8 @@ There are several reasons you might want a shell inside a running service contai
 - **Inspecting configuration** — View the generated config files or environment variables a service is actually running with.
 - **Advanced recovery** — In rare cases, manually repair data or state that cannot be fixed through the StartOS UI.
 
+Service commands receive the image's environment variables, with package-defined values taking precedence. StartOS supplies the selected user's home directory and a standard command search path when neither image nor package specifies them.
+
 ## Usage
 
 First, [SSH](ssh.md) into your StartOS server. Then attach to a running service:

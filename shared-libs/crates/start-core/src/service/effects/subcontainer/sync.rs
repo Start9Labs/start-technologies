@@ -104,6 +104,36 @@ fn open_file_read(path: impl AsRef<Path>) -> Result<File, Error> {
     })
 }
 
+fn apply_exec_env(
+    cmd: &mut StdCommand,
+    env_file: Option<&Path>,
+    env: &[String],
+) -> Result<bool, Error> {
+    cmd.env_clear();
+    cmd.env(
+        "PATH",
+        "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    );
+    let mut needs_home = true;
+    let mut update_env = |line: &str| {
+        if let Some((k, v)) = line.split_once('=') {
+            needs_home &= k != "HOME";
+            cmd.env(k, v);
+        } else {
+            tracing::warn!("Invalid line in env: {line}");
+        }
+    };
+    if let Some(f) = env_file {
+        for line in BufReader::new(open_file_read(f)?).lines() {
+            update_env(&line?);
+        }
+    }
+    for line in env {
+        update_env(line);
+    }
+    Ok(needs_home)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Parser)]
 #[group(skip)]
 pub struct ExecParams {
@@ -145,10 +175,10 @@ impl ExecParams {
         };
 
         let mut cmd = StdCommand::new(command);
+        let needs_home = apply_exec_env(&mut cmd, env_file.as_deref(), env)?;
 
         let mut uid = Err(None);
         let mut gid = Err(None);
-        let mut needs_home = true;
 
         if let Some(user) = user {
             if let Some((u, g)) = user.split_once(":") {
@@ -164,28 +194,6 @@ impl ExecParams {
         }
         if let Some(g) = gid.err().flatten().and_then(|g| g.parse::<u32>().ok()) {
             gid = Ok(g);
-        }
-
-        let mut update_env = |line: &str| {
-            if let Some((k, v)) = line.split_once("=") {
-                needs_home &= k != "HOME";
-                cmd.env(k, v);
-            } else {
-                tracing::warn!("Invalid line in env: {line}");
-            }
-        };
-        if let Some(f) = env_file {
-            let mut lines = BufReader::new(
-                File::open(&f).with_ctx(|_| (ErrorKind::Filesystem, format!("open r {f:?}")))?,
-            )
-            .lines();
-            while let Some(line) = lines.next().transpose()? {
-                update_env(&line);
-            }
-        }
-
-        for line in env {
-            update_env(&line);
         }
 
         let needs_gid = Err(None) == gid;
@@ -830,6 +838,58 @@ pub fn exec(
 
 pub fn exec_command(_: ContainerCliContext, params: ExecParams) -> Result<(), Error> {
     params.exec()
+}
+
+#[cfg(test)]
+mod env_tests {
+    use std::io::Write;
+
+    use super::*;
+
+    fn child_env(cmd: &mut StdCommand) -> Vec<String> {
+        let output = cmd.output().unwrap();
+        assert!(output.status.success());
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn service_env_without_package_overrides() {
+        let mut cmd = StdCommand::new("/usr/bin/env");
+        cmd.env("RUST_LOG", "warn,start_core=debug");
+        cmd.env("INVOCATION_ID", "runtime-id");
+        assert!(apply_exec_env(&mut cmd, None, &[]).unwrap());
+        assert_eq!(
+            child_env(&mut cmd),
+            ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]
+        );
+    }
+
+    #[test]
+    fn package_env_overrides_image_env_without_inheriting_runtime() {
+        let mut image_env = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            image_env,
+            "RUST_LOG=image\nSSL_CERT_FILE=/image/cert\nPATH=/image/bin"
+        )
+        .unwrap();
+        let mut cmd = StdCommand::new("/usr/bin/env");
+        cmd.env("INVOCATION_ID", "runtime-id");
+        let package_env = ["RUST_LOG=info".to_owned(), "HOME=/package/home".to_owned()];
+        assert!(!apply_exec_env(&mut cmd, Some(image_env.path()), &package_env).unwrap());
+        assert_eq!(
+            child_env(&mut cmd),
+            [
+                "HOME=/package/home",
+                "PATH=/image/bin",
+                "RUST_LOG=info",
+                "SSL_CERT_FILE=/image/cert",
+            ]
+        );
+    }
 }
 
 /// Wrap a child process so that its stdout/stderr are always pipes, even when
