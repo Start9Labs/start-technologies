@@ -109,7 +109,11 @@ fn apply_exec_env(
     env_file: Option<&Path>,
     env: &[String],
 ) -> Result<bool, Error> {
+    let lang = std::env::var_os("LANG");
     cmd.env_clear();
+    if let Some(lang) = lang {
+        cmd.env("LANG", lang);
+    }
     cmd.env(
         "PATH",
         "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -862,10 +866,13 @@ mod env_tests {
         cmd.env("RUST_LOG", "warn,start_core=debug");
         cmd.env("INVOCATION_ID", "runtime-id");
         assert!(apply_exec_env(&mut cmd, None, &[]).unwrap());
-        assert_eq!(
-            child_env(&mut cmd),
-            ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]
-        );
+        let mut expected =
+            vec!["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_owned()];
+        if let Some(lang) = std::env::var_os("LANG") {
+            expected.push(format!("LANG={}", lang.to_string_lossy()));
+            expected.sort();
+        }
+        assert_eq!(child_env(&mut cmd), expected);
     }
 
     #[test]
@@ -873,7 +880,7 @@ mod env_tests {
         let mut image_env = tempfile::NamedTempFile::new().unwrap();
         writeln!(
             image_env,
-            "RUST_LOG=image\nSSL_CERT_FILE=/image/cert\nPATH=/image/bin"
+            "RUST_LOG=image\nSSL_CERT_FILE=/image/cert\nPATH=/image/bin\nLANG=de_DE.UTF-8"
         )
         .unwrap();
         let mut cmd = StdCommand::new("/usr/bin/env");
@@ -884,6 +891,7 @@ mod env_tests {
             child_env(&mut cmd),
             [
                 "HOME=/package/home",
+                "LANG=de_DE.UTF-8",
                 "PATH=/image/bin",
                 "RUST_LOG=info",
                 "SSL_CERT_FILE=/image/cert",

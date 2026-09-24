@@ -12,7 +12,7 @@ for the detail behind its highlights.
 
 ### Fixed
 
-- **Service processes receive a consistent environment.** Image variables and package-defined overrides determine each service's environment, including log levels, regardless of whether the package sets custom variables.
+- **Service processes receive a consistent environment.** Image variables and package-defined overrides determine each service's environment, including log levels, with the server's language available to services regardless of whether the package sets custom variables.
 
 - **IPv4 public domains work on servers with IPv6 disabled.** StartOS sets up
   the IPv4 reply path for source-preserving TLS routing on those servers.
