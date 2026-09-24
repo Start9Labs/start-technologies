@@ -32,6 +32,9 @@ for the detail behind its highlights.
 - **An update's loading indicator stays on the service being updated** when you
   switch registries in the Updates tab.
 
+- **A service installed again after a failed install is reachable without
+  restarting the server.**
+
 ### Added
 
 - **UEFI installations carry a standard fallback bootloader.** StartOS remains
