@@ -132,7 +132,8 @@
 - **`Watchable.combine(effects, [a, b], map?, eq?)` builds one reader from
   several.** Its raw value is the tuple of the sources' values, and `map`/`eq`
   work as on any reader: it emits when `map`'s result differs from the last by
-  `eq`. Any `Watchable` is a source (`WatchSource`)
+  `eq`. It returns a `WatchSource<Mapped>`, the reader interface every
+  `Watchable` implements, and any `Watchable` is a source
 
 - **`sdk.setupPrimaryUrl()` replaces the hand-rolled "Set Primary URL" action
   and watcher.** Give it the interface the URL belongs to, a reader for the

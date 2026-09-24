@@ -9,7 +9,7 @@ import {
 import { InitScript, setupOnInit } from '@start9labs/start-core/inits'
 import * as T from '@start9labs/start-core/types'
 import { getOwnHost } from '@start9labs/start-core/util/GetHostInfo'
-import { Watchable } from '@start9labs/start-core/util/Watchable'
+import { Watchable, WatchSource } from '@start9labs/start-core/util/Watchable'
 import { FilledHost } from '@start9labs/start-core/util/filledAddress'
 
 /** A reader in the shape `FileHelper.read()` returns. */
@@ -43,9 +43,7 @@ export type PrimaryUrl<Id extends T.ActionId> = {
    * hostname's current port and scheme; else the `.local` address, else the
    * first.
    */
-  bestUsable: (
-    effects: T.Effects,
-  ) => Watchable<[string | null | undefined, string[]], string | null>
+  bestUsable: (effects: T.Effects) => WatchSource<string | null>
   /**
    * Keeps a task on `action` raised while the stored URL is unset or no longer
    * one of the interface's addresses, pre-filled with the `.local` address.

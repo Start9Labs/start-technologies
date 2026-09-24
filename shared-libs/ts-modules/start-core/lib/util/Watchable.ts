@@ -3,13 +3,23 @@ import { AbortedError } from './AbortedError'
 import { deepEqual } from './deepEqual'
 import { DropGenerator, DropPromise } from './Drop'
 
-/** A reader that `Watchable.combine` can follow. */
+/** A reactive reader of one value. */
 export type WatchSource<A> = {
+  const(): Promise<A>
   once(): Promise<A>
   watch(abort?: AbortSignal): AsyncGenerator<A, unknown, unknown>
+  onChange(
+    callback: (
+      value: A | undefined,
+      error?: Error,
+    ) => { cancel: boolean } | Promise<{ cancel: boolean }>,
+  ): void
+  waitFor(pred: (value: A) => boolean): Promise<A>
 }
 
-type WatchSources<V extends unknown[]> = { [K in keyof V]: WatchSource<V[K]> }
+type WatchSources<V extends unknown[]> = {
+  [K in keyof V]: Pick<WatchSource<V[K]>, 'once' | 'watch'>
+}
 
 export abstract class Watchable<
   Raw,
@@ -24,7 +34,7 @@ export abstract class Watchable<
     sources: readonly [...WatchSources<V>],
     map?: (values: V) => Mapped,
     eq?: (a: Mapped, b: Mapped) => boolean,
-  ): Watchable<V, Mapped> {
+  ): WatchSource<Mapped> {
     return new Combined(effects, sources, { map, eq })
   }
 
