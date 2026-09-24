@@ -709,11 +709,7 @@ export class SubContainerEager<
       workdir = spawnOptions.cwd
       delete spawnOptions.cwd
     }
-    if (spawnOptions.env) {
-      for (let [k, v] of Object.entries(spawnOptions.env)) {
-        extra.push(`--env=${k}=${v}`)
-      }
-    }
+    if (spawnOptions.env) extra.push(...envArgs(spawnOptions.env))
     const child = cp.spawn(
       'start-container',
       [
@@ -847,13 +843,7 @@ export class SubContainerEager<
       workdir = options.cwd
       delete options.cwd
     }
-    if (options?.env) {
-      for (let [k, v] of Object.entries(options.env).filter(
-        ([_, v]) => v != undefined,
-      )) {
-        extra.push(`--env=${k}=${v}`)
-      }
-    }
+    if (options?.env) extra.push(...envArgs(options.env))
     await this.killLeader()
     this.leaderExited = false
     this.leader = cp.spawn(
@@ -904,13 +894,7 @@ export class SubContainerEager<
       workdir = options.cwd
       delete options.cwd
     }
-    if (options?.env) {
-      for (let [k, v] of Object.entries(options.env).filter(
-        ([_, v]) => v != undefined,
-      )) {
-        extra.push(`--env=${k}=${v}`)
-      }
-    }
+    if (options?.env) extra.push(...envArgs(options.env))
     return cp.spawn(
       'start-container',
       [
@@ -1202,7 +1186,7 @@ export class SubContainerLazy<
 }
 
 export type CommandOptions = {
-  /** Environment variables to set for this command */
+  /** Environment variables to set for this command; `undefined` unsets one */
   env?: { [variable in string]?: string }
   /** the working directory to run this command in */
   cwd?: string
@@ -1249,6 +1233,12 @@ export type MountOptionsPointer = {
   subpath: string | null
   readonly: boolean
   idmap: { fromId: number; toId: number; range: number }[]
+}
+
+function envArgs(env: NonNullable<CommandOptions['env']>): string[] {
+  return Object.entries(env).map(([k, v]) =>
+    v === undefined ? `--env=${k}` : `--env=${k}=${v}`,
+  )
 }
 
 function wait(time: number) {
