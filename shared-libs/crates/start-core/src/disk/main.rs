@@ -269,6 +269,9 @@ pub async fn export<P: AsRef<Path>>(guid: &str, datadir: P) -> Result<(), Error>
     Ok(())
 }
 
+/// Requires free space for a second copy of the used data, plus a reserve of
+/// 5% or 1 GiB, whichever is larger. Defragmenting a converted filesystem does
+/// not free the extents it replaces.
 fn has_defrag_headroom(path: &Path) -> Result<bool, Error> {
     let stat = nix::sys::statvfs::statvfs(path).with_kind(ErrorKind::Filesystem)?;
     let used = stat.blocks().saturating_sub(stat.blocks_free());
