@@ -43,7 +43,9 @@ export type PrimaryUrl<Id extends T.ActionId> = {
    * hostname's current port and scheme; else the `.local` address, else the
    * first.
    */
-  bestUsable: (effects: T.Effects) => Watchable<string | null>
+  bestUsable: (
+    effects: T.Effects,
+  ) => Watchable<[string | null | undefined, string[]], string | null>
   /**
    * Keeps a task on `action` raised while the stored URL is unset or no longer
    * one of the interface's addresses, pre-filled with the `.local` address.
@@ -88,7 +90,7 @@ function fallback(urls: string[]) {
 
 type Stored = string | null | undefined
 
-const resolve = (stored: Stored, urls: string[]): string | null =>
+const resolve = ([stored, urls]: [Stored, string[]]): string | null =>
   follow(stored, urls) ?? fallback(urls) ?? stored ?? null
 
 export function setupPrimaryUrl<Id extends T.ActionId>(

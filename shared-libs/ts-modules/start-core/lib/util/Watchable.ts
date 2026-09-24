@@ -16,15 +16,16 @@ export abstract class Watchable<
   Mapped = Raw,
 > implements WatchSource<Mapped> {
   /**
-   * A reader over several sources, re-evaluating `fn` when any of them changes.
-   * Its `watch`es end with this reader's.
+   * A reader over several sources, whose raw value is the tuple of their
+   * values. Its `watch`es end with this reader's.
    */
-  static combine<V extends unknown[], R>(
+  static combine<V extends unknown[], Mapped = V>(
     effects: Effects,
     sources: readonly [...WatchSources<V>],
-    fn: (...values: V) => R,
-  ): Watchable<R> {
-    return new Combined(effects, sources, fn)
+    map?: (values: V) => Mapped,
+    eq?: (a: Mapped, b: Mapped) => boolean,
+  ): Watchable<V, Mapped> {
+    return new Combined(effects, sources, { map, eq })
   }
 
   protected readonly mapFn: (value: Raw) => Mapped
@@ -204,26 +205,25 @@ export abstract class Watchable<
   }
 }
 
-class Combined<V extends unknown[], R> extends Watchable<R> {
+class Combined<V extends unknown[], Mapped> extends Watchable<V, Mapped> {
   protected readonly label = 'Watchable.combine'
 
   constructor(
     effects: Effects,
     private readonly sources: readonly [...WatchSources<V>],
-    private readonly fn: (...values: V) => R,
+    options: {
+      map?: (values: V) => Mapped
+      eq?: (a: Mapped, b: Mapped) => boolean
+    },
   ) {
-    super(effects)
-  }
-
-  private apply(values: unknown[]) {
-    return this.fn(...(values as V))
+    super(effects, options)
   }
 
   protected async fetch() {
-    return this.apply(await Promise.all(this.sources.map(s => s.once())))
+    return (await Promise.all(this.sources.map(s => s.once()))) as V
   }
 
-  protected async *produce(abort: AbortSignal): AsyncGenerator<R, void> {
+  protected async *produce(abort: AbortSignal): AsyncGenerator<V, void> {
     const gens = this.sources.map(s => s.watch(abort))
     const next = (i: number) =>
       gens[i].next().then(
@@ -241,7 +241,7 @@ class Combined<V extends unknown[], R> extends Watchable<R> {
     }
     const pending = gens.map((_, i) => next(i))
     while (!abort.aborted) {
-      yield this.apply(values)
+      yield [...values] as V
       const { i, r } = await Promise.race(pending)
       if (!r || r.done) return
       values[i] = r.value

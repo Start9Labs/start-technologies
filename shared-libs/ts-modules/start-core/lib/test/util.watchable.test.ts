@@ -30,11 +30,37 @@ const makeEffects = (constRetry?: () => void) =>
   }) as unknown as Effects
 
 describe('Watchable.combine', () => {
+  test('without map, reads the tuple of values', async () => {
+    const effects = makeEffects()
+    const a = new Cell(effects, 1)
+    const b = new Cell(effects, 'x')
+    expect(await Watchable.combine(effects, [a, b]).once()).toEqual([1, 'x'])
+  })
+
+  test('eq decides what counts as a change', async () => {
+    const constRetry = jest.fn()
+    const effects = makeEffects(constRetry)
+    const a = new Cell(effects, 1)
+    const b = new Cell(effects, 2)
+    await Watchable.combine(
+      effects,
+      [a, b],
+      ([x, y]) => x + y,
+      (p, q) => p % 2 === q % 2,
+    ).const()
+    a.set(3)
+    await tick()
+    expect(constRetry).not.toHaveBeenCalled()
+    b.set(3)
+    await tick()
+    expect(constRetry).toHaveBeenCalledTimes(1)
+  })
+
   test('once() applies the function to each source', async () => {
     const effects = makeEffects()
     const a = new Cell(effects, 1)
     const b = new Cell(effects, 'x')
-    const sum = Watchable.combine(effects, [a, b], (n, s) => `${s}${n}`)
+    const sum = Watchable.combine(effects, [a, b], ([n, s]) => `${s}${n}`)
     expect(await sum.once()).toBe('x1')
   })
 
@@ -44,7 +70,7 @@ describe('Watchable.combine', () => {
     const a = new Cell(effects, 1)
     const b = new Cell(effects, 2)
     expect(
-      await Watchable.combine(effects, [a, b], (x, y) => x + y).const(),
+      await Watchable.combine(effects, [a, b], ([x, y]) => x + y).const(),
     ).toBe(3)
     b.set(5)
     await tick()
@@ -56,7 +82,7 @@ describe('Watchable.combine', () => {
     const effects = makeEffects(constRetry)
     const a = new Cell(effects, 1)
     const b = new Cell(effects, 2)
-    await Watchable.combine(effects, [a, b], (x, y) => x < y).const()
+    await Watchable.combine(effects, [a, b], ([x, y]) => x < y).const()
     a.set(0)
     await tick()
     expect(constRetry).not.toHaveBeenCalled()
@@ -73,7 +99,7 @@ describe('Watchable.combine', () => {
         for await (const v of Watchable.combine(
           effects,
           [a, b],
-          (x, y) => x + y,
+          ([x, y]) => x + y,
         ).watch(abort.signal))
           seen.push(v)
       } catch {}
