@@ -2702,6 +2702,20 @@ service.effects.dependency.volume-missing:
   fr_FR: "le volume %{volume} de %{package} n'existe pas — %{package} est-il installé ?"
   pl_PL: "wolumin %{volume} pakietu %{package} nie istnieje — czy %{package} jest zainstalowany?"
 
+service.effects.subcontainer.sync.unknown-group:
+  en_US: "unknown group: %{group}"
+  de_DE: "unbekannte Gruppe: %{group}"
+  es_ES: "grupo desconocido: %{group}"
+  fr_FR: "groupe inconnu : %{group}"
+  pl_PL: "nieznana grupa: %{group}"
+
+service.effects.subcontainer.sync.unknown-user:
+  en_US: "unknown user: %{user}"
+  de_DE: "unbekannter Benutzer: %{user}"
+  es_ES: "usuario desconocido: %{user}"
+  fr_FR: "utilisateur inconnu : %{user}"
+  pl_PL: "nieznany użytkownik: %{user}"
+
 # service/service_actor.rs
 service.service-actor.error-synchronizing-state:
   en_US: "error synchronizing state of service: %{error}"

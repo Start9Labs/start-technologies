@@ -175,7 +175,7 @@ impl ExecParams {
             gid,
             home,
             groups,
-        } = resolve_exec_user(chroot, user.as_deref())?;
+        } = ExecUser::resolve(chroot, user.as_deref())?;
         if needs_home {
             cmd.env("HOME", home);
         }
@@ -271,6 +271,85 @@ struct ExecUser {
     groups: Vec<nix::unistd::Gid>,
 }
 
+impl ExecUser {
+    fn resolve(chroot: &Path, spec: Option<&str>) -> Result<Self, Error> {
+        let passwd = read_user_database(&chroot.join("etc/passwd"))?;
+        let group = read_user_database(&chroot.join("etc/group"))?;
+        let (user, group_spec) = match spec {
+            Some(spec) => spec
+                .split_once(':')
+                .map_or((spec, None), |(u, g)| (u, Some(g))),
+            None => ("0", None),
+        };
+
+        let uid_spec = user.parse::<u32>().ok();
+        let entry = user_database_entries(&passwd)
+            .find(|(name, uid, _)| uid_spec.map_or(*name == user, |u| u == *uid));
+        let uid = uid_spec
+            .or(entry.as_ref().map(|(_, uid, _)| *uid))
+            .or((user == "root").then_some(0))
+            .ok_or_else(|| {
+                Error::new(
+                    eyre!(
+                        "{}",
+                        t!(
+                            "service.effects.subcontainer.sync.unknown-user",
+                            user = user
+                        )
+                    ),
+                    ErrorKind::InvalidRequest,
+                )
+            })?;
+
+        let gid = match group_spec {
+            Some(g) => g
+                .parse()
+                .ok()
+                .or(user_database_entries(&group)
+                    .find(|(name, ..)| *name == g)
+                    .map(|(_, gid, _)| gid))
+                .or((g == "root").then_some(0))
+                .ok_or_else(|| {
+                    Error::new(
+                        eyre!(
+                            "{}",
+                            t!("service.effects.subcontainer.sync.unknown-group", group = g)
+                        ),
+                        ErrorKind::InvalidRequest,
+                    )
+                })?,
+            None => entry
+                .as_ref()
+                .and_then(|(_, _, rest)| rest.first()?.parse().ok())
+                .unwrap_or(0),
+        };
+
+        let home = entry
+            .as_ref()
+            .and_then(|(_, _, rest)| rest.get(2).copied())
+            .unwrap_or("/")
+            .to_owned();
+
+        let groups = match &entry {
+            Some((name, ..)) => user_database_entries(&group)
+                .filter(|(_, _, rest)| {
+                    rest.first()
+                        .is_some_and(|members| members.split(',').any(|m| m == *name))
+                })
+                .map(|(_, gid, _)| nix::unistd::Gid::from_raw(gid))
+                .collect(),
+            None => Vec::new(),
+        };
+
+        Ok(Self {
+            uid,
+            gid,
+            home,
+            groups,
+        })
+    }
+}
+
 fn read_user_database(path: &Path) -> Result<String, Error> {
     match std::fs::read_to_string(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
@@ -293,64 +372,6 @@ fn user_database_entries(db: &str) -> impl Iterator<Item = (&str, u32, Vec<&str>
     })
 }
 
-fn resolve_exec_user(chroot: &Path, spec: Option<&str>) -> Result<ExecUser, Error> {
-    let passwd = read_user_database(&chroot.join("etc/passwd"))?;
-    let group = read_user_database(&chroot.join("etc/group"))?;
-    let (user, group_spec) = match spec {
-        Some(spec) => spec
-            .split_once(':')
-            .map_or((spec, None), |(u, g)| (u, Some(g))),
-        None => ("0", None),
-    };
-
-    let uid_spec = user.parse::<u32>().ok();
-    let entry = user_database_entries(&passwd)
-        .find(|(name, uid, _)| uid_spec.map_or(*name == user, |u| u == *uid));
-    let uid = uid_spec
-        .or(entry.as_ref().map(|(_, uid, _)| *uid))
-        .or((user == "root").then_some(0))
-        .ok_or_else(|| Error::new(eyre!("unknown user: {user}"), ErrorKind::InvalidRequest))?;
-
-    let gid = match group_spec {
-        Some(g) => g
-            .parse()
-            .ok()
-            .or(user_database_entries(&group)
-                .find(|(name, ..)| *name == g)
-                .map(|(_, gid, _)| gid))
-            .or((g == "root").then_some(0))
-            .ok_or_else(|| Error::new(eyre!("unknown group: {g}"), ErrorKind::InvalidRequest))?,
-        None => entry
-            .as_ref()
-            .and_then(|(_, _, rest)| rest.first()?.parse().ok())
-            .unwrap_or(0),
-    };
-
-    let home = entry
-        .as_ref()
-        .and_then(|(_, _, rest)| rest.get(2).copied())
-        .unwrap_or("/")
-        .to_owned();
-
-    let groups = match &entry {
-        Some((name, ..)) => user_database_entries(&group)
-            .filter(|(_, _, rest)| {
-                rest.first()
-                    .is_some_and(|members| members.split(',').any(|m| m == *name))
-            })
-            .map(|(_, gid, _)| nix::unistd::Gid::from_raw(gid))
-            .collect(),
-        None => Vec::new(),
-    };
-
-    Ok(ExecUser {
-        uid,
-        gid,
-        home,
-        groups,
-    })
-}
-
 #[cfg(test)]
 mod user_database_tests {
     use super::*;
@@ -359,12 +380,12 @@ mod user_database_tests {
     fn missing_user_database_runs_as_root() {
         let dir = tempfile::tempdir().unwrap();
         for spec in [None, Some("root"), Some("0:0"), Some("root:root")] {
-            let user = resolve_exec_user(dir.path(), spec).unwrap();
+            let user = ExecUser::resolve(dir.path(), spec).unwrap();
             assert_eq!((user.uid, user.gid, user.home.as_str()), (0, 0, "/"));
             assert!(user.groups.is_empty());
         }
-        assert!(resolve_exec_user(dir.path(), Some("app")).is_err());
-        assert!(resolve_exec_user(dir.path(), Some("0:app")).is_err());
+        assert!(ExecUser::resolve(dir.path(), Some("app")).is_err());
+        assert!(ExecUser::resolve(dir.path(), Some("0:app")).is_err());
     }
 
     #[test]
@@ -377,9 +398,9 @@ mod user_database_tests {
         )
         .unwrap();
         std::fs::write(dir.path().join("etc/group"), "staff:x:2000:app\n").unwrap();
-        let user = resolve_exec_user(dir.path(), None).unwrap();
+        let user = ExecUser::resolve(dir.path(), None).unwrap();
         assert_eq!((user.uid, user.gid, user.home.as_str()), (0, 0, "/admin"));
-        let user = resolve_exec_user(dir.path(), Some("app:staff")).unwrap();
+        let user = ExecUser::resolve(dir.path(), Some("app:staff")).unwrap();
         assert_eq!(
             (user.uid, user.gid, user.home.as_str()),
             (1000, 2000, "/home/app")
