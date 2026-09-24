@@ -17,8 +17,17 @@ for the detail behind its highlights.
 - **A service command set to run as a user or group its image does not define
   fails instead of running as root.**
 
+- **Services log at the level their package sets.** A service process no
+  longer inherits the container runtime's environment, including its
+  `RUST_LOG`, when its package passes no environment variables. Every service
+  process receives the server's language as `LANG` unless its package sets
+  one.
+
 - **IPv4 public domains work on servers with IPv6 disabled.** StartOS sets up
   the IPv4 reply path for source-preserving TLS routing on those servers.
+
+- **An update's loading indicator stays on the service being updated** when you
+  switch registries in the Updates tab.
 
 ### Added
 

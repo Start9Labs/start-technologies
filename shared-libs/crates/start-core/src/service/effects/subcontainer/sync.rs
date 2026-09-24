@@ -145,6 +145,11 @@ impl ExecParams {
         };
 
         let mut cmd = StdCommand::new(command);
+        cmd.env_clear();
+        cmd.env(
+            "PATH",
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        );
 
         let mut needs_home = true;
 
@@ -152,8 +157,8 @@ impl ExecParams {
             if let Some((k, v)) = line.split_once("=") {
                 needs_home &= k != "HOME";
                 cmd.env(k, v);
-            } else {
-                tracing::warn!("Invalid line in env: {line}");
+            } else if !line.is_empty() {
+                cmd.env_remove(line);
             }
         };
         if let Some(f) = env_file {
@@ -164,6 +169,13 @@ impl ExecParams {
             while let Some(line) = lines.next().transpose()? {
                 update_env(&line);
             }
+        }
+
+        for line in std::fs::read_to_string("/etc/default/locale")
+            .unwrap_or_default()
+            .lines()
+        {
+            update_env(line);
         }
 
         for line in env {
