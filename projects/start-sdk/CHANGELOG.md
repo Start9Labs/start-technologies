@@ -163,6 +163,10 @@
 
 ### Fixed
 
+- **Reactive init re-runs receive `kind: null`** after the initial install,
+  update, or restore pass. Lifecycle-only work guarded by `kind` runs once for
+  that event, even when a watched value changes.
+
 - **Lazy subcontainers retry filesystem materialization after a transient
   failure**, allowing daemons to recover without a service restart
 

@@ -1056,6 +1056,20 @@ error.backup-password-mismatch:
   pl_PL: "Niezgodne Hasło Kopii Zapasowej"
 
 # disk/main.rs
+disk.main.defrag-failed:
+  en_US: "Filesystem optimization failed; continuing with the converted filesystem."
+  de_DE: "Die Dateisystemoptimierung ist fehlgeschlagen; die Konvertierung wird fortgesetzt."
+  es_ES: "La optimización del sistema de archivos falló; se continúa con el sistema de archivos convertido."
+  fr_FR: "L'optimisation du système de fichiers a échoué ; la conversion se poursuit."
+  pl_PL: "Optymalizacja systemu plików nie powiodła się; konwersja będzie kontynuowana."
+
+disk.main.defrag-skipped:
+  en_US: "Skipping filesystem optimization to preserve free space."
+  de_DE: "Die Dateisystemoptimierung wird übersprungen, um freien Speicherplatz zu erhalten."
+  es_ES: "Se omite la optimización del sistema de archivos para conservar espacio libre."
+  fr_FR: "L'optimisation du système de fichiers est ignorée afin de préserver l'espace libre."
+  pl_PL: "Pominięto optymalizację systemu plików, aby zachować wolne miejsce."
+
 disk.main.disk-not-found:
   en_US: "StartOS disk not found."
   de_DE: "StartOS-Festplatte nicht gefunden."

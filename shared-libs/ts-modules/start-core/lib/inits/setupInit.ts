@@ -8,7 +8,7 @@ import { FullProgressTracker } from '../util/FullProgressTracker'
  * - `'install'` — first-time installation
  * - `'update'` — after a package update
  * - `'restore'` — after restoring from backup
- * - `null` — regular startup (no special lifecycle event)
+ * - `null` — regular startup or reactive re-run
  */
 export type InitKind = 'install' | 'update' | 'restore' | null
 
@@ -65,6 +65,7 @@ export function setupInit(...inits: InitScriptOrFn[]): T.ExpectedExports.init {
       let firstRun = true
       const fn = async () => {
         const progress = firstRun ? tracker : new FullProgressTracker()
+        const kind = firstRun ? opts.kind : null
         firstRun = false
         let res: (value?: undefined) => void = () => {}
         const complete = new Promise(resolve => {
@@ -75,8 +76,8 @@ export function setupInit(...inits: InitScriptOrFn[]): T.ExpectedExports.init {
           complete.then(() => fn()).catch(console.error),
         )
         try {
-          if ('init' in init) await init.init(e, opts.kind, progress)
-          else await init(e, opts.kind, progress)
+          if ('init' in init) await init.init(e, kind, progress)
+          else await init(e, kind, progress)
         } finally {
           res()
         }
