@@ -13,9 +13,9 @@
 //! a name public DNS resolves anywhere but this router's WAN address. A name
 //! belongs to the first owner that claims it.
 //!
-//! Listeners are `SO_BINDTODEVICE`-bound per profile, so the arrival
-//! interface is the kernel's fact. Records, ownership and the directory live
-//! in memory; clients re-assert within 180 s of a restart.
+//! Listeners bind each profile's gateway address and outlive the interface
+//! being recreated. Records, ownership and the directory live in memory;
+//! clients re-assert within 180 s of a restart.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -57,9 +57,8 @@ use crate::prelude::*;
 use crate::utils::{DeserializeStdin, HandlerExtSerde};
 use crate::{CliContext, CtrlContext, Error, ServerContext};
 
-/// Redirect targets of the nft include. LAN bridges and inbound WireGuard
-/// interfaces take separate ports so no two device-bound sockets share an
-/// (addr, port). Both sit above SmartDNS's 5300–9394 range.
+/// Redirect targets of the nft include for LAN and inbound-WireGuard
+/// arrivals. Both sit above SmartDNS's 5300–9394 range.
 pub(crate) const DNS_UPDATE_PORT_LAN: u16 = 9553;
 pub(crate) const DNS_UPDATE_PORT_WG: u16 = 9554;
 
@@ -117,8 +116,6 @@ struct Injector {
 struct ProfileNet {
     /// UCI interface name, e.g. "lan" / "guest".
     interface: String,
-    /// Kernel bridge device, e.g. "br-lan.101".
-    device: String,
     gateway: Ipv4Addr,
     /// Firewall zone, for the `lan_access` visibility relation.
     zone: String,
@@ -436,12 +433,11 @@ fn read_snapshot(cfgs: &Configs) -> Result<NetSnapshot, Error> {
     })?;
     cfgs["startwrt"].each::<crate::profiles::UciProfile, Error>(|_, profile| {
         let iface = profile.interface.clone();
-        let Some((gateway, device)) = cfgs["network"].sections.iter().find_map(|s| {
+        let Some(gateway) = cfgs["network"].sections.iter().find_map(|s| {
             if s.name().as_deref() != Some(iface.as_str()) {
                 return None;
             }
-            let net = s.get::<NetworkInterface>().ok()?;
-            Some((net.ipaddr?, net.device))
+            s.get::<NetworkInterface>().ok()?.ipaddr
         }) else {
             return;
         };
@@ -458,7 +454,6 @@ fn read_snapshot(cfgs: &Configs) -> Result<NetSnapshot, Error> {
             .then_some(wg_name.clone());
         snapshot.profiles.push(ProfileNet {
             interface: iface,
-            device,
             gateway,
             zone,
             wg_device,
@@ -750,19 +745,11 @@ fn bind_listener(injector: Arc<DnsInjector>, p: &ProfileNet) -> Result<Listener,
     let upstream = SocketAddr::from((p.gateway, 53));
     let catalog = forwarding_catalog(vec![upstream], FORWARD_TIMEOUT)?;
     let mut server = Server::new(InjectingHandler::new(injector.clone(), catalog));
-    server.register_socket(bind_device_udp(p.gateway, DNS_UPDATE_PORT_LAN, &p.device)?);
-    let mut tcp = vec![bind_device_tcp(p.gateway, DNS_UPDATE_PORT_LAN, &p.device)?];
-    if let Some(wg) = &p.wg_device {
-        // Best-effort: the wg interface can lag its UCI section.
-        let bound = bind_device_udp(p.gateway, DNS_UPDATE_PORT_WG, wg)
-            .and_then(|udp| Ok((udp, bind_device_tcp(p.gateway, DNS_UPDATE_PORT_WG, wg)?)));
-        match bound {
-            Ok((udp, listener)) => {
-                server.register_socket(udp);
-                tcp.push(listener);
-            }
-            Err(e) => tracing::warn!("dns-inject wg bind on {wg} failed: {e}"),
-        }
+    server.register_socket(bind_udp(p.gateway, DNS_UPDATE_PORT_LAN)?);
+    let mut tcp = vec![bind_tcp(p.gateway, DNS_UPDATE_PORT_LAN)?];
+    if p.wg_device.is_some() {
+        server.register_socket(bind_udp(p.gateway, DNS_UPDATE_PORT_WG)?);
+        tcp.push(bind_tcp(p.gateway, DNS_UPDATE_PORT_WG)?);
     }
     let shutdown = server.shutdown_token().clone();
     let tcp_shutdown = shutdown.clone();
@@ -785,25 +772,8 @@ fn bind_listener(injector: Arc<DnsInjector>, p: &ProfileNet) -> Result<Listener,
     })
 }
 
-/// A TCP listener bound to exactly one kernel device.
-fn bind_device_tcp(addr: Ipv4Addr, port: u16, device: &str) -> Result<TcpListener, Error> {
-    let socket = socket2::Socket::new(
-        socket2::Domain::IPV4,
-        socket2::Type::STREAM,
-        Some(socket2::Protocol::TCP),
-    )
-    .with_kind(ErrorKind::Network)?;
-    // A rebind must not wait out the last listener's TIME_WAIT connections.
-    socket
-        .set_reuse_address(true)
-        .with_kind(ErrorKind::Network)?;
-    socket
-        .bind_device(Some(device.as_bytes()))
-        .with_kind(ErrorKind::Network)?;
-    socket.set_nonblocking(true).with_kind(ErrorKind::Network)?;
-    socket
-        .bind(&SocketAddrV4::new(addr, port).into())
-        .with_kind(ErrorKind::Network)?;
+fn bind_tcp(addr: Ipv4Addr, port: u16) -> Result<TcpListener, Error> {
+    let socket = bound_socket(socket2::Type::STREAM, socket2::Protocol::TCP, addr, port)?;
     socket.listen(128).with_kind(ErrorKind::Network)?;
     TcpListener::from_std(socket.into()).with_kind(ErrorKind::Network)
 }
@@ -935,26 +905,33 @@ async fn write_frame(stream: &mut TcpStream, message: &[u8]) -> std::io::Result<
     stream.write_all(&framed).await
 }
 
-/// A UDP socket bound to exactly one kernel device.
-fn bind_device_udp(
+fn bind_udp(addr: Ipv4Addr, port: u16) -> Result<tokio::net::UdpSocket, Error> {
+    let socket = bound_socket(socket2::Type::DGRAM, socket2::Protocol::UDP, addr, port)?;
+    tokio::net::UdpSocket::from_std(socket.into()).with_kind(ErrorKind::Network)
+}
+
+/// Binds while the address is absent, and keeps serving it across the
+/// interface's teardown and recreation.
+fn bound_socket(
+    ty: socket2::Type,
+    protocol: socket2::Protocol,
     addr: Ipv4Addr,
     port: u16,
-    device: &str,
-) -> Result<tokio::net::UdpSocket, Error> {
-    let socket = socket2::Socket::new(
-        socket2::Domain::IPV4,
-        socket2::Type::DGRAM,
-        Some(socket2::Protocol::UDP),
-    )
-    .with_kind(ErrorKind::Network)?;
-    socket
-        .bind_device(Some(device.as_bytes()))
+) -> Result<socket2::Socket, Error> {
+    let socket = socket2::Socket::new(socket2::Domain::IPV4, ty, Some(protocol))
         .with_kind(ErrorKind::Network)?;
+    if ty == socket2::Type::STREAM {
+        // A rebind must not wait out the last listener's TIME_WAIT connections.
+        socket
+            .set_reuse_address(true)
+            .with_kind(ErrorKind::Network)?;
+    }
+    socket.set_freebind_v4(true).with_kind(ErrorKind::Network)?;
     socket.set_nonblocking(true).with_kind(ErrorKind::Network)?;
     socket
         .bind(&SocketAddrV4::new(addr, port).into())
         .with_kind(ErrorKind::Network)?;
-    tokio::net::UdpSocket::from_std(socket.into()).with_kind(ErrorKind::Network)
+    Ok(socket)
 }
 
 // ── Answer plane ───────────────────────────────────────────
@@ -1450,6 +1427,14 @@ mod tests {
         assert_eq!(asked.load(Ordering::SeqCst), 0);
     }
 
+    /// Serving an address the interface does not hold yet.
+    #[tokio::test]
+    async fn listeners_bind_an_absent_address() {
+        let absent = Ipv4Addr::new(192, 0, 2, 1);
+        bind_udp(absent, 0).unwrap();
+        bind_tcp(absent, 0).unwrap();
+    }
+
     /// An unsigned UDP source is unproven, even one naming a WireGuard peer.
     #[tokio::test]
     async fn unsigned_udp_is_refused() {
@@ -1826,7 +1811,6 @@ mod tests {
     fn profile(iface: &str, third_octet: u8, zone: &str) -> ProfileNet {
         ProfileNet {
             interface: iface.into(),
-            device: format!("br-lan.{third_octet}"),
             gateway: Ipv4Addr::new(192, 168, third_octet, 1),
             zone: zone.into(),
             wg_device: None,

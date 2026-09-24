@@ -447,6 +447,12 @@ comparison can be made. Required-change 1 below is scoped accordingly.
 
 ### The arrival-interface hole, and how to close it without a core change
 
+> **Superseded in review.** Once unsigned updates require TCP, the arrival
+> interface stops mattering: a spoofed source never completes the handshake,
+> and a UDP update must carry a TSIG. Device-bound sockets also died silently
+> whenever netifd recreated the bridge, so the listeners now bind each
+> gateway address with `IP_FREEBIND` and no device.
+
 Phase 1 does **not** merely accept LAN source-address spoofing — it closes the
 cross-segment half of it. `serve_pcp` reads the receiving interface from
 `IP_PKTINFO` and `arrival_matches` (`port_control.rs:804-843`, gated by

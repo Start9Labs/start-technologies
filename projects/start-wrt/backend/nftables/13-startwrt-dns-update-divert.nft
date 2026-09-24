@@ -7,8 +7,7 @@
 # type local` leaves transiting DNS alone.
 # `redirect` keeps the destination address. Priority -101 runs before fw4's
 # dstnat (-100), so the per-profile DNS-Override DNAT never sees these.
-# Inbound WireGuard arrivals take their own port: each listener is bound to
-# one kernel device, and no two may share an (addr, port).
+# Inbound WireGuard arrivals take their own port.
 #
 # `redirect` needs kmod-nft-nat (build/openwrt.diffconfig); without it fw4
 # loads no ruleset at all.
