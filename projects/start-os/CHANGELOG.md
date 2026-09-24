@@ -12,6 +12,8 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **Upgrades from 0.3.5.1 can convert nearly full data drives.** Filesystem optimization runs only when there is enough free space to retain a reserve for migration.
+
 - **IPv4 public domains work on servers with IPv6 disabled.** StartOS sets up
   the IPv4 reply path for source-preserving TLS routing on those servers.
 

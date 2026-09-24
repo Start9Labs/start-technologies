@@ -269,6 +269,65 @@ pub async fn export<P: AsRef<Path>>(guid: &str, datadir: P) -> Result<(), Error>
     Ok(())
 }
 
+fn defrag_budget(total: u128, free: u128) -> (bool, u128) {
+    let reserve = (total / 20).max(1024 * 1024 * 1024);
+    let used = total.saturating_sub(free);
+    (
+        free >= used.saturating_mul(2).saturating_add(reserve),
+        reserve,
+    )
+}
+
+fn conversion_space(path: &Path) -> Result<(u128, u128), Error> {
+    let stat = nix::sys::statvfs::statvfs(path).with_kind(ErrorKind::Filesystem)?;
+    let block_size = stat.fragment_size() as u128;
+    Ok((
+        stat.blocks() as u128 * block_size,
+        stat.blocks_available() as u128 * block_size,
+    ))
+}
+
+async fn finalize_conversion(tmp_mount: &Path) -> Result<(), Error> {
+    tracing::info!("{}", t!("disk.main.clearing-duplicate-files"));
+    Command::new("btrfs")
+        .args(["subvolume", "delete"])
+        .arg(tmp_mount.join("ext2_saved"))
+        .invoke(ErrorKind::DiskManagement)
+        .await?;
+    Command::new("btrfs")
+        .args(["subvolume", "sync"])
+        .arg(tmp_mount)
+        .invoke(ErrorKind::DiskManagement)
+        .await?;
+    let (total, free) = conversion_space(tmp_mount)?;
+    let (can_defrag, reserve) = defrag_budget(total, free);
+    if can_defrag {
+        tracing::info!("{}", t!("disk.main.optimizing-filesystem"));
+        if let Err(error) = Command::new("btrfs")
+            .args(["filesystem", "defragment", "-r"])
+            .arg(tmp_mount)
+            .invoke(ErrorKind::DiskManagement)
+            .await
+        {
+            crate::disk::mount::util::sync_filesystem(tmp_mount).await?;
+            let (_, remaining) = conversion_space(tmp_mount)?;
+            if remaining < reserve {
+                return Err(error);
+            }
+            tracing::warn!(?error, "{}", t!("disk.main.defrag-failed"));
+        }
+    } else {
+        tracing::warn!("{}", t!("disk.main.defrag-skipped"));
+    }
+    Ok(())
+}
+
+async fn cleanup_conversion_mount(tmp_mount: &Path) -> Result<(), Error> {
+    unmount(tmp_mount, false).await?;
+    tokio::fs::remove_dir(tmp_mount).await?;
+    Ok(())
+}
+
 fn record_cleanup_error(first_error: &mut Option<Error>, result: Result<(), Error>) {
     if let Err(error) = result {
         if first_error.is_none() {
@@ -440,20 +499,13 @@ pub(crate) async fn mount_fs<P: AsRef<Path>>(
         BlockDev::new(&blockdev_path)
             .mount(&tmp_mount, ReadWrite)
             .await?;
-        tracing::info!("{}", t!("disk.main.clearing-duplicate-files"));
-        Command::new("btrfs")
-            .args(["subvolume", "delete"])
-            .arg(tmp_mount.join("ext2_saved"))
-            .invoke(ErrorKind::DiskManagement)
-            .await?;
-        tracing::info!("{}", t!("disk.main.optimizing-filesystem"));
-        Command::new("btrfs")
-            .args(["filesystem", "defragment", "-r"])
-            .arg(&tmp_mount)
-            .invoke(ErrorKind::DiskManagement)
-            .await?;
-        unmount(&tmp_mount, false).await?;
-        tokio::fs::remove_dir(&tmp_mount).await?;
+        let conversion_result = finalize_conversion(&tmp_mount).await;
+        let cleanup_result = cleanup_conversion_mount(&tmp_mount).await;
+        if let Err(error) = conversion_result {
+            cleanup_result.log_err();
+            return Err(error);
+        }
+        cleanup_result?;
         if let Some(ref mut phase) = convert_phase {
             phase.complete();
         }
@@ -679,4 +731,20 @@ pub async fn probe_package_data_fs(guid: &str) -> Result<Option<String>, Error> 
     }
 
     result
+}
+
+#[cfg(test)]
+mod conversion_tests {
+    use super::defrag_budget;
+
+    #[test]
+    fn defrag_needs_room_for_rewrites_and_a_reserve() {
+        let gib = 1024_u128.pow(3);
+        assert!(!defrag_budget(gib, gib / 3).0);
+        assert!(!defrag_budget(100 * gib, 68 * gib).0);
+        assert!(!defrag_budget(100 * gib, 60 * gib).0);
+        assert!(defrag_budget(100 * gib, 81 * gib).0);
+        assert_eq!(defrag_budget(100 * gib, 81 * gib).1, 5 * gib);
+        assert!(!defrag_budget(u128::MAX, 0).0);
+    }
 }
