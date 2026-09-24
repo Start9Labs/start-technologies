@@ -189,6 +189,13 @@ impl ExecParams {
             }
         }
 
+        for line in std::fs::read_to_string("/etc/default/locale")
+            .unwrap_or_default()
+            .lines()
+        {
+            update_env(line);
+        }
+
         for line in env {
             update_env(&line);
         }
