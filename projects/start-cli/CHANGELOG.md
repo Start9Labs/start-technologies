@@ -21,6 +21,8 @@ or the CLI's externally observable behavior.
 - **`s9pk pack` and `s9pk edit add-image` accept a Docker image that declares no `CMD` or
   `ENTRYPOINT`.**
 
+- **`s9pk pack` removes its temporary container and built image when packing fails.**
+
 ## [2.1.0]
 
 ### Added
