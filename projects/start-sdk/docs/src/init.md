@@ -2,14 +2,14 @@
 
 `setupOnInit` registers a handler that runs when the container initializes — and runs again, from the top, whenever a `.const()` read inside it sees a new value. An init handler is a live reactive context for the life of the container, the same as `setupMain`. It is not a script that runs once and exits. Read [Init Handlers Are Reactive](#init-handlers-are-reactive) before writing one.
 
-`kind` says why the container came up, and every re-run of a handler carries the value the handler started with:
+`kind` identifies the lifecycle event on the first pass of each handler. Reactive re-runs receive `null`:
 
-| Kind        | The container came up because     | Use For                                                                                                              |
-| ----------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `'install'` | It was freshly installed          | Generate internal secrets, seed file-model defaults, create critical tasks for user setup actions, bootstrap via API |
-| `'update'`  | The package version changed       | Re-apply config, handle post-migration setup                                                                         |
-| `'restore'` | A backup was restored             | Re-establish external state; credentials are already present from the restored store                                 |
-| `null`      | Container rebuild, server restart | The work that has to happen every time, watchers included                                                            |
+| Kind        | The container came up because                         | Use For                                                                                                              |
+| ----------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `'install'` | It was freshly installed                              | Generate internal secrets, seed file-model defaults, create critical tasks for user setup actions, bootstrap via API |
+| `'update'`  | The package version changed                           | Re-apply config, handle post-migration setup                                                                         |
+| `'restore'` | A backup was restored                                 | Re-establish external state; credentials are already present from the restored store                                 |
+| `null`      | Container rebuild, server restart, or reactive re-run | The work that has to happen every time, watchers included                                                            |
 
 ## Init Handlers Are Reactive
 
@@ -18,7 +18,7 @@
 The reactivity is opt-in, and `.const()` is the opt-in: a handler that reads nothing reactively runs once per container init and is done. Once one is present, three consequences follow:
 
 - **A watcher is not registered and left behind — the handler body _is_ the watcher.** Everything above the `.const()` runs again on every change, so a handler that watches something must be cheap and idempotent.
-- **`kind` does not change on a re-run.** A handler that first ran with `kind === 'install'` still sees `'install'` when its watched value changes weeks later. `kind` is why the container came up, never what is happening now.
+- **`kind` is `null` on a re-run.** Install, update, and restore work guarded by `kind` runs once for that event; reactive synchronization continues with `null`.
 - **Reacting to another package's state belongs here as readily as in `setupMain`.** An init handler observes a dependency's files, bindings, and addresses changing exactly as `main` does. Re-running it does not rebuild your daemon spec, so prefer init for work that only has to keep a file, a task, or a registration correct.
 
 ## Init Kinds
@@ -65,9 +65,7 @@ export const registerWatchers = sdk.setupOnInit(async (effects, kind) => {
   const setting = await someConfig.read(c => c.setting).const(effects)
   await applySetting(effects, setting)
 
-  // `kind` is still 'install' on every one of those re-runs, so the guard alone
-  // does not make this happen once. Generate only when the secret is absent, or
-  // a change to `setting` rotates a secret the service is already using.
+  // Re-runs receive null; preserve a secret already present on install.
   const store = await storeJson.read().once()
   if (kind === 'install' && !store?.jwtSecret) {
     await storeJson.merge(effects, {
@@ -432,7 +430,7 @@ export const seedFiles = sdk.setupOnInit(async (effects, kind) => {
   // kind === 'install': Fresh install
   // kind === 'update': After version upgrade
   // kind === 'restore': Restoring from backup
-  // kind === null: Container rebuild / server restart
+  // kind === null: Container rebuild / server restart / reactive re-run
 
   if (kind === 'install') {
     // Generate new passwords, bootstrap server
@@ -446,7 +444,7 @@ export const seedFiles = sdk.setupOnInit(async (effects, kind) => {
 ```
 
 > [!TIP]
-> `if (!kind) return` is the common guard for "install, update, or restore — but not a plain container rebuild." The inverse (`if (kind) return`) would mean "only on rebuild" — almost never what you want.
+> `if (!kind) return` runs a handler only on its initial install, update, or restore pass. The inverse (`if (kind) return`) runs on container rebuilds and reactive re-runs.
 
 ### Empty-Seed Inits: Drop the `kind` Parameter
 
