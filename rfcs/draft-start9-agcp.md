@@ -112,12 +112,15 @@ source address of its request, and trust that address:
   address, but has no identity beyond that address. UPnP DeviceProtection
   {{UPNP-DP}} added identity and access control and saw no adoption.
 
-Address-based identity is tolerable when the worst a forged request can do
-is open a port to the host whose address was forged. It is not tolerable
-for operations whose effect on a host is disruptive rather than additive,
-such as blocking remote peers from reaching it, or for operations a
-gateway operator wants to grant to specific hosts rather than to whatever
-occupies an address.
+Address-based identity was never sound: a forged request can expose
+another host's services to the Internet, or remove the mappings that host
+depends on. It persisted because no deployable alternative existed. Each
+capability built on it extends what a forged request can do: hostname
+routes on shared ports, IPv6 pinholes, and filters that make a host
+unreachable to chosen peers. Nor can it express a capability an operator
+grants to a specific host rather than to whatever occupies an address.
+Past a point, extending that surface costs more than self-provisioning
+saves.
 
 AGCP keeps the self-provisioning model (a host provisions only what
 targets itself) and replaces address-based identity with an enrolled
