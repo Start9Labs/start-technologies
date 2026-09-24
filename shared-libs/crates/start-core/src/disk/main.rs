@@ -273,7 +273,7 @@ fn has_defrag_headroom(path: &Path) -> Result<bool, Error> {
     let stat = nix::sys::statvfs::statvfs(path).with_kind(ErrorKind::Filesystem)?;
     let used = stat.blocks().saturating_sub(stat.blocks_free());
     let reserve = (stat.blocks() / 20).max((1 << 30) / stat.fragment_size());
-    Ok(stat.blocks_available() >= used.saturating_mul(2).saturating_add(reserve))
+    Ok(stat.blocks_available() >= used.saturating_add(reserve))
 }
 
 async fn finalize_conversion(tmp_mount: &Path) -> Result<(), Error> {
