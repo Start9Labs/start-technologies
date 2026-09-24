@@ -12,7 +12,10 @@ for the detail behind its highlights.
 
 ### Fixed
 
-- **Services built from minimal images start without a user database.** A root daemon can run from an image without `/etc/passwd` or `/etc/group`, including images containing only a static binary.
+- **Services start from images without `/etc/passwd` or `/etc/group`.**
+
+- **A service command set to run as a user or group its image does not define
+  fails instead of running as root.**
 
 - **IPv4 public domains work on servers with IPv6 disabled.** StartOS sets up
   the IPv4 reply path for source-preserving TLS routing on those servers.
