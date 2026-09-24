@@ -44,6 +44,8 @@ or the CLI's externally observable behavior.
 
 ### Fixed
 
+- **`s9pk pack` accepts images that contain binaries without a default Docker command.** Package authors can pin these images directly and name the service binary in their daemon configuration.
+
 - **The notice that `start-cli` is behind the published release is given only when the workspace's
   `start-technologies` checkout is on `live-docs`.**
 
