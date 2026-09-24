@@ -93,8 +93,8 @@ identity carried in mutually authenticated TLS, and every grant a host holds
 is confined to addresses the gateway attributes to that host. Commands are
 JSON-RPC 2.0 over HTTPS. AGCP carries the self-provisioning model of the
 Port Control Protocol (PCP) to an authenticated transport, and a gateway
-that implements both refuses PCP and UPnP requests from any host that has
-enrolled with AGCP.
+that implements AGCP alongside PCP, UPnP IGD, or DNS UPDATE refuses those
+protocols from any host that has enrolled with AGCP.
 
 --- middle
 
@@ -116,13 +116,17 @@ source address of its request, and trust that address:
 - UPnP IGD runs over TCP, which proves the requester can receive at its
   address, but has no identity beyond that address. UPnP DeviceProtection
   {{UPNP-DP}} added identity and access control and saw no adoption.
+- DNS UPDATE {{RFC2136}} can publish a host's names in a gateway's
+  resolver. TSIG {{RFC8945}} authenticates the updater with a shared
+  secret, but nothing limits which names or addresses an authorized
+  updater may publish, or whose records it may delete.
 
 Address-based identity was never sound: a forged request can expose
 another host's services to the Internet, or remove the mappings that host
 depends on. It persisted because no deployable alternative existed. Each
-capability built on it extends what a forged request can do: hostname
-SNI routes on shared ports, IPv6 pinholes, and filters that make a host
-unreachable to chosen peers. Nor can it express a capability an operator
+feature built on it extends what a forged request can do: SNI routes on
+shared ports, IPv6 pinholes, DNS records, and filters that make a host
+unreachable to chosen peers. Nor can it express a permission an operator
 grants to a specific host rather than to whatever occupies an address.
 Past a point, extending that surface costs more than self-provisioning
 saves.
@@ -133,9 +137,11 @@ public key, verified on every connection by mutually authenticated TLS.
 
 ## Design Goals {#goals}
 
-1. Self-scoped authority. A host can create, alter, or remove only grants
-   that target addresses the gateway attributes to it ({{ownership}}). A
-   compromised host can damage only its own reachability.
+1. Self-scoped authority. A host can create, alter, or remove only its own
+   grants, and every grant targets addresses the gateway attributes to it
+   ({{ownership}}). Where a grant claims a resource hosts share (an
+   external port, a server name, a DNS name), operator policy and quotas
+   bound what one host can claim ({{policy}}).
 2. Cryptographic identity. A host's authority follows its key, not its
    address; forging a host's address grants nothing.
 3. Implementability. Every mechanism is available in common libraries:
@@ -186,6 +192,10 @@ Grant:
 route ({{sni-routes}}), a pinhole ({{pinholes}}), a filter ({{filters}}), or a
 DNS record ({{dns-records}}). Each grant has a lease ({{leases}}).
 
+Capability:
+: a feature available to an enrollment: implemented by the gateway and
+granted by the operator's policy ({{policy}}).
+
 Epoch:
 : an opaque value that changes whenever the gateway may have lost grant
 state.
@@ -202,8 +212,8 @@ This section is informative.
    address on a link, or the tunnel peer that carried it.
 3. The host calls `enrollment.enroll`. If the binding is permitted to use
    AGCP and has no enrolled identity, the gateway enrolls the presented
-   identity (trust on first use), records it, and releases any PCP or UPnP
-   mappings the binding held. The host pins the gateway's identity.
+   identity (trust on first use), records it, and removes any state the
+   binding held through other provisioning protocols ({{coexistence}}). The host pins the gateway's identity.
 4. The host reads the capabilities available to it from `gateway.info`.
 5. The host provisions grants with `mapping.set`, `sni-route.set`,
    `pinhole.set`, `filter.set`, and `dns-record.set`, each targeting an
@@ -289,22 +299,21 @@ never from anything the client asserts:
 Link binding:
 : for a connection from a directly attached link, the link-layer address
 the gateway's neighbor table holds for the connection's source address,
-on the interface the connection arrived on. The gateway MUST reject the
-connection if the source address has no neighbor entry on the arrival
-interface.
+on the interface the connection arrived on. A source address with no
+neighbor entry on the arrival interface has no link binding.
 
 Tunnel binding:
 : for a connection carried by a tunnel whose encapsulation authenticates
 its peers (e.g. WireGuard), the peer that carried it.
 
-A connection with neither binding (for example, one routed to the gateway
-from beyond its directly attached networks) MUST be refused with
+Every call on a connection with neither binding (for example, one routed
+to the gateway from beyond its directly attached networks) MUST fail with
 NOT_AUTHORIZED ({{errors}}).
 
 A link binding is spoofable in isolation. It serves AGCP as a key under
 which the gateway records enrollment and ownership, and as the identifier
-by which the gateway recognizes the same host in PCP and UPnP requests
-({{coexistence}}); it confers no authority without the enrolled identity.
+by which the gateway recognizes the same host in the requests of other
+provisioning protocols ({{coexistence}}); it confers no authority without the enrolled identity.
 
 ## Permission {#permission}
 
@@ -329,12 +338,14 @@ A binding has at most one enrolled identity. `enrollment.enroll`
    operator decides. Gateways SHOULD tell the operator that the binding
    was previously enrolled under a different identity.
 
-On enrolling an identity, the gateway MUST, before returning, remove every
-mapping and DNS record the binding holds through the protocols of
-{{coexistence}}, and MUST begin refusing those protocols for the binding. Enrollment MUST be stored durably.
+On enrolling an identity, the gateway MUST, before returning, remove all
+state the binding holds through the protocols of {{coexistence}}, and MUST
+begin refusing those protocols for the binding. Enrollment MUST be stored
+durably.
 
-An enrollment ends only when the operator removes it or the enrolled host
-calls `enrollment.leave` ({{m-leave}}). When an enrollment ends, the
+An enrollment ends only when the operator removes it, the operator approves
+a different identity for the binding, or the enrolled host calls
+`enrollment.leave` ({{m-leave}}). When an enrollment ends, the
 gateway MUST remove all grants held under it.
 
 Gateways SHOULD display each enrollment's fingerprint to the operator, so
@@ -383,11 +394,20 @@ reassigned, a neighbor entry resolving elsewhere), the gateway MUST remove
 the grants that target it, as PCP requires for mappings whose internal
 address is released ({{Section 15 of RFC6887}}, {{Section 5.10 of RFC6970}}).
 
-## Quotas {#quotas}
+## Capabilities, Policy, and Quotas {#policy}
+
+The operator's policy decides, per enrollment, which capabilities the
+enrollment has, and MAY restrict requests within a capability, such as
+the external ports it may claim or the DNS names it may publish
+({{dns-records}}). A gateway reports each enrollment's capabilities and
+limits in `gateway.info`. A request that needs a capability the
+enrollment lacks fails with UNSUPPORTED; a request that policy otherwise
+forbids fails with NOT_PERMITTED.
 
 A gateway MAY limit the number of grants of each kind per enrollment and
-the maximum lease it grants, and reports its limits in `gateway.info`. A
-request that would exceed a limit fails with QUOTA_EXCEEDED.
+the maximum lease it grants. A request that would exceed a limit fails
+with QUOTA_EXCEEDED. When policy changes, the gateway MUST remove the
+grants the enrollment may no longer hold.
 
 # Grants {#grants}
 
@@ -416,8 +436,8 @@ There are no permanent grants; persistent state is the host's to maintain
 by renewal. A gateway MAY retain grants across a restart; if it may have
 lost any, it MUST change its epoch.
 
-Every `*.set` result and every `gateway.info` and `event.wait` result
-carries the current `epoch`. A client that observes a change of epoch
+Every `*.set` result and every `gateway.info`, `grant.list`, and
+`event.wait` result carries the current `epoch`. A client that observes a change of epoch
 MUST re-issue `*.set` for every grant it intends to hold.
 
 # Methods {#methods}
@@ -445,16 +465,16 @@ Callable without enrollment. No parameters. Result:
 For an enrolled caller, the result also carries:
 
 `capabilities`:
-: an array of strings naming the features available to the caller: those
-the gateway implements and the operator's policy grants the enrollment.
-The features are `"mapping"`, `"mapping-port-range"`, `"sni-route-tcp"`,
-`"sni-route-quic"`, `"sni-route-wildcard"`, `"pinhole"`,
-`"pinhole-port-translation"`, `"filter-deny"`, `"filter-allow"`,
-`"dns-record"`, and `"event"`. Every other method is available to every
-enrolled caller.
+: an array of strings naming the caller's capabilities ({{policy}}):
+`"mapping"`, `"port-range"`, `"sni-route-tcp"`, `"sni-route-quic"`,
+`"sni-route-wildcard"`, `"pinhole"`, `"pinhole-port-translation"`,
+`"filter-deny"`, `"filter-allow"`, `"dns-record"`, and `"event"`. The
+`*.set` methods and `event.wait` require the capabilities their
+descriptions name; every other method is available to every enrolled
+caller.
 
 `externalAddresses`:
-: an array of the external IPv4 addresses the gateway can map for the
+: an array of the gateway's external IPv4 addresses available to the
 caller.
 
 `limits`:
@@ -506,7 +526,7 @@ more than one IPv4 address.
 
 `portCount` (optional):
 : the number of consecutive ports, default 1. Values above 1 require the
-`mapping-port-range` capability; the gateway MAY grant fewer.
+`port-range` capability; the gateway MAY grant fewer.
 
 `externalAddress` (optional):
 : the suggested external address.
@@ -525,10 +545,11 @@ other than the suggested one, as with PCP's PREFER_FAILURE option.
 Result: `id`, `externalAddress`, `externalPort`, `portCount`, `lifetime`,
 and `epoch`.
 
-An external port range held by a mapping of another enrollment, or by
-another protocol's mapping on the gateway, is unavailable. A mapping on an
-external port that also carries SNI routes is that port's fallback
-mapping ({{sni-routes}}).
+An external port range held by another grant or by another protocol's
+mapping is unavailable; the gateway assigns other external ports, or fails
+with CANNOT_PROVIDE_EXTERNAL when `preferFailure` is set or none are
+available. A mapping on an external port that also carries SNI routes is
+that port's fallback mapping ({{sni-routes}}).
 
 ### mapping.remove
 
@@ -536,8 +557,8 @@ Parameters: `id`. Result: an empty object.
 
 ## SNI Routes {#sni-routes}
 
-An SNI route binds one or more TLS server names, on a shared external port, to
-an owned address. The gateway demultiplexes inbound connections on that
+An SNI route binds one or more TLS server names, on a shared external port,
+to an owned IPv4 address. The gateway demultiplexes inbound connections on that
 port by the server name in the TLS ClientHello, with the semantics that
 {{PCP-HOSTNAME}} defines for hostname bindings: its rules for hostname
 syntax and matching, wildcards, conflicts, TCP and QUIC demultiplexing,
@@ -578,8 +599,10 @@ require the `sni-route-wildcard` capability.
 Result: `id`, `externalAddress`, `externalPort`, `lifetime`, and `epoch`.
 
 If any name is held on the same external address, port, and protocol by
-another enrollment, the call fails with HOSTNAME_TAKEN and no part of the
-SNI route is created or changed.
+another enrollment, the call fails with HOSTNAME_TAKEN; if the gateway
+cannot demultiplex the external port, it fails with
+CANNOT_PROVIDE_EXTERNAL. In either case no part of the SNI route is
+created or changed.
 
 ### sni-route.remove
 
@@ -700,7 +723,7 @@ Parameters:
 
 `name`:
 : a fully qualified domain name, in A-label form {{RFC5890}} without a
-trailing dot.
+trailing dot. Wildcard names are not allowed.
 
 `addresses`:
 : a non-empty array of owned addresses. IPv4 addresses are served as A
@@ -715,11 +738,14 @@ The gateway MUST refuse, with NOT_PERMITTED, a name its policy does not
 permit the enrollment to publish. That policy is the operator's, per
 enrollment, and is drawn from:
 
-- names for which the enrollment holds an SNI route ({{sni-routes}});
+- names that one of the enrollment's SNI routes ({{sni-routes}})
+  matches;
 - names at or below domains the operator grants the enrollment; granting
   the root permits any name.
 
-Gateways SHOULD by default permit only the first. If another enrollment
+Gateways SHOULD by default permit only the first. A record whose name
+the policy no longer permits, for example because the SNI route that
+permitted it ended, is removed ({{policy}}). If another enrollment
 holds a DNS record grant for the same name, the call fails with
 NAME_TAKEN.
 
@@ -774,8 +800,8 @@ array of event objects each carrying a `type`:
 
 `"grant-removed"`:
 : the gateway removed a grant other than on request or expiry. Carries
-`kind`, `id`, and `reason`, one of `"address-released"`, `"operator"`, or
-`"conflict"`.
+`kind`, `id`, and `reason`, one of `"address-released"`, `"operator"`
+(the operator removed it), or `"policy"` ({{policy}}).
 
 `"enrollment-ended"`:
 : the enrollment ended. The client's next call fails with NOT_ENROLLED.
@@ -791,19 +817,18 @@ AGCP errors use the following JSON-RPC error codes. The error object's
 `data` member MUST be an object whose `kind` member carries the name
 below, and MAY carry further detail.
 
-| Code | Name                    | Meaning                                                                            |
-| ---- | ----------------------- | ---------------------------------------------------------------------------------- |
-| 1001 | NOT_AUTHORIZED          | The connection has no binding, or the binding is not permitted to enroll.          |
-| 1002 | NOT_ENROLLED            | The identity is not enrolled for this binding.                                     |
-| 1003 | ENROLLMENT_PENDING      | The identity awaits operator approval.                                             |
-| 1004 | NOT_OWNED               | A target address is not owned by the binding.                                      |
-| 1005 | CONFLICT                | The requested external address and port are held by another grant.                 |
-| 1006 | CANNOT_PROVIDE_EXTERNAL | The suggested external address or port is unavailable and `preferFailure` was set. |
-| 1007 | HOSTNAME_TAKEN          | A requested server name is held by another enrollment.                             |
-| 1008 | QUOTA_EXCEEDED          | The request exceeds a limit reported in `gateway.info`.                            |
-| 1009 | UNSUPPORTED             | The request uses a capability not in the caller's `capabilities`.                  |
-| 1010 | NOT_PERMITTED           | Within an available capability, the operator's policy forbids the request.         |
-| 1011 | NAME_TAKEN              | A DNS name is held by another enrollment.                                          |
+| Code | Name                    | Meaning                                                                         |
+| ---- | ----------------------- | ------------------------------------------------------------------------------- |
+| 1001 | NOT_AUTHORIZED          | The connection has no binding, or the binding is not permitted to enroll.       |
+| 1002 | NOT_ENROLLED            | The identity is not enrolled for this binding.                                  |
+| 1003 | ENROLLMENT_PENDING      | The identity awaits operator approval.                                          |
+| 1004 | NOT_OWNED               | A target address is not owned by the binding.                                   |
+| 1005 | CANNOT_PROVIDE_EXTERNAL | The gateway cannot provide the requested external address or port.              |
+| 1006 | HOSTNAME_TAKEN          | A requested server name is held by another enrollment.                          |
+| 1007 | NAME_TAKEN              | A DNS name is held by another enrollment.                                       |
+| 1008 | UNSUPPORTED             | The request needs a capability the enrollment lacks.                            |
+| 1009 | NOT_PERMITTED           | The operator's policy forbids the request within the enrollment's capabilities. |
+| 1010 | QUOTA_EXCEEDED          | The request exceeds a limit reported in `gateway.info`.                         |
 
 Every method other than `gateway.info`, `enrollment.enroll`, and
 `enrollment.status` fails with NOT_ENROLLED or ENROLLMENT_PENDING for a
@@ -836,12 +861,12 @@ AGCP grants without AGCP's enrolled identity and ownership checks: PCP,
 UPnP IGD, and DNS UPDATE {{RFC2136}}, whether or not signed with TSIG
 {{RFC8945}}. A gateway that implements AGCP alongside any of them:
 
-- MUST keep one mapping state and one DNS record state across all of
-  them, so that an external port or name held through one protocol is
+- MUST keep one state for each kind of grant across all of them, so that
+  an external port, server name, or DNS name held through one protocol is
   unavailable through another;
 - MUST refuse, from a binding with an AGCP enrollment, every request of
-  those protocols that creates, alters, or removes a mapping or other
-  forwarding state or a DNS record, answering PCP requests with
+  those protocols that creates, alters, or removes state of a kind AGCP
+  grants, answering PCP requests with
   NOT_AUTHORIZED, UPnP actions with error 606 (Action not authorized), and
   DNS UPDATE with REFUSED. The gateway identifies
   the binding of such a request as in {{bindings}};
@@ -884,26 +909,27 @@ binding ({{coexistence-gateway}}). A client that has never enrolled with a
 gateway has no such protection.
 
 Blast radius:
-: Every grant targets owned addresses, and filters apply only to traffic
-toward them, so a compromised host or stolen key can affect only the
-reachability of that host. Operators revoke a compromised identity by
-ending its enrollment.
+: Pinholes and filters affect only the reachability of the host that holds
+them. Mappings, SNI routes, and DNS records also claim resources hosts
+share: a compromised host or stolen key can hold external ports, server
+names, and DNS names that other hosts need, up to the limits of
+{{policy}}. Operators revoke a compromised identity by ending its
+enrollment.
 
 DNS names:
-: A DNS record grant is the one grant whose effect reaches other hosts
-directly: every client of the gateway's resolver that asks for the name
+: A DNS record grant alone changes what other hosts see: every client of the gateway's resolver that asks for the name
 receives the enrolled host's addresses. A host permitted to publish
 arbitrary names can divert other clients' traffic for any name to itself;
 TLS certificate validation protects the clients that use it, and nothing
 protects those that do not. The default policy of {{dns-records}} limits a
-host to names it already serves through an SNI route.
+host to names its SNI routes already match.
 
 Link bindings on wired segments:
 : Link-layer addresses are forgeable. A binding is used only to locate
 enrollment and ownership; it never substitutes for the enrolled identity.
 
 Resource exhaustion:
-: Gateways bound per-enrollment state through the quotas of {{quotas}},
+: Gateways bound per-enrollment state through the quotas of {{policy}},
 and SHOULD bound concurrent connections, pending enrollments, and
 concurrent `event.wait` calls per binding. The resource considerations
 of {{PCP-HOSTNAME}} apply to SNI routes.
@@ -1027,7 +1053,7 @@ its response body.
   "result": {"id": "web", "externalAddress": "203.0.113.7",
              "externalPort": 443, "lifetime": 3600, "epoch": "c1"}},
  {"jsonrpc": "2.0", "id": 4,
-  "error": {"code": 1009, "message": "unsupported",
+  "error": {"code": 1008, "message": "unsupported",
             "data": {"kind": "UNSUPPORTED", "capability": "filter-deny"}}}]
 ```
 
@@ -1035,5 +1061,6 @@ its response body.
 
 No implementation exists yet. Implementations are planned in StartOS
 (client) and in its StartTunnel and StartWRT gateways, which already serve
-PCP, UPnP IGD, and {{PCP-HOSTNAME}} from shared mapping state; AGCP is
-planned as a further front end to that state.
+PCP, UPnP IGD, and {{PCP-HOSTNAME}} from shared mapping state, and in
+StartTunnel's DNS UPDATE record injection; AGCP is planned as a further
+front end to that state.
