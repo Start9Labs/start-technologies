@@ -11,7 +11,10 @@ export type WatchSource<A> = {
 
 type WatchSources<V extends unknown[]> = { [K in keyof V]: WatchSource<V[K]> }
 
-export abstract class Watchable<Raw, Mapped = Raw> {
+export abstract class Watchable<
+  Raw,
+  Mapped = Raw,
+> implements WatchSource<Mapped> {
   /**
    * A reader over several sources, re-evaluating `fn` when any of them changes.
    * Its `watch`es end with this reader's.
