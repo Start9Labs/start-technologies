@@ -54,6 +54,8 @@ export type Effects = {
     getInput(options: {
       packageId?: PackageId
       actionId: ActionId
+      /** Seeds the form, including the values its dynamic fields are computed from. */
+      prefill?: Record<string, unknown> | null
     }): Promise<ActionInput | null>
     run<Input extends Record<string, unknown>>(options: {
       packageId?: PackageId

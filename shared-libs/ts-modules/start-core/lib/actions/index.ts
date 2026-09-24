@@ -3,47 +3,48 @@ import * as IST from '../actions/input/inputSpecTypes'
 import { Action, ActionInfo } from './setupActions'
 import { ExtractInputSpecType } from './input/builder/inputSpec'
 
-export type RunActionInput<Input> =
-  | Input
-  | ((prev?: { spec: IST.InputSpec; value: Input | null }) => Input)
+/** Receives the action's form as `getInput` opened it and returns the input to submit. */
+export type RunActionInput<Input> = (form: {
+  spec: IST.InputSpec
+  value: T.DeepPartial<Input> | null
+}) => Input
 
+/**
+ * Runs an action of this service, or of another one whose `access` admits it.
+ * An action with input opens its form first, so the input is checked against
+ * the form it answers. The target keys that form by the calling procedure's
+ * event id, so one procedure runs one such action at a time.
+ */
 export const runAction = async <
   Input extends Record<string, unknown>,
 >(options: {
   effects: T.Effects
-  //   packageId?: T.PackageId
+  packageId?: T.PackageId
   actionId: T.ActionId
+  /** Seeds the form, including the values its dynamic fields are computed from. */
+  prefill?: T.DeepPartial<Input> | null
   input?: RunActionInput<Input>
 }) => {
-  if (options.input) {
-    if (options.input instanceof Function) {
-      const prev = await options.effects.action.getInput({
-        // packageId: options.packageId,
-        actionId: options.actionId,
-      })
-      const input = options.input(
-        prev
-          ? { spec: prev.spec as IST.InputSpec, value: prev.value as Input }
-          : undefined,
-      )
-      return options.effects.action.run({
-        // packageId: options.packageId,
-        actionId: options.actionId,
-        input,
-      })
-    } else {
-      return options.effects.action.run({
-        // packageId: options.packageId,
-        actionId: options.actionId,
-        input: options.input,
-      })
-    }
-  } else {
-    return options.effects.action.run({
-      //   packageId: options.packageId,
-      actionId: options.actionId,
-    })
+  const { effects, packageId, actionId } = options
+  if (!options.input) return effects.action.run({ packageId, actionId })
+  const form = await effects.action.getInput({
+    packageId,
+    actionId,
+    prefill: (options.prefill ?? null) as Record<string, unknown> | null,
+  })
+  if (!form) {
+    throw new Error(
+      `Action ${actionId} of ${packageId ?? 'this service'} has no input form`,
+    )
   }
+  return effects.action.run({
+    packageId,
+    actionId,
+    input: options.input({
+      spec: form.spec as IST.InputSpec,
+      value: form.value as T.DeepPartial<Input> | null,
+    }),
+  })
 }
 type GetActionInputType<A extends ActionInfo<T.ActionId, any>> =
   A extends ActionInfo<T.ActionId, infer I> ? I : never

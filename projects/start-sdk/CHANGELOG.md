@@ -9,6 +9,14 @@
   `fetchRaw`/`produceRaw` in place of `fetch`/`produce`. A type written
   `Watchable<Raw, Mapped>` becomes `Watchable<Mapped>`
 
+- **Breaking — `sdk.action.run` opens the action's form and passes it to
+  `input`.** `input` is a function from the opened form to the input to submit;
+  a plain value is no longer accepted. The run then answers that form, which is
+  what lets a service run an action that takes input — another service's that
+  `access` admits, via the new `packageId`, or its own. `prefill` seeds the
+  form. Underneath, `effects.action.getInput` accepts `prefill`, and the form
+  and the run that answers it share the calling procedure's event id
+
 - **Breaking — a filled address lists the server's `.local` name whenever the
   user has it enabled, and `utils.mdnsResolvable` is removed.** `.local` was
   left out while no LAN IP on its gateways was enabled, which dropped it
@@ -100,6 +108,9 @@
 
 ### Added
 
+- **An `env` variable set to `undefined` is removed from the process**,
+  including one the image or StartOS would otherwise supply, such as `LANG`.
+
 - **An action learns who is running it.** The `run` handler, the prefill
   function and a function-valued input spec each receive `caller`: the id of
   the service that reached the action through `effects.action`, or `null` when
@@ -173,6 +184,10 @@
   See [Result Types](https://docs.start9.com/packaging/actions.html#result-types)
 
 ### Fixed
+
+- **Reactive init re-runs receive `kind: null`** after the initial install,
+  update, or restore pass. Lifecycle-only work guarded by `kind` runs once for
+  that event, even when a watched value changes.
 
 - **Lazy subcontainers retry filesystem materialization after a transient
   failure**, allowing daemons to recover without a service restart

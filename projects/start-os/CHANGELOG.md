@@ -10,6 +10,28 @@ for the detail behind its highlights.
 
 ## [0.4.0.2]
 
+### Fixed
+
+- **Services start from images without `/etc/passwd` or `/etc/group`.**
+
+- **A service command set to run as a user or group its image does not define
+  fails instead of running as root.**
+
+- **Upgrades from 0.3.5.1 succeed on nearly full data drives.** StartOS skips
+  the optional filesystem optimization when a drive lacks room for it.
+
+- **Services log at the level their package sets.** A service process no
+  longer inherits the container runtime's environment, including its
+  `RUST_LOG`, when its package passes no environment variables. Every service
+  process receives the server's language as `LANG` unless its package sets
+  one.
+
+- **IPv4 public domains work on servers with IPv6 disabled.** StartOS sets up
+  the IPv4 reply path for source-preserving TLS routing on those servers.
+
+- **An update's loading indicator stays on the service being updated** when you
+  switch registries in the Updates tab.
+
 ### Added
 
 - **UEFI installations carry a standard fallback bootloader.** StartOS remains
@@ -150,6 +172,19 @@ for the detail behind its highlights.
   driver still provides display output without GPU compute.
 
 ### Fixed
+
+- **You can sign in to the StartOS UI, and log in with `start-cli`, at one of
+  your server's IPv6 addresses**, such as `https://[2001:db8::1]`.
+
+- **A port forward takes effect for peers that were already sending to it.**
+  A peer that sent to a port while it had no forward, such as after a
+  gateway's public address changed or during a service update, kept reaching
+  the server instead of the service, and the service's own connections to that
+  peer could leave from a different port. Services on raw UDP ports were the
+  most affected.
+
+- **You can sign in to the StartOS UI at any loopback address**, such as
+  `http://127.1.1.19:8989` through a Holesail tunnel.
 
 - **Switching off a service's LAN IP address closes it.** The address kept
   answering for as long as the service's `.local` address was on. On an

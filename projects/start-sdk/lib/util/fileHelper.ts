@@ -226,17 +226,11 @@ class FileHelperImpl<A> implements FileHelper<A> {
     return null
   }
 
-  /** Renders to the file format. A key whose value is `undefined` is dropped, so
-   * merging `undefined` removes it rather than serializing the word. */
-  private serialize(data: A): string {
-    return this.writeData(filterUndefined(data))
-  }
-
   /**
    * Accepts structured data and overwrites the existing file on disk.
    */
   private async writeFile(data: A): Promise<null> {
-    return await this.writeFileRaw(this.serialize(data))
+    return await this.writeFileRaw(this.writeData(data))
   }
 
   private async readFileRaw(): Promise<string | null> {
@@ -414,7 +408,7 @@ class FileHelperImpl<A> implements FileHelper<A> {
       fileData = this.validate(fileData)
     } catch (_) {}
     const mergeData = this.validate(fileMerge({}, fileData, data))
-    const toWrite = this.serialize(mergeData)
+    const toWrite = this.writeData(mergeData)
     if (toWrite !== fileDataRaw) {
       await this.writeFile(mergeData)
       if (!options.allowWriteAfterConst && effects.constRetry) {
@@ -451,14 +445,14 @@ function rawTransformed<A extends Transformed, Raw, Transformed>(
   validate: (data: Transformed) => A,
   transformers: Transformers<Raw, Transformed, A> | undefined,
 ): FileHelper<A> {
-  return FileHelper.raw<A>(
-    path,
-    inData => {
-      if (transformers) {
-        return toFile(transformers.onWrite(inData))
-      }
-      return toFile(inData as any as Raw)
-    },
+  return new FileHelperImpl<A>(
+    toPath(path),
+    inData =>
+      toFile(
+        filterUndefined(
+          transformers ? transformers.onWrite(inData) : (inData as any as Raw),
+        ),
+      ),
     fileData => {
       if (transformers) {
         return transformers.onRead(fromFile(fileData))
@@ -585,7 +579,12 @@ export const FileHelper: FileHelperStatic = {
     fromFile: (rawData: string) => unknown,
     validate: (data: unknown) => A,
   ): FileHelper<A> {
-    return new FileHelperImpl<A>(toPath(path), toFile, fromFile, validate)
+    return new FileHelperImpl<A>(
+      toPath(path),
+      inData => toFile(filterUndefined(inData)),
+      fromFile,
+      validate,
+    )
   },
 
   string<A extends Transformed, Transformed = string>(
