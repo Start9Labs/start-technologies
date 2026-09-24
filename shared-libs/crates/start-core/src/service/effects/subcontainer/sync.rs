@@ -146,25 +146,7 @@ impl ExecParams {
 
         let mut cmd = StdCommand::new(command);
 
-        let mut uid = Err(None);
-        let mut gid = Err(None);
         let mut needs_home = true;
-
-        if let Some(user) = user {
-            if let Some((u, g)) = user.split_once(":") {
-                uid = Err(Some(u));
-                gid = Err(Some(g));
-            } else {
-                uid = Err(Some(user));
-            }
-        }
-
-        if let Some(u) = uid.err().flatten().and_then(|u| u.parse::<u32>().ok()) {
-            uid = Ok(u);
-        }
-        if let Some(g) = gid.err().flatten().and_then(|g| g.parse::<u32>().ok()) {
-            gid = Ok(g);
-        }
 
         let mut update_env = |line: &str| {
             if let Some((k, v)) = line.split_once("=") {
@@ -188,83 +170,9 @@ impl ExecParams {
             update_env(&line);
         }
 
-        let needs_gid = Err(None) == gid;
-        let mut username = InternedString::intern("root");
-        let mut handle_passwd_line = |line: &str| -> Option<()> {
-            let l = line.trim();
-            let mut split = l.split(":");
-            let user = split.next()?;
-            match uid {
-                Err(Some(u)) if u != user => return None,
-                _ => (),
-            }
-            split.next(); // throw away x
-            let u: u32 = split.next()?.parse().ok()?;
-            match uid {
-                Err(Some(_)) => uid = Ok(u),
-                Err(None) if u == 0 => uid = Ok(u),
-                Ok(uid) if uid != u => return None,
-                _ => (),
-            }
-
-            username = user.into();
-
-            if !needs_gid && !needs_home {
-                return Some(());
-            }
-            let g = split.next()?;
-            if needs_gid {
-                gid = Ok(g.parse().ok()?);
-            }
-
-            if needs_home {
-                split.next(); // throw away group name
-
-                let home = split.next()?;
-
-                cmd.env("HOME", home);
-            }
-
-            Some(())
-        };
-
-        let mut lines = BufReader::new(
-            File::open(chroot.join("etc/passwd"))
-                .with_ctx(|_| (ErrorKind::Filesystem, format!("open r /etc/passwd")))?,
-        )
-        .lines();
-        while let Some(line) = lines.next().transpose()? {
-            if handle_passwd_line(&line).is_some() {
-                break;
-            }
-        }
-
-        let mut groups = Vec::new();
-        let mut handle_group_line = |line: &str| -> Option<()> {
-            let l = line.trim();
-            let mut split = l.split(":");
-            let name = split.next()?;
-            split.next()?; // throw away x
-            let g = split.next()?.parse::<u32>().ok()?;
-            match gid {
-                Err(Some(n)) if n == name => gid = Ok(g),
-                _ => (),
-            }
-            let users = split.next()?;
-            if users.split(",").any(|u| u == &*username) {
-                groups.push(nix::unistd::Gid::from_raw(g));
-            }
-            Some(())
-        };
-        let mut lines = BufReader::new(
-            File::open(chroot.join("etc/group"))
-                .with_ctx(|_| (ErrorKind::Filesystem, format!("open r /etc/group")))?,
-        )
-        .lines();
-        while let Some(line) = lines.next().transpose()? {
-            if handle_group_line(&line).is_none() {
-                tracing::warn!("Invalid /etc/group line: {line}");
-            }
+        let (uid, gid, home, groups) = resolve_exec_user(chroot, user.as_deref(), needs_home)?;
+        if let Some(home) = home {
+            cmd.env("HOME", home);
         }
 
         // Switch into the subcontainer rootfs via pivot_root rather than
@@ -308,18 +216,16 @@ impl ExecParams {
         nix::mount::umount2("/.put_old", nix::mount::MntFlags::MNT_DETACH)
             .with_ctx(|_| (ErrorKind::Filesystem, "umount /.put_old"))?;
         std::fs::remove_dir("/.put_old").ok();
-        if let Ok(uid) = uid {
-            if uid != 0 {
-                std::os::unix::fs::chown("/proc/self/fd/0", Some(uid), gid.ok()).ok();
-                std::os::unix::fs::chown("/proc/self/fd/1", Some(uid), gid.ok()).ok();
-                std::os::unix::fs::chown("/proc/self/fd/2", Some(uid), gid.ok()).ok();
-            }
+        if uid != 0 {
+            std::os::unix::fs::chown("/proc/self/fd/0", Some(uid), Some(gid)).ok();
+            std::os::unix::fs::chown("/proc/self/fd/1", Some(uid), Some(gid)).ok();
+            std::os::unix::fs::chown("/proc/self/fd/2", Some(uid), Some(gid)).ok();
         }
         // Handle credential changes in pre_exec to control the order:
         // setgroups must happen before setgid/setuid (requires CAP_SETGID)
         {
-            let set_uid = uid.ok();
-            let set_gid = gid.ok();
+            let set_uid = uid;
+            let set_gid = gid;
             unsafe {
                 cmd.pre_exec(move || {
                     // Create a new session so entrypoint scripts that do
@@ -332,18 +238,12 @@ impl ExecParams {
                             return Err(std::io::Error::from_raw_os_error(e as i32));
                         }
                     }
-                    if !groups.is_empty() {
-                        nix::unistd::setgroups(&groups)
-                            .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
-                    }
-                    if let Some(gid) = set_gid {
-                        nix::unistd::setgid(nix::unistd::Gid::from_raw(gid))
-                            .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
-                    }
-                    if let Some(uid) = set_uid {
-                        nix::unistd::setuid(nix::unistd::Uid::from_raw(uid))
-                            .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
-                    }
+                    nix::unistd::setgroups(&groups)
+                        .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+                    nix::unistd::setgid(nix::unistd::Gid::from_raw(set_gid))
+                        .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+                    nix::unistd::setuid(nix::unistd::Uid::from_raw(set_uid))
+                        .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
                     // Restore dumpable flag cleared by setuid so that
                     // /proc/self/fd/* is owned by the current uid and
                     // /dev/stderr works for the target user.
@@ -360,6 +260,213 @@ impl ExecParams {
             cmd.current_dir("/");
         }
         Err(cmd.exec().into())
+    }
+}
+
+fn optional_user_database(path: &Path) -> Result<impl BufRead + use<>, Error> {
+    let file: Box<dyn Read> = match File::open(path) {
+        Ok(file) => Box::new(file),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Box::new(std::io::empty()),
+        Err(e) => {
+            return Err(e).with_ctx(|_| {
+                (
+                    ErrorKind::Filesystem,
+                    lazy_format!("open r {}", path.display()),
+                )
+            });
+        }
+    };
+    Ok(BufReader::new(file))
+}
+
+fn resolve_exec_user(
+    chroot: &Path,
+    user: Option<&str>,
+    needs_home: bool,
+) -> Result<(u32, u32, Option<String>, Vec<nix::unistd::Gid>), Error> {
+    let mut uid = Err(None);
+    let mut gid = Err(None);
+
+    if let Some(user) = user {
+        if let Some((u, g)) = user.split_once(":") {
+            uid = Err(Some(u));
+            gid = Err(Some(g));
+        } else {
+            uid = Err(Some(user));
+        }
+    }
+
+    if let Some(u) = uid.err().flatten().and_then(|u| u.parse::<u32>().ok()) {
+        uid = Ok(u);
+    }
+    if let Some(g) = gid.err().flatten().and_then(|g| g.parse::<u32>().ok()) {
+        gid = Ok(g);
+    }
+
+    let mut resolved_home = None;
+    let needs_gid = Err(None) == gid;
+    let mut username = user
+        .unwrap_or("root")
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .to_owned();
+    if username.parse::<u32>().is_ok() {
+        username.clear();
+    }
+    let mut handle_passwd_line = |line: &str| -> Option<()> {
+        let l = line.trim();
+        let mut split = l.split(":");
+        let user = split.next()?;
+        match uid {
+            Err(Some(u)) if u != user => return None,
+            _ => (),
+        }
+        split.next(); // throw away x
+        let u: u32 = split.next()?.parse().ok()?;
+        match uid {
+            Err(Some(_)) => uid = Ok(u),
+            Err(None) if u == 0 => uid = Ok(u),
+            Err(None) => return None,
+            Ok(uid) if uid != u => return None,
+            _ => (),
+        }
+
+        username = user.to_owned();
+
+        if !needs_gid && !needs_home {
+            return Some(());
+        }
+        let g = split.next()?;
+        if needs_gid {
+            gid = Ok(g.parse().ok()?);
+        }
+
+        if needs_home {
+            split.next(); // throw away group name
+
+            let home = split.next()?;
+
+            resolved_home = Some(home.to_owned());
+        }
+
+        Some(())
+    };
+
+    let mut lines = optional_user_database(&chroot.join("etc/passwd"))?.lines();
+    while let Some(line) = lines.next().transpose()? {
+        if handle_passwd_line(&line).is_some() {
+            break;
+        }
+    }
+
+    let mut groups = Vec::new();
+    let mut handle_group_line = |line: &str| -> Option<()> {
+        let l = line.trim();
+        let mut split = l.split(":");
+        let name = split.next()?;
+        split.next()?; // throw away x
+        let g = split.next()?.parse::<u32>().ok()?;
+        match gid {
+            Err(Some(n)) if n == name => gid = Ok(g),
+            _ => (),
+        }
+        let users = split.next()?;
+        if !username.is_empty() && users.split(",").any(|u| u == username) {
+            groups.push(nix::unistd::Gid::from_raw(g));
+        }
+        Some(())
+    };
+    let mut lines = optional_user_database(&chroot.join("etc/group"))?.lines();
+    while let Some(line) = lines.next().transpose()? {
+        if handle_group_line(&line).is_none() {
+            tracing::warn!("Invalid /etc/group line: {line}");
+        }
+    }
+
+    let uid = match uid {
+        Ok(uid) => uid,
+        Err(None) | Err(Some("root")) => 0,
+        Err(Some(name)) => {
+            return Err(Error::new(
+                eyre!("unknown user: {name}"),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+    };
+    let gid = match gid {
+        Ok(gid) => gid,
+        Err(None) | Err(Some("root")) => 0,
+        Err(Some(name)) => {
+            return Err(Error::new(
+                eyre!("unknown group: {name}"),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+    };
+    if needs_home && resolved_home.is_none() {
+        resolved_home = Some("/".to_owned());
+    }
+    Ok((uid, gid, resolved_home, groups))
+}
+
+#[cfg(test)]
+mod user_database_tests {
+    use super::*;
+
+    #[test]
+    fn missing_user_database_runs_as_root() {
+        let dir = tempfile::tempdir().unwrap();
+        for user in [
+            None,
+            Some("root"),
+            Some("0"),
+            Some("0:0"),
+            Some("root:root"),
+        ] {
+            let (uid, gid, home, groups) = resolve_exec_user(dir.path(), user, true).unwrap();
+            assert_eq!((uid, gid, home.as_deref()), (0, 0, Some("/")));
+            assert!(groups.is_empty());
+        }
+        assert_eq!(resolve_exec_user(dir.path(), None, false).unwrap().2, None);
+        assert_eq!(
+            resolve_exec_user(dir.path(), Some("1000:1001"), true)
+                .unwrap()
+                .0,
+            1000
+        );
+        assert!(resolve_exec_user(dir.path(), Some("service"), true).is_err());
+        assert!(resolve_exec_user(dir.path(), Some("0:service"), true).is_err());
+    }
+
+    #[test]
+    fn passwd_and_group_resolve_independently() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("etc")).unwrap();
+        std::fs::write(
+            dir.path().join("etc/passwd"),
+            "root:x:0:0:root:/root:/bin/sh\napp:x:1000:1001:app:/home/app:/bin/sh\n",
+        )
+        .unwrap();
+        let (uid, gid, home, groups) = resolve_exec_user(dir.path(), Some("app"), true).unwrap();
+        assert_eq!((uid, gid, home.as_deref()), (1000, 1001, Some("/home/app")));
+        assert!(groups.is_empty());
+        std::fs::remove_file(dir.path().join("etc/passwd")).unwrap();
+        std::fs::write(dir.path().join("etc/group"), "staff:x:2000:root\n").unwrap();
+        let (uid, gid, home, groups) =
+            resolve_exec_user(dir.path(), Some("root:staff"), true).unwrap();
+        assert_eq!((uid, gid, home.as_deref()), (0, 2000, Some("/")));
+        assert_eq!(groups, vec![nix::unistd::Gid::from_raw(2000)]);
+        let (_, _, _, groups) = resolve_exec_user(dir.path(), Some("1000:1001"), true).unwrap();
+        assert!(groups.is_empty());
+    }
+
+    #[test]
+    fn unreadable_database_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("etc")).unwrap();
+        std::fs::create_dir(dir.path().join("etc/passwd")).unwrap();
+        assert!(resolve_exec_user(dir.path(), None, true).is_err());
     }
 }
 

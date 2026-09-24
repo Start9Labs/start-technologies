@@ -41,6 +41,8 @@ To run one command instead of opening a shell, put it after `--`. Commands run a
 start-cli package attach <PACKAGE> -n <SUBCONTAINER> -u <USER> -- <COMMAND>
 ```
 
+Images containing only a binary can run without `/etc/passwd` or `/etc/group`. For these images, a command with no user specified runs as root with `HOME=/`. Use an absolute path to the binary after `--` when the image has no shell.
+
 Type `exit` or press `Ctrl+D` to return to the host.
 
 ## Accessing the LXC Container
