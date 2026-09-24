@@ -138,7 +138,7 @@ Once StartOS 0.4.0 is available for your server, it is offered under **System â†
 
 Both methods converge here: your server is migrating, and shows its progress at `http://start.local`.
 
-1. StartOS converts your system to the 0.4.0 format and then migrates every installed service. This can take **hours**, depending on how much data you have. Be patient and do not power off or unplug your server. On a drive with limited free space, StartOS preserves space for the service migration while converting the filesystem.
+1. StartOS converts your system to the 0.4.0 format and then migrates every installed service. This can take **hours**, depending on how much data you have. Be patient and do not power off or unplug your server.
 
    > [!TIP]
    > Expect progress to sit at **85%** for a long time â€” potentially hours. This is when your installed packages are being migrated to the 0.4.0 format, and the time scales with how many packages you have and how much data each one contains. It is not stuck.

@@ -1064,11 +1064,11 @@ disk.main.defrag-failed:
   pl_PL: "Optymalizacja systemu plików nie powiodła się; konwersja będzie kontynuowana."
 
 disk.main.defrag-skipped:
-  en_US: "Continuing filesystem conversion with space reserved for migration."
-  de_DE: "Die Dateisystemkonvertierung wird mit reserviertem Speicherplatz für die Migration fortgesetzt."
-  es_ES: "La conversión del sistema de archivos continúa con espacio reservado para la migración."
-  fr_FR: "La conversion du système de fichiers se poursuit avec de l'espace réservé pour la migration."
-  pl_PL: "Konwersja systemu plików będzie kontynuowana z miejscem zarezerwowanym na migrację."
+  en_US: "Skipping filesystem optimization to preserve free space."
+  de_DE: "Die Dateisystemoptimierung wird übersprungen, um freien Speicherplatz zu erhalten."
+  es_ES: "Se omite la optimización del sistema de archivos para conservar espacio libre."
+  fr_FR: "L'optimisation du système de fichiers est ignorée afin de préserver l'espace libre."
+  pl_PL: "Pominięto optymalizację systemu plików, aby zachować wolne miejsce."
 
 disk.main.disk-not-found:
   en_US: "StartOS disk not found."

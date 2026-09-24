@@ -269,22 +269,11 @@ pub async fn export<P: AsRef<Path>>(guid: &str, datadir: P) -> Result<(), Error>
     Ok(())
 }
 
-fn defrag_budget(total: u128, free: u128) -> (bool, u128) {
-    let reserve = (total / 20).max(1024 * 1024 * 1024);
-    let used = total.saturating_sub(free);
-    (
-        free >= used.saturating_mul(2).saturating_add(reserve),
-        reserve,
-    )
-}
-
-fn conversion_space(path: &Path) -> Result<(u128, u128), Error> {
+fn has_defrag_headroom(path: &Path) -> Result<bool, Error> {
     let stat = nix::sys::statvfs::statvfs(path).with_kind(ErrorKind::Filesystem)?;
-    let block_size = stat.fragment_size() as u128;
-    Ok((
-        stat.blocks() as u128 * block_size,
-        stat.blocks_available() as u128 * block_size,
-    ))
+    let used = stat.blocks().saturating_sub(stat.blocks_free());
+    let reserve = (stat.blocks() / 20).max((1 << 30) / stat.fragment_size());
+    Ok(stat.blocks_available() >= used.saturating_mul(2).saturating_add(reserve))
 }
 
 async fn finalize_conversion(tmp_mount: &Path) -> Result<(), Error> {
@@ -299,25 +288,18 @@ async fn finalize_conversion(tmp_mount: &Path) -> Result<(), Error> {
         .arg(tmp_mount)
         .invoke(ErrorKind::DiskManagement)
         .await?;
-    let (total, free) = conversion_space(tmp_mount)?;
-    let (can_defrag, reserve) = defrag_budget(total, free);
-    if can_defrag {
-        tracing::info!("{}", t!("disk.main.optimizing-filesystem"));
-        if let Err(error) = Command::new("btrfs")
-            .args(["filesystem", "defragment", "-r"])
-            .arg(tmp_mount)
-            .invoke(ErrorKind::DiskManagement)
-            .await
-        {
-            crate::disk::mount::util::sync_filesystem(tmp_mount).await?;
-            let (_, remaining) = conversion_space(tmp_mount)?;
-            if remaining < reserve {
-                return Err(error);
-            }
-            tracing::warn!(?error, "{}", t!("disk.main.defrag-failed"));
-        }
-    } else {
+    if !has_defrag_headroom(tmp_mount)? {
         tracing::warn!("{}", t!("disk.main.defrag-skipped"));
+        return Ok(());
+    }
+    tracing::info!("{}", t!("disk.main.optimizing-filesystem"));
+    if let Err(error) = Command::new("btrfs")
+        .args(["filesystem", "defragment", "-r"])
+        .arg(tmp_mount)
+        .invoke(ErrorKind::DiskManagement)
+        .await
+    {
+        tracing::warn!(?error, "{}", t!("disk.main.defrag-failed"));
     }
     Ok(())
 }
@@ -731,20 +713,4 @@ pub async fn probe_package_data_fs(guid: &str) -> Result<Option<String>, Error> 
     }
 
     result
-}
-
-#[cfg(test)]
-mod conversion_tests {
-    use super::defrag_budget;
-
-    #[test]
-    fn defrag_needs_room_for_rewrites_and_a_reserve() {
-        let gib = 1024_u128.pow(3);
-        assert!(!defrag_budget(gib, gib / 3).0);
-        assert!(!defrag_budget(100 * gib, 68 * gib).0);
-        assert!(!defrag_budget(100 * gib, 60 * gib).0);
-        assert!(defrag_budget(100 * gib, 81 * gib).0);
-        assert_eq!(defrag_budget(100 * gib, 81 * gib).1, 5 * gib);
-        assert!(!defrag_budget(u128::MAX, 0).0);
-    }
 }
