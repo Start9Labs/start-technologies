@@ -1,4 +1,5 @@
 import { Effects } from '../Effects'
+import { AbortedError } from '../util/AbortedError'
 import { Watchable } from '../util/Watchable'
 
 const tick = () => new Promise(r => setTimeout(r, 10))
@@ -113,5 +114,38 @@ describe('Watchable.combine', () => {
     a.set(3)
     await done
     expect(seen).toEqual([11, 12, 22])
+  })
+})
+
+describe('Watchable.from', () => {
+  const source = <A>(values: A[]) => ({
+    once: async () => values[0],
+    watch: async function* (abort?: AbortSignal) {
+      for (const v of values) {
+        if (abort?.aborted) return
+        yield v
+        await tick()
+      }
+    },
+  })
+
+  test('once() reads the source once', async () => {
+    const effects = makeEffects()
+    expect(await Watchable.from(effects, source([1, 2])).once()).toBe(1)
+  })
+
+  test('watch() yields the source’s values, dropping repeats by eq', async () => {
+    const effects = makeEffects()
+    const seen: number[] = []
+    await expect(
+      (async () => {
+        for await (const v of Watchable.from(
+          effects,
+          source([1, 1, 2, 3]),
+        ).watch())
+          seen.push(v)
+      })(),
+    ).rejects.toThrow(AbortedError)
+    expect(seen).toEqual([1, 2, 3])
   })
 })

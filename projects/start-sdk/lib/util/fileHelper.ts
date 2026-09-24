@@ -11,7 +11,7 @@ import * as YAML from 'yaml'
 import { z } from '@start9labs/start-core/zExport'
 import * as T from '@start9labs/start-core/types'
 import { asError, deepEqual } from '@start9labs/start-core/util'
-import { Watchable } from '@start9labs/start-core/util/Watchable'
+import { MappedWatchable } from '@start9labs/start-core/util/Watchable'
 import { PathBase } from './Volume'
 
 const previousPath = /(.+?)\/([^/]*)$/
@@ -281,14 +281,14 @@ class FileHelperImpl<A> implements FileHelper<A> {
       return map(raw)
     }
 
-    return new (class extends Watchable<A | null, B | null> {
+    return new (class extends MappedWatchable<A | null, B | null> {
       protected readonly label = 'FileHelper'
 
-      protected async fetch() {
+      protected async fetchRaw() {
         return doRead()
       }
 
-      protected async *produce(
+      protected async *produceRaw(
         abort: AbortSignal,
       ): AsyncGenerator<A | null, void> {
         while (this.effects.isInContext && !abort.aborted) {

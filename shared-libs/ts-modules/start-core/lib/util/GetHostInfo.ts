@@ -2,9 +2,9 @@ import { Effects } from '../Effects'
 import { HostId, PackageId } from '../osBindings'
 import { deepEqual } from './deepEqual'
 import { fillHost, filledAddress, FilledHost } from './filledAddress'
-import { Watchable } from './Watchable'
+import { MappedWatchable, Watchable } from './Watchable'
 
-export class GetHostInfo<Mapped = FilledHost | null> extends Watchable<
+export class GetHostInfo<Mapped = FilledHost | null> extends MappedWatchable<
   FilledHost | null,
   Mapped
 > {
@@ -21,7 +21,7 @@ export class GetHostInfo<Mapped = FilledHost | null> extends Watchable<
     super(effects, options)
   }
 
-  protected async fetch(callback?: () => void): Promise<FilledHost | null> {
+  protected async fetchRaw(callback?: () => void): Promise<FilledHost | null> {
     const host = await this.effects.getHostInfo({ ...this.opts, callback })
     return host && fillHost(host)
   }

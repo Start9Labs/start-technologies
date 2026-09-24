@@ -180,7 +180,7 @@ Utility modules including:
 
 **Reactive subscription wrappers** — Each wraps an Effects callback-based method into a consistent reactive API:
 
-- `Watchable` — Base class providing `const()`, `once()`, `watch()`, `onChange()`, `waitFor()`
+- `Watchable<A>` — Base class providing `const()`, `once()`, `watch()`, `onChange()`, `waitFor()`; `MappedWatchable<Raw, Mapped>` adds a `map` over a raw value; `Watchable.from` and `Watchable.combine` build readers from `WatchSource`s
 - `GetContainerIp`, `GetStatus`, `GetSystemSmtp`, `GetOutboundGateway`, `GetSslCertificate`, `GetHostInfo`, `GetServiceManifest` — Typed wrappers for specific Effects methods
 
 **General utilities:**
@@ -315,7 +315,7 @@ Health checks are paired with **triggers** that control polling behavior:
 
 ### Primary URL (`lib/primaryUrl/`)
 
-`setupPrimaryUrl.ts` builds the action behind `sdk.setupPrimaryUrl` over the package's `get`/`set`, plus `bestUsable` and `setupTask`. Both judge the stored URL against the interface's `nonLocal` addresses. `bestUsable` is a `Watchable` whose `produce` built with `Watchable.combine` over the package's `get` reader and the host, so the caller picks the read strategy; it resolves the URL when read, leaving the store as the user set it. `setupTask` is an init script that passes those addresses to StartOS as an `input-not-matches` task's accepted input, and StartOS decides when the task is active.
+`setupPrimaryUrl.ts` builds the action behind `sdk.setupPrimaryUrl` over the package's `get`/`set`, plus `bestUsable` and `setupTask`. Both judge the stored URL against the interface's `nonLocal` addresses. `bestUsable` is a `Watchable.combine` over the package's `get` reader and the host, so the caller picks the read strategy; it resolves the URL when read, leaving the store as the user set it. `setupTask` is an init script that passes those addresses to StartOS as an `input-not-matches` task's accepted input, and StartOS decides when the task is active.
 
 ### Backup System (`lib/backup/`)
 
@@ -475,6 +475,8 @@ The `Watchable` base class provides a consistent API for values that can change 
 - `watch()` — Async generator yielding on each change
 - `onChange(callback)` — Invoke callback on each change
 - `waitFor(predicate)` — Block until a condition is met
+
+`Watchable<A>` is typed only by the value it reads. A reader that maps a raw value extends `MappedWatchable<Raw, Mapped>`, implementing `fetchRaw`/`produceRaw`. `Watchable.from(effects, source)` and `Watchable.combine(effects, sources, map?, eq?)` build readers from any `WatchSource` (`once()` + `watch(abort)`), which every `Watchable` is.
 
 ### Type-safe Manifest Threading
 

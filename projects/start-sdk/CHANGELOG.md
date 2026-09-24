@@ -4,6 +4,11 @@
 
 ### Changed
 
+- **Breaking — `Watchable<A>` takes only the type it reads.** A reader that
+  maps a raw value extends `MappedWatchable<Raw, Mapped>` and implements
+  `fetchRaw`/`produceRaw` in place of `fetch`/`produce`. A type written
+  `Watchable<Raw, Mapped>` becomes `Watchable<Mapped>`
+
 - **Breaking — a filled address lists the server's `.local` name whenever the
   user has it enabled, and `utils.mdnsResolvable` is removed.** `.local` was
   left out while no LAN IP on its gateways was enabled, which dropped it
@@ -132,8 +137,9 @@
 - **`Watchable.combine(effects, [a, b], map?, eq?)` builds one reader from
   several.** Its raw value is the tuple of the sources' values, and `map`/`eq`
   work as on any reader: it emits when `map`'s result differs from the last by
-  `eq`. It returns a `WatchSource<Mapped>`, the reader interface every
-  `Watchable` implements, and any `Watchable` is a source
+  `eq`. `Watchable.from(effects, source, eq?)` makes a reader of a single
+  source. A source is any `WatchSource` (`once()` and `watch(abort)`), which
+  every `Watchable` is
 
 - **`sdk.setupPrimaryUrl()` replaces the hand-rolled "Set Primary URL" action
   and watcher.** Give it the interface the URL belongs to, a reader for the
