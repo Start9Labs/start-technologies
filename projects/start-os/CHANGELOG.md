@@ -15,6 +15,9 @@ for the detail behind its highlights.
 - **IPv4 public domains work on servers with IPv6 disabled.** StartOS sets up
   the IPv4 reply path for source-preserving TLS routing on those servers.
 
+- **An update's loading indicator stays on the service being updated** when you
+  switch registries in the Updates tab.
+
 ### Added
 
 - **UEFI installations carry a standard fallback bootloader.** StartOS remains

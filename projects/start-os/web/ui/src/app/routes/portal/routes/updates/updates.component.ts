@@ -115,7 +115,7 @@ interface UpdatesData {
               packages | filterUpdates: data()?.localPkgs : data()?.hidden;
               as updates
             ) {
-              @for (pkg of updates; track $index) {
+              @for (pkg of updates; track pkg.id) {
                 <updates-item
                   [item]="pkg"
                   [local]="data()?.localPkgs?.[pkg.id]!"
