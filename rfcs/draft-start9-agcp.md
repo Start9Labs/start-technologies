@@ -82,7 +82,7 @@ informative:
 This document defines the Authenticated Gateway Control Protocol (AGCP),
 with which a host asks the gateway it sits behind to provision inbound
 reachability and filtering for the host's own addresses: port mappings,
-TLS hostname routes on shared ports, IPv6 firewall pinholes, and
+SNI routes on shared ports, IPv6 firewall pinholes, and
 source-address filters. Hosts enroll with the gateway under a public-key
 identity carried in mutually authenticated TLS, and every grant a host holds
 is confined to addresses the gateway attributes to that host. Commands are
@@ -116,7 +116,7 @@ Address-based identity was never sound: a forged request can expose
 another host's services to the Internet, or remove the mappings that host
 depends on. It persisted because no deployable alternative existed. Each
 capability built on it extends what a forged request can do: hostname
-routes on shared ports, IPv6 pinholes, and filters that make a host
+SNI routes on shared ports, IPv6 pinholes, and filters that make a host
 unreachable to chosen peers. Nor can it express a capability an operator
 grants to a specific host rather than to whatever occupies an address.
 Past a point, extending that surface costs more than self-provisioning
@@ -177,8 +177,8 @@ Owned address:
 : an address the gateway attributes to a binding ({{ownership}}).
 
 Grant:
-: state a host holds on the gateway: a mapping ({{mappings}}), a route
-({{routes}}), a pinhole ({{pinholes}}), or a filter ({{filters}}). Each
+: state a host holds on the gateway: a mapping ({{mappings}}), an SNI
+route ({{sni-routes}}), a pinhole ({{pinholes}}), or a filter ({{filters}}). Each
 grant has a lease ({{leases}}).
 
 Epoch:
@@ -199,7 +199,7 @@ This section is informative.
    AGCP and has no enrolled identity, the gateway enrolls the presented
    identity (trust on first use), records it, and releases any PCP or UPnP
    mappings the binding held. The host pins the gateway's identity.
-4. The host provisions grants with `mapping.set`, `route.set`,
+4. The host provisions grants with `mapping.set`, `sni-route.set`,
    `pinhole.set`, and `filter.set`, each targeting an owned address and
    carrying a lease, and renews them before expiry.
 5. The host follows `event.wait` to learn of external address changes,
@@ -451,7 +451,7 @@ caller.
 
 `limits`:
 : an object with `maxLifetime` (seconds), `maxBatch`, and the per-kind
-quotas `maxMappings`, `maxRoutes`, `maxPinholes`, and `maxFilters`.
+quotas `maxMappings`, `maxSniRoutes`, `maxPinholes`, and `maxFilters`.
 
 ## enrollment.enroll {#m-enroll}
 
@@ -517,25 +517,25 @@ and `epoch`.
 
 An external port range held by a mapping of another enrollment, or by
 another protocol's mapping on the gateway, is unavailable. A mapping on an
-external port that also carries routes is that port's fallback mapping
-({{routes}}).
+external port that also carries SNI routes is that port's fallback
+mapping ({{sni-routes}}).
 
 ### mapping.remove
 
 Parameters: `id`. Result: an empty object.
 
-## Routes {#routes}
+## SNI Routes {#sni-routes}
 
-A route binds one or more TLS server names, on a shared external port, to
+An SNI route binds one or more TLS server names, on a shared external port, to
 an owned address. The gateway demultiplexes inbound connections on that
 port by the server name in the TLS ClientHello, with the semantics that
 {{PCP-HOSTNAME}} defines for hostname bindings: its rules for hostname
 syntax and matching, wildcards, conflicts, TCP and QUIC demultiplexing,
-the fallback mapping, and source address preservation apply, with a route
+the fallback mapping, and source address preservation apply, with an SNI route
 in the role of a hostname binding and a mapping ({{mappings}}) in the
 role of the fallback mapping.
 
-### route.set
+### sni-route.set
 
 Parameters:
 
@@ -560,7 +560,7 @@ require the `sni-route-wildcard` capability.
 : the external address; required when the gateway has more than one.
 
 `externalPort`:
-: the external port. Routes are never moved to another external port.
+: the external port. SNI routes are never moved to another external port.
 
 `lifetime`:
 : the requested lease in seconds.
@@ -569,9 +569,9 @@ Result: `id`, `externalAddress`, `externalPort`, `lifetime`, and `epoch`.
 
 If any name is held on the same external address, port, and protocol by
 another enrollment, the call fails with HOSTNAME_TAKEN and no part of the
-route is created or changed.
+SNI route is created or changed.
 
-### route.remove
+### sni-route.remove
 
 Parameters: `id`. Result: an empty object.
 
@@ -661,9 +661,9 @@ apply them to traffic that does not transit it.
   none of them is dropped, as with PCP's FILTER option. Deny takes
   precedence over allow.
 - On creating a deny filter, the gateway SHOULD terminate established
-  flows it matches, including connections it relays for routes.
+  flows it matches, including connections it relays for SNI routes.
 - On a demultiplexed port, the gateway evaluates the filters of the
-  enrollment whose route (or fallback mapping) the connection selects,
+  enrollment whose SNI route (or fallback mapping) the connection selects,
   before forwarding any data to the host.
 
 A filter never affects traffic toward any address other than the
@@ -675,7 +675,7 @@ Parameters: `id`. Result: an empty object.
 
 ## grant.list
 
-Parameters: `kind` (optional), one of `"mapping"`, `"route"`, `"pinhole"`,
+Parameters: `kind` (optional), one of `"mapping"`, `"sni-route"`, `"pinhole"`,
 or `"filter"`. Result: `epoch`, and `grants`, an array of objects each
 carrying `kind`, the parameters of the grant's most recent `*.set` call,
 the external values granted, and `remaining`, its remaining lease in
@@ -820,7 +820,7 @@ Resource exhaustion:
 : Gateways bound per-enrollment state through the quotas of {{quotas}},
 and SHOULD bound concurrent connections, pending enrollments, and
 concurrent `event.wait` calls per binding. The resource considerations
-of {{PCP-HOSTNAME}} apply to routes.
+of {{PCP-HOSTNAME}} apply to SNI routes.
 
 Server names:
 : Server names received in ClientHellos are untrusted input and are
@@ -902,8 +902,8 @@ client-certificate support is universal among TLS libraries.
 
 # Example {#example}
 
-This section is informative. A host enrolls, maps TCP port 8333, routes a
-hostname on the shared port 443, and denies a prefix, on a gateway that
+This section is informative. A host enrolls, maps TCP port 8333, adds an SNI
+route for a hostname on the shared port 443, and denies a prefix, on a gateway that
 does not support deny filters. Each block shows a request body followed by
 its response body.
 
@@ -919,7 +919,7 @@ its response body.
 [{"jsonrpc": "2.0", "id": 2, "method": "mapping.set",
   "params": {"id": "bitcoin", "protocol": "tcp", "internalPort": 8333,
              "externalPort": 8333, "lifetime": 3600}},
- {"jsonrpc": "2.0", "id": 3, "method": "route.set",
+ {"jsonrpc": "2.0", "id": 3, "method": "sni-route.set",
   "params": {"id": "web", "protocol": "tcp",
              "hostnames": ["cloud.example.com"],
              "internalPort": 443, "externalPort": 443, "lifetime": 3600}},
