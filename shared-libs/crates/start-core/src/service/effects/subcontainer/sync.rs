@@ -175,8 +175,8 @@ impl ExecParams {
             if let Some((k, v)) = line.split_once("=") {
                 needs_home &= k != "HOME";
                 cmd.env(k, v);
-            } else {
-                tracing::warn!("Invalid line in env: {line}");
+            } else if !line.is_empty() {
+                cmd.env_remove(line);
             }
         };
         if let Some(f) = env_file {
