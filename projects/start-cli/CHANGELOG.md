@@ -16,6 +16,11 @@ or the CLI's externally observable behavior.
 - **`s9pk edit add-image` enables CPU emulation by default** when the server uses
   another architecture. Use `--no-emulation` for images that require a native architecture.
 
+### Fixed
+
+- **`s9pk pack` and `s9pk edit add-image` accept a Docker image that declares no `CMD` or
+  `ENTRYPOINT`.**
+
 ## [2.1.0]
 
 ### Added
@@ -43,8 +48,6 @@ or the CLI's externally observable behavior.
   target when Linux reorders disk names.
 
 ### Fixed
-
-- **`s9pk pack` accepts images that contain binaries without a default Docker command.** Package authors can pin these images directly and name the service binary in their daemon configuration.
 
 - **The notice that `start-cli` is behind the published release is given only when the workspace's
   `start-technologies` checkout is on `live-docs`.**

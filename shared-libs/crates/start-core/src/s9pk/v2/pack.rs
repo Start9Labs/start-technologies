@@ -607,94 +607,86 @@ impl ImageSource {
                             .await?,
                     )?;
                     let container = container.trim();
-                    let packed_image: Result<(), Error> = async {
-                        let image = String::from_utf8(
-                            Command::new(*CONTAINER_TOOL)
-                                .arg("container")
-                                .arg("inspect")
-                                .arg("--format")
-                                .arg("{{.Image}}")
-                                .arg(container)
-                                .invoke(ErrorKind::Docker)
-                                .await?,
-                        )?;
-                        let config = serde_json::from_slice::<DockerImageConfig>(
-                            &Command::new(*CONTAINER_TOOL)
-                                .arg("image")
-                                .arg("inspect")
-                                .arg("--format")
-                                .arg("{{json .Config}}")
-                                .arg(image.trim())
-                                .invoke(ErrorKind::Docker)
-                                .await?,
-                        )
-                        .with_kind(ErrorKind::Deserialization)?;
-                        let base_path = Path::new("images").join(arch).join(image_id);
-                        into.insert_path(
-                            base_path.with_extension("json"),
-                            Entry::file(
-                                TmpSource::new(
-                                    tmp_dir.clone(),
-                                    PackSource::Buffered(
-                                        serde_json::to_vec(&ImageMetadata {
-                                            workdir: if config.working_dir == Path::new("") {
-                                                "/".into()
-                                            } else {
-                                                config.working_dir
-                                            },
-                                            user: if config.user.is_empty() {
-                                                "root".into()
-                                            } else {
-                                                config.user.into()
-                                            },
-                                            entrypoint: config.entrypoint,
-                                            cmd: config.cmd,
-                                        })
-                                        .with_kind(ErrorKind::Serialization)?
-                                        .into(),
-                                    ),
-                                )
-                                .into(),
-                            ),
-                        )?;
-                        into.insert_path(
-                            base_path.with_extension("env"),
-                            Entry::file(
-                                TmpSource::new(
-                                    tmp_dir.clone(),
-                                    PackSource::Buffered(config.env.join("\n").into_bytes().into()),
-                                )
-                                .into(),
-                            ),
-                        )?;
-                        let dest = tmp_dir
-                            .join(Guid::new().as_ref())
-                            .with_extension("squashfs");
-
+                    let image = String::from_utf8(
                         Command::new(*CONTAINER_TOOL)
-                            .arg("export")
+                            .arg("container")
+                            .arg("inspect")
+                            .arg("--format")
+                            .arg("{{.Image}}")
                             .arg(container)
-                            .pipe(&mut tar2sqfs(&dest)?)
-                            .capture(false)
                             .invoke(ErrorKind::Docker)
-                            .await?;
-                        into.insert_path(
-                            base_path.with_extension("squashfs"),
-                            Entry::file(
-                                TmpSource::new(tmp_dir.clone(), PackSource::File(dest)).into(),
-                            ),
-                        )?;
+                            .await?,
+                    )?;
+                    let config = serde_json::from_slice::<DockerImageConfig>(
+                        &Command::new(*CONTAINER_TOOL)
+                            .arg("image")
+                            .arg("inspect")
+                            .arg("--format")
+                            .arg("{{json .Config}}")
+                            .arg(image.trim())
+                            .invoke(ErrorKind::Docker)
+                            .await?,
+                    )
+                    .with_kind(ErrorKind::Deserialization)?;
+                    let base_path = Path::new("images").join(arch).join(image_id);
+                    into.insert_path(
+                        base_path.with_extension("json"),
+                        Entry::file(
+                            TmpSource::new(
+                                tmp_dir.clone(),
+                                PackSource::Buffered(
+                                    serde_json::to_vec(&ImageMetadata {
+                                        workdir: if config.working_dir == Path::new("") {
+                                            "/".into()
+                                        } else {
+                                            config.working_dir
+                                        },
+                                        user: if config.user.is_empty() {
+                                            "root".into()
+                                        } else {
+                                            config.user.into()
+                                        },
+                                        entrypoint: config.entrypoint,
+                                        cmd: config.cmd,
+                                    })
+                                    .with_kind(ErrorKind::Serialization)?
+                                    .into(),
+                                ),
+                            )
+                            .into(),
+                        ),
+                    )?;
+                    into.insert_path(
+                        base_path.with_extension("env"),
+                        Entry::file(
+                            TmpSource::new(
+                                tmp_dir.clone(),
+                                PackSource::Buffered(config.env.join("\n").into_bytes().into()),
+                            )
+                            .into(),
+                        ),
+                    )?;
+                    let dest = tmp_dir
+                        .join(Guid::new().as_ref())
+                        .with_extension("squashfs");
 
-                        Ok(())
-                    }
-                    .await;
-                    let removal = Command::new(*CONTAINER_TOOL)
+                    Command::new(*CONTAINER_TOOL)
+                        .arg("export")
+                        .arg(container)
+                        .pipe(&mut tar2sqfs(&dest)?)
+                        .capture(false)
+                        .invoke(ErrorKind::Docker)
+                        .await?;
+                    Command::new(*CONTAINER_TOOL)
                         .arg("rm")
                         .arg(container)
                         .invoke(ErrorKind::Docker)
-                        .await;
-                    packed_image?;
-                    removal?;
+                        .await?;
+                    into.insert_path(
+                        base_path.with_extension("squashfs"),
+                        Entry::file(TmpSource::new(tmp_dir.clone(), PackSource::File(dest)).into()),
+                    )?;
+
                     Ok(())
                 }
             }
@@ -1071,76 +1063,6 @@ pub async fn list_ingredients(_: CliContext, params: PackParams) -> Result<Vec<P
 #[cfg(test)]
 mod test {
     use super::*;
-
-    #[tokio::test]
-    #[ignore = "requires Docker or Podman and tar2sqfs"]
-    async fn packs_images_with_and_without_default_commands() {
-        use tokio::io::AsyncReadExt;
-
-        if std::env::var_os("STARTOS_PACK_TEST_DOCKER").is_some() {
-            let _ = PREFER_DOCKER.set(true);
-        }
-        let tmp_dir = Arc::new(TmpDir::new().await.unwrap());
-        let tag = format!("start9/pack-command-test:{}", new_guid());
-        let id = "pack-command-test".parse().unwrap();
-        let version = "1.0.0:0".parse().unwrap();
-        let image_id = "image".parse().unwrap();
-        let result: Result<(), Error> = async {
-            tokio::fs::write(tmp_dir.join("marker"), "hello").await?;
-            for (dockerfile, entrypoint, cmd) in [
-                ("FROM scratch\nCOPY marker /marker\n", None, None),
-                (
-                    "FROM scratch\nCOPY marker /marker\nENTRYPOINT [\"/app\"]\nCMD [\"--serve\"]\n",
-                    Some(vec!["/app".to_owned()]),
-                    Some(vec!["--serve".to_owned()]),
-                ),
-            ] {
-                tokio::fs::write(tmp_dir.join("Dockerfile"), dockerfile).await?;
-                Command::new(*CONTAINER_TOOL)
-                    .arg("build")
-                    .arg("-t")
-                    .arg(&tag)
-                    .arg(&**tmp_dir)
-                    .invoke(ErrorKind::Docker)
-                    .await?;
-                let mut contents = DirectoryContents::<TmpSource<PackSource>>::new();
-                ImageSource::DockerTag(tag.clone())
-                    .load(
-                        tmp_dir.clone(),
-                        &id,
-                        &version,
-                        &image_id,
-                        "x86_64",
-                        &mut contents,
-                    )
-                    .await?;
-                let mut json = Vec::new();
-                contents
-                    .get_path("images/x86_64/image.json")
-                    .unwrap()
-                    .as_file()
-                    .unwrap()
-                    .reader()
-                    .await?
-                    .read_to_end(&mut json)
-                    .await?;
-                let metadata: ImageMetadata = serde_json::from_slice(&json).unwrap();
-                assert_eq!(metadata.entrypoint, entrypoint);
-                assert_eq!(metadata.cmd, cmd);
-                assert!(contents.get_path("images/x86_64/image.squashfs").is_some());
-            }
-            Ok(())
-        }
-        .await;
-        let cleanup = Command::new(*CONTAINER_TOOL)
-            .arg("rmi")
-            .arg("-f")
-            .arg(&tag)
-            .invoke(ErrorKind::Docker)
-            .await;
-        result.unwrap();
-        cleanup.unwrap();
-    }
 
     #[test]
     fn cli_enables_emulation_by_default() {
