@@ -436,7 +436,7 @@ Callable without enrollment. No parameters. Result:
 `capabilities`:
 : an array of strings naming the optional features the gateway supports:
 `"mapping-port-range"`, `"pinhole"`, `"pinhole-port-translation"`,
-`"route-tcp"`, `"route-quic"`, `"route-wildcard"`, `"filter-deny"`,
+`"sni-route-tcp"`, `"sni-route-quic"`, `"sni-route-wildcard"`, `"filter-deny"`,
 `"filter-allow"`. The methods of {{mappings}} and {{events}} are
 mandatory and are not listed.
 
@@ -543,12 +543,12 @@ Parameters:
 : the grant identifier.
 
 `protocol`:
-: `"tcp"`, or `"udp"` for QUIC, which requires the `route-quic`
+: `"tcp"`, or `"udp"` for QUIC, which requires the `sni-route-quic`
 capability.
 
 `hostnames`:
 : a non-empty array of server names. Names with a leading `*` label
-require the `route-wildcard` capability.
+require the `sni-route-wildcard` capability.
 
 `internalAddress` (optional):
 : as for `mapping.set`.
