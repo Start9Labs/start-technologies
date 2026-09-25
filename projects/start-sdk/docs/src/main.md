@@ -565,7 +565,7 @@ await appSub.execFail(['pg_restore', '-U', user, '-d', database, dumpFile], {
 Opt out whenever the runtime is set by something you cannot bound: the size of the data, the speed of a disk or backup target, or another process you are waiting on. Keep the default for commands that should answer promptly, where the timeout is what stops a wedged container from hanging the service.
 
 > [!NOTE]
-> On timeout the SDK sends `SIGKILL` to the process it spawned and reports `timed out after <n>ms and was killed with SIGKILL`; `exec()`'s result carries `timedOutAfter`, set to the limit that elapsed. The command itself runs inside the subcontainer and is not signalled — it stops when the subcontainer is torn down, so treat a timeout as "the SDK stopped waiting", not "the work stopped".
+> On timeout the SDK sends `SIGKILL` to the process it spawned and reports `timed out after <n>ms and was killed with SIGKILL`; `exec()`'s result carries `timedOutAfter`, set to the limit that elapsed. StartOS also kills the command running inside the subcontainer when its exec wrapper dies. A command that starts independent background processes must still manage their lifetime itself. A command terminated by `SIGTERM` reports a failure rather than success.
 
 ## PostgreSQL Sidecar
 

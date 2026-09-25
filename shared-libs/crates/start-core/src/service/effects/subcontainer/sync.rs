@@ -1,6 +1,7 @@
 use std::ffi::{OsStr, OsString, c_int};
 use std::fs::File;
 use std::io::{BufRead, BufReader, IsTerminal, Read};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio};
@@ -126,8 +127,64 @@ pub struct ExecParams {
     #[arg(trailing_var_arg = true, help = "help.arg.command-to-execute")]
     command: Vec<OsString>,
 }
+fn open_parent_pidfd() -> Result<OwnedFd, Error> {
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, libc::getpid(), 0) } as RawFd;
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+    let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFD) };
+    if flags < 0
+        || unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, flags & !libc::FD_CLOEXEC) } < 0
+    {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    Ok(fd)
+}
+
+fn arm_parent_death(fd: RawFd) -> std::io::Result<()> {
+    if unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut poll_fd = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    loop {
+        let ready = unsafe { libc::poll(&mut poll_fd, 1, 0) };
+        if ready < 0 {
+            let error = std::io::Error::last_os_error();
+            if error.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error);
+        }
+        if ready > 0 {
+            if poll_fd.revents & libc::POLLIN != 0 {
+                unsafe { libc::_exit(1) };
+            }
+            return Err(std::io::Error::from_raw_os_error(libc::EBADF));
+        }
+        break;
+    }
+    if unsafe { libc::close(fd) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Parser)]
+#[group(skip)]
+pub struct ExecCommandParams {
+    #[arg(long, hide = true)]
+    parent_pidfd: RawFd,
+    #[command(flatten)]
+    params: ExecParams,
+}
+
 impl ExecParams {
-    fn exec(&self) -> Result<(), Error> {
+    fn exec(&self, parent_pidfd: Option<RawFd>) -> Result<(), Error> {
         let ExecParams {
             env,
             env_file,
@@ -262,6 +319,9 @@ impl ExecParams {
                 // /proc/self/fd/* is owned by the current uid and
                 // /dev/stderr works for the target user.
                 libc::prctl(libc::PR_SET_DUMPABLE, 1, 0, 0, 0);
+                if let Some(fd) = parent_pidfd {
+                    arm_parent_death(fd)?;
+                }
                 Ok(())
             });
         }
@@ -647,7 +707,7 @@ pub fn launch_init(_: ContainerCliContext, params: ExecParams) -> Result<(), Err
         }
         std::process::exit(0)
     } else {
-        params.exec()
+        params.exec(None)
     }
 }
 
@@ -788,11 +848,16 @@ pub fn exec(
     )
     .with_ctx(|_| (ErrorKind::Filesystem, "set ipc ns"))?;
 
+    let parent_pidfd = open_parent_pidfd()?;
+
     if tty {
         use pty_process::blocking as pty_process;
         let (pty, pts) = pty_process::open().with_kind(ErrorKind::Filesystem)?;
         let mut cmd = pty_process::Command::new("/usr/bin/start-container");
-        cmd = cmd.arg("subcontainer").arg("exec-command");
+        cmd = cmd
+            .arg("subcontainer")
+            .arg("exec-command")
+            .arg(format!("--parent-pidfd={}", parent_pidfd.as_raw_fd()));
         for env in env {
             cmd = cmd.arg("-e").arg(env);
         }
@@ -850,7 +915,9 @@ pub fn exec(
         }
     } else {
         let mut cmd = StdCommand::new("/usr/bin/start-container");
-        cmd.arg("subcontainer").arg("exec-command");
+        cmd.arg("subcontainer")
+            .arg("exec-command")
+            .arg(format!("--parent-pidfd={}", parent_pidfd.as_raw_fd()));
         for env in env {
             cmd.arg("-e").arg(env);
         }
@@ -875,7 +942,7 @@ pub fn exec(
             .with_ctx(|_| (ErrorKind::Filesystem, "waiting on child process"))?;
         if let Some(code) = exit.code() {
             std::process::exit(code);
-        } else if exit.success() || exit.signal() == Some(15) {
+        } else if exit.success() {
             Ok(())
         } else {
             Err(Error::new(
@@ -886,8 +953,103 @@ pub fn exec(
     }
 }
 
-pub fn exec_command(_: ContainerCliContext, params: ExecParams) -> Result<(), Error> {
-    params.exec()
+pub fn exec_command(
+    _: ContainerCliContext,
+    ExecCommandParams {
+        parent_pidfd,
+        params,
+    }: ExecCommandParams,
+) -> Result<(), Error> {
+    params.exec(Some(parent_pidfd))
+}
+
+#[cfg(test)]
+mod exec_parent_tests {
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    #[test]
+    fn exec_command_accepts_hidden_pidfd_before_the_command() {
+        use clap::Parser;
+
+        let parsed = ExecCommandParams::try_parse_from([
+            "exec-command",
+            "--parent-pidfd=7",
+            "--user",
+            "1000",
+            "/rootfs",
+            "echo",
+            "--literal-argument",
+        ])
+        .unwrap();
+        assert_eq!(parsed.parent_pidfd, 7);
+        assert_eq!(parsed.params.user.as_deref(), Some("1000"));
+        assert_eq!(parsed.params.command[1], "--literal-argument");
+    }
+
+    #[test]
+    fn dead_parent_is_rejected_before_exec() {
+        let mut parent = StdCommand::new("true").spawn().unwrap();
+        let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, parent.id(), 0) } as RawFd;
+        assert!(fd >= 0);
+        let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+        parent.wait().unwrap();
+
+        let mut command = StdCommand::new("true");
+        unsafe { command.pre_exec(move || arm_parent_death(fd.as_raw_fd())) };
+        assert_eq!(command.status().unwrap().code(), Some(1));
+    }
+
+    #[test]
+    fn wrapper_process() {
+        let Ok(path) = std::env::var("STARTOS_EXEC_TEST_PID_PATH") else {
+            return;
+        };
+        let fd = open_parent_pidfd().unwrap();
+        let mut child = StdCommand::new("sleep");
+        child.arg("30");
+        unsafe { child.pre_exec(move || arm_parent_death(fd.as_raw_fd())) };
+        let mut child = child.spawn().unwrap();
+        std::fs::write(path, child.id().to_string()).unwrap();
+        child.wait().unwrap();
+    }
+
+    #[test]
+    fn killing_wrapper_kills_exec_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_path = dir.path().join("command-pid");
+        let mut wrapper = StdCommand::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "service::effects::subcontainer::sync::exec_parent_tests::wrapper_process",
+            ])
+            .env("STARTOS_EXEC_TEST_PID_PATH", &pid_path)
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let pid = loop {
+            if let Ok(pid) = std::fs::read_to_string(&pid_path) {
+                break pid.parse::<i32>().unwrap();
+            }
+            assert!(Instant::now() < deadline, "wrapper did not start command");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        wrapper.kill().unwrap();
+        wrapper.wait().unwrap();
+        while Instant::now() < deadline {
+            let state = std::fs::read_to_string(format!("/proc/{pid}/stat"));
+            if state.as_ref().map_or(true, |s| {
+                s.split_once(") ")
+                    .is_some_and(|(_, rest)| rest.starts_with('Z'))
+            }) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+        panic!("command survived its wrapper");
+    }
 }
 
 /// Wrap a child process so that its stdout/stderr are always pipes, even when

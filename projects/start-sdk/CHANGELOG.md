@@ -185,6 +185,10 @@
 
 ### Fixed
 
+- **Timed-out `SubContainer.exec` commands stop running inside the subcontainer**
+  on StartOS 0.4.0.2 when their exec wrapper is killed. Background processes
+  started by the command remain the package's responsibility.
+
 - **Reactive init re-runs receive `kind: null`** after the initial install,
   update, or restore pass. Lifecycle-only work guarded by `kind` runs once for
   that event, even when a watched value changes.

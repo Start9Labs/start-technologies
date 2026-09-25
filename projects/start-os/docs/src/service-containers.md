@@ -45,7 +45,7 @@ start-cli package attach <PACKAGE> -n <SUBCONTAINER> -u <USER> -- <COMMAND>
 
 An image without `/etc/passwd` runs commands as root with `HOME=/`. If it has no shell either, give the binary's absolute path after `--`.
 
-Type `exit` or press `Ctrl+D` to return to the host.
+Type `exit` or press `Ctrl+D` to return to the host. If an attached command's exec wrapper is killed, StartOS kills that command inside the subcontainer as well. A command that starts independent background processes must manage their lifetime itself.
 
 ## Accessing the LXC Container
 
