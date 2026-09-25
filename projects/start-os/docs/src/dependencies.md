@@ -13,7 +13,7 @@ StartOS lists required dependencies from the package as soon as it initializes t
 
 ## Configuring Dependencies
 
-Some dependencies need to be configured to work with the services that depend on them. When this is the case, a [task](tasks.md) will appear on the dashboard guiding you through the necessary steps. These tasks often link directly to an [action](actions.md) on the dependency, with form fields pre-filled to simplify configuration. When a service stops using an optional dependency, its tasks for that dependency disappear.
+Some dependencies need to be configured to work with the services that depend on them. When this is the case, a [task](tasks.md) will appear on the dashboard guiding you through the necessary steps. These tasks often link directly to an [action](actions.md) on the dependency, with form fields pre-filled to simplify configuration. While a service is not using an optional dependency, its tasks for that dependency are hidden and do not prevent it from starting.
 
 ## Service Communication
 

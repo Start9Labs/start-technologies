@@ -28,6 +28,17 @@ export function getManifest(pkg: PackageDataEntry): T.Manifest {
     : pkg.stateInfo.manifest!
 }
 
+/** Tasks on the package itself or a current dependency, keyed by replay ID. */
+export function getLiveTasks(pkg: PackageDataEntry): [string, T.TaskEntry][] {
+  const { id } = getManifest(pkg)
+  return Object.entries(pkg.tasks).filter(
+    (entry): entry is [string, T.TaskEntry] =>
+      !!entry[1] &&
+      (entry[1].task.packageId === id ||
+        entry[1].task.packageId in pkg.currentDependencies),
+  )
+}
+
 export function isInstalled(
   pkg: PackageDataEntry,
 ): pkg is PackageDataEntry<InstalledState> {

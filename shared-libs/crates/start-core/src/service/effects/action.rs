@@ -361,7 +361,13 @@ async fn create_task(
                     None => true,
                 },
             };
-            if active && task.severity == TaskSeverity::Critical {
+            if active
+                && task.severity == TaskSeverity::Critical
+                && pde
+                    .as_current_dependencies()
+                    .de()?
+                    .is_task_target(src_id, &task.package_id)
+            {
                 pde.as_status_info_mut().stop()?;
             }
             pde.as_tasks_mut()

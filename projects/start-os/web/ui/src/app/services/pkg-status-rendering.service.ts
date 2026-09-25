@@ -1,6 +1,7 @@
 import { i18nKey } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
+import { getLiveTasks } from 'src/app/utils/get-package-data'
 
 export const INACTIVE_STATUSES: PrimaryStatus[] = [
   'installing',
@@ -67,15 +68,16 @@ export function getInstalledBaseStatus(statusInfo: T.StatusInfo): BaseStatus {
   return statusInfo.desired.main
 }
 
-export function getInstalledPrimaryStatus({
-  tasks,
-  statusInfo,
-}: T.PackageDataEntry): PrimaryStatus {
-  const base = getInstalledBaseStatus(statusInfo)
+export function getInstalledPrimaryStatus(
+  pkg: PackageDataEntry,
+): PrimaryStatus {
+  const base = getInstalledBaseStatus(pkg.statusInfo)
 
   if (
     !INACTIVE_STATUSES.includes(base) &&
-    Object.values(tasks).some(t => t.active && t.task.severity === 'critical')
+    getLiveTasks(pkg).some(
+      ([_, t]) => t.active && t.task.severity === 'critical',
+    )
   ) {
     return 'task-required'
   }

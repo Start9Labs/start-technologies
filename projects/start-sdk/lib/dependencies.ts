@@ -177,13 +177,13 @@ export class Dependencies<Ids extends string = never> implements InitScript {
     let ready = false
     let published: DependencyRequirement[] | null = null
     let lastPublish = Promise.resolve()
-    const publish = (force = false) => {
+    const publish = () => {
       const next = lastPublish.then(async () => {
         const dependencies = this.entries.flatMap(entry => {
           const requirement = active.get(entry.id)
           return requirement ? [requirement] : []
         })
-        if (!force && deepEqual(published, dependencies)) return
+        if (deepEqual(published, dependencies)) return
         await effects.setDependencies({ dependencies })
         published = dependencies
       })
@@ -218,10 +218,7 @@ export class Dependencies<Ids extends string = never> implements InitScript {
           await runReactiveInit(
             effects,
             `dependency_${entry.id}_init_${index}`,
-            async (child, runKind, runProgress) => {
-              await handler.init(child, runKind, runProgress)
-              if (gen !== generation) await publish(true)
-            },
+            handler,
             initKind,
             initProgress,
             () => gen === generation,

@@ -4,7 +4,6 @@ use tracing::instrument;
 use ts_rs::TS;
 
 use crate::context::RpcContext;
-use crate::db::model::package::TaskSeverity;
 use crate::prelude::*;
 use crate::{Error, PackageId};
 
@@ -39,13 +38,7 @@ pub async fn start(ctx: RpcContext, StartParams { id, force }: StartParams) -> R
                 .as_package_data_mut()
                 .as_idx_mut(&id)
                 .or_not_found(&id)?;
-            if !force
-                && entry
-                    .as_tasks()
-                    .de()?
-                    .into_iter()
-                    .any(|(_, t)| t.active && t.task.severity == TaskSeverity::Critical)
-            {
+            if !force && entry.has_blocking_task(&id)? {
                 return Err(Error::new(
                     eyre!("{}", t!("control.start-critical-task", id = id)),
                     ErrorKind::InvalidRequest,

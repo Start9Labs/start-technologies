@@ -233,10 +233,14 @@ impl Handler<RunAction> for ServiceActor {
             .ctx
             .db
             .mutate(|db| {
-                for (_, pde) in db.as_public_mut().as_package_data_mut().as_entries_mut()? {
+                for (id, pde) in db.as_public_mut().as_package_data_mut().as_entries_mut()? {
                     if pde.as_tasks_mut().mutate(|tasks| {
                         Ok(update_tasks(tasks, &package_id, action_id, &input, true))
-                    })? {
+                    })? && pde
+                        .as_current_dependencies()
+                        .de()?
+                        .is_task_target(&id, &package_id)
+                    {
                         pde.as_status_info_mut().stop()?;
                     }
                 }

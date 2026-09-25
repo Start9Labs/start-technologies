@@ -440,6 +440,12 @@ impl CurrentDependencies {
         self
     }
 }
+impl CurrentDependencies {
+    /// Whether tasks on the target count against the owning package.
+    pub fn is_task_target(&self, owner: &PackageId, target: &PackageId) -> bool {
+        target == owner || self.0.contains_key(target)
+    }
+}
 impl Map for CurrentDependencies {
     type Key = PackageId;
     type Value = CurrentDependencyInfo;
@@ -474,6 +480,18 @@ pub enum CurrentDependencyKind {
         #[ts(type = "string[]")]
         health_checks: BTreeSet<HealthCheckId>,
     },
+}
+
+impl Model<PackageDataEntry> {
+    /// Whether an active critical task on the package or a current dependency blocks starting.
+    pub fn has_blocking_task(&self, id: &PackageId) -> Result<bool, Error> {
+        let deps = self.as_current_dependencies().de()?;
+        Ok(self.as_tasks().de()?.into_values().any(|t| {
+            t.active
+                && t.task.severity == TaskSeverity::Critical
+                && deps.is_task_target(id, &t.task.package_id)
+        }))
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS, HasModel)]

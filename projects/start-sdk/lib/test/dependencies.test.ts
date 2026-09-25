@@ -251,36 +251,6 @@ test('multiple inits of one dependency react independently', async () => {
   expect(setDependencies).toHaveBeenCalledTimes(1)
 })
 
-test('an init finishing after disablement republishes', async () => {
-  const { effects, children, setDependencies } = mockEffects()
-  let enabled = true
-  let release!: () => void
-  const blocked = new Promise<void>(resolve => (release = resolve))
-  let calls = 0
-  const init = jest.fn(async () => {
-    if (++calls === 2) await blocked
-  })
-  const dependencies = Dependencies.of().addDependency(
-    Dependency.optional('lnd', {
-      description: null,
-      metadata: { title: 'LND', icon: 'https://example.com/icon.png' },
-      versionRange: '*',
-      kind: 'exists',
-      enabled: async () => enabled,
-    }).withInit(init),
-  )
-  await dependencies.init(effects)
-  const rerun = retry(children.get('dependency_lnd_init_0')!)
-  await new Promise(resolve => setImmediate(resolve))
-  enabled = false
-  await retry(children.get('dependency_lnd_enabled')!)
-  expect(setDependencies).toHaveBeenCalledTimes(2)
-  release()
-  await rerun
-  expect(setDependencies).toHaveBeenCalledTimes(3)
-  expect(setDependencies).toHaveBeenLastCalledWith({ dependencies: [] })
-})
-
 test('a watched value inside one init only reruns that init', async () => {
   const { effects, children, setDependencies } = mockEffects()
   let value = 0

@@ -29,8 +29,7 @@ use url::Url;
 
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::package::{
-    InstalledState, ManifestPreference, PackageState, PackageStateMatchModelRef, TaskSeverity,
-    UpdatingState,
+    InstalledState, ManifestPreference, PackageState, PackageStateMatchModelRef, UpdatingState,
 };
 use crate::disk::mount::filesystem::ReadOnly;
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
@@ -351,13 +350,8 @@ impl Service {
                         })?;
                     }
                 }
-                for (_, pde) in db.as_public_mut().as_package_data_mut().as_entries_mut()? {
-                    if pde
-                        .as_tasks()
-                        .de()?
-                        .into_iter()
-                        .any(|(_, t)| t.active && t.task.severity == TaskSeverity::Critical)
-                    {
+                for (id, pde) in db.as_public_mut().as_package_data_mut().as_entries_mut()? {
+                    if pde.has_blocking_task(&id)? {
                         pde.as_status_info_mut().stop()?;
                     }
                 }
@@ -737,7 +731,7 @@ impl Service {
                     .as_idx_mut(&manifest.id)
                     .or_not_found(&manifest.id)?;
                 let actions = entry.as_actions().keys()?;
-                if entry.as_tasks_mut().mutate(|t| {
+                entry.as_tasks_mut().mutate(|t| {
                     t.retain(|id, v| {
                         v.task.package_id != manifest.id
                             || if actions.contains(&v.task.action_id) {
@@ -753,9 +747,9 @@ impl Service {
                                 false
                             }
                     });
-                    Ok(t.iter()
-                        .any(|(_, t)| t.active && t.task.severity == TaskSeverity::Critical))
-                })? {
+                    Ok(())
+                })?;
+                if entry.has_blocking_task(&manifest.id)? {
                     entry.as_status_info_mut().stop()?;
                 }
                 entry

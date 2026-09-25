@@ -59,7 +59,7 @@ await sdk.action.createOwnTask(effects, manageSmtp, 'important', {
 
 ## Dependency Tasks
 
-Use `sdk.action.createTask()` to prompt the user to run an action on a dependency service. The action must be imported from the dependency's package. StartOS clears these tasks when the dependency is no longer among the service's current dependencies, such as when an optional dependency is disabled.
+Use `sdk.action.createTask()` to prompt the user to run an action on a dependency service. The action must be imported from the dependency's package. While the dependency is not among the service's current dependencies, such as an optional dependency that is disabled, StartOS hides these tasks and a critical one does not prevent the service from starting.
 
 ```typescript
 import { someAction } from 'dependency-package/startos/actions/someAction'

@@ -438,14 +438,13 @@ pub async fn set_dependencies(
                 .as_package_data_mut()
                 .as_idx_mut(id)
                 .or_not_found(id)?;
-            pde.as_tasks_mut().mutate(|tasks| {
-                tasks.retain(|_, entry| {
-                    &entry.task.package_id == id || deps.contains_key(&entry.task.package_id)
-                });
-                Ok(())
-            })?;
-            pde.as_current_dependencies_mut()
-                .ser(&CurrentDependencies(deps))
+            let deps = CurrentDependencies(deps);
+            let blocked = pde.has_blocking_task(id)?;
+            pde.as_current_dependencies_mut().ser(&deps)?;
+            if !blocked && pde.has_blocking_task(id)? {
+                pde.as_status_info_mut().stop()?;
+            }
+            Ok(())
         })
         .await
         .result
