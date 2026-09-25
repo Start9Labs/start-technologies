@@ -1247,6 +1247,23 @@ struct OutboundVpnCreateResponse {
 // traffic silently falls back to the WAN. `vpn-client.set-enabled` holds the
 // other half of that invariant, refusing to disable a VPN that something
 // already chains through.
+//
+// A chained VPN (target ≠ "Internet") additionally needs (InvalidValue):
+//   * an IP-literal Endpoint — only an address can be routed through the target;
+//   * a target tunnel with an address of the endpoint's family whose peer
+//     AllowedIPs cover the endpoint;
+//   * an endpoint address no other VPN shares (checked for every VPN, since a
+//     chain route captures all router traffic to that address).
+// A bracketed IPv6 Endpoint is stored without its brackets.
+//
+// Routing: each chained VPN gets `vcr_<iface>` (endpoint /32 or /128 → target
+// tunnel, main table) plus `vcrb_<iface>`, an `unreachable` route on loopback
+// at metric 2048, so the endpoint is unreachable rather than reached over the
+// WAN while the target is down. A routed chained VPN's interface also gets
+// `nohostroute '1'`: netifd's endpoint host route would otherwise copy the
+// fallback as a unicast route over it. With no MTU in the .conf, a chained
+// VPN gets the chain MTU: the target's MTU (default 1420) less 60 (IPv4
+// endpoint) or 80 (IPv6), floored at 1280.
 ```
 
 ### `vpn-client.update`
@@ -1257,9 +1274,10 @@ struct OutboundVpnUpdateRequest {
     id: String,
     label: String,
     target: String,
-    /// Desired interface MTU (1280–1500). null/absent clears it (inherit the
-    /// kernel default). UCI is the single source of truth — there is no stored
-    /// .conf; the web edit form always submits the field's current value.
+    /// Desired interface MTU (1280–1500). null/absent restores the default:
+    /// the chain MTU for a chained VPN, else the kernel's. UCI is the single
+    /// source of truth — there is no stored .conf; the web edit form always
+    /// submits the field's current value.
     #[serde(default)]
     mtu: Option<u16>,
 }
@@ -1268,9 +1286,10 @@ struct OutboundVpnUpdateRequest {
 // Bounces the WG interface only when the MTU actually changed.
 //
 // Validation: same `target` rules as vpn-client.create, except the disabled
-// check runs ONLY when `target` differs from the stored one — mirroring
-// guard_subnet_collision, so an unrelated edit (label, MTU) isn't blocked by a
-// broken chain already present in the config.
+// and chained-endpoint checks run ONLY when `target` differs from the stored
+// one — mirroring guard_subnet_collision, so an unrelated edit (label, MTU)
+// isn't blocked by a broken chain already present in the config. The cycle
+// check runs after a rename is carried into dependents' targets.
 ```
 
 ### `vpn-client.delete`

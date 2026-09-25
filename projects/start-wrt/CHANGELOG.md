@@ -19,6 +19,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A chained VPN no longer falls back to a single hop.** If the VPN it
+  connects through went down, or had not come up yet after a reboot, a chained
+  VPN reconnected to its server directly over your WAN, showing that provider
+  your home IP while every screen still reported the chain. It now stops until
+  its target is back. Existing chains are protected on the first boot of this
+  version.
+
+- **Outbound VPNs with an IPv6 server address connect.** A config whose
+  `Endpoint` was a bracketed IPv6 address, such as `[2001:db8::1]:51820`,
+  imported without error but its tunnel never came up. Existing VPNs are
+  repaired on the first boot of this version.
+
+- **VPN chaining refuses setups it cannot route.** A VPN can connect through
+  another only when its config's `Endpoint` is an IP address, the target VPN
+  can carry that address (it has an address of the same family and its
+  `AllowedIPs` include it), and no other VPN uses the same server address.
+  Previously these were accepted and the VPN either skipped the chain or could
+  not connect. Renaming a VPN while pointing it at a VPN that connects through
+  it is also refused as a circular chain. A VPN already chained with a
+  hostname `Endpoint` still connects directly; delete it and import a config
+  whose `Endpoint` is an IP address.
+
+- **A VPN connecting through another gets a fitting MTU.** With no MTU in its
+  config, or with the field left blank, it uses its target's MTU less the
+  chained tunnel's headers instead of 1420, avoiding fragmented packets.
+
 - **Publishing a port no longer names the device after its generated label,
   which could stop the router's DHCP server.** Publishing a port to a device
   with no reserved address reserves one; for a device without a name of its

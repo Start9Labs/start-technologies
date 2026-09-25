@@ -96,14 +96,14 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
             <label tuiLabel>{{ 'MTU' | i18n }}</label>
             <input
               tuiInputNumber
-              [placeholder]="'Default (~1420)' | i18n"
+              [placeholder]="'Default' | i18n"
               formControlName="mtu"
             />
           </tui-textfield>
           <tui-error formControlName="mtu" />
           <small class="g-secondary">
             {{
-              'Leave blank to use the default. Lower to 1280 if the VPN connects but requests time out.'
+              'Leave blank to use the default: ~1420, or smaller for a VPN that connects through another. Lower to 1280 if the VPN connects but requests time out.'
                 | i18n
             }}
           </small>
