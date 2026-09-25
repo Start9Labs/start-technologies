@@ -16,7 +16,7 @@ import type {
   InitScriptOrFn,
 } from '@start9labs/start-core/inits/setupInit'
 import { deepEqual } from '@start9labs/start-core/util/deepEqual'
-import type { FullProgressTracker } from '@start9labs/start-core/util/FullProgressTracker'
+import { FullProgressTracker } from '@start9labs/start-core/util/FullProgressTracker'
 
 type Base = {
   description: LocaleString | null
@@ -38,7 +38,7 @@ export class Dependency<Id extends string = string> {
   private narrowing?: (options: {
     effects: Effects
   }) => Promise<Narrowing | null>
-  private readonly inits: { script: InitScript; taskIds: string[] }[] = []
+  private readonly inits: InitScript[] = []
   private enabledFn?: (options: { effects: Effects }) => Promise<boolean>
 
   private constructor(
@@ -75,34 +75,18 @@ export class Dependency<Id extends string = string> {
     return this
   }
 
-  /** Appends an independent reactive init; declared replay IDs are cleared when disabled. */
-  withInit(fn: InitScriptOrFn, taskReplayIds?: string[]) {
-    if (this.optional && !taskReplayIds) {
-      throw new Error(
-        `Optional dependency ${this.id} must declare task replay IDs`,
-      )
-    }
-    this.inits.push({ script: setupOnInit(fn), taskIds: taskReplayIds || [] })
+  /** Appends an independent reactive init, run while the dependency is enabled. */
+  withInit(fn: InitScriptOrFn) {
+    this.inits.push(setupOnInit(fn))
     return this
   }
 
-  private async isEnabled(effects: Effects) {
+  async enabled(effects: Effects): Promise<boolean> {
     return !this.enabledFn || (await this.enabledFn({ effects }))
   }
 
-  initHandlers(): InitScript[] {
-    return this.inits.map(
-      ({ script, taskIds }): InitScript => ({
-        init: async (effects, kind, progress) => {
-          if (!(await this.isEnabled(effects))) {
-            if (taskIds.length)
-              await effects.action.clearTasks({ only: taskIds })
-            return
-          }
-          await script.init(effects, kind, progress)
-        },
-      }),
-    )
+  initHandlers(): readonly InitScript[] {
+    return this.inits
   }
 
   manifestInfo(): Manifest['dependencies'][string] {
@@ -118,8 +102,8 @@ export class Dependency<Id extends string = string> {
     }
   }
 
-  async requirement(effects: Effects): Promise<DependencyRequirement | null> {
-    if (!(await this.isEnabled(effects))) return null
+  /** The runtime requirement while enabled. */
+  async requirement(effects: Effects): Promise<DependencyRequirement> {
     const narrowed = await this.narrowing?.({ effects })
     const baseRange = VersionRange.parse(this.base.versionRange)
     const runtimeRange = narrowed?.versionRange
@@ -190,48 +174,90 @@ export class Dependencies<Ids extends string = never> implements InitScript {
     progress?: FullProgressTracker,
   ): Promise<void> {
     const active = new Map<string, DependencyRequirement>()
-    let initializing = true
+    let ready = false
+    let published: DependencyRequirement[] | null = null
     let lastPublish = Promise.resolve()
-    const publish = () => {
-      const dependencies = this.entries.flatMap(entry => {
-        const requirement = active.get(entry.id)
-        return requirement ? [requirement] : []
+    const publish = (force = false) => {
+      const next = lastPublish.then(async () => {
+        const dependencies = this.entries.flatMap(entry => {
+          const requirement = active.get(entry.id)
+          return requirement ? [requirement] : []
+        })
+        if (!force && deepEqual(published, dependencies)) return
+        await effects.setDependencies({ dependencies })
+        published = dependencies
       })
-      const next = lastPublish.then(() =>
-        effects.setDependencies({ dependencies }),
-      )
       lastPublish = next.then(
         () => {},
         () => {},
       )
       return next
     }
+    const setRequirement = async (
+      id: string,
+      requirement: DependencyRequirement | null,
+    ) => {
+      if (requirement) active.set(id, requirement)
+      else active.delete(id)
+      if (ready) await publish()
+    }
+
+    const starters: (() => Promise<void> | false)[] = []
     for (const entry of this.entries) {
+      let enabled = false
+      let generation = 0
+      let initsStarted = -1
+      const startInits = async (
+        gen: number,
+        initKind: InitKind,
+        initProgress?: FullProgressTracker,
+      ) => {
+        if (gen !== generation || initsStarted === gen) return
+        initsStarted = gen
+        for (const [index, handler] of entry.initHandlers().entries()) {
+          await runReactiveInit(
+            effects,
+            `dependency_${entry.id}_init_${index}`,
+            async (child, runKind, runProgress) => {
+              await handler.init(child, runKind, runProgress)
+              if (gen !== generation) await publish(true)
+            },
+            initKind,
+            initProgress,
+            () => gen === generation,
+          )
+        }
+      }
       await runReactiveInit(
         effects,
-        `dependency_${entry.id}`,
+        `dependency_${entry.id}_enabled`,
         async child => {
-          const requirement = await entry.requirement(child)
-          if (deepEqual(active.get(entry.id) ?? null, requirement)) return
-          if (requirement) active.set(entry.id, requirement)
-          else active.delete(entry.id)
-          if (!initializing) await publish()
+          const next = await entry.enabled(child)
+          if (next === enabled) return
+          enabled = next
+          const gen = ++generation
+          if (!next) return setRequirement(entry.id, null)
+          await runReactiveInit(
+            effects,
+            `dependency_${entry.id}`,
+            async child => {
+              const requirement = await entry.requirement(child)
+              if (gen === generation)
+                await setRequirement(entry.id, requirement)
+            },
+            null,
+            undefined,
+            () => gen === generation,
+          )
+          if (ready) await startInits(gen, null, new FullProgressTracker())
         },
-        kind,
-        progress,
+        null,
       )
-      for (const [index, handler] of entry.initHandlers().entries()) {
-        await runReactiveInit(
-          effects,
-          `dependency_${entry.id}_init_${index}`,
-          handler,
-          kind,
-          progress,
-        )
-      }
+      starters.push(() => enabled && startInits(generation, kind, progress))
     }
-    initializing = false
+    ready = true
     await publish()
+    for (const start of starters) await start()
   }
 
   /** Checks the active runtime requirements. */

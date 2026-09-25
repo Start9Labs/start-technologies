@@ -39,9 +39,9 @@ const lightning = sdk.Dependency.optional('lnd', {
 }).withDynamicNarrowing(async ({ effects }) => ((await config.read(c => c.features).const(effects)).advanced ? { versionRange: '>=0.21:0', kind: 'running', healthChecks: ['lnd'] } : null))
 ```
 
-A dynamic range is intersected with the base. A disjoint range throws; a broader range cannot loosen the published requirement. StartOS applies the same base when an enabled optional dependency is reported through `effects.setDependencies`, including its running status and health checks. `kind` may tighten from `exists` to `running`, and health checks may only be added. Returning `null` keeps the base. `.const(effects)` makes `enabled`, narrowing, and `withInit` reactive. Requirement changes republish the combined list. Each `.withInit` handler has its own effects context, so a watched change reruns only that handler, even when the same dependency has multiple init handlers.
+A dynamic range is intersected with the base. A disjoint range throws; a broader range cannot loosen the published requirement. StartOS applies the same base when an enabled optional dependency is reported through `effects.setDependencies`, including its running status and health checks. `kind` may tighten from `exists` to `running`, and health checks may only be added. Returning `null` keeps the base. `.const(effects)` makes `enabled`, narrowing, and `withInit` reactive, and each has its own effects context. A watched change in `enabled` reruns only `enabled`: the runtime requirements are republished when its result changes, and enabling the dependency reruns its narrowing and init handlers. A watched change in the narrowing republishes the requirements when the result changes. A watched change in a `.withInit` handler reruns only that handler.
 
-Both required and optional dependencies can use `.withInit` to create cross-service tasks. Chain multiple `.withInit` calls to add handlers in order. For optional dependencies, pass `.withInit(handler, ['dependency-id:action-id'])` for **each handler**, listing the task replay IDs that handler creates. When the integration is disabled, each handler clears its own IDs, including after a container restart; enabling it reruns each handler. Initially all handlers run in order before the combined runtime requirements are published. A task created with `sdk.action.createTask` defaults to the replay ID `[package-id]:[action-id]`; specify a different ID in both the task creation and the list if needed.
+Both required and optional dependencies can use `.withInit` to create cross-service tasks. Chain multiple `.withInit` calls to add handlers in order. Handlers run only while the dependency is enabled, after the combined runtime requirements are published. When an optional dependency is disabled, StartOS clears every task the service created on it.
 
 ```typescript
 const bitcoin = sdk.Dependency.required('bitcoind', {
@@ -50,26 +50,23 @@ const bitcoin = sdk.Dependency.required('bitcoind', {
   versionRange: '>=28.4:17',
   kind: 'running',
   healthChecks: ['bitcoind'],
-}).withInit(
-  async effects => {
-    await sdk.action.createTask(effects, 'bitcoind', someAction, 'critical', {
-      input: {
-        kind: 'partial',
-        accept: [
-          {
-            /* matching input */
-          },
-        ],
-        set: {
-          /* prefill */
+}).withInit(async effects => {
+  await sdk.action.createTask(effects, 'bitcoind', someAction, 'critical', {
+    input: {
+      kind: 'partial',
+      accept: [
+        {
+          /* matching input */
         },
+      ],
+      set: {
+        /* prefill */
       },
-      when: { condition: 'input-not-matches', once: false },
-      reason: i18n('Configure Bitcoin for this service'),
-    })
-  },
-  ['bitcoind:some-action'],
-)
+    },
+    when: { condition: 'input-not-matches', once: false },
+    reason: i18n('Configure Bitcoin for this service'),
+  })
+})
 ```
 
 See [Tasks](tasks.md) for action input matching and replay IDs. Importing another package's action or types requires adding its repo to `package.json` and using `"overrides": { "@start9labs/start-sdk": "$@start9labs/start-sdk" }` to avoid a second SDK copy.

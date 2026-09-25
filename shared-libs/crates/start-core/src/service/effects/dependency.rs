@@ -433,11 +433,18 @@ pub async fn set_dependencies(
         .ctx
         .db
         .mutate(|db| {
-            db.as_public_mut()
+            let pde = db
+                .as_public_mut()
                 .as_package_data_mut()
                 .as_idx_mut(id)
-                .or_not_found(id)?
-                .as_current_dependencies_mut()
+                .or_not_found(id)?;
+            pde.as_tasks_mut().mutate(|tasks| {
+                tasks.retain(|_, entry| {
+                    &entry.task.package_id == id || deps.contains_key(&entry.task.package_id)
+                });
+                Ok(())
+            })?;
+            pde.as_current_dependencies_mut()
                 .ser(&CurrentDependencies(deps))
         })
         .await

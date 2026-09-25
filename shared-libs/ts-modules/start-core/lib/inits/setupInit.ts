@@ -41,16 +41,21 @@ export type InitScriptOrFn<Kind extends InitKind = InitKind> =
   | InitScript<Kind>
   | InitFn<Kind>
 
-/** Reruns only this handler when its watched values change; subsequent runs receive a null kind and detached progress. */
+/**
+ * Reruns only this handler when its watched values change; subsequent runs receive a null kind and detached progress.
+ * A run skipped by `active` stops watching and leaves the named context alone.
+ */
 export async function runReactiveInit(
   effects: T.Effects,
   name: string,
   init: InitScriptOrFn,
   kind: InitKind,
   progress?: FullProgressTracker,
+  active: () => boolean = () => true,
 ): Promise<void> {
   let firstRun = true
   const run = async () => {
+    if (!active()) return
     const runKind = firstRun ? kind : null
     const runProgress = firstRun ? progress : new FullProgressTracker()
     firstRun = false

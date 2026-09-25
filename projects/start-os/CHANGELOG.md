@@ -12,7 +12,7 @@ for the detail behind its highlights.
 
 ### Fixed
 
-- **Required service dependencies appear from the package manifest during initialization.** StartOS shows their base version and health requirements even if the service has not reported runtime dependencies; active runtime requirements can tighten the base, including for optional dependencies.
+- **Required service dependencies appear from the package manifest during initialization.** StartOS shows their base version and health requirements even if the service has not reported runtime dependencies; active runtime requirements can tighten the base, including for optional dependencies. When a service stops using an optional dependency, StartOS clears the tasks it created on that dependency.
 
 - **Timed-out or aborted service commands stop running inside their subcontainer.**
   StartOS kills the command when its exec wrapper dies, including during health

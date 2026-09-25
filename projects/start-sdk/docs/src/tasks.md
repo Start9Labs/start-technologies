@@ -59,7 +59,7 @@ await sdk.action.createOwnTask(effects, manageSmtp, 'important', {
 
 ## Dependency Tasks
 
-Use `sdk.action.createTask()` to prompt the user to run an action on a dependency service. The action must be imported from the dependency's package.
+Use `sdk.action.createTask()` to prompt the user to run an action on a dependency service. The action must be imported from the dependency's package. StartOS clears these tasks when the dependency is no longer among the service's current dependencies, such as when an optional dependency is disabled.
 
 ```typescript
 import { someAction } from 'dependency-package/startos/actions/someAction'
@@ -70,26 +70,23 @@ const dependency = sdk.Dependency.required('dependency-id', {
   versionRange: '>=1.0.0:0',
   kind: 'running',
   healthChecks: ['dependency-id'],
-}).withInit(
-  async effects => {
-    await sdk.action.createTask(effects, 'dependency-id', someAction, 'critical', {
-      input: {
-        kind: 'partial',
-        accept: [
-          {
-            /* matching input */
-          },
-        ],
-        set: {
-          /* prefill */
+}).withInit(async effects => {
+  await sdk.action.createTask(effects, 'dependency-id', someAction, 'critical', {
+    input: {
+      kind: 'partial',
+      accept: [
+        {
+          /* matching input */
         },
+      ],
+      set: {
+        /* prefill */
       },
-      when: { condition: 'input-not-matches', once: false },
-      reason: i18n('Configure the dependency for use with this service'),
-    })
-  },
-  ['dependency-id:some-action'],
-)
+    },
+    when: { condition: 'input-not-matches', once: false },
+    reason: i18n('Configure the dependency for use with this service'),
+  })
+})
 
 export const dependencies = sdk.Dependencies.of().addDependency(dependency)
 ```
