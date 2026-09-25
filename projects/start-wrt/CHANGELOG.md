@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Custom DNS works after an update.** On a router using custom system DNS
+  or a profile DNS override, devices could not resolve names after an update
+  until a DNS setting was saved again. DNS lookups over TCP, used for answers
+  too large for UDP, also failed under custom DNS.
+
 - **A published domain typed without `https://` now reaches the published
   service, not the router.** While port 443 is published to a device — by a
   Published Port or a device's hostname routes — plain HTTP at the router's
