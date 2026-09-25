@@ -16,7 +16,7 @@ After unboxing your Start9 router or completing a fresh install, follow these st
 
 1. Confirm the password and click "Set Password".
 
-1. The page will confirm "Setup complete" and normal Internet access will resume. Click "Open router.lan" to continue to [Trust Your Root CA](#trust-your-root-ca). If you set your password in a captive portal popup, open `router.lan` in your regular browser instead — a popup may not be able to download or install a certificate.
+1. The page will confirm "Setup complete" and normal Internet access will resume. Click "Open router.lan" to continue to [Trust Your Root CA](#trust-your-root-ca). If it opens inside the captive portal popup, open `router.lan` in your browser instead to download the certificate.
 
 > [!IMPORTANT]
 > All Internet access is blocked until you set an admin password. If you dismiss the captive portal popup, open any browser and navigate to `router.lan`.
@@ -28,7 +28,7 @@ After unboxing your Start9 router or completing a fresh install, follow these st
 
 To access the web interface securely over HTTPS, download and trust your router's Root Certificate Authority (Root CA).
 
-1. Open `router.lan` in your browser. Until your device trusts the Root CA, the page walks you through downloading it, links to the instructions for your platform, and lets you test the result.
+1. Open `router.lan` in your browser and follow the steps to download your Root CA.
 
 1. Follow the instructions for [Trusting Your Root CA](trust-ca.md) on each device you want to connect to the router's web interface.
 

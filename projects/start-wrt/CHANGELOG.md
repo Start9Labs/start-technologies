@@ -23,14 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Setup ends by sending you to `router.lan`.** After you set the admin
-  password, the confirmation page links to `router.lan` to continue with
-  trusting your Root CA, instead of saying the window can be closed.
+- **Setup ends with a link to `router.lan`.** After you set the admin
+  password, the confirmation page links to `router.lan` to trust your Root
+  CA, instead of saying the window can be closed.
 
-- **The Root CA walkthrough matches StartOS.** The page `router.lan` shows
-  over HTTP links to the instructions for each platform and no longer asks
-  you to bookmark it. The Root CA downloads from `/static/local-root-ca.crt`,
-  the path StartOS uses.
+- **The Root CA walkthrough matches StartOS.** It links to the instructions
+  for each platform and no longer asks you to bookmark the page. The Root CA
+  downloads from `/static/local-root-ca.crt`, the path StartOS uses.
 
 ### Fixed
 

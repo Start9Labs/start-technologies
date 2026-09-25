@@ -6,8 +6,8 @@
 `DownloadHTMLService`, `Exver` (version algebra façade), `SetupLogsService` +
 `provideSetupLogsService(Api)`, `i18nService`/`i18nPipe`/`LocalizePipe` + `I18N_PROVIDERS`,
 `MarkdownComponent`/`MARKDOWN` + `PromptModal`/`PROMPT` (ready `PolymorpheusComponent` dialogs),
-`InitializingComponent`/`LogsWindowComponent`, `CaWizard` (+`CA_TRUST_CHECK`; the
-http-origin Root CA trust walkthrough), `DocsLinkDirective` (+`VERSION`, optional),
+`InitializingComponent`/`LogsWindowComponent`, `CaWizard` (+`CA_TRUST_CHECK`),
+`DocsLinkDirective` (+`VERSION`, optional),
 `SafeLinksDirective`, pipes (`convertBytes`, `empty`, `compareExver`, `leafProgress`,
 `markdown`, `trustUrl`), `RELATIVE_URL` token, `HttpError`/`RpcError`, disk/RPC/http types,
 utils (`convertAnsi`, `formatProgress`, `getPkgId`, `pauseFor`, `@debounce`, `sameUrl`,
