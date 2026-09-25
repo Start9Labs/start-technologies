@@ -824,5 +824,5 @@ export default {
   932: 'Moment!',
   933: 'Ihr Router verwendet seine Root-Zertifizierungsstelle, um SSL/TLS-Zertifikate für sich selbst zu erstellen. Diese Zertifikate werden verwendet, um die Netzwerkverbindung mit Ihren Geräten zu verschlüsseln.',
   934: 'Befolgen Sie die Anweisungen für Ihr Betriebssystem. Wenn Sie Ihrer Root-Zertifizierungsstelle vertrauen, kann Ihr Gerät die Echtheit der verschlüsselten Kommunikation mit Ihrem Router überprüfen.',
-  935: 'Dies müssen Sie auf jedem Gerät wiederholen, mit dem Sie eine Verbindung zum Router herstellen.',
+  935: 'Dies müssen Sie auf jedem Gerät wiederholen, mit dem Sie die StartWRT-Oberfläche aufrufen.',
 } satisfies i18n

@@ -36,7 +36,7 @@ const PRODUCTS = {
   'start-wrt': {
     docs: '/start-wrt/trust-ca.html',
     repeat:
-      'You will need to repeat this on every device you use to connect to your router.',
+      'You will need to repeat this on every device you use to connect to the StartWRT UI.',
     download:
       'Your router uses its Root CA to generate SSL/TLS certificates for itself. These certificates are then used to encrypt network traffic with your client devices.',
     trust:

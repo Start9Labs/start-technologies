@@ -824,5 +824,5 @@ export default {
   932: 'Attendez !',
   933: 'Votre routeur utilise son certificat racine pour générer des certificats SSL/TLS pour lui-même. Ces certificats servent ensuite à chiffrer le trafic réseau avec vos appareils clients.',
   934: 'Suivez les instructions pour votre système d’exploitation. En donnant votre confiance au certificat racine, votre appareil pourra vérifier l’authenticité des communications chiffrées avec votre routeur.',
-  935: 'Vous devrez répéter cette opération sur chaque appareil utilisé pour vous connecter à votre routeur.',
+  935: 'Vous devrez répéter cette opération sur chaque appareil utilisé pour accéder à l’interface de StartWRT.',
 } satisfies i18n
