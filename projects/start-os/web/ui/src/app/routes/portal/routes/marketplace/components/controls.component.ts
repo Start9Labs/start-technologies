@@ -23,7 +23,7 @@ import { hasCurrentDeps } from 'src/app/utils/has-deps'
 
 import { MarketplaceAlertsService } from '../services/alerts.service'
 
-type KEYS = 'id' | 'version' | 'flavor' | 'satisfies'
+type KEYS = 'id' | 'version' | 'flavor' | 'satisfies' | 'preDownloadAlert'
 
 @Component({
   selector: 'marketplace-controls',
@@ -185,7 +185,15 @@ export class MarketplaceControlsComponent {
   }
 
   private async install(url: string) {
-    const { id, version } = this.pkg()
+    const { id, version, preDownloadAlert } = this.pkg()
+    const local = this.localPkg()
+    const sourceVersion = local ? getManifest(local).version : null
+
+    if (
+      !(await this.alerts.alertPreDownload(preDownloadAlert, sourceVersion))
+    ) {
+      return
+    }
 
     this.tasks.run(
       async () => await this.marketplace.installPackage(id, version, url),

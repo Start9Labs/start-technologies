@@ -1,6 +1,12 @@
 import { inject, Injectable } from '@angular/core'
-import { MarketplacePkgBase } from '@start9labs/marketplace'
-import { DialogService, i18nKey, i18nPipe, sameUrl } from '@start9labs/shared'
+import {
+  DialogService,
+  Exver,
+  i18nKey,
+  i18nPipe,
+  sameUrl,
+} from '@start9labs/shared'
+import { T } from '@start9labs/start-core'
 import { defaultIfEmpty, firstValueFrom } from 'rxjs'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 
@@ -11,6 +17,7 @@ export class MarketplaceAlertsService {
   private readonly dialog = inject(DialogService)
   private readonly marketplaceService = inject(MarketplaceService)
   private readonly i18n = inject(i18nPipe)
+  private readonly exver = inject(Exver)
 
   async alertMarketplace(
     url: string,
@@ -38,6 +45,36 @@ export class MarketplaceAlertsService {
         .pipe(defaultIfEmpty(false))
         .subscribe(response => resolve(response))
     })
+  }
+
+  async alertPreDownload(
+    alert: T.PreDownloadAlert | null | undefined,
+    sourceVersion: string | null,
+  ): Promise<boolean> {
+    if (
+      !alert ||
+      !sourceVersion ||
+      !this.exver.satisfies(sourceVersion, alert.when.sourceVersion)
+    ) {
+      return true
+    }
+
+    return firstValueFrom(
+      this.dialog
+        .openConfirm({
+          label: 'Warning',
+          size: 's',
+          data: {
+            content: alert.message
+              .replaceAll('&', '&amp;')
+              .replaceAll('<', '&lt;')
+              .replaceAll('>', '&gt;') as i18nKey,
+            yes: 'Continue',
+            no: 'Cancel',
+          },
+        })
+        .pipe(defaultIfEmpty(false)),
+    )
   }
 
   async alertBreakages(breakages: string[]): Promise<boolean> {

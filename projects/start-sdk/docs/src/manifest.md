@@ -97,6 +97,19 @@ export const manifest = setupManifest({
 | `images`            | Docker image configuration (including `arch`)                                            |
 | `dependencies`      | Service dependencies                                                                     |
 
+## Pre-download alerts
+
+A package can ask StartOS to confirm an update **before downloading it** when the installed version matches an ExVer range. Add `preDownloadAlert` to `setupManifest()`:
+
+```typescript
+preDownloadAlert: {
+  message: 'Back up this service before updating.',
+  when: { sourceVersion: '<2.0.0:0' },
+},
+```
+
+`message` is plain text shown in a Continue/Cancel confirmation on both the Marketplace and Updates tab. Cancel leaves the installed service unchanged. `when.sourceVersion` matches the version already installed, not the version being downloaded; on a fresh install there is no source version to match. The `when` object holds the conditions for displaying the alert.
+
 ## License
 
 Check the upstream project's LICENSE file and use the correct SPDX identifier (e.g., `MIT`, `Apache-2.0`, `GPL-3.0`). If you have a git submodule, symlink to its license. Otherwise, copy the license text directly from the upstream repository:

@@ -41,6 +41,8 @@ for the detail behind its highlights.
 
 ### Added
 
+- **Packages can show a pre-download alert before an update.** A matching installed version prompts for confirmation in the Marketplace and Updates tab before StartOS fetches the package.
+
 - **UEFI installations carry a standard fallback bootloader.** StartOS remains
   bootable if firmware loses its saved boot entry while retaining the normal
   entry and StartOS's automatic priority for a plugged-in installer.

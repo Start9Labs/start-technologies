@@ -2,6 +2,10 @@
 
 ## 3.0.0 — StartOS 0.4.0.2
 
+### Added
+
+- **`preDownloadAlert` in `setupManifest()`** displays a confirmation before downloading an update from an installed version matching `when.sourceVersion`.
+
 ### Changed
 
 - **Breaking — `Watchable<A>` takes only the type it reads.** A reader that

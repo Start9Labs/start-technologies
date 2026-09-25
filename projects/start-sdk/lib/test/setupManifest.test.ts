@@ -20,6 +20,10 @@ function manifest(emulateMissing?: boolean) {
     upstreamRepo: 'https://example.com/upstream',
     marketingUrl: '',
     donationUrl: null,
+    preDownloadAlert: {
+      message: 'Back up before updating',
+      when: { sourceVersion: '<1.0.0:0' },
+    },
     description: { short: 'Test', long: 'Test' },
     images: {
       main: {
@@ -32,6 +36,13 @@ function manifest(emulateMissing?: boolean) {
     dependencies: {},
   })
 }
+
+test('pre-download alert is included in the built manifest', () => {
+  expect(buildManifest(versions, manifest()).preDownloadAlert).toEqual({
+    message: 'Back up before updating',
+    when: { sourceVersion: '<1.0.0:0' },
+  })
+})
 
 test('images emulate missing architectures by default', () => {
   const built = buildManifest(versions, manifest())
