@@ -14,6 +14,8 @@ for the detail behind its highlights.
 
 - **Required service dependencies appear from the package manifest during initialization.** StartOS shows their base version and health requirements even if the service has not reported runtime dependencies; active runtime requirements can tighten the base, including for optional dependencies. While a service is not using an optional dependency, its tasks for that dependency are hidden and do not prevent it from starting.
 
+- **Freshly generated Root CAs use the self-signed certificate format allowed by RFC 5280.** Existing servers retain their trusted Root CA when updated.
+
 - **Timed-out or aborted service commands stop running inside their subcontainer.**
   StartOS kills the command when its exec wrapper dies, including during health
   checks.

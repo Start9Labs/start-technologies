@@ -2,6 +2,8 @@
 
 In order to establish a secure (HTTPS) connection with your server on the local network, it is necessary to download and trust your server's Root Certificate Authority (Root CA).
 
+Your server creates its Root CA during setup and keeps it across updates. Devices that already trust it remain trusted when you update StartOS.
+
 > [!Note]
 > You must repeat this guide for each device you want to connect to the server locally or using a VPN. This guide is _not_ necessary for devices that will connect using Tor or clearnet.
 

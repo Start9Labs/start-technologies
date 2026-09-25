@@ -378,11 +378,6 @@ pub fn make_root_cert(
     let ctx = builder.x509v3_context(None, Some(&cfg));
     // subjectKeyIdentifier = hash
     let subject_key_identifier = SubjectKeyIdentifier::new().build(&ctx)?;
-    // authorityKeyIdentifier = keyid,issuer:always
-    let authority_key_identifier = AuthorityKeyIdentifier::new()
-        .keyid(false)
-        .issuer(true)
-        .build(&ctx)?;
     // basicConstraints = critical, CA:true, pathlen:0
     let basic_constraints = BasicConstraints::new().critical().ca().build()?;
     // keyUsage = critical, digitalSignature, cRLSign, keyCertSign
@@ -393,7 +388,6 @@ pub fn make_root_cert(
         .key_cert_sign()
         .build()?;
     builder.append_extension(subject_key_identifier)?;
-    builder.append_extension(authority_key_identifier)?;
     builder.append_extension(basic_constraints)?;
     builder.append_extension(key_usage)?;
     builder.sign(&root_key, MessageDigest::sha256())?;
@@ -635,10 +629,6 @@ pub fn make_self_signed(
     let ctx = builder.x509v3_context(None, Some(&cfg));
 
     let subject_key_identifier = SubjectKeyIdentifier::new().build(&ctx)?;
-    let authority_key_identifier = AuthorityKeyIdentifier::new()
-        .keyid(false)
-        .issuer(true)
-        .build(&ctx)?;
     let subject_alt_name = applicant.1.x509_extension().build(&ctx)?;
     let basic_constraints = BasicConstraints::new().build()?;
     let key_usage = KeyUsage::new()
@@ -648,7 +638,6 @@ pub fn make_self_signed(
         .build()?;
 
     builder.append_extension(subject_key_identifier)?;
-    builder.append_extension(authority_key_identifier)?;
     builder.append_extension(subject_alt_name)?;
     builder.append_extension(basic_constraints)?;
     builder.append_extension(key_usage)?;
@@ -860,6 +849,42 @@ mod fingerprint_tests {
     #[test]
     fn fingerprint_bytes_are_uppercase_zero_padded_and_colon_separated() {
         assert_eq!(format_x509_fingerprint(&[0, 1, 10, 255]), "00:01:0A:FF");
+    }
+}
+
+#[cfg(test)]
+mod self_signed_cert_tests {
+    use super::*;
+
+    fn assert_self_signed_identifiers(cert: &X509, key: &PKey<Private>) {
+        assert!(cert.verify(key).unwrap());
+        assert!(cert.subject_key_id().is_some());
+        let text = String::from_utf8(cert.to_text().unwrap()).unwrap();
+        assert!(!text.contains("X509v3 Authority Key Identifier:"));
+    }
+
+    #[test]
+    fn root_ca_omits_authority_key_identifier() {
+        let key = gen_nistp256().unwrap();
+        let branding = CertBranding::start_os("test");
+        let root = make_root_cert(&key, &branding, SystemTime::now()).unwrap();
+        assert_self_signed_identifiers(&root, &key);
+
+        let intermediate_key = gen_nistp256().unwrap();
+        let intermediate = make_int_cert((&key, &root), &intermediate_key, &branding).unwrap();
+        assert_eq!(
+            intermediate.authority_key_id().unwrap().as_slice(),
+            root.subject_key_id().unwrap().as_slice()
+        );
+        assert!(intermediate.verify(&key).unwrap());
+    }
+
+    #[test]
+    fn self_signed_leaf_omits_authority_key_identifier() {
+        let key = gen_nistp256().unwrap();
+        let san = SANInfo::new(&BTreeSet::from([InternedString::intern("example.local")]));
+        let leaf = make_self_signed((&key, &san), &CertBranding::start_os("test")).unwrap();
+        assert_self_signed_identifiers(&leaf, &key);
     }
 }
 

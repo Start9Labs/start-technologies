@@ -2,6 +2,8 @@
 
 In order to establish a secure (HTTPS) connection with your router on the local network, it is necessary to download and trust your router's Root Certificate Authority (Root CA).
 
+Your router creates its Root CA during setup and keeps it across updates that preserve its settings. Devices that already trust it remain trusted after such an update.
+
 > [!NOTE]
 > You must repeat this guide for each device you want to connect to the router's web interface over HTTPS.
 
