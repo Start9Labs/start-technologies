@@ -17,15 +17,6 @@ import {
   MaybeFn,
   Run,
 } from '@start9labs/start-core/actions/setupActions'
-import {
-  CheckDependencies,
-  checkDependencies,
-} from '@start9labs/start-core/dependencies/dependencies'
-import {
-  CurrentDependenciesResult,
-  ValidateVersionRanges,
-  setupDependencies,
-} from '@start9labs/start-core/dependencies/setupDependencies'
 import { testTypeVersion } from '@start9labs/start-core/exver'
 import {
   setupInit,
@@ -49,6 +40,7 @@ import {
 import { GetStatus } from '@start9labs/start-core/util/GetStatus'
 import * as patterns from '@start9labs/start-core/util/patterns'
 import { Backups } from './backup/Backups'
+import { Dependencies, Dependency } from './dependencies'
 import { SetupBackupsParams, setupBackups } from './backup/setupBackups'
 import {
   SetupPrimaryUrlParams,
@@ -196,6 +188,8 @@ export class StartSdk<Manifest extends T.SDKManifest> {
     return {
       /** The bound service manifest */
       manifest: this.manifest,
+      Dependency,
+      Dependencies,
       /** Volume path helpers derived from the manifest volume definitions */
       volumes: createVolumes(this.manifest),
       ...startSdkEffectWrapper,
@@ -287,19 +281,6 @@ export class StartSdk<Manifest extends T.SDKManifest> {
         create: (effects: T.Effects, options: T.CreateNotificationParams) =>
           effects.notification.create(options),
       },
-      /**
-       * Check whether the specified (or all) dependencies are satisfied.
-       * @param effects - The effects context
-       * @param packageIds - Optional subset of dependency IDs to check; defaults to all
-       * @returns An object describing which dependencies are satisfied and which are not
-       */
-      checkDependencies: checkDependencies as <
-        DependencyId extends keyof Manifest['dependencies'] & T.PackageId =
-          keyof Manifest['dependencies'] & T.PackageId,
-      >(
-        effects: Effects,
-        packageIds?: DependencyId[],
-      ) => Promise<CheckDependencies<DependencyId>>,
       host: {
         /**
          * Retrieve one of this package's own hosts by id, with reactive read
@@ -737,30 +718,6 @@ export class StartSdk<Manifest extends T.SDKManifest> {
         params: SetupPrimaryUrlParams<Id>,
       ) => setupPrimaryUrl<Id>(this.manifest.id, params),
       /**
-       * @description Use this function to set dependency information.
-       * @example
-       * In this example, we create a dependency on Hello World >=1.0.0:0, where Hello World must be running and passing its "primary" health check.
-       *
-       * ```
-        export const setDependencies = sdk.setupDependencies(
-          async ({ effects }) => {
-            return {
-              'hello-world': {
-                kind: 'running',
-                versionRange: '>=1.0.0',
-                healthChecks: ['primary'],
-              },
-            }
-          },
-        )
-       * ```
-       */
-      setupDependencies: <const R extends CurrentDependenciesResult<Manifest>>(
-        fn: (options: {
-          effects: T.Effects
-        }) => Promise<R & ValidateVersionRanges<R>>,
-      ) => setupDependencies<Manifest, R>(fn),
-      /**
        * @description Use this function to create an InitScript that runs every time the service initializes (install, update, restore, rebuild, and server bootup)
        */
       setupOnInit,
@@ -782,9 +739,9 @@ export class StartSdk<Manifest extends T.SDKManifest> {
         export const init = sdk.setupInit(
           restoreInit,
           versions,
-          setDependencies,
           setInterfaces,
           actions,
+          dependencies,
           postInstall,
         )
        * ```

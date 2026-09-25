@@ -463,7 +463,7 @@ pub struct CurrentDependencyInfo {
     pub version_range: VersionRange,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "kebab-case")]
 #[serde(tag = "kind")]
 pub enum CurrentDependencyKind {

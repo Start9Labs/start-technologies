@@ -300,6 +300,8 @@ impl TryFrom<ManifestV1> for Manifest {
                             DepInfo {
                                 description: value.description.map(LocaleString::Translated),
                                 optional: !value.requirement.required(),
+                                version_range: None,
+                                kind: None,
                                 metadata: None,
                             },
                         )

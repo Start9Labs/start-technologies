@@ -76,7 +76,6 @@ export const manifest = setupManifest({
   images: {
     /* see Images Configuration below */
   },
-  dependencies: {},
 })
 ```
 
@@ -370,24 +369,4 @@ Reference these in `main.ts` mounts by the volume ID you chose.
 
 ## Dependencies
 
-Declare dependencies on other StartOS services. Note that dependency `description` is a plain string, not a locale object:
-
-```typescript
-dependencies: {
-  // Required dependency
-  bitcoin: {
-    description: 'Required for blockchain data',
-    optional: false,
-  },
-
-  // Optional dependency with metadata
-  'c-lightning': {
-    description: 'Needed for Lightning payments',
-    optional: true,
-    metadata: {
-      title: 'Core Lightning',
-      icon: 'https://raw.githubusercontent.com/Start9Labs/cln-startos/refs/heads/master/icon.png',
-    },
-  },
-},
-```
+Define dependencies in `startos/dependencies.ts` with `sdk.Dependency.required` or `sdk.Dependency.optional`, and pass the resulting `sdk.Dependencies.of()` builder to `buildManifest(versionGraph, sdkManifest, dependencies)`. See [Dependencies](dependencies.md) for base requirements and runtime narrowing.

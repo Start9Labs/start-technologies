@@ -167,7 +167,7 @@ Add your custom init function to `init/index.ts`:
 
 ```typescript
 import { sdk } from '../sdk'
-import { setDependencies } from '../dependencies'
+import { dependencies } from '../dependencies'
 import { setInterfaces } from '../interfaces'
 import { versionGraph } from '../versions'
 import { actions } from '../actions'
@@ -178,8 +178,8 @@ export const init = sdk.setupInit(
   restoreInit,
   versionGraph,
   setInterfaces,
-  setDependencies,
   actions,
+  dependencies,
   seedFiles, // Add this
 )
 

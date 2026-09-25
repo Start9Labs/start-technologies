@@ -10,10 +10,12 @@ use crate::db::model::package::{
     CurrentDependencies, CurrentDependencyInfo, CurrentDependencyKind, ManifestPreference,
     TaskEntry,
 };
+use crate::dependencies::DepInfo;
 use crate::disk::mount::filesystem::bind::{Bind, FileType};
 use crate::disk::mount::filesystem::idmapped::{IdMap, IdMapped};
 use crate::disk::mount::filesystem::{FileSystem, MountType};
 use crate::disk::mount::util::{is_mountpoint, unmount};
+use crate::s9pk::S9pk;
 use crate::s9pk::manifest::Manifest;
 use crate::service::effects::callbacks::CallbackHandler;
 use crate::service::effects::prelude::*;
@@ -317,14 +319,84 @@ impl ValueParserFactory for DependencyRequirement {
 pub struct SetDependenciesParams {
     dependencies: Vec<DependencyRequirement>,
 }
+fn required_base(info: &DepInfo) -> Option<(CurrentDependencyKind, VersionRange)> {
+    if info.optional {
+        return None;
+    }
+    Some((info.kind.clone()?, info.version_range.clone()?))
+}
+
+fn narrow_to_base(
+    base: &DepInfo,
+    kind: CurrentDependencyKind,
+    version_range: VersionRange,
+) -> (CurrentDependencyKind, VersionRange) {
+    let kind = match (&base.kind, kind) {
+        (
+            Some(CurrentDependencyKind::Running {
+                health_checks: base,
+            }),
+            CurrentDependencyKind::Running { mut health_checks },
+        ) => {
+            health_checks.extend(base.iter().cloned());
+            CurrentDependencyKind::Running { health_checks }
+        }
+        (Some(CurrentDependencyKind::Running { health_checks }), CurrentDependencyKind::Exists) => {
+            CurrentDependencyKind::Running {
+                health_checks: health_checks.clone(),
+            }
+        }
+        (_, kind) => kind,
+    };
+    let version_range = if let Some(base) = &base.version_range {
+        let outside_base =
+            VersionRange::and(version_range.clone(), VersionRange::not(base.clone()));
+        if outside_base.satisfiable() {
+            VersionRange::and(base.clone(), version_range)
+        } else {
+            version_range
+        }
+    } else {
+        version_range
+    };
+    (kind, version_range)
+}
+
+async fn dependency_info(
+    s9pk: &S9pk,
+    dep_id: &PackageId,
+    kind: CurrentDependencyKind,
+    version_range: VersionRange,
+) -> Result<CurrentDependencyInfo, Error> {
+    Ok(CurrentDependencyInfo {
+        title: s9pk.dependency_metadata(dep_id).await?.map(|m| m.title),
+        icon: s9pk.dependency_icon_data_url(dep_id).await?,
+        kind,
+        version_range,
+    })
+}
+
+pub(crate) async fn required_base_dependencies(s9pk: &S9pk) -> Result<CurrentDependencies, Error> {
+    let mut deps = BTreeMap::new();
+    for (id, info) in &s9pk.as_manifest().dependencies.0 {
+        if let Some((kind, version_range)) = required_base(info) {
+            deps.insert(
+                id.clone(),
+                dependency_info(s9pk, id, kind, version_range).await?,
+            );
+        }
+    }
+    Ok(CurrentDependencies(deps))
+}
+
 pub async fn set_dependencies(
     context: EffectContext,
     SetDependenciesParams { dependencies }: SetDependenciesParams,
 ) -> Result<(), Error> {
     let context = context.deref()?;
     let id = &context.seed.id;
-
-    let mut deps = BTreeMap::new();
+    let s9pk = &context.seed.persistent_container.s9pk;
+    let mut deps = required_base_dependencies(s9pk).await?.0;
     for dependency in dependencies {
         let (dep_id, kind, version_range) = match dependency {
             DependencyRequirement::Exists { id, version_range } => {
@@ -340,24 +412,21 @@ pub async fn set_dependencies(
                 version_range,
             ),
         };
-        let info = CurrentDependencyInfo {
-            title: context
-                .seed
-                .persistent_container
-                .s9pk
-                .dependency_metadata(&dep_id)
-                .await?
-                .map(|m| m.title),
-            icon: context
-                .seed
-                .persistent_container
-                .s9pk
-                .dependency_icon_data_url(&dep_id)
-                .await?,
-            kind,
-            version_range,
-        };
-        deps.insert(dep_id, info);
+        let (kind, version_range) =
+            if let Some(base) = s9pk.as_manifest().dependencies.0.get(&dep_id) {
+                narrow_to_base(base, kind, version_range)
+            } else {
+                (kind, version_range)
+            };
+        if let Some(info) = deps.get_mut(&dep_id) {
+            info.kind = kind;
+            info.version_range = version_range;
+        } else {
+            deps.insert(
+                dep_id.clone(),
+                dependency_info(s9pk, &dep_id, kind, version_range).await?,
+            );
+        }
     }
     context
         .seed
@@ -549,6 +618,65 @@ pub async fn get_service_manifest(
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn required_manifest_requirement_is_the_static_fallback() {
+        let base: crate::dependencies::DepInfo = serde_json::from_str(
+            r#"{"description":null,"optional":false,"versionRange":">=31.1:17","kind":"running","healthChecks":["bitcoind"],"metadata":{"title":"Bitcoin","icon":"https://example.com/icon.png"}}"#,
+        )
+        .unwrap();
+        let (kind, range) = required_base(&base).unwrap();
+        assert_eq!(range.to_string(), ">=31.1:17");
+        assert!(
+            matches!(kind, CurrentDependencyKind::Running { health_checks } if health_checks.contains(&"bitcoind".parse().unwrap()))
+        );
+
+        let mut optional = base.clone();
+        optional.optional = true;
+        assert!(required_base(&optional).is_none());
+        let mut legacy = base;
+        legacy.kind = None;
+        assert!(required_base(&legacy).is_none());
+    }
+
+    #[test]
+    fn runtime_cannot_broaden_an_enabled_optional_dependency() {
+        let base: DepInfo = serde_json::from_str(
+            r#"{"description":null,"optional":true,"versionRange":">=31.1:17","kind":"running","healthChecks":["ready"],"metadata":{"title":"Bitcoin","icon":"https://example.com/icon.png"}}"#,
+        )
+        .unwrap();
+        assert!(required_base(&base).is_none());
+        let (kind, range) =
+            narrow_to_base(&base, CurrentDependencyKind::Exists, VersionRange::any());
+        assert_eq!(range.to_string(), ">=31.1:17");
+        assert!(
+            matches!(kind, CurrentDependencyKind::Running { health_checks } if health_checks.contains(&"ready".parse().unwrap()))
+        );
+    }
+
+    #[test]
+    fn runtime_running_health_checks_add_to_the_manifest_base() {
+        let base: DepInfo = serde_json::from_str(
+            r#"{"description":null,"optional":false,"versionRange":">=31.1:17","kind":"running","healthChecks":["ready"],"metadata":{"title":"Bitcoin","icon":"https://example.com/icon.png"}}"#,
+        )
+        .unwrap();
+        let (kind, range) = narrow_to_base(
+            &base,
+            CurrentDependencyKind::Running {
+                health_checks: ["rpc".parse().unwrap()].into(),
+            },
+            ">=32:0".parse().unwrap(),
+        );
+        assert_eq!(range.to_string(), ">=32:0");
+        assert!(
+            matches!(kind, CurrentDependencyKind::Running { health_checks } if health_checks == ["ready".parse().unwrap(), "rpc".parse().unwrap()].into())
+        );
+
+        let already_narrow: VersionRange = ">=31.1:17 && >=32:0".parse().unwrap();
+        let expected = already_narrow.to_string();
+        let (_, preserved) = narrow_to_base(&base, CurrentDependencyKind::Exists, already_narrow);
+        assert_eq!(preserved.to_string(), expected);
+    }
 
     #[test]
     fn relative_components_drops_roots_and_dots() {

@@ -464,13 +464,6 @@ describe('values', () => {
             },
             images: {},
             volumes: [],
-            dependencies: {
-              'remote-test': {
-                description: '',
-                optional: true,
-                s9pk: 'https://example.com/remote-test.s9pk',
-              },
-            },
           }),
         )
         .build(true)

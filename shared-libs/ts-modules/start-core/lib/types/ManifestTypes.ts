@@ -99,23 +99,6 @@ export type SDKManifest = {
   readonly volumes: string[]
 
   /**
-   * @description A mapping of service dependencies to be displayed to users when viewing the Marketplace
-   * @property {string} description - An explanation of why this service is a dependency.
-   * @property {boolean} optional - Whether or not this dependency is required or contingent on user configuration.
-   * @property {string} s9pk - A path or url to an s9pk of the dependency to extract metadata at build time
-   * @example
-   * ```
-    dependencies: {
-      'hello-world': {
-        description: 'A moon needs a world',
-        optional: false,
-        s9pk: '',
-      },
-    },
-   * ```
-   */
-  readonly dependencies: Record<string, ManifestDependency>
-  /**
    * @description (optional) A set of hardware requirements for this service. A machine that does
    *   not meet them is not offered this service at all — so tightening a requirement on an
    *   already-published package cuts hosts below it off from further updates.
@@ -195,5 +178,3 @@ export type SDKImageInputSpec = {
     nvidiaContainer?: boolean
   }
 }[keyof ArchOptions]
-
-export type ManifestDependency = T.Manifest['dependencies'][string]

@@ -13,7 +13,7 @@ mod bind_mount;
 pub mod callbacks;
 pub mod context;
 mod control;
-mod dependency;
+pub(super) mod dependency;
 mod health;
 mod init;
 mod net;

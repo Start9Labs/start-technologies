@@ -64,31 +64,34 @@ Use `sdk.action.createTask()` to prompt the user to run an action on a dependenc
 ```typescript
 import { someAction } from 'dependency-package/startos/actions/someAction'
 
-export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
-  await sdk.action.createTask(effects, 'dependency-id', someAction, 'critical', {
-    input: {
-      kind: 'partial',
-      accept: [
-        {
-          /* one or more acceptable partial inputs */
+const dependency = sdk.Dependency.required('dependency-id', {
+  description: i18n('Needed by this service'),
+  metadata: { title: 'Dependency', icon: 'https://example.com/icon.png' },
+  versionRange: '>=1.0.0:0',
+  kind: 'running',
+  healthChecks: ['dependency-id'],
+}).withInit(
+  async effects => {
+    await sdk.action.createTask(effects, 'dependency-id', someAction, 'critical', {
+      input: {
+        kind: 'partial',
+        accept: [
+          {
+            /* matching input */
+          },
+        ],
+        set: {
+          /* prefill */
         },
-      ],
-      set: {
-        /* the value to pre-fill when none are accepted */
       },
-    },
-    when: { condition: 'input-not-matches', once: false },
-    reason: i18n('Configure the dependency for use with this service'),
-  })
+      when: { condition: 'input-not-matches', once: false },
+      reason: i18n('Configure the dependency for use with this service'),
+    })
+  },
+  ['dependency-id:some-action'],
+)
 
-  return {
-    'dependency-id': {
-      kind: 'running',
-      versionRange: '>=1.0.0:0',
-      healthChecks: ['dependency-id'],
-    },
-  }
-})
+export const dependencies = sdk.Dependencies.of().addDependency(dependency)
 ```
 
 ### Parameters

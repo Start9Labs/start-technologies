@@ -390,6 +390,19 @@ impl Service {
             .await
             .result?;
         let persistent_container = PersistentContainer::new(&ctx, s9pk).await?;
+        let required =
+            effects::dependency::required_base_dependencies(&persistent_container.s9pk).await?;
+        ctx.db
+            .mutate(|db| {
+                db.as_public_mut()
+                    .as_package_data_mut()
+                    .as_idx_mut(&id)
+                    .or_not_found(&id)?
+                    .as_current_dependencies_mut()
+                    .ser(&required)
+            })
+            .await
+            .result?;
         let seed = Arc::new(ServiceActorSeed {
             id,
             persistent_container,

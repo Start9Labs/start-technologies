@@ -132,10 +132,10 @@ Supported field types via `Value`:
 - `object` — Nested sub-form
 - `union` / `dynamicUnion` — Conditional fields based on a discriminator
 
-### Dependencies (`shared-libs/ts-modules/start-core/lib/dependencies/`)
+### Dependencies
 
-- `setupDependencies.ts` — Declare what the service depends on (package IDs, version ranges, health checks)
-- `dependencies.ts` — Runtime dependency checking via `checkDependencies()`
+- `lib/dependencies.ts` — Builder for published base requirements and reactive runtime requirements
+- `shared-libs/ts-modules/start-core/lib/dependencies/dependencies.ts` — Runtime satisfaction checks used by the builder
 
 ### Interfaces (`shared-libs/ts-modules/start-core/lib/interfaces/`)
 
@@ -214,7 +214,7 @@ The `.build()` method returns an object containing the entire SDK surface area, 
 | **Interfaces**   | `createInterface`, `MultiHost.of`, `setupInterfaces`, `serviceInterface.*`                                                          | Network endpoint management                       |
 | **Backups**      | `setupBackups`, `Backups.ofVolumes`, `Backups.ofSyncs`, `Backups.withOptions`                                                       | Backup configuration                              |
 | **Primary URL**  | `setupPrimaryUrl`                                                                                                                   | The URL a service advertises as its own           |
-| **Dependencies** | `setupDependencies`, `checkDependencies`                                                                                            | Dependency declaration and verification           |
+| **Dependencies** | `Dependency.required`, `Dependency.optional`, `Dependencies.of`                                                                     | Published and runtime requirements                |
 | **Init/Uninit**  | `setupInit`, `setupUninit`, `setupOnInit`, `setupOnUninit`                                                                          | Lifecycle hooks                                   |
 | **Containers**   | `SubContainer.of`, `SubContainer.withTemp`, `Mounts.of`                                                                             | Container execution with mounts                   |
 | **Forms**        | `InputSpec.of`, `Value`, `Variants`, `List`                                                                                         | Form input builders                               |
@@ -382,15 +382,14 @@ const manifest = setupManifest({
   license: 'MIT',
   description: { short: '...', long: '...' },
   images: { main: { source: { dockerTag: 'myimage:1.0' } } },
-  volumes: { main: {} },
-  dependencies: {},
+  volumes: ['main'],
   // ...
 })
 
-export default buildManifest(manifest)
+export default buildManifest(versionGraph, manifest, dependencies)
 ```
 
-`buildManifest()` finalizes the manifest with the current SDK version, OS version compatibility, and migration version ranges.
+`buildManifest()` finalizes the manifest with the current SDK version, OS version compatibility, migration version ranges, and dependency definitions from the same builder that runs during init.
 
 ### Versioning (`lib/version/`)
 
@@ -436,7 +435,7 @@ A typical service package lifecycle:
 1. INSTALL / UPDATE / RESTORE
    ├── init({ effects, kind })
    │   ├── Version migrations (if update)
-   │   ├── setupDependencies()
+   │   ├── dependencies.init()
    │   ├── setupInterfaces() → bind ports, export interfaces
    │   └── Actions registration → export actions to OS
    │

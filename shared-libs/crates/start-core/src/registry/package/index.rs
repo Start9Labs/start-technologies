@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 use std::u32;
 
 use chrono::Utc;
@@ -10,6 +11,7 @@ use ts_rs::TS;
 use url::Url;
 
 use crate::PackageId;
+use crate::db::model::package::CurrentDependencyKind;
 use crate::prelude::*;
 use crate::registry::asset::RegistryAsset;
 use crate::registry::context::RegistryContext;
@@ -53,15 +55,46 @@ pub struct Category {
     pub name: LocaleString,
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel, TS, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, HasModel, PartialEq)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct DependencyMetadata {
     pub title: Option<LocaleString>,
     pub icon: Option<DataUrl<'static>>,
     pub description: Option<LocaleString>,
     pub optional: bool,
+    #[serde(default)]
+    pub version_range: Option<VersionRange>,
+    #[serde(flatten)]
+    pub kind: Option<CurrentDependencyKind>,
+}
+impl TS for DependencyMetadata {
+    type WithoutGenerics = Self;
+    fn decl() -> String {
+        format!("type {} = {}", Self::name(), Self::inline())
+    }
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
+    fn name() -> String {
+        "DependencyMetadata".into()
+    }
+    fn inline() -> String {
+        "{ title: LocaleString | null, icon: DataUrl | null, description: LocaleString | null, optional: boolean, versionRange?: string | null, kind?: 'exists' | 'running' | null, healthChecks?: string[] }".into()
+    }
+    fn inline_flattened() -> String {
+        Self::inline()
+    }
+    fn visit_dependencies(v: &mut impl ts_rs::TypeVisitor)
+    where
+        Self: 'static,
+    {
+        v.visit::<LocaleString>();
+        v.visit::<DataUrl<'static>>();
+    }
+    fn output_path() -> Option<&'static Path> {
+        Some(Path::new("DependencyMetadata.ts"))
+    }
 }
 impl DependencyMetadata {
     pub fn localize_for(&mut self, locale: &str) {
@@ -165,6 +198,8 @@ impl PackageVersionInfo {
                     icon: s9pk.dependency_icon_data_url(id).await?,
                     description: info.description.clone(),
                     optional: info.optional,
+                    version_range: info.version_range.clone(),
+                    kind: info.kind.clone(),
                 },
             );
         }
@@ -330,6 +365,28 @@ pub async fn get_package_index(ctx: RegistryContext) -> Result<PackageIndex, Err
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registry_dependency_metadata_preserves_base_requirement() {
+        let metadata: DependencyMetadata = serde_json::from_str(
+            r#"{"title":"Bitcoin","icon":null,"description":null,"optional":false,"versionRange":">=31.1:17","kind":"running","healthChecks":["bitcoind"]}"#,
+        )
+        .unwrap();
+        assert!(
+            matches!(metadata.kind, Some(CurrentDependencyKind::Running { ref health_checks }) if health_checks.contains(&"bitcoind".parse().unwrap()))
+        );
+        let json = serde_json::to_value(&metadata).unwrap();
+        assert_eq!(json["kind"], "running");
+        assert_eq!(json["healthChecks"], serde_json::json!(["bitcoind"]));
+        assert_eq!(json["versionRange"], ">=31.1:17");
+
+        let old: DependencyMetadata = serde_json::from_str(
+            r#"{"title":"Bitcoin","icon":null,"description":null,"optional":false}"#,
+        )
+        .unwrap();
+        assert!(old.kind.is_none());
+        assert!(old.version_range.is_none());
+    }
 
     #[test]
     fn old_manifest_defaults_hardware_virtualization_to_false() {

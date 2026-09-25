@@ -5,6 +5,7 @@ import {
   SDKImageInputSpec,
 } from '@start9labs/start-core/types/ManifestTypes'
 import { OSVersion } from '../StartSdk'
+import { Dependencies } from '../dependencies'
 import { VersionGraph } from '../version/VersionGraph'
 import { version as sdkVersion } from '../../package.json'
 
@@ -53,11 +54,10 @@ export function setupManifest<
 export function buildManifest<
   Id extends string,
   Version extends string,
-  Dependencies extends Record<string, unknown>,
+  DependencyIds extends string,
   VolumesTypes extends VolumeId,
   ImagesTypes extends ImageId,
   Manifest extends {
-    dependencies: Dependencies
     id: Id
     images: Record<ImagesTypes, SDKImageInputSpec>
     volumes: VolumesTypes[]
@@ -65,6 +65,7 @@ export function buildManifest<
 >(
   versions: VersionGraph<Version>,
   manifest: SDKManifest & Manifest,
+  dependencies: Dependencies<DependencyIds>,
 ): Manifest & T.Manifest {
   const images = Object.entries(manifest.images).reduce(
     (images, [k, v]) => {
@@ -78,6 +79,7 @@ export function buildManifest<
   )
   return {
     ...manifest,
+    dependencies: dependencies.manifestDependencies(),
     gitHash: null,
     osVersion: manifest.osVersion ?? OSVersion,
     sdkVersion,

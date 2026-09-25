@@ -1,10 +1,10 @@
 # Depend on Another Service
 
-When your service needs another StartOS service (e.g., a Bitcoin node for a wallet, or PostgreSQL from a shared instance), declare it as a dependency. You can require it to be installed, running, or healthy, and optionally pin a version range.
+When your service needs another StartOS service (e.g., a Bitcoin node for a wallet, or PostgreSQL from a shared instance), declare it as a dependency. You can require it to be installed, running, or healthy, and declare the versions it accepts.
 
 ## Solution
 
-In `setupDependencies()`, return an object mapping dependency package IDs to their requirements: `kind: 'running'` (the dependency should be running), `kind: 'exists'` (just installed), a `versionRange`, and `healthChecks` listing which of the dependency's daemons or standalone health checks the user should expect to be passing.
+In `dependencies.ts`, create a `sdk.Dependency.required()` or `.optional()` with a published `versionRange`, `kind: 'running'` or `'exists'`, and any required `healthChecks`. Add it to `sdk.Dependencies.of()` and pass that builder to both `buildManifest` and `setupInit`.
 
 These declarations drive the **warning UI** StartOS shows the user when a dependency isn't installed, isn't running, or has a listed health check failing. They do **not** gate your service's startup — your service starts whenever the user starts it, regardless of dependency state. If your service genuinely cannot operate before a dependency reaches a particular state, handle that at runtime in `setupMain` (poll, retry, or surface your own error); don't expect the dependency declaration to block startup for you.
 
