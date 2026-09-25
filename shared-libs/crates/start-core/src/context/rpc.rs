@@ -76,7 +76,7 @@ pub struct RpcContextSeed {
     pub callbacks: Arc<ServiceCallbacks>,
     pub wifi_manager: RwLock<Option<WpaCli>>,
     pub current_secret: Arc<Jwk>,
-    http: ReloadableHttpClient,
+    pub client: ReloadableHttpClient,
     pub start_time: Instant,
     pub crons: SyncMutex<BTreeMap<Guid, NonDetachingJoinHandle<()>>>,
 }
@@ -128,7 +128,8 @@ impl CleanupInitPhases {
 #[derive(Clone)]
 pub struct RpcContext(Arc<RpcContextSeed>);
 
-struct ReloadableHttpClient {
+/// Clients acquired before a reload retain their previous trust configuration.
+pub struct ReloadableHttpClient {
     client: SyncRwLock<Client>,
     socks_proxy_url: String,
 }
@@ -148,11 +149,11 @@ impl ReloadableHttpClient {
             .with_kind(ErrorKind::ParseUrl)
     }
 
-    fn get(&self) -> Client {
+    pub fn get(&self) -> Client {
         self.client.peek(Clone::clone)
     }
 
-    fn reload(&self) -> Result<(), Error> {
+    pub fn reload(&self) -> Result<(), Error> {
         let client = Self::build_for_proxy(&self.socks_proxy_url)?;
         self.client.replace(client);
         Ok(())
@@ -435,7 +436,7 @@ impl RpcContext {
                     )
                 })?,
             ),
-            http: ReloadableHttpClient::new(socks_proxy_url)?,
+            client: ReloadableHttpClient::new(socks_proxy_url)?,
             start_time: Instant::now(),
             crons,
         });
@@ -466,14 +467,6 @@ impl RpcContext {
     pub async fn wait_closed(&self) {
         let mut rx = self.0.closed.subscribe();
         let _ = rx.wait_for(|closed| *closed).await;
-    }
-
-    pub(crate) fn http_client(&self) -> Client {
-        self.http.get()
-    }
-
-    pub(crate) fn reload_http_client(&self) -> Result<(), Error> {
-        self.http.reload()
     }
 
     pub fn add_cron<F: Future<Output = ()> + Send + 'static>(&self, fut: F) -> Guid {

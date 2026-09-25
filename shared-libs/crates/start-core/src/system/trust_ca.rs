@@ -98,7 +98,7 @@ pub(crate) async fn install(
         write_file_atomic(Path::new(PERSISTENT_CA_DIRECTORY).join(&filename), &ca.pem).await?;
         write_file_atomic(Path::new(LIVE_CA_DIRECTORY).join(&filename), &ca.pem).await?;
         update_trust_store().await?;
-        ctx.reload_http_client()?;
+        ctx.client.reload()?;
         Ok(ca.result)
     })
     .await

@@ -290,7 +290,7 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
 
         let mut res = match crate::middleware::auth::signature::call_remote_with_client(
             self,
-            self.http_client(),
+            self.client.get(),
             registry,
             headers,
             sig_context.as_deref(),

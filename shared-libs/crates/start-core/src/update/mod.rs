@@ -325,7 +325,7 @@ async fn maybe_do_update(
 
     tokio::spawn(async move {
         let res = do_update(
-            ctx.http_client(),
+            ctx.client.get(),
             asset,
             UpdateProgressHandles {
                 progress,

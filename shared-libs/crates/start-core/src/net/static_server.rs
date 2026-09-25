@@ -388,7 +388,7 @@ fn s9pk_router(ctx: RpcContext) -> Router {
                  request: Request| async move {
                     if_authorized(&ctx, request, |request| async {
                         let s9pk = S9pk::deserialize(
-                            &Arc::new(HttpSource::new(ctx.http_client(), url).await?),
+                            &Arc::new(HttpSource::new(ctx.client.get(), url).await?),
                             query
                                 .as_deref()
                                 .map(MerkleArchiveCommitment::from_query)
