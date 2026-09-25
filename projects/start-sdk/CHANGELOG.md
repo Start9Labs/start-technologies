@@ -4,7 +4,7 @@
 
 ### Added
 
-- **`preDownloadAlert` in `setupManifest()`** displays a confirmation before downloading an update from an installed version matching `when.sourceVersion`.
+- **`preDownloadAlert` in `setupManifest()`** displays a localized Markdown confirmation before downloading an update from an installed version matching `when.sourceVersion`.
 
 ### Changed
 

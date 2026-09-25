@@ -37,9 +37,9 @@ export type SDKManifest = {
    * @example `https://nextcloud.com/contribute/`
    */
   readonly donationUrl: string | null
-  /** Shown before downloading an update from a matching installed version. */
+  /** Localized Markdown shown before downloading an update from a matching installed version. */
   readonly preDownloadAlert?: {
-    readonly message: string
+    readonly message: T.LocaleString
     readonly when: {
       readonly sourceVersion: string
     }

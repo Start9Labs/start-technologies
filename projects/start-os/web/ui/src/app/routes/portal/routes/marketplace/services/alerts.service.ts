@@ -1,14 +1,44 @@
-import { inject, Injectable } from '@angular/core'
+import { Component, inject, Injectable } from '@angular/core'
 import {
   DialogService,
   Exver,
   i18nKey,
   i18nPipe,
+  LocalizePipe,
+  MarkdownPipe,
+  SafeLinksDirective,
   sameUrl,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
+import { TuiDialogContext } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
+import { TuiConfirmData } from '@taiga-ui/kit'
+import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { defaultIfEmpty, firstValueFrom } from 'rxjs'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
+
+type PreDownloadDialogData = TuiConfirmData & {
+  content: PolymorpheusComponent<PreDownloadMessage>
+  message: T.LocaleString
+}
+
+@Component({
+  template: `
+    <div
+      class="g-markdown"
+      safeLinks
+      [innerHTML]="message | localize | markdown | dompurify"
+    ></div>
+  `,
+  imports: [LocalizePipe, MarkdownPipe, NgDompurifyPipe, SafeLinksDirective],
+})
+class PreDownloadMessage {
+  protected readonly message =
+    injectContext<TuiDialogContext<boolean, PreDownloadDialogData>>().data
+      .message
+}
+
+const PRE_DOWNLOAD_MESSAGE = new PolymorpheusComponent(PreDownloadMessage)
 
 @Injectable({
   providedIn: 'root',
@@ -59,20 +89,16 @@ export class MarketplaceAlertsService {
       return true
     }
 
+    const data: PreDownloadDialogData = {
+      content: PRE_DOWNLOAD_MESSAGE,
+      message: alert.message,
+      yes: 'Continue',
+      no: 'Cancel',
+    }
+
     return firstValueFrom(
       this.dialog
-        .openConfirm({
-          label: 'Warning',
-          size: 's',
-          data: {
-            content: alert.message
-              .replaceAll('&', '&amp;')
-              .replaceAll('<', '&lt;')
-              .replaceAll('>', '&gt;') as i18nKey,
-            yes: 'Continue',
-            no: 'Cancel',
-          },
-        })
+        .openConfirm({ label: 'Warning', size: 's', data })
         .pipe(defaultIfEmpty(false)),
     )
   }

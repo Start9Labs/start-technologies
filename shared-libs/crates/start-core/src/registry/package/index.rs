@@ -86,7 +86,7 @@ pub struct PreDownloadAlertWhen {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct PreDownloadAlert {
-    pub message: String,
+    pub message: LocaleString,
     pub when: PreDownloadAlertWhen,
 }
 
@@ -308,6 +308,12 @@ impl Model<PackageVersionInfo> {
                 self.as_metadata_mut()
                     .as_release_notes_mut()
                     .mutate(|r| Ok(r.localize_for(locale)))?;
+                self.as_metadata_mut().mutate(|metadata| {
+                    if let Some(alert) = &mut metadata.pre_download_alert {
+                        alert.message.localize_for(locale);
+                    }
+                    Ok(())
+                })?;
             }
         }
 
@@ -333,7 +339,7 @@ mod tests {
             },
             release_notes: LocaleString::Translated("Notes".into()),
             pre_download_alert: Some(PreDownloadAlert {
-                message: "Back up before updating".into(),
+                message: LocaleString::Translated("Back up before updating".into()),
                 when: PreDownloadAlertWhen {
                     source_version: ">=1.0.0:0".parse().unwrap(),
                 },
@@ -376,7 +382,14 @@ mod tests {
     #[test]
     fn pre_download_alert_round_trips() {
         let alert = PreDownloadAlert {
-            message: "Back up before updating".into(),
+            message: LocaleString::LanguageMap(
+                [
+                    ("en_US".into(), "Back up before updating".into()),
+                    ("fr_FR".into(), "Sauvegardez avant la mise à jour".into()),
+                ]
+                .into_iter()
+                .collect(),
+            ),
             when: PreDownloadAlertWhen {
                 source_version: ">=1.0.0:0 && <2.0.0:0".parse().unwrap(),
             },
@@ -384,8 +397,15 @@ mod tests {
         let encoded = serde_json::to_value(&alert).unwrap();
         assert_eq!(encoded["when"]["sourceVersion"], ">=1.0.0:0 <2.0.0:0");
         assert_eq!(
-            serde_json::from_value::<PreDownloadAlert>(encoded).unwrap(),
-            alert
+            encoded["message"]["fr_FR"],
+            "Sauvegardez avant la mise à jour"
+        );
+        let mut localized = serde_json::from_value::<PreDownloadAlert>(encoded).unwrap();
+        assert_eq!(localized, alert);
+        localized.message.localize_for("fr_FR");
+        assert_eq!(
+            localized.message,
+            LocaleString::Translated("Sauvegardez avant la mise à jour".into())
         );
     }
 }

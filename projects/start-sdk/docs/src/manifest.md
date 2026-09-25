@@ -103,12 +103,18 @@ A package can ask StartOS to confirm an update **before downloading it** when th
 
 ```typescript
 preDownloadAlert: {
-  message: 'Back up this service before updating.',
+  message: {
+    en_US: '**Back up this service** before updating.',
+    es_ES: '**Haga una copia de seguridad** de este servicio antes de actualizarlo.',
+    de_DE: '**Sichern Sie diesen Dienst** vor dem Update.',
+    fr_FR: '**Sauvegardez ce service** avant la mise à jour.',
+    pl_PL: '**Utwórz kopię zapasową** tej usługi przed aktualizacją.',
+  },
   when: { sourceVersion: '<2.0.0:0' },
 },
 ```
 
-`message` is plain text shown in a Continue/Cancel confirmation on both the Marketplace and Updates tab. Cancel leaves the installed service unchanged. `when.sourceVersion` matches the version already installed, not the version being downloaded; on a fresh install there is no source version to match. The `when` object holds the conditions for displaying the alert.
+`message` is a localized Markdown value shown in a Continue/Cancel confirmation on both the Marketplace and Updates tab. Markdown is sanitized before display, and external links open in a new tab. Cancel leaves the installed service unchanged. `when.sourceVersion` matches the version already installed, not the version being downloaded; on a fresh install there is no source version to match. The `when` object holds the conditions for displaying the alert.
 
 ## License
 

@@ -41,7 +41,7 @@ for the detail behind its highlights.
 
 ### Added
 
-- **Packages can show a pre-download alert before an update.** A matching installed version prompts for confirmation in the Marketplace and Updates tab before StartOS fetches the package.
+- **Packages can show a localized pre-download alert before an update.** A matching installed version prompts for confirmation in the Marketplace and Updates tab before StartOS fetches the package. The alert supports Markdown formatting.
 
 - **UEFI installations carry a standard fallback bootloader.** StartOS remains
   bootable if firmware loses its saved boot entry while retaining the normal

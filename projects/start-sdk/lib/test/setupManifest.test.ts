@@ -21,7 +21,10 @@ function manifest(emulateMissing?: boolean) {
     marketingUrl: '',
     donationUrl: null,
     preDownloadAlert: {
-      message: 'Back up before updating',
+      message: {
+        en_US: 'Back up before updating',
+        fr_FR: 'Sauvegardez avant la mise à jour',
+      },
       when: { sourceVersion: '<1.0.0:0' },
     },
     description: { short: 'Test', long: 'Test' },
@@ -39,7 +42,10 @@ function manifest(emulateMissing?: boolean) {
 
 test('pre-download alert is included in the built manifest', () => {
   expect(buildManifest(versions, manifest()).preDownloadAlert).toEqual({
-    message: 'Back up before updating',
+    message: {
+      en_US: 'Back up before updating',
+      fr_FR: 'Sauvegardez avant la mise à jour',
+    },
     when: { sourceVersion: '<1.0.0:0' },
   })
 })
