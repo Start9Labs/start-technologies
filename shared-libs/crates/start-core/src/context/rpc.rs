@@ -150,7 +150,7 @@ impl ReloadableHttpClient {
     }
 
     pub fn get(&self) -> Client {
-        self.client.peek(Clone::clone)
+        self.client.read()
     }
 
     pub fn reload(&self) -> Result<(), Error> {
