@@ -1,6 +1,6 @@
 # Installing StartOS
 
-This guide is for flashing StartOS to a USB drive, then installing it onto a desktop, laptop, or mini PC. For an up-to-date list of known-good hardware, please check out this [forum post](https://community.start9.com/t/known-good-hardware-master-list-hardware-capable-of-running-startos/). For Raspberry Pi, which does not use the USB installer, see [Raspberry Pi](#raspberry-pi) below.
+This guide is for flashing StartOS to a USB drive, then installing it onto a desktop, laptop, or mini PC. StartOS is built for x86_64 (Intel and AMD), ARM64 and RISC-V hardware, and for the Raspberry Pi 4. For an up-to-date list of known-good hardware, please check out this [forum post](https://community.start9.com/t/known-good-hardware-master-list-hardware-capable-of-running-startos/); for servers Start9 sold, see [Start9 Hardware](start9-hardware.md). For Raspberry Pi, which does not use the USB installer, see [Raspberry Pi](#raspberry-pi) below.
 
 ## Watch The Video
 
