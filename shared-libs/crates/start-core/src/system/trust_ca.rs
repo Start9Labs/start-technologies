@@ -19,15 +19,12 @@ use crate::net::ssl::x509_sha256_fingerprint;
 use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::io::{open_file, write_file_atomic};
-use crate::util::serde::{WithIoFormat, display_serializable};
+use crate::util::serde::{Pem, WithIoFormat, display_serializable};
 
 const MAX_CERTIFICATE_SIZE: usize = crate::CAP_1_MiB;
 const LIVE_CA_DIRECTORY: &str = "/usr/local/share/ca-certificates/startos-custom";
 const PERSISTENT_CA_DIRECTORY: &str =
     "/media/startos/config/overlay/usr/local/share/ca-certificates/startos-custom";
-const PEM_BEGIN: &str = "-----BEGIN CERTIFICATE-----";
-const PEM_END: &str = "-----END CERTIFICATE-----";
-
 static INSTALL_LOCK: Mutex<()> = Mutex::const_new(());
 
 #[derive(Debug, Deserialize, Serialize, Parser)]
@@ -166,14 +163,10 @@ fn parse_ca(pem: &str) -> Result<ParsedCa, Error> {
         "{}",
         t!("system.trust-ca.input-too-large")
     );
-    let pem = pem.trim();
-    ensure_code!(
-        pem.starts_with(PEM_BEGIN) && pem.ends_with(PEM_END) && pem.matches(PEM_BEGIN).count() == 1,
-        ErrorKind::InvalidRequest,
-        "{}",
-        t!("system.trust-ca.invalid-certificate")
-    );
-    let certificate = X509::from_pem(pem.as_bytes()).map_err(invalid_certificate)?;
+    let certificate = pem
+        .trim()
+        .parse::<Pem<X509>>()
+        .map_err(invalid_certificate)?;
 
     let der = certificate.to_der().map_err(invalid_certificate)?;
     let (_, parsed) = parse_x509_certificate(&der).map_err(invalid_certificate)?;
@@ -390,20 +383,43 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn rejects_malformed_multiple_and_oversized_input() {
+    #[test]
+    fn validates_the_first_certificate_in_a_bundle() {
         let pem = root(2, true, key_cert_sign());
-        for input in [
-            "not a certificate".to_owned(),
-            format!("{pem}{pem}"),
-            format!("{pem}trailing data"),
-        ] {
-            assert_eq!(
-                parse_ca(&input).unwrap_err().kind,
-                ErrorKind::InvalidRequest
-            );
-        }
+        let first = parse_ca(&pem).unwrap();
+        assert_eq!(
+            parse_ca(&format!("{pem}{pem}")).unwrap().result,
+            first.result
+        );
+        assert_eq!(
+            parse_ca(&format!("{pem}trailing data")).unwrap().result,
+            first.result
+        );
 
+        let key = gen_nistp256().unwrap();
+        let names = BTreeSet::from([InternedString::intern("leaf.local")]);
+        let leaf = String::from_utf8(
+            make_self_signed(
+                (&key, &SANInfo::new(&names)),
+                &CertBranding::start_os("test"),
+            )
+            .unwrap()
+            .to_pem()
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            parse_ca(&format!("{leaf}{pem}")).unwrap_err().kind,
+            ErrorKind::InvalidRequest
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_malformed_and_oversized_input() {
+        assert_eq!(
+            parse_ca("not a certificate").unwrap_err().kind,
+            ErrorKind::InvalidRequest
+        );
         let oversized = vec![b'a'; MAX_CERTIFICATE_SIZE + 1];
         assert_eq!(
             read_limited(oversized.as_slice()).await.unwrap_err().kind,
@@ -411,6 +427,13 @@ mod tests {
         );
         assert_eq!(
             parse_ca(&String::from_utf8(oversized).unwrap())
+                .unwrap_err()
+                .kind,
+            ErrorKind::InvalidRequest
+        );
+        let pem = root(2, true, key_cert_sign());
+        assert_eq!(
+            parse_ca(&format!("{pem}{}", "x".repeat(MAX_CERTIFICATE_SIZE)))
                 .unwrap_err()
                 .kind,
             ErrorKind::InvalidRequest
