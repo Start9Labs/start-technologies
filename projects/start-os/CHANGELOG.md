@@ -14,7 +14,7 @@ for the detail behind its highlights.
 
 - **Timed-out or aborted service commands stop running inside their subcontainer.**
   StartOS kills the command when its exec wrapper dies, including during health
-  checks. Commands terminated by `SIGTERM` report a failure to their caller.
+  checks.
 
 - **Services start from images without `/etc/passwd` or `/etc/group`.**
 

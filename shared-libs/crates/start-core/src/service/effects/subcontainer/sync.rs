@@ -942,7 +942,7 @@ pub fn exec(
             .with_ctx(|_| (ErrorKind::Filesystem, "waiting on child process"))?;
         if let Some(code) = exit.code() {
             std::process::exit(code);
-        } else if exit.success() {
+        } else if exit.success() || exit.signal() == Some(15) {
             Ok(())
         } else {
             Err(Error::new(
