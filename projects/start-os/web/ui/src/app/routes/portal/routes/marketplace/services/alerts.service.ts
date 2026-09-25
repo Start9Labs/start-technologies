@@ -10,7 +10,7 @@ import {
   sameUrl,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
-import { TuiDialogContext } from '@taiga-ui/core'
+import { TuiDialogContext, TuiNotification } from '@taiga-ui/core'
 import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { TuiConfirmData } from '@taiga-ui/kit'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
@@ -24,13 +24,21 @@ type PreDownloadDialogData = TuiConfirmData & {
 
 @Component({
   template: `
-    <div
-      class="g-markdown"
-      safeLinks
-      [innerHTML]="message | localize | markdown | dompurify"
-    ></div>
+    <div tuiNotification appearance="warning">
+      <div
+        class="g-markdown"
+        safeLinks
+        [innerHTML]="message | localize | markdown | dompurify"
+      ></div>
+    </div>
   `,
-  imports: [LocalizePipe, MarkdownPipe, NgDompurifyPipe, SafeLinksDirective],
+  imports: [
+    LocalizePipe,
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
+    TuiNotification,
+  ],
 })
 class PreDownloadMessage {
   protected readonly message =
@@ -98,7 +106,7 @@ export class MarketplaceAlertsService {
 
     return firstValueFrom(
       this.dialog
-        .openConfirm({ label: 'Warning', size: 's', data })
+        .openConfirm({ label: 'Wait!', size: 's', data })
         .pipe(defaultIfEmpty(false)),
     )
   }

@@ -822,4 +822,5 @@ export const ENGLISH: Record<string, number> = {
   'Descending': 929,
   'Services from this registry are maintained by the Start9 community and are undergoing beta testing. Bugs are expected. Install at your own risk.': 930,
   'Every IP address this name resolves to on this gateway is disabled': 931,
+  'Wait!': 932,
 }
