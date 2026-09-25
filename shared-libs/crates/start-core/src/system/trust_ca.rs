@@ -2,14 +2,13 @@ use std::cmp::Ordering;
 use std::path::Path;
 
 use clap::Parser;
+use foreign_types::ForeignTypeRef;
 use itertools::Itertools;
 use openssl::nid::Nid;
-use openssl::x509::{X509, X509NameRef};
+use openssl::x509::{X509, X509NameRef, X509Ref};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tokio::sync::Mutex;
-use x509_parser::parse_x509_certificate;
-use x509_parser::x509::X509Version;
 
 use crate::context::RpcContext;
 use crate::net::ssl::x509_sha256_fingerprint;
@@ -103,18 +102,8 @@ pub(crate) async fn update_trust_store() -> Result<(), Error> {
 }
 
 fn validate_ca(certificate: &X509) -> Result<ParsedCa, Error> {
-    let der = certificate.to_der().map_err(invalid_certificate)?;
-    let (_, parsed) = parse_x509_certificate(&der).map_err(invalid_certificate)?;
-    let is_ca = match parsed.basic_constraints().map_err(invalid_certificate)? {
-        Some(constraints) => constraints.value.ca,
-        None => parsed.version() == X509Version::V1,
-    };
-    let signs_certificates = parsed
-        .key_usage()
-        .map_err(invalid_certificate)?
-        .is_none_or(|usage| usage.value.key_cert_sign());
     ensure_code!(
-        is_ca && signs_certificates,
+        is_ca(certificate),
         ErrorKind::InvalidRequest,
         "{}",
         t!("system.trust-ca.not-ca")
@@ -143,6 +132,14 @@ fn validate_ca(certificate: &X509) -> Result<ParsedCa, Error> {
             fingerprint: x509_sha256_fingerprint(&certificate).map_err(invalid_certificate)?,
         },
     })
+}
+
+unsafe extern "C" {
+    fn X509_check_ca(x: *mut openssl_sys::X509) -> std::ffi::c_int;
+}
+
+fn is_ca(certificate: &X509Ref) -> bool {
+    unsafe { X509_check_ca(certificate.as_ptr()) != 0 }
 }
 
 fn render_subject(subject: &X509NameRef) -> String {

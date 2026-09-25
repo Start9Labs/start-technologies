@@ -79,6 +79,7 @@ ed25519-dalek-v1 = { package = "ed25519-dalek", version = "1" }
 exver = { path = "../exver", features = ["serde"] }
 fast-socks5 = "1.0.0"
 fd-lock-rs = "0.1.4"
+foreign-types = "0.3.2"
 form_urlencoded = "1.2.1"
 futures = "0.3.28"
 gpt = "4.1.0"
@@ -157,6 +158,7 @@ num_enum = "0.7.0"
 once_cell = "1.19.0"
 openssh-keys = "0.6.2"
 openssl = { version = "0.10.57", features = ["vendored"] }
+openssl-sys = "0.9.116"
 p256 = { version = "0.14.0-rc.15", features = ["pem"] }
 patch-db = { path = "../patch-db/core", features = ["trace"] }
 pbkdf2 = "0.13.0"
@@ -219,7 +221,6 @@ url = { version = "2.4.1", features = ["serde"] }
 uuid = { version = "1.4.1", features = ["v4"] }
 visit-rs = "0.1.1"
 x25519-dalek = { version = "3.0.0-rc.1", features = ["static_secrets"] }
-x509-parser = "0.16.0"
 xmltree = "0.10"
 zbus = "5.1.1"
 

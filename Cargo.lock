@@ -7756,6 +7756,7 @@ dependencies = [
  "exver",
  "fast-socks5",
  "fd-lock-rs",
+ "foreign-types",
  "form_urlencoded",
  "futures",
  "gpt",
@@ -7804,6 +7805,7 @@ dependencies = [
  "once_cell",
  "openssh-keys",
  "openssl",
+ "openssl-sys",
  "p256",
  "patch-db",
  "pbkdf2",
@@ -7859,7 +7861,6 @@ dependencies = [
  "uuid",
  "visit-rs",
  "x25519-dalek 3.0.0-rc.1",
- "x509-parser",
  "xmltree",
  "zbus",
 ]
