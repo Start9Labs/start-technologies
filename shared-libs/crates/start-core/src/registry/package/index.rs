@@ -74,6 +74,22 @@ fn placeholder_url() -> Url {
     "https://example.com".parse().unwrap()
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PreDownloadAlertWhen {
+    #[ts(type = "string")]
+    pub source_version: VersionRange,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PreDownloadAlert {
+    pub message: LocaleString,
+    pub when: PreDownloadAlertWhen,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, HasModel, TS, PartialEq)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
@@ -82,6 +98,9 @@ pub struct PackageMetadata {
     pub title: InternedString,
     pub description: Description,
     pub release_notes: LocaleString,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pre_download_alert: Option<PreDownloadAlert>,
     pub git_hash: Option<GitHash>,
     #[ts(type = "string")]
     pub license: InternedString,
@@ -289,6 +308,14 @@ impl Model<PackageVersionInfo> {
                 self.as_metadata_mut()
                     .as_release_notes_mut()
                     .mutate(|r| Ok(r.localize_for(locale)))?;
+                self.as_metadata_mut()
+                    .as_pre_download_alert_mut()
+                    .mutate(|alert| {
+                        if let Some(alert) = alert {
+                            alert.message.localize_for(locale);
+                        }
+                        Ok(())
+                    })?;
             }
         }
 
@@ -313,6 +340,12 @@ mod tests {
                 long: LocaleString::Translated("Long".into()),
             },
             release_notes: LocaleString::Translated("Notes".into()),
+            pre_download_alert: Some(PreDownloadAlert {
+                message: LocaleString::Translated("Back up before updating".into()),
+                when: PreDownloadAlertWhen {
+                    source_version: ">=1.0.0:0".parse().unwrap(),
+                },
+            }),
             git_hash: None,
             license: "MIT".into(),
             package_repo: "https://example.com/package".parse().unwrap(),
@@ -329,13 +362,52 @@ mod tests {
             satisfies: BTreeSet::new(),
         };
         let mut old_manifest = serde_json::to_value(metadata).unwrap();
+        assert_eq!(
+            old_manifest["preDownloadAlert"]["message"],
+            "Back up before updating"
+        );
         old_manifest
             .as_object_mut()
             .unwrap()
             .remove("hardwareVirtualization");
+        old_manifest
+            .as_object_mut()
+            .unwrap()
+            .remove("preDownloadAlert");
 
         let parsed: PackageMetadata = serde_json::from_value(old_manifest).unwrap();
 
         assert!(!parsed.hardware_virtualization);
+        assert!(parsed.pre_download_alert.is_none());
+    }
+
+    #[test]
+    fn pre_download_alert_round_trips() {
+        let alert = PreDownloadAlert {
+            message: LocaleString::LanguageMap(
+                [
+                    ("en_US".into(), "Back up before updating".into()),
+                    ("fr_FR".into(), "Sauvegardez avant la mise à jour".into()),
+                ]
+                .into_iter()
+                .collect(),
+            ),
+            when: PreDownloadAlertWhen {
+                source_version: ">=1.0.0:0 && <2.0.0:0".parse().unwrap(),
+            },
+        };
+        let encoded = serde_json::to_value(&alert).unwrap();
+        assert_eq!(encoded["when"]["sourceVersion"], ">=1.0.0:0 <2.0.0:0");
+        assert_eq!(
+            encoded["message"]["fr_FR"],
+            "Sauvegardez avant la mise à jour"
+        );
+        let mut localized = serde_json::from_value::<PreDownloadAlert>(encoded).unwrap();
+        assert_eq!(localized, alert);
+        localized.message.localize_for("fr_FR");
+        assert_eq!(
+            localized.message,
+            LocaleString::Translated("Sauvegardez avant la mise à jour".into())
+        );
     }
 }

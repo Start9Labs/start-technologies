@@ -14,27 +14,25 @@ const metadata = {
   access: 'public' as const,
 }
 
-/** Routes the effects to one action the way StartOS does: a fresh event id per call unless one is named. */
-function hostedBy(action: ReturnType<typeof attachAction>, caller: string) {
-  let next = 0
-  const effectsFor = (eventId: string) => ({ eventId }) as unknown as Effects
+/** Routes a service's effects to one action the way StartOS does: under the calling procedure's event id. */
+function callerEffects(
+  action: ReturnType<typeof attachAction>,
+  caller: string,
+  eventId: string,
+) {
+  const target = { eventId } as unknown as Effects
   return {
-    eventId: 'caller-event',
+    eventId,
     action: {
       getInput: jest.fn(async ({ prefill }: { prefill?: unknown }) =>
         action.getInput({
-          effects: effectsFor(`event-${next++}`),
+          effects: target,
           prefill: (prefill ?? null) as any,
           caller,
         }),
       ),
-      run: jest.fn(
-        async ({ eventId, input }: { eventId?: string; input?: any }) =>
-          action.run({
-            effects: effectsFor(eventId ?? `event-${next++}`),
-            input,
-            caller,
-          }),
+      run: jest.fn(async ({ input }: { input?: any }) =>
+        action.run({ effects: target, input, caller }),
       ),
     },
   } as unknown as Effects
@@ -50,7 +48,10 @@ function attachAction(ran: jest.Mock) {
         address: Value.select({
           name: 'Address',
           default: 'new',
-          values: { new: 'New', [`${(prefill as any)?.hostId}-0`]: 'Existing' },
+          values: {
+            new: 'New',
+            [`${(prefill as any)?.hostId}-0`]: 'Existing',
+          },
         }),
       }),
     async () => null,
@@ -62,9 +63,9 @@ function attachAction(ran: jest.Mock) {
 }
 
 describe('runAction', () => {
-  test('answers the form it opened, under that form’s event id', async () => {
+  test('answers the form it opened in the same procedure', async () => {
     const ran = jest.fn()
-    const effects = hostedBy(attachAction(ran), 'bitcoind')
+    const effects = callerEffects(attachAction(ran), 'bitcoind', 'init')
 
     await runAction({
       effects,
@@ -86,25 +87,21 @@ describe('runAction', () => {
       actionId: 'attach',
       prefill: { hostId: 'peer' },
     })
-    expect(effects.action.run).toHaveBeenCalledWith(
-      expect.objectContaining({
-        packageId: 'tor',
-        actionId: 'attach',
-        eventId: 'event-0',
-      }),
-    )
     expect(ran).toHaveBeenCalledWith(
       { hostId: 'peer', address: 'peer-0' },
       'bitcoind',
     )
   })
 
-  test('an input run under an event id no form was opened for is refused', async () => {
+  test('a procedure that opened no form cannot run with input', async () => {
     const ran = jest.fn()
-    const effects = hostedBy(attachAction(ran), 'bitcoind')
+    const action = attachAction(ran)
+    await callerEffects(action, 'bitcoind', 'init').action.getInput({
+      actionId: 'attach',
+    })
 
     await expect(
-      effects.action.run({
+      callerEffects(action, 'bitcoind', 'main').action.run({
         actionId: 'attach',
         input: { hostId: 'peer', address: 'new' },
       }),

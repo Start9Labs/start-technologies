@@ -317,6 +317,8 @@ Pass environment variables to a daemon or oneshot via the `env` option on `exec`
 })
 ```
 
+The process also receives the image's environment variables and the server's language as `LANG`; these `env` values override both. Set a variable to `undefined` to remove it, e.g. `env: { LANG: undefined }`.
+
 ## Health Checks
 
 There are two kinds of health checks:
@@ -395,7 +397,7 @@ The `fn` returns an object with `result` and `message`:
 
 Available on `sdk.healthCheck`:
 
-- **`checkPortListening(effects, port, { successMessage, errorMessage })`** — checks if a TCP/UDP port is bound by reading `/proc/net`. Lightweight, no network I/O. Preferred for daemon readiness checks.
+- **`checkPortListening(effects, port, { successMessage, errorMessage })`** — checks if a TCP port has a listening socket, or a UDP port is bound, by reading `/proc/net`. A TCP connection left in `TIME_WAIT` after its process exits does not count. Lightweight, no network I/O. Preferred for daemon readiness checks.
 - **`checkWebUrl(effects, url, { successMessage, errorMessage })`** — fetches a URL, succeeds on any HTTP response.
 - **`runHealthScript(command, subcontainer, { errorMessage })`** — runs a command in a subcontainer, succeeds on exit code 0.
 
@@ -563,7 +565,7 @@ await appSub.execFail(['pg_restore', '-U', user, '-d', database, dumpFile], {
 Opt out whenever the runtime is set by something you cannot bound: the size of the data, the speed of a disk or backup target, or another process you are waiting on. Keep the default for commands that should answer promptly, where the timeout is what stops a wedged container from hanging the service.
 
 > [!NOTE]
-> On timeout the SDK sends `SIGKILL` to the process it spawned and reports `timed out after <n>ms and was killed with SIGKILL`; `exec()`'s result carries `timedOutAfter`, set to the limit that elapsed. The command itself runs inside the subcontainer and is not signalled — it stops when the subcontainer is torn down, so treat a timeout as "the SDK stopped waiting", not "the work stopped".
+> On timeout the SDK sends `SIGKILL` to the process it spawned and reports `timed out after <n>ms and was killed with SIGKILL`; `exec()`'s result carries `timedOutAfter`, set to the limit that elapsed.
 
 ## PostgreSQL Sidecar
 

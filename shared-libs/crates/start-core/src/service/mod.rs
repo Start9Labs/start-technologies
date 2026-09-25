@@ -328,10 +328,10 @@ impl Service {
             .flatten_ok()
             .map(|a| a.and_then(|a| a))
             .try_collect()?;
-        let procedure_id = Guid::new();
+        let event_id = Guid::new();
         for action_id in tasks {
             if let Some(input) = self
-                .get_action_input(procedure_id.clone(), action_id.clone(), Value::Null, None)
+                .get_action_input(event_id.clone(), action_id.clone(), Value::Null, None)
                 .await
                 .log_err()
                 .flatten()
@@ -372,7 +372,7 @@ impl Service {
     async fn new(
         ctx: RpcContext,
         s9pk: S9pk,
-        procedure_id: Guid,
+        event_id: Guid,
         init_kind: Option<InitKind>,
         recovery_source: Option<impl GenericMountGuard>,
         init_progress: Option<crate::progress::PhaseProgressTrackerHandle>,
@@ -417,7 +417,7 @@ impl Service {
         service
             .seed
             .persistent_container
-            .init(service.weak(), procedure_id, init_kind)
+            .init(service.weak(), event_id, init_kind)
             .await?;
         service.recheck_tasks().await?;
         if let Some(recovery_guard) = recovery_guard {
@@ -698,7 +698,7 @@ impl Service {
         crate::volume::ensure_volume_root(&manifest.id).await?;
         let developer_key = s9pk.as_archive().signer();
         let icon = s9pk.icon_data_url().await?;
-        let procedure_id = Guid::new();
+        let event_id = Guid::new();
         let (finalization_progress, overall_progress) = match progress {
             Some(InstallProgressHandles {
                 finalization_progress,
@@ -709,7 +709,7 @@ impl Service {
         let service = Self::new(
             ctx.clone(),
             s9pk,
-            procedure_id.clone(),
+            event_id.clone(),
             Some(kind),
             recovery_source,
             finalization_progress,

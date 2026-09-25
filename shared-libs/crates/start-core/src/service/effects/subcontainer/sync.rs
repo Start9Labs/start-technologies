@@ -127,7 +127,7 @@ pub struct ExecParams {
     command: Vec<OsString>,
 }
 impl ExecParams {
-    fn exec(&self) -> Result<(), Error> {
+    fn exec(&self, parent_death_signal: Option<c_int>) -> Result<(), Error> {
         let ExecParams {
             env,
             env_file,
@@ -145,33 +145,20 @@ impl ExecParams {
         };
 
         let mut cmd = StdCommand::new(command);
+        cmd.env_clear();
+        cmd.env(
+            "PATH",
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        );
 
-        let mut uid = Err(None);
-        let mut gid = Err(None);
         let mut needs_home = true;
-
-        if let Some(user) = user {
-            if let Some((u, g)) = user.split_once(":") {
-                uid = Err(Some(u));
-                gid = Err(Some(g));
-            } else {
-                uid = Err(Some(user));
-            }
-        }
-
-        if let Some(u) = uid.err().flatten().and_then(|u| u.parse::<u32>().ok()) {
-            uid = Ok(u);
-        }
-        if let Some(g) = gid.err().flatten().and_then(|g| g.parse::<u32>().ok()) {
-            gid = Ok(g);
-        }
 
         let mut update_env = |line: &str| {
             if let Some((k, v)) = line.split_once("=") {
                 needs_home &= k != "HOME";
                 cmd.env(k, v);
-            } else {
-                tracing::warn!("Invalid line in env: {line}");
+            } else if !line.is_empty() {
+                cmd.env_remove(line);
             }
         };
         if let Some(f) = env_file {
@@ -184,87 +171,25 @@ impl ExecParams {
             }
         }
 
+        for line in std::fs::read_to_string("/etc/default/locale")
+            .unwrap_or_default()
+            .lines()
+        {
+            update_env(line);
+        }
+
         for line in env {
             update_env(&line);
         }
 
-        let needs_gid = Err(None) == gid;
-        let mut username = InternedString::intern("root");
-        let mut handle_passwd_line = |line: &str| -> Option<()> {
-            let l = line.trim();
-            let mut split = l.split(":");
-            let user = split.next()?;
-            match uid {
-                Err(Some(u)) if u != user => return None,
-                _ => (),
-            }
-            split.next(); // throw away x
-            let u: u32 = split.next()?.parse().ok()?;
-            match uid {
-                Err(Some(_)) => uid = Ok(u),
-                Err(None) if u == 0 => uid = Ok(u),
-                Ok(uid) if uid != u => return None,
-                _ => (),
-            }
-
-            username = user.into();
-
-            if !needs_gid && !needs_home {
-                return Some(());
-            }
-            let g = split.next()?;
-            if needs_gid {
-                gid = Ok(g.parse().ok()?);
-            }
-
-            if needs_home {
-                split.next(); // throw away group name
-
-                let home = split.next()?;
-
-                cmd.env("HOME", home);
-            }
-
-            Some(())
-        };
-
-        let mut lines = BufReader::new(
-            File::open(chroot.join("etc/passwd"))
-                .with_ctx(|_| (ErrorKind::Filesystem, format!("open r /etc/passwd")))?,
-        )
-        .lines();
-        while let Some(line) = lines.next().transpose()? {
-            if handle_passwd_line(&line).is_some() {
-                break;
-            }
-        }
-
-        let mut groups = Vec::new();
-        let mut handle_group_line = |line: &str| -> Option<()> {
-            let l = line.trim();
-            let mut split = l.split(":");
-            let name = split.next()?;
-            split.next()?; // throw away x
-            let g = split.next()?.parse::<u32>().ok()?;
-            match gid {
-                Err(Some(n)) if n == name => gid = Ok(g),
-                _ => (),
-            }
-            let users = split.next()?;
-            if users.split(",").any(|u| u == &*username) {
-                groups.push(nix::unistd::Gid::from_raw(g));
-            }
-            Some(())
-        };
-        let mut lines = BufReader::new(
-            File::open(chroot.join("etc/group"))
-                .with_ctx(|_| (ErrorKind::Filesystem, format!("open r /etc/group")))?,
-        )
-        .lines();
-        while let Some(line) = lines.next().transpose()? {
-            if handle_group_line(&line).is_none() {
-                tracing::warn!("Invalid /etc/group line: {line}");
-            }
+        let ExecUser {
+            uid,
+            gid,
+            home,
+            groups,
+        } = ExecUser::resolve(chroot, user.as_deref())?;
+        if needs_home {
+            cmd.env("HOME", home);
         }
 
         // Switch into the subcontainer rootfs via pivot_root rather than
@@ -308,49 +233,43 @@ impl ExecParams {
         nix::mount::umount2("/.put_old", nix::mount::MntFlags::MNT_DETACH)
             .with_ctx(|_| (ErrorKind::Filesystem, "umount /.put_old"))?;
         std::fs::remove_dir("/.put_old").ok();
-        if let Ok(uid) = uid {
-            if uid != 0 {
-                std::os::unix::fs::chown("/proc/self/fd/0", Some(uid), gid.ok()).ok();
-                std::os::unix::fs::chown("/proc/self/fd/1", Some(uid), gid.ok()).ok();
-                std::os::unix::fs::chown("/proc/self/fd/2", Some(uid), gid.ok()).ok();
-            }
+        if uid != 0 {
+            std::os::unix::fs::chown("/proc/self/fd/0", Some(uid), Some(gid)).ok();
+            std::os::unix::fs::chown("/proc/self/fd/1", Some(uid), Some(gid)).ok();
+            std::os::unix::fs::chown("/proc/self/fd/2", Some(uid), Some(gid)).ok();
         }
         // Handle credential changes in pre_exec to control the order:
         // setgroups must happen before setgid/setuid (requires CAP_SETGID)
-        {
-            let set_uid = uid.ok();
-            let set_gid = gid.ok();
-            unsafe {
-                cmd.pre_exec(move || {
-                    // Create a new session so entrypoint scripts that do
-                    // kill(0, SIGTERM) don't cascade to other subcontainers.
-                    // EPERM means we're already a session leader (e.g. pty_process
-                    // called setsid() for us), which is fine.
-                    match nix::unistd::setsid() {
-                        Ok(_) | Err(Errno::EPERM) => {}
-                        Err(e) => {
-                            return Err(std::io::Error::from_raw_os_error(e as i32));
-                        }
+        unsafe {
+            cmd.pre_exec(move || {
+                // Create a new session so entrypoint scripts that do
+                // kill(0, SIGTERM) don't cascade to other subcontainers.
+                // EPERM means we're already a session leader (e.g. pty_process
+                // called setsid() for us), which is fine.
+                match nix::unistd::setsid() {
+                    Ok(_) | Err(Errno::EPERM) => {}
+                    Err(e) => {
+                        return Err(std::io::Error::from_raw_os_error(e as i32));
                     }
-                    if !groups.is_empty() {
-                        nix::unistd::setgroups(&groups)
-                            .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+                }
+                nix::unistd::setgroups(&groups)
+                    .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+                nix::unistd::setgid(nix::unistd::Gid::from_raw(gid))
+                    .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+                nix::unistd::setuid(nix::unistd::Uid::from_raw(uid))
+                    .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+                // Restore dumpable flag cleared by setuid so that
+                // /proc/self/fd/* is owned by the current uid and
+                // /dev/stderr works for the target user.
+                libc::prctl(libc::PR_SET_DUMPABLE, 1, 0, 0, 0);
+                // Credential changes clear the parent-death signal.
+                if let Some(signal) = parent_death_signal {
+                    if libc::prctl(libc::PR_SET_PDEATHSIG, signal) < 0 {
+                        return Err(std::io::Error::last_os_error());
                     }
-                    if let Some(gid) = set_gid {
-                        nix::unistd::setgid(nix::unistd::Gid::from_raw(gid))
-                            .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
-                    }
-                    if let Some(uid) = set_uid {
-                        nix::unistd::setuid(nix::unistd::Uid::from_raw(uid))
-                            .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
-                    }
-                    // Restore dumpable flag cleared by setuid so that
-                    // /proc/self/fd/* is owned by the current uid and
-                    // /dev/stderr works for the target user.
-                    libc::prctl(libc::PR_SET_DUMPABLE, 1, 0, 0, 0);
-                    Ok(())
-                });
-            }
+                }
+                Ok(())
+            });
         }
         cmd.args(args);
 
@@ -360,6 +279,151 @@ impl ExecParams {
             cmd.current_dir("/");
         }
         Err(cmd.exec().into())
+    }
+}
+
+struct ExecUser {
+    uid: u32,
+    gid: u32,
+    home: String,
+    groups: Vec<nix::unistd::Gid>,
+}
+
+impl ExecUser {
+    fn resolve(chroot: &Path, spec: Option<&str>) -> Result<Self, Error> {
+        let passwd = read_user_database(&chroot.join("etc/passwd"))?;
+        let group = read_user_database(&chroot.join("etc/group"))?;
+        let (user, group_spec) = match spec {
+            Some(spec) => spec
+                .split_once(':')
+                .map_or((spec, None), |(u, g)| (u, Some(g))),
+            None => ("0", None),
+        };
+
+        let uid_spec = user.parse::<u32>().ok();
+        let entry = user_database_entries(&passwd)
+            .find(|(name, uid, _)| uid_spec.map_or(*name == user, |u| u == *uid));
+        let uid = uid_spec
+            .or(entry.as_ref().map(|(_, uid, _)| *uid))
+            .or((user == "root").then_some(0))
+            .ok_or_else(|| {
+                Error::new(
+                    eyre!(
+                        "{}",
+                        t!(
+                            "service.effects.subcontainer.sync.unknown-user",
+                            user = user
+                        )
+                    ),
+                    ErrorKind::InvalidRequest,
+                )
+            })?;
+
+        let gid = match group_spec {
+            Some(g) => g
+                .parse()
+                .ok()
+                .or(user_database_entries(&group)
+                    .find(|(name, ..)| *name == g)
+                    .map(|(_, gid, _)| gid))
+                .or((g == "root").then_some(0))
+                .ok_or_else(|| {
+                    Error::new(
+                        eyre!(
+                            "{}",
+                            t!("service.effects.subcontainer.sync.unknown-group", group = g)
+                        ),
+                        ErrorKind::InvalidRequest,
+                    )
+                })?,
+            None => entry
+                .as_ref()
+                .and_then(|(_, _, rest)| rest.first()?.parse().ok())
+                .unwrap_or(0),
+        };
+
+        let home = entry
+            .as_ref()
+            .and_then(|(_, _, rest)| rest.get(2).copied())
+            .unwrap_or("/")
+            .to_owned();
+
+        let groups = match &entry {
+            Some((name, ..)) => user_database_entries(&group)
+                .filter(|(_, _, rest)| {
+                    rest.first()
+                        .is_some_and(|members| members.split(',').any(|m| m == *name))
+                })
+                .map(|(_, gid, _)| nix::unistd::Gid::from_raw(gid))
+                .collect(),
+            None => Vec::new(),
+        };
+
+        Ok(Self {
+            uid,
+            gid,
+            home,
+            groups,
+        })
+    }
+}
+
+fn read_user_database(path: &Path) -> Result<String, Error> {
+    match std::fs::read_to_string(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        res => res.with_ctx(|_| {
+            (
+                ErrorKind::Filesystem,
+                lazy_format!("read {}", path.display()),
+            )
+        }),
+    }
+}
+
+fn user_database_entries(db: &str) -> impl Iterator<Item = (&str, u32, Vec<&str>)> {
+    db.lines().filter_map(|line| {
+        let mut fields = line.trim().split(':');
+        let name = fields.next()?;
+        fields.next();
+        let id = fields.next()?.parse().ok()?;
+        Some((name, id, fields.collect()))
+    })
+}
+
+#[cfg(test)]
+mod user_database_tests {
+    use super::*;
+
+    #[test]
+    fn missing_user_database_runs_as_root() {
+        let dir = tempfile::tempdir().unwrap();
+        for spec in [None, Some("root"), Some("0:0"), Some("root:root")] {
+            let user = ExecUser::resolve(dir.path(), spec).unwrap();
+            assert_eq!((user.uid, user.gid, user.home.as_str()), (0, 0, "/"));
+            assert!(user.groups.is_empty());
+        }
+        assert!(ExecUser::resolve(dir.path(), Some("app")).is_err());
+        assert!(ExecUser::resolve(dir.path(), Some("0:app")).is_err());
+    }
+
+    #[test]
+    fn resolves_from_user_database() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("etc")).unwrap();
+        std::fs::write(
+            dir.path().join("etc/passwd"),
+            "root:x:0:0:root:/admin:/bin/sh\napp:x:1000:1001:app:/home/app:/bin/sh\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("etc/group"), "staff:x:2000:app\n").unwrap();
+        let user = ExecUser::resolve(dir.path(), None).unwrap();
+        assert_eq!((user.uid, user.gid, user.home.as_str()), (0, 0, "/admin"));
+        let user = ExecUser::resolve(dir.path(), Some("app:staff")).unwrap();
+        assert_eq!(
+            (user.uid, user.gid, user.home.as_str()),
+            (1000, 2000, "/home/app")
+        );
+        assert_eq!(user.groups, vec![nix::unistd::Gid::from_raw(2000)]);
     }
 }
 
@@ -589,7 +653,7 @@ pub fn launch_init(_: ContainerCliContext, params: ExecParams) -> Result<(), Err
         }
         std::process::exit(0)
     } else {
-        params.exec()
+        params.exec(None)
     }
 }
 
@@ -829,7 +893,7 @@ pub fn exec(
 }
 
 pub fn exec_command(_: ContainerCliContext, params: ExecParams) -> Result<(), Error> {
-    params.exec()
+    params.exec(Some(SIGKILL))
 }
 
 /// Wrap a child process so that its stdout/stderr are always pipes, even when

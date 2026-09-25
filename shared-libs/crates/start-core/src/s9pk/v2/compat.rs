@@ -262,6 +262,7 @@ impl TryFrom<ManifestV1> for Manifest {
             metadata: PackageMetadata {
                 title: format!("{} (Legacy)", value.title).into(),
                 release_notes: LocaleString::Translated(value.release_notes),
+                pre_download_alert: None,
                 license: value.license.into(),
                 package_repo: value.wrapper_repo,
                 upstream_repo: value.upstream_repo,

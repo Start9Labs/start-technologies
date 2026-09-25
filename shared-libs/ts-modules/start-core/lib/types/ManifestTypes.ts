@@ -37,6 +37,13 @@ export type SDKManifest = {
    * @example `https://nextcloud.com/contribute/`
    */
   readonly donationUrl: string | null
+  /** Localized Markdown shown before downloading an update from a matching installed version. */
+  readonly preDownloadAlert?: {
+    readonly message: T.LocaleString
+    readonly when: {
+      readonly sourceVersion: string
+    }
+  }
   readonly description: {
     /**
      * Short description, shown on the marketplace list page. The tile clamps it

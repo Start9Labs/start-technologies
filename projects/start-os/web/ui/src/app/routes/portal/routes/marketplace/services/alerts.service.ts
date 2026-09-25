@@ -1,8 +1,52 @@
-import { inject, Injectable } from '@angular/core'
-import { MarketplacePkgBase } from '@start9labs/marketplace'
-import { DialogService, i18nKey, i18nPipe, sameUrl } from '@start9labs/shared'
+import { Component, inject, Injectable } from '@angular/core'
+import {
+  DialogService,
+  Exver,
+  i18nKey,
+  i18nPipe,
+  LocalizePipe,
+  MarkdownPipe,
+  SafeLinksDirective,
+  sameUrl,
+} from '@start9labs/shared'
+import { T } from '@start9labs/start-core'
+import { TuiDialogContext, TuiNotification } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
+import { TuiConfirmData } from '@taiga-ui/kit'
+import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { defaultIfEmpty, firstValueFrom } from 'rxjs'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
+
+type PreDownloadDialogData = TuiConfirmData & {
+  content: PolymorpheusComponent<PreDownloadMessage>
+  message: T.LocaleString
+}
+
+@Component({
+  template: `
+    <div tuiNotification appearance="warning">
+      <div
+        class="g-markdown"
+        safeLinks
+        [innerHTML]="message | localize | markdown | dompurify"
+      ></div>
+    </div>
+  `,
+  imports: [
+    LocalizePipe,
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
+    TuiNotification,
+  ],
+})
+class PreDownloadMessage {
+  protected readonly message =
+    injectContext<TuiDialogContext<boolean, PreDownloadDialogData>>().data
+      .message
+}
+
+const PRE_DOWNLOAD_MESSAGE = new PolymorpheusComponent(PreDownloadMessage)
 
 @Injectable({
   providedIn: 'root',
@@ -11,6 +55,7 @@ export class MarketplaceAlertsService {
   private readonly dialog = inject(DialogService)
   private readonly marketplaceService = inject(MarketplaceService)
   private readonly i18n = inject(i18nPipe)
+  private readonly exver = inject(Exver)
 
   async alertMarketplace(
     url: string,
@@ -38,6 +83,32 @@ export class MarketplaceAlertsService {
         .pipe(defaultIfEmpty(false))
         .subscribe(response => resolve(response))
     })
+  }
+
+  async alertPreDownload(
+    alert: T.PreDownloadAlert | null | undefined,
+    sourceVersion: string | null,
+  ): Promise<boolean> {
+    if (
+      !alert ||
+      !sourceVersion ||
+      !this.exver.satisfies(sourceVersion, alert.when.sourceVersion)
+    ) {
+      return true
+    }
+
+    const data: PreDownloadDialogData = {
+      content: PRE_DOWNLOAD_MESSAGE,
+      message: alert.message,
+      yes: 'Continue',
+      no: 'Cancel',
+    }
+
+    return firstValueFrom(
+      this.dialog
+        .openConfirm({ label: 'Wait!', size: 's', data })
+        .pipe(defaultIfEmpty(false)),
+    )
   }
 
   async alertBreakages(breakages: string[]): Promise<boolean> {

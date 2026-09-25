@@ -3,34 +3,67 @@ import { AbortedError } from './AbortedError'
 import { deepEqual } from './deepEqual'
 import { DropGenerator, DropPromise } from './Drop'
 
-export abstract class Watchable<Raw, Mapped = Raw> {
-  protected readonly mapFn: (value: Raw) => Mapped
-  protected readonly eqFn: (a: Mapped, b: Mapped) => boolean
+/** A reader `Watchable.from` and `Watchable.combine` can follow. */
+export type WatchSource<A> = {
+  once(): Promise<A>
+  watch(abort?: AbortSignal): AsyncGenerator<A, unknown, unknown>
+}
+
+type WatchSources<V extends unknown[]> = { [K in keyof V]: WatchSource<V[K]> }
+
+export abstract class Watchable<A> implements WatchSource<A> {
+  /** A reader over a source, emitting when a value differs from the last by `eq`. */
+  static from<A>(
+    effects: Effects,
+    source: WatchSource<A>,
+    eq?: (a: A, b: A) => boolean,
+  ): Watchable<A> {
+    return new FromSource(effects, source, eq)
+  }
+
+  /**
+   * A reader over several sources, whose raw value is the tuple of their
+   * values. Its `watch`es end with this reader's.
+   */
+  static combine<V extends unknown[], Mapped = V>(
+    effects: Effects,
+    sources: readonly [...WatchSources<V>],
+    map?: (values: V) => Mapped,
+    eq?: (a: Mapped, b: Mapped) => boolean,
+  ): Watchable<Mapped> {
+    return new Combined(effects, sources, { map, eq })
+  }
+
+  protected readonly eqFn: (a: A, b: A) => boolean
 
   constructor(
     readonly effects: Effects,
-    options?: {
-      map?: (value: Raw) => Mapped
-      eq?: (a: Mapped, b: Mapped) => boolean
-    },
+    eq?: (a: A, b: A) => boolean,
   ) {
-    this.mapFn = options?.map ?? (a => a as unknown as Mapped)
-    this.eqFn = options?.eq ?? ((a, b) => deepEqual(a, b))
+    this.eqFn = eq ?? ((a, b) => deepEqual(a, b))
   }
 
   /**
    * Fetch the current value, optionally registering a callback for change notification.
    * The callback should be invoked when the underlying data changes.
    */
-  protected abstract fetch(callback?: () => void): Promise<Raw>
+  protected abstract fetch(callback?: () => void): Promise<A>
   protected abstract readonly label: string
 
   /**
-   * Produce a stream of raw values. Default implementation uses fetch() with
+   * Produce a stream of values. Default implementation uses fetch() with
    * effects callback in a loop. Override for custom subscription mechanisms
    * (e.g. fs.watch).
    */
-  protected async *produce(abort: AbortSignal): AsyncGenerator<Raw, void> {
+  protected produce(abort: AbortSignal): AsyncGenerator<A, void> {
+    return this.poll(abort, callback => this.fetch(callback))
+  }
+
+  /** Values from repeated fetches, each after the previous one's callback fires. */
+  protected async *poll<T>(
+    abort: AbortSignal,
+    fetch: (callback: () => void) => Promise<T>,
+  ): AsyncGenerator<T, void> {
     const resolveCell = { resolve: () => {} }
     this.effects.onLeaveContext(() => {
       resolveCell.resolve()
@@ -42,7 +75,7 @@ export abstract class Watchable<Raw, Mapped = Raw> {
         callback = resolve
         resolveCell.resolve = resolve
       })
-      yield await this.fetch(() => callback())
+      yield await fetch(() => callback())
       await waitForNext
     }
   }
@@ -52,21 +85,20 @@ export abstract class Watchable<Raw, Mapped = Raw> {
    * Return a cleanup function to be called when the subscription ends.
    * Override for side effects like FileHelper's consts tracking.
    */
-  protected onConstRegistered(_value: Mapped): (() => void) | void {}
+  protected onConstRegistered(_value: A): (() => void) | void {}
 
   /**
-   * Internal generator that maps raw values and deduplicates using eq.
+   * Internal generator that deduplicates produced values using eq.
    */
   private async *watchGen(
     abort: AbortSignal,
-  ): AsyncGenerator<Mapped, void, unknown> {
-    let prev: { value: Mapped } | null = null
-    for await (const raw of this.produce(abort)) {
+  ): AsyncGenerator<A, void, unknown> {
+    let prev: { value: A } | null = null
+    for await (const value of this.produce(abort)) {
       if (abort.aborted) return
-      const mapped = this.mapFn(raw)
-      if (!prev || !this.eqFn(prev.value, mapped)) {
-        prev = { value: mapped }
-        yield mapped
+      if (!prev || !this.eqFn(prev.value, value)) {
+        prev = { value }
+        yield value
       }
     }
   }
@@ -74,11 +106,11 @@ export abstract class Watchable<Raw, Mapped = Raw> {
   /**
    * Returns the value. Reruns the context from which it has been called if the underlying value changes
    */
-  async const(): Promise<Mapped> {
+  async const(): Promise<A> {
     const abort = new AbortController()
     const gen = this.watchGen(abort.signal)
     const res = await gen.next()
-    const value = res.value as Mapped
+    const value = res.value as A
     if (this.effects.constRetry) {
       const constRetry = this.effects.constRetry
       const cleanup = this.onConstRegistered(value)
@@ -108,18 +140,18 @@ export abstract class Watchable<Raw, Mapped = Raw> {
   /**
    * Returns the value. Does nothing if the value changes
    */
-  async once(): Promise<Mapped> {
-    return this.mapFn(await this.fetch())
+  async once(): Promise<A> {
+    return this.fetch()
   }
 
   /**
    * Watches the value. Returns an async iterator that yields whenever the value changes
    */
-  watch(abort?: AbortSignal): AsyncGenerator<Mapped, never, unknown> {
+  watch(abort?: AbortSignal): AsyncGenerator<A, never, unknown> {
     const ctrl = new AbortController()
     abort?.addEventListener('abort', () => ctrl.abort())
     return DropGenerator.of(
-      (async function* (gen): AsyncGenerator<Mapped, never, unknown> {
+      (async function* (gen): AsyncGenerator<A, never, unknown> {
         yield* gen
         throw new AbortedError()
       })(this.watchGen(ctrl.signal)),
@@ -132,7 +164,7 @@ export abstract class Watchable<Raw, Mapped = Raw> {
    */
   onChange(
     callback: (
-      value: Mapped | undefined,
+      value: A | undefined,
       error?: Error,
     ) => { cancel: boolean } | Promise<{ cancel: boolean }>,
   ) {
@@ -165,7 +197,7 @@ export abstract class Watchable<Raw, Mapped = Raw> {
   /**
    * Watches the value. Returns when the predicate is true
    */
-  waitFor(pred: (value: Mapped) => boolean): Promise<Mapped> {
+  waitFor(pred: (value: A) => boolean): Promise<A> {
     const ctrl = new AbortController()
     return DropPromise.of(
       Promise.resolve().then(async () => {
@@ -178,5 +210,106 @@ export abstract class Watchable<Raw, Mapped = Raw> {
       }),
       () => ctrl.abort(),
     )
+  }
+}
+
+/** A {@link Watchable} over a raw value, reading `map`'s result of it. */
+export abstract class MappedWatchable<Raw, Mapped> extends Watchable<Mapped> {
+  protected readonly mapFn: (value: Raw) => Mapped
+
+  constructor(
+    effects: Effects,
+    options?: {
+      map?: (value: Raw) => Mapped
+      eq?: (a: Mapped, b: Mapped) => boolean
+    },
+  ) {
+    super(effects, options?.eq)
+    this.mapFn = options?.map ?? (a => a as unknown as Mapped)
+  }
+
+  /** Fetch the raw value, as {@link Watchable.fetch} does. */
+  protected abstract fetchRaw(callback?: () => void): Promise<Raw>
+
+  /** Produce raw values, as {@link Watchable.produce} does. */
+  protected produceRaw(abort: AbortSignal): AsyncGenerator<Raw, void> {
+    return this.poll(abort, callback => this.fetchRaw(callback))
+  }
+
+  protected async fetch(callback?: () => void) {
+    return this.mapFn(await this.fetchRaw(callback))
+  }
+
+  protected async *produce(abort: AbortSignal): AsyncGenerator<Mapped, void> {
+    for await (const raw of this.produceRaw(abort)) yield this.mapFn(raw)
+  }
+}
+
+class FromSource<A> extends Watchable<A> {
+  protected readonly label = 'Watchable.from'
+
+  constructor(
+    effects: Effects,
+    private readonly source: WatchSource<A>,
+    eq?: (a: A, b: A) => boolean,
+  ) {
+    super(effects, eq)
+  }
+
+  protected fetch() {
+    return this.source.once()
+  }
+
+  protected async *produce(abort: AbortSignal): AsyncGenerator<A, void> {
+    try {
+      for await (const value of this.source.watch(abort)) yield value
+    } catch (e) {
+      if (!(e instanceof AbortedError)) throw e
+    }
+  }
+}
+
+class Combined<V extends unknown[], Mapped> extends MappedWatchable<V, Mapped> {
+  protected readonly label = 'Watchable.combine'
+
+  constructor(
+    effects: Effects,
+    private readonly sources: readonly [...WatchSources<V>],
+    options: {
+      map?: (values: V) => Mapped
+      eq?: (a: Mapped, b: Mapped) => boolean
+    },
+  ) {
+    super(effects, options)
+  }
+
+  protected async fetchRaw() {
+    return (await Promise.all(this.sources.map(s => s.once()))) as V
+  }
+
+  protected async *produceRaw(abort: AbortSignal): AsyncGenerator<V, void> {
+    const gens = this.sources.map(s => s.watch(abort))
+    const next = (i: number) =>
+      gens[i].next().then(
+        r => ({ i, r }),
+        e => {
+          if (e instanceof AbortedError) return { i, r: null }
+          throw e
+        },
+      )
+    const first = await Promise.all(gens.map((_, i) => next(i)))
+    const values: unknown[] = []
+    for (const { i, r } of first) {
+      if (!r || r.done) return
+      values[i] = r.value
+    }
+    const pending = gens.map((_, i) => next(i))
+    while (!abort.aborted) {
+      yield [...values] as V
+      const { i, r } = await Promise.race(pending)
+      if (!r || r.done) return
+      values[i] = r.value
+      pending[i] = next(i)
+    }
   }
 }

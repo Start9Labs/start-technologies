@@ -10,7 +10,6 @@ use nix::net::if_::if_nametoindex;
 use patch_db::json_ptr::JsonPointer;
 use tokio::process::Command;
 use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
 use tokio_rustls::rustls::ClientConfig as TlsClientConfig;
 use tokio_rustls::rustls::crypto::CryptoProvider;
 use tracing::instrument;
@@ -1151,7 +1150,7 @@ async fn sync_outbound_rules(
 pub struct NetService {
     shutdown: bool,
     data: Arc<Mutex<NetServiceData>>,
-    sync_task: JoinHandle<()>,
+    sync_task: NonDetachingJoinHandle<()>,
     synced: Watch<u64>,
 }
 impl NetService {
@@ -1166,7 +1165,7 @@ impl NetService {
                 controller: Default::default(),
                 binds: BTreeMap::new(),
             })),
-            sync_task: tokio::spawn(futures::future::ready(())),
+            sync_task: tokio::spawn(futures::future::ready(())).into(),
             synced: Watch::new(0u64),
         }
     }
@@ -1299,7 +1298,7 @@ impl NetService {
         Ok(Self {
             shutdown: false,
             data,
-            sync_task,
+            sync_task: sync_task.into(),
             synced,
         })
     }
@@ -1417,14 +1416,11 @@ impl NetService {
                 let hostname = ServerHostname::load(db.as_public().as_server_info())?;
                 let ports = db.as_private().as_available_ports().de()?;
                 if let Some(ref pkg_id) = pkg_id {
-                    for (host_id, host) in db
-                        .as_public_mut()
-                        .as_package_data_mut()
-                        .as_idx_mut(pkg_id)
-                        .or_not_found(pkg_id)?
-                        .as_hosts_mut()
-                        .as_entries_mut()?
-                    {
+                    let Some(pde) = db.as_public_mut().as_package_data_mut().as_idx_mut(pkg_id)
+                    else {
+                        return Ok(());
+                    };
+                    for (host_id, host) in pde.as_hosts_mut().as_entries_mut()? {
                         host.as_bindings_mut().mutate(|b| {
                             for (internal_port, info) in b.iter_mut() {
                                 if !except.contains(&BindId {
@@ -1604,7 +1600,15 @@ impl NetService {
             }
         }
         self.sync_task.abort();
-        let outbound_sources = self.data.lock().await.outbound_sources();
+        let outbound_sources = {
+            let mut data = self.data.lock().await;
+            if let Ok(ctrl) = data.net_controller() {
+                for id in data.binds.keys().cloned().collect::<Vec<_>>() {
+                    data.retire(&*ctrl, id).await.log_err();
+                }
+            }
+            data.outbound_sources()
+        };
         purge_outbound_rules(&outbound_sources).await;
         // Set last: an earlier failure leaves shutdown false so Drop's fallback re-runs.
         self.shutdown = true;
@@ -2063,6 +2067,23 @@ mod tests {
         assert_eq!(
             data.outbound_sources(),
             ["10.0.3.5", "fd00:3::5"].map(|a| a.parse::<IpAddr>().unwrap())
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dropped_service_stops_its_sync_task() {
+        let (held, released) = tokio::sync::oneshot::channel::<()>();
+        let mut service = NetService::dummy();
+        service.sync_task = tokio::spawn(async move {
+            let _held = held;
+            std::future::pending::<()>().await
+        })
+        .into();
+        drop(service);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(5), released)
+                .await
+                .is_ok()
         );
     }
 }

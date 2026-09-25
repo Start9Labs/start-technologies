@@ -50,6 +50,10 @@ import { GetStatus } from '@start9labs/start-core/util/GetStatus'
 import * as patterns from '@start9labs/start-core/util/patterns'
 import { Backups } from './backup/Backups'
 import { SetupBackupsParams, setupBackups } from './backup/setupBackups'
+import {
+  SetupPrimaryUrlParams,
+  setupPrimaryUrl,
+} from './primaryUrl/setupPrimaryUrl'
 import { checkWebUrl, runHealthScript } from './health/checkFns'
 import { checkPortListening } from './health/checkFns/checkPortListening'
 import { setupMain } from './mainFn'
@@ -693,6 +697,45 @@ export class StartSdk<Manifest extends T.SDKManifest> {
        */
       setupBackups: (options: SetupBackupsParams<Manifest>) =>
         setupBackups<Manifest>(options),
+      /**
+       * @description Let the user choose which of an interface's URLs the service advertises as its own — the one it puts in the links, invites and callbacks it generates. The package stores the choice: `get` is its reader, in the shape `FileHelper.read()` returns, and `set` writes it.
+       *
+       *    Returns `action` (add it to `sdk.Actions.of()`); `bestUsable(effects)`, a reader for the URL the service should use; and `setupTask(severity, options)`, an init script (add it to `sdk.setupInit()`) that keeps a task raised while the stored URL is unset or no longer one of the interface's addresses.
+       * @example
+       * ```
+        import { sdk } from './sdk'
+        import { i18n } from './i18n'
+        import { storeJson } from './fileModels/store.json'
+
+        export const primaryUrl = sdk.setupPrimaryUrl({
+          id: 'set-primary-url',
+          hostId: 'ui-multi',
+          interfaceId: 'ui',
+          metadata: {
+            name: i18n('Set Primary URL'),
+            description: i18n('Choose the URL Immich puts in the share links it generates'),
+            warning: null,
+            allowedStatuses: 'any',
+            group: null,
+            visibility: 'enabled',
+          },
+          field: { name: i18n('URL'), description: null },
+          get: storeJson.read(s => s.primaryUrl),
+          set: (effects, url) => storeJson.merge(effects, { primaryUrl: url }),
+        })
+
+        // init/index.ts, after `actions`
+        primaryUrl.setupTask('important', {
+          reason: i18n('Choose the URL Immich puts in its share links'),
+        })
+
+        // main.ts, and interfaces.ts for `preferredLauncherAddress`
+        const url = await primaryUrl.bestUsable(effects).const()
+       * ```
+       */
+      setupPrimaryUrl: <Id extends T.ActionId>(
+        params: SetupPrimaryUrlParams<Id>,
+      ) => setupPrimaryUrl<Id>(this.manifest.id, params),
       /**
        * @description Use this function to set dependency information.
        * @example

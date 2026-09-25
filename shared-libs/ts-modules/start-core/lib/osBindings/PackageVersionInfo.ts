@@ -8,6 +8,7 @@ import type { LocaleString } from './LocaleString'
 import type { MerkleArchiveCommitment } from './MerkleArchiveCommitment'
 import type { PackageId } from './PackageId'
 import type { PluginId } from './PluginId'
+import type { PreDownloadAlert } from './PreDownloadAlert'
 import type { RegistryAsset } from './RegistryAsset'
 import type { Version } from './Version'
 
@@ -19,6 +20,7 @@ export type PackageVersionInfo = {
   title: string
   description: Description
   releaseNotes: LocaleString
+  preDownloadAlert?: PreDownloadAlert
   gitHash: GitHash | null
   license: string
   packageRepo: string
