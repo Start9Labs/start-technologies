@@ -130,16 +130,19 @@ async fn setup_flash_handler(
         .unwrap()
 }
 
-/// GET /static/root-ca.crt — serves the Root CA certificate for download (no auth required).
-async fn root_ca_handler() -> Response<Body> {
-    match ssl::read_root_ca_pem() {
-        Ok(pem) => Response::builder()
-            .header(header::CONTENT_TYPE, "application/x-pem-file")
+fn root_ca_response(
+    file: Result<String, Error>,
+    content_type: &'static str,
+    filename: &'static str,
+) -> Response<Body> {
+    match file {
+        Ok(body) => Response::builder()
+            .header(header::CONTENT_TYPE, content_type)
             .header(
                 header::CONTENT_DISPOSITION,
-                "attachment; filename=\"startwrt-ca.crt\"",
+                format!("attachment; filename=\"{filename}\""),
             )
-            .body(Body::from(pem))
+            .body(Body::from(body))
             .unwrap(),
         Err(_) => Response::builder()
             .status(500)
@@ -437,7 +440,26 @@ async fn inner_main() -> Result<(), Error> {
         // being rejected with 405 by the method router.
         .route("/api/logs", any(crate::logs::logs_ws_handler))
         // Root CA download (no auth required)
-        .route("/static/root-ca.crt", get(root_ca_handler))
+        .route(
+            "/static/local-root-ca.crt",
+            get(|| async {
+                root_ca_response(
+                    ssl::read_root_ca_pem(),
+                    "application/x-x509-ca-cert",
+                    "startwrt-ca.crt",
+                )
+            }),
+        )
+        .route(
+            "/static/local-root-ca.mobileconfig",
+            get(|| async {
+                root_ca_response(
+                    ssl::read_root_ca_mobileconfig(),
+                    "application/x-apple-aspen-config",
+                    "startwrt-ca.mobileconfig",
+                )
+            }),
+        )
         // LuCI reverse proxy — forwards to uhttpd on localhost:8080
         .route("/cgi-bin/{*rest}", any(luci_proxy::handler))
         .route("/luci-static/{*rest}", any(luci_proxy::handler))

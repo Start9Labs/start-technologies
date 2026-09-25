@@ -1,19 +1,56 @@
-import { Component, DOCUMENT, inject, OnInit, signal } from '@angular/core'
 import {
-  DocsLinkDirective,
-  i18nPipe,
-  RELATIVE_URL,
-  ROOT_CA_DOWNLOAD_HREF,
-} from '@start9labs/shared'
+  Component,
+  DOCUMENT,
+  inject,
+  InjectionToken,
+  input,
+  signal,
+} from '@angular/core'
 import { TuiButton, TuiNotification, TuiTitle } from '@taiga-ui/core'
 import { TuiAvatar, TuiBadge, tuiBadgeOptionsProvider } from '@taiga-ui/kit'
 import { TuiCardLarge, TuiHeader, TuiList } from '@taiga-ui/layout'
-import { ApiService } from 'src/app/services/api/embassy-api.service'
-import { ConfigService } from 'src/app/services/config.service'
+import { DocsLinkDirective } from '../directives/docs-link.directive'
+import { i18nPipe } from '../i18n/i18n.pipe'
+import { i18nKey } from '../i18n/i18n.providers'
+import { ROOT_CA_DOWNLOAD_HREF } from '../util/is-ios'
+
+/** Resolves once an HTTPS request to this host succeeds. */
+export const CA_TRUST_CHECK = new InjectionToken<() => Promise<unknown>>('', {
+  factory: () => {
+    const { host } = inject(DOCUMENT).location
+
+    return () => fetch(`https://${host}${ROOT_CA_DOWNLOAD_HREF}`)
+  },
+})
+
+const PRODUCTS = {
+  'start-os': {
+    docs: '/start-os/trust-ca.html',
+    repeat:
+      'You will need to repeat this on every device you use to connect to your server.',
+    download:
+      'Your server uses its Root CA to generate SSL/TLS certificates for itself and installed services. These certificates are then used to encrypt network traffic with your client devices.',
+    trust:
+      'Follow instructions for your OS. By trusting your Root CA, your device can verify the authenticity of encrypted communications with your server.',
+  },
+  'start-wrt': {
+    docs: '/start-wrt/trust-ca.html',
+    repeat:
+      'You will need to repeat this on every device you use to connect to your router.',
+    download:
+      'Your router uses its Root CA to generate SSL/TLS certificates for itself. These certificates are then used to encrypt network traffic with your client devices.',
+    trust:
+      'Follow instructions for your OS. By trusting your Root CA, your device can verify the authenticity of encrypted communications with your router.',
+  },
+} satisfies Record<
+  string,
+  { docs: string; repeat: i18nKey; download: i18nKey; trust: i18nKey }
+>
 
 @Component({
   selector: 'ca-wizard',
   template: `
+    @let copy = products[product()];
     @if (!caTrusted()) {
       <div tuiCardLarge>
         <span size="xxl" tuiAvatar="@tui.lock"></span>
@@ -29,19 +66,13 @@ import { ConfigService } from 'src/app/services/config.service'
           </hgroup>
         </header>
         <div tuiNotification appearance="warning">
-          {{
-            'You will need to repeat this on every device you use to connect to your server.'
-              | i18n
-          }}
+          {{ copy.repeat | i18n }}
         </div>
         <ol tuiList="m">
           <li>
             <b>{{ 'Download your Root CA' | i18n }}</b>
             -
-            {{
-              'Your server uses its Root CA to generate SSL/TLS certificates for itself and installed services. These certificates are then used to encrypt network traffic with your client devices.'
-                | i18n
-            }}
+            {{ copy.download | i18n }}
             <br />
             <a tuiBadge iconEnd="@tui.download" [href]="rootCaHref">
               {{ 'Download' | i18n }}
@@ -50,16 +81,13 @@ import { ConfigService } from 'src/app/services/config.service'
           <li>
             <b>{{ 'Trust your Root CA' | i18n }}</b>
             -
-            {{
-              'Follow instructions for your OS. By trusting your Root CA, your device can verify the authenticity of encrypted communications with your server.'
-                | i18n
-            }}
+            {{ copy.trust | i18n }}
             <br />
             <a
               tuiBadge
               docsLink
-              path="/start-os/trust-ca.html"
               iconEnd="@tui.external-link"
+              [path]="copy.docs"
             >
               {{ 'View instructions' | i18n }}
             </a>
@@ -76,7 +104,7 @@ import { ConfigService } from 'src/app/services/config.service'
               tuiBadge
               appearance="positive"
               iconEnd="@tui.refresh-cw"
-              (click)="refresh()"
+              (click)="document.location.reload()"
             >
               {{ 'Refresh' | i18n }}
             </button>
@@ -87,7 +115,7 @@ import { ConfigService } from 'src/app/services/config.service'
             tuiBadge
             appearance="secondary-grayscale"
             iconEnd="@tui.external-link"
-            [href]="'https://' + config.host"
+            [href]="httpsUrl"
           >
             {{ 'Skip' | i18n }}
           </a>
@@ -111,11 +139,7 @@ import { ConfigService } from 'src/app/services/config.service'
           </hgroup>
         </header>
         <footer>
-          <a
-            tuiButton
-            iconEnd="@tui.external-link"
-            [href]="'https://' + config.host"
-          >
+          <a tuiButton iconEnd="@tui.external-link" [href]="httpsUrl">
             {{ 'Go to login' | i18n }}
           </a>
         </footer>
@@ -145,41 +169,31 @@ import { ConfigService } from 'src/app/services/config.service'
   `,
   providers: [tuiBadgeOptionsProvider({ size: 'xl', appearance: 'primary' })],
   imports: [
+    DocsLinkDirective,
+    i18nPipe,
+    TuiAvatar,
+    TuiBadge,
     TuiButton,
     TuiCardLarge,
-    TuiNotification,
-    i18nPipe,
-    DocsLinkDirective,
-    TuiAvatar,
     TuiHeader,
-    TuiTitle,
     TuiList,
-    TuiBadge,
+    TuiNotification,
+    TuiTitle,
   ],
 })
-export class CAWizardComponent implements OnInit {
-  private readonly api = inject(ApiService)
-  private readonly relativeUrl = inject(RELATIVE_URL)
-  private readonly document = inject(DOCUMENT)
+export class CaWizard {
+  protected readonly document = inject(DOCUMENT)
+  protected readonly products = PRODUCTS
+  protected readonly rootCaHref = ROOT_CA_DOWNLOAD_HREF
+  protected readonly httpsUrl = `https://${this.document.location.host}`
+  protected readonly caTrusted = signal(false)
 
-  readonly config = inject(ConfigService)
-  readonly rootCaHref = ROOT_CA_DOWNLOAD_HREF
-  readonly caTrusted = signal(false)
+  readonly product = input.required<keyof typeof PRODUCTS>()
 
-  async ngOnInit() {
-    await this.testHttps().catch(e =>
-      console.warn('Failed Https connection attempt'),
+  constructor() {
+    inject(CA_TRUST_CHECK)().then(
+      () => this.caTrusted.set(true),
+      () => {},
     )
-  }
-
-  refresh() {
-    this.document.location.reload()
-  }
-
-  private async testHttps() {
-    const url = `https://${this.document.location.host}${this.relativeUrl}`
-    await this.api.echo({ message: 'ping' }, url).then(() => {
-      this.caTrusted.set(true)
-    })
   }
 }

@@ -665,6 +665,13 @@ pub fn read_root_ca_pem() -> Result<String, Error> {
         .map_err(|e| Error::new(eyre!("failed to read CA cert: {e}"), ErrorKind::Filesystem))
 }
 
+/// Read the Root CA as an Apple configuration profile.
+pub fn read_root_ca_mobileconfig() -> Result<String, Error> {
+    let cert = X509::from_pem(read_root_ca_pem()?.as_bytes())?;
+    startos::net::static_server::root_ca_mobileconfig(&cert, "StartWRT", ROUTER_HOSTNAME)
+        .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::OpenSsl))
+}
+
 #[cfg(test)]
 mod tests {
     use openssl::nid::Nid;

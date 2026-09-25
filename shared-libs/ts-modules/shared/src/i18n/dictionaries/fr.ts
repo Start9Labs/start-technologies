@@ -822,4 +822,7 @@ export default {
   930: 'Les services de cette bibliothèque sont maintenus par la communauté Start9 et sont en phase de test bêta. Des bugs sont à prévoir. Installez-les à vos risques et périls.',
   931: 'Toutes les adresses IP vers lesquelles ce nom se résout sur cette passerelle sont désactivées',
   932: 'Attendez !',
+  933: 'Votre routeur utilise son certificat racine pour générer des certificats SSL/TLS pour lui-même. Ces certificats servent ensuite à chiffrer le trafic réseau avec vos appareils clients.',
+  934: 'Suivez les instructions pour votre système d’exploitation. En donnant votre confiance au certificat racine, votre appareil pourra vérifier l’authenticité des communications chiffrées avec votre routeur.',
+  935: 'Vous devrez répéter cette opération sur chaque appareil utilisé pour vous connecter à votre routeur.',
 } satisfies i18n

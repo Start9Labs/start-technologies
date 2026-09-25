@@ -15,7 +15,8 @@ Additional routes:
 | `GET\|POST /rest/rpc/{guid}`              | Continuation endpoint for backup/restore/diagnostics (10MB limit) |
 | `GET /ws/rpc/{guid}`                      | WebSocket continuation endpoint (progress streaming for updates)  |
 | `GET /luci`                               | Convenience redirect to `/cgi-bin/luci`                           |
-| `GET /static/root-ca.crt`                 | Root CA certificate download (no auth)                            |
+| `GET /static/local-root-ca.crt`           | Root CA certificate download (no auth)                            |
+| `GET /static/local-root-ca.mobileconfig`  | Root CA as an Apple configuration profile (no auth)               |
 | `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` | LuCI reverse proxy (localhost:8080)                               |
 | Fallback                                  | Serves embedded web UI via `include_dir`                          |
 

@@ -38,7 +38,7 @@ import { TuiElasticContainer, TuiHeader } from '@taiga-ui/layout'
 import { filter } from 'rxjs'
 import { Footer } from 'src/app/components/footer'
 import { Form } from 'src/app/components/form'
-import { MarkdownPipe } from '@start9labs/shared'
+import { MarkdownPipe, ROOT_CA_DOWNLOAD_HREF } from '@start9labs/shared'
 import { ActionService } from 'src/app/services/action.service'
 import {
   ApiService,
@@ -163,13 +163,7 @@ const THEMES: Theme[] = ['system', 'dark', 'light']
           }}
         </section>
       </fieldset>
-      <a
-        tuiButton
-        size="s"
-        iconEnd="@tui.download"
-        href="/static/root-ca.crt"
-        download="startwrt-ca.crt"
-      >
+      <a tuiButton size="s" iconEnd="@tui.download" [href]="rootCaHref">
         {{ 'Download Root CA' | i18n }}
       </a>
       <fieldset>
@@ -287,6 +281,7 @@ export default class General {
   protected readonly system = inject(SystemService)
   protected readonly gitHash = inject(GIT_HASH)
   protected readonly languages = LANGUAGES
+  protected readonly rootCaHref = ROOT_CA_DOWNLOAD_HREF
 
   protected readonly shortGitHash = computed(() => {
     const hash = this.gitHash

@@ -8,17 +8,17 @@ import {
 } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { Router } from '@angular/router'
+import { CaWizard } from '@start9labs/shared'
 import { TuiButton, TuiError, TuiInput, TuiTextfield } from '@taiga-ui/core'
 import { TuiButtonLoading } from '@taiga-ui/kit'
 import { ApiService } from 'src/app/services/api/api.service'
 import { AuthService } from 'src/app/services/auth.service'
-import { CaWizard } from 'src/app/components/ca-wizard'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 
 @Component({
   template: `
     @if (showWizard()) {
-      <app-ca-wizard />
+      <ca-wizard product="start-wrt" />
     } @else {
       <img alt="Start9" src="assets/favicon.svg" />
       <form (ngSubmit)="login()">
@@ -47,11 +47,15 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
   `,
   styles: `
     :host {
+      box-sizing: border-box;
       height: 100%;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
+      overflow-y: auto;
+      padding: 1rem;
+      display: grid;
+      grid-template-columns: min(100%, max(70%, 40rem));
       justify-content: center;
+      justify-items: center;
+      align-content: safe center;
       gap: 2rem;
     }
 

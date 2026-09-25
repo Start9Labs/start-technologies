@@ -5,7 +5,9 @@ Angular + Taiga UI frontend for StartWRT. Assumes you've read the parent
 workspace** (it shares the root `package.json`/`node_modules`/`tsconfig.json` and upgrades in
 lockstep with the other apps). Build/serve/check it from the repo root: `npm run build:wrt`,
 `npm run start:wrt`, `npm run check:wrt`. It uses `@start9labs/shared` for `RELATIVE_URL`,
-`pauseFor`, and the markdown pipe. It deliberately keeps its own HTTP/RPC/connection stack
+`pauseFor`, the markdown pipe, and the `CaWizard` login screen. Its strings still come from the
+local dictionaries; `i18nService.setLangLocal` also loads the shared dictionary, so a shared
+component renders in the router's language — keep new language paths going through it. It deliberately keeps its own HTTP/RPC/connection stack
 (`HttpService`/`RpcService`/`ConnectionService`): the aborting per-request timeout that surfaces a
 code-0 network error drives the reconnect UX and differs from shared's non-aborting timeout, so
 don't swap it for shared's `HttpService`. Error surfacing is bespoke too — `ActionService`/

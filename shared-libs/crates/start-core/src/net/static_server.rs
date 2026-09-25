@@ -536,15 +536,15 @@ fn cert_send(cert: &X509, hostname: &ServerHostname) -> Result<Response, Error> 
         .with_kind(ErrorKind::Network)
 }
 
-fn mobileconfig_send(cert: &X509, hostname: &ServerHostname) -> Result<Response, Error> {
+/// An Apple configuration profile that installs the certificate as a trusted root.
+pub fn root_ca_mobileconfig(cert: &X509, product: &str, host: &str) -> Result<String, Error> {
     let der = cert.to_der()?;
     let fingerprint = hex::encode(&*cert.digest(MessageDigest::sha256())?);
     let cert_uuid = format_uuid_from_hex(&fingerprint[..32]);
     let profile_uuid = format_uuid_from_hex(&fingerprint[32..64]);
     let der_b64 = BASE64.encode(&der);
-    let host = hostname.as_ref();
 
-    let plist = format!(
+    Ok(format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
          <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
          <plist version=\"1.0\">\n\
@@ -557,7 +557,7 @@ fn mobileconfig_send(cert: &X509, hostname: &ServerHostname) -> Result<Response,
          \t\t\t<key>PayloadContent</key>\n\
          \t\t\t<data>{der_b64}</data>\n\
          \t\t\t<key>PayloadDescription</key>\n\
-         \t\t\t<string>Adds the StartOS root certificate authority for {host}.</string>\n\
+         \t\t\t<string>Adds the {product} root certificate authority for {host}.</string>\n\
          \t\t\t<key>PayloadDisplayName</key>\n\
          \t\t\t<string>{host} Root Certificate</string>\n\
          \t\t\t<key>PayloadIdentifier</key>\n\
@@ -573,7 +573,7 @@ fn mobileconfig_send(cert: &X509, hostname: &ServerHostname) -> Result<Response,
          \t<key>PayloadDescription</key>\n\
          \t<string>Trusts the root certificate authority for {host}.</string>\n\
          \t<key>PayloadDisplayName</key>\n\
-         \t<string>StartOS Root CA ({host})</string>\n\
+         \t<string>{product} Root CA ({host})</string>\n\
          \t<key>PayloadIdentifier</key>\n\
          \t<string>com.start9.ca.profile.{profile_uuid}</string>\n\
          \t<key>PayloadType</key>\n\
@@ -584,7 +584,12 @@ fn mobileconfig_send(cert: &X509, hostname: &ServerHostname) -> Result<Response,
          \t<integer>1</integer>\n\
          </dict>\n\
          </plist>\n",
-    );
+    ))
+}
+
+fn mobileconfig_send(cert: &X509, hostname: &ServerHostname) -> Result<Response, Error> {
+    let host = hostname.as_ref();
+    let plist = root_ca_mobileconfig(cert, "StartOS", host)?;
 
     Response::builder()
         .status(StatusCode::OK)
