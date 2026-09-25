@@ -53,6 +53,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
       padding: 1rem;
       display: grid;
       grid-template-columns: min(100%, max(70%, 40rem));
+      grid-auto-rows: max-content;
       justify-content: center;
       justify-items: center;
       align-content: safe center;
