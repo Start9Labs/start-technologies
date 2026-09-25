@@ -1,8 +1,8 @@
 # Start9 Hardware
 
-Every server and router Start9 has sold, newest first: the Start9 Router, the Server One (6600H) — the only server sold today — the Server One (2026), Server Pure (2026), Server Pure (2025), Server One (2024), Server One (2023), Server Pure (2023, sold earlier as the Embassy Pro and Server Pro), and the Raspberry Pi 4 based Embassy, Embassy One and Server Lite. Each entry lists the specifications, how to tell that model from its neighbours, and whether its memory and storage can be upgraded. What is for sale now is at [store.start9.com](https://store.start9.com). For hardware Start9 did not sell, see the community [known-good hardware list](https://community.start9.com/t/known-good-hardware-master-list-hardware-capable-of-running-startos/).
+Every server and router Start9 has sold, newest first: the RISC-V Router, the Server One (6600H) — the only server sold today — the Server One (2026), Server Pure (2026), Server Pure (2025), Server One (2024), Server One (2023), Server Pure (2023, sold earlier as the Embassy Pro and Server Pro), and the Raspberry Pi 4 based Embassy, Embassy One and Server Lite. Each entry lists the specifications, how to tell that model from its neighbours, and whether its memory and storage can be upgraded. What is for sale now is at [store.start9.com](https://store.start9.com). For hardware Start9 did not sell, see the community [known-good hardware list](https://community.start9.com/t/known-good-hardware-master-list-hardware-capable-of-running-startos/).
 
-## Start9 Router
+## RISC-V Router
 
 - **Sold:** October 2026 – present
 - **Base hardware:** BananaPi BPI-F3
