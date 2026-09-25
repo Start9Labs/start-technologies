@@ -36,7 +36,7 @@ The options control direct WAN-side access only:
 
 ### Security
 
-- **Download Root CA** — Download the router's Root CA certificate, saved as `startwrt-ca.crt`. See [Trusting Your Root CA](trust-ca.md) for installation instructions.
+- **Download Root CA** — Download the router's Root CA: a configuration profile on iPhone and iPad, `startwrt-ca.crt` elsewhere. See [Trusting Your Root CA](trust-ca.md) for installation instructions.
 
 ### About
 
