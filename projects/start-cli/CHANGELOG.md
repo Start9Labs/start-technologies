@@ -13,9 +13,9 @@ or the CLI's externally observable behavior.
 
 ### Added
 
-- **`server trust-ca` adds a PEM-encoded CA root to the server's host trust store.** It reads
-  a file, or standard input when given `-`, and prints the certificate's subject and SHA-256
-  fingerprint.
+- **`server trust-ca --cert <PEM>` adds a CA root to the server's host trust store.** Pass
+  the PEM certificate text directly or use shell substitution to read a file. The command
+  prints its subject and SHA-256 fingerprint.
 
 - **`s9pk edit add-image` enables CPU emulation by default** when the server uses
   another architecture. Use `--no-emulation` for images that require a native architecture.

@@ -401,16 +401,13 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "trust-ca",
-            from_fn_async(system::trust_ca::install).no_cli(),
-        )
-        .subcommand(
-            "trust-ca",
-            from_fn_async_local(system::trust_ca::cli)
+            from_fn_async(system::trust_ca::install)
                 .with_display_serializable()
                 .with_custom_display_fn(|handle, result| {
                     system::trust_ca::display(handle.params, result)
                 })
-                .with_about("about.trust-custom-ca-root"),
+                .with_about("about.trust-custom-ca-root")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "set-smtp",

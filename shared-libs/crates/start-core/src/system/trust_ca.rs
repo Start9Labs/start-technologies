@@ -1,27 +1,23 @@
 use std::cmp::Ordering;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use clap::Parser;
-use imbl_value::{from_value, to_value};
 use itertools::Itertools;
 use openssl::nid::Nid;
 use openssl::x509::{X509, X509NameRef};
-use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use x509_parser::parse_x509_certificate;
 use x509_parser::x509::X509Version;
 
-use crate::context::{CliContext, RpcContext};
+use crate::context::RpcContext;
 use crate::net::ssl::x509_sha256_fingerprint;
 use crate::prelude::*;
 use crate::util::Invoke;
-use crate::util::io::{open_file, write_file_atomic};
+use crate::util::io::write_file_atomic;
 use crate::util::serde::{Pem, WithIoFormat, display_serializable};
 
-const MAX_CERTIFICATE_SIZE: usize = crate::CAP_1_MiB;
 const LIVE_CA_DIRECTORY: &str = "/usr/local/share/ca-certificates/startos-custom";
 const PERSISTENT_CA_DIRECTORY: &str =
     "/media/startos/config/overlay/usr/local/share/ca-certificates/startos-custom";
@@ -31,15 +27,9 @@ static INSTALL_LOCK: Mutex<()> = Mutex::const_new(());
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
-pub(crate) struct TrustCaCliParams {
-    #[arg(help = "help.arg.ca-certificate-path")]
-    certificate: PathBuf,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct TrustCaRpcParams {
-    pem: String,
+pub(crate) struct TrustCaParams {
+    #[arg(long, help = "help.arg.ca-certificate")]
+    cert: Pem<X509>,
 }
 
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -55,37 +45,11 @@ struct ParsedCa {
     result: TrustedCa,
 }
 
-pub(crate) async fn cli(
-    HandlerArgs {
-        context,
-        parent_method,
-        method,
-        params,
-        ..
-    }: HandlerArgs<CliContext, TrustCaCliParams>,
-) -> Result<TrustedCa, Error> {
-    let pem = if params.certificate == Path::new("-") {
-        read_limited(tokio::io::stdin()).await?
-    } else {
-        read_limited(open_file(&params.certificate).await?).await?
-    };
-    let pem = String::from_utf8(pem).map_err(invalid_certificate)?;
-
-    Ok(from_value(
-        context
-            .call_remote::<RpcContext>(
-                &parent_method.into_iter().chain(method).join("."),
-                to_value(&TrustCaRpcParams { pem })?,
-            )
-            .await?,
-    )?)
-}
-
 pub(crate) async fn install(
     ctx: RpcContext,
-    TrustCaRpcParams { pem }: TrustCaRpcParams,
+    TrustCaParams { cert }: TrustCaParams,
 ) -> Result<TrustedCa, Error> {
-    let ca = parse_ca(&pem)?;
+    let ca = validate_ca(&cert)?;
     tokio::spawn(async move {
         let _guard = INSTALL_LOCK.lock().await;
         let filename = format!(
@@ -102,10 +66,7 @@ pub(crate) async fn install(
     .with_kind(ErrorKind::Unknown)?
 }
 
-pub(crate) fn display(
-    params: WithIoFormat<TrustCaCliParams>,
-    result: TrustedCa,
-) -> Result<(), Error> {
+pub(crate) fn display(params: WithIoFormat<TrustCaParams>, result: TrustedCa) -> Result<(), Error> {
     if let Some(format) = params.format {
         return display_serializable(format, result);
     }
@@ -141,33 +102,7 @@ pub(crate) async fn update_trust_store() -> Result<(), Error> {
     Ok(())
 }
 
-async fn read_limited(reader: impl AsyncRead + Unpin) -> Result<Vec<u8>, Error> {
-    let mut contents = Vec::new();
-    reader
-        .take(MAX_CERTIFICATE_SIZE as u64 + 1)
-        .read_to_end(&mut contents)
-        .await?;
-    ensure_code!(
-        contents.len() <= MAX_CERTIFICATE_SIZE,
-        ErrorKind::InvalidRequest,
-        "{}",
-        t!("system.trust-ca.input-too-large")
-    );
-    Ok(contents)
-}
-
-fn parse_ca(pem: &str) -> Result<ParsedCa, Error> {
-    ensure_code!(
-        pem.len() <= MAX_CERTIFICATE_SIZE,
-        ErrorKind::InvalidRequest,
-        "{}",
-        t!("system.trust-ca.input-too-large")
-    );
-    let certificate = pem
-        .trim()
-        .parse::<Pem<X509>>()
-        .map_err(invalid_certificate)?;
-
+fn validate_ca(certificate: &X509) -> Result<ParsedCa, Error> {
     let der = certificate.to_der().map_err(invalid_certificate)?;
     let (_, parsed) = parse_x509_certificate(&der).map_err(invalid_certificate)?;
     let is_ca = match parsed.basic_constraints().map_err(invalid_certificate)? {
@@ -251,6 +186,11 @@ mod tests {
 
     use super::*;
     use crate::net::ssl::{CertBranding, SANInfo, gen_nistp256, make_root_cert, make_self_signed};
+
+    fn parse_ca(pem: &str) -> Result<ParsedCa, Error> {
+        let cert = pem.parse::<Pem<X509>>().map_err(invalid_certificate)?;
+        validate_ca(&cert)
+    }
 
     fn name(entries: &[(&str, &str, Asn1Type)]) -> X509Name {
         let mut name = X509NameBuilder::new().unwrap();
@@ -414,29 +354,25 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn rejects_malformed_and_oversized_input() {
+    #[test]
+    fn rejects_malformed_input() {
         assert_eq!(
             parse_ca("not a certificate").unwrap_err().kind,
             ErrorKind::InvalidRequest
         );
-        let oversized = vec![b'a'; MAX_CERTIFICATE_SIZE + 1];
-        assert_eq!(
-            read_limited(oversized.as_slice()).await.unwrap_err().kind,
-            ErrorKind::InvalidRequest
-        );
-        assert_eq!(
-            parse_ca(&String::from_utf8(oversized).unwrap())
-                .unwrap_err()
-                .kind,
-            ErrorKind::InvalidRequest
-        );
+    }
+
+    #[test]
+    fn cli_cert_round_trips_to_rpc() {
         let pem = root(2, true, key_cert_sign());
+        let params =
+            TrustCaParams::try_parse_from(["trust-ca", &format!("--cert={}", pem.trim_end())])
+                .unwrap();
+        let remote: TrustCaParams =
+            imbl_value::from_value(imbl_value::to_value(&params).unwrap()).unwrap();
         assert_eq!(
-            parse_ca(&format!("{pem}{}", "x".repeat(MAX_CERTIFICATE_SIZE)))
-                .unwrap_err()
-                .kind,
-            ErrorKind::InvalidRequest
+            validate_ca(&params.cert).unwrap().result,
+            validate_ca(&remote.cert).unwrap().result
         );
     }
 }

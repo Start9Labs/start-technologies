@@ -104,14 +104,14 @@ Display hardware and device information.
 
 Tear down and rebuild all service containers.
 
-### `start-cli server trust-ca <CERTIFICATE>`
+### `start-cli server trust-ca --cert <PEM>`
 
-Add a PEM-encoded CA root to the StartOS host trust store. The certificate can be read from a
-local file or from standard input by passing `-`:
+Add a PEM-encoded CA root to the StartOS host trust store. Pass the certificate text with `--cert`.
+Use shell substitution to read it from a file or standard input:
 
 ```sh
-start-cli --host https://server.local server trust-ca company-root.crt
-cat company-root.crt | start-cli --host https://server.local server trust-ca -
+start-cli --host https://server.local server trust-ca --cert="$(cat company-root.crt)"
+cat company-root.crt | start-cli --host https://server.local server trust-ca --cert="$(cat)"
 ```
 
 The command requires authentication and reports the certificate subject and SHA-256 fingerprint.
