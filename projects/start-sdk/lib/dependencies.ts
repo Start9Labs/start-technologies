@@ -6,7 +6,10 @@ import type {
   Manifest,
   LocaleString,
 } from '@start9labs/start-core/types'
-import { runReactiveInit } from '@start9labs/start-core/inits/setupInit'
+import {
+  runReactiveInit,
+  setupOnInit,
+} from '@start9labs/start-core/inits/setupInit'
 import type {
   InitKind,
   InitScript,
@@ -35,8 +38,7 @@ export class Dependency<Id extends string = string> {
   private narrowing?: (options: {
     effects: Effects
   }) => Promise<Narrowing | null>
-  private initFn?: InitScriptOrFn
-  private taskIds: string[] = []
+  private readonly inits: { script: InitScript; taskIds: string[] }[] = []
   private enabledFn?: (options: { effects: Effects }) => Promise<boolean>
 
   private constructor(
@@ -73,16 +75,34 @@ export class Dependency<Id extends string = string> {
     return this
   }
 
-  /** Runs while enabled; declared replay IDs are cleared when disabled. */
+  /** Appends an independent reactive init; declared replay IDs are cleared when disabled. */
   withInit(fn: InitScriptOrFn, taskReplayIds?: string[]) {
     if (this.optional && !taskReplayIds) {
       throw new Error(
         `Optional dependency ${this.id} must declare task replay IDs`,
       )
     }
-    this.initFn = fn
-    this.taskIds = taskReplayIds || []
+    this.inits.push({ script: setupOnInit(fn), taskIds: taskReplayIds || [] })
     return this
+  }
+
+  private async isEnabled(effects: Effects) {
+    return !this.enabledFn || (await this.enabledFn({ effects }))
+  }
+
+  initHandlers(): InitScript[] {
+    return this.inits.map(
+      ({ script, taskIds }): InitScript => ({
+        init: async (effects, kind, progress) => {
+          if (!(await this.isEnabled(effects))) {
+            if (taskIds.length)
+              await effects.action.clearTasks({ only: taskIds })
+            return
+          }
+          await script.init(effects, kind, progress)
+        },
+      }),
+    )
   }
 
   manifestInfo(): Manifest['dependencies'][string] {
@@ -98,16 +118,8 @@ export class Dependency<Id extends string = string> {
     }
   }
 
-  async sync(
-    effects: Effects,
-    initKind: InitKind,
-    progress?: FullProgressTracker,
-  ): Promise<DependencyRequirement | null> {
-    if (this.enabledFn && !(await this.enabledFn({ effects }))) {
-      if (this.taskIds.length)
-        await effects.action.clearTasks({ only: this.taskIds })
-      return null
-    }
+  async requirement(effects: Effects): Promise<DependencyRequirement | null> {
+    if (!(await this.isEnabled(effects))) return null
     const narrowed = await this.narrowing?.({ effects })
     const baseRange = VersionRange.parse(this.base.versionRange)
     const runtimeRange = narrowed?.versionRange
@@ -144,11 +156,6 @@ export class Dependency<Id extends string = string> {
             ],
           }
         : { id: this.id, kind, versionRange }
-    if (this.initFn) {
-      if ('init' in this.initFn)
-        await this.initFn.init(effects, initKind, progress)
-      else await this.initFn(effects, initKind, progress!)
-    }
     return requirement
   }
 }
@@ -203,8 +210,8 @@ export class Dependencies<Ids extends string = never> implements InitScript {
       await runReactiveInit(
         effects,
         `dependency_${entry.id}`,
-        async (child, runKind, runProgress) => {
-          const requirement = await entry.sync(child, runKind, runProgress)
+        async child => {
+          const requirement = await entry.requirement(child)
           if (deepEqual(active.get(entry.id) ?? null, requirement)) return
           if (requirement) active.set(entry.id, requirement)
           else active.delete(entry.id)
@@ -213,6 +220,15 @@ export class Dependencies<Ids extends string = never> implements InitScript {
         kind,
         progress,
       )
+      for (const [index, handler] of entry.initHandlers().entries()) {
+        await runReactiveInit(
+          effects,
+          `dependency_${entry.id}_init_${index}`,
+          handler,
+          kind,
+          progress,
+        )
+      }
     }
     initializing = false
     await publish()

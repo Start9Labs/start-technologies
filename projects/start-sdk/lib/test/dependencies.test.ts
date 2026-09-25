@@ -1,4 +1,5 @@
 import type { Effects } from '@start9labs/start-core/types'
+import { Watchable } from '@start9labs/start-core/util/Watchable'
 import { Dependencies, Dependency } from '../dependencies'
 
 function mockEffects() {
@@ -6,7 +7,9 @@ function mockEffects() {
   const setDependencies = jest.fn(
     async (_: Parameters<Effects['setDependencies']>[0]) => null,
   )
-  const clearTasks = jest.fn(async () => null)
+  const clearTasks = jest.fn(
+    async (_: Parameters<Effects['action']['clearTasks']>[0]) => null,
+  )
   const effects = {
     setDependencies,
     action: { clearTasks },
@@ -112,7 +115,7 @@ test('a dependency watcher reruns only its own child scope', async () => {
   expect(setDependencies).toHaveBeenCalledTimes(1)
   expect(requiredInit).toHaveBeenCalledTimes(1)
   expect(optionalInit).toHaveBeenCalledWith(
-    children.get('dependency_lnd'),
+    children.get('dependency_lnd_init_0'),
     'install',
     undefined,
   )
@@ -120,7 +123,9 @@ test('a dependency watcher reruns only its own child scope', async () => {
   enabled = false
   const oldChild = children.get('dependency_lnd')!
   await (oldChild.constRetry!() as unknown as Promise<void>)
-  expect(effects.child).toHaveBeenCalledTimes(3)
+  await (children.get('dependency_lnd_init_0')!
+    .constRetry!() as unknown as Promise<void>)
+  expect(effects.child).toHaveBeenCalledTimes(6)
   expect(children.get('dependency_lnd')).not.toBe(oldChild)
   expect(clearTasks).toHaveBeenCalledWith({ only: ['lnd:setup'] })
   expect(requiredInit).toHaveBeenCalledTimes(1)
@@ -133,26 +138,153 @@ test('a dependency watcher reruns only its own child scope', async () => {
   enabled = true
   await (children.get('dependency_lnd')!
     .constRetry!() as unknown as Promise<void>)
+  await (children.get('dependency_lnd_init_0')!
+    .constRetry!() as unknown as Promise<void>)
   expect(optionalInit).toHaveBeenCalledTimes(2)
   expect(optionalInit).toHaveBeenLastCalledWith(
-    children.get('dependency_lnd'),
+    children.get('dependency_lnd_init_0'),
     null,
     expect.anything(),
   )
   expect(requiredInit).toHaveBeenCalledTimes(1)
   expect(setDependencies).toHaveBeenCalledTimes(3)
 
-  await (children.get('dependency_bitcoind')!
+  await (children.get('dependency_bitcoind_init_0')!
     .constRetry!() as unknown as Promise<void>)
   expect(requiredInit).toHaveBeenCalledTimes(2)
   expect(requiredInit).toHaveBeenLastCalledWith(
-    children.get('dependency_bitcoind'),
+    children.get('dependency_bitcoind_init_0'),
     null,
     expect.anything(),
   )
   expect(optionalInit).toHaveBeenCalledTimes(2)
   expect(setDependencies).toHaveBeenCalledTimes(3)
   expect(parentRetry).not.toHaveBeenCalled()
+})
+
+test('multiple inits of one dependency react independently', async () => {
+  const { effects, children, setDependencies, clearTasks } = mockEffects()
+  let enabled = true
+  const firstInit = jest.fn(async () => {})
+  const secondInit = jest.fn(async () => {})
+  const narrowing = jest.fn(async () => null)
+  const dependencies = Dependencies.of().addDependency(
+    Dependency.optional('lnd', {
+      description: null,
+      metadata: { title: 'LND', icon: 'https://example.com/icon.png' },
+      versionRange: '*',
+      kind: 'exists',
+      enabled: async () => enabled,
+    })
+      .withDynamicNarrowing(narrowing)
+      .withInit(firstInit, ['lnd:first'])
+      .withInit({ init: secondInit }, ['lnd:second']),
+  )
+  await dependencies.init(effects, 'update')
+  expect(firstInit).toHaveBeenCalledWith(
+    children.get('dependency_lnd_init_0'),
+    'update',
+    undefined,
+  )
+  expect(secondInit).toHaveBeenCalledWith(
+    children.get('dependency_lnd_init_1'),
+    'update',
+    undefined,
+  )
+  expect(narrowing).toHaveBeenCalledTimes(1)
+  expect(setDependencies).toHaveBeenCalledTimes(1)
+
+  await (children.get('dependency_lnd_init_0')!
+    .constRetry!() as unknown as Promise<void>)
+  expect(firstInit).toHaveBeenCalledTimes(2)
+  expect(firstInit).toHaveBeenLastCalledWith(
+    children.get('dependency_lnd_init_0'),
+    null,
+    expect.anything(),
+  )
+  expect(secondInit).toHaveBeenCalledTimes(1)
+  expect(narrowing).toHaveBeenCalledTimes(1)
+  expect(setDependencies).toHaveBeenCalledTimes(1)
+
+  await (children.get('dependency_lnd_init_1')!
+    .constRetry!() as unknown as Promise<void>)
+  expect(secondInit).toHaveBeenCalledTimes(2)
+  expect(firstInit).toHaveBeenCalledTimes(2)
+  expect(setDependencies).toHaveBeenCalledTimes(1)
+
+  enabled = false
+  for (const name of [
+    'dependency_lnd',
+    'dependency_lnd_init_0',
+    'dependency_lnd_init_1',
+  ]) {
+    await (children.get(name)!.constRetry!() as unknown as Promise<void>)
+  }
+  expect(setDependencies).toHaveBeenLastCalledWith({ dependencies: [] })
+  expect(clearTasks.mock.calls.map(([arg]) => arg)).toEqual([
+    { only: ['lnd:first'] },
+    { only: ['lnd:second'] },
+  ])
+  expect(firstInit).toHaveBeenCalledTimes(2)
+  expect(secondInit).toHaveBeenCalledTimes(2)
+
+  enabled = true
+  for (const name of [
+    'dependency_lnd',
+    'dependency_lnd_init_0',
+    'dependency_lnd_init_1',
+  ]) {
+    await (children.get(name)!.constRetry!() as unknown as Promise<void>)
+  }
+  expect(setDependencies).toHaveBeenCalledTimes(3)
+  expect(firstInit).toHaveBeenCalledTimes(3)
+  expect(secondInit).toHaveBeenCalledTimes(3)
+  expect(narrowing).toHaveBeenCalledTimes(2)
+})
+
+test('a watched value inside one init only reruns that init', async () => {
+  const { effects, children, setDependencies } = mockEffects()
+  let value = 0
+  let signal: (() => void) | undefined
+  const source = {
+    once: async () => value,
+    async *watch(abort?: AbortSignal) {
+      yield value
+      while (!abort?.aborted) {
+        await new Promise<void>(resolve => {
+          signal = resolve
+          abort?.addEventListener('abort', () => resolve(), { once: true })
+        })
+        if (abort?.aborted) return
+        yield value
+      }
+    },
+  }
+  const firstInit = jest.fn(async (child: Effects) => {
+    await Watchable.from(child, source).const()
+  })
+  const secondInit = jest.fn(async () => {})
+  const dependencies = Dependencies.of().addDependency(
+    Dependency.required('bitcoind', {
+      description: null,
+      metadata: { title: 'Bitcoin', icon: 'https://example.com/icon.png' },
+      versionRange: '*',
+      kind: 'exists',
+    })
+      .withInit(firstInit)
+      .withInit(secondInit),
+  )
+  await dependencies.init(effects)
+  const oldChild = children.get('dependency_bitcoind_init_0')
+  await new Promise(resolve => setImmediate(resolve))
+  value = 1
+  signal!()
+  await new Promise(resolve => setImmediate(resolve))
+
+  expect(firstInit).toHaveBeenCalledTimes(2)
+  expect(children.get('dependency_bitcoind_init_0')).not.toBe(oldChild)
+  expect(secondInit).toHaveBeenCalledTimes(1)
+  expect(setDependencies).toHaveBeenCalledTimes(1)
 })
 
 test('overlapping dependency changes publish ordered snapshots', async () => {
@@ -208,7 +340,7 @@ test('init scripts receive the lifecycle kind and require task IDs when optional
   const { effects, children } = mockEffects()
   await Dependencies.of().addDependency(dependency).init(effects, 'restore')
   expect(init).toHaveBeenCalledWith(
-    children.get('dependency_bitcoind'),
+    children.get('dependency_bitcoind_init_0'),
     'restore',
     undefined,
   )

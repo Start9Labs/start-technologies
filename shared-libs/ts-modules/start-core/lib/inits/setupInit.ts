@@ -41,12 +41,6 @@ export type InitScriptOrFn<Kind extends InitKind = InitKind> =
   | InitScript<Kind>
   | InitFn<Kind>
 
-/**
- * Composes multiple init handlers into a single `ExpectedExports.init`-compatible function.
- * Handlers are executed sequentially in the order provided.
- *
- * @param inits - One or more init handlers to compose
- */
 /** Reruns only this handler when its watched values change; subsequent runs receive a null kind and detached progress. */
 export async function runReactiveInit(
   effects: T.Effects,
@@ -78,6 +72,7 @@ export async function runReactiveInit(
   await run()
 }
 
+/** Composes init handlers in order into an `ExpectedExports.init` function. */
 export function setupInit(...inits: InitScriptOrFn[]): T.ExpectedExports.init {
   return async opts => {
     // One root tracker, shared across all inits — each handler adds its own
