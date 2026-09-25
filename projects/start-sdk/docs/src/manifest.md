@@ -114,7 +114,7 @@ preDownloadAlert: {
 },
 ```
 
-`message` is a localized Markdown value shown in a Continue/Cancel confirmation on both the Marketplace and Updates tab. Markdown is sanitized before display, and external links open in a new tab. Cancel leaves the installed service unchanged. `when.sourceVersion` matches the version already installed, not the version being downloaded; on a fresh install there is no source version to match. The `when` object holds the conditions for displaying the alert.
+`message` is a localized Markdown value shown in a Continue/Cancel confirmation on both the Marketplace and Updates tab. Markdown is sanitized before display, and external links open in a new tab. Cancel leaves the installed service unchanged. `when.sourceVersion` matches the version already installed, not the version being downloaded; on a fresh install there is no source version to match.
 
 ## License
 

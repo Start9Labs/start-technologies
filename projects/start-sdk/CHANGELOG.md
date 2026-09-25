@@ -2,10 +2,6 @@
 
 ## 3.0.0 — StartOS 0.4.0.2
 
-### Added
-
-- **`preDownloadAlert` in `setupManifest()`** displays a localized Markdown confirmation before downloading an update from an installed version matching `when.sourceVersion`.
-
 ### Changed
 
 - **Breaking — `Watchable<A>` takes only the type it reads.** A reader that
@@ -111,6 +107,8 @@
   than a `README.md`
 
 ### Added
+
+- **`preDownloadAlert` in `setupManifest()`** displays a localized Markdown confirmation before downloading an update from an installed version matching `when.sourceVersion`.
 
 - **An `env` variable set to `undefined` is removed from the process**,
   including one the image or StartOS would otherwise supply, such as `LANG`.

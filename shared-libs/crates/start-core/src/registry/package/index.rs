@@ -308,12 +308,14 @@ impl Model<PackageVersionInfo> {
                 self.as_metadata_mut()
                     .as_release_notes_mut()
                     .mutate(|r| Ok(r.localize_for(locale)))?;
-                self.as_metadata_mut().mutate(|metadata| {
-                    if let Some(alert) = &mut metadata.pre_download_alert {
-                        alert.message.localize_for(locale);
-                    }
-                    Ok(())
-                })?;
+                self.as_metadata_mut()
+                    .as_pre_download_alert_mut()
+                    .mutate(|alert| {
+                        if let Some(alert) = alert {
+                            alert.message.localize_for(locale);
+                        }
+                        Ok(())
+                    })?;
             }
         }
 

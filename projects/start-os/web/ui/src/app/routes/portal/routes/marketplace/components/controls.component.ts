@@ -126,6 +126,16 @@ export class MarketplaceControlsComponent {
 
   async tryInstall() {
     const localPkg = this.localPkg()
+    if (
+      !this.file() &&
+      !(await this.alerts.alertPreDownload(
+        this.pkg().preDownloadAlert,
+        localPkg ? getManifest(localPkg).version : null,
+      ))
+    ) {
+      return
+    }
+
     const currentUrl = this.file()
       ? null
       : await firstValueFrom(this.marketplace.currentRegistryUrl$)
@@ -185,16 +195,7 @@ export class MarketplaceControlsComponent {
   }
 
   private async install(url: string) {
-    const { id, version, preDownloadAlert } = this.pkg()
-    const local = this.localPkg()
-    const sourceVersion = local ? getManifest(local).version : null
-
-    if (
-      !(await this.alerts.alertPreDownload(preDownloadAlert, sourceVersion))
-    ) {
-      return
-    }
-
+    const { id, version } = this.pkg()
     this.tasks.run(
       async () => await this.marketplace.installPackage(id, version, url),
       'Beginning install',
