@@ -284,6 +284,12 @@
 
 - **Backup and restore progress no longer falls back mid-sync**
 
+- **`checkPortListening` counts a TCP port as listening only while a socket is
+  in the `LISTEN` state.** It matched any socket on the port, so the
+  connections a process leaves in `TIME_WAIT` when it exits kept its port
+  reading as listening for up to a minute: a daemon's `ready` check passed, and
+  the health checks that require it ran, while nothing was listening
+
 ### Security
 
 - **ESLint and typescript-eslint carry patched `brace-expansion` and

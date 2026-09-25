@@ -397,7 +397,7 @@ The `fn` returns an object with `result` and `message`:
 
 Available on `sdk.healthCheck`:
 
-- **`checkPortListening(effects, port, { successMessage, errorMessage })`** — checks if a TCP/UDP port is bound by reading `/proc/net`. Lightweight, no network I/O. Preferred for daemon readiness checks.
+- **`checkPortListening(effects, port, { successMessage, errorMessage })`** — checks if a TCP port has a listening socket, or a UDP port is bound, by reading `/proc/net`. A TCP connection left in `TIME_WAIT` after its process exits does not count. Lightweight, no network I/O. Preferred for daemon readiness checks.
 - **`checkWebUrl(effects, url, { successMessage, errorMessage })`** — fetches a URL, succeeds on any HTTP response.
 - **`runHealthScript(command, subcontainer, { errorMessage })`** — runs a command in a subcontainer, succeeds on exit code 0.
 
