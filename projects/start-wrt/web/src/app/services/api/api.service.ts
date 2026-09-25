@@ -733,7 +733,7 @@ export interface OutboundVpnUpdateRequest {
   id: string
   label: string
   target: string
-  /** Desired MTU; null clears it (inherit default). Always sent by the form. */
+  /** Desired MTU; null restores the default: the chain MTU for a chained VPN, else the kernel's (~1420). Always sent by the form. */
   mtu: number | null
 }
 

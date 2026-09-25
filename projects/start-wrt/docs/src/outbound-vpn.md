@@ -34,6 +34,16 @@ For example, if "Mullvad" targets "Proton" and "Proton" targets "Internet", a pr
 
 Neither provider holds both halves. To link you to your destination they would have to compare logs with each other, across whatever jurisdictions they operate in.
 
+A VPN can connect through another only when:
+
+- Its config's `Endpoint` is an IP address, not a hostname.
+- The target VPN's tunnel can carry it: the target has an address of the same family (IPv4 or IPv6) and its `AllowedIPs` include this VPN's server address.
+- No other VPN uses the same server address.
+
+If the target VPN goes down, the VPN connecting through it stops rather than reconnecting to its server over your WAN, so your home IP is never shown to the provider you meant to hide it from.
+
+Each tunnel in a chain adds its own headers, so a VPN that connects through another gets a smaller MTU: its target's MTU less 60 bytes for an IPv4 server, or 80 for an IPv6 one (1360 through a target at the default 1420). You can still set the MTU yourself on its detail page.
+
 > [!NOTE]
 > VPN chaining adds latency since traffic passes through multiple servers. For most users, a single VPN provider is sufficient.
 
@@ -58,7 +68,7 @@ Click a VPN label in the table to open its detail page, which shows:
 - **Used by** — Which [Security Profiles](security-profiles.md) currently route their traffic through this VPN. Check this before making changes to understand the impact.
 - **Label** — Edit the display name.
 - **Connects to** — Change the target (Internet or another VPN). Only targets that would not create a circular chain are offered.
-- **MTU** — The tunnel's packet size limit. Leave blank to use the default (~1420). Lower it — down to a minimum of 1280 — if the VPN connects but requests time out.
+- **MTU** — The tunnel's packet size limit. Leave blank to use the default: ~1420, or for a VPN connecting through another, the chained MTU described under [VPN Chaining](#vpn-chaining). Lower it — down to a minimum of 1280 — if the VPN connects but requests time out.
 
 To delete a VPN, click "Delete" on its detail page. If any Security Profiles route through the VPN, you will be asked to confirm — those profiles will switch to the regular WAN connection.
 
