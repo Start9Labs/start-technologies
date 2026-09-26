@@ -1,5 +1,7 @@
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
-use uciedit::Configs;
+use uciedit::{parse_all, Arena, Configs};
 
 use crate::prelude::*;
 use crate::profiles::UciProfile;
@@ -36,10 +38,12 @@ pub fn generate_smartdns_conf(groups: &[SmartDnsGroup]) -> String {
 
     for group in groups {
         conf.push('\n');
-        conf.push_str(&format!(
-            "bind 127.0.0.1:{} -group {} -no-rule-addr -no-rule-nameserver -no-rule-ipset -no-rule-soa -no-dualstack-selection\n",
-            group.port, group.name
-        ));
+        for bind in ["bind", "bind-tcp"] {
+            conf.push_str(&format!(
+                "{bind} 127.0.0.1:{} -group {} -no-rule-addr -no-rule-nameserver -no-rule-ipset -no-rule-soa -no-dualstack-selection\n",
+                group.port, group.name
+            ));
+        }
         for server in &group.servers {
             if server.ssl {
                 conf.push_str(&format!(
@@ -157,6 +161,22 @@ pub async fn apply_smartdns_groups(groups: Vec<SmartDnsGroup>) -> Result<(), Err
     Ok(())
 }
 
+/// Rewrites the SmartDNS config from UCI, restarting SmartDNS only when it differs.
+/// sysupgrade does not keep the config file.
+pub async fn heal_smartdns_conf(uci_root: impl AsRef<Path>) -> Result<(), Error> {
+    let groups = {
+        let arena = Arena::new();
+        let cfgs = parse_all(uci_root.as_ref(), &arena, &["startwrt"]).await?;
+        collect_smartdns_groups(&cfgs)
+    };
+    let wanted = (!groups.is_empty()).then(|| generate_smartdns_conf(&groups));
+    let current = tokio::fs::read_to_string(SMARTDNS_CONF_PATH).await.ok();
+    if current == wanted {
+        return Ok(());
+    }
+    apply_smartdns_groups(groups).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,6 +206,7 @@ mod tests {
         }];
         let conf = generate_smartdns_conf(&groups);
         assert!(conf.contains("bind 127.0.0.1:5300 -group system"));
+        assert!(conf.contains("bind-tcp 127.0.0.1:5300 -group system"));
         assert!(conf.contains("server 1.1.1.1 -group system -exclude-default-group"));
         assert!(conf.contains(
             "server-https https://8.8.8.8/dns-query -group system -exclude-default-group"
@@ -325,9 +346,11 @@ server-name startwrt-smartdns
 log-level warn
 
 bind 127.0.0.1:5300 -group system -no-rule-addr -no-rule-nameserver -no-rule-ipset -no-rule-soa -no-dualstack-selection
+bind-tcp 127.0.0.1:5300 -group system -no-rule-addr -no-rule-nameserver -no-rule-ipset -no-rule-soa -no-dualstack-selection
 server 9.9.9.9 -group system -exclude-default-group
 
 bind 127.0.0.1:5401 -group profile_guest -no-rule-addr -no-rule-nameserver -no-rule-ipset -no-rule-soa -no-dualstack-selection
+bind-tcp 127.0.0.1:5401 -group profile_guest -no-rule-addr -no-rule-nameserver -no-rule-ipset -no-rule-soa -no-dualstack-selection
 server 1.1.1.1 -group profile_guest -exclude-default-group
 server-https https://8.8.8.8/dns-query -group profile_guest -exclude-default-group
 ";
