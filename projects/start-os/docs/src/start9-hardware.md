@@ -10,7 +10,7 @@ Every server and router Start9 has sold, newest first: the RISC-V Router, the Se
 - **RAM:** 4 GB LPDDR4
 - **Storage:** 16 GB eMMC, plus a microSD slot for flashing
 - **Ethernet:** 1× Gigabit WAN, 1× Gigabit LAN
-- **Wi-Fi:** AsiaRF AW7916-NPD mini-PCIe module (MediaTek MT7916), Wi-Fi 6E, 2.4 GHz + 5 GHz concurrent, up to 2402 Mbps
+- **Wi-Fi:** AsiaRF AW7916-NPD mini-PCIe module (MediaTek MT7916), Wi-Fi 6E, 2.4 GHz + 5 GHz concurrent, up to 2402 Mbps. Sold separately to US customers, as FCC regulations require
 - **Operating system:** [StartWRT](/start-wrt/)
 - **How to identify it:** Start9 wordmark on top, a small DeepComputing logo on the back, and a Wi-Fi password sticker on the bottom
 - **Known issues:** none
