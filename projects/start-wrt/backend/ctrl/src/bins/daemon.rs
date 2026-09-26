@@ -187,7 +187,7 @@ async fn init_ssl() -> bool {
 /// connection. Plumbed through `WebServer`'s metadata pipeline so request
 /// extensions can inspect it if needed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum WebserverListener {
+pub enum WebserverListener {
     Http,
     Https,
 }
@@ -372,6 +372,8 @@ async fn inner_main() -> Result<(), Error> {
                 ErrorKind::Network,
             )
         })?;
+        // Seeded before port control raises the gate.
+        crate::http_redirect::seed("/etc/config".into()).await;
         let pc = crate::port_control::PortControl::new("/etc/config".into());
         if crate::port_control::PORT_CONTROL.set(pc.clone()).is_ok() {
             tokio::spawn(crate::port_control::run(pc));
@@ -455,6 +457,9 @@ async fn inner_main() -> Result<(), Error> {
         .layer(Extension(continuations))
         .layer(Extension(proxy_client))
         .layer(Extension(app_state));
+
+    // Must stay outermost.
+    let app = crate::http_redirect::redirect_public_http(app);
 
     // WAN-specific demux listeners require every wildcard listener to use SO_REUSEPORT.
     let http_addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 80));

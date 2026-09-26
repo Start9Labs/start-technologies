@@ -77,6 +77,7 @@ pub fn extract<
 #[derive(Clone, Copy, Debug)]
 pub struct TcpMetadata {
     pub peer_addr: SocketAddr,
+    /// The connection's destination, not the listener's bound address.
     pub local_addr: SocketAddr,
 }
 impl<V: MetadataVisitor> Visit<V> for TcpMetadata {
@@ -115,7 +116,7 @@ impl Accept for TcpListener {
             }
             return Poll::Ready(Ok((
                 TcpMetadata {
-                    local_addr: self.local_addr()?,
+                    local_addr: stream.local_addr()?,
                     peer_addr,
                 },
                 Box::pin(stream),

@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A published domain typed without `https://` now reaches the published
+  service, not the router.** While port 443 is published to a device — by a
+  Published Port or a device's hostname routes — plain HTTP at the router's
+  public address is answered with a redirect to `https://` instead of the
+  router's web interface, from inside the network and from the Internet under
+  every Remote Access setting. A Published Port or a hostname route on 80
+  takes precedence.
+
 - **Publishing a port no longer names the device after its generated label,
   which could stop the router's DHCP server.** Publishing a port to a device
   with no reserved address reserves one; for a device without a name of its

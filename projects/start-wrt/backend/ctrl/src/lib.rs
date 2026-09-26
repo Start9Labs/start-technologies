@@ -20,6 +20,7 @@ pub mod ethernet;
 pub mod exec;
 pub mod files;
 pub mod flash;
+pub mod http_redirect;
 pub mod init;
 pub mod ipv6_tracker;
 pub mod lan;
