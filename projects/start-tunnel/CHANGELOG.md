@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A device sends from a forwarded port on that port.** Traffic a device
+  starts from a port StartTunnel forwards to it leaves with the forward's
+  public address and port.
+
 - **SNI hostname routes work on IPv4-only tunnel hosts.** The reply path for
   IPv4 routes is set up when IPv6 is disabled on the host.
 

@@ -399,7 +399,7 @@ fn is_forward_script_tag(tag: &str) -> bool {
 async fn remove_stale_forward_rules() -> Result<(), Error> {
     let mut script = String::new();
     for family in ["ip", "ip6"] {
-        for chain in ["prerouting", "output", "postrouting", "forward"] {
+        for chain in ["prerouting", "output", "postrouting", "forward", "forward_snat"] {
             for line in nft_list_chain(family, chain).await.lines() {
                 let Some(tag) = line
                     .split_once("comment \"")

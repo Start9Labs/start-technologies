@@ -12,6 +12,12 @@
 #   - sport != dport: a per-port verdict map mapping each external port to its
 #     offset internal port (one rule, <count> map elements). This is what lets
 #     bindPortRange use different external/internal bases.
+#
+# Outbound, traffic the target sends from its forwarded port(s) out of the
+# interface that holds $sip is SNATed to $sip and the matching external port.
+# Without it, that traffic falls to lxc-net's (or StartTunnel's) masquerade,
+# which picks another source port on a NAT clash and then reuses that mapping
+# for every later flow from the same source.
 
 if [ -z "$sip" ] || [ -z "$dip" ] || [ -z "$dprefix" ] || [ -z "$sport" ] || [ -z "$dport" ]; then
     >&2 echo 'missing required env var'
@@ -53,18 +59,38 @@ else
     dport_match="${dport}-${dport_end}"
 fi
 
+# SNAT clause pinning the target's outbound source port(s) to the external
+# one(s). A range maps port by port, so no flow moves within the range either.
+if [ "$count" -eq 1 ]; then
+    snat="th sport $dport snat to $sip:$sport"
+else
+    map=""; sep=""
+    for ((i = 0; i < count; i++)); do
+        map+="${sep}$((dport + i)) : $sip . $((sport + i))"; sep=", "
+    done
+    snat="th sport $dport_match snat to th sport map { $map }"
+fi
+
+# The interface holding $sip. None for an address traffic never leaves by
+# (loopback, the container bridge), which gets no outbound rule.
+sip_iface="$(ip -o -4 addr show | awk -v ip="$sip" '{ split($4, a, "/"); if (a[1] == ip) { print $2; exit } }')"
+case "$sip_iface" in
+    lo | lxcbr0) sip_iface= ;;
+esac
+
 # Base table/chains are owned by PortForwardController init; ensure defensively.
 nft -f - <<'EOF'
 add table ip startos
 add chain ip startos prerouting { type nat hook prerouting priority dstnat; policy accept; }
 add chain ip startos output { type nat hook output priority -100; policy accept; }
 add chain ip startos postrouting { type nat hook postrouting priority srcnat; policy accept; }
+add chain ip startos forward_snat { type nat hook postrouting priority srcnat - 1; policy accept; }
 add chain ip startos forward { type filter hook forward priority filter; policy drop; }
 EOF
 
 delete_tagged() {
     local chain
-    for chain in prerouting output postrouting forward; do
+    for chain in prerouting output postrouting forward forward_snat; do
         nft -a list chain ip startos "$chain" 2>/dev/null | awk -v chain="$chain" -v tag="comment \"$TAG\"" '
             index($0, tag) {
                 for (i = 1; i <= NF; i++) if ($i == "handle") print "delete rule ip startos " chain " handle " $(i+1)
@@ -90,6 +116,10 @@ delete_tagged() {
         # Masquerade hairpin replies so they reverse through this host.
         echo "add rule ip startos postrouting fib saddr type local ct original ip daddr $sip ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
         echo "add rule ip startos postrouting ip saddr $dip/$dprefix ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
+        # Pin the target's outbound traffic from the forwarded port to $sip.
+        if [ -n "$sip_iface" ]; then
+            echo "add rule ip startos forward_snat ip saddr $dip oifname \"$sip_iface\" $PROTO $snat comment \"$TAG\""
+        fi
     fi
 } | nft -f -
 

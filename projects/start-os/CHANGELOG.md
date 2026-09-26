@@ -12,6 +12,11 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **A service sends from its forwarded port on that port.** Traffic a service
+  starts from a forwarded port leaves with the forward's external address and
+  port, so peer-to-peer services that publish their port (HyperDHT, QUIC,
+  WebRTC) stay directly reachable under load.
+
 - **Required service dependencies appear from the package manifest during initialization.** StartOS shows their base version and health requirements even if the service has not reported runtime dependencies; active runtime requirements can tighten the base, including for optional dependencies. While a service is not using an optional dependency, its tasks for that dependency are hidden and do not prevent it from starting.
 
 - **Freshly generated Root CAs carry an Authority Key Identifier conforming to RFC 5280 and the CA/Browser Forum Baseline Requirements.** Existing servers retain their trusted Root CA when updated.
