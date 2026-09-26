@@ -143,13 +143,23 @@ chmod +x "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-published-ports"
 cp "$PROJECT_DIR"/backend/hotplug/99-startwrt-port-control "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-port-control"
 chmod +x "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-port-control"
 
-# Custom nftables rules auto-included by fw4 (/etc/nftables.d/*.nft).
-# 10-startwrt-dnat-mark.nft marks DNAT-state reply traffic so port-forward
-# replies route via the main table instead of a VPN tunnel.
-mkdir -p "${FILES_DIR}/etc/nftables.d"
+# fw4 auto-includes these into `table inet fw4`. They must not go in
+# /etc/nftables.d, which sysupgrade restores over the image.
+mkdir -p "${FILES_DIR}/usr/share/nftables.d/table-pre"
 for f in "$PROJECT_DIR"/backend/nftables/*.nft; do
-    cp "$f" "${FILES_DIR}/etc/nftables.d/$(basename "$f")"
+    cp "$f" "${FILES_DIR}/usr/share/nftables.d/table-pre/$(basename "$f")"
 done
+
+# Deletes the copies earlier images staged in /etc/nftables.d. fw4 would load
+# them alongside the ones above.
+mkdir -p "${FILES_DIR}/etc/uci-defaults"
+cat > "${FILES_DIR}/etc/uci-defaults/90-startwrt-nftables" << 'NFTEOF'
+#!/bin/sh
+rm -f /etc/nftables.d/10-startwrt-dnat-mark.nft \
+	/etc/nftables.d/11-startwrt-inbound6-mark.nft \
+	/etc/nftables.d/12-startwrt-sni-divert.nft \
+	/etc/nftables.d/13-startwrt-dns-update-divert.nft
+NFTEOF
 
 # sysupgrade keep.d — additional files to include in config backups
 mkdir -p "${FILES_DIR}/lib/upgrade/keep.d"

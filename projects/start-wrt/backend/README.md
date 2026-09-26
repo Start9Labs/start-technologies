@@ -14,7 +14,7 @@ Other directories:
 
 - `firstboot_config/` — Factory-default UCI configs, copied into the OpenWrt image's `/etc/config/` at image staging time (`../build/stage-files.sh`)
 - `hotplug/` — Interface hotplug scripts (proxy ARP, published ports, remote access), staged into the image's `/etc/hotplug.d/iface/`
-- `nftables/` — nftables include files auto-loaded by fw4, staged into the image's `/etc/nftables.d/`
+- `nftables/` — nftables include files auto-loaded by fw4, staged into the image's `/usr/share/nftables.d/table-pre/`
 - `config_experiments/` — Reference UCI configs for manual testing
 - `notes/` — Research notes
 
