@@ -233,7 +233,7 @@ start9-workspace/
 
 You get the **whole** monorepo, not just the guide. That's deliberate: when the guide can't settle a question, the SDK source (`projects/start-sdk/lib`) and the StartOS source (`projects/start-os`, `shared-libs/`) are right there to read — and if you find a bug, you're already in a repo you can open a pull request from. The clone is `--filter=blob:none`, so file contents are fetched on demand: it lands in a few seconds and takes ~75 MB, while `git log`, `git blame`, and rebase all behave normally.
 
-The context lives once, at the workspace root — it is never copied into your package repos. Open the workspace in your AI tool and it picks up `AGENTS.md` / `CLAUDE.md` automatically. You can read exactly what it contains on the [Agent Context](./agent-context.md) page.
+The context lives once, at the workspace root — it is never copied into your package repos. **Start every AI session from the workspace root, never from inside a package repo.** From the root, your assistant picks up `AGENTS.md` / `CLAUDE.md` automatically; a session started in a package directory can miss them and work without the guide. You can read exactly what it contains on the [Agent Context](./agent-context.md) page.
 
 ### Already have the monorepo?
 
