@@ -38,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A device can move a hostname route it holds to another of its own ports.**
   Previously the request was refused as taken until the old lease expired.
 
+- **Changing Remote Access ends only the SSH sessions it no longer allows.**
+  Turning it off from the command line, or the router re-applying it when its
+  WAN address changes, left open WAN-side SSH sessions connected. Changing it
+  from the web interface ended every WAN-side SSH session, including ones the
+  new setting still accepts.
+
 ## [1.1.1]
 
 ### Fixed
