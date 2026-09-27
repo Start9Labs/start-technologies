@@ -77,7 +77,7 @@ pub fn extract<
 #[derive(Clone, Copy, Debug)]
 pub struct TcpMetadata {
     pub peer_addr: SocketAddr,
-    /// The connection's destination, not the listener's bound address.
+    /// The accepted connection's destination.
     pub local_addr: SocketAddr,
 }
 impl<V: MetadataVisitor> Visit<V> for TcpMetadata {

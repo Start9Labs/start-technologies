@@ -1,13 +1,4 @@
 //! HTTP→HTTPS redirect on port 80 while WAN 443 is published.
-//!
-//! StartOS publishes only 443 and expects its gateway to redirect plain HTTP
-//! at the public address (start-core `net/vhost.rs`).
-//!
-//! [`redirect_public_http`] serves the UI to a client on a connected subnet
-//! off the WAN, at an address that is not the WAN's. Every other IPv4 request
-//! gets a 307 to the same authority over HTTPS, or a 400 without one. Port
-//! control admits WAN-side tcp/80 at the WAN address with an ACCEPT rule in
-//! the SNI admission set.
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
@@ -81,7 +72,7 @@ async fn refresh_stale_addrs() -> bool {
 }
 
 async fn read_addrs() {
-    // Subnets first: a WAN address appearing between the reads stays untrusted.
+    // Must precede the WAN read.
     let connected = tokio::process::Command::new("ip")
         .args(["-j", "-4", "addr", "show"])
         .invoke(ErrorKind::Network.into())
@@ -227,7 +218,7 @@ fn respond(gate: &Gate, req: &Request) -> Option<Response> {
     .then(|| redirect(req))
 }
 
-/// Mirrors start-core's `handle_http_on_https`. Never falls through.
+/// Never falls through.
 fn redirect(req: &Request) -> Response {
     match request_authority(req).and_then(|authority| https_redirect_uri(req.uri(), authority).ok())
     {

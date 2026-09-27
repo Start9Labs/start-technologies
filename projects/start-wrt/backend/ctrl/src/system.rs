@@ -261,8 +261,7 @@ pub(crate) fn wan_ipv4_addrs() -> Vec<Ipv4Addr> {
     read_wan_ipv4_addrs().unwrap_or_default()
 }
 
-/// Every IPv4 address on the `wan` interface, in ubus order. `None` when ubus
-/// is unavailable; empty when the interface is down.
+/// `None` when ubus is unavailable; empty when the interface is down.
 pub(crate) fn read_wan_ipv4_addrs() -> Option<Vec<Ipv4Addr>> {
     let out = StdCommand::new("ubus")
         .args(["call", "network.interface.wan", "status"])

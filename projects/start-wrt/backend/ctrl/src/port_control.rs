@@ -903,8 +903,7 @@ impl PortControl {
         }
     }
 
-    /// Reconciles WAN admission against the demux's live ports and the
-    /// HTTP→HTTPS redirect's port.
+    /// Reconciles WAN admission against the demux's live ports and the redirect.
     async fn sync_sni_rules(&self) -> Result<(), Error> {
         self.sync_sni_rules_inner(true).await
     }
@@ -921,12 +920,12 @@ impl PortControl {
             Ok(crate::http_redirect::desired(&cfgs["firewall"], &routes))
         })
         .await?;
-        // The rule is scoped to the WAN address; without one there is no rule.
         let scope = if redirect {
             self.wan_ipv4().await
         } else {
             None
         };
+        // The gate opens before the rule is written.
         if redirect {
             crate::http_redirect::set_admitted(true);
         }
@@ -1269,7 +1268,7 @@ pub(crate) fn wan_reserved_overlaps(
         let Some(spec) = rule.dest_port.as_deref() else {
             continue;
         };
-        // The redirect shares the label and is a router service.
+        // The redirect's rule shares the label but is a router service.
         let held_by_sni = rule._apf_label.as_deref() == Some(KIND_SNI)
             && rule.name != crate::http_redirect::RULE_NAME;
         if parse_port_range(spec).is_some_and(|range| ranges_overlap(want, range))
@@ -1424,8 +1423,7 @@ fn sni_section_name(port: u16) -> String {
     format!("apf_sni_{port}")
 }
 
-/// A build without the redirect purges the redirect's rule by its `SNI` label.
-/// The redirect's rule admits the WAN address alone.
+/// The `SNI` label lets a build without the redirect purge its rule.
 fn desired_sni_rule(port: u16, redirect: Option<Ipv4Addr>) -> FirewallRule {
     let redirect = redirect.filter(|_| port == crate::http_redirect::HTTP_PORT);
     FirewallRule {
@@ -1485,7 +1483,6 @@ pub(crate) fn wan_dnat_covers(firewall: &uciedit::Config<'_>, port: u16) -> bool
 
 /// Whether the TCP port is held by a DNAT or incompatible router service.
 fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
-    // The HTTP→HTTPS redirect answers port 80 at the WAN address.
     if port == crate::http_redirect::HTTP_PORT && crate::http_redirect::admission_present(firewall)
     {
         return true;
@@ -1534,9 +1531,8 @@ fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
     false
 }
 
-/// Replaces SNI admission rules with one per requested port. Port 80 belongs
-/// to the HTTP→HTTPS redirect at the given WAN address, else to a hostname
-/// route. Returns whether UCI changed.
+/// Replaces SNI admission rules with one per requested port.
+/// Returns whether UCI changed.
 async fn reconcile_sni_rules_uci(
     uci_root: &Path,
     want: std::collections::BTreeSet<u16>,
