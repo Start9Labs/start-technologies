@@ -57,6 +57,16 @@ Even with proper backups the risk of data corruption is always non-zero. Therefo
 >
 > If you are using a Raspberry Pi, backup drive _must_ be self-powered, or be connected via a powered USB hub, to prevent possible data corruption.
 
+1. Plug the drive into your server.
+
+1. In StartOS, go to `System > Create Backup`. The drive appears under `Physical Drives`; if it doesn't, click "Refresh".
+
+1. Click the drive.
+
+1. Select the services to back up, or click "Toggle all", then click "Done".
+
+1. Enter your master password.
+
 ## Network Folder
 
 A network folder backup sends your encrypted backup over the LAN to a shared folder on another device. First, create a shared folder on the target device, then connect to it from StartOS.
@@ -351,7 +361,7 @@ A network folder backup sends your encrypted backup over the LAN to a shared fol
 
 1. In StartOS, go to `System > Create Backup`.
 
-1. Click "Open New".
+1. Under `Network Folders`, click "New".
 
 1. Complete the form:
 
@@ -436,3 +446,11 @@ A network folder backup sends your encrypted backup over the LAN to a shared fol
 
 > [!WARNING]
 > If you receive `Filesystem I/O Error mount error(13): Permission denied`, ensure you have entered the correct values. The hostname can be particularly tricky.
+
+### Step 3. Back Up
+
+1. Click the folder under `Network Folders`.
+
+1. Select the services to back up, or click "Toggle all", then click "Done".
+
+1. Enter your master password.
