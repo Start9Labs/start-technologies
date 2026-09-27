@@ -8,7 +8,7 @@ import { FullProgressTracker } from '../util/FullProgressTracker'
  * - `'install'` — first-time installation
  * - `'update'` — after a package update
  * - `'restore'` — after restoring from backup
- * - `null` — regular startup (no special lifecycle event)
+ * - `null` — regular startup or reactive re-run
  */
 export type InitKind = 'install' | 'update' | 'restore' | null
 
@@ -42,11 +42,42 @@ export type InitScriptOrFn<Kind extends InitKind = InitKind> =
   | InitFn<Kind>
 
 /**
- * Composes multiple init handlers into a single `ExpectedExports.init`-compatible function.
- * Handlers are executed sequentially in the order provided.
- *
- * @param inits - One or more init handlers to compose
+ * Reruns only this handler when its watched values change; subsequent runs receive a null kind and detached progress.
+ * A run skipped by `active` stops watching and leaves the named context alone.
  */
+export async function runReactiveInit(
+  effects: T.Effects,
+  name: string,
+  init: InitScriptOrFn,
+  kind: InitKind,
+  progress?: FullProgressTracker,
+  active: () => boolean = () => true,
+): Promise<void> {
+  let firstRun = true
+  const run = async () => {
+    if (!active()) return
+    const runKind = firstRun ? kind : null
+    const runProgress = firstRun ? progress : new FullProgressTracker()
+    firstRun = false
+    let complete: () => void = () => {}
+    const settled = new Promise<void>(resolve => {
+      complete = resolve
+    })
+    const child = effects.child(name)
+    child.constRetry = once(() =>
+      settled.then(() => run()).catch(console.error),
+    )
+    try {
+      if ('init' in init) await init.init(child, runKind, runProgress)
+      else await init(child, runKind, runProgress as FullProgressTracker)
+    } finally {
+      complete()
+    }
+  }
+  await run()
+}
+
+/** Composes init handlers in order into an `ExpectedExports.init` function. */
 export function setupInit(...inits: InitScriptOrFn[]): T.ExpectedExports.init {
   return async opts => {
     // One root tracker, shared across all inits — each handler adds its own
@@ -58,30 +89,13 @@ export function setupInit(...inits: InitScriptOrFn[]): T.ExpectedExports.init {
     )
 
     for (const idx in inits) {
-      const init = inits[idx]
-      // Progress belongs to the initial install/update pass. A constRetry
-      // re-run (reactive `.const` watcher) gets a detached tracker so its
-      // phases don't pile up on the root over the container's lifetime.
-      let firstRun = true
-      const fn = async () => {
-        const progress = firstRun ? tracker : new FullProgressTracker()
-        firstRun = false
-        let res: (value?: undefined) => void = () => {}
-        const complete = new Promise(resolve => {
-          res = resolve
-        })
-        const e: T.Effects = opts.effects.child(`init_${idx}`)
-        e.constRetry = once(() =>
-          complete.then(() => fn()).catch(console.error),
-        )
-        try {
-          if ('init' in init) await init.init(e, opts.kind, progress)
-          else await init(e, opts.kind, progress)
-        } finally {
-          res()
-        }
-      }
-      await fn()
+      await runReactiveInit(
+        opts.effects,
+        `init_${idx}`,
+        inits[idx],
+        opts.kind,
+        tracker,
+      )
     }
     tracker.complete()
     await tracker.sync()

@@ -5,6 +5,7 @@ import { promisify } from 'util'
 import { Buffer } from 'node:buffer'
 import { once } from '@start9labs/start-core/util/once'
 import { Drop } from '@start9labs/start-core/util/Drop'
+import { logErrorOnce } from '@start9labs/start-core/util/logErrorOnce'
 import { Mounts } from '../mainFn/Mounts'
 
 export const execFile = promisify(cp.execFile)
@@ -418,8 +419,9 @@ export class SubContainerEager<
   implements SubContainer<Manifest, Effects>
 {
   private destroyed = false
-  private destroyPending = false
+  private destroyRequested = false
   private holdCount = 0
+  private teardown: Promise<void> | null = null
 
   private leader: cp.ChildProcess
   private leaderExited: boolean = false
@@ -607,7 +609,7 @@ export class SubContainerEager<
       if (released) return
       released = true
       this.holdCount--
-      if (this.holdCount === 0 && this.destroyPending) {
+      if (this.holdCount === 0 && this.destroyRequested) {
         await this._destroyImmediate()
       }
     }
@@ -619,7 +621,7 @@ export class SubContainerEager<
    * it. Idempotent.
    */
   async destroy(): Promise<void> {
-    this.destroyPending = true
+    this.destroyRequested = true
     if (this.holdCount === 0) await this._destroyImmediate()
   }
 
@@ -633,13 +635,14 @@ export class SubContainerEager<
     unregisterFromContextCleanup(this.effects, this)
   }
 
-  private async _destroyImmediate(): Promise<void> {
-    if (this.destroyed) return
-    this.destroyed = true
-    unregisterFromContextCleanup(this.effects, this)
-    const guid = this.guid
-    await this.killLeader()
-    await this.effects.subcontainer.destroyFs({ guid })
+  private _destroyImmediate(): Promise<void> {
+    return (this.teardown ??= (async () => {
+      this.destroyed = true
+      unregisterFromContextCleanup(this.effects, this)
+      const guid = this.guid
+      await this.killLeader()
+      await this.effects.subcontainer.destroyFs({ guid })
+    })())
   }
 
   private async killLeader(): Promise<null> {
@@ -706,11 +709,7 @@ export class SubContainerEager<
       workdir = spawnOptions.cwd
       delete spawnOptions.cwd
     }
-    if (spawnOptions.env) {
-      for (let [k, v] of Object.entries(spawnOptions.env)) {
-        extra.push(`--env=${k}=${v}`)
-      }
-    }
+    if (spawnOptions.env) extra.push(...envArgs(spawnOptions.env))
     const child = cp.spawn(
       'start-container',
       [
@@ -844,13 +843,7 @@ export class SubContainerEager<
       workdir = options.cwd
       delete options.cwd
     }
-    if (options?.env) {
-      for (let [k, v] of Object.entries(options.env).filter(
-        ([_, v]) => v != undefined,
-      )) {
-        extra.push(`--env=${k}=${v}`)
-      }
-    }
+    if (options?.env) extra.push(...envArgs(options.env))
     await this.killLeader()
     this.leaderExited = false
     this.leader = cp.spawn(
@@ -901,13 +894,7 @@ export class SubContainerEager<
       workdir = options.cwd
       delete options.cwd
     }
-    if (options?.env) {
-      for (let [k, v] of Object.entries(options.env).filter(
-        ([_, v]) => v != undefined,
-      )) {
-        extra.push(`--env=${k}=${v}`)
-      }
-    }
+    if (options?.env) extra.push(...envArgs(options.env))
     return cp.spawn(
       'start-container',
       [
@@ -976,8 +963,11 @@ export class SubContainerLazy<
 
   private materialized: Promise<SubContainerEager<Manifest, Effects>> | null =
     null
-  private destroyPending = false
-  private detachPending = false
+  private destroyRequested = false
+  private detachRequested = false
+  private holds = new Set<{
+    release: (() => Promise<void>) | null
+  }>()
 
   constructor(
     readonly effects: Effects,
@@ -996,9 +986,10 @@ export class SubContainerLazy<
   }
 
   /**
-   * Materialize the underlying eager subcontainer (idempotent) and return
-   * it. Subsequent calls return the same instance. Useful when you need
-   * the synchronous `SubContainerEager` interface (e.g. sync `rootfs` /
+   * Materialize the underlying eager subcontainer and return it. Concurrent
+   * calls share one attempt; successful materialization is cached, while a
+   * failed attempt is logged and retried by the next call. Useful when you
+   * need the synchronous `SubContainerEager` interface (e.g. sync `rootfs` /
    * `subpath()`) — for ordinary command execution, just call `.exec()` /
    * `.writeFile()` directly and the lazy handle materializes internally.
    */
@@ -1009,11 +1000,20 @@ export class SubContainerLazy<
       this.mounts,
       this.name,
       this.identity,
-    ).then(async eager => {
-      if (this.destroyPending) await eager.destroy()
-      else if (this.detachPending) eager.detach()
-      return eager
-    }))
+    )
+      .catch(e => {
+        this.materialized = null
+        logErrorOnce(e)
+        throw e
+      })
+      .then(eager => {
+        for (const hold of this.holds) {
+          if (!hold.release) hold.release = eager.hold()
+        }
+        if (this.destroyRequested) eager.destroy().catch(logErrorOnce)
+        else if (this.detachRequested) eager.detach()
+        return eager
+      }))
   }
 
   /** Absolute path to the materialized subcontainer's rootfs. Triggers materialization on first access. */
@@ -1054,49 +1054,37 @@ export class SubContainerLazy<
    * eager subcontainer asynchronously and places the hold on it.
    *
    * The returned release function is safe to call before materialization
-   * completes — it cancels the pending hold so a never-materialized lazy
-   * (the canonical "left alone" case in `Daemons.dynamic`) stays cheap.
+   * completes; it cancels the pending hold. Failed materializations keep the
+   * hold pending for the next attempt.
    *
    * @returns A release function — call it to drop this hold
    */
   hold(): () => Promise<void> {
-    // Acquire the hold on the eager once materialized. Until then we record
-    // a "pending" intent so destroy() honors any outstanding holds even on
-    // a never-materialized handle.
-    let released = false
-    let underlyingRelease: (() => Promise<void>) | null = null
-    const eagerPromise = this.eager()
-    const acquired = eagerPromise
+    const hold = { release: null as (() => Promise<void>) | null }
+    this.holds.add(hold)
+    this.eager()
       .then(eager => {
-        if (released) return
-        underlyingRelease = eager.hold()
+        if (this.holds.has(hold) && !hold.release) {
+          hold.release = eager.hold()
+        }
       })
-      .catch(e => {
-        released = true
-        throw e
-      })
+      .catch(logErrorOnce)
     return async () => {
-      if (released) return
-      released = true
-      try {
-        await acquired
-      } catch (_) {
-        // materialization failed; nothing to release
-        return
-      }
-      if (underlyingRelease) await underlyingRelease()
+      if (!this.holds.delete(hold)) return
+      if (hold.release) await hold.release()
     }
   }
 
   /**
    * Mark this subcontainer for destruction. If already materialized, the
    * underlying eager's destroy is invoked (which respects outstanding
-   * holds). If never materialized, the destroy pending flag is set so
-   * that any future materialization fires destroy immediately.
+   * holds), after any materialization in flight. Otherwise the request is
+   * recorded and applied on materialization.
    */
   async destroy(): Promise<void> {
-    this.destroyPending = true
-    if (this.materialized) await (await this.materialized).destroy()
+    this.destroyRequested = true
+    const eager = await this.materialized?.catch(logErrorOnce)
+    await eager?.destroy()
   }
 
   /**
@@ -1105,10 +1093,8 @@ export class SubContainerLazy<
    * so materialization detaches immediately. Idempotent.
    */
   detach(): void {
-    this.detachPending = true
-    if (this.materialized) {
-      this.materialized.then(e => e.detach()).catch(e => console.error(e))
-    }
+    this.detachRequested = true
+    this.materialized?.then(e => e.detach()).catch(logErrorOnce)
   }
 
   /**
@@ -1195,14 +1181,12 @@ export class SubContainerLazy<
   }
 
   onDrop(): void {
-    if (this.materialized) {
-      this.materialized.then(e => e.destroy()).catch(e => console.error(e))
-    }
+    this.materialized?.then(e => e.destroy()).catch(logErrorOnce)
   }
 }
 
 export type CommandOptions = {
-  /** Environment variables to set for this command */
+  /** Environment variables to set for this command; `undefined` unsets one */
   env?: { [variable in string]?: string }
   /** the working directory to run this command in */
   cwd?: string
@@ -1249,6 +1233,12 @@ export type MountOptionsPointer = {
   subpath: string | null
   readonly: boolean
   idmap: { fromId: number; toId: number; range: number }[]
+}
+
+function envArgs(env: NonNullable<CommandOptions['env']>): string[] {
+  return Object.entries(env).map(([k, v]) =>
+    v === undefined ? `--env=${k}` : `--env=${k}=${v}`,
+  )
 }
 
 function wait(time: number) {

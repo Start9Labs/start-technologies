@@ -18,6 +18,7 @@ use crate::{ActionId, PackageId, ReplayId};
 pub(super) struct GetActionInput {
     id: ActionId,
     prefill: Value,
+    caller: Option<PackageId>,
 }
 impl Handler<GetActionInput> for ServiceActor {
     type Response = Result<Option<ActionInput>, Error>;
@@ -26,19 +27,20 @@ impl Handler<GetActionInput> for ServiceActor {
     }
     async fn handle(
         &mut self,
-        id: Guid,
+        event_id: Guid,
         GetActionInput {
             id: action_id,
             prefill,
+            caller,
         }: GetActionInput,
         _: &BackgroundJobQueue,
     ) -> Self::Response {
         let container = &self.0.persistent_container;
         container
             .execute::<Option<ActionInput>>(
-                id,
+                event_id,
                 ProcedureName::GetActionInput(action_id),
-                json!({ "prefill": prefill }),
+                json!({ "prefill": prefill, "caller": caller }),
                 Some(Duration::from_secs(30)),
             )
             .await
@@ -47,11 +49,14 @@ impl Handler<GetActionInput> for ServiceActor {
 }
 
 impl Service {
+    /// `caller` is the service asking through its effects, or `None` for the
+    /// user and for the OS evaluating a task.
     pub async fn get_action_input(
         &self,
-        id: Guid,
+        event_id: Guid,
         action_id: ActionId,
         prefill: Value,
+        caller: Option<PackageId>,
     ) -> Result<Option<ActionInput>, Error> {
         if !self
             .seed
@@ -73,10 +78,11 @@ impl Service {
         }
         self.actor
             .send(
-                id,
+                event_id,
                 GetActionInput {
                     id: action_id,
                     prefill,
+                    caller,
                 },
             )
             .await?
@@ -150,6 +156,7 @@ pub fn update_tasks(
 pub(super) struct RunAction {
     action_id: ActionId,
     input: Value,
+    caller: Option<PackageId>,
 }
 impl Handler<RunAction> for ServiceActor {
     type Response = Result<Option<ActionResult>, Error>;
@@ -158,10 +165,11 @@ impl Handler<RunAction> for ServiceActor {
     }
     async fn handle(
         &mut self,
-        id: Guid,
+        event_id: Guid,
         RunAction {
             ref action_id,
             input,
+            caller,
         }: RunAction,
         _: &BackgroundJobQueue,
     ) -> Self::Response {
@@ -210,10 +218,11 @@ impl Handler<RunAction> for ServiceActor {
         }
         let result = container
             .execute::<Option<ActionResult>>(
-                id.clone(),
+                event_id.clone(),
                 ProcedureName::RunAction(action_id.clone()),
                 json!({
                     "input": input,
+                    "caller": caller,
                 }),
                 Some(Duration::from_secs(120)),
             )
@@ -224,10 +233,14 @@ impl Handler<RunAction> for ServiceActor {
             .ctx
             .db
             .mutate(|db| {
-                for (_, pde) in db.as_public_mut().as_package_data_mut().as_entries_mut()? {
+                for (id, pde) in db.as_public_mut().as_package_data_mut().as_entries_mut()? {
                     if pde.as_tasks_mut().mutate(|tasks| {
                         Ok(update_tasks(tasks, &package_id, action_id, &input, true))
-                    })? {
+                    })? && pde
+                        .as_current_dependencies()
+                        .de()?
+                        .is_task_target(&id, &package_id)
+                    {
                         pde.as_status_info_mut().stop()?;
                     }
                 }
@@ -240,12 +253,24 @@ impl Handler<RunAction> for ServiceActor {
 }
 
 impl Service {
+    /// `caller` is the service running the action through its effects, or
+    /// `None` for the user.
     pub async fn run_action(
         &self,
-        id: Guid,
+        event_id: Guid,
         action_id: ActionId,
         input: Value,
+        caller: Option<PackageId>,
     ) -> Result<Option<ActionResult>, Error> {
-        self.actor.send(id, RunAction { action_id, input }).await?
+        self.actor
+            .send(
+                event_id,
+                RunAction {
+                    action_id,
+                    input,
+                    caller,
+                },
+            )
+            .await?
     }
 }

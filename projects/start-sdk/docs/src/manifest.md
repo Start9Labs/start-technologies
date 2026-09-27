@@ -76,7 +76,6 @@ export const manifest = setupManifest({
   images: {
     /* see Images Configuration below */
   },
-  dependencies: {},
 })
 ```
 
@@ -96,6 +95,25 @@ export const manifest = setupManifest({
 | `volumes`           | Storage volumes (usually `['main']`)                                                     |
 | `images`            | Docker image configuration (including `arch`)                                            |
 | `dependencies`      | Service dependencies                                                                     |
+
+## Pre-download alerts
+
+A package can ask StartOS to confirm an update **before downloading it** when the installed version matches an ExVer range. Add `preDownloadAlert` to `setupManifest()`:
+
+```typescript
+preDownloadAlert: {
+  message: {
+    en_US: '**Back up this service** before updating.',
+    es_ES: '**Haga una copia de seguridad** de este servicio antes de actualizarlo.',
+    de_DE: '**Sichern Sie diesen Dienst** vor dem Update.',
+    fr_FR: '**Sauvegardez ce service** avant la mise à jour.',
+    pl_PL: '**Utwórz kopię zapasową** tej usługi przed aktualizacją.',
+  },
+  when: { sourceVersion: '<2.0.0:0' },
+},
+```
+
+`message` is a localized Markdown value shown in a Continue/Cancel confirmation on both the Marketplace and Updates tab. Markdown is sanitized before display, and external links open in a new tab. Cancel leaves the installed service unchanged. `when.sourceVersion` matches the version already installed, not the version being downloaded; on a fresh install there is no source version to match.
 
 ## License
 
@@ -351,24 +369,4 @@ Reference these in `main.ts` mounts by the volume ID you chose.
 
 ## Dependencies
 
-Declare dependencies on other StartOS services. Note that dependency `description` is a plain string, not a locale object:
-
-```typescript
-dependencies: {
-  // Required dependency
-  bitcoin: {
-    description: 'Required for blockchain data',
-    optional: false,
-  },
-
-  // Optional dependency with metadata
-  'c-lightning': {
-    description: 'Needed for Lightning payments',
-    optional: true,
-    metadata: {
-      title: 'Core Lightning',
-      icon: 'https://raw.githubusercontent.com/Start9Labs/cln-startos/refs/heads/master/icon.png',
-    },
-  },
-},
-```
+Define dependencies in `startos/dependencies.ts` with `sdk.Dependency.required` or `sdk.Dependency.optional`, and pass the resulting `sdk.Dependencies.of()` builder to `buildManifest(versionGraph, sdkManifest, dependencies)`. See [Dependencies](dependencies.md) for base requirements and runtime narrowing.

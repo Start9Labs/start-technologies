@@ -7,7 +7,6 @@ use crate::action::{ActionInput, ActionResult, display_action_result};
 use crate::db::model::package::{
     ActionAccess, ActionMetadata, Task, TaskCondition, TaskEntry, TaskSeverity, TaskTrigger,
 };
-use crate::rpc_continuations::Guid;
 use crate::service::cli::ContainerCliContext;
 use crate::service::effects::prelude::*;
 use crate::util::serde::HandlerExtSerde;
@@ -116,13 +115,13 @@ async fn clear_actions(
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct GetActionInputParams {
-    #[serde(default)]
-    #[ts(skip)]
-    #[arg(skip)]
-    procedure_id: Guid,
     #[ts(optional)]
     #[arg(short, long, help = "help.arg.package-id")]
     package_id: Option<PackageId>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    #[arg(skip)]
+    event: EventId,
     #[arg(help = "help.arg.action-id")]
     action_id: ActionId,
     #[ts(type = "Record<string, unknown> | null")]
@@ -133,14 +132,16 @@ pub struct GetActionInputParams {
 async fn get_action_input(
     context: EffectContext,
     GetActionInputParams {
-        procedure_id,
+        event,
         package_id,
         action_id,
         prefill,
     }: GetActionInputParams,
 ) -> Result<Option<ActionInput>, Error> {
     let context = context.deref()?;
+    let event_id = event.or_new();
     let prefill = prefill.unwrap_or(Value::Null);
+    let caller = Some(context.seed.id.clone());
 
     if let Some(package_id) = package_id {
         context
@@ -151,11 +152,11 @@ async fn get_action_input(
             .await
             .as_ref()
             .or_not_found(&package_id)?
-            .get_action_input(procedure_id, action_id, prefill)
+            .get_action_input(event_id, action_id, prefill, caller)
             .await
     } else {
         context
-            .get_action_input(procedure_id, action_id, prefill)
+            .get_action_input(event_id, action_id, prefill, caller)
             .await
     }
 }
@@ -165,13 +166,13 @@ async fn get_action_input(
 #[serde(rename_all = "camelCase")]
 #[ts(export, rename = "EffectsRunActionParams")]
 pub struct RunActionParams {
-    #[serde(default)]
-    #[ts(skip)]
-    #[arg(skip)]
-    procedure_id: Guid,
     #[ts(optional)]
     #[arg(short, long, help = "help.arg.package-id")]
     package_id: Option<PackageId>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    #[command(flatten)]
+    event: EventId,
     #[arg(help = "help.arg.action-id")]
     action_id: ActionId,
     #[ts(type = "any")]
@@ -181,13 +182,15 @@ pub struct RunActionParams {
 async fn run_action(
     context: EffectContext,
     RunActionParams {
-        procedure_id,
+        event,
         package_id,
         action_id,
         input,
     }: RunActionParams,
 ) -> Result<Option<ActionResult>, Error> {
     let context = context.deref()?;
+    let event_id = event.or_new();
+    let caller = Some(context.seed.id.clone());
 
     let package_id = package_id.as_ref().unwrap_or(&context.seed.id);
 
@@ -252,10 +255,10 @@ async fn run_action(
             .await
             .as_ref()
             .or_not_found(package_id)?
-            .run_action(procedure_id, action_id, input)
+            .run_action(event_id, action_id, input, caller)
             .await
     } else {
-        context.run_action(procedure_id, action_id, input).await
+        context.run_action(event_id, action_id, input, caller).await
     }
 }
 
@@ -263,9 +266,9 @@ async fn run_action(
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct CreateTaskParams {
-    #[serde(default)]
+    #[serde(flatten)]
     #[ts(skip)]
-    procedure_id: Guid,
+    event: EventId,
     replay_id: ReplayId,
     #[serde(flatten)]
     task: Task,
@@ -273,12 +276,13 @@ pub struct CreateTaskParams {
 async fn create_task(
     context: EffectContext,
     CreateTaskParams {
-        procedure_id,
+        event,
         replay_id,
         task,
     }: CreateTaskParams,
 ) -> Result<(), Error> {
     let context = context.deref()?;
+    let event_id = event.or_new();
 
     let src_id = &context.seed.id;
     let active = match &task.when {
@@ -301,7 +305,12 @@ async fn create_task(
                     .filter(|s| s.is_initialized())
                 {
                     service
-                        .get_action_input(procedure_id.clone(), task.action_id.clone(), Value::Null)
+                        .get_action_input(
+                            event_id.clone(),
+                            task.action_id.clone(),
+                            Value::Null,
+                            None,
+                        )
                         .await
                         .log_err()
                         .flatten()
@@ -352,7 +361,13 @@ async fn create_task(
                     None => true,
                 },
             };
-            if active && task.severity == TaskSeverity::Critical {
+            if active
+                && task.severity == TaskSeverity::Critical
+                && pde
+                    .as_current_dependencies()
+                    .de()?
+                    .is_task_target(src_id, &task.package_id)
+            {
                 pde.as_status_info_mut().stop()?;
             }
             pde.as_tasks_mut()
@@ -402,4 +417,72 @@ async fn clear_tasks(
         .await
         .result?;
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use imbl_value::json;
+
+    use super::*;
+    use crate::rpc_continuations::Guid;
+
+    fn envelope(params: Value) -> (Guid, Value) {
+        let event_id = Guid::new();
+        let mut params = params;
+        params["eventId"] = json!(event_id.as_ref());
+        (event_id, params)
+    }
+
+    #[test]
+    fn effect_params_take_the_calling_procedures_event_id() {
+        let (id, params) = envelope(json!({ "actionId": "attach", "prefill": null }));
+        let get: GetActionInputParams = imbl_value::from_value(params).unwrap();
+        assert_eq!(get.event.or_new(), id);
+
+        let (id, params) = envelope(json!({ "actionId": "attach", "input": { "a": 1 } }));
+        let run: RunActionParams = imbl_value::from_value(params).unwrap();
+        assert_eq!(run.event.or_new(), id);
+        assert_eq!(run.input, json!({ "a": 1 }));
+
+        let (id, params) = envelope(json!({
+            "replayId": "r",
+            "packageId": "tor",
+            "actionId": "attach",
+        }));
+        let task: CreateTaskParams = imbl_value::from_value(params).unwrap();
+        assert_eq!(task.event.or_new(), id);
+        assert_eq!(AsRef::<str>::as_ref(&task.task.action_id), "attach");
+    }
+
+    #[test]
+    fn cli_event_id_reaches_the_request() {
+        let id = Guid::new();
+
+        let run =
+            RunActionParams::try_parse_from(["run", "--event-id", id.as_ref(), "attach", "{}"])
+                .unwrap();
+        let sent = imbl_value::to_value(&run).unwrap();
+        assert_eq!(sent["eventId"], json!(id.as_ref()));
+        assert_eq!(
+            imbl_value::from_value::<RunActionParams>(sent)
+                .unwrap()
+                .event
+                .or_new(),
+            id
+        );
+
+        assert!(
+            GetActionInputParams::try_parse_from([
+                "get-input",
+                "--event-id",
+                id.as_ref(),
+                "attach",
+            ])
+            .is_err()
+        );
+
+        let unnamed = RunActionParams::try_parse_from(["run", "attach", "{}"]).unwrap();
+        assert!(unnamed.event.event_id.is_none());
+        assert!(imbl_value::to_value(&unnamed).unwrap()["eventId"].is_null());
+    }
 }

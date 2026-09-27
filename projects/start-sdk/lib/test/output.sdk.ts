@@ -27,13 +27,6 @@ export const sdk = StartSdk.of()
         },
       },
       volumes: [],
-      dependencies: {
-        'remote-test': {
-          description: '',
-          optional: false,
-          s9pk: 'https://example.com/remote-test.s9pk',
-        },
-      },
     }),
   )
   .build(true)

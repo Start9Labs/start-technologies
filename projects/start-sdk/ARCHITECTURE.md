@@ -132,10 +132,10 @@ Supported field types via `Value`:
 - `object` — Nested sub-form
 - `union` / `dynamicUnion` — Conditional fields based on a discriminator
 
-### Dependencies (`shared-libs/ts-modules/start-core/lib/dependencies/`)
+### Dependencies
 
-- `setupDependencies.ts` — Declare what the service depends on (package IDs, version ranges, health checks)
-- `dependencies.ts` — Runtime dependency checking via `checkDependencies()`
+- `lib/dependencies.ts` — Builder for published base requirements and reactive runtime requirements
+- `shared-libs/ts-modules/start-core/lib/dependencies/dependencies.ts` — Runtime satisfaction checks used by the builder
 
 ### Interfaces (`shared-libs/ts-modules/start-core/lib/interfaces/`)
 
@@ -180,7 +180,7 @@ Utility modules including:
 
 **Reactive subscription wrappers** — Each wraps an Effects callback-based method into a consistent reactive API:
 
-- `Watchable` — Base class providing `const()`, `once()`, `watch()`, `onChange()`, `waitFor()`
+- `Watchable<A>` — Base class providing `const()`, `once()`, `watch()`, `onChange()`, `waitFor()`; `MappedWatchable<Raw, Mapped>` adds a `map` over a raw value; `Watchable.from` and `Watchable.combine` build readers from `WatchSource`s
 - `GetContainerIp`, `GetStatus`, `GetSystemSmtp`, `GetOutboundGateway`, `GetSslCertificate`, `GetHostInfo`, `GetServiceManifest` — Typed wrappers for specific Effects methods
 
 **General utilities:**
@@ -213,7 +213,8 @@ The `.build()` method returns an object containing the entire SDK surface area, 
 | **Health**       | `healthCheck.checkPortListening`, `.checkWebUrl`, `.runHealthScript`                                                                | Built-in health checks                            |
 | **Interfaces**   | `createInterface`, `MultiHost.of`, `setupInterfaces`, `serviceInterface.*`                                                          | Network endpoint management                       |
 | **Backups**      | `setupBackups`, `Backups.ofVolumes`, `Backups.ofSyncs`, `Backups.withOptions`                                                       | Backup configuration                              |
-| **Dependencies** | `setupDependencies`, `checkDependencies`                                                                                            | Dependency declaration and verification           |
+| **Primary URL**  | `setupPrimaryUrl`                                                                                                                   | The URL a service advertises as its own           |
+| **Dependencies** | `Dependency.required`, `Dependency.optional`, `Dependencies.of`                                                                     | Published and runtime requirements                |
 | **Init/Uninit**  | `setupInit`, `setupUninit`, `setupOnInit`, `setupOnUninit`                                                                          | Lifecycle hooks                                   |
 | **Containers**   | `SubContainer.of`, `SubContainer.withTemp`, `Mounts.of`                                                                             | Container execution with mounts                   |
 | **Forms**        | `InputSpec.of`, `Value`, `Variants`, `List`                                                                                         | Form input builders                               |
@@ -312,6 +313,10 @@ Health checks are paired with **triggers** that control polling behavior:
 - `cooldownTrigger` — Fixed interval between checks
 - `statusTrigger` — Per-status polling intervals with a default fallback
 
+### Primary URL (`lib/primaryUrl/`)
+
+`setupPrimaryUrl.ts` builds the action behind `sdk.setupPrimaryUrl` over the package's `get`/`set`, plus `bestUsable` and `setupTask`. Both judge the stored URL against the interface's `nonLocal` addresses. `bestUsable` is a `Watchable.combine` over the package's `get` reader and the host, so the caller picks the read strategy; it resolves the URL when read, leaving the store as the user set it. `setupTask` is an init script that passes those addresses to StartOS as an `input-not-matches` task's accepted input, and StartOS decides when the task is active.
+
 ### Backup System (`lib/backup/`)
 
 ```
@@ -377,15 +382,14 @@ const manifest = setupManifest({
   license: 'MIT',
   description: { short: '...', long: '...' },
   images: { main: { source: { dockerTag: 'myimage:1.0' } } },
-  volumes: { main: {} },
-  dependencies: {},
+  volumes: ['main'],
   // ...
 })
 
-export default buildManifest(manifest)
+export default buildManifest(versionGraph, manifest, dependencies)
 ```
 
-`buildManifest()` finalizes the manifest with the current SDK version, OS version compatibility, and migration version ranges.
+`buildManifest()` finalizes the manifest with the current SDK version, OS version compatibility, migration version ranges, and dependency definitions from the same builder that runs during init.
 
 ### Versioning (`lib/version/`)
 
@@ -431,7 +435,7 @@ A typical service package lifecycle:
 1. INSTALL / UPDATE / RESTORE
    ├── init({ effects, kind })
    │   ├── Version migrations (if update)
-   │   ├── setupDependencies()
+   │   ├── dependencies.init()
    │   ├── setupInterfaces() → bind ports, export interfaces
    │   └── Actions registration → export actions to OS
    │
@@ -470,6 +474,8 @@ The `Watchable` base class provides a consistent API for values that can change 
 - `watch()` — Async generator yielding on each change
 - `onChange(callback)` — Invoke callback on each change
 - `waitFor(predicate)` — Block until a condition is met
+
+`Watchable<A>` is typed only by the value it reads. A reader that maps a raw value extends `MappedWatchable<Raw, Mapped>`, implementing `fetchRaw`/`produceRaw`. `Watchable.from(effects, source)` and `Watchable.combine(effects, sources, map?, eq?)` build readers from any `WatchSource` (`once()` + `watch(abort)`), which every `Watchable` is.
 
 ### Type-safe Manifest Threading
 

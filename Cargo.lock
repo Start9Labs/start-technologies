@@ -7756,6 +7756,7 @@ dependencies = [
  "exver",
  "fast-socks5",
  "fd-lock-rs",
+ "foreign-types",
  "form_urlencoded",
  "futures",
  "gpt",
@@ -7804,6 +7805,7 @@ dependencies = [
  "once_cell",
  "openssh-keys",
  "openssl",
+ "openssl-sys",
  "p256",
  "patch-db",
  "pbkdf2",
@@ -7873,7 +7875,7 @@ dependencies = [
 
 [[package]]
 name = "start-registry"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "start-core",
 ]

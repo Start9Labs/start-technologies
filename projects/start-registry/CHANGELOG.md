@@ -2,6 +2,11 @@
 
 All notable changes to `start-registry` (the Start Registry server) are documented here. This project is versioned **independently** (starting at `1.0.0`); its version lives in `Cargo.toml`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.1.1]
+
+- **A registry accepts admin requests at any loopback address**, such as
+  `start-cli -r http://127.0.0.1:5959` on the registry's own host.
+
 ## [1.1.0]
 
 - **A registry can declare a description.** `info set-description` stores markdown (a

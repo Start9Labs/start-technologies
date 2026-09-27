@@ -28,12 +28,14 @@ export type System = {
     effects: Effects,
     actionId: string,
     input: unknown,
+    caller: T.PackageId | null,
     timeoutMs: number | null,
   ): Promise<T.ActionResult | null>
   getActionInput(
     effects: Effects,
     actionId: string,
     prefill: Record<string, unknown> | null,
+    caller: T.PackageId | null,
     timeoutMs: number | null,
   ): Promise<T.ActionInput | null>
 

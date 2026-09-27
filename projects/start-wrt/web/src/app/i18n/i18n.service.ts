@@ -1,4 +1,5 @@
 import { inject, Injectable } from '@angular/core'
+import { I18N as SHARED_I18N, loadDictionary } from '@start9labs/shared'
 import { TuiLanguageName, TuiLanguageSwitcherService } from '@taiga-ui/i18n'
 import { Language } from 'src/app/utils/languages'
 import { I18N, I18N_LOADER } from './i18n.providers'
@@ -20,6 +21,7 @@ export const LANGUAGE_TO_TUI: Record<Language, TuiLanguageName> = {
 export class i18nService extends TuiLanguageSwitcherService {
   private readonly i18n = inject(I18N)
   private readonly i18nLoader = inject(I18N_LOADER)
+  private readonly sharedI18n = inject(SHARED_I18N)
 
   /**
    * Current language as a POSIX locale string.
@@ -38,6 +40,9 @@ export class i18nService extends TuiLanguageSwitcherService {
     super.setLanguage(tuiLang)
     this.i18nLoader(tuiLang).then(value => {
       this.i18n.set(value)
+    })
+    loadDictionary(tuiLang).then(value => {
+      this.sharedI18n.set(value)
     })
   }
 }

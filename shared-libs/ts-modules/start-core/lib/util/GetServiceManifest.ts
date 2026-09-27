@@ -1,12 +1,11 @@
 import { Effects } from '../Effects'
 import { Manifest, PackageId } from '../osBindings'
 import { deepEqual } from './deepEqual'
-import { Watchable } from './Watchable'
+import { MappedWatchable } from './Watchable'
 
-export class GetServiceManifest<Mapped = Manifest | null> extends Watchable<
-  Manifest | null,
-  Mapped
-> {
+export class GetServiceManifest<
+  Mapped = Manifest | null,
+> extends MappedWatchable<Manifest | null, Mapped> {
   protected readonly label = 'GetServiceManifest'
 
   constructor(
@@ -20,7 +19,7 @@ export class GetServiceManifest<Mapped = Manifest | null> extends Watchable<
     super(effects, options)
   }
 
-  protected fetch(callback?: () => void) {
+  protected fetchRaw(callback?: () => void) {
     return this.effects.getServiceManifest({ ...this.opts, callback })
   }
 }

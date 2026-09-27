@@ -4,14 +4,16 @@ Some services need to know which URL they're hosted at — for generating links,
 
 ## Solution
 
-Create a "Set Primary URL" action using `sdk.Action.withInput()` with `Value.dynamicSelect()` that queries the service's own interfaces for available hostnames. The action persists the choice to a file model. In `setupMain()`, read the selected URL and pass it to the service as an env var or config value.
+Call `sdk.setupPrimaryUrl()` with the interface the URL belongs to, the file model's reader for the stored choice (`get`), and a function that writes it (`set`). Register the `action` it returns, and in `setupMain()` pass `await primaryUrl.bestUsable(effects).const()` to the service as an env var or config value. That is the stored URL while its hostname is one of the interface's addresses, and the `.local` address otherwise, so the service keeps running while the chosen address is gone and returns to it when it comes back.
 
-Where the URL the user picked is an address of the service's own web UI, pass it to `createInterface`'s `preferredLauncherAddress` in `setupInterfaces` as well, so StartOS's **Open UI** control opens the address the service is configured for instead of the one that suits the admin's connection. It has to be a whole URL, and it only does anything on the interface carrying that control — a service whose canonical URL is a bare hostname, or belongs to an interface other than its web UI, has nothing to nominate. See [Nominating an Address to Open](interfaces.md#nominating-an-address-to-open).
+Where the URL is an address of the service's own web UI, pass the same read to `createInterface`'s `preferredLauncherAddress` in `setupInterfaces` as well, so StartOS's **Open UI** control opens the address the service is configured for instead of the one that suits the admin's connection. See [Choosing a Primary URL](interfaces.md#choosing-a-primary-url) for the code, and [Nominating an Address to Open](interfaces.md#nominating-an-address-to-open) for what a nomination does.
 
-There are two variants. For services where the URL can change anytime (Ghost, Gitea, Vaultwarden), register a reactive watcher in `setupOnInit` that monitors the URL via `.const(effects)`. If the selected URL becomes unavailable (e.g., user disables a gateway), create a critical task prompting the user to pick a new one. For services where the hostname is permanent and cannot change after initial setup (Synapse), use a critical task on install with `visibility: 'hidden'` so it's a one-time choice.
+To tell the user when the choice is unset or gone, list `primaryUrl.setupTask(severity, { reason })` after `actions` in `setupInit()`. StartOS clears the task once the stored URL is one of the interface's addresses again.
 
-**Reference:** [Actions](actions.md) · [Interfaces](interfaces.md) · [Initialization](init.md) · [Tasks](tasks.md)
+For a service whose hostname is permanent and cannot change after initial setup (Synapse), use a critical task on install with `visibility: 'hidden'` instead, so it's a one-time choice.
+
+**Reference:** [Interfaces](interfaces.md#choosing-a-primary-url) · [Actions](actions.md) · [Initialization](init.md) · [Tasks](tasks.md)
 
 ## Examples
 
-See `startos/actions/` and `startos/init/` in: [ghost](https://github.com/Start9Labs/ghost-startos) (changeable URL), [gitea](https://github.com/Start9Labs/gitea-startos) (changeable URL), [vaultwarden](https://github.com/Start9Labs/vaultwarden-startos) (changeable domain), [synapse](https://github.com/Start9Labs/synapse-startos) (permanent server name)
+See `startos/` in: [synapse](https://github.com/Start9Labs/synapse-startos) (permanent server name)

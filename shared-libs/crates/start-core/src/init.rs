@@ -277,9 +277,7 @@ pub async fn init(
         account.root_ca_cert.to_pem()?,
     )
     .await?;
-    Command::new("update-ca-certificates")
-        .invoke(crate::ErrorKind::OpenSsl)
-        .await?;
+    crate::system::trust_ca::update_trust_store().await?;
     load_ca_cert.complete();
 
     load_wifi.start();

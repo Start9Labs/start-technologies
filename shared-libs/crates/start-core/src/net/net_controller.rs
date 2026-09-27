@@ -10,7 +10,6 @@ use nix::net::if_::if_nametoindex;
 use patch_db::json_ptr::JsonPointer;
 use tokio::process::Command;
 use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
 use tokio_rustls::rustls::ClientConfig as TlsClientConfig;
 use tokio_rustls::rustls::crypto::CryptoProvider;
 use tracing::instrument;
@@ -315,6 +314,73 @@ fn ssl_vhost_public_v4<'a>(
         .collect()
 }
 
+/// The loopback and bridge addresses of a binding's SSL port. Every name the
+/// binding serves accepts them.
+fn ssl_vhost_internal_ips<'a>(
+    enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
+) -> BTreeSet<IpAddr> {
+    enabled_addresses
+        .into_iter()
+        .filter(|a| a.ssl && a.is_internal())
+        .filter_map(|a| a.hostname.parse().ok())
+        .collect()
+}
+
+/// The `(port, is the public leg)` a name is served on. A plugin's name arrives
+/// on the binding's own SSL port, whatever port the name advertises.
+fn named_vhost_leg(addr_info: &HostnameInfo, assigned_ssl_port: u16) -> Option<(u16, bool)> {
+    match &addr_info.metadata {
+        HostnameMetadata::PublicDomain { .. }
+        | HostnameMetadata::PrivateDomain { .. }
+        | HostnameMetadata::Mdns { .. } => Some((addr_info.port?, addr_info.public)),
+        HostnameMetadata::Plugin { .. } => Some((assigned_ssl_port, false)),
+        _ => None,
+    }
+}
+
+/// Adds an entry for each name the binding serves over TLS, or merges the
+/// name's gateways into an entry another row already made.
+fn add_named_vhosts(
+    vhosts: &mut BTreeMap<VHostKey, ProxyTarget>,
+    enabled_addresses: &BTreeSet<&HostnameInfo>,
+    assigned_ssl_port: u16,
+    net_ifaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    new_target: impl Fn(&HostnameInfo, bool) -> ProxyTarget,
+) {
+    let internal = ssl_vhost_internal_ips(enabled_addresses.iter().copied());
+    for addr_info in enabled_addresses {
+        if !addr_info.ssl {
+            continue;
+        }
+        let Some((port, public)) = named_vhost_leg(addr_info, assigned_ssl_port) else {
+            continue;
+        };
+        let key = (Some(addr_info.hostname.clone()), port, public);
+        let ProxyTarget {
+            public_v4,
+            public_v6,
+            private: accepts,
+            ..
+        } = vhosts.entry(key).or_insert_with(|| ProxyTarget {
+            private: internal.clone(),
+            ..new_target(addr_info, public)
+        });
+        if public {
+            // A public domain is dual-stack (A + AAAA): public on its
+            // gateways' bare IPv4 and on each of their GUAs.
+            let gws: BTreeSet<GatewayId> = addr_info.metadata.gateways().cloned().collect();
+            public_v4.extend(gws.iter().cloned());
+            public_v6.extend(crate::net::utils::gua_ips(net_ifaces, &gws));
+        } else {
+            for gw in addr_info.metadata.gateways() {
+                if let Some(ip_info) = net_ifaces.get(gw).and_then(|i| i.ip_info.as_ref()) {
+                    accepts.extend(ip_info.subnets.iter().map(|s| s.addr()));
+                }
+            }
+        }
+    }
+}
+
 /// LAN addresses a binding's SSL `*` vhost answers on: its enabled SSL-port IPs.
 fn ssl_vhost_private_ips<'a>(
     enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
@@ -518,27 +584,19 @@ impl NetServiceData {
                 // entry carries its own gateways, so a public domain accepts WAN
                 // even where the bare IP is disabled.
                 //
-                // The mDNS name is registered here like any other: the vhost
-                // controller serves a name only if it has an entry, and this is
-                // where the set of names a host answers to is decided. It is never
-                // public, so it contributes no upstream port map.
+                // The mDNS name and a plugin's names are registered here like any
+                // other: the vhost controller serves a name only if it has an
+                // entry, and this is where the set of names a host answers to is
+                // decided. Neither is public, so neither contributes an upstream
+                // port map. Every name accepts the bridge, where other services
+                // and a plugin's provider reach it.
                 let passthrough = bind.options.add_ssl.is_none();
-                for addr_info in &enabled_addresses {
-                    if !addr_info.ssl {
-                        continue;
-                    }
-                    match &addr_info.metadata {
-                        HostnameMetadata::PublicDomain { .. }
-                        | HostnameMetadata::PrivateDomain { .. }
-                        | HostnameMetadata::Mdns { .. } => {}
-                        _ => continue,
-                    }
-                    let domain = &addr_info.hostname;
-                    let Some(domain_ssl_port) = addr_info.port else {
-                        continue;
-                    };
-                    let key = (Some(domain.clone()), domain_ssl_port, addr_info.public);
-                    let target = vhosts.entry(key).or_insert_with(|| ProxyTarget {
+                add_named_vhosts(
+                    &mut vhosts,
+                    &enabled_addresses,
+                    assigned_ssl_port,
+                    &net_ifaces,
+                    |addr_info, public| ProxyTarget {
                         public_v4: BTreeSet::new(),
                         public_v6: BTreeSet::new(),
                         public_v6_gateways: BTreeSet::new(),
@@ -546,12 +604,12 @@ impl NetServiceData {
                         // The public leg's alone, so a name served both ways
                         // keeps its LAN side. A passthrough never intermediates
                         // ACME — the backend is the ACME client.
-                        acme: if passthrough || !addr_info.public {
+                        acme: if passthrough || !public {
                             None
                         } else {
                             host_addresses
                                 .iter()
-                                .find(|a| a.address == *domain)
+                                .find(|a| a.address == addr_info.hostname)
                                 .and_then(|a| a.public.as_ref())
                                 .and_then(|p| p.acme.clone())
                         },
@@ -567,28 +625,8 @@ impl NetServiceData {
                         alpn: alpn.clone(),
                         passthrough,
                         preserve_source_ip: passthrough,
-                    });
-                    if addr_info.public {
-                        // A public domain is dual-stack (A + AAAA): public on its
-                        // gateways' bare IPv4 and on each of their GUAs.
-                        let gws: BTreeSet<GatewayId> =
-                            addr_info.metadata.gateways().cloned().collect();
-                        target.public_v4.extend(gws.iter().cloned());
-                        target
-                            .public_v6
-                            .extend(crate::net::utils::gua_ips(&net_ifaces, &gws));
-                    } else {
-                        for gw in addr_info.metadata.gateways() {
-                            if let Some(info) = net_ifaces.get(gw) {
-                                if let Some(ip_info) = &info.ip_info {
-                                    for subnet in &ip_info.subnets {
-                                        target.private.insert(subnet.addr());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                    },
+                );
             }
 
             // Direct forward — the plaintext port, the only external port with
@@ -1112,7 +1150,7 @@ async fn sync_outbound_rules(
 pub struct NetService {
     shutdown: bool,
     data: Arc<Mutex<NetServiceData>>,
-    sync_task: JoinHandle<()>,
+    sync_task: NonDetachingJoinHandle<()>,
     synced: Watch<u64>,
 }
 impl NetService {
@@ -1127,7 +1165,7 @@ impl NetService {
                 controller: Default::default(),
                 binds: BTreeMap::new(),
             })),
-            sync_task: tokio::spawn(futures::future::ready(())),
+            sync_task: tokio::spawn(futures::future::ready(())).into(),
             synced: Watch::new(0u64),
         }
     }
@@ -1260,7 +1298,7 @@ impl NetService {
         Ok(Self {
             shutdown: false,
             data,
-            sync_task,
+            sync_task: sync_task.into(),
             synced,
         })
     }
@@ -1378,14 +1416,11 @@ impl NetService {
                 let hostname = ServerHostname::load(db.as_public().as_server_info())?;
                 let ports = db.as_private().as_available_ports().de()?;
                 if let Some(ref pkg_id) = pkg_id {
-                    for (host_id, host) in db
-                        .as_public_mut()
-                        .as_package_data_mut()
-                        .as_idx_mut(pkg_id)
-                        .or_not_found(pkg_id)?
-                        .as_hosts_mut()
-                        .as_entries_mut()?
-                    {
+                    let Some(pde) = db.as_public_mut().as_package_data_mut().as_idx_mut(pkg_id)
+                    else {
+                        return Ok(());
+                    };
+                    for (host_id, host) in pde.as_hosts_mut().as_entries_mut()? {
                         host.as_bindings_mut().mutate(|b| {
                             for (internal_port, info) in b.iter_mut() {
                                 if !except.contains(&BindId {
@@ -1565,7 +1600,15 @@ impl NetService {
             }
         }
         self.sync_task.abort();
-        let outbound_sources = self.data.lock().await.outbound_sources();
+        let outbound_sources = {
+            let mut data = self.data.lock().await;
+            if let Ok(ctrl) = data.net_controller() {
+                for id in data.binds.keys().cloned().collect::<Vec<_>>() {
+                    data.retire(&*ctrl, id).await.log_err();
+                }
+            }
+            data.outbound_sources()
+        };
         purge_outbound_rules(&outbound_sources).await;
         // Set last: an earlier failure leaves shutdown false so Drop's fallback re-runs.
         self.shutdown = true;
@@ -1643,6 +1686,131 @@ mod tests {
             ssl_vhost_private_ips([&mdns, &plain, &wan, &ssl]),
             BTreeSet::from(["192.0.2.10".parse::<IpAddr>().unwrap()])
         );
+    }
+
+    #[test]
+    fn a_plugin_name_is_served_on_the_bindings_ssl_port_over_internal_ips_alone() {
+        let eth = GatewayId::from(InternedString::intern("eth0"));
+        let row = |host: &str, ssl, public, port, metadata| HostnameInfo {
+            ssl,
+            public,
+            hostname: InternedString::intern(host),
+            port: Some(port),
+            metadata,
+        };
+        let ipv4 = || HostnameMetadata::Ipv4 {
+            gateway: eth.clone(),
+        };
+        let onion = row(
+            "example.onion",
+            true,
+            true,
+            443,
+            HostnameMetadata::Plugin {
+                package_id: "tor".parse().unwrap(),
+                remove_action: None,
+                overflow_actions: Vec::new(),
+                info: imbl_value::Value::Null,
+            },
+        );
+        let domain = row(
+            "example.com",
+            true,
+            true,
+            443,
+            HostnameMetadata::PublicDomain {
+                gateway: eth.clone(),
+            },
+        );
+        let bridge = row("10.0.3.1", true, false, 49443, ipv4());
+        let bridge_plain = row("10.0.3.1", false, false, 49080, ipv4());
+        let lan = row("192.0.2.10", true, false, 49443, ipv4());
+
+        assert_eq!(named_vhost_leg(&onion, 49443), Some((49443, false)));
+        assert_eq!(named_vhost_leg(&domain, 49443), Some((443, true)));
+        assert_eq!(named_vhost_leg(&lan, 49443), None);
+        assert_eq!(
+            ssl_vhost_internal_ips([&onion, &bridge, &bridge_plain, &lan]),
+            BTreeSet::from(["10.0.3.1".parse::<IpAddr>().unwrap()])
+        );
+    }
+
+    #[test]
+    fn every_named_vhost_accepts_the_bridge_even_when_names_share_an_entry() {
+        let eth = GatewayId::from(InternedString::intern("eth0"));
+        let row = |host: &str, public, port, metadata| HostnameInfo {
+            ssl: true,
+            public,
+            hostname: InternedString::intern(host),
+            port: Some(port),
+            metadata,
+        };
+        let plugin = || HostnameMetadata::Plugin {
+            package_id: "tor".parse().unwrap(),
+            remove_action: None,
+            overflow_actions: Vec::new(),
+            info: imbl_value::Value::Null,
+        };
+        let private_domain = || HostnameMetadata::PrivateDomain {
+            gateways: BTreeSet::from([eth.clone()]),
+        };
+        let bridge = row(
+            "10.0.3.1",
+            false,
+            49443,
+            HostnameMetadata::Ipv4 {
+                gateway: eth.clone(),
+            },
+        );
+        let named = |rows: &[&HostnameInfo]| {
+            let enabled: BTreeSet<&HostnameInfo> = rows.iter().copied().chain([&bridge]).collect();
+            let mut vhosts = BTreeMap::new();
+            add_named_vhosts(&mut vhosts, &enabled, 49443, &OrdMap::new(), |_, _| {
+                ProxyTarget {
+                    public_v4: BTreeSet::new(),
+                    public_v6: BTreeSet::new(),
+                    public_v6_gateways: BTreeSet::new(),
+                    private: BTreeSet::new(),
+                    acme: None,
+                    addr: "10.0.3.2:443".parse().unwrap(),
+                    addr_v6: None,
+                    add_x_forwarded_headers: false,
+                    auth: None,
+                    connect_ssl: None,
+                    alpn: None,
+                    passthrough: false,
+                    preserve_source_ip: false,
+                }
+            });
+            vhosts
+        };
+        let accepts = |vhosts: &BTreeMap<VHostKey, ProxyTarget>, name: &str, public| {
+            let ProxyTarget { private, .. } =
+                &vhosts[&(Some(InternedString::intern(name)), 49443, public)];
+            private.contains(&"10.0.3.1".parse::<IpAddr>().unwrap())
+        };
+
+        let onion = row("example.onion", true, 443, plugin());
+        let shared_onion = row("box.example", true, 443, plugin());
+        let shared_domain = row("box.example", false, 49443, private_domain());
+        let private = row("lan.example", false, 49443, private_domain());
+        let public = row(
+            "www.example",
+            true,
+            49443,
+            HostnameMetadata::PublicDomain {
+                gateway: eth.clone(),
+            },
+        );
+
+        assert!(accepts(&named(&[&onion]), "example.onion", false));
+        assert!(accepts(&named(&[&private]), "lan.example", false));
+        assert!(accepts(&named(&[&public]), "www.example", true));
+        assert!(accepts(
+            &named(&[&shared_domain, &shared_onion]),
+            "box.example",
+            false
+        ));
     }
 
     #[test]
@@ -1899,6 +2067,23 @@ mod tests {
         assert_eq!(
             data.outbound_sources(),
             ["10.0.3.5", "fd00:3::5"].map(|a| a.parse::<IpAddr>().unwrap())
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dropped_service_stops_its_sync_task() {
+        let (held, released) = tokio::sync::oneshot::channel::<()>();
+        let mut service = NetService::dummy();
+        service.sync_task = tokio::spawn(async move {
+            let _held = held;
+            std::future::pending::<()>().await
+        })
+        .into();
+        drop(service);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(5), released)
+                .await
+                .is_ok()
         );
     }
 }

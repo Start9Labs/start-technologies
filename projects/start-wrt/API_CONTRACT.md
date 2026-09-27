@@ -1913,7 +1913,8 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `/ws/rpc/{guid}`                                   | WebSocket | GUID capability            | Progress streaming (`system.update`)                                                         |
 | `/api/logs`                                        | WebSocket | Session or local cookie    | Live log streaming (see § 2)                                                                 |
 | `/api/setup/flash`                                 | POST      | None (setup wizard)        | Streams NDJSON `SetupEvent` progress while flashing the eMMC; one flash at a time            |
-| `/static/root-ca.crt`                              | GET       | None                       | Root CA certificate download                                                                 |
+| `/static/local-root-ca.crt`                        | GET       | None                       | Root CA certificate download                                                                 |
+| `/static/local-root-ca.mobileconfig`               | GET       | None                       | Root CA as an Apple configuration profile                                                    |
 | `/cgi-bin/*`, `/luci-static/*`, `/ubus`, `/ubus/*` | any       | LuCI's own                 | Reverse proxy to uhttpd (LuCI) on localhost:8080; `/luci` redirects to `/cgi-bin/luci`       |
 | everything else                                    | any       | None                       | Embedded web UI                                                                              |
 

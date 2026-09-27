@@ -27,6 +27,8 @@ start9-workspace/
 └── hello-world-startos/    ← your new package
 ```
 
+Keep starting your AI sessions from the workspace root, not from inside `hello-world-startos/` — that's where the agent context loads from (see [Environment Setup](./environment-setup.md#create-the-workspace)).
+
 > [!TIP]
 > Already have a package repo? Clone it into the workspace alongside `start-technologies/` and build it the same way.
 

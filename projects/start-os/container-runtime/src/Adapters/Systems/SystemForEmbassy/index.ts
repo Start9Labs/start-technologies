@@ -588,6 +588,7 @@ export class SystemForEmbassy implements System {
     effects: Effects,
     actionId: string,
     _prefill: Record<string, unknown> | null,
+    _caller: T.PackageId | null,
     timeoutMs: number | null,
   ): Promise<T.ActionInput | null> {
     if (actionId === 'config') {
@@ -613,6 +614,7 @@ export class SystemForEmbassy implements System {
     effects: Effects,
     actionId: string,
     input: unknown,
+    _caller: T.PackageId | null,
     timeoutMs: number | null,
   ): Promise<T.ActionResult | null> {
     if (actionId === 'config') {

@@ -400,6 +400,16 @@ pub fn server<C: Context>() -> ParentHandler<C> {
             .with_call_remote::<CliContext>(),
         )
         .subcommand(
+            "trust-ca",
+            from_fn_async(system::trust_ca::install)
+                .with_display_serializable()
+                .with_custom_display_fn(|handle, result| {
+                    system::trust_ca::display(handle.params, result)
+                })
+                .with_about("about.trust-custom-ca-root")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
             "set-smtp",
             from_fn_async(system::set_system_smtp)
                 .no_display()

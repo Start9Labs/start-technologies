@@ -1,6 +1,9 @@
+use std::path::Path;
+
 use exver::VersionRange;
 
 use super::v0_3_5::V0_3_0_COMPAT;
+use super::v0_3_6_alpha_0::migrated_id_str;
 use super::{VersionT, v0_4_0_1};
 use crate::hostname::repair_hostname;
 use crate::prelude::*;
@@ -10,6 +13,7 @@ lazy_static::lazy_static! {
 }
 
 const UI_PORT: u64 = 80;
+const TOR_MIGRATION_DIR: &str = "/media/startos/data/package-data/volumes/tor/data/startos";
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Version;
@@ -19,7 +23,7 @@ impl VersionT for Version {
     type PreUpRes = ();
 
     async fn pre_up(self) -> Result<Self::PreUpRes, Error> {
-        Ok(())
+        recover_renamed_onion_addresses(Path::new(TOR_MIGRATION_DIR)).await
     }
     fn semver(self) -> exver::Version {
         V0_4_0_2.clone()
@@ -28,7 +32,7 @@ impl VersionT for Version {
         &V0_3_0_COMPAT
     }
     fn migration_revision(self) -> usize {
-        3
+        4
     }
     #[instrument(skip_all)]
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
@@ -187,6 +191,55 @@ fn title_case(hostname: &str) -> String {
             }
         })
         .collect()
+}
+
+async fn recover_renamed_onion_addresses(dir: &Path) -> Result<(), Error> {
+    let handoff = dir.join("onion-migration.json");
+    let (raw, imported) = if let Some(raw) =
+        crate::util::io::maybe_read_file_to_string(&handoff).await?
+    {
+        (raw, false)
+    } else if let Some(raw) =
+        crate::util::io::maybe_read_file_to_string(dir.join(".onion-migration.json.bak")).await?
+    {
+        (raw, true)
+    } else {
+        return Ok(());
+    };
+    let mut migration = serde_json::from_str(&raw).with_kind(ErrorKind::Deserialization)?;
+    if !rename_onion_packages(&mut migration, imported) {
+        return Ok(());
+    }
+    let json = serde_json::to_string(&migration).with_kind(ErrorKind::Serialization)?;
+    crate::util::io::write_file_atomic(handoff, json).await
+}
+
+/// An imported handoff keeps only the entries under an old id, which Tor skipped.
+fn rename_onion_packages(migration: &mut serde_json::Value, imported: bool) -> bool {
+    let Some(addresses) = migration
+        .get_mut("addresses")
+        .and_then(|a| a.as_array_mut())
+    else {
+        return false;
+    };
+    let mut renamed = false;
+    addresses.retain_mut(|entry| {
+        let Some(id) = entry
+            .get("packageId")
+            .and_then(|p| p.as_str())
+            .map(str::to_owned)
+        else {
+            return !imported;
+        };
+        let migrated = migrated_id_str(&id);
+        if migrated == id {
+            return !imported;
+        }
+        entry["packageId"] = migrated.into();
+        renamed = true;
+        true
+    });
+    renamed
 }
 
 fn rehome_admin_ui_port(db: &mut Value) {
@@ -440,6 +493,34 @@ mod test {
         let before = db.clone();
         repair_unusable_hostname(&mut db);
         assert_eq!(db, before);
+    }
+
+    #[test]
+    fn renames_pending_entries_and_reissues_only_skipped_ones() {
+        let handoff = serde_json::json!({ "addresses": [
+            { "packageId": "nostr", "hostId": "relay" },
+            { "packageId": "bitcoind", "hostId": "main" },
+        ] });
+
+        let mut pending = handoff.clone();
+        assert!(rename_onion_packages(&mut pending, false));
+        assert_eq!(
+            pending,
+            serde_json::json!({ "addresses": [
+                { "packageId": "nostr-rs-relay", "hostId": "relay" },
+                { "packageId": "bitcoind", "hostId": "main" },
+            ] })
+        );
+
+        let mut imported = handoff;
+        assert!(rename_onion_packages(&mut imported, true));
+        assert_eq!(
+            imported,
+            serde_json::json!({ "addresses": [
+                { "packageId": "nostr-rs-relay", "hostId": "relay" },
+            ] })
+        );
+        assert!(!rename_onion_packages(&mut imported, true));
     }
 
     #[test]

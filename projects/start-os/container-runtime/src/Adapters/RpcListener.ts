@@ -448,6 +448,7 @@ export class RpcListener {
                 effects,
                 procedures[2],
                 input?.prefill ?? null,
+                input?.caller ?? null,
                 timeout || null,
               )
             case procedures[1] === 'actions' && procedures[3] === 'run':
@@ -455,6 +456,7 @@ export class RpcListener {
                 effects,
                 procedures[2],
                 input.input,
+                input.caller ?? null,
                 timeout || null,
               )
           }

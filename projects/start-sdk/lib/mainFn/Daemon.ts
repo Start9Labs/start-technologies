@@ -175,7 +175,7 @@ export class Daemon<
             break
           }
         } catch (e) {
-          if (!signal.aborted) console.error(e)
+          if (!signal.aborted) logErrorOnce(e)
         }
         if (signal.aborted) break
         await new Promise<void>(resolve => {

@@ -4,6 +4,21 @@
 
 ### Changed
 
+- **Breaking — `Watchable<A>` takes only the type it reads.** A reader that
+  maps a raw value extends `MappedWatchable<Raw, Mapped>` and implements
+  `fetchRaw`/`produceRaw` in place of `fetch`/`produce`. A type written
+  `Watchable<Raw, Mapped>` becomes `Watchable<Mapped>`
+
+- **Breaking — define dependencies once in `dependencies.ts`.** Create each base with `sdk.Dependency.required` or `.optional` (including metadata, version range, kind and health checks), add it to `sdk.Dependencies.of()`, and pass the builder to `buildManifest(versionGraph, sdkManifest, dependencies)` and `setupInit`. Move runtime conditions to `enabled` and `withDynamicNarrowing`, tasks to `withInit`, and use `dependencies.check(effects)` in place of `sdk.checkDependencies(effects)`. The base version range, kind, and health checks are also included in the package manifest and registry metadata, allowing StartOS to record required dependencies independently of init effects and enforce the published base for enabled optional dependencies. `enabled`, the narrowing, and each `.withInit` handler rerun independently when a watched value changes; the requirements are republished only when they change, and init handlers run only while the dependency is enabled. StartOS hides the tasks a service created on a dependency while that dependency is disabled.
+
+- **Breaking — `sdk.action.run` opens the action's form and passes it to
+  `input`.** `input` is a function from the opened form to the input to submit;
+  a plain value is no longer accepted. The run then answers that form, which is
+  what lets a service run an action that takes input — another service's that
+  `access` admits, via the new `packageId`, or its own. `prefill` seeds the
+  form. Underneath, `effects.action.getInput` accepts `prefill`, and the form
+  and the run that answers it share the calling procedure's event id
+
 - **Breaking — a filled address lists the server's `.local` name whenever the
   user has it enabled, and `utils.mdnsResolvable` is removed.** `.local` was
   left out while no LAN IP on its gateways was enabled, which dropped it
@@ -95,6 +110,17 @@
 
 ### Added
 
+- **`preDownloadAlert` in `setupManifest()`** displays a localized Markdown confirmation before downloading an update from an installed version matching `when.sourceVersion`.
+
+- **An `env` variable set to `undefined` is removed from the process**,
+  including one the image or StartOS would otherwise supply, such as `LANG`.
+
+- **An action learns who is running it.** The `run` handler, the prefill
+  function and a function-valued input spec each receive `caller`: the id of
+  the service that reached the action through `effects.action`, or `null` when
+  the user did. An action with `access: 'dependent'` or `'public'` can act on
+  the caller's own resources instead of trusting a package id in its input
+
 - **`utils.isAddressEnabled(addresses, hostname)`** reports whether the user's
   overrides leave one of a binding's addresses on
 
@@ -123,6 +149,23 @@
   so handle its absence. See
   [Hardware Virtualization (KVM)](https://docs.start9.com/packaging/manifest.html#hardware-virtualization-kvm)
 
+- **`Watchable.combine(effects, [a, b], map?, eq?)` builds one reader from
+  several.** Its raw value is the tuple of the sources' values, and `map`/`eq`
+  work as on any reader: it emits when `map`'s result differs from the last by
+  `eq`. `Watchable.from(effects, source, eq?)` makes a reader of a single
+  source. A source is any `WatchSource` (`once()` and `watch(abort)`), which
+  every `Watchable` is
+
+- **`sdk.setupPrimaryUrl()` replaces the hand-rolled "Set Primary URL" action
+  and watcher.** Give it the interface the URL belongs to, a reader for the
+  stored choice (`storeJson.read(s => s.primaryUrl)`) and a function that
+  writes it. It returns the action to register;
+  `bestUsable(effects)`, a reader for the stored URL while its hostname is one
+  of the interface's addresses and the `.local` address otherwise; and
+  `setupTask(severity, options)`, an init script that keeps a task raised while
+  the stored URL is unset or gone, which StartOS clears once it is back. See
+  [Set a Primary URL](https://docs.start9.com/packaging/recipe-primary-url.html)
+
 - **`createInterface` accepts `preferredLauncherAddress`.** A UI interface can
   nominate the absolute URL that StartOS should open when a service depends on
   one canonical origin. See
@@ -145,6 +188,13 @@
   See [Result Types](https://docs.start9.com/packaging/actions.html#result-types)
 
 ### Fixed
+
+- **Reactive init re-runs receive `kind: null`** after the initial install,
+  update, or restore pass. Lifecycle-only work guarded by `kind` runs once for
+  that event, even when a watched value changes.
+
+- **Lazy subcontainers retry filesystem materialization after a transient
+  failure**, allowing daemons to recover without a service restart
 
 - **`Backups.withMariadbDump` works against MariaDB 11 images**, official or
   packaged from a distribution
@@ -237,6 +287,12 @@
   side
 
 - **Backup and restore progress no longer falls back mid-sync**
+
+- **`checkPortListening` counts a TCP port as listening only while a socket is
+  in the `LISTEN` state.** It matched any socket on the port, so the
+  connections a process leaves in `TIME_WAIT` when it exits kept its port
+  reading as listening for up to a minute: a daemon's `ready` check passed, and
+  the health checks that require it ran, while nothing was listening
 
 ### Security
 

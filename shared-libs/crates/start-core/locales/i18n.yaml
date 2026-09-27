@@ -494,6 +494,34 @@ system.field-missing-from-meminfo:
   fr_FR: "%{field} manquant dans /proc/meminfo"
   pl_PL: "%{field} brakuje w /proc/meminfo"
 
+system.trust-ca.fingerprint:
+  en_US: "SHA-256 fingerprint"
+  de_DE: "SHA-256-Fingerabdruck"
+  es_ES: "Huella digital SHA-256"
+  fr_FR: "Empreinte SHA-256"
+  pl_PL: "Odcisk SHA-256"
+
+system.trust-ca.not-ca:
+  en_US: "The certificate is not a CA"
+  de_DE: "Das Zertifikat ist keine Zertifizierungsstelle"
+  es_ES: "El certificado no es una CA"
+  fr_FR: "Le certificat n’est pas une autorité de certification"
+  pl_PL: "Certyfikat nie jest certyfikatem CA"
+
+system.trust-ca.not-self-signed-root:
+  en_US: "The certificate is not a self-signed root CA"
+  de_DE: "Das Zertifikat ist keine selbstsignierte Stammzertifizierungsstelle"
+  es_ES: "El certificado no es una CA raíz autofirmada"
+  fr_FR: "Le certificat n’est pas une autorité de certification racine autosignée"
+  pl_PL: "Certyfikat nie jest samopodpisanym głównym certyfikatem CA"
+
+system.trust-ca.subject:
+  en_US: "Subject"
+  de_DE: "Subjekt"
+  es_ES: "Sujeto"
+  fr_FR: "Sujet"
+  pl_PL: "Podmiot"
+
 # error.rs - ErrorKind strings
 error.unknown:
   en_US: "Unknown Error"
@@ -1056,6 +1084,20 @@ error.backup-password-mismatch:
   pl_PL: "Niezgodne Hasło Kopii Zapasowej"
 
 # disk/main.rs
+disk.main.defrag-failed:
+  en_US: "Filesystem optimization failed; continuing with the converted filesystem."
+  de_DE: "Die Dateisystemoptimierung ist fehlgeschlagen; die Konvertierung wird fortgesetzt."
+  es_ES: "La optimización del sistema de archivos falló; se continúa con el sistema de archivos convertido."
+  fr_FR: "L'optimisation du système de fichiers a échoué ; la conversion se poursuit."
+  pl_PL: "Optymalizacja systemu plików nie powiodła się; konwersja będzie kontynuowana."
+
+disk.main.defrag-skipped:
+  en_US: "Skipping filesystem optimization to preserve free space."
+  de_DE: "Die Dateisystemoptimierung wird übersprungen, um freien Speicherplatz zu erhalten."
+  es_ES: "Se omite la optimización del sistema de archivos para conservar espacio libre."
+  fr_FR: "L'optimisation du système de fichiers est ignorée afin de préserver l'espace libre."
+  pl_PL: "Pominięto optymalizację systemu plików, aby zachować wolne miejsce."
+
 disk.main.disk-not-found:
   en_US: "StartOS disk not found."
   de_DE: "StartOS-Festplatte nicht gefunden."
@@ -2702,6 +2744,20 @@ service.effects.dependency.volume-missing:
   fr_FR: "le volume %{volume} de %{package} n'existe pas — %{package} est-il installé ?"
   pl_PL: "wolumin %{volume} pakietu %{package} nie istnieje — czy %{package} jest zainstalowany?"
 
+service.effects.subcontainer.sync.unknown-group:
+  en_US: "unknown group: %{group}"
+  de_DE: "unbekannte Gruppe: %{group}"
+  es_ES: "grupo desconocido: %{group}"
+  fr_FR: "groupe inconnu : %{group}"
+  pl_PL: "nieznana grupa: %{group}"
+
+service.effects.subcontainer.sync.unknown-user:
+  en_US: "unknown user: %{user}"
+  de_DE: "unbekannter Benutzer: %{user}"
+  es_ES: "usuario desconocido: %{user}"
+  fr_FR: "utilisateur inconnu : %{user}"
+  pl_PL: "nieznany użytkownik: %{user}"
+
 # service/service_actor.rs
 service.service-actor.error-synchronizing-state:
   en_US: "error synchronizing state of service: %{error}"
@@ -3475,6 +3531,13 @@ help.arg.binding-enabled:
   es_ES: "Habilitar o deshabilitar este enlace"
   fr_FR: "Activer ou désactiver cette liaison"
   pl_PL: "Włącz lub wyłącz to powiązanie"
+
+help.arg.ca-certificate:
+  en_US: "PEM-encoded CA certificate"
+  de_DE: "PEM-codiertes CA-Zertifikat"
+  es_ES: "Certificado de CA codificado en PEM"
+  fr_FR: "Certificat d’autorité encodé en PEM"
+  pl_PL: "Certyfikat CA zakodowany w formacie PEM"
 
 help.arg.cert-subject-alt-names:
   en_US: "Subject Alternative Name(s) for certificate"
@@ -6911,6 +6974,13 @@ about.tor-commands:
   es_ES: "Comandos de Tor"
   fr_FR: "Commandes Tor"
   pl_PL: "Polecenia Tora"
+
+about.trust-custom-ca-root:
+  en_US: "Trust a custom CA root for StartOS host processes"
+  de_DE: "Einer benutzerdefinierten CA-Wurzel für StartOS-Hostprozesse vertrauen"
+  es_ES: "Confiar en una raíz de CA personalizada para los procesos del host de StartOS"
+  fr_FR: "Approuver une autorité de certification racine personnalisée pour les processus hôtes de StartOS"
+  pl_PL: "Zaufaj niestandardowemu certyfikatowi głównemu CA dla procesów hosta StartOS"
 
 about.unmount-backup-target:
   en_US: "Unmount a backup target"

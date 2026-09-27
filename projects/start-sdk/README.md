@@ -23,7 +23,8 @@ It lives at `projects/start-sdk/` inside the [start-technologies monorepo](https
 ## Quick Start
 
 ```typescript
-import { setupManifest, buildManifest } from '@start9labs/start-sdk'
+import { setupManifest, buildManifest, Dependencies } from '@start9labs/start-sdk'
+import { versionGraph } from './versions'
 
 const manifest = setupManifest({
   id: 'my-service',
@@ -32,7 +33,7 @@ const manifest = setupManifest({
   // ...
 })
 
-export default buildManifest(manifest)
+export default buildManifest(versionGraph, manifest, Dependencies.of())
 ```
 
 The primary entry point is the `StartSdk` facade:

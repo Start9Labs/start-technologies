@@ -3,7 +3,7 @@ import { cooldownTrigger } from '../trigger'
 import { Daemon } from '../mainFn/Daemon'
 import { Mounts } from '../mainFn/Mounts'
 import { setupMain } from '../mainFn'
-import { SubContainer } from '../util/SubContainer'
+import { SubContainer, SubContainerEager } from '../util/SubContainer'
 import * as T from '@start9labs/start-core/types'
 
 type Manifest = {
@@ -28,6 +28,28 @@ const fakeEffects = (): T.Effects =>
       destroyFs: async () => null,
     },
   }) as any
+
+/** A SubContainerEager with its own hold and destroy logic and no runtime behind it. */
+const bareEager = (destroyFs: () => Promise<null>) =>
+  Object.assign(Object.create(SubContainerEager.prototype), {
+    destroyed: false,
+    destroyRequested: false,
+    holdCount: 0,
+    teardown: null,
+    leaderExited: true,
+    guid: 'guid',
+    effects: { subcontainer: { destroyFs } },
+  }) as SubContainerEager<T.SDKManifest>
+
+const slowDestroyFs = () => {
+  const state = { done: false }
+  const destroyFs = async () => {
+    await new Promise(resolve => setTimeout(resolve, 20))
+    state.done = true
+    return null
+  }
+  return { state, destroyFs }
+}
 
 const baseReady = {
   display: 'Reg',
@@ -515,6 +537,169 @@ describe('SubContainerLazy.detach', () => {
       sub.detach()
       sub.detach()
     }).not.toThrow()
+  })
+})
+
+describe('SubContainerEager.destroy', () => {
+  it('shares one teardown between concurrent callers', async () => {
+    const { state, destroyFs } = slowDestroyFs()
+    const eager = bareEager(destroyFs)
+
+    const first = eager.destroy()
+    await eager.destroy()
+    expect(state.done).toBe(true)
+    await first
+  })
+})
+
+describe('SubContainerLazy.eager', () => {
+  let logged: jest.SpyInstance
+  beforeEach(() => {
+    logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+  })
+  afterEach(() => jest.restoreAllMocks())
+
+  it('retries after a failed materialization and caches the success', async () => {
+    const failure = new Error('transient mount failure')
+    const eager = {} as SubContainerEager<T.SDKManifest>
+    const materialize = jest
+      .spyOn(SubContainerEager, '_of')
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValue(eager)
+    const sub = SubContainer.of<Manifest>(
+      fakeEffects(),
+      { imageId: 'reg' },
+      null,
+      'name',
+    )
+
+    const failed = sub.eager()
+    expect(sub.eager()).toBe(failed)
+    await expect(failed).rejects.toBe(failure)
+
+    const succeeded = sub.eager()
+    expect(succeeded).not.toBe(failed)
+    await expect(succeeded).resolves.toBe(eager)
+    expect(sub.eager()).toBe(succeeded)
+    expect(materialize).toHaveBeenCalledTimes(2)
+    expect(logged.mock.calls).toEqual([[failure]])
+  })
+
+  it('keeps unreleased holds pending across a failed materialization', async () => {
+    const failure = new Error('transient mount failure')
+    const underlyingRelease = jest.fn(async () => {})
+    const eager = {
+      hold: jest.fn(() => underlyingRelease),
+    } as unknown as SubContainerEager<T.SDKManifest>
+    jest
+      .spyOn(SubContainerEager, '_of')
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValue(eager)
+    const sub = SubContainer.of<Manifest>(
+      fakeEffects(),
+      { imageId: 'reg' },
+      null,
+      'name',
+    )
+
+    const release = sub.hold()
+    const cancel = sub.hold()
+    await expect(sub.eager()).rejects.toBe(failure)
+    await cancel()
+    await expect(sub.eager()).resolves.toBe(eager)
+    expect(eager.hold).toHaveBeenCalledTimes(1)
+
+    await release()
+    expect(underlyingRelease).toHaveBeenCalledTimes(1)
+    expect(logged.mock.calls).toEqual([[failure]])
+  })
+
+  it('stays materialized when a pending destroy throws', async () => {
+    const failure = new Error('destroyFs failed')
+    const eager = {
+      destroy: jest.fn(async () => {
+        throw failure
+      }),
+    } as unknown as SubContainerEager<T.SDKManifest>
+    const materialize = jest
+      .spyOn(SubContainerEager, '_of')
+      .mockResolvedValue(eager)
+    const sub = SubContainer.of<Manifest>(
+      fakeEffects(),
+      { imageId: 'reg' },
+      null,
+      'name',
+    )
+
+    await sub.destroy()
+    await expect(sub.eager()).resolves.toBe(eager)
+    await expect(sub.destroy()).rejects.toBe(failure)
+    expect(materialize).toHaveBeenCalledTimes(1)
+    expect(logged.mock.calls).toEqual([[failure]])
+  })
+
+  it('resolves without waiting for a pending destroy, which destroy() joins', async () => {
+    const { state, destroyFs } = slowDestroyFs()
+    jest.spyOn(SubContainerEager, '_of').mockResolvedValue(bareEager(destroyFs))
+    const sub = SubContainer.of<Manifest>(
+      fakeEffects(),
+      { imageId: 'reg' },
+      null,
+      'name',
+    )
+
+    const materialized = sub.eager()
+    const destroyed = sub.destroy()
+    await materialized
+    expect(state.done).toBe(false)
+    await destroyed
+    expect(state.done).toBe(true)
+  })
+
+  it('has nothing to destroy after a failed materialization', async () => {
+    const failure = new Error('transient mount failure')
+    const eager = {
+      destroy: jest.fn(async () => {}),
+    } as unknown as SubContainerEager<T.SDKManifest>
+    jest
+      .spyOn(SubContainerEager, '_of')
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValue(eager)
+    const sub = SubContainer.of<Manifest>(
+      fakeEffects(),
+      { imageId: 'reg' },
+      null,
+      'name',
+    )
+
+    const failed = sub.eager()
+    sub.detach()
+    const destroyed = sub.destroy()
+    await expect(failed).rejects.toBe(failure)
+    await expect(destroyed).resolves.toBeUndefined()
+    expect(eager.destroy).not.toHaveBeenCalled()
+    expect(logged.mock.calls).toEqual([[failure]])
+
+    await expect(sub.eager()).resolves.toBe(eager)
+    expect(eager.destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('is logged once per failed attempt under a daemon', async () => {
+    const materialize = jest
+      .spyOn(SubContainerEager, '_of')
+      .mockImplementation(async () => {
+        throw new Error('transient mount failure')
+      })
+    const e = fakeEffects()
+    const daemon = Daemon.of<Manifest>()(e, lazy(e), { command: ['x'] })
+
+    await daemon.start()
+    while (materialize.mock.calls.length < 2) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    await daemon.term()
+
+    expect(logged).toHaveBeenCalledTimes(materialize.mock.calls.length)
   })
 })
 
