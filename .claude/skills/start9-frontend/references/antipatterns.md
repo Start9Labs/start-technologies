@@ -71,7 +71,10 @@ fields inlined into the group literal.
 `select(type) { this.context.completeWith(type) }` + `(click)="select('public')"` →
 `(click)="context.completeWith('public')"`; `sentTo = this.verification.sentTo` plus
 `resend() { return this.verification.resend() }` → `protected readonly verification` and
-`verification.sentTo()` / `(click)="verification.resend()"` in the template.
+`verification.sentTo()` / `(click)="verification.resend()"` in the template. A module-level
+`const BULLET: Record<Status, string>` that one component reads becomes that component's field.
+A helper takes the value it needs, not the injectable that produces it:
+`pickTopic(dialogs, i18n.transform('Choose a topic'))`, not `pickTopic(dialogs, i18n)`.
 `if`-ladders → one boolean expression or ternary;
 `p.length > 0` → `!!p.length`; flag parameters → default parameters; `try/catch` around a
 subscribe callback → deleted.
@@ -109,7 +112,8 @@ redirectTo, pathMatch: 'full' }` first.
 
 **18. Utility-class hygiene.** `g-*` utilities exist once in the shared/global sheet — per-app
 copies get centralized, one-off spacing classes (`.padding-top`) get deleted. The global
-stylesheet count goes down, never up.
+stylesheet count goes down, never up. A global modifier that only one component uses
+(`.g-markdown._document`) moves into that component as `:host ::ng-deep .g-markdown { … }`.
 
 **19. Copy-pasted markup branches → data-driven rendering.** Three hand-written dropdown
 templates + eight nav buttons → one `navigation` object rendered via `| keyvalue: asIs` (with
