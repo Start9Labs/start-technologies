@@ -23,7 +23,7 @@ flat-grayscale | outline-grayscale | action-grayscale | …"` on buttons/badges/
 5. **`g-*` global utilities** (shared stylesheet only — never re-declared per app/component):
    layout (`g-page`, `g-form`, `g-table`, `g-aside`, `g-buttons`, store's `g-band`/`g-wrap`
    marketing system) and text colors (`g-positive/negative/warning/info/secondary/primary`) for
-   things with no appearance input (`tui-icon`). Their `!important` is by design; nowhere else.
+   things with no appearance input (`tui-icon`).
 6. **`:host` layout CSS last**: `display: grid/flex`, `gap`, sizing. Modern CSS is expected —
    logical properties (`inline-size`, `margin-block`, `inset-inline-start`), `:has()`,
    `color-mix()`, `clamp()`, container queries, `dvh`. Fluid sizing via `min(36rem, 90vw)`.
