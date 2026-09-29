@@ -222,8 +222,12 @@ class FileHelperImpl<A> implements FileHelper<A> {
     readonly validate: (value: unknown) => A,
   ) {}
 
-  private async writeLocked(path: string, data: string): Promise<void> {
-    await replaceFile(path, data)
+  private async writeLocked(
+    path: string,
+    data: string,
+    temp?: string,
+  ): Promise<void> {
+    await replaceFile(path, data, temp)
     await refreshFileMounts(path)
   }
 
@@ -397,7 +401,7 @@ class FileHelperImpl<A> implements FileHelper<A> {
     change: (raw: string | null) => Promise<A | null>,
     options: { allowWriteAfterConst?: boolean },
   ): Promise<null> {
-    const written = await withFileLock(this.path, async path => {
+    const written = await withFileLock(this.path, async (path, temp) => {
       const raw = await readRaw(path)
       const next = await change(raw)
       if (next === null) return null
@@ -406,7 +410,7 @@ class FileHelperImpl<A> implements FileHelper<A> {
         await refreshFileMounts(path)
         return null
       }
-      await this.writeLocked(path, serialized)
+      await this.writeLocked(path, serialized, temp)
       return { data: next }
     })
     if (written) this.checkConsts(effects, written.data, options)

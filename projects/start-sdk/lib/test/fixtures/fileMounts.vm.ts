@@ -119,7 +119,7 @@ async function run() {
     await sub.destroy()
     await fs.rm(source, { force: true })
     await fs.rm(
-      '/media/startos/volumes/file-watch-test/.config.txt.startos-lock',
+      '/media/startos/volumes/file-watch-test/.config.txt.startos-new',
       { force: true },
     )
     await fs.rm('/media/startos/images/file-watch-test.json', { force: true })

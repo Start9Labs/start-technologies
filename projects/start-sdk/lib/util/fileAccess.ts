@@ -7,7 +7,12 @@ import { basename, dirname, resolve } from 'node:path'
 
 const queues = new Map<string, Promise<void>>()
 const heldLocks = new AsyncLocalStorage<
-  { target: string; held: boolean; flocked: boolean }[]
+  {
+    target: string
+    held: boolean
+    flocked: boolean
+    temp?: string
+  }[]
 >()
 const execFileAsync = promisify(execFile)
 
@@ -43,7 +48,7 @@ export async function withFileQueue<A>(
     return operation(target)
   }
   const result = (queues.get(target) ?? Promise.resolve()).then(async () => {
-    const holder = { target, held: true, flocked: false }
+    const holder = { target, held: true, flocked: false, temp: undefined }
     try {
       return await heldLocks.run([...outer, holder], () => operation(target))
     } finally {
@@ -61,49 +66,65 @@ export async function withFileQueue<A>(
   return result
 }
 
-/** Also excludes other processes through a sibling lock file removed on release. */
+/**
+ * Also excludes other processes by locking the file itself. For a missing
+ * file, the second argument is the locked temp file that must become it.
+ */
 export async function withFileLock<A>(
   path: string,
-  operation: (path: string) => Promise<A>,
+  operation: (path: string, temp: string | undefined) => Promise<A>,
 ): Promise<A> {
   return withFileQueue(path, async target => {
     const holder = heldLocks
       .getStore()!
       .find(lock => lock.held && lock.target === target)!
-    if (holder.flocked) return operation(target)
-    return flock(target, async () => {
+    if (holder.flocked) return operation(target, holder.temp)
+    return flock(target, async temp => {
       holder.flocked = true
+      holder.temp = temp
       try {
-        return await operation(target)
+        return await operation(target, temp)
       } finally {
         holder.flocked = false
+        holder.temp = undefined
       }
     })
   })
 }
 
-// Retries until the locked inode is the one at the path; the holder unlinks
-// the lock file before releasing it.
+// Retries until the locked inode is the one at the target, or at the temp
+// path while the target is missing. An unused temp is removed under its lock.
 const flockScript = `
+umask 077
 while :; do
-  exec 9>>"$1"
+  if [ -e "$1" ]; then
+    command exec 9<"$1" 2>/dev/null || continue
+  else
+    exec 9>>"$2"
+  fi
   flock --exclusive 9
-  [ /proc/$$/fd/9 -ef "$1" ] && break
-  exec 9>&-
+  if [ -e "$1" ]; then
+    [ /proc/$$/fd/9 -ef "$1" ] && echo existing && break
+  else
+    [ /proc/$$/fd/9 -ef "$2" ] && echo new && break
+  fi
+  if [ /proc/$$/fd/9 -ef "$2" ]; then rm -f "$2"; fi
+  exec 9<&-
 done
-printf 'locked\\n'
 cat >/dev/null
-rm -f "$1"
+if [ /proc/$$/fd/9 -ef "$2" ]; then rm -f "$2"; fi
 `
 
-async function flock<A>(target: string, operation: () => Promise<A>) {
+async function flock<A>(
+  target: string,
+  operation: (temp: string | undefined) => Promise<A>,
+) {
   await fs.mkdir(dirname(target), { recursive: true })
-  const lock = resolve(dirname(target), `.${basename(target)}.startos-lock`)
-  const child = spawn('sh', ['-ec', flockScript, 'sh', lock], {
+  const temp = resolve(dirname(target), `.${basename(target)}.startos-new`)
+  const child = spawn('sh', ['-ec', flockScript, 'sh', target, temp], {
     stdio: ['pipe', 'pipe', 'pipe'],
   })
   let stderr = ''
-  let ready = false
   child.stderr.on('data', chunk => (stderr += chunk))
   const exited = new Promise<void>((resolve, reject) => {
     child.once('error', reject)
@@ -112,36 +133,45 @@ async function flock<A>(target: string, operation: () => Promise<A>) {
     )
   })
   try {
-    await new Promise<void>((resolve, reject) => {
-      child.stdout.once('data', () => {
-        ready = true
-        resolve()
+    const created = await new Promise<boolean>((resolve, reject) => {
+      let stdout = ''
+      child.stdout.on('data', chunk => {
+        stdout += chunk
+        if (stdout.includes('\n')) resolve(stdout.trim() === 'new')
       })
-      exited.then(() => {
-        if (!ready) reject(new Error('File lock exited before acquisition'))
-      }, reject)
+      exited.then(
+        () => reject(new Error('File lock exited before acquisition')),
+        reject,
+      )
     })
-    return await operation()
+    return await operation(created ? temp : undefined)
   } finally {
     child.stdin.end()
     await exited
   }
 }
 
-export async function replaceFile(path: string, data: string): Promise<void> {
+/** Writes through the given temp file when one is supplied. */
+export async function replaceFile(
+  path: string,
+  data: string,
+  lockedTemp?: string,
+): Promise<void> {
   await fs.mkdir(dirname(path), { recursive: true })
   const previous = await fs.stat(path).catch(error => {
     if (error.code !== 'ENOENT') throw error
     return null
   })
-  const temp = resolve(
-    dirname(path),
-    `.${basename(path)}.${randomBytes(12).toString('hex')}.tmp`,
-  )
+  const temp =
+    lockedTemp ??
+    resolve(
+      dirname(path),
+      `.${basename(path)}.${randomBytes(12).toString('hex')}.tmp`,
+    )
   let created = false
   let metadataTemp: string | null = null
   try {
-    const file = await fs.open(temp, 'wx', 0o600)
+    const file = await fs.open(temp, lockedTemp ? 'w' : 'wx', 0o600)
     created = true
     try {
       await file.writeFile(data)

@@ -13,7 +13,7 @@ async function run() {
     for (let i = 0; i < Number(process.argv[3]); i++) {
       await file.update({} as any, async current => {
         await new Promise(resolve => setImmediate(resolve))
-        return { count: current!.count + 1 }
+        return { count: (current?.count ?? 0) + 1 }
       })
     }
   }

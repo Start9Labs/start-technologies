@@ -164,6 +164,16 @@ test('separate runtimes serialize the entire read-modify-write', async () => {
   })
 }, 20000)
 
+test('separate runtimes serialize creating a missing file', async () => {
+  await Promise.all(
+    Array.from({ length: 4 }, () => finished(worker(path, '10'))),
+  )
+  expect(await FileHelper.json(path, shape).read().once()).toEqual({
+    count: 40,
+  })
+  expect(await fs.readdir(dir)).toEqual(['store.json'])
+}, 20000)
+
 test('a killed runtime releases its file lock', async () => {
   await fs.writeFile(path, '{"count":0}')
   const child = worker(path, 'hold')
@@ -237,7 +247,7 @@ test('failure to acquire a lock does not write and does not poison the queue', a
   expect(await file.read().once()).toEqual({ count: 2 })
 })
 
-test('released locks leave no lock file behind', async () => {
+test('locking leaves no files behind', async () => {
   const file = FileHelper.json(path, shape)
   await Promise.all(
     Array.from({ length: 5 }, () =>
@@ -246,6 +256,10 @@ test('released locks leave no lock file behind', async () => {
   )
   await file.merge(effects, { a: 'a' })
   expect(await file.read().once()).toEqual({ count: 5, a: 'a' })
+  await FileHelper.json(join(dir, 'skipped.json'), shape).update(
+    effects,
+    () => null,
+  )
   expect(await fs.readdir(dir)).toEqual(['store.json'])
 })
 

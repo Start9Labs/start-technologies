@@ -362,7 +362,7 @@ await configFile.write(effects, { port: 9090, debug: true })
 
 Supported formats: JSON, YAML, TOML, XML, INI, ENV, strings, and custom parsers.
 
-- `fileAccess.ts` owns canonical paths, the reentrant process-local queue, temp-file replacement, and the sibling `flock` lock that covers the complete `merge()`/`update()` read-modify-write across processes. The holder removes the lock file before releasing it; acquirers retry until the locked inode is the one at the path.
+- `fileAccess.ts` owns canonical paths, the reentrant process-local queue, temp-file replacement, and the `flock` that covers the complete `merge()`/`update()` read-modify-write across processes. The lock is on the file itself, or on a fixed `.startos-new` temp that becomes the file when it is missing; acquirers retry until the locked inode is the one at the path.
 - `fileMounts.ts` owns own-volume file registrations, directory watches, inode reconciliation, and teardown. Subcontainers register after a file bind is created, share their rootfs mount with exec namespaces, and synchronize before commands launch. Rebinds insert the prepared mount beneath the old one before detaching it, keeping pathname reads on a complete file. FileHelper refreshes local registrations before returning a write or a changed reactive read.
 
 ### Subcontainers (`lib/util/SubContainer.ts`)
