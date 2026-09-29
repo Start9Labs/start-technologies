@@ -11,6 +11,13 @@ export type WatchSource<A> = {
 
 type WatchSources<V extends unknown[]> = { [K in keyof V]: WatchSource<V[K]> }
 
+function linkedAbort(abort?: AbortSignal): AbortController {
+  const ctrl = new AbortController()
+  if (abort?.aborted) ctrl.abort()
+  else abort?.addEventListener('abort', () => ctrl.abort(), { once: true })
+  return ctrl
+}
+
 export abstract class Watchable<A> implements WatchSource<A> {
   /** A reader over a source, emitting when a value differs from the last by `eq`. */
   static from<A>(
@@ -148,8 +155,7 @@ export abstract class Watchable<A> implements WatchSource<A> {
    * Watches the value. Returns an async iterator that yields whenever the value changes
    */
   watch(abort?: AbortSignal): AsyncGenerator<A, never, unknown> {
-    const ctrl = new AbortController()
-    abort?.addEventListener('abort', () => ctrl.abort())
+    const ctrl = linkedAbort(abort)
     return DropGenerator.of(
       (async function* (gen): AsyncGenerator<A, never, unknown> {
         yield* gen
@@ -195,10 +201,11 @@ export abstract class Watchable<A> implements WatchSource<A> {
   }
 
   /**
-   * Watches the value. Returns when the predicate is true
+   * Watches the value. Returns when the predicate is true, or rejects with
+   * `AbortedError` once `abort` fires.
    */
-  waitFor(pred: (value: A) => boolean): Promise<A> {
-    const ctrl = new AbortController()
+  waitFor(pred: (value: A) => boolean, abort?: AbortSignal): Promise<A> {
+    const ctrl = linkedAbort(abort)
     return DropPromise.of(
       Promise.resolve().then(async () => {
         for await (const next of this.watchGen(ctrl.signal)) {
@@ -288,6 +295,15 @@ class Combined<V extends unknown[], Mapped> extends MappedWatchable<V, Mapped> {
   }
 
   protected async *produceRaw(abort: AbortSignal): AsyncGenerator<V, void> {
+    const ctrl = linkedAbort(abort)
+    try {
+      yield* this.combineSources(ctrl.signal)
+    } finally {
+      ctrl.abort()
+    }
+  }
+
+  private async *combineSources(abort: AbortSignal): AsyncGenerator<V, void> {
     const gens = this.sources.map(s => s.watch(abort))
     const next = (i: number) =>
       gens[i].next().then(

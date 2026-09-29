@@ -110,6 +110,11 @@
 
 ### Added
 
+- **`waitFor` takes an optional `AbortSignal`**, as `watch` does, and rejects
+  with `AbortedError` when it aborts. Pass one to cancel a wait you race against
+  a timeout. `watch` and `waitFor` end at once on a signal that has already
+  aborted.
+
 - **`preDownloadAlert` in `setupManifest()`** displays a localized Markdown confirmation before downloading an update from an installed version matching `when.sourceVersion`.
 
 - **An `env` variable set to `undefined` is removed from the process**,

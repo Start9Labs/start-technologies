@@ -117,6 +117,72 @@ describe('Watchable.combine', () => {
   })
 })
 
+describe('Watchable.combine cleanup', () => {
+  const held = () => {
+    const signals: AbortSignal[] = []
+    return {
+      signals,
+      once: async () => 0,
+      watch: async function* (abort?: AbortSignal) {
+        signals.push(abort!)
+        yield 0
+        await new Promise(r => abort!.addEventListener('abort', r))
+      },
+    }
+  }
+  const ending = {
+    once: async () => 0,
+    watch: async function* () {
+      yield 0
+    },
+  }
+
+  test('a source that ends stops the other sources', async () => {
+    const effects = makeEffects()
+    const b = held()
+    await expect(
+      (async () => {
+        for await (const _ of Watchable.combine(effects, [ending, b]).watch());
+      })(),
+    ).rejects.toThrow(AbortedError)
+    expect(b.signals[0].aborted).toBe(true)
+  })
+
+  test('leaving the loop stops every source', async () => {
+    const effects = makeEffects()
+    const b = held()
+    for await (const _ of Watchable.combine(effects, [b, held()]).watch()) break
+    expect(b.signals[0].aborted).toBe(true)
+  })
+})
+
+describe('Watchable.waitFor', () => {
+  test('rejects once the signal aborts', async () => {
+    const effects = makeEffects()
+    const abort = new AbortController()
+    const wait = new Cell(effects, 0).waitFor(v => v > 0, abort.signal)
+    await tick()
+    abort.abort()
+    await expect(wait).rejects.toThrow(AbortedError)
+  })
+
+  test('rejects on an already-aborted signal', async () => {
+    const effects = makeEffects()
+    await expect(
+      new Cell(effects, 0).waitFor(v => v > 0, AbortSignal.abort()),
+    ).rejects.toThrow(AbortedError)
+  })
+
+  test('resolves when the predicate holds', async () => {
+    const effects = makeEffects()
+    const cell = new Cell(effects, 0)
+    const wait = cell.waitFor(v => v > 0, new AbortController().signal)
+    await tick()
+    cell.set(2)
+    expect(await wait).toBe(2)
+  })
+})
+
 describe('Watchable.from', () => {
   const source = <A>(values: A[]) => ({
     once: async () => values[0],

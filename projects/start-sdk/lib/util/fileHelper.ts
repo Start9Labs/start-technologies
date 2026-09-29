@@ -135,6 +135,7 @@ type ReadType<A> = {
   waitFor: (
     effects: T.Effects,
     pred: (value: A | null) => boolean,
+    abort?: AbortSignal,
   ) => Promise<A | null>
 }
 
@@ -338,7 +339,7 @@ class FileHelperImpl<A> implements FileHelper<A> {
    * - `const(effects)` - Read once but re-read when the file changes (for use with constRetry)
    * - `watch(effects)` - Async generator yielding new values on each file change
    * - `onChange(effects, callback)` - Fire a callback on each file change
-   * - `waitFor(effects, predicate)` - Block until the file value satisfies a predicate
+   * - `waitFor(effects, predicate, abort?)` - Block until the file value satisfies a predicate
    *
    * @param map - Optional transform function applied after validation
    * @param eq - Optional equality function to deduplicate watch emissions
@@ -367,8 +368,11 @@ class FileHelperImpl<A> implements FileHelper<A> {
           error?: Error,
         ) => { cancel: boolean } | Promise<{ cancel: boolean }>,
       ) => this.createFileWatchable(effects, map, eq).onChange(callback),
-      waitFor: (effects: T.Effects, pred: (value: A | null) => boolean) =>
-        this.createFileWatchable(effects, map, eq).waitFor(pred),
+      waitFor: (
+        effects: T.Effects,
+        pred: (value: A | null) => boolean,
+        abort?: AbortSignal,
+      ) => this.createFileWatchable(effects, map, eq).waitFor(pred, abort),
     }
   }
 
