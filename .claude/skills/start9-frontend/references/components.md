@@ -200,4 +200,6 @@ sticky and translucent by a global utility (support-server's `g-header`: sticky,
 the scrollbar, wrapped in a `.page`/`.chat` div, gets rewritten. When a child component owns the
 scrollbar, it renders the `<header tuiHeader class="g-header"><ng-content /></header>` and the
 route projects the title and accessories into it. The route then styles its semantic children
-directly (`header, section { inline-size: min(100%, 48rem); margin-inline: auto }`).
+directly (`header, section { inline-size: min(100%, 48rem); margin-inline: auto }`). A back link
+goes above the title, as a `<p tuiCaption>` in the header's `hgroup`. Inside the `<h1>` it
+becomes part of the heading's accessible name.

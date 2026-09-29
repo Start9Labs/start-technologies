@@ -41,7 +41,10 @@ must diverge from the app threshold uses its own `@media` with a comment saying 
 `inset-inline`) is the parent's rule, not a `side="start"` variant on the child; a shell that
 wants its routed pages to flow into its card says so once,
 `::ng-deep > :last-child { display: contents }`, not through a `g-*` class every page puts on
-its host. Hiding an element on phones is `display: none` under
+its host. The same goes for the side gutter. A row component carries no inline padding; the
+column gives its children `inline-size: min(100% - 2rem, 56rem); margin-inline: auto`. When the
+padding moves out of a row, grep for every host that renders it, since each one now owes the row
+a gutter. Hiding an element on phones is `display: none` under
 `:host-context(tui-root._mobile)`; an `@if` on the breakpoint is for branches that differ.
 
 A grid or flex item whose `overflow` isn't `visible` already has a zero minimum size, so
