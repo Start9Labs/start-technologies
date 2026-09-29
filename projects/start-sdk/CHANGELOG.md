@@ -116,6 +116,8 @@
   a timeout. `watch` and `waitFor` end at once on a signal that has already
   aborted.
 
+- **`FileHelper.update(effects, change)`** computes a complete replacement under the writer lock. The callback receives the validated current value and returns the replacement or `null` to skip writing.
+
 - **`preDownloadAlert` in `setupManifest()`** displays a localized Markdown confirmation before downloading an update from an installed version matching `when.sourceVersion`.
 
 - **An `env` variable set to `undefined` is removed from the process**,
@@ -202,6 +204,10 @@
 - **A file model's reads see every change to the file.** `watch`, `const` and
   `waitFor` no longer miss a write made while the previous value was being
   read or handled, or a file created just as the wait began.
+
+- **FileHelper writes replace files atomically and serialize concurrent SDK writers across processes.** `merge()` and `update()` hold the lock through their complete read-modify-write; replacements retain the file's owner and permissions.
+
+- **Own-volume file mounts follow atomic source replacement in running subcontainers.** Refreshes preserve idmaps and readonly settings, and complete before reactive reads and command launches. Existing descriptors retain the previous inode until the application reopens the file.
 
 - **Reactive init re-runs receive `kind: null`** after the initial install,
   update, or restore pass. Lifecycle-only work guarded by `kind` runs once for

@@ -7,6 +7,7 @@ import { once } from '@start9labs/start-core/util/once'
 import { Drop } from '@start9labs/start-core/util/Drop'
 import { logErrorOnce } from '@start9labs/start-core/util/logErrorOnce'
 import { Mounts } from '../mainFn/Mounts'
+import { FileMounts } from './fileMounts'
 
 export const execFile = promisify(cp.execFile)
 const False = () => false
@@ -57,22 +58,21 @@ async function bind(
   to: string,
   type: 'file' | 'directory' | 'infer',
   idmap: IdMap[],
-) {
+  readonly: boolean,
+  beneath = false,
+): Promise<boolean> {
   const isFile = await prepBind(from, to, type)
 
-  // Inside the LXC subcontainer (which is itself idmapped), util-linux's
-  // `mount --bind -oX-mount.idmap=...` can't reliably set up a second,
-  // nested idmap. start-container's `bind-mount` subcommand performs the
-  // bind via direct syscalls (open_tree + mount_setattr + move_mount) so
-  // the SDK's idmap field on volume/asset/dependency mounts works.
+  // Nested idmaps require start-container's syscall-based bind.
   const args = ['bind-mount', '--source', from, '--target', to, '--recursive']
-  if (isFile) {
-    args.push('--file')
-  }
+  if (isFile) args.push('--file')
+  if (readonly) args.push('--readonly')
+  if (beneath) args.push('--beneath')
   for (const i of idmap) {
     args.push('--idmap', `${i.fromId}:${i.toId}:${i.range}`)
   }
   await execFile('start-container', args)
+  return isFile
 }
 
 /**
@@ -422,6 +422,8 @@ export class SubContainerEager<
   private destroyRequested = false
   private holdCount = 0
   private teardown: Promise<void> | null = null
+  private readonly fileMounts = new FileMounts()
+  private sharedMounts = false
 
   private leader: cp.ChildProcess
   private leaderExited: boolean = false
@@ -563,7 +565,36 @@ export class SubContainerEager<
           : '/'
         const from = `/media/startos/volumes/${options.volumeId}${subpath}`
 
-        await bind(from, path, options.filetype, options.idmap)
+        const isFile = await bind(
+          from,
+          path,
+          options.filetype,
+          options.idmap,
+          options.readonly,
+        )
+        if (isFile) {
+          if (!this.sharedMounts) {
+            // Exec namespaces become slaves of this tree and receive its rebinds.
+            await execFile('mount', ['--make-shared', this.rootfs])
+            this.sharedMounts = true
+          }
+          let staged = false
+          await this.fileMounts.add(from, path, async () => {
+            if (!staged) {
+              await bind(
+                from,
+                path,
+                'file',
+                options.idmap,
+                options.readonly,
+                true,
+              )
+              staged = true
+            }
+            await execFile('umount', ['--lazy', path])
+            staged = false
+          })
+        }
       } else if (options.type === 'assets') {
         const subpath = options.subpath
           ? options.subpath.startsWith('/')
@@ -572,7 +603,7 @@ export class SubContainerEager<
           : '/'
         const from = `/media/startos/assets/${subpath}`
 
-        await bind(from, path, options.filetype, options.idmap)
+        await bind(from, path, options.filetype, options.idmap, true)
       } else if (options.type === 'pointer') {
         await prepBind(null, path, 'directory')
         // The host-side mount effect applies the SDK idmap in startd, which
@@ -640,6 +671,7 @@ export class SubContainerEager<
       this.destroyed = true
       unregisterFromContextCleanup(this.effects, this)
       const guid = this.guid
+      await this.fileMounts.close()
       await this.killLeader()
       await this.effects.subcontainer.destroyFs({ guid })
     })())
@@ -689,6 +721,7 @@ export class SubContainerEager<
     stderr: string | Buffer
   }> {
     await this.waitProc()
+    await this.fileMounts.sync()
     const imageMeta: T.ImageMetadata = await fs
       .readFile(`/media/startos/images/${this.imageId}.json`, {
         encoding: 'utf8',
@@ -826,6 +859,7 @@ export class SubContainerEager<
     options?: CommandOptions,
   ): Promise<cp.ChildProcessWithoutNullStreams> {
     await this.waitProc()
+    await this.fileMounts.sync()
     const imageMeta: T.ImageMetadata = await fs
       .readFile(`/media/startos/images/${this.imageId}.json`, {
         encoding: 'utf8',
@@ -877,6 +911,7 @@ export class SubContainerEager<
     options: CommandOptions & StdioOptions = { stdio: 'inherit' },
   ): Promise<cp.ChildProcess> {
     await this.waitProc()
+    await this.fileMounts.sync()
     const imageMeta: T.ImageMetadata = await fs
       .readFile(`/media/startos/images/${this.imageId}.json`, {
         encoding: 'utf8',

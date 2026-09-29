@@ -208,6 +208,24 @@ await storeJson.write(effects, {
 })
 ```
 
+### Changing the Current Value
+
+Use `update()` when the next value depends on the current file, including toggles and deleting entries from a typed record:
+
+```typescript
+await configToml.update(effects, current =>
+  current === null
+    ? null
+    : { ...current, allow_registration: !current.allow_registration },
+)
+```
+
+The callback receives the same validated value as `read().once()`. Return a complete replacement or `null` to skip writing. An unchanged serialized value also skips writing. The callback may be asynchronous and must operate on its supplied value. Perform SDK I/O before entering it; FileHelper writes and mounted subcontainer commands acquire file locks.
+
+`write()`, `merge()`, and `update()` share a process-local queue and a cross-process advisory lock for each target. `merge()` and `update()` hold that lock through the entire read-modify-write. Other SDK runtimes accessing the same file through a mounted directory use the same sibling lock file. Keep the hidden `.startos-lock` files in place: their inodes carry the locks across target replacement.
+
+Writes replace the file atomically, preserving its owner, access ACL, permissions, and extended attributes. New files inherit their directory's default ACL. Own-volume file mounts follow replacement while their subcontainer is alive, and commands synchronize these mounts before launching. Existing open descriptors retain the previous inode; applications must reopen the pathname to read the replacement.
+
 ### What an Empty `merge()` Does
 
 Every `merge()` — including `merge(effects, {})` — reads the file, parses it through your schema, deep-merges the patch over the parsed value, re-serializes, and writes only if the result differs from what was on disk. With an empty patch, against a file that already exists:
@@ -445,7 +463,7 @@ await configToml.merge(effects, { legacy_key: undefined })
 ```
 
 > [!WARNING]
-> This removes a stale key your schema doesn't model. It cannot surgically delete one entry of a _typed_ collection that has a `.catch()` default. `merge({ users: { bob: undefined } })` against `users: z.record(...).catch({})` makes the whole `users` value fail validation, so the `.catch({})` replaces the **entire** record with `{}` — every entry is wiped, not just `bob`. To drop one entry while keeping the rest, rebuild the value in code and `write()` it.
+> This removes a stale key your schema doesn't model. It cannot surgically delete one entry of a _typed_ collection that has a `.catch()` default. `merge({ users: { bob: undefined } })` against `users: z.record(...).catch({})` makes the whole `users` value fail validation, so the `.catch({})` replaces the **entire** record with `{}` — every entry is wiped, not just `bob`. To drop one entry while keeping the rest, rebuild the complete value inside `update()`.
 
 ### Arrays Are Replaced, Not Merged
 
@@ -530,7 +548,11 @@ const appSub = sdk.SubContainer.of(
 await configToml.read(c => c.some_mutable_setting).const(effects)
 
 // In an action, toggle a setting directly
-await configToml.merge(effects, { allow_registration: !current })
+await configToml.update(effects, current =>
+  current === null
+    ? null
+    : { ...current, allow_registration: !current.allow_registration },
+)
 ```
 
 > [!WARNING]

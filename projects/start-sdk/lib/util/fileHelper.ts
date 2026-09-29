@@ -13,8 +13,15 @@ import * as T from '@start9labs/start-core/types'
 import { asError, deepEqual } from '@start9labs/start-core/util'
 import { MappedWatchable } from '@start9labs/start-core/util/Watchable'
 import { PathBase } from './Volume'
+import { filePath, replaceFile, withFileLock } from './fileAccess'
+import { hasFileMounts, refreshFileMounts } from './fileMounts'
 
-const previousPath = /(.+?)\/([^/]*)$/
+async function readRaw(path: string): Promise<string | null> {
+  return fs.readFile(path, 'utf-8').catch(error => {
+    if (error.code !== 'ENOENT') throw error
+    return null
+  })
+}
 
 const exists = (path: string) =>
   fs.access(path).then(
@@ -147,43 +154,18 @@ type ReadType<A> = {
 }
 
 /**
- * @description Use this class to read/write an underlying configuration file belonging to the upstream service.
+ * A validated file with reactive reads and serialized atomic writes.
  *
- *   These type definitions should reflect the underlying file as closely as possible. For example, if the service does not require a particular value, it should be marked as optional(), even if your package requires it.
- *
- *   It is recommended to use onMismatch() whenever possible. This provides an escape hatch in case the user edits the file manually and accidentally sets a value to an unsupported type.
- *
- *   Officially supported file types are json, yaml, and toml. Other files types can use "raw"
- *
- *   Choose between officially supported file formats (), or a custom format (raw).
+ * Use `z.looseObject` to retain unknown keys and `.catch()` defaults to repair
+ * invalid fields during `merge()`.
  *
  * @example
- * Below are a few examples
+ * ```typescript
+ * import { FileHelper, z } from '@start9labs/start-sdk'
  *
- * ```
- * import { matches, FileHelper } from '@start9labs/start-sdk'
- * const { arrayOf, boolean, literal, literals, object, natural, string } = matches
- *
- * export const jsonFile = FileHelper.json('./inputSpec.json', object({
- *   passwords: arrayOf(string).onMismatch([])
- *   type: literals('private', 'public').optional().onMismatch(undefined)
+ * const config = FileHelper.json('./config.json', z.looseObject({
+ *   enabled: z.boolean().catch(false),
  * }))
- *
- * export const tomlFile = FileHelper.toml('./inputSpec.toml', object({
- *   url: literal('https://start9.com').onMismatch('https://start9.com')
- *   public: boolean.onMismatch(true)
- * }))
- *
- * export const yamlFile = FileHelper.yaml('./inputSpec.yml', object({
- *   name: string.optional().onMismatch(undefined)
- *   age: natural.optional().onMismatch(undefined)
- * }))
- *
- * export const bitcoinConfFile = FileHelper.raw(
- *   './service.conf',
- *   (obj: CustomType) => customConvertObjToFormattedString(obj),
- *   (str) => customParseStringToTypedObj(str),
- * )
  * ```
  */
 export interface FileHelper<A> {
@@ -196,6 +178,7 @@ export interface FileHelper<A> {
     map: (value: A) => B,
     eq?: (left: B | null, right: B | null) => boolean,
   ): ReadType<B>
+  /** Atomically replaces the file, preserving its ownership and permissions. */
   write(
     effects: T.Effects,
     data: T.AllowReadonly<A> | A,
@@ -204,6 +187,17 @@ export interface FileHelper<A> {
   merge(
     effects: T.Effects,
     data: T.AllowReadonly<T.DeepPartial<A>>,
+    options?: { allowWriteAfterConst?: boolean },
+  ): Promise<null>
+  /**
+   * Serializes a read-modify-write with other SDK writers; `null` skips the write.
+   * Perform SDK I/O beforehand; the callback must use the supplied value.
+   */
+  update(
+    effects: T.Effects,
+    change: (
+      current: A | null,
+    ) => T.AllowReadonly<A> | null | Promise<T.AllowReadonly<A> | null>,
     options?: { allowWriteAfterConst?: boolean },
   ): Promise<null>
   withPath(path: ToPath): FileHelper<A>
@@ -223,29 +217,19 @@ class FileHelperImpl<A> implements FileHelper<A> {
     readonly validate: (value: unknown) => A,
   ) {}
 
-  private async writeFileRaw(data: string): Promise<null> {
-    const parent = previousPath.exec(this.path)
-    if (parent) {
-      await fs.mkdir(parent[1], { recursive: true })
-    }
-
-    await fs.writeFile(this.path, data)
-
-    return null
-  }
-
-  /**
-   * Accepts structured data and overwrites the existing file on disk.
-   */
-  private async writeFile(data: A): Promise<null> {
-    return await this.writeFileRaw(this.writeData(data))
+  private async writeLocked(path: string, data: string): Promise<void> {
+    await replaceFile(path, data)
+    await refreshFileMounts(path)
   }
 
   private async readFileRaw(): Promise<string | null> {
-    if (!(await exists(this.path))) {
-      return null
-    }
-    return await fs.readFile(this.path).then(data => data.toString('utf-8'))
+    if (!(await exists(this.path))) return null
+    const target = await filePath(this.path)
+    if (!hasFileMounts(target)) return readRaw(target)
+    return withFileLock(target, async path => {
+      await refreshFileMounts(path)
+      return readRaw(path)
+    })
   }
 
   private async readFile(): Promise<unknown> {
@@ -374,16 +358,24 @@ class FileHelperImpl<A> implements FileHelper<A> {
     }
   }
 
-  /**
-   * Accepts full structured data and overwrites the existing file on disk if it exists.
-   */
   async write(
     effects: T.Effects,
     data: T.AllowReadonly<A> | A,
     options: { allowWriteAfterConst?: boolean } = {},
   ) {
     const newData = this.validate(data)
-    await this.writeFile(newData)
+    await withFileLock(this.path, path =>
+      this.writeLocked(path, this.writeData(newData)),
+    )
+    this.checkConsts(effects, newData, options)
+    return null
+  }
+
+  private checkConsts(
+    effects: T.Effects,
+    newData: A,
+    options: { allowWriteAfterConst?: boolean },
+  ): void {
     if (!options.allowWriteAfterConst && effects.constRetry) {
       const records = this.consts.filter(([c]) => c === effects.constRetry)
       for (const record of records) {
@@ -393,37 +385,63 @@ class FileHelperImpl<A> implements FileHelper<A> {
         }
       }
     }
+  }
+
+  private async modify(
+    effects: T.Effects,
+    change: (raw: string | null) => Promise<A | null>,
+    options: { allowWriteAfterConst?: boolean },
+  ): Promise<null> {
+    const written = await withFileLock(this.path, async path => {
+      const raw = await readRaw(path)
+      const next = await change(raw)
+      if (next === null) return null
+      const serialized = this.writeData(next)
+      if (serialized === raw) {
+        await refreshFileMounts(path)
+        return null
+      }
+      await this.writeLocked(path, serialized)
+      return { data: next }
+    })
+    if (written) this.checkConsts(effects, written.data, options)
     return null
   }
 
-  /**
-   * Accepts partial structured data and performs a merge with the existing file on disk.
-   */
   async merge(
     effects: T.Effects,
     data: T.AllowReadonly<T.DeepPartial<A>>,
     options: { allowWriteAfterConst?: boolean } = {},
   ) {
-    const fileDataRaw = await this.readFileRaw()
-    let fileData: any = fileDataRaw === null ? null : this.readData(fileDataRaw)
-    try {
-      fileData = this.validate(fileData)
-    } catch (_) {}
-    const mergeData = this.validate(fileMerge({}, fileData, data))
-    const toWrite = this.writeData(mergeData)
-    if (toWrite !== fileDataRaw) {
-      await this.writeFile(mergeData)
-      if (!options.allowWriteAfterConst && effects.constRetry) {
-        const records = this.consts.filter(([c]) => c === effects.constRetry)
-        for (const record of records) {
-          const [_, prev, map, eq] = record
-          if (!eq(prev, map(mergeData))) {
-            throw new Error(`Canceled: write after const: ${this.path}`)
-          }
-        }
-      }
-    }
-    return null
+    return this.modify(
+      effects,
+      async raw => {
+        let fileData: any = raw === null ? null : this.readData(raw)
+        try {
+          fileData = this.validate(fileData)
+        } catch (_) {}
+        return this.validate(fileMerge({}, fileData, data))
+      },
+      options,
+    )
+  }
+
+  async update(
+    effects: T.Effects,
+    change: (
+      current: A | null,
+    ) => T.AllowReadonly<A> | null | Promise<T.AllowReadonly<A> | null>,
+    options: { allowWriteAfterConst?: boolean } = {},
+  ): Promise<null> {
+    return this.modify(
+      effects,
+      async raw => {
+        const data = raw === null ? null : this.readData(raw)
+        const next = await change(data ? this.validate(data) : null)
+        return next === null ? null : this.validate(next)
+      },
+      options,
+    )
   }
 
   /**

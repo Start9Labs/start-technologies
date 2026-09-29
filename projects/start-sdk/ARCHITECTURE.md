@@ -342,22 +342,28 @@ The package also exports these as the `backup` namespace (`Backups`,
 Type-safe configuration file management:
 
 ```typescript
-const configFile = FileHelper.yaml(effects, sdk.volumes.main.path('config.yml'), {
-  port: 8080,
-  debug: false,
-})
+const configFile = FileHelper.yaml(
+  { base: sdk.volumes.main, subpath: 'config.yml' },
+  z.looseObject({
+    port: z.number().catch(8080),
+    debug: z.boolean().catch(false),
+  }),
+)
 
 // Reactive reading
-const config = await configFile.read.const(effects)
+const config = await configFile.read().const(effects)
 
 // Partial merge
-await configFile.merge({ debug: true })
+await configFile.merge(effects, { debug: true })
 
 // Full write
-await configFile.write({ port: 9090, debug: true })
+await configFile.write(effects, { port: 9090, debug: true })
 ```
 
-Supported formats: JSON, YAML, TOML, INI, ENV, and custom parsers.
+Supported formats: JSON, YAML, TOML, XML, INI, ENV, strings, and custom parsers.
+
+- `fileAccess.ts` owns canonical paths, the local queue, sibling `flock` locks, and temp-file replacement. Locks survive target replacement and cover the complete `merge()`/`update()` read-modify-write.
+- `fileMounts.ts` owns own-volume file registrations, directory watches, inode reconciliation, and teardown. Subcontainers register after a file bind is created, share their rootfs mount with exec namespaces, and synchronize before commands launch. Rebinds insert the prepared mount beneath the old one before detaching it, keeping pathname reads on a complete file. FileHelper refreshes local registrations before returning a write or a changed reactive read.
 
 ### Subcontainers (`lib/util/SubContainer.ts`)
 
