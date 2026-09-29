@@ -199,6 +199,10 @@
   `waitFor` on a status, file or other reader no longer fails with
   `AbortedError` after garbage collection while the condition is still false.
 
+- **A file model's reads see every change to the file.** `watch`, `const` and
+  `waitFor` no longer miss a write made while the previous value was being
+  read or handled, or a file created just as the wait began.
+
 - **Reactive init re-runs receive `kind: null`** after the initial install,
   update, or restore pass. Lifecycle-only work guarded by `kind` runs once for
   that event, even when a watched value changes.

@@ -41,13 +41,18 @@ describe('FileHelper.waitFor cancellation', () => {
     const initial = subpath === 'existing.txt' ? 'pending' : null
     if (initial !== null) await fs.writeFile(path, initial)
     const { watching, spy } = observeWatch()
-    const predicate = jest.fn(value => value === 'created')
+    let predicateCalled!: () => void
+    const firstRead = new Promise<void>(r => (predicateCalled = r))
+    const predicate = jest.fn(value => {
+      predicateCalled()
+      return value === 'created'
+    })
     const wait = Promise.resolve(
       FileHelper.string(path).read().waitFor(effects, predicate, abort.signal),
     )
     let timeout: NodeJS.Timeout | undefined
     try {
-      await watching
+      await Promise.all([watching, firstRead])
       expect(predicate).toHaveBeenCalledWith(initial)
       abort.abort()
       await expect(
@@ -105,6 +110,48 @@ describe('FileHelper.waitFor cancellation', () => {
       expect(spy).not.toHaveBeenCalled()
     } finally {
       spy.mockRestore()
+    }
+  })
+})
+
+describe('FileHelper.watch', () => {
+  const next = <T>(gen: AsyncGenerator<T>) =>
+    Promise.race([
+      gen.next().then(r => r.value),
+      new Promise(resolve => setTimeout(() => resolve('still waiting'), 1000)),
+    ])
+
+  test('sees a write made while the consumer holds a value', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'file-watch-'))
+    const path = join(dir, 'config.txt')
+    await fs.writeFile(path, 'a')
+    const abort = new AbortController()
+    const gen = FileHelper.string(path).read().watch(effects, abort.signal)
+    try {
+      expect((await gen.next()).value).toBe('a')
+      await fs.writeFile(path, 'b')
+      expect(await next(gen)).toBe('b')
+    } finally {
+      abort.abort()
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('returns while the consumer holds a value', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'file-watch-'))
+    const path = join(dir, 'config.txt')
+    await fs.writeFile(path, 'a')
+    const gen = FileHelper.string(path).read().watch(effects)
+    try {
+      await gen.next()
+      expect(
+        await Promise.race([
+          gen.return(undefined as never).then(() => 'returned'),
+          new Promise(resolve => setTimeout(() => resolve('hung'), 1000)),
+        ]),
+      ).toBe('returned')
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true })
     }
   })
 })

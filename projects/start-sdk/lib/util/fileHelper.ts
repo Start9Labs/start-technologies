@@ -22,6 +22,24 @@ const exists = (path: string) =>
     () => false,
   )
 
+/** Starts watching at once; `fs.watch` defers until its first read. */
+function watchPath(path: string, abort: AbortSignal) {
+  const ctrl = new AbortController()
+  const onAbort = () => ctrl.abort()
+  abort.addEventListener('abort', onAbort, { once: true })
+  const events = fs.watch(path, { persistent: false, signal: ctrl.signal })
+  const first = events.next()
+  first.catch(() => {})
+  return {
+    events,
+    first,
+    stop: () => {
+      abort.removeEventListener('abort', onAbort)
+      ctrl.abort()
+    },
+  }
+}
+
 async function onCreated(path: string, abort: AbortSignal) {
   if (path === '/' || abort.aborted) return
   if (!path.startsWith('/')) path = `${process.cwd()}/${path}`
@@ -33,14 +51,14 @@ async function onCreated(path: string, abort: AbortSignal) {
   const parent = split.join('/')
   await onCreated(parent, abort)
   if (abort.aborted) return
-  const watch = fs.watch(parent, { persistent: false, signal: abort })
+  const watch = watchPath(parent, abort)
   try {
     if (await exists(path)) return
-    for await (const event of watch) {
-      if (event.filename === filename) return
+    for (let r = await watch.first; !r.done; r = await watch.events.next()) {
+      if (r.value.filename === filename) return
     }
   } finally {
-    await watch.return?.()
+    watch.stop()
   }
 }
 
@@ -277,17 +295,14 @@ class FileHelperImpl<A> implements FileHelper<A> {
       ): AsyncGenerator<A | null, void> {
         while (this.effects.isInContext && !abort.aborted) {
           if (await exists(filePath)) {
-            const watch = fs.watch(filePath, {
-              persistent: false,
-              signal: abort,
-            })
+            const watch = watchPath(filePath, abort)
             try {
               yield await doRead()
-              await watch.next().catch(e => {
+              await watch.first.catch(e => {
                 if (!abort.aborted) console.error(asError(e))
               })
             } finally {
-              await watch.return?.()
+              watch.stop()
             }
           } else {
             yield null
