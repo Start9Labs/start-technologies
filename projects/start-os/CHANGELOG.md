@@ -12,7 +12,7 @@ for the detail behind its highlights.
 
 ### Fixed
 
-- **Starting a StartOS update from the UI uses the selected release and configured registry.**
+- **Starting a StartOS update from the UI installs the release whose notes it shows.** It previously installed whatever version the registry listed last.
 
 - **Required service dependencies appear from the package manifest during initialization.** StartOS shows their base version and health requirements even if the service has not reported runtime dependencies; active runtime requirements can tighten the base, including for optional dependencies. While a service is not using an optional dependency, its tasks for that dependency are hidden and do not prevent it from starting.
 
