@@ -197,13 +197,11 @@ the source of truth.
 The rule agents work from is [AGENTS.md § Code style](AGENTS.md#code-style), and it applies to people too. In short:
 
 - **Default to no comment.** Reach for the rename or the smaller function first — a name that needs a comment is the wrong name.
-- **Comment the _why_, never the _what_:** a non-obvious mechanism, a deviation from convention, a load-bearing subtlety.
-- **Write plain prose** — one idea, a complete sentence, present tense, the actor named. Not a paragraph, and not shorthand with the articles and verbs stripped out. Shorten by dropping ideas, never grammar; a comment nobody can read is worse than the paragraph it replaced.
+- **One fact, stated bare:** a non-obvious mechanism, an external constraint, a load-bearing ordering. The reasoning behind a change goes in the commit message and the PR body, never in the source.
+- **Write plain prose** — one idea, a complete sentence, present tense, the actor named. Shorten by dropping ideas, never grammar.
 - **Keep it true.** Update or delete a comment when the code moves under it. History belongs in the commit message, and a task belongs in a GitHub issue rather than a `// TODO`.
 
-**Rust:** a `///` on a public item is documentation — write it, and hold it to the same voice. On a `#[ts(export)]` type it also generates the TypeScript binding, so editing one is never a comment-only change (see [`shared-libs/crates/start-core/AGENTS.md`](shared-libs/crates/start-core/AGENTS.md)).
-
-**TypeScript:** the same goes for JSDoc on an exported SDK surface, which package authors read in their editor. Elsewhere, a line restating the signature is noise.
+**A doc block gets the same budget.** A `///` on a public item or a JSDoc on an exported SDK surface is held to the rules above, not exempt from them. On a `#[ts(export)]` type a `///` also generates the TypeScript binding, so editing one is never a comment-only change (see [`shared-libs/crates/start-core/AGENTS.md`](shared-libs/crates/start-core/AGENTS.md)).
 
 ## Commits / PRs
 

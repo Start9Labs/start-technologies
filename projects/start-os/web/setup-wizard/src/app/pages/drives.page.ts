@@ -68,7 +68,7 @@ import { StateService } from '../services/state.service'
             <h2 tuiTitle>{{ 'Select Drives' | i18n }}</h2>
           </header>
 
-          <tui-textfield [stringify]="stringify">
+          <tui-textfield [stringify]="stringify" [tuiTextfieldCleaner]="false">
             <label tuiLabel>{{ 'OS Drive' | i18n }}</label>
             @if (mobile) {
               <select
@@ -92,7 +92,7 @@ import { StateService } from '../services/state.service'
             <tui-error formControlName="osDrive" />
           }
 
-          <tui-textfield [stringify]="stringify">
+          <tui-textfield [stringify]="stringify" [tuiTextfieldCleaner]="false">
             <label tuiLabel>{{ 'Data Drive' | i18n }}</label>
             @if (mobile) {
               <select

@@ -239,7 +239,7 @@ You get the **whole** monorepo, not just the guide. That's deliberate: when the 
 
 The checkout tracks **`live-docs`**, not `master`. That branch is what every product has published: each release moves it to the tagged tree for the product being released, so the guide you read, the template `init-package` scaffolds from, and the SDK source all describe the `@start9labs/start-sdk` that `npm install` resolves. `master` carries what hasn't shipped, where a page can document a call your package cannot import. It is also the branch docs.start9.com serves, and corrections to published pages land there first — so your local copy and the site are the same thing, and you get a fix the moment it goes live.
 
-The context lives once, at the workspace root — it is never copied into your package repos. Open the workspace in your AI tool and it picks up `AGENTS.md` / `CLAUDE.md` automatically. You can read exactly what it contains on the [Agent Context](./agent-context.md) page.
+The context lives once, at the workspace root — it is never copied into your package repos. **Start every AI session from the workspace root, never from inside a package repo.** From the root, your assistant picks up `AGENTS.md` / `CLAUDE.md` automatically; a session started in a package directory can miss them and work without the guide. You can read exactly what it contains on the [Agent Context](./agent-context.md) page.
 
 ### Skills
 

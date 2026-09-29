@@ -9,14 +9,14 @@ nothing may import it. When in doubt: the official MCP
 ### v5 renames & dead APIs (your training data is probably stale)
 
 | If you remember…                                           | v5 reality                                                                                     |
-| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | `TuiAlertService` / `[tuiAlert]`                           | `TuiNotificationService` / `[tuiNotification]` (kit also adds a new compact `TuiToastService`) |
 | `tui-input`, `tui-input-password`, … wrappers              | gone — native `<input tuiInput>` etc. inside `<tui-textfield>`                                 |
 | inner directive `tuiTextfield` on the input                | renamed `tuiInput`                                                                             |
 | `<tui-avatar>`, `<tui-badge>`, `<tui-tag>`                 | `[tuiAvatar]`, `<span tuiBadge>`, `<span tuiChip>` attributes                                  |
 | Loader `[showLoader]`                                      | `[loading]`                                                                                    |
 | `NG_EVENT_PLUGINS`, `provideAnimations()`                  | one `provideTaiga(options?)` (event plugins included)                                          |
-| `TuiFieldErrorPipe` (`tuiFieldError                        | async`)                                                                                        | `TuiErrorPipe` (`tuiError`) — house style: bare `<tui-error formControlName>` + provider map |
+| `TuiFieldErrorPipe` (`tuiFieldError \| async`)             | `TuiErrorPipe` (`tuiError`) — house style: bare `<tui-error formControlName>` + provider map   |
 | `tuiPure`, `TuiLet`, `TuiRepeatTimes`, `TuiDestroyService` | gone — `computed()`/pipes, `@let`, `@for`, `takeUntilDestroyed()`                              |
 | `tuiCreateToken` / `tuiCreateTokenFromFactory`             | not in v5 cdk — `new InjectionToken(desc, { factory })` or `tuiCreateOptions`                  |
 | `TUI_IS_MOBILE`                                            | `WA_IS_MOBILE` (`@ng-web-apis/platform`; also `WA_IS_IOS/ANDROID`, `WA_REDUCED_MOTION`)        |

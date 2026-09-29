@@ -1245,6 +1245,8 @@ pub async fn set<C: CtrlContext>(
                     port_control
                         .displace_sni_routes(&sni_displacement_ranges)
                         .await;
+                    // The reload below applies the port-80 admission rule.
+                    port_control.sync_sni_rules_before_reload().await;
                 }
                 if !displaced_auto.is_empty() {
                     tracing::info!(

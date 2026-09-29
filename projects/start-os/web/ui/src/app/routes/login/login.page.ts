@@ -1,8 +1,21 @@
 import { CommonModule } from '@angular/common'
-import { Component, inject, linkedSignal, signal } from '@angular/core'
+import {
+  Component,
+  DOCUMENT,
+  inject,
+  linkedSignal,
+  signal,
+} from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { Router } from '@angular/router'
-import { AuthKeyService, i18nKey, i18nPipe } from '@start9labs/shared'
+import {
+  AuthKeyService,
+  CA_TRUST_CHECK,
+  CaWizard,
+  i18nKey,
+  i18nPipe,
+  RELATIVE_URL,
+} from '@start9labs/shared'
 import {
   TuiButton,
   TuiError,
@@ -12,7 +25,6 @@ import {
 } from '@taiga-ui/core'
 import { TuiButtonLoading, TuiPassword } from '@taiga-ui/kit'
 import { TuiCardLarge, TuiForm, TuiHeader } from '@taiga-ui/layout'
-import { CAWizardComponent } from 'src/app/routes/login/ca-wizard.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { AuthService } from 'src/app/services/auth.service'
 import { ConfigService } from 'src/app/services/config.service'
@@ -46,7 +58,7 @@ import { ConfigService } from 'src/app/services/config.service'
       </div>
     } @else {
       <!-- Insecure context -->
-      <ca-wizard />
+      <ca-wizard product="start-os" />
     }
   `,
   styles: `
@@ -80,7 +92,7 @@ import { ConfigService } from 'src/app/services/config.service'
   imports: [
     CommonModule,
     FormsModule,
-    CAWizardComponent,
+    CaWizard,
     TuiButton,
     TuiButtonLoading,
     TuiCardLarge,
@@ -92,6 +104,17 @@ import { ConfigService } from 'src/app/services/config.service'
     TuiHeader,
     TuiTitle,
     TuiForm,
+  ],
+  providers: [
+    {
+      provide: CA_TRUST_CHECK,
+      useFactory: () => {
+        const api = inject(ApiService)
+        const url = `https://${inject(DOCUMENT).location.host}${inject(RELATIVE_URL)}`
+
+        return () => api.echo({ message: 'ping' }, url)
+      },
+    },
   ],
 })
 export default class LoginPage {

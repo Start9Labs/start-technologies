@@ -18,9 +18,7 @@ injectContext<TuiDialogContext<Result, Data>>()`; form via NNFB; footer with fla
 4. Per-dialog validation messages via `tuiValidationErrorsProvider` (or the app's translated
    wrapper) in the dialog's `providers`.
 
-**Add a form** — forms.md anatomy: NNFB group in a field initializer, `tui-textfield` + `tuiLabel` +
-`tuiInput`, bare `<tui-error formControlName>`, `(submit.prevent)`, enabled submit +
-`tuiMarkControlAsTouchedAndValidate`, async through `TaskService`/try-catch-finally + toast.
+**Add a form** — follow forms.md top to bottom.
 
 **Add a table page** — `table[appX]` component with
 `hostDirectives: [{ directive: TuiTableDirective, inputs: ['sorter'] }]` or plain `<table>` +

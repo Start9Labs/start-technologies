@@ -17,7 +17,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   worldwide subset (2.4 GHz channels 1–11, 5 GHz channels 36–48, 20 dBm), so
   select yours after setup.
 
+- **Root CA profile for iPhone and iPad.** Downloading the Root CA in Safari
+  on iOS or iPadOS now fetches a configuration profile that installs through
+  Settings.
+
+### Changed
+
+- **Setup ends with a link to `router.lan`.** After you set the admin
+  password, the confirmation page links to `router.lan` to trust your Root
+  CA, instead of saying the window can be closed.
+
+- **The Root CA walkthrough matches StartOS.** It links to the instructions
+  for each platform and no longer asks you to bookmark the page. The Root CA
+  downloads from `/static/local-root-ca.crt`, the path StartOS uses.
+
 ### Fixed
+
+- **Custom DNS works after an update.** On a router using custom system DNS
+  or a profile DNS override, devices could not resolve names after an update
+  until a DNS setting was saved again. DNS lookups over TCP, used for answers
+  too large for UDP, also failed under custom DNS.
+
+- **A published domain typed without `https://` now reaches the published
+  service, not the router.** While port 443 is published to a device — by a
+  Published Port or a device's hostname routes — plain HTTP at the router's
+  public address is answered with a redirect to `https://` instead of the
+  router's web interface, from inside the network and from the Internet under
+  every Remote Access setting. A Published Port or a hostname route on 80
+  takes precedence.
 
 - **Freshly generated Root CAs carry an Authority Key Identifier conforming to RFC 5280 and the CA/Browser Forum Baseline Requirements.** Existing routers retain their trusted Root CA when updated with settings preserved.
 

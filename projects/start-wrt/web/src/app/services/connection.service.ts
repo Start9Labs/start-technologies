@@ -282,7 +282,7 @@ export class ConnectionService {
    * the page's scheme (no mixed-content block) and the cert is reissued for the
    * new IP and router.lan, so https validates once the router is back.
    *
-   * Probes the tiny no-auth /static/root-ca.crt rather than the ~100KB SPA index
+   * Probes the tiny no-auth /static/local-root-ca.crt rather than the ~100KB SPA index
    * so a 3s poll stays cheap.
    *
    * Edge case: an untrusted self-signed HTTPS target (a client that hasn't
@@ -296,7 +296,7 @@ export class ConnectionService {
     // the flow recovers (recover() skips the actual navigation under mock too).
     if (this.isMock) return true
     try {
-      await fetch(`${url}/static/root-ca.crt?_probe=${Date.now()}`, {
+      await fetch(`${url}/static/local-root-ca.crt?_probe=${Date.now()}`, {
         mode: 'no-cors',
         cache: 'no-store',
         // Bound each probe so an unroutable destination (the new subnet before

@@ -823,4 +823,7 @@ export const ENGLISH: Record<string, number> = {
   'Services from this registry are maintained by the Start9 community and are undergoing beta testing. Bugs are expected. Install at your own risk.': 930,
   'Every IP address this name resolves to on this gateway is disabled': 931,
   'Wait!': 932,
+  'Your router uses its Root CA to generate SSL/TLS certificates for itself. These certificates are then used to encrypt network traffic with your client devices.': 933,
+  'Follow instructions for your OS. By trusting your Root CA, your device can verify the authenticity of encrypted communications with your router.': 934,
+  'You will need to repeat this on every device you use to connect to the StartWRT UI.': 935,
 }

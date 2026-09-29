@@ -9,7 +9,17 @@ Your router creates its Root CA during setup and keeps it across updates that pr
 
 ## Step 1 - Download
 
-Navigate to `System > Settings > General` and click "Download Root CA". This saves the certificate as `startwrt-ca.crt`. When you inspect or install it, the certificate is named "StartWRT Local Root CA" followed by a short random identifier (e.g. "StartWRT Local Root CA 3f8a1b2c") — each router generates a unique one so a reflashed device's new CA won't collide with one you already trust.
+There are two ways to download your router's Root CA.
+
+- ### Option 1: HTTP LAN
+
+  Visit `http://router.lan` (_not_ HTTPS) or your router's LAN IP address (`http://192.168.0.1` by default) and click "Download".
+
+- ### Option 2: StartWRT Dashboard
+
+  If you are logged in, navigate to `System > Settings > General` and click "Download Root CA".
+
+On an iPhone or iPad this downloads a configuration profile; everywhere else it saves the certificate as `startwrt-ca.crt`. When you inspect or install it, the certificate is named "StartWRT Local Root CA" followed by a short random identifier (e.g. "StartWRT Local Root CA 3f8a1b2c") — each router generates a unique one so a reflashed device's new CA won't collide with one you already trust.
 
 ## Step 2 - Trust
 
@@ -66,25 +76,24 @@ Select your platform:
 {{#endtab }}
 {{#tab name="iOS" }}
 
-1. Open your Downloads folder and click on the certificate. It will display a dialog box that says `Profile Downloaded`. Click "Close".
+> [!NOTE]
+> Download your Root CA in **Safari**. iOS and iPadOS only install certificate profiles downloaded through Safari — Chrome, Firefox, and other browsers cannot complete this step.
+
+1. Tap "Download". Safari will ask permission to download a configuration profile — tap "Allow". When the `Profile Downloaded` dialog appears, tap "Close".
 
 1. Head to _Settings > General > VPN & Device Management_.
 
-1. Under "DOWNLOADED PROFILE", click your Root CA.
+1. Under "DOWNLOADED PROFILE", tap your `StartWRT Root CA` profile.
 
-1. Click "Install".
+1. Tap "Install" in the top-right corner and enter your passcode if prompted.
 
-1. Click "Install" again.
-
-1. Click "Install" for a 3rd time.
-
-1. You should see green text with a check-mark saying "Verified" under the Profile Installed dialog.
+1. Your Root CA is self-signed, so iOS warns that the profile is unsigned before continuing. This is expected. Tap "Install" again, then "Install" a final time to confirm.
 
 1. Tap "Done".
 
-1. Go to `General > About > Certificate Trust Settings` and enable your Root CA.
+1. Go to `Settings > General > About > Certificate Trust Settings` and enable full trust for your Root CA.
 
-1. Click "Continue".
+1. Tap "Continue".
 
 {{#endtab }}
 {{#tab name="Android / Graphene" }}

@@ -39,7 +39,8 @@ appearance="…">` (host-directive form, not the element form).
   `<tui-data-list *tuiDropdown="let close"><button tuiOption (click)="close()">…` inside the
   host element — the context-provided `close`. A menu is `tuiDropdown tuiDropdownAuto`; an
   `open = signal(false)` behind `[(tuiDropdownOpen)]`, set back to `false` in every handler, is
-  the rewrite target. **Hints**: `[tuiHint]` (template content allowed), tuned globally
+  the rewrite target. Leave `tuiDropdownDirection` unset: its default opens on whichever side
+  has room, and a pinned `top` breaks when there's none. **Hints**: `[tuiHint]` (template content allowed), tuned globally
   via `tuiHintOptionsProvider`. **Drawers/sheets**: `<tui-drawer *tuiPopup="open()"
 (click.self)="toggle(false)">` with URL-driven `open` state.
 - All dialogs auto-close on navigation/server-crash in StartOS via a custom `TUI_DIALOGS_CLOSE`

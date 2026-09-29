@@ -12,6 +12,8 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **Starting a StartOS update from the UI installs the release whose notes it shows.** It previously installed whatever version the registry listed last.
+
 - **Forwarded IPv4 UDP ports retain their outbound mapping.** UDP traffic a
   service starts from a forwarded port leaves through that forward's gateway
   with its external address and port, keeping peer-to-peer services such as
