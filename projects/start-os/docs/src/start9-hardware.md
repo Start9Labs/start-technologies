@@ -11,6 +11,7 @@ Every server and router Start9 has sold, newest first: the RISC-V Router, the Se
 - **Storage:** 16 GB eMMC, plus a microSD slot for flashing
 - **Ethernet:** 1× Gigabit WAN, 1× Gigabit LAN
 - **Wi-Fi:** AsiaRF AW7916-NPD mini-PCIe module (MediaTek MT7916), Wi-Fi 6E, 2.4 GHz + 5 GHz concurrent, up to 2402 Mbps. Sold separately to US customers, as FCC regulations require
+- **Power:** 12 V / 3 A DC; shipped with a C13/C14 mains cord
 - **Operating system:** [StartWRT](/start-wrt/)
 - **How to identify it:** Start9 wordmark on top, a small DeepComputing logo on the back, and a Wi-Fi password sticker on the bottom
 - **Known issues:** none
@@ -26,7 +27,7 @@ Every server and router Start9 has sold, newest first: the RISC-V Router, the Se
 - **Graphics:** AMD Radeon 660M, integrated
 - **Networking:** 1× Gigabit Ethernet, no Wi-Fi
 - **Ports:** 2× USB 3.0, 2× USB 2.0, 1× USB-C 3.1, 2× HDMI
-- **Power:** 19 V / 5 A DC
+- **Power:** 19 V DC, 3.2 A minimum; shipped with a 19 V / 3.2 A supply and a C5/C6 mains cord
 - **Dimensions / weight:** 4.5″ × 4.2″ × 1.5″ (11.4 × 10.6 × 3.75 cm), 0.81 lb (0.37 kg)
 - **Warranty:** 1 year
 - **Firmware:** manufacturer BIOS
@@ -45,7 +46,7 @@ Every server and router Start9 has sold, newest first: the RISC-V Router, the Se
 - **Graphics:** AMD Radeon 680M, integrated
 - **Networking:** 1× Gigabit Ethernet, no Wi-Fi
 - **Ports:** 2× USB 3.0, 2× USB 2.0, 1× USB-C 3.1, 2× HDMI
-- **Power:** 19 V / 5 A DC
+- **Power:** 19 V DC, 3.2 A minimum; most units shipped with a 19 V / 4.7 A supply and a C7/C8 mains cord
 - **Dimensions / weight:** 4.5″ × 4.2″ × 1.5″ (11.4 × 10.6 × 3.75 cm), 0.81 lb (0.37 kg)
 - **Warranty:** 1 year
 - **Firmware:** manufacturer BIOS
@@ -67,7 +68,7 @@ Every server and router Start9 has sold, newest first: the RISC-V Router, the Se
 - **Graphics:** Intel UHD, integrated
 - **Networking:** 1× Gigabit Ethernet, no Wi-Fi
 - **Ports:** 4× USB 3.0, 2× USB 2.0, 1× USB-C 3.1, HDMI 2.0, DisplayPort 1.2
-- **Power:** 19 V DC, 3.2 A minimum; most units shipped with a 19 V / 4.7 A supply
+- **Power:** 19 V DC, 3.2 A minimum; most units shipped with a 19 V / 4.7 A supply and a C5/C6 mains cord
 - **Dimensions / weight:** 5.0″ × 5.0″ × 1.5″ (12.8 × 12.8 × 3.8 cm), 2.2 lb (1 kg)
 - **Warranty:** 2 years
 - **Firmware:** PureBoot — see [Flashing Firmware - Server Pure](firmware-pure.md)
@@ -88,7 +89,7 @@ Every server and router Start9 has sold, newest first: the RISC-V Router, the Se
 - **Graphics:** Intel UHD, integrated
 - **Networking:** 1× Gigabit Ethernet, no Wi-Fi
 - **Ports:** 4× USB 3.0, 2× USB 2.0, 1× USB-C 3.1, HDMI 2.0, DisplayPort 1.2
-- **Power:** 19 V DC, 3.2 A minimum; most units shipped with a 19 V / 4.7 A supply
+- **Power:** 19 V DC, 3.2 A minimum; shipped with a 19 V / 3.2 A supply and a C5/C6 mains cord
 - **Dimensions / weight:** 5.0″ × 5.0″ × 1.5″ (12.8 × 12.8 × 3.8 cm), 2.2 lb (1 kg)
 - **Warranty:** 1 year
 - **Firmware:** PureBoot — see [Flashing Firmware - Server Pure](firmware-pure.md)
@@ -109,7 +110,7 @@ Every server and router Start9 has sold, newest first: the RISC-V Router, the Se
 - **Graphics:** AMD Radeon (Vega 8), integrated
 - **Networking:** 1× Gigabit Ethernet, no Wi-Fi
 - **Ports:** 2× USB 3.0, 2× USB 2.0, 1× USB-C 3.1, 2× HDMI
-- **Power:** 19 V / 5 A DC
+- **Power:** 19 V DC, 3.2 A minimum; shipped with a 19 V / 3.2 A supply and a C5/C6 mains cord
 - **Dimensions / weight:** 4.5″ × 4.2″ × 1.5″ (11.4 × 10.6 × 3.75 cm), 0.81 lb (0.37 kg)
 - **Warranty:** 1 year
 - **Firmware:** manufacturer BIOS
@@ -128,7 +129,7 @@ Every server and router Start9 has sold, newest first: the RISC-V Router, the Se
 - **Graphics:** Intel UHD, integrated
 - **Networking:** 1× Gigabit Ethernet; Wi-Fi 5 (Intel Wireless-AC 9462) and Bluetooth
 - **Ports:** 4× USB 3.2 (2 front, 2 rear), 2× USB 2.0, 1× HDMI 2.0b
-- **Power:** 19 V DC, 65 W supply
+- **Power:** 19 V DC, 3.2 A minimum; shipped with a 19 V / 3.2 A supply and a C5/C6 mains cord
 - **Warranty:** 1 year
 - **Firmware:** Intel BIOS — see [Flashing Firmware - Server One (2023)](firmware-one-2023.md)
 - **StartOS image:** x86_64, standard
@@ -148,7 +149,7 @@ Sold as the Embassy Pro from November 2022, renamed the Server Pro in May 2023 a
 - **Graphics:** Intel UHD, integrated
 - **Networking:** 1× Gigabit Ethernet and Wi-Fi
 - **Ports:** 4× USB 3.0, 2× USB 2.0, 1× USB-C 3.1, HDMI 2.0, DisplayPort 1.2
-- **Power:** 19 V DC, 3.2 A minimum; most units shipped with a 19 V / 4.7 A supply
+- **Power:** 19 V DC, 3.2 A minimum; shipped with a 19 V / 3.2 A supply and a C5/C6 mains cord
 - **Warranty:** 1 year
 - **Firmware:** PureBoot — see [Flashing Firmware - Server Pure](firmware-pure.md)
 - **StartOS image:** x86_64, slim
@@ -163,6 +164,7 @@ Several slightly different Raspberry Pi 4 builds, sold between 2020 and 2023 und
 - **Base hardware:** Raspberry Pi 4 Model B
 - **RAM:** 8 GB, soldered — not upgradeable
 - **Storage:** depending on the build, an SSD in an external enclosure, a standalone external SSD, an SSD inside a NASPi case, or a 128 or 256 GB microSD card alone
+- **Power:** the official Raspberry Pi 4 power supply
 - **StartOS image:** Raspberry Pi — see [Installing StartOS](installing-startos.md#raspberry-pi). StartOS 0.4.0 supports the Raspberry Pi 4 only.
 - **How to identify it:** a Raspberry Pi 4, in a NASPi case or a Raspberry Pi case, with or without an attached external SSD
 - **Known issues:**
