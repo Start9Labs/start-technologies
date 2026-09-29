@@ -4,6 +4,10 @@
 
 ### Changed
 
+- **Breaking — volume mounts honor `readonly: true`.** Writes through a
+  read-only volume mount fail with `EROFS`. Mount the volume writable wherever
+  the service writes to it
+
 - **Breaking — `Watchable<A>` takes only the type it reads.** A reader that
   maps a raw value extends `MappedWatchable<Raw, Mapped>` and implements
   `fetchRaw`/`produceRaw` in place of `fetch`/`produce`. A type written
@@ -207,7 +211,7 @@
 
 - **FileHelper writes replace files atomically and serialize concurrent SDK writers across processes.** `merge()` and `update()` hold the lock through their complete read-modify-write; replacements retain the file's owner and permissions.
 
-- **Own-volume file mounts follow atomic source replacement in running subcontainers.** Refreshes preserve idmaps and readonly settings, and complete before reactive reads and command launches. Existing descriptors retain the previous inode until the application reopens the file.
+- **Own-volume file mounts follow atomic source replacement in running subcontainers.** Refreshes preserve idmaps and readonly settings and run before reactive reads and command launches; a command fails while its mount cannot be refreshed. Existing descriptors retain the previous inode until the application reopens the file.
 
 - **Reactive init re-runs receive `kind: null`** after the initial install,
   update, or restore pass. Lifecycle-only work guarded by `kind` runs once for

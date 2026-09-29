@@ -1,7 +1,7 @@
-import { watch, type FSWatcher } from 'node:fs'
+import { watch, type FSWatcher, type Stats } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
-import { withFileLock } from './fileAccess'
+import { outsideFileLocks, withFileLock } from './fileAccess'
 
 const mounts = new Map<string, Set<FileMount>>()
 
@@ -24,11 +24,21 @@ export function hasFileMounts(path: string): boolean {
   return mounts.has(path)
 }
 
-/** The caller must hold the source's `withFileLock` through refresh. */
+/**
+ * Logs failures; commands retry through `FileMounts.sync()`.
+ * The caller must hold the source's `withFileLock` through refresh.
+ */
 export async function refreshFileMounts(path: string): Promise<void> {
   for (const mount of mounts.get(path) ?? []) {
-    if (mount.active) await mount.refresh()
+    if (mount.active) await mount.refresh().catch(console.error)
   }
+}
+
+async function sourceStat(path: string): Promise<Stats | null> {
+  return fs.stat(path).catch(error => {
+    if (error.code !== 'ENOENT') throw error
+    return null
+  })
 }
 
 export class FileMounts {
@@ -51,31 +61,33 @@ export class FileMounts {
           const pending = (async () => {
             while (mount.active) {
               const [from, to] = await Promise.all([
-                fs.stat(path),
+                sourceStat(path),
                 fs.stat(target),
               ])
-              if (from.dev === to.dev && from.ino === to.ino) return
+              if (!from || (from.dev === to.dev && from.ino === to.ino)) return
               await rebind()
             }
           })()
           await track(mount, pending)
         },
       }
-      const watcher = watch(dirname(path), { persistent: false }, (_, name) => {
-        if (
-          !mount.active ||
-          (name !== null && name.toString() !== basename(path))
-        )
-          return
-        void track(
-          mount,
-          withFileLock(path, async () => {
-            if (mount.active) await mount.refresh()
-          }),
-        ).catch(error => {
-          if (mount.active) console.error(error)
-        })
-      })
+      const watcher = outsideFileLocks(() =>
+        watch(dirname(path), { persistent: false }, (_, name) => {
+          if (
+            !mount.active ||
+            (name !== null && name.toString() !== basename(path))
+          )
+            return
+          void track(
+            mount,
+            withFileLock(path, async () => {
+              if (mount.active) await mount.refresh()
+            }),
+          ).catch(error => {
+            if (mount.active) console.error(error)
+          })
+        }),
+      )
       watcher.on('error', error => console.error(error))
       let set = mounts.get(path)
       if (!set) {

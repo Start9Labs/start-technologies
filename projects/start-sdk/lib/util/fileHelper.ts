@@ -191,7 +191,7 @@ export interface FileHelper<A> {
   ): Promise<null>
   /**
    * Serializes a read-modify-write with other SDK writers; `null` skips the write.
-   * Perform SDK I/O beforehand; the callback must use the supplied value.
+   * The returned value replaces any write made inside the callback.
    */
   update(
     effects: T.Effects,

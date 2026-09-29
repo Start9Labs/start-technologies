@@ -77,7 +77,7 @@ test('reads reconcile before emitting a changed const', async () => {
   context.isInContext = false
 })
 
-test('refresh failures block reads and writes until a retry succeeds', async () => {
+test('refresh failures block commands until a retry succeeds', async () => {
   let fail = true
   const errors = jest.spyOn(console, 'error').mockImplementation(() => {})
   rebind.mockImplementation(async () => {
@@ -87,15 +87,35 @@ test('refresh failures block reads and writes until a retry succeeds', async () 
   })
   try {
     const file = FileHelper.string(source)
-    await expect(file.write({} as any, 'new')).rejects.toThrow('rebind failed')
-    await expect(file.read().once()).rejects.toThrow('rebind failed')
+    await file.write({} as any, 'new')
+    expect(await file.read().once()).toBe('new')
+    await expect(mounts.sync()).rejects.toThrow('rebind failed')
     expect(await fs.readFile(target, 'utf8')).toBe('old')
     fail = false
-    expect(await file.read().once()).toBe('new')
+    await mounts.sync()
     expect(await fs.readFile(target, 'utf8')).toBe('new')
   } finally {
     errors.mockRestore()
   }
+})
+
+test('a deleted source leaves the mount on its last file', async () => {
+  await fs.rm(source)
+  await mounts.sync()
+  expect(rebind).not.toHaveBeenCalled()
+  expect(await fs.readFile(target, 'utf8')).toBe('old')
+})
+
+test('file access inside update reenters the held lock', async () => {
+  const file = FileHelper.string(source)
+  await file.update({} as any, async current => {
+    expect(await file.read().once()).toBe(current)
+    await file.merge({} as any, 'inner')
+    await mounts.sync()
+    return `${current}-outer`
+  })
+  expect(await file.read().once()).toBe('old-outer')
+  expect(await fs.readFile(target, 'utf8')).toBe('old-outer')
 })
 
 test('teardown unregisters watches and sync skips unchanged mounts', async () => {

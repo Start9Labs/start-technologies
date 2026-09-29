@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import { randomBytes } from 'node:crypto'
@@ -5,6 +6,7 @@ import * as fs from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
 
 const queues = new Map<string, Promise<void>>()
+const heldLocks = new AsyncLocalStorage<{ target: string; held: boolean }[]>()
 const execFileAsync = promisify(execFile)
 
 export async function filePath(path: string): Promise<string> {
@@ -23,12 +25,24 @@ export async function filePath(path: string): Promise<string> {
   }
 }
 
-/** The sibling lock survives atomic replacement; its inode must never be deleted. */
+/** Runs without inheriting the caller's file locks. */
+export function outsideFileLocks<A>(operation: () => A): A {
+  return heldLocks.exit(operation)
+}
+
+/**
+ * Reentrant for the holder. The sibling lock survives atomic replacement; its
+ * inode must never be deleted.
+ */
 export async function withFileLock<A>(
   path: string,
   operation: (path: string) => Promise<A>,
 ): Promise<A> {
   const target = await filePath(path)
+  const outer = heldLocks.getStore() ?? []
+  if (outer.some(lock => lock.held && lock.target === target)) {
+    return operation(target)
+  }
   const result = (queues.get(target) ?? Promise.resolve()).then(async () => {
     await fs.mkdir(dirname(target), { recursive: true })
     const lock = resolve(dirname(target), `.${basename(target)}.startos-lock`)
@@ -65,7 +79,12 @@ export async function withFileLock<A>(
           if (!ready) reject(new Error('File lock exited before acquisition'))
         }, reject)
       })
-      return await operation(target)
+      const holder = { target, held: true }
+      try {
+        return await heldLocks.run([...outer, holder], () => operation(target))
+      } finally {
+        holder.held = false
+      }
     } finally {
       child.stdin.end()
       await exited
@@ -116,7 +135,11 @@ export async function replaceFile(path: string, data: string): Promise<void> {
     } finally {
       await file.close()
     }
-    await fs.rename(temp, path)
+    await fs.rename(temp, path).catch(async error => {
+      // A bind-mounted target cannot be replaced.
+      if (error.code !== 'EBUSY') throw error
+      await fs.writeFile(path, data)
+    })
     const directory = await fs.open(dirname(path), 'r')
     try {
       await directory.sync()

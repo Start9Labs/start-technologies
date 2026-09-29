@@ -216,11 +216,11 @@ Use `update()` when the next value depends on the current file, including toggle
 await configToml.update(effects, current => (current === null ? null : { ...current, allow_registration: !current.allow_registration }))
 ```
 
-The callback receives the same validated value as `read().once()`. Return a complete replacement or `null` to skip writing. An unchanged serialized value also skips writing. The callback may be asynchronous and must operate on its supplied value. Perform SDK I/O before entering it; FileHelper writes and mounted subcontainer commands acquire file locks.
+The callback receives the same validated value as `read().once()`. Return a complete replacement or `null` to skip writing. An unchanged serialized value also skips writing. The callback may be asynchronous. Its return value replaces any write it makes to the same file.
 
-`write()`, `merge()`, and `update()` share a process-local queue and a cross-process advisory lock for each target. `merge()` and `update()` hold that lock through the entire read-modify-write. Other SDK runtimes accessing the same file through a mounted directory use the same sibling lock file. Keep the hidden `.startos-lock` files in place: their inodes carry the locks across target replacement.
+`write()`, `merge()`, and `update()` share a process-local queue and a cross-process advisory lock for each target. `merge()` and `update()` hold that lock through the entire read-modify-write. Other SDK runtimes accessing the same file through a mounted directory use the same sibling lock file. Keep the hidden `.startos-lock` files in place: their inodes carry the locks across target replacement. An interrupted write can leave a hidden `.<name>.<random>.tmp` file beside the target; it is safe to delete.
 
-Writes replace the file atomically, preserving its owner, access ACL, permissions, and extended attributes. New files inherit their directory's default ACL. Own-volume file mounts follow replacement while their subcontainer is alive, and commands synchronize these mounts before launching. Existing open descriptors retain the previous inode; applications must reopen the pathname to read the replacement.
+Writes replace the file atomically, preserving its owner, access ACL, permissions, and extended attributes. New files inherit their directory's default ACL. Own-volume file mounts follow replacement while their subcontainer is alive, and commands synchronize these mounts before launching. A command fails while its mount cannot be refreshed; a deleted source leaves the mount on its last file. A target that is itself a bind mount is written in place. Existing open descriptors retain the previous inode; applications must reopen the pathname to read the replacement.
 
 ### What an Empty `merge()` Does
 

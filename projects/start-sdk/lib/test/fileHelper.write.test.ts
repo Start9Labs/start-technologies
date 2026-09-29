@@ -7,10 +7,15 @@ import { z } from '@start9labs/start-core/zExport'
 
 jest.mock('node:fs/promises', () => {
   const actual = jest.requireActual('node:fs/promises')
-  return { ...actual, open: jest.fn(actual.open) }
+  return {
+    ...actual,
+    open: jest.fn(actual.open),
+    rename: jest.fn(actual.rename),
+  }
 })
 const actual = jest.requireActual('node:fs/promises') as typeof fs
 const open = fs.open as jest.MockedFunction<typeof fs.open>
+const rename = fs.rename as jest.MockedFunction<typeof fs.rename>
 const shape = z.object({
   count: z.number().catch(0),
   a: z.string().optional(),
@@ -230,4 +235,19 @@ test('failure to acquire a lock does not write and does not poison the queue', a
   }
   await file.write(effects, { count: 2 })
   expect(await file.read().once()).toEqual({ count: 2 })
+})
+
+test('a bind-mounted target is written in place', async () => {
+  const file = FileHelper.json(path, shape)
+  await file.write(effects, { count: 1 })
+  const { ino } = await actual.stat(path)
+  rename.mockRejectedValueOnce(
+    Object.assign(new Error('EBUSY'), { code: 'EBUSY' }),
+  )
+  await file.write(effects, { count: 2 })
+  expect((await actual.stat(path)).ino).toBe(ino)
+  expect(await file.read().once()).toEqual({ count: 2 })
+  expect((await actual.readdir(dir)).filter(n => n.endsWith('.tmp'))).toEqual(
+    [],
+  )
 })
