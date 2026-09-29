@@ -9,7 +9,7 @@
 
 1. Go to `System -> General -> Software Update`.
 
-1. Read the release notes and click "Begin Update". StartOS downloads the selected version from your configured StartOS registry.
+1. Read the release notes and click "Begin Update".
 
    > [!WARNING]
    > Ensure you have a stable Internet connection before beginning an OS update, and do not unplug your server while StartOS is downloading.
