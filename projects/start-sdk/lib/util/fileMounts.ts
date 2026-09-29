@@ -1,7 +1,7 @@
 import { watch, type FSWatcher, type Stats } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
-import { outsideFileLocks, withFileLock } from './fileAccess'
+import { outsideFileLocks, withFileQueue } from './fileAccess'
 
 const mounts = new Map<string, Set<FileMount>>()
 
@@ -26,7 +26,7 @@ export function hasFileMounts(path: string): boolean {
 
 /**
  * Logs failures; commands retry through `FileMounts.sync()`.
- * The caller must hold the source's `withFileLock` through refresh.
+ * The caller must hold the source's `withFileQueue` through refresh.
  */
 export async function refreshFileMounts(path: string): Promise<void> {
   for (const mount of mounts.get(path) ?? []) {
@@ -53,7 +53,7 @@ export class FileMounts {
     target: string,
     rebind: () => Promise<void>,
   ): Promise<void> {
-    await withFileLock(source, async path => {
+    await withFileQueue(source, async path => {
       const mount: FileMount = {
         active: true,
         pending: new Set(),
@@ -80,7 +80,7 @@ export class FileMounts {
             return
           void track(
             mount,
-            withFileLock(path, async () => {
+            withFileQueue(path, async () => {
               if (mount.active) await mount.refresh()
             }),
           ).catch(error => {
@@ -104,7 +104,7 @@ export class FileMounts {
     for (const { path, mount } of this.registrations) {
       await track(
         mount,
-        withFileLock(path, async () => {
+        withFileQueue(path, async () => {
           if (mount.active) await mount.refresh()
         }),
       )

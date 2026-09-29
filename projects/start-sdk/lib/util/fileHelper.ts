@@ -13,7 +13,12 @@ import * as T from '@start9labs/start-core/types'
 import { asError, deepEqual } from '@start9labs/start-core/util'
 import { MappedWatchable } from '@start9labs/start-core/util/Watchable'
 import { PathBase } from './Volume'
-import { filePath, replaceFile, withFileLock } from './fileAccess'
+import {
+  filePath,
+  replaceFile,
+  withFileLock,
+  withFileQueue,
+} from './fileAccess'
 import { hasFileMounts, refreshFileMounts } from './fileMounts'
 
 async function readRaw(path: string): Promise<string | null> {
@@ -226,7 +231,7 @@ class FileHelperImpl<A> implements FileHelper<A> {
     if (!(await exists(this.path))) return null
     const target = await filePath(this.path)
     if (!hasFileMounts(target)) return readRaw(target)
-    return withFileLock(target, async path => {
+    return withFileQueue(target, async path => {
       await refreshFileMounts(path)
       return readRaw(path)
     })
@@ -364,7 +369,7 @@ class FileHelperImpl<A> implements FileHelper<A> {
     options: { allowWriteAfterConst?: boolean } = {},
   ) {
     const newData = this.validate(data)
-    await withFileLock(this.path, path =>
+    await withFileQueue(this.path, path =>
       this.writeLocked(path, this.writeData(newData)),
     )
     this.checkConsts(effects, newData, options)

@@ -6,7 +6,9 @@ import * as fs from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
 
 const queues = new Map<string, Promise<void>>()
-const heldLocks = new AsyncLocalStorage<{ target: string; held: boolean }[]>()
+const heldLocks = new AsyncLocalStorage<
+  { target: string; held: boolean; flocked: boolean }[]
+>()
 const execFileAsync = promisify(execFile)
 
 export async function filePath(path: string): Promise<string> {
@@ -30,11 +32,8 @@ export function outsideFileLocks<A>(operation: () => A): A {
   return heldLocks.exit(operation)
 }
 
-/**
- * Reentrant for the holder. The sibling lock survives atomic replacement; its
- * inode must never be deleted.
- */
-export async function withFileLock<A>(
+/** Serializes access within this process; reentrant for the holder. */
+export async function withFileQueue<A>(
   path: string,
   operation: (path: string) => Promise<A>,
 ): Promise<A> {
@@ -44,50 +43,11 @@ export async function withFileLock<A>(
     return operation(target)
   }
   const result = (queues.get(target) ?? Promise.resolve()).then(async () => {
-    await fs.mkdir(dirname(target), { recursive: true })
-    const lock = resolve(dirname(target), `.${basename(target)}.startos-lock`)
-    const child = spawn(
-      'flock',
-      [
-        '--exclusive',
-        '--',
-        lock,
-        'sh',
-        '-c',
-        'printf "locked\\n"; cat >/dev/null',
-      ],
-      { stdio: ['pipe', 'pipe', 'pipe'] },
-    )
-    let stderr = ''
-    let ready = false
-    child.stderr.on('data', chunk => (stderr += chunk))
-    const exited = new Promise<void>((resolve, reject) => {
-      child.once('error', reject)
-      child.once('close', code =>
-        code === 0
-          ? resolve()
-          : reject(new Error(`File lock failed: ${stderr}`)),
-      )
-    })
+    const holder = { target, held: true, flocked: false }
     try {
-      await new Promise<void>((resolve, reject) => {
-        child.stdout.once('data', () => {
-          ready = true
-          resolve()
-        })
-        exited.then(() => {
-          if (!ready) reject(new Error('File lock exited before acquisition'))
-        }, reject)
-      })
-      const holder = { target, held: true }
-      try {
-        return await heldLocks.run([...outer, holder], () => operation(target))
-      } finally {
-        holder.held = false
-      }
+      return await heldLocks.run([...outer, holder], () => operation(target))
     } finally {
-      child.stdin.end()
-      await exited
+      holder.held = false
     }
   })
   const tail = result.then(
@@ -101,7 +61,75 @@ export async function withFileLock<A>(
   return result
 }
 
+/** Also excludes other processes through a sibling lock file removed on release. */
+export async function withFileLock<A>(
+  path: string,
+  operation: (path: string) => Promise<A>,
+): Promise<A> {
+  return withFileQueue(path, async target => {
+    const holder = heldLocks
+      .getStore()!
+      .find(lock => lock.held && lock.target === target)!
+    if (holder.flocked) return operation(target)
+    return flock(target, async () => {
+      holder.flocked = true
+      try {
+        return await operation(target)
+      } finally {
+        holder.flocked = false
+      }
+    })
+  })
+}
+
+// Retries until the locked inode is the one at the path; the holder unlinks
+// the lock file before releasing it.
+const flockScript = `
+while :; do
+  exec 9>>"$1"
+  flock --exclusive 9
+  [ /proc/$$/fd/9 -ef "$1" ] && break
+  exec 9>&-
+done
+printf 'locked\\n'
+cat >/dev/null
+rm -f "$1"
+`
+
+async function flock<A>(target: string, operation: () => Promise<A>) {
+  await fs.mkdir(dirname(target), { recursive: true })
+  const lock = resolve(dirname(target), `.${basename(target)}.startos-lock`)
+  const child = spawn('sh', ['-ec', flockScript, 'sh', lock], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+  let stderr = ''
+  let ready = false
+  child.stderr.on('data', chunk => (stderr += chunk))
+  const exited = new Promise<void>((resolve, reject) => {
+    child.once('error', reject)
+    child.once('close', code =>
+      code === 0 ? resolve() : reject(new Error(`File lock failed: ${stderr}`)),
+    )
+  })
+  try {
+    await new Promise<void>((resolve, reject) => {
+      child.stdout.once('data', () => {
+        ready = true
+        resolve()
+      })
+      exited.then(() => {
+        if (!ready) reject(new Error('File lock exited before acquisition'))
+      }, reject)
+    })
+    return await operation()
+  } finally {
+    child.stdin.end()
+    await exited
+  }
+}
+
 export async function replaceFile(path: string, data: string): Promise<void> {
+  await fs.mkdir(dirname(path), { recursive: true })
   const previous = await fs.stat(path).catch(error => {
     if (error.code !== 'ENOENT') throw error
     return null

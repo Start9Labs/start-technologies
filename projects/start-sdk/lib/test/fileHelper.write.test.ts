@@ -227,7 +227,7 @@ test('failure to acquire a lock does not write and does not poison the queue', a
   await fs.chmod(dir, 0o555)
   const file = FileHelper.json(path, shape)
   try {
-    await expect(file.write(effects, { count: 1 })).rejects.toThrow(
+    await expect(file.merge(effects, { count: 1 })).rejects.toThrow(
       'File lock failed',
     )
   } finally {
@@ -235,6 +235,18 @@ test('failure to acquire a lock does not write and does not poison the queue', a
   }
   await file.write(effects, { count: 2 })
   expect(await file.read().once()).toEqual({ count: 2 })
+})
+
+test('released locks leave no lock file behind', async () => {
+  const file = FileHelper.json(path, shape)
+  await Promise.all(
+    Array.from({ length: 5 }, () =>
+      file.update(effects, value => ({ count: (value?.count ?? 0) + 1 })),
+    ),
+  )
+  await file.merge(effects, { a: 'a' })
+  expect(await file.read().once()).toEqual({ count: 5, a: 'a' })
+  expect(await fs.readdir(dir)).toEqual(['store.json'])
 })
 
 test('a bind-mounted target is written in place', async () => {
