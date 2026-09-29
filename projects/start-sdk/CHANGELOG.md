@@ -110,6 +110,8 @@
 
 ### Added
 
+- **`FileHelper.update(effects, change)`** replaces a file with what `change` returns for its current contents, with no other write to that file landing between the read and the write. `merge()` and `write()` share the same per-path queue, so concurrent merges to one file no longer lose an update. See [Read-Modify-Write with `update()`](https://docs.start9.com/packaging/file-models.html#read-modify-write-with-update)
+
 - **`preDownloadAlert` in `setupManifest()`** displays a localized Markdown confirmation before downloading an update from an installed version matching `when.sourceVersion`.
 
 - **An `env` variable set to `undefined` is removed from the process**,
@@ -188,6 +190,8 @@
   See [Result Types](https://docs.start9.com/packaging/actions.html#result-types)
 
 ### Fixed
+
+- **A `FileHelper` write can no longer leave its file truncated.** It writes a temporary file beside the target and renames it over, so a reader sees the old contents or the new ones, and a write cut short leaves the old file in place. The replacement keeps the file's mode and owner, writes through a symlink, and overwrites in place a file bind-mounted into a subcontainer, whose mount would otherwise keep showing the old contents
 
 - **Reactive init re-runs receive `kind: null`** after the initial install,
   update, or restore pass. Lifecycle-only work guarded by `kind` runs once for

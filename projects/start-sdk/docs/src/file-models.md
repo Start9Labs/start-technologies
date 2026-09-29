@@ -203,6 +203,18 @@ await storeJson.write(effects, {
 })
 ```
 
+### Read-Modify-Write with `update()`
+
+When the new contents depend on what is in the file now — increment a counter, clear a flag only if it still holds the id you consumed — use `update()`. It passes the current value (what `read().once()` returns, or `null` if the file is missing) to your function and writes what it returns:
+
+```typescript
+await storeJson.update(effects, store => (store?.pendingId === consumedId ? { ...store, pendingId: null } : null))
+```
+
+Returning `null` leaves the file as it is. Writes to one file from `write()`, `merge()` and `update()` run one at a time, so no other write lands between the read and the write. Don't write the same file from inside the function: that write waits for this one, which never finishes.
+
+Every write replaces the file atomically — a reader sees the old contents or the new ones, never a truncated file. A file that is itself mounted into a subcontainer (`type: 'file'`) is the exception: it is overwritten in place, so the mount sees the new contents.
+
 ### What an Empty `merge()` Does
 
 Every `merge()` — including `merge(effects, {})` — reads the file, parses it through your schema, deep-merges the patch over the parsed value, re-serializes, and writes only if the result differs from what was on disk. With an empty patch, against a file that already exists:

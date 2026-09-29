@@ -6,7 +6,9 @@ import {
   type XmlBuilderOptions,
 } from 'fast-xml-parser'
 import * as INI from 'ini'
+import { randomBytes } from 'node:crypto'
 import * as fs from 'node:fs/promises'
+import { posix, resolve as resolvePath } from 'node:path'
 import * as YAML from 'yaml'
 import { z } from '@start9labs/start-core/zExport'
 import * as T from '@start9labs/start-core/types'
@@ -88,6 +90,125 @@ function filterUndefined<A>(a: A): A {
     }, {}) as A
   }
   return a
+}
+
+const writeQueues = new Map<string, Promise<void>>()
+
+/**
+ * Runs `op` after every write already queued for `path`. Every procedure of a
+ * package runs in one runtime process, so an in-process queue serializes all
+ * of its writers to a file.
+ */
+function queueWrite<T>(path: string, op: () => Promise<T>): Promise<T> {
+  const key = resolvePath(path)
+  const result = (writeQueues.get(key) ?? Promise.resolve()).then(op)
+  const tail = result.then(
+    () => {},
+    () => {},
+  )
+  writeQueues.set(key, tail)
+  tail.then(() => {
+    if (writeQueues.get(key) === tail) writeQueues.delete(key)
+  })
+  return result
+}
+
+const unescapeMountinfo = (field: string) =>
+  field.replace(/\\([0-7]{3})/g, (_, octal) =>
+    String.fromCharCode(parseInt(octal, 8)),
+  )
+
+/**
+ * Whether the file at `path`, on device `device` (`major:minor`), is the
+ * source of a bind mount listed in `mountinfo` (the format of
+ * `/proc/self/mountinfo`).
+ */
+export function isBindMountSource(
+  mountinfo: string,
+  path: string,
+  device: string,
+): boolean {
+  const mounts = mountinfo
+    .split('\n')
+    .map(line => line.split(' '))
+    .filter(fields => fields.length > 4 && fields[2] === device)
+    .map(fields => ({
+      root: unescapeMountinfo(fields[3]),
+      mountPoint: unescapeMountinfo(fields[4]),
+    }))
+  const holding = mounts
+    .filter(
+      m =>
+        m.mountPoint === '/' ||
+        path === m.mountPoint ||
+        path.startsWith(`${m.mountPoint}/`),
+    )
+    .reduce<
+      (typeof mounts)[number] | null
+    >((best, m) => (!best || m.mountPoint.length >= best.mountPoint.length ? m : best), null)
+  if (!holding) return false
+  const root = posix.join(
+    holding.root,
+    holding.mountPoint === '/' ? path : path.slice(holding.mountPoint.length),
+  )
+  return mounts.some(m => m !== holding && m.root === root)
+}
+
+function deviceId(dev: bigint): string {
+  const major = ((dev >> 8n) & 0xfffn) | ((dev >> 32n) & ~0xfffn)
+  const minor = (dev & 0xffn) | ((dev >> 12n) & ~0xffn)
+  return `${major}:${minor}`
+}
+
+/**
+ * Replaces the contents of `path` so that a reader sees either the old
+ * contents or the new ones, never a truncated file: the data is written and
+ * flushed to a temporary file beside it, which is then renamed over it.
+ *
+ * A bind mount pins the inode it was made from, so a file mounted into a
+ * subcontainer (`type: 'file'`) is overwritten in place instead; renaming over
+ * it would leave the mount showing the old contents.
+ */
+async function replaceFile(path: string, data: string): Promise<void> {
+  const target = await fs.realpath(path).catch(() => null)
+  if (target === null) {
+    const link = await fs.lstat(path).catch(() => null)
+    if (link?.isSymbolicLink()) return fs.writeFile(path, data)
+  }
+  const dest = target ?? path
+  const stat = await fs.stat(dest, { bigint: true }).catch(() => null)
+  if (stat) {
+    const mountinfo = await fs
+      .readFile('/proc/self/mountinfo', 'utf-8')
+      .catch(() => '')
+    if (isBindMountSource(mountinfo, dest, deviceId(stat.dev))) {
+      return fs.writeFile(dest, data)
+    }
+  }
+
+  const slash = dest.lastIndexOf('/')
+  const tmp = `${dest.slice(0, slash + 1)}.${dest.slice(slash + 1)}.${randomBytes(6).toString('hex')}.tmp`
+  try {
+    await fs.writeFile(tmp, data, { flag: 'wx', flush: true })
+    if (stat) {
+      await fs.chmod(tmp, Number(stat.mode & 0o7777n))
+      const created = await fs.stat(tmp)
+      if (
+        created.uid !== Number(stat.uid) ||
+        created.gid !== Number(stat.gid)
+      ) {
+        await fs.chown(tmp, Number(stat.uid), Number(stat.gid))
+      }
+    }
+    await fs.rename(tmp, dest)
+  } catch (e) {
+    await fs.rm(tmp, { force: true })
+    const code = (e as NodeJS.ErrnoException).code
+    if (['EACCES', 'EBUSY', 'EPERM', 'EXDEV'].includes(code ?? '')) {
+      return fs.writeFile(dest, data)
+    }
+    throw e
+  }
 }
 
 /**
@@ -198,6 +319,13 @@ export interface FileHelper<A> {
     data: T.AllowReadonly<T.DeepPartial<A>>,
     options?: { allowWriteAfterConst?: boolean },
   ): Promise<null>
+  update(
+    effects: T.Effects,
+    change: (
+      current: A | null,
+    ) => T.AllowReadonly<A> | A | null | Promise<T.AllowReadonly<A> | A | null>,
+    options?: { allowWriteAfterConst?: boolean },
+  ): Promise<null>
   withPath(path: ToPath): FileHelper<A>
 }
 
@@ -221,7 +349,7 @@ class FileHelperImpl<A> implements FileHelper<A> {
       await fs.mkdir(parent[1], { recursive: true })
     }
 
-    await fs.writeFile(this.path, data)
+    await replaceFile(this.path, data)
 
     return null
   }
@@ -372,6 +500,44 @@ class FileHelperImpl<A> implements FileHelper<A> {
     }
   }
 
+  private checkConsts(
+    effects: T.Effects,
+    written: A,
+    options: { allowWriteAfterConst?: boolean },
+  ) {
+    if (!options.allowWriteAfterConst && effects.constRetry) {
+      const records = this.consts.filter(([c]) => c === effects.constRetry)
+      for (const record of records) {
+        const [_, prev, map, eq] = record
+        if (!eq(prev, map(written))) {
+          throw new Error(`Canceled: write after const: ${this.path}`)
+        }
+      }
+    }
+  }
+
+  /**
+   * Reads the file, passes its raw contents to `change`, and writes the
+   * result if it differs from what is on disk, all in this path's write queue.
+   */
+  private async modify(
+    effects: T.Effects,
+    change: (raw: string | null) => Promise<A | null>,
+    options: { allowWriteAfterConst?: boolean },
+  ) {
+    const written = await queueWrite(this.path, async () => {
+      const raw = await this.readFileRaw()
+      const next = await change(raw)
+      if (next === null) return null
+      const toWrite = this.writeData(next)
+      if (toWrite === raw) return null
+      await this.writeFileRaw(toWrite)
+      return { data: next }
+    })
+    if (written) this.checkConsts(effects, written.data, options)
+    return null
+  }
+
   /**
    * Accepts full structured data and overwrites the existing file on disk if it exists.
    */
@@ -381,16 +547,8 @@ class FileHelperImpl<A> implements FileHelper<A> {
     options: { allowWriteAfterConst?: boolean } = {},
   ) {
     const newData = this.validate(data)
-    await this.writeFile(newData)
-    if (!options.allowWriteAfterConst && effects.constRetry) {
-      const records = this.consts.filter(([c]) => c === effects.constRetry)
-      for (const record of records) {
-        const [_, prev, map, eq] = record
-        if (!eq(prev, map(newData))) {
-          throw new Error(`Canceled: write after const: ${this.path}`)
-        }
-      }
-    }
+    await queueWrite(this.path, () => this.writeFile(newData))
+    this.checkConsts(effects, newData, options)
     return null
   }
 
@@ -402,26 +560,43 @@ class FileHelperImpl<A> implements FileHelper<A> {
     data: T.AllowReadonly<T.DeepPartial<A>>,
     options: { allowWriteAfterConst?: boolean } = {},
   ) {
-    const fileDataRaw = await this.readFileRaw()
-    let fileData: any = fileDataRaw === null ? null : this.readData(fileDataRaw)
-    try {
-      fileData = this.validate(fileData)
-    } catch (_) {}
-    const mergeData = this.validate(fileMerge({}, fileData, data))
-    const toWrite = this.writeData(mergeData)
-    if (toWrite !== fileDataRaw) {
-      await this.writeFile(mergeData)
-      if (!options.allowWriteAfterConst && effects.constRetry) {
-        const records = this.consts.filter(([c]) => c === effects.constRetry)
-        for (const record of records) {
-          const [_, prev, map, eq] = record
-          if (!eq(prev, map(mergeData))) {
-            throw new Error(`Canceled: write after const: ${this.path}`)
-          }
-        }
-      }
-    }
-    return null
+    return this.modify(
+      effects,
+      async raw => {
+        let fileData: any = raw === null ? null : this.readData(raw)
+        try {
+          fileData = this.validate(fileData)
+        } catch (_) {}
+        return this.validate(fileMerge({}, fileData, data))
+      },
+      options,
+    )
+  }
+
+  /**
+   * Replaces the file with what `change` returns for its current contents —
+   * the value `read().once()` would return, or `null` if the file is missing.
+   * Returning `null` leaves the file as it is. Writers to one path run one at
+   * a time, so no other write to this file lands between the read and the
+   * write. `change` must not write this file itself: that write would wait for
+   * this one to finish.
+   */
+  async update(
+    effects: T.Effects,
+    change: (
+      current: A | null,
+    ) => T.AllowReadonly<A> | A | null | Promise<T.AllowReadonly<A> | A | null>,
+    options: { allowWriteAfterConst?: boolean } = {},
+  ) {
+    return this.modify(
+      effects,
+      async raw => {
+        const data = raw === null ? null : this.readData(raw)
+        const next = await change(data ? this.validate(data) : null)
+        return next === null ? null : this.validate(next)
+      },
+      options,
+    )
   }
 
   /**
