@@ -213,11 +213,7 @@ await storeJson.write(effects, {
 Use `update()` when the next value depends on the current file, including toggles and deleting entries from a typed record:
 
 ```typescript
-await configToml.update(effects, current =>
-  current === null
-    ? null
-    : { ...current, allow_registration: !current.allow_registration },
-)
+await configToml.update(effects, current => (current === null ? null : { ...current, allow_registration: !current.allow_registration }))
 ```
 
 The callback receives the same validated value as `read().once()`. Return a complete replacement or `null` to skip writing. An unchanged serialized value also skips writing. The callback may be asynchronous and must operate on its supplied value. Perform SDK I/O before entering it; FileHelper writes and mounted subcontainer commands acquire file locks.
@@ -548,11 +544,7 @@ const appSub = sdk.SubContainer.of(
 await configToml.read(c => c.some_mutable_setting).const(effects)
 
 // In an action, toggle a setting directly
-await configToml.update(effects, current =>
-  current === null
-    ? null
-    : { ...current, allow_registration: !current.allow_registration },
-)
+await configToml.update(effects, current => (current === null ? null : { ...current, allow_registration: !current.allow_registration }))
 ```
 
 > [!WARNING]
