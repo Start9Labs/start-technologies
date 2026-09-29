@@ -43,6 +43,7 @@ use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::AtomicFile;
 
 #[derive(Deserialize, Serialize, Parser, TS)]
+#[ts(export)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
@@ -51,14 +52,19 @@ pub struct UpdateSystemParams {
     #[ts(type = "string")]
     registry: Url,
     #[ts(type = "string | null")]
-    #[arg(long = "to", help = "help.arg.update-target-version")]
-    target: Option<VersionRange>,
+    #[arg(
+        long = "to",
+        value_name = "TARGET",
+        help = "help.arg.update-target-version"
+    )]
+    target_version: Option<VersionRange>,
     #[arg(long = "no-progress", action = ArgAction::SetFalse, help = "help.arg.no-progress")]
     #[serde(default)]
     progress: bool,
 }
 
 #[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
 pub struct UpdateSystemRes {
     #[ts(type = "string | null")]
     target: Option<Version>,
@@ -72,7 +78,7 @@ pub struct UpdateSystemRes {
 pub async fn update_system(
     ctx: RpcContext,
     UpdateSystemParams {
-        target,
+        target_version: target,
         registry,
         progress,
     }: UpdateSystemParams,
@@ -458,4 +464,23 @@ pub(crate) async fn do_update(
     progress.complete();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_params_use_target_version_with_cli_to_flag() {
+        let params = UpdateSystemParams::try_parse_from([
+            "update",
+            "https://registry.start9.com",
+            "--to",
+            "=0.4.0.2",
+        ])
+        .unwrap();
+        let value = serde_json::to_value(params).unwrap();
+        assert_eq!(value["targetVersion"], "=0.4.0.2:0");
+        assert!(value.get("target").is_none());
+    }
 }

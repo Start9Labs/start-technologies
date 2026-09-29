@@ -12,6 +12,8 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **Starting a StartOS update from the UI uses the selected release and configured registry.**
+
 - **Required service dependencies appear from the package manifest during initialization.** StartOS shows their base version and health requirements even if the service has not reported runtime dependencies; active runtime requirements can tighten the base, including for optional dependencies. While a service is not using an optional dependency, its tasks for that dependency are hidden and do not prevent it from starting.
 
 - **Freshly generated Root CAs carry an Authority Key Identifier conforming to RFC 5280 and the CA/Browser Forum Baseline Requirements.** Existing servers retain their trusted Root CA when updated.
