@@ -1,20 +1,6 @@
 # Start9 Hardware
 
-Every server and router Start9 has sold, newest first: the RISC-V Router, the Server One (6600H) — the only server sold today — the Server One (2026), Server Pure (2026), Server Pure (2025), Server One (2024), Server One (2023), Server Pure (2023, sold earlier as the Embassy Pro and Server Pro), and the Raspberry Pi 4 based Embassy, Embassy One and Server Lite. Each entry lists the specifications, how to tell that model from its neighbours, and whether its memory and storage can be upgraded. What is for sale now is at [store.start9.com](https://store.start9.com). For hardware Start9 did not sell, see the community [known-good hardware list](https://community.start9.com/t/known-good-hardware-master-list-hardware-capable-of-running-startos/).
-
-## RISC-V Router
-
-- **Sold:** October 2026 – present
-- **Base hardware:** BananaPi BPI-F3
-- **CPU:** SpaceMiT K1, 8-core RISC-V
-- **RAM:** 4 GB LPDDR4
-- **Storage:** 16 GB eMMC, plus a microSD slot for flashing
-- **Ethernet:** 1× Gigabit WAN, 1× Gigabit LAN
-- **Wi-Fi:** AsiaRF AW7916-NPD mini-PCIe module (MediaTek MT7916), Wi-Fi 6E, 2.4 GHz + 5 GHz concurrent, up to 2402 Mbps. Sold separately to US customers, as FCC regulations require
-- **Power:** 12 V / 3 A DC; shipped with a C13/C14 mains cord
-- **Operating system:** [StartWRT](/start-wrt/)
-- **How to identify it:** Start9 wordmark on top, a small DeepComputing logo on the back, and a Wi-Fi password sticker on the bottom
-- **Known issues:** none
+Every server Start9 has sold, newest first: the Server One (6600H) — the only server sold today — the Server One (2026), Server Pure (2026), Server Pure (2025), Server One (2024), Server One (2023), Server Pure (2023, sold earlier as the Embassy Pro and Server Pro), and the Raspberry Pi 4 based Embassy, Embassy One and Server Lite. Each entry lists the specifications, how to tell that model from its neighbours, and whether its memory and storage can be upgraded. What is for sale now is at [store.start9.com](https://store.start9.com). For the router, see [Hardware](/start-wrt/hardware.html) in the StartWRT documentation. For hardware Start9 did not sell, see the community [known-good hardware list](https://community.start9.com/t/known-good-hardware-master-list-hardware-capable-of-running-startos/).
 
 ## Server One (6600H)
 
