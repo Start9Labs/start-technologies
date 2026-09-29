@@ -189,6 +189,10 @@
 
 ### Fixed
 
+- **An awaited `waitFor` waits until its predicate holds.** Awaiting
+  `waitFor` on a status, file or other reader no longer fails with
+  `AbortedError` after garbage collection while the condition is still false.
+
 - **Reactive init re-runs receive `kind: null`** after the initial install,
   update, or restore pass. Lifecycle-only work guarded by `kind` runs once for
   that event, even when a watched value changes.
