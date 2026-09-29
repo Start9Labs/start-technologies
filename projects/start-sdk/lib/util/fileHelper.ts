@@ -22,8 +22,8 @@ const exists = (path: string) =>
     () => false,
   )
 
-async function onCreated(path: string) {
-  if (path === '/') return
+async function onCreated(path: string, abort: AbortSignal) {
+  if (path === '/' || abort.aborted) return
   if (!path.startsWith('/')) path = `${process.cwd()}/${path}`
   if (await exists(path)) {
     return
@@ -31,27 +31,16 @@ async function onCreated(path: string) {
   const split = path.split('/')
   const filename = split.pop()
   const parent = split.join('/')
-  await onCreated(parent)
-  const ctrl = new AbortController()
-  const watch = fs.watch(parent, { persistent: false, signal: ctrl.signal })
-  if (await exists(path)) {
-    ctrl.abort()
-    return
-  }
-  if (
-    await fs.access(path).then(
-      () => true,
-      () => false,
-    )
-  ) {
-    ctrl.abort()
-    return
-  }
-  for await (let event of watch) {
-    if (event.filename === filename) {
-      ctrl.abort('finished')
-      return
+  await onCreated(parent, abort)
+  if (abort.aborted) return
+  const watch = fs.watch(parent, { persistent: false, signal: abort })
+  try {
+    if (await exists(path)) return
+    for await (const event of watch) {
+      if (event.filename === filename) return
     }
+  } finally {
+    await watch.return?.()
   }
 }
 
@@ -288,29 +277,23 @@ class FileHelperImpl<A> implements FileHelper<A> {
       ): AsyncGenerator<A | null, void> {
         while (this.effects.isInContext && !abort.aborted) {
           if (await exists(filePath)) {
-            const ctrl = new AbortController()
-            const onAbort = () => ctrl.abort()
-            abort.addEventListener('abort', onAbort, { once: true })
+            const watch = fs.watch(filePath, {
+              persistent: false,
+              signal: abort,
+            })
             try {
-              const watch = fs.watch(filePath, {
-                persistent: false,
-                signal: ctrl.signal,
-              })
               yield await doRead()
-              await Promise.resolve()
-                .then(async () => {
-                  for await (const _ of watch) {
-                    ctrl.abort()
-                    return null
-                  }
-                })
-                .catch(e => console.error(asError(e)))
+              await watch.next().catch(e => {
+                if (!abort.aborted) console.error(asError(e))
+              })
             } finally {
-              abort.removeEventListener('abort', onAbort)
+              await watch.return?.()
             }
           } else {
             yield null
-            await onCreated(filePath).catch(e => console.error(asError(e)))
+            await onCreated(filePath, abort).catch(e => {
+              if (!abort.aborted) console.error(asError(e))
+            })
           }
         }
       }

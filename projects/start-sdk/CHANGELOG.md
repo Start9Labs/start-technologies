@@ -111,7 +111,8 @@
 ### Added
 
 - **`waitFor` takes an optional `AbortSignal`**, as `watch` does, and rejects
-  with `AbortedError` when it aborts. Pass one to cancel a wait you race against
+  with `AbortedError` when it aborts, including while waiting for a file or
+  its parent directory to be created. Pass one to cancel a wait you race against
   a timeout. `watch` and `waitFor` end at once on a signal that has already
   aborted.
 

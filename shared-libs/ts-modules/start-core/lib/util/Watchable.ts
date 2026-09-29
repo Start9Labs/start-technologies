@@ -14,7 +14,15 @@ type WatchSources<V extends unknown[]> = { [K in keyof V]: WatchSource<V[K]> }
 function linkedAbort(abort?: AbortSignal): AbortController {
   const ctrl = new AbortController()
   if (abort?.aborted) ctrl.abort()
-  else abort?.addEventListener('abort', () => ctrl.abort(), { once: true })
+  else if (abort) {
+    const onAbort = () => ctrl.abort()
+    abort.addEventListener('abort', onAbort, { once: true })
+    ctrl.signal.addEventListener(
+      'abort',
+      () => abort.removeEventListener('abort', onAbort),
+      { once: true },
+    )
+  }
   return ctrl
 }
 
@@ -151,17 +159,20 @@ export abstract class Watchable<A> implements WatchSource<A> {
     return this.fetch()
   }
 
-  /**
-   * Watches the value. Returns an async iterator that yields whenever the value changes
-   */
+  /** Values emitted when the source changes. */
   watch(abort?: AbortSignal): AsyncGenerator<A, never, unknown> {
-    const ctrl = linkedAbort(abort)
+    let ctrl: AbortController | undefined
     return DropGenerator.of(
-      (async function* (gen): AsyncGenerator<A, never, unknown> {
-        yield* gen
-        throw new AbortedError()
-      })(this.watchGen(ctrl.signal)),
-      () => ctrl.abort(),
+      (async function* (self): AsyncGenerator<A, never, unknown> {
+        ctrl = linkedAbort(abort)
+        try {
+          yield* self.watchGen(ctrl.signal)
+          throw new AbortedError()
+        } finally {
+          ctrl.abort()
+        }
+      })(this),
+      () => ctrl?.abort(),
     )
   }
 
@@ -200,20 +211,21 @@ export abstract class Watchable<A> implements WatchSource<A> {
       )
   }
 
-  /**
-   * Watches the value. Returns when the predicate is true, or rejects with
-   * `AbortedError` once `abort` fires.
-   */
+  /** Resolves on a matching value; rejects with `AbortedError` on cancellation. */
   waitFor(pred: (value: A) => boolean, abort?: AbortSignal): Promise<A> {
     const ctrl = linkedAbort(abort)
     return DropPromise.of(
       Promise.resolve().then(async () => {
-        for await (const next of this.watchGen(ctrl.signal)) {
-          if (pred(next)) {
-            return next
+        try {
+          for await (const next of this.watchGen(ctrl.signal)) {
+            if (pred(next)) {
+              return next
+            }
           }
+          throw new AbortedError()
+        } finally {
+          ctrl.abort()
         }
-        throw new AbortedError()
       }),
       () => ctrl.abort(),
     )
@@ -305,27 +317,28 @@ class Combined<V extends unknown[], Mapped> extends MappedWatchable<V, Mapped> {
 
   private async *combineSources(abort: AbortSignal): AsyncGenerator<V, void> {
     const gens = this.sources.map(s => s.watch(abort))
-    const next = (i: number) =>
-      gens[i].next().then(
-        r => ({ i, r }),
-        e => {
-          if (e instanceof AbortedError) return { i, r: null }
-          throw e
-        },
-      )
-    const first = await Promise.all(gens.map((_, i) => next(i)))
-    const values: unknown[] = []
-    for (const { i, r } of first) {
-      if (!r || r.done) return
-      values[i] = r.value
+    const next = (i: number) => {
+      const promise = gens[i].next().then(r => {
+        if (r.done) throw new AbortedError()
+        return { i, value: r.value }
+      })
+      // Prefetched reads can reject while the consumer holds the previous yield.
+      promise.catch(() => {})
+      return promise
     }
-    const pending = gens.map((_, i) => next(i))
-    while (!abort.aborted) {
-      yield [...values] as V
-      const { i, r } = await Promise.race(pending)
-      if (!r || r.done) return
-      values[i] = r.value
-      pending[i] = next(i)
+    try {
+      const first = await Promise.all(gens.map((_, i) => next(i)))
+      const values: unknown[] = []
+      for (const { i, value } of first) values[i] = value
+      const pending = gens.map((_, i) => next(i))
+      while (!abort.aborted) {
+        yield [...values] as V
+        const { i, value } = await Promise.race(pending)
+        values[i] = value
+        pending[i] = next(i)
+      }
+    } catch (e) {
+      if (!(e instanceof AbortedError)) throw e
     }
   }
 }

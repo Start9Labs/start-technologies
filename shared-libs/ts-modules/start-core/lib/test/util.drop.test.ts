@@ -59,6 +59,13 @@ describe('DropPromise under garbage collection', () => {
     expect(settled).toBe(false)
   })
 
+  test('a watch dropped between next calls aborts', async () => {
+    const never = new Never(effects)
+    await never.watch().next()
+    await collect()
+    expect(never.signals[0].aborted).toBe(true)
+  })
+
   test('an unsubscribed DropPromise runs its drop', async () => {
     const drop = jest.fn()
     DropPromise.of(new Promise(() => {}), drop)

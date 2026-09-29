@@ -175,6 +175,8 @@ const syncedStore = await storeJson.read(s => s.fullySynced).waitFor(effects, sy
 const syncedInTime = await storeJson.read(s => s.fullySynced).waitFor(effects, synced => synced === true, AbortSignal.timeout(60_000))
 ```
 
+The signal also cancels waits for a file or its parent directory to be created.
+
 ## Writing File Models
 
 ### Prefer `merge()` Over `write()`
