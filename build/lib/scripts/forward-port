@@ -13,11 +13,7 @@
 #     offset internal port (one rule, <count> map elements). This is what lets
 #     bindPortRange use different external/internal bases.
 #
-# Outbound, traffic the target sends from its forwarded port(s) out of the
-# interface that holds $sip is SNATed to $sip and the matching external port.
-# Without it, that traffic falls to lxc-net's (or StartTunnel's) masquerade,
-# which picks another source port on a NAT clash and then reuses that mapping
-# for every later flow from the same source.
+# Outbound UDP uses the forward's external address and corresponding port.
 
 if [ -z "$sip" ] || [ -z "$dip" ] || [ -z "$dprefix" ] || [ -z "$sport" ] || [ -z "$dport" ]; then
     >&2 echo 'missing required env var'
@@ -59,8 +55,6 @@ else
     dport_match="${dport}-${dport_end}"
 fi
 
-# SNAT clause pinning the target's outbound source port(s) to the external
-# one(s). A range maps port by port, so no flow moves within the range either.
 if [ "$count" -eq 1 ]; then
     snat="th sport $dport snat to $sip:$sport"
 else
@@ -116,9 +110,8 @@ delete_tagged() {
         # Masquerade hairpin replies so they reverse through this host.
         echo "add rule ip startos postrouting fib saddr type local ct original ip daddr $sip ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
         echo "add rule ip startos postrouting ip saddr $dip/$dprefix ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
-        # Pin the target's outbound traffic from the forwarded port to $sip.
         if [ -n "$sip_iface" ]; then
-            echo "add rule ip startos forward_snat ip saddr $dip oifname \"$sip_iface\" $PROTO $snat comment \"$TAG\""
+            echo "add rule ip startos forward_snat ip saddr $dip oifname \"$sip_iface\" meta l4proto udp $snat comment \"$TAG\""
         fi
     fi
 } | nft -f -

@@ -30,6 +30,8 @@ If you need a stable public IP, use a [StartTunnel](/start-tunnel/) gateway. VPS
 
 The selected port must be forwarded in the corresponding gateway. StartOS tests port forwarding automatically when you add or enable a public IP address, and will guide you through the setup if the test doesn't pass. When the port is served directly by the service (the usual case for a raw IP), this test needs the service to be **running** — it is disabled while the service is stopped, and if the service restarts as you enable the address StartOS shows it as untested rather than failed until it is back up (see [Interfaces](interfaces.md)).
 
+IPv4 UDP traffic initiated from a forwarded service port uses the corresponding external address and port when it leaves StartOS through that forward's gateway. Upstream routers can apply additional NAT.
+
 - **Routers**: Refer to your router's manual for instructions on port forwarding.
 
-- **StartTunnel**: Refer to the [StartTunnel Port Forwarding guide](/start-tunnel/port-forwarding.html).
+- **StartTunnel**: Refer to the [StartTunnel Port Forwarding guide](/start-tunnel/published-ports.html).

@@ -13,6 +13,8 @@ Publishing a port exposes a device's port to the public Internet. StartTunnel ca
 - An **IPv4** published port is a DNAT: clients connect to your VPS's public IPv4 on the external port, and the tunnel rewrites the destination to the device's tunnel IP and internal port.
 - An **IPv6** published port is a _pinhole_: the device already has a globally-routable address (its GUA — see [IPv6](./ipv6.md)), so there is no NAT. The tunnel simply permits inbound to `[GUA]:port`. If you pick an external port different from the internal port (e.g. an `80 → 443` redirect) it becomes a port-only translation on that same address.
 
+IPv4 UDP traffic initiated by the device from a forwarded internal port leaves through the forward's public interface using its public address and corresponding external port. A forwarded range maps each internal port to its matching external port.
+
 Because each device has its own IPv6 address, two different devices can both publish on the same external port over IPv6 (whereas over IPv4 they share one public address, so external ports must be unique).
 
 > [!NOTE]
