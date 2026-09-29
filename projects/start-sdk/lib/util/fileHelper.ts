@@ -22,8 +22,26 @@ const exists = (path: string) =>
     () => false,
   )
 
-async function onCreated(path: string) {
-  if (path === '/') return
+/** Starts watching at once; `fs.watch` defers until its first read. */
+function watchPath(path: string, abort: AbortSignal) {
+  const ctrl = new AbortController()
+  const onAbort = () => ctrl.abort()
+  abort.addEventListener('abort', onAbort, { once: true })
+  const events = fs.watch(path, { persistent: false, signal: ctrl.signal })
+  const first = events.next()
+  first.catch(() => {})
+  return {
+    events,
+    first,
+    stop: () => {
+      abort.removeEventListener('abort', onAbort)
+      ctrl.abort()
+    },
+  }
+}
+
+async function onCreated(path: string, abort: AbortSignal) {
+  if (path === '/' || abort.aborted) return
   if (!path.startsWith('/')) path = `${process.cwd()}/${path}`
   if (await exists(path)) {
     return
@@ -31,27 +49,16 @@ async function onCreated(path: string) {
   const split = path.split('/')
   const filename = split.pop()
   const parent = split.join('/')
-  await onCreated(parent)
-  const ctrl = new AbortController()
-  const watch = fs.watch(parent, { persistent: false, signal: ctrl.signal })
-  if (await exists(path)) {
-    ctrl.abort()
-    return
-  }
-  if (
-    await fs.access(path).then(
-      () => true,
-      () => false,
-    )
-  ) {
-    ctrl.abort()
-    return
-  }
-  for await (let event of watch) {
-    if (event.filename === filename) {
-      ctrl.abort('finished')
-      return
+  await onCreated(parent, abort)
+  if (abort.aborted) return
+  const watch = watchPath(parent, abort)
+  try {
+    if (await exists(path)) return
+    for (let r = await watch.first; !r.done; r = await watch.events.next()) {
+      if (r.value.filename === filename) return
     }
+  } finally {
+    watch.stop()
   }
 }
 
@@ -135,6 +142,7 @@ type ReadType<A> = {
   waitFor: (
     effects: T.Effects,
     pred: (value: A | null) => boolean,
+    abort?: AbortSignal,
   ) => Promise<A | null>
 }
 
@@ -287,29 +295,20 @@ class FileHelperImpl<A> implements FileHelper<A> {
       ): AsyncGenerator<A | null, void> {
         while (this.effects.isInContext && !abort.aborted) {
           if (await exists(filePath)) {
-            const ctrl = new AbortController()
-            const onAbort = () => ctrl.abort()
-            abort.addEventListener('abort', onAbort, { once: true })
+            const watch = watchPath(filePath, abort)
             try {
-              const watch = fs.watch(filePath, {
-                persistent: false,
-                signal: ctrl.signal,
-              })
               yield await doRead()
-              await Promise.resolve()
-                .then(async () => {
-                  for await (const _ of watch) {
-                    ctrl.abort()
-                    return null
-                  }
-                })
-                .catch(e => console.error(asError(e)))
+              await watch.first.catch(e => {
+                if (!abort.aborted) console.error(asError(e))
+              })
             } finally {
-              abort.removeEventListener('abort', onAbort)
+              watch.stop()
             }
           } else {
             yield null
-            await onCreated(filePath).catch(e => console.error(asError(e)))
+            await onCreated(filePath, abort).catch(e => {
+              if (!abort.aborted) console.error(asError(e))
+            })
           }
         }
       }
@@ -338,7 +337,7 @@ class FileHelperImpl<A> implements FileHelper<A> {
    * - `const(effects)` - Read once but re-read when the file changes (for use with constRetry)
    * - `watch(effects)` - Async generator yielding new values on each file change
    * - `onChange(effects, callback)` - Fire a callback on each file change
-   * - `waitFor(effects, predicate)` - Block until the file value satisfies a predicate
+   * - `waitFor(effects, predicate, abort?)` - Block until the file value satisfies a predicate
    *
    * @param map - Optional transform function applied after validation
    * @param eq - Optional equality function to deduplicate watch emissions
@@ -367,8 +366,11 @@ class FileHelperImpl<A> implements FileHelper<A> {
           error?: Error,
         ) => { cancel: boolean } | Promise<{ cancel: boolean }>,
       ) => this.createFileWatchable(effects, map, eq).onChange(callback),
-      waitFor: (effects: T.Effects, pred: (value: A | null) => boolean) =>
-        this.createFileWatchable(effects, map, eq).waitFor(pred),
+      waitFor: (
+        effects: T.Effects,
+        pred: (value: A | null) => boolean,
+        abort?: AbortSignal,
+      ) => this.createFileWatchable(effects, map, eq).waitFor(pred, abort),
     }
   }
 

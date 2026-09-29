@@ -29,6 +29,8 @@ cargo check -p start-core                          # type-check the real logic
 make start-registry                                       # release musl build
 ```
 
+CI builds the Debian packages and a multi-architecture container image. Fork pull requests validate the container build locally on the runner; same-repository pull requests and branch builds also publish an image to GHCR. A manual workflow dispatch can select one architecture with the **arch** input or build all three with **ALL**.
+
 Run a local server while iterating:
 
 ```bash
