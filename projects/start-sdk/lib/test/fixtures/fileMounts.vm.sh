@@ -10,7 +10,7 @@ if [[ ${FILE_MOUNT_TEST_NAMESPACE:-} != 1 ]]; then
     exec env FILE_MOUNT_TEST_NAMESPACE=1 unshare --mount --propagation private bash "$0" "$NODE" "$HELPER" "$BUNDLE"
 fi
 SOURCE=/media/startos/volumes/file-watch-test
-[[ ! -e "$SOURCE" ]]
+[[ ! -e "$SOURCE" && ! -e /media/startos/assets/file-watch-test.txt ]]
 [[ ! -e /media/startos/images/file-watch-test.json && ! -e /media/startos/images/file-watch-test.env ]]
 BASE=$(mktemp -d /var/tmp/file-mounts.XXXXXX)
 ROOTFS="$BASE/rootfs"
@@ -22,7 +22,7 @@ cleanup() {
     umount "$SOURCE" 2>/dev/null || true
     umount "$BASE/runtime" 2>/dev/null || true
     rm -rf "$BASE" "$SOURCE"
-    rm -f /media/startos/images/file-watch-test.json /media/startos/images/file-watch-test.env
+    rm -f /media/startos/images/file-watch-test.json /media/startos/images/file-watch-test.env /media/startos/assets/file-watch-test.txt
 }
 trap cleanup EXIT
 mkdir -p "$BASE/upper" "$BASE/work" "$ROOTFS" "$BASE/runtime" "$BASE/bin" "$SOURCE"

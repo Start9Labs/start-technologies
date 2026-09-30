@@ -10,6 +10,9 @@ async function run() {
   const source = '/media/startos/volumes/file-watch-test/config.txt'
   await fs.mkdir('/media/startos/volumes/file-watch-test', { recursive: true })
   await fs.mkdir('/media/startos/images', { recursive: true })
+  const asset = '/media/startos/assets/file-watch-test.txt'
+  await fs.mkdir('/media/startos/assets', { recursive: true })
+  await fs.writeFile(asset, 'asset\n')
   await fs.writeFile('/media/startos/images/file-watch-test.json', '{}')
   await fs.writeFile('/media/startos/images/file-watch-test.env', '')
   await fs.writeFile(source, 'old\n', { mode: 0o640 })
@@ -28,14 +31,20 @@ async function run() {
   const sub = await SubContainer.eager<any>(
     effects,
     { imageId: 'file-watch-test' },
-    Mounts.of<any>().mountVolume({
-      volumeId: 'file-watch-test',
-      subpath: 'config.txt',
-      mountpoint: '/etc/watched.conf',
-      type: 'infer',
-      readonly: true,
-      idmap: [{ fromId: 0, toId: 1000 }],
-    }),
+    Mounts.of<any>()
+      .mountVolume({
+        volumeId: 'file-watch-test',
+        subpath: 'config.txt',
+        mountpoint: '/etc/watched.conf',
+        type: 'infer',
+        readonly: true,
+        idmap: [{ fromId: 0, toId: 1000 }],
+      })
+      .mountAssets({
+        subpath: 'file-watch-test.txt',
+        mountpoint: '/etc/asset.conf',
+        type: 'file',
+      }),
     'file-watch-test',
   )
   let child: Awaited<ReturnType<typeof sub.spawn>> | undefined
@@ -89,6 +98,23 @@ async function run() {
       )
       await seen(value)
     }
+    const nativeFs: typeof fs = require('node:fs/promises')
+    const stat = nativeFs.stat
+    let sourceStats = 0
+    nativeFs.stat = (async (...args: Parameters<typeof fs.stat>) => {
+      const result = await stat(...args)
+      if (args[0] === source && ++sourceStats === 2) await fs.unlink(source)
+      return result
+    }) as typeof fs.stat
+    try {
+      await assert.rejects(file.write(effects, 'deleted-before-rebind\n'))
+    } finally {
+      nativeFs.stat = stat
+    }
+    await assert.rejects(fs.stat(source), { code: 'ENOENT' })
+    const deleted = await sub.exec(['cat', '/etc/watched.conf'])
+    assert.equal(deleted.stdout, values[values.length - 1])
+    assert.equal(deleted.exitCode, 0)
     await fs.writeFile(`${source}.new`, 'external\n')
     await fs.rename(`${source}.new`, source)
     await seen('external\n')
@@ -111,13 +137,21 @@ async function run() {
     ])
     assert.notEqual(readonly.exitCode, 0)
     assert.equal(await fs.readFile(source, 'utf8'), 'external\n')
+    const readonlyAsset = await sub.exec([
+      'sh',
+      '-c',
+      'echo corrupt >/etc/asset.conf',
+    ])
+    assert.notEqual(readonlyAsset.exitCode, 0)
+    assert.equal(await fs.readFile(asset, 'utf8'), 'asset\n')
     console.log(
-      'PASS: repeated own-file rebinds, running exec namespace, external watch, idmap and readonly',
+      'PASS: repeated own-file rebinds, running exec namespace, deletion race, external watch, idmap and readonly volume/assets',
     )
   } finally {
     child?.kill('SIGTERM')
     await sub.destroy()
     await fs.rm(source, { force: true })
+    await fs.rm(asset, { force: true })
     await fs.rm('/media/startos/volumes/file-watch-test/.config.txt.tmp', {
       force: true,
     })

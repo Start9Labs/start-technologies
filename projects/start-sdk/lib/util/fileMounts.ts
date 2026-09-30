@@ -7,7 +7,7 @@ const mounts = new Map<string, Set<FileMount>>()
 
 type FileMount = {
   active: boolean
-  refresh: () => Promise<void>
+  refresh: (signal: AbortSignal) => Promise<void>
   pending: Set<Promise<void>>
 }
 
@@ -24,13 +24,13 @@ export function hasFileMounts(path: string): boolean {
   return mounts.has(path)
 }
 
-/**
- * Logs failures; commands retry through `FileMounts.sync()`.
- * The caller must hold the source's `withFileQueue` through refresh.
- */
-export async function refreshFileMounts(path: string): Promise<void> {
+/** The caller must hold the source's `withFileQueue` through refresh. */
+export async function refreshFileMounts(
+  path: string,
+  signal: AbortSignal,
+): Promise<void> {
   for (const mount of mounts.get(path) ?? []) {
-    if (mount.active) await mount.refresh().catch(console.error)
+    if (mount.active) await mount.refresh(signal)
   }
 }
 
@@ -51,21 +51,22 @@ export class FileMounts {
   async add(
     source: string,
     target: string,
-    rebind: () => Promise<void>,
+    rebind: (signal: AbortSignal) => Promise<void>,
   ): Promise<void> {
-    await withFileQueue(source, async path => {
+    await withFileQueue(source, async (path, signal) => {
       const mount: FileMount = {
         active: true,
         pending: new Set(),
-        refresh: async () => {
+        refresh: async signal => {
           const pending = (async () => {
             while (mount.active) {
+              signal.throwIfAborted()
               const [from, to] = await Promise.all([
                 sourceStat(path),
                 fs.stat(target),
               ])
               if (!from || (from.dev === to.dev && from.ino === to.ino)) return
-              await rebind()
+              await rebind(signal)
             }
           })()
           await track(mount, pending)
@@ -80,8 +81,8 @@ export class FileMounts {
             return
           void track(
             mount,
-            withFileQueue(path, async () => {
-              if (mount.active) await mount.refresh()
+            withFileQueue(path, async (_, signal) => {
+              if (mount.active) await mount.refresh(signal)
             }),
           ).catch(error => {
             if (mount.active) console.error(error)
@@ -96,7 +97,7 @@ export class FileMounts {
       }
       set.add(mount)
       this.registrations.push({ path, mount, watcher })
-      await mount.refresh()
+      await mount.refresh(signal)
     })
   }
 
@@ -104,8 +105,8 @@ export class FileMounts {
     for (const { path, mount } of this.registrations) {
       await track(
         mount,
-        withFileQueue(path, async () => {
-          if (mount.active) await mount.refresh()
+        withFileQueue(path, async (_, signal) => {
+          if (mount.active) await mount.refresh(signal)
         }),
       )
     }

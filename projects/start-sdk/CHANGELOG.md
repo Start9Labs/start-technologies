@@ -4,9 +4,7 @@
 
 ### Changed
 
-- **Breaking — volume mounts honor `readonly: true`.** Writes through a
-  read-only volume mount fail with `EROFS`. Mount the volume writable wherever
-  the service writes to it
+- **Breaking — read-only volume and asset mounts are enforced.** Writes through a volume mount declared `readonly: true`, or through any asset mount, fail with `EROFS`. Mount volumes writable wherever the service writes to them. Copy assets that need modification into a writable volume
 
 - **Breaking — `Watchable<A>` takes only the type it reads.** A reader that
   maps a raw value extends `MappedWatchable<Raw, Mapped>` and implements
@@ -120,7 +118,7 @@
   a timeout. `watch` and `waitFor` end at once on a signal that has already
   aborted.
 
-- **`FileHelper.update(effects, change)`** computes a complete replacement under the writer lock. The callback receives the validated current value and returns the replacement or `null` to skip writing.
+- **`FileHelper.update(effects, change)`** computes a complete replacement under the writer lock. The callback receives the validated current value and returns the replacement or `null` to skip writing. Reads inside it remain reentrant; nested writes, merges, or updates to the same file throw immediately. File operations have a five-second deadline for queued access, lock acquisition, asynchronous callbacks, and mount reconciliation; timed-out callbacks cannot commit later.
 
 - **`preDownloadAlert` in `setupManifest()`** displays a localized Markdown confirmation before downloading an update from an installed version matching `when.sourceVersion`.
 
@@ -211,7 +209,7 @@
 
 - **FileHelper writes replace files atomically.** Writers hold a cross-process lock on the file, and `merge()` and `update()` hold it through their complete read-modify-write; replacements retain the file's owner and permissions.
 
-- **Own-volume file mounts follow atomic source replacement in running subcontainers.** Refreshes preserve idmaps and readonly settings and run before reactive reads and command launches; a command fails while its mount cannot be refreshed. Existing descriptors retain the previous inode until the application reopens the file.
+- **Own-volume file mounts follow atomic source replacement in running subcontainers.** Refreshes preserve idmaps and readonly settings and run before FileHelper operations return and commands launch. Refresh failures propagate to the caller, including after a write has replaced the source. Existing descriptors retain the previous inode until the application reopens the file.
 
 - **Reactive init re-runs receive `kind: null`** after the initial install,
   update, or restore pass. Lifecycle-only work guarded by `kind` runs once for

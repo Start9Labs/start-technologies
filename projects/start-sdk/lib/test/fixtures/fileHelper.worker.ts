@@ -9,6 +9,8 @@ async function run() {
       await new Promise(() => {})
       return current
     })
+  } else if (process.argv[3] === 'write') {
+    await file.write({} as any, { count: 1 })
   } else {
     for (let i = 0; i < Number(process.argv[3]); i++) {
       await file.update({} as any, async current => {

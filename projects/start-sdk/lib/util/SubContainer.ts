@@ -22,10 +22,7 @@ export type ExecOptions = {
 
 const TIMES_TO_WAIT_FOR_PROC = 100
 
-// Returns whether the bind target was prepared as a file (vs a directory),
-// so callers can pass the matching `--file` flag. For `infer` this resolves
-// against the source, so it must be the single source of truth — `bind()`
-// keys `--file` off this rather than re-deciding.
+/** Returns whether the prepared target is a file. */
 async function prepBind(
   from: string | null,
   to: string,
@@ -59,10 +56,21 @@ async function bind(
   type: 'file' | 'directory' | 'infer',
   idmap: IdMap[],
   readonly: boolean,
-  beneath = false,
 ): Promise<boolean> {
   const isFile = await prepBind(from, to, type)
+  await attachBind(from, to, isFile, idmap, readonly)
+  return isFile
+}
 
+async function attachBind(
+  from: string,
+  to: string,
+  isFile: boolean,
+  idmap: IdMap[],
+  readonly: boolean,
+  beneath = false,
+  signal?: AbortSignal,
+): Promise<void> {
   // Nested idmaps require start-container's syscall-based bind.
   const args = ['bind-mount', '--source', from, '--target', to, '--recursive']
   if (isFile) args.push('--file')
@@ -71,8 +79,7 @@ async function bind(
   for (const i of idmap) {
     args.push('--idmap', `${i.fromId}:${i.toId}:${i.range}`)
   }
-  await execFile('start-container', args)
-  return isFile
+  await execFile('start-container', args, { signal, killSignal: 'SIGKILL' })
 }
 
 /**
@@ -579,19 +586,23 @@ export class SubContainerEager<
             this.sharedMounts = true
           }
           let staged = false
-          await this.fileMounts.add(from, path, async () => {
+          await this.fileMounts.add(from, path, async signal => {
             if (!staged) {
-              await bind(
+              await attachBind(
                 from,
                 path,
-                'file',
+                true,
                 options.idmap,
                 options.readonly,
                 true,
+                signal,
               )
               staged = true
             }
-            await execFile('umount', ['--lazy', path])
+            await execFile('umount', ['--lazy', path], {
+              signal,
+              killSignal: 'SIGKILL',
+            })
             staged = false
           })
         }

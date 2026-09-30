@@ -429,6 +429,8 @@ trigger: sdk.trigger.statusTrigger(30_000, {
 
 ## Volume Mounts
 
+Volume mounts declared `readonly: true` and all asset mounts are read-only; writes through them fail with `EROFS`. Copy assets that need modification into a writable volume and mount that copy. `type: 'infer'` detects existing regular files; use `type: 'file'` when the file may need to be created.
+
 ```typescript
 sdk.Mounts.of()
   // Mount entire volume (directory)
@@ -438,13 +440,13 @@ sdk.Mounts.of()
     mountpoint: '/data',
     readonly: false,
   })
-  // Mount specific file from volume (requires type: 'file')
+  // Mount a specific file from the volume
   .mountVolume({
     volumeId: 'main',
     subpath: 'config.py',
     mountpoint: '/app/config.py',
     readonly: true,
-    type: 'file', // Required when mounting a single file
+    type: 'file',
   })
 ```
 

@@ -3,12 +3,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FileMounts, hasFileMounts } from '../util/fileMounts'
 import { FileHelper } from '../util/fileHelper'
+import { FILE_ACCESS_TIMEOUT_MS } from '../util/fileAccess'
 
 let dir: string
 let source: string
 let target: string
 let mounts: FileMounts
 let rebind: jest.Mock<Promise<void>, []>
+async function relink(from: string, to: string) {
+  const temp = `${to}.next`
+  await fs.link(from, temp)
+  await fs.rename(temp, to)
+}
 beforeEach(async () => {
   dir = await fs.mkdtemp(join(tmpdir(), 'file-mount-'))
   source = join(dir, 'source')
@@ -16,10 +22,7 @@ beforeEach(async () => {
   await fs.writeFile(source, 'old')
   await fs.link(source, target)
   mounts = new FileMounts()
-  rebind = jest.fn(async () => {
-    await fs.unlink(target)
-    await fs.link(source, target)
-  })
+  rebind = jest.fn(() => relink(source, target))
   await mounts.add(source, target, rebind)
 })
 afterEach(async () => {
@@ -30,10 +33,7 @@ afterEach(async () => {
 test('writes await refresh and repeated replacements update every mounted view', async () => {
   const second = join(dir, 'second')
   await fs.link(source, second)
-  await mounts.add(source, second, async () => {
-    await fs.unlink(second)
-    await fs.link(source, second)
-  })
+  await mounts.add(source, second, () => relink(source, second))
   const file = FileHelper.string(source)
   for (const value of ['one', 'two', 'three']) {
     await file.write({} as any, value)
@@ -82,13 +82,13 @@ test('refresh failures block commands until a retry succeeds', async () => {
   const errors = jest.spyOn(console, 'error').mockImplementation(() => {})
   rebind.mockImplementation(async () => {
     if (fail) throw new Error('rebind failed')
-    await fs.unlink(target)
-    await fs.link(source, target)
+    await relink(source, target)
   })
   try {
     const file = FileHelper.string(source)
-    await file.write({} as any, 'new')
-    expect(await file.read().once()).toBe('new')
+    await expect(file.write({} as any, 'new')).rejects.toThrow('rebind failed')
+    await expect(file.read().once()).rejects.toThrow('rebind failed')
+    expect(await fs.readFile(source, 'utf8')).toBe('new')
     await expect(mounts.sync()).rejects.toThrow('rebind failed')
     expect(await fs.readFile(target, 'utf8')).toBe('old')
     fail = false
@@ -106,16 +106,39 @@ test('a deleted source leaves the mount on its last file', async () => {
   expect(await fs.readFile(target, 'utf8')).toBe('old')
 })
 
-test('file access inside update reenters the held lock', async () => {
+test('reads and mount sync inside update reenter the queue', async () => {
   const file = FileHelper.string(source)
   await file.update({} as any, async current => {
     expect(await file.read().once()).toBe(current)
-    await file.merge({} as any, 'inner')
     await mounts.sync()
     return `${current}-outer`
   })
   expect(await file.read().once()).toBe('old-outer')
   expect(await fs.readFile(target, 'utf8')).toBe('old-outer')
+})
+
+test('mount reconciliation times out when rebinding makes no progress', async () => {
+  const errors = jest.spyOn(console, 'error').mockImplementation(() => {})
+  jest.useFakeTimers()
+  let enter!: () => void
+  const entered = new Promise<void>(resolve => (enter = resolve))
+  rebind.mockImplementation(async () => {
+    enter()
+  })
+  try {
+    const file = FileHelper.string(source)
+    const writing = file.write({} as any, 'new')
+    const rejected = expect(writing).rejects.toThrow('File access timed out')
+    await entered
+    await jest.advanceTimersByTimeAsync(FILE_ACCESS_TIMEOUT_MS)
+    await rejected
+    rebind.mockImplementation(() => relink(source, target))
+    await mounts.sync()
+    expect(await fs.readFile(target, 'utf8')).toBe('new')
+  } finally {
+    jest.useRealTimers()
+    errors.mockRestore()
+  }
 })
 
 test('teardown unregisters watches and sync skips unchanged mounts', async () => {
@@ -142,8 +165,7 @@ test('teardown waits for in-flight refreshes and queued watch callbacks', async 
   rebind.mockImplementation(async () => {
     enter()
     await blocked
-    await fs.unlink(target)
-    await fs.link(source, target)
+    await relink(source, target)
   })
   const temp = join(dir, 'temp')
   await fs.writeFile(temp, 'new')

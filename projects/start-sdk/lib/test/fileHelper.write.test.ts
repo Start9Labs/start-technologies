@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FileHelper } from '../util/fileHelper'
 import { z } from '@start9labs/start-core/zExport'
+import { FILE_ACCESS_TIMEOUT_MS } from '../util/fileAccess'
 
 jest.mock('node:fs/promises', () => {
   const actual = jest.requireActual('node:fs/promises')
@@ -85,6 +86,53 @@ test('a failed temp write preserves the target and restricts temp permissions', 
   )
 })
 
+test('timed-out filesystem work holds the queue and cannot rename later', async () => {
+  await fs.writeFile(path, '{"count":0}')
+  jest.useFakeTimers()
+  let entered!: () => void
+  let finish!: () => void
+  const started = new Promise<void>(resolve => (entered = resolve))
+  const blocked = new Promise<void>(resolve => (finish = resolve))
+  let first = true
+  open.mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+    const handle = await actual.open(...args)
+    if (first && String(args[0]).endsWith('.tmp')) {
+      first = false
+      const sync = handle.sync.bind(handle)
+      handle.sync = async () => {
+        entered()
+        await blocked
+        await sync()
+      }
+    }
+    return handle
+  })
+  const file = FileHelper.json(path, shape)
+  try {
+    const writing = file.write(effects, { count: 1 })
+    const rejected = expect(writing).rejects.toThrow('File access timed out')
+    await started
+    await jest.advanceTimersByTimeAsync(FILE_ACCESS_TIMEOUT_MS)
+    await rejected
+    expect(await fs.readFile(path, 'utf8')).toBe('{"count":0}')
+    let recovered = false
+    const recovery = file.write(effects, { count: 2 }).then(() => {
+      recovered = true
+    })
+    for (let i = 0; i < 100 && !jest.getTimerCount(); i++) await fs.stat(path)
+    expect(recovered).toBe(false)
+    finish()
+    await recovery
+    expect(await file.read().once()).toEqual({ count: 2 })
+    expect(
+      (await fs.readdir(dir)).filter(name => name.endsWith('.tmp')),
+    ).toEqual([])
+  } finally {
+    finish()
+    jest.useRealTimers()
+  }
+})
+
 test('atomic replacement preserves mode and readers never see partial JSON', async () => {
   await fs.writeFile(path, '{"count":1}', { mode: 0o640 })
   const file = FileHelper.json(path, shape)
@@ -124,6 +172,40 @@ test('update matches once for falsy contents, validates and recovers from callba
   })
 })
 
+test.each([false, true])(
+  'nested same-file mutations reject (existing: %s)',
+  async existing => {
+    const file = FileHelper.json(path, shape)
+    const alias = join(dir, 'alias')
+    await fs.symlink(path, alias)
+    const nested = FileHelper.json(alias, shape)
+    if (existing) await file.write(effects, { count: 0 })
+    const callback = jest.fn(() => ({ count: 10 }))
+    await file.update(effects, async current => {
+      expect(await nested.read().once()).toEqual(current)
+      for (const mutation of [
+        () => nested.write(effects, { count: 10 }),
+        () => nested.merge(effects, { count: 10 }),
+        () => nested.update(effects, callback),
+      ]) {
+        await expect(mutation()).rejects.toThrow(
+          'Cannot perform a nested mutation',
+        )
+      }
+      expect(callback).not.toHaveBeenCalled()
+      expect(await file.read().once()).toEqual(current)
+      await FileHelper.string(join(dir, 'other')).write(effects, 'allowed')
+      return { count: 1 }
+    })
+    await expect(
+      file.update(effects, () => nested.write(effects, { count: 10 })),
+    ).rejects.toThrow('Cannot perform a nested mutation')
+    expect(await file.read().once()).toEqual({ count: 1 })
+    await file.update(effects, current => ({ count: current!.count + 1 }))
+    expect(await file.read().once()).toEqual({ count: 2 })
+  },
+)
+
 function worker(path: string, mode: string) {
   return spawn(
     process.execPath,
@@ -134,7 +216,7 @@ function worker(path: string, mode: string) {
       path,
       mode,
     ],
-    { stdio: ['ignore', 'pipe', 'pipe'] },
+    { detached: true, stdio: ['ignore', 'pipe', 'pipe'] },
   )
 }
 function finished(child: ReturnType<typeof worker>) {
@@ -271,6 +353,36 @@ test('failure to acquire a lock does not write and does not poison the queue', a
   expect(await file.read().once()).toEqual({ count: 2 })
 })
 
+test('an unreadable target rejects promptly and releases the queue', async () => {
+  await fs.writeFile(path, '{"count":0}', { mode: 0o200 })
+  const child = worker(path, 'write')
+  const done = finished(child)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await expect(
+      Promise.race([
+        done,
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error('lock acquisition hung')),
+            1000,
+          )
+        }),
+      ]),
+    ).rejects.toThrow('File lock failed:')
+  } finally {
+    clearTimeout(timer)
+    if (child.exitCode === null && child.signalCode === null && child.pid) {
+      process.kill(-child.pid, 'SIGKILL')
+    }
+    await done.catch(() => {})
+    await fs.chmod(path, 0o600)
+  }
+  expect(await fs.readFile(path, 'utf8')).toBe('{"count":0}')
+  await FileHelper.json(path, shape).write(effects, { count: 1 })
+  expect(await FileHelper.json(path, shape).read().once()).toEqual({ count: 1 })
+})
+
 test('locking leaves no files behind', async () => {
   const file = FileHelper.json(path, shape)
   await Promise.all(
@@ -287,15 +399,28 @@ test('locking leaves no files behind', async () => {
   expect(await fs.readdir(dir)).toEqual(['store.json'])
 })
 
-test('a bind-mounted target is written in place', async () => {
+test('a bind-mounted target is written and synced in place', async () => {
   const file = FileHelper.json(path, shape)
   await file.write(effects, { count: 1 })
   const { ino } = await actual.stat(path)
+  const sync = jest.fn()
+  open.mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+    const handle = await actual.open(...args)
+    if (args[0] === path) {
+      const original = handle.sync.bind(handle)
+      handle.sync = async () => {
+        sync()
+        await original()
+      }
+    }
+    return handle
+  })
   rename.mockRejectedValueOnce(
     Object.assign(new Error('EBUSY'), { code: 'EBUSY' }),
   )
   await file.write(effects, { count: 2 })
   expect((await actual.stat(path)).ino).toBe(ino)
+  expect(sync).toHaveBeenCalledTimes(1)
   expect(await file.read().once()).toEqual({ count: 2 })
   expect((await actual.readdir(dir)).filter(n => n.endsWith('.tmp'))).toEqual(
     [],

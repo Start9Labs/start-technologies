@@ -18,6 +18,7 @@ import {
   replaceFile,
   withFileLock,
   withFileQueue,
+  waitForFileOperation,
 } from './fileAccess'
 import { hasFileMounts, refreshFileMounts } from './fileMounts'
 
@@ -109,21 +110,13 @@ function filterUndefined<A>(a: A): A {
   return a
 }
 
-/**
- * Bidirectional transformers for converting between the raw file format and
- * the application-level data type. Used with FileHelper factory methods.
- *
- * @typeParam Raw - The native type the file format parses to (e.g. `Record<string, unknown>` for JSON)
- * @typeParam Transformed - The application-level type after transformation
- */
+/** Maps between the parsed file format and the schema's input. */
 export type Transformers<
   Raw = unknown,
   Transformed = unknown,
   Validated extends Transformed = Transformed,
 > = {
-  /** Transform raw parsed data into the application type */
   onRead: (value: Raw) => Transformed
-  /** Transform application data back into the raw format for writing */
   onWrite: (value: Validated) => Raw
 }
 
@@ -158,21 +151,7 @@ type ReadType<A> = {
   ) => Promise<A | null>
 }
 
-/**
- * A validated file with reactive reads and serialized atomic writes.
- *
- * Use `z.looseObject` to retain unknown keys and `.catch()` defaults to repair
- * invalid fields during `merge()`.
- *
- * @example
- * ```typescript
- * import { FileHelper, z } from '@start9labs/start-sdk'
- *
- * const config = FileHelper.json('./config.json', z.looseObject({
- *   enabled: z.boolean().catch(false),
- * }))
- * ```
- */
+/** A validated file with reactive reads and serialized writes. */
 export interface FileHelper<A> {
   readonly path: string
   readonly writeData: (dataIn: A) => string
@@ -183,7 +162,7 @@ export interface FileHelper<A> {
     map: (value: A) => B,
     eq?: (left: B | null, right: B | null) => boolean,
   ): ReadType<B>
-  /** Atomically replaces the file, preserving its ownership and permissions. */
+  /** Replaces regular files atomically; bind-mounted targets are written in place. */
   write(
     effects: T.Effects,
     data: T.AllowReadonly<A> | A,
@@ -194,10 +173,7 @@ export interface FileHelper<A> {
     data: T.AllowReadonly<T.DeepPartial<A>>,
     options?: { allowWriteAfterConst?: boolean },
   ): Promise<null>
-  /**
-   * Serializes a read-modify-write with other SDK writers; `null` skips the write.
-   * The returned value replaces any write made inside the callback.
-   */
+  /** Rejects nested same-file mutations; returning `null` skips the write. */
   update(
     effects: T.Effects,
     change: (
@@ -225,18 +201,19 @@ class FileHelperImpl<A> implements FileHelper<A> {
   private async writeLocked(
     path: string,
     data: string,
-    temp?: string,
+    temp: string | undefined,
+    signal: AbortSignal,
   ): Promise<void> {
-    await replaceFile(path, data, temp)
-    await refreshFileMounts(path)
+    await replaceFile(path, data, temp, signal)
+    await refreshFileMounts(path, signal)
   }
 
   private async readFileRaw(): Promise<string | null> {
     if (!(await exists(this.path))) return null
     const target = await filePath(this.path)
     if (!hasFileMounts(target)) return readRaw(target)
-    return withFileQueue(target, async path => {
-      await refreshFileMounts(path)
+    return withFileQueue(target, async (path, signal) => {
+      await refreshFileMounts(path, signal)
       return readRaw(path)
     })
   }
@@ -249,9 +226,6 @@ class FileHelperImpl<A> implements FileHelper<A> {
     return this.readData(raw)
   }
 
-  /**
-   * Reads the file from disk and converts it to structured data.
-   */
   private async readOnce<B>(map: (value: A) => B): Promise<B | null> {
     const data = await this.readFile()
     if (!data) return null
@@ -322,19 +296,6 @@ class FileHelperImpl<A> implements FileHelper<A> {
     })(effects, { map: wrappedMap, eq })
   }
 
-  /**
-   * Create a reactive reader for this file.
-   *
-   * Returns an object with multiple read strategies:
-   * - `once()` - Read the file once and return the parsed value
-   * - `const(effects)` - Read once but re-read when the file changes (for use with constRetry)
-   * - `watch(effects)` - Async generator yielding new values on each file change
-   * - `onChange(effects, callback)` - Fire a callback on each file change
-   * - `waitFor(effects, predicate, abort?)` - Block until the file value satisfies a predicate
-   *
-   * @param map - Optional transform function applied after validation
-   * @param eq - Optional equality function to deduplicate watch emissions
-   */
   read(): ReadType<A>
   read<B>(
     map: (value: A) => B,
@@ -373,8 +334,8 @@ class FileHelperImpl<A> implements FileHelper<A> {
     options: { allowWriteAfterConst?: boolean } = {},
   ) {
     const newData = this.validate(data)
-    await withFileLock(this.path, (path, temp) =>
-      this.writeLocked(path, this.writeData(newData), temp),
+    await withFileLock(this.path, (path, temp, signal) =>
+      this.writeLocked(path, this.writeData(newData), temp, signal),
     )
     this.checkConsts(effects, newData, options)
     return null
@@ -401,18 +362,22 @@ class FileHelperImpl<A> implements FileHelper<A> {
     change: (raw: string | null) => Promise<A | null>,
     options: { allowWriteAfterConst?: boolean },
   ): Promise<null> {
-    const written = await withFileLock(this.path, async (path, temp) => {
-      const raw = await readRaw(path)
-      const next = await change(raw)
-      if (next === null) return null
-      const serialized = this.writeData(next)
-      if (serialized === raw) {
-        await refreshFileMounts(path)
-        return null
-      }
-      await this.writeLocked(path, serialized, temp)
-      return { data: next }
-    })
+    const written = await withFileLock(
+      this.path,
+      async (path, temp, signal) => {
+        const raw = await readRaw(path)
+        signal.throwIfAborted()
+        const next = await waitForFileOperation(change(raw), signal)
+        if (next === null) return null
+        const serialized = this.writeData(next)
+        if (serialized === raw) {
+          await refreshFileMounts(path, signal)
+          return null
+        }
+        await this.writeLocked(path, serialized, temp, signal)
+        return { data: next }
+      },
+    )
     if (written) this.checkConsts(effects, written.data, options)
     return null
   }
@@ -453,10 +418,6 @@ class FileHelperImpl<A> implements FileHelper<A> {
     )
   }
 
-  /**
-   * We wanted to be able to have a fileHelper, and just modify the path later in time.
-   * Like one behavior of another dependency or something similar.
-   */
   withPath(path: ToPath): FileHelper<A> {
     return new FileHelperImpl<A>(
       toPath(path),
@@ -492,16 +453,12 @@ function rawTransformed<A extends Transformed, Raw, Transformed>(
   )
 }
 
-// Deep-loosen a file-model shape so unknown keys present in the on-disk file
-// survive validation (and the merge round-trip) instead of being stripped.
-// Computed once per FileHelper construction.
 function deepLooseParse<A>(shape: z.ZodType<A>): (data: unknown) => A {
   const loose = z.deepLoose(shape)
   return data => loose.parse(data)
 }
 
 interface FileHelperStatic {
-  /** Create a File Helper for an arbitrary file type. */
   raw<A>(
     path: ToPath,
     toFile: (dataIn: A) => string,
@@ -509,7 +466,6 @@ interface FileHelperStatic {
     validate: (data: unknown) => A,
   ): FileHelper<A>
 
-  /** Create a File Helper for a text file */
   string(path: ToPath): FileHelper<string>
   string<A extends string>(
     path: ToPath,
@@ -521,7 +477,6 @@ interface FileHelperStatic {
     transformers: Transformers<string, Transformed, A>,
   ): FileHelper<A>
 
-  /** Create a File Helper for a .json file. */
   json<A>(path: ToPath, shape: Validator<unknown, A>): FileHelper<A>
   json<A extends Transformed, Transformed = unknown>(
     path: ToPath,
@@ -529,7 +484,6 @@ interface FileHelperStatic {
     transformers: Transformers<unknown, Transformed, A>,
   ): FileHelper<A>
 
-  /** Create a File Helper for a .yaml file */
   yaml<A extends Record<string, unknown>>(
     path: ToPath,
     shape: Validator<Record<string, unknown>, A>,
@@ -552,7 +506,6 @@ interface FileHelperStatic {
     transformers: Transformers<Record<string, unknown>, Transformed, A>,
   ): FileHelper<A>
 
-  /** Create a File Helper for a .toml file */
   toml<A extends Record<string, unknown>>(
     path: ToPath,
     shape: Validator<Record<string, unknown>, A>,
@@ -563,7 +516,6 @@ interface FileHelperStatic {
     transformers: Transformers<Record<string, unknown>, Transformed, A>,
   ): FileHelper<A>
 
-  /** Create a File Helper for a .ini file. */
   ini<A extends Record<string, unknown>>(
     path: ToPath,
     shape: Validator<Record<string, unknown>, A>,
@@ -576,7 +528,6 @@ interface FileHelperStatic {
     transformers: Transformers<Record<string, unknown>, Transformed, A>,
   ): FileHelper<A>
 
-  /** Create a File Helper for a .env file (KEY=VALUE format, one per line). */
   env<A extends Record<string, string>>(
     path: ToPath,
     shape: Validator<Record<string, string>, A>,
@@ -587,7 +538,6 @@ interface FileHelperStatic {
     transformers: Transformers<Record<string, string>, Transformed, A>,
   ): FileHelper<A>
 
-  /** Create a File Helper for an .xml file. */
   xml<A extends Record<string, unknown>>(
     path: ToPath,
     shape: Validator<Record<string, unknown>, A>,
