@@ -36,19 +36,7 @@ impl Model<StatusInfo> {
     pub fn started(&mut self) -> Result<(), Error> {
         self.as_started_mut()
             .map_mutate(|s| Ok(Some(s.unwrap_or_else(|| Utc::now()))))?;
-        self.as_desired_mut().map_mutate(|s| {
-            Ok(match s {
-                DesiredStatus::Restarting {
-                    restart_again: true,
-                } => DesiredStatus::Restarting {
-                    restart_again: false,
-                },
-                DesiredStatus::Restarting {
-                    restart_again: false,
-                } => DesiredStatus::Running,
-                a => a,
-            })
-        })?;
+        self.as_desired_mut().map_mutate(|s| Ok(s.started()))?;
         Ok(())
     }
     pub fn stop(&mut self) -> Result<(), Error> {
@@ -177,6 +165,21 @@ impl DesiredStatus {
                 on_complete: StartStop::Start,
             },
             Self::Stopped => Self::Running,
+            x => *x,
+        }
+    }
+
+    /// The desired status once a start completes.
+    pub fn started(&self) -> Self {
+        match self {
+            Self::Restarting {
+                restart_again: true,
+            } => Self::Restarting {
+                restart_again: false,
+            },
+            Self::Restarting {
+                restart_again: false,
+            } => Self::Running,
             x => *x,
         }
     }
