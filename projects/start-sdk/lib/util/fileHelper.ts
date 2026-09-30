@@ -585,7 +585,7 @@ interface FileHelperStatic {
     transformers: Transformers<Record<string, unknown>, Transformed, A>,
   ): FileHelper<A>
 
-  /** Creates a FileHelper for a file of `KEY=VALUE` lines. */
+  /** Creates a FileHelper for a .env file of `KEY=VALUE` lines. */
   env<A extends Record<string, string>>(
     path: ToPath,
     shape: Validator<Record<string, string>, A>,
