@@ -243,6 +243,14 @@ pub async fn sideload(
                                 }
                                 err = (&mut err_recv) => {
                                     if let Ok(e) = err {
+                                        // The close reason is truncated; this frame carries the full error.
+                                        ws.send(ws::Message::Binary(
+                                            serde_json::to_vec(&RpcError::from(e.clone_output()))
+                                                .with_kind(ErrorKind::Serialization)?
+                                                .into(),
+                                        ))
+                                        .await
+                                        .with_kind(ErrorKind::Network)?;
                                         ws.close_result(Err::<&str, _>(e.clone_output())).await?;
                                         return Err(e)
                                     }
@@ -452,6 +460,7 @@ pub async fn cli_install(
                 let mut ws = ctx.ws_continuation(progress).await?;
 
                 let mut progress = FullProgress::new();
+                let mut error = None;
 
                 loop {
                     tokio::select! {
@@ -464,8 +473,16 @@ pub async fn cli_install(
                                                 .with_kind(ErrorKind::Deserialization)?;
                                         bar.update(&progress);
                                     }
+                                    Message::Binary(b) => {
+                                        error = Some(Error::from(
+                                            serde_json::from_slice::<RpcError>(&b)
+                                                .with_kind(ErrorKind::Deserialization)?,
+                                        ));
+                                    }
                                     Message::Close(Some(c)) if c.code != CloseCode::Normal => {
-                                        return Err(Error::new(eyre!("{}", c.reason), ErrorKind::Network))
+                                        return Err(error.take().unwrap_or_else(|| {
+                                            Error::new(eyre!("{}", c.reason), ErrorKind::Network)
+                                        }))
                                     }
                                     _ => (),
                                 }
@@ -479,7 +496,7 @@ pub async fn cli_install(
                     }
                 }
 
-                Ok::<_, Error>(())
+                error.map_or(Ok::<_, Error>(()), Err)
             };
 
             let (upload, progress) = tokio::join!(upload, progress);
@@ -491,29 +508,67 @@ pub async fn cli_install(
                 ctx.call_remote::<RpcContext>("package.installed-version", json!({ "id": &id }))
                     .await?,
             )?;
-            let mut packages: GetPackageResponse = from_value(
+            let get = |source_version: Option<&VersionString>| {
                 ctx.call_remote::<RegistryContext>(
                     "package.get",
-                    json!({ "id": &id, "targetVersion": version, "sourceVersion": source_version, "otherVersions": "none" }),
+                    json!({ "id": &id, "targetVersion": &version, "sourceVersion": source_version, "otherVersions": "none" }),
                 )
-                .await?,
-            )?;
-            let version = if packages.best.len() == 1 {
-                packages.best.pop_first().map(|(k, _)| k).unwrap()
-            } else {
-                let versions = packages.best.keys().collect::<Vec<_>>();
-                let version = choose(
-                    &format!(
-                        concat!(
-                            "Multiple flavors of {id} found. ",
-                            "Please select one of the following versions to install:"
+            };
+            let mut packages: GetPackageResponse = from_value(get(source_version.as_ref()).await?)?;
+            let version = match packages.best.len() {
+                0 => {
+                    let range = version.clone().unwrap_or(VersionRange::Any);
+                    let blocked_by = match source_version {
+                        Some(installed) => (!from_value::<GetPackageResponse>(get(None).await?)?
+                            .best
+                            .is_empty())
+                        .then_some(installed),
+                        None => None,
+                    };
+                    return Err(if let Some(installed) = blocked_by {
+                        Error::new(
+                            eyre!(
+                                "{}",
+                                t!(
+                                    "install.mod.no-version-installable-over",
+                                    id = id,
+                                    version = range,
+                                    installed = installed
+                                )
+                            ),
+                            ErrorKind::InvalidRequest,
+                        )
+                    } else {
+                        Error::new(
+                            eyre!(
+                                "{}",
+                                t!(
+                                    "registry.package.get.version-not-found",
+                                    id = id,
+                                    version = range
+                                )
+                            ),
+                            ErrorKind::NotFound,
+                        )
+                    }
+                    .into());
+                }
+                1 => packages.best.pop_first().map(|(k, _)| k).unwrap(),
+                _ => {
+                    let versions = packages.best.keys().collect::<Vec<_>>();
+                    let version = choose(
+                        &format!(
+                            concat!(
+                                "Multiple flavors of {id} found. ",
+                                "Please select one of the following versions to install:"
+                            ),
+                            id = id
                         ),
-                        id = id
-                    ),
-                    &versions,
-                )
-                .await?;
-                (*version).clone()
+                        &versions,
+                    )
+                    .await?;
+                    (*version).clone()
+                }
             };
             ctx.call_remote::<RpcContext>(
                 &method.join("."),

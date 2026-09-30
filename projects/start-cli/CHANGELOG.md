@@ -27,6 +27,12 @@ or the CLI's externally observable behavior.
 
 - **`s9pk pack` removes its temporary container and built image when packing fails.**
 
+- **`package install --sideload` prints the full error when a service installation fails**
+  on StartOS 0.4.0.2 or later.
+
+- **`package install <id>` reports an error when no version matching the request can be
+  installed**, naming the installed version when it is what rules them out.
+
 ## [2.1.0]
 
 ### Added
