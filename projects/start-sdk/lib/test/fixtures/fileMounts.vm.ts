@@ -118,10 +118,9 @@ async function run() {
     child?.kill('SIGTERM')
     await sub.destroy()
     await fs.rm(source, { force: true })
-    await fs.rm(
-      '/media/startos/volumes/file-watch-test/.config.txt.startos-new',
-      { force: true },
-    )
+    await fs.rm('/media/startos/volumes/file-watch-test/.config.txt.tmp', {
+      force: true,
+    })
     await fs.rm('/media/startos/images/file-watch-test.json', { force: true })
     await fs.rm('/media/startos/images/file-watch-test.env', { force: true })
   }

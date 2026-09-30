@@ -120,7 +120,7 @@ async function flock<A>(
   operation: (temp: string | undefined) => Promise<A>,
 ) {
   await fs.mkdir(dirname(target), { recursive: true })
-  const temp = resolve(dirname(target), `.${basename(target)}.startos-new`)
+  const temp = resolve(dirname(target), `.${basename(target)}.tmp`)
   const child = spawn('sh', ['-ec', flockScript, 'sh', target, temp], {
     stdio: ['pipe', 'pipe', 'pipe'],
   })
