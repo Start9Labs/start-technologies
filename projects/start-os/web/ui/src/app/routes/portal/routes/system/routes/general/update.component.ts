@@ -73,6 +73,7 @@ export class SystemUpdateModal {
       await this.embassyApi.updateServer({
         targetVersion: `=${this.versions[0]!.version}`,
         registry: startosRegistry,
+        progress: false,
       })
       this.context.$implicit.complete()
     }, 'Beginning update')

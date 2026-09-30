@@ -271,7 +271,8 @@ struct SetPreferencesRequest {
 
 ### `system.apply-remote-access`
 
-Internal endpoint (`no_auth`), **not called from the frontend**. Fired by the
+Internal endpoint, **not called from the frontend**; its `startwrt-cli` caller
+authenticates with the local auth cookie. Fired by the
 `/etc/hotplug.d/iface/99-startwrt-remote-access` hook (in `backend/hotplug/`)
 when a WAN interface comes up.
 
@@ -285,7 +286,8 @@ when a WAN interface comes up.
 
 ### `system.set-timezone`
 
-No auth required — called during initial setup before login.
+Auth required. The setup wizard calls it right after
+`auth.set-initial-password`, whose response sets the session cookie.
 
 ```rust
 #[derive(Deserialize)]
@@ -1129,7 +1131,8 @@ struct AutomaticPortUse {
 // Response: null
 ```
 
-Internal endpoint (`no_auth`), **not called from the frontend**. Fired by the
+Internal endpoint, **not called from the frontend**; its `startwrt-cli` caller
+authenticates with the local auth cookie. Fired by the
 `/etc/hotplug.d/iface/99-startwrt-port-control` hook on `wan` `ifup`/
 `ifupdate`: forwards to the daemon, which re-keys live SNI hostname routes
 onto the (possibly changed) WAN IPv4 — their listeners bind the WAN address
@@ -1143,7 +1146,8 @@ configs-only mode or when no routes exist.
 // Response: null
 ```
 
-Internal endpoint (`no_auth`), **not called from the frontend**. Fired two
+Internal endpoint, **not called from the frontend**; its `startwrt-cli` caller
+authenticates with the local auth cookie. Fired two
 ways: by the `/etc/hotplug.d/iface/99-startwrt-published-ports` hook on `wan6`
 `ifup`/`ifupdate` (i.e. when the ISP-delegated IPv6 prefix changes) — the CLI
 forwards the call to the daemon (`with_call_remote`), where the `ipv6_tracker`'s
@@ -1925,16 +1929,17 @@ struct DiagnosticsCreateRes {
 Every RPC method above is a JSON-RPC 2.0 call to a single endpoint: **`POST /rpc/v1`**.
 The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 
-| Route                                              | Method    | Auth                       | Purpose                                                                                      |
-| -------------------------------------------------- | --------- | -------------------------- | -------------------------------------------------------------------------------------------- |
-| `/rpc/v1`                                          | POST      | Session (unless `no_auth`) | JSON-RPC 2.0 endpoint for all RPC methods                                                    |
-| `/rest/rpc/{guid}`                                 | GET/POST  | GUID capability (one-shot) | RPC continuation: binary download (backup, diagnostics) / upload (restore); 10 MB body limit |
-| `/ws/rpc/{guid}`                                   | WebSocket | GUID capability            | Progress streaming (`system.update`)                                                         |
-| `/api/logs`                                        | WebSocket | Session or local cookie    | Live log streaming (see § 2)                                                                 |
-| `/api/setup/flash`                                 | POST      | None (setup wizard)        | Streams NDJSON `SetupEvent` progress while flashing the eMMC; one flash at a time            |
-| `/static/root-ca.crt`                              | GET       | None                       | Root CA certificate download                                                                 |
-| `/cgi-bin/*`, `/luci-static/*`, `/ubus`, `/ubus/*` | any       | LuCI's own                 | Reverse proxy to uhttpd (LuCI) on localhost:8080; `/luci` redirects to `/cgi-bin/luci`       |
-| everything else                                    | any       | None                       | Embedded web UI                                                                              |
+| Route                                              | Method    | Auth                                       | Purpose                                                                                      |
+| -------------------------------------------------- | --------- | ------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `/rpc/v1`                                          | POST      | Session or local cookie (unless `no_auth`) | JSON-RPC 2.0 endpoint for all RPC methods                                                    |
+| `/rest/rpc/{guid}`                                 | GET/POST  | GUID capability (one-shot)                 | RPC continuation: binary download (backup, diagnostics) / upload (restore); 10 MB body limit |
+| `/ws/rpc/{guid}`                                   | WebSocket | GUID capability                            | Progress streaming (`system.update`)                                                         |
+| `/api/logs`                                        | WebSocket | Session or local cookie                    | Live log streaming (see § 2)                                                                 |
+| `/api/setup/flash`                                 | POST      | None (setup wizard)                        | Streams NDJSON `SetupEvent` progress while flashing the eMMC; one flash at a time            |
+| `/static/local-root-ca.crt`                        | GET       | None                                       | Root CA certificate download                                                                 |
+| `/static/local-root-ca.mobileconfig`               | GET       | None                                       | Root CA as an Apple configuration profile                                                    |
+| `/cgi-bin/*`, `/luci-static/*`, `/ubus`, `/ubus/*` | any       | LuCI's own                                 | Reverse proxy to uhttpd (LuCI) on localhost:8080; `/luci` redirects to `/cgi-bin/luci`       |
+| everything else                                    | any       | None                                       | Embedded web UI                                                                              |
 
 ---
 
@@ -1954,8 +1959,8 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `system.restart`               | System          |                             |
 | `system.factory-reset`         | System          |                             |
 | `system.set-preferences`       | System          |                             |
-| `system.apply-remote-access`   | System          | No auth; internal, hotplug  |
-| `system.set-timezone`          | System          | No auth                     |
+| `system.apply-remote-access`   | System          | Internal, hotplug           |
+| `system.set-timezone`          | System          |                             |
 | `system.get-timezones`         | System          | No auth                     |
 | `system.logs`                  | System          |                             |
 | `setup.status`                 | Setup           | No auth                     |
@@ -1984,8 +1989,8 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `published-ports.list`         | Published Ports |                             |
 | `published-ports.set`          | Published Ports |                             |
 | `published-ports.auto-list`    | Published Ports | Automatic PCP/UPnP forwards |
-| `published-ports.reconcile`    | Published Ports | No auth; internal, hotplug  |
-| `published-ports.wan-changed`  | Published Ports | No auth; internal, hotplug  |
+| `published-ports.reconcile`    | Published Ports | Internal, hotplug           |
+| `published-ports.wan-changed`  | Published Ports | Internal, hotplug           |
 | `published-ports.sync-hairpin` | Published Ports | Internal, WAN-schedule cron |
 | `vpn-client.list`              | Outbound VPN    |                             |
 | `vpn-client.create`            | Outbound VPN    |                             |

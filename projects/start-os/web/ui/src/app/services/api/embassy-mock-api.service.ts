@@ -373,10 +373,7 @@ export class MockApiService extends ApiService {
     }
   }
 
-  async updateServer(params?: {
-    registry: string
-    targetVersion: string
-  }): Promise<'updating' | 'no-updates'> {
+  async updateServer(params: T.UpdateSystemParams): Promise<T.UpdateSystemRes> {
     await pauseFor(2000)
     const initialProgress = {
       size: null,
@@ -396,7 +393,10 @@ export class MockApiService extends ApiService {
     ]
     this.mockRevision(patch)
 
-    return 'updating'
+    return {
+      target: params.targetVersion?.replace(/^=/, '') ?? null,
+      progress: null,
+    }
   }
 
   async restartServer(params: {}): Promise<null> {

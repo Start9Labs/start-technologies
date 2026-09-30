@@ -4,6 +4,10 @@ All notable changes to `start-registry` (the Start Registry server) are document
 
 ## [1.1.1]
 
+- **Each release's container image is published as `ghcr.io/start9labs/startos-registry:v<version>`**, the same image alpha ran for that commit.
+
+- **Fork pull requests validate the registry's multi-architecture container build.** Manual CI dispatches build the selected architecture.
+
 - **A registry accepts admin requests at any loopback address**, such as
   `start-cli -r http://127.0.0.1:5959` on the registry's own host.
 

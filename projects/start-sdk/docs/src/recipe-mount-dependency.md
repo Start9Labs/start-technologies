@@ -4,7 +4,7 @@ Some services need read-only access to files from another service — media file
 
 ## Solution
 
-In the `Mounts` chain in `setupMain()`, use `.mountDependency()` typed against the dependency's manifest. Specify the dependency's `volumeId`, a `subpath` (or `null` for the whole volume), a `mountpoint` in your container, and `readonly: true`. In `setupDependencies()`, declare the dependency with `kind: 'exists'` (if you just need the files) or `kind: 'running'` (if the dependency must be active).
+In the `Mounts` chain in `setupMain()`, use `.mountDependency()` typed against the dependency's manifest. Specify the dependency's `volumeId`, a `subpath` (or `null` for the whole volume), a `mountpoint` in your container, and `readonly: true`. In `dependencies.ts`, declare the dependency with `kind: 'exists'` (if you just need the files) or `kind: 'running'` (if the dependency must be active).
 
 **Reference:** [Dependencies](dependencies.md) · [Main](main.md)
 

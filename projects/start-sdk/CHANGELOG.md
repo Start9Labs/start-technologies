@@ -9,6 +9,8 @@
   `fetchRaw`/`produceRaw` in place of `fetch`/`produce`. A type written
   `Watchable<Raw, Mapped>` becomes `Watchable<Mapped>`
 
+- **Breaking — define dependencies once in `dependencies.ts`.** Create each base with `sdk.Dependency.required` or `.optional` (including metadata, version range, kind and health checks), add it to `sdk.Dependencies.of()`, and pass the builder to `buildManifest(versionGraph, sdkManifest, dependencies)` and `setupInit`. Move runtime conditions to `enabled` and `withDynamicNarrowing`, tasks to `withInit`, and use `dependencies.check(effects)` in place of `sdk.checkDependencies(effects)`. The base version range, kind, and health checks are also included in the package manifest and registry metadata, allowing StartOS to record required dependencies independently of init effects and enforce the published base for enabled optional dependencies. `enabled`, the narrowing, and each `.withInit` handler rerun independently when a watched value changes; the requirements are republished only when they change, and init handlers run only while the dependency is enabled. StartOS hides the tasks a service created on a dependency while that dependency is disabled.
+
 - **Breaking — `sdk.action.run` opens the action's form and passes it to
   `input`.** `input` is a function from the opened form to the input to submit;
   a plain value is no longer accepted. The run then answers that form, which is
@@ -108,6 +110,14 @@
 
 ### Added
 
+- **`waitFor` takes an optional `AbortSignal`**, as `watch` does, and rejects
+  with `AbortedError` when it aborts, including while waiting for a file or
+  its parent directory to be created. Pass one to cancel a wait you race against
+  a timeout. `watch` and `waitFor` end at once on a signal that has already
+  aborted.
+
+- **`preDownloadAlert` in `setupManifest()`** displays a localized Markdown confirmation before downloading an update from an installed version matching `when.sourceVersion`.
+
 - **An `env` variable set to `undefined` is removed from the process**,
   including one the image or StartOS would otherwise supply, such as `LANG`.
 
@@ -184,6 +194,14 @@
   See [Result Types](https://docs.start9.com/packaging/actions.html#result-types)
 
 ### Fixed
+
+- **An awaited `waitFor` waits until its predicate holds.** Awaiting
+  `waitFor` on a status, file or other reader no longer fails with
+  `AbortedError` after garbage collection while the condition is still false.
+
+- **A file model's reads see every change to the file.** `watch`, `const` and
+  `waitFor` no longer miss a write made while the previous value was being
+  read or handled, or a file created just as the wait began.
 
 - **Reactive init re-runs receive `kind: null`** after the initial install,
   update, or restore pass. Lifecycle-only work guarded by `kind` runs once for
@@ -283,6 +301,12 @@
   side
 
 - **Backup and restore progress no longer falls back mid-sync**
+
+- **`checkPortListening` counts a TCP port as listening only while a socket is
+  in the `LISTEN` state.** It matched any socket on the port, so the
+  connections a process leaves in `TIME_WAIT` when it exits kept its port
+  reading as listening for up to a minute: a daemon's `ready` check passed, and
+  the health checks that require it ran, while nothing was listening
 
 ### Security
 

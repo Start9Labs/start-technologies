@@ -4,7 +4,7 @@ Sometimes your service requires specific configuration on a dependency — a Bit
 
 ## Solution
 
-In `setupDependencies()`, call `sdk.action.createTask()` targeting the dependency's autoconfig action (imported from the dependency's package). Pass `input: { kind: 'partial', accept: [{ ... }], set: { ... } }` — `accept` lists the partial inputs that satisfy the task and `set` is pre-filled when none match — and `when: { condition: 'input-not-matches', once: false }` so the task re-fires whenever the dependency's config drifts. The autoconfig action must be exported by the dependency and added to your `package.json` dependencies.
+In the dependency's `.withInit(handler)`, call `sdk.action.createTask()` targeting the dependency's autoconfig action (imported from the dependency's package). Pass `input: { kind: 'partial', accept: [{ ... }], set: { ... } }` — `accept` lists the partial inputs that satisfy the task and `set` is pre-filled when none match — and `when: { condition: 'input-not-matches', once: false }` so the task re-fires whenever the dependency's config drifts. The autoconfig action must be exported by the dependency and added to your `package.json` dependencies.
 
 **Reference:** [Dependencies](dependencies.md) · [Tasks](tasks.md)
 

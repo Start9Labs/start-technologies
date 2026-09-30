@@ -5,17 +5,7 @@ All notable changes to StartWRT are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.0]
-
-### Added
-
-- **Wi-Fi regulatory country.** `Points of Entry > Wi-Fi > Settings` gains a
-  Country selector. The selected country sets the channels each band may use
-  and the maximum transmit power; the channel dropdowns list only what that
-  country permits, and automatic channel selection skips radar-detection
-  (DFS) channels, which take a minute or more to come up. With no country selected the router runs on a conservative
-  worldwide subset (2.4 GHz channels 1–11, 5 GHz channels 36–48, 20 dBm), so
-  select yours after setup.
+## [1.2.1]
 
 ### Fixed
 
@@ -44,6 +34,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A VPN connecting through another gets a fitting MTU.** With no MTU in its
   config, or with the field left blank, it uses its target's MTU less the
   chained tunnel's headers instead of 1420, avoiding fragmented packets.
+
+- **Custom DNS works after an update.** On a router using custom system DNS
+  or a profile DNS override, devices could not resolve names after an update
+  until a DNS setting was saved again. DNS lookups over TCP, used for answers
+  too large for UDP, also failed under custom DNS.
+
+### Security
+
+- Hardens authentication for local clients
+
+## [1.2.0]
+
+### Added
+
+- **Wi-Fi regulatory country.** `Points of Entry > Wi-Fi > Settings` gains a
+  Country selector. The selected country sets the channels each band may use
+  and the maximum transmit power; the channel dropdowns list only what that
+  country permits, and automatic channel selection skips radar-detection
+  (DFS) channels, which take a minute or more to come up. With no country selected the router runs on a conservative
+  worldwide subset (2.4 GHz channels 1–11, 5 GHz channels 36–48, 20 dBm), so
+  select yours after setup.
+
+- **Root CA profile for iPhone and iPad.** Downloading the Root CA in Safari
+  on iOS or iPadOS now fetches a configuration profile that installs through
+  Settings.
+
+### Changed
+
+- **Setup ends with a link to `router.lan`.** After you set the admin
+  password, the confirmation page links to `router.lan` to trust your Root
+  CA, instead of saying the window can be closed.
+
+- **The Root CA walkthrough matches StartOS.** It links to the instructions
+  for each platform and no longer asks you to bookmark the page. The Root CA
+  downloads from `/static/local-root-ca.crt`, the path StartOS uses.
+
+### Fixed
+
+- **A published domain typed without `https://` now reaches the published
+  service, not the router.** While port 443 is published to a device — by a
+  Published Port or a device's hostname routes — plain HTTP at the router's
+  public address is answered with a redirect to `https://` instead of the
+  router's web interface, from inside the network and from the Internet under
+  every Remote Access setting. A Published Port or a hostname route on 80
+  takes precedence.
+
+- **Freshly generated Root CAs carry an Authority Key Identifier conforming to RFC 5280 and the CA/Browser Forum Baseline Requirements.** Existing routers retain their trusted Root CA when updated with settings preserved.
 
 - **Publishing a port no longer names the device after its generated label,
   which could stop the router's DHCP server.** Publishing a port to a device

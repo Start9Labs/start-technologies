@@ -69,7 +69,8 @@ StartOS is a sovereign computing platform that makes it easy to run a personal s
 - [Architecture](architecture.md)
 - [FAQ](faq.md)
 
-## Firmware
+## Start9 Hardware
 
-- [Server Pure](firmware-pure.md)
-- [Server One (2023)](firmware-one-2023.md)
+- [Specifications](start9-hardware.md)
+- [Server Pure Firmware](firmware-pure.md)
+- [Server One (2023) Firmware](firmware-one-2023.md)

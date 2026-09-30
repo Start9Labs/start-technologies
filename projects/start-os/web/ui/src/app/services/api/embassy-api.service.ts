@@ -110,10 +110,9 @@ export abstract class ApiService {
 
   abstract followServerMetrics(params: {}): Promise<T.MetricsFollowResponse>
 
-  abstract updateServer(params: {
-    registry: string
-    targetVersion: string
-  }): Promise<'updating' | 'no-updates'>
+  abstract updateServer(
+    params: T.UpdateSystemParams,
+  ): Promise<T.UpdateSystemRes>
 
   abstract restartServer(params: {}): Promise<null>
 

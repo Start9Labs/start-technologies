@@ -33,6 +33,7 @@ export {
   SubContainerLazy,
 } from './util/SubContainer'
 export { StartSdk } from './StartSdk'
+export { Dependency, Dependencies } from './dependencies'
 export { setupManifest, buildManifest } from './manifest/setupManifest'
 export { FileHelper } from './util/fileHelper'
 export {

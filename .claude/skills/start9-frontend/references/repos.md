@@ -4,22 +4,14 @@
   `npm run build:deps` **must** run before anything type-checks. Dev: `npm run start:ui`
   (mocks; needs `config.json` copied from `shared-libs/ts-modules/config-sample.json`),
   `start:wrt`, etc. Verify: `npm run check` / `check:<app>` + `make web-format` +
-  `npm run check:i18n`. Never hand-edit `osBindings/*.ts` (regenerate from Rust). UIs are
-  embedded into Rust binaries at compile time — web build precedes cargo.
-  `brochure-marketplace` **auto-deploys to marketplace.start9.com on merge to `master`**.
-  StartWRT web keeps its own HTTP/RPC/connection stack and local i18n dictionaries —
-  deliberate; don't "unify" either without the maintainer.
-- **start9-store** — SSR; browser APIs only via tokens/`afterNextRender`; `/api/*` only (the
-  frontend must never know Shopify/Vendure exists); icons via root `postinstall` (don't move
-  into `angular.json` — hoisted-workspace limitation); `TUI_MEDIA.mobile: 1120` is measured —
-  adding a nav item means re-measuring; light theme is a deliberate deferral of design;
-  checkout is a redirect in Phase 1 (Shopify) — multi-step checkout is Phase 2 (Vendure).
-- **ops-server** — same-origin Express serves the build; relative `/_api` URLs, no
-  proxy/environments/CORS; dark theme, accent `#07a4ff`, Montserrat. No route guards —
-  `AdminShell` gates on `adminService.token()`; admin-only actions check
-  `adminService.isAdmin()`; all HTTP through `AdminService` (authed) / `ApiService` (public).
-  Husky+lint-staged Prettier on commit — fix formatting, never `--no-verify`. Never commit
-  `.env`.
+  `npm run check:i18n`. UIs are embedded into Rust binaries at compile time — web build
+  precedes cargo. `brochure-marketplace` **auto-deploys to marketplace.start9.com on merge to
+  `master`**.
+- **start9-store** — SSR; browser APIs only via tokens/`afterNextRender`;
+  `TUI_MEDIA.mobile: 1120` is measured — adding a nav item means re-measuring; light theme is a
+  deliberate deferral of design; checkout is a redirect in Phase 1 (Shopify) — multi-step
+  checkout is Phase 2 (Vendure).
+- **ops-server** — admin-only actions check `adminService.isAdmin()`. Never commit `.env`.
 - **support-server** (`web/`) — the support portal over Frappe Helpdesk, not a dashboard: one
   app with the customer chat at `/` and the staff inbox at `/staff`, sharing components and a
   store base and never branching on the role outside the shell and the route guards.

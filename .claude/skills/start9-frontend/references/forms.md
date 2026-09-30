@@ -30,7 +30,7 @@ protected readonly form = inject(NonNullableFormBuilder).group({
   <tui-error formControlName="email" />
   <footer>
     <button tuiButton appearance="flat" type="button" (click)="context.$implicit.complete()">Cancel</button>
-    <button tuiButton [disabled]="form.invalid" [loading]="saving()">Save</button>
+    <button tuiButton [loading]="saving()">Save</button>
   </footer>
 </form>
 ```

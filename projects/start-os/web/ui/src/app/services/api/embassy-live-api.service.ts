@@ -233,10 +233,7 @@ export class LiveApiService extends ApiService {
     return this.rpcRequest({ method: 'server.metrics.follow', params })
   }
 
-  async updateServer(params: {
-    registry: string
-    targetVersion: string
-  }): Promise<'updating' | 'no-updates'> {
+  async updateServer(params: T.UpdateSystemParams): Promise<T.UpdateSystemRes> {
     return this.rpcRequest({ method: 'server.update', params })
   }
 

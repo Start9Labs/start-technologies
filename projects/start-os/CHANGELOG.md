@@ -12,6 +12,23 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **Restart requests during service startup take effect after startup completes.**
+
+- **Starting a StartOS update from the UI installs the release whose notes it shows.** It previously installed whatever version the registry listed last.
+
+- **Forwarded IPv4 UDP ports retain their outbound mapping.** UDP traffic a
+  service starts from a forwarded port leaves through that forward's gateway
+  with its external address and port, keeping peer-to-peer services such as
+  HyperDHT directly reachable under load.
+
+- **Required service dependencies appear from the package manifest during initialization.** StartOS shows their base version and health requirements even if the service has not reported runtime dependencies; active runtime requirements can tighten the base, including for optional dependencies. While a service is not using an optional dependency, its tasks for that dependency are hidden and do not prevent it from starting.
+
+- **Freshly generated Root CAs carry an Authority Key Identifier conforming to RFC 5280 and the CA/Browser Forum Baseline Requirements.** Existing servers retain their trusted Root CA when updated.
+
+- **Timed-out or aborted service commands stop running inside their subcontainer.**
+  StartOS kills the command when its exec wrapper dies, including during health
+  checks.
+
 - **Services start from images without `/etc/passwd` or `/etc/group`.**
 
 - **A service command set to run as a user or group its image does not define
@@ -36,6 +53,13 @@ for the detail behind its highlights.
   restarting the server.**
 
 ### Added
+
+- **Administrators can add a custom CA root to the host trust store with
+  `start-cli server trust-ca`.** The root takes effect immediately and persists
+  across reboots and OS updates. Services keep the trust store their package
+  provides.
+
+- **Packages can show a localized pre-download alert before an update.** A matching installed version prompts for confirmation in the Marketplace and Updates tab before StartOS fetches the package. The alert supports Markdown formatting.
 
 - **UEFI installations carry a standard fallback bootloader.** StartOS remains
   bootable if firmware loses its saved boot entry while retaining the normal

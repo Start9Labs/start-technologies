@@ -7,4 +7,7 @@ export type DependencyMetadata = {
   icon: DataUrl | null
   description: LocaleString | null
   optional: boolean
+  versionRange?: string | null
+  kind?: 'exists' | 'running' | null
+  healthChecks?: string[]
 }

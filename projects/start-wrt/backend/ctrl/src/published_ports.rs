@@ -36,7 +36,6 @@ pub fn published_ports<C: CtrlContext>() -> ParentHandler<C> {
             // snapshot, stale by up to PERSIST_MIN_INTERVAL_SECS or absent on
             // first boot, and reconcile against a fiction.
             from_fn_async_local(reconcile)
-                .with_metadata("no_auth", Value::Bool(true))
                 .no_display()
                 .with_call_remote::<CliContext>(),
         )
@@ -50,7 +49,6 @@ pub fn published_ports<C: CtrlContext>() -> ParentHandler<C> {
             "wan-changed",
             // Live SNI routes exist only in daemon memory.
             from_fn_async_local(crate::port_control::wan_changed)
-                .with_metadata("no_auth", Value::Bool(true))
                 .no_display()
                 .with_call_remote::<CliContext>(),
         )
@@ -1245,6 +1243,8 @@ pub async fn set<C: CtrlContext>(
                     port_control
                         .displace_sni_routes(&sni_displacement_ranges)
                         .await;
+                    // The reload below applies the port-80 admission rule.
+                    port_control.sync_sni_rules_before_reload().await;
                 }
                 if !displaced_auto.is_empty() {
                     tracing::info!(

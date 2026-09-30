@@ -185,3 +185,21 @@ validation`).
   `safeLinks` directive (forces `target="_blank" rel="noreferrer"` on external links).
 - Text stacks use `tuiTitle`/`tuiSubtitle` with `<b>` for the title — never custom
   heading/caption CSS: `<span tuiTitle><b>{{ title }}</b><span tuiSubtitle>{{ sub }}</span></span>`.
+- **A cell's children sit flat in the `[tuiCell]`.** A single-line title is one element,
+  `<span tuiTitle tuiFade>`, with no inner span. Trailing `<time tuiSubtitle>`, badges and
+  statuses are direct children, and the title's own flex pushes them to the end. Taiga already
+  lays these out, so `[tuiTitle] { flex: 1; min-inline-size: 0 }`, a `[tuiAccessories]` gap and
+  per-row `white-space: nowrap` all get deleted. Set `nowrap` once on the element that wraps the
+  rows, never on a host that also renders empty or error states.
+
+### Sticky page headers
+
+A scrolling page puts its header **inside** the `tui-scrollbar`, as its first child, made
+sticky and translucent by a global utility (support-server's `g-header`: sticky, padded,
+`backdrop-filter` over a `color-mix()` of the page background). A header in a flex column above
+the scrollbar, wrapped in a `.page`/`.chat` div, gets rewritten. When a child component owns the
+scrollbar, it renders the `<header tuiHeader class="g-header"><ng-content /></header>` and the
+route projects the title and accessories into it. The route then styles its semantic children
+directly (`header, section { inline-size: min(100%, 48rem); margin-inline: auto }`). A back link
+goes above the title, as a `<p tuiCaption>` in the header's `hgroup`. Inside the `<h1>` it
+becomes part of the heading's accessible name.

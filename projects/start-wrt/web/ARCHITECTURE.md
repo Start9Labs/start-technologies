@@ -13,7 +13,6 @@ src/app/
 │
 ├── components/               # Shared UI components
 │   ├── aside.ts              # Right help panel — renders HelpService content via `| markdown | dompurify`
-│   ├── ca-wizard.ts          # CA certificate install wizard
 │   ├── copy.ts               # Copy-to-clipboard directive
 │   ├── footer.ts             # Form footer (Cancel / Save buttons)
 │   ├── form.ts               # [formLoading] directive — TuiForm + TuiCardLarge + TuiSkeleton

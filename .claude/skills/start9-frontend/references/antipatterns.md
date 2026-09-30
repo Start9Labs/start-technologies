@@ -30,20 +30,15 @@ title/subtitle/actions row, you missed a primitive.
 where a flow needs raw promise semantics, that call site went back to a manual loader — the
 abstraction is not forced where it doesn't fit.
 
-**4. Duplicated desktop/mobile DOM → one DOM restyled per breakpoint.**
-`<div class="desktop"><table>…</table></div><div class="mobile">…re-marked-up…</div>` becomes a
-single table whose cells self-label (`<td [attr.data-label]="'Type' | i18n">`) restyled under
-`:host-context(tui-root._mobile)` (−90 lines per component). Use the `TUI_BREAKPOINT` signal +
-`@if` only when the branches genuinely differ.
+**4. Duplicated desktop/mobile DOM → one DOM restyled per breakpoint** (−90 lines per
+component; the self-labeling table is in styling.md). Use the `TUI_BREAKPOINT` signal + `@if`
+only when the branches genuinely differ.
 
 **5. Wrapper elements → attribute components on semantic hosts.** `selector: 'app-footer'`
 wrapping `<footer>` becomes `selector: 'footer[appFooter]'`; a `.shell` wrapper div is deleted
 in favor of semantic elements directly inside `tui-root`; an element component wrapping
 `<a tuiButton>` becomes `selector: 'a[marketplacePackageLink]'` with `hostDirectives:
-[TuiButton]`, static `host` attrs and option providers; an avatar component that was
-`:host { display: contents }` around `<span tuiAvatar [size]="size()">` becomes
-`hostDirectives: [{ directive: TuiAvatar, inputs: ['size'] }]` with its own `size` input
-deleted.
+[TuiButton]`, static `host` attrs and option providers.
 
 **6. Semantic-HTML repair.** `<h3>` abused for body text (with CSS undoing it) → plain text +
 `font: var(--tui-typography-body-l)`; `<h2>` for dialog sections → `<h3 tuiHeader="h6">`
@@ -69,69 +64,53 @@ fields inlined into the group literal.
 
 **10. Single-use names, wrapper methods, multi-branch returns → inlined expressions.**
 `select(type) { this.context.completeWith(type) }` + `(click)="select('public')"` →
-`(click)="context.completeWith('public')"`; `sentTo = this.verification.sentTo` plus
-`resend() { return this.verification.resend() }` → `protected readonly verification` and
-`verification.sentTo()` / `(click)="verification.resend()"` in the template.
+`(click)="context.completeWith('public')"`; aliased fields and wrapper methods over a service →
+the service itself, `protected readonly` (components.md member conventions). A module-level
+`const BULLET: Record<Status, string>` that one component reads becomes that component's field.
+A helper takes the value it needs, not the injectable that produces it:
+`pickTopic(dialogs, i18n.transform('Choose a topic'))`, not `pickTopic(dialogs, i18n)`.
 `if`-ladders → one boolean expression or ternary;
 `p.length > 0` → `!!p.length`; flag parameters → default parameters; `try/catch` around a
 subscribe callback → deleted.
 
 **11. Derived-state ceremony → template pipes.** A `computed()` mapping
 `Object.entries(x).map(([name, value]) => ({name, value}))` → `@for (row of x | keyvalue)`;
-a `switchMap(async …)` that builds an object → `map(c => c ?? defaultConfig)`;
-`takeUntilDestroyed(this.destroyRef)` + stored `DestroyRef` → bare `takeUntilDestroyed()`.
+a `switchMap(async …)` that builds an object → `map(c => c ?? defaultConfig)`.
 
-**12. `track $index` on entity lists → `track item` / `track item.id`** ("service table DOM
-cached"). `$index` is for genuinely static lists.
-
-**13. Manual reset plumbing → `linkedSignal`.** `menuOpen = signal(false)` + `.set(false)`
+**12. Manual reset plumbing → `linkedSignal`.** `menuOpen = signal(false)` + `.set(false)`
 sprinkled across handlers → one `linkedSignal({ source, computation: () => false })` keyed on
 navigation/breakpoint. Conversely, needlessly added signal ceremony gets deleted (a
 `TitleStrategy` injection where `toSignal(router.events)` as a change trigger sufficed).
 
-**14. DI style.** `private readonly patch: PatchDB<DataModel> = inject(PatchDB)` →
-`inject<PatchDB<DataModel>>(PatchDB)`; `{ provide, useExisting }` → `tuiProvide`; inject the
+**13. DI style.** `private readonly patch: PatchDB<DataModel> = inject(PatchDB)` →
+`inject<PatchDB<DataModel>>(PatchDB)`; inject the
 **narrow** dependency (`PATCH_CACHE` observable, not the whole `PatchDB`) to break cycles; type
 against the abstract class — "the less concrete you define it here the better"; a child may
 inject its parent component instance (`inject(MarketplacePreviewComponent)`) instead of
 prop-drilling; hand-rolled unions → library types (`PolymorpheusContent`).
 
-**15. Dead code dies immediately.** Unused components, `.html`/`.scss` orphans,
+**14. Dead code dies immediately.** Unused components, `.html`/`.scss` orphans,
 `.asObservable()` no-ops, post-upgrade `// TODO: Remove in Taiga v5.0` shims (actually removed
 after the upgrade), unused imports, five font families the day the design settled on one.
 
-**16. `input<T | null>(null)` → `input<T>()`** and make consumers tolerate `undefined` —
-"it's better to make the argument optional so `undefined` will not cause type error." Delete
-the `@if` guard around `*ngTemplateOutlet` (it no-ops on nullish).
-
-**17. Route redirects: `{ path: '**', redirectTo: … }`last**, not`{ path: '',
-redirectTo, pathMatch: 'full' }` first.
-
-**18. Utility-class hygiene.** `g-*` utilities exist once in the shared/global sheet — per-app
+**15. Utility-class hygiene.** `g-*` utilities exist once in the shared/global sheet — per-app
 copies get centralized, one-off spacing classes (`.padding-top`) get deleted. The global
-stylesheet count goes down, never up.
+stylesheet count goes down, never up. A global modifier that only one component uses
+(`.g-markdown._document`) moves into that component as `:host ::ng-deep .g-markdown { … }`.
 
-**19. Copy-pasted markup branches → data-driven rendering.** Three hand-written dropdown
+**16. Copy-pasted markup branches → data-driven rendering.** Three hand-written dropdown
 templates + eight nav buttons → one `navigation` object rendered via `| keyvalue: asIs` (with
 `asIs = () => 0` preserving insertion order); string-vs-object value discriminates leaf vs
 dropdown; `/`-prefix discriminates routerLink vs external href.
 
-**20. Copy is sentence case.** `'Beginning Backup'` → `'Beginning backup'`. Title Case only
+**17. Copy is sentence case.** `'Beginning Backup'` → `'Beginning backup'`. Title Case only
 for proper nouns and page titles.
-
-**21. Hand-built kit pieces → the kit.** An `initial(name)` util → `| tuiInitials`; three
-`label tuiBlock` + `input tuiRadio` rows in a `tuiGroup` → one `tui-radio-list`; a
-`[tuiDropdown]="tpl"` menu with an `open` signal reset in every handler → `tuiDropdownAuto` +
-`*tuiDropdown="let close"`; `section > [tuiCell] { inline-size: 100% }` → `tuiCellStretch`.
 
 ### Review quotes (verbatim, from actual PRs)
 
 - On template function calls: _"This way you call this function on each change detection,
   effectively creating a new Observable each time. You need a readonly property… or a custom
   pipe so that it is only called once."_
-- On submit buttons: _"There's no way to click save until the form is valid because it's
-  disabled. A good UX pattern is to not disable it… so that I can see all the fields I forgot
-  to type in."_ → enabled submit + `tuiMarkControlAsTouchedAndValidate(this.form)` on click.
 - On dialog copy: _"It makes more sense for longer text to be in `data: { content }` rather
   than in the title… it looks better with a title and an actual message than with just a huge
   title."_
@@ -144,9 +123,6 @@ for proper nouns and page titles.
 - On RxJS: observables end in `$`; `defer(() => this.api.call().pipe(catchError(…)))` over
   fetch-in-`ngOnInit`; drop `async`/`switchMap` when nothing is async — use `map`; no `else`
   after `return`.
-- Template attribute order, normalized by hand in review: `*structuralDirective`, `#templateRef`,
-  `booleanAttr`, `stringAttr="value"`, `[input]="value"`, `[(twoWay)]="value"`,
-  `(output)="handler($event)"`.
 
 ### The upgrade playbook (how framework bumps are executed)
 

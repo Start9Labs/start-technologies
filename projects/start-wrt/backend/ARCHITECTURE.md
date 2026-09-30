@@ -15,9 +15,14 @@ Additional routes:
 | `GET\|POST /rest/rpc/{guid}`              | Continuation endpoint for backup/restore/diagnostics (10MB limit) |
 | `GET /ws/rpc/{guid}`                      | WebSocket continuation endpoint (progress streaming for updates)  |
 | `GET /luci`                               | Convenience redirect to `/cgi-bin/luci`                           |
-| `GET /static/root-ca.crt`                 | Root CA certificate download (no auth)                            |
+| `GET /static/local-root-ca.crt`           | Root CA certificate download (no auth)                            |
+| `GET /static/local-root-ca.mobileconfig`  | Root CA as an Apple configuration profile (no auth)               |
 | `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` | LuCI reverse proxy (localhost:8080)                               |
 | Fallback                                  | Serves embedded web UI via `include_dir`                          |
+
+Beside the wildcard listeners, port control binds the SNI demux to the WAN IPv4 on 443 while hostname routes hold it (SO_REUSEPORT; the kernel delivers a connection to the most specific bound socket).
+
+Port 80 is decided per request (`http_redirect.rs`). An outermost layer serves the UI to a client on a connected subnet off the WAN, at an address that is not the WAN's, and answers every other IPv4 request with a 307 to the same authority over HTTPS. While 443 is published and the WAN address is known, port control keeps a WAN ACCEPT rule on tcp/80 at that address in the SNI admission set, rewritten when the address changes. The layer checks the client's subnet as well as the address it dialed. Its `SNI` label makes a build without the redirect purge it; its `name` tells it from a hostname route's rule on 80, which takes precedence. The gate opens before the rule is written, shuts after the reload that removes it, and is seeded from any `SNI` rule on 80 before port control starts. The router's addresses are read at seeding, on every sweep and WAN hotplug, and when a request would redirect on stale addresses; unreadable, they leave no client trusted.
 
 ## Server vs CLI
 
@@ -31,7 +36,7 @@ pub trait CtrlContext: Context + Clone {
 ```
 
 - **`ServerContext`**: always reads `/etc/config/`, always reloads services. Holds `RpcContinuations` for long-running operations.
-- **`CliContext`**: configurable root (`--config-root`), cookie persistence in `~/.startwrt/.cookies.json`, calls server via HTTP when needed. Injects local auth cookie from `/run/startwrt/rpc.authcookie` when running on the router.
+- **`CliContext`**: configurable root (`--config-root`), cookie persistence in `~/.startwrt/.cookies.json`, calls server via HTTP when needed. Injects the local auth cookie from `/run/startwrt/rpc.authcookie` into requests to loopback hosts only.
 
 The single binary `startwrt` uses `MultiExecutable` to dispatch based on the symlink name (`startwrt-ctrld` or `startwrt-cli`) or the first argument.
 
@@ -40,7 +45,7 @@ The single binary `startwrt` uses `MultiExecutable` to dispatch based on the sym
 ```
 --config-root PATH   UCI config directory (default: /etc/config)
 --configs-only       Skip service reloads (write configs only)
---host URL           Server URL (default: http://router.lan/rpc/v1)
+--host URL           Server URL (default: http://127.0.0.1/rpc/v1 on the router, else http://router.lan/rpc/v1)
 ```
 
 ### Local-Only Subcommands
@@ -160,7 +165,7 @@ Maps physical ports to profiles via bridge VLAN assignments on the LAN bridge (`
 - Tokens: random bytes → base32 encoding (sent to client), SHA-256 hash (stored server-side)
 - 1-day session expiry, HTTP-only SameSite=Strict cookie
 - Rate limiting: 3 login attempts per 20 seconds
-- Local auth cookie: generated at daemon startup → `/run/startwrt/rpc.authcookie`, read by CLI to bypass session auth over SSH
+- Local auth cookie: generated at daemon startup → `/run/startwrt/rpc.authcookie`, read by CLI to authenticate without a session
 
 ### middleware/auth.rs — HTTP Session Middleware
 
@@ -170,6 +175,8 @@ Maps physical ports to profiles via bridge VLAN assignments on the LAN bridge (`
 - `no_auth: true` — skip auth (status endpoints)
 - `get_session: true` — inject `sessionHash` into params
 
+Every other call needs a valid session cookie or the local auth cookie; the peer address grants nothing.
+
 Returns RPC error code 34 on auth failure (frontend auto-logs out).
 
 ### uci.rs, files.rs, exec.rs — Generic/Legacy
@@ -178,36 +185,37 @@ Low-level UCI, file, and shell access. These are vestigial — all features now 
 
 ### Other Modules
 
-| Module                            | Purpose                                                                                                                                                                                   |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `system.rs`                       | System settings, remote access rules, schedules, restart, factory reset                                                                                                                   |
-| `devices.rs`                      | Device enumeration from ARP/DHCP, rename, forget (flush ARP + lease)                                                                                                                      |
-| `wan.rs` / `lan.rs`               | WAN/LAN interface configuration                                                                                                                                                           |
-| `published_ports.rs`              | Port forwarding rules (firewall redirects)                                                                                                                                                |
-| `port_control.rs`                 | Automatic port forwarding: PCP + UPnP IGD servers on the shared `start-core` protocol cores, mapping device-requested forwards onto auto-tagged UCI redirects with in-memory lease expiry |
-| `ssh_keys.rs`                     | SSH public key CRUD (`/etc/dropbear/authorized_keys`)                                                                                                                                     |
-| `vpn_client.rs` / `vpn_server.rs` | WireGuard VPN management                                                                                                                                                                  |
-| `dns.rs`                          | DNS server configuration                                                                                                                                                                  |
-| `activity.rs`                     | Activity logging via SQLite                                                                                                                                                               |
-| `backup.rs` / `diagnostics.rs`    | Backup/restore and diagnostic bundles (via continuations)                                                                                                                                 |
-| `logs.rs`                         | WebSocket log streaming                                                                                                                                                                   |
-| `ssl.rs`                          | TLS cert generation: Root CA → Intermediate CA → Server cert                                                                                                                              |
-| `init.rs`                         | Early boot WiFi config, password generation                                                                                                                                               |
-| `setup.rs` / `flash.rs`           | Setup wizard, firmware flashing                                                                                                                                                           |
-| `captive.rs`                      | Captive portal management                                                                                                                                                                 |
-| `embedded_web.rs`                 | Serves the Angular SPA from `include_dir`                                                                                                                                                 |
-| `luci_proxy.rs`                   | Reverse proxy to LuCI on localhost:8080                                                                                                                                                   |
-| `continuations.rs`                | Long-running operation handling (GUID-based, timeout, kill signals)                                                                                                                       |
-| `update.rs`                       | OTA update engine — download/verify/flash, progress via continuations                                                                                                                     |
-| `registry/`                       | Registry client (`device_info`, `asset`, `os`, `signer`)                                                                                                                                  |
-| `sign/`                           | ed25519 signature + commitment verification                                                                                                                                               |
-| `progress.rs`                     | Progress reporting, wire-compatible with start-os                                                                                                                                         |
-| `eeprom.rs`                       | EEPROM TLV read (ONIE blob; WiFi PMK in tag 0x2F)                                                                                                                                         |
-| `wg.rs`                           | WireGuard key management types                                                                                                                                                            |
-| `device_names.rs`                 | Persistent cache of auto-learned device hostnames                                                                                                                                         |
-| `verify.rs`                       | Factory QC checks (firmware integrity, EEPROM password, SSID broadcast)                                                                                                                   |
-| `templates/`                      | `client.conf.template` — WireGuard peer client-config template                                                                                                                            |
-| `error.rs`                        | `ErrorKind` enum and `Error` type                                                                                                                                                         |
+| Module                            | Purpose                                                                                                                                                                                                                                                      |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `system.rs`                       | System settings, remote access rules, schedules, restart, factory reset                                                                                                                                                                                      |
+| `devices.rs`                      | Device enumeration from ARP/DHCP, rename, forget (flush ARP + lease)                                                                                                                                                                                         |
+| `wan.rs` / `lan.rs`               | WAN/LAN interface configuration                                                                                                                                                                                                                              |
+| `published_ports.rs`              | Port forwarding rules (firewall redirects)                                                                                                                                                                                                                   |
+| `port_control.rs`                 | Automatic port forwarding: PCP + UPnP IGD servers on the shared `start-core` protocol cores, mapping device-requested forwards onto auto-tagged UCI redirects with in-memory lease expiry; also owns the SNI demux and the port-80 redirect's admission rule |
+| `http_redirect.rs`                | HTTP→HTTPS redirect on port 80 while 443 is published: a request layer keyed on the client's subnet and the dialed address                                                                                                                                   |
+| `ssh_keys.rs`                     | SSH public key CRUD (`/etc/dropbear/authorized_keys`)                                                                                                                                                                                                        |
+| `vpn_client.rs` / `vpn_server.rs` | WireGuard VPN management                                                                                                                                                                                                                                     |
+| `dns.rs`                          | DNS server configuration                                                                                                                                                                                                                                     |
+| `activity.rs`                     | Activity logging via SQLite                                                                                                                                                                                                                                  |
+| `backup.rs` / `diagnostics.rs`    | Backup/restore and diagnostic bundles (via continuations)                                                                                                                                                                                                    |
+| `logs.rs`                         | WebSocket log streaming                                                                                                                                                                                                                                      |
+| `ssl.rs`                          | TLS cert generation: Root CA → Intermediate CA → Server cert                                                                                                                                                                                                 |
+| `init.rs`                         | Early boot WiFi config, password generation                                                                                                                                                                                                                  |
+| `setup.rs` / `flash.rs`           | Setup wizard, firmware flashing                                                                                                                                                                                                                              |
+| `captive.rs`                      | Captive portal management                                                                                                                                                                                                                                    |
+| `embedded_web.rs`                 | Serves the Angular SPA from `include_dir`                                                                                                                                                                                                                    |
+| `luci_proxy.rs`                   | Reverse proxy to LuCI on localhost:8080                                                                                                                                                                                                                      |
+| `continuations.rs`                | Long-running operation handling (GUID-based, timeout, kill signals)                                                                                                                                                                                          |
+| `update.rs`                       | OTA update engine — download/verify/flash, progress via continuations                                                                                                                                                                                        |
+| `registry/`                       | Registry client (`device_info`, `asset`, `os`, `signer`)                                                                                                                                                                                                     |
+| `sign/`                           | ed25519 signature + commitment verification                                                                                                                                                                                                                  |
+| `progress.rs`                     | Progress reporting, wire-compatible with start-os                                                                                                                                                                                                            |
+| `eeprom.rs`                       | EEPROM TLV read (ONIE blob; WiFi PMK in tag 0x2F)                                                                                                                                                                                                            |
+| `wg.rs`                           | WireGuard key management types                                                                                                                                                                                                                               |
+| `device_names.rs`                 | Persistent cache of auto-learned device hostnames                                                                                                                                                                                                            |
+| `verify.rs`                       | Factory QC checks (firmware integrity, EEPROM password, SSID broadcast)                                                                                                                                                                                      |
+| `templates/`                      | `client.conf.template` — WireGuard peer client-config template                                                                                                                                                                                               |
+| `error.rs`                        | `ErrorKind` enum and `Error` type                                                                                                                                                                                                                            |
 
 ## UCI Library (uciedit)
 

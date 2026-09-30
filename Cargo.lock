@@ -7756,6 +7756,7 @@ dependencies = [
  "exver",
  "fast-socks5",
  "fd-lock-rs",
+ "foreign-types",
  "form_urlencoded",
  "futures",
  "gpt",
@@ -7804,6 +7805,7 @@ dependencies = [
  "once_cell",
  "openssh-keys",
  "openssl",
+ "openssl-sys",
  "p256",
  "patch-db",
  "pbkdf2",
@@ -7925,7 +7927,7 @@ dependencies = [
 
 [[package]]
 name = "startwrt-core"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "arc-swap",
  "async_cell",

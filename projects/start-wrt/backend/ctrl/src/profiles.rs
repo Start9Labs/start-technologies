@@ -2472,7 +2472,7 @@ const VPN_KILLSWITCH_METRIC: u32 = 2048;
 
 /// Ensure a single `ip rule` exists that routes fwmark 0x80 packets via the
 /// main routing table.  This cooperates with the static nftables chain
-/// (/etc/nftables.d/10-startwrt-dnat-mark.nft), which marks DNAT-state packets
+/// (/usr/share/nftables.d/table-pre/10-startwrt-dnat-mark.nft), which marks DNAT-state packets
 /// with 0x80, to prevent DNAT reply traffic from being captured by source-based
 /// VPN policy routing rules.
 fn ensure_dnat_return_rule(cfgs: &mut Configs) -> Result<(), Error> {
@@ -2499,7 +2499,7 @@ fn ensure_dnat_return_rule(cfgs: &mut Configs) -> Result<(), Error> {
 /// Ensure a single `ip -6 rule` exists that routes fwmark 0x80 packets via the
 /// main routing table.  This is the IPv6 sibling of [`ensure_dnat_return_rule`]:
 /// it cooperates with the static nftables chain
-/// (/etc/nftables.d/11-startwrt-inbound6-mark.nft), which connection-marks
+/// (/usr/share/nftables.d/table-pre/11-startwrt-inbound6-mark.nft), which connection-marks
 /// IPv6 flows initiated from WAN, so that replies to inbound port-forwarded
 /// connections route out wan6 instead of being captured by the per-VLAN VPN
 /// policy rules (prr6_*). Priority 100 (DNAT_RETURN_PRIORITY) keeps it ahead of
@@ -5365,7 +5365,7 @@ config profile guest
         assert!(dnat_data.src.is_none());
 
         // The DNAT-return mark is no longer a per-profile UCI firewall rule —
-        // it moved to a static nftables chain (/etc/nftables.d/10-startwrt-dnat-mark.nft)
+        // it moved to a static nftables chain (10-startwrt-dnat-mark.nft)
         // because fw4 has no UCI option for `ct status dnat` matching.
         assert!(
             !cfgs["firewall"]

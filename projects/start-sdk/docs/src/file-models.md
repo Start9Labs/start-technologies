@@ -121,13 +121,13 @@ export const networkXml = FileHelper.xml({ base: sdk.volumes.config, subpath: 'n
 
 ### Reading Methods
 
-| Method                         | Purpose                                                |
-| ------------------------------ | ------------------------------------------------------ |
-| `.once()`                      | Read once, no reactivity                               |
-| `.const(effects)`              | Read and re-run the enclosing context if value changes |
-| `.onChange(effects, callback)` | Register a callback for value changes                  |
-| `.watch(effects)`              | Create an async iterator of new values                 |
-| `.waitFor(effects, predicate)` | Block until the value satisfies a predicate            |
+| Method                                  | Purpose                                                |
+| --------------------------------------- | ------------------------------------------------------ |
+| `.once()`                               | Read once, no reactivity                               |
+| `.const(effects)`                       | Read and re-run the enclosing context if value changes |
+| `.onChange(effects, callback)`          | Register a callback for value changes                  |
+| `.watch(effects, signal?)`              | Create an async iterator of new values                 |
+| `.waitFor(effects, predicate, signal?)` | Block until the value satisfies a predicate            |
 
 > [!NOTE]
 > All read methods return `null` if the file doesn't exist. Do NOT use try-catch for missing files.
@@ -170,7 +170,12 @@ const serverHost = await configYaml.read(c => c.server.host).once()
 
 // Wait until a condition is met (blocks until predicate returns true)
 const syncedStore = await storeJson.read(s => s.fullySynced).waitFor(effects, synced => synced === true)
+
+// Give up after a minute; the signal stops the wait (it rejects with AbortedError)
+const syncedInTime = await storeJson.read(s => s.fullySynced).waitFor(effects, synced => synced === true, AbortSignal.timeout(60_000))
 ```
+
+The signal also cancels waits for a file or its parent directory to be created.
 
 ## Writing File Models
 

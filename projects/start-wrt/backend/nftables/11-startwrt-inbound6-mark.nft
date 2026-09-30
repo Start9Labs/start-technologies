@@ -17,8 +17,9 @@
 # daemon for VPN-routed profiles, then routes the marked replies via the main
 # table (out wan6) instead of the per-VLAN VPN table.
 #
-# fw4 auto-includes /etc/nftables.d/*.nft into the `inet fw4` table. Marking is
-# harmless when no dnat_return6 ip-rule is present (replies use main anyway).
+# fw4 auto-includes /usr/share/nftables.d/table-pre/*.nft into the `inet fw4`
+# table. Marking is harmless when no dnat_return6 ip-rule is present (replies
+# use main anyway).
 
 chain startwrt_inbound6_mark {
 	type filter hook prerouting priority mangle; policy accept;
