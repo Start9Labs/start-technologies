@@ -36,7 +36,7 @@ Neither provider holds both halves. To link you to your destination they would h
 
 A VPN can connect through another only when:
 
-- Its config's `Endpoint` is an IP address, not a hostname.
+- Its config's `Endpoint` is an IP address, not a hostname. A VPN whose server is a hostname offers only **Internet** as its target.
 - The target VPN's tunnel can carry it: the target has an address of the same family (IPv4 or IPv6) and its `AllowedIPs` include this VPN's server address.
 - No other VPN uses the same server address.
 

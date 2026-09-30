@@ -1212,6 +1212,9 @@ struct OutboundVpn {
     supports_ipv6: bool,
     /// Interface MTU if explicitly set, else null (kernel default ~1420).
     mtu: Option<u16>,
+    /// True when the peer Endpoint is a hostname. Such a VPN can only target
+    /// "Internet"; the web UI offers no other target for it.
+    hostname_endpoint: bool,
 }
 // Response: Vec<OutboundVpn>
 ```
@@ -1253,7 +1256,9 @@ struct OutboundVpnCreateResponse {
 // already chains through.
 //
 // A chained VPN (target ≠ "Internet") additionally needs (InvalidValue):
-//   * an IP-literal Endpoint — only an address can be routed through the target;
+//   * an IP-literal Endpoint — only an address can be routed through the target.
+//     At boot, a chained VPN with a hostname Endpoint is retargeted to
+//     "Internet" and the change logged to activity (`vpn-client.unchained`);
 //   * a target tunnel with an address of the endpoint's family whose peer
 //     AllowedIPs cover the endpoint;
 //   * an endpoint address no other VPN shares (checked for every VPN, since a

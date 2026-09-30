@@ -1,4 +1,5 @@
-import { Component, inject, signal } from '@angular/core'
+import { Component, effect, inject, signal } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms'
 import {
   TuiButton,
@@ -18,12 +19,14 @@ import {
 } from '@taiga-ui/kit'
 import { TuiForm } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
+import { switchMap } from 'rxjs'
 import { provideHelp } from 'src/app/help/help'
 import { ModalHelp } from 'src/app/help/modal-help'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import {
   AddClientDialogData,
   getAddOutboundVpnForm,
+  hasHostnameEndpoint,
   OUTBOUND_VALIDATION_ERRORS,
 } from './utils'
 
@@ -66,7 +69,7 @@ import {
       <tui-textfield tuiChevron [stringify]="stringifyTarget">
         <label tuiLabel>{{ 'Target' | i18n }}</label>
         <input tuiSelect formControlName="target" />
-        <tui-data-list-wrapper *tuiDropdown [items]="context.data.targets" />
+        <tui-data-list-wrapper *tuiDropdown [items]="targets()" />
       </tui-textfield>
       <footer>
         <button
@@ -111,11 +114,29 @@ class AddClient {
     this.context.data.existingLabels,
   )
 
+  protected readonly targets = toSignal(
+    this.form.controls.config.valueChanges.pipe(
+      switchMap(async file => {
+        const config = await file?.text().catch(() => '')
+        return config && hasHostnameEndpoint(config)
+          ? ['Internet']
+          : this.context.data.targets
+      }),
+    ),
+    { initialValue: this.context.data.targets },
+  )
+
   // Translates the 'Internet' option; user VPN labels pass through unchanged.
   protected readonly stringifyTarget = (v: string): string =>
     this.i18n.transform(v)
 
   constructor() {
+    effect(() => {
+      const { target } = this.form.controls
+      if (!this.targets().includes(target.value)) {
+        target.setValue('Internet')
+      }
+    })
     // The config control uses an async validator (WireGuard content check), so
     // its status settles to INVALID *after* the value changes — listen on
     // statusChanges, not valueChanges, or the error never gets marked touched

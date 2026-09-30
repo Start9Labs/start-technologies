@@ -7,7 +7,7 @@ import {
 } from '@angular/forms'
 import { FormRawValue } from 'src/app/services/form.service'
 import { OutboundVpn } from 'src/app/services/api/api.service'
-import { CustomValidators } from 'src/app/utils/validators'
+import { CustomValidators, isValidIpv4 } from 'src/app/utils/validators'
 
 export const OUTBOUND_VALIDATION_ERRORS = {
   required: 'Required',
@@ -123,18 +123,32 @@ export type AddOutboundVpnForm = FormRawValue<
   ReturnType<typeof getAddOutboundVpnForm>
 >
 
+/** Whether a WireGuard .conf names its server by hostname. */
+export function hasHostnameEndpoint(config: string): boolean {
+  const endpoint = /^[ \t]*Endpoint[ \t]*=[ \t]*(\S+)/im.exec(config)?.[1]
+  if (!endpoint) return false
+  const host = endpoint.includes(':')
+    ? endpoint.slice(0, endpoint.lastIndexOf(':'))
+    : endpoint
+  return !host.includes(':') && !isValidIpv4(host)
+}
+
 /**
  * Compute which VPN labels are safe targets for a given VPN.
  * A target T is unsafe if it is disabled, or if following T's chain eventually
  * reaches selfLabel (cycle). A disabled target's interface is never registered
  * with netifd, so the chain route through it is dropped and this VPN's traffic
  * silently falls back to the WAN — one hop where the user asked for two.
+ * A VPN whose server is a hostname can only target Internet.
  * Note the cycle walk still traverses the full unfiltered graph.
  */
 export function getSafeTargets(
   selfLabel: string,
   allVpns: OutboundVpn[],
 ): string[] {
+  if (allVpns.find(v => v.label === selfLabel)?.hostname_endpoint) {
+    return ['Internet']
+  }
   return [
     'Internet',
     ...allVpns

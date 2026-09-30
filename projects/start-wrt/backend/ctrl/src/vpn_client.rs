@@ -42,6 +42,8 @@ pub struct OutboundVpn {
     /// Interface MTU, if explicitly set. `None` means the kernel default
     /// (1420 on a clean path) is in effect. Editable via `update`.
     pub mtu: Option<u16>,
+    /// The server is named by hostname; only `Internet` is a valid target.
+    pub hostname_endpoint: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -741,6 +743,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<OutboundVpn>, Error> {
             let mtu = wg_iface.mtu;
 
             let used_by = get_used_by_profiles(&cfgs, &meta.interface);
+            let hostname_endpoint = has_hostname_endpoint(&cfgs, &meta.interface);
 
             Some(OutboundVpn {
                 id: meta.interface.clone(),
@@ -750,6 +753,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<OutboundVpn>, Error> {
                 used_by,
                 supports_ipv6,
                 mtu,
+                hostname_endpoint,
             })
         })
         .collect();
@@ -1344,6 +1348,10 @@ fn get_peer_endpoint_host(cfgs: &Configs, interface: &str) -> Option<String> {
         })
 }
 
+fn has_hostname_endpoint(cfgs: &Configs, interface: &str) -> bool {
+    get_peer_endpoint_host(cfgs, interface).is_some_and(|host| host.parse::<IpAddr>().is_err())
+}
+
 fn get_peer_allowed_ips(cfgs: &Configs, interface: &str) -> Vec<String> {
     let peer_type = format!("wireguard_{}", interface);
     cfgs["network"]
@@ -1742,16 +1750,44 @@ fn unbracket_endpoint_hosts<'a>(cfgs: &mut Configs<'a>, arena: &'a Arena) -> Vec
 
 /// Repairs outbound VPN config an earlier release wrote: bracketed IPv6
 /// endpoints and chains without their fail-closed fallback.
+/// Retarget every chained VPN with a hostname endpoint to `Internet`.
+/// Returns the labels retargeted.
+fn unchain_hostname_endpoints(cfgs: &mut Configs) -> Result<Vec<String>, Error> {
+    let hostname_interfaces: Vec<String> = cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<UciVpnClient>().ok())
+        .filter(|meta| meta.target != "Internet")
+        .filter(|meta| has_hostname_endpoint(cfgs, &meta.interface))
+        .map(|meta| meta.interface)
+        .collect();
+
+    let mut unchained = Vec::new();
+    for section in &mut cfgs["startwrt"].sections {
+        let Ok(mut meta) = section.get::<UciVpnClient>() else {
+            continue;
+        };
+        if !hostname_interfaces.contains(&meta.interface) {
+            continue;
+        }
+        unchained.push(meta.label.clone());
+        meta.target = "Internet".to_string();
+        section.set(&meta)?;
+    }
+    Ok(unchained)
+}
+
 pub async fn heal_vpn_clients(uci_root: impl AsRef<std::path::Path>) -> Result<(), Error> {
     let arena = Arena::new();
     let mut cfgs = parse_all(uci_root.as_ref(), &arena, &["network", "startwrt"]).await?;
 
     let unbracketed = unbracket_endpoint_hosts(&mut cfgs, &arena);
+    let unchained = unchain_hostname_endpoints(&mut cfgs)?;
     let before = chain_route_snapshot(&cfgs);
     rewrite_vpn_chain_routes(&mut cfgs)?;
     let routes_changed = chain_route_snapshot(&cfgs) != before;
 
-    if unbracketed.is_empty() && !routes_changed {
+    if unbracketed.is_empty() && unchained.is_empty() && !routes_changed {
         return Ok(());
     }
 
@@ -1763,6 +1799,18 @@ pub async fn heal_vpn_clients(uci_root: impl AsRef<std::path::Path>) -> Result<(
 
     dump_all(uci_root.as_ref(), cfgs).await?;
     drop(arena);
+
+    for label in &unchained {
+        crate::activity::log(
+            "vpn-client",
+            "unchained",
+            true,
+            &format!(
+                "Outbound VPN '{label}' now connects over the Internet — a VPN connecting through another needs its server's IP address, not a hostname"
+            ),
+            None,
+        );
+    }
 
     let _ =
         crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/network").arg("reload"))
@@ -4384,6 +4432,7 @@ config wireguard_wg_inner 'in_peer0'
                     used_by: vec![],
                     supports_ipv6: wg.addresses.iter().any(|a| a.contains(':')),
                     mtu: wg.mtu,
+                    hostname_endpoint: has_hostname_endpoint(&cfgs, &meta.interface),
                 })
             })
             .collect();
@@ -4759,6 +4808,56 @@ config wireguard_wg_b 'b_peer0'
         assert_eq!(old_target, "Internet");
         let c = client_by_interface(&cfgs, "wg_c").unwrap();
         assert_eq!(c.target, "B2");
+    }
+
+    #[tokio::test]
+    async fn test_unchain_hostname_endpoints() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_two_hop(
+            dir.path(),
+            "vpn.example.com",
+            "1.2.3.4",
+            &["10.8.0.2/32"],
+            &["0.0.0.0/0"],
+            None,
+        );
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        assert_eq!(
+            unchain_hostname_endpoints(&mut cfgs).unwrap(),
+            vec!["Inner"]
+        );
+        assert_eq!(
+            client_by_interface(&cfgs, "wg_inner").unwrap().target,
+            "Internet"
+        );
+        assert!(unchain_hostname_endpoints(&mut cfgs).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_unchain_keeps_chain_through_hostname_target() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_two_hop(
+            dir.path(),
+            "5.6.7.8",
+            "outer.example.com",
+            &["10.8.0.2/32"],
+            &["0.0.0.0/0"],
+            None,
+        );
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        assert!(unchain_hostname_endpoints(&mut cfgs).unwrap().is_empty());
+        assert_eq!(
+            client_by_interface(&cfgs, "wg_inner").unwrap().target,
+            "Outer"
+        );
     }
 
     #[tokio::test]

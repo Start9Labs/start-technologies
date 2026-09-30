@@ -27,9 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AllowedIPs` include it), and no other VPN uses the same server address.
   Previously these were accepted and the VPN either skipped the chain or could
   not connect. Renaming a VPN while pointing it at a VPN that connects through
-  it is also refused as a circular chain. A VPN already chained with a
-  hostname `Endpoint` still connects directly; delete it and import a config
-  whose `Endpoint` is an IP address.
+  it is also refused as a circular chain. A VPN with a hostname `Endpoint`
+  offers only Internet as its target.
+
+- **VPN chains that could not route are switched to connect over the
+  Internet.** A VPN chained with a hostname `Endpoint` connected directly over
+  your WAN while every screen still reported the chain. On the first boot of
+  this version it is set to connect over the Internet, and the change appears
+  in the activity log. To chain it again, import a config whose `Endpoint` is
+  an IP address.
 
 - **A VPN connecting through another gets a fitting MTU.** With no MTU in its
   config, or with the field left blank, it uses its target's MTU less the

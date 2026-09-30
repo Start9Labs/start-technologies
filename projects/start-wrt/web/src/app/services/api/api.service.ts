@@ -717,6 +717,8 @@ export interface OutboundVpn {
   supports_ipv6: boolean
   /** Interface MTU, or null to inherit the kernel default (~1420). */
   mtu: number | null
+  /** The server is named by hostname; only 'Internet' is a valid target. */
+  hostname_endpoint: boolean
 }
 
 export interface OutboundVpnCreateRequest {
