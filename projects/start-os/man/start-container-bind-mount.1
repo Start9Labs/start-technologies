@@ -4,7 +4,7 @@
 .SH NAME
 start\-container\-bind\-mount
 .SH SYNOPSIS
-\fBstart\-container bind\-mount\fR <\fB\-\-source\fR> <\fB\-\-target\fR> [\fB\-\-recursive\fR] [\fB\-\-readonly\fR] [\fB\-\-beneath\fR] [\fB\-\-file\fR] [\fB\-\-idmap\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBstart\-container bind\-mount\fR <\fB\-\-source\fR> <\fB\-\-target\fR> [\fB\-\-recursive\fR] [\fB\-\-readonly\fR] [\fB\-\-file\fR] [\fB\-\-idmap\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
 .SH OPTIONS
 .TP
@@ -19,9 +19,6 @@ Apply the bind recursively (the `\-\-rbind` semantic)
 .TP
 \fB\-\-readonly\fR
 Mark the mount read\-only via `mount_setattr(MOUNT_ATTR_RDONLY)`
-.TP
-\fB\-\-beneath\fR
-Insert beneath the top mount; detaching the top reveals this mount
 .TP
 \fB\-\-file\fR
 Treat the target as a regular file rather than a directory when creating it

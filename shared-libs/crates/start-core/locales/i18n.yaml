@@ -3924,13 +3924,6 @@ help.arg.mirror-url:
   fr_FR: "URL du miroir"
   pl_PL: "URL serwera lustrzanego"
 
-help.arg.mount-beneath:
-  en_US: "Insert beneath the top mount; detaching the top reveals this mount"
-  de_DE: "Unter der obersten Einhängung einfügen; deren Aushängen legt diese Einhängung frei"
-  es_ES: "Insertar debajo del montaje superior; al desmontarlo se revela este montaje"
-  fr_FR: "Insérer sous le montage supérieur ; son démontage révèle ce montage"
-  pl_PL: "Umieść pod najwyższym montowaniem; jego odmontowanie odsłoni to montowanie"
-
 help.arg.multi-arch-s9pks:
   en_US: "Enable multi-architecture s9pk support"
   de_DE: "Multi-Architektur-s9pk-Unterstützung aktivieren"
