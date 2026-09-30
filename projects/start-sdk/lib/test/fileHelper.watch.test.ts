@@ -137,6 +137,25 @@ describe('FileHelper.watch', () => {
     }
   })
 
+  test('follows successive atomic replacements', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'file-watch-'))
+    const path = join(dir, 'config.txt')
+    const file = FileHelper.string(path)
+    await file.write(effects, 'a')
+    const abort = new AbortController()
+    const gen = file.read().watch(effects, abort.signal)
+    try {
+      expect((await gen.next()).value).toBe('a')
+      for (const value of ['b', 'c', 'd']) {
+        await file.write(effects, value)
+        expect(await next(gen)).toBe(value)
+      }
+    } finally {
+      abort.abort()
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  })
+
   test('returns while the consumer holds a value', async () => {
     const dir = await fs.mkdtemp(join(tmpdir(), 'file-watch-'))
     const path = join(dir, 'config.txt')

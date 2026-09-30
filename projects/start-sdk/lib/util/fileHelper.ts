@@ -110,13 +110,20 @@ function filterUndefined<A>(a: A): A {
   return a
 }
 
-/** Maps between the parsed file format and the schema's input. */
+/**
+ * Maps between the parsed file format and the schema's input.
+ *
+ * @typeParam Raw - The value the file format parses to
+ * @typeParam Transformed - The value the schema validates
+ */
 export type Transformers<
   Raw = unknown,
   Transformed = unknown,
   Validated extends Transformed = Transformed,
 > = {
+  /** Converts the parsed file into the schema's input. */
   onRead: (value: Raw) => Transformed
+  /** Converts validated data into the value the file format serializes. */
   onWrite: (value: Validated) => Raw
 }
 
@@ -151,29 +158,65 @@ type ReadType<A> = {
   ) => Promise<A | null>
 }
 
-/** A validated file with reactive reads and serialized writes. */
+/**
+ * A validated file with reactive reads and serialized writes.
+ *
+ * The schema mirrors the file: a value the upstream service does not require is
+ * optional, even where the package always sets it. Give every key a `.catch()`
+ * default, so a hand-edited value of the wrong type falls back to it.
+ *
+ * @example
+ * ```ts
+ * import { FileHelper, z } from '@start9labs/start-sdk'
+ *
+ * export const configToml = FileHelper.toml(
+ *   { base: sdk.volumes.main, subpath: 'config.toml' },
+ *   z.object({
+ *     port: z.number().catch(8080),
+ *     allow_registration: z.boolean().catch(false),
+ *   }),
+ * )
+ * ```
+ */
 export interface FileHelper<A> {
   readonly path: string
   readonly writeData: (dataIn: A) => string
   readonly readData: (stringValue: string) => unknown
   readonly validate: (value: unknown) => A
+  /**
+   * Creates a reactive reader for this file.
+   *
+   * - `once()` - Reads the file once
+   * - `const(effects)` - Reads once and re-runs the enclosing context when the value changes
+   * - `watch(effects)` - Yields the value on each change
+   * - `onChange(effects, callback)` - Calls back on each change
+   * - `waitFor(effects, predicate, abort?)` - Resolves once the value satisfies the predicate
+   *
+   * @param map - Transforms the validated value
+   * @param eq - Deduplicates emissions of the mapped value
+   */
   read(): ReadType<A>
   read<B>(
     map: (value: A) => B,
     eq?: (left: B | null, right: B | null) => boolean,
   ): ReadType<B>
-  /** Replaces regular files atomically; bind-mounted targets are written in place. */
+  /** Replaces the file with validated data; bind-mounted targets are written in place. */
   write(
     effects: T.Effects,
     data: T.AllowReadonly<A> | A,
     options?: { allowWriteAfterConst?: boolean },
   ): Promise<null>
+  /** Deep-merges partial data into the file under the writer lock; arrays are replaced. */
   merge(
     effects: T.Effects,
     data: T.AllowReadonly<T.DeepPartial<A>>,
     options?: { allowWriteAfterConst?: boolean },
   ): Promise<null>
-  /** Rejects nested same-file mutations; returning `null` skips the write. */
+  /**
+   * Replaces the file with the callback's result under the writer lock.
+   * Returning `null` skips the write. The callback has five seconds; nested
+   * mutations of the same file reject.
+   */
   update(
     effects: T.Effects,
     change: (
@@ -181,6 +224,7 @@ export interface FileHelper<A> {
     ) => T.AllowReadonly<A> | null | Promise<T.AllowReadonly<A> | null>,
     options?: { allowWriteAfterConst?: boolean },
   ): Promise<null>
+  /** Returns a helper with the same format and schema at another path. */
   withPath(path: ToPath): FileHelper<A>
 }
 
@@ -466,6 +510,7 @@ function deepLooseParse<A>(shape: z.ZodType<A>): (data: unknown) => A {
 }
 
 interface FileHelperStatic {
+  /** Creates a FileHelper for a custom format. */
   raw<A>(
     path: ToPath,
     toFile: (dataIn: A) => string,
@@ -473,6 +518,7 @@ interface FileHelperStatic {
     validate: (data: unknown) => A,
   ): FileHelper<A>
 
+  /** Creates a FileHelper for a text file. */
   string(path: ToPath): FileHelper<string>
   string<A extends string>(
     path: ToPath,
@@ -484,6 +530,7 @@ interface FileHelperStatic {
     transformers: Transformers<string, Transformed, A>,
   ): FileHelper<A>
 
+  /** Creates a FileHelper for a JSON file. */
   json<A>(path: ToPath, shape: Validator<unknown, A>): FileHelper<A>
   json<A extends Transformed, Transformed = unknown>(
     path: ToPath,
@@ -491,6 +538,7 @@ interface FileHelperStatic {
     transformers: Transformers<unknown, Transformed, A>,
   ): FileHelper<A>
 
+  /** Creates a FileHelper for a YAML file. */
   yaml<A extends Record<string, unknown>>(
     path: ToPath,
     shape: Validator<Record<string, unknown>, A>,
@@ -513,6 +561,7 @@ interface FileHelperStatic {
     transformers: Transformers<Record<string, unknown>, Transformed, A>,
   ): FileHelper<A>
 
+  /** Creates a FileHelper for a TOML file. */
   toml<A extends Record<string, unknown>>(
     path: ToPath,
     shape: Validator<Record<string, unknown>, A>,
@@ -523,6 +572,7 @@ interface FileHelperStatic {
     transformers: Transformers<Record<string, unknown>, Transformed, A>,
   ): FileHelper<A>
 
+  /** Creates a FileHelper for an INI file. */
   ini<A extends Record<string, unknown>>(
     path: ToPath,
     shape: Validator<Record<string, unknown>, A>,
@@ -535,6 +585,7 @@ interface FileHelperStatic {
     transformers: Transformers<Record<string, unknown>, Transformed, A>,
   ): FileHelper<A>
 
+  /** Creates a FileHelper for a file of `KEY=VALUE` lines. */
   env<A extends Record<string, string>>(
     path: ToPath,
     shape: Validator<Record<string, string>, A>,
@@ -545,6 +596,7 @@ interface FileHelperStatic {
     transformers: Transformers<Record<string, string>, Transformed, A>,
   ): FileHelper<A>
 
+  /** Creates a FileHelper for an XML file. */
   xml<A extends Record<string, unknown>>(
     path: ToPath,
     shape: Validator<Record<string, unknown>, A>,
