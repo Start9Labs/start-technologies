@@ -16,6 +16,7 @@ const heldLocks = new AsyncLocalStorage<
 >()
 const execFileAsync = promisify(execFile)
 export const UPDATE_TIMEOUT_MS = 5000
+export const LOCK_TIMEOUT_MS = 10000
 
 export async function waitForFileOperation<A>(
   pending: Promise<A>,
@@ -188,7 +189,17 @@ async function flock<A>(
       if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
     }
   }
-  signal.addEventListener('abort', abort, { once: true })
+  const deadline = new AbortController()
+  const timer = setTimeout(
+    () =>
+      deadline.abort(
+        new Error(`File lock timed out after ${LOCK_TIMEOUT_MS}ms: ${target}`),
+      ),
+    LOCK_TIMEOUT_MS,
+  )
+  const acquiring = AbortSignal.any([signal, deadline.signal])
+  acquiring.addEventListener('abort', abort, { once: true })
+  let acquired = false
   let stderr = ''
   child.stderr.on('data', chunk => (stderr += chunk))
   const exited = new Promise<void>((resolve, reject) => {
@@ -198,38 +209,51 @@ async function flock<A>(
     )
   })
   try {
-    const created = await new Promise<boolean>((resolve, reject) => {
-      let stdout = ''
-      child.stdout.on('data', chunk => {
-        stdout += chunk
-        if (stdout.includes('\n')) resolve(stdout.trim() === 'new')
-      })
-      exited.then(
-        () => reject(new Error('File lock exited before acquisition')),
-        reject,
-      )
-    })
-    signal.removeEventListener('abort', abort)
+    const created = await waitForFileOperation(
+      new Promise<boolean>((resolve, reject) => {
+        let stdout = ''
+        child.stdout.on('data', chunk => {
+          stdout += chunk
+          if (stdout.includes('\n')) resolve(stdout.trim() === 'new')
+        })
+        exited.then(
+          () => reject(new Error('File lock exited before acquisition')),
+          reject,
+        )
+      }),
+      acquiring,
+    )
+    acquired = true
+    clearTimeout(timer)
+    acquiring.removeEventListener('abort', abort)
     signal.throwIfAborted()
     return await operation(created ? temp : undefined)
   } finally {
-    signal.removeEventListener('abort', abort)
+    clearTimeout(timer)
+    acquiring.removeEventListener('abort', abort)
     child.stdin.end()
-    await exited
+    await exited.catch(error => {
+      if (acquired) throw error
+    })
   }
 }
 
 const swept = new Set<string>()
-const leftover = /^(?:[0-9a-f]{24}\.tmp(?:\.attrs)?|tmp\.attrs)$/
+const leftover = /^[0-9a-f]{24}\.tmp(?:\.attrs)?$/
 
-/** Removes temps of writers that died holding the lock. */
-async function sweepTemps(path: string, locked: boolean): Promise<void> {
+/** Removes temps of writers that died holding the caller's lock. */
+async function sweepTemps(
+  path: string,
+  lockedTemp: string | undefined,
+): Promise<void> {
+  if (lockedTemp) {
+    await fs.rm(`${lockedTemp}.attrs`, { force: true })
+    return
+  }
   if (swept.has(path)) return
   const prefix = `.${basename(path)}.`
   for (const name of await fs.readdir(dirname(path))) {
-    if (!name.startsWith(prefix)) continue
-    const rest = name.slice(prefix.length)
-    if (leftover.test(rest) || (!locked && rest === 'tmp')) {
+    if (name.startsWith(prefix) && leftover.test(name.slice(prefix.length))) {
       await fs.rm(resolve(dirname(path), name), { force: true })
     }
   }
@@ -244,7 +268,7 @@ export async function replaceFile(
 ): Promise<void> {
   signal.throwIfAborted()
   await fs.mkdir(dirname(path), { recursive: true })
-  await sweepTemps(path, lockedTemp !== undefined)
+  await sweepTemps(path, lockedTemp)
   const previous = await fs.stat(path).catch(error => {
     if (error.code !== 'ENOENT') throw error
     return null
@@ -281,6 +305,11 @@ export async function replaceFile(
         { signal, killSignal: 'SIGKILL' },
       )
       await file.sync()
+      // `cp` recreates a removed temp as an empty file.
+      const [written, named] = await Promise.all([file.stat(), fs.stat(temp)])
+      if (written.ino !== named.ino || written.dev !== named.dev) {
+        throw new Error(`Temp file was replaced during the write: ${temp}`)
+      }
     } finally {
       await file.close()
     }

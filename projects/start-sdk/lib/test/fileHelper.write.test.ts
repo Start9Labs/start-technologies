@@ -89,14 +89,10 @@ test('a failed temp write preserves the target and restricts temp permissions', 
 test('the first write removes temps left by dead writers', async () => {
   await fs.writeFile(path, '{"count":1}')
   const hex = 'ab'.repeat(12)
-  const stale = [
-    `.store.json.${hex}.tmp`,
-    `.store.json.${hex}.tmp.attrs`,
-    '.store.json.tmp',
-    '.store.json.tmp.attrs',
-  ]
+  const stale = [`.store.json.${hex}.tmp`, `.store.json.${hex}.tmp.attrs`]
   const kept = [
     '.store.json.bak',
+    '.store.json.tmp',
     `.other.json.${hex}.tmp`,
     `.store.json.x.tmp`,
   ]
@@ -104,6 +100,26 @@ test('the first write removes temps left by dead writers', async () => {
     await fs.writeFile(join(dir, name), '')
   await FileHelper.json(path, shape).write(effects, { count: 2 })
   expect((await fs.readdir(dir)).sort()).toEqual([...kept, 'store.json'].sort())
+})
+
+test('a temp removed during the write is never renamed into place', async () => {
+  await fs.writeFile(path, '{"count":1}')
+  open.mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+    const handle = await actual.open(...args)
+    if (String(args[0]).endsWith('.tmp')) {
+      const writeFile = handle.writeFile.bind(handle)
+      handle.writeFile = async data => {
+        await writeFile(data)
+        await actual.rm(String(args[0]))
+      }
+    }
+    return handle
+  })
+  await expect(
+    FileHelper.json(path, shape).write(effects, { count: 2 }),
+  ).rejects.toThrow('replaced during the write')
+  expect(await fs.readFile(path, 'utf8')).toBe('{"count":1}')
+  expect(await fs.readdir(dir)).toEqual(['store.json'])
 })
 
 test('a leftover attributes template does not block creating the file', async () => {

@@ -582,7 +582,7 @@ export class SubContainerEager<
         if (isFile) {
           if (!this.sharedMounts) {
             // Exec namespaces become slaves of this tree and receive its rebinds.
-            await execFile('mount', ['--make-shared', this.rootfs])
+            await execFile('mount', ['--make-rshared', this.rootfs])
             this.sharedMounts = true
           }
           let staged = false
