@@ -12,6 +12,8 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **Restart requests during service startup take effect after startup completes.**
+
 - **Starting a StartOS update from the UI installs the release whose notes it shows.** It previously installed whatever version the registry listed last.
 
 - **Forwarded IPv4 UDP ports retain their outbound mapping.** UDP traffic a

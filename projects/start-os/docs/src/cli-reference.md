@@ -256,7 +256,9 @@ Stop a running service.
 
 ### `start-cli package restart <ID>`
 
-Restart a running service.
+Restart a running service. If the service is still starting, StartOS lets startup
+complete, then stops and starts the service again. Repeated restart requests during
+the same startup coalesce into one additional restart.
 
 ### `start-cli package uninstall <ID>`
 
