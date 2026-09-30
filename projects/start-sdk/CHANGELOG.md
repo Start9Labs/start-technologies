@@ -209,7 +209,7 @@
   `waitFor` no longer miss a write made while the previous value was being
   read or handled, or a file created just as the wait began.
 
-- **FileHelper writes replace files atomically.** Writers in one runtime are serialized, and `merge()` and `update()` also hold a cross-process lock through their complete read-modify-write; replacements retain the file's owner and permissions.
+- **FileHelper writes replace files atomically.** Writers hold a cross-process lock on the file, and `merge()` and `update()` hold it through their complete read-modify-write; replacements retain the file's owner and permissions.
 
 - **Own-volume file mounts follow atomic source replacement in running subcontainers.** Refreshes preserve idmaps and readonly settings and run before reactive reads and command launches; a command fails while its mount cannot be refreshed. Existing descriptors retain the previous inode until the application reopens the file.
 

@@ -174,6 +174,30 @@ test('separate runtimes serialize creating a missing file', async () => {
   expect(await fs.readdir(dir)).toEqual(['store.json'])
 }, 20000)
 
+test('writes wait for another runtime holding the lock', async () => {
+  await fs.writeFile(path, '{"count":0}')
+  const child = worker(path, 'hold')
+  try {
+    await new Promise<void>((resolve, reject) => {
+      child.stdout.once('data', () => resolve())
+      child.once('error', reject)
+    })
+    let done = false
+    const writing = FileHelper.json(path, shape)
+      .write(effects, { count: 7 })
+      .then(() => (done = true))
+    await new Promise(resolve => setTimeout(resolve, 300))
+    expect(done).toBe(false)
+    child.kill('SIGKILL')
+    await writing
+    expect(await FileHelper.json(path, shape).read().once()).toEqual({
+      count: 7,
+    })
+  } finally {
+    child.kill('SIGKILL')
+  }
+}, 10000)
+
 test('a killed runtime releases its file lock', async () => {
   await fs.writeFile(path, '{"count":0}')
   const child = worker(path, 'hold')

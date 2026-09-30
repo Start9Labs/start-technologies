@@ -373,8 +373,8 @@ class FileHelperImpl<A> implements FileHelper<A> {
     options: { allowWriteAfterConst?: boolean } = {},
   ) {
     const newData = this.validate(data)
-    await withFileQueue(this.path, path =>
-      this.writeLocked(path, this.writeData(newData)),
+    await withFileLock(this.path, (path, temp) =>
+      this.writeLocked(path, this.writeData(newData), temp),
     )
     this.checkConsts(effects, newData, options)
     return null
