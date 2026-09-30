@@ -36,7 +36,7 @@ pub trait CtrlContext: Context + Clone {
 ```
 
 - **`ServerContext`**: always reads `/etc/config/`, always reloads services. Holds `RpcContinuations` for long-running operations.
-- **`CliContext`**: configurable root (`--config-root`), cookie persistence in `~/.startwrt/.cookies.json`, calls server via HTTP when needed. Injects local auth cookie from `/run/startwrt/rpc.authcookie` when running on the router.
+- **`CliContext`**: configurable root (`--config-root`), cookie persistence in `~/.startwrt/.cookies.json`, calls server via HTTP when needed. Injects the local auth cookie from `/run/startwrt/rpc.authcookie` into requests to loopback hosts only.
 
 The single binary `startwrt` uses `MultiExecutable` to dispatch based on the symlink name (`startwrt-ctrld` or `startwrt-cli`) or the first argument.
 
@@ -45,7 +45,7 @@ The single binary `startwrt` uses `MultiExecutable` to dispatch based on the sym
 ```
 --config-root PATH   UCI config directory (default: /etc/config)
 --configs-only       Skip service reloads (write configs only)
---host URL           Server URL (default: http://router.lan/rpc/v1)
+--host URL           Server URL (default: http://127.0.0.1/rpc/v1 on the router, else http://router.lan/rpc/v1)
 ```
 
 ### Local-Only Subcommands
@@ -165,7 +165,7 @@ Maps physical ports to profiles via bridge VLAN assignments on the LAN bridge (`
 - Tokens: random bytes → base32 encoding (sent to client), SHA-256 hash (stored server-side)
 - 1-day session expiry, HTTP-only SameSite=Strict cookie
 - Rate limiting: 3 login attempts per 20 seconds
-- Local auth cookie: generated at daemon startup → `/run/startwrt/rpc.authcookie`, read by CLI to bypass session auth over SSH
+- Local auth cookie: generated at daemon startup → `/run/startwrt/rpc.authcookie`, read by CLI to authenticate without a session
 
 ### middleware/auth.rs — HTTP Session Middleware
 
@@ -174,6 +174,8 @@ Maps physical ports to profiles via bridge VLAN assignments on the LAN bridge (`
 - `login: true` — rate-limit, inject user agent
 - `no_auth: true` — skip auth (status endpoints)
 - `get_session: true` — inject `sessionHash` into params
+
+Every other call needs a valid session cookie or the local auth cookie; the peer address grants nothing.
 
 Returns RPC error code 34 on auth failure (frontend auto-logs out).
 

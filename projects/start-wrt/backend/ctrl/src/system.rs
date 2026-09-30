@@ -973,9 +973,7 @@ pub fn system<C: CtrlContext>() -> ParentHandler<C> {
         )
         .subcommand(
             "apply-remote-access",
-            from_fn_async_local(apply_remote_access::<C>)
-                .with_metadata("no_auth", Value::Bool(true))
-                .no_display(),
+            from_fn_async_local(apply_remote_access::<C>).no_display(),
         )
         .subcommand(
             "restart",
@@ -993,9 +991,7 @@ pub fn system<C: CtrlContext>() -> ParentHandler<C> {
         )
         .subcommand(
             "set-timezone",
-            from_fn_async(set_timezone::<C>)
-                .with_metadata("no_auth", Value::Bool(true))
-                .no_display(),
+            from_fn_async(set_timezone::<C>).no_display(),
         )
         .subcommand(
             "get-timezones",
