@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FileHelper } from '../util/fileHelper'
 import { z } from '@start9labs/start-core/zExport'
-import { FILE_ACCESS_TIMEOUT_MS } from '../util/fileAccess'
+import { UPDATE_TIMEOUT_MS } from '../util/fileAccess'
 
 jest.mock('node:fs/promises', () => {
   const actual = jest.requireActual('node:fs/promises')
@@ -86,7 +86,33 @@ test('a failed temp write preserves the target and restricts temp permissions', 
   )
 })
 
-test('timed-out filesystem work holds the queue and cannot rename later', async () => {
+test('the first write removes temps left by dead writers', async () => {
+  await fs.writeFile(path, '{"count":1}')
+  const hex = 'ab'.repeat(12)
+  const stale = [
+    `.store.json.${hex}.tmp`,
+    `.store.json.${hex}.tmp.attrs`,
+    '.store.json.tmp',
+    '.store.json.tmp.attrs',
+  ]
+  const kept = [
+    '.store.json.bak',
+    `.other.json.${hex}.tmp`,
+    `.store.json.x.tmp`,
+  ]
+  for (const name of [...stale, ...kept])
+    await fs.writeFile(join(dir, name), '')
+  await FileHelper.json(path, shape).write(effects, { count: 2 })
+  expect((await fs.readdir(dir)).sort()).toEqual([...kept, 'store.json'].sort())
+})
+
+test('a leftover attributes template does not block creating the file', async () => {
+  await fs.writeFile(join(dir, '.store.json.tmp.attrs'), '')
+  await FileHelper.json(path, shape).write(effects, { count: 1 })
+  expect(await fs.readdir(dir)).toEqual(['store.json'])
+})
+
+test('slow filesystem work has no deadline and holds the queue', async () => {
   await fs.writeFile(path, '{"count":0}')
   jest.useFakeTimers()
   let entered!: () => void
@@ -109,20 +135,17 @@ test('timed-out filesystem work holds the queue and cannot rename later', async 
   })
   const file = FileHelper.json(path, shape)
   try {
-    const writing = file.write(effects, { count: 1 })
-    const rejected = expect(writing).rejects.toThrow('File access timed out')
-    await started
-    await jest.advanceTimersByTimeAsync(FILE_ACCESS_TIMEOUT_MS)
-    await rejected
-    expect(await fs.readFile(path, 'utf8')).toBe('{"count":0}')
-    let recovered = false
-    const recovery = file.write(effects, { count: 2 }).then(() => {
-      recovered = true
+    let written = false
+    const writing = file.write(effects, { count: 1 }).then(() => {
+      written = true
     })
-    for (let i = 0; i < 100 && !jest.getTimerCount(); i++) await fs.stat(path)
-    expect(recovered).toBe(false)
+    await started
+    const queued = file.update(effects, value => ({ count: value!.count + 1 }))
+    await jest.advanceTimersByTimeAsync(UPDATE_TIMEOUT_MS * 10)
+    expect(written).toBe(false)
+    expect(await fs.readFile(path, 'utf8')).toBe('{"count":0}')
     finish()
-    await recovery
+    await Promise.all([writing, queued])
     expect(await file.read().once()).toEqual({ count: 2 })
     expect(
       (await fs.readdir(dir)).filter(name => name.endsWith('.tmp')),

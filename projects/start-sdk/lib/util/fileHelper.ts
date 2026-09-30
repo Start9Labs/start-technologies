@@ -18,7 +18,7 @@ import {
   replaceFile,
   withFileLock,
   withFileQueue,
-  waitForFileOperation,
+  withUpdateDeadline,
 } from './fileAccess'
 import { hasFileMounts, refreshFileMounts } from './fileMounts'
 
@@ -359,7 +359,11 @@ class FileHelperImpl<A> implements FileHelper<A> {
 
   private async modify(
     effects: T.Effects,
-    change: (raw: string | null) => Promise<A | null>,
+    change: (
+      raw: string | null,
+      path: string,
+      signal: AbortSignal,
+    ) => Promise<A | null>,
     options: { allowWriteAfterConst?: boolean },
   ): Promise<null> {
     const written = await withFileLock(
@@ -367,7 +371,7 @@ class FileHelperImpl<A> implements FileHelper<A> {
       async (path, temp, signal) => {
         const raw = await readRaw(path)
         signal.throwIfAborted()
-        const next = await waitForFileOperation(change(raw), signal)
+        const next = await change(raw, path, signal)
         if (next === null) return null
         const serialized = this.writeData(next)
         if (serialized === raw) {
@@ -409,9 +413,12 @@ class FileHelperImpl<A> implements FileHelper<A> {
   ): Promise<null> {
     return this.modify(
       effects,
-      async raw => {
+      async (raw, path, signal) => {
         const data = raw === null ? null : this.readData(raw)
-        const next = await change(data ? this.validate(data) : null)
+        const current = data ? this.validate(data) : null
+        const next = await withUpdateDeadline(path, signal, () =>
+          change(current),
+        )
         return next === null ? null : this.validate(next)
       },
       options,

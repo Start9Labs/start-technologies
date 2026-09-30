@@ -4,6 +4,7 @@ import { basename, dirname } from 'node:path'
 import { outsideFileLocks, withFileQueue } from './fileAccess'
 
 const mounts = new Map<string, Set<FileMount>>()
+const MAX_REBINDS = 3
 
 type FileMount = {
   active: boolean
@@ -59,13 +60,16 @@ export class FileMounts {
         pending: new Set(),
         refresh: async signal => {
           const pending = (async () => {
-            while (mount.active) {
+            for (let rebinds = 0; mount.active; rebinds++) {
               signal.throwIfAborted()
               const [from, to] = await Promise.all([
                 sourceStat(path),
                 fs.stat(target),
               ])
               if (!from || (from.dev === to.dev && from.ino === to.ino)) return
+              if (rebinds === MAX_REBINDS) {
+                throw new Error(`File mount ${target} does not follow ${path}`)
+              }
               await rebind(signal)
             }
           })()

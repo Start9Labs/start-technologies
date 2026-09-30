@@ -118,7 +118,7 @@
   a timeout. `watch` and `waitFor` end at once on a signal that has already
   aborted.
 
-- **`FileHelper.update(effects, change)`** computes a complete replacement under the writer lock. The callback receives the validated current value and returns the replacement or `null` to skip writing. Reads inside it remain reentrant; nested writes, merges, or updates to the same file throw immediately. File operations have a five-second deadline for queued access, lock acquisition, asynchronous callbacks, and mount reconciliation; timed-out callbacks cannot commit later.
+- **`FileHelper.update(effects, change)`** computes a complete replacement under the writer lock. The callback receives the validated current value and returns the replacement or `null` to skip writing. Reads inside it remain reentrant; nested writes, merges, or updates to the same file throw immediately. The callback has a five-second deadline, which also bounds file access it starts; a timed-out callback cannot commit later.
 
 - **`preDownloadAlert` in `setupManifest()`** displays a localized Markdown confirmation before downloading an update from an installed version matching `when.sourceVersion`.
 

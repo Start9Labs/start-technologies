@@ -15,7 +15,7 @@ const heldLocks = new AsyncLocalStorage<
   }[]
 >()
 const execFileAsync = promisify(execFile)
-export const FILE_ACCESS_TIMEOUT_MS = 5000
+export const UPDATE_TIMEOUT_MS = 5000
 
 export async function waitForFileOperation<A>(
   pending: Promise<A>,
@@ -60,22 +60,10 @@ export async function withFileQueue<A>(
   const target = await filePath(path)
   const outer = heldLocks.getStore() ?? []
   for (const lock of outer) lock.signal.throwIfAborted()
-  const inherited = outer.find(lock => lock.held && lock.target === target)
-  if (inherited) return operation(target, inherited.signal)
-  const controller = new AbortController()
-  const signal = AbortSignal.any([
-    controller.signal,
-    ...outer.map(lock => lock.signal),
-  ])
-  const timer = setTimeout(
-    () =>
-      controller.abort(
-        new Error(
-          `File access timed out after ${FILE_ACCESS_TIMEOUT_MS}ms: ${target}`,
-        ),
-      ),
-    FILE_ACCESS_TIMEOUT_MS,
-  )
+  const signal = AbortSignal.any(outer.map(lock => lock.signal))
+  if (outer.some(lock => lock.held && lock.target === target)) {
+    return operation(target, signal)
+  }
   const result = (queues.get(target) ?? Promise.resolve()).then(async () => {
     signal.throwIfAborted()
     const holder = { target, held: true, flocked: false, signal }
@@ -95,8 +83,34 @@ export async function withFileQueue<A>(
   void tail.then(() => {
     if (queues.get(target) === tail) queues.delete(target)
   })
+  return waitForFileOperation(result, signal)
+}
+
+/** Aborts the callback, and all file access it starts, after `UPDATE_TIMEOUT_MS`. */
+export async function withUpdateDeadline<A>(
+  target: string,
+  signal: AbortSignal,
+  callback: () => A | Promise<A>,
+): Promise<A> {
+  const controller = new AbortController()
+  const timer = setTimeout(
+    () =>
+      controller.abort(
+        new Error(
+          `File update timed out after ${UPDATE_TIMEOUT_MS}ms: ${target}`,
+        ),
+      ),
+    UPDATE_TIMEOUT_MS,
+  )
+  const deadline = AbortSignal.any([signal, controller.signal])
+  const frame = { target, held: false, flocked: false, signal: deadline }
   try {
-    return await waitForFileOperation(result, signal)
+    return await waitForFileOperation(
+      heldLocks.run([...(heldLocks.getStore() ?? []), frame], async () =>
+        callback(),
+      ),
+      deadline,
+    )
   } finally {
     clearTimeout(timer)
   }
@@ -205,6 +219,23 @@ async function flock<A>(
   }
 }
 
+const swept = new Set<string>()
+const leftover = /^(?:[0-9a-f]{24}\.tmp(?:\.attrs)?|tmp\.attrs)$/
+
+/** Removes temps of writers that died holding the lock. */
+async function sweepTemps(path: string, locked: boolean): Promise<void> {
+  if (swept.has(path)) return
+  const prefix = `.${basename(path)}.`
+  for (const name of await fs.readdir(dirname(path))) {
+    if (!name.startsWith(prefix)) continue
+    const rest = name.slice(prefix.length)
+    if (leftover.test(rest) || (!locked && rest === 'tmp')) {
+      await fs.rm(resolve(dirname(path), name), { force: true })
+    }
+  }
+  swept.add(path)
+}
+
 export async function replaceFile(
   path: string,
   data: string,
@@ -213,6 +244,7 @@ export async function replaceFile(
 ): Promise<void> {
   signal.throwIfAborted()
   await fs.mkdir(dirname(path), { recursive: true })
+  await sweepTemps(path, lockedTemp !== undefined)
   const previous = await fs.stat(path).catch(error => {
     if (error.code !== 'ENOENT') throw error
     return null

@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FileHelper } from '../util/fileHelper'
-import { FILE_ACCESS_TIMEOUT_MS, withFileQueue } from '../util/fileAccess'
+import { UPDATE_TIMEOUT_MS, withFileQueue } from '../util/fileAccess'
 
 let dir: string
 let path: string
@@ -39,14 +39,14 @@ test('a timed-out update releases its lock and cannot commit later', async () =>
     entered.resolve()
     await finish.promise
     await expect(file.write({} as any, 'late')).rejects.toThrow(
-      'File access timed out',
+      'File update timed out',
     )
     continued.resolve()
     return 'late return'
   })
-  const rejected = expect(updating).rejects.toThrow('File access timed out')
+  const rejected = expect(updating).rejects.toThrow('File update timed out')
   await entered.promise
-  await jest.advanceTimersByTimeAsync(FILE_ACCESS_TIMEOUT_MS)
+  await jest.advanceTimersByTimeAsync(UPDATE_TIMEOUT_MS)
   await rejected
   await file.write({} as any, 'recovered')
   finish.resolve()
@@ -54,33 +54,21 @@ test('a timed-out update releases its lock and cannot commit later', async () =>
   expect(await file.read().once()).toBe('recovered')
 })
 
-test('expired queued operations never run and active work drains before reuse', async () => {
+test('queued access waits for its holder without a deadline', async () => {
   const entered = gate()
   const finish = gate()
   const holding = withFileQueue(path, async () => {
     entered.resolve()
     await finish.promise
   })
-  const rejectedHolder = expect(holding).rejects.toThrow(
-    'File access timed out',
-  )
   await entered.promise
   const callback = jest.fn(async () => {})
   const queued = withFileQueue(path, callback)
-  const rejectedQueue = expect(queued).rejects.toThrow('File access timed out')
-  await waitForTimers(2)
-  await jest.advanceTimersByTimeAsync(FILE_ACCESS_TIMEOUT_MS)
-  await Promise.all([rejectedHolder, rejectedQueue])
-  let reused = false
-  const recovery = withFileQueue(path, async () => {
-    reused = true
-  })
-  await fs.stat(path)
-  expect(reused).toBe(false)
-  finish.resolve()
-  await recovery
+  await jest.advanceTimersByTimeAsync(UPDATE_TIMEOUT_MS * 10)
   expect(callback).not.toHaveBeenCalled()
-  expect(reused).toBe(true)
+  finish.resolve()
+  await Promise.all([holding, queued])
+  expect(callback).toHaveBeenCalledTimes(1)
 })
 
 test('a cross-file update cycle times out and both queues recover', async () => {
@@ -102,10 +90,10 @@ test('a cross-file update cycle times out and both queues recover', async () => 
     await a.update({} as any, () => 'nested A')
     return 'new B'
   })
-  const rejectedA = expect(updateA).rejects.toThrow('File access timed out')
-  const rejectedB = expect(updateB).rejects.toThrow('File access timed out')
-  await waitForTimers(4)
-  await jest.advanceTimersByTimeAsync(FILE_ACCESS_TIMEOUT_MS)
+  const rejectedA = expect(updateA).rejects.toThrow('File update timed out')
+  const rejectedB = expect(updateB).rejects.toThrow('File update timed out')
+  await waitForTimers(2)
+  await jest.advanceTimersByTimeAsync(UPDATE_TIMEOUT_MS)
   await Promise.all([rejectedA, rejectedB])
   expect(await a.read().once()).toBe('old')
   expect(await b.read().once()).toBe('other old')
@@ -117,10 +105,12 @@ test('a cross-file update cycle times out and both queues recover', async () => 
   expect(await b.read().once()).toBe('recovered B')
 })
 
-test('lock acquisition times out without leaving a child holding the lock', async () => {
+test('an update deadline aborts nested lock acquisition without leaving a child holding the lock', async () => {
+  const other = join(dir, 'other')
+  await fs.writeFile(other, 'other old')
   const blocker = spawn(
     'flock',
-    ['--exclusive', path, 'sh', '-c', 'echo locked; cat >/dev/null'],
+    ['--exclusive', other, 'sh', '-c', 'echo locked; cat >/dev/null'],
     {
       detached: true,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -134,16 +124,21 @@ test('lock acquisition times out without leaving a child holding the lock', asyn
       blocker.stdout.once('data', () => resolve())
       blocker.once('error', reject)
     })
-    const file = FileHelper.string(path)
-    const updating = file.update({} as any, () => 'new')
-    const rejected = expect(updating).rejects.toThrow('File access timed out')
+    const a = FileHelper.string(path)
+    const b = FileHelper.string(other)
+    const updating = a.update({} as any, async () => {
+      await b.write({} as any, 'nested')
+      return 'new'
+    })
+    const rejected = expect(updating).rejects.toThrow('File update timed out')
     await waitForTimers(1)
-    await jest.advanceTimersByTimeAsync(FILE_ACCESS_TIMEOUT_MS)
+    await jest.advanceTimersByTimeAsync(UPDATE_TIMEOUT_MS)
     await rejected
     blocker.stdin.end()
     await exited
-    await file.write({} as any, 'recovered')
-    expect(await file.read().once()).toBe('recovered')
+    await b.write({} as any, 'recovered')
+    expect(await a.read().once()).toBe('old')
+    expect(await b.read().once()).toBe('recovered')
   } finally {
     if (blocker.exitCode === null && blocker.signalCode === null && blocker.pid)
       process.kill(-blocker.pid, 'SIGKILL')

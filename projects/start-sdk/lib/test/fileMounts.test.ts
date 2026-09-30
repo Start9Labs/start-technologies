@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FileMounts, hasFileMounts } from '../util/fileMounts'
 import { FileHelper } from '../util/fileHelper'
-import { FILE_ACCESS_TIMEOUT_MS } from '../util/fileAccess'
 
 let dir: string
 let source: string
@@ -117,26 +116,18 @@ test('reads and mount sync inside update reenter the queue', async () => {
   expect(await fs.readFile(target, 'utf8')).toBe('old-outer')
 })
 
-test('mount reconciliation times out when rebinding makes no progress', async () => {
+test('mount reconciliation gives up when rebinding makes no progress', async () => {
   const errors = jest.spyOn(console, 'error').mockImplementation(() => {})
-  jest.useFakeTimers()
-  let enter!: () => void
-  const entered = new Promise<void>(resolve => (enter = resolve))
-  rebind.mockImplementation(async () => {
-    enter()
-  })
+  rebind.mockImplementation(async () => {})
   try {
     const file = FileHelper.string(source)
-    const writing = file.write({} as any, 'new')
-    const rejected = expect(writing).rejects.toThrow('File access timed out')
-    await entered
-    await jest.advanceTimersByTimeAsync(FILE_ACCESS_TIMEOUT_MS)
-    await rejected
+    await expect(file.write({} as any, 'new')).rejects.toThrow(
+      'does not follow',
+    )
     rebind.mockImplementation(() => relink(source, target))
     await mounts.sync()
     expect(await fs.readFile(target, 'utf8')).toBe('new')
   } finally {
-    jest.useRealTimers()
     errors.mockRestore()
   }
 })
