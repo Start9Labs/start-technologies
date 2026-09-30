@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Hardens authentication for local clients
+- Removes a third-party root certificate (`dc.com-CA`), inherited from the
+  board vendor's base image, from the router's system certificate store.
+  Routers drop it on their next update.
 
 ## [1.2.0]
 
