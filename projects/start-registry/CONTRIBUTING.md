@@ -31,6 +31,8 @@ make start-registry                                       # release musl build
 
 CI builds the Debian packages and a multi-architecture container image. Fork pull requests validate the container build locally on the runner; same-repository pull requests and branch builds also publish an image to GHCR. A manual workflow dispatch can select one architecture with the **arch** input or build all three with **ALL**.
 
+Every master build is also tagged `sha-<commit>`. Pushing a `start-registry/v<version>` tag makes [`start-registry-release-image.yaml`](../../.github/workflows/start-registry-release-image.yaml) tag that commit's image `v<version>` rather than rebuild it, and it refuses to move a `v<version>` tag that already exists. A release commit with no `sha-` image is tagged by dispatching that workflow with the image's digest as **source**.
+
 Run a local server while iterating:
 
 ```bash

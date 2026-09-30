@@ -169,6 +169,7 @@ jobs:
           images: ghcr.io/Start9Labs/startos-registry
           tags: |
             type=raw,value=${{ github.ref_name }}
+            type=sha,format=long,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
 
       - name: Download debian package
         uses: actions/download-artifact@v8
@@ -204,8 +205,12 @@ jobs:
           done
           echo "DOCKER_PLATFORM=$platforms" >> "$GITHUB_ENV"
 
-      - run: |
-          cat | docker buildx build --platform "$DOCKER_PLATFORM" --push="$PUSH_IMAGE" -t ${{ steps.meta.outputs.tags }} -f - . << 'EOF'
+      - env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          tag_args=()
+          while read -r tag; do tag_args+=(-t "$tag"); done <<< "$TAGS"
+          docker buildx build --platform "$DOCKER_PLATFORM" --push="$PUSH_IMAGE" "${tag_args[@]}" -f - . << 'EOF'
           FROM debian:trixie
 
           ADD *.deb .
