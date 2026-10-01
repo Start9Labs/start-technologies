@@ -5,6 +5,83 @@ Define a service's dependencies once in `startos/dependencies.ts`. Each base req
 ## Declare the Base Requirement
 
 ```typescript
+<<<<<<< HEAD
+=======
+dependencies: {
+  // Provide metadata directly
+  synapse: {
+    description: 'Needed for Matrix homeserver',
+    optional: false,
+    metadata: {
+      title: 'Synapse',
+      icon: '../synapse-wrapper/icon.png',
+    },
+  },
+
+  // Extract metadata from an s9pk file
+  electrs: {
+    description: 'Provides an index for address lookups',
+    optional: true,
+    s9pk: 'https://github.com/org/repo/releases/download/v1.0/electrs.s9pk',
+  },
+
+  // s9pk: null when no s9pk URL is available
+  'other-service': {
+    description: 'Optional integration',
+    optional: true,
+    s9pk: null,
+  },
+}
+```
+
+### Naming a Dependency
+
+**If a dependency has multiple flavors, refer to it by a generic term.** The most prominent example today is `bitcoind`: dependents should call it **Bitcoin**, never Bitcoin Core or Bitcoin Knots. Use the `metadata.title` you declared for it above — that's the name the UI shows.
+
+This covers user-facing text only: release notes, `instructions.md`, action and config-field descriptions, task reasons, i18n dictionaries. Import paths and mount points are code, not messaging.
+
+### Adding the Dependency to `package.json`
+
+Importing a dependency's types — its manifest, its interface constants, an action object — means installing its packaging repo as an npm dependency, pinned to a branch:
+
+```json
+"dependencies": {
+  "@start9labs/start-sdk": "2.0.9",
+  "synapse-startos": "github:Start9Labs/synapse-startos#next"
+},
+"overrides": {
+  "@start9labs/start-sdk": "$@start9labs/start-sdk"
+}
+```
+
+Nothing from that repo ships in your package. StartOS installs each service separately; the dependency is present purely so your code compiles against its real types instead of hand-copied string literals.
+
+> [!IMPORTANT]
+> **The `overrides` entry is required whenever you depend on another packaging repo.** That repo declares its own `@start9labs/start-sdk` version, and if it differs from yours by even a patch, npm nests a second copy of the SDK under it. Both copies then get bundled into your `javascript/index.js` — roughly doubling it — and the two sets of SDK classes are distinct types at runtime.
+>
+> The `$` form points at your own root pin, so it keeps tracking your SDK version with no further edits. It also makes a genuine mismatch _loud_: your `tsconfig.json` includes `node_modules/**/startos`, so the dependency's source is type-checked against **your** SDK. If it uses an API your version doesn't have, you get a build error naming the file — rather than a silently duplicated SDK. Fix that by bumping your own SDK to match.
+>
+> It costs nothing where it isn't needed: with no nested copy to collapse, the lockfile and the built bundle are byte-identical.
+
+## What `setupDependencies` Returns
+
+The object you return from `setupDependencies()` declares what state each dependency should be in for your service to be considered "fully operational." It drives the **warning UI** the user sees on the service detail page — if a listed dependency isn't installed, isn't running, or has a listed health check failing, StartOS shows them a warning indicator and links them to the offending service.
+
+It does **not** gate your service's startup. Your service starts whenever the user starts it, regardless of dependency state. The fields:
+
+- `kind: 'running'` — user should have this dependency running. `kind: 'exists'` — user only needs it installed.
+- `versionRange` — ExVer range the dependency must satisfy; see [Versions](versions.md).
+- `healthChecks` — names of the dependency's daemons (their `ready` IDs) or standalone health checks (`addHealthCheck` IDs) that should be passing.
+
+If your service genuinely cannot operate before a dependency reaches a particular state (a file exists, an RPC responds, a config is generated), handle that at runtime in `setupMain` — poll the dependency, retry, or surface your own error. Don't rely on the dependency declaration to block startup for you.
+
+## Creating Cross-Service Tasks
+
+Use `sdk.action.createTask()` in `dependencies.ts` to trigger an action on a dependency. The action must be exported from the dependency's package.
+
+```typescript
+import { i18n } from './i18n'
+>>>>>>> bed7e9467 (docs(start-sdk): preserve full upstream versions without assuming SemVer (#4129))
 import { sdk } from './sdk'
 import { i18n } from './i18n'
 
