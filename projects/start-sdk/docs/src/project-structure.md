@@ -291,7 +291,7 @@ This file is plumbing, used to imbue the generic Start SDK with package-specific
 
 #### utils.ts
 
-This file is for defining constants and functions specific to your package that are used throughout the code base. Many packages will not make use of this file.
+This file holds the package's own constants and helper functions. **A constant or function that doesn't belong in one of the files above goes here, not in a new file of its own.** A new top-level file under `startos/` is warranted only for a large, self-contained unit — a subsystem of several cooperating functions, or a long generated table — never for a single function or constant. Many packages will not make use of this file.
 
 ### Subdirectories
 
