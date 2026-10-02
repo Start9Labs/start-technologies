@@ -63,7 +63,8 @@ All paths below are under `shared-libs/crates/start-core/src/tunnel/`.
 
 1. Build `TunnelContext` from `TunnelConfig`. After loading conntrack through the
    firewall rules, raise its entry limit to 256 entries per MiB of host RAM and
-   its bucket count to at least the entry limit. Preserve higher host settings.
+   its bucket count to at least the entry limit. Preserve higher host settings;
+   log a failure without aborting startup.
 2. Start a `WebServer` bound to the HTTP listen address, serving
    `tunnel_router` (UI + API).
 3. Spawn a task subscribed to the `/webserver` db path. When HTTPS is enabled it

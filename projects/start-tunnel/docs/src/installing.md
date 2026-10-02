@@ -30,9 +30,11 @@ The Debian package installs the required networking tools, including `iproute2` 
 
 ### Connection capacity
 
-At startup, StartTunnel raises the connection-tracking limit to at least 256 entries per MiB of host RAM. A host with 512 MiB of usable RAM gets 131,072 entries; a host with 1 GiB gets 262,144. The calculation uses the RAM reported by the kernel, which can be lower than the VPS plan's advertised RAM. Higher existing limits are preserved.
+At startup, StartTunnel attempts to raise the connection-tracking limit to at least 256 entries per MiB of host RAM. The target is 131,072 entries for a host with 512 MiB of usable RAM, or 262,144 for a host with 1 GiB. The calculation uses the RAM reported by the kernel, which can be lower than the VPS plan's advertised RAM. Higher existing limits are preserved.
 
 StartTunnel also raises the hash-table bucket count to at least the entry limit, preserving higher bucket counts. The hash table is allocated at startup; connection entries are allocated as traffic arrives. These settings are reapplied whenever the daemon starts.
+
+If the VPS host restricts these kernel settings, StartTunnel logs the error and continues with the available connection capacity. Ask the VPS provider to raise the limits if that capacity is insufficient for the workload.
 
 Connection tracking covers both inbound and outbound traffic, including traffic sent through StartTunnel as an outbound gateway. SNI hostname forwards additionally use userspace relay buffers and TCP sockets for each active connection. Choose more RAM for workloads with many simultaneous SNI connections.
 

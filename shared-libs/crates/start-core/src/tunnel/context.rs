@@ -263,7 +263,7 @@ impl TunnelContext {
         )
         .await?;
         // The ct rule loads conntrack before its sysctls are accessed.
-        crate::tunnel::conntrack::configure().await?;
+        crate::tunnel::conntrack::configure().await.log_err();
         // Inbound IPv6 to a client requires a firewall pinhole.
         nft_rule_v6(
             "forward",

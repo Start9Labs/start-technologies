@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Small VPSes have room for connection-heavy services such as Tor relays.**
   StartTunnel sizes connection tracking at 256 entries per MiB of host RAM,
-  preserving higher host settings.
+  preserving higher host settings. Hosts that restrict these kernel settings
+  keep their available capacity.
 
 - **The Debian package installs the networking utilities needed on minimal
   images.** `iproute2` and `procps` are explicit dependencies.
