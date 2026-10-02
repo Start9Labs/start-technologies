@@ -99,9 +99,7 @@ make start-tunnel-format-check  # CI check (read-only)
 The tunnel crate is Rust (edition 2024). The tunnel web app formats with the
 rest of the Angular workspace via `make web-format`.
 
-## Docs are part of the change
+## Documentation
 
-User-facing changes (UI, CLI flags/output, install flow, subnet/device/forward
-behavior) must update `docs/src/` in the same change. The mdbook is published at
-`start9.com/start-tunnel/`. Reference: `docs/src/cli-reference.md`,
+The user-facing mdbook lives in `docs/src/`. Reference: `docs/src/cli-reference.md`,
 `installing.md`, `subnets.md`, `devices.md`, `published-ports.md`.

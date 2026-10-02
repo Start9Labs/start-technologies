@@ -14,11 +14,11 @@ The repo root's docs split across five files:
 - `AGENTS.md` — AI-developer/agent operating rules (`CLAUDE.md` is a one-line `@AGENTS.md` import)
 - `SECURITY.md` — how to report a vulnerability, and what is in scope
 
-**These docs must be kept up to date.** When you change project structure, conventions, build process, or product context, update the relevant file(s) in the same change — do not defer. Each product and shared library keeps its own `README.md`/`ARCHITECTURE.md`/`AGENTS.md` for what is specific to it — see `projects/*/`, `shared-libs/crates/start-core/`, `shared-libs/ts-modules/`, and `projects/start-os/container-runtime/`.
+**These docs must be kept up to date.** When a change makes a documented statement about project structure, conventions, build process, or product context inaccurate, correct it in the same change — do not defer. Each product and shared library keeps its own `README.md`/`ARCHITECTURE.md`/`AGENTS.md` for what is specific to it — see `projects/*/`, `shared-libs/crates/start-core/`, `shared-libs/ts-modules/`, and `projects/start-os/container-runtime/`.
 
 ### The user-facing books, and `live-docs`
 
-Each product's end-user documentation is an mdBook under `projects/<product>/docs/`, and a user-visible change updates it in the same PR (see [`AGENTS.md`](AGENTS.md)). Those edits go to master like any other change — but master's books describe what is _next_, not what is published.
+Each product's end-user documentation is an mdBook under `projects/<product>/docs/`. The documentation policy lives in [`AGENTS.md`](AGENTS.md): accurate docs stay unchanged unless a new feature needs discovery. Required book edits accompany the code in the same PR and go to master like any other change — but master's books describe what is _next_, not what is published.
 
 **[docs.start9.com](https://docs.start9.com) serves the `live-docs` branch.** A book goes live when its product is tagged: the tag sync copies that tag's `docs/` tree, plus the shared `projects/start-docs/` site infrastructure, onto `live-docs` and redeploys. So the site always matches released software, and docs for an unreleased version can sit in master indefinitely without leaking.
 
