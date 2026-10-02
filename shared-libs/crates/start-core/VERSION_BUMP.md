@@ -99,7 +99,7 @@ A pre-release version instead takes prerelease segments: `exver::Version::new([0
 
 ### 5. Release notes
 
-**`projects/start-os/release-notes/X.Y.Z.N.md`** — this release's curated notes: a lede, an optional `## ⚠️ Before You Update`, `## Highlights`, an optional `## Important`. The GitHub release body, the registry entry the update screen shows, and the post-update notification are all composed from this one file. **The image packages it by name** (`projects/start-os/build.mk`), so the StartOS image does not build until it exists.
+**`projects/start-os/release-notes/X.Y.Z.N.md`** — this release's curated notes: a lede, an optional `## ⚠️ Before You Update`, `## Highlights`, an optional `## Important`. The GitHub release body, the registry entry the update screen shows, and the post-update notification (which leaves out `Before You Update`) are all composed from this one file; `pre-check` rejects any other `##` heading. **The image packages it by name** (`projects/start-os/build.mk`), so the StartOS image does not build until it exists.
 
 ### 6. Release-gated docs
 

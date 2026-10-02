@@ -735,6 +735,13 @@ cmd_pre_check() {
     notes=$(notes_path "$PROJECT")
     if [ -s "$notes" ]; then
         echo "  ✓ release notes at ${notes#"$REPO_ROOT/"}"
+        # The StartOS welcome drops '## ⚠️ Before You Update' by exact match.
+        local stray
+        stray=$(grep '^## ' "$notes" | grep -vxE '## (⚠️ Before You Update|Highlights|Important)' || true)
+        if [ -n "$stray" ]; then
+            >&2 printf '  ✗ release notes headings must be ## ⚠️ Before You Update, ## Highlights or ## Important; found:\n%s\n' "$(sed 's/^/      /' <<< "$stray")"
+            errors=1
+        fi
     else
         >&2 echo "  ✗ no release notes at ${notes#"$REPO_ROOT/"} — write this release's notes (lede, optional '## ⚠️ Before You Update', '## Highlights', optional '## Important')"
         errors=1
