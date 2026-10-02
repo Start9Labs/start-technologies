@@ -102,7 +102,6 @@ pub struct SniRoute {
 type OnChange = Box<dyn Fn(u16, bool) + Send + Sync>;
 
 /// Resolves a target's local subnet prefix for hairpin detection.
-/// `None` preserves the client source address.
 pub type LocalPrefix = Arc<dyn Fn(Ipv4Addr) -> BoxFuture<'static, Option<u8>> + Send + Sync>;
 
 /// A registration that can restore the exact prior bindings.
@@ -637,8 +636,10 @@ async fn handle_conn(
     let _ = copy_bidirectional(&mut conn, &mut upstream).await;
 }
 
-/// Whether the peer and target share a known local subnet.
 async fn is_hairpin(local_prefix: &Option<LocalPrefix>, peer: Ipv4Addr, target: Ipv4Addr) -> bool {
+    if peer == target {
+        return true;
+    }
     let Some(resolve) = local_prefix else {
         return false;
     };
@@ -1131,6 +1132,65 @@ mod tests {
         let before = events.peek(|e| e.len());
         demux.rekey_ipv4(new_ip);
         assert_eq!(events.peek(|e| e.len()), before);
+    }
+
+    #[tokio::test]
+    async fn self_hairpin_needs_no_subnet_resolver() {
+        let target = Ipv4Addr::new(10, 59, 0, 2);
+        assert!(is_hairpin(&None, target, target).await);
+        assert!(!is_hairpin(&None, Ipv4Addr::new(10, 59, 0, 3), target).await);
+        let unknown: LocalPrefix = Arc::new(|_| Box::pin(async { None }));
+        assert!(is_hairpin(&Some(unknown), target, target).await);
+    }
+
+    #[tokio::test]
+    async fn self_hairpin_relays_hostname_and_fallback_traffic() {
+        for named in [true, false] {
+            let backend = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+                .await
+                .unwrap();
+            let SocketAddr::V4(target) = backend.local_addr().unwrap() else {
+                unreachable!();
+            };
+            let probe = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            let port = probe.local_addr().unwrap().port();
+            drop(probe);
+            let demux = SniDemux::new();
+            if named {
+                demux
+                    .register(
+                        Ipv4Addr::LOCALHOST,
+                        port,
+                        &["probe.example.com".into()],
+                        target,
+                        None,
+                    )
+                    .unwrap();
+            } else {
+                demux
+                    .register_fallback(Ipv4Addr::LOCALHOST, port, target)
+                    .unwrap();
+            }
+            timeout(Duration::from_secs(3), async {
+                let hello = real_client_hello("probe.example.com");
+                let mut client = TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+                    .await
+                    .unwrap();
+                client.write_all(&hello).await.unwrap();
+                let (mut upstream, _) = backend.accept().await.unwrap();
+                let mut received = vec![0; hello.len()];
+                upstream.read_exact(&mut received).await.unwrap();
+                assert_eq!(received, hello);
+                upstream.write_all(b"reply").await.unwrap();
+                let mut reply = [0; 5];
+                client.read_exact(&mut reply).await.unwrap();
+                assert_eq!(&reply, b"reply");
+                client.shutdown().await.unwrap();
+                upstream.shutdown().await.unwrap();
+            })
+            .await
+            .expect("self-hairpin relay timed out");
+        }
     }
 
     #[tokio::test]

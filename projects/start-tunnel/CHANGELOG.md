@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Devices can reach their own services through published SNI hostnames**,
+  including a shared port's fallback.
+
 - **Forwarded IPv4 UDP ports retain their outbound mapping.** UDP traffic a
   device starts from a forwarded port leaves through the forward's public
   interface with its public address and port.
