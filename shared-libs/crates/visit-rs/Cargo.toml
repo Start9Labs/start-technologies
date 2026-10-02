@@ -1,0 +1,22 @@
+[package]
+description = "A generic visitor pattern library for Rust"
+documentation = "https://docs.rs/visit-rs"
+edition = "2024"
+license = "MIT"
+name = "visit-rs"
+repository = "https://github.com/Start9Labs/start-technologies"
+version = "0.2.0"
+
+[features]
+default = ["serde", "meta"]
+meta = ["visit-rs-derive/meta"]
+
+[dependencies]
+async-stream = "0.3"
+futures = "0.3"
+visit-rs-derive = { version = "=0.2.0", path = "../visit-rs-derive", default-features = false }
+
+serde = { version = "1", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }

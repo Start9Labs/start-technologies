@@ -6635,7 +6635,7 @@ dependencies = [
 
 [[package]]
 name = "rpc-toolkit"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6654,11 +6654,12 @@ dependencies = [
  "serde",
  "serde_cbor",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
- "ts-rs",
  "url",
+ "visit-rs",
  "yajrc",
 ]
 
@@ -7051,6 +7052,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "serde_derive_internals"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f852137cce035d6a4df67ccce505ff6b3e9fd3a10e3e52b24dc71e650bb1a9bd"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -8130,6 +8142,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "syn"
+version = "3.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-ident",
+]
+
+[[package]]
 name = "sync_wrapper"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9172,25 +9195,23 @@ checksum = "051eb1abcf10076295e815102942cc58f9d5e3b4560e46e53c21e8ff6f3af7b1"
 
 [[package]]
 name = "visit-rs"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f89c27f644c3e4ce302bc7bce5144e295405d569784e5f4921271404e600cecf"
+version = "0.2.0"
 dependencies = [
  "async-stream",
  "futures",
  "serde",
+ "tokio",
  "visit-rs-derive",
 ]
 
 [[package]]
 name = "visit-rs-derive"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a3bfb04fd13da4fc8df24709b7a0949667f43c63691d9fecddf1d3be8af5099"
+version = "0.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.117",
+ "serde_derive_internals",
+ "syn 3.0.6",
 ]
 
 [[package]]

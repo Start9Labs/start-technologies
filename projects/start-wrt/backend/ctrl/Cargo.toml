@@ -107,5 +107,5 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uciedit = { path = "../uciedit" }
 url = { version = "2", features = ["serde"] }
-visit-rs = "0.1"
+visit-rs = { path = "../../../../shared-libs/crates/visit-rs" }
 x25519-dalek = { version = "2", features = ["static_secrets"] }

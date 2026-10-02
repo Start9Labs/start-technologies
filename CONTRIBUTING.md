@@ -139,6 +139,7 @@ Each product's `CONTRIBUTING.md` documents the `PLATFORM` values and `ENVIRONMEN
 ```bash
 make test                    # all tests
 make start-core-test               # Rust (shared-libs/crates/start-core)
+make rpc-toolkit-test              # reflection + RPC JSON/CBOR/TypeScript matrices
 make start-sdk-test                # SDK
 make backup-fs-test                # backup-fs library tests except the /dev/fuse suite
 make container-runtime-test  # container runtime

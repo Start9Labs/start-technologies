@@ -49,7 +49,7 @@ start-core-clean:
 	rm -f build/env/*.txt
 
 # Formats every Rust crate under shared-libs/crates/ (the product crates have their own format targets).
-SHARED_CRATE_PKGS := -p start-core -p exver -p imbl-value -p yasi -p rpc-toolkit -p jsonpath_lib -p pi-beep -p patch-db -p patch-db-macro -p patch-db-macro-internals -p patch-db-util -p json-patch -p json-ptr
+SHARED_CRATE_PKGS := -p start-core -p exver -p imbl-value -p yasi -p rpc-toolkit -p visit-rs -p visit-rs-derive -p jsonpath_lib -p pi-beep -p patch-db -p patch-db-macro -p patch-db-macro-internals -p patch-db-util -p json-patch -p json-ptr
 
 .PHONY: start-core-format start-core-format-check
 start-core-format:

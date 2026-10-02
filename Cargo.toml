@@ -5,6 +5,8 @@ members = [
   "shared-libs/crates/imbl-value",
   "shared-libs/crates/yasi",
   "shared-libs/crates/rpc-toolkit",
+  "shared-libs/crates/visit-rs",
+  "shared-libs/crates/visit-rs-derive",
   "shared-libs/crates/jsonpath",
   "shared-libs/crates/pi-beep",
   "shared-libs/crates/patch-db/core",

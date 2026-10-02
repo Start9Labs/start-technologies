@@ -34,7 +34,7 @@ start-technologies/                # repo root (monorepo)
 │   ├── crates/
 │   │   ├── start-core/            # the ENTIRE backend lib (package start-core, lib name start_core)
 │   │   ├── patch-db/              #   first-party crate (Rust core + TS client)
-│   │   └── …                      #   exver, imbl-value, jsonpath, pi-beep, rpc-toolkit, yasi
+│   │   └── …                      #   exver, imbl-value, jsonpath, pi-beep, rpc-toolkit, visit-rs, visit-rs-derive, yasi
 │   └── ts-modules/                # Angular shared libs (workspace rooted at repo root)
 │       ├── shared/                #   @start9labs/shared
 │       └── marketplace/           #   @start9labs/marketplace

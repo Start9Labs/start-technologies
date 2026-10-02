@@ -17,15 +17,14 @@ RUST_ARCH := $(shell if [ "$(ARCH)" = "riscv64" ]; then echo riscv64gc; else ech
 REGISTRY_BASENAME := $(shell PROJECT=start-registry PLATFORM=$(ARCH) ./build/env/basename.sh)
 TUNNEL_BASENAME := $(shell PROJECT=start-tunnel PLATFORM=$(ARCH) ./build/env/basename.sh)
 CLI_BASENAME := $(shell PROJECT=start-cli PLATFORM=$(ARCH) ./build/env/basename.sh)
-# start-core path-depends on these first-party sibling crates (start-core/Cargo.toml
-# + their transitive path deps); they must be prereqs of every Rust bin or a
-# shared-crate edit leaves `make start-os`/`start-cli`/`start-registry`/`start-tunnel` shipping a
-# stale binary. patch-db is globbed separately below.
+# Every Rust binary tracks its transitive path dependencies.
 CORE_SRC := $(call ls-files, shared-libs/crates/start-core) \
 	$(call ls-files, shared-libs/crates/exver) \
 	$(call ls-files, shared-libs/crates/imbl-value) \
 	$(call ls-files, shared-libs/crates/jsonpath) \
 	$(call ls-files, shared-libs/crates/rpc-toolkit) \
+	$(call ls-files, shared-libs/crates/visit-rs) \
+	$(call ls-files, shared-libs/crates/visit-rs-derive) \
 	$(call ls-files, shared-libs/crates/yasi) \
 	$(shell git ls-files shared-libs/crates/patch-db) build/builder-alias.sh $(GIT_HASH_FILE)
 PATCH_DB_CLIENT_SRC := $(shell git ls-files shared-libs/crates/patch-db/client)

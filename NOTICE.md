@@ -57,6 +57,7 @@ someone else's work and carry that author's copyright as well as Start9's.
 | `shared-libs/crates/imbl-value/` (`de.rs`, `ser.rs`, `index.rs`, `macros.rs`)                 | [serde_json](https://github.com/serde-rs/json)                        | Erick Tryzelaar and David Tolnay (MIT OR Apache-2.0, used here under MIT) |
 | `shared-libs/crates/patch-db/json-patch/`                                                     | [idubrov/json-patch](https://github.com/idubrov/json-patch)           | Ivan Dubrov (MIT OR Apache-2.0)                                           |
 | `shared-libs/crates/jsonpath/`                                                                | [freestrings/jsonpath](https://github.com/freestrings/jsonpath)       | Changseok Han (MIT)                                                       |
+| `shared-libs/crates/visit-rs/`, `shared-libs/crates/visit-rs-derive/`                         | [dr-bonez/visit-rs](https://github.com/dr-bonez/visit-rs)             | Aiden McClelland (MIT)                                                    |
 | `projects/start-os/build/image-recipe/raspberrypi/img/usr/lib/startos/scripts/init_resize.sh` | [RPi-Distro/raspi-config](https://github.com/RPi-Distro/raspi-config) | Alex Bradbury (MIT)                                                       |
 
 ## Trademarks

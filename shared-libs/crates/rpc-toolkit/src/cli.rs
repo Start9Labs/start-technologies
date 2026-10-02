@@ -13,9 +13,11 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader
 use url::Url;
 use yajrc::{Id, RpcError};
 
+#[cfg(feature = "ts")]
+use crate::ts::{PassthroughChildrenTS, PassthroughParamsTS, PassthroughReturnTS};
 use crate::util::{internal_error, invalid_params, parse_error, without, Flat, PhantomData};
 use crate::{
-    AnyHandler, CliBindings, CliBindingsAny, Empty, HandleAny, HandleAnyArgs, HandlerArgs,
+    Adapter, AnyHandler, CliBindings, CliBindingsAny, Empty, HandleAny, HandleAnyArgs, HandlerArgs,
     HandlerArgsFor, HandlerFor, HandlerTypes, Name, ParentHandler, PrintCliResult,
 };
 
@@ -233,17 +235,20 @@ where
     type Err = RemoteHandler::Err;
 }
 
-#[cfg(feature = "ts-rs")]
-impl<Context, RemoteContext, RemoteHandler, Extra> crate::handler::HandlerTS
+impl<Context, RemoteContext, RemoteHandler, Extra> Adapter
     for CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra>
-where
-    RemoteHandler: crate::handler::HandlerTS,
-    Extra: Send + Sync + 'static,
 {
-    fn type_info(&self) -> Option<String> {
-        self.handler.type_info()
+    type Inner = RemoteHandler;
+    fn as_inner(&self) -> &Self::Inner {
+        &self.handler
     }
 }
+#[cfg(feature = "ts")]
+impl<C, R, H, E> PassthroughParamsTS for CallRemoteHandler<C, R, H, E> {}
+#[cfg(feature = "ts")]
+impl<C, R, H, E> PassthroughReturnTS for CallRemoteHandler<C, R, H, E> {}
+#[cfg(feature = "ts")]
+impl<C, R, H, E> PassthroughChildrenTS for CallRemoteHandler<C, R, H, E> {}
 
 impl<Context, RemoteContext, RemoteHandler, Extra> HandlerFor<Context>
     for CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra>

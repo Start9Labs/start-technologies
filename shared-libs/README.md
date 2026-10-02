@@ -13,6 +13,9 @@ here on its own.
   `start-cli`, `registrybox`, `tunnelbox`) depends on it. See
   [`crates/start-core/README.md`](crates/start-core/README.md).
 
+- **`crates/visit-rs/`** and **`crates/visit-rs-derive/`** — value/type reflection
+  and serde JSON-shape traversal, shared by the backend and RPC bindings.
+
 - **`ts-modules/`** — shared TypeScript modules; currently two publishable
   Angular libraries built through the single Angular workspace rooted at the repo
   root (`angular.json`, `package.json`, `package-lock.json`):
@@ -31,7 +34,7 @@ Rust backend:
 ```bash
 # from the repo root
 cargo build -p start-core            # build the shared lib
-cd shared-libs/crates/start-core && cargo test
+make start-core-test
 ```
 
 Web:
@@ -39,12 +42,12 @@ Web:
 ```bash
 # from the repo root
 npm ci
-npm run build:deps                   # build start-sdk bundle + patch-db client
+npm run build:deps                   # build start-core + patch-db client
 npm run check                        # typecheck all projects
 ```
 
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how the two sub-libs fit into the monorepo
-- [CONTRIBUTING.md](CONTRIBUTING.md) — build/test/format workflow
+- [AGENTS.md](AGENTS.md) — build/test/format workflow
 - [AGENTS.md](AGENTS.md) — practical notes for working in this directory
