@@ -61,7 +61,9 @@ All paths below are under `shared-libs/crates/start-core/src/tunnel/`.
 
 `start-tunneld` runs `inner_main` on a multi-threaded Tokio runtime:
 
-1. Build `TunnelContext` from `TunnelConfig`.
+1. Build `TunnelContext` from `TunnelConfig`. After loading conntrack through the
+   firewall rules, raise its entry limit to 256 entries per MiB of host RAM and
+   its bucket count to at least the entry limit. Preserve higher host settings.
 2. Start a `WebServer` bound to the HTTP listen address, serving
    `tunnel_router` (UI + API).
 3. Spawn a task subscribed to the `/webserver` db path. When HTTPS is enabled it
@@ -109,7 +111,7 @@ chains it) → `projects/start-tunnel/web/dist/raw/start-tunnel/` → compressed
 - `make start-tunnel` → `target/<arch>-unknown-linux-musl/<profile>/tunnelbox`
   (depends on the prebuilt static UI).
 - `make start-tunnel-deb` → a Debian package declaring `wireguard-tools`, `iptables`,
-  `nftables`, and `conntrack` as dependencies, installing the three symlinks and
+  `nftables`, `conntrack`, `iproute2`, and `procps` as dependencies, installing the three symlinks and
   the systemd unit.
 - TS bindings for the tunnel API are generated into
   `shared-libs/crates/start-core/bindings/tunnel/` (`make start-core-ts-bindings`).

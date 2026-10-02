@@ -95,7 +95,7 @@ embeds the compiled UI from `web/dist/static/start-tunnel/` into.
 - Debian 13
 - x86_64, aarch64, or riscv64
 - Root access
-- `wireguard-tools`, `iptables`, `nftables`, `conntrack` (pulled in by the .deb)
+- `wireguard-tools`, `iptables`, `nftables`, `conntrack`, `iproute2`, `procps` (pulled in by the .deb)
 - A public IP (required only for clearnet port forwarding)
 
 ## Documentation & Contributing

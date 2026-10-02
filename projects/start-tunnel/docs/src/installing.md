@@ -26,6 +26,22 @@ Rent a cheap VPS with a dedicated public IP. Minimum CPU, RAM, and disk are fine
 - Root access
 - Dedicated public IPv4 address (required for publishing ports to the clearnet)
 
+The Debian package installs the required networking tools, including `iproute2` (`ip`) and `procps` (`sysctl`).
+
+### Connection capacity
+
+At startup, StartTunnel raises the connection-tracking limit to at least 256 entries per MiB of host RAM. A host with 512 MiB of usable RAM gets 131,072 entries; a host with 1 GiB gets 262,144. The calculation uses the RAM reported by the kernel, which can be lower than the VPS plan's advertised RAM. Higher existing limits are preserved.
+
+StartTunnel also raises the hash-table bucket count to at least the entry limit, preserving higher bucket counts. The hash table is allocated at startup; connection entries are allocated as traffic arrives. These settings are reapplied whenever the daemon starts.
+
+Connection tracking covers both inbound and outbound traffic, including traffic sent through StartTunnel as an outbound gateway. SNI hostname forwards additionally use userspace relay buffers and TCP sockets for each active connection. Choose more RAM for workloads with many simultaneous SNI connections.
+
+To inspect usage and capacity on the VPS:
+
+```sh
+sysctl net.netfilter.nf_conntrack_count net.netfilter.nf_conntrack_max net.netfilter.nf_conntrack_buckets
+```
+
 ### Network speed and monthly transfer
 
 Choose a network speed that supports the traffic you expect to send through StartTunnel. Monthly transfer rules vary by provider.

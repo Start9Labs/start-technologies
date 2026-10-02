@@ -77,7 +77,7 @@ Notes:
   paths and reconciles kernel state (WireGuard, iptables). Schema changes need a
   numbered migration in `tunnel/migrations/` and registration in `mod.rs`.
 - **Runtime deps.** The daemon shells out to `wireguard-tools`, `iptables`,
-  `nftables`, and `conntrack`; the `.deb` declares them. Adding a new external
+  `nftables`, `conntrack`, `iproute2`, and `procps`; the `.deb` declares them. Adding a new external
   tool means updating the `DEPENDS=` list in the Makefile `start-tunnel-deb` target.
 - **Port forwarding is Layer 3/4.** It rewrites IP headers (DNAT) and does not
   decrypt payloads — keep it that way; TLS terminates at the user's service.

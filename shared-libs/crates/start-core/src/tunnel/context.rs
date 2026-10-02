@@ -262,9 +262,9 @@ impl TunnelContext {
             &format!("iifname \"{WIREGUARD_INTERFACE_NAME}\" ct state new accept"),
         )
         .await?;
-        // Let clients originate IPv6 out through the tunnel (return traffic is
-        // covered by the v6 base-established rule). Inbound IPv6 to a client is a
-        // firewall pinhole, opened per-port via PCP / the manual pinhole API.
+        // The ct rule loads conntrack before its sysctls are accessed.
+        crate::tunnel::conntrack::configure().await?;
+        // Inbound IPv6 to a client requires a firewall pinhole.
         nft_rule_v6(
             "forward",
             "wg-forward",
@@ -273,9 +273,7 @@ impl TunnelContext {
             &format!("iifname \"{WIREGUARD_INTERFACE_NAME}\" ct state new accept"),
         )
         .await?;
-        // Clamp forwarded-SYN MSS to the WireGuard path MTU, else large TLS
-        // ClientHellos (post-quantum key shares) get dropped after encapsulation.
-        // See start-os#3261.
+        // Large TLS ClientHellos must fit the WireGuard path MTU.
         nft_rule(
             "mangle_forward",
             "wg-mss-clamp",
