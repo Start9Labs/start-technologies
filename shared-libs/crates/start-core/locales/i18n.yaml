@@ -2564,6 +2564,14 @@ registry.package.index.dependency-metadata-mismatch:
   fr_FR: "discordance des métadonnées de dépendance : supprimez d'abord la version existante, puis ajoutez-la à nouveau"
   pl_PL: "niezgodność metadanych zależności: najpierw usuń istniejącą wersję, a następnie dodaj ponownie"
 
+# install/mod.rs
+install.mod.no-version-installable-over:
+  en_US: "No version of %{id} that satisfies %{version} can be installed over the installed version %{installed}"
+  de_DE: "Keine Version von %{id}, die %{version} erfüllt, kann über die installierte Version %{installed} installiert werden"
+  es_ES: "Ninguna versión de %{id} que satisfaga %{version} puede instalarse sobre la versión instalada %{installed}"
+  fr_FR: "Aucune version de %{id} qui satisfait %{version} ne peut être installée par-dessus la version installée %{installed}"
+  pl_PL: "Żadnej wersji %{id} spełniającej %{version} nie można zainstalować w miejsce zainstalowanej wersji %{installed}"
+
 # registry/package/get.rs
 registry.package.get.version-not-found:
   en_US: "Could not find a version of %{id} that satisfies %{version}"

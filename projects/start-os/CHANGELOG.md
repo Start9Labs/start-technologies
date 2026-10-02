@@ -341,9 +341,8 @@ for the detail behind its highlights.
   finished cleaning up after the attempt, which can take several minutes. It now
   arrives as soon as the operation fails, while that cleanup is still running.
 
-- **`start-cli package install --sideload` reports long service installation
-  errors in its progress output.** Very long messages are shortened safely to
-  fit the progress stream.
+- **`start-cli package install --sideload` reports the full error when a
+  service installation fails.** start-cli 2.1.0 and earlier show it shortened.
 
 - **Restoring from a backup, or transferring to a new drive, keeps your server's
   name.** Both flows renamed the server to `start9`, so the restored server
