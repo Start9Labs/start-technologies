@@ -4,7 +4,7 @@ How the documentation site is built, versioned, and deployed.
 
 ## Place in the monorepo
 
-This is the `projects/start-docs/` project in the `start-os` monorepo. It owns the site build infra (`build.sh`, `serve.sh`, `versions.conf`), the shared mdBook `theme/`, the `landing/` page, and the Bitcoin Guides book — and it wires together the per-product books that live in their own product dirs (`../start-os/docs/`, `../start-tunnel/docs/`, `../start-sdk/docs/`, `../start-wrt/docs/`) into one deployed site. CI (`.github/workflows/docs-deploy.yml`) consumes its output to deploy `docs.start9.com`.
+This is the `projects/start-docs/` project in the `start-technologies` monorepo. It owns the site build infra (`build.sh`, `serve.sh`, `versions.conf`), the shared mdBook `theme/`, the `landing/` page, and the Bitcoin Guides book — and it wires together the per-product books that live in their own product dirs (`../start-os/docs/`, `../start-tunnel/docs/`, `../start-sdk/docs/`, `../start-wrt/docs/`) into one deployed site. CI (`.github/workflows/docs-deploy.yml`) consumes its output to deploy `docs.start9.com`.
 
 ## Multi-Book Design
 
@@ -13,7 +13,7 @@ The site is composed of independent mdBook instances — one per product. Each b
 The per-product books live **next to the code they document**, not inside this directory. This `docs/` project owns only the build infra, the shared theme, the landing page, and the Bitcoin Guides book.
 
 ```
-start-os/ (monorepo root)
+start-technologies/ (monorepo root)
 ├── projects/start-os/docs/        ← StartOS book (book.toml, src/, theme -> ../../start-docs/theme)
 ├── projects/start-tunnel/docs/    ← StartTunnel book
 ├── projects/start-sdk/docs/       ← Service Packaging book (book name: "packaging")
@@ -115,10 +115,9 @@ Run via `cd scripts && npm run generate-llms-txt` (uses `tsx`).
 
 ## Cross-Book Links
 
-mdBook validates links only within a single book. Links between books use unversioned absolute paths (`/start-tunnel/devices.html`) — the stub `build.sh` writes at that path sends the browser to the current version. They are not validated at build time, so keep them few and correct.
+mdBook rewrites intra-book Markdown links but does not reject missing pages or anchors. Links between books use unversioned absolute paths (`/start-tunnel/devices.html`) — the stub `build.sh` writes at that path sends the browser to the current version. They are not validated at build time, so keep them few and correct.
 
 ## Further reading
 
 - [README.md](README.md) — what this project is and where the books live
-- [CONTRIBUTING.md](CONTRIBUTING.md) — local setup and how to submit changes
-- [AGENTS.md](AGENTS.md) — operating rules for AI developers (`CLAUDE.md` is a one-line `@AGENTS.md` import)
+- [AGENTS.md](AGENTS.md) — local setup and how to submit changes

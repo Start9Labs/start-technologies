@@ -1,8 +1,6 @@
 # AGENTS.md — patch-db
 
-patch-db is a JSON Patch–based database with a Rust backend and a TypeScript client. Its six Rust crates are first-party members of the start-os root Cargo workspace — `start-core` consumes the Rust `core` via a path dep, and the web front ends consume the TS `client`. `CLAUDE.md` is a one-line `@AGENTS.md` import. See [README.md](README.md) for what it is and quick-start examples, [ARCHITECTURE.md](ARCHITECTURE.md) for design/storage/concurrency, and [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
-
-**Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
+patch-db is a JSON Patch–based database with a Rust backend and a TypeScript client. Its six Rust crates are first-party members of the monorepo root Cargo workspace — `start-core` consumes the Rust `core` via a path dep, and the web front ends consume the TS `client`. `CLAUDE.md` is a one-line `@AGENTS.md` import. See [README.md](README.md) for what it is and quick-start examples, [ARCHITECTURE.md](ARCHITECTURE.md) for design/storage/concurrency.
 
 ## Layout
 
@@ -24,7 +22,7 @@ Workspace members (`Cargo.toml`): `patch-db` (`core/`), `json-patch`, `json-ptr`
 
 ## Build & test (run from the repo root)
 
-The six Rust crates are members of the start-os root Cargo workspace:
+The six Rust crates are members of the monorepo root Cargo workspace:
 
 ```bash
 cargo build -p patch-db                  # core crate (also -p json-patch / json-ptr / patch-db-macro / …)
@@ -39,8 +37,20 @@ The web workspace consumes the built TS client; the monorepo's root `build/commo
 
 ## Operating rules
 
-- **Wire format** — Rust and TS define `Revision`, `Dump`, and patch operations independently. Changes to one side must be mirrored in the other. See the cross-layer section in [CONTRIBUTING.md](CONTRIBUTING.md#making-changes).
+- **Wire format** — Rust and TS define `Revision`, `Dump`, and patch operations independently. Changes to one side must be mirrored in the other. The definitions live in `core/src/patch.rs` and `client/lib/types.ts`; patch application lives in `json-patch/` and `client/lib/json-patch-lib.ts`.
 - **Patch operations** — Only `add`, `remove`, and `replace` are used. The TS client does not implement `test`, `move`, or `copy`.
 - **Immutable patch application** — The TS client applies patches by shallow-copying objects/arrays, not mutating in place. This is intentional for UI framework change detection.
 - **`HasModel` derive** — Respects serde attributes (`rename_all`, `rename`, `flatten`, `tag`, `content`). Generated accessors follow the pattern `as_<field>()`, `as_<field>_mut()`, `into_<field>()`.
 - **Error handling** — Rust uses `thiserror` with the `Error` enum in `core/src/lib.rs`. TS does not have formal error types.
+
+## CLI utility
+
+`patch-db-util` provides commands for inspecting and restoring database files:
+
+```bash
+# Dump database state as JSON
+cargo run -p patch-db-util -- dump path/to/my.db
+
+# Restore database from JSON on stdin
+echo '{"count": 42}' | cargo run -p patch-db-util -- from-dump path/to/my.db
+```

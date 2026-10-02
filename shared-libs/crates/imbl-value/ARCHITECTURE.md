@@ -78,4 +78,3 @@ Both are off by default.
 
 - [README.md](README.md) — what the crate is and how to use it.
 - [AGENTS.md](AGENTS.md) — layout, build/test commands, and gotchas for agents.
-- [CONTRIBUTING.md](CONTRIBUTING.md) — toolchain, workflow, and PR conventions.

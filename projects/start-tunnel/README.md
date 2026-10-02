@@ -23,7 +23,7 @@ For a feature tour and comparison to Cloudflare Tunnel / Tailscale, see the
 
 ## Place in the monorepo
 
-StartTunnel is one product in the `start-os` monorepo. This directory is a thin
+StartTunnel is one product in the `start-technologies` monorepo. This directory is a thin
 wrapper; the actual server logic lives in the shared Rust library.
 
 ```
@@ -101,10 +101,9 @@ embeds the compiled UI from `web/dist/static/start-tunnel/` into.
 ## Documentation & Contributing
 
 - User & reference docs: [`docs/`](docs/) (browse at
-  [start9.com/start-tunnel](https://start9.com/start-tunnel/))
+  [docs.start9.com/start-tunnel](https://docs.start9.com/start-tunnel/))
 - Architecture: [ARCHITECTURE.md](ARCHITECTURE.md)
-- Building, testing, formatting: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Agent/dev quick reference: [AGENTS.md](AGENTS.md)
+- Building, testing, formatting: [AGENTS.md](AGENTS.md)
 
 ## License
 

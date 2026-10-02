@@ -266,22 +266,27 @@ Internally the builder is record-then-materialize: `.addDaemon()` appends a reco
 ```typescript
 export const main = sdk.setupMain(async ({ effects }) => {
   return sdk.Daemons.dynamic(effects, async ({ effects }) => {
-    const { instances } = (await instancesYaml.read().const(effects)) ?? { instances: [] }
-    let daemons = sdk.Daemons.of<Manifest>({ effects })
-    for (const inst of instances) {
-      daemons = daemons.addDaemon(`reg-${inst.id}`, {
-        subcontainer: sdk.SubContainer.of(effects, { imageId: 'reg', sharedRun: true }, mounts, `reg-${inst.id}-sub`),
-        exec: { command: ['start-registryd'] },
-        ready: { display: inst.label, fn: () => sdk.healthCheck.checkPortListening(effects, inst.port, {}) },
-        requires: [],
-      })
-    }
-    return daemons
+    const config = await registryYaml.read().const(effects)
+    const daemons = sdk.Daemons.of(effects)
+    if (!config?.enabled) return daemons
+    return daemons.addDaemon('registry', {
+      subcontainer: sdk.SubContainer.of(effects, { imageId: 'reg', sharedRun: true }, mounts, 'registry-sub'),
+      exec: { command: ['start-registryd'] },
+      ready: {
+        display: 'Registry',
+        fn: () =>
+          sdk.healthCheck.checkPortListening(effects, 80, {
+            successMessage: 'Registry is ready',
+            errorMessage: 'Registry is not listening',
+          }),
+      },
+      requires: [],
+    })
   })
 })
 ```
 
-Diff semantics per id: absent→present **start**, present→absent **stop**, same `configHash` **leave alone**, different `configHash` **restart**. Dependents of any restarted/stopped daemon are also restarted. `configHash` is a canonical-JSON hash over the subcontainer descriptor (`imageId`, `sharedRun`, `name`, `mounts.build()`), exec, `requires`, and the structural parts of `ready` — closures (`ready.fn`, `ready.trigger`) are excluded so a watched-file touch with unchanged content doesn't bounce every daemon. Lazy `SubContainer`s ({@link SubContainer.of}) are required under `Daemons.dynamic`; eager handles produced inside the builder would defeat the "leave alone" guarantee and the reconciler throws if it sees one.
+Diff semantics per id: absent→present **start**, present→absent **stop**, same `configHash` **leave alone**, different `configHash` **restart**. Dependents of any restarted/stopped daemon are also restarted. `configHash` is a canonical-JSON hash over the subcontainer descriptor (`imageId`, `sharedRun`, `name`, `mounts.build()`), exec, `requires`, `uses`, and the structural parts of `ready` — closures (`ready.fn`, `ready.trigger`) are excluded so a watched-file touch with unchanged content doesn't bounce every daemon. Captured values that must trigger a restart belong in the entry's `uses`. Lazy `SubContainer`s (`SubContainer.of`) are required under `Daemons.dynamic`; eager handles produced inside the builder would defeat the "leave alone" guarantee and the reconciler throws if it sees one.
 
 **SubContainers** come in two flavors:
 
@@ -293,7 +298,7 @@ The unified `SubContainer<M>` interface widens `rootfs` / `guid` / `subpath()` t
 **Mounts** declares what to attach to a container:
 
 ```typescript
-sdk.Mounts.of().mountVolume('main', '/data').mountAssets('scripts', '/scripts').mountDependency('bitcoind', 'main', '/bitcoin-data', { readonly: true }).mountBackup('/backup')
+sdk.Mounts.of().mountVolume({ volumeId: 'main', subpath: null, mountpoint: '/data', readonly: false }).mountAssets({ subpath: 'scripts', mountpoint: '/scripts' }).mountDependency({ dependencyId: 'bitcoind', volumeId: 'main', subpath: null, mountpoint: '/bitcoin-data', readonly: true })
 ```
 
 ### Health Checks (`lib/health/`)
@@ -371,7 +376,7 @@ Execute commands in isolated container environments:
 
 ```typescript
 // Long-lived subcontainer
-const container = await sdk.SubContainer.of(effects, { imageId: 'main' }, mounts, 'app')
+const container = sdk.SubContainer.of(effects, { imageId: 'main' }, mounts, 'app')
 
 // One-shot execution
 await sdk.SubContainer.withTemp(effects, { imageId: 'main' }, mounts, 'migrate', async c => {
@@ -411,8 +416,8 @@ Used in init scripts to track which migration version the service's data has bee
 ### Internationalization (`lib/i18n/`)
 
 ```typescript
-const t = setupI18n({ en_US: enStrings, es_ES: esStrings })
-const greeting = t('hello', { name: 'World' }) // "Hello, World!" or "Hola, World!"
+const t = setupI18n({ 'Hello, ${name}!': 0 }, { es_ES: { 0: '¡Hola, ${name}!' } }, 'en_US')
+const greeting = t('Hello, ${name}!', { name: 'World' })
 ```
 
 Supports locale fallback and Intl-based formatting.
@@ -475,11 +480,13 @@ All runtime interactions go through the `Effects` object rather than direct syst
 
 The `Watchable` base class provides a consistent API for values that can change over time:
 
-- `const(effects)` — Read once; if the value changes, triggers a retry of the enclosing context
+- `const()` — Read once; if the value changes, triggers a retry of the enclosing context
 - `once()` — Read once without reactivity
 - `watch()` — Async generator yielding on each change
 - `onChange(callback)` — Invoke callback on each change
 - `waitFor(predicate)` — Block until a condition is met
+
+`FileHelper.read()` provides a deferred reader instead: pass the context to its `.const(effects)`, `.watch(effects)`, `.onChange(effects, callback)`, or `.waitFor(effects, predicate)` method.
 
 `Watchable<A>` is typed only by the value it reads. A reader that maps a raw value extends `MappedWatchable<Raw, Mapped>`, implementing `fetchRaw`/`produceRaw`. `Watchable.from(effects, source)` and `Watchable.combine(effects, sources, map?, eq?)` build readers from any `WatchSource` (`once()` + `watch(abort)`), which every `Watchable` is.
 

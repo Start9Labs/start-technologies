@@ -42,7 +42,7 @@ argv ─▶ MultiExecutable ─▶ start_cli::main (in start-core)
 The actual CLI bin (`start_cli::main`) lives in
 [`shared-libs/crates/start-core/src/bins/start_cli.rs`](../../shared-libs/crates/start-core/src/bins/start_cli.rs).
 It constructs an `rpc_toolkit::CliApp` from `start-core::main_api()` and a `ClientConfig`,
-renames the command to `start-cli`, stamps the current StartOS version, and runs it. Errors
+renames the command to `start-cli`, stamps the start-cli product version, and runs it. Errors
 are unwrapped from the RPC envelope and printed to stderr; the process exits with the RPC error code.
 
 ### Remote vs. local commands
@@ -85,5 +85,4 @@ to write the committed man pages into this project's `man/` dir
 ## Further reading
 
 - [`README.md`](./README.md) — what `start-cli` is and how to use it.
-- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — how to contribute to this crate.
-- [`AGENTS.md`](./AGENTS.md) — agent/dev rules; `CLAUDE.md` is a one-line `@AGENTS.md` import.
+- [`AGENTS.md`](./AGENTS.md) — how to contribute to this crate.

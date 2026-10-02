@@ -73,5 +73,4 @@ their clients will disagree about which version is newer.
 ## Further reading
 
 - README.md — what the crate is and how to use the public API (format, ranges, laws).
-- CONTRIBUTING.md — toolchain, build/test, and PR conventions.
-- AGENTS.md — agent-facing rules and gotchas (CLAUDE.md is a one-line `@AGENTS.md` import).
+- AGENTS.md — toolchain, build/test, and PR conventions.

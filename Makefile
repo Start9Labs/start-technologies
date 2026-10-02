@@ -23,7 +23,7 @@ help:
 	@echo "  start-cli start-cli-deb start-registry start-tunnel start-wrt start-wrt-image        (other products)"
 	@echo "  test start-core-test start-sdk-test container-runtime-test start-os-scripts-test start-wrt-test (tests)"
 	@echo "  format format-check start-core-ts-bindings clean                                     (tooling)"
-	@echo "See CONTRIBUTING.md for the full list."
+	@echo "See AGENTS.md for the full list."
 
 touch:
 	touch $(STARTOS_TARGETS)

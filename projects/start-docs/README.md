@@ -4,7 +4,7 @@ The documentation site for [Start9](https://start9.com) products — StartOS, St
 
 **Live site:** [docs.start9.com](https://docs.start9.com)
 
-This project (the `projects/start-docs/` directory of the `start-os` monorepo) owns the **site build infrastructure**, the **landing page**, and the **Bitcoin Guides** book. The per-product mdBooks now live in their own product directories; this project's build wires them together into one deployed site.
+This project (the `projects/start-docs/` directory of the `start-technologies` monorepo) owns the **site build infrastructure**, the **landing page**, and the **Bitcoin Guides** book. The per-product mdBooks now live in their own product directories; this project's build wires them together into one deployed site.
 
 ## Books and where they live
 
@@ -49,6 +49,5 @@ Built with [mdBook](https://rust-lang.github.io/mdBook/). Each book is an indepe
 
 ## Documentation
 
-- [CONTRIBUTING.md](CONTRIBUTING.md) — local setup and how to submit changes
+- [AGENTS.md](AGENTS.md) — local setup and how to submit changes
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how the build is structured
-- [AGENTS.md](AGENTS.md) — operating rules for AI developers (`CLAUDE.md` is a one-line `@AGENTS.md` import)

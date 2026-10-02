@@ -3,10 +3,7 @@
 A semver extension that tracks an upstream version and a downstream (packaging) version
 separately, with an optional flavor prefix. First-party crate in the start-technologies monorepo at
 `shared-libs/crates/exver` (Cargo package `exver`). `CLAUDE.md`
-is a one-line `@AGENTS.md` import. See ARCHITECTURE.md for how it works and CONTRIBUTING.md for
-the workflow.
-
-**Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
+is a one-line `@AGENTS.md` import. See [ARCHITECTURE.md](ARCHITECTURE.md) for how it works.
 
 ## Layout
 
@@ -49,3 +46,8 @@ cargo test  -p exver
   that they agree.** A change to the version/range format or to ordering here must land in
   `shared-libs/ts-modules/start-core/lib/exver/` (`exver.pegjs` + `index.ts`) in the same change,
   or the registries and their clients will disagree about which version is newer.
+
+## Regression seeds
+
+Commit new failing-case seeds under `proptest-regressions/`. The property suite
+in `src/test.rs` exercises the range algebra and release satisfaction semantics.
