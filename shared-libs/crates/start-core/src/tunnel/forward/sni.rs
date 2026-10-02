@@ -605,7 +605,6 @@ async fn handle_conn(
     let Some((target, transparent)) = selected else {
         return;
     };
-    // Same-subnet clients need the gateway source address for return traffic.
     let transparent = transparent && !is_hairpin(&local_prefix, *peer.ip(), *target.ip()).await;
     let mut upstream = if transparent {
         // A failed source-preserving connection must not fall back to gateway source.

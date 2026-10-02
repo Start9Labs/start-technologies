@@ -57,18 +57,16 @@ export class LiveApiService extends ApiService {
     this.document.defaultView.rpcClient = this
   }
 
-  // for uploading files
-
   async uploadFile(guid: string, body: Blob): Promise<void> {
     await this.httpRequest({
       method: 'POST',
       body,
       url: `/rest/rpc/${guid}`,
+      // Service-worker fetch events expire during long uploads.
+      headers: { 'ngsw-bypass': 'true' },
       timeout: 0,
     })
   }
-
-  // for getting static files: ex: license
 
   async getStatic(
     urls: string[],

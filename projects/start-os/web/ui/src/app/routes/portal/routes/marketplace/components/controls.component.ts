@@ -4,6 +4,7 @@ import { toObservable, toSignal } from '@angular/core/rxjs-interop'
 import { Router } from '@angular/router'
 import { MarketplacePkg } from '@start9labs/marketplace'
 import {
+  ErrorService,
   Exver,
   ExverComparesPipe,
   i18nPipe,
@@ -102,6 +103,7 @@ export class MarketplaceControlsComponent {
   private readonly alerts = inject(MarketplaceAlertsService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly tasks = inject(TaskService)
+  private readonly error = inject(ErrorService)
   private readonly exver = inject(Exver)
   private readonly router = inject(Router)
   private readonly marketplace = inject(MarketplaceService)
@@ -109,7 +111,6 @@ export class MarketplaceControlsComponent {
 
   readonly pkg = input.required<Pick<MarketplacePkg, KEYS>>()
 
-  // only present if side loading
   readonly file = input<File>()
 
   readonly localPkg = toSignal(
@@ -208,7 +209,9 @@ export class MarketplaceControlsComponent {
 
     this.tasks.run(async () => {
       const res = await this.api.sideloadPackage()
-      this.api.uploadFile(res.upload, file).catch(console.error)
+      this.api
+        .uploadFile(res.upload, file)
+        .catch(e => this.error.handleError(e))
     }, 'Starting upload')
   }
 }

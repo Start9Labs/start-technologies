@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Devices can reach their own services through published SNI hostnames**,
   including a shared port's fallback.
 
+- **Small VPSes have room for connection-heavy services such as Tor relays.**
+  StartTunnel sizes connection tracking at 256 entries per MiB of host RAM,
+  preserving higher host settings. Hosts that restrict these kernel settings
+  keep their available capacity.
+
+- **The Debian package installs the networking utilities needed on minimal
+  images.** `iproute2` and `procps` are explicit dependencies.
+
 - **Forwarded IPv4 UDP ports retain their outbound mapping.** UDP traffic a
   device starts from a forwarded port leaves through the forward's public
   interface with its public address and port.
