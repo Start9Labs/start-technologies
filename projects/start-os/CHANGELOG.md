@@ -12,7 +12,7 @@ for the detail behind its highlights.
 
 ### Fixed
 
-- **Large packages sideload successfully in the UI over slow connections.** Upload failures appear as notifications.
+- **Large packages sideload successfully in the UI over slow connections.** A failed upload shows an error message.
 
 - **Restart requests during service startup take effect after startup completes.**
 
