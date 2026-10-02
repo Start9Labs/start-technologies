@@ -65,5 +65,5 @@ This crate holds only `src/main.rs` and `Cargo.toml`. **Almost all changes belon
 
 Edit this crate only when the entrypoint, Cargo features, or bin wiring change.
 
-If your change touches the CLI surface a user or package author sees, update the relevant docs in
-`projects/start-sdk/docs` (packaging) and the `projects/start-os/docs` in the same change set.
+Docs for the CLI surface a user or package author sees live in `projects/start-sdk/docs` (packaging)
+and `projects/start-os/docs`.
