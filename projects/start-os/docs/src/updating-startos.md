@@ -9,7 +9,7 @@
 
 1. Go to `System -> General -> Software Update`.
 
-1. Read the release notes and click "Begin Update".
+1. Read the release notes, including any **Before You Update** instructions, and click "Begin Update".
 
    > [!WARNING]
    > Ensure you have a stable Internet connection before beginning an OS update, and do not unplug your server while StartOS is downloading.
@@ -21,7 +21,7 @@
    > [!WARNING]
    > Updates can take up to an _hour_ to complete. During this time, there is no indication of progress and your StartOS UI will be unreachable. **DO NOT UNPLUG YOUR SERVER DURING THIS TIME!**
 
-1. When your server comes back, a notification welcomes you to the new version. Open it from **Notifications** — the bell in the menu — to read that release's notes again at any time.
+1. When your server comes back, a notification welcomes you to the new version with its highlights and important follow-up instructions. Open it from **Notifications** — the bell in the menu — to read them again at any time.
 
 A browser page left open during the update displays **Refresh Needed** when the server returns. Select **Refresh** to open the updated interface. If an installed StartOS app still shows the previous interface afterwards, remove and reinstall the app.
 

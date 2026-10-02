@@ -21,7 +21,7 @@ help:
 	@echo "No default target — specify one. Common targets:"
 	@echo "  start-os start-os-deb start-os-squashfs start-os-ui start-os-uis start-os-install   (StartOS)"
 	@echo "  start-cli start-cli-deb start-registry start-tunnel start-wrt start-wrt-image        (other products)"
-	@echo "  test start-core-test start-sdk-test container-runtime-test start-os-scripts-test start-wrt-test (tests)"
+	@echo "  test start-core-test start-sdk-test container-runtime-test start-os-scripts-test start-wrt-test release-notes-test (tests)"
 	@echo "  format format-check start-core-ts-bindings clean                                     (tooling)"
 	@echo "See CONTRIBUTING.md for the full list."
 
@@ -47,4 +47,8 @@ format-check:
 	npm --prefix . run format:check
 	npm --prefix . run format:toml:check
 
-test: | start-core-test start-sdk-test backup-fs-test container-runtime-test start-os-scripts-test start-wrt-test
+.PHONY: release-notes-test
+release-notes-test:
+	python3 scripts/tests/release-notes-test.py
+
+test: | start-core-test start-sdk-test backup-fs-test container-runtime-test start-os-scripts-test start-wrt-test release-notes-test
