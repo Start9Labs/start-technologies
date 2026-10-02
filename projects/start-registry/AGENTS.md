@@ -60,6 +60,6 @@ cargo build -p start-registry --bin registrybox
 
 Defaults: listen `127.0.0.1:5959`, datadir `/var/lib/startos` (state in `<datadir>/registry.db` + a SQLite metrics DB + hosted assets). Useful flags: `-l/--listen`, `-H/--hostname`, `-p/--tor-proxy`, `-d/--datadir`, `-c/--config`.
 
-## Docs to update with changes
+## Documentation
 
-If you change a flag, the API surface, the data model, or the install/run flow, update this dir's `README.md` / `ARCHITECTURE.md`, add a `CHANGELOG.md` entry, and check the OS-level packaging docs (`projects/start-os/docs/`) plus the marketplace UI if the API contract changed.
+This dir's `README.md` / `ARCHITECTURE.md` cover registry usage and internals. OS-level packaging and registry documentation lives in `projects/start-os/docs/`. API contract changes also require checking the marketplace UI.

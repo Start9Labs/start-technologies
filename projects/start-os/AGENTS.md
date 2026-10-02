@@ -75,12 +75,6 @@ monorepo-wide rules and [ARCHITECTURE.md](ARCHITECTURE.md) for how this product 
   forwards to `start-core`'s `beta` feature — keep both seeds in sync when you
   change seed shape.
 
-## Docs are part of the change
-
-User-facing changes (UI, CLI output/flags, install/setup flow) must update the
-matching page under `docs/` in the same change. Keep this AGENTS, README, and
-ARCHITECTURE current when you change structure, build steps, or conventions.
-
 ## Contributor workflow
 
 This guide covers building and contributing to the **StartOS OS product** in `projects/start-os/` — the `startbox` / `start-container` bins, the web UIs, the container runtime, and the bootable OS image. It is the source of truth for the OS-image toolchain and the build/deploy targets.
@@ -91,7 +85,7 @@ If you want to **package a service** for StartOS instead, see the [packaging gui
 
 ### Documentation
 
-User-facing changes (UI, CLI, install/setup flow) must update the end-user docs under `docs/` (an mdbook served at `/start-os/`) in the same change. This product's docs: [README.md](README.md) (what it is / usage), [ARCHITECTURE.md](ARCHITECTURE.md) (how it's wired), [AGENTS.md](AGENTS.md) (agent rules and contributor workflow; `CLAUDE.md` is a one-line `@AGENTS.md` import).
+The end-user book lives under `docs/` and is served at `/start-os/`. This product's repo docs: [README.md](README.md) (what it is / usage), [ARCHITECTURE.md](ARCHITECTURE.md) (how it's wired), [AGENTS.md](AGENTS.md) (agent rules and contributor workflow; `CLAUDE.md` is a one-line `@AGENTS.md` import).
 
 ### Collaboration
 

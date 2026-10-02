@@ -141,8 +141,8 @@ for the detail behind its highlights.
   grid.
 
 - **A notification welcomes you to a new version after your server restarts.**
-  It names the version you landed on and carries that release's notes, so what
-  you read before updating is there afterwards too.
+  It names the version you landed on and carries that release's highlights and
+  important follow-up instructions. Pre-update warnings appear before updating.
 
 - **An action can return a multi-line value** — a diagnostic report, a
   generated config file, an exported key block. It appears as a read-only

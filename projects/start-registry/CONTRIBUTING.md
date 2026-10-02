@@ -66,10 +66,6 @@ Make sure `make start-registry-format-check` is clean before opening a PR.
 - **API additions:** add subcommands in `registry/mod.rs`; use `with_call_remote::<CliContext>()` to expose them to the `start-registry` CLI and `with_about(...)` for help text. Tag admin-only commands with `with_metadata("admin", true)`.
 - **Schema changes:** changing `RegistryDatabase` / index types requires a migration in `shared-libs/crates/start-core/src/registry/migrations`.
 
-## Docs are part of the change
+## Documentation and changelog
 
-Update the matching docs in the same PR:
-
-- This dir's `README.md` / `ARCHITECTURE.md` for behavior, flags, or structure changes.
-- `CHANGELOG.md` (Keep a Changelog style) for any user-visible change.
-- OS-level packaging/registry docs in `projects/start-os/docs`, and the marketplace UI, if you change the API contract or the install/run flow.
+The root [`AGENTS.md`](../../AGENTS.md) owns the documentation and changelog requirements; this scope's [`AGENTS.md`](AGENTS.md#documentation) maps the relevant docs and consumers.

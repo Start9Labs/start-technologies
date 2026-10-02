@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Devices can reach their own services through published SNI hostnames**,
+  including a shared port's fallback.
+
 - **Small VPSes have room for connection-heavy services such as Tor relays.**
   StartTunnel sizes connection tracking at 256 entries per MiB of host RAM,
   preserving higher host settings. Hosts that restrict these kernel settings

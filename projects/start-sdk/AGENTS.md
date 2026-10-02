@@ -91,7 +91,7 @@ If that commit never landed on `master` (e.g. the publish was cut from an unmerg
 
 ## Docs
 
-`README.md` (overview + quickstart), `ARCHITECTURE.md` (modules + data flow), `CHANGELOG.md`, and this file (contribute + operate). The packaging mdbook in `docs/` is the developer-facing reference — update it when you change the SDK's developer surface. Keep all of these current in the same change that alters structure, conventions, build, or surface.
+`README.md` (overview + quickstart), `ARCHITECTURE.md` (modules + data flow), `CHANGELOG.md`, and this file (contribute + operate). The packaging mdbook in `docs/` is the developer-facing reference.
 
 ### The `docs/` mdbook
 
