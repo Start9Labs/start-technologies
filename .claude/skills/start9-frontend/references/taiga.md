@@ -40,7 +40,9 @@ nothing may import it. When in doubt: the official MCP
   `tuiTakeUntilDestroyed`, `tuiTypedFromEvent`, `tuiMarkControlAsTouchedAndValidate`,
   `tuiInjectElement()`, `tuiWindowSize`, `tuiIsPresent`/`tuiIsString`, `tuiSetSignal`,
   `TUI_TRUE_HANDLER`/`TUI_FALSE_HANDLER`; `TuiMapperPipe` (`value | tuiMapper: fn : args` —
-  pure template mapping without component methods), `TuiFilterPipe`, `TuiObfuscatePipe`.
+  pure template mapping without component methods), `TuiFilterPipe`, `TuiObfuscatePipe`;
+  `TUI_DEFAULT_MATCHER(item, search)` for a case-insensitive "contains" filter (it doesn't trim
+  `search`).
 - Types: `TuiBooleanHandler`, `TuiStringHandler`, `TuiContext<T>`, `TuiStringMatcher`,
   `TuiIdentityMatcher`, `TuiValidationError`.
 

@@ -46,7 +46,7 @@ in favor of semantic elements directly inside `tui-root`; an element component w
 `tuiSubtitle`; click-handler navigation → real `<a tuiButton [href]>`; icon-only buttons get
 text content (Taiga hides it visually) instead of `aria-label`; bare `<label>` + flex CSS →
 `<label tuiLabel>`; styled `<span class="divider">` → `<hr>`; `autocomplete="new-password"` on
-password fields; `TuiAutoFocus` on the first focusable in dialogs/drawers.
+password fields; `TuiAutoFocus` on the first focusable in dialogs/drawers, never on phones.
 
 **7. Fine-tuning CSS → deleted.** Every `letter-spacing`, `text-transform`, `vertical-align`
 nudge, and `margin-top` ladder goes; vertical rhythm comes from `:host { display: grid;

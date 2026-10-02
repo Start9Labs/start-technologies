@@ -109,6 +109,9 @@ it with every Angular/Taiga bump (other repos' docs deliberately carry no versio
   `[(ngModel)]="signal"` for single ad-hoc fields.
 - **No icons inside switches.** `tuiSwitchOptionsProvider({ showIcons: false })` in the
   app config; a toggle is a track and a thumb.
+- **No autofocus on phones.** A focused field opens the keyboard over the page. Bind
+  `[tuiAutoFocus]="!isMobile"` with `isMobile = inject(WA_IS_MOBILE)`, the device rather than
+  the breakpoint.
 - **No cleaner on a select.** `[tuiTextfieldCleaner]="false"` on every `tui-textfield` holding
   an `input[tuiSelect]`; the default is on, and it also lets Backspace clear the choice.
 - **No route-level `providers`,** no resolvers, few guards (inline `canMatch` arrows).

@@ -34,7 +34,10 @@ component-wrapper helper.
   can be a `PolymorpheusComponent`). **Blocking loaders — `TuiNotificationMiddleService`**: hold
   the subscription open, `unsubscribe()` in `finally` (that's what `TaskService` does).
   `TuiAlertService` is not used anywhere; inline banners are `<div tuiNotification
-appearance="…">` (host-directive form, not the element form).
+appearance="…">` (host-directive form, not the element form). A banner that asks for one of
+  two choices is a `form`: the primary action is its default submit button and the alternative
+  a `type="reset"` button, handled as `(submit.prevent)` and `(reset)` on the form, with no
+  `(click)` or `type="button"` on either.
 - **Dropdowns**: `tuiDropdown` + `tuiDropdownAuto`/`tuiDropdownHover`/`tuiDropdownOpen`, content
   `<tui-data-list *tuiDropdown="let close"><button tuiOption (click)="close()">…` inside the
   host element — the context-provided `close`. A menu is `tuiDropdown tuiDropdownAuto`; an

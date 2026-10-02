@@ -23,7 +23,9 @@ switchMap(() => from(this.load()).pipe(catchError(...))), share())` → `data = 
     derived counts.
 - **`.subscribe()` policy** — allowed shapes only: ① fire-and-forget completing streams
   (`alerts.open(...).subscribe()`, `dialogs.open(...).subscribe(result => …)` — dialog streams
-  complete on close); ② app-lifetime class-field subscriptions with `takeUntilDestroyed()`.
+  complete on close, and a dismissal is a completion with no value, so
+  `defaultIfEmpty(null)` handles it in the same callback rather than a `complete:` handler and a
+  flag); ② app-lifetime class-field subscriptions with `takeUntilDestroyed()`.
   Data for templates is never manually subscribed.
 - **Async actions run through the wrapper**, never per-component try/catch+loader:
   - Monorepo: `TaskService.run(task, 'Saving')` (`@start9labs/shared`) — opens a

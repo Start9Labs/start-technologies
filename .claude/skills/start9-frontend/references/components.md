@@ -123,7 +123,10 @@ host: {
 - Outputs: `output()` — rare; prefer `model()` or URL state.
 - Queries: `viewChild()`, `contentChild()` — e.g.
   `contentChild<TemplateRef<{ $implicit: Pkg }>>(TemplateRef)` for app-supplied fragments.
-- Derivation: `computed()`. Reset-on-source-change: `linkedSignal`:
+- Derivation: `computed()`. A computation that reads one signal several times names it as a
+  default parameter instead of opening a block:
+  `computed((chat = this.opened.conversation()) => !!chat && !chat.escalated)`.
+  Reset-on-source-change: `linkedSignal`, never an `effect` that `untracked`-sets a signal:
 
 ```ts
 // Drawer auto-closes on navigation or resize — zero per-link handlers:
