@@ -2,11 +2,12 @@
   "name": "upload-each",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Upload every file matching a glob as its own GitHub Actions artifact.",
   "main": "dist/index.js",
   "license": "MIT",
   "scripts": {
-    "build": "ncc build src/index.js -o dist --minify --license index.js.LICENSES.txt",
+    "build": "ncc build src/index.js -o dist --minify --external supports-color --license index.js.LICENSES.txt",
     "test": "node --experimental-test-module-mocks --test test/*.test.cjs"
   },
   "dependencies": {

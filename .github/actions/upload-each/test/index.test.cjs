@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict')
 const { test, mock } = require('node:test')
 const path = require('node:path')
+const { randomUUID } = require('node:crypto')
 
 async function runAction(inputs, files, uploadError) {
   const uploads = []
@@ -51,8 +52,7 @@ async function runAction(inputs, files, uploadError) {
     },
   })
   try {
-    delete require.cache[require.resolve('../src/index.js')]
-    require('../src/index.js')
+    await import(`../src/index.js?run=${randomUUID()}`)
     await finished
     return { uploads, messages, outcome }
   } finally {
