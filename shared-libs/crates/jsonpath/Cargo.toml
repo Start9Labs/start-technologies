@@ -24,13 +24,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 
 [dev-dependencies]
-env_logger = "0.8"
+env_logger = "0.11"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 name = "jsonpath_lib"
 path = "src/lib.rs"
-
-#[profile.release]
-#debug = true
-#lto = false

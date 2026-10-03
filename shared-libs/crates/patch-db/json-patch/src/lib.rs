@@ -421,8 +421,10 @@ pub fn patch<'a>(doc: &mut Value, patch: &'a Patch) -> Result<Undo<'a>, PatchErr
     apply_patches(doc, &patch.0, &mut undo).map(|_| undo)
 }
 
+type UndoOperation<'a> = Box<dyn FnOnce(&mut Value) + Send + Sync + 'a>;
+
 /// Object that can be used to undo a patch if successful
-pub struct Undo<'a>(Vec<Box<dyn FnOnce(&mut Value) + Send + Sync + 'a>>);
+pub struct Undo<'a>(Vec<UndoOperation<'a>>);
 impl<'a> Undo<'a> {
     /// Apply the undo to the document
     pub fn apply(mut self, doc: &mut Value) {
@@ -586,7 +588,7 @@ pub fn merge(doc: &mut Value, patch: &Value) {
     let map = doc.as_object_mut().unwrap();
     for (key, value) in patch.as_object().unwrap() {
         if value.is_null() {
-            map.remove(&*key);
+            map.remove(key);
         } else {
             merge(map.entry(key.clone()).or_insert(Value::Null), value);
         }

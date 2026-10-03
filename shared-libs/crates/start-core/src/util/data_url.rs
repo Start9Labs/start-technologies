@@ -23,7 +23,7 @@ impl<'a> DataUrl<'a> {
     pub const DEFAULT_MIME: &'static str = "application/octet-stream";
     pub const MAX_SIZE: u64 = 100 * 1024;
 
-    fn to_string(&self) -> String {
+    fn encode(&self) -> String {
         use std::fmt::Write;
         let mut res = String::with_capacity(self.len());
         write!(&mut res, "{self}").unwrap();
@@ -193,7 +193,7 @@ impl<'a> Serialize for DataUrl<'a> {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(&self.to_string())
+        serializer.serialize_str(&self.encode())
     }
 }
 
@@ -205,6 +205,6 @@ fn doesnt_reallocate() {
             mime: InternedString::intern("png"),
             data: Cow::Borrowed(&random[..i]),
         };
-        assert_eq!(icon.to_string().capacity(), icon.len());
+        assert_eq!(icon.encode().capacity(), icon.len());
     }
 }

@@ -6,10 +6,11 @@
   "main": "dist/index.js",
   "license": "MIT",
   "scripts": {
-    "build": "ncc build src/index.js -o dist --minify --license index.js.LICENSES.txt"
+    "build": "ncc build src/index.js -o dist --minify --license index.js.LICENSES.txt",
+    "test": "node --experimental-test-module-mocks --test test/*.test.cjs"
   },
   "dependencies": {
-    "@actions/artifact": "^2.3.2",
+    "@actions/artifact": "^6.2.1",
     "@actions/core": "^1.11.1",
     "@actions/glob": "^0.5.0"
   },

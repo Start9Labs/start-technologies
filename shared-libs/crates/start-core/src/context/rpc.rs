@@ -669,14 +669,14 @@ mod tests {
         let proxy_server = tokio::spawn(async move {
             let (mut stream, _) = proxy.accept().await.unwrap();
             let mut request = [0; 64];
-            stream.read(&mut request).await.unwrap();
+            assert!(stream.read(&mut request).await.unwrap() > 0);
         });
         let target = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let target_url = format!("http://{}", target.local_addr().unwrap());
         let target_server = tokio::spawn(async move {
             let (mut stream, _) = target.accept().await.unwrap();
             let mut request = [0; 4096];
-            stream.read(&mut request).await.unwrap();
+            assert!(stream.read(&mut request).await.unwrap() > 0);
             stream
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
                 .await

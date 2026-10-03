@@ -1,9 +1,8 @@
 const path = require('path')
 const core = require('@actions/core')
 const glob = require('@actions/glob')
-const { DefaultArtifactClient } = require('@actions/artifact')
-
 async function run() {
+  const { DefaultArtifactClient } = await import('@actions/artifact')
   const pattern = core.getInput('pattern', { required: true })
   const retentionRaw = core.getInput('retention-days')
   const retentionDays = retentionRaw ? parseInt(retentionRaw, 10) : 0
