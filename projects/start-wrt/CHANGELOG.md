@@ -5,6 +5,14 @@ All notable changes to StartWRT are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2]
+
+### Fixed
+
+- **The serial console offers a login again after one times out.** An unused
+  login prompt expires after 60 seconds, and the console then stayed silent
+  until the next reboot.
+
 ## [1.2.1]
 
 ### Fixed
