@@ -4,7 +4,7 @@ use clap::Parser;
 use exver::Version;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::CliContext;
 use crate::prelude::*;
@@ -49,7 +49,6 @@ pub fn signer_api<C: Context>() -> ParentHandler<C> {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct VersionSignerParams {
-    #[ts(type = "string")]
     pub version: Version,
     pub signer: Guid,
 }
@@ -120,7 +119,6 @@ pub async fn remove_version_signer(
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct ListVersionSignersParams {
-    #[ts(type = "string")]
     pub version: Version,
 }
 

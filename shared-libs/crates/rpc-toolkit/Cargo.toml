@@ -11,9 +11,9 @@ version = "0.4.0"
 
 
 [features]
-cbor = ["dep:serde_cbor"]
+cbor = ["dep:serde_cbor", "visit-rs?/cbor"]
 default = ["cbor"]
-ts = ["dep:visit-rs"]
+ts = ["dep:visit-rs", "imbl-value/ts"]
 
 [dependencies]
 async-stream = "0.3"
@@ -38,7 +38,7 @@ thiserror = "2.0"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["io-util", "net"] }
 url = "2"
-visit-rs = { path = "../visit-rs", optional = true }
+visit-rs = { path = "../visit-rs", optional = true, features = ["ts"] }
 yajrc = "0.1"
 
 [dev-dependencies]

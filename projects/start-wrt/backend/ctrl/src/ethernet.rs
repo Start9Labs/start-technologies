@@ -34,12 +34,12 @@ pub fn find_lan_bridge(cfgs: &Configs) -> Result<Option<NetworkDevice>, Error> {
 pub const DEFAULT_WAN_INTERFACE: &str = "wan";
 pub const DEFAULT_WAN6_INTERFACE: &str = "wan6";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct Port<Id: Ord = ProfileId> {
     pub profile: Option<Id>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct Ethernet<Id: Ord = ProfileId> {
     pub wan_ipv6: bool,
     pub wan_port: Option<String>,
@@ -52,7 +52,7 @@ pub struct Ethernet<Id: Ord = ProfileId> {
 /// and such ports exist, `set` applies nothing and returns them in
 /// `EthernetSetResult` for a confirmation dialog; with the flag true it deletes
 /// those published ports as part of the reassignment.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct EthernetSetRequest {
     #[serde(flatten)]
     pub ethernet: Ethernet<ProfileIdOpt>,
@@ -60,7 +60,7 @@ pub struct EthernetSetRequest {
     pub confirm_published_port_deletion: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, visit_rs::TS)]
 pub struct EthernetSetResult {
     /// Non-empty (and nothing applied) when published ports would be deleted and
     /// the caller hasn't confirmed yet. Empty once the change is applied.

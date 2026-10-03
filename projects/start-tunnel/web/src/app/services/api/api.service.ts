@@ -1,90 +1,105 @@
 import { Injectable } from '@angular/core'
-import { T } from '@start9labs/start-core'
+import { RPC } from '@start9labs/start-core'
 import { Dump } from 'patch-db-client'
 import { Observable } from 'rxjs'
 import { TunnelData } from '../patch-db/data-model'
 
-@Injectable({
-  providedIn: 'root',
-})
+export type Params<M extends RPC.RpcMethod<RPC.Tunnel>> = RPC.RpcParamType<
+  RPC.Tunnel,
+  M
+>
+export type Result<M extends RPC.RpcMethod<RPC.Tunnel>> = RPC.RpcReturnType<
+  RPC.Tunnel,
+  M
+>
+
+@Injectable({ providedIn: 'root' })
 export abstract class ApiService {
   abstract openWebsocket$<T>(guid: string): Observable<T>
-  abstract subscribe(): Promise<SubscribeRes> // db.subscribe
-  // auth
-  abstract login(params: T.LoginParams): Promise<null> // auth.login
-  abstract logout(): Promise<null> // auth.logout
-  abstract setPassword(params: T.Tunnel.SetPasswordParams): Promise<null> // auth.set-password
-  // subnets
+  abstract subscribe(): Promise<SubscribeRes>
+  abstract login(params: Params<'auth.login'>): Promise<Result<'auth.login'>>
+  abstract logout(): Promise<Result<'auth.logout'>>
+  abstract setPassword(
+    params: Params<'auth.set-password'>,
+  ): Promise<Result<'auth.set-password'>>
   abstract addSubnet(
-    params: T.Tunnel.SubnetParams & T.Tunnel.AddSubnetParams,
-  ): Promise<null> // subnet.add
+    params: Params<'subnet.add'>,
+  ): Promise<Result<'subnet.add'>>
   abstract editSubnet(
-    params: T.Tunnel.SubnetParams & T.Tunnel.AddSubnetParams,
-  ): Promise<null> // subnet.edit
-  abstract deleteSubnet(params: T.Tunnel.SubnetParams): Promise<null> // subnet.remove
+    params: Params<'subnet.add'>,
+  ): Promise<Result<'subnet.add'>>
+  abstract deleteSubnet(
+    params: Params<'subnet.remove'>,
+  ): Promise<Result<'subnet.remove'>>
   abstract setSubnetDns(
-    params: T.Tunnel.SubnetParams & T.Tunnel.SetSubnetDnsParams,
-  ): Promise<null> // subnet.set-dns
+    params: Params<'subnet.set-dns'>,
+  ): Promise<Result<'subnet.set-dns'>>
   abstract setSubnetWan(
-    params: T.Tunnel.SubnetParams & T.Tunnel.SetSubnetWanParams,
-  ): Promise<null> // subnet.set-wan
-  // devices
-  abstract addDevice(params: T.Tunnel.AddDeviceParams): Promise<null> // device.add
-  abstract editDevice(params: T.Tunnel.AddDeviceParams): Promise<null> // device.edit
-  abstract deleteDevice(params: T.Tunnel.RemoveDeviceParams): Promise<null> // device.remove
+    params: Params<'subnet.set-wan'>,
+  ): Promise<Result<'subnet.set-wan'>>
+  abstract addDevice(
+    params: Params<'device.add'>,
+  ): Promise<Result<'device.add'>>
+  abstract editDevice(
+    params: Params<'device.add'>,
+  ): Promise<Result<'device.add'>>
+  abstract deleteDevice(
+    params: Params<'device.remove'>,
+  ): Promise<Result<'device.remove'>>
   abstract showDeviceConfig(
-    params: T.Tunnel.RemoveDeviceParams,
-  ): Promise<string> // device.show-config
+    params: Params<'device.show-config'>,
+  ): Promise<Result<'device.show-config'>>
   abstract setDnsInjection(
-    params: T.Tunnel.SetDnsInjectionParams,
-  ): Promise<null> // device.set-dns-injection
+    params: Params<'device.set-dns-injection'>,
+  ): Promise<Result<'device.set-dns-injection'>>
   abstract setAutoPortForward(
-    params: T.Tunnel.SetAutoPortForwardParams,
-  ): Promise<null> // device.set-auto-port-forward
-  abstract setDeviceWan(params: T.Tunnel.SetDeviceWanParams): Promise<null> // device.set-wan
-  abstract setDeviceKind(params: T.Tunnel.SetDeviceKindParams): Promise<null> // device.set-kind
-  // dns
-  abstract addDnsRecord(params: T.Tunnel.AddDnsRecordParams): Promise<null> // dns.add
+    params: Params<'device.set-auto-port-forward'>,
+  ): Promise<Result<'device.set-auto-port-forward'>>
+  abstract setDeviceWan(
+    params: Params<'device.set-wan'>,
+  ): Promise<Result<'device.set-wan'>>
+  abstract setDeviceKind(
+    params: Params<'device.set-kind'>,
+  ): Promise<Result<'device.set-kind'>>
+  abstract addDnsRecord(params: Params<'dns.add'>): Promise<Result<'dns.add'>>
   abstract removeDnsRecord(
-    params: T.Tunnel.RemoveDnsRecordParams,
-  ): Promise<null> // dns.remove
-  // forwards
-  abstract addForward(params: T.Tunnel.AddPortForwardParams): Promise<null> // port-forward.add
+    params: Params<'dns.remove'>,
+  ): Promise<Result<'dns.remove'>>
+  abstract addForward(
+    params: Params<'port-forward.add'>,
+  ): Promise<Result<'port-forward.add'>>
   abstract deleteForward(
-    params: T.Tunnel.RemovePortForwardParams,
-  ): Promise<null> // port-forward.remove
+    params: Params<'port-forward.remove'>,
+  ): Promise<Result<'port-forward.remove'>>
   abstract updateForwardLabel(
-    params: T.Tunnel.UpdatePortForwardLabelParams,
-  ): Promise<null> // port-forward.update-label
+    params: Params<'port-forward.update-label'>,
+  ): Promise<Result<'port-forward.update-label'>>
   abstract setForwardEnabled(
-    params: T.Tunnel.SetPortForwardEnabledParams,
-  ): Promise<null> // port-forward.set-enabled
-
-  abstract addPinhole(params: T.Tunnel.AddPinholeParams): Promise<null> // pinhole.add
-  abstract deletePinhole(params: T.Tunnel.RemovePinholeParams): Promise<null> // pinhole.remove
+    params: Params<'port-forward.set-enabled'>,
+  ): Promise<Result<'port-forward.set-enabled'>>
+  abstract addPinhole(
+    params: Params<'pinhole.add'>,
+  ): Promise<Result<'pinhole.add'>>
+  abstract deletePinhole(
+    params: Params<'pinhole.remove'>,
+  ): Promise<Result<'pinhole.remove'>>
   abstract updatePinholeLabel(
-    params: T.Tunnel.UpdatePinholeLabelParams,
-  ): Promise<null> // pinhole.update-label
+    params: Params<'pinhole.update-label'>,
+  ): Promise<Result<'pinhole.update-label'>>
   abstract setPinholeEnabled(
-    params: T.Tunnel.SetPinholeEnabledParams,
-  ): Promise<null> // pinhole.set-enabled
-
-  // http redirects
+    params: Params<'pinhole.set-enabled'>,
+  ): Promise<Result<'pinhole.set-enabled'>>
   abstract setHttpRedirectEnabled(
-    params: T.Tunnel.SetHttpRedirectEnabledParams,
-  ): Promise<null> // http-redirect.set-enabled
-  // ipv6
+    params: Params<'http-redirect.set-enabled'>,
+  ): Promise<Result<'http-redirect.set-enabled'>>
   abstract setSubnetIpv6(
-    params: T.Tunnel.SubnetParams & T.Tunnel.SetSubnetIpv6Params,
-  ): Promise<null> // subnet.set-ipv6
-  // system
-  abstract restart(): Promise<null> // restart
-  // update
-  abstract checkUpdate(): Promise<T.Tunnel.TunnelUpdateResult> // update.check
-  abstract applyUpdate(): Promise<T.Tunnel.TunnelUpdateResult> // update.apply
+    params: Params<'subnet.set-ipv6'>,
+  ): Promise<Result<'subnet.set-ipv6'>>
+  abstract restart(): Promise<Result<'restart'>>
+  abstract checkUpdate(): Promise<Result<'update.check'>>
+  abstract applyUpdate(): Promise<Result<'update.apply'>>
 }
 
-export type SubscribeRes = {
+export type SubscribeRes = Omit<Result<'db.subscribe'>, 'dump'> & {
   dump: Dump<TunnelData>
-  guid: string
 }

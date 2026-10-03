@@ -9,7 +9,7 @@ use itertools::Itertools;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::PackageId;
 use crate::context::CliContext;
@@ -76,11 +76,9 @@ pub struct GetPackageParams {
 #[ts(export)]
 #[model = "Model<Self>"]
 pub struct GetPackageResponse {
-    #[ts(type = "string[]")]
     pub categories: BTreeSet<InternedString>,
     pub best: BTreeMap<VersionString, PackageVersionInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub other_versions: Option<BTreeMap<VersionString, PackageInfoShort>>,
 }
 impl GetPackageResponse {
@@ -123,7 +121,6 @@ impl GetPackageResponse {
 #[ts(export)]
 #[model = "Model<Self>"]
 pub struct GetPackageResponseFull {
-    #[ts(type = "string[]")]
     pub categories: BTreeSet<InternedString>,
     pub best: BTreeMap<VersionString, PackageVersionInfo>,
     pub other_versions: BTreeMap<VersionString, PackageVersionInfo>,
@@ -148,6 +145,15 @@ impl GetPackageResponseFull {
 
 pub type GetPackagesResponse = BTreeMap<PackageId, GetPackageResponse>;
 pub type GetPackagesResponseFull = BTreeMap<PackageId, GetPackageResponseFull>;
+
+#[derive(Debug, Deserialize, Serialize, TS)]
+#[serde(untagged)]
+pub enum GetPackageResult {
+    PackageFull(GetPackageResponseFull),
+    Package(GetPackageResponse),
+    PackagesFull(GetPackagesResponseFull),
+    Packages(GetPackagesResponse),
+}
 
 fn get_matching_models(
     db: &Model<PackageIndex>,
@@ -271,12 +277,12 @@ pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Resu
             .try_collect()?;
         let other = other.remove(id).unwrap_or_default();
         match params.other_versions.unwrap_or_default() {
-            PackageDetailLevel::None => to_value(&GetPackageResponse {
+            PackageDetailLevel::None => to_value(&GetPackageResult::Package(GetPackageResponse {
                 categories,
                 best,
                 other_versions: None,
-            }),
-            PackageDetailLevel::Short => to_value(&GetPackageResponse {
+            })),
+            PackageDetailLevel::Short => to_value(&GetPackageResult::Package(GetPackageResponse {
                 categories,
                 best,
                 other_versions: Some(
@@ -285,21 +291,22 @@ pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Resu
                         .map(|(k, i)| from_value(i.into()).map(|v| (k, v)))
                         .try_collect()?,
                 ),
-            }),
-            PackageDetailLevel::Full => to_value(&GetPackageResponseFull {
-                categories,
-                best,
-                other_versions: other
-                    .into_iter()
-                    .map(|(k, i)| Ok::<_, Error>((k, i.de()?)))
-                    .try_collect()?,
-            }),
+            })),
+            PackageDetailLevel::Full => {
+                to_value(&GetPackageResult::PackageFull(GetPackageResponseFull {
+                    categories,
+                    best,
+                    other_versions: other
+                        .into_iter()
+                        .map(|(k, i)| Ok::<_, Error>((k, i.de()?)))
+                        .try_collect()?,
+                }))
+            }
         }
     } else {
         match params.other_versions.unwrap_or_default() {
-            PackageDetailLevel::None => to_value(
-                &best
-                    .into_iter()
+            PackageDetailLevel::None => to_value(&GetPackageResult::Packages(
+                best.into_iter()
                     .map(|(id, best)| {
                         let categories = peek
                             .as_index()
@@ -322,10 +329,9 @@ pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Resu
                         ))
                     })
                     .try_collect::<_, GetPackagesResponse, _>()?,
-            ),
-            PackageDetailLevel::Short => to_value(
-                &best
-                    .into_iter()
+            )),
+            PackageDetailLevel::Short => to_value(&GetPackageResult::Packages(
+                best.into_iter()
                     .map(|(id, best)| {
                         let categories = peek
                             .as_index()
@@ -354,10 +360,9 @@ pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Resu
                         ))
                     })
                     .try_collect::<_, GetPackagesResponse, _>()?,
-            ),
-            PackageDetailLevel::Full => to_value(
-                &best
-                    .into_iter()
+            )),
+            PackageDetailLevel::Full => to_value(&GetPackageResult::PackagesFull(
+                best.into_iter()
                     .map(|(id, best)| {
                         let categories = peek
                             .as_index()
@@ -384,7 +389,7 @@ pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Resu
                         ))
                     })
                     .try_collect::<_, GetPackagesResponseFull, _>()?,
-            ),
+            )),
         }
     }
 }
@@ -647,4 +652,36 @@ fn check_matching_info_short() {
         s9pks: Vec::new(),
     };
     from_value::<PackageInfoShort>(to_value(&info).unwrap()).unwrap();
+}
+
+#[test]
+fn rpc_result_surrogate_preserves_all_package_selection_shapes() {
+    let minimal = serde_json::json!({ "categories": ["tools"], "best": {} });
+    let with_versions =
+        serde_json::json!({ "categories": ["tools"], "best": {}, "otherVersions": {} });
+    for fixture in [minimal, with_versions.clone()] {
+        let package = serde_json::from_value::<GetPackageResponse>(fixture.clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(to_value(&GetPackageResult::Package(package)).unwrap()).unwrap(),
+            fixture
+        );
+        let packages_fixture = serde_json::json!({ "demo": fixture });
+        let packages =
+            serde_json::from_value::<GetPackagesResponse>(packages_fixture.clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(to_value(&GetPackageResult::Packages(packages)).unwrap()).unwrap(),
+            packages_fixture
+        );
+    }
+    let full = serde_json::from_value::<GetPackageResponseFull>(with_versions.clone()).unwrap();
+    assert_eq!(
+        serde_json::to_value(to_value(&GetPackageResult::PackageFull(full)).unwrap()).unwrap(),
+        with_versions
+    );
+    let full_map = serde_json::json!({ "demo": with_versions });
+    let packages = serde_json::from_value::<GetPackagesResponseFull>(full_map.clone()).unwrap();
+    assert_eq!(
+        serde_json::to_value(to_value(&GetPackageResult::PackagesFull(packages)).unwrap()).unwrap(),
+        full_map
+    );
 }

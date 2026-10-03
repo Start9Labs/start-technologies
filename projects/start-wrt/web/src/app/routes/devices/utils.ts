@@ -17,7 +17,7 @@ export interface DeviceTableItem {
   ipv6?: string
   ipv4Static?: boolean
   dataUsage?: number // GB
-  speed?: { up: number; down: number } // MB/s (only for online)
+  speed?: { up: number | null; down: number | null }
 }
 
 // Full device data for detail view

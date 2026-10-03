@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tokio::sync::{RwLockMappedWriteGuard, RwLockReadGuard, RwLockWriteGuard};
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;

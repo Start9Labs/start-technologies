@@ -5,7 +5,7 @@ use qrcode::QrCode;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 pub use crate::ActionId;
 use crate::context::{CliContext, RpcContext};
@@ -180,7 +180,6 @@ pub struct ActionResultMember {
     /// (optional) A description of the value, such as an explaining why it exists or how to use it
     pub description: Option<String>,
     #[serde(flatten)]
-    #[ts(flatten)]
     pub value: ActionResultValue,
 }
 
@@ -194,32 +193,24 @@ pub enum ActionResultValue {
         /// multi-line text belongs in a `multiline` value.
         value: String,
         /// (optional) Whether or not to include a copy to clipboard icon to copy the value
-        #[ts(optional)]
         copyable: Option<bool>,
         /// (optional) Whether or not to also display the value as a QR code
-        #[ts(optional)]
         qr: Option<bool>,
         /// (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
-        #[ts(optional)]
         masked: Option<bool>,
         /// (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
-        #[ts(optional)]
         launchable: Option<bool>,
     },
     Multiline {
         /// The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks
         value: String,
         /// (optional) Whether or not to include a copy to clipboard icon to copy the value
-        #[ts(optional)]
         copyable: Option<bool>,
         /// (optional) Whether or not to also display the value as a QR code
-        #[ts(optional)]
         qr: Option<bool>,
         /// (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
-        #[ts(optional)]
         masked: Option<bool>,
         /// (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
-        #[ts(optional)]
         filename: Option<String>,
     },
     Group {
@@ -312,7 +303,6 @@ pub struct RunActionParams {
     pub package_id: PackageId,
     pub event_id: Option<Guid>,
     pub action_id: ActionId,
-    #[ts(optional, type = "any")]
     pub input: Option<Value>,
 }
 

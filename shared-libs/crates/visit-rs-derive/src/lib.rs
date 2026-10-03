@@ -7,8 +7,17 @@ use syn::{DataStruct, DeriveInput, Fields, Path, WhereClause, WherePredicate, pa
 mod attrs;
 mod helpers;
 mod shape;
+mod ts;
 
-#[proc_macro_derive(SerdeShape, attributes(serde))]
+#[proc_macro_derive(TS, attributes(serde, ts, visit))]
+pub fn derive_ts(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let ast = syn::parse_macro_input!(input as DeriveInput);
+    ts::derive(&ast)
+        .unwrap_or_else(|error| error.to_compile_error())
+        .into()
+}
+
+#[proc_macro_derive(SerdeShape, attributes(serde, visit))]
 pub fn derive_serde_shape(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let ast = syn::parse_macro_input!(input as DeriveInput);
     shape::derive(&ast)

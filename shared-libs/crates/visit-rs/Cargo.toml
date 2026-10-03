@@ -8,15 +8,35 @@ repository = "https://github.com/Start9Labs/start-technologies"
 version = "0.2.0"
 
 [features]
+cbor = ["ts", "dep:serde_cbor"]
+chrono = ["ts", "dep:chrono"]
 default = ["serde", "meta"]
+ipnet = ["ts", "dep:ipnet"]
+josekit = ["ts", "dep:josekit"]
 meta = ["visit-rs-derive/meta"]
+ts = ["dep:serde_json", "dep:thiserror", "dep:imbl", "dep:inventory"]
+url = ["ts", "dep:url"]
+yajrc = ["ts", "dep:yajrc"]
 
 [dependencies]
 async-stream = "0.3"
+chrono = { version = "0.4", optional = true, default-features = false, features = [
+  "serde",
+] }
 futures = "0.3"
+imbl = { version = "6", optional = true }
+inventory = { version = "0.3", optional = true }
+ipnet = { version = "2", optional = true, features = ["serde"] }
+josekit = { version = "0.10", optional = true }
+serde_cbor = { version = "0.11", optional = true }
+serde_json = { version = "1", optional = true }
+thiserror = { version = "2", optional = true }
+url = { version = "2", optional = true, features = ["serde"] }
 visit-rs-derive = { version = "=0.2.0", path = "../visit-rs-derive", default-features = false }
+yajrc = { version = "0.1", optional = true }
 
 serde = { version = "1", optional = true }
 
 [dev-dependencies]
+serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }

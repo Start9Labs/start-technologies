@@ -1,7 +1,6 @@
 import { inject, Injectable } from '@angular/core'
 import { Router } from '@angular/router'
-import { T } from '@start9labs/start-core'
-import { ApiService } from './api.service'
+import { ApiService, Params } from './api.service'
 
 export type SetupType = 'fresh' | 'restore' | 'attach' | 'transfer'
 
@@ -73,7 +72,7 @@ export class StateService {
 
   // Fresh setup requires a password; restore and transfer allow null.
   async executeSetup(password: string | null, hostname: string): Promise<void> {
-    let recoverySource: T.RecoverySource<T.EncryptedWire> | null = null
+    let recoverySource: Params<'setup.execute'>['recoverySource'] = null
 
     if (this.recoverySource) {
       if (this.recoverySource.type === 'migrate') {

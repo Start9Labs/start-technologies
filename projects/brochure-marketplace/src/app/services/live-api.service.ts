@@ -6,6 +6,8 @@ import {
   GetPackagesReq,
   GetPackagesRes,
   MarketplacePkg,
+  packageResponse,
+  packagesResponse,
 } from '@start9labs/marketplace'
 import {
   HttpOptions,
@@ -14,7 +16,7 @@ import {
   RpcError,
   RPCOptions,
 } from '@start9labs/shared'
-import { T } from '@start9labs/start-core'
+import { RPC, T } from '@start9labs/start-core'
 import { ApiService } from './api.service'
 
 @Injectable()
@@ -47,10 +49,12 @@ export class LiveApiService extends ApiService {
       otherVersions: 'short',
     }
 
-    return this.registryRequest<GetPackageRes>(registryUrl, {
-      method: 'package.get',
-      params,
-    })
+    return packageResponse(
+      await this.registryRequest(registryUrl, {
+        method: 'package.get',
+        params,
+      }),
+    )
   }
 
   async getRegistryPackages(registryUrl: string): Promise<GetPackagesRes> {
@@ -61,10 +65,12 @@ export class LiveApiService extends ApiService {
       otherVersions: 'short',
     }
 
-    return this.registryRequest<GetPackagesRes>(registryUrl, {
-      method: 'package.get',
-      params,
-    })
+    return packagesResponse(
+      await this.registryRequest(registryUrl, {
+        method: 'package.get',
+        params,
+      }),
+    )
   }
 
   async getStaticProxy(
@@ -84,19 +90,21 @@ export class LiveApiService extends ApiService {
     })
   }
 
-  private async registryRequest<T>(
+  private async registryRequest<M extends RPC.RpcMethod<RPC.Registry>>(
     registryUrl: string,
-    options: RPCOptions,
-  ): Promise<T> {
-    // Hit the registry's RPC directly; the registry.* namespace + registry param is the StartOS host-proxy convention, absent on this static site.
+    options: RPCOptions<RPC.RpcParamType<RPC.Registry, M>, M>,
+  ): Promise<RPC.RpcReturnType<RPC.Registry, M>> {
     return this.rpcRequest(options, `${new URL('rpc/v0', registryUrl)}`)
   }
 
-  private async rpcRequest<T>(
-    options: RPCOptions,
+  private async rpcRequest<M extends RPC.RpcMethod<RPC.Registry>>(
+    options: RPCOptions<RPC.RpcParamType<RPC.Registry, M>, M>,
     urlOverride?: string,
-  ): Promise<T> {
-    const res = await this.http.rpcRequest<T>(options, urlOverride)
+  ): Promise<RPC.RpcReturnType<RPC.Registry, M>> {
+    const res = await this.http.rpcRequest<RPC.RpcReturnType<RPC.Registry, M>>(
+      options,
+      urlOverride,
+    )
     const body = res.body
 
     if (isRpcError(body)) {

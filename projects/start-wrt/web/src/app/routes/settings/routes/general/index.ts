@@ -54,6 +54,8 @@ import { GIT_HASH } from 'src/app/utils/workspace-config'
 import { getTimezoneLabel } from 'src/app/utils/timezones'
 
 const THEMES: Theme[] = ['system', 'dark', 'light']
+const getTheme = (theme: string): Theme =>
+  THEMES.find(choice => choice === theme) ?? 'light'
 
 @Component({
   template: `
@@ -316,7 +318,7 @@ export default class General {
       const info = this.system.info()
       if (info && this.form.pristine) {
         this.form.reset({
-          theme: info.theme,
+          theme: getTheme(info.theme),
           language: info.language as Language,
           remote: info.remoteAccess ?? 'default',
           // Show the actual device zone; default to UTC when unset (mirrors
@@ -357,7 +359,7 @@ export default class General {
   }
 
   // Live-preview the theme on selection; persisted on submit or reverted on leave.
-  protected onTheme(theme: Theme): void {
+  protected onTheme(theme: string): void {
     if (theme === 'system') {
       this.mode.reset()
     } else {
@@ -369,7 +371,7 @@ export default class General {
     const info = this.system.info()
     if (info) {
       this.form.reset({
-        theme: info.theme,
+        theme: getTheme(info.theme),
         language: info.language as Language,
         remote: info.remoteAccess ?? 'default',
         timezone: (info.timezone || 'UTC').replaceAll(' ', '_'),

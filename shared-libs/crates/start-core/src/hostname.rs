@@ -4,7 +4,7 @@ use lazy_format::lazy_format;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::RpcContext;
 use crate::db::model::public::{RestartReason, ServerInfo};
@@ -13,7 +13,7 @@ use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::io::{copy_file, write_file_atomic};
 
-#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize, ts_rs::TS)]
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize, visit_rs::ts::TS)]
 #[ts(type = "string")]
 pub struct ServerHostname(InternedString);
 impl std::ops::Deref for ServerHostname {

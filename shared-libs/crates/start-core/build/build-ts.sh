@@ -37,7 +37,7 @@ if [[ "${ENVIRONMENT}" =~ (^|-)console($|-) ]]; then
 fi
 echo "FEATURES=\"$FEATURES\""
 echo "RUSTFLAGS=\"$RUSTFLAGS\""
-rust-zig-builder cargo test --manifest-path=./Cargo.toml -p start-core --lib $BUILD_FLAGS --features test,$FEATURES --locked 'export_bindings_'
+rust-zig-builder cargo run --manifest-path=./Cargo.toml -p start-core --example generate_bindings $BUILD_FLAGS --features "$FEATURES" --locked -- shared-libs/crates/start-core/bindings
 if [ "$(ls -nd "shared-libs/crates/start-core/bindings" | awk '{ print $3 }')" != "$UID" ]; then
   rust-zig-builder sh -c "chown -R $UID:$UID target && chown -R $UID:$UID shared-libs/crates/start-core/bindings && chown -R $UID:$UID  /usr/local/cargo"
 fi

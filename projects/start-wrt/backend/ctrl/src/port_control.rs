@@ -1981,7 +1981,7 @@ async fn run_sweep(pc: Arc<PortControl>) {
 }
 
 /// One automatic port use for the published-ports UI.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct AutomaticPortUse {
     /// UCI section name (`apf_<mac>_<extport>`).
     pub id: String,
@@ -2133,7 +2133,7 @@ pub async fn wan_changed(ctx: ServerContext) -> Result<Value, Error> {
     Ok(Value::Null)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct SetAutoForwardRequest {
     pub mac: String,
     pub allow: bool,

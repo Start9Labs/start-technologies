@@ -1,4 +1,4 @@
-ls-files = $(shell git ls-files --cached --others --exclude-standard $1)
+include build/source-files.mk
 PROFILE = release
 
 # rustfmt runs in a container pinned to a specific nightly (our rustfmt.toml uses
@@ -26,8 +26,8 @@ CORE_SRC := $(call ls-files, shared-libs/crates/start-core) \
 	$(call ls-files, shared-libs/crates/visit-rs) \
 	$(call ls-files, shared-libs/crates/visit-rs-derive) \
 	$(call ls-files, shared-libs/crates/yasi) \
-	$(shell git ls-files shared-libs/crates/patch-db) build/builder-alias.sh $(GIT_HASH_FILE)
-PATCH_DB_CLIENT_SRC := $(shell git ls-files shared-libs/crates/patch-db/client)
+	$(call ls-files, shared-libs/crates/patch-db) build/builder-alias.sh $(GIT_HASH_FILE)
+PATCH_DB_CLIENT_SRC := $(call ls-files, shared-libs/crates/patch-db/client)
 GZIP_BIN := $(shell which pigz || which gzip)
 TAR_BIN := $(shell which gtar || which tar)
 

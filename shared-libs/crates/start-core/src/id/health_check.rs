@@ -2,7 +2,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::{Id, InvalidId};
 

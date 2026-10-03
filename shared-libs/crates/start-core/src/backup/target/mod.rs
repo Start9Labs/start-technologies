@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use tokio::sync::Mutex;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use self::cifs::CifsBackupTarget;
 use crate::PackageId;
@@ -222,7 +222,6 @@ pub async fn list(ctx: RpcContext) -> Result<BTreeMap<BackupTargetId, BackupTarg
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupInfo {
-    #[ts(type = "string")]
     pub version: Version,
     #[ts(type = "string | null")]
     pub timestamp: Option<DateTime<Utc>>,
@@ -235,7 +234,6 @@ pub struct BackupInfo {
 pub struct PackageBackupInfo {
     pub title: InternedString,
     pub version: VersionString,
-    #[ts(type = "string")]
     pub os_version: Version,
     #[ts(type = "string")]
     pub timestamp: DateTime<Utc>,
@@ -320,7 +318,7 @@ lazy_static::lazy_static! {
         Mutex::new(BTreeMap::new());
 }
 
-#[derive(Deserialize, Serialize, Parser)]
+#[derive(Deserialize, Serialize, Parser, visit_rs::TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]

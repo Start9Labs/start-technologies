@@ -15,7 +15,7 @@ use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::rustls::crypto::CryptoProvider;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio_rustls::rustls::server::ClientHello;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::CliContext;
 use crate::net::ssl::{CertBranding, SANInfo, root_ca_start_time};
@@ -283,7 +283,7 @@ pub async fn import_certificate_cli(
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser)]
+#[derive(Debug, Deserialize, Serialize, Parser, visit_rs::TS)]
 #[group(skip)]
 pub struct GenerateCertParams {
     #[arg(help = "help.arg.cert-subject-alt-names")]
@@ -333,7 +333,7 @@ pub async fn get_certificate(ctx: TunnelContext) -> Result<Option<Pem<Vec<X509>>
         .transpose()
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser)]
+#[derive(Debug, Deserialize, Serialize, Parser, visit_rs::TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SetListenParams {

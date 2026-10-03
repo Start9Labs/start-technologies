@@ -69,8 +69,8 @@ constructs one during deserialization.
 
 - **`arbitrary`** pulls in `proptest`/`proptest-derive` and enables `imbl/proptest`, adding the `Arbitrary`
   impl and the strategy functions in `arbitrary.rs`. Used by `json-patch` for property-based tests.
-- **`ts-rs`** enables `ts_rs.rs`, which implements the `TS` trait for `Value` and `InOMap` so TypeScript type
-  definitions can be generated. Required by `start_core`.
+- **`ts`** enables the `visit_rs::TS` representations owned in `lib.rs`: `Value` is `unknown`,
+  and `InOMap` delegates to the visitor's map renderer. Required by `start_core`.
 
 Both are off by default.
 

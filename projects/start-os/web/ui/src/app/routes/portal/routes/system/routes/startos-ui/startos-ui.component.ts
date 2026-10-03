@@ -56,6 +56,7 @@ export default class StartOsUiComponent {
     )!,
     type: 'ui' as const,
     masked: false,
+    preferredLauncherAddress: null,
     addressInfo: {
       hostId: 'admin',
       internalPort: 80,

@@ -120,7 +120,7 @@ pub fn mac_suffix(mac: &str) -> String {
 /// What a device's DHCP request revealed about its OS: the option-55
 /// parameter-request list (comma-separated decimals, as dnsmasq reports it)
 /// and the option-60 vendor class. Either may be empty, not both.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Fingerprint {
     pub options: String,

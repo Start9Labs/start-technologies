@@ -5,7 +5,7 @@ use clap::Parser;
 use imbl_value::InternedString;
 use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
@@ -26,6 +26,7 @@ use crate::util::serde::{HandlerExtSerde, display_serializable};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[derive(TS)]
 pub struct HostAddress {
     pub address: InternedString,
     pub public: Option<PublicDomainConfig>,

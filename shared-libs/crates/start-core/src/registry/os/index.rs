@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use exver::{Version, VersionRange};
 use imbl_value::InternedString;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::prelude::*;
 use crate::registry::asset::RegistryAsset;
@@ -21,7 +21,7 @@ pub struct OsIndex {
 
 #[derive(Debug, Default, Deserialize, Serialize, TS)]
 pub struct OsVersionInfoMap(
-    #[ts(as = "BTreeMap::<String, OsVersionInfo>")] pub BTreeMap<Version, OsVersionInfo>,
+    #[ts(wire = "BTreeMap::<String, OsVersionInfo>")] pub BTreeMap<Version, OsVersionInfo>,
 );
 impl Map for OsVersionInfoMap {
     type Key = Version;
@@ -41,7 +41,6 @@ impl Map for OsVersionInfoMap {
 pub struct OsVersionInfo {
     pub headline: String,
     pub release_notes: String,
-    #[ts(type = "string")]
     pub source_version: VersionRange,
     pub authorized: BTreeSet<Guid>,
     pub iso: BTreeMap<InternedString, RegistryAsset<Blake3Commitment>>, // platform (i.e. x86_64-nonfree) -> asset

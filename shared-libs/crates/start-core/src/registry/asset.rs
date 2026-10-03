@@ -7,8 +7,8 @@ use reqwest::header::RANGE;
 use reqwest::{Client, Response};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWrite;
-use ts_rs::TS;
 use url::Url;
+use visit_rs::ts::TS;
 
 use crate::prelude::*;
 use crate::progress::PhaseProgressTrackerHandle;
@@ -26,7 +26,6 @@ use crate::util::io::TmpDir;
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct RegistryAsset<Commitment> {
     #[ts(type = "string")]
     pub published_at: DateTime<Utc>,

@@ -26,7 +26,7 @@ use tokio::io::{
 use tokio::net::TcpStream;
 use tokio::sync::{Notify, OwnedMutexGuard};
 use tokio::time::{Instant, Sleep};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::prelude::*;
 use crate::util::FromStrParser;

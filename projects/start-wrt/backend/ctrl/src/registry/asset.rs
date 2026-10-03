@@ -12,7 +12,7 @@ use crate::Error;
 
 /// A downloadable, signed asset from the registry.
 /// Wire-compatible with start-os's `RegistryAsset<Commitment>`.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistryAsset<Commitment> {
     pub published_at: DateTime<Utc>,

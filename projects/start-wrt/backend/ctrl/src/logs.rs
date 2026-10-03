@@ -11,14 +11,14 @@ use crate::invoke::Invoke;
 use crate::prelude::*;
 use crate::ServerContext;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct LogEntry {
     pub timestamp: String,
     pub message: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct LogsResponse {
     pub entries: Vec<LogEntry>,

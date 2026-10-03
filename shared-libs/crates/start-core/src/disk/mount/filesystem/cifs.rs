@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use tokio::process::Command;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use super::{BackupWrite, FileSystem, MountType, ReadOnly, ReadWrite};
 use crate::Error;

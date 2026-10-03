@@ -36,7 +36,7 @@ static DB: LazyLock<Mutex<Connection>> = LazyLock::new(|| {
     Mutex::new(conn)
 });
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct ActivityEntry {
     pub id: i64,
     pub timestamp: String,
@@ -48,14 +48,14 @@ pub struct ActivityEntry {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityListResponse {
     pub entries: Vec<ActivityEntry>,
     pub total: usize,
 }
 
-#[derive(Debug, Deserialize, Serialize, Default, Parser)]
+#[derive(Debug, Deserialize, Serialize, Default, Parser, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct ActivityListParams {
@@ -67,7 +67,7 @@ pub struct ActivityListParams {
     pub limit: Option<usize>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser)]
+#[derive(Debug, Deserialize, Serialize, Parser, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct ActivityDeleteParams {

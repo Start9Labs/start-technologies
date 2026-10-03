@@ -15,7 +15,7 @@ use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 pub mod diagnostic;
 
@@ -49,7 +49,6 @@ use crate::util::io::AtomicFile;
 #[command(rename_all = "kebab-case")]
 pub struct UpdateSystemParams {
     #[arg(help = "help.arg.registry-url")]
-    #[ts(type = "string")]
     registry: Url,
     #[ts(type = "string | null")]
     #[arg(

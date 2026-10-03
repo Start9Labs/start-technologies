@@ -60,7 +60,9 @@ export interface Action<
   Id extends T.ActionId,
   Type extends Record<string, any>,
 > extends ActionInfo<Id, Type> {
-  exportMetadata(options: { effects: T.Effects }): Promise<T.ActionMetadata>
+  exportMetadata(options: {
+    effects: T.Effects
+  }): Promise<T.ActionMetadataInput>
   getInput(options: {
     effects: T.Effects
     prefill: T.DeepPartial<Type> | null
@@ -84,7 +86,7 @@ class ActionImpl<
   > = {}
   constructor(
     readonly id: Id,
-    private readonly metadataFn: MaybeFn<T.ActionMetadata>,
+    private readonly metadataFn: MaybeFn<T.ActionMetadataInput>,
     private readonly inputSpec: MaybeFn<
       MaybeInputSpec<Type>,
       {
@@ -98,7 +100,7 @@ class ActionImpl<
   ) {}
   async exportMetadata(options: {
     effects: T.Effects
-  }): Promise<T.ActionMetadata> {
+  }): Promise<T.ActionMetadataInput> {
     const childEffects = options.effects.child(`setupActions/${this.id}`)
     childEffects.constRetry = once(() => {
       this.exportMetadata(options)
@@ -170,7 +172,7 @@ export const Action = {
     InputSpecType extends InputSpec<Record<string, any>>,
   >(
     id: Id,
-    metadata: MaybeFn<Omit<T.ActionMetadata, 'hasInput'>>,
+    metadata: MaybeFn<Omit<T.ActionMetadataInput, 'hasInput'>>,
     inputSpec: MaybeFn<
       InputSpecType,
       {
@@ -192,7 +194,7 @@ export const Action = {
   },
   withoutInput<Id extends T.ActionId>(
     id: Id,
-    metadata: MaybeFn<Omit<T.ActionMetadata, 'hasInput'>>,
+    metadata: MaybeFn<Omit<T.ActionMetadataInput, 'hasInput'>>,
     run: Run<{}>,
   ): Action<Id, {}> {
     return new ActionImpl(

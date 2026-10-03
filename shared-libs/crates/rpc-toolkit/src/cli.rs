@@ -14,7 +14,10 @@ use url::Url;
 use yajrc::{Id, RpcError};
 
 #[cfg(feature = "ts")]
-use crate::ts::{PassthroughChildrenTS, PassthroughParamsTS, PassthroughReturnTS};
+use crate::ts::{
+    intersection_writer, type_writer, ParamsTS, PassthroughChildrenTS, PassthroughReturnTS,
+    TSWriter,
+};
 use crate::util::{internal_error, invalid_params, parse_error, without, Flat, PhantomData};
 use crate::{
     Adapter, AnyHandler, CliBindings, CliBindingsAny, Empty, HandleAny, HandleAnyArgs, HandlerArgs,
@@ -244,7 +247,11 @@ impl<Context, RemoteContext, RemoteHandler, Extra> Adapter
     }
 }
 #[cfg(feature = "ts")]
-impl<C, R, H, E> PassthroughParamsTS for CallRemoteHandler<C, R, H, E> {}
+impl<C, R, H: ParamsTS, E: visit_rs::ts::TS> ParamsTS for CallRemoteHandler<C, R, H, E> {
+    fn params_ts(&self) -> TSWriter<'_> {
+        intersection_writer(self.handler.params_ts(), type_writer::<E>())
+    }
+}
 #[cfg(feature = "ts")]
 impl<C, R, H, E> PassthroughReturnTS for CallRemoteHandler<C, R, H, E> {}
 #[cfg(feature = "ts")]

@@ -6,7 +6,7 @@ use exver::VersionRange;
 use itertools::Itertools;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::CliContext;
 use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthContext};
@@ -33,6 +33,7 @@ pub fn admin_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(cli_add_admin)
+                .no_ts()
                 .no_display()
                 .with_about("about.add-admin-signer"),
         )
@@ -74,7 +75,9 @@ fn signers_api<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "add",
-            from_fn_async(cli_add_signer).with_about("about.add-signer"),
+            from_fn_async(cli_add_signer)
+                .no_ts()
+                .with_about("about.add-signer"),
         )
         .subcommand(
             "edit",

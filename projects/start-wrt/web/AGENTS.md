@@ -20,6 +20,7 @@ shapes don't fit.
 
 - **Follow the `start9-frontend` skill** at the repo root (`.claude/skills/start9-frontend/`) — the house style for all Start9 Angular/Taiga work: components, styling, forms, overlays, state, the antipattern catalog, and a verified Taiga 5 reference. Read it before writing frontend code; where this file, neighbours, or older docs disagree with the skill, the skill wins.
 - **Pattern-match this app's structure.** `routes/published-ports/` is the reference route folder (`index.ts` page + `table.ts` + `dialog.ts` + `service.ts`).
+- **Derive API contracts from generated bindings.** `services/api/bindings.ts` owns `Api`; `events.ts` owns streaming schemas. Run `make start-wrt-rpc-bindings` after backend schema/handler changes. `RpcService.request` infers params and results from method literals; public facade aliases select those generated types. UI-only constraints and preferences remain local. Preserve the app's aborting HTTP transport.
 
 ## Getting Started
 

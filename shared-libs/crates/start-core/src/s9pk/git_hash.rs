@@ -2,7 +2,7 @@ use std::ops::Deref;
 use std::path::Path;
 
 use tokio::process::Command;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::prelude::*;
 use crate::util::Invoke;

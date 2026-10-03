@@ -20,8 +20,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::process::Command;
 use tokio::sync::oneshot;
-use ts_rs::TS;
 use url::Url;
+use visit_rs::ts::TS;
 use visit_rs::{Visit, VisitFields};
 use zbus::proxy::{PropertyChanged, PropertyStream, SignalStream};
 use zbus::zvariant::{

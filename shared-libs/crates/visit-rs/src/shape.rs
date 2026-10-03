@@ -38,6 +38,7 @@ pub struct Field {
     pub name: &'static str,
     pub aliases: &'static [&'static str],
     pub optional: bool,
+    pub option_default: bool,
     pub flatten: bool,
 }
 

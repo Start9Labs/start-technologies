@@ -4,6 +4,10 @@
 
 ### Added
 
+- Shared TypeScript derive/rendering, checked annotation-owned export namespaces
+  and directional custom serde representations.
+- Explicit input declaration naming for input/output alias collisions.
+
 - Workspace-owned proc macros and the directional `SerdeShape` derive.
 
 ### Fixed

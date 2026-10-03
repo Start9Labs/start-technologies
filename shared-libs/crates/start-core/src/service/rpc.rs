@@ -9,7 +9,7 @@ use imbl::Vector;
 use imbl_value::{InternedString, Value};
 use rpc_toolkit::Empty;
 use rpc_toolkit::yajrc::RpcMethod;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
@@ -146,7 +146,6 @@ impl serde::Serialize for Exit {
 pub struct ExecuteParams {
     id: Guid,
     procedure: String,
-    #[ts(type = "any")]
     input: Value,
     timeout: Option<u128>,
 }

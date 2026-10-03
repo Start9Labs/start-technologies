@@ -12,7 +12,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::process::Command;
 use tokio::sync::broadcast::Receiver;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::bins::set_locale;
 use crate::context::{CliContext, RpcContext};
@@ -161,7 +161,7 @@ pub async fn zram(ctx: RpcContext, ZramParams { enable }: ZramParams) -> Result<
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, visit_rs::TS)]
 pub struct GovernorInfo {
     current: Option<Governor>,
     available: BTreeSet<Governor>,
@@ -1213,7 +1213,7 @@ pub async fn clear_system_smtp(ctx: RpcContext) -> Result<(), Error> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, visit_rs::TS)]
 #[group(skip)]
 pub struct SetEchoipUrlsParams {
     #[arg(help = "help.arg.echoip-urls")]
@@ -1454,7 +1454,7 @@ pub async fn test_get_disk_usage() {
     println!("{:?}", get_disk_info().await.unwrap())
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, visit_rs::TS)]
 pub struct EppInfo {
     current: Option<Epp>,
     available: BTreeSet<Epp>,

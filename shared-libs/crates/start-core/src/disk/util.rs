@@ -24,14 +24,14 @@ use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::serde::IoFormat;
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub enum PartitionTable {
     Mbr,
     Gpt,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct DiskInfo {
     pub logicalname: PathBuf,
@@ -45,7 +45,7 @@ pub struct DiskInfo {
     pub filesystem: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, ts_rs::TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, visit_rs::ts::TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct PartitionInfo {
@@ -105,12 +105,11 @@ impl From<BackupUnencryptedMetadata> for StartOsRecoveryInfo {
 
 /// The public view of a backup found on a target: enough to identify it, and none of
 /// [`BackupUnencryptedMetadata`]'s key material.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, ts_rs::TS)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, visit_rs::ts::TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct StartOsRecoveryInfo {
     pub hostname: ServerHostname,
-    #[ts(type = "string")]
     pub version: exver::Version,
     #[ts(type = "string")]
     pub timestamp: DateTime<Utc>,

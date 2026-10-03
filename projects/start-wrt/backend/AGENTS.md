@@ -30,13 +30,13 @@ crates are members of the **root** Cargo workspace (build with `cargo build -p s
 1. **Define param/response types** in your module:
 
 ```rust
-#[derive(Deserialize, clap::Parser)]
+#[derive(Deserialize, clap::Parser, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 struct MyParams {
     name: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 struct MyResponse {
     success: bool,
@@ -73,7 +73,16 @@ pub fn my_module<C: CtrlContext + Clone>() -> ParentHandler<C> {
 .subcommand("my-module", my_module::my_module::<C>())
 ```
 
-5. Update the RPC contract and frontend implementations together as required by the parent `AGENTS.md`.
+5. Run `make start-wrt-rpc-bindings`, then update the RPC contract and frontend implementations together as required by the parent `AGENTS.md`.
+
+## Production TypeScript generation
+
+`ctrl/examples/generate_rpc_bindings.rs` generates the `Api` tree from
+`main_api::<ServerContext>()` into `web/src/app/services/api/bindings.ts` and
+inventory-owned `#[ts(export, namespace = "events")]` streaming roots into
+`events.ts`. Requests use input shapes; returns and streaming events use output
+shapes. Both files are generated build inputs — never hand-edit them. CLI-only
+backup callbacks use `no_ts()`; the RPC download/upload endpoints remain typed.
 
 ## Adding a Typed UCI Section
 

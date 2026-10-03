@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 use tokio::sync::broadcast::Sender;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::MAIN_DATA;
 use crate::context::RpcContext;

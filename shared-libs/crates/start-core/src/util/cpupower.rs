@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use imbl::OrdMap;
 use tokio::process::Command;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::prelude::*;
 use crate::util::Invoke;

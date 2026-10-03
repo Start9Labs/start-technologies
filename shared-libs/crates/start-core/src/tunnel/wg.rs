@@ -5,7 +5,7 @@ use imbl_value::InternedString;
 use ipnet::{Ipv4Net, Ipv6Net};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::prelude::*;
@@ -76,7 +76,7 @@ impl WgServer {
 
 #[derive(Default, Deserialize, Serialize, TS)]
 pub struct WgSubnetMap(
-    #[ts(as = "BTreeMap::<String, WgSubnetConfig>")] pub BTreeMap<Ipv4Net, WgSubnetConfig>,
+    #[ts(wire = "BTreeMap::<String, WgSubnetConfig>")] pub BTreeMap<Ipv4Net, WgSubnetConfig>,
 );
 impl Map for WgSubnetMap {
     type Key = Ipv4Net;
@@ -99,10 +99,7 @@ pub enum DnsConfig {
     #[default]
     Default,
     /// Forward to a device on this subnet (its WireGuard IP) on port 53.
-    Device {
-        #[ts(type = "string")]
-        ip: Ipv4Addr,
-    },
+    Device { ip: Ipv4Addr },
     /// Forward to operator-specified upstream servers (1-3, optional `:port`).
     Custom {
         #[ts(type = "string[]")]

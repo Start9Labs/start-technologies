@@ -271,7 +271,7 @@ impl From<rusqlite::Error> for Error {
 
 // --- RPC conversion ---
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, visit_rs::TS)]
 pub struct ErrorData {
     pub details: String,
     #[serde(default)]

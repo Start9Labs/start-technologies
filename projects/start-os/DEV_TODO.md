@@ -6,22 +6,17 @@ Pending tasks for AI agents. Remove items when completed.
 
 - [ ] Extract TS-exported types into a lightweight sub-crate for fast binding generation
 
-  **Problem**: `make start-core-ts-bindings` compiles the entire `start-os` crate (with all dependencies: tokio,
-  axum, openssl, etc.) just to run test functions that serialize type definitions to `.ts` files.
-  Even in debug mode, this takes minutes. The generated output is pure type info — no runtime code
-  is needed.
+  **Problem**: `make start-core-ts-bindings` compiles `start-core` with its backend dependencies
+  to reflect the actual server handlers and standalone DTO exports. Even in debug mode,
+  a rebuild can take minutes.
 
   **Goal**: Generate TS bindings in seconds by isolating exported types in a small crate with minimal
   dependencies.
 
-  **Approach**: Create a `core/bindings-types/` sub-crate containing (or re-exporting) all 168
-  `#[ts(export)]` types. This crate depends only on `serde`, `ts-rs`, `exver`, and other type-only
-  crates — not on tokio, axum, openssl, etc. Then `build-ts.sh` runs `cargo test -p bindings-types`
-  instead of `cargo test -p start-os`.
-
-  **Challenge**: The exported types are scattered across `core/src/` and reference each other and
-  other crate types. Extracting them requires either moving the type definitions into the sub-crate
-  (and importing them back into `start-os`) or restructuring to share a common types crate.
+  **Constraint**: `visit-rs` owns the renderer, and standalone exports belong to annotations.
+  The RPC trees come from production contexts; a separate hand-maintained handler or export list
+  would lose their freshness guarantee. Any type extraction must preserve that ownership and
+  account for the DTOs scattered across `shared-libs/crates/start-core/src/`.
 
 - [ ] Auto-configure port forwards via UPnP/NAT-PMP/PCP - @dr-bonez
 

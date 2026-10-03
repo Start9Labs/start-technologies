@@ -5,15 +5,9 @@ start-core-ts-bindings: shared-libs/crates/start-core/bindings/index.ts
 	mkdir -p shared-libs/ts-modules/start-core/lib/osBindings
 	rsync -ac --delete shared-libs/crates/start-core/bindings/ shared-libs/ts-modules/start-core/lib/osBindings/
 
-# LC_ALL=C pins ls collation so index line order matches CI on any host locale.
-shared-libs/crates/start-core/bindings/index.ts: $(call ls-files, shared-libs/crates/start-core) $(ENVIRONMENT_FILE)
+shared-libs/crates/start-core/bindings/index.ts: $(CORE_SRC) Cargo.toml Cargo.lock $(ENVIRONMENT_FILE)
 	rm -rf shared-libs/crates/start-core/bindings
 	./shared-libs/crates/start-core/build/build-ts.sh
-	LC_ALL=C ls shared-libs/crates/start-core/bindings/*.ts | sed 's|.*/bindings/\([^.]*\)\.ts|export { \1 } from "./\1";|g' | grep -v '"./index"' | tee shared-libs/crates/start-core/bindings/index.ts
-	if [ -d shared-libs/crates/start-core/bindings/tunnel ]; then \
-		LC_ALL=C ls shared-libs/crates/start-core/bindings/tunnel/*.ts | sed 's|.*/bindings/tunnel/\([^.]*\)\.ts|export { \1 } from "./\1";|g' | grep -v '"./index"' > shared-libs/crates/start-core/bindings/tunnel/index.ts; \
-		echo 'export * as Tunnel from "./tunnel";' >> shared-libs/crates/start-core/bindings/index.ts; \
-	fi
 	npm --prefix shared-libs/ts-modules/start-core exec -- prettier -w './shared-libs/crates/start-core/bindings/**/*.ts'
 	touch shared-libs/crates/start-core/bindings/index.ts
 

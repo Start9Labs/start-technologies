@@ -37,8 +37,9 @@ struct AppState {
     flash_in_progress: Arc<AtomicBool>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "events")]
 struct FlashParams {
     mode: FlashMode,
     password: String,

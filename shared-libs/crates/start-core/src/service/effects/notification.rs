@@ -13,7 +13,7 @@ pub struct CreateNotificationParams {
     /// changelogs, structured error reports). When omitted, the notification
     /// has no extra payload.
     #[serde(default)]
-    #[ts(optional, type = "string | null")]
+    #[ts(type = "string | null")]
     pub data: Option<String>,
 }
 

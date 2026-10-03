@@ -4,6 +4,20 @@ export type RpcHandler = {
   _CHILDREN?: { [name: string]: RpcHandler }
 }
 
+export type RpcMethod<Root extends RpcHandler> =
+  | (Root extends { _RETURN: unknown } ? '' : never)
+  | (Root extends { _CHILDREN: infer Children }
+      ? {
+          [Name in keyof Children & string]: Children[Name] extends RpcHandler
+            ? RpcMethod<Children[Name]> extends infer ChildMethod extends string
+              ? ChildMethod extends ''
+                ? Name
+                : `${Name}.${ChildMethod}`
+              : never
+            : never
+        }[keyof Children & string]
+      : never)
+
 export type RpcParamType<
   Root extends RpcHandler,
   Method extends string,

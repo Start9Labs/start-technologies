@@ -27,25 +27,70 @@ fn fields(
             || (transparent && !attrs.transparent()) {
             return None;
         }
-        let ty = field.ty;
+        let wire_type = match wire_type(&field.original.attrs, input) {
+            Ok(wire_type) => wire_type,
+            Err(error) => return Some(error.to_compile_error()),
+        };
+        let ty = wire_type.as_ref().unwrap_or(field.ty);
         let name = if input { attrs.name().deserialize_name() } else { attrs.name().serialize_name() };
         let name = &name.value;
         let aliases: Vec<_> = if input { attrs.aliases().iter().map(|n| &n.value).collect() } else { vec![] };
         let optional = if input { default || !attrs.default().is_none() } else { attrs.skip_serializing_if().is_some() };
         let flatten = attrs.flatten();
+        let option_default = attrs.deserialize_with().is_none();
         let custom = if input { attrs.deserialize_with().is_some() } else { attrs.serialize_with().is_some() };
-        if custom {
-            return Some(quote!(visitor.unsupported(concat!("Custom serde field ", #name, " requires a TypeScript override"));));
+        if custom && wire_type.is_none() {
+            return Some(quote!(visitor.unsupported(concat!("Custom serde field ", #name, " requires a wire type override"));));
         }
         types.push(ty.clone());
         Some(quote! {
             visitor.field::<#ty>(visit_rs::shape::Field {
                 name: #name, aliases: &[#(#aliases),*], optional: #optional,
-                flatten: #flatten,
+                option_default: #option_default, flatten: #flatten,
             });
         })
     }).collect();
     (quote!(#(#visits)*), types)
+}
+
+fn wire_type(attrs: &[syn::Attribute], input: bool) -> syn::Result<Option<syn::Type>> {
+    use syn::punctuated::Punctuated;
+    use syn::{Expr, Lit, Meta, Token};
+
+    let mut common = None;
+    let mut directional = None;
+    let key = if input { "input_wire" } else { "output_wire" };
+    for attr in attrs.iter().filter(|attr| attr.path().is_ident("visit")) {
+        let items = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+        for item in items {
+            if let Meta::NameValue(value) = item
+                && (value.path.is_ident("wire") || value.path.is_ident(key))
+            {
+                let ty = if let Expr::Lit(literal) = &value.value
+                    && let Lit::Str(literal) = &literal.lit
+                {
+                    literal.parse()?
+                } else {
+                    return Err(syn::Error::new_spanned(
+                        value,
+                        "expected a wire type string",
+                    ));
+                };
+                let target = if value.path.is_ident(key) {
+                    &mut directional
+                } else {
+                    &mut common
+                };
+                if target.replace(ty).is_some() {
+                    return Err(syn::Error::new_spanned(
+                        value,
+                        "duplicate wire type override",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(directional.or(common))
 }
 
 fn tag(tag: &attr::TagType) -> TokenStream {
@@ -59,7 +104,16 @@ fn tag(tag: &attr::TagType) -> TokenStream {
     }
 }
 
-fn direction(ast: &DeriveInput, input: bool) -> syn::Result<(TokenStream, Vec<syn::Type>)> {
+pub(crate) fn direction(
+    ast: &DeriveInput,
+    input: bool,
+) -> syn::Result<(TokenStream, Vec<syn::Type>)> {
+    if let Some(ty) = wire_type(&ast.attrs, input)? {
+        return Ok((
+            quote!(visit_rs::Visit::visit(visit_rs::Static::<#ty>::new_ref(), visitor);),
+            vec![ty],
+        ));
+    }
     let cx = Ctxt::new();
     let container = ast::Container::from_ast(
         &cx,

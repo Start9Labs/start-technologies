@@ -15,8 +15,8 @@ use tinyvec::ArrayVec;
 #[cfg(feature = "serde")]
 mod serde;
 
-#[cfg(feature = "ts-rs")]
-mod ts_rs;
+#[cfg(feature = "ts")]
+visit_rs::impl_ts!(InternedString => "string");
 
 #[inline]
 #[cold]

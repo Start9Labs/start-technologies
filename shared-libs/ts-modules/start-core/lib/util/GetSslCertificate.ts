@@ -1,7 +1,9 @@
 import { Effects } from '../Effects'
 import { Watchable } from './Watchable'
 
-export class GetSslCertificate extends Watchable<[string, string, string]> {
+export class GetSslCertificate extends Watchable<
+  Awaited<ReturnType<Effects['getSslCertificate']>>
+> {
   protected readonly label = 'GetSslCertificate'
 
   constructor(

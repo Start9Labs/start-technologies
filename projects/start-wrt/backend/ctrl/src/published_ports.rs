@@ -82,7 +82,7 @@ pub(crate) fn may_affect_v6_rules(mac: &str) -> bool {
 
 // ── Types ──────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum Protocol {
     Tcp,
@@ -91,7 +91,7 @@ pub enum Protocol {
     TcpUdp,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum PublishedPortStatus {
     Active,
@@ -101,7 +101,7 @@ pub enum PublishedPortStatus {
     Disabled,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct PublishedPort {
     pub id: String,
     pub enabled: bool,
@@ -122,7 +122,7 @@ pub struct PublishedPort {
     pub device_ipv6: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct PublishedPortInput {
     pub id: String,
     pub enabled: bool,
@@ -139,13 +139,13 @@ pub struct PublishedPortInput {
     pub override_wan_ports: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct PublishedPortsSetRequest {
     pub ports: Vec<PublishedPortInput>,
 }
 
 /// An enabled IPv4 forward overlapping a router- or SNI-owned WAN port.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct WanPortCollision {
     pub id: String,
     pub label: String,
@@ -153,7 +153,7 @@ pub struct WanPortCollision {
     pub hostname_route_ports: Vec<SniPortUse>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct SniPortUse {
     pub ports: String,
     pub hostnames: Vec<String>,
@@ -162,7 +162,7 @@ pub struct SniPortUse {
 
 /// [`set`] response. A non-empty collision list means nothing was applied —
 /// the caller confirms and re-saves; empty means the request was applied.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct PublishedPortsSetResult {
     pub pending_wan_port_collisions: Vec<WanPortCollision>,
 }
@@ -172,7 +172,7 @@ pub struct PublishedPortsSetResult {
 /// (ethernet-port or WiFi-password reassignment) or its WiFi password is being
 /// deleted (disconnecting it) — so its DNAT rule, bound to the device's old
 /// subnet, would otherwise break. Surfaced to the UI to confirm the deletion.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct AffectedPublishedPort {
     pub id: String,
     pub label: String,

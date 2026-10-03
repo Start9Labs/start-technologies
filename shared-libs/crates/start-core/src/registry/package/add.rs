@@ -6,8 +6,8 @@ use imbl_value::InternedString;
 use itertools::Itertools;
 use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 use url::Url;
+use visit_rs::ts::TS;
 
 use crate::PackageId;
 use crate::context::CliContext;
@@ -340,7 +340,6 @@ pub async fn remove_package(
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct AddMirrorParams {
-    #[ts(type = "string")]
     pub url: Url,
     #[ts(skip)]
     #[serde(rename = "__Auth_signer")]
@@ -507,7 +506,6 @@ pub struct RemoveMirrorParams {
     #[arg(help = "help.arg.package-version")]
     pub version: VersionString,
     #[arg(long, help = "help.arg.mirror-url")]
-    #[ts(type = "string")]
     pub url: Url,
     #[ts(skip)]
     #[arg(skip)]

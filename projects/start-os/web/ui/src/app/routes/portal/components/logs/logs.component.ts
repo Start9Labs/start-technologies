@@ -168,7 +168,7 @@ export class LogsComponent {
   ) => Promise<T.LogFollowResponse>
 
   @Input({ required: true }) fetchLogs!: (
-    params: T.LogsParams,
+    params: T.LogsParamsInput,
   ) => Promise<T.LogResponse>
 
   @Input({ required: true }) context!: string

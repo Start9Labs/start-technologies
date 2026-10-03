@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router'
 import { WA_WINDOW } from '@ng-web-apis/common'
 import {
   DialogService,
+  getRpcErrorDetails,
   i18nKey,
   i18nPipe,
   TaskService,
@@ -47,7 +48,7 @@ export default class HomePage implements OnInit {
           problem: 'Unknown storage drive detected',
           solution:
             'To use a different storage drive, replace the current one and click RESTART SERVER below. To use the current storage drive, click USE CURRENT DRIVE below, then follow instructions. No data will be erased during this process.',
-          details: error.data?.details,
+          details: getRpcErrorDetails(error.data),
         })
         // no drive
       } else if (error.code === 20) {
@@ -56,7 +57,7 @@ export default class HomePage implements OnInit {
           problem: 'Storage drive not found',
           solution:
             'Insert your StartOS storage drive and click RESTART SERVER below.',
-          details: error.data?.details,
+          details: getRpcErrorDetails(error.data),
         })
         // drive corrupted
       } else if (error.code === 25) {
@@ -66,7 +67,7 @@ export default class HomePage implements OnInit {
             'Storage drive corrupted. This could be the result of data corruption or physical damage.',
           solution:
             'It may or may not be possible to re-use this drive by reformatting and recovering from backup. To enter recovery mode, click ENTER RECOVERY MODE below, then follow instructions. No data will be erased during this step.',
-          details: error.data?.details,
+          details: getRpcErrorDetails(error.data),
         })
         // filesystem I/O error - disk needs repair
       } else if (error.code === 2) {
@@ -75,7 +76,7 @@ export default class HomePage implements OnInit {
           problem: 'Filesystem error',
           solution:
             'Repairing the disk could help resolve this issue. Please DO NOT unplug the drive or server during this time or the situation will become worse.',
-          details: error.data?.details,
+          details: getRpcErrorDetails(error.data),
         })
         // disk management error - disk needs repair
       } else if (error.code === 48) {
@@ -84,14 +85,14 @@ export default class HomePage implements OnInit {
           problem: 'Disk management error',
           solution:
             'Repairing the disk could help resolve this issue. Please DO NOT unplug the drive or server during this time or the situation will become worse.',
-          details: error.data?.details,
+          details: getRpcErrorDetails(error.data),
         })
       } else {
         this.error.set({
           code: error.code,
           problem: error.message as i18nKey,
           solution: 'Please contact support',
-          details: error.data?.details,
+          details: getRpcErrorDetails(error.data),
         })
       }
     } catch (e) {

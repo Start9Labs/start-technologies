@@ -147,7 +147,6 @@ pub async fn retire_binding(
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct GetServicePortForwardParams {
-    #[ts(optional)]
     package_id: Option<PackageId>,
     host_id: HostId,
     internal_port: u16,

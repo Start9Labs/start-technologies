@@ -99,7 +99,7 @@ use rpc_toolkit::{
     from_fn_async_local, from_fn_blocking,
 };
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::{CliContext, DiagnosticContext, InitContext, RpcContext};
 use crate::disk::fsck::RequiresReboot;
@@ -236,6 +236,7 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "completions",
             from_fn(bins::start_cli::completions)
+                .no_ts()
                 .no_display()
                 .with_about("about.print-shell-completions"),
         )
@@ -259,6 +260,7 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
         api = api.subcommand(
             "flash-os",
             from_fn_async(os_install::cli_install_os)
+                .no_ts()
                 .no_display()
                 .with_about("about.flash-startos"),
         );
@@ -321,6 +323,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "logs",
             from_fn_async(logs::cli_logs::<RpcContext, Empty>)
+                .no_ts()
                 .no_display()
                 .with_about("about.display-os-logs"),
         )
@@ -331,6 +334,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "kernel-logs",
             from_fn_async(logs::cli_logs::<RpcContext, Empty>)
+                .no_ts()
                 .no_display()
                 .with_about("about.display-kernel-logs"),
         )
@@ -485,6 +489,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "install",
             from_fn_async_local(install::cli_install)
+                .no_ts()
                 .no_display()
                 .with_about("about.install-package"),
         )
@@ -597,6 +602,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "logs",
             from_fn_async(logs::cli_logs::<RpcContext, logs::PackageIdParams>)
+                .no_ts()
                 .no_display()
                 .with_about("about.display-package-logs"),
         )
@@ -614,6 +620,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "attach",
             from_fn_async_local(service::cli_attach)
+                .no_ts()
                 .no_display()
                 .with_about("about.execute-commands-container"),
         )

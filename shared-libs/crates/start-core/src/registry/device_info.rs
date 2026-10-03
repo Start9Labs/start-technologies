@@ -10,8 +10,8 @@ use patch_db::ModelExt;
 use rpc_toolkit::yajrc::RpcMethod;
 use rpc_toolkit::{Middleware, RpcRequest, RpcResponse};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 use url::Url;
+use visit_rs::ts::TS;
 
 use crate::context::RpcContext;
 use crate::prelude::*;
@@ -168,9 +168,8 @@ impl DeviceInfo {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct OsInfo {
-    #[ts(as = "VersionString")]
+    #[ts(wire = "VersionString")]
     pub version: Version,
-    #[ts(type = "string")]
     pub compat: VersionRange,
     pub platform: InternedString,
     pub language: Option<InternedString>,
@@ -189,7 +188,6 @@ impl From<&RpcContext> for OsInfo {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct HardwareInfo {
-    #[ts(type = "string")]
     pub arch: InternedString,
     #[ts(type = "number")]
     pub ram: u64,

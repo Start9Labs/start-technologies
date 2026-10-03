@@ -23,6 +23,7 @@ export {
   z,
   utils,
 }
+export type { RPC } from '@start9labs/start-core'
 export { setupI18n } from './i18n'
 export * as T from './types'
 export { Daemons, configHash, DaemonsReconciler } from './mainFn/Daemons'

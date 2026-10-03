@@ -14,5 +14,11 @@ This keeps JSON rules out of TypeScript generation and separates input semantics
 from serialization-oriented value reflection.
 
 The Rust backend uses value visiting for shared networking/storage operations.
-The optional rpc-toolkit generator uses static JSON-shape visiting without needing
-an instance of each parameter/result type.
+The optional `ts` module owns TypeScript rendering, declaration identity and
+annotation-owned export collections. `TS` derives reuse `shape.rs` lowering;
+input/output surrogate types also describe custom serde hooks. A single checked
+registry owns aliases and pending/completed definitions across both directions.
+
+rpc-toolkit reuses that renderer for handler parameters/results. Its own module
+owns handler traversal, binding adapters and TypeScript method-inference helpers;
+standalone types require no RPC dependency.

@@ -19,7 +19,7 @@ use serde::de::DeserializeOwned;
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::Digest;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use super::IntoDoubleEndedIterator;
 use crate::prelude::*;
@@ -245,7 +245,7 @@ impl<'de> serde::de::Deserialize<'de> for ValuePrimitive {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, TS)]
 #[serde(rename_all = "kebab-case")]
 pub enum IoFormat {
     Json,
@@ -454,7 +454,7 @@ pub fn display_serializable<T: Serialize>(format: IoFormat, result: T) -> Result
     Ok(())
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, TS)]
 pub struct WithIoFormat<T> {
     pub format: Option<IoFormat>,
     #[serde(flatten)]
@@ -511,6 +511,22 @@ impl<T: HandlerFor<C>, C: Context> HandlerExtSerde<C> for T {
 
 #[derive(Debug, Clone)]
 pub struct DisplaySerializable<T>(pub T);
+impl<T> rpc_toolkit::Adapter for DisplaySerializable<T> {
+    type Inner = T;
+    fn as_inner(&self) -> &T {
+        &self.0
+    }
+}
+impl<T> rpc_toolkit::ts::PassthroughReturnTS for DisplaySerializable<T> {}
+impl<T> rpc_toolkit::ts::PassthroughChildrenTS for DisplaySerializable<T> {}
+impl<T: rpc_toolkit::ts::ParamsTS> rpc_toolkit::ts::ParamsTS for DisplaySerializable<T> {
+    fn params_ts(&self) -> Box<dyn Fn(&mut visit_rs::ts::TSVisitor) + Send + Sync + '_> {
+        rpc_toolkit::ts::intersection_writer(
+            rpc_toolkit::ts::type_writer::<WithIoFormat<rpc_toolkit::Empty>>(),
+            self.0.params_ts(),
+        )
+    }
+}
 impl<T: HandlerTypes> HandlerTypes for DisplaySerializable<T> {
     type Params = WithIoFormat<T::Params>;
     type InheritedParams = T::InheritedParams;
@@ -939,6 +955,8 @@ where
     }
 }
 
+#[derive(TS)]
+#[ts(wire = "std::collections::BTreeMap<K, V>")]
 pub struct KeyVal<K, V> {
     pub key: K,
     pub value: V,
@@ -1069,7 +1087,7 @@ pub const BASE64: base64::engine::GeneralPurpose =
     );
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, TS)]
-#[ts(type = "string", concrete(T = Vec<u8>))]
+#[ts(export, namespace = ["", "tunnel"], type = "string", concrete(T = Vec<u8>))]
 pub struct Base64<T>(pub T);
 impl<T: AsRef<[u8]>> Base64<T> {
     pub fn to_padded_string(&self) -> String {
@@ -1133,7 +1151,7 @@ impl<T> Deref for Base64<T> {
 /// A parameter that arrives as structured `T` over the JSON-RPC wire, but as a
 /// JSON **string** argument on the CLI. serde is a pure passthrough to `T` (the
 /// wire carries `T` directly — no double-encoding), while the clap `ValueParser`
-/// parses the string argument as JSON. Pair with `#[ts(as = "T")]` on the field
+/// parses the string argument as JSON. Pair with `#[ts(wire = "T")]` on the field
 /// so the generated binding shows `T`, not a string.
 #[derive(Debug, Clone)]
 pub struct CliFromJsonString<T>(pub T);
@@ -1411,7 +1429,7 @@ pub mod pem {
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Hash, TS)]
-#[ts(type = "string", concrete(T = ed25519_dalek::VerifyingKey))]
+#[ts(export, namespace = ["", "tunnel"], type = "string", concrete(T = ed25519_dalek::VerifyingKey))]
 pub struct Pem<T: PemEncoding>(#[serde(with = "pem")] pub T);
 impl<T: PemEncoding> Pem<T> {
     pub fn new(value: T) -> Self {

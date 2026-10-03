@@ -28,7 +28,7 @@ struct UciVpnClient {
 
 // === Public API Types ===
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct OutboundVpn {
     pub id: String,
     pub label: String,
@@ -46,7 +46,7 @@ pub struct OutboundVpn {
     pub hostname_endpoint: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct OutboundVpnCreateRequest {
     pub label: String,
     pub target: String,
@@ -54,12 +54,12 @@ pub struct OutboundVpnCreateRequest {
     pub config: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct OutboundVpnCreateResponse {
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct OutboundVpnUpdateRequest {
     pub id: String,
     pub label: String,
@@ -70,13 +70,13 @@ pub struct OutboundVpnUpdateRequest {
     pub mtu: Option<u16>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, Parser, visit_rs::TS)]
 pub struct OutboundVpnDeleteRequest {
     #[clap(short, long)]
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct OutboundVpnSetEnabledRequest {
     pub id: String,
     pub enabled: bool,

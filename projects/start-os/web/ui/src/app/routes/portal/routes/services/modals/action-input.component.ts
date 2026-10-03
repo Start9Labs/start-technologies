@@ -135,7 +135,7 @@ export class ActionInputModal {
       }),
     ).pipe(
       map(res => {
-        console.warn('MAP', res)
+        if (!res) throw new Error('Invalid response from server')
         const originalValue = res.value || {}
         this.eventId = res.eventId
 

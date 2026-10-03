@@ -10,7 +10,7 @@ use imbl_value::InternedString;
 use patch_db::TypedDbWatch;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::db::model::package::PackageState;
 use crate::db::model::public::NetworkInterfaceInfo;

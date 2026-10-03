@@ -16,7 +16,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::bind::Bind;

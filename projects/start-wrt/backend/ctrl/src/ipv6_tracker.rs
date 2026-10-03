@@ -75,7 +75,7 @@ const PROD_INTERVAL_SECS: u64 = 10 * 60;
 /// of neighbor events (device reboot, prefix change) yields one rewrite.
 const DEBOUNCE_SECS: u64 = 20;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 struct AddrRecord {
     first_seen: i64,

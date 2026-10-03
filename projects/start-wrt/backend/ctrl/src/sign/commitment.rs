@@ -25,7 +25,7 @@ pub trait Digestable {
 
 /// Commitment to a file's contents: BLAKE3 hash + expected size.
 /// Wire-compatible with start-os's `Blake3Commitment`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Blake3Commitment {
     /// BLAKE3 hash as base64-encoded 32-byte array.

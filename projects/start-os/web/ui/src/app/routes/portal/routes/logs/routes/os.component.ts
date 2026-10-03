@@ -32,6 +32,6 @@ export default class SystemOSComponent {
   protected readonly follow = (params: FollowServerLogsReq) =>
     this.api.followServerLogs(params)
 
-  protected readonly fetch = (params: T.LogsParams) =>
+  protected readonly fetch = (params: T.LogsParamsInput) =>
     this.api.getServerLogs(params)
 }

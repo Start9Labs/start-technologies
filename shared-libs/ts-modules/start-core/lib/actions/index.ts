@@ -70,7 +70,7 @@ export type TaskOptions<T extends ActionInfo<T.ActionId, any>> = TaskBase &
       }
   )
 
-const _validate: T.Task = {} as TaskOptions<any> & {
+const _validate: T.TaskParams = {} as TaskOptions<any> & {
   actionId: string
   packageId: string
   severity: T.TaskSeverity

@@ -3,6 +3,8 @@ use std::marker::PhantomData;
 use futures::Stream;
 pub use visit_rs_derive::*;
 pub mod shape;
+#[cfg(feature = "ts")]
+pub mod ts;
 
 #[cfg(feature = "serde")]
 pub mod serde;

@@ -7,7 +7,7 @@ structures from the [`imbl`](https://crates.io/crates/imbl) crate: arrays are `i
 insertion-order-preserving `InOMap`, and strings are `Arc<String>`. Cloning a value is therefore cheap, and
 snapshots structurally share memory. Numbers reuse `serde_json::Number`, so numeric behavior matches
 `serde_json` exactly. The crate ships its own serde (de)serialization, a `json!` macro, and optional proptest
-and ts-rs integrations.
+and visit-rs TypeScript integrations.
 
 ## Place in the monorepo
 
@@ -51,8 +51,8 @@ let back: Config = from_value(v).unwrap();
 ## Features
 
 - `arbitrary` — proptest `Arbitrary` impl and value/number/array/object strategies (off by default).
-- `ts-rs` — `TS` impls for `Value`/`InOMap` for TypeScript type generation (off by default; required by
-  `start_core`).
+- `ts` — `visit_rs::TS` representations for `Value` (`unknown`) and `InOMap` (map), off by default;
+  enabled by `start_core`.
 
 ## Provenance
 

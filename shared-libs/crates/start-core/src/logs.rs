@@ -24,7 +24,7 @@ use tokio::process::{Child, Command};
 use tokio_stream::wrappers::LinesStream;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::PackageId;
 use crate::context::{CliContext, RpcContext};
@@ -114,7 +114,7 @@ async fn ws_handler(
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct LogResponse {
-    #[ts(as = "Vec<LogEntry>")]
+    #[ts(wire = "Vec<LogEntry>")]
     pub entries: Reversible<LogEntry>,
     start_cursor: Option<String>,
     end_cursor: Option<String>,
@@ -234,7 +234,7 @@ pub enum LogSource {
 
 pub const SYSTEM_UNIT: &str = "startd";
 
-#[derive(Deserialize, Serialize, Parser)]
+#[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
@@ -330,16 +330,14 @@ impl From<BootIdentifier> for String {
 
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
-#[ts(export, concrete(Extra = Empty), bound = "")]
+#[ts(export, concrete(Extra = Empty))]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct LogsParams<Extra: FromArgMatches + Args = Empty> {
     #[command(flatten)]
     #[serde(flatten)]
-    #[ts(skip)]
     extra: Extra,
     #[arg(short = 'l', long = "limit", help = "help.arg.log-limit")]
-    #[ts(optional)]
     limit: Option<usize>,
     #[arg(
         short = 'c',
@@ -347,11 +345,10 @@ pub struct LogsParams<Extra: FromArgMatches + Args = Empty> {
         conflicts_with = "follow",
         help = "help.arg.log-cursor"
     )]
-    #[ts(optional)]
     cursor: Option<String>,
     #[arg(short = 'b', long = "boot", help = "help.arg.log-boot")]
     #[serde(default)]
-    #[ts(optional, type = "number | string")]
+    #[ts(type = "number | string")]
     boot: Option<BootIdentifier>,
     #[arg(
         short = 'B',
@@ -379,7 +376,7 @@ pub struct CliLogsParams<Extra: FromArgMatches + Args = Empty> {
 #[allow(private_bounds)]
 pub fn logs<
     C: Context + AsRef<RpcContinuations>,
-    Extra: FromArgMatches + Serialize + DeserializeOwned + Args + Send + Sync + 'static,
+    Extra: FromArgMatches + Serialize + DeserializeOwned + Args + TS + Send + Sync + 'static,
 >(
     source: impl for<'a> LogSourceFn<'a, C, Extra>,
 ) -> ParentHandler<C, LogsParams<Extra>> {
@@ -456,10 +453,16 @@ where
 
 fn logs_nofollow<C, Extra>(
     f: impl for<'a> LogSourceFn<'a, C, Extra>,
-) -> impl HandlerFor<C, Params = LogsParams<Extra>, InheritedParams = Empty, Ok = LogResponse, Err = Error>
+) -> impl HandlerFor<
+    C,
+    Params = LogsParams<Extra>,
+    InheritedParams = Empty,
+    Ok = LogResponse,
+    Err = Error,
+> + rpc_toolkit::ts::HandlerTSBindings
 where
     C: Context,
-    Extra: FromArgMatches + Args + Send + Sync + 'static,
+    Extra: FromArgMatches + Args + TS + Send + Sync + 'static,
 {
     from_fn_async(
         move |HandlerArgs {
@@ -500,7 +503,7 @@ fn logs_follow<
     InheritedParams = LogsParams<Extra>,
     Ok = LogFollowResponse,
     Err = Error,
-> {
+> + rpc_toolkit::ts::HandlerTSBindings {
     from_fn_async(
         move |HandlerArgs {
                   context,

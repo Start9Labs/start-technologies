@@ -29,7 +29,7 @@ impl<T> SyncMutex<T> {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, visit_rs::TS)]
 pub struct Metadata {
     #[serde(default)]
     login: bool,

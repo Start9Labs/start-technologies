@@ -27,7 +27,7 @@ use rpc_toolkit::{
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;

@@ -16,6 +16,8 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **Setup accepts backslash-separated network backup paths** when verifying or restoring a CIFS share.
+
 - **Large packages sideload successfully in the UI over slow connections.** A failed upload shows an error message.
 
 - **Restart requests during service startup take effect after startup completes.**

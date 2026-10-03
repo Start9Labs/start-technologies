@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
 use std::u32;
 
 use chrono::Utc;
@@ -7,8 +6,8 @@ use exver::{Version, VersionRange};
 use imbl_value::InternedString;
 use patch_db::ModelExt;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 use url::Url;
+use visit_rs::ts::TS;
 
 use crate::PackageId;
 use crate::db::model::package::CurrentDependencyKind;
@@ -40,7 +39,7 @@ pub struct PackageIndex {
 #[model = "Model<Self>"]
 #[ts(export)]
 pub struct PackageInfo {
-    #[ts(as = "BTreeMap::<Guid, String>")]
+    #[ts(wire = "BTreeMap::<Guid, String>")]
     pub authorized: BTreeMap<Guid, VersionRange>,
     pub versions: BTreeMap<VersionString, PackageVersionInfo>,
     #[ts(type = "string[]")]
@@ -55,9 +54,10 @@ pub struct Category {
     pub name: LocaleString,
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, HasModel, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
+#[ts(export)]
 pub struct DependencyMetadata {
     pub title: Option<LocaleString>,
     pub icon: Option<DataUrl<'static>>,
@@ -68,34 +68,7 @@ pub struct DependencyMetadata {
     #[serde(flatten)]
     pub kind: Option<CurrentDependencyKind>,
 }
-impl TS for DependencyMetadata {
-    type WithoutGenerics = Self;
-    fn decl() -> String {
-        format!("type {} = {}", Self::name(), Self::inline())
-    }
-    fn decl_concrete() -> String {
-        Self::decl()
-    }
-    fn name() -> String {
-        "DependencyMetadata".into()
-    }
-    fn inline() -> String {
-        "{ title: LocaleString | null, icon: DataUrl | null, description: LocaleString | null, optional: boolean, versionRange?: string | null, kind?: 'exists' | 'running' | null, healthChecks?: string[] }".into()
-    }
-    fn inline_flattened() -> String {
-        Self::inline()
-    }
-    fn visit_dependencies(v: &mut impl ts_rs::TypeVisitor)
-    where
-        Self: 'static,
-    {
-        v.visit::<LocaleString>();
-        v.visit::<DataUrl<'static>>();
-    }
-    fn output_path() -> Option<&'static Path> {
-        Some(Path::new("DependencyMetadata.ts"))
-    }
-}
+
 impl DependencyMetadata {
     pub fn localize_for(&mut self, locale: &str) {
         self.title.as_mut().map(|t| t.localize_for(locale));
@@ -111,7 +84,6 @@ fn placeholder_url() -> Url {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct PreDownloadAlertWhen {
-    #[ts(type = "string")]
     pub source_version: VersionRange,
 }
 
@@ -127,27 +99,21 @@ pub struct PreDownloadAlert {
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct PackageMetadata {
-    #[ts(type = "string")]
     pub title: InternedString,
     pub description: Description,
     pub release_notes: LocaleString,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub pre_download_alert: Option<PreDownloadAlert>,
     pub git_hash: Option<GitHash>,
-    #[ts(type = "string")]
     pub license: InternedString,
     #[ts(type = "string")]
     #[serde(default = "placeholder_url")] // TODO: remove
     pub package_repo: Url,
-    #[ts(type = "string")]
     pub upstream_repo: Url,
-    #[ts(type = "string")]
     pub marketing_url: Option<Url>,
     #[ts(type = "string | null")]
     pub donation_url: Option<Url>,
     #[serde(default = "current_version")]
-    #[ts(type = "string")]
     pub os_version: Version,
     #[ts(type = "string | null")]
     pub sdk_version: Option<Version>,

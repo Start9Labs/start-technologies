@@ -70,7 +70,7 @@ One root Cargo workspace (members: the product bin crates + every shared crate u
 
 ```
 Rust (shared-libs/crates/start-core)
-  → make start-core-ts-bindings: ts-rs export → shared-libs/crates/start-core/bindings/ → rsync to shared-libs/ts-modules/start-core/lib/osBindings/
+  → make start-core-ts-bindings: production RPC trees + visit-rs exports → shared-libs/crates/start-core/bindings/ → rsync to shared-libs/ts-modules/start-core/lib/osBindings/
     → start-core build (cd shared-libs/ts-modules/start-core && make dist) → dist/
       → shared-libs/ts-modules + web apps consume it (via @start9labs/start-core)
     → SDK build (cd projects/start-sdk && make bundle) → dist/ (bundles @start9labs/start-core)
@@ -79,13 +79,13 @@ Rust (shared-libs/crates/start-core)
 
 Key make targets along the chain:
 
-| Step | Command                                                   | What it does                                                                      |
-| ---- | --------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| 1    | `cargo check -p start-core`                               | Verify the backend lib compiles                                                   |
-| 2    | `make start-core-ts-bindings`                             | Export ts-rs types → rsync to `shared-libs/ts-modules/start-core/lib/osBindings/` |
-| 3    | `cd projects/start-sdk && make bundle`                    | Build the SDK `dist/` (builds `@start9labs/start-core` first and bundles it)      |
-| 4    | `npm run check`                                           | Type-check Angular projects (from the repo root)                                  |
-| 5    | `cd projects/start-os/container-runtime && npm run check` | Type-check the runtime                                                            |
+| Step | Command                                                   | What it does                                                                                         |
+| ---- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| 1    | `cargo check -p start-core`                               | Verify the backend lib compiles                                                                      |
+| 2    | `make start-core-ts-bindings`                             | Generate directional RPC/shared types → rsync to `shared-libs/ts-modules/start-core/lib/osBindings/` |
+| 3    | `cd projects/start-sdk && make bundle`                    | Build the SDK `dist/` (builds `@start9labs/start-core` first and bundles it)                         |
+| 4    | `npm run check`                                           | Type-check Angular projects (from the repo root)                                                     |
+| 5    | `cd projects/start-os/container-runtime && npm run check` | Type-check the runtime                                                                               |
 
 **Important**: editing `shared-libs/ts-modules/start-core/lib/osBindings/*.ts` alone is NOT enough — rebuild start-core (and the SDK bundle, step 3) before web/container-runtime can see the change.
 

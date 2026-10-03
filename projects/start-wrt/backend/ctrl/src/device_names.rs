@@ -54,7 +54,7 @@ const TOUCH_INTERVAL_SECS: i64 = 24 * 60 * 60;
 /// One device's cached identity. `hostname: Option` (rather than a separate
 /// map) keeps pre-fingerprint `device_names.json` files loading unchanged:
 /// legacy entries always carried a hostname, and the new fields default.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct CachedName {
     pub hostname: Option<String>,

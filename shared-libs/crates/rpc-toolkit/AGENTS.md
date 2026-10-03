@@ -12,10 +12,11 @@ root and `shared-libs/` guidance first. `CLAUDE.md` imports this file.
 - `handler/from_fn.rs` owns sync, blocking, async and local-async factories.
 - `server/` owns dispatch and HTTP/socket transports; `cli.rs` owns clap and
   remote calls.
-- `ts.rs` owns TypeScript expressions, named definitions and handler bindings.
-  `type-helpers.ts` owns method-path parameter/return inference.
-- `visit-rs` owns serde shape semantics. Extend its `SerdeShape` derive instead
-  of parsing serde attributes again in the renderer.
+- `ts.rs` owns handler traversal, deferred parameter/result writers and binding
+  composition. `type-helpers.ts` owns method-path parameter/return inference.
+- `visit-rs::ts` owns TypeScript expressions and checked declarations;
+  `visit-rs-derive` shares serde lowering between `TS` and `SerdeShape`. Extend
+  that owner instead of parsing serde attributes again in RPC.
 
 ## Contributor workflow
 

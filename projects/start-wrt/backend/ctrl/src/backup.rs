@@ -17,13 +17,13 @@ use crate::invoke::Invoke;
 use crate::prelude::*;
 use crate::{CliContext, ServerContext};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct BackupCreateRes {
     pub guid: Guid,
     pub filename: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct BackupRestoreRes {
     pub upload: Guid,
 }
@@ -234,7 +234,7 @@ async fn restore(ctx: ServerContext) -> Result<BackupRestoreRes, Error> {
     Ok(BackupRestoreRes { upload: guid })
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser)]
+#[derive(Debug, Deserialize, Serialize, Parser, visit_rs::TS)]
 struct RestoreParams {
     /// Path to the backup file
     file: PathBuf,
@@ -286,6 +286,7 @@ pub fn backup<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "create",
             from_fn_async(cli_download)
+                .no_ts()
                 .no_display()
                 .with_about("Download a config backup"),
         )
@@ -293,6 +294,7 @@ pub fn backup<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "restore",
             from_fn_async(cli_upload)
+                .no_ts()
                 .no_display()
                 .with_about("Restore config backup from file"),
         )

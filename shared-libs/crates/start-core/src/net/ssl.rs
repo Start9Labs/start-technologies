@@ -29,8 +29,8 @@ use tokio_rustls::rustls::crypto::CryptoProvider;
 use tokio_rustls::rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio_rustls::rustls::server::ClientHello;
 use tracing::instrument;
-use ts_rs::TS;
 use visit_rs::Visit;
+use visit_rs::ts::TS;
 
 use crate::SOURCE_DATE;
 use crate::account::AccountInfo;

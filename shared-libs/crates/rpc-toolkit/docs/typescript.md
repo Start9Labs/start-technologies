@@ -91,13 +91,15 @@ directly; `TSVisitor::direction()` identifies input versus output traversal.
 ## Migration from the `ts-rs` feature
 
 Use `ts` instead of rpc-toolkit's optional `ts-rs` feature. Replace
-`HandlerTS::type_info` with `ts::handler_bindings`, and derive `SerdeShape` plus
-`impl_ts_shape!` instead of `ts_rs::TS` for this method-tree generator. Replace
+`HandlerTS::type_info` with `ts::handler_bindings`, and derive `visit_rs::TS`.
+`SerdeShape` plus `impl_ts_shape!` remains available for manual schema ownership. Replace
 `unknown_ts`/`custom_ts` with the parameter/return overrides above. `type_helpers`
 lives in `rpc_toolkit::ts`.
 
-StartOS's separate `ts-rs` type-export pipeline remains in use; this feature does
-not change its generated OS bindings.
+Core and StartWRT generate their production server trees through this feature.
+The same visitor renderer owns standalone `#[ts(export)]` namespaces; use
+`make start-core-ts-bindings` or `make start-wrt-rpc-bindings` and rebuild consumers.
+Input declarations follow deserialization; output declarations follow serialization.
 
 ## Verification
 

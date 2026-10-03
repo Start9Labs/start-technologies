@@ -10,6 +10,7 @@ import { Effects } from '../Models/Effects'
 
 import { CallbackHolder } from '../Models/CallbackHolder'
 import { asError } from '@start9labs/start-core/util'
+import { RPC } from '@start9labs/start-core'
 const matchRpcError = z.looseObject({
   error: z.looseObject({
     code: z.number(),
@@ -48,10 +49,10 @@ export type EffectContext = {
 
 const rpcRoundFor =
   (eventId: string | null) =>
-  <K extends T.EffectMethod | 'clearCallbacks'>(
+  <K extends RPC.RpcMethod<RPC.Effects>>(
     method: K,
-    params: Record<string, unknown>,
-  ) => {
+    params: RPC.RpcParamType<RPC.Effects, K>,
+  ): Promise<RPC.RpcReturnType<RPC.Effects, K>> => {
     const id = hostSystemId++
     const client = net.createConnection({ path: SOCKET_PATH }, () => {
       client.write(
@@ -63,7 +64,7 @@ const rpcRoundFor =
       )
     })
     let bufs: Buffer[] = []
-    return new Promise((resolve, reject) => {
+    return new Promise<RPC.RpcReturnType<RPC.Effects, K>>((resolve, reject) => {
       client.on('data', data => {
         try {
           bufs.push(data)
@@ -92,7 +93,7 @@ const rpcRoundFor =
               }
               reject(new Error(`${message}@${method}`))
             } else if (testRpcResult(res)) {
-              resolve(res.result)
+              resolve(res.result as RPC.RpcReturnType<RPC.Effects, K>)
             } else {
               reject(new Error(`malformed response ${JSON.stringify(res)}`))
             }
@@ -127,74 +128,63 @@ export function makeEffects(context: EffectContext): Effects {
     clearCallbacks(...[options]: Parameters<T.Effects['clearCallbacks']>) {
       return rpcRound('clear-callbacks', {
         ...options,
-      }) as ReturnType<T.Effects['clearCallbacks']>
+      })
     },
     action: {
       clear(...[options]: Parameters<T.Effects['action']['clear']>) {
         return rpcRound('action.clear', {
           ...options,
-        }) as ReturnType<T.Effects['action']['clear']>
+        })
       },
       export(...[options]: Parameters<T.Effects['action']['export']>) {
         return rpcRound('action.export', {
           ...options,
-        }) as ReturnType<T.Effects['action']['export']>
+        })
       },
       getInput(...[options]: Parameters<T.Effects['action']['getInput']>) {
         return rpcRound('action.get-input', {
           ...options,
-        }) as ReturnType<T.Effects['action']['getInput']>
+        })
       },
       createTask(...[options]: Parameters<T.Effects['action']['createTask']>) {
         return rpcRound('action.create-task', {
           ...options,
-        }) as ReturnType<T.Effects['action']['createTask']>
+        })
       },
       run(...[options]: Parameters<T.Effects['action']['run']>) {
         return rpcRound('action.run', {
           ...options,
-        }) as ReturnType<T.Effects['action']['run']>
+          input: options.input ?? null,
+        })
       },
       clearTasks(...[options]: Parameters<T.Effects['action']['clearTasks']>) {
         return rpcRound('action.clear-tasks', {
           ...options,
-        }) as ReturnType<T.Effects['action']['clearTasks']>
+        })
       },
     },
     bind(...[options]: Parameters<T.Effects['bind']>) {
-      return rpcRound('bind', { ...options }) as ReturnType<T.Effects['bind']>
+      return rpcRound('bind', { ...options })
     },
     bindRange(...[options]: Parameters<T.Effects['bindRange']>) {
-      return rpcRound('bind-range', { ...options }) as ReturnType<
-        T.Effects['bindRange']
-      >
+      return rpcRound('bind-range', { ...options })
     },
     clearBindings(...[options]: Parameters<T.Effects['clearBindings']>) {
-      return rpcRound('clear-bindings', { ...options }) as ReturnType<
-        T.Effects['clearBindings']
-      >
+      return rpcRound('clear-bindings', { ...options })
     },
     retireHost(...[options]: Parameters<T.Effects['retireHost']>) {
-      return rpcRound('retire-host', { ...options }) as ReturnType<
-        T.Effects['retireHost']
-      >
+      return rpcRound('retire-host', { ...options })
     },
     retireBinding(...[options]: Parameters<T.Effects['retireBinding']>) {
-      return rpcRound('retire-binding', { ...options }) as ReturnType<
-        T.Effects['retireBinding']
-      >
+      return rpcRound('retire-binding', { ...options })
     },
     clearServiceInterfaces(
       ...[options]: Parameters<T.Effects['clearServiceInterfaces']>
     ) {
-      return rpcRound('clear-service-interfaces', { ...options }) as ReturnType<
-        T.Effects['clearServiceInterfaces']
-      >
+      return rpcRound('clear-service-interfaces', { ...options })
     },
     getInstalledPackages(...[]: Parameters<T.Effects['getInstalledPackages']>) {
-      return rpcRound('get-installed-packages', {}) as ReturnType<
-        T.Effects['getInstalledPackages']
-      >
+      return rpcRound('get-installed-packages', {})
     },
     getServiceManifest(
       ...[options]: Parameters<T.Effects['getServiceManifest']>
@@ -202,51 +192,41 @@ export function makeEffects(context: EffectContext): Effects {
       return rpcRound('get-service-manifest', {
         ...options,
         callback: context.callbacks?.addCallback(options.callback) || null,
-      }) as ReturnType<T.Effects['getServiceManifest']>
+      })
     },
     subcontainer: {
       createFs(options: { imageId: string; name: string }) {
-        return rpcRound('subcontainer.create-fs', options) as ReturnType<
-          T.Effects['subcontainer']['createFs']
-        >
+        return rpcRound('subcontainer.create-fs', options)
       },
       destroyFs(options: { guid: string }): Promise<null> {
-        return rpcRound('subcontainer.destroy-fs', options) as ReturnType<
-          T.Effects['subcontainer']['destroyFs']
-        >
+        return rpcRound('subcontainer.destroy-fs', options)
       },
     },
     exportServiceInterface: ((
       ...[options]: Parameters<Effects['exportServiceInterface']>
     ) => {
-      return rpcRound('export-service-interface', options) as ReturnType<
-        T.Effects['exportServiceInterface']
-      >
+      return rpcRound('export-service-interface', options)
     }) as Effects['exportServiceInterface'],
     exportRangeServiceInterface: ((
       ...[options]: Parameters<Effects['exportRangeServiceInterface']>
     ) => {
-      return rpcRound('export-range-service-interface', options) as ReturnType<
-        T.Effects['exportRangeServiceInterface']
-      >
+      return rpcRound('export-range-service-interface', options)
     }) as Effects['exportRangeServiceInterface'],
     getContainerIp(...[options]: Parameters<T.Effects['getContainerIp']>) {
       return rpcRound('get-container-ip', {
         ...options,
         callback: context.callbacks?.addCallback(options.callback) || null,
-      }) as ReturnType<T.Effects['getContainerIp']>
+      })
     },
     getOsIp(...[]: Parameters<T.Effects['getOsIp']>) {
-      return rpcRound('get-os-ip', {}) as ReturnType<T.Effects['getOsIp']>
+      return rpcRound('get-os-ip', {})
     },
     getHostInfo: ((...[allOptions]: Parameters<T.Effects['getHostInfo']>) => {
       const options = {
         ...allOptions,
         callback: context.callbacks?.addCallback(allOptions.callback) || null,
       }
-      return rpcRound('get-host-info', options) as ReturnType<
-        T.Effects['getHostInfo']
-      > as any
+      return rpcRound('get-host-info', options) as any
     }) as Effects['getHostInfo'],
     getServiceInterface(
       ...[options]: Parameters<T.Effects['getServiceInterface']>
@@ -254,32 +234,28 @@ export function makeEffects(context: EffectContext): Effects {
       return rpcRound('get-service-interface', {
         ...options,
         callback: context.callbacks?.addCallback(options.callback) || null,
-      }) as ReturnType<T.Effects['getServiceInterface']>
+      })
     },
 
     getServicePortForward(
       ...[options]: Parameters<T.Effects['getServicePortForward']>
     ) {
-      return rpcRound('get-service-port-forward', options) as ReturnType<
-        T.Effects['getServicePortForward']
-      >
+      return rpcRound('get-service-port-forward', options)
     },
     getSslCertificate(options: Parameters<T.Effects['getSslCertificate']>[0]) {
       return rpcRound('get-ssl-certificate', {
         ...options,
         callback: context.callbacks?.addCallback(options.callback) || null,
-      }) as ReturnType<T.Effects['getSslCertificate']>
+      })
     },
     getSslKey(options: Parameters<T.Effects['getSslKey']>[0]) {
-      return rpcRound('get-ssl-key', options) as ReturnType<
-        T.Effects['getSslKey']
-      >
+      return rpcRound('get-ssl-key', options)
     },
     getSystemSmtp(...[options]: Parameters<T.Effects['getSystemSmtp']>) {
       return rpcRound('get-system-smtp', {
         ...options,
         callback: context.callbacks?.addCallback(options.callback) || null,
-      }) as ReturnType<T.Effects['getSystemSmtp']>
+      })
     },
     getOutboundGateway(
       ...[options]: Parameters<T.Effects['getOutboundGateway']>
@@ -287,7 +263,7 @@ export function makeEffects(context: EffectContext): Effects {
       return rpcRound('get-outbound-gateway', {
         ...options,
         callback: context.callbacks?.addCallback(options.callback) || null,
-      }) as ReturnType<T.Effects['getOutboundGateway']>
+      })
     },
     listServiceInterfaces(
       ...[options]: Parameters<T.Effects['listServiceInterfaces']>
@@ -295,56 +271,42 @@ export function makeEffects(context: EffectContext): Effects {
       return rpcRound('list-service-interfaces', {
         ...options,
         callback: context.callbacks?.addCallback(options.callback) || null,
-      }) as ReturnType<T.Effects['listServiceInterfaces']>
+      })
     },
     mount(...[options]: Parameters<T.Effects['mount']>) {
-      return rpcRound('mount', options) as ReturnType<T.Effects['mount']>
+      return rpcRound('mount', options)
     },
     restart(...[]: Parameters<T.Effects['restart']>) {
       console.log('Restarting service...')
-      return rpcRound('restart', {}) as ReturnType<T.Effects['restart']>
+      return rpcRound('restart', {})
     },
     setDependencies(
       dependencies: Parameters<T.Effects['setDependencies']>[0],
     ): ReturnType<T.Effects['setDependencies']> {
-      return rpcRound('set-dependencies', dependencies) as ReturnType<
-        T.Effects['setDependencies']
-      >
+      return rpcRound('set-dependencies', dependencies)
     },
     checkDependencies(
       options: Parameters<T.Effects['checkDependencies']>[0],
     ): ReturnType<T.Effects['checkDependencies']> {
-      return rpcRound('check-dependencies', options) as ReturnType<
-        T.Effects['checkDependencies']
-      >
+      return rpcRound('check-dependencies', options)
     },
     getDependencies(): ReturnType<T.Effects['getDependencies']> {
-      return rpcRound('get-dependencies', {}) as ReturnType<
-        T.Effects['getDependencies']
-      >
+      return rpcRound('get-dependencies', {})
     },
     setHealth(...[options]: Parameters<T.Effects['setHealth']>) {
-      return rpcRound('set-health', options) as ReturnType<
-        T.Effects['setHealth']
-      >
+      return rpcRound('set-health', options)
     },
     setBackupProgress(
       ...[options]: Parameters<T.Effects['setBackupProgress']>
     ) {
-      return rpcRound('set-backup-progress', options) as ReturnType<
-        T.Effects['setBackupProgress']
-      >
+      return rpcRound('set-backup-progress', options)
     },
     setInitProgress(...[options]: Parameters<T.Effects['setInitProgress']>) {
-      return rpcRound('set-init-progress', options) as ReturnType<
-        T.Effects['setInitProgress']
-      >
+      return rpcRound('set-init-progress', options)
     },
     notification: {
       create(...[options]: Parameters<T.Effects['notification']['create']>) {
-        return rpcRound('notification.create', options) as ReturnType<
-          T.Effects['notification']['create']
-        >
+        return rpcRound('notification.create', options)
       },
     },
 
@@ -352,50 +314,38 @@ export function makeEffects(context: EffectContext): Effects {
       return rpcRound('get-status', {
         ...o,
         callback: context.callbacks?.addCallback(o.callback) || null,
-      }) as ReturnType<T.Effects['getStatus']>
+      })
     },
     /// DEPRECATED
     setMainStatus(o: { status: 'running' | 'stopped' }): Promise<null> {
-      return rpcRound('set-main-status', o) as ReturnType<
-        T.Effects['setHealth']
-      >
+      return rpcRound('set-main-status', o)
     },
 
     shutdown(...[]: Parameters<T.Effects['shutdown']>) {
-      return rpcRound('shutdown', {}) as ReturnType<T.Effects['shutdown']>
+      return rpcRound('shutdown', {})
     },
     getDataVersion() {
-      return rpcRound('get-data-version', {}) as ReturnType<
-        T.Effects['getDataVersion']
-      >
+      return rpcRound('get-data-version', {})
     },
     setDataVersion(...[options]: Parameters<T.Effects['setDataVersion']>) {
-      return rpcRound('set-data-version', options) as ReturnType<
-        T.Effects['setDataVersion']
-      >
+      return rpcRound('set-data-version', options)
     },
     plugin: {
       url: {
         register(
           ...[options]: Parameters<T.Effects['plugin']['url']['register']>
         ) {
-          return rpcRound('plugin.url.register', options) as ReturnType<
-            T.Effects['plugin']['url']['register']
-          >
+          return rpcRound('plugin.url.register', options)
         },
         exportUrl(
           ...[options]: Parameters<T.Effects['plugin']['url']['exportUrl']>
         ) {
-          return rpcRound('plugin.url.export-url', options) as ReturnType<
-            T.Effects['plugin']['url']['exportUrl']
-          >
+          return rpcRound('plugin.url.export-url', options)
         },
         clearUrls(
           ...[options]: Parameters<T.Effects['plugin']['url']['clearUrls']>
         ) {
-          return rpcRound('plugin.url.clear-urls', options) as ReturnType<
-            T.Effects['plugin']['url']['clearUrls']
-          >
+          return rpcRound('plugin.url.clear-urls', options)
         },
       },
     },

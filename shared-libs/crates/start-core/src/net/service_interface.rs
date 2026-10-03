@@ -3,7 +3,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 
 use imbl_value::InternedString;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::prelude::*;
 use crate::{ActionId, GatewayId, HostId, PackageId, ServiceInterfaceId};
@@ -121,12 +121,12 @@ pub struct PluginHostnameInfo {
         default = "PackageId::start_os",
         deserialize_with = "deserialize_os_ui_package_id"
     )]
+    #[visit(input_wire = "Option<PackageId>")]
     pub package_id: PackageId,
     pub host_id: HostId,
     pub internal_port: u16,
     pub ssl: bool,
     pub public: bool,
-    #[ts(type = "string")]
     pub hostname: InternedString,
     pub port: Option<u16>,
     #[ts(type = "unknown")]
@@ -197,7 +197,6 @@ pub struct ServiceInterface {
     #[serde(rename = "type")]
     pub interface_type: ServiceInterfaceType,
     /// The interface address Open UI should prefer.
-    #[ts(optional = nullable)]
     pub preferred_launcher_address: Option<String>,
 }
 

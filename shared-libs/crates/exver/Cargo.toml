@@ -17,6 +17,7 @@ version = "0.2.1"
 [features]
 default = []
 serde = ["dep:serde", "emver/serde"]
+ts = ["serde", "dep:visit-rs"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
@@ -29,6 +30,7 @@ pest = "2.7"
 pest_derive = "2.7"
 serde = { version = "1", optional = true }
 smallvec = "1.13"
+visit-rs = { path = "../visit-rs", optional = true, features = ["ts"] }
 yasi = { path = "../yasi" }
 
 [dev-dependencies]

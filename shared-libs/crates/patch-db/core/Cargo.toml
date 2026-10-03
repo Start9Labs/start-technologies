@@ -14,6 +14,7 @@ version = "0.1.0"
 [features]
 debug = ["tracing"]
 trace = ["debug", "tracing-error"]
+ts = ["dep:visit-rs", "imbl-value/ts"]
 unstable = []
 
 [dependencies]
@@ -33,6 +34,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "rt", "sync"] }
 tracing = { version = "0.1.29", optional = true }
 tracing-error = { version = "0.2.0", optional = true }
+visit-rs = { path = "../../visit-rs", optional = true, features = ["ts"] }
 
 [dev-dependencies]
 proptest = "1.0.0"

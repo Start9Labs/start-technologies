@@ -13,7 +13,7 @@ use tokio::process::Command;
 use tokio::sync::OnceCell;
 use tokio_stream::wrappers::ReadDirStream;
 use tracing::{debug, warn};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::CliContext;
 use crate::dependencies::{DependencyMetadata, MetadataSrc};
@@ -460,12 +460,10 @@ pub enum ImageSource {
     Packed,
     #[serde(rename_all = "camelCase")]
     DockerBuild {
-        #[ts(optional)]
         workdir: Option<PathBuf>,
-        #[ts(optional)]
+
         dockerfile: Option<PathBuf>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
         build_args: Option<BTreeMap<String, BuildArg>>,
     },
     DockerTag(String),
@@ -741,7 +739,6 @@ fn tar2sqfs(dest: impl AsRef<Path>) -> Result<Command, Error> {
 #[ts(export)]
 pub struct ImageMetadata {
     pub workdir: PathBuf,
-    #[ts(type = "string")]
     pub user: InternedString,
     pub entrypoint: Option<Vec<String>>,
     pub cmd: Option<Vec<String>>,

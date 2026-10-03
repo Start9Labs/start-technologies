@@ -9,7 +9,7 @@ use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::CliContext;
 use crate::prelude::*;
@@ -49,6 +49,7 @@ pub fn version_api<C: Context>() -> ParentHandler<C> {
             from_fn_async(get_version)
                 .with_metadata("authenticated", Value::Bool(false))
                 .with_metadata("get_device_info", Value::Bool(true))
+                .override_return_ts_as::<super::index::OsVersionInfoMap>()
                 .with_display_serializable()
                 .with_custom_display_fn(|handle, result| {
                     display_version_info(handle.params, result)

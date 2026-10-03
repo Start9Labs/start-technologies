@@ -16,9 +16,8 @@ use crate::{GatewayId, PackageId};
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct GetContainerIpParams {
-    #[ts(optional)]
     package_id: Option<PackageId>,
-    #[ts(optional)]
+
     callback: Option<CallbackId>,
 }
 
@@ -63,7 +62,6 @@ pub async fn get_container_ip(
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct GetOutboundGatewayParams {
-    #[ts(optional)]
     callback: Option<CallbackId>,
 }
 

@@ -27,7 +27,7 @@ pub fn uci<C: CtrlContext>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct Section {
     pub ty: String,
     pub name: Option<String>,
@@ -35,7 +35,7 @@ pub struct Section {
     pub lists: HashMap<String, Vec<String>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct UciFile {
     pub sections: Vec<Section>,
     pub modified: Option<DateTime<Utc>>,
@@ -43,7 +43,7 @@ pub struct UciFile {
 
 type UciFiles = BTreeMap<String, UciFile>;
 
-#[derive(Parser, Serialize, Deserialize)]
+#[derive(Parser, Serialize, Deserialize, visit_rs::TS)]
 pub struct GetArgs {
     names: Vec<String>,
 }

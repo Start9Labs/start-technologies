@@ -185,7 +185,7 @@ fn mark_overlay_ready(overlay_mount: &str) -> Result<(), Error> {
 // Disk state detection
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct DiskState {
     /// An eMMC device was found.
@@ -570,7 +570,7 @@ async fn write_timezone(merged_mount: &str, iana: &str) -> Result<(), Error> {
 // Flash orchestration
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "kebab-case")]
 pub enum FlashMode {
     Update,
@@ -578,12 +578,13 @@ pub enum FlashMode {
 }
 
 /// Streaming event sent to the frontend during flash.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, visit_rs::TS)]
 #[serde(
     tag = "phase",
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
+#[ts(export, namespace = "events")]
 pub enum SetupEvent {
     Copying {
         copied: u64,
@@ -785,7 +786,7 @@ async fn run_setup_flash_inner(
 // RPC endpoints
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SetupStatusRes {
     pub setup_mode: bool,

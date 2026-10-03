@@ -10,7 +10,7 @@ use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_f
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::account::AccountInfo;
 use crate::context::config::ServerConfig;
@@ -464,6 +464,7 @@ pub fn init_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "logs",
             from_fn_async(crate::logs::cli_logs::<InitContext, Empty>)
+                .no_ts()
                 .no_display()
                 .with_about("about.display-os-logs"),
         )
@@ -474,6 +475,7 @@ pub fn init_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "kernel-logs",
             from_fn_async(crate::logs::cli_logs::<InitContext, Empty>)
+                .no_ts()
                 .no_display()
                 .with_about("about.display-kernel-logs"),
         )

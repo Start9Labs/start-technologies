@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use tokio::sync::watch;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::{CliContext, RpcContext};
 use crate::prelude::*;
@@ -53,6 +53,7 @@ pub fn db<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "dump",
             from_fn_async(cli_dump)
+                .no_ts()
                 .with_display_serializable()
                 .with_about("about.filter-query-db"),
         )
@@ -70,6 +71,7 @@ pub fn db<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "apply",
             from_fn_async(cli_apply)
+                .no_ts()
                 .no_display()
                 .with_about("about.update-db-record"),
         )
@@ -139,7 +141,7 @@ async fn cli_dump(
 #[serde(rename_all = "camelCase")]
 pub struct DumpParams {
     #[ts(type = "string | null")]
-    pointer: Option<JsonPointer>,
+    pub pointer: Option<JsonPointer>,
 }
 
 pub async fn dump(ctx: RpcContext, DumpParams { pointer }: DumpParams) -> Result<Dump, Error> {
@@ -150,16 +152,15 @@ pub async fn dump(ctx: RpcContext, DumpParams { pointer }: DumpParams) -> Result
 #[serde(rename_all = "camelCase")]
 pub struct SubscribeParams {
     #[ts(type = "string | null")]
-    pointer: Option<JsonPointer>,
+    pub pointer: Option<JsonPointer>,
     #[ts(skip)]
     #[serde(rename = "__Auth_signer")]
-    signer: Option<InternedString>,
+    pub signer: Option<InternedString>,
 }
 
 #[derive(Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SubscribeRes {
-    #[ts(type = "{ id: number; value: unknown }")]
     pub dump: Dump,
     pub guid: Guid,
 }
@@ -340,7 +341,15 @@ async fn cli_apply(
 #[command(rename_all = "kebab-case")]
 pub struct ApplyParams {
     #[arg(help = "help.arg.db-apply-expr")]
-    expr: String,
+    pub expr: String,
+}
+
+#[derive(Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyWithPathParams {
+    #[serde(flatten)]
+    pub expression: ApplyParams,
+    pub path: Option<PathBuf>,
 }
 
 pub async fn apply(ctx: RpcContext, ApplyParams { expr }: ApplyParams) -> Result<(), Error> {
@@ -384,7 +393,6 @@ pub struct UiParams {
     #[ts(type = "string")]
     pointer: JsonPointer,
     #[arg(help = "help.arg.json-value")]
-    #[ts(type = "any")]
     value: Value,
 }
 

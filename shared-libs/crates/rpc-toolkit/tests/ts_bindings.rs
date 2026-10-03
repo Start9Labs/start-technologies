@@ -331,6 +331,12 @@ async fn handler_tree_matches_dispatch_and_inference() {
     typecheck(
         &module,
         r#"
+const method: RpcMethod<Api> = 'jobs.leaf';
+const parentMethod: RpcMethod<Api> = 'jobs';
+// @ts-expect-error
+const invalidMethod: RpcMethod<Api> = 'missing.leaf';
+// @ts-expect-error
+const namespaceMethod: RpcMethod<Api> = '';
 const rootParams: RpcParamType<Api,'jobs'> = {token:'t'};
 const params: RpcParamType<Api,'jobs.leaf'> = {token:'t',REQUIRED_VALUE:1,in:'x',INPUT_ONLY:'x'};
 const result: RpcReturnType<Api,'jobs.leaf'> = {value:'x',next:null};
@@ -480,6 +486,35 @@ struct Custom {
     value: u32,
 }
 impl_ts_shape!(Custom);
+
+#[derive(Deserialize, Serialize, visit_rs::TS)]
+struct RemoteOptions {
+    registry: String,
+}
+
+#[test]
+fn remote_extra_parameters_are_inherited_by_children() {
+    let inner = ParentHandler::<Ctx>::new().subcommand(
+        "fetch",
+        from_fn(|_: Ctx, _: Inner| Ok::<_, RpcError>("done".to_owned())).no_cli(),
+    );
+    let remote = rpc_toolkit::CallRemoteHandler::<Ctx, Ctx, _, RemoteOptions>::new(inner);
+    typecheck(
+        &handler_bindings(&remote, "Api").unwrap().unwrap(),
+        r#"
+const good: RpcParamType<Api, 'fetch'> = {registry: 'https://registry.test', inner: 1};
+// @ts-expect-error
+const missingExtra: RpcParamType<Api, 'fetch'> = {inner: 1};
+// @ts-expect-error
+const missingChild: RpcParamType<Api, 'fetch'> = {registry: 'https://registry.test'};
+const result: RpcReturnType<Api, 'fetch'> = 'done';
+"#,
+    );
+    let disabled = rpc_toolkit::CallRemoteHandler::<Ctx, Ctx, _, RemoteOptions>::new(
+        from_fn(|_: Ctx, _: Empty| Ok::<_, RpcError>(())).no_ts(),
+    );
+    assert!(handler_bindings(&disabled, "Api").unwrap().is_none());
+}
 
 #[test]
 fn overrides_and_opt_out_compose_with_other_adapters() {

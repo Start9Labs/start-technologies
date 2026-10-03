@@ -9,8 +9,8 @@ use http::HeaderValue;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWrite;
 use tokio_util::io::StreamReader;
-use ts_rs::TS;
 use url::Url;
+use visit_rs::ts::TS;
 
 use crate::prelude::*;
 use crate::s9pk::merkle_archive::hash::VerifyingWriter;

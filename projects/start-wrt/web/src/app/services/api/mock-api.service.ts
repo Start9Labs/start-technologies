@@ -1,3 +1,4 @@
+import type { Api, RpcReturnType } from './bindings'
 import { inject, Injectable } from '@angular/core'
 import { pauseFor } from '@start9labs/shared'
 import { GIT_HASH } from 'src/app/utils/workspace-config'
@@ -8,6 +9,7 @@ import {
   GetFileReq,
   GetFileRes,
   GetUciReq,
+  GetUciRes,
   LoginReq,
   SystemInfoRes,
   SetFileReq,
@@ -95,10 +97,10 @@ import {
   providedIn: 'root',
 })
 export class MockApiService extends ApiService {
-  async login(params: LoginReq): Promise<null> {
+  async login(params: LoginReq): Promise<RpcReturnType<Api, 'auth.login'>> {
     await pauseFor(250)
 
-    return null
+    return { session: 'mock-session' }
   }
 
   async logout(): Promise<null> {
@@ -202,41 +204,42 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async getUci<T extends Record<string, UciFile<any>>>(
-    params: GetUciReq,
-  ): Promise<T> {
+  async getUci(params: GetUciReq): Promise<GetUciRes> {
     await pauseFor(250)
 
-    return params.names.reduce(
-      (obj, name) => ({
-        ...obj,
-        [name]: mockUci[name],
-      }),
-      {} as T,
+    return Object.fromEntries(
+      params.names.map(name => [
+        name,
+        {
+          modified: mockUci[name].modified,
+          sections: mockUci[name].sections.map(({ type, ...section }) => ({
+            ...section,
+            ty: type,
+          })),
+        },
+      ]),
     )
   }
 
-  async setUci<T extends string[]>(params: SetUciReq): Promise<SetUciRes<T>> {
+  async setUci(params: SetUciReq): Promise<SetUciRes> {
     await pauseFor(250)
 
     const isoString = new Date().toISOString()
 
-    // Actually update the mock data
     for (const name of Object.keys(params)) {
       if (mockUci[name]) {
         mockUci[name] = {
-          ...params[name],
+          sections: params[name].sections.map(({ ty, ...section }) => ({
+            ...section,
+            type: ty,
+          })),
           modified: isoString,
-        }
+        } as UciFile<UciSection>
       }
     }
 
-    return Object.keys(params).reduce(
-      (obj, name) => ({
-        ...obj,
-        [name]: isoString,
-      }),
-      {} as SetUciRes<T>,
+    return Object.fromEntries(
+      Object.keys(params).map(name => [name, isoString]),
     )
   }
 
@@ -609,6 +612,7 @@ export class MockApiService extends ApiService {
       access_to_new_profiles: true,
       owns_lan: true,
       dns_source: 'system',
+      dns_override: [],
     },
     {
       fullname: 'Guest',
@@ -637,6 +641,7 @@ export class MockApiService extends ApiService {
       access_to_new_profiles: false,
       owns_lan: false,
       dns_source: 'system',
+      dns_override: [],
     },
   ]
 
@@ -651,27 +656,44 @@ export class MockApiService extends ApiService {
 
   async profileGet(params: ProfileIdOpt): Promise<SecurityProfile> {
     await pauseFor(250)
-    const profile = this.mockProfiles.find(
+    return structuredClone(this.profileFromQuery(params))
+  }
+
+  private findProfile(params: ProfileIdOpt): SecurityProfile | undefined {
+    return this.mockProfiles.find(
       p =>
-        (!params.fullname || p.fullname === params.fullname) &&
-        (!params.interface || p.interface === params.interface) &&
-        (params.vlan_tag === undefined || p.vlan_tag === params.vlan_tag),
+        (params.fullname == null || p.fullname === params.fullname) &&
+        (params.interface == null || p.interface === params.interface) &&
+        (params.vlan_tag == null || p.vlan_tag === params.vlan_tag),
     )
-    if (!profile) {
-      throw new Error('Profile not found')
+  }
+
+  private profileFromQuery(params: ProfileIdOpt): SecurityProfile {
+    const profile = this.findProfile(params)
+    if (!profile) throw new Error('Profile not found')
+    return profile
+  }
+
+  private resolveLanAccess(
+    access: ProfileCreateInput['lan_access'],
+  ): SecurityProfile['lan_access'] {
+    if (typeof access === 'string') return access
+    return {
+      other_profiles: access.other_profiles.map(query => {
+        const {
+          fullname,
+          interface: iface,
+          vlan_tag,
+        } = this.profileFromQuery(query)
+        return { fullname, interface: iface, vlan_tag }
+      }),
     }
-    return structuredClone(profile)
   }
 
   async profileCreate(params: ProfileCreateInput): Promise<ProfileId> {
     await pauseFor(250)
 
-    // Allocate a random opaque interface id, mirroring the backend's
-    // collision-safe allocation (backend/ctrl/src/profiles.rs
-    // `allocate_interface_name`). The id is never shown in the UI (profiles
-    // display `fullname`), so it's always random rather than derived from the
-    // name — that's what lets a freed-then-reused name get a fresh id instead of
-    // colliding. Retry against ids already taken to avoid a chance collision.
+    // Opaque IDs remain independent of reusable display names.
     const taken = new Set(this.mockProfiles.map(p => p.interface))
     const randomInterface = () =>
       Array.from({ length: 5 }, () =>
@@ -682,7 +704,6 @@ export class MockApiService extends ApiService {
       interface_name = randomInterface()
     }
 
-    // Auto-assign vlan_tag if not provided
     const existing_tags = this.mockProfiles.map(p => p.vlan_tag)
     const vlan_tag =
       params.vlan_tag ||
@@ -697,11 +718,11 @@ export class MockApiService extends ApiService {
       vlan_tag,
       gateway_ip: params.gateway_ip,
       outbound: params.outbound,
-      lan_access: params.lan_access as any, // Cast needed for ProfileIdOpt -> ProfileId
+      lan_access: this.resolveLanAccess(params.lan_access),
       wan_access: params.wan_access,
       access_to_new_profiles: params.access_to_new_profiles,
       owns_lan: params.owns_lan,
-      dns_override: params.dns_override,
+      dns_override: params.dns_override ?? [],
       dns_source: params.dns_override?.length
         ? 'custom'
         : params.outbound !== 'wan'
@@ -738,11 +759,11 @@ export class MockApiService extends ApiService {
             fullname: newFullname,
             gateway_ip: params.gateway_ip,
             outbound: params.outbound,
-            lan_access: params.lan_access as any,
+            lan_access: this.resolveLanAccess(params.lan_access),
             wan_access: params.wan_access,
             access_to_new_profiles: params.access_to_new_profiles,
             owns_lan: params.owns_lan,
-            dns_override: params.dns_override,
+            dns_override: params.dns_override ?? [],
             dns_source: params.dns_override?.length
               ? 'custom'
               : params.outbound !== 'wan'
@@ -795,12 +816,7 @@ export class MockApiService extends ApiService {
   async profileDelete(params: ProfileIdOpt): Promise<null> {
     await pauseFor(250)
 
-    const deleted = this.mockProfiles.find(
-      p =>
-        (!params.fullname || p.fullname === params.fullname) &&
-        (!params.interface || p.interface === params.interface) &&
-        (params.vlan_tag === undefined || p.vlan_tag === params.vlan_tag),
-    )
+    const deleted = this.findProfile(params)
 
     this.mockProfiles = this.mockProfiles.filter(p => p !== deleted)
 
@@ -890,10 +906,12 @@ export class MockApiService extends ApiService {
     return { initialized: this.mockInitialized }
   }
 
-  async setInitialPassword(params: SetInitialPasswordReq): Promise<null> {
+  async setInitialPassword(
+    params: SetInitialPasswordReq,
+  ): Promise<RpcReturnType<Api, 'auth.set-initial-password'>> {
     await pauseFor(250)
     this.mockInitialized = true
-    return null
+    return { session: 'mock-session' }
   }
 
   async setupStatus(): Promise<SetupStatusRes> {
@@ -1465,6 +1483,7 @@ export class MockApiService extends ApiService {
       const device = this.lookupDeviceByMac(input.device_mac)
       return {
         ...input,
+        override_wan_ports: input.override_wan_ports ?? false,
         ipv4_public_port: input.ipv4_public_port ?? null,
         status: input.enabled ? ('active' as const) : ('disabled' as const),
         status_reason: input.enabled ? null : null,
@@ -1596,7 +1615,12 @@ export class MockApiService extends ApiService {
     await pauseFor(250)
     this.mockVpnClients = this.mockVpnClients.map(c =>
       c.id === params.id
-        ? { ...c, label: params.label, target: params.target, mtu: params.mtu }
+        ? {
+            ...c,
+            label: params.label,
+            target: params.target,
+            mtu: params.mtu ?? null,
+          }
         : c,
     )
     this.logActivity(
@@ -1687,7 +1711,7 @@ export class MockApiService extends ApiService {
     await pauseFor(250)
     this.mockEthernet = {
       wan_ipv6: params.wan_ipv6,
-      wan_port: params.wan_port,
+      wan_port: params.wan_port ?? null,
       ports: Object.fromEntries(
         Object.entries(params.ports).map(([name, port]) => [
           name,

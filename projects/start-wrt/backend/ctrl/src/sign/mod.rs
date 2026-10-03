@@ -98,7 +98,8 @@ impl digest::Update for AnyDigest {
 
 // ── AnyVerifyingKey ──────────────────────────────────────────────────
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, visit_rs::TS)]
+#[ts(type = "string")]
 #[non_exhaustive]
 pub enum AnyVerifyingKey {
     Ed25519(ed25519_dalek::VerifyingKey),
@@ -168,7 +169,8 @@ impl Serialize for AnyVerifyingKey {
 
 // ── AnySignature ─────────────────────────────────────────────────────
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, visit_rs::TS)]
+#[ts(type = "string")]
 pub enum AnySignature {
     Ed25519(ed25519_dalek::Signature),
 }

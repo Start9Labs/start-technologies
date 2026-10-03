@@ -13,9 +13,9 @@ shared `Arc`; well-known constants can be registered as `'static`.
 - **Consumers (first-party, direct path deps — no `[patch]`):**
   - `exver` — `yasi = { path = "../yasi" }`
   - `imbl-value` — `yasi = { path = "../yasi", features = ["serde"] }`, and re-exports the
-    `ts-rs` feature through its own `ts-rs` feature.
+    `ts` feature through its own `ts` feature.
 - **Dependencies:** `hashbrown` (`raw` API), `lazy_static`, `tinyvec`, `xxhash-rust` (xxh3);
-  `serde` and `ts-rs` are optional.
+  `serde` and `visit-rs` are optional.
 
 ## How it works
 
@@ -79,7 +79,7 @@ looping `intern → drop` over a few long keys, and fails via a watchdog channel
     `PartialEq<&str> / PartialEq<str> / PartialEq<Cow<str>>`.
 - `TableHasher` — public low-level xxh3 wrapper used internally; rarely needed by consumers.
 - With `serde`: `Serialize` (as a plain string) and `Deserialize` (interns any string/bytes form).
-- With `ts-rs`: `TS` reports the type as `string` (it cannot be declared or flattened).
+- With `ts`: `visit_rs::TS` reports the wire type as `string` in both directions.
 
 ## Further reading
 

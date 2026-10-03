@@ -1,22 +1,9 @@
 import { DiskInfo, PartitionInfo, StartOSDiskInfo } from '@start9labs/shared'
 
-// === Install OS === (no binding available)
+import { Params, Result } from './services/api.service'
 
-export interface InstallOsParams {
-  osDrive: string | null // null = already booted from the OS drive; provision data only
-  dataDrive: {
-    stablePath: string
-    wipe: boolean
-  }
-}
-
-export interface InstallOsRes {
-  guid: string // data drive guid
-  attach: boolean
-  mokEnrolled: boolean
-}
-
-// === Disk Info Helpers ===
+export type InstallOsParams = Params<'setup.install-os'>
+export type InstallOsRes = Result<'setup.install-os'>
 
 export type StartOSDiskInfoWithId = StartOSDiskInfo & {
   id: string

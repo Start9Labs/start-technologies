@@ -4,8 +4,8 @@ use std::str::FromStr;
 use clap::builder::ValueParserFactory;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 use url::Url;
+use visit_rs::ts::TS;
 
 use crate::prelude::*;
 use crate::sign::commitment::Digestable;

@@ -243,12 +243,10 @@ pub enum DependencyRequirement {
     Running {
         id: PackageId,
         health_checks: BTreeSet<HealthCheckId>,
-        #[ts(type = "string")]
         version_range: VersionRange,
     },
     Exists {
         id: PackageId,
-        #[ts(type = "string")]
         version_range: VersionRange,
     },
 }
@@ -492,7 +490,6 @@ pub async fn get_dependencies(context: EffectContext) -> Result<Vec<DependencyRe
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct CheckDependenciesParam {
-    #[ts(optional)]
     package_ids: Option<Vec<PackageId>>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -583,7 +580,7 @@ pub async fn check_dependencies(
 #[ts(export)]
 pub struct GetServiceManifestParams {
     pub package_id: PackageId,
-    #[ts(optional)]
+
     #[arg(skip)]
     pub callback: Option<CallbackId>,
 }
