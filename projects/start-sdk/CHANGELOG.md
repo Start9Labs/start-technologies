@@ -2,6 +2,10 @@
 
 ## 3.0.0 — StartOS 0.4.0.2
 
+### Security
+
+- **Update SDK build and test dependencies with security fixes.**
+
 ### Changed
 
 - **Breaking — read-only volume and asset mounts are enforced.** Writes through a volume mount declared `readonly: true`, or through any asset mount, fail with `EROFS`. Mount volumes writable wherever the service writes to them. Copy assets that need modification into a writable volume

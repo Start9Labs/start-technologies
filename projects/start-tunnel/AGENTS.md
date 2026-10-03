@@ -1,12 +1,9 @@
 # AGENTS.md — start-tunnel
 
 Practical instructions for working on the StartTunnel product inside the
-`start-os` monorepo. Read the root `AGENTS.md` for monorepo-wide conventions
+`start-technologies` monorepo. Read the root `AGENTS.md` for monorepo-wide conventions
 first; this file is scoped to `projects/start-tunnel/`. `CLAUDE.md` is a one-line
-`@AGENTS.md` import. See [ARCHITECTURE.md](ARCHITECTURE.md) and
-[CONTRIBUTING.md](CONTRIBUTING.md).
-
-**Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
+`@AGENTS.md` import. See [ARCHITECTURE.md](ARCHITECTURE.md) for structure.
 
 ## What this is
 
@@ -56,10 +53,9 @@ make start-core-test                                 # backend tests (tunnel log
 
 Notes:
 
-- `cargo check`/`cargo build` here only cover the linux target. The CI matrix
-  also builds `*-apple-darwin` and `riscv64`/`aarch64` musl — platform-specific
-  code (`libc`, resolv-conf, etc.) can pass locally and break darwin. cfg-gate
-  platform-only paths; don't reimplement them cross-platform.
+- StartTunnel CI builds x86_64/aarch64/riscv64 linux-musl. Shared `start-core`
+  also feeds start-cli's apple-darwin builds; cfg-gate Linux-only code there
+  rather than introducing a cross-platform implementation.
 - `make start-tunnel` needs the static UI at `web/dist/static/start-tunnel/index.html`;
   the Makefile target chains the UI build → `compress-uis.sh` automatically.
 - TS bindings for the tunnel API regenerate via `make start-core-ts-bindings` into
@@ -78,7 +74,7 @@ Notes:
   numbered migration in `tunnel/migrations/` and registration in `mod.rs`.
 - **Runtime deps.** The daemon shells out to `wireguard-tools`, `iptables`,
   `nftables`, `conntrack`, `iproute2`, and `procps`; the `.deb` declares them. Adding a new external
-  tool means updating the `DEPENDS=` list in the Makefile `start-tunnel-deb` target.
+  tool means updating the `DEPENDS=` list in the `build.mk` `start-tunnel-deb` target.
 - **Port forwarding is Layer 3/4.** It rewrites IP headers (DNAT) and does not
   decrypt payloads — keep it that way; TLS terminates at the user's service.
 - **CLI and UI share `tunnel_api()`.** Add a method once in `api.rs`; both
@@ -103,3 +99,7 @@ rest of the Angular workspace via `make web-format`.
 
 The user-facing mdbook lives in `docs/src/`. Reference: `docs/src/cli-reference.md`,
 `installing.md`, `subnets.md`, `devices.md`, `published-ports.md`.
+
+## Runtime verification
+
+Build the `.deb` and install it on a Debian 13 test VPS or local VM.

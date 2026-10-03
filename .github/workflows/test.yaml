@@ -98,6 +98,13 @@ jobs:
           setup-docker: 'false'
           setup-sccache: 'false'
 
+      - name: Validate upload action
+        run: |
+          npm --prefix .github/actions/upload-each ci
+          npm --prefix .github/actions/upload-each test
+          npm --prefix .github/actions/upload-each run build
+          test -z "$(git status --porcelain --untracked-files=all -- .github/actions/upload-each/dist)"
+
       - name: Build And Run Tests
         run: make test
 

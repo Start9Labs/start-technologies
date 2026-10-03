@@ -437,7 +437,7 @@ mod tests {
     /// the new generation still resolves everything.
     #[test]
     fn spill_then_reshard_preserves_all_entries() {
-        let tmp = tempdir::TempDir::new("dirtest").unwrap();
+        let tmp = tempfile::TempDir::with_prefix("dirtest").unwrap();
         let c = ctrl(tmp.path());
         let dir = Inode(2);
         let mut dc = DirectoryContents::new();
@@ -514,7 +514,7 @@ mod tests {
     /// repairs a deliberately corrupted cached count.
     #[test]
     fn counts_saturate_and_recompute() {
-        let tmp = tempdir::TempDir::new("dirtest").unwrap();
+        let tmp = tempfile::TempDir::with_prefix("dirtest").unwrap();
         let c = ctrl(tmp.path());
         let dir = Inode(3);
         let mut dc = DirectoryContents::new();

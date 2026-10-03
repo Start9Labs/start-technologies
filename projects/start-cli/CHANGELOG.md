@@ -11,6 +11,10 @@ or the CLI's externally observable behavior.
 
 ## [2.2.0]
 
+### Security
+
+- **Update shared dependencies with security fixes.** Replace the unmaintained YAML library while preserving configuration formats.
+
 ### Added
 
 - **`server trust-ca --cert <PEM>` adds a CA root to the server's host trust store.** Pass

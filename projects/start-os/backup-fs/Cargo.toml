@@ -50,7 +50,7 @@ zstd = "0.13"
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 oneshot = "0.1.8"
-tempdir = "0.3.7"
+tempfile = "3.23"
 test-log = "0.2.16"
 tokio = { version = "1.38.0", features = ["fs", "rt", "macros"] }
 

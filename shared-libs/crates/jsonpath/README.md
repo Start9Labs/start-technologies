@@ -34,7 +34,7 @@ maintained here as first-party code, with no intent to sync back upstream.
 
 <details><summary><b>jsonpath_lib crate</b></summary>
 
-Go to [`jsonpath_lib` creates.io](https://crates.io/crates/jsonpath_lib)
+Use the in-tree `jsonpath_lib` path dependency; the upstream crates.io release is a different implementation.
 
 ```rust
 extern crate jsonpath_lib as jsonpath;
@@ -388,7 +388,10 @@ assert_eq!(ret, json!({
 
 [Rust - Other Examples](https://github.com/freestrings/jsonpath/wiki/rust-examples)
 
-## Javascript API
+## Historical upstream JavaScript API
+
+The examples below describe the upstream `jsonpath-wasm` npm package, not a
+Start9-published artifact. Monorepo consumers use the Rust crate.
 
 <details><summary><b>npm package</b></summary>
 
@@ -672,9 +675,7 @@ console.log(
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how it's built (parse → walk flow, public API, place in the
   monorepo).
-- [CONTRIBUTING.md](CONTRIBUTING.md) — toolchain, build/test/format, conventions.
-- [AGENTS.md](AGENTS.md) — AI/dev operating rules and layout map (`CLAUDE.md` is a one-line
-  `@AGENTS.md` import).
+- [AGENTS.md](AGENTS.md) — toolchain, build/test/format, conventions.
 
 Licensed under MIT — see [LICENSE](LICENSE). Originally written by Changseok Han as
 [freestrings/jsonpath](https://github.com/freestrings/jsonpath), Copyright (c) 2019 Changseok Han.

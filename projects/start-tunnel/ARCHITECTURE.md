@@ -85,8 +85,8 @@ The `start-tunnel` CLI builds an `rpc-toolkit` `CliApp` against the same
    DNAT rules so the VPS's public IP:port maps to the device's WireGuard IP:port.
 4. Optionally requests an upstream mapping from the network gateway via
    IGD (`igd.rs`) or PCP (`pcp.rs`).
-5. Inbound packets are NAT-forwarded at Layer 3/4 — payloads are never
-   inspected, so TLS terminates at the destination service, not the tunnel.
+5. Inbound packets are NAT-forwarded at Layer 3/4 — TLS is not terminated by the tunnel. Hostname forwards inspect ClientHello
+   SNI to choose a destination, then relay the connection; TLS terminates at the destination service, not the tunnel.
 
 ## Frontend
 
@@ -120,5 +120,4 @@ chains it) → `projects/start-tunnel/web/dist/raw/start-tunnel/` → compressed
 ## Further reading
 
 - [`README.md`](README.md) — what StartTunnel is and how to use it.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — building, testing, and changing it.
-- [`AGENTS.md`](AGENTS.md) — rules for AI agents working in this scope.
+- [`AGENTS.md`](AGENTS.md) — building, testing, and changing it.

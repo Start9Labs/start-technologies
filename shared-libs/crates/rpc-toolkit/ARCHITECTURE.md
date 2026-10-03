@@ -97,5 +97,4 @@ preserves the binding opt-out regardless of decoration order. See
 ## Further reading
 
 - [README.md](README.md) — what the crate is and a usage sketch.
-- [AGENTS.md](AGENTS.md) — file map and contributor gotchas.
-- [AGENTS.md](AGENTS.md) — build/test/format and PR conventions.
+- [AGENTS.md](AGENTS.md) — file map and build/test/format workflow.

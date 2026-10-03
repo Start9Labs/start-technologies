@@ -1,6 +1,6 @@
 # Backend Architecture
 
-Rust workspace powering the StartWRT router daemon and CLI. Three crates: `ctrl` (RPC server + CLI), `uciedit` (UCI parser library), `uciedit_macros` (proc macros for typed UCI sections).
+Rust crates powering the StartWRT router daemon and CLI. Three crates: `ctrl` (RPC server + CLI), `uciedit` (UCI parser library), `uciedit_macros` (proc macros for typed UCI sections).
 
 ## Transport
 

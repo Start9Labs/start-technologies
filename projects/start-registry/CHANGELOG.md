@@ -4,6 +4,8 @@ All notable changes to `start-registry` (the Start Registry server) are document
 
 ## [1.1.1]
 
+- **Update shared dependencies with security fixes** and replace the unmaintained YAML parser.
+
 - **Each release's container image is published as `ghcr.io/start9labs/startos-registry:v<version>`**, the same image alpha ran for that commit.
 
 - **Fork pull requests validate the registry's multi-architecture container build.** Manual CI dispatches build the selected architecture.

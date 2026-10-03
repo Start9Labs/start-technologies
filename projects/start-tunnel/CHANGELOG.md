@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.3.1]
 
+### Security
+
+- **Update the web interface and shared dependencies with security fixes**, including Angular and DOMPurify, and replace the unmaintained YAML parser.
+
 ### Fixed
 
 - **Devices can reach their own services through published SNI hostnames**,

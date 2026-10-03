@@ -312,7 +312,7 @@ Passing a client TSval through to the backend can violate PAWS monotonicity
   team accepts the bpf-linker/nightly build dependency. BPF bytecode is
   target-independent, so one embedded object serves all host architectures.
   Decision point for the implementer + maintainer; whichever is chosen must
-  be added to the CI build image and `projects/start-tunnel/CONTRIBUTING.md`.
+  be added to the CI build image and `projects/start-tunnel/AGENTS.md`.
 - Config: a tunnel db setting (`/settings/kernel-handoff`, default **off**
   for the first release; flip after soak on tunnel-chad), surfaced in CLI
   only (`start-tunnel settings ...`) — i18n for any user-facing strings, all

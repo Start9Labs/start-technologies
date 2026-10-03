@@ -12,8 +12,6 @@ Topical references: [rpc-toolkit.md](rpc-toolkit.md), [patchdb.md](patchdb.md),
 [s9pk-structure.md](s9pk-structure.md), [exver.md](exver.md), [VERSION_BUMP.md](VERSION_BUMP.md),
 [policy-routing.md](policy-routing.md).
 
-**Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
-
 ## Layout
 
 - This is a library; entrypoints live in `src/bins/` and are selected by each product wrapper's

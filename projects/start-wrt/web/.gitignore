@@ -38,7 +38,7 @@ testem.log
 /typings
 
 # Generated from config-sample.json by web/update-config.sh (prod)
-# or web/build-config.js (dev). See web/CONTRIBUTING.md.
+# or web/build-config.js (dev). See web/AGENTS.md.
 /config.json
 
 # System files

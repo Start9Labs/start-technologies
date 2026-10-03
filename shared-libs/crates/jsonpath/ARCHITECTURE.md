@@ -69,6 +69,5 @@ examples.
 ## Further reading
 
 - [README.md](README.md) — usage and API examples (Rust, plus the JS/WASM bindings inherited from the original project).
-- [CONTRIBUTING.md](CONTRIBUTING.md) — toolchain, build/test/format, conventions.
-- [AGENTS.md](AGENTS.md) — agent operating rules and layout map.
+- [AGENTS.md](AGENTS.md) — toolchain, build/test/format, conventions.
 - Sibling: [`imbl-value`](../imbl-value) — the value types this engine queries.

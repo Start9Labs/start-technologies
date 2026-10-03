@@ -68,6 +68,4 @@ MIT. See the `license` field in `Cargo.toml`.
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how the crate works internally.
-- [AGENTS.md](AGENTS.md) — build, test, format, and PR conventions.
-- [AGENTS.md](AGENTS.md) — file map and gotchas for agents (`CLAUDE.md` is a one-line `@AGENTS.md`
-  import).
+- [AGENTS.md](AGENTS.md) — file map and build/test/format workflow.

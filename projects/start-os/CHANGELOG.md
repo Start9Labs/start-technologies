@@ -10,6 +10,10 @@ for the detail behind its highlights.
 
 ## [0.4.0.2]
 
+### Security
+
+- **Update dependencies with security fixes**, including Angular, DOMPurify, networking libraries, and the service runtime. Replace the unmaintained YAML library while preserving configuration formats.
+
 ### Fixed
 
 - **Large packages sideload successfully in the UI over slow connections.** A failed upload shows an error message.
