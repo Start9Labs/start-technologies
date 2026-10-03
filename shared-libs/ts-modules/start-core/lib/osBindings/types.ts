@@ -1144,10 +1144,12 @@ export type ImageConfig = {
   emulateMissing: boolean
   nvidiaContainer: boolean
 }
-export type ImageConfigInput = {
+export type ImageConfigInput = ImageConfigReprInput
+export type ImageConfigReprInput = {
   source: ImageSourceInput
   arch: string[]
-  emulateMissing: boolean
+  emulateMissing?: boolean | null
+  emulateMissingAs?: string | null
   nvidiaContainer?: boolean
 }
 export type ImageId = string
@@ -1320,13 +1322,13 @@ export type LoginParamsInput = {
 export type LogsParams = {
   limit: number | null
   cursor: string | null
-  boot: number | string
+  boot: number | string | null
   before: boolean
 } & {}
 export type LogsParamsInput = {
   limit?: number | null
   cursor?: string | null
-  boot?: number | string
+  boot?: number | string | null
   before?: boolean
 } & {}
 export type LshwDevice =

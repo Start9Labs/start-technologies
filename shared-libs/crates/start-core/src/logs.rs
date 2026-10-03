@@ -348,7 +348,7 @@ pub struct LogsParams<Extra: FromArgMatches + Args = Empty> {
     cursor: Option<String>,
     #[arg(short = 'b', long = "boot", help = "help.arg.log-boot")]
     #[serde(default)]
-    #[ts(type = "number | string")]
+    #[ts(type = "number | string | null")]
     boot: Option<BootIdentifier>,
     #[arg(
         short = 'B',
@@ -743,46 +743,38 @@ pub async fn follow_logs<Context: AsRef<RpcContinuations>>(
     Ok(LogFollowResponse { start_cursor, guid })
 }
 
-// #[tokio::test]
-// pub async fn test_logs() {
-//     let response = fetch_logs(
-//         // change `tor.service` to an actual journald unit on your machine
-//         // LogSource::Service("tor.service"),
-//         // first run `docker run --name=hello-world.embassy --log-driver=journald hello-world`
-//         LogSource::Container("hello-world".parse().unwrap()),
-//         // Some(5),
-//         None,
-//         None,
-//         // Some("s=1b8c418e28534400856c27b211dd94fd;i=5a7;b=97571c13a1284f87bc0639b5cff5acbe;m=740e916;t=5ca073eea3445;x=f45bc233ca328348".to_owned()),
-//         false,
-//         true,
-//     )
-//     .await
-//     .unwrap();
-//     let serialized = serde_json::to_string_pretty(&response).unwrap();
-//     println!("{}", serialized);
-// }
+#[cfg(test)]
+mod tests {
+    use visit_rs::ts::{Direction, TSVisitor};
 
-// #[tokio::test]
-// pub async fn test_logs() {
-//     let mut cmd = Command::new("journalctl");
-//     cmd.kill_on_drop(true);
+    use super::*;
 
-//     cmd.arg("-f");
-//     cmd.arg("CONTAINER_NAME=hello-world.embassy");
-
-//     let mut child = cmd.stdout(Stdio::piped()).spawn().unwrap();
-//     let out = BufReader::new(
-//         child
-//             .stdout
-//             .take()
-//             .ok_or_else(|| Error::new(eyre!("No stdout available"), crate::ErrorKind::Journald))
-//             .unwrap(),
-//     );
-
-//     let mut journalctl_entries = LinesStream::new(out.lines());
-
-//     while let Some(line) = journalctl_entries.try_next().await.unwrap() {
-//         dbg!(line);
-//     }
-// }
+    #[test]
+    fn log_boot_binding_matches_nullable_serde() {
+        for input in [
+            serde_json::json!({}),
+            serde_json::json!({"boot": null}),
+            serde_json::json!({"boot": -1}),
+            serde_json::json!({"boot": "boot-id"}),
+        ] {
+            let params: LogsParams = serde_json::from_value(input.clone()).unwrap();
+            let output = serde_json::to_value(params).unwrap();
+            assert_eq!(
+                output["boot"],
+                input.get("boot").cloned().unwrap_or_default()
+            );
+        }
+        assert!(serde_json::from_value::<LogsParams>(serde_json::json!({"boot": true})).is_err());
+        for direction in [Direction::Input, Direction::Output] {
+            let mut visitor = TSVisitor::new();
+            visitor.with_direction(direction, |visitor| visitor.append_type::<LogsParams>());
+            let schema = visitor.into_module("Logs").unwrap();
+            let field = if direction == Direction::Input {
+                "\"boot\"?:(number | string | null)"
+            } else {
+                "\"boot\":(number | string | null)"
+            };
+            assert!(schema.contains(field), "{schema}");
+        }
+    }
+}

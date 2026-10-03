@@ -581,7 +581,7 @@ export type Api = {
           _PARAMS: {
             limit?: number | null
             cursor?: string | null
-            boot?: number | string
+            boot?: number | string | null
             before?: boolean
           } & PackageIdParamsInput
           _RETURN: LogResponse
@@ -915,7 +915,7 @@ export type Api = {
           _PARAMS: {
             limit?: number | null
             cursor?: string | null
-            boot?: number | string
+            boot?: number | string | null
             before?: boolean
           } & {}
           _RETURN: LogResponse
@@ -925,7 +925,7 @@ export type Api = {
           _PARAMS: {
             limit?: number | null
             cursor?: string | null
-            boot?: number | string
+            boot?: number | string | null
             before?: boolean
           } & {}
           _RETURN: LogResponse

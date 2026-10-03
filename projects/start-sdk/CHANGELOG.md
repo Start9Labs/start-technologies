@@ -14,6 +14,8 @@
   input types. `RPC` exposes generated method, parameter and result inference.
   Select concrete request/result members through `RPC` instead of the standalone
   generic `T.RecoverySource<Password>` and `T.RegistryAsset<Commitment>` aliases.
+  Generated wire declarations no longer include Rust field documentation in
+  editor hovers.
 - **Breaking — effects return their actual wire results.** `getContainerIp`
   may return `null` for an unavailable dependency, `getSslCertificate` returns a
   variable-length string array, and `mount` resolves to `null`, not a path.
