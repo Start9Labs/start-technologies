@@ -63,10 +63,7 @@ mod non_fuse_tests {
 
     #[test]
     fn handler_read_past_eof_returns_no_bytes() {
-        let data = tempfile::Builder::new()
-            .prefix("backupfs_data")
-            .tempdir()
-            .unwrap();
+        let data = TempDir::with_prefix("backupfs_data").unwrap();
         let ctrl = controller(&data);
         let inode = ctrl.next_inode().unwrap();
         let mut attrs = InodeAttributes::new(inode, None, FileData::Inline(b"0123456789".to_vec()));
@@ -110,10 +107,7 @@ mod non_fuse_tests {
 
     #[test]
     fn handler_empty_io_leaves_the_file_untouched() {
-        let data = tempfile::Builder::new()
-            .prefix("backupfs_data")
-            .tempdir()
-            .unwrap();
+        let data = TempDir::with_prefix("backupfs_data").unwrap();
         let ctrl = controller(&data);
         let inode = create_file(&ctrl, b"0123456789");
         let mut handler = Handler::new(ctrl);
@@ -135,10 +129,7 @@ mod non_fuse_tests {
 
     #[test]
     fn handler_copy_range_reports_a_partial_read() {
-        let data = tempfile::Builder::new()
-            .prefix("backupfs_data")
-            .tempdir()
-            .unwrap();
+        let data = TempDir::with_prefix("backupfs_data").unwrap();
         let ctrl = controller(&data);
         let source_bytes = bytes(3 * CHUNK_SIZE as usize);
         let source = create_file(&ctrl, &source_bytes);
@@ -181,10 +172,7 @@ mod non_fuse_tests {
 
     #[test]
     fn handler_copy_range_counts_a_partial_spill() {
-        let data = tempfile::Builder::new()
-            .prefix("backupfs_data")
-            .tempdir()
-            .unwrap();
+        let data = TempDir::with_prefix("backupfs_data").unwrap();
         let ctrl = controller(&data);
         let source_bytes = bytes(17 * CHUNK_SIZE as usize);
         let source = create_file(&ctrl, &source_bytes);
@@ -219,10 +207,7 @@ mod non_fuse_tests {
 
     #[test]
     fn handler_write_preserves_a_partial_failed_migration() {
-        let data = tempfile::Builder::new()
-            .prefix("backupfs_data")
-            .tempdir()
-            .unwrap();
+        let data = TempDir::with_prefix("backupfs_data").unwrap();
         let ctrl = controller(&data);
         let inode = create_file(&ctrl, &vec![0xab; 200 * 1024]);
         let blocked = ctrl.resolve_block_path(ContentId::from(inode), 0);

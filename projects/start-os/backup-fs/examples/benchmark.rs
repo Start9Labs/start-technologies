@@ -24,10 +24,7 @@ use fuser::{Config, MountOption, Session, SessionACL};
 const MIB: usize = 1024 * 1024;
 
 fn with_mount(data: &Path, body: impl FnOnce(&Path)) {
-    let mnt = tempfile::Builder::new()
-        .prefix("bench_mnt")
-        .tempdir()
-        .unwrap();
+    let mnt = tempfile::TempDir::with_prefix("bench_mnt").unwrap();
     let opt = vec![
         MountOption::FSName("backup-fs".to_string()),
         MountOption::AutoUnmount,
@@ -84,10 +81,7 @@ fn count_dir_files(dir: &Path) -> (usize, u64) {
 }
 
 fn main() {
-    let data = tempfile::Builder::new()
-        .prefix("bench_data")
-        .tempdir()
-        .unwrap();
+    let data = tempfile::TempDir::with_prefix("bench_data").unwrap();
     println!("backup-fs benchmark (block store + ChaCha20 + Reed-Solomon ECC)\n");
 
     with_mount(data.path(), |mnt| {

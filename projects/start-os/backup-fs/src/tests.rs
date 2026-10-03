@@ -57,10 +57,7 @@ fn with_backupfs(
     func: impl FnOnce(&Path),
     file_size_padding: Option<f64>,
 ) {
-    let mnt = tempfile::Builder::new()
-        .prefix("backupfs_mnt")
-        .tempdir()
-        .unwrap();
+    let mnt = TempDir::with_prefix("backupfs_mnt").unwrap();
     let mut config = Config::default();
     // No AutoUnmount: with 0.17's spawn(), the auto-unmount helper deadlocks
     // an explicit umount. umount_and_join (and BackgroundSession's Drop, which
@@ -150,10 +147,7 @@ fn content_files(data: &Path) -> usize {
 
 #[test_log::test]
 fn write_file() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(
         data.path(),
         "ohea".to_owned(),
@@ -176,10 +170,7 @@ fn write_file() {
 
 #[test_log::test]
 fn write_directory() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(
         data.path(),
         "ohea".to_owned(),
@@ -198,10 +189,7 @@ fn write_directory() {
 
 #[test_log::test]
 fn preserves_file() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(
         data.path(),
         "ohea".to_owned(),
@@ -222,10 +210,7 @@ fn preserves_file() {
 
 #[test_log::test]
 fn preserves_directory() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(
         data.path(),
         "ohea".to_owned(),
@@ -252,10 +237,7 @@ fn preserves_directory() {
 
 #[test_log::test]
 fn checksum() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(data.path(), "ohea".to_owned(), |_mnt| {}, None);
     let res = BackupFS::new(BackupFSOptions {
         data_dir: data.path().to_owned(),
@@ -273,10 +255,7 @@ fn checksum() {
 
 #[test_log::test]
 fn change_password() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(
         data.path(),
         "ohea".to_owned(),
@@ -312,10 +291,7 @@ fn change_password() {
 #[test_log::test]
 fn write_one_file_async() {
     use tokio::fs;
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs_async(
         data.path(),
         "ohea".to_owned(),
@@ -346,10 +322,7 @@ fn write_one_file_async() {
 #[test_log::test]
 fn write_many_files_async() {
     use tokio::fs;
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs_async(
         data.path(),
         "ohea".to_owned(),
@@ -394,10 +367,7 @@ fn write_many_files_async() {
 /// is in a half-deleted state.
 #[test_log::test]
 fn rmrf_leaves_no_orphans() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
 
     // Phase 1: create nested tree + files
     with_backupfs(
@@ -481,10 +451,7 @@ fn rmrf_leaves_no_orphans() {
 /// from the prior session's flush.
 #[test_log::test]
 fn rmrf_after_remount_updates_root() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
 
     with_backupfs(
         data.path(),
@@ -550,10 +517,7 @@ fn rmrf_after_remount_updates_root() {
 /// has no way to recover if cleanup is impossible.
 #[test_log::test]
 fn rmdir_heals_stale_parent_reference() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
 
     with_backupfs(
         data.path(),
@@ -627,10 +591,7 @@ fn rmdir_heals_stale_parent_reference() {
 /// the parent's listing AND the content file is reaped.
 #[test_log::test]
 fn unlink_file_after_remount() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
 
     with_backupfs(
         data.path(),
@@ -680,10 +641,7 @@ fn unlink_file_after_remount() {
 /// case: here gc_inode should find the disk file and remove it.
 #[test_log::test]
 fn rmdir_after_remount_updates_parent() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
 
     with_backupfs(
         data.path(),
@@ -739,10 +697,7 @@ fn rmdir_after_remount_updates_parent() {
 /// dirty-cache save racing a stale parent snapshot.
 #[test_log::test]
 fn rmdir_updates_parent_listing() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(
         data.path(),
         "ohea".to_owned(),
@@ -797,10 +752,7 @@ fn rmdir_updates_parent_listing() {
 fn sequential_writes_preserve_order() {
     const WRITES: usize = 64;
     const BLOCK: usize = 4096;
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(
         data.path(),
         "ohea".to_owned(),
@@ -830,10 +782,7 @@ fn sequential_writes_preserve_order() {
 /// Regression test for blocks being reported in 4096-byte units.
 #[test_log::test]
 fn stat_blocks_units() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(
         data.path(),
         "ohea".to_owned(),
@@ -873,10 +822,7 @@ fn stat_blocks_units() {
 /// truncation, and partial-flush bugs.
 #[test_log::test]
 fn large_file_integrity() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(
         data.path(),
         "ohea".to_owned(),
@@ -899,10 +845,7 @@ fn large_file_integrity() {
 /// boundaries), verify the complete file.
 #[test_log::test]
 fn random_access_writes() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(
         data.path(),
         "ohea".to_owned(),
@@ -948,10 +891,7 @@ fn random_access_writes() {
 /// Persist, remount, and verify data integrity — catches flush/Drop bugs.
 #[test_log::test]
 fn large_file_persists_across_remount() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let size: usize = 2 * 1024 * 1024 + 3;
 
     with_backupfs(
@@ -981,10 +921,7 @@ fn large_file_persists_across_remount() {
 /// unchanged regions are preserved and overwritten regions have new data.
 #[test_log::test]
 fn partial_overwrite_preserves_surrounding_data() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(
         data.path(),
         "ohea".to_owned(),
@@ -1037,10 +974,7 @@ fn partial_overwrite_preserves_surrounding_data() {
 /// ENOENT was the reported symptom.
 #[test_log::test]
 fn rename_over_existing_resolves() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(
         data.path(),
         "ohea".to_owned(),
@@ -1099,10 +1033,7 @@ fn rename_over_existing_resolves() {
 /// users actually run into.
 #[test_log::test]
 fn rename_over_existing_with_siblings_across_remounts() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
 
     with_backupfs(
         data.path(),
@@ -1175,10 +1106,7 @@ fn rename_over_existing_with_siblings_across_remounts() {
 /// leave exactly one resolvable entry.
 #[test_log::test]
 fn rename_over_existing_many_rounds() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(
         data.path(),
         "ohea".to_owned(),
@@ -1233,10 +1161,7 @@ fn rename_over_existing_many_rounds() {
 /// no future backup can write to it.
 #[test_log::test]
 fn rename_over_stale_parent_reference_recovers() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
 
     with_backupfs(
         data.path(),
@@ -1313,10 +1238,7 @@ fn rename_over_stale_parent_reference_recovers() {
 fn fsync_on_dirfd_reaches_handler_and_flushes() {
     use std::os::fd::AsRawFd;
     use std::sync::atomic::Ordering;
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let before = crate::FSYNCDIR_CALL_COUNT.load(Ordering::Relaxed);
     with_backupfs(
         data.path(),
@@ -1345,10 +1267,7 @@ fn fsync_on_dirfd_reaches_handler_and_flushes() {
 /// this sequence loses data on clean unmount.
 #[test_log::test]
 fn rename_immediately_before_unmount() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
 
     with_backupfs(
         data.path(),
@@ -1406,10 +1325,7 @@ fn rename_immediately_before_unmount() {
 /// atomic save and resumes in a fresh mount.
 #[test_log::test]
 fn rename_over_existing_across_remount() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(
         data.path(),
         "ohea".to_owned(),
@@ -1514,10 +1430,7 @@ fn sha256_file(path: &Path) -> Vec<u8> {
 /// unlike char/block devices).
 #[test_log::test]
 fn mkfifo_persists_across_remount() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(
         data.path(),
         "ohea".to_owned(),
@@ -1567,10 +1480,7 @@ fn char_device_rdev_roundtrip() {
 /// the file still reads back byte-for-byte.
 #[test_log::test]
 fn ecc_recovers_corrupted_block() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let size = 2 * 1024 * 1024usize; // > 1 MiB → block-backed (has block files)
     let mut payload = vec![0u8; size];
     pattern_fill(0, &mut payload);
@@ -1612,10 +1522,7 @@ fn ecc_recovers_corrupted_block() {
 /// disk — the property that makes rsync/rclone incremental copies cheap.
 #[test_log::test]
 fn incremental_overwrite_touches_one_block() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let size = 3 * 1024 * 1024usize; // exactly 3 blocks
     let mut payload = vec![0u8; size];
     pattern_fill(0, &mut payload);
@@ -1679,10 +1586,7 @@ const CHUNK_OFFSET: u64 = crate::blockstore::CHUNK_SIZE;
 /// blocks: holes occupy no block files on disk and read back as zeros.
 #[test_log::test]
 fn sparse_file_omits_hole_blocks() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let total = 3 * 1024 * 1024u64;
 
     let ino = capture(data.path(), "ohea", move |mnt| {
@@ -1737,10 +1641,7 @@ fn sparse_file_omits_hole_blocks() {
 /// while the block that was never read comes back as the hole it now is.
 #[test_log::test]
 fn repeated_reads_in_one_block_decode_it_once() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let chunk = CHUNK_OFFSET as usize;
     let mut payload = vec![0u8; 2 * chunk];
     pattern_fill(0, &mut payload);
@@ -1788,10 +1689,7 @@ fn repeated_reads_in_one_block_decode_it_once() {
 /// file's lock and, once the file is closed, the whole session's.
 #[test_log::test]
 fn read_past_a_short_pending_write_reads_zeros() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let chunk = CHUNK_OFFSET;
 
     with_backupfs(
@@ -1835,10 +1733,7 @@ fn read_past_a_short_pending_write_reads_zeros() {
 /// written it out and emptied the dirty map.
 #[test_log::test]
 fn write_supersedes_a_previously_read_block() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let mut payload = vec![0u8; 2 * CHUNK_OFFSET as usize];
     pattern_fill(0, &mut payload);
 
@@ -1883,10 +1778,7 @@ fn write_supersedes_a_previously_read_block() {
 /// next flush, so growing the file back reads that region as a hole.
 #[test_log::test]
 fn truncate_below_a_read_block_then_grow_reads_zeros() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let chunk = CHUNK_OFFSET;
     let mut payload = vec![0u8; 2 * chunk as usize];
     pattern_fill(0, &mut payload);
@@ -1929,10 +1821,7 @@ fn truncate_below_a_read_block_then_grow_reads_zeros() {
 /// backup, and the damaged copy should self-heal on the next mount.
 #[test_log::test]
 fn superblock_survives_primary_loss_and_self_heals() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(
         data.path(),
         "ohea".to_owned(),
@@ -1987,10 +1876,7 @@ fn superblock_survives_primary_loss_and_self_heals() {
 /// path added to bound dirty memory under FOPEN_DIRECT_IO.
 #[test_log::test]
 fn large_file_spills_and_stays_intact() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     // 40 MiB > the 16 MiB default write buffer → forces several spills.
     let size = 40 * 1024 * 1024usize;
     let mut buf = vec![0u8; size];
@@ -2043,10 +1929,7 @@ fn large_file_spills_and_stays_intact() {
 /// removes exactly one entry; and rm -rf reaps every bucket file.
 #[test_log::test]
 fn large_directory_spills_and_stays_consistent() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let n = 2500usize; // > the 1024 spill threshold → spills
 
     with_backupfs(
@@ -2122,10 +2005,7 @@ fn large_directory_spills_and_stays_consistent() {
 /// rename-over-existing — all must keep the entries resolvable and persist.
 #[test_log::test]
 fn spilled_directory_rename_paths() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let n = 1500usize; // spills
 
     with_backupfs(
@@ -2179,10 +2059,7 @@ fn spilled_directory_rename_paths() {
 /// empty bytes — the file read back as zeros.
 #[test_log::test]
 fn inline_small_file_survives_fsync_and_remount() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(
         data.path(),
         "ohea".to_owned(),
@@ -2221,10 +2098,7 @@ fn inline_small_file_survives_fsync_and_remount() {
 /// and reads back correctly live and across a remount.
 #[test_log::test]
 fn file_grows_from_inline_to_blocks() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let total = 3 * 1024 * 1024usize; // > 1 MiB → block-backed
     let mut buf = vec![0u8; total];
     pattern_fill(0, &mut buf);
@@ -2275,10 +2149,7 @@ fn file_grows_from_inline_to_blocks() {
 /// reaped on delete.
 #[test_log::test]
 fn medium_file_is_packed_not_blocked() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let size = 64 * 1024usize; // 64 KiB ∈ (4 KiB, 1 MiB] → packed
     let mut buf = vec![0u8; size];
     pattern_fill(0, &mut buf);
@@ -2332,10 +2203,7 @@ fn medium_file_is_packed_not_blocked() {
 /// stale packed extent is dropped.
 #[test_log::test]
 fn packed_grows_to_blocks() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let total = 3 * 1024 * 1024usize; // > 1 MiB → must end up block-backed
     let mut buf = vec![0u8; total];
     pattern_fill(0, &mut buf);
@@ -2398,10 +2266,7 @@ fn segment_bytes(data: &Path) -> u64 {
 /// surviving files relocate intact (verbatim) and still read correctly.
 #[test_log::test]
 fn compaction_reclaims_dead_space() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let n = 220usize; // ~14 MiB of 64 KiB files → spans multiple 8 MiB segments
     let payload = |i: usize| {
         let mut b = vec![0u8; 64 * 1024];
@@ -2484,10 +2349,7 @@ fn segment_names(data: &Path) -> Vec<String> {
 /// nothing dead and leaves every segment untouched.
 #[test_log::test]
 fn idle_remount_does_not_recompact_live_packed() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let n = 220usize; // > one 8 MiB segment of 64 KiB packed files
     with_backupfs(
         data.path(),
@@ -2559,10 +2421,7 @@ fn compression_shrinks_compressible_content() {
         .cycle()
         .take(2 * 1024 * 1024)
         .collect();
-    let data_log = tempfile::Builder::new()
-        .prefix("backupfs_log")
-        .tempdir()
-        .unwrap();
+    let data_log = TempDir::with_prefix("backupfs_log").unwrap();
     with_backupfs(
         data_log.path(),
         "ohea".to_owned(),
@@ -2585,10 +2444,7 @@ fn compression_shrinks_compressible_content() {
         use rand::Rng;
         rand::rand_core::UnwrapErr(rand::rng()).fill_bytes(&mut rnd);
     }
-    let data_jpg = tempfile::Builder::new()
-        .prefix("backupfs_jpg")
-        .tempdir()
-        .unwrap();
+    let data_jpg = TempDir::with_prefix("backupfs_jpg").unwrap();
     with_backupfs(
         data_jpg.path(),
         "ohea".to_owned(),
@@ -2622,10 +2478,7 @@ fn compression_shrinks_compressible_content() {
 /// cache is pure Handler RAM and is lost — exactly what a crash discards.
 #[test_log::test]
 fn packed_to_blocks_on_close_survives_crash_before_flush() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
 
     // The clean unmount makes the packed inode and extent durable.
     let small = vec![0xABu8; 200 * 1024];
@@ -2728,10 +2581,7 @@ fn measure_compression_ratio() {
     ];
     let logical: usize = files.iter().map(|(_, d)| d.len()).sum();
 
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_ratio")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_ratio").unwrap();
     let files_for_write = files.clone();
     with_backupfs(
         data.path(),
@@ -2775,10 +2625,7 @@ fn measure_compression_ratio() {
 #[test_log::test]
 fn superblock_rejects_newer_format_version() {
     use crate::error::BkfsErrorKind;
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     // Create a fresh, valid store.
     crate::ctrl::Controller::new(opts(data.path(), "ohea")).unwrap();
 
@@ -2814,10 +2661,7 @@ fn open_ctrl_err(data: &Path, password: &str) -> crate::error::BkfsError {
 #[test_log::test]
 fn superblock_wrong_password_is_bad_checksum() {
     use crate::error::BkfsErrorKind;
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     crate::ctrl::Controller::new(opts(data.path(), "correct horse")).unwrap();
 
     let err = open_ctrl_err(data.path(), "wrong");
@@ -2832,10 +2676,7 @@ fn superblock_wrong_password_is_bad_checksum() {
 #[test_log::test]
 fn legacy_cryptinfo_store_is_refused() {
     use crate::error::BkfsErrorKind;
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     fs::write(data.path().join("cryptinfo"), b"legacy unversioned header").unwrap();
 
     let err = open_ctrl_err(data.path(), "ohea");
@@ -2853,10 +2694,7 @@ fn legacy_cryptinfo_store_is_refused() {
 #[test_log::test]
 fn superblock_change_password_persists() {
     use crate::error::BkfsErrorKind;
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     {
         let ctrl = crate::ctrl::Controller::new(opts(data.path(), "old-pass")).unwrap();
         ctrl.change_password("new-pass").unwrap();
@@ -2878,10 +2716,7 @@ fn superblock_change_password_persists() {
 #[test_log::test]
 fn missing_superblock_over_existing_data_is_refused() {
     use crate::error::BkfsErrorKind;
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     // Create a populated store (writes superblock + segments/contents).
     with_backupfs(
         data.path(),
@@ -2916,10 +2751,7 @@ fn missing_superblock_over_existing_data_is_refused() {
 fn copy_file_range_that_fails_partway_reports_the_bytes_it_moved() {
     use std::os::unix::io::AsRawFd;
 
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let size = 3 * CHUNK_OFFSET as usize;
     let src_bytes: Vec<u8> = (0..size as u64).map(pattern_byte).collect();
 
@@ -2984,10 +2816,7 @@ fn copy_file_range_that_fails_partway_reports_the_bytes_it_moved() {
 fn copy_file_range_counts_only_complete_writes_before_an_unaligned_error() {
     use std::os::unix::io::AsRawFd;
 
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let size = 2 * CHUNK_OFFSET as usize;
     let src_bytes: Vec<u8> = (0..size as u64).map(pattern_byte).collect();
     let dest_ino = {
@@ -3044,10 +2873,7 @@ fn copy_file_range_counts_only_complete_writes_before_an_unaligned_error() {
 
 #[test_log::test]
 fn read_starting_past_eof_returns_no_bytes() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
 
     with_backupfs(
         data.path(),
@@ -3080,10 +2906,7 @@ fn copy_file_range_spanning_chunks_lands_at_the_right_offsets() {
     use std::os::unix::fs::FileExt;
     use std::os::unix::io::AsRawFd;
 
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let size = (3 * CHUNK_OFFSET + 4096) as usize;
     let dest_offset = CHUNK_OFFSET + 7;
 
@@ -3139,10 +2962,7 @@ fn copy_file_range_spanning_chunks_lands_at_the_right_offsets() {
 
 #[test_log::test]
 fn empty_reads_and_writes_leave_a_file_untouched() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
     let ino = capture(data.path(), "ohea", |mnt| {
         fs::write(mnt.join("f.bin"), b"0123456789").unwrap();
         fs::metadata(mnt.join("f.bin")).unwrap().ino()
@@ -3171,10 +2991,7 @@ fn empty_reads_and_writes_leave_a_file_untouched() {
 
 #[test_log::test]
 fn a_write_that_fails_after_a_tier_migration_leaves_the_file_readable() {
-    let data = tempfile::Builder::new()
-        .prefix("backupfs_data")
-        .tempdir()
-        .unwrap();
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
 
     let small = vec![0xABu8; 200 * 1024];
     let ino = {

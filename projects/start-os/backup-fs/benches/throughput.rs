@@ -38,14 +38,8 @@ struct Harness {
 
 impl Harness {
     fn mount() -> Self {
-        let data = tempfile::Builder::new()
-            .prefix("bench_data")
-            .tempdir()
-            .unwrap();
-        let mnt = tempfile::Builder::new()
-            .prefix("bench_mnt")
-            .tempdir()
-            .unwrap();
+        let data = tempfile::TempDir::with_prefix("bench_data").unwrap();
+        let mnt = tempfile::TempDir::with_prefix("bench_mnt").unwrap();
         let fs = BackupFS::new(BackupFSOptions {
             data_dir: data.path().to_owned(),
             setuid_support: false,
