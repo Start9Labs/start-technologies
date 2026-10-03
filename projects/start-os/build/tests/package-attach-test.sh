@@ -12,7 +12,7 @@ attach() {
     "$START_CLI" package attach "$PACKAGE" --name "$NAME" "$@" </dev/null
 }
 
-for batch in {1..16}; do
+for _ in {1..16}; do
     pids=()
     for i in {1..16}; do
         attach -- sh -c 'echo ATTACH_OK' >"$TMP/out.$i" 2>"$TMP/err.$i" &
@@ -39,7 +39,9 @@ attach --user __attach_test_missing_user__ -- sh -c 'echo SHOULD_NOT_RUN' >"$TMP
 rc=$?
 set -e
 [ "$rc" -ne 0 ]
-! grep -q SHOULD_NOT_RUN "$TMP/failure.out"
+if grep -q SHOULD_NOT_RUN "$TMP/failure.out"; then
+    exit 1
+fi
 [ -s "$TMP/failure.err" ]
 
 set +e

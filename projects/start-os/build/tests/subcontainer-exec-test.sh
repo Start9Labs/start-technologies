@@ -22,7 +22,7 @@ run_exec() {
         'test "$PWD" = / && test -f /fixture && test ! -e /bin/start-container && echo EXEC_OK'
 }
 
-for batch in {1..16}; do
+for _ in {1..16}; do
     pids=()
     for i in {1..16}; do
         run_exec >"$TMP/out.$i" 2>"$TMP/err.$i" &
