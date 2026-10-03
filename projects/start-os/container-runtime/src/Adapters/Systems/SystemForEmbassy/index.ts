@@ -20,7 +20,7 @@ import { promisify } from 'node:util'
 import * as U from './oldEmbassyTypes'
 import { MainLoop } from './MainLoop'
 import { z } from '@start9labs/start-sdk'
-import { AddSslOptions } from '@start9labs/start-core/osBindings'
+import { AddSslOptionsInput as AddSslOptions } from '@start9labs/start-core/osBindings'
 import {
   BindOptionsByProtocol,
   MultiHost,
@@ -338,6 +338,7 @@ function convertProperties(
       copyable: value.copyable || false,
       masked: value.masked || false,
       qr: value.qr || false,
+      launchable: null,
       value: value.value,
     }
   }

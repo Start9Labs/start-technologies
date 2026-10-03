@@ -7,7 +7,7 @@ use itertools::Itertools;
 use patch_db::HasModel;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::auth::{AuthKeys, LoginContext, Session, check_password};
 use crate::context::CliContext;
@@ -214,6 +214,7 @@ pub fn auth_api<C: Context>() -> ParentHandler<C> {
 #[derive(Debug, Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct AddKeyParams {
     pub name: InternedString,
     pub key: AnyVerifyingKey,
@@ -243,6 +244,7 @@ pub async fn add_key(
 #[derive(Debug, Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct RemoveKeyParams {
     pub key: AnyVerifyingKey,
 }
@@ -260,6 +262,7 @@ pub async fn list_keys(ctx: TunnelContext) -> Result<AuthKeys, Error> {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[ts(export, namespace = "tunnel")]
 pub struct SetPasswordParams {
     pub password: String,
 }

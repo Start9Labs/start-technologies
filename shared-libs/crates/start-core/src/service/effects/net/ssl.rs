@@ -26,9 +26,9 @@ pub enum Algorithm {
 pub struct GetSslCertificateParams {
     #[ts(type = "string[]")]
     hostnames: BTreeSet<InternedString>,
-    #[ts(optional)]
+
     algorithm: Option<Algorithm>, //"ecdsa" | "ed25519"
-    #[ts(optional)]
+
     callback: Option<CallbackId>,
 }
 pub async fn get_ssl_certificate(
@@ -148,7 +148,7 @@ pub async fn get_ssl_certificate(
 pub struct GetSslKeyParams {
     #[ts(type = "string[]")]
     hostnames: BTreeSet<InternedString>,
-    #[ts(optional)]
+
     algorithm: Option<Algorithm>, //"ecdsa" | "ed25519"
 }
 pub async fn get_ssl_key(

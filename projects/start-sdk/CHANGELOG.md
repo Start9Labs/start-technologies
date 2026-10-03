@@ -8,6 +8,18 @@
 
 ### Changed
 
+- **Breaking — shared types distinguish serde inputs from outputs.** `T.FooInput`
+  describes accepted requests and constructor values; `T.Foo` describes serialized
+  values, including required nullable fields. Action and network builders use
+  input types. `RPC` exposes generated method, parameter and result inference.
+  Select concrete request/result members through `RPC` instead of the standalone
+  generic `T.RecoverySource<Password>` and `T.RegistryAsset<Commitment>` aliases.
+  Generated wire declarations no longer include Rust field documentation in
+  editor hovers.
+- **Breaking — effects return their actual wire results.** `getContainerIp`
+  may return `null` for an unavailable dependency, `getSslCertificate` returns a
+  variable-length string array, and `mount` resolves to `null`, not a path.
+
 - **Breaking — read-only volume and asset mounts are enforced.** Writes through a volume mount declared `readonly: true`, or through any asset mount, fail with `EROFS`. Mount volumes writable wherever the service writes to them. Copy assets that need modification into a writable volume
 
 - **Breaking — `Watchable<A>` takes only the type it reads.** A reader that

@@ -24,8 +24,8 @@ use termion::raw::IntoRawMode;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-use ts_rs::TS;
 use url::Url;
+use visit_rs::ts::TS;
 
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::package::{

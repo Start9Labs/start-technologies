@@ -19,8 +19,10 @@ pub mod ser;
 #[cfg(feature = "arbitrary")]
 mod arbitrary;
 
-#[cfg(feature = "ts-rs")]
-mod ts_rs;
+#[cfg(feature = "ts")]
+visit_rs::impl_ts!(Value => "unknown");
+#[cfg(feature = "ts")]
+visit_rs::impl_ts_map!(InOMap<K,V> where [K: Eq + Clone, V: Clone]);
 
 pub use imbl;
 pub use in_order_map::InOMap;

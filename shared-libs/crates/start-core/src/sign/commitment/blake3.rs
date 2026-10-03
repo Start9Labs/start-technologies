@@ -2,7 +2,7 @@ use blake3::Hash;
 use digest::Update;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWrite;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::CAP_10_MiB;
 use crate::prelude::*;

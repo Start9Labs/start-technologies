@@ -14,7 +14,7 @@ use crate::{CliContext, ServerContext};
 const SSH_DIR: &str = "/etc/dropbear";
 const AUTHORIZED_KEYS: &str = "/etc/dropbear/authorized_keys";
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SshKeyResponse {
     pub algorithm: String,
@@ -49,7 +49,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<SshKeyResponse>, Error> {
     list_keys(Path::new(AUTHORIZED_KEYS)).await
 }
 
-#[derive(Deserialize, Serialize, Parser)]
+#[derive(Deserialize, Serialize, Parser, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct SshKeyAddParams {
@@ -81,7 +81,7 @@ pub async fn add(
     result
 }
 
-#[derive(Deserialize, Serialize, Parser)]
+#[derive(Deserialize, Serialize, Parser, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct SshKeyDeleteParams {

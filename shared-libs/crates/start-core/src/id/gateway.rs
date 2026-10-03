@@ -4,10 +4,10 @@ use std::str::FromStr;
 
 use imbl_value::InternedString;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, TS)]
-#[ts(type = "string")]
+#[ts(export, namespace = ["", "tunnel"], type = "string")]
 pub struct GatewayId(InternedString);
 impl GatewayId {
     pub fn as_str(&self) -> &str {

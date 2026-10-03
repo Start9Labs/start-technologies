@@ -11,7 +11,7 @@ use crate::Error;
 /// - `All(vec)` — require ALL sub-conditions
 /// - `Any(vec)` — require at least one sub-condition
 /// - `Accepted` — already satisfied
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub enum AcceptSigners {
     #[serde(skip)]

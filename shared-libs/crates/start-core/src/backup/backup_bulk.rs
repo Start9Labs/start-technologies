@@ -11,7 +11,7 @@ use imbl_value::InternedString;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use super::PackageBackupReport;
 use super::target::{BackupTargetId, PackageBackupInfo};

@@ -11,6 +11,12 @@ read its own `AGENTS.md` first. `CLAUDE.md` is a one-line `@AGENTS.md` import. S
   Has its own `AGENTS.md` and `ARCHITECTURE.md`, plus topic notes
   (`core-rust-patterns.md`, `i18n-patterns.md`, `patchdb.md`, `rpc-toolkit.md`,
   `s9pk-structure.md`, `exver.md`, `VERSION_BUMP.md`).
+- `crates/rpc-toolkit/` — JSON-RPC handlers, transports, CLI bindings and optional
+  TypeScript method-tree generation.
+- `crates/visit-rs/` and `crates/visit-rs-derive/` — value/type reflection and
+  directional serde JSON-shape traversal. Both start-core and StartWRT use the
+  in-workspace runtime crate; rpc-toolkit uses it for its opt-in `ts` feature.
+- The other first-party Rust crates have their own scoped guidance.
 - `ts-modules/` — shared TypeScript modules; the `@start9labs/shared`
   and `@start9labs/marketplace` Angular libraries plus the non-Angular
   `@start9labs/start-core` (`start-core/` — the SDK's core types/ABI/effects/OS
@@ -18,16 +24,17 @@ read its own `AGENTS.md` first. `CLAUDE.md` is a one-line `@AGENTS.md` import. S
   repo root, where `angular.json` lives). Has its own `AGENTS.md` and
   `ARCHITECTURE.md` (structure and data flow).
 
-## Build & test (run from the repo root)
+## Contributor workflow
 
-Rust (`crates/start-core`) — runs from the root Cargo workspace:
+Build and test Rust by package name from the root workspace. `make start-core-test`
+exercises the backend; `make rpc-toolkit-test` exercises reflection and RPC bindings
+in their supported feature configurations, including generated-module checks with
+the root pinned TypeScript compiler. The latter installs its Node prerequisites
+through the existing workspace make rules.
 
-```bash
-cargo build -p start-core
-cargo check -p start-core            # linux-only locally; CI also builds darwin + musl targets
-cd shared-libs/crates/start-core && ./run-tests.sh
-make start-core-format                     # format the shared Rust crates (rustfmt); make start-core-format-check in CI
-```
+`make start-core-format` and `make start-core-format-check` include every shared
+Rust crate. Native Rust builds are Linux-only; CI also verifies the product target
+matrix. Platform-specific dependencies and APIs must preserve those targets.
 
 Web (`ts-modules/`) — runs from the repo root (the Angular workspace root, where
 `package.json` lives; there is no `package.json` under `ts-modules/`):
@@ -35,7 +42,7 @@ Web (`ts-modules/`) — runs from the repo root (the Angular workspace root, whe
 ```bash
 npm ci
 npm run build:deps                   # builds @start9labs/start-core + patch-db client (required before typecheck/build)
-npm run check                        # typechecks i18n, shared, marketplace, ui, setup, brochure
+npm run check                        # typechecks all projects
 make web-format-check                # prettier check across the Angular workspace (make web-format to write)
 ```
 

@@ -14,7 +14,7 @@ use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 use tokio_rustls::rustls;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::InvalidId;
 use crate::prelude::to_value;

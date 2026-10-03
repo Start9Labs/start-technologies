@@ -24,8 +24,8 @@ use tokio::fs::File;
 use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
 use tokio::sync::{Mutex, OwnedMutexGuard, RwLock, oneshot};
 use tracing::instrument;
-use ts_rs::TS;
 use url::Url;
+use visit_rs::ts::TS;
 
 use crate::shutdown::Shutdown;
 use crate::util::io::{canonicalize, create_file};

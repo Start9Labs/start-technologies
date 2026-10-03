@@ -1,20 +1,15 @@
 import { DOCUMENT, inject, Injectable } from '@angular/core'
 import {
-  DiskInfo,
-  FullKeyboard,
   HttpService,
   isRpcError,
   RpcError,
   RPCOptions,
-  SetLanguageParams,
-  StartOSDiskInfo,
 } from '@start9labs/shared'
-import { T } from '@start9labs/start-core'
+import { RPC } from '@start9labs/start-core'
 import * as jose from 'node-jose'
 import { Observable } from 'rxjs'
 import { webSocket } from 'rxjs/webSocket'
-import { InstallOsParams, InstallOsRes } from '../types'
-import { ApiService } from './api.service'
+import { Api, ApiService, Params } from './api.service'
 
 @Injectable({
   providedIn: 'root',
@@ -33,33 +28,33 @@ export class LiveApiService extends ApiService {
     })
   }
 
-  async echo(params: T.EchoParams, url: string): Promise<string> {
+  async echo(params: Params<'echo'>, url: string): Promise<string> {
     return this.rpcRequest({ method: 'echo', params }, url)
   }
 
   async getStatus() {
-    return this.rpcRequest<T.SetupStatusRes>({
+    return this.rpcRequest({
       method: 'setup.status',
       params: {},
     })
   }
 
   async getPubKey() {
-    const response: jose.JWK.Key = await this.rpcRequest({
+    const response = await this.rpcRequest({
       method: 'setup.get-pubkey',
       params: {},
     })
-    this.pubkey = response
+    this.pubkey = await jose.JWK.asKey(response)
   }
 
-  async setKeyboard(params: FullKeyboard): Promise<null> {
+  async setKeyboard(params: Params<'setup.set-keyboard'>): Promise<null> {
     return this.rpcRequest({
       method: 'setup.set-keyboard',
       params,
     })
   }
 
-  async setLanguage(params: SetLanguageParams): Promise<null> {
+  async setLanguage(params: Params<'setup.set-language'>): Promise<null> {
     return this.rpcRequest({
       method: 'setup.set-language',
       params,
@@ -67,86 +62,89 @@ export class LiveApiService extends ApiService {
   }
 
   async getDisks() {
-    return this.rpcRequest<DiskInfo[]>({
+    return this.rpcRequest({
       method: 'setup.disk.list',
       params: {},
     })
   }
 
-  async installOs(params: InstallOsParams) {
-    return this.rpcRequest<InstallOsRes>({
+  async installOs(params: Params<'setup.install-os'>) {
+    return this.rpcRequest({
       method: 'setup.install-os',
       params,
       timeout: 5 * 60 * 1000,
     })
   }
 
-  async verifyCifs(source: T.VerifyCifsParams) {
-    source.path = source.path.replace('/\\/g', '/')
-    return this.rpcRequest<Record<string, StartOSDiskInfo>>({
+  async verifyCifs(source: Params<'setup.cifs.verify'>) {
+    source.path = normalizeCifsPath(source.path)
+    return this.rpcRequest({
       method: 'setup.cifs.verify',
       params: source,
     })
   }
 
-  async attach(params: T.AttachParams) {
-    return this.rpcRequest<T.SetupProgress>({
+  async attach(params: Params<'setup.attach'>) {
+    return this.rpcRequest({
       method: 'setup.attach',
       params,
     })
   }
 
-  async execute(params: T.SetupExecuteParams) {
+  async execute(params: Params<'setup.execute'>) {
     if (params.recoverySource?.type === 'backup') {
       const target = params.recoverySource.target
       if (target.type === 'cifs') {
-        target.path = target.path.replace('/\\/g', '/')
+        target.path = normalizeCifsPath(target.path)
       }
     }
 
-    return this.rpcRequest<T.SetupProgress>({
+    return this.rpcRequest({
       method: 'setup.execute',
       params,
     })
   }
 
   async initFollowLogs() {
-    return this.rpcRequest<T.LogFollowResponse>({
+    return this.rpcRequest({
       method: 'setup.logs.follow',
       params: {},
     })
   }
 
   async complete() {
-    return this.rpcRequest<T.SetupResult>({
+    return this.rpcRequest({
       method: 'setup.complete',
       params: {},
     })
   }
 
   async exit() {
-    await this.rpcRequest<void>({
+    await this.rpcRequest({
       method: 'setup.exit',
       params: {},
     })
   }
 
   async shutdown() {
-    await this.rpcRequest<void>({
+    await this.rpcRequest({
       method: 'setup.shutdown',
       params: {},
     })
   }
 
   async restart() {
-    await this.rpcRequest<void>({
+    await this.rpcRequest({
       method: 'setup.restart',
       params: {},
     })
   }
 
-  private async rpcRequest<T>(opts: RPCOptions, url?: string): Promise<T> {
-    const res = await this.http.rpcRequest<T>(opts, url)
+  private async rpcRequest<M extends RPC.RpcMethod<Api>>(
+    opts: RPCOptions<RPC.RpcParamType<Api, M>, M>,
+    url?: string,
+  ): Promise<RPC.RpcReturnType<Api, M>> {
+    const res = await this.http.rpcRequest<RPC.RpcReturnType<Api, M>>(opts, url)
     const rpcRes = res.body
 
     if (isRpcError(rpcRes)) {
@@ -155,4 +153,8 @@ export class LiveApiService extends ApiService {
 
     return rpcRes.result
   }
+}
+
+function normalizeCifsPath(path: string): string {
+  return path.replaceAll('\\', '/')
 }

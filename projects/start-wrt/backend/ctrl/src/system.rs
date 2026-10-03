@@ -31,7 +31,7 @@ pub(crate) struct UciPreferences {
     pub remote_access: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 struct SystemInfoResponse {
     version: String,
@@ -43,14 +43,14 @@ struct SystemInfoResponse {
     timezone: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 struct VersionInfo {
     version: String,
     release_notes: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 struct SetPreferencesReq {
     language: Option<String>,
@@ -797,7 +797,7 @@ async fn restart(_ctx: ServerContext) -> Result<(), Error> {
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 struct SetTimezoneParams {
     /// IANA timezone name, e.g. "America/New_York"

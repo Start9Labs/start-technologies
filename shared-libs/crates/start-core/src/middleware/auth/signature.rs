@@ -143,7 +143,7 @@ pub trait SignatureAuthContext: DbContext {
 /// and ephemeral signer stores with any continuations they opened killed.
 /// Obtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]
 /// from inside a db transaction.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, visit_rs::TS)]
 pub struct HasUnenrolledKeys(());
 impl HasUnenrolledKeys {
     /// For call sites already inside a db transaction. Taking the

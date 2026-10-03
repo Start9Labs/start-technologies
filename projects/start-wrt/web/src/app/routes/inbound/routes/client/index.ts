@@ -312,7 +312,7 @@ export default class InboundClients {
               usedIps,
               defaults: {
                 name: peer.name,
-                ip: peer.ip,
+                ip: peer.ip ?? undefined,
                 route_all: newRouteAll,
               },
             } satisfies ClientDialogData,

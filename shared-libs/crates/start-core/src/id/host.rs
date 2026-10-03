@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use imbl_value::InternedString;
 use serde::{Deserialize, Deserializer, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::{Id, InvalidId};
 

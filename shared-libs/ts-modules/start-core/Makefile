@@ -1,4 +1,6 @@
-TS_FILES := $(shell git ls-files lib)
+include ../../../build/source-files.mk
+
+TS_FILES := $(call ls-files, lib)
 
 .PHONY: all dist test check fmt check-fmt clean node_modules
 

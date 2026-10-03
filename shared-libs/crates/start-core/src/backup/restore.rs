@@ -7,7 +7,7 @@ use patch_db::json_ptr::ROOT;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use super::target::BackupTargetId;
 use crate::PackageId;

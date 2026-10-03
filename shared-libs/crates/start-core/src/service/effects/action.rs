@@ -115,7 +115,6 @@ async fn clear_actions(
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct GetActionInputParams {
-    #[ts(optional)]
     #[arg(short, long, help = "help.arg.package-id")]
     package_id: Option<PackageId>,
     #[serde(flatten)]
@@ -166,7 +165,6 @@ async fn get_action_input(
 #[serde(rename_all = "camelCase")]
 #[ts(export, rename = "EffectsRunActionParams")]
 pub struct RunActionParams {
-    #[ts(optional)]
     #[arg(short, long, help = "help.arg.package-id")]
     package_id: Option<PackageId>,
     #[serde(flatten)]
@@ -175,7 +173,6 @@ pub struct RunActionParams {
     event: EventId,
     #[arg(help = "help.arg.action-id")]
     action_id: ActionId,
-    #[ts(type = "any")]
     #[arg(help = "help.arg.action-input")]
     input: Value,
 }

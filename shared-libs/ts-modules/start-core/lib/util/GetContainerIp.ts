@@ -2,7 +2,9 @@ import { Effects } from '../Effects'
 import { PackageId } from '../osBindings'
 import { Watchable } from './Watchable'
 
-export class GetContainerIp extends Watchable<string> {
+export class GetContainerIp extends Watchable<
+  Awaited<ReturnType<Effects['getContainerIp']>>
+> {
   protected readonly label = 'GetContainerIp'
 
   constructor(

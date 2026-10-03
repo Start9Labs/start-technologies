@@ -263,7 +263,10 @@ export class BackupNetworkComponent {
                   ...value,
                 })
 
-                target.entry = Object.values(res)[0]!
+                const entry = Object.values(res)[0]
+                if (!entry || entry.type !== 'cifs')
+                  throw new Error('Invalid response from server')
+                target.entry = entry
                 this.service.cifs.update(cifs => [...cifs])
               }, 'Testing connectivity to shared folder'),
           },
@@ -290,7 +293,7 @@ export class BackupNetworkComponent {
       const [item] = Object.entries(await this.api.addBackupTarget(v))
       const [id, entry] = item || []
 
-      if (!id || !entry) {
+      if (!id || !entry || entry.type !== 'cifs') {
         throw 'Invalid response from server'
       }
 

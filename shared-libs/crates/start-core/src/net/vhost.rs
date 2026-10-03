@@ -28,8 +28,8 @@ use tokio_rustls::rustls::server::ClientHello;
 use tokio_rustls::rustls::{ClientConfig, ServerConfig};
 use tokio_util::sync::CancellationToken;
 use tracing::instrument;
-use ts_rs::TS;
 use visit_rs::Visit;
+use visit_rs::ts::TS;
 
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
@@ -69,10 +69,8 @@ type HostMapOwner = (Option<PackageId>, HostId);
 #[model = "Model<Self>"]
 #[ts(export)]
 pub struct PassthroughInfo {
-    #[ts(type = "string")]
     pub hostname: InternedString,
     pub listen_port: u16,
-    #[ts(type = "string")]
     pub backend: SocketAddr,
     #[ts(type = "string[]")]
     pub public_gateways: BTreeSet<GatewayId>,
@@ -80,7 +78,7 @@ pub struct PassthroughInfo {
     pub private_ips: BTreeSet<IpAddr>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, visit_rs::TS)]
 #[group(skip)]
 #[serde(rename_all = "kebab-case")]
 struct AddPassthroughParams {
@@ -96,7 +94,7 @@ struct AddPassthroughParams {
     pub private_ip: Vec<IpAddr>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, visit_rs::TS)]
 #[group(skip)]
 #[serde(rename_all = "kebab-case")]
 struct RemovePassthroughParams {

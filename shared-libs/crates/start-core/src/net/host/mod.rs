@@ -10,7 +10,7 @@ use patch_db::DestructureMut;
 use patch_db::json_ptr::JsonPointer;
 use rpc_toolkit::{Context, Empty, HandlerExt, OrEmpty, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
@@ -54,9 +54,7 @@ fn default_port_forward_count() -> u16 {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct PortForward {
-    #[ts(type = "string")]
     pub src: SocketAddrV4,
-    #[ts(type = "string")]
     pub dst: SocketAddrV4,
     pub gateway: GatewayId,
     /// Number of contiguous ports covered by this forward (always >= 1).
@@ -775,14 +773,14 @@ impl Model<Host> {
     }
 }
 
-#[derive(Deserialize, Serialize, Parser)]
+#[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 pub struct RequiresPackageId {
     #[arg(help = "help.arg.package-id")]
     package: PackageId,
 }
 
-#[derive(Deserialize, Serialize, Parser)]
+#[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 pub struct RequiresHostId {
     #[arg(help = "help.arg.host-id")]

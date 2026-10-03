@@ -19,8 +19,8 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::Sender;
 use tracing::instrument;
-use ts_rs::TS;
 use url::Url;
+use visit_rs::ts::TS;
 
 use crate::context::config::{CONFIG_PATH, ContextConfig};
 use crate::context::{CliContext, RpcContext};
@@ -188,7 +188,7 @@ impl Deref for RegistryContext {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser)]
+#[derive(Debug, Deserialize, Serialize, visit_rs::TS, Parser)]
 #[group(skip)]
 pub struct RegistryUrlParams {
     #[arg(help = "help.arg.registry-url")]

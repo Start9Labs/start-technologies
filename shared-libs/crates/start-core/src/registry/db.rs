@@ -10,10 +10,11 @@ use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
-use ts_rs::TS;
 
 use crate::context::CliContext;
-use crate::db::SubscribeRes;
+pub use crate::db::{
+    ApplyWithPathParams as ApplyParams, DumpParams, DumpParams as SubscribeParams, SubscribeRes,
+};
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::context::RegistryContext;
@@ -29,6 +30,7 @@ pub fn db_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "dump",
             from_fn_async(cli_dump)
+                .no_ts()
                 .with_display_serializable()
                 .with_about("about.filter-query-db"),
         )
@@ -47,6 +49,7 @@ pub fn db_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "apply",
             from_fn_async(cli_apply)
+                .no_ts()
                 .no_display()
                 .with_about("about.update-db-record"),
         )
@@ -93,28 +96,11 @@ async fn cli_dump(
     Ok(dump)
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
-#[group(skip)]
-#[serde(rename_all = "camelCase")]
-#[command(rename_all = "kebab-case")]
-pub struct DumpParams {
-    #[arg(long = "pointer", short = 'p', help = "help.arg.db-pointer")]
-    #[ts(type = "string | null")]
-    pointer: Option<JsonPointer>,
-}
-
 pub async fn dump(ctx: RegistryContext, DumpParams { pointer }: DumpParams) -> Result<Dump, Error> {
     Ok(ctx
         .db
         .dump(&pointer.as_ref().map_or(ROOT, |p| p.borrowed()))
         .await)
-}
-
-#[derive(Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct SubscribeParams {
-    #[ts(type = "string | null")]
-    pointer: Option<JsonPointer>,
 }
 
 fn subscription_pointer(pointer: Option<JsonPointer>) -> Result<JsonPointer, Error> {
@@ -276,20 +262,12 @@ async fn cli_apply(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
-#[group(skip)]
-#[serde(rename_all = "camelCase")]
-#[command(rename_all = "kebab-case")]
-pub struct ApplyParams {
-    #[arg(help = "help.arg.db-apply-expr")]
-    expr: String,
-    #[arg(help = "help.arg.database-path")]
-    path: Option<PathBuf>,
-}
-
 pub async fn apply(
     ctx: RegistryContext,
-    ApplyParams { expr, .. }: ApplyParams,
+    ApplyParams {
+        expression: crate::db::ApplyParams { expr },
+        ..
+    }: ApplyParams,
 ) -> Result<(), Error> {
     ctx.db
         .mutate(|db| {

@@ -7,7 +7,7 @@ use tokio::process::Command;
 use crate::prelude::*;
 use crate::ServerContext;
 
-#[derive(Parser, Serialize, Deserialize)]
+#[derive(Parser, Serialize, Deserialize, visit_rs::TS)]
 pub struct ExecReq {
     pub command: String,
     pub args: Vec<String>,
@@ -16,7 +16,7 @@ pub struct ExecReq {
     pub timeout: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecRes {
     pub stdout: String,

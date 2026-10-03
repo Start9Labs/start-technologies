@@ -3,7 +3,7 @@ use std::process::Stdio;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
@@ -11,6 +11,7 @@ use crate::util::Invoke;
 
 #[derive(Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct TunnelUpdateResult {
     /// "up-to-date", "update-available", or "updating"
     pub status: String,
@@ -93,9 +94,4 @@ fn parse_version_field(policy: &str, field: &str) -> Option<String> {
         .and_then(|l| l.split_whitespace().nth(1))
         .filter(|v| *v != "(none)")
         .map(|s| s.to_string())
-}
-
-#[test]
-fn export_bindings_tunnel_update() {
-    TunnelUpdateResult::export_all_to("bindings/tunnel").unwrap();
 }

@@ -10,8 +10,8 @@ use ipnet::IpNet;
 use isocountry::CountryCode;
 use patch_db::{HasModel, Value};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 use url::Url;
+use visit_rs::ts::TS;
 
 use crate::account::AccountInfo;
 use crate::db::DbAccessByKey;
@@ -169,9 +169,7 @@ pub fn default_echoip_urls() -> Vec<Url> {
 pub struct ServerInfo {
     pub id: String,
     pub hostname: InternedString,
-    #[ts(type = "string")]
     pub version: Version,
-    #[ts(type = "string")]
     pub package_version_compat: VersionRange,
     #[ts(type = "Record<string, unknown>")]
     pub post_init_migration_todos: BTreeMap<Version, Value>,
@@ -222,7 +220,7 @@ pub enum RestartReason {
 pub struct NetworkInfo {
     pub wifi: WifiInfo,
     pub host: Host,
-    #[ts(as = "BTreeMap::<GatewayId, NetworkInterfaceInfo>")]
+    #[ts(wire = "BTreeMap::<GatewayId, NetworkInterfaceInfo>")]
     #[serde(default)]
     pub gateways: OrdMap<GatewayId, NetworkInterfaceInfo>,
     #[serde(default)]
@@ -255,11 +253,9 @@ pub struct NetworkInterfaceInfo {
     pub name: Option<InternedString>,
     pub secure: Option<bool>,
     pub ip_info: Option<Arc<IpInfo>>,
-    // Pre-release dev DBs persisted this as `null` for auto-discovered gateways;
-    // coerce absent/null to the default so those nodes still load.
     #[serde(default, rename = "type")]
     #[serde(deserialize_with = "deserialize_null_default")]
-    #[ts(rename = "type")]
+    #[visit(input_wire = "Option<GatewayType>")]
     pub gateway_type: GatewayType,
     #[serde(default)]
     pub port_map: GatewayPortMapCapabilities,
@@ -358,7 +354,6 @@ impl NetworkInterfaceInfo {
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct IpInfo {
-    #[ts(type = "string")]
     pub name: InternedString,
     pub scope_id: u32,
     pub device_type: Option<NetworkInterfaceType>,

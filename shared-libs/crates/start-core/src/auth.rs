@@ -14,7 +14,7 @@ use rpc_toolkit::{CallRemote, Context, HandlerArgs, HandlerExt, ParentHandler, f
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthContext};

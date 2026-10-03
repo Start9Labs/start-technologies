@@ -8,7 +8,7 @@ use imbl_value::InternedString;
 use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::util::mime::{mime, unmime};
 use crate::{Error, ErrorKind, ResultExt};

@@ -871,7 +871,7 @@ impl CallRemote<TunnelContext> for CliContext {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser)]
+#[derive(Debug, Deserialize, Serialize, visit_rs::TS, Parser)]
 #[group(skip)]
 pub struct TunnelUrlParams {
     #[arg(help = "help.arg.tunnel-url")]

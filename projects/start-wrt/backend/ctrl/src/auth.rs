@@ -136,7 +136,7 @@ impl HashSessionToken {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
     pub logged_in: DateTime<Utc>,
@@ -144,13 +144,13 @@ pub struct Session {
     pub user_agent: Option<String>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginRes {
     pub session: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginParams {
     pub password: String,
@@ -377,7 +377,7 @@ pub async fn login_impl(
     Ok(hash_token.to_login_res())
 }
 
-#[derive(Deserialize, Serialize, Parser)]
+#[derive(Deserialize, Serialize, Parser, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct LogoutParams {
     /// Session hash injected by auth middleware
@@ -398,7 +398,7 @@ pub async fn logout(
     Ok(())
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct VerifyPasswordParams {
     pub password: String,
@@ -412,7 +412,7 @@ pub async fn verify_password_impl(
     check_password(&password).await
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ResetPasswordParams {
     pub old_password: String,
@@ -599,7 +599,7 @@ async fn cli_reset_password(
     Ok(())
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckInitializedRes {
     pub initialized: bool,
@@ -613,7 +613,7 @@ pub async fn check_initialized_impl(_ctx: ServerContext) -> Result<CheckInitiali
     })
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SetInitialPasswordParams {
     pub password: String,

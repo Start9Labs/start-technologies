@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, visit_rs::TS)]
 pub struct EqSet<T: Eq>(Vec<T>);
 impl<T: Eq> Default for EqSet<T> {
     fn default() -> Self {

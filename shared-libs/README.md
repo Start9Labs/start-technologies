@@ -14,6 +14,9 @@ here on its own.
   `start-cli`, `registrybox`, `tunnelbox`, `startwrt`) depends on it. See
   [`crates/start-core/README.md`](crates/start-core/README.md).
 
+- **`crates/visit-rs/`** and **`crates/visit-rs-derive/`** — value/type reflection
+  and serde JSON-shape traversal, shared by the backend and RPC bindings.
+
 - **`ts-modules/`** — shared TypeScript modules; two Angular source libraries in the single Angular workspace rooted at the repo
   root (`angular.json`, `package.json`, `package-lock.json`):
   - `ts-modules/shared/` → `@start9labs/shared` (API clients, components, i18n, styles)

@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::package::{ManifestPreference, PackageStateMatchModelRef};
@@ -113,7 +113,6 @@ impl std::fmt::Display for MinMax {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct InstallParams {
-    #[ts(type = "string")]
     registry: Url,
     id: PackageId,
     version: VersionString,

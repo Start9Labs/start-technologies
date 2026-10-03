@@ -6,7 +6,7 @@ use color_eyre::eyre::eyre;
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::Error;
 use crate::context::config::ServerConfig;

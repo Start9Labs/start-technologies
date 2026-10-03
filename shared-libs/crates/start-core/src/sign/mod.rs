@@ -8,7 +8,7 @@ use pkcs8::der::AnyRef;
 use pkcs8::{PrivateKeyInfoRef, SubjectPublicKeyInfo};
 use serde::{Deserialize, Serialize};
 use sha2::Sha512;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::prelude::*;
 use crate::sign::commitment::Digestable;

@@ -934,10 +934,10 @@ fn err_has_exited<T>(_: T) -> Error {
     )
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, visit_rs::TS)]
 pub struct ForwardTable(pub BTreeMap<u16, ForwardTarget>);
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, visit_rs::TS)]
 pub struct ForwardTarget {
     pub target: SocketAddrV4,
     pub target_prefix: u8,

@@ -16,7 +16,7 @@ use rand::rngs::ThreadRng;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::prelude::*;
 
@@ -64,7 +64,6 @@ pub fn decrypt_slice(input: impl AsRef<[u8]>, password: impl AsRef<[u8]>) -> Vec
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 #[ts(export)]
 pub struct EncryptedWire {
-    #[ts(type = "any")]
     encrypted: Value,
 }
 impl EncryptedWire {

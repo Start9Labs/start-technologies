@@ -11,5 +11,8 @@ pub use emver;
 
 pub use crate::exver::*;
 
+#[cfg(feature = "ts")]
+visit_rs::impl_ts!(Version, ExtendedVersion, VersionRange => "string");
+
 #[cfg(test)]
 mod test;

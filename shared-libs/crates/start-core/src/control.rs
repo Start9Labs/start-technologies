@@ -1,7 +1,7 @@
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::RpcContext;
 use crate::prelude::*;
@@ -17,7 +17,7 @@ pub struct ControlParams {
     pub id: PackageId,
 }
 
-#[derive(Deserialize, Serialize, Parser)]
+#[derive(Deserialize, Serialize, Parser, visit_rs::TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]

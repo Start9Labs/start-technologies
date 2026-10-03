@@ -11,7 +11,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncSeek, AsyncWrite};
 use tokio::sync::watch;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::db::model::{Database, DatabaseModel};
 use crate::prelude::*;
@@ -203,7 +203,6 @@ impl std::ops::AddAssign<u64> for Progress {
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 #[ts(export)]
 pub struct NamedProgress {
-    #[ts(type = "string")]
     pub name: InternedString,
     pub progress: Progress,
 }

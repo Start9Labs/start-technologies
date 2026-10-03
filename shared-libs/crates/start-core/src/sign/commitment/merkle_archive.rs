@@ -1,7 +1,7 @@
 use digest::Update;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWrite;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::prelude::*;
 use crate::s9pk::S9pk;

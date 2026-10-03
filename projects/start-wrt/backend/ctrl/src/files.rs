@@ -30,18 +30,18 @@ pub fn file<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct FileContents {
     pub contents: String,
     pub modified: DateTime<Utc>,
 }
 
-#[derive(Parser, Serialize, Deserialize)]
+#[derive(Parser, Serialize, Deserialize, visit_rs::TS)]
 pub struct GetFileArgs {
     pub path: PathBuf,
 }
 
-#[derive(Parser, Serialize, Deserialize)]
+#[derive(Parser, Serialize, Deserialize, visit_rs::TS)]
 pub struct SetFileArgs {
     pub path: PathBuf,
     pub contents: String,
@@ -139,7 +139,7 @@ pub fn dir<C: Context>() -> ParentHandler<C> {
     )
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, visit_rs::TS)]
 #[serde(rename_all = "kebab-case")]
 pub enum FileType {
     RegularFile,
@@ -151,7 +151,7 @@ pub enum FileType {
     Socket,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct DirEntry {
     pub name: String,
     pub size: u64,
@@ -169,7 +169,7 @@ pub struct DirEntry {
     pub change: DateTime<Utc>,
 }
 
-#[derive(Parser, Serialize, Deserialize)]
+#[derive(Parser, Serialize, Deserialize, visit_rs::TS)]
 pub struct DirGetArgs {
     pub path: PathBuf,
 }

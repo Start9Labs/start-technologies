@@ -59,13 +59,13 @@ pub(crate) fn validate_lan_block(addr: Ipv4Addr) -> Result<(), Error> {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct LanIpv4Response {
     pub address: String,
     pub netmask: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct LanIpv4SetRequest {
     pub address: String,
     /// When true, forcibly delete VPN peers that would break due to block change.
@@ -73,7 +73,7 @@ pub struct LanIpv4SetRequest {
     pub force: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct LanIpv6Response {
     pub slaac: bool,
     pub dhcpv6: bool,
@@ -85,7 +85,7 @@ pub struct LanIpv6Response {
     pub wan_prefix: u8,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct LanIpv6SetRequest {
     pub slaac: bool,
     pub dhcpv6: bool,

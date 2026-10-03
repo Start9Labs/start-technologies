@@ -6,7 +6,7 @@ use color_eyre::eyre::eyre;
 use exver::{Version, VersionRange};
 use imbl_value::{InOMap, InternedString};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 pub use crate::PackageId;
 use crate::dependencies::Dependencies;
@@ -32,9 +32,7 @@ pub(crate) fn current_version() -> Version {
 pub struct Manifest {
     pub id: PackageId,
     pub version: VersionString,
-    #[ts(type = "string")]
     pub can_migrate_to: VersionRange,
-    #[ts(type = "string")]
     pub can_migrate_from: VersionRange,
     #[serde(flatten)]
     pub metadata: PackageMetadata,
@@ -309,9 +307,9 @@ pub struct DeviceFilter {
     pub product: Option<Regex>,
     #[ts(type = "string | null")]
     pub vendor: Option<Regex>,
-    #[ts(optional)]
+
     pub capabilities: Option<BTreeSet<InternedString>>,
-    #[ts(optional)]
+
     pub driver: Option<InternedString>,
 }
 // Omit description

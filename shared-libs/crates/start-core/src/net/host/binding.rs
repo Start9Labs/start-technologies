@@ -13,7 +13,7 @@ use rpc_toolkit::{
     Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async, from_fn_async_local,
 };
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::{CliContext, RpcContext};
 use crate::db::prelude::Map;
@@ -584,11 +584,11 @@ pub struct AddSslOptions {
     /// The application protocols StartOS answers a client with, from those it
     /// asked for. Unset answers with whatever it asked for.
     #[serde(default, deserialize_with = "legacy_alpn::deserialize")]
+    #[visit(input_wire = "Option<legacy_alpn::CompatibleAlpnInfo>")]
     pub alpn: Option<AlpnInfo>,
     /// Certificate validation for the OS→container TLS leg when rewrapping.
     /// `None` (the default) validates against the StartOS root CA.
     #[serde(default)]
-    #[ts(optional)]
     pub upstream_cert_validation: Option<UpstreamCertValidation>,
     /// Optional reverse-proxy auth gate. When set, the OS reverse proxy
     /// will validate the `Authorization` header on incoming HTTP requests
@@ -607,16 +607,16 @@ mod legacy_alpn {
     use crate::net::vhost::AlpnInfo;
     use crate::util::serde::MaybeUtf8String;
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, visit_rs::ts::TS)]
     #[serde(rename_all = "camelCase")]
-    enum LegacyAlpnInfo {
+    pub(super) enum LegacyAlpnInfo {
         Reflect,
         Specified(Vec<MaybeUtf8String>),
     }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, visit_rs::ts::TS)]
     #[serde(untagged)]
-    enum CompatibleAlpnInfo {
+    pub(super) enum CompatibleAlpnInfo {
         Current(Vec<MaybeUtf8String>),
         Legacy(LegacyAlpnInfo),
     }
@@ -737,6 +737,7 @@ pub fn binding<C: Context, Kind: HostApiKind>()
         .subcommand(
             "set-address-enabled",
             from_fn_async_local(cli_set_address_enabled::<Kind>)
+                .no_ts()
                 .with_inherited(Kind::inheritance)
                 .no_display()
                 .with_about("about.set-address-enabled-for-binding"),
@@ -751,6 +752,7 @@ pub fn binding<C: Context, Kind: HostApiKind>()
         .subcommand(
             "set-range-address-enabled",
             from_fn_async_local(cli_set_range_address_enabled::<Kind>)
+                .no_ts()
                 .with_inherited(Kind::inheritance)
                 .no_display()
                 .with_about("about.set-range-address-enabled-for-binding"),
@@ -765,6 +767,7 @@ pub fn binding<C: Context, Kind: HostApiKind>()
         .subcommand(
             "set-gua-wan",
             from_fn_async_local(cli_set_gua_wan::<Kind>)
+                .no_ts()
                 .with_inherited(Kind::inheritance)
                 .no_display()
                 .with_about("about.set-gua-wan-for-binding"),

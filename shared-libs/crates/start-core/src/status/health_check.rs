@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use clap::builder::ValueParserFactory;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 pub use crate::HealthCheckId;
 use crate::util::FromStrParser;

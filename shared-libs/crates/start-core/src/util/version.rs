@@ -3,7 +3,7 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 #[derive(Debug, Clone, TS)]
 #[ts(type = "string", rename = "Version")]

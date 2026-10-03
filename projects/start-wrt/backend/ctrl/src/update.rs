@@ -16,7 +16,7 @@ use crate::ServerContext;
 
 // ── Request / Response types ─────────────────────────────────────────
 
-#[derive(Debug, Deserialize, Serialize, clap::Parser)]
+#[derive(Debug, Deserialize, Serialize, clap::Parser, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 #[group(skip)]
@@ -27,7 +27,7 @@ pub struct UpdateSystemParams {
     pub target_version: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSystemRes {
     pub target: Option<String>,

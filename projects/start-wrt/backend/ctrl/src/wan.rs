@@ -26,7 +26,7 @@ const DDNS_SECTION: &str = "wan";
 
 // ── IPv4 types ──────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, visit_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum WanIpv4Mode {
     Dhcp,
@@ -34,7 +34,7 @@ pub enum WanIpv4Mode {
     Pppoe,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct WanIpv4Response {
     pub mode: WanIpv4Mode,
     pub assigned_ip: Option<String>,
@@ -46,7 +46,7 @@ pub struct WanIpv4Response {
     pub device: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct WanIpv4SetRequest {
     pub mode: WanIpv4Mode,
     pub address: Option<String>,
@@ -59,7 +59,7 @@ pub struct WanIpv4SetRequest {
 
 // ── IPv6 types ──────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, visit_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum WanIpv6Mode {
     Disabled,
@@ -71,7 +71,7 @@ pub enum WanIpv6Mode {
     SixRd,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct WanIpv6Response {
     pub mode: WanIpv6Mode,
     pub address: Option<String>,
@@ -86,7 +86,7 @@ pub struct WanIpv6Response {
     pub lan_prefix: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct WanIpv6SetRequest {
     pub mode: WanIpv6Mode,
     pub address: Option<String>,
@@ -102,21 +102,21 @@ pub struct WanIpv6SetRequest {
 
 // ── MAC types ───────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, visit_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum MacStrategy {
     Router,
     Custom,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct WanMacResponse {
     pub strategy: MacStrategy,
     pub mac: String,
     pub default_mac: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct WanMacSetRequest {
     pub strategy: MacStrategy,
     pub mac: Option<String>,
@@ -124,20 +124,20 @@ pub struct WanMacSetRequest {
 
 // ── DNS types ───────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, visit_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum DnsMode {
     Isp,
     Custom,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct WanDnsResponse {
     pub mode: DnsMode,
     pub servers: Vec<DnsServer>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct WanDnsSetRequest {
     pub mode: DnsMode,
     pub servers: Option<Vec<DnsServer>>,
@@ -145,7 +145,7 @@ pub struct WanDnsSetRequest {
 
 // ── DDNS types ──────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, visit_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum DdnsProvider {
     Dyndns,
@@ -155,7 +155,7 @@ pub enum DdnsProvider {
     Freedns,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct WanDdnsResponse {
     pub enabled: bool,
     pub provider: DdnsProvider,
@@ -166,7 +166,7 @@ pub struct WanDdnsResponse {
     pub zone: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct WanDdnsSetRequest {
     pub enabled: bool,
     pub provider: DdnsProvider,

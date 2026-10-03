@@ -4,7 +4,7 @@ use std::path::Path;
 use digest::Digest;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use super::FileSystem;
 use crate::disk::mount::filesystem::MountType;

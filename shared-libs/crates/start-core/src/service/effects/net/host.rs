@@ -9,9 +9,9 @@ use crate::{HostId, PackageId};
 #[ts(export)]
 pub struct GetHostInfoParams {
     host_id: HostId,
-    #[ts(optional)]
+
     package_id: Option<PackageId>,
-    #[ts(optional)]
+
     callback: Option<CallbackId>,
 }
 pub async fn get_host_info(

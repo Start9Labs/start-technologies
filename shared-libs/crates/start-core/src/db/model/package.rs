@@ -8,7 +8,7 @@ use patch_db::HasModel;
 use patch_db::json_ptr::JsonPointer;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::net::host::Hosts;
 use crate::prelude::*;
@@ -360,7 +360,6 @@ pub struct ActionMetadata {
     ///   - "dependent" — only services that declare this package as a current dependency
     ///   - "user" — only the user (other services must create a task). Default when omitted.
     /// Services that lack direct access can always queue a task with `effects.action.createTask`.
-    #[ts(optional)]
     pub access: Option<ActionAccess>,
 }
 
@@ -465,7 +464,6 @@ pub struct CurrentDependencyInfo {
     pub icon: Option<DataUrl<'static>>,
     #[serde(flatten)]
     pub kind: CurrentDependencyKind,
-    #[ts(type = "string")]
     pub version_range: VersionRange,
 }
 
@@ -507,16 +505,17 @@ pub struct TaskEntry {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 #[model = "Model<Self>"]
+#[ts(input_rename = "TaskParams")]
 pub struct Task {
     pub package_id: PackageId,
     pub action_id: ActionId,
     #[serde(default)]
     pub severity: TaskSeverity,
-    #[ts(optional)]
+
     pub reason: Option<String>,
-    #[ts(optional)]
+
     pub when: Option<TaskTrigger>,
-    #[ts(optional)]
+
     pub input: Option<TaskInput>,
 }
 
@@ -553,6 +552,7 @@ pub enum TaskCondition {
 #[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "kebab-case")]
 #[serde(tag = "kind")]
+#[visit(input_wire = "TaskInputRepr")]
 pub enum TaskInput {
     Partial {
         #[ts(type = "Record<string, unknown>[]")]
@@ -561,23 +561,23 @@ pub enum TaskInput {
         set: Value,
     },
 }
-// Accepts both the current `{ accept, set }` shape and the legacy `{ value }`
-// shape emitted by s9pks built against the pre-2.0 SDK.
+#[derive(Deserialize, TS)]
+#[serde(rename_all = "kebab-case", tag = "kind")]
+enum TaskInputRepr {
+    Partial {
+        #[serde(default)]
+        accept: Option<Vec<Value>>,
+        #[serde(default)]
+        set: Option<Value>,
+        #[serde(default)]
+        value: Option<Value>,
+    },
+}
+
 impl<'de> Deserialize<'de> for TaskInput {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "kebab-case", tag = "kind")]
-        enum Repr {
-            Partial {
-                #[serde(default)]
-                accept: Option<Vec<Value>>,
-                #[serde(default)]
-                set: Option<Value>,
-                #[serde(default)]
-                value: Option<Value>,
-            },
-        }
-        let Repr::Partial { accept, set, value } = Repr::deserialize(deserializer)?;
+        let TaskInputRepr::Partial { accept, set, value } =
+            TaskInputRepr::deserialize(deserializer)?;
         match (accept, set, value) {
             (Some(accept), Some(set), _) => Ok(Self::Partial { accept, set }),
             (_, _, Some(value)) => Ok(Self::Partial {

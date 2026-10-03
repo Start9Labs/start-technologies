@@ -9,8 +9,8 @@ use imbl_value::InternedString;
 use itertools::Itertools;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 use url::Url;
+use visit_rs::ts::TS;
 
 use crate::context::CliContext;
 use crate::prelude::*;
@@ -83,11 +83,8 @@ pub fn remove_api<C: Context>() -> ParentHandler<C> {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct AddAssetParams {
-    #[ts(type = "string")]
     pub version: Version,
-    #[ts(type = "string")]
     pub platform: InternedString,
-    #[ts(type = "string")]
     pub url: Url,
     #[serde(rename = "__Auth_signer")]
     #[ts(skip)]

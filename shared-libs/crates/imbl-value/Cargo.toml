@@ -3,13 +3,13 @@ description = "A JSON `Value` type built on `imbl`"
 edition = "2021"
 license = "MIT"
 name = "imbl-value"
-version = "0.4.4"
+version = "0.5.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 arbitrary = ["proptest", "proptest-derive", "imbl/proptest"]
 default = []
-ts-rs = ["dep:ts-rs", "yasi/ts-rs"]
+ts = ["dep:visit-rs", "yasi/ts"]
 
 [dependencies]
 imbl = { version = "6", features = ["serde", "small-chunks"] }
@@ -17,5 +17,5 @@ proptest = { version = "1", optional = true }
 proptest-derive = { version = "0.6", optional = true }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
-ts-rs = { version = "9", optional = true }
+visit-rs = { path = "../visit-rs", optional = true, features = ["ts"] }
 yasi = { path = "../yasi", features = ["serde"] }

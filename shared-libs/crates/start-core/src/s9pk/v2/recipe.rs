@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 use url::Url;
+use visit_rs::ts::TS;
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 pub struct DirRecipe(BTreeMap<PathBuf, Recipe>);
@@ -12,10 +12,6 @@ pub struct DirRecipe(BTreeMap<PathBuf, Recipe>);
 #[serde(rename_all = "camelCase")]
 pub enum Recipe {
     Make(PathBuf),
-    Wget {
-        #[ts(type = "string")]
-        url: Url,
-        checksum: String,
-    },
+    Wget { url: Url, checksum: String },
     Recipe(DirRecipe),
 }

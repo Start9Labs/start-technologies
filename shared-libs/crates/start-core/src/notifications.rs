@@ -10,7 +10,7 @@ use imbl_value::InternedString;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::PackageId;
 use crate::backup::BackupReport;
@@ -416,7 +416,6 @@ pub struct Notification {
     pub level: NotificationLevel,
     pub title: String,
     pub message: String,
-    #[ts(type = "any")]
     pub data: Value,
     #[serde(default = "const_true")]
     pub seen: bool,
@@ -428,7 +427,6 @@ pub struct Notification {
 pub struct NotificationWithId {
     id: u32,
     #[serde(flatten)]
-    #[ts(flatten)]
     notification: Notification,
 }
 

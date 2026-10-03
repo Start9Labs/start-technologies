@@ -10,7 +10,7 @@ use crate::CtrlContext;
 /// A single DNS server entry with protocol info.
 /// `ssl: false` = plain UDP on port 53.
 /// `ssl: true`  = DNS-over-HTTPS via SmartDNS (`server-https`).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, visit_rs::TS)]
 pub struct DnsServer {
     pub address: String, // always an IPv4 address
     pub ssl: bool,

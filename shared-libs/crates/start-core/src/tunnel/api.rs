@@ -7,7 +7,7 @@ use imbl_value::InternedString;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::CliContext;
 use crate::db::model::public::NetworkInterfaceType;
@@ -180,6 +180,7 @@ pub async fn restart(ctx: TunnelContext) -> Result<(), Error> {
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct SubnetParams {
     #[ts(type = "string")]
     subnet: Ipv4Net,
@@ -319,10 +320,10 @@ pub fn device_api<C: Context>() -> ParentHandler<C> {
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct SetDnsInjectionParams {
     #[ts(type = "string")]
     subnet: Ipv4Net,
-    #[ts(type = "string")]
     ip: Ipv4Addr,
     #[arg(long)]
     enabled: bool,
@@ -365,10 +366,10 @@ pub async fn set_dns_injection(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct SetAutoPortForwardParams {
     #[ts(type = "string")]
     subnet: Ipv4Net,
-    #[ts(type = "string")]
     ip: Ipv4Addr,
     #[arg(long)]
     enabled: bool,
@@ -410,10 +411,10 @@ pub async fn set_auto_port_forward(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct SetDeviceKindParams {
     #[ts(type = "string")]
     subnet: Ipv4Net,
-    #[ts(type = "string")]
     ip: Ipv4Addr,
     #[arg(long, value_enum)]
     kind: WgClientKind,
@@ -522,6 +523,7 @@ pub async fn list_dns_records(ctx: TunnelContext) -> Result<Vec<DnsRecordEntry>,
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct AddDnsRecordParams {
     name: String,
     #[serde(rename = "type")]
@@ -555,6 +557,7 @@ pub async fn add_dns_record(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct RemoveDnsRecordParams {
     name: String,
     #[serde(rename = "type")]
@@ -580,6 +583,7 @@ pub async fn remove_dns_record(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct AddSubnetParams {
     name: InternedString,
 }
@@ -685,6 +689,7 @@ pub enum DnsMode {
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct SetSubnetDnsParams {
     #[arg(long, help = "help.arg.dns-mode")]
     mode: DnsMode,
@@ -776,6 +781,7 @@ pub async fn set_subnet_dns(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct SetSubnetWanParams {
     #[arg(long)]
     #[ts(type = "string | null")]
@@ -807,6 +813,7 @@ pub async fn set_subnet_wan(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct SetSubnetIpv6Params {
     /// The routed IPv6 prefix delegated to this subnet (e.g. a /64 from Hetzner,
     /// a /56 from Linode). `null` disables IPv6 on the subnet.
@@ -928,10 +935,10 @@ pub async fn set_subnet_ipv6(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct SetDeviceWanParams {
     #[ts(type = "string")]
     subnet: Ipv4Net,
-    #[ts(type = "string")]
     ip: Ipv4Addr,
     #[arg(long)]
     #[ts(type = "string | null")]
@@ -965,6 +972,7 @@ pub async fn set_device_wan(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct AddDeviceParams {
     #[ts(type = "string")]
     subnet: Ipv4Net,
@@ -1077,10 +1085,10 @@ pub async fn add_device(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct RemoveDeviceParams {
     #[ts(type = "string")]
     subnet: Ipv4Net,
-    #[ts(type = "string")]
     ip: Ipv4Addr,
 }
 
@@ -1114,6 +1122,7 @@ pub async fn remove_device(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct ListDevicesParams {
     #[ts(type = "string")]
     subnet: Ipv4Net,
@@ -1136,10 +1145,10 @@ pub async fn list_devices(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct ShowConfigParams {
     #[ts(type = "string")]
     subnet: Ipv4Net,
-    #[ts(type = "string")]
     ip: Ipv4Addr,
     #[serde(rename = "__ConnectInfo_local_addr")]
     #[arg(skip)]
@@ -1205,11 +1214,11 @@ pub async fn show_config(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct AddPortForwardParams {
     /// External (WAN) port to forward. The external IP is fixed to the target's
     /// WAN so return traffic stays symmetric.
     external_port: u16,
-    #[ts(type = "string")]
     target: SocketAddrV4,
     #[arg(long)]
     label: Option<String>,
@@ -1222,7 +1231,6 @@ pub struct AddPortForwardParams {
     /// together with SNI demux.
     #[arg(long)]
     #[serde(default)]
-    #[ts(optional)]
     count: Option<u16>,
 }
 
@@ -1377,8 +1385,8 @@ pub async fn add_forward(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct RemovePortForwardParams {
-    #[ts(type = "string")]
     source: SocketAddrV4,
     /// Remove a single SNI route on `source`; omit to remove the whole forward.
     #[arg(long)]
@@ -1438,8 +1446,8 @@ pub async fn remove_forward(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct UpdatePortForwardLabelParams {
-    #[ts(type = "string")]
     source: SocketAddrV4,
     label: Option<String>,
     /// Label a single SNI route on `source`; omit to label the DNAT forward.
@@ -1496,8 +1504,8 @@ pub async fn update_forward_label(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct SetPortForwardEnabledParams {
-    #[ts(type = "string")]
     source: SocketAddrV4,
     #[arg(long)]
     enabled: bool,
@@ -1612,10 +1620,10 @@ pub async fn set_forward_enabled(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct AddPinholeParams {
     /// The client's global IPv6 (GUA) to expose. Must be an address this tunnel
     /// delegates to a client — its subnet needs an IPv6 prefix.
-    #[ts(type = "string")]
     gua: Ipv6Addr,
     /// External port opened on the GUA.
     external_port: u16,
@@ -1623,14 +1631,12 @@ pub struct AddPinholeParams {
     /// external); set a different value for a port remap (e.g. 80 -> 443).
     #[arg(long)]
     #[serde(default)]
-    #[ts(optional)]
     internal_port: Option<u16>,
     #[arg(long)]
     label: Option<String>,
     /// Number of contiguous ports, counting up from external/internal. Default 1.
     #[arg(long)]
     #[serde(default)]
-    #[ts(optional)]
     count: Option<u16>,
 }
 
@@ -1676,8 +1682,8 @@ pub async fn add_pinhole(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct RemovePinholeParams {
-    #[ts(type = "string")]
     gua: Ipv6Addr,
     external_port: u16,
 }
@@ -1693,8 +1699,8 @@ pub async fn remove_pinhole(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct UpdatePinholeLabelParams {
-    #[ts(type = "string")]
     gua: Ipv6Addr,
     external_port: u16,
     label: Option<String>,
@@ -1714,8 +1720,8 @@ pub async fn update_pinhole_label(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct SetPinholeEnabledParams {
-    #[ts(type = "string")]
     gua: Ipv6Addr,
     external_port: u16,
     #[arg(long)]
@@ -1736,9 +1742,9 @@ pub async fn set_pinhole_enabled(
 #[derive(Deserialize, Serialize, Parser, TS)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct SetHttpRedirectEnabledParams {
     /// The public IPv4 whose default-on port-80 HTTP→HTTPS redirect to toggle.
-    #[ts(type = "string")]
     ip: Ipv4Addr,
     #[arg(long)]
     enabled: bool,
@@ -1782,8 +1788,8 @@ pub async fn set_http_redirect_enabled(
 
 #[derive(Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, namespace = "tunnel")]
 pub struct HttpRedirectStatus {
-    #[ts(type = "string")]
     ip: Ipv4Addr,
     /// Whether the redirect is on for this IP (default true).
     enabled: bool,

@@ -1,7 +1,7 @@
 use clap::Parser;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::CliContext;
 use crate::prelude::*;

@@ -4,14 +4,14 @@ use std::path::Path;
 use digest::Digest;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use super::FileSystem;
 use crate::prelude::*;
 
 #[derive(Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(concrete(LogicalName = std::path::PathBuf))]
+#[ts(export, concrete(LogicalName = std::path::PathBuf))]
 pub struct BlockDev<LogicalName: AsRef<Path>> {
     logicalname: LogicalName,
 }

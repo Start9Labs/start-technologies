@@ -11,7 +11,7 @@ pub const SIG_CONTEXT: &str = "startos";
 
 /// Information about a single OS version from the registry.
 /// Wire-compatible with start-os's `OsVersionInfo`.
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct OsVersionInfo {
     pub headline: String,

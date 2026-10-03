@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tokio::fs::OpenOptions;
 use tokio::process::Command;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::{CliContext, RpcContext};
 use crate::hostname::ServerHostname;
@@ -162,7 +162,6 @@ pub async fn add(
 #[command(rename_all = "kebab-case")]
 pub struct SshDeleteParams {
     #[arg(help = "help.arg.ssh-fingerprint")]
-    #[ts(type = "string")]
     fingerprint: InternedString,
 }
 

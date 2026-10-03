@@ -15,7 +15,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::try_join;
 use tracing::instrument;
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::account::AccountInfo;
 use crate::auth::write_shadow;
@@ -65,6 +65,7 @@ pub fn setup<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "attach",
             from_fn_async(cli_attach)
+                .no_ts()
                 .no_display()
                 .with_about("about.setup-attach"),
         )
@@ -75,6 +76,7 @@ pub fn setup<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "install-os",
             from_fn_async(cli_install_os)
+                .no_ts()
                 .no_display()
                 .with_about("about.setup-install-os"),
         )
@@ -82,6 +84,7 @@ pub fn setup<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "execute",
             from_fn_async(cli_execute)
+                .no_ts()
                 .no_display()
                 .with_about("about.setup-execute"),
         )
@@ -112,6 +115,7 @@ pub fn setup<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "logs",
             from_fn_async(crate::logs::cli_logs::<SetupContext, Empty>)
+                .no_ts()
                 .no_display()
                 .with_about("about.display-os-logs"),
         )

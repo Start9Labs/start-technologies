@@ -18,7 +18,9 @@ use crate::prelude::*;
 
 /// Unguessable random token, used as a one-time REST endpoint path segment.
 /// Wraps `startos::util::new_guid()` (160-bit, base32-encoded, 32 chars).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, visit_rs::TS,
+)]
 pub struct Guid(String);
 
 impl Guid {

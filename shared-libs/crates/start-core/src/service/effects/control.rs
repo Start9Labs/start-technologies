@@ -68,9 +68,8 @@ pub async fn shutdown(context: EffectContext) -> Result<(), Error> {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct GetStatusParams {
-    #[ts(optional)]
     pub package_id: Option<PackageId>,
-    #[ts(optional)]
+
     #[arg(skip)]
     pub callback: Option<CallbackId>,
 }

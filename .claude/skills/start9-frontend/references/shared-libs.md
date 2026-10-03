@@ -21,11 +21,19 @@ release-notes/flavors/dependencies/links, registry picker) abstracted over
 (`MARKETPLACE_REGISTRY_ALERTS`), and pass install buttons as templates
 (`contentChild(TemplateRef)`).
 
-`@start9labs/start-core`: generated OS types (`T.*` — the ts-rs projection of the Rust
-backend), `IST`/`ISB` input-spec types/builders, `VersionRange`/`ExtendedVersion`, `S9pk`,
-utils, zod re-export. **Never hand-edit `osBindings/*.ts`** — change the Rust type and run
-`make start-core-ts-bindings`; a Rust `///` doc comment on an exported type changes the emitted
-`.ts`.
+`@start9labs/start-core`: generated serde-aware types (`T.*`) and server method trees
+(`RPC.StartOS`, `Setup`, `Init`, `Diagnostic`, `Registry`, `Tunnel`, `Effects`),
+`IST`/`ISB` input-spec types/builders, `VersionRange`/`ExtendedVersion`, `S9pk`, utils,
+zod re-export. `RPC.RpcMethod`, `RpcParamType` and `RpcReturnType` select request and
+result types from method literals. Use input declarations for requests; output
+DTOs may contain required nullable fields absent from inputs. **Never hand-edit
+`osBindings/*.ts`** — change the owning Rust schema and run `make start-core-ts-bindings`,
+then rebuild core and SDK before checking consumers.
+
+StartWRT uses its own generated `Api` in `services/api/bindings.ts` and streaming
+schemas in `events.ts`; run `make start-wrt-rpc-bindings`. Keep its aborting
+transport. Shared `HttpService` remains a JSON-RPC transport boundary; product
+wrappers infer results rather than accepting caller-selected return types.
 
 Library authoring (when you add to `shared`/`marketplace`): configurability layers in order —
 signal inputs → content projection/`contentChild(TemplateRef)`/`PolymorpheusContent` → abstract

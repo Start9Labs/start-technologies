@@ -1,3 +1,4 @@
+import type { Api, Params } from './api.types'
 import { FullKeyboard, SetLanguageParams } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { GetPackageRes, GetPackagesRes } from '@start9labs/marketplace'
@@ -48,13 +49,13 @@ export abstract class ApiService {
 
   // state
 
-  abstract echo(params: T.EchoParams, url: string): Promise<string>
+  abstract echo(params: Params<'echo'>, url: string): Promise<string>
 
   abstract getState(): Promise<ServerState>
 
   // db
 
-  abstract subscribeToPatchDB(params: {}): Promise<{
+  abstract subscribeToPatchDB(): Promise<{
     dump: Dump<DataModel>
     guid: string
   }>
@@ -66,23 +67,25 @@ export abstract class ApiService {
 
   // auth
 
-  abstract login(params: T.LoginParams): Promise<null>
+  abstract login(params: Params<'auth.login'>): Promise<null>
 
   abstract logout(params: {}): Promise<null>
 
   abstract getSessions(params: {}): Promise<T.SessionList>
 
-  abstract killSessions(params: T.KillParams): Promise<null>
+  abstract killSessions(params: Params<'auth.session.kill'>): Promise<null>
 
-  abstract resetPassword(params: T.ResetPasswordParams): Promise<null>
+  abstract resetPassword(params: Params<'auth.reset-password'>): Promise<null>
 
   // diagnostic
 
   abstract diagnosticGetError(): Promise<DiagnosticErrorRes>
-  abstract diagnosticRestart(): Promise<void>
-  abstract diagnosticForgetDrive(): Promise<void>
-  abstract diagnosticRepairDisk(): Promise<void>
-  abstract diagnosticGetLogs(params: T.LogsParams): Promise<T.LogResponse>
+  abstract diagnosticRestart(): Promise<null>
+  abstract diagnosticForgetDrive(): Promise<null>
+  abstract diagnosticRepairDisk(): Promise<null>
+  abstract diagnosticGetLogs(
+    params: Params<'diagnostic.logs'>,
+  ): Promise<T.LogResponse>
 
   // init
 
@@ -96,9 +99,11 @@ export abstract class ApiService {
 
   abstract getSystemTime(params: {}): Promise<T.TimeInfo>
 
-  abstract getServerLogs(params: T.LogsParams): Promise<T.LogResponse>
+  abstract getServerLogs(params: Params<'server.logs'>): Promise<T.LogResponse>
 
-  abstract getKernelLogs(params: T.LogsParams): Promise<T.LogResponse>
+  abstract getKernelLogs(
+    params: Params<'server.kernel-logs'>,
+  ): Promise<T.LogResponse>
 
   abstract followServerLogs(
     params: FollowServerLogsReq,
@@ -111,7 +116,7 @@ export abstract class ApiService {
   abstract followServerMetrics(params: {}): Promise<T.MetricsFollowResponse>
 
   abstract updateServer(
-    params: T.UpdateSystemParams,
+    params: Params<'server.update'>,
   ): Promise<T.UpdateSystemRes>
 
   abstract restartServer(params: {}): Promise<null>
@@ -122,35 +127,39 @@ export abstract class ApiService {
 
   abstract toggleKiosk(enable: boolean): Promise<null>
 
-  abstract setHostname(params: T.SetServerHostnameParams): Promise<null>
+  abstract setHostname(params: Params<'server.set-hostname'>): Promise<null>
 
   abstract setKeyboard(params: FullKeyboard): Promise<null>
 
   abstract setLanguage(params: SetLanguageParams): Promise<null>
 
-  abstract setDns(params: T.SetStaticDnsParams): Promise<null>
+  abstract setDns(params: Params<'net.dns.set-static'>): Promise<null>
 
-  abstract queryDns(params: T.QueryDnsParams): Promise<T.QueryDnsRes>
+  abstract queryDns(params: Params<'net.dns.query'>): Promise<T.QueryDnsRes>
 
-  abstract checkPort(params: T.CheckPortParams): Promise<T.CheckPortRes>
+  abstract checkPort(
+    params: Params<'net.gateway.check-port'>,
+  ): Promise<T.CheckPortRes>
 
   abstract checkPortV6(
-    params: T.CheckPortParams,
+    params: Params<'net.gateway.check-port-v6'>,
   ): Promise<T.CheckPortV6Res | null>
 
   abstract checkChallenge(
-    params: T.CheckChallengeParams,
+    params: Params<'net.acme.check-challenge'>,
   ): Promise<T.CheckChallengeRes | null>
 
-  abstract checkDns(params: T.CheckDnsParams): Promise<CheckDnsRes>
+  abstract checkDns(
+    params: Params<'net.gateway.check-dns'>,
+  ): Promise<CheckDnsRes>
 
   // smtp
 
-  abstract setSmtp(params: T.SmtpValue): Promise<null>
+  abstract setSmtp(params: Params<'server.set-smtp'>): Promise<null>
 
   abstract clearSmtp(params: {}): Promise<null>
 
-  abstract testSmtp(params: T.TestSmtpParams): Promise<null>
+  abstract testSmtp(params: Params<'server.test-smtp'>): Promise<null>
 
   // marketplace URLs
 
@@ -174,62 +183,66 @@ export abstract class ApiService {
   // notification
 
   abstract getNotifications(
-    params: T.ListNotificationParams,
+    params: Params<'notification.list'>,
   ): Promise<T.NotificationWithId[]>
 
   abstract markSeenNotifications(
-    params: T.ModifyNotificationParams,
+    params: Params<'notification.mark-seen'>,
   ): Promise<null>
 
   abstract markSeenAllNotifications(
-    params: T.ModifyNotificationBeforeParams,
+    params: Params<'notification.mark-seen-before'>,
   ): Promise<null>
 
   abstract markUnseenNotifications(
-    params: T.ModifyNotificationParams,
+    params: Params<'notification.mark-unseen'>,
   ): Promise<null>
 
   abstract deleteNotifications(
-    params: T.ModifyNotificationParams,
+    params: Params<'notification.remove'>,
   ): Promise<null>
 
   // ** proxies **
 
-  abstract addTunnel(params: T.AddTunnelParams): Promise<{ id: string }>
+  abstract addTunnel(params: Params<'net.tunnel.add'>): Promise<string>
 
-  abstract updateTunnel(params: T.RenameGatewayParams): Promise<null>
+  abstract updateTunnel(params: Params<'net.gateway.set-name'>): Promise<null>
 
-  abstract updateTunnelConfig(params: T.UpdateTunnelParams): Promise<null>
+  abstract updateTunnelConfig(
+    params: Params<'net.tunnel.update'>,
+  ): Promise<null>
 
-  abstract removeTunnel(params: T.RemoveTunnelParams): Promise<null>
+  abstract removeTunnel(params: Params<'net.tunnel.remove'>): Promise<null>
 
   abstract setDefaultOutbound(params: { gateway: string | null }): Promise<null>
 
-  abstract setServiceOutbound(params: T.SetOutboundGatewayParams): Promise<null>
+  abstract setServiceOutbound(
+    params: Params<'package.set-outbound-gateway'>,
+  ): Promise<null>
 
   // ** domains **
 
   // wifi
 
-  abstract enableWifi(params: T.SetWifiEnabledParams): Promise<null>
+  abstract enableWifi(params: Params<'wifi.set-enabled'>): Promise<null>
 
-  abstract setWifiCountry(params: T.SetCountryParams): Promise<null>
+  abstract setWifiCountry(params: Params<'wifi.country.set'>): Promise<null>
 
   abstract getWifi(params: {}, timeout: number): Promise<T.WifiListInfo>
 
-  abstract addWifi(params: T.WifiAddParams): Promise<null>
+  abstract addWifi(params: Params<'wifi.add'>): Promise<null>
 
-  abstract connectWifi(params: T.WifiSsidParams): Promise<null>
+  abstract connectWifi(params: Params<'wifi.connect'>): Promise<null>
 
-  abstract deleteWifi(params: T.WifiSsidParams): Promise<null>
+  abstract deleteWifi(params: Params<'wifi.remove'>): Promise<null>
 
   // ssh
 
   abstract getSshKeys(params: {}): Promise<T.SshKeyResponse[]>
 
-  abstract addSshKey(params: T.SshAddParams): Promise<T.SshKeyResponse>
+  abstract addSshKey(params: Params<'ssh.add'>): Promise<T.SshKeyResponse>
 
-  abstract deleteSshKey(params: T.SshDeleteParams): Promise<null>
+  abstract deleteSshKey(params: Params<'ssh.remove'>): Promise<null>
 
   // backup
 
@@ -238,20 +251,26 @@ export abstract class ApiService {
   }>
 
   abstract addBackupTarget(
-    params: T.CifsAddParams,
-  ): Promise<{ [id: string]: CifsBackupTarget }>
+    params: Params<'backup.target.cifs.add'>,
+  ): Promise<Record<string, T.BackupTarget>>
 
   abstract updateBackupTarget(
-    params: T.CifsUpdateParams,
-  ): Promise<{ [id: string]: CifsBackupTarget }>
+    params: Params<'backup.target.cifs.update'>,
+  ): Promise<Record<string, T.BackupTarget>>
 
-  abstract removeBackupTarget(params: T.CifsRemoveParams): Promise<null>
+  abstract removeBackupTarget(
+    params: Params<'backup.target.cifs.remove'>,
+  ): Promise<null>
 
-  abstract deleteLegacyBackup(params: T.DeleteLegacyParams): Promise<null>
+  abstract deleteLegacyBackup(
+    params: Params<'backup.target.delete-legacy'>,
+  ): Promise<null>
 
-  abstract getBackupInfo(params: T.InfoParams): Promise<T.BackupInfo>
+  abstract getBackupInfo(
+    params: Params<'backup.target.info'>,
+  ): Promise<T.BackupInfo>
 
-  abstract createBackup(params: T.BackupParams): Promise<null>
+  abstract createBackup(params: Params<'backup.create'>): Promise<null>
 
   // @TODO 041
 
@@ -309,29 +328,33 @@ export abstract class ApiService {
     params: FollowPackageLogsReq,
   ): Promise<T.LogFollowResponse>
 
-  abstract installPackage(params: T.InstallParams): Promise<null>
+  abstract installPackage(params: Params<'package.install'>): Promise<null>
 
-  abstract cancelInstallPackage(params: T.CancelInstallParams): Promise<null>
+  abstract cancelInstallPackage(
+    params: Params<'package.cancel-install'>,
+  ): Promise<null>
 
   abstract getActionInput(
-    params: T.GetActionInputParams,
+    params: Params<'package.action.get-input'>,
   ): Promise<GetActionInputRes>
 
-  abstract runAction(params: T.RunActionParams): Promise<ActionRes>
+  abstract runAction(params: Params<'package.action.run'>): Promise<ActionRes>
 
-  abstract clearTask(params: T.ClearTaskParams): Promise<null>
+  abstract clearTask(params: Params<'package.action.clear-task'>): Promise<null>
 
-  abstract restorePackages(params: T.RestorePackageParams): Promise<null>
+  abstract restorePackages(
+    params: Params<'package.backup.restore'>,
+  ): Promise<null>
 
-  abstract startPackage(params: T.ControlParams): Promise<null>
+  abstract startPackage(params: Params<'package.start'>): Promise<null>
 
-  abstract restartPackage(params: T.ControlParams): Promise<null>
+  abstract restartPackage(params: Params<'package.restart'>): Promise<null>
 
-  abstract stopPackage(params: T.ControlParams): Promise<null>
+  abstract stopPackage(params: Params<'package.stop'>): Promise<null>
 
-  abstract rebuildPackage(params: T.RebuildParams): Promise<null>
+  abstract rebuildPackage(params: Params<'package.rebuild'>): Promise<null>
 
-  abstract uninstallPackage(params: T.UninstallParams): Promise<null>
+  abstract uninstallPackage(params: Params<'package.uninstall'>): Promise<null>
 
   abstract sideloadPackage(): Promise<T.SideloadResponse>
 
@@ -343,25 +366,29 @@ export abstract class ApiService {
   //   params: RR.SetServiceOutboundTunnelReq,
   // ): Promise<RR.SetServiceOutboundTunnelRes>
 
-  abstract initAcme(params: T.InitAcmeParams): Promise<null>
+  abstract initAcme(params: Params<'net.acme.init'>): Promise<null>
 
-  abstract removeAcme(params: T.RemoveAcmeParams): Promise<null>
+  abstract removeAcme(params: Params<'net.acme.remove'>): Promise<null>
 
   abstract serverBindingSetAddressEnabled(
     params: ServerBindingSetAddressEnabledReq,
   ): Promise<null>
 
   abstract osUiAddPublicDomain(
-    params: T.AddPublicDomainParams,
+    params: Params<'server.host.address.domain.public.add'>,
   ): Promise<T.AddPublicDomainRes>
 
-  abstract osUiRemovePublicDomain(params: T.RemoveDomainParams): Promise<null>
+  abstract osUiRemovePublicDomain(
+    params: Params<'server.host.address.domain.public.remove'>,
+  ): Promise<null>
 
   abstract osUiAddPrivateDomain(
-    params: T.AddPrivateDomainParams,
+    params: Params<'server.host.address.domain.private.add'>,
   ): Promise<boolean>
 
-  abstract osUiRemovePrivateDomain(params: T.RemoveDomainParams): Promise<null>
+  abstract osUiRemovePrivateDomain(
+    params: Params<'server.host.address.domain.private.remove'>,
+  ): Promise<null>
 
   abstract pkgBindingSetAddressEnabled(
     params: PkgBindingSetAddressEnabledReq,

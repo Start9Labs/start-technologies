@@ -17,7 +17,7 @@ export class LogsDownloadDirective {
   private readonly downloadHtml = inject(DownloadHTMLService)
 
   logsDownload =
-    input.required<(params: T.LogsParams) => Promise<T.LogResponse>>()
+    input.required<(params: T.LogsParamsInput) => Promise<T.LogResponse>>()
 
   async download() {
     this.tasks.run(async () => {

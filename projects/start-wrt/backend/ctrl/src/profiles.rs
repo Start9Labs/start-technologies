@@ -32,7 +32,7 @@ pub const DEFAULT_WAN_ZONE: &str = "wan";
 /// Do NOT raise this without re-checking every interface-derived netdev name.
 pub const INTERFACE_NAME_LIMIT: usize = 5;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub enum LanAccess<Id: Ord> {
     #[serde(rename = "ALL")]
     All,
@@ -42,7 +42,7 @@ pub enum LanAccess<Id: Ord> {
     OtherProfiles(BTreeSet<Id>),
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::TS)]
 pub enum WanAccess {
     #[serde(rename = "ALL")]
     All,
@@ -54,7 +54,7 @@ pub enum WanAccess {
     Blacklist(Vec<String>), // List of blocked destination IPs/CIDRs
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduleWindow {
     pub start_time: String,
@@ -62,13 +62,13 @@ pub struct ScheduleWindow {
     pub days: [bool; 7],
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::TS)]
 pub struct ScheduleWindows {
     pub interface: String,
     pub windows: Vec<ScheduleWindow>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct Profile<Id: Ord = ProfileId> {
     #[serde(flatten)]
     pub id: Id,
@@ -84,7 +84,7 @@ pub struct Profile<Id: Ord = ProfileId> {
     pub owns_lan: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, visit_rs::TS)]
 pub struct ProfileSetRequest {
     #[serde(flatten)]
     pub profile: Profile<ProfileIdOpt>,
@@ -125,14 +125,18 @@ pub fn profiles<C: CtrlContext>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Deserialize, Serialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, visit_rs::TS,
+)]
 pub struct ProfileId {
     pub fullname: String,
     pub interface: String,
     pub vlan_tag: u16,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Parser)]
+#[derive(
+    Debug, Deserialize, Serialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Parser, visit_rs::TS,
+)]
 pub struct ProfileIdOpt {
     #[clap(short, long)]
     pub fullname: Option<String>,
@@ -3124,7 +3128,7 @@ fn heal_ipv6_state_in_cfgs(cfgs: &mut Configs) -> Result<Vec<String>, Error> {
     Ok(repaired)
 }
 
-#[derive(Debug, Parser, Serialize, Deserialize)]
+#[derive(Debug, Parser, Serialize, Deserialize, visit_rs::TS)]
 pub struct EditArgs {
     #[clap(flatten)]
     pub get: ProfileIdOpt,
@@ -3261,7 +3265,7 @@ fn parse_schedule_windows(raw: &[String]) -> Vec<ScheduleWindow> {
         .collect()
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, visit_rs::TS)]
 pub struct ScheduleGetParams {
     interface: String,
 }

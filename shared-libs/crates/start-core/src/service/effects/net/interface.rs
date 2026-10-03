@@ -25,7 +25,6 @@ pub struct ExportServiceInterfaceParams {
     address_info: AddressInfo,
     r#type: ServiceInterfaceType,
     /// The interface address Open UI should prefer.
-    #[ts(optional = nullable)]
     preferred_launcher_address: Option<String>,
 }
 
@@ -263,10 +262,9 @@ fn interface_ptr(
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct GetServiceInterfaceParams {
-    #[ts(optional)]
     package_id: Option<PackageId>,
     service_interface_id: ServiceInterfaceId,
-    #[ts(optional)]
+
     callback: Option<CallbackId>,
 }
 pub async fn get_service_interface(
@@ -336,9 +334,8 @@ pub async fn get_service_interface(
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct ListServiceInterfacesParams {
-    #[ts(optional)]
     package_id: Option<PackageId>,
-    #[ts(optional)]
+
     callback: Option<CallbackId>,
 }
 pub async fn list_service_interfaces(

@@ -23,6 +23,7 @@ impl Revision {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "ts", derive(visit_rs::TS))]
 pub struct Dump {
     pub id: u64,
     pub value: Value,

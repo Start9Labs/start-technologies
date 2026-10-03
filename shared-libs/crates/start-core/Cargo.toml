@@ -76,7 +76,7 @@ ed25519-dalek = { version = "3.0.0-rc.1", features = [
   "zeroize",
 ] }
 ed25519-dalek-v1 = { package = "ed25519-dalek", version = "1" }
-exver = { path = "../exver", features = ["serde"] }
+exver = { path = "../exver", features = ["serde", "ts"] }
 fast-socks5 = "1.0.0"
 fd-lock-rs = "0.1.4"
 foreign-types = "0.3.2"
@@ -109,7 +109,7 @@ igd-next = { version = "0.17.1", default-features = false, features = [
   "aio_tokio",
 ] }
 imbl = { version = "6", features = ["serde", "small-chunks"] }
-imbl-value = { path = "../imbl-value", features = ["ts-rs"] }
+imbl-value = { path = "../imbl-value", features = ["ts"] }
 include_dir = { version = "0.7.3", features = ["metadata"] }
 indexmap = { version = "2.0.2", features = ["serde"] }
 indicatif = { version = "0.18.3", features = ["tokio"] }
@@ -160,7 +160,7 @@ openssh-keys = "0.6.2"
 openssl = { version = "0.10.57", features = ["vendored"] }
 openssl-sys = "0.9.116"
 p256 = { version = "0.14.0-rc.15", features = ["pem"] }
-patch-db = { path = "../patch-db/core", features = ["trace"] }
+patch-db = { path = "../patch-db/core", features = ["trace", "ts"] }
 pbkdf2 = "0.13.0"
 pin-project = "1.1.3"
 pkcs8 = { version = "0.11.0", features = ["pem", "std"] }
@@ -178,7 +178,7 @@ reqwest = { version = "0.12.25", features = [
   "stream",
 ] }
 rpassword = "7.2.0"
-rpc-toolkit = { path = "../rpc-toolkit" }
+rpc-toolkit = { path = "../rpc-toolkit", features = ["ts"] }
 rusqlite = { version = "0.34", features = ["bundled"] }
 rust-argon2 = "3.0.0"
 rust-i18n = "3.1.5"
@@ -215,11 +215,17 @@ tracing-appender = "0.2.3"
 tracing-error = "0.2.0"
 tracing-journald = "0.3.0"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-ts-rs = "9.0.1"
 typed-builder = "0.23.2"
 url = { version = "2.4.1", features = ["serde"] }
 uuid = { version = "1.4.1", features = ["v4"] }
-visit-rs = "0.1.1"
+visit-rs = { path = "../visit-rs", features = [
+  "ts",
+  "chrono",
+  "ipnet",
+  "josekit",
+  "url",
+  "yajrc",
+] }
 x25519-dalek = { version = "3.0.0-rc.1", features = ["static_secrets"] }
 xmltree = "0.10"
 zbus = "5.1.1"

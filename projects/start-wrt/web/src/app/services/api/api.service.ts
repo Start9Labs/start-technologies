@@ -1,25 +1,27 @@
 import { Injectable } from '@angular/core'
-import { UciFile } from './types'
+import type * as Bindings from './bindings'
+import type * as Events from './events'
+import type { Api, RpcParamType, RpcReturnType } from './bindings'
 
 @Injectable({
   providedIn: 'root',
 })
 export abstract class ApiService {
-  abstract login(params: LoginReq): Promise<null>
+  abstract login(params: LoginReq): Promise<RpcReturnType<Api, 'auth.login'>>
   abstract logout(): Promise<null>
   abstract exec(params: ExecReq): Promise<ExecRes>
   abstract getFile(params: GetFileReq): Promise<GetFileRes>
   abstract setFile(params: SetFileReq): Promise<null>
-  abstract getUci<T extends Record<string, UciFile<any>>>(
-    params: GetUciReq,
-  ): Promise<T>
-  abstract setUci<T extends string[]>(params: SetUciReq): Promise<SetUciRes<T>>
+  abstract getUci(params: GetUciReq): Promise<GetUciRes>
+  abstract setUci(params: SetUciReq): Promise<SetUciRes>
   abstract systemInfo(timeout?: number): Promise<SystemInfoRes>
   abstract systemNewerVersions(): Promise<VersionInfo[]>
   abstract systemUpdate(params: SystemUpdateReq): Promise<SystemUpdateRes>
   abstract systemRestart(): Promise<null>
   abstract setPassword(params: SetPasswordReq): Promise<null>
-  abstract setPreferences(params: SetPreferencesReq): Promise<null>
+  abstract setPreferences(
+    params: SetPreferencesReq,
+  ): Promise<RpcReturnType<Api, 'system.set-preferences'>>
   abstract vpnServerList(): Promise<VpnServers>
   abstract vpnServerSet(params: VpnServerSetArgs): Promise<null>
   abstract vpnServerDelete(params: VpnServerDeleteArgs): Promise<null>
@@ -48,7 +50,9 @@ export abstract class ApiService {
   abstract setTimezone(params: { timezone: string }): Promise<null>
   abstract getTimezones(): Promise<string[]>
   abstract checkInitialized(): Promise<CheckInitializedRes>
-  abstract setInitialPassword(params: SetInitialPasswordReq): Promise<null>
+  abstract setInitialPassword(
+    params: SetInitialPasswordReq,
+  ): Promise<RpcReturnType<Api, 'auth.set-initial-password'>>
   abstract setupStatus(): Promise<SetupStatusRes>
   abstract systemFactoryReset(): Promise<null>
   abstract systemLogs(): Promise<LogsResponse>
@@ -106,169 +110,77 @@ export abstract class ApiService {
 }
 
 // Continuation types
-export type BackupCreateRes = { guid: string; filename: string }
-export type BackupRestoreRes = { upload: string }
-export type DiagnosticsCreateRes = { guid: string; filename: string }
+export type BackupCreateRes = RpcReturnType<Api, 'backup.create'>
 
-// Ethernet types
-export interface EthernetPort {
-  profile: ProfileId | null
-}
+export type BackupRestoreRes = RpcReturnType<Api, 'backup.restore'>
 
-export interface EthernetConfig {
-  wan_ipv6: boolean
-  wan_port: string | null
-  ports: Record<string, EthernetPort>
-}
+export type DiagnosticsCreateRes = RpcReturnType<Api, 'diagnostics.create'>
 
-export interface EthernetSetPort {
-  profile: ProfileIdOpt | null
-}
+export type EthernetPort = RpcReturnType<Api, 'ethernet.get'>['ports'][string]
 
-export interface EthernetSetConfig {
-  wan_ipv6: boolean
-  wan_port: string | null
-  ports: Record<string, EthernetSetPort>
-  // When true, authorize deleting the published ports listed in a prior
-  // EthernetSetResult.pending_published_port_deletions response.
-  confirm_published_port_deletion?: boolean
-}
+export type EthernetConfig = RpcReturnType<Api, 'ethernet.get'>
 
-// A published port that will be deleted because its device is moving to a
-// different security profile (snake_case fields — the backend serializes the
-// shared AffectedPublishedPort verbatim in both ethernet and wifi results).
-export interface AffectedPublishedPort {
-  id: string
-  label: string
-  device_mac: string
-  device_name: string | null
-}
+export type EthernetSetPort = RpcParamType<Api, 'ethernet.set'>['ports'][string]
 
-export interface EthernetSetResult {
-  // Non-empty (and nothing applied) when confirmation is required; empty once applied.
-  pending_published_port_deletions: AffectedPublishedPort[]
-}
+export type EthernetSetConfig = RpcParamType<Api, 'ethernet.set'>
 
-// SSH Keys types
-export interface SshKeyFromApi {
-  algorithm: string
-  fingerprint: string
-  hostname: string
-}
+export type AffectedPublishedPort = Bindings.AffectedPublishedPort
 
-export type SshKeysAddRequest = { key: string }
-export type SshKeysDeleteRequest = { fingerprint: string }
+export type EthernetSetResult = RpcReturnType<Api, 'ethernet.set'>
 
-export type LanIpv4Response = {
-  address: string
-  netmask: string
-}
+export type SshKeyFromApi = RpcReturnType<Api, 'ssh-keys.add'>
 
-export type LanIpv4SetRequest = {
-  address: string
-  force?: boolean
-}
+export type SshKeysAddRequest = RpcParamType<Api, 'ssh-keys.add'>
 
-export type LanIpv6Response = {
-  slaac: boolean
-  dhcpv6: boolean
-  prefix: number
-  ip6addr: string | null
-  wan_prefix: number
-}
+export type SshKeysDeleteRequest = RpcParamType<Api, 'ssh-keys.delete'>
 
-export type LanIpv6SetRequest = {
-  slaac: boolean
-  dhcpv6: boolean
-  prefix: number
-}
+export type LanIpv4Response = RpcReturnType<Api, 'lan.ipv4-get'>
 
-export type LogEntry = { timestamp: string; message: string }
-export type LogsResponse = { entries: LogEntry[] }
+export type LanIpv4SetRequest = RpcParamType<Api, 'lan.ipv4-set'>
 
-export type LoginReq = { password: string }
+export type LanIpv6Response = RpcReturnType<Api, 'lan.ipv6-get'>
 
-export type ExecReq = {
-  command: string
-  args: string[]
-  timeout: number
-}
+export type LanIpv6SetRequest = RpcParamType<Api, 'lan.ipv6-set'>
 
-export type ExecRes = {
-  stdout: string
-  stderr: string
-  exitCode: number
-}
+export type LogEntry = Bindings.LogEntry
 
-export type GetFileReq = {
-  path: string
-}
+export type LogsResponse = RpcReturnType<Api, 'system.logs'>
 
-export type GetFileRes = {
-  contents: string
-  modified: string
-}
+export type LoginReq = RpcParamType<Api, 'auth.login'>
 
-export type SetFileReq = GetFileReq & GetFileRes
+export type ExecReq = RpcParamType<Api, 'exec'>
 
-export type GetUciReq = {
-  names: string[]
-}
+export type ExecRes = RpcReturnType<Api, 'exec'>
 
-export type GetUciRes<T> = T
+export type GetFileReq = RpcParamType<Api, 'file.get'>
 
-export type SetUciReq = Record<string, UciFile<any>>
+export type GetFileRes = RpcReturnType<Api, 'file.get'>
 
-export type SetUciRes<T extends string[]> = {
-  [K in T[number]]: string
-}
+export type SetFileReq = RpcParamType<Api, 'file.set'>
 
-export type SystemInfoRes = {
-  version: string
-  gitHash: string
-  language: string
-  date: string
-  theme: 'dark' | 'light' | 'system'
-  remoteAccess: RemoteAccess
-  timezone: string
-}
+export type GetUciReq = RpcParamType<Api, 'uci.get'>
 
-export type VersionInfo = {
-  version: string
-  releaseNotes: string
-}
+export type GetUciRes = RpcReturnType<Api, 'uci.get'>
 
-export type SystemUpdateReq = {
-  registry?: string
-  targetVersion?: string
-}
+export type SetUciReq = RpcParamType<Api, 'uci.set'>
 
-export type SystemUpdateRes = {
-  target: string | null
-  progress: string | null
-}
+export type SetUciRes = RpcReturnType<Api, 'uci.set'>
 
-// Progress types for WebSocket streaming (mirrors start-os FullProgress)
-export type FullProgress = {
-  overall: Progress
-  phases: NamedProgress[]
-}
+export type SystemInfoRes = RpcReturnType<Api, 'system.info'>
 
-export type NamedProgress = {
-  name: string
-  progress: Progress
-}
+export type VersionInfo = RpcReturnType<Api, 'system.newer-versions'>[number]
 
-// null = NotStarted, boolean = Complete, object = in-progress
-export type Progress =
-  | null
-  | boolean
-  | { done: number; total: number | null; units: string | null }
+export type SystemUpdateReq = RpcParamType<Api, 'system.update'>
 
-export type SetPasswordReq = {
-  oldPassword: string
-  newPassword: string
-}
+export type SystemUpdateRes = RpcReturnType<Api, 'system.update'>
+
+export type FullProgress = Events.FullProgress
+
+export type NamedProgress = Events.NamedProgress
+
+export type Progress = Events.Progress
+
+export type SetPasswordReq = RpcParamType<Api, 'auth.set-password'>
 
 export type Theme = 'dark' | 'light' | 'system'
 
@@ -280,326 +192,113 @@ export type SetPreferencesReq = Partial<{
   remoteAccess: RemoteAccess
 }>
 
-export interface VpnServerPeer {
-  name: string
-  ip?: string
-  public_key?: string
-  preshared_key?: string
-  route_all?: boolean
-}
+export type VpnServerPeer = Bindings.VpnServerPeer
 
-export interface VpnServer {
-  profile: string
-  label: string
-  enabled: boolean
-  listen_port: number
-  endpoint: string
-  public_key: string
-  server_address: string
-  peers: VpnServerPeer[]
-}
+export type VpnServer = Bindings.VpnServer
 
-export interface VpnServerConfig {
-  label: string
-  enabled: boolean
-  listen_port: number
-  endpoint: string
-  private_key?: string
-}
+export type VpnServerConfig = Bindings.VpnServerConfigInput
 
 export interface VpnServerEndpoint {
   address: string
   label: string
 }
 
-export interface VpnServers {
-  servers: VpnServer[]
-}
+export type VpnServers = RpcReturnType<Api, 'vpn-server.list'>
 
-export interface VpnServerSetArgs {
-  profile: string
-  config: VpnServerConfig
-}
+export type VpnServerSetArgs = RpcParamType<Api, 'vpn-server.set'>
 
-export interface VpnServerDeleteArgs {
-  profile: string
-}
+export type VpnServerDeleteArgs = RpcParamType<Api, 'vpn-server.delete'>
 
-export interface VpnServerPeerAddArgs {
-  profile: string
-  peer: VpnServerPeer
-}
+export type VpnServerPeerAddArgs = RpcParamType<Api, 'vpn-server.peer-add'>
 
-export interface VpnServerPeerDeleteArgs {
-  profile: string
-  public_key: string
-}
+export type VpnServerPeerDeleteArgs = RpcParamType<
+  Api,
+  'vpn-server.peer-delete'
+>
 
-export interface VpnServerPeerAddResponse {
-  client_config?: string
-  public_key: string
-  ip: string
-}
+export type VpnServerPeerAddResponse = RpcReturnType<Api, 'vpn-server.peer-add'>
 
-export interface WifiRadio {
-  band: string
-  channel: string
-  enabled: boolean
-  broadcast: boolean
-}
+export type WifiRadio = Bindings.WifiRadio
 
-export interface WifiPassword {
-  label: string
-  profile: WifiProfileId | null
-  password: string
-}
+export type WifiPassword = RpcReturnType<Api, 'wifi.get'>['passwords'][number]
 
-export interface WifiProfileId {
-  fullname: string
-  interface: string
-  vlan_tag: number
-}
+export type WifiProfileId = Bindings.ProfileId
 
-export interface WifiConfig {
-  ssid: string
-  broadcastSeparately: boolean
-  // ISO 3166-1 alpha-2; null leaves the radios on the world domain.
-  country: string | null
-  radios: Record<string, WifiRadio>
-  passwords: WifiPassword[]
-  // When true, authorize deleting the published ports listed in a prior
-  // WifiSetResult.pendingPublishedPortDeletions response.
-  confirmPublishedPortDeletion?: boolean
-}
+export type WifiConfig = RpcReturnType<Api, 'wifi.get'> &
+  Pick<RpcParamType<Api, 'wifi.set'>, 'confirmPublishedPortDeletion'>
 
-export interface WifiSetResult {
-  // Non-empty (and nothing applied) when confirmation is required; empty once applied.
-  pendingPublishedPortDeletions: AffectedPublishedPort[]
-}
+export type WifiSetResult = RpcReturnType<Api, 'wifi.set'>
 
-export interface WifiRegulatory {
-  countries: string[]
-  // Channels an access point may use under the current country, by band ('2g', '5g').
-  channels: Record<string, number[]>
-}
+export type WifiRegulatory = RpcReturnType<Api, 'wifi.regulatory'>
 
-export interface ScheduleWindow {
-  startTime: string
-  endTime: string
-  days: [boolean, boolean, boolean, boolean, boolean, boolean, boolean]
-}
+export type ScheduleWindow = RpcReturnType<Api, 'profiles.schedule-get'>[number]
 
-// Security Profile types
-export interface ProfileId {
-  fullname: string
-  interface: string
-  vlan_tag: number
-}
+export type ProfileId = RpcReturnType<Api, 'profiles.set'>
 
-export interface ProfileIdOpt {
-  fullname?: string
-  interface?: string
-  vlan_tag?: number
-}
+export type ProfileIdOpt = Bindings.ProfileIdOptInput
 
-export interface SecurityProfile {
-  fullname: string
-  interface: string
-  vlan_tag: number
-  gateway_ip: string
-  outbound: string // 'wan' for default WAN, or VPN interface name
-  lan_access: LanAccess<ProfileId>
-  wan_access: WanAccess
-  access_to_new_profiles: boolean
-  owns_lan: boolean
-  dns_override?: DnsServer[]
-  dns_source: 'system' | 'custom' | 'vpn'
-}
+export type SecurityProfile = RpcReturnType<Api, 'profiles.get'>
 
-export type LanAccess<Id = ProfileId> =
-  | 'ALL'
-  | 'SAME_PROFILE'
-  | { other_profiles: Id[] }
+export type LanAccess = RpcParamType<Api, 'profiles.create'>['lan_access']
 
-export type WanAccess =
-  | 'ALL'
-  | 'NONE'
-  | { whitelist: string[] }
-  | { blacklist: string[] }
+export type WanAccess = Bindings.WanAccess
 
-export interface ProfileCreateInput {
-  fullname?: string
-  interface?: string
-  vlan_tag?: number
-  gateway_ip: string
-  outbound: string
-  lan_access: LanAccess<ProfileIdOpt>
-  wan_access: WanAccess
-  access_to_new_profiles: boolean
-  owns_lan: boolean
-  dns_override?: DnsServer[]
-}
+export type ProfileCreateInput = RpcParamType<Api, 'profiles.create'>
 
-export interface ProfileUpdateInput {
-  fullname?: string
-  interface: string
-  vlan_tag: number
-  gateway_ip: string
-  outbound: string
-  lan_access: LanAccess<ProfileIdOpt>
-  wan_access: WanAccess
-  access_to_new_profiles: boolean
-  owns_lan: boolean
-  dns_override?: DnsServer[]
-  force?: boolean
-}
-export type CheckInitializedRes = { initialized: boolean }
+export type ProfileUpdateInput = RpcParamType<Api, 'profiles.set'> &
+  Pick<ProfileId, 'interface' | 'vlan_tag'>
 
-export type SetInitialPasswordReq = { password: string }
+export type CheckInitializedRes = RpcReturnType<Api, 'auth.check-initialized'>
 
-export interface SetupStatusRes {
-  setupMode: boolean
-  disk: {
-    emmcFound: boolean
-    hasFirmware: boolean
-  }
-}
+export type SetInitialPasswordReq = RpcParamType<
+  Api,
+  'auth.set-initial-password'
+>
 
-export interface SetupFlashReq {
-  mode: 'update' | 'fresh-start'
-  password: string
-}
+export type SetupStatusRes = RpcReturnType<Api, 'setup.status'>
 
-export interface SetupFlashEvent {
-  phase: 'copying' | 'status' | 'complete' | 'error'
-  copied?: number
-  total?: number
-  message?: string
-  step?: number
-  totalSteps?: number
-}
+export type SetupFlashReq = Events.FlashParamsInput
 
-// Device types (from backend smart endpoints)
-export interface DeviceFromApi {
-  mac: string | null
-  name: string
-  /** The name assigned in the router; null when `name` is resolved from elsewhere. */
-  custom_name: string | null
-  hostname: string | null
-  status: 'online' | 'offline'
-  connection: string | null
-  ipv4: string | null
-  ipv6: string | null
-  ipv4_static: boolean
-  /** May auto-create port forwards via PCP/UPnP (default off). */
-  allow_auto_port_forward: boolean
-  security_profile: string | null
-  speed: { up: number; down: number } | null
-  data_usage: number | null
-}
+export type SetupFlashEvent = Events.SetupEvent
 
-export interface DeviceUpdateReq {
-  mac: string
-  /** Omitted leaves the assigned name untouched; empty clears it. */
-  name?: string
-  ipv4_static: boolean
-  ipv4: string
-}
+export type DeviceFromApi = RpcReturnType<Api, 'devices.list'>[number]
+
+export type DeviceUpdateReq = RpcParamType<Api, 'devices.update'>
 
 export type DeviceDataUsagePeriod = 'week' | 'month' | '3months'
 
-export interface DeviceDataUsageReq {
-  mac: string
-  period: DeviceDataUsagePeriod
-}
+export type DeviceDataUsageReq = RpcParamType<Api, 'devices.data-usage'>
 
-export interface DataUsagePointFromApi {
-  timestamp: number
-  upload: number
-  download: number
-}
-
-// WAN types
+export type DataUsagePointFromApi = RpcReturnType<
+  Api,
+  'devices.data-usage'
+>[number]
 
 export type WanIpv4Mode = 'dhcp' | 'static' | 'pppoe'
 
-export type WanIpv4Response = {
-  mode: WanIpv4Mode
-  assigned_ip: string | null
-  address: string | null
-  netmask: string | null
-  gateway: string | null
-  username: string | null
-  password: string | null
-  device: string | null
-}
+export type WanIpv4Response = RpcReturnType<Api, 'wan.ipv4-get'>
 
-export type WanIpv4SetRequest = {
-  mode: WanIpv4Mode
-  address?: string
-  netmask?: string
-  gateway?: string
-  username?: string
-  password?: string
-  device?: string
-}
+export type WanIpv4SetRequest = RpcParamType<Api, 'wan.ipv4-set'>
 
 export type WanIpv6Mode = 'disabled' | 'slaac' | 'dhcpv6' | 'static' | '6rd'
 
-export type WanIpv6Response = {
-  mode: WanIpv6Mode
-  address?: string | null
-  prefix?: string | null
-  gateway?: string | null
-  ip6prefix?: string | null
-  ip6prefixlen?: string | null
-  ip4prefixlen?: string | null
-  border_relay?: string | null
-  assigned_ipv6?: string | null
-  lan_prefix?: string | null
-}
+export type WanIpv6Response = RpcReturnType<Api, 'wan.ipv6-get'>
 
-export type WanIpv6SetRequest = {
-  mode: WanIpv6Mode
-  address?: string
-  prefix?: string
-  gateway?: string
-  ip6prefix?: string
-  ip6prefixlen?: string
-  ip4prefixlen?: string
-  border_relay?: string
-  lan_prefix?: string
-}
+export type WanIpv6SetRequest = RpcParamType<Api, 'wan.ipv6-set'>
 
 export type WanMacStrategy = 'router' | 'custom'
 
-export type WanMacResponse = {
-  strategy: WanMacStrategy
-  mac: string
-  default_mac: string
-}
+export type WanMacResponse = RpcReturnType<Api, 'wan.mac-get'>
 
-export type WanMacSetRequest = {
-  strategy: WanMacStrategy
-  mac?: string
-}
+export type WanMacSetRequest = RpcParamType<Api, 'wan.mac-set'>
 
 export type WanDnsMode = 'isp' | 'custom'
 
-export type DnsServer = {
-  address: string
-  ssl: boolean
-}
+export type DnsServer = Bindings.DnsServer
 
-export type WanDnsResponse = {
-  mode: WanDnsMode
-  servers: DnsServer[]
-}
+export type WanDnsResponse = RpcReturnType<Api, 'wan.dns-get'>
 
-export type WanDnsSetRequest = {
-  mode: WanDnsMode
-  servers?: DnsServer[]
-}
+export type WanDnsSetRequest = RpcParamType<Api, 'wan.dns-set'>
 
 export type WanDdnsProvider =
   | 'dyndns'
@@ -608,28 +307,12 @@ export type WanDdnsProvider =
   | 'duckdns'
   | 'freedns'
 
-export type WanDdnsResponse = {
-  enabled: boolean
-  provider: WanDdnsProvider
-  hostname?: string | null
-  username?: string | null
-  password?: string | null
-  token?: string | null
-  zone?: string | null
-}
+export type WanDdnsResponse = RpcReturnType<Api, 'wan.ddns-get'>
 
-export type WanDdnsSetRequest = {
-  enabled: boolean
-  provider: WanDdnsProvider
-  hostname?: string
-  username?: string
-  password?: string
-  token?: string
-  zone?: string
-}
+export type WanDdnsSetRequest = RpcParamType<Api, 'wan.ddns-set'>
 
-// Published Ports types (from backend smart endpoints)
 export type PublishedPortProtocol = 'tcp' | 'udp' | 'tcp+udp'
+
 export type PublishedPortStatusValue =
   | 'active'
   | 'partial'
@@ -637,135 +320,48 @@ export type PublishedPortStatusValue =
   | 'error'
   | 'disabled'
 
-export interface PublishedPortFromApi {
-  id: string
-  enabled: boolean
-  label: string
-  device_mac: string
-  ports: string
-  protocol: PublishedPortProtocol
-  ipv4: boolean
-  ipv6: boolean
-  ipv4_public_port: string | null
-  source: string
-  override_wan_ports: boolean
-  status: PublishedPortStatusValue
-  status_reason: string | null
-  device_name: string | null
-  device_ipv4: string | null
-  device_ipv6: string | null
-}
+export type PublishedPortFromApi = RpcReturnType<
+  Api,
+  'published-ports.list'
+>[number]
 
-export interface PublishedPortInputForApi {
-  id: string
-  enabled: boolean
-  label: string
-  device_mac: string
-  ports: string
-  protocol: PublishedPortProtocol
-  ipv4: boolean
-  ipv6: boolean
-  ipv4_public_port?: string | null
-  source: string
-  /** Confirms an enabled IPv4 WAN collision. */
-  override_wan_ports: boolean
-}
+export type PublishedPortInputForApi = RpcParamType<
+  Api,
+  'published-ports.set'
+>['ports'][number]
 
-export type PublishedPortsSetRequest = {
-  ports: PublishedPortInputForApi[]
-}
+export type PublishedPortsSetRequest = RpcParamType<Api, 'published-ports.set'>
 
-export interface WanPortCollision {
-  id: string
-  label: string
-  router_service_ports: string[]
-  hostname_route_ports: SniPortUse[]
-}
+export type WanPortCollision = Bindings.WanPortCollision
 
-export interface SniPortUse {
-  ports: string
-  hostnames: string[]
-  devices: string[]
-}
+export type SniPortUse = Bindings.SniPortUse
 
-export type PublishedPortsSetResult = {
-  pending_wan_port_collisions: WanPortCollision[]
-}
+export type PublishedPortsSetResult = RpcReturnType<Api, 'published-ports.set'>
 
-export type AutomaticPortUseKind = 'PCP' | 'UPnP' | 'SNI'
+export type AutomaticPortUseKind = Bindings.AutomaticPortUse['kind']
 
-export interface AutomaticPortUseFromApi {
-  id: string
-  kind: AutomaticPortUseKind
-  device_mac: string
-  device_name: string | null
-  internal_ip: string | null
-  ports: string
-  public_ports: string
-  expires_secs: number | null
-  hostname: string | null
-}
+export type AutomaticPortUseFromApi = RpcReturnType<
+  Api,
+  'published-ports.auto-list'
+>[number]
 
-// Outbound VPN (WireGuard Client) types
+export type OutboundVpn = RpcReturnType<Api, 'vpn-client.list'>[number]
 
-export interface OutboundVpn {
-  id: string
-  label: string
-  target: string
-  enabled: boolean
-  used_by: string[]
-  supports_ipv6: boolean
-  /** Interface MTU, or null to inherit the kernel default (~1420). */
-  mtu: number | null
-  /** The server is named by hostname; only 'Internet' is a valid target. */
-  hostname_endpoint: boolean
-}
+export type OutboundVpnCreateRequest = RpcParamType<Api, 'vpn-client.create'>
 
-export interface OutboundVpnCreateRequest {
-  label: string
-  target: string
-  config: string
-}
+export type OutboundVpnCreateResponse = RpcReturnType<Api, 'vpn-client.create'>
 
-export interface OutboundVpnCreateResponse {
-  id: string
-}
+export type OutboundVpnUpdateRequest = RpcParamType<Api, 'vpn-client.update'>
 
-export interface OutboundVpnUpdateRequest {
-  id: string
-  label: string
-  target: string
-  /** Desired MTU; null restores the default: the chain MTU for a chained VPN, else the kernel's (~1420). Always sent by the form. */
-  mtu: number | null
-}
+export type OutboundVpnDeleteRequest = RpcParamType<Api, 'vpn-client.delete'>
 
-export interface OutboundVpnDeleteRequest {
-  id: string
-}
+export type OutboundVpnSetEnabledRequest = RpcParamType<
+  Api,
+  'vpn-client.set-enabled'
+>
 
-export interface OutboundVpnSetEnabledRequest {
-  id: string
-  enabled: boolean
-}
+export type ActivityEntry = Bindings.ActivityEntry
 
-// Activity types
+export type ActivityListResponse = RpcReturnType<Api, 'activity.list'>
 
-export interface ActivityEntry {
-  id: number
-  timestamp: string
-  category: string
-  action: string
-  success: boolean
-  summary: string
-  error: string | null
-}
-
-export interface ActivityListResponse {
-  entries: ActivityEntry[]
-  total: number
-}
-
-export interface ActivityListParams {
-  offset?: number
-  limit?: number
-}
+export type ActivityListParams = RpcParamType<Api, 'activity.list'>

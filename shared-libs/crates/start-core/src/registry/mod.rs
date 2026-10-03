@@ -5,7 +5,7 @@ use futures::future::ready;
 use imbl_value::InternedString;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, Server, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 use crate::context::CliContext;
 use crate::middleware::auth::Auth;

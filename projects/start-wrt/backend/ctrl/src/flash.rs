@@ -27,7 +27,7 @@ pub(crate) fn squashfs_bytes_used(dev_path: &str, offset: u64) -> Option<u64> {
 }
 
 /// Partition entry from sfdisk --json output.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, visit_rs::TS)]
 pub(crate) struct SfdiskPartition {
     pub node: String,
     pub start: u64,
@@ -36,19 +36,19 @@ pub(crate) struct SfdiskPartition {
     pub name: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, visit_rs::TS)]
 pub(crate) struct SfdiskTable {
     pub partitions: Vec<SfdiskPartition>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, visit_rs::TS)]
 pub(crate) struct SfdiskOutput {
     #[serde(rename = "partitiontable")]
     pub partition_table: SfdiskTable,
 }
 
 /// Progress/phase events emitted during flash operations.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, visit_rs::TS)]
 #[serde(tag = "phase", rename_all = "camelCase")]
 pub enum FlashEvent {
     /// Raw byte copy in progress.

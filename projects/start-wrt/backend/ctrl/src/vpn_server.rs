@@ -70,7 +70,7 @@ pub struct UciVpnServer {
 // === Public API Types ===
 
 /// Peer configuration for VPN server
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct VpnServerPeer {
     /// Human-readable name for the peer
     pub name: String,
@@ -89,7 +89,7 @@ pub struct VpnServerPeer {
 }
 
 /// VPN server configuration returned by list (excludes sensitive data)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct VpnServer {
     /// Profile interface name this VPN server is associated with (e.g., "lan", "guest")
     pub profile: String,
@@ -110,7 +110,7 @@ pub struct VpnServer {
 }
 
 /// VPN server configuration for set/create requests
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct VpnServerConfig {
     /// Human-readable label for the VPN server
     pub label: String,
@@ -126,12 +126,12 @@ pub struct VpnServerConfig {
 }
 
 /// Response containing all VPN servers
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct VpnServers {
     pub servers: Vec<VpnServer>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct SetArgs {
     /// Profile interface name (e.g., "lan", "guest")
     pub profile: String,
@@ -139,14 +139,14 @@ pub struct SetArgs {
     pub config: VpnServerConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, Parser, visit_rs::TS)]
 pub struct DeleteArgs {
     /// Profile interface name
     #[clap(short, long)]
     pub profile: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct PeerAddArgs {
     /// Profile interface name (e.g., "lan", "guest")
     pub profile: String,
@@ -154,7 +154,7 @@ pub struct PeerAddArgs {
     pub peer: VpnServerPeer,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, Parser, visit_rs::TS)]
 pub struct PeerDeleteArgs {
     /// Profile interface name
     #[clap(short, long)]
@@ -165,7 +165,7 @@ pub struct PeerDeleteArgs {
 }
 
 /// Response from adding a peer, contains client config if keys were generated
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::TS)]
 pub struct PeerAddResponse {
     /// WireGuard client configuration (only present if keys were generated server-side)
     #[serde(skip_serializing_if = "Option::is_none")]

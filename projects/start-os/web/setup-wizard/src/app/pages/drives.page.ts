@@ -281,13 +281,12 @@ export default class DrivesPage {
   async ngOnInit() {
     await this.loadDrives()
 
-    // Pre-installed device: fix the OS drive to the disk the OS booted from and
-    // disable it. The user only selects a data drive; the backend provisions
-    // only that drive and leaves the OS untouched.
+    // The pre-installed boot disk cannot be changed.
     if (this.stateService.osDrive) {
       this.form.controls.osDrive.setValue({
         logicalname: this.stateService.osDrive,
         stablePath: this.stateService.osDrive,
+        partitionTable: null,
         vendor: null,
         model: this.stateService.osDrive,
         partitions: [],
@@ -488,8 +487,7 @@ export default class DrivesPage {
 
     this.tasks.run(async () => {
       const result = await this.api.installOs({
-        // Pre-installed: null OS drive tells the backend to skip the install
-        // and only provision the data drive.
+        // Null preserves the pre-installed OS.
         osDrive: this.stateService.osDrive ? null : osDrive.stablePath,
         dataDrive: {
           stablePath: dataDrive.stablePath,
@@ -497,13 +495,12 @@ export default class DrivesPage {
         },
       })
 
-      this.stateService.dataDriveGuid = result.guid
+      this.stateService.dataDriveGuid = result.guid ?? ''
       this.stateService.attach = result.attach
       this.stateService.mokEnrolled = result.mokEnrolled
 
       console.log('Ctrl+Shift+X to shutdown')
 
-      // Show success dialog
       this.dialogSub = this.dialogs
         .openAlert('StartOS has been installed successfully.', {
           label: 'Installation Complete!',

@@ -38,14 +38,14 @@ pub fn devices<C: CtrlContext>() -> ParentHandler<C> {
 
 // --- Types ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum DeviceStatus {
     Online,
     Offline,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::TS)]
 pub struct Device {
     pub mac: Option<String>,
     /// Fully-resolved display name: UCI static name → live DHCP hostname →
@@ -69,13 +69,13 @@ pub struct Device {
     pub data_usage: Option<f64>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::TS)]
 pub struct SpeedData {
     pub up: f64,
     pub down: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct DeviceUpdateReq {
     pub mac: String,
     /// Absent leaves the assigned name untouched; empty clears it. Otherwise
@@ -86,12 +86,12 @@ pub struct DeviceUpdateReq {
     pub ipv4: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct DeviceMacReq {
     pub mac: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum DataUsagePeriod {
     Week,
@@ -100,13 +100,13 @@ pub enum DataUsagePeriod {
     ThreeMonths,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct DataUsageReq {
     pub mac: String,
     pub period: DataUsagePeriod,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 pub struct DataUsagePoint {
     pub timestamp: u64,
     pub upload: u64,

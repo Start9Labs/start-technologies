@@ -13,7 +13,7 @@ use futures::future::BoxFuture;
 use futures::{Future, FutureExt};
 use imbl_value::InternedString;
 use tokio::sync::{Mutex as AsyncMutex, broadcast};
-use ts_rs::TS;
+use visit_rs::ts::TS;
 
 #[allow(unused_imports)]
 use crate::prelude::*;

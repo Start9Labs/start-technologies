@@ -71,7 +71,7 @@ export interface ProfileDialogResult {
   fullname?: string
   gateway_ip: string
   outbound: string
-  lan_access: LanAccess<ProfileIdOpt>
+  lan_access: LanAccess
   wan_access: WanAccess
   access_to_new_profiles: boolean
   owns_lan: boolean
@@ -709,7 +709,7 @@ class AddProfile {
       const val = this.form.getRawValue()
 
       // Build LAN access
-      let lan_access: LanAccess<ProfileIdOpt>
+      let lan_access: LanAccess
       if (val.lanAccessType === 'all') {
         lan_access = 'ALL'
       } else if (val.lanAccessType === 'none') {

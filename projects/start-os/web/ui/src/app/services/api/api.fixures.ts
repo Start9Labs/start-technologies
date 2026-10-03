@@ -289,11 +289,13 @@ export namespace Mock {
     sdkVersion: '0.4.0',
     dependencies: {
       bitcoind: {
+        versionRange: null,
         description: 'LND needs bitcoin to live.',
         optional: true,
         s9pk: '',
       },
       'btc-rpc-proxy': {
+        versionRange: null,
         description:
           'As long as Bitcoin is pruned, LND needs Bitcoin Proxy to fetch block over the P2P network.',
         optional: true,
@@ -385,6 +387,7 @@ export namespace Mock {
     sdkVersion: '0.4.0',
     dependencies: {
       bitcoind: {
+        versionRange: null,
         description: 'Bitcoin Proxy requires a Bitcoin node.',
         optional: false,
         s9pk: '',
@@ -412,6 +415,7 @@ export namespace Mock {
   }
 
   export const BitcoinDep: T.DependencyMetadata = {
+    versionRange: null,
     title: 'Bitcoin',
     icon: BTC_ICON,
     optional: false,
@@ -419,6 +423,7 @@ export namespace Mock {
   }
 
   export const ProxyDep: T.DependencyMetadata = {
+    versionRange: null,
     title: 'Bitcoin Proxy',
     icon: PROXY_ICON,
     optional: true,
@@ -1552,6 +1557,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     title: 'Enrollment Code',
     message: 'Scan this with your device.',
     result: {
+      launchable: null,
       type: 'single',
       copyable: true,
       qr: true,
@@ -1579,6 +1585,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     title: 'gRPC Connect',
     message: 'Pair your wallet with this address.',
     result: {
+      launchable: null,
       type: 'single',
       copyable: true,
       qr: true,
@@ -1593,6 +1600,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     message:
       'Action was run successfully and smoothly and fully and all is good on the western front.',
     result: {
+      launchable: null,
       type: 'single',
       copyable: true,
       qr: false,
@@ -1610,6 +1618,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       type: 'group',
       value: [
         {
+          launchable: null,
           type: 'single',
           name: 'LND Connect',
           description: 'This is some information about the thing.',
@@ -1625,6 +1634,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
           description: 'This is a nested thing metric',
           value: [
             {
+              launchable: null,
               type: 'single',
               name: 'Last Name',
               description: 'The last name of the user',
@@ -1634,6 +1644,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
               value: 'Hill',
             },
             {
+              launchable: null,
               type: 'single',
               name: 'Age',
               description: 'The age of the user',
@@ -1643,6 +1654,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
               value: '35',
             },
             {
+              launchable: null,
               type: 'single',
               name: 'Password',
               description: 'A secret password',
@@ -1733,6 +1745,7 @@ PersistentKeepalive = 25`
       type: 'group',
       value: [
         {
+          launchable: null,
           type: 'single',
           name: 'Version',
           description: null,
@@ -1762,6 +1775,7 @@ PersistentKeepalive = 25`
           value: DEVICE_CONFIG,
         },
         {
+          filename: null,
           type: 'multiline',
           name: 'Recovery Phrase',
           description: 'Write this down. It is shown only once.',
@@ -2420,6 +2434,7 @@ PersistentKeepalive = 25`
     },
     actions: {
       config: {
+        access: null,
         name: 'Set Config',
         description: 'edit bitcoin.conf',
         warning: null,
@@ -2429,6 +2444,7 @@ PersistentKeepalive = 25`
         group: null,
       },
       rpc: {
+        access: null,
         name: 'Set RPC',
         description: 'Create RPC Credentials',
         warning: null,
@@ -2438,6 +2454,7 @@ PersistentKeepalive = 25`
         group: null,
       },
       properties: {
+        access: null,
         name: 'View Properties',
         description: 'view important information about Bitcoin',
         warning: null,
@@ -2447,6 +2464,7 @@ PersistentKeepalive = 25`
         group: null,
       },
       test: {
+        access: null,
         name: 'Do Another Thing',
         description:
           'An example of an action that shows a warning and takes no input',
@@ -2527,6 +2545,7 @@ PersistentKeepalive = 25`
             },
             interfaces: {
               ui: {
+                preferredLauncherAddress: null,
                 id: 'ui',
                 masked: false,
                 name: 'Web UI',
@@ -2572,6 +2591,7 @@ PersistentKeepalive = 25`
             },
             interfaces: {
               rpc: {
+                preferredLauncherAddress: null,
                 id: 'rpc',
                 masked: false,
                 name: 'RPC',
@@ -2617,6 +2637,7 @@ PersistentKeepalive = 25`
             },
             interfaces: {
               p2p: {
+                preferredLauncherAddress: null,
                 id: 'p2p',
                 masked: false,
                 name: 'P2P',
@@ -2649,6 +2670,8 @@ PersistentKeepalive = 25`
     tasks: {
       'bitcoind-config': {
         task: {
+          when: null,
+          input: null,
           packageId: 'bitcoind',
           actionId: 'config',
           severity: 'critical',
@@ -2659,6 +2682,8 @@ PersistentKeepalive = 25`
       },
       'bitcoind-properties': {
         task: {
+          when: null,
+          input: null,
           packageId: 'bitcoind',
           actionId: 'properties',
           severity: 'important',
@@ -2718,6 +2743,7 @@ PersistentKeepalive = 25`
     },
     actions: {
       config: {
+        access: null,
         name: 'Config',
         description: 'LND needs configuration before starting',
         warning: null,
@@ -2727,6 +2753,7 @@ PersistentKeepalive = 25`
         group: null,
       },
       connect: {
+        access: null,
         name: 'Connect',
         description: 'View LND connection details',
         warning: null,
@@ -2761,6 +2788,8 @@ PersistentKeepalive = 25`
       config: {
         active: true,
         task: {
+          when: null,
+          input: null,
           packageId: 'lnd',
           actionId: 'config',
           severity: 'critical',
@@ -2770,6 +2799,8 @@ PersistentKeepalive = 25`
       connect: {
         active: true,
         task: {
+          when: null,
+          input: null,
           packageId: 'lnd',
           actionId: 'connect',
           severity: 'important',
@@ -2779,6 +2810,7 @@ PersistentKeepalive = 25`
       'bitcoind/config': {
         active: true,
         task: {
+          when: null,
           packageId: 'bitcoind',
           actionId: 'config',
           severity: 'critical',
@@ -2801,6 +2833,7 @@ PersistentKeepalive = 25`
       'bitcoind/rpc': {
         active: true,
         task: {
+          when: null,
           packageId: 'bitcoind',
           actionId: 'rpc',
           severity: 'important',

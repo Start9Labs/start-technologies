@@ -54,14 +54,14 @@ pub fn find_ap_interface_names(cfgs: &Configs) -> Result<Vec<String>, Error> {
     Ok(names)
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, visit_rs::TS)]
 pub struct Password<Id: Ord> {
     pub label: String,
     pub profile: Option<Id>,
     pub password: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::TS)]
 pub struct WifiRadio {
     pub band: String,
     pub channel: String,
@@ -69,7 +69,7 @@ pub struct WifiRadio {
     pub broadcast: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Wifi<Id: Ord = ProfileId> {
     pub ssid: String,
@@ -87,7 +87,7 @@ pub struct Wifi<Id: Ord = ProfileId> {
 /// them. When the flag is false and such ports exist, `set` applies nothing and
 /// returns them in `WifiSetResult` for a confirmation dialog; with the flag true
 /// it deletes those published ports as part of the change.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiSetRequest {
     #[serde(flatten)]
@@ -96,7 +96,7 @@ pub struct WifiSetRequest {
     pub confirm_published_port_deletion: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiSetResult {
     /// Non-empty (and nothing applied) when published ports would be deleted and
@@ -104,7 +104,7 @@ pub struct WifiSetResult {
     pub pending_published_port_deletions: Vec<crate::published_ports::AffectedPublishedPort>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiRegulatory {
     /// ISO 3166-1 alpha-2 codes the regulatory database defines.
@@ -113,7 +113,7 @@ pub struct WifiRegulatory {
     pub channels: BTreeMap<String, Vec<u32>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BlackoutWindow {
     pub start_time: String,
@@ -121,7 +121,7 @@ pub struct BlackoutWindow {
     pub days: [bool; 7],
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::TS)]
 pub struct BlackoutWindows {
     pub windows: Vec<BlackoutWindow>,
 }
