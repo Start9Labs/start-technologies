@@ -207,6 +207,21 @@ make backup-fs-test                  # backup-fs library tests except the /dev/f
 make start-os-scripts-test           # shell scripts under build/lib/scripts (suite in build/tests/)
 ```
 
+The privileged subcontainer exec regression suite runs inside a disposable Linux VM:
+
+```sh
+sudo bash projects/start-os/build/tests/subcontainer-exec-test.sh /path/to/start-container /path/to/static-busybox
+```
+
+It exercises concurrent execs, rootfs isolation, read-only roots, user/workdir/environment settings,
+nested user namespaces, and command exit codes. It requires root and a statically linked BusyBox.
+The end-to-end attach suite runs on a StartOS VM with an installed package whose selected
+subcontainer is running and provides `sh`:
+
+```sh
+bash projects/start-os/build/tests/package-attach-test.sh /usr/bin/start-cli <package-id> <subcontainer-name>
+```
+
 The container-runtime has its own test suite — see [container-runtime/AGENTS.md](container-runtime/AGENTS.md). Note CI builds a multi-platform matrix (apple-darwin + aarch64/x86_64/riscv64 musl); local `cargo check` is linux-only, so consider platform-specific impact.
 
 ### Formatting

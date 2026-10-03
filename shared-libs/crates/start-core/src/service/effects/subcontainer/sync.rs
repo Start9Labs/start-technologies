@@ -192,12 +192,7 @@ impl ExecParams {
             cmd.env("HOME", home);
         }
 
-        // Switch into the subcontainer rootfs via pivot_root rather than
-        // chroot. The kernel's `current_chrooted()` check rejects
-        // `unshare(CLONE_NEWUSER)` from a chrooted process, so a chrooted
-        // service can't spawn a rootless OCI runtime (podman/docker), which
-        // is the whole point of `manifest.userspaceFilesystems`. pivot_root runs
-        // inside its own mount namespace and doesn't trip that check.
+        // chroot prevents rootless OCI runtimes from creating user namespaces.
         nix::sched::unshare(CloneFlags::CLONE_NEWNS)
             .with_ctx(|_| (ErrorKind::Filesystem, "unshare mount ns"))?;
         nix::mount::mount(
@@ -208,7 +203,6 @@ impl ExecParams {
             None::<&str>,
         )
         .with_ctx(|_| (ErrorKind::Filesystem, "make / private"))?;
-        // pivot_root requires the new root to itself be a mount.
         nix::mount::mount(
             Some(chroot.as_path()),
             chroot.as_path(),
@@ -222,30 +216,21 @@ impl ExecParams {
                 lazy_format!("bind {chroot:?} on itself"),
             )
         })?;
-        let put_old = chroot.join(".put_old");
-        std::fs::create_dir_all(&put_old)
-            .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mkdir {put_old:?}")))?;
         std::env::set_current_dir(chroot)
             .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("chdir {chroot:?}")))?;
-        nix::unistd::pivot_root(".", ".put_old")
-            .with_ctx(|_| (ErrorKind::Filesystem, "pivot_root"))?;
+        nix::unistd::pivot_root(".", ".").with_ctx(|_| (ErrorKind::Filesystem, "pivot_root"))?;
+        // Keep '.' until the stacked old root is detached.
+        nix::mount::umount2(".", nix::mount::MntFlags::MNT_DETACH)
+            .with_ctx(|_| (ErrorKind::Filesystem, "umount old root"))?;
         std::env::set_current_dir("/").with_ctx(|_| (ErrorKind::Filesystem, "chdir /"))?;
-        nix::mount::umount2("/.put_old", nix::mount::MntFlags::MNT_DETACH)
-            .with_ctx(|_| (ErrorKind::Filesystem, "umount /.put_old"))?;
-        std::fs::remove_dir("/.put_old").ok();
         if uid != 0 {
             std::os::unix::fs::chown("/proc/self/fd/0", Some(uid), Some(gid)).ok();
             std::os::unix::fs::chown("/proc/self/fd/1", Some(uid), Some(gid)).ok();
             std::os::unix::fs::chown("/proc/self/fd/2", Some(uid), Some(gid)).ok();
         }
-        // Handle credential changes in pre_exec to control the order:
-        // setgroups must happen before setgid/setuid (requires CAP_SETGID)
         unsafe {
             cmd.pre_exec(move || {
-                // Create a new session so entrypoint scripts that do
-                // kill(0, SIGTERM) don't cascade to other subcontainers.
-                // EPERM means we're already a session leader (e.g. pty_process
-                // called setsid() for us), which is fine.
+                // pty_process may have already made this process a session leader.
                 match nix::unistd::setsid() {
                     Ok(_) | Err(Errno::EPERM) => {}
                     Err(e) => {
@@ -258,9 +243,7 @@ impl ExecParams {
                     .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
                 nix::unistd::setuid(nix::unistd::Uid::from_raw(uid))
                     .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
-                // Restore dumpable flag cleared by setuid so that
-                // /proc/self/fd/* is owned by the current uid and
-                // /dev/stderr works for the target user.
+                // setuid clears dumpability and changes /proc/self/fd ownership.
                 libc::prctl(libc::PR_SET_DUMPABLE, 1, 0, 0, 0);
                 // Credential changes clear the parent-death signal.
                 if let Some(signal) = parent_death_signal {
@@ -928,7 +911,6 @@ pub fn pipe_wrap(
     let orig_stdout_fd = std::io::stdout().as_raw_fd();
     let orig_stderr_fd = std::io::stderr().as_raw_fd();
 
-    // Relay child stdout → original stdout (which may be a socket)
     std::thread::spawn(move || {
         let mut reader = child_stdout;
         let mut buf = [0u8; 8192];
@@ -945,7 +927,6 @@ pub fn pipe_wrap(
         }
     });
 
-    // Relay child stderr → original stderr
     std::thread::spawn(move || {
         let mut reader = child_stderr;
         let mut buf = [0u8; 8192];
@@ -962,7 +943,6 @@ pub fn pipe_wrap(
         }
     });
 
-    // Forward signals to the child
     let child_pid = child.id() as i32;
     let mut sig = signal_hook::iterator::Signals::new(FWD_SIGNALS)?;
     std::thread::spawn(move || {
