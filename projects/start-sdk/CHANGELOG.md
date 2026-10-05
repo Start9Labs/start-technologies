@@ -2,12 +2,14 @@
 
 ## 3.0.1 — StartOS 0.4.0.2
 
-### Fixed
+### Changed
 
-- **File models parse with the shape exactly as written.** A `z.object` shape
-  drops keys it doesn't declare on `merge()`, as 3.0.0 describes; build file
-  models with `z.looseObject` to keep them. A `z.discriminatedUnion` keeps the
-  variant its discriminator names
+- **Breaking — file models parse with their shape exactly as written.** A
+  `z.object` shape deletes every key it doesn't declare on the next `merge()`,
+  `write()` or `update()`. Build every file model with `z.looseObject` at every
+  nesting level; use `z.object` only for a file you have fully modeled and will
+  always keep fully modeled. A `z.discriminatedUnion` keeps the variant its
+  discriminator names
 
 ## 3.0.0 — StartOS 0.4.0.2
 

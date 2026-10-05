@@ -163,7 +163,9 @@ type ReadType<A> = {
  *
  * The schema mirrors the file: a value the upstream service does not require is
  * optional, even where the package always sets it. Give every key a `.catch()`
- * default, so a hand-edited value of the wrong type falls back to it.
+ * default, so a hand-edited value of the wrong type falls back to it. Build it
+ * with `z.looseObject` at every level: `z.object` deletes every key it does not
+ * declare on the next write.
  *
  * @example
  * ```ts
@@ -171,7 +173,7 @@ type ReadType<A> = {
  *
  * export const configToml = FileHelper.toml(
  *   { base: sdk.volumes.main, subpath: 'config.toml' },
- *   z.object({
+ *   z.looseObject({
  *     port: z.number().catch(8080),
  *     allow_registration: z.boolean().catch(false),
  *   }),
