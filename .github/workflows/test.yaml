@@ -44,10 +44,8 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODEJS_VERSION }}
-      # Pin to the repo's prettier (devDependencies) so this matches `make
-      # format-check` exactly, without drift from a hardcoded version here.
       - name: Check formatting
-        run: npx --yes prettier@$(node -p "require('./package.json').devDependencies.prettier") --check .
+        run: npx --yes --package=prettier@$(node -p "require('./package.json').devDependencies.prettier") -- npm run format:check
 
   # On pull requests, the expensive jobs below only run when a non-docs file
   # changed. A docs-only PR is fully covered by the `prettier` job above, so it
