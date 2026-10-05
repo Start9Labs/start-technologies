@@ -53,7 +53,7 @@ pub mod rpc;
 pub mod rpc_client;
 pub mod rsync;
 pub mod serde;
-// pub mod squashfs;
+pub mod squashfs;
 pub mod sync;
 pub mod tui;
 pub mod version;
