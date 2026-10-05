@@ -14,6 +14,8 @@ use crate::prelude::*;
 use crate::s9pk::merkle_archive::source::FileSource;
 use crate::util::io::{ParallelBlake3Writer, TrackingIO};
 
+const MAX_PORTABLE_SYMLINK_TARGET_SIZE: usize = 4095;
+
 struct FlatNode<'a, S> {
     node: &'a Node<S>,
     path: PathBuf,
@@ -271,14 +273,7 @@ impl InodeTables {
         let mut size = 0u32;
         for (name, value) in &metadata.xattrs {
             let bytes = name.as_bytes();
-            let (kind, name) = [
-                (0, &b"user."[..]),
-                (1, &b"trusted."[..]),
-                (2, &b"security."[..]),
-            ]
-            .into_iter()
-            .find_map(|(kind, prefix)| bytes.strip_prefix(prefix).map(|name| (kind, name)))
-            .ok_or_else(|| {
+            let (kind, name) = xattr_kind(bytes).ok_or_else(|| {
                 invalid("SquashFS xattr namespace must be user, trusted, or security")
             })?;
             if name.is_empty() || name.contains(&0) {
@@ -441,12 +436,14 @@ impl InodeTables {
                 if bytes.contains(&0) {
                     return Err(invalid("SquashFS symlink target contains NUL"));
                 }
+                if bytes.len() > MAX_PORTABLE_SYMLINK_TARGET_SIZE {
+                    return Err(invalid(format!(
+                        "SquashFS symlink target exceeds portable {MAX_PORTABLE_SYMLINK_TARGET_SIZE}-byte limit"
+                    )));
+                }
                 SymlinkInode {
                     links: node.links,
-                    size: bytes
-                        .len()
-                        .try_into()
-                        .map_err(|_| invalid("SquashFS symlink exceeds format limit"))?,
+                    size: bytes.len() as u32,
                 }
                 .serialize(&mut self.inodes)?;
                 self.inodes.write_all(bytes)?;
@@ -512,6 +509,7 @@ async fn indexed_table<W: AsyncWrite + Unpin>(
 
 impl<S: FileSource> Squashfs<S> {
     /// Writes an image at the current position and leaves the output after its 4 KiB padding.
+    /// Rejects symlink targets above 4095 bytes for lossless reads on 4 KiB-page kernels.
     pub async fn serialize<W: AsyncWrite + AsyncSeek + Unpin + Send>(
         &self,
         writer: &mut W,

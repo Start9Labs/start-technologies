@@ -10,6 +10,15 @@ pub(super) const EXPORTABLE: u16 = 1 << 7;
 pub(super) const DEDUPLICATED: u16 = 1 << 6;
 pub(super) const NO_XATTRS: u16 = 1 << 9;
 
+pub(super) const XATTR_PREFIXES: [&[u8]; 3] = [b"user.", b"trusted.", b"security."];
+
+pub(super) fn xattr_kind(name: &[u8]) -> Option<(u16, &[u8])> {
+    XATTR_PREFIXES
+        .iter()
+        .zip(0..)
+        .find_map(|(prefix, kind)| name.strip_prefix(*prefix).map(|name| (kind, name)))
+}
+
 pub(super) trait Disk: Sized {
     const SIZE: usize;
     fn serialize(&self, writer: &mut impl Write) -> io::Result<()>;

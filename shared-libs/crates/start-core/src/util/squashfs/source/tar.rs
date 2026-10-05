@@ -116,10 +116,7 @@ fn percent_decode(bytes: &[u8]) -> std::io::Result<Vec<u8>> {
 }
 
 fn metadata(header: &Header, pax: &Pax) -> std::io::Result<Metadata> {
-    let mode = header.mode()?;
-    if mode & !0o7777 != 0 {
-        return Err(invalid("tar mode exceeds SquashFS permission field"));
-    }
+    let mode = header.mode()? & 0o7777;
     let mtime = match pax.get(b"mtime".as_slice()) {
         Some(bytes) => {
             let bytes = bytes.strip_prefix(b"+").unwrap_or(bytes);
@@ -148,6 +145,7 @@ fn metadata(header: &Header, pax: &Pax) -> std::io::Result<Metadata> {
             xattrs.insert(OsString::from_vec(name), value);
         }
     }
+    xattrs.retain(|name, _| xattr_kind(name.as_bytes()).is_some());
     Ok(Metadata {
         mode: mode as u16,
         uid: checked_u32(number(pax, b"uid", || header.uid())?)?,

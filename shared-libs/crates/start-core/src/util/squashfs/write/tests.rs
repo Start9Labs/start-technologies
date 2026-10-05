@@ -39,6 +39,39 @@ async fn extract(image: &Squashfs<Bytes>, temp: &Path) -> PathBuf {
     dest
 }
 
+#[tokio::test]
+async fn symlink_targets_fit_portable_kernel_pages() {
+    for size in [4095, 4096, 4097] {
+        let target = "a".repeat(size);
+        let mut contents = DirectoryContents::new();
+        contents
+            .insert(
+                "link",
+                Entry::new(
+                    Metadata::new(0o777),
+                    NodeContents::Symlink(target.clone().into()),
+                ),
+            )
+            .unwrap();
+        let image = image(contents);
+        if size == 4095 {
+            let temp = TmpDir::new().await.unwrap();
+            let output = listing(&image, &temp).await;
+            let (_, actual) = output
+                .lines()
+                .find_map(|line| line.split_once(" -> "))
+                .unwrap();
+            assert_eq!(actual, target);
+        } else {
+            let error = image
+                .serialize(&mut Cursor::new(Vec::new()))
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("portable 4095-byte limit"));
+        }
+    }
+}
+
 async fn listing(image: &Squashfs<Bytes>, temp: &TmpDir) -> String {
     let path = temp.join("image.squashfs");
     image

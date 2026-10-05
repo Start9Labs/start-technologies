@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::os::unix::ffi::OsStringExt;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
 
 use super::blocks::invalid;
+use super::format::xattr_kind;
 use super::tree::{normalize_path, *};
 use crate::prelude::*;
 
@@ -22,8 +23,14 @@ fn checked_u32(value: u64) -> std::io::Result<u32> {
 
 fn unix_metadata(path: &Path, metadata: &std::fs::Metadata) -> std::io::Result<Metadata> {
     let mut xattrs = BTreeMap::new();
-    for name in xattr::list(path)? {
-        if let Some(value) = xattr::get(path, &name)? {
+    let names = match xattr::list(path) {
+        Err(e) if e.raw_os_error() == Some(libc::ENOTSUP) => None,
+        names => Some(names?),
+    };
+    for name in names.into_iter().flatten() {
+        if xattr_kind(name.as_bytes()).is_some()
+            && let Some(value) = xattr::get(path, &name)?
+        {
             xattrs.insert(name, value);
         }
     }

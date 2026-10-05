@@ -329,6 +329,279 @@ async fn unsafe_paths_truncation_dangling_and_sparse_maps() {
 }
 
 #[tokio::test]
+async fn imported_symlink_targets_fit_portable_kernel_pages() {
+    for extension in [b'x', b'K'] {
+        for size in [4095, 4096, 4097] {
+            let target = vec![b'a'; size];
+            let mut tar = Vec::new();
+            let payload = if extension == b'x' {
+                pax(&[(b"linkpath", &target)])
+            } else {
+                let mut payload = target.clone();
+                payload.push(0);
+                payload
+            };
+            append(&mut tar, b"extension", extension, &payload, None);
+            append(&mut tar, b"link", b'2', b"", Some(b"fallback"));
+            finish(&mut tar);
+            let image = Squashfs::from_tar(tar.as_slice()).await.unwrap();
+            let NodeContents::Symlink(imported) = &image
+                .contents()
+                .get("link")
+                .unwrap()
+                .as_node()
+                .unwrap()
+                .contents
+            else {
+                panic!("not a symlink")
+            };
+            assert_eq!(imported.as_os_str().as_bytes(), target);
+            let mut output = std::io::Cursor::new(Vec::new());
+            let result = image.serialize(&mut output).await;
+            if size == 4095 {
+                result.unwrap();
+                let decoded =
+                    Squashfs::deserialize(std::sync::Arc::<[u8]>::from(output.into_inner()))
+                        .await
+                        .unwrap();
+                let NodeContents::Symlink(actual) = &decoded
+                    .contents()
+                    .get("link")
+                    .unwrap()
+                    .as_node()
+                    .unwrap()
+                    .contents
+                else {
+                    panic!("not a symlink")
+                };
+                assert_eq!(actual.as_os_str().as_bytes(), target);
+            } else {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("portable 4095-byte limit")
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn tar_builder_preserves_permissions_and_payload() {
+    use futures::StreamExt;
+
+    let tmp = TmpDir::new().await.unwrap();
+    let root = tmp.join("root");
+    std::fs::create_dir_all(root.join("dir")).unwrap();
+    let name = OsString::from_vec(b"file\xff".to_vec());
+    std::fs::write(root.join("dir").join(&name), b"contents").unwrap();
+    std::fs::set_permissions(root.join("dir"), std::fs::Permissions::from_mode(0o3751)).unwrap();
+    std::fs::set_permissions(
+        root.join("dir").join(&name),
+        std::fs::Permissions::from_mode(0o6751),
+    )
+    .unwrap();
+    let mut builder = tokio_tar::Builder::new(Vec::new());
+    builder.append_dir_all("assets", &root).await.unwrap();
+    let tar = builder.into_inner().await.unwrap();
+    let mut archive = tokio_tar::Archive::new(tar.as_slice());
+    let mut entries = archive.entries().unwrap();
+    let mut checked = 0;
+    while let Some(entry) = entries.next().await {
+        let entry = entry.unwrap();
+        let path = entry.path().unwrap();
+        let expected = if path == Path::new("assets/dir") {
+            Some((0o040000, 0o3751))
+        } else if path == Path::new("assets/dir").join(&name) {
+            Some((0o100000, 0o6751))
+        } else {
+            None
+        };
+        if let Some((kind, mode)) = expected {
+            assert_eq!(entry.header().mode().unwrap(), kind | mode);
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 2);
+    let image = Squashfs::from_tar(tar.as_slice()).await.unwrap();
+    let mut output = std::io::Cursor::new(Vec::new());
+    image.serialize(&mut output).await.unwrap();
+    let decoded = Squashfs::deserialize(std::sync::Arc::<[u8]>::from(output.into_inner()))
+        .await
+        .unwrap();
+    for (path, mode) in [
+        (PathBuf::from("assets/dir"), 0o3751),
+        (Path::new("assets/dir").join(&name), 0o6751),
+    ] {
+        assert_eq!(
+            decoded
+                .contents()
+                .get_path(path)
+                .unwrap()
+                .as_node()
+                .unwrap()
+                .metadata
+                .mode,
+            mode
+        );
+    }
+    assert_eq!(
+        file_bytes(&decoded, Path::new("assets/dir").join(name)).await,
+        b"contents"
+    );
+}
+
+#[tokio::test]
+async fn programmatic_xattrs_remain_strict() {
+    for name in [
+        b"system.posix_acl_access".as_slice(),
+        b"com.apple.quarantine",
+        b"user.",
+        b"user.bad\0name",
+    ] {
+        let mut image = Squashfs::<PathBuf>::new(Metadata::new(0o755), DirectoryContents::new());
+        image
+            .root_metadata_mut()
+            .xattrs
+            .insert(OsString::from_vec(name.to_vec()), b"value".to_vec());
+        assert!(
+            image
+                .serialize(&mut std::io::Cursor::new(Vec::new()))
+                .await
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn directory_xattr_errors_other_than_enotsup_propagate() {
+    let tmp = tempfile::tempdir().unwrap();
+    let stat = std::fs::metadata(tmp.path()).unwrap();
+    let error = unix_metadata(&tmp.path().join("absent"), &stat).unwrap_err();
+    assert_eq!(error.raw_os_error(), Some(libc::ENOENT));
+}
+
+#[tokio::test]
+async fn pax_skips_unstorable_xattr_namespaces() {
+    for unsupported in [
+        b"SCHILY.xattr.system.posix_acl_access".as_slice(),
+        b"LIBARCHIVE.xattr.system.posix_acl_access",
+        b"SCHILY.xattr.com.apple.quarantine",
+        b"LIBARCHIVE.xattr.com.apple.quarantine",
+    ] {
+        let mut tar = Vec::new();
+        append(
+            &mut tar,
+            b"local",
+            b'x',
+            &pax(&[
+                (unsupported, b"AgAAAA=="),
+                (b"SCHILY.xattr.user.keep", b"value"),
+                (b"LIBARCHIVE.xattr.user.%ff", b"AAo="),
+            ]),
+            None,
+        );
+        append(&mut tar, b"file", b'0', b"contents", None);
+        finish(&mut tar);
+        let image = Squashfs::from_tar(tar.as_slice()).await.unwrap();
+        let mut output = std::io::Cursor::new(Vec::new());
+        image.serialize(&mut output).await.unwrap();
+        let decoded = Squashfs::deserialize(std::sync::Arc::<[u8]>::from(output.into_inner()))
+            .await
+            .unwrap();
+        let node = decoded.contents().get("file").unwrap().as_node().unwrap();
+        assert_eq!(node.metadata.mode, 0o640);
+        assert_eq!(
+            node.metadata.xattrs,
+            BTreeMap::from([
+                (OsString::from("user.keep"), b"value".to_vec()),
+                (OsString::from_vec(b"user.\xff".to_vec()), b"\0\n".to_vec()),
+            ])
+        );
+        assert_eq!(file_bytes(&decoded, "file").await, b"contents");
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn directory_skips_posix_acl_and_retains_user_xattrs() {
+    let tmp = TmpDir::new().await.unwrap();
+    let root = tmp.join("root");
+    std::fs::create_dir(&root).unwrap();
+    let path = root.join("file");
+    std::fs::write(&path, b"contents").unwrap();
+    xattr::set(&path, "user.keep", b"value").unwrap();
+    let mut acl = 2u32.to_le_bytes().to_vec();
+    for (tag, perm, id) in [
+        (0x01u16, 7u16, u32::MAX),
+        (0x02, 4, 65534),
+        (0x04, 5, u32::MAX),
+        (0x10, 5, u32::MAX),
+        (0x20, 1, u32::MAX),
+    ] {
+        acl.extend_from_slice(&tag.to_le_bytes());
+        acl.extend_from_slice(&perm.to_le_bytes());
+        acl.extend_from_slice(&id.to_le_bytes());
+    }
+    xattr::set(&path, "system.posix_acl_access", &acl).unwrap();
+    assert_eq!(
+        xattr::get(&path, "system.posix_acl_access").unwrap(),
+        Some(acl)
+    );
+    assert!(
+        xattr::list(&path)
+            .unwrap()
+            .any(|name| name == "system.posix_acl_access")
+    );
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o6751)).unwrap();
+    let image = Squashfs::from_directory(&root).await.unwrap();
+    let mut output = std::io::Cursor::new(Vec::new());
+    image.serialize(&mut output).await.unwrap();
+    let decoded = Squashfs::deserialize(std::sync::Arc::<[u8]>::from(output.into_inner()))
+        .await
+        .unwrap();
+    let node = decoded.contents().get("file").unwrap().as_node().unwrap();
+    assert_eq!(node.metadata.mode, 0o6751);
+    assert_eq!(
+        node.metadata.xattrs,
+        BTreeMap::from([(OsString::from("user.keep"), b"value".to_vec())])
+    );
+    assert_eq!(file_bytes(&decoded, "file").await, b"contents");
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn directory_skips_macos_quarantine_and_retains_user_xattrs() {
+    let tmp = TmpDir::new().await.unwrap();
+    let root = tmp.join("root");
+    std::fs::create_dir(&root).unwrap();
+    let path = root.join("file");
+    std::fs::write(&path, b"contents").unwrap();
+    xattr::set(&path, "user.keep", b"value").unwrap();
+    xattr::set(&path, "com.apple.quarantine", b"0081;00000000;test;").unwrap();
+    assert!(
+        xattr::list(&path)
+            .unwrap()
+            .any(|name| name == "com.apple.quarantine")
+    );
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o751)).unwrap();
+    let image = Squashfs::from_directory(&root).await.unwrap();
+    let mut output = std::io::Cursor::new(Vec::new());
+    image.serialize(&mut output).await.unwrap();
+    let decoded = Squashfs::deserialize(std::sync::Arc::<[u8]>::from(output.into_inner()))
+        .await
+        .unwrap();
+    let node = decoded.contents().get("file").unwrap().as_node().unwrap();
+    assert_eq!(node.metadata.mode, 0o751);
+    assert_eq!(
+        node.metadata.xattrs,
+        BTreeMap::from([(OsString::from("user.keep"), b"value".to_vec())])
+    );
+    assert_eq!(file_bytes(&decoded, "file").await, b"contents");
+}
+
+#[tokio::test]
 async fn drains_large_transport_padding() {
     let (mut writer, reader) = tokio::io::duplex(1024);
     let mut tar = Vec::new();

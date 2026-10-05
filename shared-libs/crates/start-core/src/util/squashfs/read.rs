@@ -472,12 +472,9 @@ impl<S: ArchiveSource> Image<S> {
         let mut total = 0u64;
         for _ in 0..id.count {
             let entry = disk::<XattrEntry>(&mut reader).await?;
-            let prefix: &[u8] = match entry.kind & !0x100 {
-                0 => b"user.",
-                1 => b"trusted.",
-                2 => b"security.",
-                _ => return Err(invalid("invalid xattr namespace").into()),
-            };
+            let prefix = *XATTR_PREFIXES
+                .get((entry.kind & !0x100) as usize)
+                .ok_or_else(|| invalid("invalid xattr namespace"))?;
             if entry.name_size == 0 {
                 return Err(invalid("invalid xattr name size").into());
             }

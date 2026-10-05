@@ -60,8 +60,14 @@ fn payload() -> Vec<u8> {
 
 fn asset_tar() -> Vec<u8> {
     let mut tar = tar::Builder::new(Vec::new());
-    append(&mut tar, b".", tar::EntryType::Directory, 0o710, b"", None);
-    // Literal PAX record: length includes the decimal prefix and newline.
+    append(
+        &mut tar,
+        b".",
+        tar::EntryType::Directory,
+        0o40710,
+        b"",
+        None,
+    );
     append(
         &mut tar,
         b"pax",
@@ -74,7 +80,7 @@ fn asset_tar() -> Vec<u8> {
         &mut tar,
         RAW_NAME,
         tar::EntryType::Regular,
-        0o4600,
+        0o104600,
         &payload(),
         None,
     );
@@ -82,7 +88,7 @@ fn asset_tar() -> Vec<u8> {
         &mut tar,
         b"private/z-hard",
         tar::EntryType::Link,
-        0o777,
+        0o100777,
         b"",
         Some(RAW_NAME),
     );
@@ -90,7 +96,7 @@ fn asset_tar() -> Vec<u8> {
         &mut tar,
         b"symbolic",
         tar::EntryType::Symlink,
-        0o777,
+        0o120777,
         b"",
         Some(RAW_NAME),
     );
@@ -98,7 +104,7 @@ fn asset_tar() -> Vec<u8> {
         &mut tar,
         b"private",
         tar::EntryType::Directory,
-        0o2700,
+        0o42700,
         b"",
         None,
     );

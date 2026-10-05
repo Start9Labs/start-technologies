@@ -7,6 +7,7 @@
 //! in memory.
 //!
 //! Directory imports retain inode attributes and read file contents lazily.
+//! Imports skip xattr namespaces other than `user.`, `trusted.`, and `security.`.
 //! Tar imports spool regular-file payloads into a flat temporary file rather
 //! than extracting an archive tree. They accept GNU and PAX headers, hardlinks,
 //! and GNU sparse formats, with a 16 MiB extension-metadata limit and a
