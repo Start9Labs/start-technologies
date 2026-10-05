@@ -440,43 +440,6 @@ struct HostBinds {
     gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>)>,
 }
 
-fn reconcile_vhosts(
-    current: &mut BTreeMap<VHostKey, (ProxyTarget, Arc<()>)>,
-    desired: &mut BTreeMap<VHostKey, ProxyTarget>,
-    mut add: impl FnMut(&VHostKey, ProxyTarget) -> Result<Arc<()>, Error>,
-    mut replace: impl FnMut(&VHostKey, &(ProxyTarget, Arc<()>), ProxyTarget) -> Result<Arc<()>, Error>,
-    mut remove: impl FnMut(&VHostKey, (ProxyTarget, Arc<()>)),
-) -> Result<(), Error> {
-    let all = current
-        .keys()
-        .chain(desired.keys())
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    for key in all {
-        match (current.get(&key), desired.get(&key)) {
-            (Some((previous, _)), Some(target)) if previous == target => {
-                desired.remove(&key);
-            }
-            (Some(previous), Some(target)) => {
-                let handle = replace(&key, previous, target.clone())?;
-                let target = desired.remove(&key).unwrap();
-                current.insert(key, (target, handle));
-            }
-            (None, Some(target)) => {
-                let handle = add(&key, target.clone())?;
-                let target = desired.remove(&key).unwrap();
-                current.insert(key, (target, handle));
-            }
-            (Some(_), None) => {
-                let previous = current.remove(&key).unwrap();
-                remove(&key, previous);
-            }
-            (None, None) => unreachable!(),
-        }
-    }
-    Ok(())
-}
-
 pub struct NetServiceData {
     id: Option<PackageId>,
     ip: Ipv4Addr,
@@ -666,7 +629,8 @@ impl NetServiceData {
                 );
             }
 
-            // The assigned port is forwarded directly; assigned SSL ports use vhosts.
+            // Direct forward — the plaintext port, the only external port with
+            // no listener of ours in front (every TLS port is a vhost above).
             if let Some(external) = bind.net.assigned_port {
                 // Only addresses at this port drive its forward (a vhost's port has its own).
                 let fwd_public: BTreeSet<GatewayId> = enabled_addresses
@@ -722,7 +686,8 @@ impl NetServiceData {
                         let Some(gua) = a.gua().filter(|g| g.port() == external) else {
                             continue;
                         };
-                        // `secure` describes the backend protocol; StartOS does not terminate TLS here.
+                        // Secure only when the underlying protocol is itself secure —
+                        // this is the plaintext port, so we never terminate TLS here.
                         // The WAN is never secure, so an insecure exposure that
                         // requested public serves the LAN instead.
                         let secure_exposure = bind.options.secure.is_some();
@@ -953,22 +918,34 @@ impl NetServiceData {
         ctrl.vhost
             .reconcile_port_maps((self.id.clone(), id.clone()), &vhosts);
 
-        reconcile_vhosts(
-            &mut binds.vhosts,
-            &mut vhosts,
-            |key, target| {
-                ctrl.vhost
-                    .add(key.0.clone(), key.1, DynVHostTarget::new(target))
-            },
-            |key, previous, target| {
-                ctrl.vhost
-                    .replace(key.0.clone(), key.1, (&previous.0, &previous.1), target)
-            },
-            |key, (_, handle)| {
-                drop(handle);
-                ctrl.vhost.gc(key.0.clone(), key.1);
-            },
-        )?;
+        let all = binds
+            .vhosts
+            .keys()
+            .chain(vhosts.keys())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        for key in all {
+            let mut prev = binds.vhosts.remove(&key);
+            if let Some(target) = vhosts.remove(&key) {
+                prev = prev.filter(|(t, _)| t == &target);
+                binds.vhosts.insert(
+                    key.clone(),
+                    if let Some(prev) = prev {
+                        prev
+                    } else {
+                        (
+                            target.clone(),
+                            ctrl.vhost.add(key.0, key.1, DynVHostTarget::new(target))?,
+                        )
+                    },
+                );
+            } else {
+                if let Some((_, rc)) = prev {
+                    drop(rc);
+                    ctrl.vhost.gc(key.0, key.1);
+                }
+            }
+        }
 
         let mut rm = BTreeSet::new();
         binds.private_dns.retain(|fqdn, _| {
@@ -1660,7 +1637,6 @@ mod tests {
     use super::*;
     use crate::db::model::public::IpInfo;
     use crate::net::host::binding::Security;
-    use crate::net::vhost::{VHostBindListener, VHostTarget};
 
     fn bind_options(
         add_ssl: bool,
@@ -2147,120 +2123,6 @@ mod tests {
             passthrough: false,
             preserve_source_ip: false,
         }
-    }
-
-    #[test]
-    fn vhost_reconciliation_preserves_only_compatible_live_contexts() {
-        let key = (None, 443, false);
-        let original = proxy_target(&["192.168.1.2"]);
-        let original_handle = Arc::new(());
-        let mut current =
-            BTreeMap::from([(key.clone(), (original.clone(), original_handle.clone()))]);
-        let mut replacement = proxy_target(&["10.13.13.2"]);
-        replacement.public_v6_gateways.insert(gw("eth0"));
-        let mut desired = BTreeMap::from([(key.clone(), replacement)]);
-        let mut replaced_previous = false;
-
-        reconcile_vhosts(
-            &mut current,
-            &mut desired,
-            |_, _| panic!("an existing route must be replaced"),
-            |_, previous, target| {
-                assert!(Arc::ptr_eq(&previous.1, &original_handle));
-                replaced_previous = true;
-                assert!(VHostTarget::<VHostBindListener>::same_lifecycle(
-                    &original, &target
-                ));
-                Ok(original_handle.clone())
-            },
-            |_, _| panic!("the route remains present"),
-        )
-        .unwrap();
-        assert!(replaced_previous);
-        assert!(Arc::ptr_eq(&current[&key].1, &original_handle));
-        assert_eq!(
-            current[&key].0.private,
-            BTreeSet::from([ip("10.13.13.2")]),
-            "the retained context must be paired with the new routing set"
-        );
-
-        assert_eq!(
-            current[&key].0.public_v6_gateways,
-            BTreeSet::from([gw("eth0")])
-        );
-
-        for mutate in [
-            |target: &mut ProxyTarget| {
-                target.alpn = Some(AlpnInfo(vec![MaybeUtf8String(b"http/1.1".to_vec())]));
-            },
-            |target: &mut ProxyTarget| target.addr = "10.0.3.3:80".parse().unwrap(),
-            |target: &mut ProxyTarget| {
-                target.auth = Some(crate::net::host::binding::ProxyAuth::Bearer {
-                    tokens: vec!["token".to_owned()],
-                    realm: None,
-                });
-            },
-        ] {
-            let previous_handle = current[&key].1.clone();
-            let mut changed = current[&key].0.clone();
-            mutate(&mut changed);
-            let mut desired = BTreeMap::from([(key.clone(), changed)]);
-            reconcile_vhosts(
-                &mut current,
-                &mut desired,
-                |_, _| unreachable!(),
-                |_, previous, target| {
-                    assert!(Arc::ptr_eq(&previous.1, &previous_handle));
-                    assert!(!VHostTarget::<VHostBindListener>::same_lifecycle(
-                        &previous.0,
-                        &target
-                    ));
-                    Ok(Arc::new(()))
-                },
-                |_, _| unreachable!(),
-            )
-            .unwrap();
-            assert!(!Arc::ptr_eq(&current[&key].1, &previous_handle));
-        }
-    }
-
-    #[test]
-    fn vhost_reconciliation_keeps_the_failed_key_unchanged() {
-        let key = (None, 443, false);
-        let original = proxy_target(&["192.168.1.2"]);
-        let original_handle = Arc::new(());
-        let replacement = proxy_target(&["10.13.13.2"]);
-        let mut current =
-            BTreeMap::from([(key.clone(), (original.clone(), original_handle.clone()))]);
-        let mut desired = BTreeMap::from([(key.clone(), replacement.clone())]);
-
-        assert!(
-            reconcile_vhosts(
-                &mut current,
-                &mut desired,
-                |_, _| unreachable!(),
-                |_, _, _| Err(Error::new(eyre!("replace failed"), ErrorKind::Network)),
-                |_, _| unreachable!(),
-            )
-            .is_err()
-        );
-        assert_eq!(current[&key].0, original);
-        assert!(Arc::ptr_eq(&current[&key].1, &original_handle));
-        assert_eq!(desired[&key], replacement);
-
-        let mut current = BTreeMap::new();
-        assert!(
-            reconcile_vhosts(
-                &mut current,
-                &mut desired,
-                |_, _| Err(Error::new(eyre!("add failed"), ErrorKind::Network)),
-                |_, _, _| unreachable!(),
-                |_, _| unreachable!(),
-            )
-            .is_err()
-        );
-        assert!(current.is_empty());
-        assert_eq!(desired[&key], replacement);
     }
 
     #[test]

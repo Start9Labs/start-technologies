@@ -12,10 +12,6 @@ for the detail behind its highlights.
 
 ### Fixed
 
-- **Open service connections stay connected when only their routing or addresses
-  change.** Removing the service endpoint or changing its destination,
-  authentication, or TLS settings still closes its existing connections.
-
 - **Services keep their internal IPv6 bridge address enabled.** Address switches
   affect access from other networks while service-to-service access stays available.
 
