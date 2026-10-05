@@ -1,3 +1,2 @@
 {boot}  /boot       vfat    umask=0077  0   2
 {efi}   /boot/efi   vfat    umask=0077  0   1
-{root}  /           btrfs   defaults    0   1

@@ -22,13 +22,13 @@ start-tunnel-install: target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbo
 	$(call mkdir,$(DESTDIR)/usr/share/keyrings)
 	$(call cp,apt/start9.gpg,$(DESTDIR)/usr/share/keyrings/start9.gpg)
 
-target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbox: $(CORE_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) projects/start-tunnel/web/dist/static/start-tunnel/index.html projects/start-tunnel/build/build-tunnelbox.sh
+target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbox: $(CORE_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) projects/start-tunnel/web/dist/static/start-tunnel/immutable-assets.txt projects/start-tunnel/build/build-tunnelbox.sh
 	ARCH=$(ARCH) PROFILE=$(PROFILE) ./projects/start-tunnel/build/build-tunnelbox.sh
 
 start-tunnel-deb: results/$(TUNNEL_BASENAME).deb
 
-results/$(TUNNEL_BASENAME).deb: debian/build.sh $(call ls-files,projects/start-tunnel/debian) $(TUNNEL_TARGETS) build/lib/scripts/forward-port
-	PROJECT=start-tunnel PLATFORM=$(ARCH) REQUIRES=debian DEPENDS=wireguard-tools,iptables,nftables,conntrack ./build/os-compat/run-compat.sh ./debian/build.sh
+results/$(TUNNEL_BASENAME).deb: debian/build.sh projects/start-tunnel/build.mk $(call ls-files,projects/start-tunnel/debian) $(TUNNEL_TARGETS) build/lib/scripts/forward-port
+	PROJECT=start-tunnel PLATFORM=$(ARCH) REQUIRES=debian DEPENDS=wireguard-tools,iptables,nftables,conntrack,iproute2,procps ./build/os-compat/run-compat.sh ./debian/build.sh
 
 .PHONY: start-tunnel-clean
 start-tunnel-clean:

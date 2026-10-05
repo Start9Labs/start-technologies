@@ -4,7 +4,7 @@ The public **Start9 Marketplace** website — [marketplace.start9.com](https://m
 
 Despite the historical name "brochure," this is not a static landing page. It is a single-page Angular app that lets anyone browse the packages published to Start9's registries (and any arbitrary registry you point it at) without owning a server. It reuses the exact same `@start9labs/marketplace` UI that ships inside StartOS, so what you see here matches what a server owner sees in their marketplace tab.
 
-The actual marketing/landing site lives elsewhere (`projects/start-docs/landing`); this project is named for legacy reasons.
+`projects/start-docs/landing` is the documentation site's landing page, not this app.
 
 ## Where it lives
 
@@ -20,7 +20,7 @@ Run all `npm` scripts from the repo root, not from this directory.
 
 ```bash
 npm ci                     # install workspace deps (run once)
-npm run build:deps         # build the SDK bundle + patch-db client (run once)
+npm run build:deps         # build @start9labs/start-core + patch-db client (run once)
 
 npm run start:brochure     # dev server on http://localhost:8200
 ```
@@ -40,5 +40,4 @@ Merges to `master` that touch `projects/brochure-marketplace/**` (or its shared 
 ## More
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — structure, services, data flow
-- [CONTRIBUTING.md](CONTRIBUTING.md) — build/test/format workflow
-- [AGENTS.md](AGENTS.md) — instructions for AI/dev agents working here
+- [AGENTS.md](AGENTS.md) — build/test/format workflow

@@ -1,6 +1,6 @@
 # Architecture
 
-`brochure` is the public Start9 Marketplace web app. It is a small Angular 22 application that wraps the shared `@start9labs/marketplace` component library and feeds it data from one or more package registries.
+`brochure` is the public Start9 Marketplace web app. It is a small Angular application that wraps the shared `@start9labs/marketplace` component library and feeds it data from one or more package registries.
 
 ## Place in the monorepo
 
@@ -51,14 +51,13 @@ src/
 
 ## UI stack
 
-Taiga UI 5 + the shared marketplace/shared libraries. The app is dark-themed (`tuiTheme="dark"`, `provideTaiga({ mode: 'dark' })`). User-facing strings go through the `i18n` pipe (`I18N_PROVIDERS`), with dictionaries living in `shared-libs/ts-modules/shared/src/i18n`.
+Taiga UI + the shared marketplace/shared libraries. The app is dark-themed (`tuiTheme="dark"`, `provideTaiga({ mode: 'dark' })`). User-facing strings go through the `i18n` pipe (`I18N_PROVIDERS`), with dictionaries living in `shared-libs/ts-modules/shared/src/i18n`.
 
 ## Build & deploy
 
-`@angular/build:application` builds to `projects/brochure-marketplace/dist/raw/brochure-marketplace`. Assets are pulled from `shared/assets`, `projects/brochure-marketplace/src/assets/img`, and the Taiga icon set. Production builds apply the `environment.prod.ts` file replacement and output hashing. The deploy is automated on merge to `master` (`.github/workflows/deploy-brochure.yml`), which builds `@start9labs/start-core` + patch-db client first, then the brochure bundle, and ships it to the VPS hosting marketplace.start9.com.
+`@angular/build:application` builds to `projects/brochure-marketplace/dist/raw/brochure-marketplace`. Assets are pulled from `shared-libs/ts-modules/shared/assets`, `projects/brochure-marketplace/src/assets/img`, and the Taiga icon set. Production builds apply the `environment.prod.ts` file replacement and output hashing. The deploy is automated on merge to `master` (`.github/workflows/deploy-brochure.yml`), which builds `@start9labs/start-core` + patch-db client first, then the brochure bundle (`npm run build:brochure`, which also copies `index.html` to `404.html`: a static host answers every deep link with it, and the router takes over), and publishes it to the `marketplace.start9.com` folder on evelyn's NextExplorer, which Start9 Pages serves.
 
 ## Further reading
 
 - [README.md](README.md) — what this app is and how to run it.
-- [CONTRIBUTING.md](CONTRIBUTING.md) — build/test/format workflow.
-- [AGENTS.md](AGENTS.md) — instructions for AI/dev agents working here.
+- [AGENTS.md](AGENTS.md) — build/test/format workflow.

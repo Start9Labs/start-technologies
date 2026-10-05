@@ -61,7 +61,10 @@ All paths below are under `shared-libs/crates/start-core/src/tunnel/`.
 
 `start-tunneld` runs `inner_main` on a multi-threaded Tokio runtime:
 
-1. Build `TunnelContext` from `TunnelConfig`.
+1. Build `TunnelContext` from `TunnelConfig`. After loading conntrack through the
+   firewall rules, raise its entry limit to 256 entries per MiB of host RAM and
+   its bucket count to at least the entry limit. Preserve higher host settings;
+   log a failure without aborting startup.
 2. Start a `WebServer` bound to the HTTP listen address, serving
    `tunnel_router` (UI + API).
 3. Spawn a task subscribed to the `/webserver` db path. When HTTPS is enabled it
@@ -82,8 +85,8 @@ The `start-tunnel` CLI builds an `rpc-toolkit` `CliApp` against the same
    DNAT rules so the VPS's public IP:port maps to the device's WireGuard IP:port.
 4. Optionally requests an upstream mapping from the network gateway via
    IGD (`igd.rs`) or PCP (`pcp.rs`).
-5. Inbound packets are NAT-forwarded at Layer 3/4 — payloads are never
-   inspected, so TLS terminates at the destination service, not the tunnel.
+5. Inbound packets are NAT-forwarded at Layer 3/4 — TLS is not terminated by the tunnel. Hostname forwards inspect ClientHello
+   SNI to choose a destination, then relay the connection; TLS terminates at the destination service, not the tunnel.
 
 ## Frontend
 
@@ -109,7 +112,7 @@ chains it) → `projects/start-tunnel/web/dist/raw/start-tunnel/` → compressed
 - `make start-tunnel` → `target/<arch>-unknown-linux-musl/<profile>/tunnelbox`
   (depends on the prebuilt static UI).
 - `make start-tunnel-deb` → a Debian package declaring `wireguard-tools`, `iptables`,
-  `nftables`, and `conntrack` as dependencies, installing the three symlinks and
+  `nftables`, `conntrack`, `iproute2`, and `procps` as dependencies, installing the three symlinks and
   the systemd unit.
 - TS bindings for the tunnel API are generated into
   `shared-libs/crates/start-core/bindings/tunnel/` (`make start-core-ts-bindings`).
@@ -117,5 +120,4 @@ chains it) → `projects/start-tunnel/web/dist/raw/start-tunnel/` → compressed
 ## Further reading
 
 - [`README.md`](README.md) — what StartTunnel is and how to use it.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — building, testing, and changing it.
-- [`AGENTS.md`](AGENTS.md) — rules for AI agents working in this scope.
+- [`AGENTS.md`](AGENTS.md) — building, testing, and changing it.

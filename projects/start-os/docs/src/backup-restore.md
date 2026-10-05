@@ -12,7 +12,7 @@ This option should only be necessary if you accidentally uninstall a service.
 1.  Select the service(s) you want to restore and click "Restore Selected".
 
 > [!TIP]
-> If you're restoring a backup taken from a different system architecture (x86, ARM, RISC-V) to the one you're restoring to, you may need to _reinstall_ services (not uninstall, since you will lose your data) from the marketplace after the restore completes to avoid running them more slowly in emulation.
+> If the backup came from a different system architecture (x86, ARM, or RISC-V), StartOS runs its service images under emulation. After the restore, _reinstall_ or update each service from the marketplace so StartOS can select its package for the new server architecture. Do not uninstall it, since uninstalling deletes its data.
 
 ## Restoring an Entire Server
 

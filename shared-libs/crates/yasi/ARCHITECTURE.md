@@ -84,6 +84,5 @@ looping `intern → drop` over a few long keys, and fails via a watchdog channel
 ## Further reading
 
 - [README.md](README.md) — what it is and how to use it.
-- [CONTRIBUTING.md](CONTRIBUTING.md) — contributor workflow.
-- [AGENTS.md](AGENTS.md) — agent operating rules and gotchas.
+- [AGENTS.md](AGENTS.md) — contributor workflow.
 - [../../ARCHITECTURE.md](../../ARCHITECTURE.md) — the `shared-libs` overview.

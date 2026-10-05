@@ -195,6 +195,8 @@ export namespace Mock {
   export const RegistryInfo: T.RegistryInfo = {
     name: 'Start9 Registry',
     icon: REGISTRY_ICON,
+    description:
+      'Every service here is packaged, tested, and supported by **Start9**. Read the [docs](https://docs.start9.com) before installing.',
     categories: {
       ai: {
         name: 'AI',
@@ -248,7 +250,7 @@ export namespace Mock {
       main: {
         source: 'packed',
         arch: ['x86_64', 'aarch64'],
-        emulateMissingAs: 'aarch64',
+        emulateMissing: true,
         nvidiaContainer: false,
       },
     },
@@ -302,7 +304,7 @@ export namespace Mock {
       main: {
         source: 'packed',
         arch: ['x86_64', 'aarch64'],
-        emulateMissingAs: 'aarch64',
+        emulateMissing: true,
         nvidiaContainer: false,
       },
     },
@@ -344,7 +346,7 @@ export namespace Mock {
       main: {
         source: 'packed',
         arch: ['x86_64', 'aarch64'],
-        emulateMissingAs: 'aarch64',
+        emulateMissing: true,
         nvidiaContainer: false,
       },
     },
@@ -392,7 +394,7 @@ export namespace Mock {
       main: {
         source: 'packed',
         arch: ['x86_64', 'aarch64'],
-        emulateMissingAs: 'aarch64',
+        emulateMissing: true,
         nvidiaContainer: false,
       },
     },
@@ -437,6 +439,14 @@ export namespace Mock {
             upstreamRepo: 'https://github.com/bitcoin/bitcoin',
             marketingUrl: 'https://bitcoin.org',
             releaseNotes: 'Even better support for Bitcoin and wallets!',
+            preDownloadAlert: {
+              message: {
+                en_US: '**Back up Bitcoin Core** before updating.',
+                es_ES:
+                  '**Haga una copia de seguridad de Bitcoin Core** antes de actualizarlo.',
+              },
+              when: { sourceVersion: '<27.0.0:0' },
+            },
             osVersion: '0.4.0',
             sdkVersion: '0.4.0-beta.49',
             gitHash: 'fakehash',
@@ -827,6 +837,14 @@ For users running Bitcoin Core as a service behind a reverse proxy, note that th
 - The \`listtransactions\` RPC may return duplicate entries when called with \`include_watchonly=true\` on descriptor wallets that share derivation paths across multiple descriptors.
 
 For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/release-notes/release-notes-27.0.0.md#full-changelog-with-detailed-descriptions-of-every-commit-and-pull-request-merged`,
+          preDownloadAlert: {
+            message: {
+              en_US: '**Back up Bitcoin Core** before updating.',
+              es_ES:
+                '**Haga una copia de seguridad de Bitcoin Core** antes de actualizarlo.',
+            },
+            when: { sourceVersion: '<27.0.0:0' },
+          },
           osVersion: '0.4.0',
           sdkVersion: '0.4.0-beta.49',
           gitHash: 'fakehash',
@@ -1347,6 +1365,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     powjefhjbnwhdva: {
       type: 'disk',
       logicalname: 'sdba1',
+      stablePath: '/dev/disk/by-path/pci-0000:00:17.0-ata-2-part1',
       label: 'Another Drive',
       capacity: 2000000000000,
       used: 100000000000,
@@ -1641,7 +1660,116 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
           copyable: false,
           qr: true,
           masked: false,
+          launchable: true,
           value: 'https://guessagain.com',
+        },
+      ],
+    },
+  }
+
+  const DOCTOR_REPORT = `Vikunja Doctor
+==============
+
+Checked against https://vikunja.embassy at 2026-08-28T14:02:11Z
+
+Component          Status    Detail
+-----------------  --------  ---------------------------------------
+Database           ok        postgres 16.3, 41 tables, 0 pending
+Typesense index    degraded  4812 of 5104 tasks indexed
+Attachment store   ok        1.2 GiB across 318 files
+Mailer             skipped   no SMTP credentials configured
+Public URL         ok        resolves to 10.0.1.24:3456
+
+2 warnings
+  - The search index is behind. Run "Reindex" to rebuild it.
+  - The mailer is unconfigured, so reminders and invitations are
+    silently dropped.`
+
+  const DEVICE_CONFIG = `[Interface]
+PrivateKey = qNSHDgIkG9Bo0dnjBRAmvIBaU0MI/ADoWfDaCu9uWFo=
+Address = 10.13.13.4/32
+DNS = 10.13.13.1
+
+[Peer]
+PublicKey = HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw=
+PresharedKey = uUYtV+HDNU9kZ0eDDBTBQfLuIJfHIPRSRfBWMWFBAgk=
+Endpoint = tunnel.start9.com:51820
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25`
+
+  export const ActionResMultiline: ActionRes = {
+    version: '1',
+    title: 'Diagnostics',
+    message: 'Send this report along if you open a support ticket.',
+    result: {
+      type: 'multiline',
+      copyable: true,
+      qr: false,
+      masked: false,
+      filename: 'vikunja-doctor.txt',
+      value: DOCTOR_REPORT,
+    },
+  }
+
+  export const ActionResMultilineSecret: ActionRes = {
+    version: '1',
+    title: 'Device Added',
+    message: 'Scan this from the WireGuard app, or save it as a file.',
+    result: {
+      type: 'multiline',
+      copyable: true,
+      qr: true,
+      masked: true,
+      filename: 'start-tunnel.conf',
+      value: DEVICE_CONFIG,
+    },
+  }
+
+  export const ActionResMultilineGroup: ActionRes = {
+    version: '1',
+    title: 'Service Information',
+    message: 'Everything StartOS could collect about this service.',
+    result: {
+      type: 'group',
+      value: [
+        {
+          type: 'single',
+          name: 'Version',
+          description: null,
+          copyable: false,
+          qr: false,
+          masked: false,
+          value: '0.24.6',
+        },
+        {
+          type: 'multiline',
+          name: 'Doctor Report',
+          description: 'The full output of `vikunja doctor`.',
+          copyable: true,
+          qr: false,
+          masked: false,
+          filename: 'vikunja-doctor.txt',
+          value: DOCTOR_REPORT,
+        },
+        {
+          type: 'multiline',
+          name: 'Device Config',
+          description: 'The WireGuard config for the device you just added.',
+          copyable: true,
+          qr: true,
+          masked: true,
+          filename: 'start-tunnel.conf',
+          value: DEVICE_CONFIG,
+        },
+        {
+          type: 'multiline',
+          name: 'Recovery Phrase',
+          description: 'Write this down. It is shown only once.',
+          copyable: true,
+          qr: false,
+          masked: true,
+          value:
+            'shrug cinnamon plunge oyster\nharbor velvet timber acorn\nglisten fossil marble rooster',
         },
       ],
     },
@@ -2343,6 +2471,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
               enabled: ['[2001:db8:abcd::a3b:2]:1234'],
               disabled: [],
               guaWan: ['[2001:db8:abcd::a3b:2]:1234'],
+              lanEnabled: [],
               available: [
                 {
                   ssl: true,
@@ -2433,6 +2562,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
               enabled: [],
               disabled: [],
               guaWan: [],
+              lanEnabled: [],
               available: [],
             },
             options: {
@@ -2477,6 +2607,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
               enabled: [],
               disabled: [],
               guaWan: [],
+              lanEnabled: [],
               available: [],
             },
             options: {

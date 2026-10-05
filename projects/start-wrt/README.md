@@ -52,7 +52,7 @@ Toggle Help Mode to get a detailed explanation of everything in the current view
 
 ## Web Interface
 
-The StartWRT web interface is a single-page application that communicates with the OpenWrt backend over JSON-RPC 2.0. It manages the router's UCI configuration — network interfaces, firewall rules, DHCP, WireGuard tunnels, and more — through a clean, form-driven UI built with Angular 22 and [Taiga UI v5](https://taiga-ui.dev/next).
+The StartWRT web interface is a single-page application that communicates with the OpenWrt backend over JSON-RPC 2.0. It manages the router's UCI configuration — network interfaces, firewall rules, DHCP, WireGuard tunnels, and more — through a clean, form-driven UI built with Angular and [Taiga UI](https://taiga-ui.dev/).
 
 **Accessible complexity.** StartWRT exposes powerful networking features that traditionally require CLI expertise. The web interface makes them approachable through progressive disclosure — simple defaults up front, advanced options available when needed.
 
@@ -73,7 +73,7 @@ The interface is organized around the router's feature areas:
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — System architecture, data flow, build pipeline
-- [CONTRIBUTING.md](CONTRIBUTING.md) — Development setup and build commands
+- [AGENTS.md](AGENTS.md) — Development setup and build commands
 - [API_CONTRACT.md](API_CONTRACT.md) — Complete RPC endpoint contract with Rust types
 - [backend/](backend/) — Rust backend documentation
 - [web/](web/) — Angular frontend documentation

@@ -21,6 +21,10 @@
    > [!WARNING]
    > Updates can take up to an _hour_ to complete. During this time, there is no indication of progress and your StartOS UI will be unreachable. **DO NOT UNPLUG YOUR SERVER DURING THIS TIME!**
 
+1. When your server comes back, a notification welcomes you to the new version. Open it from **Notifications** — the bell in the menu — to read that release's notes again at any time.
+
+A browser page left open during the update displays **Refresh Needed** when the server returns. Select **Refresh** to open the updated interface. If an installed StartOS app still shows the previous interface afterwards, remove and reinstall the app.
+
 ## Update by Re-flashing
 
 If you are updating to an unreleased version of StartOS, or something went wrong with a UI update (very rare), it may be necessary to update StartOS by re-flashing. Follow the guide for [Installing StartOS](installing-startos.md).

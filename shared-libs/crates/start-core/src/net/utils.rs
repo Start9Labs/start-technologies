@@ -147,6 +147,19 @@ pub fn is_private_ip(addr: IpAddr) -> bool {
     }
 }
 
+pub fn ipv4_is_cgnat(addr: Ipv4Addr) -> bool {
+    let [a, b, ..] = addr.octets();
+    a == 100 && (64..128).contains(&b)
+}
+
+/// Outside private, loopback, link-local, and shared address space.
+pub fn is_global_ip(addr: IpAddr) -> bool {
+    match addr.to_canonical() {
+        IpAddr::V4(v4) => !is_private_ip(v4.into()) && !ipv4_is_cgnat(v4),
+        v6 => !is_private_ip(v6),
+    }
+}
+
 /// The box's own IPv6 global-unicast addresses (GUAs) on `gateways` — the
 /// non-link-local, non-ULA v6 subnet addresses. Used to populate a vhost's
 /// per-IP `public_v6`, since one gateway may carry several GUAs.
@@ -392,3 +405,50 @@ impl TcpListeners {
 //     }
 // }
 // TODO
+
+#[cfg(test)]
+mod is_global_ip_tests {
+    use super::*;
+
+    fn global(addr: &str) -> bool {
+        is_global_ip(addr.parse().unwrap())
+    }
+
+    #[test]
+    fn cgnat_space_ends_where_the_block_does() {
+        assert!(!global("100.64.0.0"));
+        assert!(!global("100.127.255.255"));
+        assert!(global("100.63.255.255"));
+        assert!(global("100.128.0.0"));
+    }
+
+    #[test]
+    fn the_ranges_a_network_hands_out_are_not_global() {
+        for addr in [
+            "10.0.3.1",
+            "172.16.0.1",
+            "192.168.0.5",
+            "127.0.0.1",
+            "169.254.1.1",
+            "::1",
+            "fd00:3::1",
+            "fe80::1",
+        ] {
+            assert!(!global(addr), "{addr}");
+        }
+    }
+
+    #[test]
+    fn a_routable_address_is_global() {
+        for addr in ["203.0.113.7", "198.51.100.9", "2001:db8::5"] {
+            assert!(global(addr), "{addr}");
+        }
+    }
+
+    #[test]
+    fn an_ipv4_mapped_address_is_classified_as_the_address_it_carries() {
+        assert!(!global("::ffff:192.168.0.90"));
+        assert!(!global("::ffff:100.100.1.5"));
+        assert!(global("::ffff:203.0.113.7"));
+    }
+}

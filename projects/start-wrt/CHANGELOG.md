@@ -5,6 +5,128 @@ All notable changes to StartWRT are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2]
+
+### Security
+
+- **Update the web interface and shared dependencies with security fixes**, including Angular and DOMPurify, and replace the unmaintained YAML parser.
+
+## [1.2.1]
+
+### Fixed
+
+- **A chained VPN no longer falls back to a single hop.** If the VPN it
+  connects through went down, or had not come up yet after a reboot, a chained
+  VPN reconnected to its server directly over your WAN, showing that provider
+  your home IP while every screen still reported the chain. It now stops until
+  its target is back. Existing chains are protected on the first boot of this
+  version.
+
+- **Outbound VPNs with an IPv6 server address connect.** A config whose
+  `Endpoint` was a bracketed IPv6 address, such as `[2001:db8::1]:51820`,
+  imported without error but its tunnel never came up. Existing VPNs are
+  repaired on the first boot of this version.
+
+- **VPN chaining refuses setups it cannot route.** A VPN can connect through
+  another only when its config's `Endpoint` is an IP address, the target VPN
+  can carry that address (it has an address of the same family and its
+  `AllowedIPs` include it), and no other VPN uses the same server address.
+  Previously these were accepted and the VPN either skipped the chain or could
+  not connect. Renaming a VPN while pointing it at a VPN that connects through
+  it is also refused as a circular chain. A VPN with a hostname `Endpoint`
+  offers only Internet as its target.
+
+- **VPN chains that could not route are switched to connect over the
+  Internet.** A VPN chained with a hostname `Endpoint` connected directly over
+  your WAN while every screen still reported the chain. On the first boot of
+  this version it is set to connect over the Internet, and the change appears
+  in the activity log. To chain it again, import a config whose `Endpoint` is
+  an IP address.
+
+- **A VPN connecting through another gets a fitting MTU.** With no MTU in its
+  config, or with the field left blank, it uses its target's MTU less the
+  chained tunnel's headers instead of 1420, avoiding fragmented packets.
+
+- **Custom DNS works after an update.** On a router using custom system DNS
+  or a profile DNS override, devices could not resolve names after an update
+  until a DNS setting was saved again. DNS lookups over TCP, used for answers
+  too large for UDP, also failed under custom DNS.
+
+### Security
+
+- Hardens authentication for local clients
+- Removes a third-party root certificate (`dc.com-CA`), inherited from the
+  board vendor's base image, from the router's system certificate store.
+  Routers drop it on their next update.
+
+## [1.2.0]
+
+### Added
+
+- **Wi-Fi regulatory country.** `Points of Entry > Wi-Fi > Settings` gains a
+  Country selector. The selected country sets the channels each band may use
+  and the maximum transmit power; the channel dropdowns list only what that
+  country permits, and automatic channel selection skips radar-detection
+  (DFS) channels, which take a minute or more to come up. With no country selected the router runs on a conservative
+  worldwide subset (2.4 GHz channels 1–11, 5 GHz channels 36–48, 20 dBm), so
+  select yours after setup.
+
+- **Root CA profile for iPhone and iPad.** Downloading the Root CA in Safari
+  on iOS or iPadOS now fetches a configuration profile that installs through
+  Settings.
+
+### Changed
+
+- **Setup ends with a link to `router.lan`.** After you set the admin
+  password, the confirmation page links to `router.lan` to trust your Root
+  CA, instead of saying the window can be closed.
+
+- **The Root CA walkthrough matches StartOS.** It links to the instructions
+  for each platform and no longer asks you to bookmark the page. The Root CA
+  downloads from `/static/local-root-ca.crt`, the path StartOS uses.
+
+### Fixed
+
+- **A published domain typed without `https://` now reaches the published
+  service, not the router.** While port 443 is published to a device — by a
+  Published Port or a device's hostname routes — plain HTTP at the router's
+  public address is answered with a redirect to `https://` instead of the
+  router's web interface, from inside the network and from the Internet under
+  every Remote Access setting. A Published Port or a hostname route on 80
+  takes precedence.
+
+- **Freshly generated Root CAs carry an Authority Key Identifier conforming to RFC 5280 and the CA/Browser Forum Baseline Requirements.** Existing routers retain their trusted Root CA when updated with settings preserved.
+
+- **Publishing a port no longer names the device after its generated label,
+  which could stop the router's DHCP server.** Publishing a port to a device
+  with no reserved address reserves one; for a device without a name of its
+  own, that reservation was saved under the label shown for it, such as
+  `Android device (4c8f63)`. The router's DHCP server refuses such a name and
+  failed to start on its next reload or reboot, leaving devices on the network
+  without addresses. Reserving an address now leaves the device's name alone,
+  the device page edits only the name you assigned rather than whatever was
+  shown, and the router rejects a reservation it could not serve — a name must
+  be a valid hostname (letters, digits, and hyphens; up to 63 characters).
+  A router that already holds such a name clears it on its first boot on this
+  version and serves DHCP again, recording the cleared name in Activity. Since
+  a router in that state is hard to reach, reflashing from a microSD card and
+  choosing **Keep settings** is the way to get there without losing anything —
+  that path preserves the settings the name is stored in.
+
+- **A device can move a hostname route it holds to another of its own ports.**
+  Previously the request was refused as taken until the old lease expired.
+
+## [1.1.1]
+
+### Fixed
+
+- **Flashing to internal storage no longer depends on the microSD card's
+  partition table being untouched since the image was written.** A card whose
+  table a partition tool had rewritten to span the whole card, or whose last
+  partition had been grown to fill it, made the flash fail with
+  `rootfs_data partition not found on eMMC` and left the router unable to boot
+  from internal storage until reflashed.
+
 ## [1.1.0]
 
 ### Added
@@ -33,10 +155,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lapsed, or it returned on a different address — so a forward can never
   quietly deliver Internet traffic to whichever device is given that address
   next (devices with a reserved address are unaffected). Turning the toggle
-  back off — or forgetting the device — closes that device's forwards
-  immediately.
+  back off — or forgetting the device — closes that device's forwards and
+  hostname routes immediately.
   The Published Ports page gains a read-only "Automatic" section showing each
-  forward's device, protocol, and expiry. UPnP clients see a complete gateway:
+  port use's device, kind (PCP, UPnP, or SNI), and expiry. UPnP clients see a complete gateway:
   the router advertises the `WANCommonInterfaceConfig` service clients use to
   recognize an Internet Gateway Device, answers the status actions they check
   before mapping anything, and supports reading mappings back
@@ -45,11 +167,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   UPnP endpoints refuse browser-shaped requests — DNS-rebinding requests and
   blind cross-origin writes alike — so a malicious web page cannot use a LAN
   device's browser to read the network's public IP, fingerprint the router, or
-  open that device's ports. Uses the shared `start-core` PCP/IGD
-  server cores; since StartWRT has no SNI demux, the shared PCP server now
-  advertises the Start9 HOSTNAME capability only on gateways that really
-  implement it (StartTunnel), so StartOS clients fall back to plain forwards
-  here instead of recording hostname mappings that would route nothing.
+  open that device's ports. Uses the shared `start-core` PCP/IGD server cores.
+  Devices can also register **SNI hostname routes** on a shared external port
+  (over PCP's HOSTNAME extension or the `X_START9_AddHostnameMapping` UPnP
+  vendor action): the router reads each TLS connection's requested hostname
+  and delivers it to whichever device owns it, so several devices — or several
+  services on one StartOS server with their own domains — share one port such
+  as 443. Hostname routes appear in the Automatic section with their hostname,
+  follow the same per-device permission and lease expiry as plain forwards,
+  claim their shared port whole (plain forwards on it are refused; ports the
+  router itself answers on — SSH, an inbound VPN — are refused to hostname
+  routes for the same reason), and are re-registered by the device within
+  minutes after a router restart rather than persisted. Remote access to the
+  router's own web interface is the exception, not a casualty: hostname
+  routes and remote access share port 443 — connections naming a routed
+  hostname reach its device, and everything else (such as browsing the
+  router by IP address) still reaches the router interface, accepted from
+  exactly the sources your Remote Access setting allows, so enabling one
+  feature never silently disables the other.
+  A routed hostname works from inside your own network too — a laptop on your
+  LAN can open the same public address and reach the device — with one
+  consequence worth knowing: because the device answers a local client
+  directly rather than through the router, the router puts its own address on
+  those connections, so the device cannot tell one local client from another
+  in its logs. Connections from another Security Profile, and from the
+  Internet, still carry the original address.
 - The UI now detects when the running firmware ships a newer interface than
   the page is displaying (every RPC response and `system.info` report the
   firmware's build stamp and the UI compares it to its own). An update
@@ -61,16 +203,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   RPC response, so an open tab notices within seconds of its next request even
   when the update restarted the daemon too quickly to drop a connection; pages
   that make no requests while idle re-check every 30 seconds.
+- **Devices that never share a hostname are now identified by operating
+  system or hardware vendor instead of a meaningless placeholder.** Some
+  devices deliberately withhold their name from the router — Chromebooks
+  never send one, and many IoT gadgets can't — and previously showed up as an
+  opaque `device-3af2b1`. The device list now recognizes the operating system
+  from how the device requests a network address (its DHCP fingerprint), e.g.
+  `Windows device (3af2b1)`, or failing that the vendor behind its MAC
+  address, e.g. `Apple device (3af2b1)` — keeping the short suffix so
+  identical unnamed devices stay distinguishable. OS recognition works even
+  for devices using randomized Wi-Fi addresses, survives reboots, and a real
+  hostname, when one ever appears, still takes over automatically; names you
+  assign always win.
 - **6in4 tunnels can now be configured on the router.** The `6in4` protocol
   and the SIT kernel module it needs now ship in the image, so an IPv6 tunnel
   from a broker such as Hurricane Electric can be set up over SSH — useful for
   reaching IPv6 on an ISP that provides none. There is no UI for this yet.
   Previously these packages had to be built and sideloaded by hand after every
   update, since a sysupgrade does not preserve separately installed packages.
+- **eMMC boot firmware provisioning.** The flash wizard, in-app updates, and a
+  check on every boot now converge the eMMC hardware boot partitions
+  (boot0/boot1) to the release's own `bootinfo` + FSBL (u-boot SPL, built from
+  the pinned `spacemit-com/uboot-2022.10` source). Previously only vendor
+  factory tooling ever wrote boot0, so a DIY BananaPi BPI-F3 whose factory left
+  it empty (or carrying an incompatible bootloader vintage) completed the setup
+  wizard but could not boot from eMMC once the microSD card was removed. Writes
+  are idempotent (byte-compared, skipped when already current), read-back
+  verified, and ordered for power-cut safety (boot1 mirror first, the
+  single-sector bootinfo header last); boards already carrying the current
+  firmware are not touched. The boot-time check makes provisioning effective
+  from the first boot after installing this release and self-heals damaged or
+  interrupted boot firmware thereafter. The `bootinfo_emmc.bin` blob now ships
+  in the image's bootfs partition to support this.
+- **The firmware image now ships MediaTek MT7915 Wi-Fi firmware alongside the
+  MT7916 firmware.** MT7915-based mini PCIe modules (such as the AsiaRF
+  AW7915-NP1) previously failed to initialize on DIY builds: the driver was
+  present but the firmware files were not, so no Wi-Fi radio ever appeared.
+  Note that MT7915 band-selectable cards operate one band at a time — with the
+  stock configuration the 2.4 GHz network comes up — unlike the
+  dual-band-concurrent AW7916-NPD module shipped in Start9 routers.
 - **Hardware documentation.** A new Hardware page in the user guide lists the
   router's specifications and publishes the SpacemiT K1 reference schematic the
   board descends from, noting where the shipped router differs from that
   reference design and why.
+- **The StartWRT user guide is now published** at
+  [docs.start9.com/start-wrt](https://docs.start9.com/start-wrt/).
 
 ### Changed
 
@@ -81,8 +258,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   previously could be published to a device without warning, silently cutting
   that router service off from outside your network. Saving such a rule now
   surfaces the conflict in a confirmation dialog; you can still publish the
-  port deliberately, and you're asked once per rule. Detection follows the
-  live configuration (nothing is asked for ports no router service uses) and
+  port deliberately, and you're asked once per rule — again only if you
+  change which port that rule publishes, or its protocol. Detection follows
+  the live configuration (nothing is asked for ports no router service uses) and
   matches transports, so e.g. a UDP-only forward on 443 doesn't warn.
 - The firmware build stamp is now identical everywhere it appears: the
   `startwrt` binary (UI `ETag`, `system.info`, `startwrt verify`) now carries
@@ -275,6 +453,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disabled) and are preserved untouched on disk, and the page now loads each
   WAN setting independently, so one failure can no longer blank out the
   endpoint list.
+
+- **A published port is now reachable from your other Security Profiles at the
+  router's public address.** Reaching a published port by the router's public
+  address — or a domain name pointing at it — rather than the device's LAN
+  address only worked from the target device's own profile. From any other
+  profile the router answered instead of the published service, so an app or
+  bookmark holding a public address worked on one network and not another. A
+  published port is a public resource, so those connections are now delivered
+  to the device from every profile that could reach it from the Internet and
+  from every profile with Access to the device's profile — and from those only.
+  A profile could reach it from the Internet when its WAN Access is All, a
+  Blacklist that does not block the router's public address, or a Whitelist
+  that includes it, outside any blackout window. The routes follow your
+  Security Profile settings and your public address as they change, apply to
+  the device's global IPv6 address as well (where a Whitelist or Blacklist
+  entry counts by the device's address), and cover ports opened through
+  automatic port forwarding (UPnP/PCP) the same way. Nothing else on the device
+  is opened: a profile without Access still cannot reach it at its LAN address
+  or on any other port.
+
+### Security
+
+- **A published port restricted by Source is no longer reachable from your own
+  network at the router's public address.** The restriction applied to
+  connections arriving from the Internet, but a device on your own network
+  could reach the port through the router's public address regardless of it.
+  Restricted rules are no longer served that way; reach them from inside your
+  network at the device's own LAN address.
 
 ## [1.0.1]
 

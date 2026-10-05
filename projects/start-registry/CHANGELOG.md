@@ -2,12 +2,27 @@
 
 All notable changes to `start-registry` (the Start Registry server) are documented here. This project is versioned **independently** (starting at `1.0.0`); its version lives in `Cargo.toml`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [1.0.2]
+## [1.1.1]
 
-- **A client can follow the package index over a websocket instead of re-fetching it.** `db.subscribe`
-  returns the index as it stands plus a continuation id; connecting to `/ws/rpc/<id>` then streams a
-  JSON patch each time a package or version is added, removed, or recategorized. It is
-  unauthenticated and carries only the subtree `package.index` already serves.
+- **Update shared dependencies with security fixes** and replace the unmaintained YAML parser.
+
+- **Each release's container image is published as `ghcr.io/start9labs/startos-registry:v<version>`**, the same image alpha ran for that commit.
+
+- **Fork pull requests validate the registry's multi-architecture container build.** Manual CI dispatches build the selected architecture.
+
+- **A registry accepts admin requests at any loopback address**, such as
+  `start-cli -r http://127.0.0.1:5959` on the registry's own host.
+
+## [1.1.0]
+
+- **A registry can declare a description.** `info set-description` stores markdown (a
+  `LocaleString`, so it can carry translations), `info` returns it, and the marketplace shows it
+  above the registry's services while that registry is selected.
+
+- **A client can follow the registry index over a websocket instead of re-fetching it.**
+  `db.subscribe` returns `/index` as it stands plus a continuation id; connecting to
+  `/ws/rpc/<id>` then streams its JSON patches. Callers can select `/index` or any subpath,
+  including the package or OS index, while the endpoint remains unauthenticated.
 
 - **An indexed package version now advertises which installed versions can migrate into it**, so a
   client asking for an upgrade path is offered a version it can actually install. Entries already

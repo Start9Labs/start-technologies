@@ -9,6 +9,7 @@ import { TuiDialogContext } from '@taiga-ui/core'
 import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { injectContext } from '@taiga-ui/polymorpheus'
 import { ActionSuccessGroupComponent } from './action-success-group.component'
+import { ActionSuccessMultilineComponent } from './action-success-multiline.component'
 import { ActionSuccessSingleComponent } from './action-success-single.component'
 import { ActionResponse } from './types'
 
@@ -24,12 +25,23 @@ import { ActionResponse } from './types'
     @if (single) {
       <app-action-success-single [single]="single" />
     }
+    @if (multiline) {
+      <app-action-success-multiline [multiline]="multiline" />
+    }
     @if (group) {
       <app-action-success-group [group]="group" />
     }
   `,
+  styles: `
+    :host {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+  `,
   imports: [
     ActionSuccessGroupComponent,
+    ActionSuccessMultilineComponent,
     ActionSuccessSingleComponent,
     NgDompurifyPipe,
     MarkdownPipe,
@@ -43,6 +55,8 @@ export class ActionSuccessPage {
   readonly message = this.data.message as i18nKey | null
   readonly single =
     this.data.result?.type === 'single' ? this.data.result : null
+  readonly multiline =
+    this.data.result?.type === 'multiline' ? this.data.result : null
   readonly group = this.data.result?.type === 'group' ? this.data.result : null
 
   readonly options = { breaks: true }

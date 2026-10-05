@@ -121,13 +121,13 @@ export const networkXml = FileHelper.xml({ base: sdk.volumes.config, subpath: 'n
 
 ### Reading Methods
 
-| Method                         | Purpose                                                |
-| ------------------------------ | ------------------------------------------------------ |
-| `.once()`                      | Read once, no reactivity                               |
-| `.const(effects)`              | Read and re-run the enclosing context if value changes |
-| `.onChange(effects, callback)` | Register a callback for value changes                  |
-| `.watch(effects)`              | Create an async iterator of new values                 |
-| `.waitFor(effects, predicate)` | Block until the value satisfies a predicate            |
+| Method                                  | Purpose                                                |
+| --------------------------------------- | ------------------------------------------------------ |
+| `.once()`                               | Read once, no reactivity                               |
+| `.const(effects)`                       | Read and re-run the enclosing context if value changes |
+| `.onChange(effects, callback)`          | Register a callback for value changes                  |
+| `.watch(effects, signal?)`              | Create an async iterator of new values                 |
+| `.waitFor(effects, predicate, signal?)` | Block until the value satisfies a predicate            |
 
 > [!NOTE]
 > All read methods return `null` if the file doesn't exist. Do NOT use try-catch for missing files.
@@ -170,7 +170,12 @@ const serverHost = await configYaml.read(c => c.server.host).once()
 
 // Wait until a condition is met (blocks until predicate returns true)
 const syncedStore = await storeJson.read(s => s.fullySynced).waitFor(effects, synced => synced === true)
+
+// Give up after a minute; the signal stops the wait (it rejects with AbortedError)
+const syncedInTime = await storeJson.read(s => s.fullySynced).waitFor(effects, synced => synced === true, AbortSignal.timeout(60_000))
 ```
+
+The signal also cancels waits for a file or its parent directory to be created.
 
 ## Writing File Models
 
@@ -178,7 +183,7 @@ const syncedStore = await storeJson.read(s => s.fullySynced).waitFor(effects, sy
 
 Use `merge()` for almost all writes. It has two major advantages:
 
-1. **Preserves unknown keys**: `merge()` only updates the fields you specify, leaving everything else intact — including keys that the upstream service uses but your file model doesn't define. `write()` replaces the entire file, destroying any keys not in your schema. See [Unknown Key Preservation](#unknown-key-preservation) for details and migration implications.
+1. **Preserves unknown keys**: `merge()` only updates the fields you specify, leaving everything else intact — including keys that the upstream service uses but your file model doesn't define. `write()` replaces the entire file with exactly the data you pass: a key you leave out is gone, and a key you pass survives whether or not your schema names it — so reading a file with `read()` and writing the result back strips nothing. See [Unknown Key Preservation](#unknown-key-preservation) for details, and for how to delete a stale key.
 2. **Defaults come from the schema**: When every key in your zod schema has a `.catch()`, the schema _is_ the default. You can seed a file on first install with `merge(effects, {})` — the `.catch()` values fill in every missing field. No need to define a separate defaults object and pass it to `write()`.
 
 ```typescript
@@ -202,6 +207,22 @@ await storeJson.write(effects, {
   smtp: { selection: 'disabled', value: {} },
 })
 ```
+
+### Changing the Current Value
+
+Use `update()` when the next value depends on the current file, including toggles and deleting entries from a typed record:
+
+```typescript
+await configToml.update(effects, current => (current === null ? null : { ...current, allow_registration: !current.allow_registration }))
+```
+
+The callback receives the same validated value as `read().once()`. Return a complete replacement or `null` to skip writing. An unchanged serialized value also skips writing. The callback may be asynchronous. Reads inside it remain reentrant; calling `write()`, `merge()`, or `update()` on the same file, including through a symlink alias, throws immediately.
+
+The callback has five seconds to return, and file access it starts on other files counts against the same deadline. On timeout, `update()` rejects and releases the lock; the callback cannot commit its return value or start further SDK file operations. Keep callbacks short: an in-process timer cannot interrupt synchronous code that blocks Node's event loop or undo side effects performed directly by the callback.
+
+`write()`, `merge()`, and `update()` hold a cross-process advisory lock on each target, so other SDK runtimes writing the same file through a mounted directory wait their turn. A writer waits up to ten seconds for the lock, then rejects; a service that holds its own `flock` on the file for longer blocks every SDK write to it. `merge()` and `update()` hold it through the entire read-modify-write. The lock is taken on the file itself; creating a missing file locks a hidden `.<name>.tmp` temp file that is renamed into place. A write interrupted by a crash or power loss can leave a hidden `.<name>.<random>.tmp` file beside the target; the first write to that file after the service restarts removes it. An interrupted create leaves `.<name>.tmp`, which the next create reuses.
+
+Writes replace the file atomically, preserving its owner, access ACL, permissions, and extended attributes. New files inherit their directory's default ACL. Own-volume file mounts follow replacement while their subcontainer is alive, and commands synchronize these mounts before launching. Reads, writes, and commands reject when their mount cannot be refreshed. A write may have replaced the source before refresh fails; rejection does not imply that the file is unchanged. A deleted source leaves the mount on its last file. A target that is itself a bind mount is written in place. Existing open descriptors retain the previous inode; applications must reopen the pathname to read the replacement.
 
 ### What an Empty `merge()` Does
 
@@ -440,7 +461,7 @@ await configToml.merge(effects, { legacy_key: undefined })
 ```
 
 > [!WARNING]
-> This removes a stale key your schema doesn't model. It cannot surgically delete one entry of a _typed_ collection that has a `.catch()` default. `merge({ users: { bob: undefined } })` against `users: z.record(...).catch({})` makes the whole `users` value fail validation, so the `.catch({})` replaces the **entire** record with `{}` — every entry is wiped, not just `bob`. To drop one entry while keeping the rest, rebuild the value in code and `write()` it.
+> This removes a stale key your schema doesn't model. It cannot surgically delete one entry of a _typed_ collection that has a `.catch()` default. `merge({ users: { bob: undefined } })` against `users: z.record(...).catch({})` makes the whole `users` value fail validation, so the `.catch({})` replaces the **entire** record with `{}` — every entry is wiped, not just `bob`. To drop one entry while keeping the rest, rebuild the complete value inside `update()`.
 
 ### Arrays Are Replaced, Not Merged
 
@@ -525,7 +546,7 @@ const appSub = sdk.SubContainer.of(
 await configToml.read(c => c.some_mutable_setting).const(effects)
 
 // In an action, toggle a setting directly
-await configToml.merge(effects, { allow_registration: !current })
+await configToml.update(effects, current => (current === null ? null : { ...current, allow_registration: !current.allow_registration }))
 ```
 
 > [!WARNING]

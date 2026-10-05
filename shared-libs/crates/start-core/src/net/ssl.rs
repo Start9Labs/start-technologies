@@ -36,13 +36,29 @@ use crate::SOURCE_DATE;
 use crate::account::AccountInfo;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
+use crate::db::model::public::IpInfo;
 use crate::db::{DbAccess, DbAccessMut};
 use crate::init::check_time_is_synchronized;
 use crate::net::gateway::GatewayInfo;
 use crate::net::tls::{TlsHandler, TlsHandlerAction};
+use crate::net::utils::is_global_ip;
 use crate::net::web_server::{Accept, ExtractVisitor, TcpMetadata, extract};
 use crate::prelude::*;
 use crate::util::serde::{HandlerExtSerde, Pem};
+
+pub(crate) fn x509_sha256_fingerprint(cert: &X509Ref) -> Result<String, ErrorStack> {
+    Ok(format_x509_fingerprint(
+        cert.digest(MessageDigest::sha256())?.as_ref(),
+    ))
+}
+
+fn format_x509_fingerprint(digest: &[u8]) -> String {
+    digest
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(":")
+}
 
 pub fn should_use_cert(cert: &X509Ref) -> Result<bool, ErrorStack> {
     Ok(cert
@@ -120,7 +136,7 @@ impl CertStore {
     }
 }
 impl Model<CertStore> {
-    /// This function will grant any cert for any domain. It is up to the *caller* to enusure that the calling service has permission to sign a cert for the requested domain
+    /// The caller must establish entitlement to every requested name.
     pub fn cert_for(
         &mut self,
         hostnames: &BTreeSet<InternedString>,
@@ -327,6 +343,21 @@ pub fn gen_nistp256() -> Result<PKey<Private>, Error> {
     Ok(PKey::from_ec_key(EcKey::generate(EC_GROUP.as_ref())?)?)
 }
 
+/// Appends a hashed `subjectKeyIdentifier` and an `authorityKeyIdentifier` carrying
+/// only that key identifier, the form CA/B Forum BR 7.1.2.1.3 requires on a root.
+fn append_self_signed_key_identifiers(
+    builder: &mut X509Builder,
+    cfg: &conf::ConfRef,
+) -> Result<(), ErrorStack> {
+    let subject_key_identifier =
+        SubjectKeyIdentifier::new().build(&builder.x509v3_context(None, Some(cfg)))?;
+    builder.append_extension(subject_key_identifier)?;
+    let authority_key_identifier = AuthorityKeyIdentifier::new()
+        .keyid(true)
+        .build(&builder.x509v3_context(None, Some(cfg)))?;
+    builder.append_extension(authority_key_identifier)
+}
+
 #[instrument(skip_all)]
 pub fn make_root_cert(
     root_key: &PKey<Private>,
@@ -359,15 +390,8 @@ pub fn make_root_cert(
 
     // Extensions
     let cfg = conf::Conf::new(conf::ConfMethod::default())?;
-    let ctx = builder.x509v3_context(None, Some(&cfg));
-    // subjectKeyIdentifier = hash
-    let subject_key_identifier = SubjectKeyIdentifier::new().build(&ctx)?;
-    // authorityKeyIdentifier = keyid,issuer:always
-    let authority_key_identifier = AuthorityKeyIdentifier::new()
-        .keyid(false)
-        .issuer(true)
-        .build(&ctx)?;
-    // basicConstraints = critical, CA:true, pathlen:0
+    append_self_signed_key_identifiers(&mut builder, &cfg)?;
+    // basicConstraints = critical, CA:true
     let basic_constraints = BasicConstraints::new().critical().ca().build()?;
     // keyUsage = critical, digitalSignature, cRLSign, keyCertSign
     let key_usage = KeyUsage::new()
@@ -376,8 +400,6 @@ pub fn make_root_cert(
         .crl_sign()
         .key_cert_sign()
         .build()?;
-    builder.append_extension(subject_key_identifier)?;
-    builder.append_extension(authority_key_identifier)?;
     builder.append_extension(basic_constraints)?;
     builder.append_extension(key_usage)?;
     builder.sign(&root_key, MessageDigest::sha256())?;
@@ -420,7 +442,7 @@ pub fn make_int_cert(
         .keyid(true)
         .issuer(true)
         .build(&ctx)?;
-    // basicConstraints = critical, CA:true, pathlen:0
+    // basicConstraints = critical, CA:true
     let basic_constraints = BasicConstraints::new().critical().ca().pathlen(0).build()?;
     // keyUsage = critical, digitalSignature, cRLSign, keyCertSign
     let key_usage = KeyUsage::new()
@@ -616,13 +638,8 @@ pub fn make_self_signed(
 
     // Extensions
     let cfg = conf::Conf::new(conf::ConfMethod::default())?;
+    append_self_signed_key_identifiers(&mut builder, &cfg)?;
     let ctx = builder.x509v3_context(None, Some(&cfg));
-
-    let subject_key_identifier = SubjectKeyIdentifier::new().build(&ctx)?;
-    let authority_key_identifier = AuthorityKeyIdentifier::new()
-        .keyid(false)
-        .issuer(true)
-        .build(&ctx)?;
     let subject_alt_name = applicant.1.x509_extension().build(&ctx)?;
     let basic_constraints = BasicConstraints::new().build()?;
     let key_usage = KeyUsage::new()
@@ -631,8 +648,6 @@ pub fn make_self_signed(
         .key_encipherment()
         .build()?;
 
-    builder.append_extension(subject_key_identifier)?;
-    builder.append_extension(authority_key_identifier)?;
     builder.append_extension(subject_alt_name)?;
     builder.append_extension(basic_constraints)?;
     builder.append_extension(key_usage)?;
@@ -724,6 +739,30 @@ pub async fn generate_certificate(
     })
 }
 
+fn served_name(
+    server_name: Option<&str>,
+    tcp: Option<TcpMetadata>,
+    gateway: Option<&IpInfo>,
+) -> Option<InternedString> {
+    if let Some(host) = server_name {
+        return Some(InternedString::from(host));
+    }
+    let tcp = tcp?;
+    let dst = tcp.local_addr.ip().to_canonical();
+    let src = tcp.peer_addr.ip().to_canonical();
+    let translated = !is_global_ip(dst)
+        && is_global_ip(src)
+        && !gateway.is_some_and(|gw| gw.subnets.iter().any(|s| s.contains(&src)));
+    let wan = gateway
+        .and_then(|gw| gw.wan_ip)
+        .filter(|wan| is_global_ip(IpAddr::V4(*wan)));
+    let dialed = match (dst, wan) {
+        (IpAddr::V4(_), Some(wan)) if translated => IpAddr::V4(wan),
+        _ => dst,
+    };
+    Some(InternedString::from_display(&dialed))
+}
+
 pub struct RootCaTlsHandler<M: HasModel> {
     pub db: TypedPatchDb<M>,
     pub crypto_provider: Arc<CryptoProvider>,
@@ -755,24 +794,14 @@ where
         hello: &ClientHello<'_>,
         metadata: &<A as Accept>::Metadata,
     ) -> Option<TlsHandlerAction> {
-        let hostnames: BTreeSet<InternedString> = hello
-            .server_name()
-            .map(InternedString::from)
-            .into_iter()
-            .chain(
-                extract::<TcpMetadata, _>(metadata)
-                    .map(|m| m.local_addr.ip())
-                    .as_ref()
-                    .map(InternedString::from_display),
-            )
-            .chain(
-                extract::<GatewayInfo, _>(metadata)
-                    .and_then(|i| i.info.ip_info)
-                    .and_then(|i| i.wan_ip)
-                    .as_ref()
-                    .map(InternedString::from_display),
-            )
-            .collect();
+        let gateway = extract::<GatewayInfo, _>(metadata).and_then(|i| i.info.ip_info);
+        let hostnames = [served_name(
+            hello.server_name(),
+            extract::<TcpMetadata, _>(metadata),
+            gateway.as_deref(),
+        )?]
+        .into_iter()
+        .collect();
         let branding = self.branding.clone();
         let cert = self
             .db
@@ -824,6 +853,55 @@ where
 }
 
 #[cfg(test)]
+mod fingerprint_tests {
+    use super::*;
+
+    #[test]
+    fn fingerprint_bytes_are_uppercase_zero_padded_and_colon_separated() {
+        assert_eq!(format_x509_fingerprint(&[0, 1, 10, 255]), "00:01:0A:FF");
+    }
+}
+
+#[cfg(test)]
+mod self_signed_cert_tests {
+    use super::*;
+
+    fn assert_self_signed_identifiers(cert: &X509, key: &PKey<Private>) {
+        assert!(cert.verify(key).unwrap());
+        assert_eq!(
+            cert.authority_key_id().unwrap().as_slice(),
+            cert.subject_key_id().unwrap().as_slice()
+        );
+        assert!(cert.authority_issuer().is_none());
+        assert!(cert.authority_serial().is_none());
+    }
+
+    #[test]
+    fn root_ca_authority_key_identifier_is_its_key_id() {
+        let key = gen_nistp256().unwrap();
+        let branding = CertBranding::start_os("test");
+        let root = make_root_cert(&key, &branding, SystemTime::now()).unwrap();
+        assert_self_signed_identifiers(&root, &key);
+
+        let intermediate_key = gen_nistp256().unwrap();
+        let intermediate = make_int_cert((&key, &root), &intermediate_key, &branding).unwrap();
+        assert_eq!(
+            intermediate.authority_key_id().unwrap().as_slice(),
+            root.subject_key_id().unwrap().as_slice()
+        );
+        assert!(intermediate.verify(&key).unwrap());
+    }
+
+    #[test]
+    fn self_signed_leaf_authority_key_identifier_is_its_key_id() {
+        let key = gen_nistp256().unwrap();
+        let san = SANInfo::new(&BTreeSet::from([InternedString::intern("example.local")]));
+        let leaf = make_self_signed((&key, &san), &CertBranding::start_os("test")).unwrap();
+        assert_self_signed_identifiers(&leaf, &key);
+    }
+}
+
+#[cfg(test)]
 mod cert_validity_tests {
     use openssl::x509::X509Builder;
 
@@ -862,5 +940,235 @@ mod cert_validity_tests {
         let expired = cert_expiring_in(-1);
         assert!(!should_use_cert(&expired).unwrap());
         assert!(!cert_is_unexpired(&expired).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod served_name_tests {
+    use std::net::Ipv4Addr;
+
+    use ipnet::IpNet;
+
+    use super::*;
+
+    const LAN: &str = "192.168.0.5:443";
+    const LAN_V6: &str = "[2001:db8::5]:443";
+    const ULA_V6: &str = "[fd00:3::1]:443";
+    const WAN: Ipv4Addr = Ipv4Addr::new(203, 0, 113, 7);
+
+    fn from(peer: &str, local: &str) -> Option<TcpMetadata> {
+        Some(TcpMetadata {
+            peer_addr: peer.parse().unwrap(),
+            local_addr: local.parse().unwrap(),
+        })
+    }
+
+    fn gateway(subnets: &[&str], wan_ip: Option<Ipv4Addr>) -> IpInfo {
+        IpInfo {
+            subnets: subnets
+                .iter()
+                .map(|s| s.parse::<IpNet>().unwrap())
+                .collect(),
+            wan_ip,
+            ..Default::default()
+        }
+    }
+
+    fn name(sni: Option<&str>, tcp: Option<TcpMetadata>, gw: Option<&IpInfo>) -> Option<String> {
+        served_name(sni, tcp, gw).map(|n| n.to_string())
+    }
+
+    #[test]
+    fn a_host_is_certified_by_name_alone_on_every_listener() {
+        let gw = gateway(&["192.168.0.5/24"], Some(WAN));
+        let sni = Some("mybox.local");
+        for local in [LAN, LAN_V6, "127.0.0.1:443", "10.0.3.1:443"] {
+            let tcp = from("198.51.100.9:51000", local);
+            assert_eq!(
+                name(sni, tcp, Some(&gw)).as_deref(),
+                Some("mybox.local"),
+                "listener {local}"
+            );
+        }
+        assert_eq!(name(sni, None, None).as_deref(), Some("mybox.local"));
+    }
+
+    #[test]
+    fn an_address_dialed_from_its_own_network_is_certified_as_itself() {
+        let gw = gateway(&["192.168.0.5/24"], Some(WAN));
+        assert_eq!(
+            name(None, from("192.168.0.90:51000", LAN), Some(&gw)).as_deref(),
+            Some("192.168.0.5")
+        );
+        let bridge = gateway(&["10.0.3.1/24"], Some(WAN));
+        assert_eq!(
+            name(None, from("10.0.3.20:51000", "10.0.3.1:443"), Some(&bridge)).as_deref(),
+            Some("10.0.3.1")
+        );
+    }
+
+    #[test]
+    fn an_ipv4_address_dialed_from_the_internet_is_certified_as_the_wan_address() {
+        let gw = gateway(&["192.168.0.5/24"], Some(WAN));
+        assert_eq!(
+            name(None, from("198.51.100.9:51000", LAN), Some(&gw)).as_deref(),
+            Some("203.0.113.7")
+        );
+    }
+
+    #[test]
+    fn an_address_dialed_over_a_vpn_is_certified_as_itself() {
+        let gw = gateway(&["192.168.0.5/24"], Some(WAN));
+        assert_eq!(
+            name(None, from("10.59.88.2:51000", LAN), Some(&gw)).as_deref(),
+            Some("192.168.0.5")
+        );
+    }
+
+    #[test]
+    fn an_address_dialed_from_a_public_subnet_of_this_gateway_is_certified_as_itself() {
+        let gw = gateway(&["192.168.0.5/24", "198.51.100.2/29"], Some(WAN));
+        assert_eq!(
+            name(None, from("198.51.100.3:51000", LAN), Some(&gw)).as_deref(),
+            Some("192.168.0.5")
+        );
+    }
+
+    #[test]
+    fn a_routable_address_is_certified_as_itself() {
+        let gw = gateway(&["192.168.0.5/24", "198.51.100.2/29"], Some(WAN));
+        assert_eq!(
+            name(
+                None,
+                from("203.0.113.99:51000", "198.51.100.3:443"),
+                Some(&gw)
+            )
+            .as_deref(),
+            Some("198.51.100.3")
+        );
+    }
+
+    #[test]
+    fn an_address_is_certified_as_itself_while_the_wan_address_is_unreachable() {
+        let gw = gateway(&["192.168.0.5/24"], Some(Ipv4Addr::new(100, 88, 0, 1)));
+        assert_eq!(
+            name(None, from("198.51.100.9:51000", LAN), Some(&gw)).as_deref(),
+            Some("192.168.0.5")
+        );
+    }
+
+    #[test]
+    fn an_address_dialed_from_shared_address_space_is_certified_as_itself() {
+        let gw = gateway(&["192.168.0.5/24"], Some(WAN));
+        assert_eq!(
+            name(None, from("100.100.1.5:51000", LAN), Some(&gw)).as_deref(),
+            Some("192.168.0.5")
+        );
+    }
+
+    #[test]
+    fn an_address_dialed_from_the_internet_onto_shared_address_space_is_certified_as_the_wan_address()
+     {
+        let gw = gateway(&["100.64.0.5/24"], Some(WAN));
+        assert_eq!(
+            name(
+                None,
+                from("198.51.100.9:51000", "100.64.0.5:443"),
+                Some(&gw)
+            )
+            .as_deref(),
+            Some("203.0.113.7")
+        );
+    }
+
+    #[test]
+    fn an_address_is_certified_as_itself_while_the_wan_address_is_unknown() {
+        let gw = gateway(&["192.168.0.5/24"], None);
+        assert_eq!(
+            name(None, from("198.51.100.9:51000", LAN), Some(&gw)).as_deref(),
+            Some("192.168.0.5")
+        );
+        assert_eq!(
+            name(None, from("198.51.100.9:51000", LAN), None).as_deref(),
+            Some("192.168.0.5")
+        );
+    }
+
+    #[test]
+    fn an_ipv6_address_is_certified_as_itself_whatever_the_source() {
+        let gw = gateway(&["2001:db8::5/64"], Some(WAN));
+        for (peer, local, expected) in [
+            ("[2001:db8::90]:51000", LAN_V6, "2001:db8::5"),
+            ("[2001:db8:1::9]:51000", LAN_V6, "2001:db8::5"),
+            ("[2001:db8:1::9]:51000", ULA_V6, "fd00:3::1"),
+        ] {
+            assert_eq!(
+                name(None, from(peer, local), Some(&gw)).as_deref(),
+                Some(expected),
+                "peer {peer} listener {local}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_ip_literal_sni_is_certified_as_the_named_address() {
+        let gw = gateway(&["192.168.0.5/24"], None);
+        for address in ["203.0.113.7", "2001:db8::5"] {
+            assert_eq!(
+                name(Some(address), from("192.168.0.90:51000", LAN), Some(&gw)).as_deref(),
+                Some(address)
+            );
+        }
+    }
+
+    #[test]
+    fn a_mapped_ipv4_dial_is_certified_as_the_ipv4_address_it_carries() {
+        let gw = gateway(&["192.168.0.5/24"], Some(WAN));
+        assert_eq!(
+            name(
+                None,
+                from("[::ffff:192.168.0.90]:51000", "[::ffff:192.168.0.5]:443"),
+                Some(&gw)
+            )
+            .as_deref(),
+            Some("192.168.0.5")
+        );
+        assert_eq!(
+            name(
+                None,
+                from("[::ffff:198.51.100.9]:51000", "[::ffff:192.168.0.5]:443"),
+                Some(&gw)
+            )
+            .as_deref(),
+            Some("203.0.113.7")
+        );
+    }
+
+    #[test]
+    fn a_connection_naming_nothing_gets_no_certificate() {
+        let gw = gateway(&["192.168.0.5/24"], Some(WAN));
+        assert_eq!(name(None, None, Some(&gw)), None);
+    }
+}
+
+#[cfg(test)]
+mod cert_store_tests {
+    use super::*;
+
+    #[test]
+    fn a_singleton_certificate_reuses_its_key() {
+        let account = AccountInfo::new("password", SystemTime::now(), None).unwrap();
+        let branding = CertBranding::start_os(account.hostname.as_ref());
+        let mut store =
+            Model::<CertStore>::new(&CertStore::new(&account, &branding).unwrap()).unwrap();
+        let hostnames = [InternedString::from("mybox.local")].into_iter().collect();
+
+        let first = store.cert_for(&hostnames, &branding).unwrap();
+        let second = store.cert_for(&hostnames, &branding).unwrap();
+
+        assert_eq!(
+            first.leaf.keys.ed25519.private_key_to_der().unwrap(),
+            second.leaf.keys.ed25519.private_key_to_der().unwrap()
+        );
     }
 }

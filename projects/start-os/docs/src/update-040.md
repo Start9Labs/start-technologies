@@ -102,7 +102,7 @@ Pick your method below. Everything above applies to both, and the two paths rejo
 1. Insert the flashed USB drive into your server and power it on. The installer should boot from the USB drive and become available at `http://start.local`.
 
    > [!TIP]
-   > If the installer fails to boot and instead your normal StartOS boots, it means you will need to attach a monitor and keyboard (Kiosk mode) in order to enter the BIOS settings to change the boot priorities. The Server Pure should always boot from USB if present. For the Server One, this is done by hitting the ESC key repeatedly at boot time until the BIOS appears. Arrow over to the boot tab, and change Boot Option #1 to your inserted USB thumb drive, then restart.
+   > If your normal StartOS boots instead of the installer, see [My server boots into StartOS instead of the USB installer](faq.md#my-server-boots-into-startos-instead-of-the-usb-installer).
 
 1. Select your language.
 
@@ -118,7 +118,7 @@ Pick your method below. Everything above applies to both, and the two paths rejo
    > [!WARNING]
    > If you do not select "Preserve", all data on the drive will be erased.
 
-1. Optionally set a new password, or skip to keep your current password. The migration begins — continue with [Step 8](#step-8-wait-for-the-migration).
+1. Optionally set a new password, or skip to keep your current password. If you have forgotten your password, this is where you set a new one. The migration begins — continue with [Step 8](#step-8-wait-for-the-migration).
 
 {{#endtab}}
 {{#tab name="Over the Air"}}
@@ -165,6 +165,9 @@ When you can sign in, continue below.
 
 Every installed service will have an update available for the 0.4.0 marketplace. Update **all** of them — including Bitcoin (again, to the latest **minor** of your selected **major** version) — before doing anything else. The 0.4.0 versions are repackaged for the new system, even if the underlying software version is the same.
 
+> [!NOTE]
+> Bitcoin Knots updates to **Bitcoin Knots (pre-RDTS)** from the Community Registry. The update keeps your blockchain, and you can switch it to Bitcoin Core afterwards if you prefer.
+
 ### Step 10: Start All Services
 
 Once all services are updated, you can start them. Wait for all services to fully start and confirm they are running correctly.
@@ -188,7 +191,11 @@ Depending on the speed of your drive, plan on 3-5 minutes per GB of backup data.
 
 Check your notifications. A service that fails to migrate raises a notification naming the service and the reason it failed, and a summary notification lists everything that needs re-installing.
 
-Your data is safe — it stays on disk where the service left it. Install the service again from the marketplace and it will pick that data back up.
+StartOS keeps the service's volume on disk if migration fails. Install the service again from the marketplace and it will pick that data back up.
+
+### Legacy Services
+
+Services that remain marked **Legacy** after migration run on servers that have a public IP or use StartTunnel. Their package-managed certificate covers the service's secure addresses.
 
 ### Tor Cleanup
 

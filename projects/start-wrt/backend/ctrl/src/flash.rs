@@ -95,6 +95,37 @@ pub(crate) fn node_partition_number(node: &str) -> Result<u64, Error> {
     ))
 }
 
+/// Strip the lines that tie an `sfdisk --dump` to the disk it was taken from,
+/// and the overlay's size, which sfdisk then extends to the end of the disk.
+pub(crate) fn portable_partition_script(dump: &str) -> String {
+    dump.lines()
+        .filter(|line| {
+            let key = line.split(':').next().unwrap_or("").trim();
+            !matches!(key, "device" | "last-lba")
+        })
+        .map(|line| {
+            if line.contains("name=\"rootfs_data\"") {
+                drop_partition_field(line, "size=")
+            } else {
+                line.to_string()
+            }
+        })
+        .map(|line| format!("{line}\n"))
+        .collect()
+}
+
+fn drop_partition_field(line: &str, key: &str) -> String {
+    let Some((node, fields)) = line.split_once(':') else {
+        return line.to_string();
+    };
+    let kept: Vec<&str> = fields
+        .split(',')
+        .map(str::trim)
+        .filter(|field| !field.starts_with(key))
+        .collect();
+    format!("{} : {}", node.trim(), kept.join(", "))
+}
+
 /// Run sfdisk with the given arguments, piping `script` to stdin.
 pub(crate) async fn run_sfdisk(args: &[&str], script: &str) -> Result<(), Error> {
     let mut input = std::io::Cursor::new(script.as_bytes().to_vec());
@@ -500,7 +531,22 @@ async fn run_flash_core(
     report("Copying firmware to eMMC...");
     copy_raw(&sd_path, &emmc_path, copy_end_bytes, on_progress)?;
 
-    // 9. Read eMMC partition table and find rootfs / rootfs_data
+    // 9. Write the source's partition table onto the eMMC. The raw copy left
+    //    the card's GPT header there, and a header rewritten for the card
+    //    describes a disk larger than the eMMC.
+    report("Writing partition table...");
+    let dump = tokio::process::Command::new("sfdisk")
+        .args(["--dump", &sd_path])
+        .invoke(ErrorKind::Filesystem.into())
+        .await?;
+    let script = portable_partition_script(&String::from_utf8_lossy(&dump));
+    run_sfdisk(
+        &["--no-reread", "--no-tell-kernel", "--force", &emmc_path],
+        &script,
+    )
+    .await?;
+
+    // 10. Read eMMC partition table and find rootfs / rootfs_data
     let emmc_sfdisk = read_partition_table(&emmc_path).await?;
     let emmc_parts = &emmc_sfdisk.partition_table.partitions;
 
@@ -528,7 +574,7 @@ async fn run_flash_core(
     let rootfs_data_start = rootfs_data_part.start;
     let rootfs_data_part_num = node_partition_number(&rootfs_data_part.node)?;
 
-    // 10. Expand rootfs_data to fill remaining eMMC space.
+    // 11. Expand rootfs_data to fill remaining eMMC space.
     let last_usable = emmc_sectors - 34;
     let new_rootfs_data_size = last_usable - rootfs_data_start;
 
@@ -542,7 +588,7 @@ async fn run_flash_core(
     )
     .await?;
 
-    // 11. Refresh kernel partition table.
+    // 12. Refresh kernel partition table.
     //     partx -d + -a is the cleanest (wipe stale entries, re-read GPT),
     //     but -a fails if entries already exist and -d fails if partitions
     //     are busy.  Fall back to -u (updates existing entries) which is
@@ -561,14 +607,14 @@ async fn run_flash_core(
         run_cmd("partx", &["-u", &emmc_path]).await?;
     }
 
-    // 12. Format rootfs_data as ext4 (clean overlay)
+    // 13. Format rootfs_data as ext4 (clean overlay)
     let rootfs_data_dev = format!("{emmc_path}p{rootfs_data_part_num}");
     report(&format!(
         "Formatting rootfs_data overlay ({rootfs_data_dev})..."
     ));
     run_cmd("mkfs.ext4", &["-L", "rootfs_data", "-F", &rootfs_data_dev]).await?;
 
-    // 13. Provision the eMMC hardware boot partitions. The raw copy above
+    // 14. Provision the eMMC hardware boot partitions. The raw copy above
     //     only wrote the user area; the K1 BootROM boots eMMC from boot0
     //     (bootinfo + FSBL), which factory provisioning may have left empty
     //     or stale on this board. Converge boot0/boot1 to the FSBL that just
@@ -576,7 +622,7 @@ async fn run_flash_core(
     report("Provisioning eMMC boot firmware...");
     crate::boot0::provision_emmc_boot(partitions, &emmc_dev, &report).await?;
 
-    // 14. Success
+    // 15. Success
     report("Flash complete.");
 
     Ok(Some(FlashResult {
@@ -735,6 +781,49 @@ mod tests {
         // Should fall back to partition boundary
         let end = find_copy_end(dev.to_str().unwrap(), &parsed.partition_table.partitions).unwrap();
         assert_eq!(end, (1024 + 2048) * 512);
+    }
+
+    #[test]
+    fn portable_partition_script_drops_disk_geometry() {
+        let dump = "\
+label: gpt
+label-id: 5452574F-2211-4433-5566-778899AABB00
+device: /dev/mmcblk0
+unit: sectors
+first-lba: 34
+last-lba: 124735454
+sector-size: 512
+
+/dev/mmcblk0p1 : start=         256, size=         512, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name=\"fsbl\"
+/dev/mmcblk0p7 : start=      661120, size=      524288, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name=\"rootfs_data\"
+/dev/mmcblk0p128 : start=          34, size=         222, type=21686148-6449-6E6F-744E-656564454649
+";
+        let script = portable_partition_script(dump);
+        assert!(!script.contains("device:"));
+        assert!(!script.contains("last-lba:"));
+        assert!(script.contains("label: gpt\n"));
+        assert!(script.contains("first-lba: 34\n"));
+        assert!(script.contains("/dev/mmcblk0p128 : start="));
+        assert_eq!(script.lines().count(), dump.lines().count() - 2);
+    }
+
+    #[test]
+    fn portable_partition_script_unsizes_rootfs_data() {
+        let dump = "\
+/dev/mmcblk0p6 : start=      137216, size=      523904, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=E613C649-750D-459D-B2FD-E14E4FD01D7C, name=\"rootfs\"
+/dev/mmcblk0p7 : start=      661120, size=   124074335, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=41A6B2FF-3487-4D73-8B52-65D303617EF2, name=\"rootfs_data\"
+";
+        let script = portable_partition_script(dump);
+        let mut lines = script.lines();
+        assert_eq!(
+            lines.next().unwrap(),
+            "/dev/mmcblk0p6 : start=      137216, size=      523904, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=E613C649-750D-459D-B2FD-E14E4FD01D7C, name=\"rootfs\""
+        );
+        assert_eq!(
+            lines.next().unwrap(),
+            "/dev/mmcblk0p7 : start=      661120, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=41A6B2FF-3487-4D73-8B52-65D303617EF2, name=\"rootfs_data\""
+        );
+        assert!(lines.next().is_none());
     }
 
     #[test]

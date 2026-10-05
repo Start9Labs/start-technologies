@@ -1,0 +1,80 @@
+name: Retarget Mergeability
+
+on:
+  pull_request_target:
+    types: [edited]
+
+permissions:
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: pr-retarget-mergeability-${{ github.event.pull_request.number }}-${{ github.event.changes.base && 'base' || 'metadata' }}
+  cancel-in-progress: true
+
+jobs:
+  mergeability:
+    name: ${{ github.event.changes.base && format('Mergeability (#{0})', github.event.pull_request.number) || format('Metadata edit (#{0})', github.event.pull_request.number) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check mergeability
+        env:
+          BASE_CHANGED: ${{ github.event.changes.base != null }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$BASE_CHANGED" != true ]; then
+            echo 'Pull request metadata changed.'
+            exit 0
+          fi
+
+          context="Mergeability (#$PR_NUMBER)"
+          status_url="repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA"
+          target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh api --method POST "$status_url" \
+            -f state=pending \
+            -f context="$context" \
+            -f description='Checking the retargeted pull request for merge conflicts.' \
+            -f target_url="$target_url"
+
+          for _ in {1..12}; do
+            pull_request=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")
+            current_base=$(jq -r '.base.sha' <<<"$pull_request")
+            current_head=$(jq -r '.head.sha' <<<"$pull_request")
+            mergeable=$(jq -r '.mergeable' <<<"$pull_request")
+
+            if [ "$current_base" != "$BASE_SHA" ] || [ "$current_head" != "$HEAD_SHA" ]; then
+              echo "::notice::Pull request moved from $BASE_SHA@$HEAD_SHA to $current_base@$current_head."
+              exit 0
+            fi
+
+            case "$mergeable" in
+              true)
+                gh api --method POST "$status_url" \
+                  -f state=success \
+                  -f context="$context" \
+                  -f description='The retargeted pull request has no merge conflicts.' \
+                  -f target_url="$target_url"
+                exit 0
+                ;;
+              false)
+                gh api --method POST "$status_url" \
+                  -f state=failure \
+                  -f context="$context" \
+                  -f description='The retargeted pull request has merge conflicts.' \
+                  -f target_url="$target_url"
+                exit 1
+                ;;
+            esac
+
+            sleep 5
+          done
+
+          gh api --method POST "$status_url" \
+            -f state=error \
+            -f context="$context" \
+            -f description='GitHub did not determine mergeability before timeout.' \
+            -f target_url="$target_url"
+          exit 1

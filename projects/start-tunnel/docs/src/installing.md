@@ -18,13 +18,50 @@ Your public key will be at `~/.ssh/id_ed25519.pub`. You'll paste its contents in
 
 ## Get a VPS
 
-Rent a cheap VPS with a dedicated public IP. Minimum CPU/RAM/disk is fine. For bandwidth, no need to exceed your home Internet's upload speed.
+Rent a cheap VPS with a dedicated public IP. Minimum CPU, RAM, and disk are fine. Choose the network speed and monthly transfer allowance based on the traffic you expect StartTunnel to relay.
 
 ### Requirements
 
 - Debian 13
 - Root access
 - Dedicated public IPv4 address (required for publishing ports to the clearnet)
+
+The Debian package installs the required networking tools, including `iproute2` (`ip`) and `procps` (`sysctl`).
+
+### Connection capacity
+
+At startup, StartTunnel attempts to raise the connection-tracking limit to at least 256 entries per MiB of host RAM. The target is 131,072 entries for a host with 512 MiB of usable RAM, or 262,144 for a host with 1 GiB. The calculation uses the RAM reported by the kernel, which can be lower than the VPS plan's advertised RAM. Higher existing limits are preserved.
+
+StartTunnel also raises the hash-table bucket count to at least the entry limit, preserving higher bucket counts. The hash table is allocated at startup; connection entries are allocated as traffic arrives. These settings are reapplied whenever the daemon starts.
+
+If the VPS host restricts these kernel settings, StartTunnel logs the error and continues with the available connection capacity. Ask the VPS provider to raise the limits if that capacity is insufficient for the workload.
+
+Connection tracking covers both inbound and outbound traffic, including traffic sent through StartTunnel as an outbound gateway. SNI hostname forwards additionally use userspace relay buffers and TCP sockets for each active connection. Choose more RAM for workloads with many simultaneous SNI connections.
+
+To inspect usage and capacity on the VPS:
+
+```sh
+sysctl net.netfilter.nf_conntrack_count net.netfilter.nf_conntrack_max net.netfilter.nf_conntrack_buckets
+```
+
+### Network speed and monthly transfer
+
+Choose a network speed that supports the traffic you expect to send through StartTunnel. Monthly transfer rules vary by provider.
+
+Traffic routed through StartTunnel enters and leaves the VPS. Check how your provider counts transfer:
+
+- If it counts only outbound transfer, plan for roughly your expected uploads plus downloads.
+- If it counts both inbound and outbound transfer, plan for roughly twice that amount.
+
+Leave extra capacity for network overhead. Selecting StartTunnel as a StartOS system or per-service [outbound gateway](/start-os/outbound-vpn.html) adds that Internet traffic to your estimate. Standard IPv4 device configurations leave unrelated Internet traffic on the device's normal connection.
+
+Use your provider's dashboard to monitor monthly transfer. To compare current usage between WireGuard peers, connect to the VPS over SSH and run:
+
+```sh
+wg show wg-start-tunnel
+```
+
+The counters show data received and sent for each peer. They reset when the WireGuard interface is recreated, so they are not a monthly total.
 
 > [!IMPORTANT]
 > StartTunnel is designed to be the sole application on your VPS. The installer disables UFW and manages its own firewall rules via iptables. Do not run other Internet-facing services on the same VPS.
@@ -144,6 +181,9 @@ Enter the password when prompted.
 {{#endtab }}
 {{#endtabs }}
 
+> [!IMPORTANT]
+> Run the commands on your VPS as `root`. If your provider logs you in as a regular user, switch to root first with `sudo -i`. `start-tunnel` authenticates to the StartTunnel service with a token only root can read, so as any other user it fails with `` `--tunnel` required ``.
+
 ## Run the installer
 
 Run:
@@ -157,6 +197,9 @@ curl -sSL https://start9.com/start-tunnel/install.sh | sh
 
 > [!NOTE]
 > If DNS resolution is not working on your VPS, the installer will configure public DNS resolvers (Google, Cloudflare, Quad9) and back up your existing `/etc/resolv.conf`.
+
+> [!TIP]
+> The installer sets StartTunnel up as the `start-tunneld` systemd service. Check it with `systemctl status start-tunneld`, and read its logs with `journalctl -u start-tunneld`.
 
 ## Initialize the web interface
 
@@ -182,19 +225,19 @@ When prompted for a certificate, you have two choices:
 
 If you already have a StartOS server and have [trusted its Root CA](/start-os/trust-ca.html), you can sign the StartTunnel certificate with that same CA. This means your browser will trust the StartTunnel web UI automatically — no additional certificate to manage.
 
-1. On your StartOS server, generate a certificate for your StartTunnel's hostname or IP:
+1. On your StartOS server, generate a certificate for your VPS's public IP address:
 
    ```bash
-   start-cli net ssl generate-certificate <HOSTNAME_OR_IP>
+   start-cli net ssl generate-certificate <VPS_IP>
    ```
 
-   This outputs a private key and certificate chain in PEM format.
+   This prints a private key, then a certificate chain of three certificates: one for your VPS, the intermediate, and the Root CA.
 
 1. During `start-tunnel web init`, when prompted for a certificate, select **Provide**.
 
 1. Paste the **private key** first and press Enter. You may need to press Enter an extra time for it to be accepted.
 
-1. Paste the **certificate chain** next and press Enter. Again, you may need to press Enter an extra time.
+1. Paste the **certificate chain** next — all three certificates, together and in the order shown — and press Enter. The prompt finishes once it has received all three; if it hasn't moved on, press Enter again until it does.
 
 {{#endtab }}
 {{#tab name="Generate a new Root CA" }}

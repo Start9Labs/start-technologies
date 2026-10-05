@@ -1,0 +1,67 @@
+name: Retarget Pull Request
+
+on:
+  # Base changes must reach this listener regardless of target branch or changed paths.
+  pull_request:
+    types: [edited]
+
+permissions: {}
+
+concurrency:
+  group: pr-retarget-${{ github.event.pull_request.number }}-${{ github.event.changes.base && 'base' || 'metadata' }}
+  cancel-in-progress: true
+
+jobs:
+  event:
+    name: Classify edit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report edit
+        env:
+          OLD_BASE: ${{ github.event.changes.base.ref.from }}
+          NEW_BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          if [ -n "$OLD_BASE" ]; then
+            printf 'Pull request retargeted: %s -> %s\n' "$OLD_BASE" "$NEW_BASE"
+          else
+            echo 'Pull request metadata changed; existing check conclusions remain authoritative.'
+          fi
+
+  test:
+    if: github.event.changes.base
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/test.yaml
+
+  start-cli:
+    if: github.event.changes.base
+    permissions:
+      contents: read
+    uses: ./.github/workflows/start-cli.yaml
+
+  start-registry:
+    if: github.event.changes.base
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/start-registry.yaml
+
+  start-tunnel:
+    if: github.event.changes.base
+    permissions:
+      contents: read
+    uses: ./.github/workflows/start-tunnel.yaml
+
+  start-wrt:
+    if: github.event.changes.base
+    permissions:
+      contents: read
+    uses: ./.github/workflows/start-wrt.yaml
+
+  startos-iso:
+    if: github.event.changes.base
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/startos-iso.yaml

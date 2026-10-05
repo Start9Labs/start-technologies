@@ -12,6 +12,12 @@ protected readonly form = inject(NonNullableFormBuilder).group({
 })
 ```
 
+- **Name controls after the API's fields** (`email_notifications`, not `emailNotifications`), so
+  the form round-trips the payload with no mapping either way: `this.form.reset(settings)`,
+  `api.updateSettings(this.form.getRawValue())`.
+- **Normalize input in one place.** A trimming directive on the input (on blur and Enter) is
+  the whole mechanism; submit handlers read `getRawValue()` and never `setValue(value.trim())`
+  a second time.
 - **Field anatomy** (the v5 textfield composition API — legacy `tui-input-*` components are
   extinct):
 
@@ -24,14 +30,23 @@ protected readonly form = inject(NonNullableFormBuilder).group({
   <tui-error formControlName="email" />
   <footer>
     <button tuiButton appearance="flat" type="button" (click)="context.$implicit.complete()">Cancel</button>
-    <button tuiButton [disabled]="form.invalid" [loading]="saving()">Save</button>
+    <button tuiButton [loading]="saving()">Save</button>
   </footer>
 </form>
 ```
 
-Password reveal: `<tui-icon tuiPassword />` inside the textfield. Selects:
+Password reveal: `<tui-icon tuiPassword />` inside the textfield — **import `TuiIcon`
+alongside `TuiPassword`**, or `TuiPassword` matches the bare element name, `TuiIcons`
+never applies, and the page dies at runtime with `NG0201: No provider for TuiIcons`
+that `strictTemplates` cannot see. Selects:
 `<tui-textfield tuiChevron [stringify]="fn"><input tuiSelect /><tui-data-list *tuiDropdown>…`
-(or `<tui-data-list-wrapper *tuiDropdown [items]="…" />`).
+(or `<tui-data-list-wrapper *tuiDropdown [items]="…" />`). A radio group is one
+`<tui-radio-list formControlName="x" [items]="…" [itemContent]="tpl" />` (kit) — never a
+`tuiGroup` of hand-written `label tuiBlock` + `input tuiRadio` rows.
+
+- **`tuiForm` lays out its own children**: each `<fieldset>` with its `<legend>` is a row, a
+  `<div tuiHeader>` heads a group, a `<footer>` holds the actions — a lone "Back to sign in" link
+  included. No flex header, `<hr>` divider, or legend font/padding CSS on top of it.
 
 - **Error messages are declarative and central**: bare `<tui-error formControlName="x" />` +
   `tuiValidationErrorsProvider({...})` — at root for a monolingual app, in **component

@@ -1,6 +1,6 @@
 # start-tunnel CLI Reference
 
-The `start-tunnel` CLI manages a StartTunnel server — a WireGuard-based gateway that provides clearnet access to devices behind NAT. Run it directly on the StartTunnel server, or use `start-cli tunnel` to manage it remotely from a StartOS server.
+The `start-tunnel` CLI manages a StartTunnel server — a WireGuard-based gateway that provides clearnet access to devices behind NAT. Run it as `root` directly on the StartTunnel server, or use `start-cli tunnel` to manage it remotely from a StartOS server.
 
 ## Global Options
 

@@ -29,6 +29,16 @@ export class Exver {
     return ExtendedVersion.parse(version).satisfies(VersionRange.parse(range))
   }
 
+  releaseSatisfies(
+    version: string,
+    satisfies: string[],
+    range: string,
+  ): boolean {
+    return VersionRange.parse(range).satisfiedByRelease(
+      [version, ...satisfies].map(v => ExtendedVersion.parse(v)),
+    )
+  }
+
   getFlavor(version: string): string | null {
     return ExtendedVersion.parse(version).flavor
   }

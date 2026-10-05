@@ -10,19 +10,29 @@ A service interface is a network endpoint exposed by a service running on your s
 
 - **P2P** — A peer-to-peer endpoint for the service to communicate with other nodes on its network. Examples: Bitcoin P2P, Lightning P2P.
 
+## Opening a UI
+
+The **Open UI** button on a running service opens its web interface, and offers a menu of them when the service has more than one. StartOS picks which address to open from the way you are reaching StartOS itself — a `.local` name for a `.local` session, an onion address for a Tor session, a domain from outside your network — so it usually lands on an address your browser can resolve. A service reachable only on your local network has nothing else to offer a browser that is away from it, and you will get a local address that does not load.
+
+A few services work at only one address, the one they were configured with, and those tell StartOS which it is. **Open UI** then opens that address and keeps opening it, because for such a service any other address rejects you. So if it opens something you cannot reach from where you are, the address to change is the service's own, through whichever action it gives you for choosing a primary URL — that action is also how you point it somewhere else. Switching that address off in the tables below has the same effect, since StartOS only opens an address you have enabled.
+
+Which browser you are in still limits what a service can ask for. An onion address is opened from a Tor session and from no other, and from a Tor session StartOS honors only an onion or a public address, never one on your local network — Tor Browser cannot reach your LAN. Where a service's choice is ruled out this way, **Open UI** goes back to choosing for you.
+
+To open one particular address instead, open it from its own row in the gateway tables below. An onion address has no such control — copy its URL and paste it into Tor Browser.
+
 ## Viewing Interface Addresses
 
 Open the **Interfaces** tab to see every interface the service exposes. Each interface expands to reveal its **addresses** — all the ways that interface can be reached, organized by [gateway](gateways.md). When a service exposes only one interface, it is expanded by default.
 
 ### Gateway Tables
 
-Each inbound gateway on your server has its own table. The rows in each table are the addresses available through that gateway. Addresses can be individually enabled or disabled.
+Each inbound gateway on your server has its own table. The rows in each table are the addresses available through that gateway. Addresses can be individually enabled or disabled. A LAN IP address you have not switched yourself follows the interface's `.local` address, so an address your server is assigned later starts out the way `.local` is set. On an interface served without TLS the two go together: switching on a LAN IP address switches `.local` on, and switching `.local` off switches its LAN IP addresses off. There, a `.local` address that is on while every IP address in its table is off shows a warning, since those are the addresses the name resolves to. The `.local` address stays in the table while the gateway is disconnected.
 
 Each table has the following columns:
 
 | Column                    | Description                                                                                                                                                                                                                                                                                                                                                                                               |
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Toggle**                | Enable or disable the address. Your server serves a private address while it is enabled and stops accepting connections through it once you switch it off. See the note below for linked non-SSL addresses and public IPv4 exposure. Public IPv4 addresses are off by default. All other addresses are on by default.                                                                                     |
+| **Toggle**                | Enable or disable the address. Save an address's enabled setting. Disabling a private IP stops new bare-IP connections, subject to the exposure rules below. Existing connections can continue while their route remains. Public IPs are off by default; a LAN IP with no override follows `.local`.                                                                                                      |
 | **Access**                | **Public** or **Private**. Public addresses are reachable from the Internet. Private addresses are only reachable on the LAN or via VPN. **For an IPv6 global-unicast (GUA) address this column is an editable Local / Public dropdown** — see the note below.                                                                                                                                            |
 | **Type**                  | The address type: `IPv4`, `IPv6`, `Domain`, or `mDNS` (mDNS is only available on router gateways).                                                                                                                                                                                                                                                                                                        |
 | **Certificate Authority** | Who signs the SSL certificate for this address: **Root CA** (your server's own CA), **Self signed** (the service presents its own certificate), the name of a public authority such as **Let's Encrypt**, or `-` for an address served without SSL. An authority StartOS does not know by name is shown by its directory URL. The column appears only where the interface has an address served over SSL. |
@@ -30,7 +40,7 @@ Each table has the following columns:
 | **Actions**               | Context-dependent buttons: **Settings** (view and test the address's external requirements — DNS records, port forwarding, and, for a DualStack domain, the IPv6 firewall), **Delete** (remove domains that were manually added), **Open** (open the URL in a new tab), **Copy** (copy the URL to clipboard), **QR** (display a QR code for the URL).                                                     |
 
 > [!NOTE]
-> Switching a private IP address off stops the interface at that IP without affecting other addresses on the gateway. For an SSL interface, domains remain independent because each connection names its destination. On a non-SSL port, a domain and the IP rows that can carry it are switched together because the connection carries no hostname.
+> For an SSL interface, enabled domains remain reachable independently of the bare-IP switches because each connection names its destination. On a non-SSL port, a private domain and the IP rows that can carry it are switched together because the connection carries no hostname. The `.local` setting and its warning follow the rules above.
 >
 > While a gateway has an enabled **public IPv4** address, every IPv4 address on that gateway accepts connections to the same port. Your router presents traffic from the Internet under the same local address that gateway already has, so your server cannot tell a local connection from a forwarded one. Switch the public IPv4 address off to close access through the gateway's other IPv4 addresses.
 
@@ -44,10 +54,15 @@ Each table has the following columns:
 > The port-forwarding and firewall tests need the service **running** only for an address it serves directly — a raw public IP, or another non-SSL binding. StartOS SSL-terminates every HTTP interface behind its always-on reverse proxy, so those stay testable even while the service is stopped (as do DNS tests). A non-SSL address's Test buttons are therefore disabled while its service is stopped; and because that service often restarts when a domain is added or an address is enabled, StartOS then shows its reachability tests as untested (not failed) and still opens the setup modal, so you can set up forwarding and re-test once it is running.
 
 > [!NOTE]
+> For an interface whose TLS StartOS terminates, StartOS allows up to 15 seconds to connect to the service and complete any required TLS handshake with it. If that connection is not ready in time, the client connection ends.
+
+> [!NOTE]
 > Unlike a private LAN address, an IPv6 **global-unicast address (GUA)** is a single globally-routable address, so how far it reaches is a choice. A GUA row keeps the usual on/off toggle, and its **Access** column becomes a **Local / Public** dropdown:
 >
 > - **Local** (default) — reachable on the local network only; traffic from outside your subnet is rejected.
 > - **Public** — also reachable from the Internet. StartOS attempts to open the matching pinhole on your gateway automatically (via PCP); if your gateway doesn't support it you may need to allow inbound traffic to that address and port manually.
+>
+> A **Public** GUA stays on when you switch `.local` off. On an interface served without TLS, `.local` resolves to that address, so it still reaches the service from your local network while its switch reads off.
 >
 > This only applies to IPv6 GUAs. IPv6 ULAs (private) are always local, and IPv4 keeps its separate LAN and WAN address rows.
 
@@ -56,7 +71,7 @@ Each table has the following columns:
 You can add domains to a gateway table by clicking "Add Domain" on the gateway and choosing either:
 
 - **[Public Domain](clearnet.md)** — A clearnet domain (e.g. `mysite.com`) accessible from the Internet. Requires DNS configuration and port forwarding.
-- **[Private Domain](private-domains.md)** — A custom domain (e.g. `nextcloud.private`) that works on LAN and VPN. Requires your gateway to use StartOS for DNS. Only available on Ethernet and Wireless gateways — not WireGuard (StartTunnel) gateways.
+- **[Private Domain](private-domains.md)** — A custom domain (e.g. `nextcloud.private`) that works on LAN and VPN. Requires the gateway's DNS to serve its record: your router pointed at StartOS on an Ethernet or WiFi gateway, DNS injection on a StartTunnel gateway.
 
 A domain you add belongs to the interface you added it to. If an update reorganizes a service's interfaces and retires the one your domain was on, the domain is removed with it — check the service's release notes, which should say when an update does this, and add the domain to one of the service's current interfaces.
 

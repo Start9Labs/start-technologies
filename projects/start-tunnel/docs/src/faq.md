@@ -30,7 +30,7 @@ Yes. WireGuard clients initiate outbound UDP connections, so CGNAT is not a prob
 
 ## What if I forget my password?
 
-SSH into your VPS and run:
+SSH into your VPS and, as `root`, run:
 
 ```
 start-tunnel auth reset-password

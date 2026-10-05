@@ -3,15 +3,20 @@ name: Build
 on:
   workflow_dispatch:
   pull_request:
-    paths-ignore: ['*.md']
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: ['master']
+    paths-ignore: ['*.md']
+
+permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: package-build-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    if: github.event.pull_request.draft == false
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    permissions:
+      contents: read
     uses: Start9Labs/start-technologies/.github/workflows/build.yml@master
     # No DEV_KEY — a PR build doesn't publish, so it doesn't need the signing key.

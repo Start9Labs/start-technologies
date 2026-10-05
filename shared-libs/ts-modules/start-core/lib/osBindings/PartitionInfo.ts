@@ -3,6 +3,7 @@ import type { StartOsRecoveryInfo } from './StartOsRecoveryInfo'
 
 export type PartitionInfo = {
   logicalname: string
+  stablePath: string
   label: string | null
   capacity: number
   used: number | null

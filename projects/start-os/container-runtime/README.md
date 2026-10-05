@@ -13,8 +13,7 @@ This runtime lives at `projects/start-os/container-runtime` — the Node service
 ## Documentation
 
 - `ARCHITECTURE.md` — runtime topology, the host/container RPC boundary, and the `/media/startos/` mount layout
-- `CONTRIBUTING.md` — local build, type-check, and test workflow
-- `AGENTS.md` — practical build/test instructions and gotchas (also imported by `CLAUDE.md`)
+- `AGENTS.md` — local build, type-check, and test workflow
 - `RPCSpec.md` — full JSON-RPC protocol the runtime exposes over `service.sock`
 
 ## Quickstart

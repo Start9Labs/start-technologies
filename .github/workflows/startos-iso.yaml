@@ -75,6 +75,8 @@ on:
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-os/docs/**) shouldn't trigger a build.
       - '!**/*.md'
+      # Except the release notes, which are packaged into the OS image.
+      - 'projects/start-os/release-notes/**'
   pull_request:
     # The jobs below skip drafts, and `ready_for_review` is not a default
     # activity type, so without it a draft marked ready is never checked.
@@ -101,13 +103,15 @@ on:
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-os/docs/**) shouldn't trigger a build.
       - '!**/*.md'
+      # Except the release notes, which are packaged into the OS image.
+      - 'projects/start-os/release-notes/**'
 
 # The group is scoped by event so a master push can't cancel an in-flight
 # dispatched release build. Only pull requests cancel: a push to master
 # publishes to alpha, so master pushes queue behind each other rather than
 # aborting a publish half-done.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  group: startos-iso-${{ github.event_name }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -231,7 +235,7 @@ jobs:
           files="$(gh api --paginate \
             "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
             --jq '.[].filename')"
-          matched="$(printf '%s\n' "$files" | grep -E '^(build/|debian/|apt/|projects/start-os/build/|projects/start-os/build\.mk$|projects/start-os/debian/|projects/start-os/[^/]+\.(service|slice)$|\.github/workflows/startos-iso\.yaml$|\.github/actions/setup-build/)' || true)"
+          matched="$(printf '%s\n' "$files" | grep -E '^(build/|debian/|apt/|projects/start-os/build/|projects/start-os/build\.mk$|projects/start-os/debian/|projects/start-os/release-notes/|projects/start-os/[^/]+\.(service|slice)$|\.github/workflows/startos-iso\.yaml$|\.github/actions/setup-build/)' || true)"
           if [ -n "$matched" ]; then
             echo "Image-affecting files changed:"; printf '  %s\n' "$matched"
             echo "image=true" >> "$GITHUB_OUTPUT"
@@ -522,7 +526,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          sparse-checkout: package.json
+          sparse-checkout: |
+            scripts
+            projects/start-os/release-notes
 
       - name: Determine version
         id: version
@@ -649,11 +655,16 @@ jobs:
           start-cli --registry="${{ env.REGISTRY }}" registry os version remove "$VERSION" \
             || echo "::notice::v${VERSION} was not indexed in ${{ env.REGISTRY }} yet."
 
+      # The notes are what the update screen shows before a server updates;
+      # manage-release.sh composes them from this version's release-notes file
+      # and appends the changelog link, pinned to the commit that built this.
       - name: Register OS version
         run: |
           VERSION="${{ steps.version.outputs.version }}"
+          NOTES=$(CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh notes start-os) \
+            || { echo "::warning::No release notes for v${VERSION}; registering without them."; NOTES=""; }
           start-cli --registry="${{ env.REGISTRY }}" registry os version add \
-            "$VERSION" "v${VERSION}" '' ">=0.3.5 <=${VERSION}"
+            "$VERSION" "v${VERSION}" "$NOTES" ">=0.3.5 <=${VERSION}"
 
       - name: Index assets in registry
         run: |

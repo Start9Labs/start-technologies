@@ -1,12 +1,13 @@
-use std::collections::{HashMap, HashSet};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use imbl_value::Value;
+use ipnet::IpNet;
 use rpc_toolkit::{from_fn_async_local, HandlerExt as _, ParentHandler};
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
-    DhcpHost, FirewallRedirect, FirewallRule, FirewallTarget, FirewallZone, InterfaceProto,
-    NetworkInterface,
+    DhcpHost, FirewallForwarding, FirewallRedirect, FirewallRule, FirewallTarget, FirewallZone,
+    InterfaceProto, NetworkInterface,
 };
 use uciedit::{dump_all, parse_all, Arena, Configs};
 
@@ -35,7 +36,6 @@ pub fn published_ports<C: CtrlContext>() -> ParentHandler<C> {
             // snapshot, stale by up to PERSIST_MIN_INTERVAL_SECS or absent on
             // first boot, and reconcile against a fiction.
             from_fn_async_local(reconcile)
-                .with_metadata("no_auth", Value::Bool(true))
                 .no_display()
                 .with_call_remote::<CliContext>(),
         )
@@ -44,6 +44,17 @@ pub fn published_ports<C: CtrlContext>() -> ParentHandler<C> {
             from_fn_async_local(crate::port_control::auto_list)
                 .with_display_serializable()
                 .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "wan-changed",
+            // Live SNI routes exist only in daemon memory.
+            from_fn_async_local(crate::port_control::wan_changed)
+                .no_display()
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "sync-hairpin",
+            from_fn_async_local(sync_hairpin_cmd::<C>).no_display(),
         )
 }
 
@@ -102,10 +113,8 @@ pub struct PublishedPort {
     pub ipv6: bool,
     pub ipv4_public_port: Option<String>,
     pub source: String,
-    /// The user confirmed forwarding a port the router itself answers on from
-    /// the WAN (see [`RouterPortCollision`]); round-tripped so later saves of
-    /// the full list don't re-prompt for the same collision.
-    pub override_router_ports: bool,
+    /// Whether WAN collision confirmation remains active.
+    pub override_wan_ports: bool,
     pub status: PublishedPortStatus,
     pub status_reason: Option<String>,
     pub device_name: Option<String>,
@@ -125,11 +134,9 @@ pub struct PublishedPortInput {
     pub ipv6: bool,
     pub ipv4_public_port: Option<String>,
     pub source: String,
-    /// Confirms forwarding a port the router itself answers on from the WAN
-    /// (persisted as `_pp_router_override` on the redirect). Without it, a
-    /// colliding port makes [`set`] report the collision and apply nothing.
+    /// Confirms an enabled IPv4 WAN collision.
     #[serde(default)]
-    pub override_router_ports: bool,
+    pub override_wan_ports: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -137,25 +144,27 @@ pub struct PublishedPortsSetRequest {
     pub ports: Vec<PublishedPortInput>,
 }
 
-/// An enabled IPv4 forward in a [`set`] request whose external range captures
-/// a port the router itself answers on from the WAN (Remote Access 80/443/22,
-/// the VPN server's listen port). nftables applies prerouting DNAT before the
-/// routing decision, so the forward would silently divert those services to
-/// the device (issue #3451). Surfaced to the UI for a confirmation dialog; the
-/// user overrides by re-saving with `override_router_ports` on the named port.
+/// An enabled IPv4 forward overlapping a router- or SNI-owned WAN port.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RouterPortCollision {
+pub struct WanPortCollision {
     pub id: String,
     pub label: String,
-    /// The colliding router-service port spec(s), e.g. ["443", "22"].
-    pub router_ports: Vec<String>,
+    pub router_service_ports: Vec<String>,
+    pub hostname_route_ports: Vec<SniPortUse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SniPortUse {
+    pub ports: String,
+    pub hostnames: Vec<String>,
+    pub devices: Vec<String>,
 }
 
 /// [`set`] response. A non-empty collision list means nothing was applied —
 /// the caller confirms and re-saves; empty means the request was applied.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PublishedPortsSetResult {
-    pub pending_router_port_collisions: Vec<RouterPortCollision>,
+    pub pending_wan_port_collisions: Vec<WanPortCollision>,
 }
 
 /// A published port that will be removed because the device it forwards to can
@@ -530,8 +539,8 @@ struct RawPort {
     ipv6: bool,
     ipv4_public_port: Option<String>,
     source: String,
-    /// Confirmed router-port collision (`_pp_router_override` on the redirect).
-    override_router_ports: bool,
+    /// Confirmed WAN-port collision (`_pp_wan_override` on the redirect).
+    override_wan_ports: bool,
     /// The IPv6 rule's stored `dest_ip` (the full GUA it forwards to), if any.
     /// Used by `compute_status` to detect a rule stranded on an old prefix.
     dest_ipv6: Option<String>,
@@ -664,8 +673,8 @@ fn sections_to_raw_port(
         ipv6: rule.is_some(),
         ipv4_public_port,
         source,
-        override_router_ports: redirect
-            .is_some_and(|r| r._pp_router_override.as_deref() == Some("1")),
+        override_wan_ports: enabled
+            && redirect.is_some_and(|redirect| redirect._pp_wan_override.as_deref() == Some("1")),
         dest_ipv6: rule.and_then(|r| r.dest_ip.clone()),
     }
 }
@@ -839,7 +848,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<PublishedPort>, Error> {
                 ipv6: raw.ipv6,
                 ipv4_public_port: raw.ipv4_public_port.clone(),
                 source: raw.source.clone(),
-                override_router_ports: raw.override_router_ports,
+                override_wan_ports: raw.override_wan_ports,
                 status,
                 status_reason,
                 device_name: device.map(|d| d.name.clone()),
@@ -881,6 +890,14 @@ pub async fn set<C: CtrlContext>(
         && crate::system::has_global_ipv6(
             &crate::system::get_wan_ipv6s().await.unwrap_or_default(),
         );
+    let port_control = ctx
+        .effectful()
+        .then(|| crate::port_control::PORT_CONTROL.get())
+        .flatten();
+    let port_control_serial = match port_control {
+        Some(port_control) => Some(port_control.lock_writes().await),
+        None => None,
+    };
 
     let mut retries = 4;
     loop {
@@ -953,20 +970,22 @@ pub async fn set<C: CtrlContext>(
         }
 
         let arena = Arena::new();
-        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["firewall", "dhcp"]).await?;
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["firewall", "dhcp", "network"]).await?;
 
-        // A forward capturing a port the router itself answers on from the
-        // WAN needs the user's explicit say-so (issue #3451): report the
-        // collisions and apply nothing until each named port is re-saved with
-        // `override_router_ports`. The auto (PCP/UPnP) path refuses the same
-        // collision outright — a protocol client can't be asked. Configs-only
-        // mode has no dialog: the CLI editor confirms implicitly, matching
-        // `ethernet::set` / `wifi::set`.
+        // Effectful saves require explicit confirmation for occupied WAN ports.
         if ctx.effectful() {
-            let pending = router_port_collisions(&cfgs["firewall"], &req.ports);
+            let mut pending = wan_port_collisions(&cfgs["firewall"], &req.ports);
             if !pending.is_empty() {
+                for collision in &mut pending {
+                    for sni in &mut collision.hostname_route_ports {
+                        if let Some(want) = crate::port_control::parse_port_range(&sni.ports) {
+                            (sni.hostnames, sni.devices) =
+                                crate::port_control::sni_route_holders(&cfgs["dhcp"], want).await;
+                        }
+                    }
+                }
                 return Ok(PublishedPortsSetResult {
-                    pending_router_port_collisions: pending,
+                    pending_wan_port_collisions: pending,
                 });
             }
         }
@@ -1059,16 +1078,8 @@ pub async fn set<C: CtrlContext>(
         // two DNAT redirects never coexist (fw4 first-match would silently
         // keep routing to the auto target). The device is refused on its next
         // renewal by the auto path's own conflict check.
-        let manual_ranges: Vec<(u16, u16)> = req
-            .ports
-            .iter()
-            .filter(|p| p.enabled && p.ipv4)
-            .filter_map(|p| {
-                crate::port_control::parse_port_range(
-                    p.ipv4_public_port.as_deref().unwrap_or(&p.ports),
-                )
-            })
-            .collect();
+        let manual_ranges = active_ipv4_ranges(&req.ports);
+        let sni_displacement_ranges = active_sni_conflicting_ranges(&req.ports);
         let mut displaced_auto: Vec<String> = Vec::new();
         cfgs["firewall"].sections.retain(|section| {
             let Ok(r) = section.get::<FirewallRedirect>() else {
@@ -1106,13 +1117,32 @@ pub async fn set<C: CtrlContext>(
             let info = device_info.get(&mac_upper);
             let ipv4_addr = info.and_then(|i| i.ipv4.clone());
             let ipv6_addr = info.and_then(|i| i.ipv6.clone());
-            let dest_zone = mac_zones
-                .get(&mac_upper)
-                .cloned()
-                .unwrap_or_else(|| "lan".into());
+            let reserved_ipv4 = cfgs["dhcp"].sections.iter().find_map(|s| {
+                let host = s.get::<DhcpHost>().ok()?;
+                if host.mac.eq_ignore_ascii_case(&mac_upper) {
+                    host.ip
+                } else {
+                    None
+                }
+            });
+            let resolved_zone = device_zone(
+                &cfgs,
+                &mac_upper,
+                ipv4_addr.as_deref().or(reserved_ipv4.as_deref()),
+                mac_zones.get(&mac_upper).map(String::as_str),
+            );
+            let dest_zone = resolved_zone.clone().unwrap_or_else(|| "lan".into());
 
             // IPv4 redirect (DNAT)
             if port.ipv4 {
+                // fw4's reflection redirect drops `src_ip` and matches the whole
+                // reflection zone, so a source restriction is honored only by
+                // declining to reflect. An unresolvable device keeps its
+                // WAN-side DNAT on the "lan" guess but is never hairpinned:
+                // the hairpin list and same-zone SNAT of a guessed zone are the
+                // wrong zone's — and one offline device must not block saving
+                // the rest, so refuse nothing.
+                let reflect = resolved_zone.is_some() && port.source == "any";
                 let redirect = FirewallRedirect {
                     name: port.label.clone(),
                     src: "wan".into(),
@@ -1132,11 +1162,14 @@ pub async fn set<C: CtrlContext>(
                         None
                     },
                     enabled: Some(if port.enabled { "1" } else { "0" }.into()),
+                    reflection: (!reflect).then_some(false),
+                    // Filled by the sync pass below (skipped for '0').
+                    reflection_zone: Vec::new(),
                     _pp_id: Some(port.id.clone()),
                     _pp_mac: Some(port.device_mac.clone()),
                     _apf_label: None,
                     _apf_mac: None,
-                    _pp_router_override: port.override_router_ports.then(|| "1".into()),
+                    _pp_wan_override: (port.enabled && port.override_wan_ports).then(|| "1".into()),
                 };
                 let section_name = format!("pp_{}", safe_id);
                 cfgs["firewall"].append(&redirect, Some(&section_name))?;
@@ -1185,6 +1218,10 @@ pub async fn set<C: CtrlContext>(
             }
         }
 
+        // One derivation for every hairpin projection: the freshly written
+        // published ports and any automatic (PCP/UPnP) forwards alike.
+        sync_hairpin(&mut cfgs["firewall"], &ctx.wan_ipv4_addrs())?;
+
         match dump_all(ctx.uci_root(), cfgs).await {
             Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
                 retries -= 1;
@@ -1201,6 +1238,14 @@ pub async fn set<C: CtrlContext>(
                 return Err(err.into());
             }
             Ok(()) => {
+                drop(port_control_serial);
+                if let Some(port_control) = port_control {
+                    port_control
+                        .displace_sni_routes(&sni_displacement_ranges)
+                        .await;
+                    // The reload below applies the port-80 admission rule.
+                    port_control.sync_sni_rules_before_reload().await;
+                }
                 if !displaced_auto.is_empty() {
                     tracing::info!(
                         "published-ports: manual rule(s) displaced auto forward(s): {displaced_auto:?}"
@@ -1233,25 +1278,45 @@ pub async fn set<C: CtrlContext>(
                     None,
                 );
                 return Ok(PublishedPortsSetResult {
-                    pending_router_port_collisions: Vec::new(),
+                    pending_wan_port_collisions: Vec::new(),
                 });
             }
         }
     }
 }
 
-/// The unconfirmed router-port collisions in a `set` request: enabled IPv4
-/// forwards without `override_router_ports` whose external range captures a
-/// port the router answers on itself over a shared transport (see
-/// [`RouterPortCollision`]). An unparseable port spec is skipped here —
-/// `validate_inputs` already rejects malformed requests.
-fn router_port_collisions(
-    firewall: &uciedit::Config<'_>,
-    ports: &[PublishedPortInput],
-) -> Vec<RouterPortCollision> {
+fn active_ipv4_ranges(ports: &[PublishedPortInput]) -> Vec<(u16, u16)> {
     ports
         .iter()
-        .filter(|p| p.enabled && p.ipv4 && !p.override_router_ports)
+        .filter(|port| port.enabled && port.ipv4)
+        .filter_map(|port| {
+            crate::port_control::parse_port_range(
+                port.ipv4_public_port.as_deref().unwrap_or(&port.ports),
+            )
+        })
+        .collect()
+}
+
+fn active_sni_conflicting_ranges(ports: &[PublishedPortInput]) -> Vec<(u16, u16)> {
+    ports
+        .iter()
+        .filter(|port| port.enabled && port.ipv4 && !matches!(port.protocol, Protocol::Udp))
+        .filter_map(|port| {
+            crate::port_control::parse_port_range(
+                port.ipv4_public_port.as_deref().unwrap_or(&port.ports),
+            )
+        })
+        .collect()
+}
+
+/// Unconfirmed IPv4 forwards overlapping occupied WAN ports.
+fn wan_port_collisions(
+    firewall: &uciedit::Config<'_>,
+    ports: &[PublishedPortInput],
+) -> Vec<WanPortCollision> {
+    ports
+        .iter()
+        .filter(|p| p.enabled && p.ipv4 && !p.override_wan_ports)
         .filter_map(|p| {
             let range = crate::port_control::parse_port_range(
                 p.ipv4_public_port.as_deref().unwrap_or(&p.ports),
@@ -1261,12 +1326,27 @@ fn router_port_collisions(
                 Protocol::Udp => (false, true),
                 Protocol::TcpUdp => (true, true),
             };
-            let router_ports =
-                crate::port_control::router_reserved_overlaps(firewall, range, tcp, udp);
-            (!router_ports.is_empty()).then(|| RouterPortCollision {
-                id: p.id.clone(),
-                label: p.label.clone(),
-                router_ports,
+            let overlaps = crate::port_control::wan_reserved_overlaps(firewall, range, tcp, udp);
+            (!overlaps.is_empty()).then(|| {
+                let (hostname_routes, router_services): (Vec<_>, Vec<_>) = overlaps
+                    .into_iter()
+                    .partition(|overlap| overlap.held_by_sni);
+                WanPortCollision {
+                    id: p.id.clone(),
+                    label: p.label.clone(),
+                    router_service_ports: router_services
+                        .into_iter()
+                        .map(|overlap| overlap.ports)
+                        .collect(),
+                    hostname_route_ports: hostname_routes
+                        .into_iter()
+                        .map(|overlap| SniPortUse {
+                            ports: overlap.ports,
+                            hostnames: Vec::new(),
+                            devices: Vec::new(),
+                        })
+                        .collect(),
+                }
             })
         })
         .collect()
@@ -1422,7 +1502,7 @@ pub async fn reconcile(ctx: ServerContext) -> Result<Value, Error> {
                     "published-ports",
                     "reconciled",
                     true,
-                    &format!("Reconciled {changed} IPv6 published port(s) to new prefix"),
+                    &format!("Reconciled {changed} IPv6 published-port rule(s) to new prefix"),
                     None,
                 );
                 return Ok(Value::Null);
@@ -1665,6 +1745,72 @@ pub(crate) fn zone_for_arp_iface(cfgs: &uciedit::Configs, arp_iface: &str) -> Op
     zone
 }
 
+/// Firewall zone whose subnet contains `ip`: each non-masquerading zone's
+/// `network` members are looked up as static interfaces and matched by
+/// address and netmask (every profile is a /24 at its gateway; the netmask
+/// defaults to /24 when absent). The by-address sibling of
+/// [`zone_for_arp_iface`]: it needs no neighbor entry, so an offline device
+/// with a static reservation still resolves. `cfgs` must contain "network"
+/// and "firewall".
+pub(crate) fn zone_for_ipv4(cfgs: &uciedit::Configs, ip: Ipv4Addr) -> Option<String> {
+    let mut interface_zone: Vec<(String, String)> = Vec::new();
+    for z in cfgs["firewall"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<FirewallZone>().ok())
+    {
+        if z.masq == Some(true) {
+            continue;
+        }
+        for iface in z.network {
+            interface_zone.push((iface, z.name.clone()));
+        }
+    }
+    for section in &cfgs["network"].sections {
+        let Ok(iface) = section.get::<NetworkInterface>() else {
+            continue;
+        };
+        if iface.proto != InterfaceProto::STATIC {
+            continue;
+        }
+        let Some(addr) = iface.ipaddr else { continue };
+        let mask = u32::from(iface.netmask.unwrap_or(Ipv4Addr::new(255, 255, 255, 0)));
+        if u32::from(ip) & mask != u32::from(addr) & mask {
+            continue;
+        }
+        let Some(name) = section.name() else { continue };
+        if let Some((_, zone)) = interface_zone.iter().find(|(i, _)| *i == name) {
+            return Some(zone.clone());
+        }
+    }
+    None
+}
+
+/// The zone a published device sits in: by its IPv4 against the profile
+/// subnets, falling back to the neighbor table. The address needs no live
+/// entry, so an offline device with a static reservation still resolves and a
+/// `set` while one target is offline no longer rewrites that target's rule
+/// around a guessed zone; the neighbor table covers a device with no IPv4 at
+/// all. `None` is a device that cannot be placed.
+fn device_zone(
+    cfgs: &uciedit::Configs,
+    mac: &str,
+    ipv4: Option<&str>,
+    neighbor_zone: Option<&str>,
+) -> Option<String> {
+    let by_address = ipv4
+        .and_then(|ip| ip.parse::<Ipv4Addr>().ok())
+        .and_then(|ip| zone_for_ipv4(cfgs, ip));
+    if let (Some(by_addr), Some(by_neigh)) = (by_address.as_deref(), neighbor_zone) {
+        if by_addr != by_neigh {
+            tracing::warn!(
+                "published-ports: device {mac} sits in zone {by_addr} by address but {by_neigh} by neighbor table; using {by_addr}"
+            );
+        }
+    }
+    by_address.or_else(|| neighbor_zone.map(str::to_string))
+}
+
 /// Resolve MAC addresses to firewall zone names via ARP interface → VLAN tag → profile → zone.
 async fn resolve_device_zones(
     uci_root: &std::path::Path,
@@ -1689,6 +1835,355 @@ async fn resolve_device_zones(
     mac_zones
 }
 
+/// Zones whose clients hairpin into `dest_zone`: that zone itself, every zone
+/// a `config forwarding` permits into it, and every zone whose Internet
+/// access reaches one of the port's `public` addresses — a forwarding into a
+/// masquerading zone, unless the zone's own rules toward it decide otherwise
+/// for those addresses ([`egress_verdict`]). A published port is a public
+/// resource: a profile that can reach it from the Internet reaches it, and a
+/// profile that can already reach the device on the LAN reaches it by its
+/// public address too. fw4 defaults to `dest_zone` alone.
+///
+/// Only names that exist as `config zone` sections are emitted: fw4 treats an
+/// unknown name (or a `src '*'` copied from a forwarding) as an invalid
+/// `reflection_zone` value and drops the *whole* redirect, WAN-side DNAT
+/// included. Masquerading zones are excluded by that property rather than by
+/// the name "wan" (an adopted config may spell its upstream differently), and
+/// so is the redirect's own `src` zone: reflection substitutes each emitted
+/// zone for `src`, and the original ingress side must never be one of them.
+/// A `dest_zone` that is no zone gets an empty list.
+///
+/// fw4 accepts a DNAT'd flow only in the redirect's own `src` and `dest`
+/// zones. From any other zone listed here the reflected flow reaches that
+/// zone's forward chain, where [`HAIRPIN_ACCEPT`] passes it ahead of the
+/// zone policy.
+///
+/// Cross-zone hairpin is DNAT-only, and that is intentional — don't "fix" it.
+/// fw4 places each reflection SNAT in the emitted zone's own srcnat chain,
+/// entered only on egress *into* that zone, but a hairpinned flow egresses
+/// into the target's zone — so for a cross-zone client the SNAT never fires.
+/// The server sees the client's real address and replies via the router (its
+/// gateway to the off-link client), where conntrack reverses the DNAT. Only
+/// the same-zone SNAT ever matches, and only there is it needed to keep the
+/// reply from short-circuiting past the router.
+fn hairpin_zones(
+    firewall: &uciedit::Config<'_>,
+    redirect_src: &str,
+    dest_zone: &str,
+    public: &[IpAddr],
+) -> Vec<String> {
+    let mut masq: HashSet<String> = HashSet::new();
+    let mut eligible: HashSet<String> = HashSet::new();
+    for zone in firewall
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<FirewallZone>().ok())
+    {
+        if zone.masq == Some(true) {
+            masq.insert(zone.name);
+        } else if zone.name != redirect_src {
+            eligible.insert(zone.name);
+        }
+    }
+    if !eligible.contains(dest_zone) {
+        return Vec::new();
+    }
+    let forwardings: Vec<FirewallForwarding> = firewall
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<FirewallForwarding>().ok())
+        .collect();
+    let rules: Vec<FirewallRule> = firewall
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<FirewallRule>().ok())
+        .collect();
+    let has_internet = |zone: &str| {
+        forwardings.iter().any(|f| {
+            f.src == zone
+                && masq.contains(&f.dest)
+                && egress_verdict(&rules, zone, &f.dest, public).unwrap_or(true)
+        })
+    };
+    let has_access = |zone: &str| {
+        forwardings
+            .iter()
+            .any(|f| f.src == zone && f.dest == dest_zone)
+    };
+    eligible
+        .into_iter()
+        .filter(|z| z == dest_zone || has_access(z) || has_internet(z))
+        .collect::<BTreeSet<String>>()
+        .into_iter()
+        .collect()
+}
+
+/// What `zone`'s own rules toward `egress` decide for a flow to one of the
+/// `public` addresses, walked in config order as fw4 evaluates them ahead of
+/// the forwarding: `Some(true)` at the first covering ACCEPT, `Some(false)`
+/// at the first covering REJECT or DROP, `None` when nothing covers and the
+/// forwarding decides.
+fn egress_verdict(
+    rules: &[FirewallRule],
+    zone: &str,
+    egress: &str,
+    public: &[IpAddr],
+) -> Option<bool> {
+    rules
+        .iter()
+        .filter(|r| {
+            r.src == zone && r.dest.as_deref() == Some(egress) && r.enabled.as_deref() != Some("0")
+        })
+        .filter(|r| rule_covers(r, public))
+        .find_map(|r| match r.target {
+            FirewallTarget::ACCEPT => Some(true),
+            FirewallTarget::REJECT | FirewallTarget::DROP => Some(false),
+            FirewallTarget::MARK | FirewallTarget::NOTRACK => None,
+        })
+}
+
+/// Whether a rule covers a flow to one of `public`. A rule narrowed by
+/// anything but a destination address covers nothing here, and so does a
+/// destination this cannot parse (a negation, a range). Without a destination
+/// address the rule covers every flow.
+fn rule_covers(rule: &FirewallRule, public: &[IpAddr]) -> bool {
+    if rule.src_ip.is_some()
+        || rule.src_mac.is_some()
+        || rule.src_port.is_some()
+        || rule.dest_port.is_some()
+        || !(rule.proto.is_empty() || rule.proto.iter().any(|p| p == "all"))
+    {
+        return false;
+    }
+    let family_ok = |a: &IpAddr| match rule.family.as_deref() {
+        None => true,
+        Some("ipv4") => a.is_ipv4(),
+        Some("ipv6") => a.is_ipv6(),
+        Some(_) => false,
+    };
+    match rule.dest_ip.as_deref().map(str::trim) {
+        None | Some("") => rule.family.is_none() || public.iter().any(family_ok),
+        Some(dest) => {
+            let Ok(net) = dest
+                .parse::<IpNet>()
+                .or_else(|_| dest.parse::<IpAddr>().map(IpNet::from))
+            else {
+                return false;
+            };
+            public.iter().any(|a| family_ok(a) && net.contains(a))
+        }
+    }
+}
+
+/// Re-derive every hairpin projection from the current firewall config: the
+/// `reflection_zone` list on each published-port (`_pp_id`) and auto-forward
+/// (`_apf_label`) DNAT redirect, and the LAN-side copies of each IPv6
+/// published-port rule. An IPv4 redirect is public at the router's WAN
+/// addresses (`wan_v4`), an IPv6 rule at its own `dest_ip`. Returns whether
+/// anything changed; the caller writes the config and reloads the firewall.
+///
+/// A redirect with `reflection '0'` gets an empty list: fw4 validates the
+/// names before it reads `reflection`.
+pub(crate) fn sync_hairpin(
+    firewall: &mut uciedit::Config<'_>,
+    wan_v4: &[Ipv4Addr],
+) -> Result<bool, Error> {
+    let public: Vec<IpAddr> = wan_v4.iter().copied().map(IpAddr::V4).collect();
+    let mut changed = false;
+    for i in 0..firewall.sections.len() {
+        let Ok(mut redirect) = firewall.sections[i].get::<FirewallRedirect>() else {
+            continue;
+        };
+        if redirect._pp_id.is_none() && redirect._apf_label.is_none() {
+            continue;
+        }
+        if redirect.reflection == Some(false) {
+            if !redirect.reflection_zone.is_empty() {
+                redirect.reflection_zone.clear();
+                firewall.sections[i].set(&redirect)?;
+                changed = true;
+            }
+            continue;
+        }
+        let Some(dest) = redirect.dest.clone() else {
+            continue;
+        };
+        let zones = hairpin_zones(firewall, &redirect.src, &dest, &public);
+        if redirect.reflection_zone != zones {
+            redirect.reflection_zone = zones;
+            firewall.sections[i].set(&redirect)?;
+            changed = true;
+        }
+    }
+    changed |= sync_v6_hairpin_rules(firewall)?;
+    Ok(changed)
+}
+
+/// IPv6 has no DNAT to reflect, so each unrestricted `pp_*_v6` WAN rule is
+/// copied once per hairpin zone (its own excluded — same-zone traffic never
+/// crosses the router) with only `src` changed. The copies are rebuilt
+/// wholesale from the WAN rules; nothing else maintains them.
+fn sync_v6_hairpin_rules(firewall: &mut uciedit::Config<'_>) -> Result<bool, Error> {
+    let mut desired: Vec<(String, FirewallRule)> = Vec::new();
+    for section in &firewall.sections {
+        let Ok(rule) = section.get::<FirewallRule>() else {
+            continue;
+        };
+        if !is_pp_v6_rule(&rule) || rule._pp_hairpin.is_some() || rule.src_ip.is_some() {
+            continue;
+        }
+        let (Some(dest), Some(name)) = (rule.dest.clone(), section.name()) else {
+            continue;
+        };
+        let stem = name.strip_suffix("_v6").unwrap_or(&name).to_string();
+        let public: Vec<IpAddr> = rule
+            .dest_ip
+            .as_deref()
+            .and_then(|a| a.parse::<Ipv6Addr>().ok())
+            .map(IpAddr::V6)
+            .into_iter()
+            .collect();
+        for zone in hairpin_zones(firewall, &rule.src, &dest, &public) {
+            if zone == dest {
+                continue;
+            }
+            let copy = FirewallRule {
+                src: zone.clone(),
+                _pp_hairpin: Some("1".into()),
+                ..rule.clone()
+            };
+            desired.push((format!("{stem}_v6_{}", uci_name_fragment(&zone)), copy));
+        }
+    }
+    let existing: Vec<(String, FirewallRule)> = firewall
+        .sections
+        .iter()
+        .filter_map(|s| {
+            let rule = s.get::<FirewallRule>().ok()?;
+            rule._pp_hairpin.as_ref()?;
+            Some((s.name()?.to_string(), rule))
+        })
+        .collect();
+    if existing == desired {
+        return Ok(false);
+    }
+    firewall.sections.retain(|s| {
+        s.get::<FirewallRule>()
+            .ok()
+            .is_none_or(|r| r._pp_hairpin.is_none())
+    });
+    for (name, rule) in &desired {
+        firewall.append(rule, Some(name))?;
+    }
+    Ok(true)
+}
+
+fn uci_name_fragment(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
+/// Rewrites the hairpin projections and nothing else; the caller reloads the
+/// firewall. Run by the WAN-schedule crontab between its `uci commit` and
+/// its firewall reload, where the blackout REJECT it just wrote must also
+/// take the hairpin away, and by the `wan` hotplug hook, where a new WAN
+/// address changes which Whitelist and Blacklist entries cover it.
+pub async fn sync_hairpin_cmd<C: CtrlContext>(ctx: C) -> Result<Value, Error> {
+    let wan_v4 = ctx.wan_ipv4_addrs();
+    let mut retries = 4;
+    loop {
+        let arena = Arena::new();
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["firewall"]).await?;
+        if !sync_hairpin(&mut cfgs["firewall"], &wan_v4)? {
+            return Ok(Value::Null);
+        }
+        match dump_all(ctx.uci_root(), cfgs).await {
+            Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
+                retries -= 1;
+                continue;
+            }
+            Err(e) => return Err(e.into()),
+            Ok(()) => return Ok(Value::Null),
+        }
+    }
+}
+
+/// fw4 loads every file here into its top-level `forward` chain, ahead of
+/// zone dispatch.
+const HAIRPIN_ACCEPT_PATH: &str =
+    "/usr/share/nftables.d/chain-pre/forward/10-startwrt-hairpin-accept.nft";
+
+/// Passes a hairpinned flow through the client zone's forward chain, which
+/// fw4 only does in the redirect's own `src` and `dest` zones. Any future
+/// DNAT into the LAN inherits it; which zones hold a reflected DNAT at all is
+/// decided per redirect by `reflection_zone`.
+const HAIRPIN_ACCEPT: &str = "\
+# A published port is a public resource, reachable at the router's public
+# address from every Security Profile that could reach it from the Internet
+# or can already reach the device on the LAN. Which of those zones hold the
+# reflected DNAT for a redirect is decided by its `reflection_zone` list
+# (startwrt published-ports); fw4 accepts a DNAT'd flow only in the
+# redirect's own src and dest zones, so the reflected flow from any other
+# zone reaches that zone's forward chain and needs this accept ahead of the
+# zone policy. Every DNAT'd flow matches: the only DNAT into the LAN is a
+# published port or an automatic (PCP/UPnP) forward.
+ct status dnat accept comment \"!startwrt: Accept hairpinned port forwards\"
+";
+
+/// Installs [`HAIRPIN_ACCEPT`] if it is missing or stale. Returns whether it
+/// wrote.
+async fn ensure_hairpin_accept() -> Result<bool, Error> {
+    let current = tokio::fs::read_to_string(HAIRPIN_ACCEPT_PATH)
+        .await
+        .is_ok_and(|c| c == HAIRPIN_ACCEPT);
+    if current {
+        return Ok(false);
+    }
+    let dir = std::path::Path::new(HAIRPIN_ACCEPT_PATH)
+        .parent()
+        .expect("nft include path has a directory");
+    tokio::fs::create_dir_all(dir)
+        .await
+        .map_err(|e| Error::new(eyre!("mkdir {}: {e}", dir.display()), ErrorKind::Filesystem))?;
+    tokio::fs::write(HAIRPIN_ACCEPT_PATH, HAIRPIN_ACCEPT)
+        .await
+        .map_err(|e| {
+            Error::new(
+                eyre!("write {HAIRPIN_ACCEPT_PATH}: {e}"),
+                ErrorKind::Filesystem,
+            )
+        })?;
+    Ok(true)
+}
+
+/// Boot heal: install the hairpin accept (daemon-side so OTA-updated routers
+/// converge on first boot) and re-derive every hairpin projection — a router
+/// that carried published ports before the sync existed, or whose config was
+/// edited by hand, can hold stale lists, including names of deleted zones
+/// that fw4 rejects whole redirects over. Reloads the firewall once, only if
+/// something changed.
+pub async fn heal_hairpin(uci_root: impl AsRef<std::path::Path>) -> Result<(), Error> {
+    let installed = ensure_hairpin_accept().await.unwrap_or_else(|e| {
+        tracing::error!("published-ports: hairpin accept not installed: {e}");
+        false
+    });
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root.as_ref(), &arena, &["firewall"]).await?;
+    let changed = sync_hairpin(&mut cfgs["firewall"], &crate::system::wan_ipv4_addrs())?;
+    if changed {
+        dump_all(uci_root.as_ref(), cfgs).await?;
+    }
+    drop(arena);
+    if installed || changed {
+        tracing::info!(
+            "published-ports: hairpin state healed (accept installed: {installed}, projections rewritten: {changed}); reloading firewall"
+        );
+        reload_firewall();
+    }
+    Ok(())
+}
+
 /// Apply firewall config changes.
 ///
 /// `reload` renders the ruleset and hands it to a single `nft -f` transaction
@@ -1703,32 +2198,33 @@ async fn resolve_device_zones(
 /// so fall back to it there, and only there.
 pub(crate) fn reload_firewall() {
     tokio::spawn(async {
-        // `run_quiet_async` reports the exit status rather than failing on it,
-        // so a non-zero reload has to be checked explicitly — otherwise the
-        // fallback below would never run.
-        match crate::run_quiet_async(
-            tokio::process::Command::new("/etc/init.d/firewall").arg("reload"),
-        )
-        .await
-        {
-            Ok(status) if status.success() => return,
-            Ok(status) => tracing::warn!(
-                "firewall reload exited {status} (not loaded?); falling back to restart"
-            ),
-            Err(e) => {
-                tracing::warn!("could not run firewall reload ({e}); falling back to restart")
-            }
-        }
-        match crate::run_quiet_async(
-            tokio::process::Command::new("/etc/init.d/firewall").arg("restart"),
-        )
-        .await
-        {
-            Ok(status) if status.success() => {}
-            Ok(status) => tracing::error!("firewall restart exited {status}"),
-            Err(e) => tracing::error!("failed to restart firewall: {e}"),
+        if let Err(e) = reload_firewall_wait().await {
+            tracing::error!("failed to activate firewall changes: {e}");
         }
     });
+}
+
+pub(crate) async fn reload_firewall_wait() -> Result<(), Error> {
+    match crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("reload"))
+        .await
+    {
+        Ok(status) if status.success() => return Ok(()),
+        Ok(status) => {
+            tracing::warn!("firewall reload exited {status}; falling back to restart")
+        }
+        Err(e) => tracing::warn!("could not reload firewall ({e}); falling back to restart"),
+    }
+    let status =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("restart"))
+            .await?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(Error::new(
+            eyre!("firewall restart exited {status}"),
+            ErrorKind::Network,
+        ))
+    }
 }
 
 pub(crate) fn reload_dnsmasq() {
@@ -2018,7 +2514,7 @@ config rule 'pp_a_v6'
             ipv6: true,
             ipv4_public_port: None,
             source: "any".into(),
-            override_router_ports: false,
+            override_wan_ports: false,
             dest_ipv6: dest_ipv6.map(str::to_string),
         }
     }
@@ -2027,6 +2523,7 @@ config rule 'pp_a_v6'
         Device {
             mac: Some("AA:AA:AA:AA:AA:AA".into()),
             name: "Dev".into(),
+            custom_name: None,
             hostname: None,
             status: DeviceStatus::Online,
             connection: None,
@@ -2402,7 +2899,7 @@ config redirect 'pp_pub2'
             ipv6,
             ipv4_public_port: None,
             source: "any".to_string(),
-            override_router_ports: false,
+            override_wan_ports: false,
         }
     }
 
@@ -2608,6 +3105,845 @@ config redirect 'pp_del1'
         );
     }
 
+    // ── NAT reflection scoping ──
+
+    /// Interface addresses matching the FORWARDINGS zones: `lan`, `guest`,
+    /// and `iot` are /24s at .1.1/.101.1/.102.1; the WAN is not static.
+    const NETWORK: &str = "\
+config interface 'lan'
+\toption device 'br-lan'
+\toption proto 'static'
+\toption ipaddr '192.168.1.1'
+\toption netmask '255.255.255.0'
+
+config interface 'guest'
+\toption device 'br-lan.101'
+\toption proto 'static'
+\toption ipaddr '192.168.101.1'
+\toption netmask '255.255.255.0'
+
+config interface 'iot'
+\toption device 'br-lan.102'
+\toption proto 'static'
+\toption ipaddr '192.168.102.1'
+\toption netmask '255.255.255.0'
+
+config interface 'wan'
+\toption device 'eth1'
+\toption proto 'dhcp'
+";
+
+    /// Give `make_port`'s device a resolvable zone: the interface subnets
+    /// plus a static reservation at `ip`. Tests are never effectful, so the
+    /// reservation is the only address source the resolver can see.
+    fn seed_device(dir: &std::path::Path, ip: &str) {
+        std::fs::write(dir.join("network"), NETWORK).unwrap();
+        std::fs::write(
+            dir.join("dhcp"),
+            format!("config host\n\toption mac 'AA:BB:CC:DD:EE:FF'\n\toption ip '{ip}'\n"),
+        )
+        .unwrap();
+    }
+
+    /// Firewall seeded the way a three-profile setup would be: zones for the
+    /// admin `lan`, `lan_guest`, `lan_iot`, and a masquerading `wan`, plus the
+    /// `config forwarding` sections such a setup would carry: `lan_guest` and
+    /// `lan_iot` may reach `lan`, and nothing forwards *from* `wan`.
+    const FORWARDINGS: &str = "\
+config zone 'z_lan'
+\toption name 'lan'
+\tlist network 'lan'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_guest'
+\toption name 'lan_guest'
+\tlist network 'guest'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_iot'
+\toption name 'lan_iot'
+\tlist network 'iot'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_wan'
+\toption name 'wan'
+\tlist network 'wan'
+\toption input 'REJECT'
+\toption output 'ACCEPT'
+\toption forward 'REJECT'
+\toption masq '1'
+
+config forwarding 'fwd_guest_lan'
+\toption src 'lan_guest'
+\toption dest 'lan'
+
+config forwarding 'fwd_iot_lan'
+\toption src 'lan_iot'
+\toption dest 'lan'
+
+config forwarding 'fwd_guest_wan'
+\toption src 'lan_guest'
+\toption dest 'wan'
+
+config forwarding 'fwd_lan_wan'
+\toption src 'lan'
+\toption dest 'wan'
+";
+
+    #[test]
+    fn hairpin_zones_cover_access_and_internet() {
+        let arena = Arena::new();
+        let cfg = uciedit::Config::parse_str(&arena, FORWARDINGS).unwrap();
+        assert_eq!(
+            hairpin_zones(&cfg, "wan", "lan", &[]),
+            vec!["lan".to_string(), "lan_guest".into(), "lan_iot".into()],
+        );
+        // Nothing forwards into lan_iot; lan and lan_guest qualify by their
+        // Internet access alone.
+        assert_eq!(
+            hairpin_zones(&cfg, "wan", "lan_iot", &[]),
+            vec!["lan".to_string(), "lan_guest".into(), "lan_iot".into()]
+        );
+    }
+
+    #[test]
+    fn hairpin_zones_internet_ground_needs_live_egress() {
+        // Eight profiles, all publishing into lan, the router's WAN address
+        // being 203.0.113.7: Blacklist keeps its WAN forwarding and only
+        // per-destination rejects; Whitelist keeps the forwarding behind a
+        // catch-all reject; a blackout window adds an unqualified reject; WAN
+        // None has no forwarding at all; a disabled reject cancels nothing; a
+        // Whitelist naming the WAN address (or a range holding it) accepts
+        // ahead of its catch-all; a Blacklist naming it rejects.
+        let content = "\
+config zone 'z_lan'
+\toption name 'lan'
+\tlist network 'lan'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_bl'
+\toption name 'lan_bl'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_wl'
+\toption name 'lan_wl'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_sched'
+\toption name 'lan_sched'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_none'
+\toption name 'lan_none'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_off'
+\toption name 'lan_off'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_wlr'
+\toption name 'lan_wlr'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_wlc'
+\toption name 'lan_wlc'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_blr'
+\toption name 'lan_blr'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config zone 'z_wan'
+\toption name 'wan'
+\tlist network 'wan'
+\toption input 'REJECT'
+\toption output 'ACCEPT'
+\toption forward 'REJECT'
+\toption masq '1'
+
+config forwarding
+\toption src 'lan_bl'
+\toption dest 'wan'
+
+config rule
+\toption name 'WAN-BL-Guest-1.2.3.4'
+\toption src 'lan_bl'
+\toption dest 'wan'
+\toption dest_ip '1.2.3.4'
+\tlist proto 'all'
+\toption target 'REJECT'
+
+config forwarding
+\toption src 'lan_wl'
+\toption dest 'wan'
+
+config rule
+\toption name 'WAN-WL-Guest-reject'
+\toption src 'lan_wl'
+\toption dest 'wan'
+\tlist proto 'all'
+\toption target 'REJECT'
+
+config forwarding
+\toption src 'lan_sched'
+\toption dest 'wan'
+
+config rule 'sched_sched'
+\toption name 'WAN-Schedule-sched'
+\toption src 'lan_sched'
+\toption dest 'wan'
+\toption target 'REJECT'
+
+config forwarding
+\toption src 'lan_off'
+\toption dest 'wan'
+
+config rule
+\toption name 'disabled'
+\toption src 'lan_off'
+\toption dest 'wan'
+\toption target 'REJECT'
+\toption enabled '0'
+
+config forwarding
+\toption src 'lan_wlr'
+\toption dest 'wan'
+
+config rule
+\toption name 'WAN-WL-Router-203.0.113.7'
+\toption src 'lan_wlr'
+\toption dest 'wan'
+\toption dest_ip '203.0.113.7'
+\tlist proto 'all'
+\toption target 'ACCEPT'
+
+config rule
+\toption name 'WAN-WL-Router-reject'
+\toption src 'lan_wlr'
+\toption dest 'wan'
+\tlist proto 'all'
+\toption target 'REJECT'
+
+config forwarding
+\toption src 'lan_wlc'
+\toption dest 'wan'
+
+config rule
+\toption name 'WAN-WL-Range-203.0.113.0/24'
+\toption src 'lan_wlc'
+\toption dest 'wan'
+\toption dest_ip '203.0.113.0/24'
+\tlist proto 'all'
+\toption target 'ACCEPT'
+
+config rule
+\toption name 'WAN-WL-Range-reject'
+\toption src 'lan_wlc'
+\toption dest 'wan'
+\tlist proto 'all'
+\toption target 'REJECT'
+
+config forwarding
+\toption src 'lan_blr'
+\toption dest 'wan'
+
+config rule
+\toption name 'WAN-BL-Router-203.0.113.7'
+\toption src 'lan_blr'
+\toption dest 'wan'
+\toption dest_ip '203.0.113.7'
+\tlist proto 'all'
+\toption target 'REJECT'
+";
+        let arena = Arena::new();
+        let cfg = uciedit::Config::parse_str(&arena, content).unwrap();
+        let wan: [IpAddr; 1] = ["203.0.113.7".parse().unwrap()];
+        assert_eq!(
+            hairpin_zones(&cfg, "wan", "lan", &wan),
+            vec![
+                "lan".to_string(),
+                "lan_bl".into(),
+                "lan_off".into(),
+                "lan_wlc".into(),
+                "lan_wlr".into(),
+            ],
+        );
+        // With the WAN address unknown, an address entry covers nothing: a
+        // Whitelist falls to its catch-all and a Blacklist to its forwarding.
+        assert_eq!(
+            hairpin_zones(&cfg, "wan", "lan", &[]),
+            vec![
+                "lan".to_string(),
+                "lan_bl".into(),
+                "lan_blr".into(),
+                "lan_off".into()
+            ],
+        );
+        // A different WAN address: neither entry covers it.
+        let other: [IpAddr; 1] = ["198.51.100.9".parse().unwrap()];
+        assert_eq!(
+            hairpin_zones(&cfg, "wan", "lan", &other),
+            vec![
+                "lan".to_string(),
+                "lan_bl".into(),
+                "lan_blr".into(),
+                "lan_off".into()
+            ],
+        );
+    }
+
+    /// A rule narrowed by anything but a destination address decides
+    /// nothing, and neither does a destination that does not parse.
+    #[test]
+    fn rule_covers_only_address_qualified_rules() {
+        let wan: [IpAddr; 1] = ["203.0.113.7".parse().unwrap()];
+        let base = FirewallRule {
+            src: "z".into(),
+            dest: Some("wan".into()),
+            target: FirewallTarget::REJECT,
+            ..Default::default()
+        };
+        assert!(rule_covers(&base, &wan));
+        assert!(rule_covers(&base, &[]));
+        for narrowed in [
+            FirewallRule {
+                dest_port: Some("443".into()),
+                ..base.clone()
+            },
+            FirewallRule {
+                src_mac: Some("AA:BB:CC:DD:EE:FF".into()),
+                ..base.clone()
+            },
+            FirewallRule {
+                proto: vec!["tcp".into()],
+                ..base.clone()
+            },
+            FirewallRule {
+                dest_ip: Some("!203.0.113.7".into()),
+                ..base.clone()
+            },
+            FirewallRule {
+                dest_ip: Some("203.0.113.1-203.0.113.9".into()),
+                ..base.clone()
+            },
+            FirewallRule {
+                family: Some("ipv6".into()),
+                ..base.clone()
+            },
+        ] {
+            assert!(!rule_covers(&narrowed, &wan), "{narrowed:?}");
+        }
+        assert!(rule_covers(
+            &FirewallRule {
+                family: Some("ipv4".into()),
+                ..base.clone()
+            },
+            &wan
+        ));
+    }
+
+    #[test]
+    fn hairpin_zones_skip_nonzones_and_masq_sources() {
+        // Hazards an adopted config can carry: a forwarding from a name that
+        // is no zone, a wildcard src (legal fw4), and one from a masquerading
+        // (WAN-like) zone. None may reach the list — fw4 rejects an unknown
+        // name by dropping the whole redirect, and a masq'd zone is the WAN
+        // side by definition.
+        let hazards = format!(
+            "{FORWARDINGS}
+config zone 'z_upstream'
+\toption name 'upstream'
+\tlist network 'wan2'
+\toption input 'REJECT'
+\toption output 'ACCEPT'
+\toption forward 'REJECT'
+\toption masq '1'
+
+config forwarding
+\toption src 'ghost'
+\toption dest 'lan'
+
+config forwarding
+\toption src '*'
+\toption dest 'lan'
+
+config forwarding
+\toption src 'upstream'
+\toption dest 'lan'
+"
+        );
+        let arena = Arena::new();
+        let cfg = uciedit::Config::parse_str(&arena, &hazards).unwrap();
+        assert_eq!(
+            hairpin_zones(&cfg, "wan", "lan", &[]),
+            vec!["lan".to_string(), "lan_guest".into(), "lan_iot".into()],
+        );
+        // A dest that is not an existing zone gets no list at all (fw4 would
+        // reject the section on its `dest` before reflection matters).
+        assert_eq!(
+            hairpin_zones(&cfg, "wan", "ghost", &[]),
+            Vec::<String>::new()
+        );
+        // A masquerading zone spelled otherwise still counts as an egress:
+        // lan_iot has no Access to lan_guest and no `wan` forwarding.
+        assert_eq!(
+            hairpin_zones(&cfg, "wan", "lan_guest", &[]),
+            vec!["lan".to_string(), "lan_guest".into()],
+        );
+        let alt = format!(
+            "{hazards}
+config forwarding
+\toption src 'lan_iot'
+\toption dest 'upstream'
+"
+        );
+        let cfg = uciedit::Config::parse_str(&arena, &alt).unwrap();
+        assert_eq!(
+            hairpin_zones(&cfg, "wan", "lan_guest", &[]),
+            vec!["lan".to_string(), "lan_guest".into(), "lan_iot".into()],
+        );
+    }
+
+    #[tokio::test]
+    async fn set_scopes_hairpin_to_eligible_zones() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall(dir.path(), FORWARDINGS);
+        seed_device(dir.path(), "192.168.1.50");
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        set(
+            ctx,
+            DeserializeStdin(PublishedPortsSetRequest {
+                ports: vec![make_port("refl1", true, false)],
+            }),
+        )
+        .await
+        .unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(
+            content.contains("option dest 'lan'"),
+            "reserved 192.168.1.50 must resolve to the lan zone:\n{content}"
+        );
+        for zone in ["lan", "lan_guest", "lan_iot"] {
+            assert!(
+                content.contains(&format!("list reflection_zone '{zone}'\n")),
+                "missing reflection_zone {zone} in:\n{content}"
+            );
+        }
+        assert!(
+            !content.contains("list reflection_zone 'wan'"),
+            "wan must never be a reflection zone:\n{content}"
+        );
+        assert!(
+            !content.contains("option reflection "),
+            "unrestricted port should leave fw4's reflection default:\n{content}"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_source_restriction_disables_reflection() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall(dir.path(), FORWARDINGS);
+        seed_device(dir.path(), "192.168.1.50");
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        let mut port = make_port("refl2", true, false);
+        port.source = "203.0.113.0/24".to_string();
+
+        set(
+            ctx,
+            DeserializeStdin(PublishedPortsSetRequest { ports: vec![port] }),
+        )
+        .await
+        .unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(
+            content.contains("option reflection '0'"),
+            "source-restricted port must disable reflection:\n{content}"
+        );
+        assert!(
+            !content.contains("list reflection_zone"),
+            "no reflection means no reflection zones:\n{content}"
+        );
+        assert!(
+            !content.contains("_pp_hairpin"),
+            "a restricted port gets no LAN-side IPv6 copies:\n{content}"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_resolves_dest_zone_from_subnet() {
+        let dir = tempfile::tempdir().unwrap();
+        // lan may also reach the guest zone (Admin has Access All); iot has
+        // neither Access to it nor Internet access, so a guest-zone port must
+        // list lan_guest + lan and never lan_iot — the eligible set of the
+        // *resolved* zone, not lan's.
+        setup_firewall(
+            dir.path(),
+            &format!(
+                "{FORWARDINGS}
+config forwarding 'fwd_lan_guest'
+\toption src 'lan'
+\toption dest 'lan_guest'
+"
+            ),
+        );
+        seed_device(dir.path(), "192.168.101.50");
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        set(
+            ctx,
+            DeserializeStdin(PublishedPortsSetRequest {
+                ports: vec![make_port("refl3", true, false)],
+            }),
+        )
+        .await
+        .unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(
+            content.contains("option dest 'lan_guest'"),
+            "a device in the guest subnet must land in the guest zone:\n{content}"
+        );
+        for zone in ["lan_guest", "lan"] {
+            assert!(
+                content.contains(&format!("list reflection_zone '{zone}'\n")),
+                "missing reflection_zone {zone} in:\n{content}"
+            );
+        }
+        assert!(
+            !content.contains("list reflection_zone 'lan_iot'"),
+            "lan_iot has no access to the guest zone:\n{content}"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_unresolvable_device_zone_disables_reflection() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall(dir.path(), FORWARDINGS);
+        // No neighbor entry (tests are never effectful), no reservation, no
+        // interface subnets: the device's zone cannot be known.
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        set(
+            ctx,
+            DeserializeStdin(PublishedPortsSetRequest {
+                ports: vec![make_port("refl4", true, false)],
+            }),
+        )
+        .await
+        .unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(
+            content.contains("option dest 'lan'"),
+            "an unresolvable device keeps the lan guess for its WAN DNAT:\n{content}"
+        );
+        assert!(
+            content.contains("option reflection '0'"),
+            "never reflect into a guessed zone:\n{content}"
+        );
+        assert!(
+            !content.contains("list reflection_zone"),
+            "no reflection means no reflection zones:\n{content}"
+        );
+    }
+
+    #[tokio::test]
+    async fn device_zone_prefers_address_and_falls_back_to_neighbor() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall(dir.path(), FORWARDINGS);
+        std::fs::write(dir.path().join("network"), NETWORK).unwrap();
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["firewall", "network"])
+            .await
+            .unwrap();
+
+        // The address decides when it resolves, whatever the neighbor table says.
+        assert_eq!(
+            device_zone(&cfgs, "AA", Some("192.168.101.50"), Some("lan_iot")).as_deref(),
+            Some("lan_guest")
+        );
+        // A device with no IPv4 (IPv6-only) is placed by the neighbor table.
+        assert_eq!(
+            device_zone(&cfgs, "AA", None, Some("lan_iot")).as_deref(),
+            Some("lan_iot")
+        );
+        // An IPv4 outside every profile subnet falls back the same way.
+        assert_eq!(
+            device_zone(&cfgs, "AA", Some("10.9.8.7"), Some("lan_iot")).as_deref(),
+            Some("lan_iot")
+        );
+        assert_eq!(device_zone(&cfgs, "AA", Some("10.9.8.7"), None), None);
+        assert_eq!(device_zone(&cfgs, "AA", None, None), None);
+    }
+
+    #[test]
+    fn sync_clears_reflection_zones_on_reflection_off_redirect() {
+        // fw4 validates `reflection_zone` names before it reads `reflection`,
+        // so a stale name on a reflection-off redirect still drops it whole.
+        let arena = Arena::new();
+        let content = format!(
+            "{FORWARDINGS}
+config redirect 'pp_off'
+\toption name 'Restricted'
+\toption src 'wan'
+\toption dest 'lan'
+\toption target 'DNAT'
+\tlist proto 'tcp'
+\toption src_dport '443'
+\toption dest_ip '192.168.1.50'
+\toption dest_port '443'
+\toption src_ip '203.0.113.0/24'
+\toption reflection '0'
+\toption _pp_id 'off'
+\toption _pp_mac 'AA:BB:CC:DD:EE:FF'
+\tlist reflection_zone 'lan'
+\tlist reflection_zone 'vlan_gone'
+"
+        );
+        let mut cfg = uciedit::Config::parse_str(&arena, &content).unwrap();
+        assert!(sync_hairpin(&mut cfg, &[]).unwrap());
+        let redirect = cfg
+            .sections
+            .iter()
+            .find(|s| s.name().as_deref() == Some("pp_off"))
+            .unwrap()
+            .get::<FirewallRedirect>()
+            .unwrap();
+        assert_eq!(redirect.reflection, Some(false));
+        assert!(redirect.reflection_zone.is_empty());
+        // Already clean: nothing to write.
+        assert!(!sync_hairpin(&mut cfg, &[]).unwrap());
+    }
+
+    const V6_RULE: &str = "\
+config rule 'pp_x_v6'
+\toption name 'Server'
+\toption src 'wan'
+\toption dest 'lan'
+\toption target 'ACCEPT'
+\tlist proto 'tcp'
+\toption dest_ip '2001:db8::10'
+\toption dest_port '8443'
+\toption family 'ipv6'
+\toption enabled '1'
+\toption _pp_id 'x'
+\toption _pp_mac 'AA:BB:CC:DD:EE:FF'
+";
+
+    fn v6_copies(cfg: &uciedit::Config<'_>) -> Vec<(String, String)> {
+        cfg.sections
+            .iter()
+            .filter_map(|s| {
+                let r = s.get::<FirewallRule>().ok()?;
+                r._pp_hairpin.as_ref()?;
+                Some((s.name()?.to_string(), r.src))
+            })
+            .collect()
+    }
+
+    /// Every hairpin zone but the target's own gets a copy of the WAN rule
+    /// that differs only in `src`; the set follows the zones as they change,
+    /// a stale copy is dropped, and a clean config is left alone.
+    #[test]
+    fn sync_rebuilds_v6_copies_from_hairpin_zones() {
+        let arena = Arena::new();
+        let content = format!(
+            "{FORWARDINGS}
+{V6_RULE}
+config rule 'pp_x_v6_vlan_gone'
+\toption name 'Server'
+\toption src 'vlan_gone'
+\toption dest 'lan'
+\toption target 'ACCEPT'
+\tlist proto 'tcp'
+\toption dest_ip '2001:db8::10'
+\toption dest_port '8443'
+\toption family 'ipv6'
+\toption _pp_id 'x'
+\toption _pp_mac 'AA:BB:CC:DD:EE:FF'
+\toption _pp_hairpin '1'
+"
+        );
+        let mut cfg = uciedit::Config::parse_str(&arena, &content).unwrap();
+        assert!(sync_hairpin(&mut cfg, &[]).unwrap());
+        assert_eq!(
+            v6_copies(&cfg),
+            vec![
+                ("pp_x_v6_lan_guest".to_string(), "lan_guest".to_string()),
+                ("pp_x_v6_lan_iot".to_string(), "lan_iot".to_string()),
+            ]
+        );
+        let copy = cfg
+            .sections
+            .iter()
+            .find(|s| s.name().as_deref() == Some("pp_x_v6_lan_guest"))
+            .unwrap()
+            .get::<FirewallRule>()
+            .unwrap();
+        let wan = cfg
+            .sections
+            .iter()
+            .find(|s| s.name().as_deref() == Some("pp_x_v6"))
+            .unwrap()
+            .get::<FirewallRule>()
+            .unwrap();
+        assert_eq!(
+            FirewallRule {
+                src: "wan".into(),
+                _pp_hairpin: None,
+                ..copy
+            },
+            wan,
+            "a copy differs from the WAN rule only in src and the marker"
+        );
+        assert!(!sync_hairpin(&mut cfg, &[]).unwrap(), "already current");
+
+        // Guest loses both Access to lan and its Internet access.
+        cfg.sections.retain(|s| {
+            !matches!(
+                s.name().as_deref(),
+                Some("fwd_guest_lan") | Some("fwd_guest_wan")
+            )
+        });
+        assert!(sync_hairpin(&mut cfg, &[]).unwrap());
+        assert_eq!(
+            v6_copies(&cfg),
+            vec![("pp_x_v6_lan_iot".to_string(), "lan_iot".to_string())]
+        );
+    }
+
+    /// An IPv6 rule is public at the device's own address, so a Whitelist
+    /// naming that address earns the zone a copy and a Blacklist naming it
+    /// loses one; the router's WAN IPv4 address plays no part.
+    #[test]
+    fn v6_copies_follow_entries_on_the_device_address() {
+        let arena = Arena::new();
+        let content = format!(
+            "{FORWARDINGS}{V6_RULE}
+config zone 'z_wl'
+\toption name 'lan_wl'
+\tlist network 'wl'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config forwarding
+\toption src 'lan_wl'
+\toption dest 'wan'
+
+config rule
+\toption name 'WAN-WL-Wl-2001:db8::10'
+\toption src 'lan_wl'
+\toption dest 'wan'
+\toption dest_ip '2001:db8::10'
+\tlist proto 'all'
+\toption target 'ACCEPT'
+
+config rule
+\toption name 'WAN-WL-Wl-reject'
+\toption src 'lan_wl'
+\toption dest 'wan'
+\tlist proto 'all'
+\toption target 'REJECT'
+
+config zone 'z_bl'
+\toption name 'lan_bl'
+\tlist network 'bl'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+
+config forwarding
+\toption src 'lan_bl'
+\toption dest 'wan'
+
+config rule
+\toption name 'WAN-BL-Bl-2001:db8::/64'
+\toption src 'lan_bl'
+\toption dest 'wan'
+\toption dest_ip '2001:db8::/64'
+\tlist proto 'all'
+\toption target 'REJECT'
+"
+        );
+        let mut cfg = uciedit::Config::parse_str(&arena, &content).unwrap();
+        let wan: [Ipv4Addr; 1] = ["203.0.113.7".parse().unwrap()];
+        assert!(sync_hairpin(&mut cfg, &wan).unwrap());
+        assert_eq!(
+            v6_copies(&cfg),
+            vec![
+                ("pp_x_v6_lan_guest".to_string(), "lan_guest".to_string()),
+                ("pp_x_v6_lan_iot".to_string(), "lan_iot".to_string()),
+                ("pp_x_v6_lan_wl".to_string(), "lan_wl".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn sync_makes_no_v6_copies_for_restricted_rule() {
+        let arena = Arena::new();
+        let content = format!("{FORWARDINGS}{V6_RULE}\toption src_ip '2001:db8:beef::/48'\n");
+        let mut cfg = uciedit::Config::parse_str(&arena, &content).unwrap();
+        assert!(!sync_hairpin(&mut cfg, &[]).unwrap());
+        assert!(v6_copies(&cfg).is_empty());
+    }
+
+    /// The copies are firewall plumbing, not ports: `list` sees one port,
+    /// and forgetting the device takes the copies with the rule.
+    #[tokio::test]
+    async fn v6_copies_are_invisible_to_list_and_removed_with_the_port() {
+        let dir = tempfile::tempdir().unwrap();
+        let arena = Arena::new();
+        let content = format!("{FORWARDINGS}{V6_RULE}");
+        let mut cfg = uciedit::Config::parse_str(&arena, &content).unwrap();
+        assert!(sync_hairpin(&mut cfg, &[]).unwrap());
+        std::fs::write(dir.path().join("firewall"), cfg.dump_str()).unwrap();
+        std::fs::write(dir.path().join("dhcp"), "").unwrap();
+
+        let ports = extract_ports(&arena, dir.path()).await.unwrap();
+        assert_eq!(ports.len(), 1);
+        assert!(ports[0].ipv6 && !ports[0].ipv4);
+
+        let mut cfgs = parse_all(dir.path(), &arena, &["firewall", "dhcp"])
+            .await
+            .unwrap();
+        let removed =
+            remove_ports_for_macs(&mut cfgs, &HashSet::from(["aa:bb:cc:dd:ee:ff".to_string()]));
+        assert_eq!(removed, 3);
+        assert!(!cfgs["firewall"]
+            .sections
+            .iter()
+            .any(|s| s.name().is_some_and(|n| n.starts_with("pp_"))));
+    }
+
     // ── uuid_v4 tests ──
 
     #[test]
@@ -2676,8 +4012,6 @@ config redirect 'pp_del1'
         );
     }
 
-    // ── router_port_collisions tests ──
-
     /// The WAN-input ACCEPT rules the router writes for its own services:
     /// Remote Access in `default` (behind-NAT) mode — src_ip-scoped, one
     /// family per rule — plus an unscoped SSH rule (`always` shape), a
@@ -2720,14 +4054,43 @@ config rule 'disabled_rule'
 \tlist proto 'tcp'
 \toption target 'ACCEPT'
 \toption enabled '0'
+
+config rule 'apf_sni_443'
+\toption name 'SNI demux (hostname routes)'
+\toption src 'wan'
+\toption dest_port '443'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+\toption _apf_label 'SNI'
+
+config rule 'apf_sni_8444'
+\toption name 'SNI demux (hostname routes)'
+\toption src 'wan'
+\toption dest_port '8444'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+\toption _apf_label 'SNI'
 ";
 
-    async fn collisions_for(ports: Vec<PublishedPortInput>) -> Vec<RouterPortCollision> {
+    async fn collisions_for(ports: Vec<PublishedPortInput>) -> Vec<WanPortCollision> {
         let dir = tempfile::tempdir().unwrap();
         setup_firewall(dir.path(), ROUTER_SERVICE_RULES);
         let arena = Arena::new();
         let cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
-        router_port_collisions(&cfgs["firewall"], &ports)
+        wan_port_collisions(&cfgs["firewall"], &ports)
+    }
+
+    #[test]
+    fn sni_displacement_requires_tcp() {
+        let tcp = make_input(|port| {
+            port.ports = "443".into();
+            port.protocol = Protocol::Tcp;
+        });
+        let udp = make_input(|port| {
+            port.ports = "8443".into();
+            port.protocol = Protocol::Udp;
+        });
+        assert_eq!(active_sni_conflicting_ranges(&[tcp, udp]), vec![(443, 443)]);
     }
 
     #[tokio::test]
@@ -2737,7 +4100,7 @@ config rule 'disabled_rule'
         let hits = collisions_for(vec![make_input(|p| p.ports = "443".into())]).await;
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].id, "valid-id");
-        assert_eq!(hits[0].router_ports, vec!["443"]);
+        assert_eq!(hits[0].router_service_ports, vec!["443"]);
 
         // A range sweeping several router ports reports each of them; the
         // external range is what counts when it differs from the device port.
@@ -2747,7 +4110,23 @@ config rule 'disabled_rule'
             p.protocol = Protocol::TcpUdp;
         })])
         .await;
-        assert_eq!(hits[0].router_ports, vec!["443", "22", "51820"]);
+        assert_eq!(hits[0].router_service_ports, vec!["443", "22", "51820"]);
+    }
+
+    #[tokio::test]
+    async fn sni_admit_rules_are_reported_as_hostname_holders() {
+        let hits = collisions_for(vec![make_input(|p| p.ports = "8444".into())]).await;
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].router_service_ports.is_empty());
+        assert_eq!(hits[0].hostname_route_ports.len(), 1);
+        assert_eq!(hits[0].hostname_route_ports[0].ports, "8444");
+        assert!(hits[0].hostname_route_ports[0].hostnames.is_empty());
+        assert!(hits[0].hostname_route_ports[0].devices.is_empty());
+
+        let hits = collisions_for(vec![make_input(|p| p.ports = "443".into())]).await;
+        assert_eq!(hits[0].router_service_ports, vec!["443"]);
+        assert_eq!(hits[0].hostname_route_ports.len(), 1);
+        assert_eq!(hits[0].hostname_route_ports[0].ports, "443");
     }
 
     #[tokio::test]
@@ -2773,7 +4152,7 @@ config rule 'disabled_rule'
                 p.protocol = Protocol::Udp;
             })])
             .await[0]
-                .router_ports,
+                .router_service_ports,
             vec!["51820"]
         );
 
@@ -2804,14 +4183,14 @@ config rule 'disabled_rule'
         .is_empty());
         assert!(collisions_for(vec![make_input(|p| {
             p.ports = "443".into();
-            p.override_router_ports = true;
+            p.override_wan_ports = true;
         })])
         .await
         .is_empty());
     }
 
     #[tokio::test]
-    async fn set_persists_router_override_flag() {
+    async fn set_persists_wan_override_only_while_enabled() {
         let dir = tempfile::tempdir().unwrap();
         setup_firewall(dir.path(), "");
         let ctx = TestContext(dir.path().to_path_buf());
@@ -2821,7 +4200,7 @@ config rule 'disabled_rule'
             DeserializeStdin(PublishedPortsSetRequest {
                 ports: vec![make_input(|p| {
                     p.ports = "443".into();
-                    p.override_router_ports = true;
+                    p.override_wan_ports = true;
                 })],
             }),
         )
@@ -2830,13 +4209,31 @@ config rule 'disabled_rule'
 
         let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
         assert!(
-            content.contains("option _pp_router_override '1'"),
+            content.contains("option _pp_wan_override '1'"),
             "override not persisted: {content}"
         );
-        // And it round-trips through extraction for the next save.
         let arena = Arena::new();
         let ports = extract_ports(&arena, dir.path()).await.unwrap();
-        assert!(ports[0].override_router_ports);
+        assert!(ports[0].override_wan_ports);
+
+        set(
+            TestContext(dir.path().to_path_buf()),
+            DeserializeStdin(PublishedPortsSetRequest {
+                ports: vec![make_input(|p| {
+                    p.enabled = false;
+                    p.ports = "443".into();
+                    p.override_wan_ports = true;
+                })],
+            }),
+        )
+        .await
+        .unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        assert!(!content.contains("_pp_wan_override"));
+        let arena = Arena::new();
+        let ports = extract_ports(&arena, dir.path()).await.unwrap();
+        assert!(!ports[0].override_wan_ports);
     }
 
     // ── Validation tests ──

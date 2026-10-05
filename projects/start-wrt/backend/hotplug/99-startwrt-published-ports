@@ -7,3 +7,8 @@
 [ "$ACTION" = "ifup" -o "$ACTION" = "ifupdate" ] && [ "$INTERFACE" = "wan6" ] && {
     /usr/bin/startwrt-cli published-ports reconcile 2>/dev/null &
 }
+# WAN Whitelist/Blacklist entries are read against the WAN address to decide a
+# profile's hairpin; fw4's 20-firewall hook has already reloaded by this point.
+[ "$ACTION" = "ifup" -o "$ACTION" = "ifupdate" ] && [ "$INTERFACE" = "wan" ] && {
+    (/usr/bin/startwrt-cli published-ports sync-hairpin && /etc/init.d/firewall reload) 2>/dev/null &
+}

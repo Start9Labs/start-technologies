@@ -4,7 +4,7 @@ use std::net::Ipv4Addr;
 use inpt::Inpt;
 use uciedit_macros::TypedSection;
 
-#[derive(strum::EnumString, strum::Display, Default, PartialEq, Eq, Debug)]
+#[derive(strum::EnumString, strum::Display, Default, Clone, PartialEq, Eq, Debug)]
 pub enum FirewallTarget {
     #[default]
     ACCEPT,
@@ -37,7 +37,7 @@ pub struct FirewallZone {
     pub mtu_fix: Option<bool>,
 }
 
-#[derive(Debug, TypedSection, Default)]
+#[derive(Debug, Clone, PartialEq, TypedSection, Default)]
 #[uci(ty = "rule")]
 pub struct FirewallRule {
     /*
@@ -80,6 +80,13 @@ pub struct FirewallRule {
     /// Published-port metadata: device MAC
     #[uci(default)]
     pub _pp_mac: Option<String>,
+    /// Port-control rule owner.
+    #[uci(default)]
+    pub _apf_label: Option<String>,
+    /// "1" on a LAN-side copy of an IPv6 published-port rule, rebuilt from
+    /// the `wan` rule on every hairpin sync.
+    #[uci(default)]
+    pub _pp_hairpin: Option<String>,
 }
 
 #[derive(Debug, TypedSection, Default)]
@@ -101,6 +108,12 @@ pub struct FirewallRedirect {
     pub target: String,
     #[uci(default)]
     pub enabled: Option<String>,
+    /// NAT reflection (hairpin). Unset is fw4's default of enabled.
+    #[uci(default)]
+    pub reflection: Option<bool>,
+    /// Zones whose clients get hairpin rules. Empty is fw4's default of the
+    /// `dest` zone alone.
+    pub reflection_zone: Vec<String>,
     /// Published-port metadata: links IPv4 redirect + IPv6 rule
     #[uci(default)]
     pub _pp_id: Option<String>,
@@ -119,7 +132,7 @@ pub struct FirewallRedirect {
     /// port the router itself answers on from the WAN (remote access, SSH,
     /// VPN), so later saves don't re-prompt for the same collision.
     #[uci(default)]
-    pub _pp_router_override: Option<String>,
+    pub _pp_wan_override: Option<String>,
 }
 
 #[derive(Debug, TypedSection)]
@@ -305,6 +318,9 @@ pub struct WifiDevice {
     pub band: String,
     #[uci(inpt)]
     pub channel: WifiChannel,
+    pub country: Option<String>,
+    /// Keeps automatic channel selection off radar-detection channels.
+    pub acs_exclude_dfs: Option<bool>,
 }
 
 #[derive(Clone, Debug, TypedSection)]

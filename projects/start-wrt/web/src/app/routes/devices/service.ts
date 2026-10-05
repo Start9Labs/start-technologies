@@ -53,6 +53,7 @@ export class DevicesApiService {
     return {
       mac: d.mac,
       name: d.name, // fully resolved server-side
+      customName: d.custom_name || undefined,
       hostname: d.hostname || '',
       status: d.status,
       connection: d.connection || undefined,

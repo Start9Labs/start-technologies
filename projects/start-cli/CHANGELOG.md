@@ -9,9 +9,71 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [2.2.0]
+
+### Security
+
+- **Update shared dependencies with security fixes.** Replace the unmaintained YAML library while preserving configuration formats.
+
+### Added
+
+- **`server trust-ca --cert <PEM>` adds a CA root to the server's host trust store.** Pass
+  the PEM certificate text directly or use shell substitution to read a file. The command
+  prints its subject and SHA-256 fingerprint.
+
+- **`s9pk edit add-image` enables CPU emulation by default** when the server uses
+  another architecture. Use `--no-emulation` for images that require a native architecture.
+
+### Fixed
+
+- **`s9pk pack` and `s9pk edit add-image` accept a Docker image that declares no `CMD` or
+  `ENTRYPOINT`.**
+
+- **`s9pk pack` removes its temporary container and built image when packing fails.**
+
+## [2.1.0]
+
+### Added
+
+- **`s9pk init-workspace` links the guide's packaging skills into the workspace**, at `.claude/skills` for Claude Code and `.agents/skills` for Codex, so a session opened at the workspace root can run `package-service` and the guide sync keeps the skills current. An existing entry at either path is left alone. A workspace made by an earlier release gets the links the first time any `start-cli` command runs inside it after the update, so nothing needs re-running; `init-workspace` does the same on demand.
+
+- **`s9pk init-workspace` and `s9pk init-package` say when the workspace's `start-technologies`
+  checkout is on a branch other than `live-docs`.** The notice names the checkout and the branch
+  and says how to replace it.
+
+- **`completions <shell>` prints a completion script** for bash, zsh, fish, elvish or PowerShell;
+  `eval "$(start-cli completions bash)"` in a shell profile enables tab completion.
+
+- **A command the server refuses because this key is not logged in prompts for the server
+  password, logs in, and runs.** Only at a terminal; a script still gets the error, and
+  `auth login` still works on its own.
+
+- **`binding list` shows each binding's bridge address** (`10.0.3.1:<port>`, plain and TLS) under
+  `package host` and `server host`.
+
+### Changed
+
+- **`setup install-os` takes the stable disk paths that `setup disk list` reports as `stablePath`.**
+  A kernel device name such as `/dev/sda` is rejected, so the selected drive stays the installation
+  target when Linux reorders disk names.
+
+### Fixed
+
+- **The notice that `start-cli` is behind the published release is given only when the workspace's
+  `start-technologies` checkout is on `live-docs`.**
+
+- **`--address` on `binding set-address-enabled`, `set-range-address-enabled` and `set-gua-wan`
+  takes the address as the UI shows it** — an IP, `<name>.local` or a domain, with `:port` where
+  one address serves several ports — under `package host` and `server host` alike. An address the
+  binding doesn't have is refused with the list of those it has; a JSON `HostnameInfo` is still
+  accepted.
+
 ## [2.0.0]
 
 ### Added
+
+- **`server epp` shows or sets the CPU energy/performance preference.** The setting persists
+  across reboots and reports the values available on the server.
 
 - **`s9pk pack` packs the package's `README.md`.** It sits beside `instructions.md` in the
   archive and is readable with `S9pk::readme()`. The point is what runs on the server: an AI
@@ -22,7 +84,16 @@ or the CLI's externally observable behavior.
   archive and the accessor returns `None`. Nothing is packed for an s9pk built before this,
   and v1 packages migrated forward carry no README either.
 
+- **An `s9pk` command says when `start-cli` is behind the published release.** It compares
+  itself against the `start-cli` version named by the workspace's `start-technologies`
+  checkout and prints a one-line notice. `start-cli` installs outside the workspace, so
+  nothing else would have told you: on Debian `apt upgrade` carries it forward, and
+  everywhere else re-running the installer is the only update path.
+
 ### Changed
+
+- **`server governor` replaces `server experimental governor`.** Scripts that set or inspect
+  the CPU governor need to use the direct `server` subcommand.
 
 - **`server set-hostname` takes one required hostname, and `setup execute` no
   longer takes `--name`.** A StartOS server carries a single name — its `.local`
@@ -32,6 +103,11 @@ or the CLI's externally observable behavior.
   needs updating. `server set-hostname` and `setup execute --hostname` also
   reject a name longer than 32 characters, or one starting or ending with a
   hyphen, which 1.1.0 accepted.
+
+- **`s9pk init-workspace` clones the monorepo's `live-docs` branch** rather than `master`, so a
+  workspace's packaging guide, package template, and SDK source describe the
+  `@start9labs/start-sdk` its packages install, and match the pages on docs.start9.com. An
+  existing workspace moves over with `git -C start-technologies checkout live-docs`.
 
 ### Fixed
 

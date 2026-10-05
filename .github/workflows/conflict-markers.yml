@@ -6,6 +6,7 @@ on:
   # A branch carrying markers should say so from its first push, so this check
   # has no draft gate.
   pull_request:
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -13,7 +14,7 @@ permissions:
 concurrency:
   # Keyed on the pull request rather than the branch, because one branch can have
   # a pull request open against both master and an integration branch.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: conflict-markers-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -23,10 +24,23 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
-          # git diff needs the base commit, which a shallow fetch would leave out.
           fetch-depth: 0
           filter: blob:none
+          persist-credentials: false
+
+      - name: Fetch the base commit
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          BASE_REPOSITORY_URL: ${{ github.event.pull_request.base.repo.clone_url }}
+        run: |
+          set -euo pipefail
+          : "${BASE:?the pull request carried no base commit}"
+          : "${BASE_REPOSITORY_URL:?the pull request carried no base repository URL}"
+          [[ "$BASE" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags -- "$BASE_REPOSITORY_URL" "$BASE"
+          test "$(git rev-parse --verify 'FETCH_HEAD^{commit}')" = "$BASE"
 
       - name: Check the changed files for conflict markers
         env:

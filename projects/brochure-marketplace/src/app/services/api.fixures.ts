@@ -16,6 +16,8 @@ export namespace Mock {
   export const RegistryInfo: T.RegistryInfo = {
     name: 'Start9 Registry',
     icon: REGISTRY_ICON,
+    description:
+      'Every service here is packaged, tested, and supported by **Start9**. Read the [docs](https://docs.start9.com) before installing.',
     categories: {
       ai: {
         name: 'AI',

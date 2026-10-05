@@ -625,6 +625,7 @@ fn check_matching_info_short() {
                 long: lang_map("A longer description of the test package"),
             },
             release_notes: lang_map("Initial release"),
+            pre_download_alert: None,
             git_hash: None,
             license: "MIT".into(),
             package_repo: "https://github.com/example/wrapper".parse().unwrap(),

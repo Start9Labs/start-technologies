@@ -469,6 +469,10 @@ The password devices will use to connect. Must be at least 8 characters. Use the
 Controls what the connected device can access on the network. Assign a security profile to limit or grant access to specific resources.`,
   '/wifi/settings': `## Wi-Fi – Settings
 
+### Country
+
+The country whose Wi-Fi regulations the router follows. It decides which channels each band may use and how much transmit power is allowed. Until a country is selected, the router runs on a conservative worldwide subset: 2.4 GHz channels 1–11 and 5 GHz channels 36–48 at reduced power. Changing the country resets the channel selections to Auto. Choose the country the router is physically located in.
+
 ### Enable Wi-Fi
 
 Turn the wireless radio on or off. When disabled, no devices can connect via Wi-Fi.
@@ -491,7 +495,7 @@ When using both frequency bands, this option creates separate SSIDs for 2.4 GHz 
 
 ### Channels
 
-Specific channels within each frequency band. Select "Auto" for the router to choose the best channel, or pick a specific channel to avoid interference from neighboring networks.`,
+Specific channels within each frequency band. Select "Auto" for the router to choose the best channel, or pick a specific channel to avoid interference from neighboring networks. "Auto" skips radar-detection (DFS) channels. You can pick one by hand, but the 5 GHz network then takes a minute or more to appear each time the router starts while it listens for radar.`,
 }
 
 export default HELP_EN

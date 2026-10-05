@@ -1,4 +1,5 @@
 import { inject, Injectable } from '@angular/core'
+import { WA_SESSION_STORAGE } from '@ng-web-apis/common'
 import { GetPackageRes, GetPackagesRes } from '@start9labs/marketplace'
 import {
   FullKeyboard,
@@ -9,6 +10,7 @@ import {
 import { T } from '@start9labs/start-core'
 import {
   AddOperation,
+  applyOperation,
   Dump,
   Operation,
   PatchOp,
@@ -24,6 +26,7 @@ import {
   InstallingState,
   PackageDataEntry,
   StateInfo,
+  UIData,
   UpdatingState,
 } from 'src/app/services/patch-db/data-model'
 import { toAuthorityUrl } from 'src/app/utils/acme'
@@ -55,6 +58,8 @@ import { ApiService } from './embassy-api.service'
 import { mockPatchData } from './mock-patch'
 
 import markdown from './md-sample.md'
+
+const UI_KEY = '_startos/mock-ui'
 
 const PROGRESS: T.FullProgress = {
   overall: {
@@ -100,6 +105,7 @@ const INIT_PROGRESS: T.FullProgress = {
 @Injectable()
 export class MockApiService extends ApiService {
   readonly mockWsSource$ = new Subject<Revision>()
+  private readonly storage = inject(WA_SESSION_STORAGE)
   private readonly revertTime = 1800
   sequence = 0
 
@@ -187,6 +193,13 @@ export class MockApiService extends ApiService {
     guid: string
   }> {
     await pauseFor(2000)
+
+    const stored = this.storage?.getItem(UI_KEY)
+
+    if (stored) {
+      mockPatchData.ui = { ...mockPatchData.ui, ...JSON.parse(stored) }
+    }
+
     return {
       dump: { id: 1, value: mockPatchData },
       guid: 'db-guid',
@@ -198,16 +211,14 @@ export class MockApiService extends ApiService {
     value: T,
   ): Promise<null> {
     const pointer = pathFromArray(pathArr)
-    const params = { pointer, value }
     await pauseFor(2000)
-    const patch = [
-      {
-        op: PatchOp.REPLACE,
-        path: '/ui' + params.pointer,
-        value: params.value,
-      },
-    ]
-    this.mockRevision(patch)
+
+    const ui: Dump<UIData> = { id: 0, value: mockPatchData.ui }
+
+    applyOperation(ui, { op: PatchOp.REPLACE, path: pointer, value })
+    mockPatchData.ui = ui.value
+    this.storage?.setItem(UI_KEY, JSON.stringify(ui.value))
+    this.mockRevision([{ op: PatchOp.REPLACE, path: '/ui' + pointer, value }])
 
     return null
   }
@@ -362,10 +373,7 @@ export class MockApiService extends ApiService {
     }
   }
 
-  async updateServer(params?: {
-    registry: string
-    targetVersion: string
-  }): Promise<'updating' | 'no-updates'> {
+  async updateServer(params: T.UpdateSystemParams): Promise<T.UpdateSystemRes> {
     await pauseFor(2000)
     const initialProgress = {
       size: null,
@@ -385,7 +393,10 @@ export class MockApiService extends ApiService {
     ]
     this.mockRevision(patch)
 
-    return 'updating'
+    return {
+      target: params.targetVersion?.replace(/^=/, '') ?? null,
+      progress: null,
+    }
   }
 
   async restartServer(params: {}): Promise<null> {
@@ -890,7 +901,7 @@ export class MockApiService extends ApiService {
       latfgvwdbhjsndmk: {
         type: 'cifs',
         hostname,
-        path: path.replace(/\\/g, '/'),
+        path,
         username,
         mountable: true,
         available: 50000000000,
@@ -1301,6 +1312,11 @@ export class MockApiService extends ApiService {
     // return Mock.ActionResSingle
     if (params.actionId === 'big-qr') return Mock.ActionResBigQr
     if (params.actionId === 'unencodable-qr') return Mock.ActionResUnencodableQr
+    if (params.actionId === 'multiline') return Mock.ActionResMultiline
+    if (params.actionId === 'multiline-secret')
+      return Mock.ActionResMultilineSecret
+    if (params.actionId === 'multiline-group')
+      return Mock.ActionResMultilineGroup
     return Mock.ActionResMessage
   }
 
@@ -2237,17 +2253,44 @@ export class MockApiService extends ApiService {
       ])
     } else {
       const port = h.port ?? 0
-      const arr = current.disabled.filter(
-        ([dHost, dPort]) => !(dHost === h.hostname && dPort === port),
-      )
+      const without = (overrides: [string, number][]) =>
+        overrides.filter(
+          ([dHost, dPort]) => !(dHost === h.hostname && dPort === port),
+        )
+      const disabled = without(current.disabled)
+      let lanEnabled = without(current.lanEnabled)
 
       if (!enabled) {
-        arr.push([h.hostname, port])
+        disabled.push([h.hostname, port])
+        // On a non-SSL port, off takes the LAN IPs it resolves to with it.
+        if (h.metadata.kind === 'mdns' && !h.ssl) {
+          const gateways = h.metadata.gateways
+          lanEnabled = lanEnabled.filter(
+            ([host, p]) =>
+              !current.available.some(
+                ip =>
+                  !ip.public &&
+                  (ip.metadata.kind === 'ipv4' ||
+                    ip.metadata.kind === 'ipv6') &&
+                  gateways.includes(ip.metadata.gateway) &&
+                  ip.hostname === host &&
+                  (ip.port ?? 0) === p,
+              ),
+          )
+        }
+      } else if (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6') {
+        lanEnabled.push([h.hostname, port])
       }
 
-      current.disabled = arr
+      current.disabled = disabled
+      current.lanEnabled = lanEnabled
       this.mockRevision([
-        { op: PatchOp.REPLACE, path: `${basePath}/disabled`, value: arr },
+        { op: PatchOp.REPLACE, path: `${basePath}/disabled`, value: disabled },
+        {
+          op: PatchOp.REPLACE,
+          path: `${basePath}/lanEnabled`,
+          value: lanEnabled,
+        },
       ])
     }
   }

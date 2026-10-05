@@ -36,7 +36,7 @@ const NOT_AUTHORIZED: u8 = 2;
 const MALFORMED_REQUEST: u8 = 3;
 const UNSUPP_OPCODE: u8 = 4;
 const MALFORMED_OPTION: u8 = 6;
-const NO_RESOURCES: u8 = 8;
+use crate::net::port_map::pcp::RESULT_NO_RESOURCES as NO_RESOURCES;
 const CANNOT_PROVIDE_EXTERNAL: u8 = 11;
 
 /// PCP protocol field value for TCP (the only transport the SNI demux handles).
@@ -167,6 +167,7 @@ pub trait GatewayBackend: Send + Sync {
             let Some(sni) = self.sni() else {
                 return Err(RESULT_UNSUPP_HOSTNAME);
             };
+            sni.prepare().await?;
             sni.register(*source.ip(), source.port(), hostnames, target, lifetime)
         }
     }

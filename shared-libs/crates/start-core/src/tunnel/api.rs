@@ -1409,7 +1409,8 @@ pub async fn remove_forward(
                 None => routes.iter().map(|(h, r)| (h.clone(), r.target)).collect(),
             };
             for (h, route_target) in to_remove {
-                ctx.remove_sni_forward(source, route_target, &[h]).await;
+                ctx.remove_sni_routes(source, route_target, &[h], false)
+                    .await;
             }
             // Removing the whole forward (no hostname) also drops its fallback.
             if hostname.is_none() {
@@ -1523,6 +1524,7 @@ pub async fn set_forward_enabled(
         hostname,
     }: SetPortForwardEnabledParams,
 ) -> Result<(), Error> {
+    let _guard = ctx.forward_write_lock.lock().await;
     let toggle = ctx
         .db
         .mutate(|db| {
@@ -1583,6 +1585,12 @@ pub async fn set_forward_enabled(
         }
         ForwardToggle::Sni { hostname, target } => {
             if enabled {
+                ctx.sni.prepare().await.map_err(|code| {
+                    Error::new(
+                        eyre!("SNI diversion setup failed (code {code})"),
+                        ErrorKind::Network,
+                    )
+                })?;
                 ctx.sni
                     .register(*source.ip(), source.port(), &[hostname], target, None)
                     .map_err(|code| {
@@ -1678,7 +1686,7 @@ pub async fn remove_pinhole(
     ctx: TunnelContext,
     RemovePinholeParams { gua, external_port }: RemovePinholeParams,
 ) -> Result<(), Error> {
-    pinhole::remove_pinhole(&ctx, gua, external_port).await;
+    pinhole::remove_pinhole(&ctx, gua, external_port, false).await;
     Ok(())
 }
 

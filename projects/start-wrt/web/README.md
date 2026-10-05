@@ -1,6 +1,6 @@
 # Web — StartWRT Admin UI
 
-Single-page application for managing the StartWRT router. Angular 22, TypeScript 6, Taiga UI v5. Signal-based state, zoneless change detection, standalone components.
+Single-page application for managing the StartWRT router. Angular, TypeScript, Taiga UI. Signal-based state, zoneless change detection, standalone components.
 
 Communicates with the backend over JSON-RPC 2.0 at `/rpc/v1`. Every page includes contextual help via a collapsible aside panel.
 
@@ -13,10 +13,13 @@ npm ci               # Install the whole workspace
 npm run build:deps   # Build the file: deps (@start9labs/start-core, patch-db client) — once after install
 npm run start:wrt    # Dev server (mock API by default)
 npm run build:wrt    # Production build → web/dist/startwrt/browser/
+npm run build:wrt:demo  # The demo bundle: mocks on, 404.html for a static host
 npm run check:wrt    # Type-check without emitting
 ```
 
 The dev server uses mock data by default (`config.json` → `useMocks: true`), so no router or running backend is needed.
+
+The same mock build is published to router-demo.start9.com on every `master` push that touches the UI (`.github/workflows/deploy-startwrt-demo.yml`).
 
 ## Feature Areas
 
@@ -31,5 +34,4 @@ The dev server uses mock data by default (`config.json` → `useMocks: true`), s
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — Frontend internals: project structure, patterns, styling, API layer
-- [CONTRIBUTING.md](CONTRIBUTING.md) — Development guide: setup, adding routes, Taiga UI lookup
-- [AGENTS.md](AGENTS.md) — AI-developer operating rules (`CLAUDE.md` is a one-line `@AGENTS.md` import)
+- [AGENTS.md](AGENTS.md) — Development setup and project-specific rules

@@ -18,6 +18,10 @@ export type DerivedAddressInfo = {
    */
   guaWan: Array<string>
   /**
+   * User override: enable these private IPs regardless of their mDNS address.
+   */
+  lanEnabled: Array<[string, number]>
+  /**
    * COMPUTED: NetServiceData::update — all possible addresses for this binding
    */
   available: Array<HostnameInfo>

@@ -1,4 +1,4 @@
-import { Component, inject, InjectionToken } from '@angular/core'
+import { Component, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { Router } from '@angular/router'
 import {
@@ -8,6 +8,7 @@ import {
   TaskService,
 } from '@start9labs/shared'
 import {
+  TUI_BREAKPOINT,
   TuiButton,
   TuiDataList,
   TuiDropdown,
@@ -26,23 +27,14 @@ import {
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreIconDirective } from './store-icon.directive'
 
-/** Optional hook for app-specific warnings when switching registries (e.g. the
- * OS UI's "untrusted registry" caveat). Apps provide it; the lib works without. */
-export interface MarketplaceRegistryAlerts {
-  alertRegistryChange(url: string): void
-}
-
-export const MARKETPLACE_REGISTRY_ALERTS =
-  new InjectionToken<MarketplaceRegistryAlerts>('Marketplace registry alerts')
-
 @Component({
   selector: 'marketplace-registry-select',
   template: `
     <button
       tuiButton
       tuiDropdown
-      tuiDropdownSided
       iconEnd="@tui.chevron-right"
+      [tuiDropdownSided]="breakpoint() !== 'mobile'"
       size="s"
       appearance="flat-grayscale"
       [(tuiDropdownOpen)]="open"
@@ -159,11 +151,9 @@ export class MarketplaceRegistrySelectComponent {
   private readonly dialog = inject(DialogService)
   private readonly marketplace = inject(AbstractMarketplaceService)
   private readonly router = inject(Router)
-  private readonly alerts = inject(MARKETPLACE_REGISTRY_ALERTS, {
-    optional: true,
-  })
 
   protected open = false
+  protected readonly breakpoint = inject(TUI_BREAKPOINT)
 
   // The resolved current registry — used to label an arbitrary (deep-linked)
   // registry that isn't in the saved list yet.
@@ -206,7 +196,6 @@ export class MarketplaceRegistrySelectComponent {
         queryParams: { registry: url },
         queryParamsHandling: 'merge',
       })
-      this.alerts?.alertRegistryChange(url)
     }, 'Changing registry')
   }
 

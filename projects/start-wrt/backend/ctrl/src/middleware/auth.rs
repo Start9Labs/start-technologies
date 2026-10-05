@@ -10,7 +10,6 @@ use http::HeaderValue;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{Context, Middleware, RpcRequest, RpcResponse};
 use serde::Deserialize;
-use startos::net::web_server::TcpMetadata;
 
 use crate::auth::{
     error_code, validate_local_auth_cookie, validate_session, HashSessionToken, LoginRes,
@@ -46,7 +45,6 @@ pub struct Metadata {
 pub struct SessionAuth {
     rate_limiter: Arc<SyncMutex<(usize, Instant)>>,
     is_login: bool,
-    is_loopback: bool,
     cookie: Option<HeaderValue>,
     set_cookie: Option<HeaderValue>,
     user_agent: Option<HeaderValue>,
@@ -57,7 +55,6 @@ impl SessionAuth {
         Self {
             rate_limiter: Arc::new(SyncMutex::new((0, Instant::now()))),
             is_login: false,
-            is_loopback: false,
             cookie: None,
             set_cookie: None,
             user_agent: None,
@@ -115,19 +112,6 @@ impl<C: Context> Middleware<C> for SessionAuth {
     async fn process_http_request(&mut self, _: &C, request: &mut Request) -> Result<(), Response> {
         self.cookie = request.headers().get(COOKIE).cloned();
         self.user_agent = request.headers().get(USER_AGENT).cloned();
-        self.is_loopback = request
-            .extensions()
-            .get::<TcpMetadata>()
-            .map_or(false, |m| {
-                let ip = match m.peer_addr.ip() {
-                    std::net::IpAddr::V6(v6) => v6
-                        .to_ipv4_mapped()
-                        .map(std::net::IpAddr::V4)
-                        .unwrap_or(std::net::IpAddr::V6(v6)),
-                    other => other,
-                };
-                ip.is_loopback()
-            });
         Ok(())
     }
 
@@ -138,10 +122,7 @@ impl<C: Context> Middleware<C> for SessionAuth {
         request: &mut RpcRequest,
     ) -> Result<(), RpcResponse> {
         let result: Result<(), Error> = async {
-            // Bypass auth for: no_auth endpoints, loopback requests, or valid local auth cookie.
-            // The local cookie is written by the daemon at startup to /run/startwrt/rpc.authcookie.
-            // Any process that can read that file (i.e. running on the router via SSH) is trusted.
-            if metadata.no_auth || self.is_loopback {
+            if metadata.no_auth {
                 return Ok(());
             }
             if let Some(ref local) = self.extract_local_cookie() {

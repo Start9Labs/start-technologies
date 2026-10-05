@@ -9,9 +9,18 @@ import {
   signal,
   TemplateRef,
 } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
 import { FormsModule } from '@angular/forms'
 import { WA_IS_MOBILE } from '@ng-web-apis/platform'
-import { i18nPipe, LocalizePipe } from '@start9labs/shared'
+import {
+  i18nKey,
+  i18nPipe,
+  knownRegistries,
+  LocalizePipe,
+  MarkdownPipe,
+  SafeLinksDirective,
+  sameUrl,
+} from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import {
   TuiButton,
@@ -19,11 +28,13 @@ import {
   TuiCell,
   TuiDataListComponent,
   TuiInput,
+  TuiNotification,
   TuiOption,
   TuiOptionWithValue,
   TuiScrollbar,
   TuiTitle,
 } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import {
   TuiAvatar,
   TuiButtonSelect,
@@ -33,6 +44,7 @@ import {
 import { TuiCardLarge, TuiHeader, TuiNavigation } from '@taiga-ui/layout'
 
 import { filterPackages } from '../pipes/filter-packages.pipe'
+import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreDataWithUrl } from '../types'
 
 const ICONS: Record<string, string> = {
@@ -91,62 +103,77 @@ const ICONS: Record<string, string> = {
       </footer>
     </aside>
     <div class="content">
-      <header tuiHeader="h4">
-        <hgroup tuiTitle>
-          <h2>
-            @if (registry()) {
-              {{ name() | localize }}
-            }
-          </h2>
-        </hgroup>
-        <aside tuiAccessories>
-          <button
-            appearance="secondary-grayscale"
-            tuiButton
-            tuiButtonSelect
-            tuiChevron
-            [(ngModel)]="sortLabel"
-          >
-            {{ sortLabel }}
-            <tui-data-list *tuiDropdown>
-              @for (key of sortKeys; track key) {
-                <button tuiOption [value]="getLabel(key)">
-                  {{ getLabel(key) }}
-                </button>
-              }
-            </tui-data-list>
-          </button>
-        </aside>
-      </header>
       <tui-scrollbar>
-        <section>
-          @if (registry()) {
-            @for ($implicit of packages(); track $index) {
-              <ng-container
-                *ngTemplateOutlet="template(); context: { $implicit }"
-              />
-            }
-          } @else {
-            @for (_ of '-'.repeat(6); track $index) {
-              <div tuiCardLarge="compact" [tuiSkeleton]="true">
-                <span tuiCell>
-                  <span tuiAvatar></span>
-                  <span tuiTitle>
-                    Loading
-                    <span tuiSubtitle>Loading</span>
-                  </span>
-                </span>
-                <span tuiDescription>Loading</span>
-              </div>
-            }
+        <div class="scroll">
+          @if (current()?.info?.description; as description) {
+            <div
+              tuiNotification
+              appearance="info"
+              class="g-markdown"
+              safeLinks
+              [innerHTML]="description | localize | markdown | dompurify"
+            ></div>
           }
-        </section>
+          @if (warning(); as warning) {
+            <div tuiNotification appearance="warning">{{ warning | i18n }}</div>
+          }
+          <header tuiHeader="h4">
+            <hgroup tuiTitle>
+              <h2>
+                @if (current()) {
+                  {{ name() | localize }}
+                }
+              </h2>
+            </hgroup>
+            <aside tuiAccessories>
+              <button
+                appearance="secondary-grayscale"
+                tuiButton
+                tuiButtonSelect
+                tuiChevron
+                [(ngModel)]="sortLabel"
+              >
+                {{ sortLabel }}
+                <tui-data-list *tuiDropdown>
+                  @for (key of sortKeys; track key) {
+                    <button tuiOption [value]="getLabel(key)">
+                      {{ getLabel(key) }}
+                    </button>
+                  }
+                </tui-data-list>
+              </button>
+            </aside>
+          </header>
+          <section>
+            @if (current()) {
+              @for ($implicit of packages(); track $index) {
+                <ng-container
+                  *ngTemplateOutlet="template(); context: { $implicit }"
+                />
+              }
+            } @else {
+              @for (_ of '-'.repeat(6); track $index) {
+                <div tuiCardLarge="compact" [tuiSkeleton]="true">
+                  <span tuiCell>
+                    <span tuiAvatar></span>
+                    <span tuiTitle>
+                      Loading
+                      <span tuiSubtitle>Loading</span>
+                    </span>
+                  </span>
+                  <span tuiDescription>Loading</span>
+                </div>
+              }
+            }
+          </section>
+        </div>
       </tui-scrollbar>
     </div>
   `,
   styles: `
     :host {
       --tui-theme-color: var(--tui-background-elevation-1);
+      --card-min: 20rem;
 
       display: flex;
       width: 100%;
@@ -182,25 +209,42 @@ const ICONS: Record<string, string> = {
       overflow: hidden;
     }
 
-    [tuiHeader] {
-      white-space: nowrap;
-      padding: 1rem 2rem 0;
+    [tuiNotification] {
+      margin: 1rem 2rem 0;
     }
 
-    tui-scrollbar {
-      padding-block-start: 1rem;
-      mask: linear-gradient(transparent, black 1rem);
+    .scroll {
+      min-inline-size: calc(var(--card-min) + 2 * 2rem);
+    }
+
+    [tuiHeader] {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      white-space: nowrap;
+      padding: 1rem 2rem;
+      background: var(--tui-background-base);
     }
 
     section {
       padding: 0 2rem 1rem;
       display: grid;
       gap: 1rem;
-      grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
     }
 
-    :host-context(tui-root._mobile) :is([tuiHeader], section) {
-      padding-inline: 1rem;
+    :host-context(tui-root._mobile) {
+      .scroll {
+        min-inline-size: calc(var(--card-min) + 2 * 1rem);
+      }
+
+      :is([tuiHeader], section) {
+        padding-inline: 1rem;
+      }
+
+      [tuiNotification] {
+        margin-inline: 1rem;
+      }
     }
   `,
   providers: [
@@ -209,6 +253,7 @@ const ICONS: Record<string, string> = {
   imports: [
     TuiNavigation,
     TuiInput,
+    TuiNotification,
     TuiSkeleton,
     TuiButton,
     TuiButtonSelect,
@@ -225,7 +270,11 @@ const ICONS: Record<string, string> = {
     NgTemplateOutlet,
     KeyValuePipe,
     LocalizePipe,
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
     FormsModule,
+    i18nPipe,
   ],
 })
 export class MarketplaceComponent {
@@ -240,14 +289,32 @@ export class MarketplaceComponent {
   protected readonly icons = ICONS
   protected readonly asIs = () => 0
   protected readonly open = signal(!inject(WA_IS_MOBILE))
+  private readonly selected = toSignal(
+    inject(AbstractMarketplaceService).currentRegistryUrl$,
+  )
+
+  protected readonly current = computed(() => {
+    const registry = this.registry()
+
+    return registry && sameUrl(registry.url, this.selected())
+      ? registry
+      : undefined
+  })
+
+  protected readonly warning = computed(() => {
+    const url = this.selected()
+
+    return url ? registryWarning(url) : null
+  })
+
   // Only categories that have at least one package are shown; 'all' is the
   // always-present pseudo-category injected by each app's service.
   protected readonly categories = computed(() => {
-    const info = this.registry()?.info?.categories
+    const info = this.current()?.info?.categories
     if (!info) return undefined
 
     const used = new Set(
-      (this.registry()?.packages || []).flatMap(p => p.categories || []),
+      (this.current()?.packages || []).flatMap(p => p.categories || []),
     )
 
     return Object.fromEntries(
@@ -265,12 +332,12 @@ export class MarketplaceComponent {
 
   protected readonly name = computed(
     (c = this.effectiveCategory()) =>
-      this.registry()?.info?.categories?.[c]?.name || c,
+      this.current()?.info?.categories?.[c]?.name || c,
   )
 
   protected readonly packages = computed(() =>
     filterPackages(
-      this.registry()?.packages || [],
+      this.current()?.packages || [],
       this.query(),
       this.effectiveCategory(),
       this.sort(),
@@ -303,4 +370,27 @@ export class MarketplaceComponent {
       sort === 'a' ? 'Alphabetical' : 'Recently updated',
     )
   }
+}
+
+function registryWarning(url: string): i18nKey | null {
+  const { start9, community, start9Beta, communityBeta, start9Alpha } =
+    knownRegistries
+
+  if (sameUrl(url, start9) || sameUrl(url, community)) {
+    return null
+  }
+
+  if (sameUrl(url, communityBeta)) {
+    return 'Services from this registry are maintained by the Start9 community and are undergoing beta testing. Bugs are expected. Install at your own risk.'
+  }
+
+  if (sameUrl(url, start9Beta)) {
+    return 'Services from this registry are undergoing beta testing. Bugs are expected. Install at your own risk.'
+  }
+
+  if (sameUrl(url, start9Alpha)) {
+    return 'Services from this registry are undergoing alpha testing. Bugs are expected and could damage your system. Install at your own risk.'
+  }
+
+  return 'This is a Custom Registry. Start9 cannot verify its services, and they could damage your system. Install at your own risk.'
 }

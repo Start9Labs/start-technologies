@@ -30,6 +30,7 @@ export abstract class ApiService {
   abstract wifiGet(): Promise<WifiConfig>
   abstract wifiSet(params: WifiConfig): Promise<WifiSetResult>
   abstract wifiGeneratePassword(): Promise<string>
+  abstract wifiRegulatory(): Promise<WifiRegulatory>
   abstract wifiBlackoutGet(): Promise<ScheduleWindow[]>
   abstract wifiBlackoutSet(params: ScheduleWindow[]): Promise<null>
   abstract profilesList(): Promise<ProfileId[]>
@@ -79,7 +80,7 @@ export abstract class ApiService {
   abstract publishedPortsSet(
     params: PublishedPortsSetRequest,
   ): Promise<PublishedPortsSetResult>
-  abstract publishedPortsAutoList(): Promise<AutoForwardFromApi[]>
+  abstract publishedPortsAutoList(): Promise<AutomaticPortUseFromApi[]>
   abstract vpnClientList(): Promise<OutboundVpn[]>
   abstract vpnClientCreate(
     params: OutboundVpnCreateRequest,
@@ -362,6 +363,8 @@ export interface WifiProfileId {
 export interface WifiConfig {
   ssid: string
   broadcastSeparately: boolean
+  // ISO 3166-1 alpha-2; null leaves the radios on the world domain.
+  country: string | null
   radios: Record<string, WifiRadio>
   passwords: WifiPassword[]
   // When true, authorize deleting the published ports listed in a prior
@@ -372,6 +375,12 @@ export interface WifiConfig {
 export interface WifiSetResult {
   // Non-empty (and nothing applied) when confirmation is required; empty once applied.
   pendingPublishedPortDeletions: AffectedPublishedPort[]
+}
+
+export interface WifiRegulatory {
+  countries: string[]
+  // Channels an access point may use under the current country, by band ('2g', '5g').
+  channels: Record<string, number[]>
 }
 
 export interface ScheduleWindow {
@@ -474,6 +483,8 @@ export interface SetupFlashEvent {
 export interface DeviceFromApi {
   mac: string | null
   name: string
+  /** The name assigned in the router; null when `name` is resolved from elsewhere. */
+  custom_name: string | null
   hostname: string | null
   status: 'online' | 'offline'
   connection: string | null
@@ -489,7 +500,8 @@ export interface DeviceFromApi {
 
 export interface DeviceUpdateReq {
   mac: string
-  name: string
+  /** Omitted leaves the assigned name untouched; empty clears it. */
+  name?: string
   ipv4_static: boolean
   ipv4: string
 }
@@ -636,8 +648,7 @@ export interface PublishedPortFromApi {
   ipv6: boolean
   ipv4_public_port: string | null
   source: string
-  /** The user confirmed capturing a port the router answers on itself. */
-  override_router_ports: boolean
+  override_wan_ports: boolean
   status: PublishedPortStatusValue
   status_reason: string | null
   device_name: string | null
@@ -656,51 +667,43 @@ export interface PublishedPortInputForApi {
   ipv6: boolean
   ipv4_public_port?: string | null
   source: string
-  /**
-   * Confirms forwarding a port the router itself answers on from the WAN.
-   * Without it, a colliding port makes `set` report the collision and apply
-   * nothing (see PublishedPortsSetResult).
-   */
-  override_router_ports: boolean
+  /** Confirms an enabled IPv4 WAN collision. */
+  override_wan_ports: boolean
 }
 
 export type PublishedPortsSetRequest = {
   ports: PublishedPortInputForApi[]
 }
 
-/**
- * An enabled IPv4 forward whose external range captures a port the router
- * itself answers on from the WAN (remote access 80/443/22, the VPN server's
- * listen port). DNAT precedes the routing decision, so saving it would divert
- * those router services to the device — the user must confirm by re-saving
- * with `override_router_ports` on the named port.
- */
-export interface RouterPortCollision {
+export interface WanPortCollision {
   id: string
   label: string
-  /** The colliding router-service port spec(s), e.g. ["443", "22"]. */
-  router_ports: string[]
+  router_service_ports: string[]
+  hostname_route_ports: SniPortUse[]
 }
 
-// A non-empty collision list means nothing was applied — confirm and re-save.
+export interface SniPortUse {
+  ports: string
+  hostnames: string[]
+  devices: string[]
+}
+
 export type PublishedPortsSetResult = {
-  pending_router_port_collisions: RouterPortCollision[]
+  pending_wan_port_collisions: WanPortCollision[]
 }
 
-/**
- * A forward created automatically by an authorized LAN device via PCP or UPnP.
- * Read-only: the device renews or withdraws it; unrenewed forwards expire.
- */
-export interface AutoForwardFromApi {
+export type AutomaticPortUseKind = 'PCP' | 'UPnP' | 'SNI'
+
+export interface AutomaticPortUseFromApi {
   id: string
-  /** Which protocol created it: "PCP" or "UPnP". */
-  label: string
+  kind: AutomaticPortUseKind
   device_mac: string
   device_name: string | null
   internal_ip: string | null
   ports: string
   public_ports: string
   expires_secs: number | null
+  hostname: string | null
 }
 
 // Outbound VPN (WireGuard Client) types
@@ -714,6 +717,8 @@ export interface OutboundVpn {
   supports_ipv6: boolean
   /** Interface MTU, or null to inherit the kernel default (~1420). */
   mtu: number | null
+  /** The server is named by hostname; only 'Internet' is a valid target. */
+  hostname_endpoint: boolean
 }
 
 export interface OutboundVpnCreateRequest {
@@ -730,7 +735,7 @@ export interface OutboundVpnUpdateRequest {
   id: string
   label: string
   target: string
-  /** Desired MTU; null clears it (inherit default). Always sent by the form. */
+  /** Desired MTU; null restores the default: the chain MTU for a chained VPN, else the kernel's (~1420). Always sent by the form. */
   mtu: number | null
 }
 

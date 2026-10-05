@@ -1,7 +1,44 @@
-import { DataModel } from 'src/app/services/patch-db/data-model'
+import { T } from '@start9labs/start-core'
+import {
+  DataModel,
+  InstalledState,
+  PackageDataEntry,
+} from 'src/app/services/patch-db/data-model'
 import { knownAuthorities } from 'src/app/utils/acme'
 import { Mock } from './api.fixures'
 const version = require('../../../../../../../../package.json').version
+
+function mockService(
+  id: string,
+  title: string,
+  pkgVersion: string,
+  statusInfo: T.StatusInfo,
+): PackageDataEntry<InstalledState> {
+  return {
+    stateInfo: {
+      state: 'installed',
+      manifest: {
+        ...Mock.MockManifestBitcoind,
+        id,
+        title,
+        version: pkgVersion,
+      },
+    },
+    s9pk: `/media/startos/data/package-data/archive/installed/${id}.s9pk`,
+    icon: '/assets/img/service-icons/fallback.png',
+    lastBackup: null,
+    statusInfo,
+    actions: {},
+    currentDependencies: {},
+    hosts: {},
+    storeExposedDependents: [],
+    outboundGateway: null,
+    registry: 'https://registry.start9.com/',
+    developerKey: 'developer-key',
+    plugin: { url: null },
+    tasks: {},
+  }
+}
 
 export const mockPatchData: DataModel = {
   ui: {
@@ -12,6 +49,7 @@ export const mockPatchData: DataModel = {
     startosRegistry: 'https://registry.start9.com/',
     snakeHighScore: 0,
     hiddenUpdates: {},
+    servicesView: { desktopLayout: 'list', asc: true },
   },
   serverInfo: {
     id: 'abcdefgh',
@@ -42,6 +80,7 @@ export const mockPatchData: DataModel = {
               enabled: [],
               disabled: [],
               guaWan: [],
+              lanEnabled: [],
               available: [
                 {
                   ssl: true,
@@ -255,6 +294,7 @@ export const mockPatchData: DataModel = {
     unreadNotificationCount: 5,
     packageVersionCompat: '>=0.3.0 <=0.3.6',
     postInitMigrationTodos: {},
+    latestMigrationRevision: 0,
     statusInfo: {
       // currentBackup: null,
       updateProgress: null,
@@ -269,8 +309,9 @@ export const mockPatchData: DataModel = {
     ntpSynced: false,
     smtp: null,
     echoipUrls: ['https://ipconfig.me', 'https://ifconfig.co'],
-    zram: true,
+    zram: false,
     governor: 'performance',
+    epp: 'balance_power',
     ram: 8 * 1024 * 1024 * 1024,
     devices: [],
     kiosk: true,
@@ -482,6 +523,36 @@ export const mockPatchData: DataModel = {
           hasInput: false,
           group: null,
         },
+        multiline: {
+          name: 'Show Report',
+          description:
+            'Returns a multi-line value with a copy button and a download',
+          warning: null,
+          visibility: 'enabled',
+          allowedStatuses: 'any',
+          hasInput: false,
+          group: null,
+        },
+        'multiline-secret': {
+          name: 'Show Device Config',
+          description:
+            'Returns a masked multi-line value that can also be shown as a QR code',
+          warning: null,
+          visibility: 'enabled',
+          allowedStatuses: 'any',
+          hasInput: false,
+          group: null,
+        },
+        'multiline-group': {
+          name: 'Show Mixed Group',
+          description:
+            'Returns a group whose members mix single-line and multi-line values',
+          warning: null,
+          visibility: 'enabled',
+          allowedStatuses: 'any',
+          hasInput: false,
+          group: null,
+        },
         test: {
           name: 'Do Another Thing',
           description:
@@ -507,6 +578,7 @@ export const mockPatchData: DataModel = {
                 enabled: ['203.0.113.45:42443', '[2001:db8:abcd::a3b:2]:1234'],
                 disabled: [],
                 guaWan: ['[2001:db8:abcd::a3b:2]:1234'],
+                lanEnabled: [],
                 available: [
                   {
                     ssl: true,
@@ -625,6 +697,7 @@ export const mockPatchData: DataModel = {
                   description:
                     'A launchable web app for you to interact with your Bitcoin node',
                   type: 'ui',
+                  preferredLauncherAddress: 'https://my-bitcoin.home:42443',
                   addressInfo: {
                     username: null,
                     hostId: 'abcdefg',
@@ -681,6 +754,7 @@ export const mockPatchData: DataModel = {
                 enabled: ['203.0.113.45:49152'],
                 disabled: [],
                 guaWan: [],
+                lanEnabled: [],
                 available: [
                   {
                     ssl: false,
@@ -779,6 +853,7 @@ export const mockPatchData: DataModel = {
                 enabled: [],
                 disabled: [],
                 guaWan: [],
+                lanEnabled: [],
                 available: [
                   {
                     ssl: false,
@@ -855,6 +930,7 @@ export const mockPatchData: DataModel = {
                 enabled: [],
                 disabled: [],
                 guaWan: [],
+                lanEnabled: [],
                 available: [],
               },
               options: {
@@ -971,5 +1047,54 @@ export const mockPatchData: DataModel = {
       plugin: { url: { tableAction: 'create-onion-service' } },
       tasks: {},
     },
+    nextcloud: mockService('nextcloud', 'Nextcloud', '30.0.2:0', {
+      desired: { main: 'running' },
+      error: null,
+      health: {
+        web: { name: 'Web Interface', result: 'success', message: null },
+      },
+      started: new Date(Date.now() - 86400000).toISOString(),
+    }),
+    vaultwarden: mockService('vaultwarden', 'Vaultwarden', '1.32.7:0', {
+      desired: { main: 'running' },
+      error: null,
+      health: {
+        web: { name: 'Web Vault', result: 'loading', message: 'Starting up' },
+      },
+      started: new Date(Date.now() - 30000).toISOString(),
+    }),
+    jellyfin: mockService('jellyfin', 'Jellyfin', '10.10.3:0', {
+      desired: { main: 'stopped' },
+      error: null,
+      health: {},
+      started: null,
+    }),
+    electrs: mockService('electrs', 'Electrs', '0.10.5:0', {
+      desired: { main: 'running' },
+      error: null,
+      health: {
+        rpc: {
+          name: 'RPC',
+          result: 'failure',
+          message: 'Cannot reach bitcoind',
+        },
+      },
+      started: new Date(Date.now() - 3600000).toISOString(),
+    }),
+    'home-assistant': mockService(
+      'home-assistant',
+      'Home Assistant',
+      '2024.11.3:0',
+      {
+        desired: { main: 'running' },
+        error: {
+          details: 'Container exited unexpectedly',
+          debug: 'exit code 137',
+          info: null,
+        },
+        health: {},
+        started: null,
+      },
+    ),
   },
 }

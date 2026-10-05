@@ -29,7 +29,7 @@ Back up your server's data to a physical drive or a network folder.
 
 1. The backup targets list shows the free space available on each drive and network folder, so you can confirm your backup will fit before you start.
 
-1. Backups taken from a specific system architecture (x86, ARM, RISC-V) are backed up for just that architecture. If restored to another architecture, they will likely need to be reinstalled to run efficiently.
+1. A backup keeps each service image for the server's architecture (x86, ARM, or RISC-V). On another architecture, StartOS restores that image under emulation. Reinstall or update the service from the marketplace after the restore so StartOS can select its package for the new server architecture, including a native image where available.
 
 1. The backup format changed. New backups are written to a `StartOSBackupsV2` folder on the target, replacing the older `StartOSBackups` (V1) format. StartOS helps you clean up the obsolete V1 data:
    - When you select a target that still holds a V1 backup for this server, StartOS warns you before backing up and shows how much free space remains on the target (see below).
@@ -46,6 +46,7 @@ Even with proper backups the risk of data corruption is always non-zero. Therefo
 - High quality SSDs should be favored over HDDs as a backup target.
 - Backup to multiple targets.
 - If backing up to multiple targets make sure all backups are up to date.
+- Set up [continuous backups](/bitcoin-guides/continuous-backups.html) where a service offers them. A StartOS backup holds LND's channel backup only as of the moment it was taken, and leaves Bark Wallet's database out entirely; a continuous backup keeps a current, encrypted copy on storage you choose.
 
 ## Physical Drive
 
@@ -55,6 +56,16 @@ Even with proper backups the risk of data corruption is always non-zero. Therefo
 > Backing up to USB thumb drives or SD card media is not recommended unless you are using high-endurance, high-quality storage. Low-quality flash memory is prone to corruption and failure over time.
 >
 > If you are using a Raspberry Pi, backup drive _must_ be self-powered, or be connected via a powered USB hub, to prevent possible data corruption.
+
+1. Plug the drive into your server.
+
+1. In StartOS, go to `System > Create Backup`. The drive appears under `Physical Drives`; if it doesn't, click "Refresh".
+
+1. Click the drive.
+
+1. Select the services to back up, or click "Toggle all", then click "Done".
+
+1. Enter your master password.
 
 ## Network Folder
 
@@ -350,7 +361,7 @@ A network folder backup sends your encrypted backup over the LAN to a shared fol
 
 1. In StartOS, go to `System > Create Backup`.
 
-1. Click "Open New".
+1. Under `Network Folders`, click "New".
 
 1. Complete the form:
 
@@ -435,3 +446,11 @@ A network folder backup sends your encrypted backup over the LAN to a shared fol
 
 > [!WARNING]
 > If you receive `Filesystem I/O Error mount error(13): Permission denied`, ensure you have entered the correct values. The hostname can be particularly tricky.
+
+### Step 3. Back Up
+
+1. Click the folder under `Network Folders`.
+
+1. Select the services to back up, or click "Toggle all", then click "Done".
+
+1. Enter your master password.

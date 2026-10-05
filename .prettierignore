@@ -2,6 +2,7 @@
 **/dist/
 **/.angular/
 **/out-tsc/
+**/coverage/
 **/node_modules/
 **/target/
 

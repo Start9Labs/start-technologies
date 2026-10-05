@@ -27,8 +27,8 @@ To set up DDNS:
 1. Click "Save".
 
 > [!NOTE]
-> For Cloudflare, the DNS record must already exist in your zone — StartWRT updates it but does not create it, so add the A record in the Cloudflare dashboard first. The API token needs **Zone → Read** and **DNS → Edit** permissions for the zone.
+> For Cloudflare, the DNS record must already exist in your zone — StartWRT updates it but does not create it, so add the A record in the Cloudflare dashboard first. The API token needs **Zone → Read** and **DNS → Edit** permissions for the zone. Proxied (orange-cloud) records work: the router reads the registered address through the Cloudflare API rather than through DNS, which would only ever show the proxy's address.
 
 ## Checking Your DDNS Status
 
-The Dynamic DNS tab on the WAN Settings page shows the current status of your dynamic DNS configuration: whether it is enabled, the provider, and the hostname.
+The Dynamic DNS tab on the WAN Settings page shows the current status of your dynamic DNS configuration: whether it is enabled, the provider, and the hostname. The router updates the record whenever the WAN connection comes up — after a modem reboot or a PPPoE reconnect — and on a periodic check in between, so a changed address is registered within minutes.

@@ -1,22 +1,27 @@
-name: Sync docs to live-docs on tag
+name: Sync a release onto live-docs
 
-# Cutting `<project>/v<version>` is what makes that product's documentation
-# current, so the tag is what publishes it: this copies the tagged tree's book
-# (and the shared start-docs infrastructure it renders through) onto live-docs,
-# which docs.start9.com serves. The push then triggers docs-deploy.yml on its
-# own — no explicit dispatch needed, because an App installation token raises
-# real events.
+# live-docs is what each product has published — the branch docs.start9.com
+# serves, and the branch a packaging workspace checks out. Cutting
+# `<project>/v<version>` is what makes a product current, so the tag is what
+# advances it: this takes the tagged tree whole, then puts every *other*
+# product back on the release it is on. A tag therefore speaks for its own
+# project, the shared libraries beneath it, and the repo root — and for nothing
+# another product owns. The push then triggers docs-deploy.yml on its own — no
+# explicit dispatch needed, because an App installation token raises real
+# events.
 #
-# Projects with no docs/ subtree (start-cli, start-registry) are skipped whole —
-# there is no book to publish, so there is no reason to move site infra either.
-#
-# projects/start-docs/versions.conf rides along with the rest of the infra, so
+# The shared site tree (projects/start-docs) rides along only with a product
+# that ships a book: a bookless release (start-cli, start-registry) has nothing
+# to redeploy, and docs-deploy.yml's paths filter is what keeps it from firing.
+# projects/start-docs/versions.conf rides along with the rest of that tree, so
 # the version each book is published under is whatever the tagged tree said. It
 # is a deliberate, hand-maintained file: set it in master before you tag.
 #
-# Two guards protect the shared tree: the tagged commit must be an ancestor of
-# master, and a tag that predates the infrastructure already published syncs its
-# book alone. Between them, a backfilled or re-cut tag cannot roll the site back.
+# Two guards protect live-docs: the tagged commit must be an ancestor of master,
+# and nothing moves backwards. A product's own tree is judged against that
+# product's earlier releases and the shared trees against every product's, so a
+# deb release that tags the older commit alpha built still advances its own
+# project, while a backfilled or re-cut tag cannot roll anything back.
 on:
   push:
     tags: ['*/v*']
@@ -30,7 +35,7 @@ concurrency:
 
 jobs:
   sync:
-    name: Sync ${{ github.ref_name }} docs onto live-docs
+    name: Sync ${{ github.ref_name }} onto live-docs
     runs-on: ubuntu-latest
     # live-docs is PR-protected with no bypass for github-actions[bot], so this
     # needs the docs bot App, which IS a bypass actor. Its private key is an
@@ -52,7 +57,7 @@ jobs:
           fetch-tags: true
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Copy the tagged docs onto live-docs
+      - name: Copy the tagged tree onto live-docs
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -62,9 +67,9 @@ jobs:
           SRC=$(git rev-list -n1 "$TAG")
           echo "Tag $TAG -> project $PROJECT, commit $SRC"
 
-          if ! git cat-file -e "$TAG:projects/$PROJECT/docs" 2>/dev/null; then
-            echo "::notice::$PROJECT ships no docs/ book — nothing to publish."
-            exit 0
+          HAS_BOOK=0
+          if git cat-file -e "$TAG:projects/$PROJECT/docs" 2>/dev/null; then
+            HAS_BOOK=1
           fi
 
           git fetch --no-tags origin master
@@ -76,44 +81,85 @@ jobs:
             exit 1
           fi
 
-          # The shared projects/start-docs tree (theme, build.sh, versions.conf,
-          # deploy infra) is not versioned per product, so a backfilled or re-cut
-          # tag from an old commit would roll the whole site back to that commit's
-          # infrastructure. Each sync records the commit it published from; if
-          # this tag predates that, publish the book alone and leave the shared
-          # tree where it is. Ancestry, not dates — tag order is not chronology.
-          # Walk back to the newest commit that actually carries a trailer, not
-          # just the newest commit touching the tree: a hand PR to live-docs
-          # fixing the shared infrastructure has no trailer, and reading only the
-          # tip would blank the watermark and re-open the rollback it guards
-          # against. (Necessarily inert until the first sync writes one.)
-          # Captured whole, then sliced in the shell, rather than piped through
-          # `head -n1`: head closes the pipe after one line, and once enough
-          # trailers exist for sed to flush a second time it takes SIGPIPE and
-          # `pipefail` aborts the sync. That threshold is passed at ~120 published
-          # tags, so the pipe form works until it suddenly doesn't.
-          TRAILERS=$(git log --format=%B -- projects/start-docs | sed -n 's/^Source-Commit: *//p')
-          PREV=${TRAILERS%%$'\n'*}
-          SYNC_INFRA=1
-          if [ -n "$PREV" ] && git cat-file -e "${PREV}^{commit}" 2>/dev/null \
-            && [ "$PREV" != "$SRC" ] && git merge-base --is-ancestor "$SRC" "$PREV"; then
-            SYNC_INFRA=0
-            echo "::warning::$TAG ($SRC) predates the published docs infrastructure ($PREV) — publishing $PROJECT's book only, leaving projects/start-docs untouched."
-          fi
+          # Every sync records the commit it published from as a Source-Commit
+          # trailer. A tag is behind a tree when its commit is a proper ancestor
+          # of any commit that tree was already synced from — any, not the
+          # newest, because releases land out of ancestry order: a deb release
+          # tags the commit alpha built, which can be older than a tag cut
+          # before it. Ancestry, not dates — tag order is not chronology. Hand
+          # PRs to live-docs carry no trailer and drop out of the scan.
+          # (Necessarily inert until the first sync writes one.)
+          # Captured whole rather than piped through `head -n1`: head closes the
+          # pipe after one line, and once enough trailers exist for sed to flush
+          # a second time it takes SIGPIPE and `pipefail` aborts the sync.
+          behind() {
+            local synced
+            for synced in $(git log --format=%B "$@" | sed -n 's/^Source-Commit: *//p'); do
+              if [ "$synced" != "$SRC" ] && git cat-file -e "${synced}^{commit}" 2>/dev/null \
+                && git merge-base --is-ancestor "$SRC" "$synced"; then
+                echo "$synced"
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          # Two watermarks. Only a product's own tags write projects/$PROJECT, so
+          # that tree is behind only when an older release of the same product is
+          # already on live-docs. shared-libs, the repo root and the site tree are
+          # written by every product's tag, so they are behind whenever any
+          # release synced from a newer commit — and then they stay where that
+          # release put them.
+          OWN_BEHIND=$(behind -- "projects/$PROJECT" || true)
+          ALL_BEHIND=$(behind || true)
 
           git config user.name "start9-docs-bot[bot]"
           git config user.email "start9-docs-bot[bot]@users.noreply.github.com"
 
-          # Delete then restore from the tag, so files the release removed are
-          # actually gone rather than left behind by a copy-over.
-          rm -rf "projects/$PROJECT/docs"
-          git checkout "$TAG" -- "projects/$PROJECT/docs"
-          if [ "$SYNC_INFRA" = 1 ]; then
-            rm -rf projects/start-docs
-            git checkout "$TAG" -- projects/start-docs
+          # Put a path back to what live-docs has: gone if live-docs lacks it.
+          hold() {
+            git rm -rfq --ignore-unmatch -- "$1"
+            if git cat-file -e "HEAD:$1" 2>/dev/null; then
+              git checkout HEAD -- "$1"
+            fi
+          }
+
+          if [ -n "$OWN_BEHIND" ]; then
+            if [ "$HAS_BOOK" = 0 ]; then
+              echo "::notice::$TAG ($SRC) predates $PROJECT's published release ($OWN_BEHIND) and ships no docs/ book — nothing to publish."
+              exit 0
+            fi
+            echo "::warning::$TAG ($SRC) predates $PROJECT's published release ($OWN_BEHIND) — publishing its book alone, leaving the rest of live-docs untouched."
+            # Remove then restore from the tag, so files the release removed are
+            # actually gone rather than left behind by a copy-over.
+            git rm -rfq --ignore-unmatch -- "projects/$PROJECT/docs"
+            git checkout "$TAG" -- "projects/$PROJECT/docs"
+          else
+            if [ -n "$ALL_BEHIND" ]; then
+              echo "::warning::$TAG ($SRC) predates the tree already published ($ALL_BEHIND) — advancing projects/$PROJECT alone, leaving the shared trees where the newer release put them."
+            fi
+            # read-tree, not a copy-over: it deletes what the release removed.
+            # HEAD stays on live-docs, so hold() can put back what this tag does
+            # not speak for.
+            git read-tree -u --reset "$TAG"
+            for p in $( { git ls-tree --name-only HEAD; git ls-tree --name-only "$TAG"; } | sort -u ); do
+              if [ "$p" != projects ]; then
+                if [ -n "$ALL_BEHIND" ]; then hold "$p"; fi
+                continue
+              fi
+              for d in $( { git ls-tree --name-only HEAD projects/
+                            git ls-tree --name-only "$TAG" projects/; } | sort -u ); do
+                case "$d" in
+                  "projects/$PROJECT") ;;
+                  projects/start-docs)
+                    if [ "$HAS_BOOK" = 0 ] || [ -n "$ALL_BEHIND" ]; then hold "$d"; fi ;;
+                  *) hold "$d" ;;
+                esac
+              done
+            done
           fi
 
-          git add -A "projects/$PROJECT/docs" projects/start-docs
+          git add -A
           if git diff --cached --quiet; then
             echo "::notice::live-docs already matches $TAG."
             exit 0
@@ -124,6 +170,6 @@ jobs:
           # rule), so docs-backport.yml will see it. The content came from master
           # already, so it must not be bounced back. Source-Commit is what the
           # next run's rollback guard reads.
-          git commit -m "docs: publish $PROJECT docs from $TAG [skip-backport]" \
+          git commit -m "chore: publish $PROJECT from $TAG [skip-backport]" \
                      -m "Source-Commit: $SRC"
           git push origin HEAD:live-docs

@@ -5,7 +5,85 @@ All notable changes to StartTunnel are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.2]
+## [1.3.1]
+
+### Security
+
+- **Update the web interface and shared dependencies with security fixes**, including Angular and DOMPurify, and replace the unmaintained YAML parser.
+
+### Fixed
+
+- **Devices can reach their own services through published SNI hostnames**,
+  including a shared port's fallback.
+
+- **Small VPSes have room for connection-heavy services such as Tor relays.**
+  StartTunnel sizes connection tracking at 256 entries per MiB of host RAM,
+  preserving higher host settings. Hosts that restrict these kernel settings
+  keep their available capacity.
+
+- **The Debian package installs the networking utilities needed on minimal
+  images.** `iproute2` and `procps` are explicit dependencies.
+
+- **Forwarded IPv4 UDP ports retain their outbound mapping.** UDP traffic a
+  device starts from a forwarded port leaves through the forward's public
+  interface with its public address and port.
+
+- **SNI hostname routes work on IPv4-only tunnel hosts.** The reply path for
+  IPv4 routes is set up when IPv6 is disabled on the host.
+
+- **A port forward takes effect for peers that were already sending to it.**
+  A peer that sent to a port while it had no forward kept reaching StartTunnel
+  itself instead of the forward's target.
+
+- **You can sign in to the StartTunnel UI at any loopback address**, such as
+  `http://127.0.0.1:8080` through an SSH port forward.
+
+- **Published-port controls remain authoritative during device refreshes.** A
+  device renewing or deleting an automatic mapping leaves manual mappings
+  intact, and a disabled mapping stays disabled while its lease is renewed.
+  This applies to IPv4 forwards, SNI routes and fallbacks, and IPv6 pinholes.
+
+- **A device can repoint an automatic mapping it already holds.** A request for
+  the same external port or SNI hostname with a different internal port
+  updates the mapping, as does a different range size on an IPv4 forward.
+  Previously IPv4 forwards, SNI routes and SNI fallbacks refused it until the
+  old lease expired.
+
+- **Port forwards left behind by an earlier run of the daemon are cleared at
+  startup.** After a crash, or a restart during which the tunnel's WAN address
+  changed, a stale forward could keep sending a port to an old address until
+  the next reboot.
+
+- **Open pages can load the current web interface after future updates.** Pages
+  opened on this release revalidate the interface when they reload.
+
+- **An SNI hostname entered with capital letters receives its traffic.** A
+  route added by hand as `Cloud.Example.com` was listed as enabled while every
+  connection to it was closed. Hostnames match in any case, and a route saved
+  that way starts working once the update is installed.
+
+## [1.3.0]
+
+### Added
+
+- **Devices can request SNI hostname routes over UPnP, not only PCP.** The
+  tunnel's UPnP IGD now serves two Start9 vendor actions
+  (`X_START9_AddHostnameMapping` / `X_START9_DeleteHostnameMapping`, advertised
+  in its `WANIPConnection:1` SCPD) that bind a hostname on a shared external
+  port via SNI demultiplexing — the same capability the PCP `HOSTNAME` option
+  provides. A device that reaches the tunnel over UPnP but not PCP (for
+  example, UDP 5351 filtered by an intermediate device) previously kept its
+  ordinary port forwards but silently lost SNI demux; StartOS now falls back to
+  the vendor action automatically. Unlike standard UPnP mappings, these routes
+  are always lease-bearing and expire if the device stops renewing them, so a
+  vanished device can never squat a hostname against its legitimate owner.
+  A hostname grant (over either protocol) is now also refused outright when
+  the tunnel cannot bind the shared port's listener, instead of being
+  acknowledged while routing nothing.
+
+- **Generated WireGuard configs identify their gateway as accepting inbound
+  connections.** Each config includes the `# inbound: yes` gateway marker while retaining its
+  StartTunnel header for compatibility with older StartOS versions.
 
 ### Fixed
 

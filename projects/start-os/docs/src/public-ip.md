@@ -4,6 +4,9 @@ Access a service interface directly using a gateway's public IP address and port
 
 For hosting websites or APIs that people access in a browser, use a [public domain](clearnet.md) instead. Public IPs accessed in a browser will display certificate warnings because Let's Encrypt does not sign certificates for IP addresses. Visitors would need to [trust your Root CA](trust-ca.md), which is not reasonable for public access.
 
+> [!NOTE]
+> A public IP address reaches your server from the Internet. If your server is behind a NAT router, typing that address from a device on the same network as the server produces a certificate warning: the router rewrites the connection to your server's LAN address, so your server sees a local connection and presents the certificate for that address instead. Use its [`.local` address, a private domain, or its LAN IP](lan.md) from inside your own network. A server that holds its public address directly, or that you reach over [StartTunnel](/start-tunnel/), is unaffected.
+
 ## Watch The Video
 
 <div class="yt-video" data-id="xKYhCMNN3gw" data-title="Public IP"></div>
@@ -27,6 +30,8 @@ If you need a stable public IP, use a [StartTunnel](/start-tunnel/) gateway. VPS
 
 The selected port must be forwarded in the corresponding gateway. StartOS tests port forwarding automatically when you add or enable a public IP address, and will guide you through the setup if the test doesn't pass. When the port is served directly by the service (the usual case for a raw IP), this test needs the service to be **running** — it is disabled while the service is stopped, and if the service restarts as you enable the address StartOS shows it as untested rather than failed until it is back up (see [Interfaces](interfaces.md)).
 
+IPv4 UDP traffic initiated from a forwarded service port uses the corresponding external address and port when it leaves StartOS through that forward's gateway. Upstream routers can apply additional NAT.
+
 - **Routers**: Refer to your router's manual for instructions on port forwarding.
 
-- **StartTunnel**: Refer to the [StartTunnel Port Forwarding guide](/start-tunnel/port-forwarding.html).
+- **StartTunnel**: Refer to the [StartTunnel Port Forwarding guide](/start-tunnel/published-ports.html).

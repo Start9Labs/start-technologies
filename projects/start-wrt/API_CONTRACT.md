@@ -271,7 +271,8 @@ struct SetPreferencesRequest {
 
 ### `system.apply-remote-access`
 
-Internal endpoint (`no_auth`), **not called from the frontend**. Fired by the
+Internal endpoint, **not called from the frontend**; its `startwrt-cli` caller
+authenticates with the local auth cookie. Fired by the
 `/etc/hotplug.d/iface/99-startwrt-remote-access` hook (in `backend/hotplug/`)
 when a WAN interface comes up.
 
@@ -285,7 +286,8 @@ when a WAN interface comes up.
 
 ### `system.set-timezone`
 
-No auth required — called during initial setup before login.
+Auth required. The setup wizard calls it right after
+`auth.set-initial-password`, whose response sets the session cookie.
 
 ```rust
 #[derive(Deserialize)]
@@ -779,7 +781,10 @@ struct Device {
     /// vendor from the MAC's OUI, e.g. `Apple device (b2c3d4)`) →
     /// `device-<mac>` placeholder. Always set.
     name: String,
-    /// Raw DHCP lease hostname ("*" when unset); a hint for the rename form.
+    /// The name assigned in the router (the UCI static name); `None` when
+    /// `name` is resolved from elsewhere. What the rename form edits.
+    custom_name: Option<String>,
+    /// Raw DHCP lease hostname ("*" when unset).
     hostname: Option<String>,
     status: DeviceStatus,
     /// "Ethernet", "Wi-Fi 2.4GHz", "Wi-Fi 5GHz", etc.
@@ -820,11 +825,20 @@ struct SpeedData {
 ```rust
 #[derive(Deserialize)]
 struct DeviceUpdateRequest {
+    /// `AA:BB:CC:DD:EE:FF`.
     mac: String,
-    name: String,
+    /// Absent leaves the assigned name untouched; empty clears it. Otherwise
+    /// a hostname label — letters, digits, and hyphens, no leading or
+    /// trailing hyphen, at most 63 characters — since dnsmasq serves it.
+    #[serde(default)]
+    name: Option<String>,
     ipv4_static: bool,
+    /// Dotted-quad, or empty for no reservation.
     ipv4: String,
 }
+// Every field lands in the config dnsmasq reads, which it refuses to start on
+// if malformed, so each is validated: a bad one is rejected with
+// `InvalidValue` and nothing is written.
 // Response: null
 // Backend: creates/updates DHCP host section, restarts dnsmasq.
 // No IPv6 fields: devices choose their own IPv6 addresses (SLAAC), so there is
@@ -943,9 +957,9 @@ struct PublishedPort {
     ipv4_public_port: Option<String>,
     /// "any" or CIDR like "203.0.113.0/24"
     source: String,
-    /// The user confirmed capturing a port the router answers on itself (see
+    /// The user confirmed capturing a WAN port already in use (see
     /// `published-ports.set`); round-tripped so later saves don't re-prompt.
-    override_router_ports: bool,
+    override_wan_ports: bool,
     // --- Enriched by backend ---
     status: PublishedPortStatus,
     status_reason: Option<String>,
@@ -974,11 +988,11 @@ struct PublishedPortInput {
     ipv6: bool,
     ipv4_public_port: Option<String>,
     source: String,
-    /// Confirms forwarding a port the router itself answers on from the WAN
-    /// (persisted as `_pp_router_override` on the redirect and round-tripped
-    /// through `list`, so the confirmation is asked once per port).
+    /// Confirms forwarding a WAN port already used by a router service or
+    /// hostname route. Round-tripped through `list` so confirmation is asked
+    /// once per port.
     #[serde(default)]
-    override_router_ports: bool,
+    override_wan_ports: bool,
 }
 
 #[derive(Deserialize)]
@@ -987,30 +1001,46 @@ struct PublishedPortsSetRequest {
 }
 
 #[derive(Serialize)]
-struct RouterPortCollision {
+struct WanPortCollision {
     id: String,
     label: String,
     /// The colliding router-service port spec(s), e.g. ["443", "22"].
-    router_ports: Vec<String>,
+    router_service_ports: Vec<String>,
+    /// Colliding ports held by hostname routes.
+    hostname_route_ports: Vec<SniPortUse>,
+}
+
+#[derive(Serialize)]
+struct SniPortUse {
+    ports: String,
+    /// The routed hostnames on the port, deduped and sorted.
+    hostnames: Vec<String>,
+    /// Display names (or MACs) of the devices the routes deliver to.
+    devices: Vec<String>,
 }
 
 #[derive(Serialize)]
 struct PublishedPortsSetResult {
-    pending_router_port_collisions: Vec<RouterPortCollision>,
+    pending_wan_port_collisions: Vec<WanPortCollision>,
 }
 // Backend: rebuilds firewall redirect+rule sections, resolves device IPs, restarts firewall
 ```
 
 The request is applied **unless** an enabled IPv4 forward without
-`override_router_ports` would capture a port the router itself answers on from
-the WAN — a live input-chain ACCEPT rule: Remote Access (80/443/22, including
+`override_wan_ports` would capture a port already in use on the WAN — a live input-chain ACCEPT rule: Remote Access (80/443/22, including
 "When behind NAT" mode whenever the WAN address is private) or the VPN
 server's listen port. nftables applies prerouting DNAT before the routing
 decision, so such a forward silently diverts those router services to the
 device (issue #3451). In that case nothing is applied and
-`pending_router_port_collisions` names the offending ports; the UI shows a
-confirmation dialog and re-saves with `override_router_ports: true` on the
-named ports. An empty list in the response means the request was applied.
+`pending_wan_port_collisions` names the offending ports; the UI shows a
+confirmation dialog and re-saves with `override_wan_ports: true` on the named
+ports. An empty list in the response means the request was applied.
+A colliding port whose WAN-input rule is an SNI-demux admit rule is reported
+under `hostname_route_ports` instead of `router_service_ports`, with the routed
+hostnames and owning devices filled in from the live demux — the real holder is a device's
+hostname routes, and the dialog names them rather than blaming the router.
+The split is informational only: the override works identically and removes
+the displaced hostname routes when the manual rule is saved.
 Detection is transport-aware (Remote Access is TCP, WireGuard is UDP — a
 UDP-only forward on 443 collides with nothing) and skipped in configs-only
 mode (the CLI editor confirms implicitly, like `ethernet.set` / `wifi.set`).
@@ -1040,8 +1070,8 @@ serve as a last-resort reconcile fallback.
 
 ### `published-ports.auto-list`
 
-Automatic forwards created by authorized LAN devices themselves via PCP or UPnP
-IGD (the server half of StartOS's gateway autoconfiguration). Read-only from
+Automatic port uses created by authorized LAN devices themselves via PCP or
+UPnP IGD (the server half of StartOS's gateway autoconfiguration). Read-only from
 the UI: the requesting device creates, renews, and withdraws them; unrenewed
 forwards expire on the lifetime the protocol granted the client (the daemon
 sweeps leases every minute). Distinct from manual published ports — they never
@@ -1049,17 +1079,31 @@ appear in `published-ports.list`, and `published-ports.set` leaves them alone
 _except_ that a manual rule claiming an auto-held external port wins: `set`
 removes the overlapping auto forward.
 
+Besides plain forwards, the list includes **SNI hostname routes** (label
+`"SNI"`, `hostname` set): TLS routes on a shared external port, demultiplexed
+by ClientHello SNI so several devices/hostnames share one port. These live in
+daemon memory (not UCI), always carry a lease (≤1h, device-renewed), and do
+not survive a daemon restart — the device re-asserts them. A demuxed port
+reads as router-reserved to manual and plain-auto forwards. Ports the router
+answers on itself refuse hostname routes — except 443, where Remote Access
+coexists with the demux: while routes share the port, connections naming no
+routed hostname (e.g. browsing the router by IP, which sends no SNI) are piped
+to the router's own UI, admitted from exactly the sources the Remote Access
+mode allows (any in "always"; RFC1918 in "default" behind NAT; none in
+"never"). A route is granted only once its listener is actually bound
+(`NO_RESOURCES` / UPnP fault 501 otherwise), so a granted route can never
+leave the port open with nothing serving it.
+
 ```rust
 // Request: {}
 
 #[derive(Serialize)]
-struct AutoForward {
-    /// UCI section name (`apf_<mac>_<extport>`), stable per (device, external
-    /// port) — UPnP's mapping identity, so one device may hold several
-    /// external ports to the same internal port.
+struct AutomaticPortUse {
+    /// Stable per automatic port use.
     id: String,
-    /// Which protocol created it: "PCP" or "UPnP".
-    label: String,
+    /// "PCP", "UPnP", or "SNI" for a hostname route.
+    kind: String,
+    /// May be empty on an SNI row whose target address matches no known device.
     device_mac: String,
     device_name: Option<String>,
     /// Forward target address on the LAN.
@@ -1071,11 +1115,29 @@ struct AutoForward {
     /// Seconds until the lease expires if the device stops renewing it. None
     /// right after a daemon restart, before the first grace lease is granted.
     expires_secs: Option<u64>,
+    /// TLS-SNI hostname for an SNI route; None for plain forwards.
+    hostname: Option<String>,
 }
-// Response: Vec<AutoForward>
-// Backend: reads `_apf_*`-tagged firewall redirects; names enriched from DHCP
-// host entries and the persistent device-name cache.
+// Response: Vec<AutomaticPortUse>
+// Backend: reads automatic firewall redirects plus the SNI demux's live
+// routes; names enriched from DHCP host entries and the persistent
+// device-name cache.
 ```
+
+### `published-ports.wan-changed`
+
+```rust
+// Request: {}
+// Response: null
+```
+
+Internal endpoint, **not called from the frontend**; its `startwrt-cli` caller
+authenticates with the local auth cookie. Fired by the
+`/etc/hotplug.d/iface/99-startwrt-port-control` hook on `wan` `ifup`/
+`ifupdate`: forwards to the daemon, which re-keys live SNI hostname routes
+onto the (possibly changed) WAN IPv4 — their listeners bind the WAN address
+itself. The daemon's sweep re-checks once a minute as a backstop. No-op in
+configs-only mode or when no routes exist.
 
 ### `published-ports.reconcile`
 
@@ -1084,7 +1146,8 @@ struct AutoForward {
 // Response: null
 ```
 
-Internal endpoint (`no_auth`), **not called from the frontend**. Fired two
+Internal endpoint, **not called from the frontend**; its `startwrt-cli` caller
+authenticates with the local auth cookie. Fired two
 ways: by the `/etc/hotplug.d/iface/99-startwrt-published-ports` hook on `wan6`
 `ifup`/`ifupdate` (i.e. when the ISP-delegated IPv6 prefix changes) — the CLI
 forwards the call to the daemon (`with_call_remote`), where the `ipv6_tracker`'s
@@ -1098,6 +1161,28 @@ elected address is EUI-64, else a legacy stored `hostid` (suppressed when
 history proves the device does not use EUI-64). A forward with neither source
 is left untouched. Reloads the firewall only if something changed. No-ops when
 the router currently has no global prefix (a flap to "none" never wipes rules).
+
+### `published-ports.sync-hairpin`
+
+```rust
+// Request: {}
+// Response: null
+```
+
+Internal endpoint, **not called from the frontend**. Re-derives every hairpin
+projection from the firewall config and the router's current WAN IPv4
+addresses (`ubus call network.interface.wan status`) — the `reflection_zone`
+list on each published-port and automatic-forward redirect, and the LAN-side
+copies of each IPv6 published-port rule — and writes the config only if
+something changed. A profile's WAN Whitelist and Blacklist entries are read
+against those addresses (for an IPv6 rule, against the device's own address),
+so the result depends on the live WAN state. It does not reload the firewall:
+the WAN-schedule crontab runs it between its `uci commit` and its
+`/etc/init.d/firewall reload`, where the blackout REJECT the edge just wrote
+must also take that profile's hairpin away, and the `wan` hotplug hook
+(`99-startwrt-published-ports`) runs it on `ifup`/`ifupdate` followed by its
+own reload. Runs in the CLI process against `/etc/config` (no
+`with_call_remote`).
 
 ---
 
@@ -1127,6 +1212,9 @@ struct OutboundVpn {
     supports_ipv6: bool,
     /// Interface MTU if explicitly set, else null (kernel default ~1420).
     mtu: Option<u16>,
+    /// True when the peer Endpoint is a hostname. Such a VPN can only target
+    /// "Internet"; the web UI offers no other target for it.
+    hostname_endpoint: bool,
 }
 // Response: Vec<OutboundVpn>
 ```
@@ -1166,6 +1254,25 @@ struct OutboundVpnCreateResponse {
 // traffic silently falls back to the WAN. `vpn-client.set-enabled` holds the
 // other half of that invariant, refusing to disable a VPN that something
 // already chains through.
+//
+// A chained VPN (target ≠ "Internet") additionally needs (InvalidValue):
+//   * an IP-literal Endpoint — only an address can be routed through the target.
+//     At boot, a chained VPN with a hostname Endpoint is retargeted to
+//     "Internet" and the change logged to activity (`vpn-client.unchained`);
+//   * a target tunnel with an address of the endpoint's family whose peer
+//     AllowedIPs cover the endpoint;
+//   * an endpoint address no other VPN shares (checked for every VPN, since a
+//     chain route captures all router traffic to that address).
+// A bracketed IPv6 Endpoint is stored without its brackets.
+//
+// Routing: each chained VPN gets `vcr_<iface>` (endpoint /32 or /128 → target
+// tunnel, main table) plus `vcrb_<iface>`, an `unreachable` route on loopback
+// at metric 2048, so the endpoint is unreachable rather than reached over the
+// WAN while the target is down. A routed chained VPN's interface also gets
+// `nohostroute '1'`: netifd's endpoint host route would otherwise copy the
+// fallback as a unicast route over it. With no MTU in the .conf, a chained
+// VPN gets the chain MTU: the target's MTU (default 1420) less 60 (IPv4
+// endpoint) or 80 (IPv6), floored at 1280.
 ```
 
 ### `vpn-client.update`
@@ -1176,9 +1283,10 @@ struct OutboundVpnUpdateRequest {
     id: String,
     label: String,
     target: String,
-    /// Desired interface MTU (1280–1500). null/absent clears it (inherit the
-    /// kernel default). UCI is the single source of truth — there is no stored
-    /// .conf; the web edit form always submits the field's current value.
+    /// Desired interface MTU (1280–1500). null/absent restores the default:
+    /// the chain MTU for a chained VPN, else the kernel's. UCI is the single
+    /// source of truth — there is no stored .conf; the web edit form always
+    /// submits the field's current value.
     #[serde(default)]
     mtu: Option<u16>,
 }
@@ -1187,9 +1295,10 @@ struct OutboundVpnUpdateRequest {
 // Bounces the WG interface only when the MTU actually changed.
 //
 // Validation: same `target` rules as vpn-client.create, except the disabled
-// check runs ONLY when `target` differs from the stored one — mirroring
-// guard_subnet_collision, so an unrelated edit (label, MTU) isn't blocked by a
-// broken chain already present in the config.
+// and chained-endpoint checks run ONLY when `target` differs from the stored
+// one — mirroring guard_subnet_collision, so an unrelated edit (label, MTU)
+// isn't blocked by a broken chain already present in the config. The cycle
+// check runs after a rename is carried into dependents' targets.
 ```
 
 ### `vpn-client.delete`
@@ -1354,6 +1463,9 @@ struct WifiPassword {
 struct WifiConfig {
     ssid: String,
     broadcast_separately: bool,
+    /// ISO 3166-1 alpha-2 regulatory country, written to every radio. `null`
+    /// (the factory state) leaves the radios on the world domain.
+    country: Option<String>,
     radios: HashMap<String, WifiRadio>,
     passwords: Vec<WifiPassword>,
 }
@@ -1389,6 +1501,10 @@ struct WifiSetResult {
 // that subnet. Without confirmation it applies nothing and returns the published
 // ports that would break; with confirmation it deletes them (firewall rules +
 // stale DHCP reservations) atomically with the WiFi update, then reloads firewall.
+// A `country` the regulatory database does not define is rejected with
+// `InvalidValue` before anything is written; codes are upper-case, as in the
+// database, so `us` is rejected. `null` clears it and returns the radios to the
+// world domain.
 ```
 
 ### `wifi.blackout-get`
@@ -1443,6 +1559,25 @@ web UI.
 ```rust
 // Request: {}
 // Response: String — a random 16-character alphanumeric password
+```
+
+### `wifi.regulatory`
+
+```rust
+// Request: {}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WifiRegulatory {
+    /// ISO 3166-1 alpha-2 codes the firmware's regulatory database defines —
+    /// the values `wifi.set` accepts for `country`.
+    countries: Vec<String>,
+    /// Channels an access point may use under the country currently in force,
+    /// keyed by band ("2g", "5g"). Re-read after a `wifi.set` that changes
+    /// `country`; a channel outside this list leaves that radio down.
+    channels: HashMap<String, Vec<u32>>,
+}
+// Response: WifiRegulatory
 ```
 
 ---
@@ -1799,101 +1934,105 @@ struct DiagnosticsCreateRes {
 Every RPC method above is a JSON-RPC 2.0 call to a single endpoint: **`POST /rpc/v1`**.
 The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 
-| Route                                              | Method    | Auth                       | Purpose                                                                                      |
-| -------------------------------------------------- | --------- | -------------------------- | -------------------------------------------------------------------------------------------- |
-| `/rpc/v1`                                          | POST      | Session (unless `no_auth`) | JSON-RPC 2.0 endpoint for all RPC methods                                                    |
-| `/rest/rpc/{guid}`                                 | GET/POST  | GUID capability (one-shot) | RPC continuation: binary download (backup, diagnostics) / upload (restore); 10 MB body limit |
-| `/ws/rpc/{guid}`                                   | WebSocket | GUID capability            | Progress streaming (`system.update`)                                                         |
-| `/api/logs`                                        | WebSocket | Session or local cookie    | Live log streaming (see § 2)                                                                 |
-| `/api/setup/flash`                                 | POST      | None (setup wizard)        | Streams NDJSON `SetupEvent` progress while flashing the eMMC; one flash at a time            |
-| `/static/root-ca.crt`                              | GET       | None                       | Root CA certificate download                                                                 |
-| `/cgi-bin/*`, `/luci-static/*`, `/ubus`, `/ubus/*` | any       | LuCI's own                 | Reverse proxy to uhttpd (LuCI) on localhost:8080; `/luci` redirects to `/cgi-bin/luci`       |
-| everything else                                    | any       | None                       | Embedded web UI                                                                              |
+| Route                                              | Method    | Auth                                       | Purpose                                                                                      |
+| -------------------------------------------------- | --------- | ------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `/rpc/v1`                                          | POST      | Session or local cookie (unless `no_auth`) | JSON-RPC 2.0 endpoint for all RPC methods                                                    |
+| `/rest/rpc/{guid}`                                 | GET/POST  | GUID capability (one-shot)                 | RPC continuation: binary download (backup, diagnostics) / upload (restore); 10 MB body limit |
+| `/ws/rpc/{guid}`                                   | WebSocket | GUID capability                            | Progress streaming (`system.update`)                                                         |
+| `/api/logs`                                        | WebSocket | Session or local cookie                    | Live log streaming (see § 2)                                                                 |
+| `/api/setup/flash`                                 | POST      | None (setup wizard)                        | Streams NDJSON `SetupEvent` progress while flashing the eMMC; one flash at a time            |
+| `/static/local-root-ca.crt`                        | GET       | None                                       | Root CA certificate download                                                                 |
+| `/static/local-root-ca.mobileconfig`               | GET       | None                                       | Root CA as an Apple configuration profile                                                    |
+| `/cgi-bin/*`, `/luci-static/*`, `/ubus`, `/ubus/*` | any       | LuCI's own                                 | Reverse proxy to uhttpd (LuCI) on localhost:8080; `/luci` redirects to `/cgi-bin/luci`       |
+| everything else                                    | any       | None                                       | Embedded web UI                                                                              |
 
 ---
 
 ## Endpoint Summary
 
-| RPC Method                   | Category        | Notes                       |
-| ---------------------------- | --------------- | --------------------------- |
-| `auth.login`                 | Auth            | Rate-limited                |
-| `auth.logout`                | Auth            |                             |
-| `auth.verify-password`       | Auth            |                             |
-| `auth.set-password`          | Auth            |                             |
-| `auth.check-initialized`     | Auth            | No auth                     |
-| `auth.set-initial-password`  | Auth            | No session; rate-limited    |
-| `system.info`                | System          | No auth                     |
-| `system.newer-versions`      | System          | No auth                     |
-| `system.update`              | System          |                             |
-| `system.restart`             | System          |                             |
-| `system.factory-reset`       | System          |                             |
-| `system.set-preferences`     | System          |                             |
-| `system.apply-remote-access` | System          | No auth; internal, hotplug  |
-| `system.set-timezone`        | System          | No auth                     |
-| `system.get-timezones`       | System          | No auth                     |
-| `system.logs`                | System          |                             |
-| `setup.status`               | Setup           | No auth                     |
-| `wan.ipv4-get`               | WAN             |                             |
-| `wan.ipv4-set`               | WAN             |                             |
-| `wan.ipv6-get`               | WAN             |                             |
-| `wan.ipv6-set`               | WAN             |                             |
-| `wan.mac-get`                | WAN             |                             |
-| `wan.mac-set`                | WAN             |                             |
-| `wan.dns-get`                | WAN             |                             |
-| `wan.dns-set`                | WAN             |                             |
-| `wan.ddns-get`               | WAN             |                             |
-| `wan.ddns-set`               | WAN             |                             |
-| `lan.ipv4-get`               | LAN             |                             |
-| `lan.ipv4-set`               | LAN             |                             |
-| `lan.ipv6-get`               | LAN             |                             |
-| `lan.ipv6-set`               | LAN             |                             |
-| `ethernet.get`               | Ethernet        |                             |
-| `ethernet.set`               | Ethernet        |                             |
-| `ethernet.edit`              | Ethernet        | CLI editor                  |
-| `devices.list`               | Devices         |                             |
-| `devices.update`             | Devices         |                             |
-| `devices.set-auto-forward`   | Devices         |                             |
-| `devices.forget`             | Devices         |                             |
-| `devices.data-usage`         | Devices         |                             |
-| `published-ports.list`       | Published Ports |                             |
-| `published-ports.set`        | Published Ports |                             |
-| `published-ports.auto-list`  | Published Ports | Automatic PCP/UPnP forwards |
-| `published-ports.reconcile`  | Published Ports | No auth; internal, hotplug  |
-| `vpn-client.list`            | Outbound VPN    |                             |
-| `vpn-client.create`          | Outbound VPN    |                             |
-| `vpn-client.update`          | Outbound VPN    |                             |
-| `vpn-client.delete`          | Outbound VPN    |                             |
-| `vpn-client.set-enabled`     | Outbound VPN    |                             |
-| `vpn-server.list`            | Inbound VPN     |                             |
-| `vpn-server.set`             | Inbound VPN     |                             |
-| `vpn-server.delete`          | Inbound VPN     |                             |
-| `vpn-server.peer-add`        | Inbound VPN     |                             |
-| `vpn-server.peer-delete`     | Inbound VPN     |                             |
-| `wifi.get`                   | WiFi            |                             |
-| `wifi.set`                   | WiFi            |                             |
-| `wifi.edit`                  | WiFi            | CLI editor                  |
-| `wifi.blackout-get`          | WiFi            |                             |
-| `wifi.blackout-set`          | WiFi            |                             |
-| `wifi.generate-password`     | WiFi            |                             |
-| `profiles.list`              | Profiles        |                             |
-| `profiles.get`               | Profiles        |                             |
-| `profiles.create`            | Profiles        |                             |
-| `profiles.set`               | Profiles        |                             |
-| `profiles.delete`            | Profiles        |                             |
-| `profiles.edit`              | Profiles        | CLI editor                  |
-| `profiles.schedule-get`      | Profiles        |                             |
-| `profiles.schedule-set`      | Profiles        |                             |
-| `ssh-keys.list`              | SSH Keys        |                             |
-| `ssh-keys.add`               | SSH Keys        |                             |
-| `ssh-keys.delete`            | SSH Keys        |                             |
-| `activity.list`              | Activity        |                             |
-| `activity.delete`            | Activity        |                             |
-| `activity.clear`             | Activity        |                             |
-| `backup.create`              | Backup          |                             |
-| `backup.restore`             | Backup          |                             |
-| `diagnostics.create`         | Diagnostics     |                             |
+| RPC Method                     | Category        | Notes                       |
+| ------------------------------ | --------------- | --------------------------- |
+| `auth.login`                   | Auth            | Rate-limited                |
+| `auth.logout`                  | Auth            |                             |
+| `auth.verify-password`         | Auth            |                             |
+| `auth.set-password`            | Auth            |                             |
+| `auth.check-initialized`       | Auth            | No auth                     |
+| `auth.set-initial-password`    | Auth            | No session; rate-limited    |
+| `system.info`                  | System          | No auth                     |
+| `system.newer-versions`        | System          | No auth                     |
+| `system.update`                | System          |                             |
+| `system.restart`               | System          |                             |
+| `system.factory-reset`         | System          |                             |
+| `system.set-preferences`       | System          |                             |
+| `system.apply-remote-access`   | System          | Internal, hotplug           |
+| `system.set-timezone`          | System          |                             |
+| `system.get-timezones`         | System          | No auth                     |
+| `system.logs`                  | System          |                             |
+| `setup.status`                 | Setup           | No auth                     |
+| `wan.ipv4-get`                 | WAN             |                             |
+| `wan.ipv4-set`                 | WAN             |                             |
+| `wan.ipv6-get`                 | WAN             |                             |
+| `wan.ipv6-set`                 | WAN             |                             |
+| `wan.mac-get`                  | WAN             |                             |
+| `wan.mac-set`                  | WAN             |                             |
+| `wan.dns-get`                  | WAN             |                             |
+| `wan.dns-set`                  | WAN             |                             |
+| `wan.ddns-get`                 | WAN             |                             |
+| `wan.ddns-set`                 | WAN             |                             |
+| `lan.ipv4-get`                 | LAN             |                             |
+| `lan.ipv4-set`                 | LAN             |                             |
+| `lan.ipv6-get`                 | LAN             |                             |
+| `lan.ipv6-set`                 | LAN             |                             |
+| `ethernet.get`                 | Ethernet        |                             |
+| `ethernet.set`                 | Ethernet        |                             |
+| `ethernet.edit`                | Ethernet        | CLI editor                  |
+| `devices.list`                 | Devices         |                             |
+| `devices.update`               | Devices         |                             |
+| `devices.set-auto-forward`     | Devices         |                             |
+| `devices.forget`               | Devices         |                             |
+| `devices.data-usage`           | Devices         |                             |
+| `published-ports.list`         | Published Ports |                             |
+| `published-ports.set`          | Published Ports |                             |
+| `published-ports.auto-list`    | Published Ports | Automatic PCP/UPnP forwards |
+| `published-ports.reconcile`    | Published Ports | Internal, hotplug           |
+| `published-ports.wan-changed`  | Published Ports | Internal, hotplug           |
+| `published-ports.sync-hairpin` | Published Ports | Internal, WAN-schedule cron |
+| `vpn-client.list`              | Outbound VPN    |                             |
+| `vpn-client.create`            | Outbound VPN    |                             |
+| `vpn-client.update`            | Outbound VPN    |                             |
+| `vpn-client.delete`            | Outbound VPN    |                             |
+| `vpn-client.set-enabled`       | Outbound VPN    |                             |
+| `vpn-server.list`              | Inbound VPN     |                             |
+| `vpn-server.set`               | Inbound VPN     |                             |
+| `vpn-server.delete`            | Inbound VPN     |                             |
+| `vpn-server.peer-add`          | Inbound VPN     |                             |
+| `vpn-server.peer-delete`       | Inbound VPN     |                             |
+| `wifi.get`                     | WiFi            |                             |
+| `wifi.set`                     | WiFi            |                             |
+| `wifi.edit`                    | WiFi            | CLI editor                  |
+| `wifi.blackout-get`            | WiFi            |                             |
+| `wifi.blackout-set`            | WiFi            |                             |
+| `wifi.generate-password`       | WiFi            |                             |
+| `wifi.regulatory`              | WiFi            |                             |
+| `profiles.list`                | Profiles        |                             |
+| `profiles.get`                 | Profiles        |                             |
+| `profiles.create`              | Profiles        |                             |
+| `profiles.set`                 | Profiles        |                             |
+| `profiles.delete`              | Profiles        |                             |
+| `profiles.edit`                | Profiles        | CLI editor                  |
+| `profiles.schedule-get`        | Profiles        |                             |
+| `profiles.schedule-set`        | Profiles        |                             |
+| `ssh-keys.list`                | SSH Keys        |                             |
+| `ssh-keys.add`                 | SSH Keys        |                             |
+| `ssh-keys.delete`              | SSH Keys        |                             |
+| `activity.list`                | Activity        |                             |
+| `activity.delete`              | Activity        |                             |
+| `activity.clear`               | Activity        |                             |
+| `backup.create`                | Backup          |                             |
+| `backup.restore`               | Backup          |                             |
+| `diagnostics.create`           | Diagnostics     |                             |
 
-**Totals:** 76 RPC methods across 16 categories, plus the HTTP/WebSocket routes
+**Totals:** 77 RPC methods across 16 categories, plus the HTTP/WebSocket routes
 table above and the deprecated generic endpoints below.
 
 ---

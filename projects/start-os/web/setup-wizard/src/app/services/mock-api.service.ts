@@ -191,6 +191,7 @@ const MOCK_DISKS: DiskInfo[] = [
   // 0 capacity - should be hidden entirely
   {
     logicalname: '/dev/sdd',
+    stablePath: '/dev/disk/by-path/mock-sdd',
     vendor: 'Generic',
     model: 'Card Reader',
     partitions: [],
@@ -201,11 +202,13 @@ const MOCK_DISKS: DiskInfo[] = [
   // 10 GiB - too small for OS and data; also tests both vendor+model null
   {
     logicalname: '/dev/sde',
+    stablePath: '/dev/disk/by-path/mock-sde',
     vendor: null,
     model: null,
     partitions: [
       {
         logicalname: '/dev/sde1',
+        stablePath: '/dev/disk/by-path/mock-sde-part1',
         label: null,
         capacity: 10 * GiB,
         used: null,
@@ -221,11 +224,13 @@ const MOCK_DISKS: DiskInfo[] = [
   // 18 GiB - exact OS boundary; tests vendor null with model present
   {
     logicalname: '/dev/sdf',
+    stablePath: '/dev/disk/by-path/mock-sdf',
     vendor: null,
     model: 'SATA Flash Drive',
     partitions: [
       {
         logicalname: '/dev/sdf1',
+        stablePath: '/dev/disk/by-path/mock-sdf-part1',
         label: null,
         capacity: 18 * GiB,
         used: null,
@@ -241,11 +246,13 @@ const MOCK_DISKS: DiskInfo[] = [
   // 20 GiB - exact data boundary; tests vendor present with model null
   {
     logicalname: '/dev/sdg',
+    stablePath: '/dev/disk/by-path/mock-sdg',
     vendor: 'PNY',
     model: null,
     partitions: [
       {
         logicalname: '/dev/sdg1',
+        stablePath: '/dev/disk/by-path/mock-sdg-part1',
         label: null,
         capacity: 20 * GiB,
         used: null,
@@ -261,11 +268,13 @@ const MOCK_DISKS: DiskInfo[] = [
   // 30 GiB - OK for OS or data alone, too small for both (< 38 GiB)
   {
     logicalname: '/dev/sdh',
+    stablePath: '/dev/disk/by-path/mock-sdh',
     vendor: 'SanDisk',
     model: 'Ultra',
     partitions: [
       {
         logicalname: '/dev/sdh1',
+        stablePath: '/dev/disk/by-path/mock-sdh-part1',
         label: null,
         capacity: 30 * GiB,
         used: null,
@@ -282,11 +291,13 @@ const MOCK_DISKS: DiskInfo[] = [
   // ext4 conversion warning; preserve is blocked if the OS drive is this drive
   {
     logicalname: '/dev/sdi',
+    stablePath: '/dev/disk/by-path/mock-sdi',
     vendor: 'Kingston',
     model: 'A400',
     partitions: [
       {
         logicalname: '/dev/sdi1',
+        stablePath: '/dev/disk/by-path/mock-sdi-part1',
         label: null,
         capacity: 30 * GiB,
         used: null,
@@ -308,11 +319,13 @@ const MOCK_DISKS: DiskInfo[] = [
   // 500 GB - large, always OK
   {
     logicalname: '/dev/sda',
+    stablePath: '/dev/disk/by-path/mock-sda',
     vendor: 'Samsung',
     model: 'SSD 970 EVO Plus',
     partitions: [
       {
         logicalname: '/dev/sda1',
+        stablePath: '/dev/disk/by-path/mock-sda-part1',
         label: null,
         capacity: 500000000000,
         used: null,
@@ -329,11 +342,13 @@ const MOCK_DISKS: DiskInfo[] = [
   // requires selecting this drive for the OS too
   {
     logicalname: '/dev/sdb',
+    stablePath: '/dev/disk/by-path/mock-sdb',
     vendor: 'Crucial',
     model: 'MX500',
     partitions: [
       {
         logicalname: '/dev/sdb1',
+        stablePath: '/dev/disk/by-path/mock-sdb-part1',
         label: null,
         capacity: 1000000000000,
         used: null,
@@ -356,11 +371,13 @@ const MOCK_DISKS: DiskInfo[] = [
   // with preserve disabled: no StartOS data to preserve
   {
     logicalname: '/dev/sdc',
+    stablePath: '/dev/disk/by-path/mock-sdc',
     vendor: 'WD',
     model: 'Blue SN570',
     partitions: [
       {
         logicalname: '/dev/sdc1',
+        stablePath: '/dev/disk/by-path/mock-sdc-part1',
         label: 'Backup',
         capacity: 2000000000000,
         used: 500000000000,

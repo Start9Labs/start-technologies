@@ -18,6 +18,7 @@ use crate::registry::os::index::OsIndex;
 use crate::registry::package::index::PackageIndex;
 use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::Guid;
+use crate::s9pk::manifest::LocaleString;
 use crate::util::DataUrl;
 use crate::util::serde::HandlerExtSerde;
 
@@ -62,6 +63,7 @@ impl RegistryDatabase {
 pub struct FullIndex {
     pub name: Option<String>,
     pub icon: Option<DataUrl<'static>>,
+    pub description: Option<LocaleString>,
     pub package: PackageIndex,
     pub os: OsIndex,
     pub signers: BTreeMap<Guid, SignerInfo>,

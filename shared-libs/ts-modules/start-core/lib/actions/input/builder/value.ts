@@ -885,12 +885,12 @@ export class Value<
     /** Supplementary text rendered persistently beneath the field. */
     footnote?: string | null
     /**
-     * @description Determines if the field is required. If so, optionally provide a default value from the list of values.
+     * @description The option to preselect. `null` leaves the field unselected; a selection is required either way.
      * @type { (keyof Values & string) | null }
      * @example default: null
      * @example default: 'radio1'
      */
-    default: keyof Values & string
+    default: (keyof Values & string) | null
     /**
      * @description A mapping of unique radio options to their human readable display format.
      * @example
@@ -937,7 +937,7 @@ export class Value<
         description?: string | null
         warning?: string | null
         footnote?: string | null
-        default: string
+        default: string | null
         values: Values
         disabled?: false | string | string[]
       },
@@ -1223,11 +1223,12 @@ export class Value<
     warning?: string | null
     variants: Variants<VariantValues>
     /**
-     * @description Provide a default value from the list of variants.
-     * @type { string }
+     * @description The variant to preselect. `null` leaves the field unselected; a selection is required either way.
+     * @type { (keyof VariantValues & string) | null }
+     * @example default: null
      * @example default: 'variant1'
      */
-    default: keyof VariantValues & string
+    default: (keyof VariantValues & string) | null
     /**
      * @description Once set, the value can never be changed.
      * @default false
@@ -1269,7 +1270,7 @@ export class Value<
         description?: string | null
         warning?: string | null
         variants: Variants<VariantValues>
-        default: keyof VariantValues & string
+        default: (keyof VariantValues & string) | null
         disabled: string[] | false | string
       },
       OuterType
@@ -1292,7 +1293,7 @@ export class Value<
         description?: string | null
         warning?: string | null
         variants: Variants<VariantValues>
-        default: keyof VariantValues & string
+        default: (keyof VariantValues & string) | null
         disabled: string[] | false | string
       },
       OuterType
@@ -1318,7 +1319,7 @@ export class Value<
         description?: string | null
         warning?: string | null
         variants: Variants<VariantValues>
-        default: keyof VariantValues & string
+        default: (keyof VariantValues & string) | null
         disabled: string[] | false | string
       },
       OuterType

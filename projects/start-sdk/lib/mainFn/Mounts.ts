@@ -114,7 +114,8 @@ export class Mounts<Manifest extends T.SDKManifest> {
   /**
    * Add a mount from a dependency package's volume. The mount is always a
    * directory — StartOS does not bind a dependency's file. To reach a single
-   * file, mount the directory holding it.
+   * file, mount the directory holding it. The volume must exist when the
+   * container starts; a missing dependency fails the start.
    *
    * @param options - Dependency ID, volume ID, mountpoint, readonly flag, and optional subpath
    * @returns A new Mounts instance with this dependency mount added

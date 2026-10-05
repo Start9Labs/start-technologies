@@ -41,7 +41,7 @@ this product's contribution.
 
 ## Web
 
-Two Angular 22 apps live under `web/`:
+Two Angular apps live under `web/`:
 
 - `ui/` — the admin dashboard (Angular project `ui`).
 - `setup-wizard/` — the first-boot setup flow (project `setup-wizard`).
@@ -60,7 +60,7 @@ and are embedded into `startbox`.
 `container-runtime/` is a Node.js program that runs inside every service LXC. It
 loads the service's JavaScript from its `.s9pk`, manages subcontainers, and
 talks to the host daemon over a Unix-socket JSON-RPC channel. It depends on the
-**built** SDK at `../start-sdk/dist`. It has its own
+**built** SDK at `../../start-sdk/dist` (relative to `container-runtime/`). It has its own
 [README](container-runtime/README.md), [ARCHITECTURE](container-runtime/ARCHITECTURE.md),
 and [AGENTS](container-runtime/AGENTS.md) — read those before editing it.
 
@@ -76,9 +76,9 @@ erasure-coded FUSE filesystem used for StartOS backups. It builds to the
 - `startd.service` — the main daemon (`Restart=always`, OOM-protected with
   `ManagedOOMPreference=avoid`).
 - `services.slice` — the cgroup slice every service container lives under;
-  `Delegate=yes` hands the subtree to LXC, and systemd-oomd kills the heaviest
-  container under memory pressure rather than wedging the host. `startd` applies
-  a RAM-dependent `MemoryMax`/`MemoryHigh` to this slice at boot.
+  systemd-oomd kills the heaviest container under memory pressure rather than
+  wedging the host. `startd` applies a RAM-dependent `MemoryMax`/`MemoryHigh` to
+  this slice at boot.
 - `startos-shutdown.service` — graceful teardown on power-off only (ties to
   `poweroff.target`/`halt.target`, not reboot); its `ExecStop` calls
   `start-cli server shutdown`.
@@ -110,7 +110,7 @@ start-core (Rust)
 
 | Step | Command (from repo root)                                  | What it does                                                                |
 | ---- | --------------------------------------------------------- | --------------------------------------------------------------------------- |
-| 1    | `cargo check -p start-os`                                 | Verify the OS bins compile                                                  |
+| 1    | `cargo check -p start-core`                               | Verify the shared backend compiles                                          |
 | 2    | `make start-core-ts-bindings`                             | Export ts-rs types from `start-core`                                        |
 | 3    | `cd projects/start-sdk && make bundle`                    | Build the SDK `dist` (builds `@start9labs/start-core` first and bundles it) |
 | 4    | `npm run check:ui && npm run check:setup`                 | Type-check the apps                                                         |

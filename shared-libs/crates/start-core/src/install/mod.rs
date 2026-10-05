@@ -165,7 +165,7 @@ pub async fn install(
         .services
         .install(
             ctx.clone(),
-            || asset.deserialize_s9pk_buffered(ctx.client.clone(), download_progress),
+            || asset.deserialize_s9pk_buffered(ctx.client.get(), download_progress),
             Some(registry),
             None::<Never>,
             Some(progress_tracker),
@@ -519,7 +519,12 @@ pub async fn cli_install(
                 &method.join("."),
                 to_value(&InstallParams {
                     id,
-                    registry: ctx.registry_url.clone().or_not_found("--registry")?,
+                    registry: ctx
+                        .registry_url
+                        .as_ref()
+                        .or_not_found("--registry")?
+                        .get()?
+                        .clone(),
                     version,
                 })?,
             )

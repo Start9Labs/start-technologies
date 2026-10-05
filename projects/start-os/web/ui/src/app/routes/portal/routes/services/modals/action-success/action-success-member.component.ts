@@ -44,6 +44,21 @@ import { QRComponent } from 'src/app/routes/portal/components/qr.component'
           {{ 'Copy' | i18n }}
         </button>
       }
+      @if (member.launchable) {
+        <a
+          tuiIconButton
+          appearance="icon"
+          size="s"
+          target="_blank"
+          rel="noreferrer"
+          tabindex="-1"
+          iconStart="@tui.external-link"
+          [href]="member.value"
+          [style.pointer-events]="'auto'"
+        >
+          {{ 'Open' | i18n }}
+        </a>
+      }
       @if (member.qr) {
         <button
           tuiIconButton
@@ -108,7 +123,7 @@ export class ActionSuccessMemberComponent {
   show(template: TemplateRef<any>) {
     const masked = this.masked
 
-    this.masked = this.member.masked
+    this.masked = !!this.member.masked
     this.dialog
       .openComponent(template, { label: 'Scan this QR', size: 's' })
       .subscribe({

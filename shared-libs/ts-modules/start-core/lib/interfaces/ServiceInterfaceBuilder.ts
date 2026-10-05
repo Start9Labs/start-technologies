@@ -26,6 +26,7 @@ export class ServiceInterfaceBuilder {
       query: Record<string, string>
       schemeOverride: { ssl: Scheme; noSsl: Scheme } | null
       masked: boolean
+      preferredLauncherAddress?: string | null
     },
   ) {}
 }

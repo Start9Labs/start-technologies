@@ -1,6 +1,6 @@
 # Frontend Architecture
 
-Angular 22 single-page application for the StartWRT admin UI. TypeScript 6, Taiga UI v5, zoneless change detection, signal-based state, standalone components. No NgModules.
+Angular single-page application for the StartWRT admin UI. TypeScript, Taiga UI, zoneless change detection, signal-based state, standalone components. No NgModules.
 
 ## Project Structure
 
@@ -13,7 +13,6 @@ src/app/
 │
 ├── components/               # Shared UI components
 │   ├── aside.ts              # Right help panel — renders HelpService content via `| markdown | dompurify`
-│   ├── ca-wizard.ts          # CA certificate install wizard
 │   ├── copy.ts               # Copy-to-clipboard directive
 │   ├── footer.ts             # Form footer (Cancel / Save buttons)
 │   ├── form.ts               # [formLoading] directive — TuiForm + TuiCardLarge + TuiSkeleton
@@ -123,159 +122,21 @@ export default [
 ] satisfies Routes
 ```
 
-## Key Patterns
+## Project state and forms
 
-### Page Component (form-based)
+`FormService<T>` owns each form's load/save/refresh cycle, polls every five seconds,
+and exposes `data` as a signal (`undefined` while loading). `provideFormService`
+binds the concrete service and the abstract token at the page component.
+The `[formLoading]` directive composes `TuiForm`, `TuiCardLarge`, and `TuiSkeleton`;
+`appFooter` supplies the reset/save footer.
 
-```typescript
-@Component({
-  template: `
-    <header tuiHeader="h6"><h2 tuiTitle>Settings</h2></header>
-    <form [formGroup]="form" [formLoading]="!service.data()" (reset.prevent)="form.reset(service.data())" (ngSubmit)="onSave()">
-      <!-- form fields -->
-      @if (service.data()) {
-        <footer appFooter></footer>
-      }
-    </form>
-  `,
-  providers: [provideFormService(MyService)],
-})
-export default class MyPage {
-  protected readonly service = injectFormService<MyForm>()
-  readonly form = getMyForm(inject(NonNullableFormBuilder))
+`ActionService` owns loading/success/error notifications. Network-affecting actions
+use `restart: true` to suppress transient failures and probe until the device is
+reachable again. These local services intentionally retain the reconnect behavior
+specified in `AGENTS.md`.
 
-  constructor() {
-    effect(() => {
-      const data = this.service.data()
-      if (data && this.form.pristine) this.form.reset(data)
-    })
-  }
-
-  async onSave() {
-    if (this.form.invalid) {
-      tuiMarkControlAsTouchedAndValidate(this.form)
-    } else if (await this.service.save(this.form.getRawValue())) {
-      this.form.markAsPristine()
-    }
-  }
-}
-```
-
-Key details:
-
-- `[formLoading]` is the `Form` directive — applies `TuiForm`, `TuiCardLarge`, and `TuiSkeleton` as host directives
-- `provideFormService(MyService)` provides both `MyService` and `FormService` tokens
-- Footer's Cancel button triggers `(reset.prevent)` which resets form to last-loaded data
-- Form service auto-polls every 5s and exposes `data` as a signal (`undefined` = loading)
-
-### Dialog (add/edit)
-
-```typescript
-@Component({
-  template: `
-    <form tuiForm="m" [formGroup]="form" (submit.prevent)="save()">
-      <!-- fields -->
-      <footer>
-        <button tuiButton appearance="flat" type="button"
-          (click)="context.$implicit.complete()">Cancel</button>
-        <button tuiButton>Save</button>
-      </footer>
-    </form>
-  `,
-})
-export class MyDialog {
-  protected readonly context =
-    injectContext<TuiDialogContext<ResultType, InputDataType>>()
-  protected readonly form = inject(NonNullableFormBuilder).group({ ... })
-
-  save() {
-    if (this.form.invalid) {
-      tuiMarkControlAsTouchedAndValidate(this.form)
-      return
-    }
-    this.context.completeWith(this.form.getRawValue())
-  }
-}
-```
-
-Opening from a parent:
-
-```typescript
-this.dialogs
-  .open<ResultType>(new PolymorpheusComponent(MyDialog), {
-    label: 'Edit Thing',
-    data: { ... },
-  })
-  .subscribe(result => { /* handle result */ })
-```
-
-### Table
-
-Tables use attribute selectors and `hostDirectives`:
-
-```typescript
-@Component({
-  selector: '[myItems]',
-  host: { class: 'g-table' },
-  hostDirectives: [TuiTableDirective],
-  template: `
-    <thead tuiThead>
-      <tr><th tuiTh [sorter]="'name' | tuiSorter">Name</th></tr>
-    </thead>
-    <tbody>
-      @for (item of myItems() | tuiTableSort; track item.id) {
-        <tr>
-          <td tuiTd>{{ item.name }}</td>
-        </tr>
-      } @empty {
-        <tr>
-          <td tuiTd colspan="...">
-            <app-placeholder icon="@tui.inbox">No items</app-placeholder>
-          </td>
-        </tr>
-      }
-    </tbody>
-  `,
-})
-export class MyTable {
-  readonly myItems = input<Item[]>([])
-}
-```
-
-Row actions use a dropdown menu pattern — see `published-ports/table.ts` for the full example.
-
-### FormService
-
-All data loading/saving goes through `FormService<T>`:
-
-```typescript
-@Injectable()
-export class MyService extends FormService<MyData> {
-  private readonly api = inject(ApiService)
-
-  async load(): Promise<MyData> {
-    return this.api.someMethod()
-  }
-  async store(data: MyData): Promise<void> {
-    await this.api.saveSomething(data)
-  }
-}
-```
-
-`FormService` handles: auto-polling (5s via RxJS timer), error toasts, loading state via `data` signal (`undefined` = loading), save with loading indicator via `ActionService`.
-
-### ActionService
-
-Wraps async operations with loading/success/error toasts:
-
-```typescript
-await this.actionService.run(
-  () => this.api.doSomething(),
-  { loading: 'Saving...', restart: true }, // restart: suppresses network errors
-)
-```
-
-For network-affecting actions (changing LAN IP, restarting services), `restart: true` suppresses transient errors and polls until the device is reachable again.
+Component, form, dialog, and table recipes live in the root `start9-frontend`
+skill. `routes/published-ports/` is the project-local example of a table/dialog flow.
 
 ## API Layer
 

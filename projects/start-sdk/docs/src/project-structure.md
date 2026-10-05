@@ -11,6 +11,7 @@ my-service-startos/
 ├── .github/
 │   └── workflows/
 │       ├── build.yml          # CI build on PR
+│       ├── pr-retarget.yml    # CI rebuild when a PR's base changes
 │       ├── tagAndRelease.yml  # Version check, tag, and release on merge
 │       ├── release.yml        # Release on manual tag push
 │       └── syncNext.yml       # Carry the base branch onto `next` on merge
@@ -47,6 +48,7 @@ my-service-startos/
 ├── Makefile                # Project config (includes the SDK's s9pk.mk from node_modules)
 ├── package.json
 ├── package-lock.json
+├── .prettierrc             # One line pointing at the SDK's Prettier config
 ├── README.md               # Service documentation (see Writing READMEs)
 ├── tsconfig.json
 ├── UPDATING.md             # Per-package upstream-version tracking
@@ -85,17 +87,19 @@ These files typically require minimal modification:
 - `.gitignore`
 - `.dockerignore` - Docker does not read `.gitignore`, so a package that builds from source needs this to keep `node_modules`, `.git`, and built `.s9pk`s out of the build context that `s9pk pack` uploads on every arch
 - `Makefile` - Includes the SDK's `s9pk.mk` from `node_modules` (see [Makefile](./makefile.md))
-- `package.json` / `package-lock.json`
+- `package.json` / `package-lock.json` - the SDK is the only dependency; it supplies TypeScript, Prettier, ESLint and ncc
+- `.prettierrc` - one line naming the SDK's shared Prettier config, so editors format the way the build gate checks
 - `tsconfig.json`
 
 ### .github/workflows/
 
-Every package should include four GitHub Actions workflows that delegate to the reusable CI workflows in this monorepo (`.github/workflows/`). The CI pipeline has two automatic stages, plus an optional manual path, and a branch-hygiene job that runs alongside them:
+Every package should include five GitHub Actions workflows that delegate to the reusable CI workflows in this monorepo (`.github/workflows/`). The CI pipeline has two automatic stages, plus an optional manual path, a retarget build, and a branch-hygiene job:
 
 ```
-PR opened/updated ──> Build
+PR opened/updated/marked ready ──> Build
+PR base changed ──> Retarget Build
 PR merged to master ──> Version check ──> Tag ──> Build ──> Release ──> Publish
-                   └─> Sync next
+                    └─> Sync next
 Manual tag push ──> Build ──> Release ──> Publish (bypasses version check)
 ```
 
@@ -109,19 +113,57 @@ name: Build
 on:
   workflow_dispatch:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: ['master']
     paths-ignore: ['*.md']
 
+permissions: {}
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: package-build-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    if: github.event.pull_request.draft == false
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    permissions:
+      contents: read
     uses: Start9Labs/start-technologies/.github/workflows/build.yml@master
     # No DEV_KEY — a PR build doesn't publish, so it doesn't need the signing key.
 ```
+
+GitHub's default `pull_request` activities cover opened, updated, and reopened PRs.
+`ready_for_review` is listed explicitly so a draft's first ready state runs the build.
+The job gate keeps subsequent draft updates out of the build matrix.
+
+**pr-retarget.yml** -- rebuilds the `.s9pk` against a PR's new base:
+
+```yaml
+name: Retarget Build
+
+on:
+  pull_request:
+    types: [edited]
+
+permissions: {}
+
+concurrency:
+  group: package-build-${{ github.event.changes.base && github.event.pull_request.number || format('metadata-{0}', github.event.pull_request.number) }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event.changes.base && github.event.pull_request.draft == false
+    permissions:
+      contents: read
+    uses: Start9Labs/start-technologies/.github/workflows/build.yml@master
+```
+
+A base change is an `edited` event. The unfiltered listener receives it even when the new
+base or changed paths fall outside `build.yml`'s trigger filters. Base changes share the
+ordinary build's `package-build-<PR>` concurrency group, so the newest run replaces work
+against an obsolete base. Title and body edits use a separate metadata group and leave an
+active build alone.
 
 A PR build only compiles and packs; it never publishes. The reusable workflow falls back to
 `start-cli init-key` when no signing key is present, so passing `DEV_KEY` here would put the
@@ -143,7 +185,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  tag-and-release:
+  tag:
     uses: Start9Labs/start-technologies/.github/workflows/tagAndRelease.yml@master
     with:
       REFERENCE_REGISTRY: ${{ vars.REFERENCE_REGISTRY }}
@@ -296,7 +338,7 @@ The `startos/` directory is where you take advantage of the StartOS SDK and APIs
 
 #### dependencies.ts
 
-`setupDependencies()` is where you define any dependencies of this package, including their versions, whether or not they need to be running or simply installed, and which health checks, if any, need to be passing for this package to be satisfied.
+Define each dependency with `sdk.Dependency.required()` or `.optional()` and add it to `sdk.Dependencies.of()`. The builder supplies both the published manifest requirements and reactive runtime requirements. See [Dependencies](dependencies.md).
 
 #### index.ts
 
@@ -320,7 +362,7 @@ This file is plumbing, used to imbue the generic Start SDK with package-specific
 
 #### utils.ts
 
-This file is for defining constants and functions specific to your package that are used throughout the code base. Many packages will not make use of this file.
+This file holds the package's own constants and helper functions. **A constant or function that doesn't belong in one of the files above goes here, not in a new file of its own.** A new top-level file under `startos/` is warranted only for a large, self-contained unit — a subsystem of several cooperating functions, or a long generated table — never for a single function or constant. Many packages will not make use of this file.
 
 ### Subdirectories
 
@@ -390,7 +432,7 @@ Container initialization takes place under the following circumstances:
 `setupInit()` is where you define the specific order in which functions will be executed when your container initializes.
 
 - `restoreInit` and `versionGraph` must remain first and second. Do not move them.
-- `setInterfaces`, `setDependencies`, `actions` are recommended to remain in this order, but could be rearranged if necessary.
+- Put `actions` before `dependencies` so dependency init handlers can create tasks for registered actions; `setInterfaces` precedes both.
 - Any custom init functions can be appended to the list of built-in functions, or even inserted between them. Most custom init functions are simply appended to the list.
 
 It is possible to limit the execution of custom init functions to specific _kinds_ of initialization. For example, if you only wanted to run a particular init function on fresh install and ignore it for updates and restores, `setupOnInit()` provides a `kind` variable (one of `install`, `update`, `restore`) that you can use for conditional logic. `kind` can also be null, which means the container is being initialized due to a server restart or manual container rebuild, rather than installation.

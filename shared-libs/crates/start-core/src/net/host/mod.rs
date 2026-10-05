@@ -7,6 +7,7 @@ use imbl::OrdMap;
 use imbl_value::InternedString;
 use itertools::Itertools;
 use patch_db::DestructureMut;
+use patch_db::json_ptr::JsonPointer;
 use rpc_toolkit::{Context, Empty, HandlerExt, OrEmpty, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -112,15 +113,26 @@ impl Host {
 /// Gateways over which `<hostname>.local` is resolvable: a LAN interface
 /// serves it by mDNS multicast; a WireGuard interface only once its resolver
 /// has accepted the injected record (`net::dns_update`), tracked as its
-/// `dns_update` capability.
-fn mdns_gateways(gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>) -> BTreeSet<GatewayId> {
+/// `dns_update` capability. A disconnected gateway keeps its place in `previous`.
+fn mdns_gateways(
+    gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    previous: &BTreeSet<HostnameInfo>,
+) -> BTreeSet<GatewayId> {
     gateways
         .iter()
-        .filter(|(_, g)| {
-            matches!(
-                g.ip_info.as_ref().and_then(|i| i.device_type),
-                Some(NetworkInterfaceType::Ethernet | NetworkInterfaceType::Wireless)
-            ) || (g.is_wireguard() && g.dns_update.supported == Some(true))
+        .filter(|(id, g)| match &g.ip_info {
+            Some(ip_info) => {
+                matches!(
+                    ip_info.device_type,
+                    Some(NetworkInterfaceType::Ethernet | NetworkInterfaceType::Wireless)
+                ) || (g.is_wireguard() && g.dns_update.supported == Some(true))
+            }
+            None => previous.iter().any(|h| {
+                matches!(
+                    &h.metadata,
+                    HostnameMetadata::Mdns { gateways } if gateways.contains(*id)
+                )
+            }),
         })
         .map(|(id, _)| id.clone())
         .collect()
@@ -154,9 +166,13 @@ impl Model<Host> {
 
             // Preserve existing plugin-provided addresses across recomputation
             let mut available = bind.as_addresses().as_available().de()?;
+            let mdns_gateways = mdns_gateways(gateways, &available);
             available.retain(|h| matches!(h.metadata, HostnameMetadata::Plugin { .. }));
             let gua_wan = bind.as_addresses().as_gua_wan().de()?;
             for (gid, g) in gateways {
+                if g.gateway_type == GatewayType::OutboundOnly {
+                    continue;
+                }
                 let Some(ip_info) = &g.ip_info else {
                     continue;
                 };
@@ -237,7 +253,6 @@ impl Model<Host> {
 
             // mdns
             let mdns_host = mdns.local_domain_name();
-            let mdns_gateways = mdns_gateways(gateways);
             if let Some(port) = net
                 .assigned_port
                 .filter(|_| opt.secure.map_or(true, |_| opt.wants_plain_port()))
@@ -356,17 +371,15 @@ impl Model<Host> {
         // `external_start_port` as its port so the single-port
         // enabled/disabled + forward machinery applies unchanged.
         let mdns_host = mdns.local_domain_name();
-        let mdns_gateways = mdns_gateways(gateways);
         for (_, range) in this.binding_ranges.as_entries_mut()? {
             let port = range.as_external_start_port().de()?;
 
             // Preserve any plugin-provided addresses across recomputation.
             let mut available = range.as_addresses().as_available().de()?;
+            let mdns_gateways = mdns_gateways(gateways, &available);
             available.retain(|h| matches!(h.metadata, HostnameMetadata::Plugin { .. }));
 
             for (gid, g) in gateways {
-                // Never expose a range on an outbound-only gateway (e.g. a VPN
-                // egress) — they don't receive inbound forwards.
                 if g.gateway_type == GatewayType::OutboundOnly {
                     continue;
                 }
@@ -408,7 +421,7 @@ impl Model<Host> {
                     hostname: mdns_host.clone(),
                     port: Some(port),
                     metadata: HostnameMetadata::Mdns {
-                        gateways: mdns_gateways.clone(),
+                        gateways: mdns_gateways,
                     },
                 });
             }
@@ -785,6 +798,7 @@ pub trait HostApiKind: 'static {
         inheritance: &Self::Inheritance,
         db: &'a mut DatabaseModel,
     ) -> Result<&'a mut Model<Host>, Error>;
+    fn host_pointer(inheritance: &Self::Inheritance) -> Result<JsonPointer, Error>;
     fn host_for_existing<'a>(
         inheritance: &Self::Inheritance,
         db: &'a mut DatabaseModel,
@@ -807,6 +821,22 @@ impl HostApiKind for ForPackage {
     ) -> Result<&'a mut Model<Host>, Error> {
         host_for(db, package, host)
     }
+    fn host_pointer((package, host): &Self::Inheritance) -> Result<JsonPointer, Error> {
+        if package.is_start_os() {
+            if *host != HostId::admin() {
+                return Err(Error::new(
+                    eyre!("the server has no host {host}"),
+                    ErrorKind::NotFound,
+                ));
+            }
+            return Ok("/public/serverInfo/network/host".parse().unwrap());
+        }
+        let mut pointer: JsonPointer = "/public/packageData".parse().unwrap();
+        pointer.push_end(package);
+        pointer.push_end("hosts");
+        pointer.push_end(host);
+        Ok(pointer)
+    }
     fn host_for_existing<'a>(
         (package, host): &Self::Inheritance,
         db: &'a mut DatabaseModel,
@@ -827,6 +857,9 @@ impl HostApiKind for ForServer {
         db: &'a mut DatabaseModel,
     ) -> Result<&'a mut Model<Host>, Error> {
         host_for(db, &PackageId::start_os(), &HostId::admin())
+    }
+    fn host_pointer(_: &Self::Inheritance) -> Result<JsonPointer, Error> {
+        Ok("/public/serverInfo/network/host".parse().unwrap())
     }
     fn host_for_existing<'a>(
         _: &Self::Inheritance,
@@ -894,18 +927,23 @@ pub async fn list_hosts(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+    use std::net::Ipv4Addr;
     use std::sync::Arc;
 
     use imbl::OrdMap;
     use imbl_value::InternedString;
+    use ipnet::IpNet;
 
     use super::{Host, Model, mdns_gateways, secure_gateways};
     use crate::GatewayId;
     use crate::db::model::public::{
-        CapabilityVerdict, IpInfo, NetworkInterfaceInfo, NetworkInterfaceType,
+        CapabilityVerdict, GatewayType, IpInfo, NetworkInterfaceInfo, NetworkInterfaceType,
     };
+    use crate::hostname::ServerHostname;
     use crate::net::forward::AvailablePorts;
     use crate::net::host::binding::BindOptions;
+    use crate::net::service_interface::HostnameMetadata;
     use crate::prelude::*;
 
     fn iface(
@@ -950,7 +988,7 @@ mod tests {
         .collect();
 
         assert_eq!(
-            mdns_gateways(&ifaces),
+            mdns_gateways(&ifaces, &BTreeSet::new()),
             [gw("eth0"), gw("wlan0"), gw("wg-ok")].into_iter().collect()
         );
     }
@@ -959,12 +997,111 @@ mod tests {
         Model::<Host>::new(&Host::default()).unwrap()
     }
 
+    fn wireguard(gateway_type: GatewayType) -> NetworkInterfaceInfo {
+        NetworkInterfaceInfo {
+            ip_info: Some(Arc::new(IpInfo {
+                device_type: Some(NetworkInterfaceType::Wireguard),
+                subnets: ["192.0.2.2/24".parse::<IpNet>().unwrap()]
+                    .into_iter()
+                    .collect(),
+                wan_ip: Some(Ipv4Addr::new(198, 51, 100, 2)),
+                ..Default::default()
+            })),
+            gateway_type,
+            ..Default::default()
+        }
+    }
+
     fn plain(preferred_external_port: u16) -> BindOptions {
         BindOptions {
             preferred_external_port,
             add_ssl: None,
             secure: Some(crate::net::host::binding::Security { ssl: false }),
         }
+    }
+
+    #[test]
+    fn single_port_addresses_are_offered_only_on_inbound_gateways() {
+        let gateways = [
+            (gw("wg-in"), wireguard(GatewayType::InboundOutbound)),
+            (gw("wg-out"), wireguard(GatewayType::OutboundOnly)),
+        ]
+        .into_iter()
+        .collect();
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.add_binding(&mut ports, 9735, plain(9735), false)
+            .unwrap();
+
+        host.update_addresses(
+            &ServerHostname::new(InternedString::intern("server")).unwrap(),
+            &gateways,
+            &ports,
+        )
+        .unwrap();
+
+        let host = host.de().unwrap();
+        let available = &host.bindings[&9735].addresses.available;
+        assert_eq!(
+            available
+                .iter()
+                .filter(|address| matches!(
+                    &address.metadata,
+                    HostnameMetadata::Ipv4 { gateway } if gateway == &gw("wg-in")
+                ))
+                .count(),
+            2
+        );
+        assert!(!available.iter().any(|address| matches!(
+            &address.metadata,
+            HostnameMetadata::Ipv4 { gateway } if gateway == &gw("wg-out")
+        )));
+    }
+
+    fn mdns_rows(host: &Model<Host>, port: u16) -> Vec<BTreeSet<GatewayId>> {
+        host.de().unwrap().bindings[&port]
+            .addresses
+            .available
+            .iter()
+            .filter_map(|address| match &address.metadata {
+                HostnameMetadata::Mdns { gateways } => Some(gateways.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn mdns_address_outlives_its_gateways_addresses() {
+        let server = ServerHostname::new(InternedString::intern("server")).unwrap();
+        let mut eth0 = iface(NetworkInterfaceType::Ethernet, None);
+        Arc::make_mut(eth0.ip_info.as_mut().unwrap()).subnets =
+            ["192.0.2.10/24".parse::<IpNet>().unwrap()]
+                .into_iter()
+                .collect();
+        let mut gateways: OrdMap<GatewayId, NetworkInterfaceInfo> =
+            [(gw("eth0"), eth0)].into_iter().collect();
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.add_binding(&mut ports, 9735, plain(9735), false)
+            .unwrap();
+        host.update_addresses(&server, &gateways, &ports).unwrap();
+        assert_eq!(mdns_rows(&host, 9735), [[gw("eth0")].into_iter().collect()]);
+
+        gateways[&gw("eth0")].ip_info = None;
+        host.update_addresses(&server, &gateways, &ports).unwrap();
+        assert_eq!(mdns_rows(&host, 9735), [[gw("eth0")].into_iter().collect()]);
+        let bind = &host.de().unwrap().bindings[&9735];
+        assert!(!bind.addresses.available.iter().any(|a| a.metadata.is_ip()));
+        assert!(
+            bind.addresses
+                .enabled()
+                .iter()
+                .any(|a| matches!(a.metadata, HostnameMetadata::Mdns { .. }))
+        );
+
+        gateways.remove(&gw("eth0"));
+        host.update_addresses(&server, &gateways, &ports).unwrap();
+        assert!(mdns_rows(&host, 9735).is_empty());
     }
 
     #[test]

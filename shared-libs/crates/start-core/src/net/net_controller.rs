@@ -3,18 +3,19 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV
 use std::sync::{Arc, Weak};
 
 use color_eyre::eyre::eyre;
+use imbl::OrdMap;
 use imbl_value::InternedString;
 use ipnet::IpNet;
 use nix::net::if_::if_nametoindex;
 use patch_db::json_ptr::JsonPointer;
 use tokio::process::Command;
 use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
 use tokio_rustls::rustls::ClientConfig as TlsClientConfig;
 use tokio_rustls::rustls::crypto::CryptoProvider;
 use tracing::instrument;
 
 use crate::db::model::Database;
+use crate::db::model::public::NetworkInterfaceInfo;
 use crate::hostname::ServerHostname;
 use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
@@ -30,6 +31,7 @@ use crate::net::service_interface::{
 };
 use crate::net::socks::SocksController;
 use crate::net::vhost::{AlpnInfo, DynVHostTarget, ProxyTarget, VHostController, VHostKey};
+use crate::net::{SERVICE_OUTBOUND_REJECT_RULE_PRIORITY, SERVICE_OUTBOUND_RULE_PRIORITY};
 use crate::prelude::*;
 use crate::service::effects::callbacks::ServiceCallbacks;
 use crate::util::Invoke;
@@ -279,6 +281,7 @@ impl NetController {
                         suffix: String::new(),
                     },
                     interface_type: ServiceInterfaceType::Ui,
+                    preferred_launcher_address: None,
                 };
                 db.as_public_mut()
                     .as_server_info_mut()
@@ -311,6 +314,74 @@ fn ssl_vhost_public_v4<'a>(
         .collect()
 }
 
+/// The loopback and bridge addresses of a binding's SSL port. Every name the
+/// binding serves accepts them.
+fn ssl_vhost_internal_ips<'a>(
+    enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
+) -> BTreeSet<IpAddr> {
+    enabled_addresses
+        .into_iter()
+        .filter(|a| a.ssl && a.is_internal())
+        .filter_map(|a| a.hostname.parse().ok())
+        .collect()
+}
+
+/// The `(port, is the public leg)` a name is served on. A plugin's name arrives
+/// on the binding's own SSL port, whatever port the name advertises.
+fn named_vhost_leg(addr_info: &HostnameInfo, assigned_ssl_port: u16) -> Option<(u16, bool)> {
+    match &addr_info.metadata {
+        HostnameMetadata::PublicDomain { .. }
+        | HostnameMetadata::PrivateDomain { .. }
+        | HostnameMetadata::Mdns { .. } => Some((addr_info.port?, addr_info.public)),
+        HostnameMetadata::Plugin { .. } => Some((assigned_ssl_port, false)),
+        _ => None,
+    }
+}
+
+/// Adds an entry for each name the binding serves over TLS, or merges the
+/// name's gateways into an entry another row already made.
+fn add_named_vhosts(
+    vhosts: &mut BTreeMap<VHostKey, ProxyTarget>,
+    enabled_addresses: &BTreeSet<&HostnameInfo>,
+    assigned_ssl_port: u16,
+    net_ifaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    new_target: impl Fn(&HostnameInfo, bool) -> ProxyTarget,
+) {
+    let internal = ssl_vhost_internal_ips(enabled_addresses.iter().copied());
+    for addr_info in enabled_addresses {
+        if !addr_info.ssl {
+            continue;
+        }
+        let Some((port, public)) = named_vhost_leg(addr_info, assigned_ssl_port) else {
+            continue;
+        };
+        let key = (Some(addr_info.hostname.clone()), port, public);
+        let ProxyTarget {
+            public_v4,
+            public_v6,
+            private: accepts,
+            ..
+        } = vhosts.entry(key).or_insert_with(|| ProxyTarget {
+            private: internal.clone(),
+            ..new_target(addr_info, public)
+        });
+        if public {
+            // A public domain is dual-stack (A + AAAA): public on its
+            // gateways' bare IPv4 and on each of their GUAs.
+            let gws: BTreeSet<GatewayId> = addr_info.metadata.gateways().cloned().collect();
+            public_v4.extend(gws.iter().cloned());
+            public_v6.extend(crate::net::utils::gua_ips(net_ifaces, &gws));
+        } else {
+            for gw in addr_info.metadata.gateways() {
+                if let Some(ip_info) = net_ifaces.get(gw).and_then(|i| i.ip_info.as_ref()) {
+                    accepts.extend(ip_info.subnets.iter().map(|s| s.addr()));
+                }
+            }
+        }
+    }
+}
+
+/// LAN addresses a binding's SSL `*` vhost answers on: its enabled SSL-port IPs.
 fn ssl_vhost_private_ips<'a>(
     enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
 ) -> BTreeSet<IpAddr> {
@@ -321,36 +392,28 @@ fn ssl_vhost_private_ips<'a>(
         .collect()
 }
 
-fn direct_forward_private_ips<'a>(
+/// LAN addresses a forwarded port answers on. An IP admits itself; a private
+/// domain, every address of its gateways.
+fn forwarded_lan_ips<'a>(
     enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
-    port: u16,
+    net_ifaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
 ) -> BTreeSet<IpAddr> {
-    enabled_addresses
-        .into_iter()
-        .filter(|a| {
-            !a.public && a.port == Some(port) && matches!(a.metadata, HostnameMetadata::Ipv4 { .. })
-        })
-        .filter_map(|a| a.hostname.parse::<Ipv4Addr>().ok().map(IpAddr::V4))
-        .collect()
-}
-
-fn mdns_vhost_private_ips<'a>(
-    mdns: &HostnameInfo,
-    enabled_addresses: impl IntoIterator<Item = &'a HostnameInfo>,
-) -> BTreeSet<IpAddr> {
-    enabled_addresses
-        .into_iter()
-        .filter(|a| {
-            !a.public
-                && a.ssl == mdns.ssl
-                && a.port == mdns.port
-                && a.metadata.is_ip()
-                && a.metadata
-                    .gateways()
-                    .any(|gateway| mdns.metadata.gateways().any(|g| g == gateway))
-        })
-        .filter_map(|a| a.hostname.parse().ok())
-        .collect()
+    let mut ips = BTreeSet::new();
+    for address in enabled_addresses.into_iter().filter(|a| !a.public) {
+        match &address.metadata {
+            HostnameMetadata::Ipv4 { .. } | HostnameMetadata::Ipv6 { .. } => {
+                ips.extend(address.hostname.parse::<IpAddr>().ok());
+            }
+            HostnameMetadata::PrivateDomain { gateways } => ips.extend(
+                gateways
+                    .iter()
+                    .filter_map(|gw| net_ifaces.get(gw).and_then(|i| i.ip_info.as_ref()))
+                    .flat_map(|ip| ip.subnets.iter().map(|s| s.addr())),
+            ),
+            _ => {}
+        }
+    }
+    ips
 }
 
 /// Hosts the datapath still holds that the database no longer has. Collected
@@ -499,7 +562,7 @@ impl NetServiceData {
             // ours — terminating (add_ssl), or an SNI-agnostic passthrough when
             // the container serves its own TLS.
             if let Some(assigned_ssl_port) = bind.net.assigned_ssl_port {
-                // A GUA set to LAN+WAN is WAN, so it lands in the public set below.
+                // A GUA set to LAN+WAN is WAN, so it lands in the public set.
                 let server_private_ips = ssl_vhost_private_ips(enabled_addresses.iter().copied());
 
                 // Public gateways, split by family: a bare public IPv4 (WAN IP)
@@ -531,6 +594,7 @@ impl NetServiceData {
                         ProxyTarget {
                             public_v4: server_public_v4,
                             public_v6: server_public_v6,
+                            public_v6_gateways: BTreeSet::new(),
                             private: server_private_ips,
                             acme: None,
                             addr,
@@ -557,52 +621,32 @@ impl NetServiceData {
                 // entry carries its own gateways, so a public domain accepts WAN
                 // even where the bare IP is disabled.
                 //
-                // The mDNS name is registered here like any other: the vhost
-                // controller serves a name only if it has an entry, and this is
-                // where the set of names a host answers to is decided. It is never
-                // public, so it contributes no upstream port map.
+                // The mDNS name and a plugin's names are registered here like any
+                // other: the vhost controller serves a name only if it has an
+                // entry, and this is where the set of names a host answers to is
+                // decided. Neither is public, so neither contributes an upstream
+                // port map. Every name accepts the bridge, where other services
+                // and a plugin's provider reach it.
                 let passthrough = bind.options.add_ssl.is_none();
-                for addr_info in &enabled_addresses {
-                    if !addr_info.ssl {
-                        continue;
-                    }
-                    match &addr_info.metadata {
-                        HostnameMetadata::PublicDomain { .. }
-                        | HostnameMetadata::PrivateDomain { .. }
-                        | HostnameMetadata::Mdns { .. } => {}
-                        _ => continue,
-                    }
-                    let domain = &addr_info.hostname;
-                    let Some(domain_ssl_port) = addr_info.port else {
-                        continue;
-                    };
-                    let mdns_private =
-                        if matches!(addr_info.metadata, HostnameMetadata::Mdns { .. }) {
-                            let private = mdns_vhost_private_ips(
-                                addr_info,
-                                enabled_addresses.iter().copied(),
-                            );
-                            if private.is_empty() {
-                                continue;
-                            }
-                            Some(private)
-                        } else {
-                            None
-                        };
-                    let key = (Some(domain.clone()), domain_ssl_port, addr_info.public);
-                    let target = vhosts.entry(key).or_insert_with(|| ProxyTarget {
+                add_named_vhosts(
+                    &mut vhosts,
+                    &enabled_addresses,
+                    assigned_ssl_port,
+                    &net_ifaces,
+                    |addr_info, public| ProxyTarget {
                         public_v4: BTreeSet::new(),
                         public_v6: BTreeSet::new(),
+                        public_v6_gateways: BTreeSet::new(),
                         private: BTreeSet::new(),
                         // The public leg's alone, so a name served both ways
                         // keeps its LAN side. A passthrough never intermediates
                         // ACME — the backend is the ACME client.
-                        acme: if passthrough || !addr_info.public {
+                        acme: if passthrough || !public {
                             None
                         } else {
                             host_addresses
                                 .iter()
-                                .find(|a| a.address == *domain)
+                                .find(|a| a.address == addr_info.hostname)
                                 .and_then(|a| a.public.as_ref())
                                 .and_then(|p| p.acme.clone())
                         },
@@ -618,30 +662,8 @@ impl NetServiceData {
                         alpn: alpn.clone(),
                         passthrough,
                         preserve_source_ip: passthrough,
-                    });
-                    if addr_info.public {
-                        // A public domain is dual-stack (A + AAAA): public on its
-                        // gateways' bare IPv4 and on each of their GUAs.
-                        let gws: BTreeSet<GatewayId> =
-                            addr_info.metadata.gateways().cloned().collect();
-                        target.public_v4.extend(gws.iter().cloned());
-                        target
-                            .public_v6
-                            .extend(crate::net::utils::gua_ips(&net_ifaces, &gws));
-                    } else if let Some(private) = mdns_private {
-                        target.private.extend(private);
-                    } else {
-                        for gw in addr_info.metadata.gateways() {
-                            if let Some(info) = net_ifaces.get(gw) {
-                                if let Some(ip_info) = &info.ip_info {
-                                    for subnet in &ip_info.subnets {
-                                        target.private.insert(subnet.addr());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                    },
+                );
             }
 
             // The assigned port is forwarded directly; assigned SSL ports use vhosts.
@@ -666,8 +688,13 @@ impl NetServiceData {
                         a.metadata.gateways().collect::<Vec<_>>(),
                     );
                 }
-                let fwd_private =
-                    direct_forward_private_ips(enabled_addresses.iter().copied(), external);
+                let fwd_private = forwarded_lan_ips(
+                    enabled_addresses
+                        .iter()
+                        .copied()
+                        .filter(|a| a.port == Some(external)),
+                    &net_ifaces,
+                );
                 // StartOS answers these addresses itself, and a loopback DNAT is martian-dropped on ingress.
                 if !self.ip.is_loopback() {
                     forwards.insert(
@@ -781,10 +808,7 @@ impl NetServiceData {
                 .flat_map(|a| a.metadata.gateways())
                 .cloned()
                 .collect();
-            let private_ips = direct_forward_private_ips(
-                enabled_addresses.iter().copied(),
-                range.external_start_port,
-            );
+            let private_ips = forwarded_lan_ips(enabled_addresses.iter().copied(), &net_ifaces);
             if public_gateways.is_empty() && private_ips.is_empty() {
                 continue;
             }
@@ -981,12 +1005,175 @@ impl NetServiceData {
         self.binds.remove(&id);
         Ok(())
     }
+
+    fn outbound_sources(&self) -> Vec<IpAddr> {
+        std::iter::once(IpAddr::V4(self.ip))
+            .chain(self.ipv6.map(IpAddr::V6))
+            .collect()
+    }
+}
+
+fn ip_rule(source: IpAddr) -> Command {
+    let mut cmd = Command::new("ip");
+    if source.is_ipv6() {
+        cmd.arg("-6");
+    }
+    cmd.arg("rule");
+    cmd
+}
+
+/// Variants order by rule priority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum ServiceOutboundRule {
+    Gateway(u32),
+    Reject,
+}
+
+fn outbound_rule_command(action: &str, source: IpAddr, rule: ServiceOutboundRule) -> Command {
+    let mut command = ip_rule(source);
+    command.arg(action).arg("from").arg(source.to_string());
+    match rule {
+        ServiceOutboundRule::Gateway(table) => {
+            command
+                .arg("lookup")
+                .arg(table.to_string())
+                .arg("priority")
+                .arg(SERVICE_OUTBOUND_RULE_PRIORITY.to_string());
+        }
+        ServiceOutboundRule::Reject => {
+            command
+                .arg("unreachable")
+                .arg("priority")
+                .arg(SERVICE_OUTBOUND_REJECT_RULE_PRIORITY.to_string());
+        }
+    }
+    command
+}
+
+async fn outbound_rule(
+    action: &str,
+    source: IpAddr,
+    rule: ServiceOutboundRule,
+) -> Result<(), Error> {
+    outbound_rule_command(action, source, rule)
+        .invoke(ErrorKind::Network)
+        .await?;
+    Ok(())
+}
+
+async fn purge_outbound_rules(sources: &[IpAddr]) {
+    for source in sources {
+        for priority in [
+            SERVICE_OUTBOUND_RULE_PRIORITY,
+            SERVICE_OUTBOUND_REJECT_RULE_PRIORITY,
+        ] {
+            while ip_rule(*source)
+                .arg("del")
+                .arg("from")
+                .arg(source.to_string())
+                .arg("priority")
+                .arg(priority.to_string())
+                .invoke(ErrorKind::Network)
+                .await
+                .is_ok()
+            {}
+        }
+    }
+}
+
+async fn add_outbound_rules(sources: &[IpAddr], rule: ServiceOutboundRule) -> Result<(), Error> {
+    let mut added = Vec::new();
+    for source in sources {
+        if let Err(e) = outbound_rule("add", *source, rule).await {
+            for source in added {
+                let _ = outbound_rule("del", source, rule).await;
+            }
+            return Err(e);
+        }
+        added.push(*source);
+    }
+    Ok(())
+}
+
+async fn delete_outbound_rules(sources: &[IpAddr], rule: ServiceOutboundRule) {
+    for source in sources {
+        let _ = outbound_rule("del", *source, rule).await;
+    }
+}
+
+fn delete_conntrack_command(source: IpAddr) -> Command {
+    let mut command = Command::new("conntrack");
+    command.arg("-D");
+    if source.is_ipv6() {
+        command.arg("-f").arg("ipv6");
+    }
+    command.arg("-s").arg(source.to_string());
+    command
+}
+
+async fn flush_outbound_connections(sources: &[IpAddr]) {
+    for source in sources {
+        // `conntrack -D` exits one when no flows match.
+        let _ = delete_conntrack_command(*source)
+            .invoke(ErrorKind::Network)
+            .await;
+    }
+}
+
+async fn sync_outbound_rules(
+    db: &TypedPatchDb<Database>,
+    id: &PackageId,
+    sources: &[IpAddr],
+    current: &mut BTreeSet<ServiceOutboundRule>,
+) {
+    if let Err(e) = async {
+        let gateway: Option<GatewayId> = db
+            .peek()
+            .await
+            .as_public()
+            .as_package_data()
+            .as_idx(id)
+            .and_then(|p| p.as_outbound_gateway().de().ok())
+            .flatten();
+        let mut desired = BTreeSet::new();
+        if let Some(gateway) = &gateway {
+            desired.insert(ServiceOutboundRule::Reject);
+            if let Some(idx) = if_nametoindex(gateway.as_str()).log_err() {
+                desired.insert(ServiceOutboundRule::Gateway(1000 + idx));
+            }
+        }
+        // A lookup that fails to install still gets its rejection.
+        let previous = current.clone();
+        let mut res = Ok::<_, Error>(());
+        for rule in &desired - &*current {
+            match add_outbound_rules(sources, rule).await {
+                Ok(()) => {
+                    current.insert(rule);
+                }
+                Err(e) => res = Err(e),
+            }
+        }
+        // The rule being replaced keeps routing until it is deleted.
+        for rule in (&*current - &desired).into_iter().rev() {
+            delete_outbound_rules(sources, rule).await;
+            current.remove(&rule);
+        }
+        if *current != previous {
+            flush_outbound_connections(sources).await;
+        }
+        res
+    }
+    .await
+    {
+        tracing::error!("Failed to update outbound gateway for {id}: {e}");
+        tracing::debug!("{e:?}");
+    }
 }
 
 pub struct NetService {
     shutdown: bool,
     data: Arc<Mutex<NetServiceData>>,
-    sync_task: JoinHandle<()>,
+    sync_task: NonDetachingJoinHandle<()>,
     synced: Watch<u64>,
 }
 impl NetService {
@@ -1001,7 +1188,7 @@ impl NetService {
                 controller: Default::default(),
                 binds: BTreeMap::new(),
             })),
-            sync_task: tokio::spawn(futures::future::ready(())),
+            sync_task: tokio::spawn(futures::future::ready(())).into(),
             synced: Watch::new(0u64),
         }
     }
@@ -1015,7 +1202,7 @@ impl NetService {
         let synced = Watch::new(0u64);
         let synced_writer = synced.clone();
 
-        let ip = data.ip;
+        let outbound_sources = data.outbound_sources();
         let data = Arc::new(Mutex::new(data));
         let thread_data = data.clone();
         let sync_task = tokio::spawn(async move {
@@ -1023,24 +1210,7 @@ impl NetService {
                 let ptr: JsonPointer = format!("/public/packageData/{}/hosts", id).parse().unwrap();
                 let mut watch = db.watch(ptr).await.typed::<Hosts>();
 
-                // Outbound gateway enforcement
-                let service_ip = ip.to_string();
-                // Purge any stale rules from a previous instance
-                loop {
-                    if Command::new("ip")
-                        .arg("rule")
-                        .arg("del")
-                        .arg("from")
-                        .arg(&service_ip)
-                        .arg("priority")
-                        .arg("100")
-                        .invoke(ErrorKind::Network)
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
+                purge_outbound_rules(&outbound_sources).await;
                 let mut outbound_sub = db
                     .subscribe(
                         format!("/public/packageData/{}/outboundGateway", id)
@@ -1056,7 +1226,8 @@ impl NetService {
                     w.mark_seen();
                 }
                 drop(ctrl_for_ip);
-                let mut current_outbound_table: Option<u32> = None;
+                let mut current_outbound = BTreeSet::new();
+                sync_outbound_rules(&db, id, &outbound_sources, &mut current_outbound).await;
 
                 loop {
                     let (hosts_changed, outbound_changed) = tokio::select! {
@@ -1111,82 +1282,16 @@ impl NetService {
                         }
                     }
 
-                    // Handle outbound gateway changes
                     if outbound_changed {
-                        if let Err(e) = async {
-                            // Remove old rule if any
-                            if let Some(old_table) = current_outbound_table.take() {
-                                let old_table_str = old_table.to_string();
-                                let _ = Command::new("ip")
-                                    .arg("rule")
-                                    .arg("del")
-                                    .arg("from")
-                                    .arg(&service_ip)
-                                    .arg("lookup")
-                                    .arg(&old_table_str)
-                                    .arg("priority")
-                                    .arg("100")
-                                    .invoke(ErrorKind::Network)
-                                    .await;
-                            }
-                            // Read current outbound gateway from DB
-                            let outbound_gw: Option<GatewayId> = db
-                                .peek()
-                                .await
-                                .as_public()
-                                .as_package_data()
-                                .as_idx(id)
-                                .map(|p| p.as_outbound_gateway().de().ok())
-                                .flatten()
-                                .flatten();
-                            if let Some(gw_id) = outbound_gw {
-                                // Look up table ID for this gateway
-                                if let Some(table_id) = if_nametoindex(gw_id.as_str())
-                                    .map(|idx| 1000 + idx)
-                                    .log_err()
-                                {
-                                    let table_str = table_id.to_string();
-                                    Command::new("ip")
-                                        .arg("rule")
-                                        .arg("add")
-                                        .arg("from")
-                                        .arg(&service_ip)
-                                        .arg("lookup")
-                                        .arg(&table_str)
-                                        .arg("priority")
-                                        .arg("100")
-                                        .invoke(ErrorKind::Network)
-                                        .await
-                                        .log_err();
-                                    current_outbound_table = Some(table_id);
-                                }
-                            }
-                            Ok::<_, Error>(())
-                        }
-                        .await
-                        {
-                            tracing::error!("Failed to update outbound gateway for {id}: {e}");
-                            tracing::debug!("{e:?}");
-                        }
+                        sync_outbound_rules(&db, id, &outbound_sources, &mut current_outbound)
+                            .await;
                     }
 
                     synced_writer.send_modify(|v| *v += 1);
                 }
 
-                // Cleanup outbound rule on task exit
-                if let Some(table_id) = current_outbound_table {
-                    let table_str = table_id.to_string();
-                    let _ = Command::new("ip")
-                        .arg("rule")
-                        .arg("del")
-                        .arg("from")
-                        .arg(&service_ip)
-                        .arg("lookup")
-                        .arg(&table_str)
-                        .arg("priority")
-                        .arg("100")
-                        .invoke(ErrorKind::Network)
-                        .await;
+                for rule in current_outbound.into_iter().rev() {
+                    delete_outbound_rules(&outbound_sources, rule).await;
                 }
             } else {
                 let ptr: JsonPointer = "/public/serverInfo/network/host".parse().unwrap();
@@ -1216,7 +1321,7 @@ impl NetService {
         Ok(Self {
             shutdown: false,
             data,
-            sync_task,
+            sync_task: sync_task.into(),
             synced,
         })
     }
@@ -1334,14 +1439,11 @@ impl NetService {
                 let hostname = ServerHostname::load(db.as_public().as_server_info())?;
                 let ports = db.as_private().as_available_ports().de()?;
                 if let Some(ref pkg_id) = pkg_id {
-                    for (host_id, host) in db
-                        .as_public_mut()
-                        .as_package_data_mut()
-                        .as_idx_mut(pkg_id)
-                        .or_not_found(pkg_id)?
-                        .as_hosts_mut()
-                        .as_entries_mut()?
-                    {
+                    let Some(pde) = db.as_public_mut().as_package_data_mut().as_idx_mut(pkg_id)
+                    else {
+                        return Ok(());
+                    };
+                    for (host_id, host) in pde.as_hosts_mut().as_entries_mut()? {
                         host.as_bindings_mut().mutate(|b| {
                             for (internal_port, info) in b.iter_mut() {
                                 if !except.contains(&BindId {
@@ -1521,23 +1623,16 @@ impl NetService {
             }
         }
         self.sync_task.abort();
-        // Clean up any outbound gateway ip rules for this service
-        let service_ip = self.data.lock().await.ip.to_string();
-        loop {
-            if Command::new("ip")
-                .arg("rule")
-                .arg("del")
-                .arg("from")
-                .arg(&service_ip)
-                .arg("priority")
-                .arg("100")
-                .invoke(ErrorKind::Network)
-                .await
-                .is_err()
-            {
-                break;
+        let outbound_sources = {
+            let mut data = self.data.lock().await;
+            if let Ok(ctrl) = data.net_controller() {
+                for id in data.binds.keys().cloned().collect::<Vec<_>>() {
+                    data.retire(&*ctrl, id).await.log_err();
+                }
             }
-        }
+            data.outbound_sources()
+        };
+        purge_outbound_rules(&outbound_sources).await;
         // Set last: an earlier failure leaves shutdown false so Drop's fallback re-runs.
         self.shutdown = true;
         Ok(())
@@ -1563,6 +1658,7 @@ mod tests {
     use imbl_value::InternedString;
 
     use super::*;
+    use crate::db::model::public::IpInfo;
     use crate::net::host::binding::Security;
     use crate::net::vhost::{VHostBindListener, VHostTarget};
 
@@ -1582,6 +1678,249 @@ mod tests {
             }),
             secure: secure_ssl.map(|ssl| Security { ssl }),
         }
+    }
+
+    #[test]
+    fn the_bare_ip_vhost_answers_on_its_enabled_ssl_ips_alone() {
+        let eth = GatewayId::from(InternedString::intern("eth0"));
+        let row = |host: &str, ssl, public, metadata| HostnameInfo {
+            ssl,
+            public,
+            hostname: InternedString::intern(host),
+            port: Some(if ssl { 8443 } else { 8080 }),
+            metadata,
+        };
+        let ipv4 = || HostnameMetadata::Ipv4 {
+            gateway: eth.clone(),
+        };
+        let mdns = row(
+            "server.local",
+            true,
+            false,
+            HostnameMetadata::Mdns {
+                gateways: BTreeSet::from([eth.clone()]),
+            },
+        );
+        let plain = row("192.0.2.10", false, false, ipv4());
+        let wan = row("198.51.100.2", true, true, ipv4());
+        let ssl = row("192.0.2.10", true, false, ipv4());
+
+        assert!(ssl_vhost_private_ips([&mdns, &plain, &wan]).is_empty());
+        assert_eq!(
+            ssl_vhost_private_ips([&mdns, &plain, &wan, &ssl]),
+            BTreeSet::from(["192.0.2.10".parse::<IpAddr>().unwrap()])
+        );
+    }
+
+    #[test]
+    fn a_plugin_name_is_served_on_the_bindings_ssl_port_over_internal_ips_alone() {
+        let eth = GatewayId::from(InternedString::intern("eth0"));
+        let row = |host: &str, ssl, public, port, metadata| HostnameInfo {
+            ssl,
+            public,
+            hostname: InternedString::intern(host),
+            port: Some(port),
+            metadata,
+        };
+        let ipv4 = || HostnameMetadata::Ipv4 {
+            gateway: eth.clone(),
+        };
+        let onion = row(
+            "example.onion",
+            true,
+            true,
+            443,
+            HostnameMetadata::Plugin {
+                package_id: "tor".parse().unwrap(),
+                remove_action: None,
+                overflow_actions: Vec::new(),
+                info: imbl_value::Value::Null,
+            },
+        );
+        let domain = row(
+            "example.com",
+            true,
+            true,
+            443,
+            HostnameMetadata::PublicDomain {
+                gateway: eth.clone(),
+            },
+        );
+        let bridge = row("10.0.3.1", true, false, 49443, ipv4());
+        let bridge_plain = row("10.0.3.1", false, false, 49080, ipv4());
+        let lan = row("192.0.2.10", true, false, 49443, ipv4());
+
+        assert_eq!(named_vhost_leg(&onion, 49443), Some((49443, false)));
+        assert_eq!(named_vhost_leg(&domain, 49443), Some((443, true)));
+        assert_eq!(named_vhost_leg(&lan, 49443), None);
+        assert_eq!(
+            ssl_vhost_internal_ips([&onion, &bridge, &bridge_plain, &lan]),
+            BTreeSet::from(["10.0.3.1".parse::<IpAddr>().unwrap()])
+        );
+    }
+
+    #[test]
+    fn every_named_vhost_accepts_the_bridge_even_when_names_share_an_entry() {
+        let eth = GatewayId::from(InternedString::intern("eth0"));
+        let row = |host: &str, public, port, metadata| HostnameInfo {
+            ssl: true,
+            public,
+            hostname: InternedString::intern(host),
+            port: Some(port),
+            metadata,
+        };
+        let plugin = || HostnameMetadata::Plugin {
+            package_id: "tor".parse().unwrap(),
+            remove_action: None,
+            overflow_actions: Vec::new(),
+            info: imbl_value::Value::Null,
+        };
+        let private_domain = || HostnameMetadata::PrivateDomain {
+            gateways: BTreeSet::from([eth.clone()]),
+        };
+        let bridge = row(
+            "10.0.3.1",
+            false,
+            49443,
+            HostnameMetadata::Ipv4 {
+                gateway: eth.clone(),
+            },
+        );
+        let named = |rows: &[&HostnameInfo]| {
+            let enabled: BTreeSet<&HostnameInfo> = rows.iter().copied().chain([&bridge]).collect();
+            let mut vhosts = BTreeMap::new();
+            add_named_vhosts(&mut vhosts, &enabled, 49443, &OrdMap::new(), |_, _| {
+                ProxyTarget {
+                    public_v4: BTreeSet::new(),
+                    public_v6: BTreeSet::new(),
+                    public_v6_gateways: BTreeSet::new(),
+                    private: BTreeSet::new(),
+                    acme: None,
+                    addr: "10.0.3.2:443".parse().unwrap(),
+                    addr_v6: None,
+                    add_x_forwarded_headers: false,
+                    auth: None,
+                    connect_ssl: None,
+                    alpn: None,
+                    passthrough: false,
+                    preserve_source_ip: false,
+                }
+            });
+            vhosts
+        };
+        let accepts = |vhosts: &BTreeMap<VHostKey, ProxyTarget>, name: &str, public| {
+            let ProxyTarget { private, .. } =
+                &vhosts[&(Some(InternedString::intern(name)), 49443, public)];
+            private.contains(&"10.0.3.1".parse::<IpAddr>().unwrap())
+        };
+
+        let onion = row("example.onion", true, 443, plugin());
+        let shared_onion = row("box.example", true, 443, plugin());
+        let shared_domain = row("box.example", false, 49443, private_domain());
+        let private = row("lan.example", false, 49443, private_domain());
+        let public = row(
+            "www.example",
+            true,
+            49443,
+            HostnameMetadata::PublicDomain {
+                gateway: eth.clone(),
+            },
+        );
+
+        assert!(accepts(&named(&[&onion]), "example.onion", false));
+        assert!(accepts(&named(&[&private]), "lan.example", false));
+        assert!(accepts(&named(&[&public]), "www.example", true));
+        assert!(accepts(
+            &named(&[&shared_domain, &shared_onion]),
+            "box.example",
+            false
+        ));
+    }
+
+    #[test]
+    fn mdns_tls_routes_accept_gateway_lan_ips_without_enabled_bare_ips() {
+        let eth = gw("eth0");
+        let ifaces = OrdMap::from_iter([(
+            eth,
+            NetworkInterfaceInfo {
+                ip_info: Some(Arc::new(IpInfo {
+                    subnets: ["192.0.2.10/24", "192.0.2.11/24"]
+                        .into_iter()
+                        .map(|s| s.parse::<IpNet>().unwrap())
+                        .collect(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        )]);
+        let name = mdns(true, 8443, ["eth0"]);
+        let bridge = lan_ip("10.0.3.1", true, 8443, "lxcbr0");
+        let enabled = BTreeSet::from([&name, &bridge]);
+        let mut vhosts = BTreeMap::new();
+        add_named_vhosts(&mut vhosts, &enabled, 8443, &ifaces, |_, _| {
+            proxy_target(&[])
+        });
+        let target = &vhosts[&(Some(name.hostname.clone()), 8443, false)];
+        assert_eq!(
+            target.private,
+            BTreeSet::from([ip("10.0.3.1"), ip("192.0.2.10"), ip("192.0.2.11")]),
+        );
+        assert!(target.public_v4.is_empty());
+        assert!(target.public_v6.is_empty());
+        assert!(target.public_v6_gateways.is_empty());
+        assert_eq!(
+            ssl_vhost_private_ips(enabled.iter().copied()),
+            BTreeSet::from([ip("10.0.3.1")]),
+        );
+    }
+
+    #[test]
+    fn a_forwarded_port_admits_its_enabled_lan_ips_alone() {
+        let eth = GatewayId::from(InternedString::intern("eth0"));
+        let ifaces: OrdMap<GatewayId, NetworkInterfaceInfo> = [(
+            eth.clone(),
+            NetworkInterfaceInfo {
+                ip_info: Some(Arc::new(IpInfo {
+                    subnets: ["192.0.2.10/24", "192.0.2.11/24"]
+                        .into_iter()
+                        .map(|s| s.parse::<IpNet>().unwrap())
+                        .collect(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        )]
+        .into_iter()
+        .collect();
+        let row = |host: &str, metadata| HostnameInfo {
+            ssl: false,
+            public: false,
+            hostname: InternedString::intern(host),
+            port: Some(8080),
+            metadata,
+        };
+        let gateways = BTreeSet::from([eth.clone()]);
+        let mdns = row(
+            "server.local",
+            HostnameMetadata::Mdns {
+                gateways: gateways.clone(),
+            },
+        );
+        let ip = row("192.0.2.10", HostnameMetadata::Ipv4 { gateway: eth });
+        let domain = row("priv.lan", HostnameMetadata::PrivateDomain { gateways });
+        let ips = |hosts: &[&str]| -> BTreeSet<IpAddr> {
+            hosts.iter().map(|h| h.parse().unwrap()).collect()
+        };
+
+        assert_eq!(forwarded_lan_ips([&mdns], &ifaces), ips(&[]));
+        assert_eq!(
+            forwarded_lan_ips([&mdns, &ip], &ifaces),
+            ips(&["192.0.2.10"])
+        );
+        assert_eq!(
+            forwarded_lan_ips([&domain], &ifaces),
+            ips(&["192.0.2.10", "192.0.2.11"])
+        );
     }
 
     /// `alpn` names protocols, not a transport, so it has no say in whether the
@@ -1684,18 +2023,6 @@ mod tests {
         }
     }
 
-    fn private_domain(port: u16, gateways: impl IntoIterator<Item = &'static str>) -> HostnameInfo {
-        HostnameInfo {
-            ssl: false,
-            public: false,
-            hostname: InternedString::intern("service.home"),
-            port: Some(port),
-            metadata: HostnameMetadata::PrivateDomain {
-                gateways: gateways.into_iter().map(gw).collect(),
-            },
-        }
-    }
-
     fn ip(s: &str) -> IpAddr {
         s.parse().unwrap()
     }
@@ -1716,55 +2043,21 @@ mod tests {
     }
 
     #[test]
-    fn direct_forward_uses_enabled_private_ipv4_rows() {
-        let enabled = lan_ip("192.168.1.5", false, 80, "eth0");
-        let same_gateway_name = private_domain(80, ["eth0"]);
-        let same_gateway_mdns = mdns(false, 80, ["eth0"]);
-
-        assert_eq!(
-            direct_forward_private_ips([&enabled, &same_gateway_name, &same_gateway_mdns], 80),
-            BTreeSet::from([ip("192.168.1.5")]),
-            "names do not restore another IP on their gateway"
-        );
-    }
-
-    #[test]
-    fn direct_forward_private_ips_match_port_and_private_ipv4() {
+    fn forwarded_lan_ips_match_the_selected_port_and_exclude_public_rows() {
         let selected = lan_ip("192.168.1.5", false, 5000, "eth0");
         let other_port = lan_ip("192.168.1.6", false, 5001, "eth0");
         let ipv6 = lan_ip("fd00::5", false, 5000, "eth0");
         let public = bare_v4(false, 5000, &gw("eth0"));
 
         assert_eq!(
-            direct_forward_private_ips([&selected, &other_port, &ipv6, &public], 5000),
-            BTreeSet::from([ip("192.168.1.5")]),
+            forwarded_lan_ips(
+                [&selected, &other_port, &ipv6, &public]
+                    .into_iter()
+                    .filter(|a| a.port == Some(5000)),
+                &OrdMap::new(),
+            ),
+            BTreeSet::from([ip("192.168.1.5"), ip("fd00::5")]),
         );
-    }
-
-    #[test]
-    fn plaintext_ip_does_not_keep_https_mdns_served() {
-        let name = mdns(true, 443, ["eth0"]);
-        let http = lan_ip("192.168.1.5", false, 80, "eth0");
-        let https = lan_ip("192.168.1.5", true, 443, "eth0");
-
-        assert_eq!(
-            mdns_vhost_private_ips(&name, [&http, &https]),
-            BTreeSet::from([ip("192.168.1.5")]),
-        );
-        assert!(mdns_vhost_private_ips(&name, [&http]).is_empty());
-    }
-
-    #[test]
-    fn another_gateway_does_not_keep_mdns_served() {
-        let name = mdns(true, 443, ["eth0"]);
-        let eth0 = lan_ip("192.168.1.5", true, 443, "eth0");
-        let wg0 = lan_ip("10.13.13.5", true, 443, "wg0");
-
-        assert_eq!(
-            mdns_vhost_private_ips(&name, [&eth0, &wg0]),
-            BTreeSet::from([ip("192.168.1.5")]),
-        );
-        assert!(mdns_vhost_private_ips(&name, [&wg0]).is_empty());
     }
 
     #[test]
@@ -1842,6 +2135,7 @@ mod tests {
         ProxyTarget {
             public_v4: BTreeSet::new(),
             public_v6: BTreeSet::new(),
+            public_v6_gateways: BTreeSet::new(),
             private: private.iter().map(|ip| ip.parse().unwrap()).collect(),
             acme: None,
             addr: "10.0.3.2:80".parse().unwrap(),
@@ -1862,7 +2156,9 @@ mod tests {
         let original_handle = Arc::new(());
         let mut current =
             BTreeMap::from([(key.clone(), (original.clone(), original_handle.clone()))]);
-        let mut desired = BTreeMap::from([(key.clone(), proxy_target(&["10.13.13.2"]))]);
+        let mut replacement = proxy_target(&["10.13.13.2"]);
+        replacement.public_v6_gateways.insert(gw("eth0"));
+        let mut desired = BTreeMap::from([(key.clone(), replacement)]);
         let mut replaced_previous = false;
 
         reconcile_vhosts(
@@ -1886,6 +2182,11 @@ mod tests {
             current[&key].0.private,
             BTreeSet::from([ip("10.13.13.2")]),
             "the retained context must be paired with the new routing set"
+        );
+
+        assert_eq!(
+            current[&key].0.public_v6_gateways,
+            BTreeSet::from([gw("eth0")])
         );
 
         for mutate in [
@@ -2011,5 +2312,107 @@ mod tests {
         assert!(vhosts.is_empty());
         assert!(private_dns.is_empty());
         assert!(gua_forwards.is_empty());
+    }
+
+    fn args(cmd: &Command) -> Vec<&str> {
+        cmd.as_std()
+            .get_args()
+            .map(|a| a.to_str().unwrap())
+            .collect()
+    }
+
+    /// `ip rule` rejects an IPv6 source without `-6`.
+    #[test]
+    fn outbound_rule_family_follows_its_source() {
+        assert_eq!(args(&ip_rule("10.0.3.5".parse().unwrap())), ["rule"]);
+        assert_eq!(args(&ip_rule("fd00:3::5".parse().unwrap())), ["-6", "rule"]);
+    }
+
+    #[test]
+    fn service_outbound_rules_order_by_priority() {
+        assert!(ServiceOutboundRule::Gateway(u32::MAX) < ServiceOutboundRule::Reject);
+        assert!(SERVICE_OUTBOUND_RULE_PRIORITY < SERVICE_OUTBOUND_REJECT_RULE_PRIORITY);
+    }
+
+    #[test]
+    fn service_outbound_rules_are_source_scoped_in_each_family() {
+        assert_eq!(
+            args(&outbound_rule_command(
+                "add",
+                "10.0.3.5".parse().unwrap(),
+                ServiceOutboundRule::Gateway(1004),
+            )),
+            [
+                "rule", "add", "from", "10.0.3.5", "lookup", "1004", "priority", "70"
+            ]
+        );
+        assert_eq!(
+            args(&outbound_rule_command(
+                "add",
+                "fd00:3::5".parse().unwrap(),
+                ServiceOutboundRule::Reject,
+            )),
+            [
+                "-6",
+                "rule",
+                "add",
+                "from",
+                "fd00:3::5",
+                "unreachable",
+                "priority",
+                "71"
+            ]
+        );
+    }
+
+    #[test]
+    fn conntrack_filter_family_follows_its_source() {
+        assert_eq!(
+            args(&delete_conntrack_command("10.0.3.5".parse().unwrap())),
+            ["-D", "-s", "10.0.3.5"]
+        );
+        assert_eq!(
+            args(&delete_conntrack_command("fd00:3::5".parse().unwrap())),
+            ["-D", "-f", "ipv6", "-s", "fd00:3::5"]
+        );
+    }
+
+    #[test]
+    fn outbound_sources_cover_every_address_the_container_holds() {
+        let mut data = NetServiceData {
+            id: None,
+            ip: Ipv4Addr::new(10, 0, 3, 5),
+            ipv6: None,
+            _dns: Default::default(),
+            controller: Default::default(),
+            binds: BTreeMap::new(),
+        };
+        assert_eq!(
+            data.outbound_sources(),
+            ["10.0.3.5".parse::<IpAddr>().unwrap()]
+        );
+
+        data.ipv6 = Some("fd00:3::5".parse().unwrap());
+        assert_eq!(
+            data.outbound_sources(),
+            ["10.0.3.5", "fd00:3::5"].map(|a| a.parse::<IpAddr>().unwrap())
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dropped_service_stops_its_sync_task() {
+        let (held, released) = tokio::sync::oneshot::channel::<()>();
+        let mut service = NetService::dummy();
+        service.sync_task = tokio::spawn(async move {
+            let _held = held;
+            std::future::pending::<()>().await
+        })
+        .into();
+        drop(service);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(5), released)
+                .await
+                .is_ok()
+        );
     }
 }

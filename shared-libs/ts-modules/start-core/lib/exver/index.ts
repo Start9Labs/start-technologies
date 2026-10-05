@@ -653,10 +653,9 @@ export class VersionRange {
       case 'Parens':
         return VersionRange.parseRange(atom.expr)
       case 'Anchor':
-        return new VersionRange({
-          type: 'Anchor',
-          operator: atom.operator || '^',
-          version: new ExtendedVersion(
+        return VersionRange.anchor(
+          atom.operator || '^',
+          new ExtendedVersion(
             atom.version.flavor,
             new Version(
               atom.version.upstream.number,
@@ -667,7 +666,7 @@ export class VersionRange {
               atom.version.downstream.prerelease,
             ),
           ),
-        })
+        )
       case 'Flavor':
         return VersionRange.flavor(atom.flavor)
       default:
@@ -718,8 +717,21 @@ export class VersionRange {
    * @param operator - One of `"="`, `">"`, `"<"`, `">="`, `"<="`, `"!="`, `"^"`, `"~"`
    * @param version - The version to compare against
    */
-  static anchor(operator: P.CmpOp, version: ExtendedVersion) {
-    return new VersionRange({ type: 'Anchor', operator, version })
+  static anchor(operator: P.CmpOp, version: ExtendedVersion): VersionRange {
+    switch (operator) {
+      case '^':
+        return VersionRange.and(
+          VersionRange.anchor('>=', version),
+          VersionRange.anchor('<', version.incrementMajor()),
+        )
+      case '~':
+        return VersionRange.and(
+          VersionRange.anchor('>=', version),
+          VersionRange.anchor('<', version.incrementMinor()),
+        )
+      default:
+        return new VersionRange({ type: 'Anchor', operator, version })
+    }
   }
 
   /**
@@ -821,6 +833,50 @@ export class VersionRange {
     return version.satisfies(this)
   }
 
+  /**
+   * Whether the declared versions collectively satisfy the complete range.
+   *
+   * A negated range passes only when no declared version satisfies its complete operand.
+   * `!=v` is evaluated as `!(=v)`. An empty release satisfies no range.
+   */
+  satisfiedByRelease(versions: ExtendedVersion[]): boolean {
+    return this.releaseMatches(versions, false).some(Boolean)
+  }
+
+  private releaseMatches(
+    versions: ExtendedVersion[],
+    negated: boolean,
+  ): boolean[] {
+    if (this.atom.type === 'Not') {
+      return this.atom.value.releaseMatches(versions, !negated)
+    }
+    if (this.atom.type === 'Anchor' && this.atom.operator === '!=') {
+      return VersionRange.anchor('=', this.atom.version).releaseMatches(
+        versions,
+        !negated,
+      )
+    }
+    if (negated) {
+      const matched = versions.some(v => v.satisfies(this))
+      return versions.map(() => !matched)
+    }
+
+    switch (this.atom.type) {
+      case 'And': {
+        const left = this.atom.left.releaseMatches(versions, false)
+        const right = this.atom.right.releaseMatches(versions, false)
+        return left.map((matched, i) => matched && right[i])
+      }
+      case 'Or': {
+        const left = this.atom.left.releaseMatches(versions, false)
+        const right = this.atom.right.releaseMatches(versions, false)
+        return left.map((matched, i) => matched || right[i])
+      }
+      default:
+        return versions.map(v => v.satisfies(this))
+    }
+  }
+
   tables(): VersionRangeTables {
     switch (this.atom.type) {
       case 'Anchor':
@@ -903,12 +959,56 @@ export class VersionRange {
   }
 
   /**
-   * Returns a canonical (simplified) form of this range using minterm expansion.
-   * Useful for normalizing complex boolean expressions into a minimal representation.
+   * Returns a simplified form with identical version and release satisfaction.
+   *
+   * Negation and `!=` remain explicit because release evaluation applies them across every
+   * declared version. Positive subtrees outside negation use canonical minterm expansion.
    */
   normalize(): VersionRange {
-    return VersionRangeTable.minterms(this.tables())
+    if (!this.hasReleaseVeto()) {
+      return VersionRangeTable.minterms(this.tables())
+    }
+
+    switch (this.atom.type) {
+      case 'And':
+        return VersionRange.and(
+          this.atom.left.normalize(),
+          this.atom.right.normalize(),
+        )
+      case 'Or':
+        return VersionRange.or(
+          this.atom.left.normalize(),
+          this.atom.right.normalize(),
+        )
+      case 'Not':
+      default:
+        return this
+    }
   }
+
+  private hasReleaseVeto(): boolean {
+    switch (this.atom.type) {
+      case 'Anchor':
+        return this.atom.operator === '!='
+      case 'Not':
+        return true
+      case 'And':
+      case 'Or':
+        return (
+          this.atom.left.hasReleaseVeto() || this.atom.right.hasReleaseVeto()
+        )
+      default:
+        return false
+    }
+  }
+}
+
+function numericPrerelease(value: string | number): string | null {
+  if (typeof value === 'number') return String(value)
+  if (!/^[1-9][0-9]{15,}$/.test(value)) return null
+  return value.length > 16 || value > String(Number.MAX_SAFE_INTEGER)
+    ? value
+    : null
 }
 
 /**
@@ -931,7 +1031,7 @@ export class Version {
   constructor(
     /** The numeric version segments (e.g. `[1, 2, 3]` for `"1.2.3"`). */
     public number: number[],
-    /** Optional prerelease identifiers (e.g. `["beta", 1]` for `"-beta.1"`). */
+    /** Numeric identifiers beyond `Number.MAX_SAFE_INTEGER` use decimal strings. */
     public prerelease: (string | number)[],
   ) {}
 
@@ -967,25 +1067,25 @@ export class Version {
       other.prerelease.length,
     )
     for (let i = 0; i < prereleaseLen; i++) {
-      if (typeof this.prerelease[i] === typeof other.prerelease[i]) {
-        if (this.prerelease[i] > other.prerelease[i]) {
-          return 'greater'
-        } else if (this.prerelease[i] < other.prerelease[i]) {
-          return 'less'
-        }
+      const left = this.prerelease[i]
+      const right = other.prerelease[i]
+      if (left === undefined) return 'less'
+      if (right === undefined) return 'greater'
+
+      const leftNumeric = numericPrerelease(left)
+      const rightNumeric = numericPrerelease(right)
+      if (leftNumeric !== null && rightNumeric !== null) {
+        if (leftNumeric.length > rightNumeric.length) return 'greater'
+        if (leftNumeric.length < rightNumeric.length) return 'less'
+        if (leftNumeric > rightNumeric) return 'greater'
+        if (leftNumeric < rightNumeric) return 'less'
+      } else if (leftNumeric !== null) {
+        return 'less'
+      } else if (rightNumeric !== null) {
+        return 'greater'
       } else {
-        switch (`${typeof this.prerelease[1]}:${typeof other.prerelease[i]}`) {
-          case 'number:string':
-            return 'less'
-          case 'string:number':
-            return 'greater'
-          case 'number:undefined':
-          case 'string:undefined':
-            return 'greater'
-          case 'undefined:number':
-          case 'undefined:string':
-            return 'less'
-        }
+        if (left > right) return 'greater'
+        if (left < right) return 'less'
       }
     }
 
@@ -1092,7 +1192,7 @@ export class ExtendedVersion {
   compareLexicographic(other: ExtendedVersion): 'greater' | 'equal' | 'less' {
     if ((this.flavor || '') > (other.flavor || '')) {
       return 'greater'
-    } else if ((this.flavor || '') > (other.flavor || '')) {
+    } else if ((this.flavor || '') < (other.flavor || '')) {
       return 'less'
     } else {
       return this.compare(other)!
@@ -1176,58 +1276,47 @@ export class ExtendedVersion {
     }
   }
 
-  /**
-   * Returns an ExtendedVersion with the Upstream major version version incremented by 1
-   * and sets subsequent digits to zero.
-   * If no non-zero upstream digit can be found the last upstream digit will be incremented.
-   */
+  private semanticNumber(): number[] {
+    let length = this.upstream.number.length
+    while (length > 1 && this.upstream.number[length - 1] === 0) length--
+    return this.upstream.number.slice(0, length)
+  }
+
+  /** Returns the exclusive upper bound for a caret range anchored at this version. */
   incrementMajor(): ExtendedVersion {
-    const majorIdx = this.upstream.number.findIndex((num: number) => num !== 0)
-
-    const majorNumber = this.upstream.number.map((num, idx): number => {
-      if (idx > majorIdx) {
-        return 0
-      } else if (idx === majorIdx) {
-        return num + 1
-      }
-      return num
-    })
-
-    const incrementedUpstream = new Version(majorNumber, [])
-    const updatedDownstream = new Version([0], [])
+    const semanticNumber = this.semanticNumber()
+    const majorIdx = semanticNumber.findIndex(num => num !== 0)
+    const incrementIdx = majorIdx === -1 ? semanticNumber.length - 1 : majorIdx
+    const incrementedUpstream = new Version(
+      semanticNumber
+        .slice(0, incrementIdx)
+        .concat(semanticNumber[incrementIdx] + 1),
+      this.upstream.prerelease,
+    )
 
     return new ExtendedVersion(
       this.flavor,
       incrementedUpstream,
-      updatedDownstream,
+      new Version([0], []),
     )
   }
 
-  /**
-   * Returns an ExtendedVersion with the Upstream minor version version incremented by 1
-   * also sets subsequent digits to zero.
-   * If no non-zero upstream digit can be found the last digit will be incremented.
-   */
+  /** Returns the exclusive upper bound for a tilde range anchored at this version. */
   incrementMinor(): ExtendedVersion {
-    const majorIdx = this.upstream.number.findIndex((num: number) => num !== 0)
-    let minorIdx = majorIdx === -1 ? majorIdx : majorIdx + 1
-
-    const majorNumber = this.upstream.number.map((num, idx): number => {
-      if (idx > minorIdx) {
-        return 0
-      } else if (idx === minorIdx) {
-        return num + 1
-      }
-      return num
-    })
-
-    const incrementedUpstream = new Version(majorNumber, [])
-    const updatedDownstream = new Version([0], [])
+    const semanticNumber = this.semanticNumber()
+    const majorIdx = semanticNumber.findIndex(num => num !== 0)
+    const incrementIdx = majorIdx === -1 ? semanticNumber.length - 1 : majorIdx
+    const incrementedUpstream = new Version(
+      semanticNumber
+        .slice(0, incrementIdx + 1)
+        .concat((semanticNumber[incrementIdx + 1] || 0) + 1),
+      this.upstream.prerelease,
+    )
 
     return new ExtendedVersion(
       this.flavor,
       incrementedUpstream,
-      updatedDownstream,
+      new Version([0], []),
     )
   }
 

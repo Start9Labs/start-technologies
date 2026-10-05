@@ -34,7 +34,7 @@ For SLAAC and DHCPv6, an optional **IPv6 Prefix** field lets you request a speci
 > IPv6 cannot be set to Disabled while any enabled [Published Ports](published-ports.md) rules use IPv6 — the option is grayed out with a hint. Remove or disable those rules first.
 
 > [!TIP]
-> A **6in4** tunnel is another way to reach IPv6 on an ISP that provides none. Unlike 6RD, which your ISP has to offer, a 6in4 tunnel comes from a third-party broker such as Hurricane Electric and works on any connection with a public IPv4 address — but not behind [CGNAT](cgnat.md), which blocks the protocol the tunnel uses. There is no UI for it; the `6in4` package ships in the image and is configured over [SSH](ssh.md) by adding an interface to `/etc/config/network`.
+> A **6in4** tunnel is another way to reach IPv6 on an ISP that provides none. Unlike 6RD, which your ISP has to offer, a 6in4 tunnel comes from a third-party broker such as Hurricane Electric and works on any connection with a public IPv4 address — but not behind [CGNAT](cgnat.md), which blocks the protocol the tunnel uses. There is no UI for it; the `6in4` package ships in the image and is configured over [SSH](ssh.md) by adding an interface to `/etc/config/network`. The web interface does not manage such an interface — the WAN page and its summary read it back as IPv6 **Disabled** — so keep managing it over SSH rather than from the IPv6 settings here.
 
 The WAN summary shows an IPv6 status badge indicating whether IPv6 is Enabled or Disabled, along with its mode (SLAAC, DHCPv6, Static, or 6RD).
 

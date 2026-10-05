@@ -13,11 +13,7 @@ use crate::service::effects::prelude::*;
 use crate::service::rpc::CallbackId;
 use crate::{HostId, PackageId, ServiceInterfaceId};
 
-// Every service interface lives under the binding it was exported from
-// (`hosts/{hostId}/bindings/{internalPort}/interfaces/{id}` for single-port
-// `Origin.export`, `hosts/{hostId}/bindingRanges/{internalStartPort}/interface`
-// for `RangeOrigin.export`). The flat `PackageDataEntry.serviceInterfaces` map
-// is gone — these effects read/write the host tree directly.
+// Service interfaces are stored under the binding that exported them.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
@@ -28,7 +24,11 @@ pub struct ExportServiceInterfaceParams {
     masked: bool,
     address_info: AddressInfo,
     r#type: ServiceInterfaceType,
+    /// The interface address Open UI should prefer.
+    #[ts(optional = nullable)]
+    preferred_launcher_address: Option<String>,
 }
+
 pub async fn export_service_interface(
     context: EffectContext,
     ExportServiceInterfaceParams {
@@ -38,6 +38,7 @@ pub async fn export_service_interface(
         masked,
         address_info,
         r#type,
+        preferred_launcher_address,
     }: ExportServiceInterfaceParams,
 ) -> Result<(), Error> {
     let context = context.deref()?;
@@ -52,6 +53,7 @@ pub async fn export_service_interface(
         masked,
         address_info,
         interface_type: r#type,
+        preferred_launcher_address,
     };
 
     context

@@ -54,7 +54,7 @@ import {
   PublishedPortFromApi,
   PublishedPortsSetRequest,
   PublishedPortsSetResult,
-  AutoForwardFromApi,
+  AutomaticPortUseFromApi,
   OutboundVpn,
   OutboundVpnCreateRequest,
   OutboundVpnCreateResponse,
@@ -65,6 +65,7 @@ import {
   EthernetSetConfig,
   EthernetSetResult,
   WifiSetResult,
+  WifiRegulatory,
   SshKeyFromApi,
   SshKeysAddRequest,
   SshKeysDeleteRequest,
@@ -177,6 +178,10 @@ export class LiveApiService extends ApiService {
 
   async wifiGeneratePassword(): Promise<string> {
     return this.rpc.request({ method: 'wifi.generate-password', params: {} })
+  }
+
+  async wifiRegulatory(): Promise<WifiRegulatory> {
+    return this.rpc.request({ method: 'wifi.regulatory', params: {} })
   }
 
   async wifiBlackoutGet(): Promise<ScheduleWindow[]> {
@@ -346,7 +351,7 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'published-ports.set', params })
   }
 
-  async publishedPortsAutoList(): Promise<AutoForwardFromApi[]> {
+  async publishedPortsAutoList(): Promise<AutomaticPortUseFromApi[]> {
     return this.rpc.request({
       method: 'published-ports.auto-list',
       params: {},

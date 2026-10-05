@@ -21,7 +21,7 @@ libraries under `../../shared-libs/ts-modules` and the SDK base from `../start-s
 ## Tech stack
 
 - **Backend:** Rust (Tokio async, Axum), built on the `start-core` crate.
-- **Frontend:** Angular 22 + Taiga UI 5 (apps live under `web/`, shared libs
+- **Frontend:** Angular + Taiga UI (apps live under `web/`, shared libs
   under `../../shared-libs/ts-modules`).
 - **Container runtime:** Node.js/TypeScript managing LXC service containers.
 - **State/sync:** Patch-DB (`../../shared-libs/crates/patch-db`) — diff-based store that pushes
@@ -46,19 +46,21 @@ start-os/
 └── startos-restart.service
 ```
 
-OS-image packaging shared across products lives at the repo root: `debian/`
-(maintainer scripts), `apt/`, and `build/` (image-recipe, firmware, env scripts);
-this product's own assets live in `assets/` here. The root `Makefile` drives the
+Shared build plumbing lives at the repo root: `debian/` (build/publish scripts),
+`apt/`, and `build/` (environment and shared tooling). OS-specific maintainer
+scripts, image recipes, and firmware live under this product's `debian/` and
+`build/`; VM assets live in `assets/`. The root `Makefile` drives the
 full ISO/img build.
 
 ## Quickstart
 
 Build commands run from the **repo root** (one Cargo workspace, one Angular
-workspace). See [CONTRIBUTING.md](CONTRIBUTING.md) for environment setup
-(including the OS-image toolchain) and the full build/test workflow.
+workspace). See [AGENTS.md](AGENTS.md#contributor-workflow) for environment
+setup (including the OS-image toolchain) and the full build/test workflow.
 
 ```sh
 # from the repo root
+make start-os-uis                         # build both embedded UIs first
 cargo check -p start-os                 # verify the OS bins compile
 make start-os-ui                          # build the admin UI
 make start-os                             # build all OS artifacts (bins + web + runtime image)
@@ -75,8 +77,8 @@ test suite.
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how the OS product is structured and how
   data flows backend → frontend.
-- [CONTRIBUTING.md](CONTRIBUTING.md) — build/test/format workflow for this product.
-- [AGENTS.md](AGENTS.md) — operating rules for AI developers working here.
+- [AGENTS.md](AGENTS.md) — build/test/format workflow and operating rules for
+  AI developers working here.
 - [CHANGELOG.md](CHANGELOG.md) — release history.
 - End-user docs: [docs.start9.com](https://docs.start9.com) (built from `docs/`).
 

@@ -218,6 +218,7 @@ mod test {
                 suffix: String::new(),
             },
             interface_type: kind,
+            preferred_launcher_address: None,
         }
     }
 

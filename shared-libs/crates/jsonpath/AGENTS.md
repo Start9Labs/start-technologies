@@ -7,10 +7,7 @@ diverged** — it is maintained as first-party code in the start-technologies mo
 `jsonpath_lib` (it differs from the directory name `jsonpath`), so all cargo commands use
 `-p jsonpath_lib`. `CLAUDE.md` is a one-line `@AGENTS.md` import — don't edit it.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for how it's built and [CONTRIBUTING.md](CONTRIBUTING.md) for
-how to contribute. [README.md](README.md) is the usage/API reference.
-
-**Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for how it's built. [README.md](README.md) is the usage/API reference.
 
 ## Layout
 
@@ -41,7 +38,7 @@ how to contribute. [README.md](README.md) is the usage/API reference.
 
 ```bash
 cargo build -p jsonpath_lib          # build the library (rlib + cdylib)
-cargo build -p jsonpath_lib --lib    # build only the rlib, skip the cdylib
+cargo build -p jsonpath_lib --lib    # select the library target (rlib + cdylib)
 cargo test  -p jsonpath_lib          # unit + integration + doc tests
 cargo test  -p jsonpath_lib --lib    # lib unit tests only
 cargo test  -p jsonpath_lib --test '*'   # integration tests only

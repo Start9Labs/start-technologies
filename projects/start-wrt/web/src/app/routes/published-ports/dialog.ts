@@ -546,6 +546,11 @@ export class PublishPortDialog implements OnInit {
       ipv6,
       ipv4PublicPort,
       source: value.sourceType === 'any' ? 'any' : value.sourceValue || 'any',
+      overrideWanPorts:
+        existing?.overrideWanPorts &&
+        existing.protocol === value.protocol &&
+        (existing.ipv4PublicPort ?? existing.ports) ===
+          (ipv4PublicPort ?? value.ports),
     }
 
     const result: PublishedPortDialogResult = {

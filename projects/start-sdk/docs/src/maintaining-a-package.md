@@ -63,13 +63,25 @@ GitHub's "Latest" badge is unreliable in both directions: it can sit on a prerel
 
 ### Scale scrutiny to the size of the jump
 
-| Jump                      | What it needs                                                                                            |
-| ------------------------- | -------------------------------------------------------------------------------------------------------- |
-| **Patch** (1.2.3 → 1.2.4) | Low risk. Bump, verify the build, move on.                                                               |
-| **Minor** (1.2.x → 1.3.0) | Read the full changelog. Look for deprecations and behavior changes; note new features worth surfacing.  |
-| **Major** (1.x → 2.0)     | Read the changelog, release notes, and any migration guide. Inspect code diffs where the notes are thin. |
+Identify upstream's versioning scheme before classifying the jump; the tier decides how much of upstream you read. Preserve the [full upstream version](versions.md#preserve-the-upstream-version) in every case. The tier is a review scope, not a reason to coerce a version into SemVer.
 
-A major bump is also where you ask whether the package needs a [data migration](./recipe-version-migrations.md) — and whether the version currently in `current.ts` carries one that has to be spun off first. See [Versions — When to Create a New Version File](./versions.md#when-to-create-a-new-version-file).
+For projects that follow **SemVer**, use the positions in the table below. Treat a SemVer `0.x` minor jump as a major jump for review. For **CalVer, build numbers, or other schemes**, read upstream's release policy and notes to classify the actual impact: compatible bugfixes take the patch scope, compatible features take the minor scope, and breaking changes take the major scope. A changed year, month, or build counter does not establish any of those on its own. If the policy and notes leave compatibility unclear, do the breaking-change pass rather than assuming a patch.
+
+Upstream's own notes outrank the number: reindexing, data migration, or a raised dependency requirement takes the major review scope regardless of the version scheme.
+
+| SemVer jump / review scope | What it needs                                                                                                                                                                                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Patch** (1.2.3 → 1.2.4)  | Bump the pin and verify the artifact. Nothing else — no changelog survey, no source reading.                                                                                                                                                                  |
+| **Minor** (1.2.x → 1.3.0)  | Read the changelog and release notes for what is worth exposing: a setting a user would want (an action), a new precondition (a task), a readiness or progress signal (a health check), a config option. Wire in what is high-value and leave the rest alone. |
+| **Major** (1.x → 2.0)      | Everything Minor needs, plus the breaking-change pass below and a decision on a [data migration](./recipe-version-migrations.md).                                                                                                                             |
+
+**The breaking-change pass re-verifies every assumption the package encodes about upstream — against the new source, not the old comment.** Each is a place a bump breaks the package without breaking the build:
+
+- **Every key the file model writes** still exists and still does what the package says. An option upstream removed is rejected or ignored; one it stopped reading is a dead knob the action still sells.
+- **Every health-check probe** — the request it sends and the reply it treats as success. A readiness gate upstream dropped turns a positive confirmation into a false one.
+- **Every log line the package parses**, and every path it reads or mounts.
+- **The data on disk** — whether the new version opens what the old one wrote. Data it cannot read is a migration, and one that rebuilds puts its disk and time cost in the release notes.
+- **What the dependency now has to provide** — a version floor in `dependencies.ts`, or a setting the dependency package must enable. A requirement the dependency's current release does not meet is an issue on that package's repo, linked from the pull request, and the pull request says it is blocked on it.
 
 ### When the packaging repo is itself a fork
 
@@ -80,6 +92,12 @@ gh api repos/<owner>/<repo> --jq '.parent.full_name'
 ```
 
 Do **not** use the manifest's `upstreamRepo` for this. That field points at the upstream _software_ project, which is a different repository from the packaging repo you forked — using it for a fork sync merges an unrelated history.
+
+## Bumping the SDK
+
+Packages pin `@start9labs/start-sdk` to an exact version, so a bump is `npm install @start9labs/start-sdk@<version> --save-exact`. Read the SDK's `CHANGELOG.md` for the range you crossed before relying on the new version.
+
+**Then run `npm install` again until `package-lock.json` stops changing.** The first install after an SDK bump is not a fixed point: npm records the SDK's bundled dependencies only once the new tarball is extracted, so the lockfile the first install writes is one the second rewrites. Committing after a single install leaves a half-written lock; two installs have always been enough. Then check that no nested copy of the previous SDK survives in the lock — if one does, a sibling's pin didn't move (see [Keep one copy of the SDK](#keep-one-copy-of-the-sdk)).
 
 ## Depending on another package's repo
 

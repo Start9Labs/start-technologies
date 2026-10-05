@@ -4,10 +4,7 @@
 for building JSON-RPC 2.0 servers whose operations double as CLI subcommands: you write
 typed, composable handlers once, then serve them over HTTP, a Unix socket, or TCP, and/or
 bind them to a `clap` command-line application. `CLAUDE.md` is a one-line `@AGENTS.md` import.
-See [ARCHITECTURE.md](ARCHITECTURE.md) for how it fits together and [CONTRIBUTING.md](CONTRIBUTING.md)
-for the workflow.
-
-**Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for how it fits together.
 
 ## Layout
 
@@ -76,3 +73,9 @@ cargo test  -p rpc-toolkit
 - **`imbl_value` everywhere.** Params and results flow through `imbl_value::Value`; derive ordering
   and `Serialize`/`DeserializeOwned` bounds on your param/return types must line up or dispatch
   fails at runtime with `invalid_params` / `internal_error`.
+
+## Consumer verification
+
+Exercise dispatch, composition, and CLI/server binding changes in `tests/test.rs`.
+Update consumers of a changed public API in the same change and run
+`cargo check -p start-core`.

@@ -22,16 +22,20 @@ The `s9pk.mk` file contains all the common build logic shared across StartOS pac
 | `make arm`           | Build for aarch64 only                               |
 | `make riscv`         | Build for riscv64 only                               |
 | `make universal`     | Build a single package containing all architectures  |
+| `make format`        | Format `startos/` with the SDK's Prettier config     |
 | `make install`       | Install the most recent .s9pk to your StartOS server |
 | `make clean`         | Remove build artifacts                               |
 
 ### Variables
 
-| Variable  | Default         | Description                              |
-| --------- | --------------- | ---------------------------------------- |
-| `ARCHES`  | `x86 arm riscv` | Architectures to build by default        |
-| `TARGETS` | `arches`        | Default build target                     |
-| `VARIANT` | (unset)         | Optional variant suffix for package name |
+| Variable       | Default                        | Description                                 |
+| -------------- | ------------------------------ | ------------------------------------------- |
+| `ARCHES`       | `x86 arm riscv`                | Architectures to build by default           |
+| `TARGETS`      | `arches`                       | Default build target                        |
+| `VARIANT`      | (unset)                        | Optional variant suffix for package name    |
+| `TS_CHECK`     | `npx tsc --noEmit`             | Type-check step of the build gate           |
+| `FORMAT_CHECK` | `npx prettier --check startos` | Formatting step of the build gate           |
+| `JS_BUNDLE`    | `npx ncc build …`              | Bundle step producing `javascript/index.js` |
 
 ## Makefile
 
@@ -88,6 +92,9 @@ make arm
 
 # Install to StartOS server (requires a workspace whose .startos/config.yaml points at your device)
 make install
+
+# Format startos/ before committing
+make format
 
 # Clean build artifacts
 make clean

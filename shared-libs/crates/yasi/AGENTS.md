@@ -1,13 +1,10 @@
 # AGENTS.md — yasi
 
-`yasi` ("Yet Another String Interner") is a small first-party Rust library in the start-os
+`yasi` ("Yet Another String Interner") is a small first-party Rust library in the start-technologies
 monorepo at `shared-libs/crates/yasi`. It deduplicates strings behind `Arc`, computing `Hash`
 and `Eq` through `Display` so any `Display` value can be interned without allocating unless it's
 new. `CLAUDE.md` is a one-line `@AGENTS.md` import; edit this file, not that one. See
-[ARCHITECTURE.md](ARCHITECTURE.md) for internals and [CONTRIBUTING.md](CONTRIBUTING.md) for the
-contributor workflow.
-
-**Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
+[ARCHITECTURE.md](ARCHITECTURE.md) for internals.
 
 ## Layout
 

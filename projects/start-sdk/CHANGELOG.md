@@ -1,11 +1,56 @@
 # Changelog
 
-## 2.0.10 — StartOS 0.4.0.2
+## 3.0.1 — StartOS 0.4.0.2
 
 ### Changed
 
+- **Breaking — file models parse with their shape exactly as written.** A
+  `z.object` shape deletes every key it doesn't declare on the next `merge()`,
+  `write()` or `update()`. Build every file model with `z.looseObject` at every
+  nesting level; use `z.object` only for a file you have fully modeled and will
+  always keep fully modeled. A `z.discriminatedUnion` keeps the variant its
+  discriminator names
+
+## 3.0.0 — StartOS 0.4.0.2
+
+### Security
+
+- **Update SDK build and test dependencies with security fixes.**
+
+### Changed
+
+- **Breaking — read-only volume and asset mounts are enforced.** Writes through a volume mount declared `readonly: true`, or through any asset mount, fail with `EROFS`. Mount volumes writable wherever the service writes to them. Copy assets that need modification into a writable volume
+
+- **Breaking — `Watchable<A>` takes only the type it reads.** A reader that
+  maps a raw value extends `MappedWatchable<Raw, Mapped>` and implements
+  `fetchRaw`/`produceRaw` in place of `fetch`/`produce`. A type written
+  `Watchable<Raw, Mapped>` becomes `Watchable<Mapped>`
+
+- **Breaking — define dependencies once in `dependencies.ts`.** Create each base with `sdk.Dependency.required` or `.optional` (including metadata, version range, kind and health checks), add it to `sdk.Dependencies.of()`, and pass the builder to `buildManifest(versionGraph, sdkManifest, dependencies)` and `setupInit`. Move runtime conditions to `enabled` and `withDynamicNarrowing`, tasks to `withInit`, and use `dependencies.check(effects)` in place of `sdk.checkDependencies(effects)`. The base version range, kind, and health checks are also included in the package manifest and registry metadata, allowing StartOS to record required dependencies independently of init effects and enforce the published base for enabled optional dependencies. `enabled`, the narrowing, and each `.withInit` handler rerun independently when a watched value changes; the requirements are republished only when they change, and init handlers run only while the dependency is enabled. StartOS hides the tasks a service created on a dependency while that dependency is disabled.
+
+- **Breaking — `sdk.action.run` opens the action's form and passes it to
+  `input`.** `input` is a function from the opened form to the input to submit;
+  a plain value is no longer accepted. The run then answers that form, which is
+  what lets a service run an action that takes input — another service's that
+  `access` admits, via the new `packageId`, or its own. `prefill` seeds the
+  form. Underneath, `effects.action.getInput` accepts `prefill`, and the form
+  and the run that answers it share the calling procedure's event id
+
+- **Breaking — a filled address lists the server's `.local` name whenever the
+  user has it enabled, and `utils.mdnsResolvable` is removed.** `.local` was
+  left out while no LAN IP on its gateways was enabled, which dropped it
+  whenever the network did and made a stored URL compare as removed. The
+  Interfaces tab and a filled address now agree on every address.
+
 - **Minimum StartOS version is now `0.4.0.2`**, which is what a package built
   with this SDK writes as its manifest `osVersion`
+
+- **Breaking — image architecture fallback is now `emulateMissing: boolean`.**
+  Remove `emulateMissingAs`; StartOS selects the image available in the s9pk,
+  so a cross-architecture restore runs the backed-up image under emulation. The
+  new field defaults to `true`; set it to
+  `false` when an image cannot run under emulation. Existing s9pks retain their
+  fallback behavior when read
 
 - **Breaking — `z.object` strips unknown keys.** Every file-model shape must use
   `z.looseObject`, at every nesting level, or the next `merge()` discards
@@ -15,11 +60,35 @@
   already on a shape is now redundant and can go. Every other `z` export,
   `z.deepLoose` and `z.deepPartial` included, is unchanged
 
+- **Breaking — the SDK supplies the package toolchain.** TypeScript, Prettier,
+  ESLint and `@vercel/ncc` install with `@start9labs/start-sdk`, so a package
+  declares the SDK and nothing else. Drop `typescript`, `@types/node`,
+  `@vercel/ncc` and `prettier` from `devDependencies`, drop the `build`,
+  `check` and `prettier` scripts and the `prettier` config block, and add a
+  `.prettierrc` containing `"@start9labs/start-sdk/prettier.config.json"` so
+  your editor formats the way the build gate checks. `s9pk.mk` runs each step
+  itself through `TS_CHECK`, `FORMAT_CHECK` and `JS_BUNDLE`, any of which a
+  `Makefile` can override above the include
+
+- **The build gate rejects unformatted `startos/`.** `make format` writes. The
+  shared config is the four settings every package already declared, so nothing
+  that was formatted needs reformatting
+
+- **`@start9labs/start-core` is the only bundled dependency.** Everything else
+  installs normally, so a package can clear a security advisory anywhere in the
+  SDK's dependency tree with its own `overrides` entry rather than waiting for
+  an SDK release
+
 - **Breaking — `mountDependency` no longer accepts `type`.** A dependency mount
   has been a directory since StartOS 0.4.0-alpha.16 disabled file mounts on
   dependencies, so the option was silently doing nothing; passing it is now a
   compile error. To reach a single file, mount the directory holding it.
   `mountVolume` and `mountAssets` still take `type`
+
+- **Breaking — MySQL and MariaDB use separate dump builders.** MySQL callers
+  keep `Backups.withMysqlDump`; `engine: 'mysql'` remains accepted but is
+  optional. MariaDB callers use `Backups.withMariadbDump`, remove
+  `engine: 'mariadb'`, and rename `mysqldOptions` to `mariadbdOptions`
 
 - **`addSsl.alpn` is written as the list of protocols itself: `['h2']`, or
   `null` for no filter.** It used to be `{ specified: ['h2'] }` or the string
@@ -37,10 +106,6 @@
   still reported its stale ports, which retiring now makes an observable
   difference. Prefer `sdk.host.getBridgeAddress` to reach a dependency; this is
   raw allocator metadata
-
-- `effects.getServicePortForward` resolves `null` instead of throwing when the
-  binding does not exist. Prefer `sdk.host.getBridgeAddress` to reach a
-  dependency; this is raw allocator metadata
 
 - **The scaffolded `build.yml` no longer passes `DEV_KEY`** — a PR build only
   compiles and packs, so it never needed the signing key. Existing packages
@@ -61,6 +126,28 @@
   than a `README.md`
 
 ### Added
+
+- **`waitFor` takes an optional `AbortSignal`**, as `watch` does, and rejects
+  with `AbortedError` when it aborts, including while waiting for a file or
+  its parent directory to be created. Pass one to cancel a wait you race against
+  a timeout. `watch` and `waitFor` end at once on a signal that has already
+  aborted.
+
+- **`FileHelper.update(effects, change)`** computes a complete replacement under the writer lock. The callback receives the validated current value and returns the replacement or `null` to skip writing. Reads inside it remain reentrant; nested writes, merges, or updates to the same file throw immediately. The callback has a five-second deadline, which also bounds file access it starts; a timed-out callback cannot commit later.
+
+- **`preDownloadAlert` in `setupManifest()`** displays a localized Markdown confirmation before downloading an update from an installed version matching `when.sourceVersion`.
+
+- **An `env` variable set to `undefined` is removed from the process**,
+  including one the image or StartOS would otherwise supply, such as `LANG`.
+
+- **An action learns who is running it.** The `run` handler, the prefill
+  function and a function-valued input spec each receive `caller`: the id of
+  the service that reached the action through `effects.action`, or `null` when
+  the user did. An action with `access: 'dependent'` or `'public'` can act on
+  the caller's own resources instead of trusting a package id in its input
+
+- **`utils.isAddressEnabled(addresses, hostname)`** reports whether the user's
+  overrides leave one of a binding's addresses on
 
 - **Scaffolded packages get a fourth workflow, `syncNext.yml`**, which keeps the
   `next` iteration branch in step with the base branch it stacks on. A repo with
@@ -87,7 +174,79 @@
   so handle its absence. See
   [Hardware Virtualization (KVM)](https://docs.start9.com/packaging/manifest.html#hardware-virtualization-kvm)
 
+- **`Watchable.combine(effects, [a, b], map?, eq?)` builds one reader from
+  several.** Its raw value is the tuple of the sources' values, and `map`/`eq`
+  work as on any reader: it emits when `map`'s result differs from the last by
+  `eq`. `Watchable.from(effects, source, eq?)` makes a reader of a single
+  source. A source is any `WatchSource` (`once()` and `watch(abort)`), which
+  every `Watchable` is
+
+- **`sdk.setupPrimaryUrl()` replaces the hand-rolled "Set Primary URL" action
+  and watcher.** Give it the interface the URL belongs to, a reader for the
+  stored choice (`storeJson.read(s => s.primaryUrl)`) and a function that
+  writes it. It returns the action to register;
+  `bestUsable(effects)`, a reader for the stored URL while its hostname is one
+  of the interface's addresses and the `.local` address otherwise; and
+  `setupTask(severity, options)`, an init script that keeps a task raised while
+  the stored URL is unset or gone, which StartOS clears once it is back. See
+  [Set a Primary URL](https://docs.start9.com/packaging/recipe-primary-url.html)
+
+- **`createInterface` accepts `preferredLauncherAddress`.** A UI interface can
+  nominate the absolute URL that StartOS should open when a service depends on
+  one canonical origin. See
+  [Nominating an Address to Open](https://docs.start9.com/packaging/interfaces.html#nominating-an-address-to-open).
+
+- **`Value.select`, `Value.dynamicSelect`, `Value.union` and `Value.dynamicUnion`
+  accept `default: null`**, which renders the field unselected and holds the form
+  unsubmittable until the user picks one
+
+- **`launchable` on a `single` action result opens the value in a new tab**, for
+  a result that hands the user a link — an authorization URL, an admin panel.
+  The value must be an `http(s)` URL. `copyable`, `qr` and `masked` are optional
+  alongside it and default to `false`. See
+  [Single Value](https://docs.start9.com/packaging/actions.html#single-value)
+
+- **An action result can be a `multiline` value**: a read-only monospace box
+  that keeps its line breaks, taking the same optional `copyable` / `qr` /
+  `masked` flags as `single`, plus an optional `filename` that offers it as a
+  download. A `single` value is one line, and a newline in one is not rendered.
+  See [Result Types](https://docs.start9.com/packaging/actions.html#result-types)
+
 ### Fixed
+
+- **An awaited `waitFor` waits until its predicate holds.** Awaiting
+  `waitFor` on a status, file or other reader no longer fails with
+  `AbortedError` after garbage collection while the condition is still false.
+
+- **A file model's reads see every change to the file.** `watch`, `const` and
+  `waitFor` no longer miss a write made while the previous value was being
+  read or handled, or a file created just as the wait began.
+
+- **FileHelper writes replace files atomically.** Writers hold a cross-process lock on the file, waiting up to ten seconds for it, and `merge()` and `update()` hold it through their complete read-modify-write; replacements retain the file's owner and permissions.
+
+- **Own-volume file mounts follow atomic source replacement in running subcontainers.** Refreshes preserve idmaps and readonly settings and run before FileHelper operations return and commands launch. Refresh failures propagate to the caller, including after a write has replaced the source. Existing descriptors retain the previous inode until the application reopens the file.
+
+- **Reactive init re-runs receive `kind: null`** after the initial install,
+  update, or restore pass. Lifecycle-only work guarded by `kind` runs once for
+  that event, even when a watched value changes.
+
+- **Lazy subcontainers retry filesystem materialization after a transient
+  failure**, allowing daemons to recover without a service restart
+
+- **`Backups.withMariadbDump` works against MariaDB 11 images**, official or
+  packaged from a distribution
+
+- `import { backup } from '@start9labs/start-sdk'` exposes `backup.Backups`
+  and `backup.mountBackupTarget`
+
+- **Scaffolded package CI builds a draft PR when it becomes ready and rebuilds
+  against every new base after retargeting.** Metadata edits preserve active
+  builds and their conclusions
+
+- **`merge()` given a value of `undefined` removes the key from an `.env` file
+  model**, the way it already did for every other format. It wrote the literal
+  `KEY=undefined`, which a shape's `.catch()` then masked on read — so the file
+  the service actually parses held the word while the model reported the default
 
 - **`VersionGraph` reports a missing migration path in terms a service owner can
   act on**, rather than as an assertion about the version range the host handed
@@ -123,7 +282,8 @@
   environment…" on every run
 
 - **A database dump backup or restore is no longer killed after exactly thirty
-  seconds.** Every step of `Backups.withPgDump` / `withMysqlDump` whose duration
+  seconds.** Every step of `Backups.withPgDump`, `withMysqlDump` and
+  `withMariadbDump` whose duration
   follows the size of the data now opts out of `SubContainer.exec`'s 30 s cap,
   and `PgDumpConfig.readyTimeout` supplies `pg_ctl`'s `-t` so that raising it
   reaches the step that actually blocks. Fixes
@@ -133,13 +293,50 @@
   out**, where the bare signal had read like an OOM kill. `exec`'s result
   carries `timedOutAfter` alongside `exitCode` and `exitSignal`
 
+- **`checkDependencies(...)`'s boolean version check honours the dependency's
+  `satisfies` list**, matching `throwIfNotSatisfied()` and the web UI.
+  `satisfied()` and `installedVersionSatisfied()` compared only the installed
+  version against the declared range, ignoring the versions that release stands
+  in for. This matters most for a flavor, which is incomparable to an unflavored
+  version: a `#knots` Bitcoin or a `#quantum` File Browser read as unsatisfied
+  while the throwing surface passed
+
+- **A dependency release is matched against `versionRange` as one set of declared versions.**
+  One installed or aliased version must satisfy a complete conjunction. `!=`
+  and negated ranges exclude the release when a declared version satisfies the
+  complete excluded range. `VersionRange.satisfiedByRelease` is the evaluator
+  behind the SDK, dependency warnings and marketplace, and `normalize()`
+  preserves the same answer. Numeric
+  prerelease identifiers retain exact ordering and serialization beyond
+  JavaScript's safe-integer limit
+
+- **`checkDependencies(...)`'s `satisfied()` takes an optional package id, and
+  `healthCheckSatisfied()`'s is optional.** Both were declared narrower than the
+  functions behind them, so `deps.satisfied('bitcoind')` was a compile error for
+  a call that has always worked, and the only way to check one dependency was to
+  reimplement the predicate
+
+- **A prerelease segment may mix letters, digits and hyphens**, matching the
+  grammar StartOS parses. `1.0.0-rc1:0` and `1.0.0-alpha-1:0` threw a parse error
+  out of `ExtendedVersion.parse` where the OS accepted them, so a dependency
+  published on such a version crashed a dependent's `checkDependencies`. A
+  numeric segment with a leading zero is rejected, as it already was on the OS
+  side
+
+- **Backup and restore progress no longer falls back mid-sync**
+
+- **`checkPortListening` counts a TCP port as listening only while a socket is
+  in the `LISTEN` state.** It matched any socket on the port, so the
+  connections a process leaves in `TIME_WAIT` when it exits kept its port
+  reading as listening for up to a minute: a daemon's `ready` check passed, and
+  the health checks that require it ran, while nothing was listening
+
 ### Security
 
-- **The bundled ESLint and typescript-eslint trees carry patched
-  `brace-expansion` and `js-yaml`**, which `bundleDependencies` puts beyond the
-  reach of `overrides` and `npm audit fix`. A package scaffolded from the
-  template now reports `found 0 vulnerabilities` from `npm audit --omit=dev`.
-  Fixes [#3592](https://github.com/Start9Labs/start-technologies/issues/3592)
+- **ESLint and typescript-eslint carry patched `brace-expansion` and
+  `js-yaml`.** A package scaffolded from the template now reports
+  `found 0 vulnerabilities` from `npm audit --omit=dev`. Fixes
+  [#3592](https://github.com/Start9Labs/start-technologies/issues/3592)
 
 ## 2.0.9 — StartOS 0.4.0-beta.10 (2026-07-25)
 
@@ -304,7 +501,7 @@
 ### Fixed
 
 - Every materialized `SubContainer` is now torn down when the effects context that created it leaves (`onLeaveContext`), instead of lingering until GC eventually runs its `Drop` finalizer. This closes the gap where a subcontainer created in `main` (or any context) but never attached to a daemon — e.g. an ad-hoc setup/bootstrap container — could outlive its context. One cleanup hook is armed per effects object and each subcontainer removes itself on `destroy()`, so repeated short-lived containers (`withTemp`, per-poll health checks) don't accumulate registrations; teardown still routes through the hold-aware `destroy()`, so a container held by a running daemon defers until the daemon's own shutdown releases it
-- `filledAddress` now excludes mDNS (`.local`) addresses whose gateways have no enabled LAN IP on the corresponding port and TLS leg. An mDNS name resolves only through that exposure on a shared gateway, so when every such IP is disabled the `.local` address is unreachable. The rule is now exported as `utils.mdnsResolvable(hostname, enabledHostnames)`, shared between the SDK's reachable-address filter and the UI's address table so the two stay consistent
+- `filledAddress` now excludes mDNS (`.local`) addresses whose gateways have no enabled LAN IP. An mDNS name resolves only via a LAN IP on a shared gateway, so when every such IP is disabled the `.local` address is unreachable — it was previously still reported as available, which let the StartOS UI offer (and launch) an unresolvable `.local` URL even though the address table showed it disabled. The rule is now exported as `utils.mdnsResolvable(hostname, enabledHostnames)`, shared between the SDK's reachable-address filter and the UI's address table so the two stay consistent
 
 ### Removed
 

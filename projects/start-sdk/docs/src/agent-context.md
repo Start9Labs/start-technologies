@@ -13,7 +13,9 @@ You are an AI assistant working in a **StartOS packaging workspace**. You help c
 ├── AGENTS.md              ← this file (symlink → start-technologies/projects/start-sdk/docs/src/agent-context.md)
 ├── AGENTS.local.md        ← your workspace-specific notes (never overwritten by a sync)
 ├── CLAUDE.md              ← loads AGENTS.md + AGENTS.local.md (Claude Code bridge)
-├── start-technologies/    ← checkout of the Start9 monorepo: the packaging guide, plus the SDK and OS source
+├── .claude/skills         ← the packaging skills (symlink → start-technologies/projects/start-sdk/docs/skills), where Claude Code looks
+├── .agents/skills         ← the same skills, where Codex looks
+├── start-technologies/    ← checkout of the Start9 monorepo on `live-docs` (what is published): the packaging guide, plus the SDK and OS source
 └── <id>-startos/ …        ← one or more package repos
 ```
 
@@ -29,11 +31,15 @@ The guide, the package template, and this file all live in `start-technologies/`
 git -C start-technologies pull --ff-only
 ```
 
+**The checkout is on `live-docs`, the branch that carries what every product has published — never `master`.** That is what keeps the guide, the template, and the SDK source describing the `@start9labs/start-sdk` a package installs; `master` carries what hasn't shipped, where a page can document a call npm cannot resolve. It is also the branch docs.start9.com serves, so the pages on disk are the published ones. Don't move the checkout to `master` to see something newer — what is newer there is not what your package builds against.
+
+`start-cli` is installed outside the workspace, so the sync does not touch it. When an `s9pk` command warns that yours is behind the published release, update it before going further — the guide on disk describes the newer one.
+
 To track a different source (e.g. a fork), repoint `start-technologies`'s remote first — the sync follows whatever remote is configured.
 
 Keep workspace-specific notes in `AGENTS.local.md`; a sync never touches it. That file is for what is true of _your_ setup — your box, your registry, your packages, any departure from the scaffolded layout. Anything that would help **every** packager belongs in the guide instead: open a PR against `start-technologies` rather than letting it drift in one workspace.
 
-If `start-technologies/` is a **symlink** to a checkout maintained outside this workspace, skip the sync: that repo has its own branches and its own work in progress, so its state is the owner's to manage, not this workspace's.
+If `start-technologies/` is a **symlink** to a checkout maintained outside this workspace, skip the sync — its branches are the owner's to manage, not this workspace's. Say so rather than pulling it: a development checkout sits on `master`, so everything read through it is ahead of what packages install. The workspace wants its own (remove the symlink and re-run `start-cli s9pk init-workspace`).
 
 ## How to use the guide (local-first)
 
@@ -50,6 +56,16 @@ Workflow for any objective:
 4. **Read only what the objective needs.**
 
 Read pages from your local checkout (`start-technologies/projects/start-sdk/docs/src/<page>.md`). Only if `start-technologies/` is missing, fall back to the web (`https://docs.start9.com/packaging/<page>.html`).
+
+## Skills
+
+`start-technologies/projects/start-sdk/docs/skills/` holds the packaging skills — each a `SKILL.md` that drives one whole job end to end, with its own references beside it. They are part of the guide, so a sync updates them like any page. A session opened at the workspace root lists them when `.claude/skills` (Claude Code) or `.agents/skills` (Codex) links to that directory, and can then invoke one by name — `/package-service <name>` in Claude Code, `$package-service` in Codex. Without the links, open a skill's `SKILL.md` at the path below and follow it.
+
+| Skill                                                                        | Use when                                                                                                                                                                   |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start-technologies/projects/start-sdk/docs/skills/package-service/SKILL.md` | asked to package a new service: it researches the upstream, settles the shape in one round of questions, then scaffolds, builds, verifies on a StartOS box, and hands back |
+
+`AGENTS.local.md` records how this workspace departs from the scaffold — which box to install to, where packages live, how finished work is handed back. Where it and a skill differ, follow `AGENTS.local.md`.
 
 ## Where to read for X
 
@@ -80,7 +96,7 @@ Read pages from your local checkout (`start-technologies/projects/start-sdk/docs
 
 Reach for them **only when the recipes, reference pages, real packages, and the installed SDK types (`node_modules/@start9labs/start-sdk`) don't answer the question** — e.g. to confirm exactly what an SDK call does, or how an OS effect behaves. Open one file to settle one question; don't browse the monorepo to "understand the system."
 
-If what you find there is a bug, say so. You are standing in a git repo you can branch from and open a pull request against.
+If what you find there is a bug, say so. You are standing in a git repo you can open a pull request against — branch from `origin/master`, not from the `live-docs` checkout, and switch back to `live-docs` when you're done.
 
 ## Key patterns
 
@@ -112,11 +128,13 @@ The full rules are in `start-technologies/projects/start-sdk/docs/src/workflow.m
 - **Fix what you find; file only what needs deciding.** A defect you spot with the package already open is a fix in the branch you are on, related to your task or not — you have the context to be sure and the next person won't. File **a GitHub issue on the package repo** when the call isn't yours: cause unpinned, two defensible fixes, or too large to ride along. Never both — the issue or the PR body, not the finding written out twice. Going the other way, an open issue is a report, not a queue: implement one when asked or when it is labelled `Approved`, then `Closes #<n>`. Don't create a `TODO.md`/`NOTES.md`/`PLAN.md` in place of any of this — a notes file is invisible to whoever can act on it and stale the moment the session ends. (`workflow.md`)
 - **Search before declaring impossible.** Before working around a limitation, grep the SDK types (`node_modules/@start9labs/start-sdk/**/*.d.ts`) and existing packages. "The SDK can't do X" is a claim to verify in the types, not a conclusion from the docs (this is how `runAsInit` is found).
 - **Refer to a multi-flavor dependency generically.** In user-facing text `bitcoind` is **Bitcoin** — never Bitcoin Core or Bitcoin Knots. (`dependencies.md`)
-- **Keep `README.md` and `instructions.md` in sync.** `README.md` is the package's technical reference — how it works, what its actions do, how to diagnose it — and the only technical file an AI support or administering agent reads; `instructions.md` tracks user-visible changes. Update each in the same change as the code. `AGENTS.md` repeats neither. Content rules: `writing-readmes.md`, `writing-instructions.md`.
+- **Keep `README.md` and `instructions.md` in sync.** `README.md` is the package's technical reference — how it works, what its actions do, how to diagnose it — and the only technical file an AI support or administering agent reads; `instructions.md` tracks user-visible changes. Update each in the same change as the code. Content rules: `writing-readmes.md`, `writing-instructions.md`.
+- **A package's `AGENTS.md` restates nothing `README.md` or `instructions.md` says.** Its one reader has both, so it carries only what has no home in them: repo mechanics, a change that looks right and is not (the imperative plus the one clause that says why), extension points, naming traps, and build or test invocations particular to the repo. A fact the README already states does not become a rule by being repeated here. Most packages need one to four bullets; a simple one needs none. (`project-structure.md` § AGENTS.md and CLAUDE.md)
 - **Iterate with a dirty tree; commit once.** The `-modified` pack-hash suffix is informational — don't commit between test attempts. One clean commit when the package works; `git reset --soft HEAD~N` collapses accumulated fixups.
 - **Pre-existing errors are still errors.** A red `tsc`, test, or pack step means the package doesn't pass, even if unrelated to your change. Fix it or flag it; never report green when a check was red.
-- **Don't create unnecessary version files.** The latest version always lives in `startos/versions/current.ts`; most bumps just edit that file in place. A new file is spun off only when the version already in `current.ts` carries a migration — it stays with the version that introduced it and is never carried forward into a successor, idempotent or not — while **a version having been released is not a reason to declare it.** `VersionGraph` synthesizes a range vertex beneath `current`, so any lower installed version migrates up in one hop without its own node; `canMigrateFrom` is derived from that graph, not authored. See `versions.md` (When to Create a New Version File, Why Released Versions Don't Need to Be Declared, Release Notes).
+- **Don't create unnecessary version files.** The latest version always lives in `startos/versions/current.ts`; most bumps just edit that file in place. A new file is spun off only when the version already in `current.ts` carries a migration, meaning an `up` whose body does work (the template's empty `up` with `down: IMPOSSIBLE` carries none). That migration stays with the version that introduced it and is never carried forward into a successor, idempotent or not, while **a version having been released is not a reason to declare it.** `VersionGraph` synthesizes a range vertex beneath `current`, so any lower installed version migrates up in one hop without its own node; `canMigrateFrom` is derived from that graph, not authored. See `versions.md` (When to Create a New Version File, Why Released Versions Don't Need to Be Declared, Release Notes).
+- **Constants and helpers go in `startos/utils.ts`, not a file of their own.** A new top-level `startos/` file is warranted only for a large, self-contained unit, never for a single function or constant. A package repo also carries no `CHANGELOG.md` — release notes live in `releaseNotes` — and no test suite of its own. (`project-structure.md`)
 
 ## Starting a new package
 
-**Scaffold first — run `start-cli s9pk init-package "<Name>"`. Do not hand-assemble a package by copying files out of another one.** Scaffolding produces a barebones hello-world clone. **Then work `new-package-checklist.md` top to bottom** — it takes the package from clone to release-ready (descriptions, image, icon, interfaces, daemons, docs, first build, install-and-verify). The checklist is a guide page, not a file in the package: read it, don't copy it in. Wrapping an existing upstream Docker image? Read `recipe-prebuilt-image.md` first.
+**Scaffold first — run `start-cli s9pk init-package "<Name>"`. Do not hand-assemble a package by copying files out of another one.** Scaffolding produces a barebones hello-world clone. **Then work `new-package-checklist.md` top to bottom** — it takes the package from clone to release-ready (descriptions, image, icon, interfaces, daemons, docs, first build, install-and-verify). The checklist is a guide page, not a file in the package: read it, don't copy it in. Wrapping an existing upstream Docker image? Read `recipe-prebuilt-image.md` first. Asked to package a named project end to end? That is the `package-service` skill (see [Skills](#skills)): it does the upstream research and the install-and-verify pass around this sequence.

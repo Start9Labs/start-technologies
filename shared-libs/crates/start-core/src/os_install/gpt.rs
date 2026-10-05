@@ -4,8 +4,8 @@ use gpt::GptConfig;
 use gpt::disk::LogicalBlockSize;
 
 use crate::disk::OsPartitionInfo;
-use crate::os_install::partition_for;
 use crate::os_install::quiesce::{quiesce_disk, update_partition_table};
+use crate::os_install::{partition_for, same_device};
 use crate::prelude::*;
 
 const ROOT_TARGET_BYTES: u64 = 14 * 1024 * 1024 * 1024;
@@ -214,7 +214,7 @@ pub async fn partition(
                 let info = existing_gpt
                     .partitions()
                     .iter()
-                    .find(|(num, _)| partition_for(&disk_path, **num) == *protect_path)
+                    .find(|(num, _)| same_device(&partition_for(&disk_path, **num), protect_path))
                     .map(|(_, p)| (p.first_lba, p.last_lba, protect_path.clone()));
                 if info.is_none() {
                     return Err(Error::new(

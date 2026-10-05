@@ -35,6 +35,17 @@ import { map } from 'rxjs'
       @if (form.valid) {
         <p class="hostname-preview">{{ hostname() }}.local</p>
       }
+      <div class="used-for">
+        <p>{{ 'Used for:' | i18n }}</p>
+        <ul>
+          <li>{{ 'The address of your server' | i18n }}</li>
+          <li>{{ 'The local address of every installed service' | i18n }}</li>
+          <li>
+            {{ 'The browser tab and the name of the installed app' | i18n }}
+          </li>
+          <li>{{ 'SSH and system logs' | i18n }}</li>
+        </ul>
+      </div>
       <footer>
         <button
           tuiButton
@@ -53,6 +64,21 @@ import { map } from 'rxjs'
       color: var(--tui-text-secondary);
       font: var(--tui-typography-body-s);
       margin-top: 0.25rem;
+    }
+
+    .used-for {
+      color: var(--tui-text-secondary);
+      font: var(--tui-typography-body-s);
+      margin-top: 1rem;
+
+      p {
+        margin: 0;
+      }
+
+      ul {
+        margin: 0.25rem 0 0;
+        padding-inline-start: 1.25rem;
+      }
     }
 
     footer {

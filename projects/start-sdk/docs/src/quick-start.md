@@ -27,6 +27,8 @@ start9-workspace/
 └── hello-world-startos/    ← your new package
 ```
 
+Keep starting your AI sessions from the workspace root, not from inside `hello-world-startos/` — that's where the agent context loads from (see [Environment Setup](./environment-setup.md#create-the-workspace)).
+
 > [!TIP]
 > Already have a package repo? Clone it into the workspace alongside `start-technologies/` and build it the same way.
 
@@ -70,6 +72,6 @@ See [Sideloading](/start-os/sideloading.html) for details.
 
 ## Next Steps
 
-With Hello World running on your server, you're ready to package your own service. Open `hello-world-startos/` in your AI assistant and point it at the [New Package Checklist](./new-package-checklist.md) — it takes the package from Hello World clone to a real service (descriptions, image, icon, interfaces, daemons, docs).
+With Hello World running on your server, you're ready to package your own service. The fastest route is the `package-service` skill your workspace already carries — `/package-service <name or upstream URL>` in Claude Code, `$package-service …` in Codex — which researches the upstream, asks you one round of questions, then scaffolds, builds, and verifies the package on your device (see [Environment Setup — Skills](./environment-setup.md#skills)). Or drive it yourself: open `hello-world-startos/` in your AI assistant and point it at the [New Package Checklist](./new-package-checklist.md), which takes the package from Hello World clone to a real service (descriptions, image, icon, interfaces, daemons, docs).
 
 Then browse the [Recipes](./recipes.md) to find the patterns your service needs — each describes an approach and points you to reference docs and real package code.

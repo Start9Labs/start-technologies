@@ -1,16 +1,14 @@
 # AGENTS.md — shared-libs
 
-This directory is a container for two cross-product libraries. There is no build
+This directory groups shared Rust crates and TypeScript modules. There is no build
 or test target for `shared-libs/` itself — operate inside the relevant sub-library and
 read its own `AGENTS.md` first. `CLAUDE.md` is a one-line `@AGENTS.md` import. See
-[ARCHITECTURE.md](ARCHITECTURE.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
-
-**Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
+[ARCHITECTURE.md](ARCHITECTURE.md) for structure.
 
 ## Layout
 
 - `crates/start-core/` — Rust backend lib (`start-core`, lib name `start_core`).
-  Has its own `AGENTS.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`, plus topic notes
+  Has its own `AGENTS.md` and `ARCHITECTURE.md`, plus topic notes
   (`core-rust-patterns.md`, `i18n-patterns.md`, `patchdb.md`, `rpc-toolkit.md`,
   `s9pk-structure.md`, `exver.md`, `VERSION_BUMP.md`).
 - `ts-modules/` — shared TypeScript modules; the `@start9labs/shared`
@@ -18,7 +16,7 @@ read its own `AGENTS.md` first. `CLAUDE.md` is a one-line `@AGENTS.md` import. S
   `@start9labs/start-core` (`start-core/` — the SDK's core types/ABI/effects/OS
   bindings, consumed by web and bundled into the SDK; the workspace root is the
   repo root, where `angular.json` lives). Has its own `AGENTS.md` and
-  `ARCHITECTURE.md` (Taiga UI 5 rules, component conventions, i18n).
+  `ARCHITECTURE.md` (structure and data flow).
 
 ## Build & test (run from the repo root)
 
@@ -64,3 +62,8 @@ make web-format-check                # prettier check across the Angular workspa
 - **Web UI work follows the `start9-frontend` skill** at the repo root
   (`.claude/skills/start9-frontend/`) — see `ts-modules/AGENTS.md`.
 - Do not edit `CLAUDE.md` files — they are one-line `@AGENTS.md` imports.
+
+## Shared Rust formatting
+
+Every crate under `crates/` formats through `make start-core-format` and
+`make start-core-format-check`, using the root pinned-nightly formatter.

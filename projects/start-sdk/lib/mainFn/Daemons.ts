@@ -71,7 +71,7 @@ export type Ready = {
    * `failure`, etc.) and an optional `message` string shown in the UI.
    *
    * The SDK ships several built-in helpers on `sdk.healthCheck`:
-   * - `checkPortListening` — checks whether a TCP/UDP port is bound
+   * - `checkPortListening` — checks whether a TCP port is listening or a UDP port is bound
    * - `checkWebUrl` — fetches a URL and succeeds on any HTTP response
    * - `runHealthScript` — runs a command in a subcontainer and succeeds on exit 0
    *

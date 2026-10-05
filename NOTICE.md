@@ -40,10 +40,9 @@ the font files in each directory.
 
 ### `.github/actions/upload-each/dist/index.js`
 
-A committed `ncc` bundle inlining this action's npm dependencies — 97 packages,
-of which 76 are MIT, 9 ISC, 7 Apache-2.0, 2 BlueOak-1.0.0, and one each
-0BSD, BSD-2-Clause and `Apache-2.0 AND BSD-3-Clause`. The
-per-dependency notices are generated alongside it as
+A committed `ncc` bundle inlining this action's npm dependencies under their
+upstream licenses. The per-dependency licenses and copyright notices are
+generated alongside it as
 [`.github/actions/upload-each/dist/index.js.LICENSES.txt`](.github/actions/upload-each/dist/index.js.LICENSES.txt);
 regenerate both together with `npm run build` in that directory.
 

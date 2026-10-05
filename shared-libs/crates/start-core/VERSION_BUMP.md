@@ -97,11 +97,15 @@ A pre-release version instead takes prerelease segments: `exver::Version::new([0
 4. **`as_version_t()` match** — `Self::V0_4_0_1(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP`
 5. **`as_exver()` match** (inside `#[cfg(test)]`) — `Version::V0_4_0_1(Wrapper(x)) => x.semver(), // VERSION_BUMP`
 
-### 5. Release-gated docs
+### 5. Release notes
+
+**`projects/start-os/release-notes/X.Y.Z.N.md`** — this release's curated notes: a lede, `## Highlights`, an optional `## Important`. Put pre-update instructions in an optional sibling **`X.Y.Z.N.pre-update.md`**, headed `## ⚠️ Before You Update`. `manage-release.sh` prefixes the companion to the main notes for the GitHub release and registry entry. The post-update notification uses the main notes alone. **The image packages the main file by name** (`projects/start-os/build.mk`), so the StartOS image does not build until it exists.
+
+### 6. Release-gated docs
 
 `projects/start-os/docs/src/installing-startos.md` (and `update-040.md`) pin the GitHub release link to the shipping version. `manage-release.sh pre-check start-os` fails on a stale or `releases/latest` link.
 
-### 6. SDK TypeScript version (only on breaking SDK changes)
+### 7. SDK TypeScript version (only on breaking SDK changes)
 
 **`projects/start-sdk/lib/StartSdk.ts`** — update `OSVersion` **only** when the bump includes breaking changes the SDK relies on. `OSVersion` tracks compatibility for service developers, not the OS release cadence; routine bumps skip it.
 
@@ -119,6 +123,7 @@ cargo test -p start-core --features test version::   # incl. current_matches_man
 - [ ] Create `shared-libs/crates/start-core/src/version/vX_Y_Z_N.rs`
 - [ ] Update `shared-libs/crates/start-core/src/version/mod.rs` in 5 locations
 - [ ] Add the `CHANGELOG.md` entry under a new heading
+- [ ] Write `projects/start-os/release-notes/X.Y.Z.N.md` (the image won't build without it), plus `X.Y.Z.N.pre-update.md` for any pre-update instructions
 - [ ] Bump the release link in `projects/start-os/docs/src/`
 - [ ] Update `projects/start-sdk/lib/StartSdk.ts` `OSVersion` — **only** on breaking SDK changes
 - [ ] `cargo test` + `pre-check` pass
@@ -132,3 +137,9 @@ The `up()` and `down()` methods handle database migrations:
 - **`down()`** — rolls back
 
 If no migration is needed, return `Ok(Value::Null)` from `up()` and `Ok(())` from `down()`. For complex migrations, set `type PreUpRes` to pass data from `pre_up()` into `up()`.
+
+### Changing a migration that has already been published
+
+Every master push publishes `Current` to alpha, so a server can be sitting on a version whose `up()` or `post_up()` has since changed — and `pre_init` only migrates a db whose `version` is _behind_ `Current`. A change to either after that version has reached any channel therefore needs its **`migration_revision()`** bumped (it defaults to `0`). `commit` records the revision it applied in `serverInfo.latestMigrationRevision`, and a server already on that version whose stored revision differs re-runs `up()` and `commit()` on its next boot; `commit` re-queues the version in `postInitMigrationTodos`, so `post_up()` runs again too.
+
+**Bumping the revision requires the migration to be idempotent with the previous revision.** The re-run happens on a db the earlier `up()` already transformed, never on the pre-migration shape, so the new `up()` must produce the same result whether it follows the previous revision or starts from the version before — and the same holds for `post_up()`. A migration that cannot satisfy that gets a new version node instead, which starts back at revision `0`.

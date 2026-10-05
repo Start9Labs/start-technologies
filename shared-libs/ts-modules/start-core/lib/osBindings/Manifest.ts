@@ -8,6 +8,7 @@ import type { ImageId } from './ImageId'
 import type { LocaleString } from './LocaleString'
 import type { PackageId } from './PackageId'
 import type { PluginId } from './PluginId'
+import type { PreDownloadAlert } from './PreDownloadAlert'
 import type { Version } from './Version'
 import type { VolumeId } from './VolumeId'
 
@@ -23,6 +24,7 @@ export type Manifest = {
   title: string
   description: Description
   releaseNotes: LocaleString
+  preDownloadAlert?: PreDownloadAlert
   gitHash: GitHash | null
   license: string
   packageRepo: string

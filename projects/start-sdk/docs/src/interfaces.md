@@ -4,7 +4,7 @@
 
 ## Network Reachability
 
-Your package declares _what_ it exposes. The **user** decides _where_ it is reachable. An interface is bound to the server's [gateways](/start-os/gateways.html), and the user enables or disables each resulting address individually from the service's **Interfaces** tab. LAN addresses (the `.local` hostname, the LAN IP) are enabled by default; public IPv4 addresses are **off** by default.
+Your package declares _what_ it exposes. The **user** decides _where_ it is reachable. An interface is bound to the server's [gateways](/start-os/gateways.html), and the user enables or disables each resulting address individually from the service's **Interfaces** tab. LAN addresses (the `.local` hostname, the LAN IP) are enabled by default; public IPv4 addresses are **off** by default. A LAN IP the user has not switched follows the `.local` hostname, and on an interface served without TLS `.local` is on while one of its LAN IPs is, so switching it off switches them off. A filled address lists every address the user has enabled, the `.local` hostname included while the server has no LAN IP for it to resolve to.
 
 **A public domain belongs to the host, but is enabled per binding.** The user adds it naming one internal port, and its addresses — the plain one and, where the binding has `addSsl`, the TLS one — are enabled on **that** binding straight away. Every other binding on the same `MultiHost` also gains the domain, but **off by default**, to be switched on individually like any other address. So a host that binds two ports needs the domain enabled twice, and a package that starts binding a second port later does not inherit the user's earlier choice for it.
 
@@ -221,7 +221,7 @@ The handler then re-runs when the new value lands, updating the interface in pla
 | `addSsl.addXForwardedHeaders`   | `boolean`                                             | Whether to add `X-Forwarded-*` headers.                                                                                                                                                                                     |
 | `addSsl.auth`                   | `ProxyAuth` \| `null`                                 | Optional auth gate enforced by the OS reverse proxy. See [Authenticating at the Proxy](#authenticating-at-the-proxy).                                                                                                       |
 | `addSsl.upstreamCertValidation` | `'disable'` \| `{ certificate: string }` \| _omitted_ | How the OS validates your container's TLS cert when it [rewraps SSL](#rewrapping-ssl-to-a-tls-container). Omit to validate against the StartOS root CA (default). See [Rewrapping SSL](#rewrapping-ssl-to-a-tls-container). |
-| `secure`                        | `{ ssl: boolean }` \| `null`                          | For non-HTTP protocols, whether the connection is secure. `{ ssl: true }` with `addSsl: null` serves your container's own TLS end to end — see [Serving Your Own TLS](#serving-your-own-tls-passthrough).                   |
+| `secure`                        | `{ ssl: boolean }` \| `null`                          | Whether the port is safe to expose on networks StartOS does not trust, and whether it speaks TLS itself. See [Choosing `secure`](#choosing-secure).                                                                         |
 
 An `addSsl` binding on any port can carry a Let's Encrypt certificate — issuance is per name, not per port. The user's side of that is one extra requirement: Let's Encrypt validates on port `443` whatever port you bind, so StartOS asks their gateway to route `443` for the domain as well. On a gateway that cannot do it automatically they forward `443` by hand. Worth a line in your instructions for an interface on a non-standard port that users will reach from software validating against public roots — an Electrum client, say.
 
@@ -238,23 +238,116 @@ sdk.createInterface(effects, {
   username: null, // Auth username embedded in URL
   path: '/some/path/', // URL path
   query: {}, // URL query params
+  preferredLauncherAddress: null, // Address Open UI should prefer (see below)
 })
 ```
 
-| Option           | Type                                                       | Description                                                                                                                                                                    |
-| ---------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `name`           | `string`                                                   | Display name shown to the user. Wrap with `i18n()`.                                                                                                                            |
-| `id`             | `string`                                                   | Unique identifier. How you find this interface at runtime, by walking the host from `sdk.host.getOwn()` (see [main.ts](./main.md)).                                            |
-| `description`    | `string`                                                   | Description shown to the user. Wrap with `i18n()`.                                                                                                                             |
-| `type`           | `'ui'`, `'api'`, or `'p2p'`                                | `'ui'` for browser interfaces, `'api'` for programmatic endpoints, `'p2p'` for peer-to-peer connections.                                                                       |
-| `masked`         | `boolean`                                                  | If `true`, the interface URL is shown as a copyable secret. Use for URLs containing credentials or tokens.                                                                     |
-| `schemeOverride` | `{ ssl: string \| null; noSsl: string \| null }` \| `null` | Override the URL scheme for custom protocols. For example, `{ ssl: 'lndconnect', noSsl: 'lndconnect' }` produces `lndconnect://` URLs. Use `null` for standard `http`/`https`. |
-| `username`       | `string` \| `null`                                         | Username embedded in the URL (e.g., for `smp://fingerprint:password@host`).                                                                                                    |
-| `path`           | `string`                                                   | URL path appended to the base address (e.g., `'/admin/'`).                                                                                                                     |
-| `query`          | `object`                                                   | URL query parameters as key-value pairs (e.g., `{ macaroon: 'abc123' }`).                                                                                                      |
+| Option                     | Type                                                       | Description                                                                                                                                                                    |
+| -------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`                     | `string`                                                   | Display name shown to the user. Wrap with `i18n()`.                                                                                                                            |
+| `id`                       | `string`                                                   | Unique identifier. How you find this interface at runtime, by walking the host from `sdk.host.getOwn()` (see [main.ts](./main.md)).                                            |
+| `description`              | `string`                                                   | Description shown to the user. Wrap with `i18n()`.                                                                                                                             |
+| `type`                     | `'ui'`, `'api'`, or `'p2p'`                                | `'ui'` for browser interfaces, `'api'` for programmatic endpoints, `'p2p'` for peer-to-peer connections.                                                                       |
+| `masked`                   | `boolean`                                                  | If `true`, the interface URL is shown as a copyable secret. Use for URLs containing credentials or tokens.                                                                     |
+| `schemeOverride`           | `{ ssl: string \| null; noSsl: string \| null }` \| `null` | Override the URL scheme for custom protocols. For example, `{ ssl: 'lndconnect', noSsl: 'lndconnect' }` produces `lndconnect://` URLs. Use `null` for standard `http`/`https`. |
+| `username`                 | `string` \| `null`                                         | Username embedded in the URL (e.g., for `smp://fingerprint:password@host`).                                                                                                    |
+| `path`                     | `string`                                                   | URL path appended to the base address (e.g., `'/admin/'`).                                                                                                                     |
+| `query`                    | `object`                                                   | URL query parameters as key-value pairs (e.g., `{ macaroon: 'abc123' }`).                                                                                                      |
+| `preferredLauncherAddress` | `string` \| `null` \| _omitted_                            | The URL of the address StartOS's **Open UI** control should prefer for this interface. See [Nominating an Address to Open](#nominating-an-address-to-open).                    |
 
 > [!TIP]
 > The `id` you assign to an interface is what you use in `main.ts` to retrieve hostnames for it. Interfaces are reached through their **host**: `sdk.host.getOwn(effects, hostId)` returns the host, and the interface lives at `host.bindings[internalPort].interfaces[id]`. See [Main](./main.md#getting-hostnames) for details.
+
+## Nominating an Address to Open
+
+StartOS's **Open UI** control picks the address that suits how the admin is reaching StartOS at that moment — a `.local` name for a `.local` session, an onion address for a Tor session — so it usually lands on a link that resolves in the browser they are already using.
+
+A few services work at exactly one origin. CryptPad derives account keys from the origin it is loaded at, so opening it at a second, perfectly reachable address rejects the right password; Ghost, Gitea and Vaultwarden each build links or callbacks from one configured URL. Such a service already asks the user which URL to treat as primary — see [Set a Primary URL](./recipe-primary-url.md) — and `preferredLauncherAddress` passes that answer on, so **Open UI** opens the address the service was configured for.
+
+Nominate on the interface the user opens, which is the one carrying the control: **Open UI** appears only for a `type: 'ui'` interface whose `scheme` is `http` or whose `sslScheme` is `https`, so a nomination on an `api` or `p2p` interface is stored and never acted on. Some services keep their canonical URL on an interface that is not the web UI — Synapse's server name belongs to its federation interface, and its admin UI is a separate one on another host. There the stored URL is not this interface's address and nominating it would match nothing, so nominate only where the URL the user picked is an address of the interface carrying the control.
+
+Read the user's choice reactively, so re-running the action re-runs `setupInterfaces` and re-nominates:
+
+```typescript
+import { primaryUrl } from './primaryUrl'
+
+export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
+  const url = await primaryUrl.bestUsable(effects).const()
+
+  const uiMulti = sdk.MultiHost.of(effects, 'ui-multi')
+  const uiOrigin = await uiMulti.bindPort(uiPort, { protocol: 'http' })
+
+  const ui = sdk.createInterface(effects, {
+    name: i18n('Web UI'),
+    id: 'ui',
+    description: i18n('The web interface'),
+    type: 'ui',
+    masked: false,
+    schemeOverride: null,
+    username: null,
+    path: '',
+    query: {},
+    preferredLauncherAddress: url,
+  })
+
+  return [await uiOrigin.export([ui])]
+})
+```
+
+Pass an absolute URL carrying a scheme and a host. Omitting `preferredLauncherAddress`, setting it to `null`, or passing a blank, whitespace-only, or malformed value leaves **Open UI** on its usual address-selection behavior.
+
+StartOS compares the scheme, hostname and port of what you pass against the addresses this interface has right now, and opens the match. The nomination outranks the connection-based choice, because a service that works at one origin is better served by the address its user picked than by one derived from the admin's connection — so **Open UI** stays on it until the user disables that address, at which point the choice reverts.
+
+Some addresses are left out of the comparison, in the cases where StartOS can tell the session asking could not resolve them. Everywhere else it takes your word for it:
+
+- **An address a plugin publishes is honored only from a session on that plugin.** `accessType` recognizes Tor by the `.onion` the browser is on, and no other plugin's session, so an onion nomination is honored from a Tor session and every other plugin address reverts to the usual choice.
+- **A Tor session honors only an onion address or a public one.** Tor Browser reaches neither a `.local` name nor a LAN IP.
+- **Loopback, IPv6 link-local and the container bridge are never nominated.** The primary-URL select a user picks from can list them, and none is reachable from another machine.
+
+> [!WARNING]
+> Nominate an address the people who use the service can actually reach, because StartOS opens it rather than second-guessing them. A public domain nominated on a home network needs the router to loop LAN traffic back to it, and a `.local` name nominated for a service reached from outside resolves for nobody who is away.
+
+> [!NOTE]
+> Only the origin has to match. The path and query of the opened URL come from this interface's own `path` and `query`, so changing either leaves the nomination standing — what pins it is the scheme, hostname and port, which is the part an origin-sensitive app checks. That also means reassigning the interface's external port unseats the nomination, which is correct: the origin the app was configured for changed too. A nomination read from `primaryUrl.bestUsable` follows the chosen hostname to its new port; a service whose URL is permanent has nothing to follow it.
+
+## Choosing a Primary URL
+
+A service that builds links, invites or callbacks from one URL asks the user which of its addresses that is. `sdk.setupPrimaryUrl()` builds the "Set Primary URL" action over a reader and a writer for the choice, wherever the package keeps it — a field of `store.json`, or the service's own config file:
+
+```typescript
+// primaryUrl.ts
+import { sdk } from './sdk'
+import { i18n } from './i18n'
+import { storeJson } from './fileModels/store.json'
+
+export const primaryUrl = sdk.setupPrimaryUrl({
+  id: 'set-primary-url',
+  hostId: 'ui-multi',
+  interfaceId: 'ui',
+  metadata: {
+    name: i18n('Set Primary URL'),
+    description: i18n('Choose the URL Ghost puts in the links it generates. Ghost restarts to apply the change.'),
+    warning: null,
+    allowedStatuses: 'any',
+    group: null,
+    visibility: 'enabled',
+  },
+  field: { name: i18n('URL'), description: null },
+  get: storeJson.read(s => s.primaryUrl),
+  set: (effects, url) => storeJson.merge(effects, { primaryUrl: url }),
+})
+
+// init/primaryUrlTask.ts — list it after `actions` in setupInit
+export const primaryUrlTask = primaryUrl.setupTask('important', {
+  reason: i18n('The primary URL is no longer one of Ghost’s addresses. Choose a new one.'),
+})
+```
+
+Register `primaryUrl.action` with `sdk.Actions.of()`. It offers the interface's addresses (the `nonLocal` view, so loopback, link-local and the container bridge are left out), pre-selects the `.local` one, and pre-fills the stored URL. `get` takes a file model's reader as-is; any object with the same `once()` and `watch()` works.
+
+`primaryUrl.bestUsable(effects)` reads the URL to give the service, with the usual `const()`, `once()`, `watch()`, `onChange()` and `waitFor()` — `await primaryUrl.bestUsable(effects).const()` in `setupMain` and for **Open UI** above. It resolves to the stored URL at its hostname's current port and scheme; the `.local` address when that hostname is not one of the interface's addresses or nothing is stored; the first address when there is no `.local` one. It leaves the store as the user set it, so a chosen address that comes back is used again.
+
+`primaryUrl.setupTask(severity, options)` is an init script that keeps a task on the action raised while the stored URL is unset or its hostname is not one of the interface's addresses, pre-filled with the `.local` address. It re-runs when the addresses change and declares the addresses as the task's accepted input (`input-not-matches`, see [Options](tasks.md#options)), so StartOS clears the task when the user picks one or the stored address returns. An IP address leaves the interface's addresses while its network link is down, so an IP choice raises the task then too. `important` suits most services: a `critical` task stops the service while it is active, which is right only for a service that cannot run without a valid URL. Keep `id` equal to the id of an action the package already ships, so its tasks' replay key survives (see [Retiring a replay key](tasks.md#retiring-a-replay-key)).
 
 ## Port Ranges
 
@@ -439,7 +532,9 @@ const origin = await multi.bindPort(10009, {
 })
 ```
 
-StartOS still fronts the port with one of its TLS listeners, but that listener pipes the raw TLS stream through instead of terminating it, so nothing about the handshake is rewritten. The container sees the client's real source address rather than the proxy's — except for a client on the box itself, which appears as the bridge IP.
+StartOS still fronts the port with one of its TLS listeners, but that listener pipes the raw TLS stream through instead of terminating it, so nothing about the handshake is rewritten. The container sees the client's real source address rather than the proxy's — except for a client on the box itself, which appears as the bridge IP. The listener routes on the client's TLS ClientHello, so the first bytes a client sends must be one: a protocol that opens in plaintext and upgrades in-band is dropped here, and its port is `ssl: false`.
+
+The listener routes by the name the client asks for (its TLS SNI). It answers for the names enabled on the binding — its domains and the server's `.local` — and for a client that asks for no name or an IP address. It refuses every other name before the connection reaches your container. A daemon whose certificate carries a fixed name that its clients ask for binds the port `secure: { ssl: false }` instead: StartOS forwards the TCP stream untouched, whatever the name, and the daemon's TLS still runs end to end.
 
 ### When to use it
 
@@ -510,6 +605,16 @@ Most daemons read their TLS pair once at startup, so reissuing the file is only 
 > Do **not** add a `<package-id>.startos` DNS name to the SANs. That overlay DNS is deprecated and slated for removal, and it resolves to the container IP rather than the bridge — so it bypasses the platform entirely. Dependents reach you through the bridge; see [Service-to-Service Networking](service-to-service.md).
 
 A passthrough port carries its external port in `net.assignedSslPort`, the same as an `addSsl` port — which of the two fields is populated says whether the port speaks TLS, not who terminates it. Dependents should read neither field directly; `sdk.host.getBridgeAddress` resolves the binding's derived address and is correct under every arrangement on this page.
+
+## Choosing `secure`
+
+On a raw-TCP binding (`protocol: null`), `secure` says whether the protocol is safe to expose, as it is, on networks StartOS does not trust — the LAN and the internet — and `ssl` says whether it does that with TLS from its first byte:
+
+| `secure`         | The protocol                                                                                                                                                                                            | Where StartOS publishes the port                                                                                                                                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `null`           | Is not safe to expose on its own                                                                                                                                                                        | Only where StartOS trusts the path: the server itself — your subcontainers and other services — and a gateway marked secure, which none is by default. Never on the internet, so off-box clients reach the service through `addSsl`. |
+| `{ ssl: false }` | Is secure without TLS from its first byte: it encrypts some other way (SSH, LND's peer protocol, or TLS negotiated after a plaintext opening, like Postgres), or it is safe to expose unencrypted (DNS) | As a plain port, on every address the user enables — LAN and public alike.                                                                                                                                                           |
+| `{ ssl: true }`  | Speaks TLS from its first byte                                                                                                                                                                          | On every address the user enables, as a TLS port. With `addSsl: null`, StartOS passes the TLS through to your container — see [Serving Your Own TLS](#serving-your-own-tls-passthrough).                                             |
 
 ## Authenticating at the Proxy
 

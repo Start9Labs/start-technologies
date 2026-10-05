@@ -15,8 +15,8 @@ use crate::util::Invoke;
 /// hard-coded 5s timeout, which is why `curl` resolves a name that `start-cli` cannot.
 ///
 /// Rewriting the URL once here, at context build, means every consumer downstream — the HTTP
-/// client and the websocket path alike — is handed an address rather than a name. The server's
-/// cert carries IP SANs (see [`crate::net::ssl`]), so TLS still verifies.
+/// client and the websocket path alike — is handed an address rather than a name. The server
+/// certifies the address a client reaches it at (see [`crate::net::ssl`]), so TLS still verifies.
 #[cfg(target_os = "linux")]
 pub fn pin_mdns_host(url: &mut Url) -> Result<(), Error> {
     let Some(hostname) = url

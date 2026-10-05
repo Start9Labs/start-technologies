@@ -8,7 +8,7 @@ use chrono::Utc;
 use imbl_value::Value;
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
-use rpc_toolkit::{from_fn, from_fn_async, from_fn_async_local, HandlerExt, ParentHandler};
+use rpc_toolkit::{from_fn_async, from_fn_async_local, HandlerExt, ParentHandler};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use uciedit::openwrt::{FirewallRule, FirewallTarget};
@@ -58,18 +58,24 @@ struct SetPreferencesReq {
     remote_access: Option<String>,
 }
 
-#[instrument(skip_all)]
-async fn info<C: CtrlContext>(ctx: C) -> Result<SystemInfoResponse, Error> {
-    let arena = Arena::new();
-    let cfgs = parse_all(ctx.uci_root(), &arena, &["startwrt"]).await?;
-
+/// The `startwrt.preferences` section, defaulted when absent.
+pub(crate) fn preferences(cfg: &uciedit::Config<'_>) -> Result<UciPreferences, Error> {
     let mut prefs = UciPreferences::default();
-    cfgs["startwrt"].try_each(|name, p: UciPreferences| {
+    cfg.try_each(|name, p: UciPreferences| {
         if name == Some("preferences") {
             prefs = p;
         }
         Ok::<_, Error>(())
     })?;
+    Ok(prefs)
+}
+
+#[instrument(skip_all)]
+async fn info<C: CtrlContext>(ctx: C) -> Result<SystemInfoResponse, Error> {
+    let arena = Arena::new();
+    let cfgs = parse_all(ctx.uci_root(), &arena, &["startwrt"]).await?;
+
+    let prefs = preferences(&cfgs["startwrt"])?;
 
     // Read timezone from system UCI config (spaces → underscores for IANA format)
     let timezone = String::from_utf8(
@@ -181,7 +187,7 @@ const VALID_LANGUAGES: &[&str] = &["en_US", "es_ES", "de_DE", "fr_FR", "pl_PL"];
 const VALID_THEMES: &[&str] = &["dark", "light", "system"];
 const VALID_REMOTE_ACCESS: &[&str] = &["default", "never", "always"];
 
-const REMOTE_RULE_PREFIX: &str = "startwrt_remote_";
+pub(crate) const REMOTE_RULE_PREFIX: &str = "startwrt_remote_";
 const REMOTE_ACCESS_PORTS: &[&str] = &["80", "443", "22"];
 
 /// ULA range (RFC 4193). Disjoint from global unicast (`2000::/3`).
@@ -247,6 +253,34 @@ pub(crate) async fn get_wan_ipv4() -> Result<Option<Ipv4Addr>, Error> {
         Some(s) => Ok(s.parse().ok()),
         None => Ok(None),
     }
+}
+
+/// Every IPv4 address on the `wan` interface, in ubus order. Empty when the
+/// interface is down or ubus is unavailable.
+pub(crate) fn wan_ipv4_addrs() -> Vec<Ipv4Addr> {
+    read_wan_ipv4_addrs().unwrap_or_default()
+}
+
+/// `None` when ubus is unavailable; empty when the interface is down.
+pub(crate) fn read_wan_ipv4_addrs() -> Option<Vec<Ipv4Addr>> {
+    let out = StdCommand::new("ubus")
+        .args(["call", "network.interface.wan", "status"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let json = serde_json::from_slice::<serde_json::Value>(&out.stdout).ok()?;
+    Some(
+        json.get("ipv4-address")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|e| e.get("address")?.as_str()?.parse().ok())
+                    .collect()
+            })
+            .unwrap_or_default(),
+    )
 }
 
 pub async fn get_wan_ipv6s() -> Result<Vec<Ipv6Addr>, Error> {
@@ -538,13 +572,7 @@ pub async fn apply_remote_access<C: CtrlContext>(ctx: C) -> Result<Value, Error>
         let arena = Arena::new();
         let mut cfgs = parse_all(ctx.uci_root(), &arena, &["startwrt", "firewall"]).await?;
 
-        let mut prefs = UciPreferences::default();
-        cfgs["startwrt"].try_each(|name, p: UciPreferences| {
-            if name == Some("preferences") {
-                prefs = p;
-            }
-            Ok::<_, Error>(())
-        })?;
+        let prefs = preferences(&cfgs["startwrt"])?;
 
         let (wan_ipv4, wan_ipv6s) = if ctx.effectful() {
             (get_wan_ipv4().await?, get_wan_ipv6s().await?)
@@ -565,6 +593,13 @@ pub async fn apply_remote_access<C: CtrlContext>(ctx: C) -> Result<Value, Error>
             Ok(()) => {
                 if ctx.effectful() {
                     reload_firewall(wan_ipv4, wan_ipv6s);
+                    // Apply mode changes to the shared SNI fallback.
+                    if let (Some(pc), Some(wan)) =
+                        (crate::port_control::PORT_CONTROL.get(), wan_ipv4)
+                    {
+                        let pc = pc.clone();
+                        tokio::spawn(async move { pc.sync_sni_fallback(wan).await });
+                    }
                 }
                 return Ok(Value::Null);
             }
@@ -938,9 +973,7 @@ pub fn system<C: CtrlContext>() -> ParentHandler<C> {
         )
         .subcommand(
             "apply-remote-access",
-            from_fn_async_local(apply_remote_access::<C>)
-                .with_metadata("no_auth", Value::Bool(true))
-                .no_display(),
+            from_fn_async_local(apply_remote_access::<C>).no_display(),
         )
         .subcommand(
             "restart",
@@ -958,9 +991,7 @@ pub fn system<C: CtrlContext>() -> ParentHandler<C> {
         )
         .subcommand(
             "set-timezone",
-            from_fn_async(set_timezone::<C>)
-                .with_metadata("no_auth", Value::Bool(true))
-                .no_display(),
+            from_fn_async(set_timezone::<C>).no_display(),
         )
         .subcommand(
             "get-timezones",

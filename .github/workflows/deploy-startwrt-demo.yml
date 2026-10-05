@@ -1,0 +1,70 @@
+name: Deploy StartWRT demo
+
+# Builds the StartWRT web UI against its mock API and publishes it to the
+# NextExplorer folder Start9 Pages serves. Triggers only when the UI's build
+# inputs change.
+
+on:
+  push:
+    branches: ['master']
+    paths:
+      - 'projects/start-wrt/web/**'
+      - 'shared-libs/ts-modules/shared/**'
+      - 'shared-libs/ts-modules/start-core/**'
+      - 'angular.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'tsconfig.lib.json'
+      - '.github/workflows/deploy-startwrt-demo.yml'
+      - '.github/actions/nextexplorer-publish/**'
+      # Doc-only edits under the allowlisted paths shouldn't redeploy.
+      - '!**/*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: 'deploy-startwrt-demo'
+  cancel-in-progress: false
+
+env:
+  NODEJS_VERSION: '24.17.0'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODEJS_VERSION }}
+          cache: npm
+          cache-dependency-path: '**/package-lock.json'
+
+      # web resolves start-core via file:shared-libs/ts-modules/start-core/dist, so it must exist
+      # before web's `npm ci`.
+      - name: Build start-core
+        run: |
+          npm --prefix shared-libs/ts-modules/start-core ci
+          cd shared-libs/ts-modules/start-core && make dist
+
+      - name: Install web dependencies
+        run: npm ci
+
+      - name: Build the demo
+        run: |
+          npm run build:wrt:demo
+          test -f projects/start-wrt/web/dist/startwrt/browser/404.html
+
+      - name: Publish to NextExplorer
+        uses: ./.github/actions/nextexplorer-publish
+        with:
+          url: https://${{ vars.NEXT_EXPLORER_EVELYN_URL }}
+          email: ${{ vars.NEXT_EXPLORER_EVELYN_USER }}
+          password: ${{ secrets.NEXT_EXPLORER_EVELYN_PASS }}
+          dir: projects/start-wrt/web/dist/startwrt/browser
+          folder: router-demo.start9.com

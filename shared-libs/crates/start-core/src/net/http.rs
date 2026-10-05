@@ -15,7 +15,8 @@ use hyper::body::{Body as HyperBody, Incoming};
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{Mutex, Notify, oneshot};
+use tokio_util::io::InspectReader;
 
 use crate::net::host::binding::ProxyAuth;
 use crate::prelude::*;
@@ -287,6 +288,119 @@ where
     }
 }
 
+const H2_SETTINGS_FRAME: u8 = 0x4;
+const ENABLE_CONNECT_PROTOCOL: u16 = 0x8;
+const MAX_SETTINGS_PAYLOAD: usize = 16_384;
+
+type OpeningSettingsResult = Result<bool, &'static str>;
+
+struct OpeningSettingsObserver {
+    result: Option<oneshot::Sender<OpeningSettingsResult>>,
+    header: [u8; 9],
+    header_len: usize,
+    payload_remaining: usize,
+    entry: [u8; 6],
+    entry_len: usize,
+    extended_connect: bool,
+}
+
+impl OpeningSettingsObserver {
+    fn new(result: oneshot::Sender<OpeningSettingsResult>) -> Self {
+        Self {
+            result: Some(result),
+            header: [0; 9],
+            header_len: 0,
+            payload_remaining: 0,
+            entry: [0; 6],
+            entry_len: 0,
+            extended_connect: false,
+        }
+    }
+
+    fn inspect(&mut self, mut bytes: &[u8]) {
+        if self.result.is_none() {
+            return;
+        }
+
+        if self.header_len < self.header.len() {
+            let len = bytes.len().min(self.header.len() - self.header_len);
+            self.header[self.header_len..self.header_len + len].copy_from_slice(&bytes[..len]);
+            self.header_len += len;
+            bytes = &bytes[len..];
+            if self.header_len < self.header.len() {
+                return;
+            }
+            self.payload_remaining = ((self.header[0] as usize) << 16)
+                | ((self.header[1] as usize) << 8)
+                | self.header[2] as usize;
+            if self.header[3] != H2_SETTINGS_FRAME {
+                return self.finish(Err("backend did not open with SETTINGS"));
+            }
+            if self.header[4] & 0x1 != 0 {
+                return self.finish(Err("backend opening SETTINGS was an acknowledgement"));
+            }
+            let stream_id = u32::from_be_bytes([
+                self.header[5],
+                self.header[6],
+                self.header[7],
+                self.header[8],
+            ]) & 0x7fff_ffff;
+            if stream_id != 0 {
+                return self.finish(Err("backend opening SETTINGS used a nonzero stream"));
+            }
+            if self.payload_remaining > MAX_SETTINGS_PAYLOAD {
+                return self.finish(Err("backend opening SETTINGS exceeded the maximum payload"));
+            }
+            if self.payload_remaining % self.entry.len() != 0 {
+                return self.finish(Err("backend opening SETTINGS had a partial entry"));
+            }
+            if self.payload_remaining == 0 {
+                return self.finish(Ok(false));
+            }
+        }
+
+        while !bytes.is_empty() && self.result.is_some() {
+            let len = bytes.len().min(self.entry.len() - self.entry_len);
+            self.entry[self.entry_len..self.entry_len + len].copy_from_slice(&bytes[..len]);
+            self.entry_len += len;
+            self.payload_remaining -= len;
+            bytes = &bytes[len..];
+
+            if self.entry_len == self.entry.len() {
+                let id = u16::from_be_bytes([self.entry[0], self.entry[1]]);
+                let value = u32::from_be_bytes([
+                    self.entry[2],
+                    self.entry[3],
+                    self.entry[4],
+                    self.entry[5],
+                ]);
+                if id == ENABLE_CONNECT_PROTOCOL {
+                    match value {
+                        0 => self.extended_connect = false,
+                        1 => self.extended_connect = true,
+                        _ => {
+                            return self.finish(Err(
+                                "backend opening SETTINGS had an invalid ENABLE_CONNECT_PROTOCOL",
+                            ));
+                        }
+                    }
+                }
+                self.entry_len = 0;
+            }
+
+            if self.payload_remaining == 0 {
+                self.finish(Ok(self.extended_connect));
+            }
+        }
+    }
+
+    fn finish(&mut self, result: OpeningSettingsResult) {
+        if let Some(sender) = self.result.take() {
+            let _ = sender.send(result);
+        }
+    }
+}
+
 pub async fn run_http2_proxy<F, T>(
     from: F,
     to: T,
@@ -298,6 +412,10 @@ where
     F: ReadWriter + Unpin + Send + 'static,
     T: ReadWriter + Unpin + Send + 'static,
 {
+    // Hyper fixes ENABLE_CONNECT_PROTOCOL when it creates the frontend connection.
+    let (settings_sender, mut settings_receiver) = oneshot::channel();
+    let mut settings_observer = OpeningSettingsObserver::new(settings_sender);
+    let to = InspectReader::new(to, move |bytes| settings_observer.inspect(bytes));
     let (client, to) = hyper::client::conn::http2::Builder::new(TokioExecutor::new())
         .timer(TokioTimer::new())
         .adaptive_window(true)
@@ -305,13 +423,35 @@ where
         .keep_alive_timeout(Duration::from_secs(300))
         .handshake(TokioIo::new(to))
         .await?;
-    let from = hyper::server::conn::http2::Builder::new(TokioExecutor::new())
-        .timer(TokioTimer::new())
-        .enable_connect_protocol()
-        .adaptive_window(true)
-        .keep_alive_interval(Duration::from_secs(25)) // Add this
-        .keep_alive_timeout(Duration::from_secs(300))
-        .serve_connection(
+    let mut to = Box::pin(to.fuse());
+    let settings = tokio::select! {
+        settings = &mut settings_receiver => {
+            settings.map_err(|e| Error::new(e, ErrorKind::Network))?
+        }
+        res = to.as_mut() => match settings_receiver.try_recv() {
+            Ok(settings) => settings,
+            Err(_) => {
+                res?;
+                return Err(Error::new(
+                    eyre!("backend http2 connection ended before opening SETTINGS"),
+                    ErrorKind::Network,
+                ));
+            }
+        }
+    };
+    let extended_connect =
+        settings.map_err(|message| Error::new(eyre!(message), ErrorKind::Network))?;
+    let from = {
+        let mut server = hyper::server::conn::http2::Builder::new(TokioExecutor::new());
+        server
+            .timer(TokioTimer::new())
+            .adaptive_window(true)
+            .keep_alive_interval(Duration::from_secs(25))
+            .keep_alive_timeout(Duration::from_secs(300));
+        if extended_connect {
+            server.enable_connect_protocol();
+        }
+        server.serve_connection(
             TokioIo::new(from),
             service_fn(move |mut req| {
                 let mut client = client.clone();
@@ -354,15 +494,17 @@ where
                     Ok::<_, hyper::Error>(res.map(box_incoming))
                 }
             }),
-        );
+        )
+    };
     let mut from = Box::pin(from);
-    let mut to = Box::pin(to.fuse());
     loop {
         tokio::select! {
             res = from.as_mut() => return Ok(res?),
             res = to.as_mut() => {
-                res?;
-                // GOAWAY plus drain, so in-flight streams still finish.
+                if let Err(e) = res {
+                    tracing::warn!("Error proxying http2 connection to backend: {e}");
+                    tracing::debug!("{e:?}");
+                }
                 from.as_mut().graceful_shutdown();
             }
         }
@@ -743,6 +885,211 @@ mod tests {
             .expect("tunnel stalled")
             .unwrap();
         assert_eq!(&echoed, b"ping");
+    }
+
+    use super::{ENABLE_CONNECT_PROTOCOL, H2_SETTINGS_FRAME as SETTINGS_FRAME};
+    const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+    const GOAWAY_FRAME: u8 = 0x7;
+
+    async fn write_frame(s: &mut DuplexStream, kind: u8, payload: &[u8]) {
+        let len = payload.len() as u32;
+        let head = [
+            (len >> 16) as u8,
+            (len >> 8) as u8,
+            len as u8,
+            kind,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ];
+        s.write_all(&head).await.unwrap();
+        s.write_all(payload).await.unwrap();
+    }
+
+    async fn write_client_preface(s: &mut DuplexStream, settings: &[(u16, u32)]) {
+        s.write_all(H2_PREFACE).await.unwrap();
+        let mut payload = Vec::new();
+        for &(id, value) in settings {
+            payload.extend_from_slice(&id.to_be_bytes());
+            payload.extend_from_slice(&value.to_be_bytes());
+        }
+        write_frame(s, SETTINGS_FRAME, &payload).await;
+    }
+
+    async fn read_frame(s: &mut DuplexStream) -> std::io::Result<(u8, Vec<u8>)> {
+        let mut head = [0u8; 9];
+        s.read_exact(&mut head).await?;
+        let len = ((head[0] as usize) << 16) | ((head[1] as usize) << 8) | head[2] as usize;
+        let mut payload = vec![0u8; len];
+        s.read_exact(&mut payload).await?;
+        Ok((head[3], payload))
+    }
+
+    async fn read_client_opening(s: &mut DuplexStream) {
+        let mut preface = [0; H2_PREFACE.len()];
+        s.read_exact(&mut preface).await.unwrap();
+        assert_eq!(&preface, H2_PREFACE);
+
+        let mut header = [0; 9];
+        s.read_exact(&mut header).await.unwrap();
+        assert_eq!(header[3], SETTINGS_FRAME);
+        assert_eq!(header[4], 0);
+        assert_eq!(&header[5..9], &[0; 4]);
+        let len = ((header[0] as usize) << 16) | ((header[1] as usize) << 8) | header[2] as usize;
+        let mut payload = vec![0; len];
+        s.read_exact(&mut payload).await.unwrap();
+    }
+
+    async fn read_opening_settings(s: &mut DuplexStream) -> Vec<u8> {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let (kind, payload) = read_frame(s).await.unwrap();
+                if kind == SETTINGS_FRAME {
+                    return payload;
+                }
+            }
+        })
+        .await
+        .expect("the proxy never sent its client-facing SETTINGS")
+    }
+
+    fn extended_connect_enabled(payload: &[u8]) -> bool {
+        payload.chunks_exact(6).any(|entry| {
+            u16::from_be_bytes([entry[0], entry[1]]) == ENABLE_CONNECT_PROTOCOL
+                && u32::from_be_bytes([entry[2], entry[3], entry[4], entry[5]]) == 1
+        })
+    }
+
+    #[tokio::test]
+    async fn extended_connect_follows_the_backend_opening_settings() {
+        for (backend_settings, advertised) in [
+            (Vec::new(), false),
+            (vec![(ENABLE_CONNECT_PROTOCOL, 1u32)], true),
+        ] {
+            let (mut client, client_facing) = tokio::io::duplex(4096);
+            let (backend_facing, mut backend) = tokio::io::duplex(4096);
+
+            let proxy = tokio::spawn(run_http2_proxy(
+                client_facing,
+                backend_facing,
+                None,
+                false,
+                None,
+            ));
+            let backend = tokio::spawn(async move {
+                read_client_opening(&mut backend).await;
+                let mut payload = Vec::with_capacity(backend_settings.len() * 6);
+                for (id, value) in backend_settings {
+                    payload.extend_from_slice(&id.to_be_bytes());
+                    payload.extend_from_slice(&value.to_be_bytes());
+                }
+                write_frame(&mut backend, SETTINGS_FRAME, &payload).await;
+            });
+
+            write_client_preface(&mut client, &[]).await;
+            assert_eq!(
+                extended_connect_enabled(&read_opening_settings(&mut client).await),
+                advertised,
+            );
+            backend.await.unwrap();
+            drop(client);
+            tokio::time::timeout(Duration::from_secs(5), proxy)
+                .await
+                .expect("proxy did not close with the client")
+                .unwrap()
+                .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn maximum_opening_settings_is_observed() {
+        let (mut client, client_facing) = tokio::io::duplex(4096);
+        let (backend_facing, mut backend) = tokio::io::duplex(32 * 1024);
+        let proxy = tokio::spawn(run_http2_proxy(
+            client_facing,
+            backend_facing,
+            None,
+            false,
+            None,
+        ));
+        let backend = tokio::spawn(async move {
+            let mut settings = vec![(0xa000u16, 0u32); 2_730];
+            settings[1_365] = (ENABLE_CONNECT_PROTOCOL, 1);
+            let mut payload = Vec::with_capacity(settings.len() * 6);
+            for (id, value) in settings {
+                payload.extend_from_slice(&id.to_be_bytes());
+                payload.extend_from_slice(&value.to_be_bytes());
+            }
+            write_frame(&mut backend, SETTINGS_FRAME, &payload).await;
+            read_client_opening(&mut backend).await;
+        });
+
+        write_client_preface(&mut client, &[]).await;
+        assert!(extended_connect_enabled(
+            &read_opening_settings(&mut client).await
+        ));
+        backend.await.unwrap();
+        drop(client);
+        tokio::time::timeout(Duration::from_secs(5), proxy)
+            .await
+            .expect("proxy did not close with the client")
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn backend_failure_before_opening_settings_returns_without_a_client_preface() {
+        let (_client, client_facing) = tokio::io::duplex(4096);
+        let (backend_facing, backend) = tokio::io::duplex(4096);
+        drop(backend);
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            run_http2_proxy(client_facing, backend_facing, None, false, None),
+        )
+        .await
+        .expect("proxy waited for the client after the backend failed");
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn established_backend_failure_sends_goaway() {
+        let (mut client, client_facing) = tokio::io::duplex(4096);
+        let (backend_facing, mut backend) = tokio::io::duplex(4096);
+
+        let proxy = tokio::spawn(run_http2_proxy(
+            client_facing,
+            backend_facing,
+            None,
+            false,
+            None,
+        ));
+        let backend = tokio::spawn(async move {
+            read_client_opening(&mut backend).await;
+            write_frame(&mut backend, SETTINGS_FRAME, &[]).await;
+            assert_eq!(read_frame(&mut backend).await.unwrap().0, SETTINGS_FRAME);
+        });
+
+        write_client_preface(&mut client, &[]).await;
+        backend.await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match read_frame(&mut client).await.unwrap() {
+                    (GOAWAY_FRAME, _) => break,
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("no GOAWAY after the upstream errored");
+        drop(client);
+        tokio::time::timeout(Duration::from_secs(5), proxy)
+            .await
+            .expect("proxy did not close with the client")
+            .unwrap()
+            .unwrap();
     }
 
     fn req_with_auth(auth: Option<&str>) -> Request<()> {
