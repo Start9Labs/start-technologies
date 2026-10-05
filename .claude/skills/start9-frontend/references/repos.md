@@ -12,14 +12,13 @@
   deliberate deferral of design; checkout is a redirect in Phase 1 (Shopify) — multi-step
   checkout is Phase 2 (Vendure).
 - **ops-server** — admin-only actions check `adminService.isAdmin()`. Never commit `.env`.
-- **support-server** (`web/`) — the support portal over Frappe Helpdesk, not a dashboard: one
+- **support-server** (`portal/web/`) — the support portal, not a dashboard: one
   app with the customer chat at `/` and the staff inbox at `/staff`, sharing components and a
   store base and never branching on the role outside the shell and the route guards.
-  Same-origin `/api/method/start9_support.api.*` (Frappe's `{ message }` envelope,
-  `X-Frappe-CSRF-Token` on every POST) plus Frappe's socket.io for live updates; no
-  environments — `ng serve` proxies to `web/mock`, an Express + socket.io server that is the
-  dev backend (there is no `MockApiService`; extend the mock). Frappe session in the frontend:
-  inline `canMatch` guards on `SessionService.user()` and its `role`. Both themes: the account's
+  Same-origin RPC and socket.io, only through `ApiService` and `RealtimeService`; the contract
+  is the repo's `portal/web/ARCHITECTURE.md`. No environments — `ng serve` proxies to `mock/`,
+  an Express + socket.io server that is the dev backend (there is no `MockApiService`; extend
+  the mock). Inline `canMatch` guards on `SessionService.user()` and its `role`. Both themes: the account's
   appearance setting drives `TUI_DARK_MODE` (`provideTaiga()` with no `mode` seeds from the OS,
   StartOS tokens for dark). Local i18n machinery with `en.ts` only. No commit hook:
   `npm run check` runs the compiler, `check-i18n`, the logic tests in `scripts/*.test.ts`
