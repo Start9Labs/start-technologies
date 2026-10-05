@@ -91,4 +91,42 @@ describe('FileHelper.merge', () => {
 
     expect(readFileSync(path, 'utf-8')).toBe('A=keep')
   })
+
+  test('drops an undeclared key under z.object, keeps it under z.looseObject', async () => {
+    const path = seeded('unknown.json', '{"A":"keep","X":"extra"}')
+
+    await FileHelper.json(path, z.object({ A: z.string() })).merge(effects, {})
+    expect(JSON.parse(readFileSync(path, 'utf-8'))).toEqual({ A: 'keep' })
+
+    writeFileSync(path, '{"A":"keep","X":"extra"}')
+    await FileHelper.json(path, shape).merge(effects, {})
+    expect(JSON.parse(readFileSync(path, 'utf-8'))).toEqual({
+      A: 'keep',
+      X: 'extra',
+    })
+  })
+
+  test('merges a discriminated union as the variant it names', async () => {
+    const path = seeded('union.json', '{}')
+    const file = FileHelper.json(
+      path,
+      z.looseObject({
+        backend: z
+          .discriminatedUnion('type', [
+            z.looseObject({
+              type: z.literal('a').catch('a'),
+              x: z.string().catch(''),
+            }),
+            z.looseObject({ type: z.literal('b').catch('b') }),
+          ])
+          .optional(),
+      }),
+    )
+
+    await file.merge(effects, { backend: { type: 'b' } })
+
+    expect(JSON.parse(readFileSync(path, 'utf-8'))).toEqual({
+      backend: { type: 'b' },
+    })
+  })
 })
