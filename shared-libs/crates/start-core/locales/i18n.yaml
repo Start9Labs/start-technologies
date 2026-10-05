@@ -3497,13 +3497,6 @@ help.arg.gua-wan:
   fr_FR: "Exposer la GUA IPv6 au WAN (false = LAN uniquement)"
   pl_PL: "Udostępnij GUA IPv6 w sieci WAN (false = tylko LAN)"
 
-help.arg.after-backup:
-  en_US: "Wait for a running backup to finish first"
-  de_DE: "Zuerst auf den Abschluss einer laufenden Sicherung warten"
-  es_ES: "Esperar primero a que termine una copia de seguridad en curso"
-  fr_FR: "Attendre d'abord la fin d'une sauvegarde en cours"
-  pl_PL: "Najpierw poczekaj na zakończenie trwającej kopii zapasowej"
-
 help.arg.allow-model-mismatch:
   en_US: "Allow database model mismatch"
   de_DE: "Datenbankmodell-Abweichung erlauben"
@@ -3727,6 +3720,13 @@ help.arg.force-clear-task:
   es_ES: "Forzar la limpieza de la tarea aunque esté ejecutándose"
   fr_FR: "Forcer la suppression de la tâche même si elle est en cours"
   pl_PL: "Wymuś wyczyszczenie zadania nawet jeśli jest uruchomione"
+
+help.arg.force-power:
+  en_US: "Interrupt a running backup instead of waiting for it to finish"
+  de_DE: "Eine laufende Sicherung unterbrechen, statt auf ihren Abschluss zu warten"
+  es_ES: "Interrumpir una copia de seguridad en curso en lugar de esperar a que termine"
+  fr_FR: "Interrompre une sauvegarde en cours au lieu d'attendre sa fin"
+  pl_PL: "Przerwij trwającą kopię zapasową zamiast czekać na jej zakończenie"
 
 help.arg.force-remove-package:
   en_US: "Force removal even if the package has versions"

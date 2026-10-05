@@ -31,6 +31,7 @@ import {
 } from 'src/app/services/patch-db/data-model'
 import { toAuthorityUrl } from 'src/app/utils/acme'
 import { AuthService } from '../auth.service'
+import { PATCH_CACHE, waitForPatchSequence } from '../patch-db/patch-db-source'
 import { Mock } from './api.fixures'
 import {
   ActionRes,
@@ -106,6 +107,7 @@ const INIT_PROGRESS: T.FullProgress = {
 export class MockApiService extends ApiService {
   readonly mockWsSource$ = new Subject<Revision>()
   private readonly storage = inject(WA_SESSION_STORAGE)
+  private readonly cache$ = inject(PATCH_CACHE)
   private readonly revertTime = 1800
   private backingUp = false
   private deferredPowerAction: T.PowerAction | null = null
@@ -404,10 +406,10 @@ export class MockApiService extends ApiService {
   async restartServer(params: Partial<T.ShutdownParams>): Promise<null> {
     await pauseFor(2000)
 
-    if (params.afterBackup && this.backingUp) {
+    if (!params.force && this.backingUp) {
       return this.deferPower('restart')
     }
-    this.deferPower(null)
+    await this.deferPower(null)
 
     const patch = [
       {
@@ -435,10 +437,10 @@ export class MockApiService extends ApiService {
   async shutdownServer(params: Partial<T.ShutdownParams>): Promise<null> {
     await pauseFor(2000)
 
-    if (params.afterBackup && this.backingUp) {
+    if (!params.force && this.backingUp) {
       return this.deferPower('shutdown')
     }
-    this.deferPower(null)
+    await this.deferPower(null)
 
     const patch = [
       {
@@ -2358,7 +2360,7 @@ export class MockApiService extends ApiService {
     this.mockRevision(patch)
   }
 
-  private deferPower(action: T.PowerAction | null): null {
+  private async deferPower(action: T.PowerAction | null): Promise<null> {
     this.deferredPowerAction = action
     this.mockRevision([
       {
@@ -2367,6 +2369,7 @@ export class MockApiService extends ApiService {
         value: action,
       },
     ])
+    await waitForPatchSequence(this.cache$, this.sequence)
     return null
   }
 

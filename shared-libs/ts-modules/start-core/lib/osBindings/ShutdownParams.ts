@@ -6,14 +6,11 @@ export type ShutdownParams = {
    * frontend omits this and gets an immediate reply). Cleared with
    * `--nowait`. The wait can't outlive the webserver teardown that follows
    * container shutdown, so the connection drops once services are stopped.
-   * Nothing is waited for when `--after-backup` defers the action, since
-   * there is no teardown yet to wait on.
+   * A deferred action replies immediately, before teardown begins.
    */
   wait: boolean
   /**
-   * Let a running backup finish first, rather than interrupting it. Off by
-   * default, so the systemd units that drive a real power-off — which cannot
-   * wait — keep their existing behavior.
+   * Interrupt a running backup instead of waiting for it to finish.
    */
-  afterBackup: boolean
+  force: boolean
 }

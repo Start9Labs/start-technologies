@@ -13,9 +13,12 @@ import {
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { Dump, pathFromArray } from 'patch-db-client'
-import { filter, firstValueFrom, Observable } from 'rxjs'
+import { Observable } from 'rxjs'
 import { webSocket, WebSocketSubject } from 'rxjs/webSocket'
-import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
+import {
+  PATCH_CACHE,
+  waitForPatchSequence,
+} from 'src/app/services/patch-db/patch-db-source'
 import { AuthService } from '../auth.service'
 import { DataModel } from '../patch-db/data-model'
 import {
@@ -784,9 +787,7 @@ export class LiveApiService extends ApiService {
 
     const patchSequence = res.headers.get('x-patch-sequence')
     if (patchSequence)
-      await firstValueFrom(
-        this.cache$.pipe(filter(({ id }) => id >= Number(patchSequence))),
-      )
+      await waitForPatchSequence(this.cache$, Number(patchSequence))
 
     return body.result
   }
