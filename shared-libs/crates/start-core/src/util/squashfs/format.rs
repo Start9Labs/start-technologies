@@ -5,6 +5,7 @@ use super::blocks::invalid;
 pub(super) const MAGIC: u32 = 0x73717368;
 pub(super) const INVALID_TABLE: u64 = u64::MAX;
 pub(super) const INVALID_INDEX: u32 = u32::MAX;
+pub(super) const ALWAYS_FRAGMENTS: u16 = 1 << 5;
 pub(super) const EXPORTABLE: u16 = 1 << 7;
 pub(super) const DEDUPLICATED: u16 = 1 << 6;
 pub(super) const NO_XATTRS: u16 = 1 << 9;
@@ -74,7 +75,7 @@ impl Superblock {
             fragment_count: 0,
             compression: 6,
             block_log: block_size.ilog2() as u16,
-            flags: EXPORTABLE,
+            flags: EXPORTABLE | ALWAYS_FRAGMENTS,
             id_count: 0,
             version_major: 4,
             version_minor: 0,
@@ -142,6 +143,26 @@ disk_struct!(InodeHeader {
     modification_time: u32,
     number: u32,
 });
+
+disk_struct!(BasicDirectoryInode {
+    block: u32,
+    links: u32,
+    size: u16,
+    offset: u16,
+    parent: u32,
+});
+disk_struct!(BasicFileInode {
+    block: u32,
+    fragment: u32,
+    offset: u32,
+    size: u32,
+});
+disk_struct!(BasicDeviceInode {
+    links: u32,
+    device: u32,
+});
+disk_struct!(BasicIpcInode { links: u32 });
+disk_struct!(XattrValue { size: u32 });
 
 disk_struct!(DirectoryInode {
     links: u32,
@@ -281,6 +302,7 @@ mod tests {
         assert_eq!(&bytes[..4], b"hsqs");
         assert_eq!(&bytes[8..12], &1234u32.to_le_bytes());
         assert_eq!(&bytes[20..24], &[6, 0, 17, 0]);
+        assert_eq!(&bytes[24..26], &[160, 0]);
         assert_eq!(&bytes[64..72], &[255; 8]);
         assert_eq!(Superblock::deserialize(&mut &bytes[..]).unwrap(), block);
     }

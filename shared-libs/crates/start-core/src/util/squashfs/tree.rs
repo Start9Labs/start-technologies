@@ -5,6 +5,7 @@ use std::path::{Component, Path, PathBuf};
 
 use super::blocks::invalid;
 use super::format::{InodeKind, validate_block_size};
+use crate::s9pk::merkle_archive::source::{DynFileSource, FileSource};
 
 /// Unix inode attributes retained in the image, including permission and special bits.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -307,6 +308,48 @@ impl<S> Squashfs<S> {
     }
     pub(super) fn root(&self) -> &Node<S> {
         &self.root
+    }
+}
+
+impl<S: FileSource> Squashfs<S> {
+    /// Erases file-source types without reading file contents.
+    pub fn into_dyn(self) -> Squashfs<DynFileSource> {
+        Squashfs {
+            root: self.root.into_dyn(),
+            options: self.options,
+        }
+    }
+}
+
+impl<S: FileSource> Node<S> {
+    fn into_dyn(self) -> Node<DynFileSource> {
+        let contents = match self.contents {
+            NodeContents::File(source) => NodeContents::File(DynFileSource::new(source)),
+            NodeContents::Directory(directory) => NodeContents::Directory(DirectoryContents {
+                entries: directory
+                    .entries
+                    .into_iter()
+                    .map(|(name, entry)| {
+                        (
+                            name,
+                            match entry {
+                                Entry::Node(node) => Entry::Node(node.into_dyn()),
+                                Entry::Hardlink(target) => Entry::Hardlink(target),
+                            },
+                        )
+                    })
+                    .collect(),
+            }),
+            NodeContents::Symlink(target) => NodeContents::Symlink(target),
+            NodeContents::BlockDevice(device) => NodeContents::BlockDevice(device),
+            NodeContents::CharacterDevice(device) => NodeContents::CharacterDevice(device),
+            NodeContents::Fifo => NodeContents::Fifo,
+            NodeContents::Socket => NodeContents::Socket,
+        };
+        Node {
+            metadata: self.metadata,
+            contents,
+        }
     }
 }
 
