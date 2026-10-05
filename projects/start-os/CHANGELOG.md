@@ -8,6 +8,12 @@ This file tracks notable changes since the move to the monorepo, and is what eac
 [GitHub release](https://github.com/Start9Labs/start-technologies/releases) links to
 for the detail behind its highlights.
 
+## [0.4.0.3]
+
+### Changed
+
+- **Legacy v1 package conversion creates SquashFS images natively**, preserving container filesystem ownership and permissions.
+
 ## [0.4.0.2]
 
 ### Security

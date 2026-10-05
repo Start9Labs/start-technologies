@@ -9,6 +9,17 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [2.2.1]
+
+### Changed
+
+- **`s9pk pack` and `s9pk edit add-image` create SquashFS images natively**, without requiring `mksquashfs` or `tar2sqfs` on the packaging workstation. JavaScript files are readable and directories traversable by the service runtime without changing source permissions.
+
+### Fixed
+
+- **Package manifest paths containing apostrophes work during packing and validation.**
+- **`s9pk edit add-image` re-signs edited packages with the workspace build key**, keeping their signatures valid.
+
 ## [2.2.0]
 
 ### Security

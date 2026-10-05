@@ -2,20 +2,26 @@
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../../.."
 
-source ./build/builder-alias.sh
-
 set -ea
+
+RUST_BUILDER_IMAGE=${RUST_BUILDER_IMAGE:-start9/start-core-testenv}
+if [ "$RUST_BUILDER_IMAGE" = "start9/start-core-testenv" ]; then
+  docker build -t "$RUST_BUILDER_IMAGE" -f shared-libs/crates/start-core/testenv.Dockerfile .
+fi
+
+source ./build/builder-alias.sh
 shopt -s expand_aliases
 
 PROFILE=${PROFILE:-release}
-if [ "${PROFILE}" = "release" ]; then
-	BUILD_FLAGS="--release"
-else
-  if [ "$PROFILE" != "debug"]; then
+BUILD_FLAGS=
+case "$PROFILE" in
+  release) BUILD_FLAGS="--release" ;;
+  dev|debug) ;;
+  *)
     >&2 echo "Unknown profile $PROFILE: falling back to debug..."
     PROFILE=debug
-  fi
-fi
+    ;;
+esac
 
 if [ -z "$ARCH" ]; then
 	ARCH=$(uname -m)

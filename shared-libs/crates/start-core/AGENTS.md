@@ -25,9 +25,11 @@ Topical references: [rpc-toolkit.md](rpc-toolkit.md), [patchdb.md](patchdb.md),
 Install stable Rust and Docker. `rust-analyzer` is recommended.
 
 - `cargo check -p start-core` — type-check the library.
-- `make start-core-test` — run the test suite (wraps `run-tests.sh`, which uses the `rust-zig-builder`
-  container and the `test` feature; skips `export_` tests). Or run a single test directly:
-  `cargo test -p start-core <name> --features=test`.
+- `make start-core-test` — run the test suite (wraps `run-tests.sh`, which builds `testenv.Dockerfile`
+  over the Rust builder with Node 24 and SquashFS oracle tools, uses the `test` feature, and skips
+  `export_` tests). `RUST_BUILDER_IMAGE` selects a prebuilt test image instead. Or run a single test
+  directly: `cargo test -p start-core <name> --features=test`. Native SquashFS interoperability tests
+  require `mksquashfs` and `unsquashfs`; manifest tests require Node.
 - `make start-core-format` — format the shared Rust crates with the pinned nightly container (`make start-core-format-check` checks formatting). Set `FMT_NATIVE=1` only when that nightly is installed locally.
 - `cargo build -p start-os --bin startbox` (or the other product crate/bin) to build a binary.
 
