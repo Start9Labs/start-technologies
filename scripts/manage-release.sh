@@ -35,6 +35,8 @@ STARTOS_SOURCE_REGISTRY="${STARTOS_SOURCE_REGISTRY:-https://beta-registry.start9
 STARTOS_TARGET_REGISTRY="${STARTOS_TARGET_REGISTRY:-https://registry.start9.com}"
 S3_BUCKET="s3://startos-images"
 S3_CDN="https://startos-images.nyc3.cdn.digitaloceanspaces.com"
+# The origin behind S3_CDN, read when deciding what is already published.
+S3_ORIGIN="https://startos-images.nyc3.digitaloceanspaces.com"
 START9_GPG_KEY="2D63C217"
 SDK_NPM_PACKAGE="@start9labs/start-sdk"
 # The changelog link sits inside the notes' Highlights section rather than at a
@@ -270,6 +272,28 @@ asset_url() {
     load_registry_index "$1"
     jq -r --arg v "$VERSION" --arg s "$2" --arg p "$3" \
         '.versions[$v][$s][$p].urls[0] // empty' <<< "$_INDEX_JSON"
+}
+
+# Every asset this version ships to a registry, one "<slot> <platform>" per line.
+registry_slots() {
+    local platform ext
+    case "$KIND" in
+        os)
+            for platform in $OS_PLATFORMS; do
+                for ext in $(os_image_exts "$platform"); do echo "$ext $platform"; done
+            done
+            ;;
+        wrt) printf '%s\n' "img $STARTWRT_PLATFORM" "squashfs $STARTWRT_PLATFORM" ;;
+    esac
+}
+
+# The assets a registry lacks for this version, space-separated.
+missing_registry_assets() {
+    local slot platform missing=""
+    while read -r slot platform; do
+        [ -n "$(asset_url "$1" "$slot" "$platform")" ] || missing="${missing} ${platform}.${slot}"
+    done < <(registry_slots)
+    echo "$missing"
 }
 
 # CI registers a build before its notes are written, so set them on the source
@@ -663,18 +687,23 @@ pull_gha_debs() {
     done
 }
 
+# The pool path of this version's deb in the stable suite. Empty if unpublished.
+apt_filename() {
+    local idx
+    idx="${APT_BASE_URL}/dists/${APT_SUITE}/${APT_COMPONENT}/binary-$(deb_arch "$1")/Packages"
+    curl -fsSL "${APT_NO_CACHE[@]}" "$idx" 2>/dev/null | awk -v pkg="$PROJECT" -v ver="$VERSION" '
+        /^$/ { p=""; v="" }
+        /^Package:/ { p=$2 }
+        /^Version:/ { v=$2 }
+        /^Filename:/ { if (p==pkg && index(v, ver) > 0) print $2 }
+    ' | head -1 || true
+}
+
 # Download this project's released debs from the apt repository into the cwd.
 pull_apt_debs() {
-    local arch darch idx filename
+    local arch filename
     for arch in $DEB_ARCHES; do
-        darch=$(deb_arch "$arch")
-        idx="${APT_BASE_URL}/dists/${APT_SUITE}/${APT_COMPONENT}/binary-${darch}/Packages"
-        filename=$(curl -fsSL "${APT_NO_CACHE[@]}" "$idx" 2>/dev/null | awk -v pkg="$PROJECT" -v ver="$VERSION" '
-            /^$/ { p=""; v="" }
-            /^Package:/ { p=$2 }
-            /^Version:/ { v=$2 }
-            /^Filename:/ { if (p==pkg && index(v, ver) > 0) print $2 }
-        ' | head -1)
+        filename=$(apt_filename "$arch")
         if [ -n "$filename" ]; then
             echo "  ${arch}: ${filename}"
             curl -fsSL "${APT_NO_CACHE[@]}" "${APT_BASE_URL}/${filename}" -o "$(basename "$filename")"
@@ -701,6 +730,90 @@ publish_debs() {
 }
 
 # --- Subcommands ---
+
+# The `release` steps for this kind, in order.
+release_steps() {
+    case "$KIND" in
+        # CI already uploaded the images to the shared S3 bucket and indexed
+        # them into alpha (and alpha->beta was promoted manually), so there's
+        # no push here. Pull the promoted images to build the release notes +
+        # sign them, and `index` promotes them from source into production.
+        # push-gz is the one upload left: the compressed .img the notes link,
+        # which has to be on S3 before the notes reference it.
+        os) echo pre-check pull push-gz tag create-gh-release index sign ;;
+        # Promote the debs CI published to alpha rather than rebuilding
+        # trust from a CI run: what testers have been running is what ships.
+        # (start-cli's per-triple binaries still come from the run — they are
+        # published only as release assets, so there is no channel to promote
+        # them from. Both halves are pinned to the tagged commit.)
+        cli | deb) echo pre-check pull-alpha tag create-gh-release push sign ;;
+        # create-gh-release before push: everything idempotent runs ahead of
+        # the one irreversible step (npm publish can't be re-run for a version).
+        npm) echo pre-check tag create-gh-release push ;;
+        # CI (start-wrt.yaml `deploy`) uploaded the images to S3 and
+        # registered + indexed them into the source (beta) registry, where
+        # beta routers soaked the version — so there's no push here. Pull
+        # the registered images (signature-verified) to build the release
+        # notes + sign them, tag, cut the GitHub release, and `index`
+        # promotes them from source into production.
+        wrt) echo pre-check pull tag create-gh-release index sign ;;
+    esac
+}
+
+# The `release` steps whose output is already published, keyed by step name.
+declare -A DONE=()
+# The commit origin's release tag points at. Empty if untagged.
+REMOTE_TAG_SHA=""
+
+published_exists() {
+    [ "$(curl -sI "${APT_NO_CACHE[@]}" -o /dev/null -w '%{http_code}' "$1")" = 200 ]
+}
+
+detect_progress() {
+    local assets arch triple platform url published=1
+    DONE=()
+    REMOTE_TAG_SHA=$(git -C "$REPO_ROOT" ls-remote --tags origin "refs/tags/${TAG}" "refs/tags/${TAG}^{}" | awk 'END { print $1 }')
+    [ -z "$REMOTE_TAG_SHA" ] || DONE[tag]=1
+
+    if assets=$(gh release view -R "$REPO" "$TAG" --json assets -q '.assets[].name' 2>/dev/null); then
+        DONE[create-gh-release]=1
+        if grep -qxF signatures.tar.gz <<< "$assets"; then DONE[sign]=1; fi
+    fi
+
+    case "$KIND" in
+        os)
+            for platform in $OS_PLATFORMS; do
+                [[ " $(os_image_exts "$platform") " == *" img "* ]] || continue
+                url=$(asset_url "$STARTOS_SOURCE_REGISTRY" img "$platform")
+                if [ -z "$url" ] || ! published_exists "${S3_ORIGIN}/v${VERSION}/$(basename "$url").gz"; then
+                    published=
+                fi
+            done
+            [ -z "$published" ] || DONE[push-gz]=1
+            [ -n "$(missing_registry_assets "$STARTOS_TARGET_REGISTRY")" ] || DONE[index]=1
+            ;;
+        wrt)
+            [ -n "$(missing_registry_assets "$STARTWRT_TARGET_REGISTRY")" ] || DONE[index]=1
+            ;;
+        cli | deb)
+            for arch in $DEB_ARCHES; do
+                if [ -z "$(apt_filename "$arch")" ] \
+                    || ! grep -qxF "${PROJECT}_${VERSION}_$(deb_arch "$arch").deb" <<< "${assets:-}"; then
+                    published=
+                fi
+            done
+            if [ "$KIND" = cli ]; then
+                for triple in $CLI_TRIPLES; do
+                    grep -qxF "start-cli_$(cli_asset_name "$triple")" <<< "${assets:-}" || published=
+                done
+            fi
+            [ -z "$published" ] || DONE[push]=1
+            ;;
+        npm)
+            [ -z "$(npm view "${SDK_NPM_PACKAGE}@${VERSION}" version 2>/dev/null || true)" ] || DONE[push]=1
+            ;;
+    esac
+}
 
 # Report a failed "already released" guard. With FORCE=1 it's tolerated (returns
 # success) so an idempotent step can be re-run — S3 put -P, gh release --clobber,
@@ -817,68 +930,70 @@ cmd_pre_check() {
         fi
     fi
 
-    # 2. Git tag must not already exist on the remote (idempotent: FORCE re-tags).
-    if git ls-remote --tags origin "refs/tags/${TAG}" 2>/dev/null | grep -q .; then
-        release_guard "tag ${TAG} already exists on origin" || errors=1
+    # 2. What of this release is already published. A partial release resumes
+    # where it stopped; a complete one is refused unless forced.
+    detect_progress
+    local step done_steps="" todo=""
+    for step in $(release_steps); do
+        case "$step" in pre-check | pull | pull-alpha) continue ;; esac
+        if [ -n "${DONE[$step]:-}" ]; then
+            done_steps="${done_steps} ${step}"
+        else
+            todo="${todo} ${step}"
+        fi
+    done
+    if [ -z "$done_steps" ]; then
+        echo "  ✓ nothing of ${TAG} is published yet"
+    elif [ -z "$todo" ]; then
+        release_guard "${TAG} is already fully released" || errors=1
+    elif [ -n "${FORCE:-}" ]; then
+        >&2 echo "  ! ${TAG} is partially released (${done_steps# }); FORCE re-runs every step"
     else
-        echo "  ✓ tag ${TAG} is free"
+        echo "  ✓ ${TAG} is partially released: resuming at${todo} (done:${done_steps})"
+    fi
+    if [ "$KIND" = npm ] && [ -n "${DONE[push]:-}" ] && [ -n "${FORCE:-}" ]; then
+        >&2 echo "  ✗ ${SDK_NPM_PACKAGE}@${VERSION} already published to npm (cannot republish)"
+        errors=1
     fi
 
-    # 3. This release's own output must not already exist. For os/cli/deb that's
-    # the GitHub release (the os images themselves are published to S3 + indexed
-    # by CI, so the registry is expected to already carry them). For npm it's the
-    # published package version.
-    case "$KIND" in
-        os | cli | deb | wrt)
-            if gh release view -R "$REPO" "$TAG" >/dev/null 2>&1; then
-                release_guard "GitHub release ${TAG} already exists" || errors=1
-            else
-                echo "  ✓ GitHub release ${TAG} does not exist"
-            fi
-            ;;
-        npm)
-            # npm can't republish a version, so this is never forceable.
-            if [ -n "$(npm view "${SDK_NPM_PACKAGE}@${VERSION}" version 2>/dev/null || true)" ]; then
-                >&2 echo "  ✗ ${SDK_NPM_PACKAGE}@${VERSION} already published to npm (cannot republish)"
+    # A resume works from the commit origin's tag already names.
+    if [ -n "${DONE[tag]:-}" ] && [ -n "$todo" ] && [ -z "${FORCE:-}" ]; then
+        if [ -n "${COMMIT:-}" ] && [ "$(tag_commit_sha)" != "$REMOTE_TAG_SHA" ]; then
+            >&2 echo "  ✗ COMMIT=${COMMIT} is not ${REMOTE_TAG_SHA}, the commit ${TAG} already points at on origin"
+            errors=1
+        elif ! git -C "$REPO_ROOT" cat-file -e "${REMOTE_TAG_SHA}^{commit}" 2>/dev/null; then
+            >&2 echo "  ✗ ${TAG} points at ${REMOTE_TAG_SHA}, which is not in this repository — git fetch --tags origin"
+            errors=1
+        else
+            COMMIT=$REMOTE_TAG_SHA
+            assert_metadata_matches_adopted || errors=1
+            if [ "$KIND" = npm ] && [ -z "${DONE[push]:-}" ] \
+                && ! git -C "$REPO_ROOT" diff --quiet "$REMOTE_TAG_SHA" HEAD; then
+                >&2 echo "  ✗ HEAD differs from ${TAG} (${REMOTE_TAG_SHA}); npm publishes the working tree — git checkout ${REMOTE_TAG_SHA}"
                 errors=1
-            else
-                echo "  ✓ ${SDK_NPM_PACKAGE}@${VERSION} not yet on npm"
             fi
-            ;;
-    esac
+        fi
+    fi
 
-    # 4. Preconditions for the release steps: everything the pipeline needs must
+    # 3. Preconditions for the release steps: everything the pipeline needs must
     # already be in place, so a release doesn't fail halfway through.
     case "$KIND" in
         os)
             # `release` pulls the images from the source registry and promotes
             # them into prod, so every expected asset must already be in source.
-            local missing platform ext
+            local missing
             load_registry_index "$STARTOS_SOURCE_REGISTRY"
             if ! jq -e --arg v "$VERSION" '.versions[$v]' <<< "$_INDEX_JSON" >/dev/null 2>&1; then
                 >&2 echo "  ✗ OS ${VERSION} not in source registry ${STARTOS_SOURCE_REGISTRY} — promote it there first"
                 errors=1
             else
-                missing=""
-                for platform in $OS_PLATFORMS; do
-                    for ext in $(os_image_exts "$platform"); do
-                        [ -n "$(asset_url "$STARTOS_SOURCE_REGISTRY" "$ext" "$platform")" ] \
-                            || missing="${missing} ${platform}.${ext}"
-                    done
-                done
+                missing=$(missing_registry_assets "$STARTOS_SOURCE_REGISTRY")
                 if [ -n "$missing" ]; then
                     >&2 echo "  ✗ source registry is missing OS assets:${missing}"
                     errors=1
                 else
                     echo "  ✓ source registry has all ${VERSION} images"
                 fi
-            fi
-            # `release` promotes into prod; it shouldn't already be there.
-            if start-cli --registry="$STARTOS_TARGET_REGISTRY" registry os index 2>/dev/null \
-                | jq -e ".versions[\"$VERSION\"]" >/dev/null 2>&1; then
-                release_guard "OS ${VERSION} already in production registry ${STARTOS_TARGET_REGISTRY}" || errors=1
-            else
-                echo "  ✓ not yet in production registry"
             fi
             # promoting re-signs registry commitments with the developer key;
             # start-cli reads id.key.pem (auto-migrating a legacy developer.key.pem).
@@ -902,30 +1017,19 @@ cmd_pre_check() {
             # promotes them into production, so both assets must already be
             # registered there (the CI deploy does that; `register` is the
             # manual fallback).
-            local slot wrt_missing
+            local wrt_missing
             load_registry_index "$STARTWRT_SOURCE_REGISTRY"
             if ! jq -e --arg v "$VERSION" '.versions[$v]' <<< "$_INDEX_JSON" >/dev/null 2>&1; then
                 >&2 echo "  ✗ StartWRT ${VERSION} not in source registry ${STARTWRT_SOURCE_REGISTRY} — run the start-wrt deploy workflow (or 'register') first"
                 errors=1
             else
-                wrt_missing=""
-                for slot in img squashfs; do
-                    [ -n "$(asset_url "$STARTWRT_SOURCE_REGISTRY" "$slot" "$STARTWRT_PLATFORM")" ] \
-                        || wrt_missing="${wrt_missing} ${slot}"
-                done
+                wrt_missing=$(missing_registry_assets "$STARTWRT_SOURCE_REGISTRY")
                 if [ -n "$wrt_missing" ]; then
                     >&2 echo "  ✗ source registry is missing StartWRT assets:${wrt_missing}"
                     errors=1
                 else
                     echo "  ✓ source registry has both ${VERSION} images"
                 fi
-            fi
-            # `release` promotes into production; it shouldn't already be there.
-            if start-cli --registry="$STARTWRT_TARGET_REGISTRY" registry os index 2>/dev/null \
-                | jq -e ".versions[\"$VERSION\"]" >/dev/null 2>&1; then
-                release_guard "StartWRT ${VERSION} already in production registry ${STARTWRT_TARGET_REGISTRY}" || errors=1
-            else
-                echo "  ✓ not yet in production registry"
             fi
             # promoting re-signs registry commitments with the developer key;
             # start-cli reads id.key.pem (auto-migrating a legacy developer.key.pem).
@@ -1106,6 +1210,11 @@ cmd_pull_alpha() {
     rm -rf "$ALPHA_TMP"
 }
 
+# Whether a local file is the asset a registry commits to: <file> <registry> <slot> <platform>.
+matches_commitment() {
+    [ -f "$1" ] && [ "$(b3sum --no-names "$1")" = "$(asset_commitment_b3 "$2" "$3" "$4")" ]
+}
+
 cmd_pull() {
     ensure_release_dir
     # Released assets replace any GHA-pulled ones, so the marker no longer applies.
@@ -1128,13 +1237,17 @@ cmd_pull() {
                         continue
                     fi
                     published=$(basename "$url")
+                    expected+=("$published")
+                    [ "$ext" != img ] || expected+=("${published}.gz")
+                    if matches_commitment "$published" "$STARTOS_SOURCE_REGISTRY" "$ext" "$platform"; then
+                        echo "  ${ext} ${platform} -> ${published} (already here)"
+                        continue
+                    fi
                     echo "  ${ext} ${platform} -> ${published}"
                     tmp=$(mktemp -d "$(pwd)/.get-${platform}-${ext}.XXXXXX")
                     start-cli --registry="$STARTOS_SOURCE_REGISTRY" registry os asset get "$ext" "$VERSION" "$platform" -d "$tmp"
                     mv -f "$tmp"/* "$published"
                     rmdir "$tmp"
-                    expected+=("$published")
-                    [ "$ext" != img ] || expected+=("${published}.gz")
                 done
             done
             ensure_img_gz
@@ -1176,6 +1289,10 @@ cmd_pull() {
                     continue
                 fi
                 published=$(basename "$url")
+                if matches_commitment "$published" "$STARTWRT_SOURCE_REGISTRY" "$slot" "$STARTWRT_PLATFORM"; then
+                    echo "  ${slot} -> ${published} (already here)"
+                    continue
+                fi
                 echo "  ${slot} -> ${published}"
                 tmp=$(mktemp -d "$(pwd)/.get-$slot.XXXXXX")
                 start-cli --registry="$STARTWRT_SOURCE_REGISTRY" registry os asset get "$slot" "$VERSION" "$STARTWRT_PLATFORM" -d "$tmp"
@@ -1203,7 +1320,10 @@ cmd_tag() {
         >&2 echo "Warning: working tree is dirty; tagging ${commit} anyway."
     fi
     echo "Tagging ${TAG} at ${commit} (${tag_sha})..."
-    (cd "$REPO_ROOT" && git tag ${FORCE:+-f} "$TAG" "$commit" && git push origin ${FORCE:+-f} "refs/tags/${TAG}")
+    if [ -n "${FORCE:-}" ] || [ "$(git -C "$REPO_ROOT" rev-parse -q --verify "refs/tags/${TAG}^{commit}")" != "$tag_sha" ]; then
+        git -C "$REPO_ROOT" tag ${FORCE:+-f} "$TAG" "$commit"
+    fi
+    git -C "$REPO_ROOT" push origin ${FORCE:+-f} "refs/tags/${TAG}"
 }
 
 cmd_create_gh_release() {
@@ -1567,59 +1687,20 @@ cmd_body() {
     release_body
 }
 
+# Runs every step not already published. pre-check, its first step, finds them.
 cmd_release() {
-    case "$KIND" in
-        os)
-            # CI already uploaded the images to the shared S3 bucket and indexed
-            # them into alpha (and alpha->beta was promoted manually), so there's
-            # no push here. Pull the promoted images to build the release notes +
-            # sign them, and `index` promotes them from source into production.
-            # push-gz is the one upload left: the compressed .img the notes link,
-            # which has to be on S3 before the notes reference it.
-            cmd_pre_check
-            cmd_pull
-            cmd_push_gz
-            cmd_tag
-            cmd_create_gh_release
-            cmd_index
-            cmd_sign
-            ;;
-        cli | deb)
-            # Promote the debs CI published to alpha rather than rebuilding
-            # trust from a CI run: what testers have been running is what ships.
-            # (start-cli's per-triple binaries still come from the run — they are
-            # published only as release assets, so there is no channel to promote
-            # them from. Both halves are pinned to the tagged commit.)
-            cmd_pre_check
-            cmd_pull_alpha
-            cmd_tag
-            cmd_create_gh_release
-            cmd_push
-            cmd_sign
-            ;;
-        npm)
-            # create-gh-release before push: everything idempotent runs ahead of
-            # the one irreversible step (npm publish can't be re-run for a version).
-            cmd_pre_check
-            cmd_tag
-            cmd_create_gh_release
-            cmd_push
-            ;;
-        wrt)
-            # CI (start-wrt.yaml `deploy`) uploaded the images to S3 and
-            # registered + indexed them into the source (beta) registry, where
-            # beta routers soaked the version — so there's no push here. Pull
-            # the registered images (signature-verified) to build the release
-            # notes + sign them, tag, cut the GitHub release, and `index`
-            # promotes them from source into production.
-            cmd_pre_check
-            cmd_pull
-            cmd_tag
-            cmd_create_gh_release
-            cmd_index
-            cmd_sign
-            ;;
-    esac
+    local step
+    for step in $(release_steps); do
+        if [ -n "${DONE[$step]:-}" ] && [ -z "${FORCE:-}" ]; then
+            echo "Skipping ${step}: already published."
+            continue
+        fi
+        # Once the debs are out, the files left to sign are the published ones.
+        if [ "$step" = pull-alpha ] && [ -n "${DONE[push]:-}" ] && [ -z "${FORCE:-}" ]; then
+            step=pull
+        fi
+        "cmd_${step//-/_}"
+    done
 }
 
 usage() {
@@ -1642,8 +1723,10 @@ crate's — or package.json for start-sdk); the git tag / GitHub release is
 <project>/v<version>.
 
 Subcommands:
-  pre-check          Verify the changelog documents this version and that the
-                     version is not already tagged/released.
+  pre-check          Verify the changelog documents this version, and report
+                     which release steps are already published (tag, GitHub
+                     release, uploads, registry, signatures). Fails on a
+                     fully released version.
   alpha-commit       Print the commit alpha's current build of this project came
                      from. `git checkout "$(... alpha-commit <project>)"` puts a
                      tree on it. (cli/deb.)
@@ -1693,7 +1776,9 @@ Subcommands:
                      serve to the in-product update screens. (all projects.)
   body               Print the whole GitHub release body: the notes plus the
                      download and checksum sections. (all projects.)
-  release            Run the full applicable pipeline for the project.
+  release            Run the full applicable pipeline for the project, skipping
+                     the steps pre-check finds already published — re-running
+                     after a failure resumes at the step that failed.
 
 Environment variables:
   VERSION                  Override the version (default: read from the manifest)
@@ -1702,9 +1787,10 @@ Environment variables:
   RUN_ID                   GitHub Actions run id/url for pull-gha
   COMMIT                   Commit to tag (default: HEAD)
   FORCE                    Set to 1 to re-release an already-released version:
-                           force-move the tag and downgrade pre-check's "already
-                           released" failures to warnings (idempotent steps only;
-                           npm republish always fails)
+                           run every step even if published, force-move the tag,
+                           and downgrade pre-check's "already released" failure to
+                           a warning (idempotent steps only; npm republish always
+                           fails)
   CLEAN                    Set to 1 to wipe and recreate the release directory
   GH_USER                  Override GitHub username (default: autodetected via gh)
   OTP                      npm one-time password for start-sdk publish
