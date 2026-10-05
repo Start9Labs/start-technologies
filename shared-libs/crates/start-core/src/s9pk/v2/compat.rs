@@ -36,16 +36,6 @@ impl S9pk<TmpSource<PackSource>> {
         tmp_dir: Arc<TmpDir>,
         signer: ed25519_dalek::SigningKey,
     ) -> Result<Self, Error> {
-        Command::new(*CONTAINER_TOOL)
-            .arg("run")
-            .arg("--rm")
-            .arg("--privileged")
-            .arg("tonistiigi/binfmt")
-            .arg("--install")
-            .arg("all")
-            .invoke(ErrorKind::Docker)
-            .await?;
-
         let mut archive = DirectoryContents::<TmpSource<PackSource>>::new();
 
         let manifest_raw = reader.manifest().await?;
@@ -62,6 +52,18 @@ impl S9pk<TmpSource<PackSource>> {
                 }
             })
             .collect();
+
+        if !images.is_empty() {
+            Command::new(*CONTAINER_TOOL)
+                .arg("run")
+                .arg("--rm")
+                .arg("--privileged")
+                .arg("tonistiigi/binfmt")
+                .arg("--install")
+                .arg("all")
+                .invoke(ErrorKind::Docker)
+                .await?;
+        }
 
         let license: Arc<[u8]> = reader.license().await?.to_vec().await?.into();
         archive.insert_path(
@@ -316,6 +318,9 @@ impl TryFrom<ManifestV1> for Manifest {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 #[cfg(test)]
 mod test {
