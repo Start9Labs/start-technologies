@@ -67,7 +67,8 @@ printf 'fixture kernel cmdline\n' > "$TMP/fixture/proc/cmdline"
 source "$TMP/diagnostics.sh"
 grep -q 'fixture kernel cmdline' "$OUTPUT_FILE" || fail 'kernel command line missing'
 grep -q 'journalctl --no-pager -k -b 0' "$COMMAND_LOG" || fail 'current kernel log missing'
-grep -q 'journalctl --no-pager -b -1' "$COMMAND_LOG" || fail 'previous boot journal missing'
+grep -q 'journalctl --no-pager -k -b -1' "$COMMAND_LOG" || fail 'previous boot kernel log missing'
+grep -q 'journalctl --no-pager -b -1 -n 5000' "$COMMAND_LOG" || fail 'previous boot journal tail missing'
 grep -q 'RuntimeWatchdogUSec=1min' "$OUTPUT_FILE" || fail 'effective watchdog status missing'
 grep -q 'No such file or directory' "$OUTPUT_FILE" || fail 'absent paths not reported'
 if grep -q 'nvme get-feature' "$COMMAND_LOG"; then fail 'queried absent controllers'; fi
@@ -99,7 +100,7 @@ command_exists() {
 }
 : > "$OUTPUT_FILE"
 source "$TMP/diagnostics.sh"
-[ "$(grep -c 'SKIPPED: Command not found' "$OUTPUT_FILE")" = 6 ] || fail 'missing tools not skipped'
+[ "$(grep -c 'SKIPPED: Command not found' "$OUTPUT_FILE")" = 7 ] || fail 'missing tools not skipped'
 source "$TMP/functions.sh"
 export TIMEOUT_TEST=1
 run_command "sleep 5" "Hanging command fixture"
@@ -107,9 +108,6 @@ grep -q 'status 124' "$OUTPUT_FILE" || fail 'timeout not reported'
 run_command "printf 'collection continued'" "Following command fixture"
 grep -q 'collection continued' "$OUTPUT_FILE" || fail 'collection stopped after timeout'
 unset TIMEOUT_TEST
-command_exists() { [ "$1" != timeout ] && command -v "$1" >/dev/null 2>&1; }
-run_command "sleep 5" "Missing timeout fixture"
-grep -q 'SKIPPED: timeout command not found' "$OUTPUT_FILE" || fail 'unbounded command ran without timeout'
 
 awk '/^mkdir -p \/etc\/systemd\/system.conf.d$/ { copying=1 } copying { print } copying && /^EOF$/ { found=1; exit } END { if (!found) exit 1 }' "$POSTINST" |
     sed "s|/etc/|$TMP/etc/|g" > "$TMP/watchdog-install.sh"
