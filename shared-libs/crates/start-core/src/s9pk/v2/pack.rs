@@ -30,8 +30,9 @@ use crate::s9pk::merkle_archive::source::{
 };
 use crate::s9pk::merkle_archive::{Entry, MerkleArchive};
 use crate::s9pk::v2::SIG_CONTEXT;
-use crate::util::io::{TmpDir, create_file, open_file};
+use crate::util::io::{TmpDir, canonicalize, create_file, open_file};
 use crate::util::serde::IoFormat;
+use crate::util::squashfs::{NodeContents, Squashfs};
 use crate::util::{DataUrl, Invoke, PathOrUrl, VersionString, new_guid};
 use crate::{ImageId, PackageId};
 
@@ -62,45 +63,81 @@ pub static CONTAINER_DATADIR: LazyLock<&'static str> = LazyLock::new(|| {
 });
 
 pub struct SqfsDir {
-    path: PathBuf,
+    filesystem: Squashfs<DynFileSource>,
     tmpdir: Arc<TmpDir>,
     sqfs: OnceCell<MultiCursorFile>,
 }
 impl SqfsDir {
-    pub fn new(path: PathBuf, tmpdir: Arc<TmpDir>) -> Self {
+    pub fn new<S: FileSource>(filesystem: Squashfs<S>, tmpdir: Arc<TmpDir>) -> Self {
         Self {
-            path,
+            filesystem: filesystem.into_dyn(),
             tmpdir,
             sqfs: OnceCell::new(),
         }
     }
+
+    pub async fn from_path(path: &Path, tmpdir: Arc<TmpDir>) -> Result<Self, Error> {
+        if path.extension().and_then(|s| s.to_str()) == Some("tar") {
+            Ok(Self::new(
+                Squashfs::from_tar(open_file(path).await?).await?,
+                tmpdir,
+            ))
+        } else {
+            Ok(Self::new(Squashfs::from_directory(path).await?, tmpdir))
+        }
+    }
+
     async fn file(&self) -> Result<&MultiCursorFile, Error> {
         self.sqfs
-            .get_or_try_init(|| async move {
-                let guid = Guid::new();
-                let path = self.tmpdir.join(guid.as_ref()).with_extension("squashfs");
-                if self.path.extension().and_then(|s| s.to_str()) == Some("tar") {
-                    tar2sqfs(&self.path)?
-                        .input(Some(&mut open_file(&self.path).await?))
-                        .invoke(ErrorKind::Filesystem)
-                        .await?;
-                } else {
-                    Command::new("mksquashfs")
-                        .arg(&self.path)
-                        .arg(&path)
-                        .arg("-quiet")
-                        .invoke(ErrorKind::Filesystem)
-                        .await?;
-                }
-
-                Ok(MultiCursorFile::from(
-                    open_file(&path)
-                        .await
-                        .with_ctx(|_| (ErrorKind::Filesystem, path.display()))?,
-                ))
+            .get_or_try_init(|| async {
+                let path = self
+                    .tmpdir
+                    .join(Guid::new().as_ref())
+                    .with_extension("squashfs");
+                self.filesystem
+                    .serialize(&mut create_file(&path).await?)
+                    .await?;
+                Ok(MultiCursorFile::from(open_file(&path).await?))
             })
             .await
     }
+}
+
+async fn javascript_manifest(path: &Path) -> Result<Vec<u8>, Error> {
+    Command::new("node")
+        .arg("-e")
+        .arg("console.log(JSON.stringify(require(process.argv[1]).manifest))")
+        .arg(canonicalize(path, false).await?)
+        .invoke(ErrorKind::ServiceRuntime)
+        .await
+}
+
+fn javascript_mode(mode: u16, directory: bool) -> u16 {
+    mode | if directory { 0o555 } else { 0o444 }
+}
+
+pub(crate) async fn javascript_squashfs(path: &Path) -> Result<Squashfs<PathBuf>, Error> {
+    fn expose_directory<S>(contents: &mut crate::util::squashfs::DirectoryContents<S>) {
+        for (_, entry) in contents.iter_mut() {
+            if let Some(node) = entry.as_node_mut() {
+                match &mut node.contents {
+                    NodeContents::File(_) => {
+                        node.metadata.mode = javascript_mode(node.metadata.mode, false)
+                    }
+                    NodeContents::Directory(children) => {
+                        node.metadata.mode = javascript_mode(node.metadata.mode, true);
+                        expose_directory(children);
+                    }
+                    _ => (),
+                }
+            }
+        }
+    }
+    let mut filesystem = Squashfs::from_directory(path).await?;
+    let root = filesystem.root_metadata_mut();
+    root.mode = javascript_mode(root.mode, true);
+    expose_directory(filesystem.contents_mut());
+    Ok(filesystem)
 }
 
 #[derive(Clone)]
@@ -119,13 +156,7 @@ impl FileSource for PackSource {
                 .await
                 .with_ctx(|_| (ErrorKind::Filesystem, f.display()))?
                 .len()),
-            Self::Squashfs(dir) => dir
-                .file()
-                .await
-                .with_ctx(|_| (ErrorKind::Filesystem, dir.path.display()))?
-                .size()
-                .await
-                .or_not_found("file metadata"),
+            Self::Squashfs(dir) => dir.file().await?.size().await.or_not_found("file metadata"),
         }
     }
     async fn reader(&self) -> Result<Self::Reader, Error> {
@@ -279,10 +310,6 @@ impl PackParams {
             }
         }
     }
-    /// Unlike `instructions`, a README is optional: it is a repository document, and an
-    /// existing package that lacks one must keep building. When present it is packed so an
-    /// agent administering the service can read it from the installed s9pk — version-matched,
-    /// and without reaching the network.
     async fn readme(&self) -> Result<Option<PathBuf>, Error> {
         let candidate = self.path().join("README.md");
         Ok(tokio::fs::metadata(&candidate)
@@ -469,7 +496,6 @@ pub enum ImageSource {
         build_args: Option<BTreeMap<String, BuildArg>>,
     },
     DockerTag(String),
-    // Recipe(DirRecipe),
 }
 impl Default for ImageSource {
     fn default() -> Self {
@@ -535,7 +561,6 @@ impl ImageSource {
                     } else {
                         format!("--platform=linux/{arch}")
                     };
-                    // docker buildx build ${path} -o type=image,name=start9/${id}
                     let tag = format!("start9/{id}/{image_id}:{}", new_guid());
                     let mut command = Command::new(*CONTAINER_TOOL);
                     if *CONTAINER_TOOL == "docker" {
@@ -552,17 +577,14 @@ impl ImageSource {
                         .arg("--build-arg")
                         .arg(format!("ARCH={}", arch));
 
-                    // add build arguments
                     if let Some(build_args) = build_args {
                         for (key, value) in build_args {
                             let build_arg_value = match value {
                                 BuildArg::String(val) => val.to_string(),
-                                BuildArg::EnvVar { env } => {
-                                    match std::env::var(&env) {
-                                        Ok(val) => val,
-                                        Err(_) => continue, // skip if env var not set or invalid
-                                    }
-                                }
+                                BuildArg::EnvVar { env } => match std::env::var(&env) {
+                                    Ok(val) => val,
+                                    Err(_) => continue,
+                                },
                             };
 
                             command
@@ -673,13 +695,11 @@ impl ImageSource {
                             .join(Guid::new().as_ref())
                             .with_extension("squashfs");
 
-                        Command::new(*CONTAINER_TOOL)
-                            .arg("export")
-                            .arg(container)
-                            .pipe(&mut tar2sqfs(&dest)?)
-                            .capture(false)
-                            .invoke(ErrorKind::Docker)
-                            .await?;
+                        export_squashfs(
+                            Command::new(*CONTAINER_TOOL).arg("export").arg(container),
+                            &dest,
+                        )
+                        .await?;
                         into.insert_path(
                             base_path.with_extension("squashfs"),
                             Entry::file(
@@ -704,36 +724,18 @@ impl ImageSource {
     }
 }
 
-fn tar2sqfs(dest: impl AsRef<Path>) -> Result<Command, Error> {
-    let dest = dest.as_ref();
-
-    Ok({
-        #[cfg(target_os = "linux")]
-        {
-            let mut command = Command::new("tar2sqfs");
-            command.arg("-q").arg(&dest);
-            command
-        }
-        #[cfg(target_os = "macos")]
-        {
-            let directory = dest
-                .parent()
-                .unwrap_or_else(|| Path::new("/"))
-                .to_path_buf();
-            let mut command = Command::new(*CONTAINER_TOOL);
-            command
-                .arg("run")
-                .arg("-i")
-                .arg("--rm")
-                .arg("--mount")
-                .arg(format!("type=bind,src={},dst=/data", directory.display()))
-                .arg("ghcr.io/start9labs/sdk/utils:latest")
-                .arg("tar2sqfs")
-                .arg("-q")
-                .arg(Path::new("/data").join(&dest.file_name().unwrap_or_default()));
-            command
-        }
-    })
+async fn export_squashfs(command: &mut Command, dest: &Path) -> Result<(), Error> {
+    let (mut output, input) = tokio::io::duplex(crate::CAP_1_MiB);
+    let producer = async {
+        let result = command
+            .output_to(&mut output)
+            .invoke(ErrorKind::Docker)
+            .await;
+        drop(output);
+        result
+    };
+    let (_, filesystem) = tokio::try_join!(producer, Squashfs::from_tar(input))?;
+    filesystem.serialize(&mut create_file(dest).await?).await
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
@@ -752,15 +754,7 @@ pub async fn pack(ctx: CliContext, params: PackParams) -> Result<(), Error> {
     let tmp_dir = Arc::new(TmpDir::new().await?);
     let mut files = DirectoryContents::<TmpSource<PackSource>>::new();
     let js_dir = params.javascript();
-    let manifest: Arc<[u8]> = Command::new("node")
-        .arg("-e")
-        .arg(format!(
-            "console.log(JSON.stringify(require('{}/index.js').manifest))",
-            js_dir.display()
-        ))
-        .invoke(ErrorKind::ServiceRuntime)
-        .await?
-        .into();
+    let manifest: Arc<[u8]> = javascript_manifest(&js_dir.join("index.js")).await?.into();
     files.insert(
         "manifest.json".into(),
         Entry::file(TmpSource::new(
@@ -801,7 +795,10 @@ pub async fn pack(ctx: CliContext, params: PackParams) -> Result<(), Error> {
         "javascript.squashfs".into(),
         Entry::file(TmpSource::new(
             tmp_dir.clone(),
-            PackSource::Squashfs(Arc::new(SqfsDir::new(js_dir, tmp_dir.clone()))),
+            PackSource::Squashfs(Arc::new(SqfsDir::new(
+                javascript_squashfs(&js_dir).await?,
+                tmp_dir.clone(),
+            ))),
         )),
     );
 
@@ -813,8 +810,6 @@ pub async fn pack(ctx: CliContext, params: PackParams) -> Result<(), Error> {
 
     let manifest = s9pk.as_manifest_mut();
     manifest.metadata.git_hash = GitHash::from_path(params.path()).await?;
-    // Surface the omission so a genuinely broken/misconfigured git isn't silent; for a
-    // fresh scaffold this doubles as a nudge to make the first commit.
     if manifest.metadata.git_hash.is_none() {
         eprintln!(
             "{}",
@@ -898,7 +893,9 @@ pub async fn pack(ctx: CliContext, params: PackParams) -> Result<(), Error> {
             "assets.squashfs",
             Entry::file(TmpSource::new(
                 tmp_dir.clone(),
-                PackSource::Squashfs(Arc::new(SqfsDir::new(assets_dir, tmp_dir.clone()))),
+                PackSource::Squashfs(Arc::new(
+                    SqfsDir::from_path(&assets_dir, tmp_dir.clone()).await?,
+                )),
             )),
         )?;
     }
@@ -1005,17 +1002,8 @@ pub async fn pack(ctx: CliContext, params: PackParams) -> Result<(), Error> {
 pub async fn list_ingredients(_: CliContext, params: PackParams) -> Result<Vec<PathBuf>, Error> {
     let js_path = params.javascript().join("index.js");
     let manifest: Manifest = match async {
-        serde_json::from_slice(
-            &Command::new("node")
-                .arg("-e")
-                .arg(format!(
-                    "console.log(JSON.stringify(require('{}').manifest))",
-                    js_path.display()
-                ))
-                .invoke(ErrorKind::ServiceRuntime)
-                .await?,
-        )
-        .with_kind(ErrorKind::Deserialization)
+        serde_json::from_slice(&javascript_manifest(&js_path).await?)
+            .with_kind(ErrorKind::Deserialization)
     }
     .await
     {
@@ -1068,6 +1056,10 @@ pub async fn list_ingredients(_: CliContext, params: PackParams) -> Result<Vec<P
 
     Ok(ingredients)
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "pack/tests.rs"]
+mod packaging_tests;
 
 #[cfg(test)]
 mod test {

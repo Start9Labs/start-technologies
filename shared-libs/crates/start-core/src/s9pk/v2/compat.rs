@@ -16,10 +16,13 @@ use crate::s9pk::merkle_archive::source::TmpSource;
 use crate::s9pk::merkle_archive::{Entry, MerkleArchive};
 use crate::s9pk::v1::manifest::{Manifest as ManifestV1, PackageProcedure};
 use crate::s9pk::v1::reader::S9pkReader;
-use crate::s9pk::v2::pack::{CONTAINER_TOOL, ImageSource, PackSource};
+use crate::s9pk::v2::pack::{
+    CONTAINER_TOOL, ImageSource, PackSource, SqfsDir, javascript_squashfs,
+};
 use crate::s9pk::v2::{S9pk, SIG_CONTEXT};
 use crate::util::Invoke;
 use crate::util::io::{TmpDir, create_file};
+use crate::util::squashfs::Squashfs;
 use crate::{ImageId, PackageId, VolumeId};
 
 pub const MAGIC_AND_VERSION: &[u8] = &[0x3b, 0x3b, 0x01];
@@ -45,7 +48,6 @@ impl S9pk<TmpSource<PackSource>> {
 
         let mut archive = DirectoryContents::<TmpSource<PackSource>>::new();
 
-        // manifest.json
         let manifest_raw = reader.manifest().await?;
         let manifest = from_value::<ManifestV1>(manifest_raw.clone())?;
         let mut new_manifest = Manifest::try_from(manifest.clone())?;
@@ -61,7 +63,6 @@ impl S9pk<TmpSource<PackSource>> {
             })
             .collect();
 
-        // LICENSE.md
         let license: Arc<[u8]> = reader.license().await?.to_vec().await?.into();
         archive.insert_path(
             "LICENSE.md",
@@ -71,8 +72,6 @@ impl S9pk<TmpSource<PackSource>> {
             )),
         )?;
 
-        // instructions.md — v1 packages may lack instructions; stub a placeholder so a
-        // missing file never breaks migration.
         let instructions = match reader.instructions().await {
             Ok(handle) => handle.to_vec().await.unwrap_or_default(),
             Err(e) => {
@@ -93,7 +92,6 @@ impl S9pk<TmpSource<PackSource>> {
             )),
         )?;
 
-        // icon.*
         let icon: Arc<[u8]> = reader.icon().await?.to_vec().await?.into();
         archive.insert_path(
             format!("icon.{}", manifest.assets.icon_type()),
@@ -103,7 +101,6 @@ impl S9pk<TmpSource<PackSource>> {
             )),
         )?;
 
-        // images
         for arch in reader.docker_arches().await? {
             Command::new(*CONTAINER_TOOL)
                 .arg("load")
@@ -138,29 +135,18 @@ impl S9pk<TmpSource<PackSource>> {
             }
         }
 
-        // assets
-        let asset_dir = tmp_dir.join("assets");
-        tokio::fs::create_dir_all(&asset_dir).await?;
-        // preserve file modes — the default drops them, stripping +x off executable assets
-        tokio_tar::ArchiveBuilder::new(reader.assets().await?)
-            .set_preserve_permissions(true)
-            .build()
-            .unpack(&asset_dir)
-            .await?;
-        let sqfs_path = asset_dir.with_extension("squashfs");
-        Command::new("mksquashfs")
-            .arg(&asset_dir)
-            .arg(&sqfs_path)
-            .invoke(ErrorKind::Filesystem)
-            .await?;
         archive.insert_path(
             "assets.squashfs",
-            Entry::file(TmpSource::new(tmp_dir.clone(), PackSource::File(sqfs_path))),
+            Entry::file(TmpSource::new(
+                tmp_dir.clone(),
+                PackSource::Squashfs(Arc::new(SqfsDir::new(
+                    Squashfs::from_tar(reader.assets().await?).await?,
+                    tmp_dir.clone(),
+                ))),
+            )),
         )?;
 
-        // javascript
         let js_dir = tmp_dir.join("javascript");
-        let sqfs_path = js_dir.with_extension("squashfs");
         tokio::fs::create_dir_all(&js_dir).await?;
         if let Some(mut scripts) = reader.scripts().await? {
             let mut js_file = create_file(js_dir.join("embassy.js")).await?;
@@ -174,14 +160,15 @@ impl S9pk<TmpSource<PackSource>> {
                 .await?;
             js_file.sync_all().await?;
         }
-        Command::new("mksquashfs")
-            .arg(&js_dir)
-            .arg(&sqfs_path)
-            .invoke(ErrorKind::Filesystem)
-            .await?;
         archive.insert_path(
             Path::new("javascript.squashfs"),
-            Entry::file(TmpSource::new(tmp_dir.clone(), PackSource::File(sqfs_path))),
+            Entry::file(TmpSource::new(
+                tmp_dir.clone(),
+                PackSource::Squashfs(Arc::new(SqfsDir::new(
+                    javascript_squashfs(&js_dir).await?,
+                    tmp_dir.clone(),
+                ))),
+            )),
         )?;
 
         archive.insert_path(
