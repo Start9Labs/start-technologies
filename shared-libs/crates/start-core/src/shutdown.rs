@@ -378,6 +378,13 @@ mod test {
         let forced: ShutdownParams = serde_json::from_str(r#"{"force":true}"#).unwrap();
         assert!(forced.force);
         assert!(!forced.wait);
+        let omitted: ShutdownParams = imbl_value::from_value(json!({})).unwrap();
+        assert!(!omitted.force);
+        assert!(!omitted.wait);
+        for force in [false, true] {
+            let params: ShutdownParams = imbl_value::from_value(json!({ "force": force })).unwrap();
+            assert_eq!(params.force, force);
+        }
     }
 
     #[test]
@@ -408,6 +415,10 @@ mod test {
                 )
                 .unwrap();
                 assert_eq!((params.force, params.wait), (force, wait));
+                let serialized = imbl_value::to_value(&params).unwrap();
+                assert_eq!(serialized, json!({ "wait": wait, "force": force }));
+                let rpc: ShutdownParams = imbl_value::from_value(serialized).unwrap();
+                assert_eq!((rpc.force, rpc.wait), (force, wait));
             }
             assert!(ShutdownParams::try_parse_from([action, "--after-backup"]).is_err());
         }
@@ -445,6 +456,33 @@ mod test {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn systemd_teardown_forces_both_power_actions() {
+        for (unit, action) in [
+            (
+                include_str!("../../../../projects/start-os/startos-restart.service"),
+                "restart",
+            ),
+            (
+                include_str!("../../../../projects/start-os/startos-shutdown.service"),
+                "shutdown",
+            ),
+        ] {
+            let command = unit
+                .lines()
+                .find_map(|line| line.strip_prefix("ExecStop="))
+                .unwrap();
+            let args: Vec<_> = command.split_whitespace().collect();
+            assert_eq!(&args[..3], &["/usr/bin/start-cli", "server", action]);
+            let params = ShutdownParams::try_parse_from(
+                std::iter::once("power").chain(args[3..].iter().copied()),
+            )
+            .unwrap();
+            assert!(params.wait);
+            assert!(params.force);
         }
     }
 
