@@ -18,7 +18,7 @@ use crate::progress::{FullProgressTracker, ProgressUnits};
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfo;
 use crate::registry::package::index::{PackageIndex, PackageVersionInfo};
-use crate::s9pk::manifest::LocaleString;
+use crate::s9pk::manifest::{HardwareRequirements, LocaleString};
 use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::v2::SIG_CONTEXT;
 use crate::util::VersionString;
@@ -213,19 +213,42 @@ fn get_matching_models(
     .collect()
 }
 
+fn covers(newer: &HardwareRequirements, older: &HardwareRequirements) -> bool {
+    newer.arch.as_ref().map_or(true, |n| {
+        older.arch.as_ref().is_some_and(|o| o.is_subset(n))
+    }) && newer
+        .ram
+        .map_or(true, |n| older.ram.is_some_and(|o| n <= o))
+        && newer.device.iter().all(|d| older.device.contains(d))
+}
+
 fn hide_superseded_revisions(
     best: Option<&BTreeMap<VersionString, Model<PackageVersionInfo>>>,
     other: &mut BTreeMap<VersionString, Model<PackageVersionInfo>>,
-) {
+) -> Result<(), Error> {
     let group = |v: &VersionString| (v.flavor().map(str::to_owned), v.upstream().clone());
-    let mut seen: BTreeSet<_> = best.into_iter().flat_map(|b| b.keys()).map(group).collect();
-    let newest: BTreeSet<VersionString> = other
-        .keys()
-        .rev()
-        .filter(|v| seen.insert(group(v)))
-        .cloned()
-        .collect();
-    other.retain(|v, _| newest.contains(v));
+    let hardware = |info: &Model<PackageVersionInfo>| {
+        from_value::<Vec<(HardwareRequirements, Value)>>(info.as_s9pks().clone().into())
+            .map(|s9pks| s9pks.into_iter().map(|(hw, _)| hw).collect_vec())
+    };
+    let mut newer: BTreeMap<_, Vec<Vec<HardwareRequirements>>> = BTreeMap::new();
+    for (v, info) in best.into_iter().flatten() {
+        newer.entry(group(v)).or_default().push(hardware(info)?);
+    }
+    let mut hidden = BTreeSet::new();
+    for (v, info) in other.iter().rev() {
+        let hw = hardware(info)?;
+        let seen = newer.entry(group(v)).or_default();
+        if seen
+            .iter()
+            .any(|n| hw.iter().all(|o| n.iter().any(|req| covers(req, o))))
+        {
+            hidden.insert(v.clone());
+        }
+        seen.push(hw);
+    }
+    other.retain(|v, _| !hidden.contains(v));
+    Ok(())
 }
 
 pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Result<Value, Error> {
@@ -255,7 +278,7 @@ pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Resu
     }
     if !params.all_revisions {
         for (id, package_other) in &mut other {
-            hide_superseded_revisions(best.get(id), package_other);
+            hide_superseded_revisions(best.get(id), package_other)?;
         }
     }
     if let Some(id) = &params.id {
@@ -636,10 +659,85 @@ mod tests {
     use super::*;
 
     fn versions(entries: &[&str]) -> BTreeMap<VersionString, Model<PackageVersionInfo>> {
-        entries
-            .iter()
-            .map(|v| (v.parse().unwrap(), json!({ "releaseNotes": v }).into()))
+        entries.iter().map(|v| version(v, Vec::new())).collect()
+    }
+
+    fn version(v: &str, s9pks: Vec<Value>) -> (VersionString, Model<PackageVersionInfo>) {
+        let s9pks: Vec<_> = s9pks.into_iter().map(|hw| json!([hw, null])).collect();
+        (
+            v.parse().unwrap(),
+            json!({ "releaseNotes": v, "s9pks": s9pks }).into(),
+        )
+    }
+
+    fn hidden(best: Vec<(&str, Vec<Value>)>, other: Vec<(&str, Vec<Value>)>) -> BTreeSet<String> {
+        let best: BTreeMap<_, _> = best.into_iter().map(|(v, hw)| version(v, hw)).collect();
+        let mut other: BTreeMap<_, _> = other.into_iter().map(|(v, hw)| version(v, hw)).collect();
+        let all: BTreeSet<_> = other.keys().map(|v| v.to_string()).collect();
+        hide_superseded_revisions(Some(&best), &mut other).unwrap();
+        all.into_iter()
+            .filter(|v| !other.keys().any(|k| k.to_string() == *v))
             .collect()
+    }
+
+    #[test]
+    fn hide_superseded_revisions_keeps_revision_followed_by_narrower_hardware() {
+        let both = json!({ "arch": ["x86_64", "aarch64"] });
+        let x86 = json!({ "arch": ["x86_64"] });
+        let other = vec![
+            ("1.0.0:0", vec![both.clone()]),
+            ("1.0.0:1", vec![x86.clone()]),
+        ];
+        assert!(hidden(vec![], other).is_empty());
+        let other = vec![("1.0.0:0", vec![both])];
+        assert!(hidden(vec![("1.0.0:1", vec![x86])], other).is_empty());
+    }
+
+    #[test]
+    fn hide_superseded_revisions_hides_once_hardware_is_restored() {
+        let both = json!({ "arch": ["x86_64", "aarch64"] });
+        let x86 = json!({ "arch": ["x86_64"] });
+        let other = vec![
+            ("1.0.0:0", vec![both.clone()]),
+            ("1.0.0:1", vec![x86]),
+            ("1.0.0:2", vec![both]),
+        ];
+        assert_eq!(
+            hidden(vec![], other),
+            BTreeSet::from(["1.0.0:0".to_owned(), "1.0.0:1".to_owned()]),
+        );
+    }
+
+    #[test]
+    fn hide_superseded_revisions_compares_each_hardware_field() {
+        let any = json!({});
+        let gpu = json!({ "device": [{ "description": "GPU", "class": "display" }] });
+        for (older, newer, hides) in [
+            (json!({ "ram": 4 }), json!({ "ram": 8 }), false),
+            (json!({ "ram": 8 }), json!({ "ram": 4 }), true),
+            (any.clone(), json!({ "arch": ["x86_64"] }), false),
+            (json!({ "arch": ["x86_64"] }), any.clone(), true),
+            (any.clone(), gpu.clone(), false),
+            (gpu, any, true),
+        ] {
+            let other = vec![
+                ("1.0.0:0", vec![older.clone()]),
+                ("1.0.0:1", vec![newer.clone()]),
+            ];
+            assert_eq!(
+                !hidden(vec![], other).is_empty(),
+                hides,
+                "{older} then {newer}"
+            );
+        }
+    }
+
+    #[test]
+    fn hide_superseded_revisions_needs_every_older_s9pk_covered() {
+        let x86 = json!({ "arch": ["x86_64"] });
+        let arm = json!({ "arch": ["aarch64"] });
+        let other = vec![("1.0.0:0", vec![x86.clone(), arm]), ("1.0.0:1", vec![x86])];
+        assert!(hidden(vec![], other).is_empty());
     }
 
     fn assert_versions(
@@ -659,7 +757,7 @@ mod tests {
     fn hide_superseded_revisions_orders_revisions_numerically() {
         let mut other = versions(&["1.0.0:2", "1.0.0:10"]);
 
-        hide_superseded_revisions(None, &mut other);
+        hide_superseded_revisions(None, &mut other).unwrap();
 
         assert_versions(other, &["1.0.0:10"]);
     }
@@ -678,7 +776,7 @@ mod tests {
             "#alpha:1.0.0-rc.1:2",
         ]);
 
-        hide_superseded_revisions(None, &mut other);
+        hide_superseded_revisions(None, &mut other).unwrap();
 
         assert_versions(
             other,
@@ -703,7 +801,7 @@ mod tests {
             "#beta:1.0.0:2",
         ]);
 
-        hide_superseded_revisions(Some(&best), &mut other);
+        hide_superseded_revisions(Some(&best), &mut other).unwrap();
 
         assert_versions(other, &["1.0.0:10", "#beta:1.0.0:2"]);
         assert_versions(best, &["2.0.0:10", "#alpha:1.0.0:10"]);
@@ -714,11 +812,11 @@ mod tests {
         let best = BTreeMap::new();
         let mut other = BTreeMap::new();
 
-        hide_superseded_revisions(None, &mut other);
+        hide_superseded_revisions(None, &mut other).unwrap();
         assert!(other.is_empty());
-        hide_superseded_revisions(Some(&best), &mut other);
+        hide_superseded_revisions(Some(&best), &mut other).unwrap();
         assert!(other.is_empty());
-        hide_superseded_revisions(Some(&versions(&["1.0.0:10"])), &mut other);
+        hide_superseded_revisions(Some(&versions(&["1.0.0:10"])), &mut other).unwrap();
         assert!(other.is_empty());
     }
 
