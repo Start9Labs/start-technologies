@@ -3,9 +3,8 @@ edition = "2024"
 license = "MIT"
 name = "start-os"
 repository = "https://github.com/Start9Labs/start-technologies"
-# Label only: SemVer has no 4th segment, so the OS version 0.4.0.2 is spelled 0.4.0-rev.2
-# here. Root package.json is the source of truth — see build/env/version.sh.
-version = "0.4.0-rev.2" # VERSION_BUMP
+# Root package.json owns the four-segment OS version.
+version = "0.4.0-rev.3" # VERSION_BUMP
 
 [[bin]]
 name = "startbox"

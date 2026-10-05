@@ -242,6 +242,12 @@ cat > /etc/systemd/oomd.conf.d/10-startos.conf << 'EOF'
 DefaultMemoryPressureDurationSec=20s
 EOF
 
+mkdir -p /etc/systemd/system.conf.d
+cat > /etc/systemd/system.conf.d/10-startos-watchdog.conf << 'EOF'
+[Manager]
+RuntimeWatchdogSec=60s
+EOF
+
 mkdir -p /etc/nginx/ssl
 
 rm -rf /var/lib/tor/*
