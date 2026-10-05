@@ -404,7 +404,7 @@ export class MockApiService extends ApiService {
   async restartServer(params: Partial<T.ShutdownParams>): Promise<null> {
     await pauseFor(2000)
 
-    if (params.afterBackup && this.backingUp) {
+    if (!params.force && this.backingUp) {
       return this.deferPower('restart')
     }
     this.deferPower(null)
@@ -435,7 +435,7 @@ export class MockApiService extends ApiService {
   async shutdownServer(params: Partial<T.ShutdownParams>): Promise<null> {
     await pauseFor(2000)
 
-    if (params.afterBackup && this.backingUp) {
+    if (!params.force && this.backingUp) {
       return this.deferPower('shutdown')
     }
     this.deferPower(null)

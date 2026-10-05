@@ -22,7 +22,7 @@ ExecStart=/bin/true
 # start-cli waits for graceful teardown by default; authenticates locally via
 # /run/startos/rpc.authcookie. startd's Shutdown::execute detects that systemd is
 # already stopping and leaves the final poweroff to systemd (see shutdown.rs).
-ExecStop=/usr/bin/start-cli server shutdown
+ExecStop=/usr/bin/start-cli server shutdown --force
 TimeoutStopSec=120
 
 [Install]

@@ -20,7 +20,7 @@ Conflicts=reboot.target kexec.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/bin/true
-ExecStop=/usr/bin/start-cli server restart
+ExecStop=/usr/bin/start-cli server restart --force
 TimeoutStopSec=120
 
 [Install]

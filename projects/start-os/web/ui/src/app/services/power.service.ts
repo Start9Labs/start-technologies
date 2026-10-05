@@ -17,15 +17,12 @@ export class PowerService {
   })
 
   /**
-   * Every in-app route to a restart or shutdown goes through here, so that none
-   * of them can interrupt a backup: during one the user is offered the choice
-   * of waiting for it, and the server keeps whichever choice is made. Emits
-   * once the server has been asked, `true` if the user chose to wait — not what
-   * the server then did, which the caller cannot see. A dismissed prompt asks
-   * for nothing and so emits nothing.
+   * Offers to wait for an observed backup or explicitly interrupt it. Emits
+   * once the server has been asked: `true` if the user chose to wait, `false`
+   * otherwise. A dismissed prompt asks for nothing and emits nothing.
    */
   power(action: T.PowerAction): Observable<boolean> {
-    if (!this.backingUp()) return this.run(action, false)
+    if (!this.backingUp()) return this.run(action, false).pipe(map(() => false))
 
     return this.dialog
       .openComponent<boolean>(POWER, {
@@ -33,28 +30,27 @@ export class PowerService {
         size: 's',
         data: action,
       })
-      .pipe(switchMap(now => this.run(action, !now)))
+      .pipe(switchMap(now => this.run(action, now)))
   }
 
   cancel() {
     this.tasks.run(async () => await this.api.cancelDeferredPower({}))
   }
 
-  private run(
-    action: T.PowerAction,
-    afterBackup: boolean,
-  ): Observable<boolean> {
+  private run(action: T.PowerAction, force: boolean): Observable<boolean> {
     return defer(() =>
       this.tasks.run(
         async () =>
           action === 'restart'
-            ? await this.api.restartServer({ afterBackup })
-            : await this.api.shutdownServer({ afterBackup }),
-        afterBackup ? 'Wait for backup to complete' : `Beginning ${action}`,
+            ? await this.api.restartServer({ force })
+            : await this.api.shutdownServer({ force }),
+        !force && this.backingUp()
+          ? 'Wait for backup to complete'
+          : `Beginning ${action}`,
       ),
     ).pipe(
       filter(Boolean),
-      map(() => afterBackup),
+      map(() => !force),
     )
   }
 }

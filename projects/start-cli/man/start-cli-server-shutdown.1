@@ -4,7 +4,7 @@
 .SH NAME
 start\-cli\-server\-shutdown \- Shutdown the server
 .SH SYNOPSIS
-\fBstart\-cli server shutdown\fR [\fB\-\-nowait\fR] [\fB\-\-after\-backup\fR] [\fB\-h\fR|\fB\-\-help\fR]
+\fBstart\-cli server shutdown\fR [\fB\-\-nowait\fR] [\fB\-\-force\fR] [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
 Shutdown the server
 .SH OPTIONS
@@ -12,8 +12,8 @@ Shutdown the server
 \fB\-\-nowait\fR
 Return immediately instead of waiting for graceful shutdown to complete
 .TP
-\fB\-\-after\-backup\fR
-Wait for a running backup to finish first
+\fB\-\-force\fR
+Interrupt a running backup instead of waiting for it to finish
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

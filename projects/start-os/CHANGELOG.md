@@ -16,7 +16,7 @@ for the detail behind its highlights.
   finish.** The prompt defaults to waiting after a countdown. A bar shows the
   pending action and lets you cancel it. Pressing the physical power button
   during a backup also waits. Over the CLI, `start-cli server restart` and
-  `server shutdown` take `--after-backup`, and
+  `server shutdown` wait by default; `--force` interrupts the backup, and
   `start-cli server cancel-deferred-power` cancels the pending action. StartOS
   refuses new backups once a restart or shutdown is committed. See
   [Creating Backups](https://docs.start9.com/start-os/backup-create.html).

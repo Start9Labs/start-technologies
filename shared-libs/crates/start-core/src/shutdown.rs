@@ -134,17 +134,14 @@ pub struct ShutdownParams {
     /// frontend omits this and gets an immediate reply). Cleared with
     /// `--nowait`. The wait can't outlive the webserver teardown that follows
     /// container shutdown, so the connection drops once services are stopped.
-    /// Nothing is waited for when `--after-backup` defers the action, since
-    /// there is no teardown yet to wait on.
+    /// A deferred action replies immediately without waiting for teardown.
     #[arg(long = "nowait", action = clap::ArgAction::SetFalse, help = "help.arg.nowait")]
     #[serde(default)]
     wait: bool,
-    /// Let a running backup finish first, rather than interrupting it. Off by
-    /// default, so the systemd units that drive a real power-off — which cannot
-    /// wait — keep their existing behavior.
-    #[arg(long = "after-backup", help = "help.arg.after-backup")]
+    /// Interrupt a running backup instead of waiting for it to finish.
+    #[arg(long, help = "help.arg.force-power")]
     #[serde(default)]
-    after_backup: bool,
+    force: bool,
 }
 
 pub(crate) const STATUS_INFO_PTR: &str = "/public/serverInfo/statusInfo";
@@ -191,13 +188,9 @@ fn defer_if_backing_up(db: &mut DatabaseModel, action: PowerAction) -> Result<bo
 /// Either records `action` for after the backup, or commits to performing it
 /// now — in one mutation, so a backup cannot start in the window between
 /// deciding and acting. Returns whether it was deferred.
-async fn defer_or_begin(
-    ctx: &RpcContext,
-    action: PowerAction,
-    after_backup: bool,
-) -> Result<bool, Error> {
+async fn defer_or_begin(ctx: &RpcContext, action: PowerAction, force: bool) -> Result<bool, Error> {
     ctx.db
-        .mutate(|db| defer_or_begin_in(db, action, after_backup))
+        .mutate(|db| defer_or_begin_in(db, action, force))
         .await
         .result
 }
@@ -205,10 +198,10 @@ async fn defer_or_begin(
 fn defer_or_begin_in(
     db: &mut DatabaseModel,
     action: PowerAction,
-    after_backup: bool,
+    force: bool,
 ) -> Result<bool, Error> {
     let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
-    if after_backup && status.as_backup_progress().transpose_ref().is_some() {
+    if !force && status.as_backup_progress().transpose_ref().is_some() {
         status.as_deferred_power_action_mut().ser(&Some(action))?;
         return Ok(true);
     }
@@ -263,12 +256,7 @@ pub async fn run_deferred_power_actions(ctx: RpcContext) {
                 continue;
             }
         };
-        // Still `after_backup`, so a backup that started since the take is
-        // waited for in turn rather than interrupted.
-        let params = ShutdownParams {
-            wait: false,
-            after_backup: true,
-        };
+        let params = ShutdownParams::default();
         let performed = match action {
             Some(PowerAction::Restart) => {
                 tracing::info!("backup finished; carrying out the deferred restart");
@@ -307,9 +295,9 @@ pub async fn run_deferred_power_actions(ctx: RpcContext) {
 
 pub async fn shutdown(
     ctx: RpcContext,
-    ShutdownParams { wait, after_backup }: ShutdownParams,
+    ShutdownParams { wait, force }: ShutdownParams,
 ) -> Result<(), Error> {
-    if defer_or_begin(&ctx, PowerAction::Shutdown, after_backup).await? {
+    if defer_or_begin(&ctx, PowerAction::Shutdown, force).await? {
         return Ok(());
     }
     begin_shutdown(&ctx, false, wait).await;
@@ -318,9 +306,9 @@ pub async fn shutdown(
 
 pub async fn restart(
     ctx: RpcContext,
-    ShutdownParams { wait, after_backup }: ShutdownParams,
+    ShutdownParams { wait, force }: ShutdownParams,
 ) -> Result<(), Error> {
-    if defer_or_begin(&ctx, PowerAction::Restart, after_backup).await? {
+    if defer_or_begin(&ctx, PowerAction::Restart, force).await? {
         return Ok(());
     }
     begin_shutdown(&ctx, true, wait).await;
@@ -380,30 +368,83 @@ mod test {
     }
 
     #[test]
-    fn records_the_action_instead_of_beginning_it_during_a_backup() {
-        let mut db = db_with(backing_up(), json!(null));
-        assert!(defer_or_begin_in(&mut db, PowerAction::Shutdown, true).unwrap());
-        assert_eq!(
-            status(&db),
-            (Some(PowerAction::Shutdown), false, false),
-            "recorded, and nothing has begun"
-        );
+    fn power_params_default_to_protecting_backups() {
+        assert!(!ShutdownParams::default().force);
+        let omitted: ShutdownParams = imbl_value::from_value(json!({})).unwrap();
+        assert!(!omitted.force);
+        assert!(!omitted.wait);
+        for force in [false, true] {
+            let params: ShutdownParams = imbl_value::from_value(json!({ "force": force })).unwrap();
+            assert_eq!(params.force, force);
+        }
+        for (args, wait, force) in [
+            (vec!["power"], true, false),
+            (vec!["power", "--nowait"], false, false),
+            (vec!["power", "--force"], true, true),
+            (vec!["power", "--force", "--nowait"], false, true),
+        ] {
+            let cli = ShutdownParams::try_parse_from(args).unwrap();
+            let params = imbl_value::to_value(&cli).unwrap();
+            assert_eq!(params, json!({ "wait": wait, "force": force }));
+            let rpc: ShutdownParams = imbl_value::from_value(params).unwrap();
+            assert_eq!(rpc.wait, wait);
+            assert_eq!(rpc.force, force);
+        }
     }
 
     #[test]
-    fn begins_the_action_when_no_backup_is_running() {
-        let mut db = db_with(json!(null), json!(null));
-        assert!(!defer_or_begin_in(&mut db, PowerAction::Restart, true).unwrap());
-        assert_eq!(status(&db), (None, false, true));
+    fn safe_and_forced_power_actions_admit_backups_atomically() {
+        for action in [PowerAction::Restart, PowerAction::Shutdown] {
+            for backup in [false, true] {
+                for force in [false, true] {
+                    let mut db = db_with(
+                        if backup { backing_up() } else { json!(null) },
+                        json!("restart"),
+                    );
+                    let deferred = defer_or_begin_in(&mut db, action, force).unwrap();
+                    assert_eq!(deferred, backup && !force);
+                    assert_eq!(
+                        status(&db),
+                        if deferred {
+                            (Some(action), false, false)
+                        } else {
+                            (
+                                None,
+                                action == PowerAction::Shutdown,
+                                action == PowerAction::Restart,
+                            )
+                        },
+                    );
+                }
+            }
+        }
     }
 
-    /// The systemd units drive a power-off that cannot wait, so they pass
-    /// `after_backup: false` and must interrupt the backup.
     #[test]
-    fn begins_the_action_without_after_backup_even_during_a_backup() {
-        let mut db = db_with(backing_up(), json!(null));
-        assert!(!defer_or_begin_in(&mut db, PowerAction::Shutdown, false).unwrap());
-        assert_eq!(status(&db), (None, true, false));
+    fn systemd_teardown_forces_both_power_actions() {
+        for (unit, action) in [
+            (
+                include_str!("../../../../projects/start-os/startos-restart.service"),
+                "restart",
+            ),
+            (
+                include_str!("../../../../projects/start-os/startos-shutdown.service"),
+                "shutdown",
+            ),
+        ] {
+            let command = unit
+                .lines()
+                .find_map(|line| line.strip_prefix("ExecStop="))
+                .unwrap();
+            let args: Vec<_> = command.split_whitespace().collect();
+            assert_eq!(&args[..3], &["/usr/bin/start-cli", "server", action]);
+            let params = ShutdownParams::try_parse_from(
+                std::iter::once("power").chain(args[3..].iter().copied()),
+            )
+            .unwrap();
+            assert!(params.wait);
+            assert!(params.force);
+        }
     }
 
     /// Why [`run_deferred_power_actions`] cannot re-arm through this function:
