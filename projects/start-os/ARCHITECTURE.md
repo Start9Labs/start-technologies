@@ -41,7 +41,7 @@ this product's contribution.
 
 ## Web
 
-Two Angular 22 apps live under `web/`:
+Two Angular apps live under `web/`:
 
 - `ui/` — the admin dashboard (Angular project `ui`).
 - `setup-wizard/` — the first-boot setup flow (project `setup-wizard`).
@@ -49,8 +49,7 @@ Two Angular 22 apps live under `web/`:
 They are part of the single Angular workspace rooted at `../../` (the repository root)
 (the root `angular.json` points each project's `root` at `projects/start-os/web/...`).
 They consume the shared `@start9labs/shared` and `@start9labs/marketplace` libs
-from the shared TypeScript modules at `../../shared-libs/ts-modules` and the SDK
-base from `../start-sdk`. The frontend talks to
+from the shared TypeScript modules at `../../shared-libs/ts-modules`. The frontend talks to
 the backend exclusively over JSON-RPC, with reactive state via Patch-DB.
 
 `web/patchdb-ui-seed.json` / `patchdb-ui-seed.beta.json` seed initial UI state
@@ -61,7 +60,7 @@ and are embedded into `startbox`.
 `container-runtime/` is a Node.js program that runs inside every service LXC. It
 loads the service's JavaScript from its `.s9pk`, manages subcontainers, and
 talks to the host daemon over a Unix-socket JSON-RPC channel. It depends on the
-**built** SDK at `../start-sdk/dist`. It has its own
+**built** SDK at `../../start-sdk/dist` (relative to `container-runtime/`). It has its own
 [README](container-runtime/README.md), [ARCHITECTURE](container-runtime/ARCHITECTURE.md),
 and [AGENTS](container-runtime/AGENTS.md) — read those before editing it.
 
@@ -70,17 +69,16 @@ and [AGENTS](container-runtime/AGENTS.md) — read those before editing it.
 `backup-fs/` is the `startos-backup-fs` crate (a workspace member): an encrypted,
 erasure-coded FUSE filesystem used for StartOS backups. It builds to the
 `startos-backup-fs` binary (installed as `/usr/bin/startos-backup-fs` and
-`mount.backup-fs`). It was migrated into the monorepo from the former
-`Start9Labs/start-fs` repo and is no longer an external git dependency.
+`mount.backup-fs`).
 
 ## Systemd units and cgroups
 
 - `startd.service` — the main daemon (`Restart=always`, OOM-protected with
   `ManagedOOMPreference=avoid`).
 - `services.slice` — the cgroup slice every service container lives under;
-  `Delegate=yes` hands the subtree to LXC, and systemd-oomd kills the heaviest
-  container under memory pressure rather than wedging the host. `startd` applies
-  a RAM-dependent `MemoryMax`/`MemoryHigh` to this slice at boot.
+  systemd-oomd kills the heaviest container under memory pressure rather than
+  wedging the host. `startd` applies a RAM-dependent `MemoryMax`/`MemoryHigh` to
+  this slice at boot.
 - `startos-shutdown.service` — graceful teardown on power-off only (ties to
   `poweroff.target`/`halt.target`, not reboot); its `ExecStop` calls
   `start-cli server shutdown`.
@@ -120,7 +118,7 @@ start-core (Rust)
 
 | Step | Command (from repo root)                                  | What it does                                                                |
 | ---- | --------------------------------------------------------- | --------------------------------------------------------------------------- |
-| 1    | `cargo check -p start-os`                                 | Verify the OS bins compile                                                  |
+| 1    | `cargo check -p start-core`                               | Verify the shared backend compiles                                          |
 | 2    | `make start-core-ts-bindings`                             | Export ts-rs types from `start-core`                                        |
 | 3    | `cd projects/start-sdk && make bundle`                    | Build the SDK `dist` (builds `@start9labs/start-core` first and bundles it) |
 | 4    | `npm run check:ui && npm run check:setup`                 | Type-check the apps                                                         |
@@ -145,5 +143,5 @@ resolving, so the UI is always eventually consistent with the backend.
 ## Further reading
 
 - [../../shared-libs/crates/start-core](../../shared-libs/crates/start-core) — Rust backend
-- [../../shared-libs/ts-modules](../../shared-libs/ts-modules) — shared TypeScript modules + workspace (currently the Angular libs `shared` and `marketplace`)
+- [../../shared-libs/ts-modules](../../shared-libs/ts-modules) — shared TypeScript modules + workspace
 - [container-runtime/ARCHITECTURE.md](container-runtime/ARCHITECTURE.md) — runtime

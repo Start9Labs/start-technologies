@@ -42,7 +42,6 @@ Optional features:
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how it works (representations, Display-based hashing, the
   global table, and the lock-reentrancy discipline).
-- [CONTRIBUTING.md](CONTRIBUTING.md) — building, testing, formatting, and PR conventions.
-- [AGENTS.md](AGENTS.md) — agent operating rules (`CLAUDE.md` is a one-line `@AGENTS.md` import).
+- [AGENTS.md](AGENTS.md) — building, testing, formatting, and PR conventions.
 
 Licensed under MIT.

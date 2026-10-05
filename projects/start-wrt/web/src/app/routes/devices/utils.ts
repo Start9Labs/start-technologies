@@ -23,6 +23,10 @@ export interface DeviceTableItem {
 // Full device data for detail view
 export interface Device extends DeviceTableItem {
   ipv4Static: boolean
+  /** The name assigned in the router; `name` is resolved from elsewhere when unset. */
+  customName?: string
+  /** May auto-create port forwards via PCP/UPnP (default off). */
+  allowAutoPortForward: boolean
 }
 
 // Form for editing a device. IPv6 has no controls: the device chooses its own
@@ -30,6 +34,7 @@ export interface Device extends DeviceTableItem {
 export function getDeviceForm(builder: NonNullableFormBuilder) {
   return builder.group({
     name: builder.control('', [CustomValidators.hostname()]),
+    allowAutoPortForward: builder.control(false),
     ip: builder.group({
       ipv4Static: builder.control(false),
       ipv4: builder.control('', [CustomValidators.ipv4()]),
@@ -41,7 +46,8 @@ export type DeviceForm = FormRawValue<ReturnType<typeof getDeviceForm>>
 
 // Flat data structure for service update
 export interface DeviceUpdateData {
-  name: string
+  /** Omitted leaves the assigned name untouched; empty clears it. */
+  name?: string
   ipv4Static: boolean
   ipv4: string
 }

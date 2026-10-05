@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io::ErrorKind as IoErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 
@@ -117,7 +118,14 @@ async fn unmount_slot(
     unmount(mountpoint, lazy).await?;
     if delete_mountpoint {
         match tokio::fs::remove_dir(mountpoint).await {
-            Err(e) if e.raw_os_error() == Some(39) => Ok(()), // directory not empty
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    IoErrorKind::NotFound | IoErrorKind::DirectoryNotEmpty
+                ) =>
+            {
+                Ok(())
+            }
             a => a,
         }
         .with_ctx(|_| {
@@ -245,5 +253,18 @@ impl<G: GenericMountGuard> GenericMountGuard for SubPath<G> {
     }
     async fn unmount(self) -> Result<(), Error> {
         self.guard.unmount().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn unmount_slot_succeeds_when_mountpoint_is_missing() {
+        let directory = tempfile::tempdir().unwrap();
+        let mountpoint = directory.path().join("missing");
+
+        unmount_slot(&None, &mountpoint, true, true).await.unwrap();
     }
 }

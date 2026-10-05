@@ -1,6 +1,6 @@
 # SSH
 
-Like other Linux distributions, StartOS allows you to go "under-the-hood" via Secure Shell Protocol (SSH).
+SSH opens a command-line session on your StartOS server from a terminal on your computer. Once connected, commands entered in that terminal run on the server.
 
 > [!WARNING]
 > Accessing your server via SSH is considered advanced. Please use caution, you can cause permanent damage to your server, potentially resulting in loss of data.
@@ -13,53 +13,67 @@ Like other Linux distributions, StartOS allows you to go "under-the-hood" via Se
 
 The SSH user is `start9`, not `root`. Root login is disabled. The `start9` user has `sudo` privileges, so commands requiring root should use `sudo`. There is no need to run `sudo -i` or `sudo su`.
 
-## Using your StartOS Master Password
+## Connect with your StartOS master password
 
-1.  Open a terminal on your client device and enter:
+Open Terminal on Mac or Linux, or PowerShell on Windows. Run:
 
-        ssh start9@SERVER-HOSTNAME
+```sh
+ssh start9@SERVER-HOSTNAME
+```
 
-    Replace `SERVER-HOSTNAME` with your server's `your-server-name.local` address.
+Replace `SERVER-HOSTNAME` with your server's `your-server-name.local` address.
 
-1.  The first time you connect, you will see something like this:
+The first time you connect, SSH displays a message like this:
 
-    ```
-    The authenticity of host 'your-server-name.local (192.168.1.175)' can't be established.
-    ED25519 key fingerprint is SHA256:BgYhzyIDbshm3annI1cfySd8C4/lh6Gfk2Oi3FdIVAa.
-    This key is not known by any other names.
-    Are you sure you want to continue connecting (yes/no/[fingerprint])?
-    ```
+```
+The authenticity of host 'your-server-name.local (192.168.1.175)' can't be established.
+ED25519 key fingerprint is SHA256:BgYhzyIDbshm3annI1cfySd8C4/lh6Gfk2Oi3FdIVAa.
+This key is not known by any other names.
+Are you sure you want to continue connecting (yes/no/[fingerprint])?
+```
 
-    Type `yes` and hit Enter to start trusting the server's SSH public key.
+Confirm that the message names your server, then type `yes` and press Enter.
 
-1.  Enter your StartOS master password.
+At the password prompt, enter the StartOS master password you use to sign in to the StartOS web interface, not your computer's login password. The terminal displays nothing while you type the password. Press Enter when finished.
 
-## Using SSH Keys
+Once connected, the command prompt typically begins with `start9@` followed by your server's hostname.
+
+If `Connection closed` appears before this prompt, you are not connected. Check the server hostname, confirm that its StartOS web interface is reachable from the same computer, and try again. If it continues, copy the complete command and output and [contact Start9 support](https://start9.com/contact).
+
+## Connect with an SSH key
 
 ### Create an SSH key
 
-If you don't already have an SSH key pair on your laptop or desktop, open a terminal and run:
+If you do not already have an SSH key pair, open a terminal and run:
 
-```bash
+```sh
 ssh-keygen -t ed25519
 ```
 
-Press Enter to accept the default file location, and optionally set a passphrase. Your public key will be at `~/.ssh/id_ed25519.pub`.
+Press Enter to accept the default file location. You can optionally create a passphrase to protect the SSH key on your computer. This key passphrase is different from your StartOS master password.
 
 ### Add your key to StartOS
 
-1.  Copy your public key to clipboard:
+Display your public key:
 
-        cat ~/.ssh/id_ed25519.pub
+Mac or Linux:
 
-1.  In the StartOS UI, go to `System > SSH`
+```sh
+cat ~/.ssh/id_ed25519.pub
+```
 
-1.  Click `Add Key`, paste in your key and click `Save`
+Windows PowerShell:
 
-1.  Open a terminal on your client device and enter:
+```powershell
+Get-Content $HOME\.ssh\id_ed25519.pub
+```
 
-        ssh start9@SERVER-HOSTNAME
+Copy the complete key. In the StartOS web interface, go to `System > SSH`, select **Add Key**, paste the key, and select **Save**.
 
-    Replace `SERVER-HOSTNAME` with your server's `your-server-name.local` address.
+Open a terminal and connect:
 
-1.  Enter your key's passphrase (if any)
+```sh
+ssh start9@SERVER-HOSTNAME
+```
+
+If prompted for `Enter passphrase for key`, enter the SSH key passphrase, not your StartOS master password.

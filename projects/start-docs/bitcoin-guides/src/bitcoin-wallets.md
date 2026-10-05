@@ -162,7 +162,7 @@ A multisig- and inheritance-focused wallet on every major platform, and one of t
 **To connect:** open **Network Settings** — under your profile on mobile, and on desktop under **Settings → Network settings**, reached from your profile picture — then put your address in **Mainnet server**, keeping the `ssl://` prefix:
 
 ```
-ssl://adjective-noun.local:50002
+ssl://server-name.local:50002
 ```
 
 For a `.onion` address, also turn on **Enable TOR proxy** on the same screen, and make sure Tor is running on the device. Save and restart Nunchuk.
@@ -206,7 +206,7 @@ The companion software for Trezor hardware wallets. A custom Electrum backend re
 **To connect:** go to **Settings → Networks**, click the sliders icon next to Bitcoin, and enter your server in `host:port:protocol` form with `s` for SSL:
 
 ```
-adjective-noun.local:50002:s
+server-name.local:50002:s
 ```
 
 For a `.onion` address, turn on Tor in Trezor Suite first — it will prompt you if you have not.

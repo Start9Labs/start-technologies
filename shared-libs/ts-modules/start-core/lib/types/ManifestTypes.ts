@@ -37,6 +37,13 @@ export type SDKManifest = {
    * @example `https://nextcloud.com/contribute/`
    */
   readonly donationUrl: string | null
+  /** Localized Markdown shown before downloading an update from a matching installed version. */
+  readonly preDownloadAlert?: {
+    readonly message: T.LocaleString
+    readonly when: {
+      readonly sourceVersion: string
+    }
+  }
   readonly description: {
     /**
      * Short description, shown on the marketplace list page. The tile clamps it
@@ -92,23 +99,6 @@ export type SDKManifest = {
   readonly volumes: string[]
 
   /**
-   * @description A mapping of service dependencies to be displayed to users when viewing the Marketplace
-   * @property {string} description - An explanation of why this service is a dependency.
-   * @property {boolean} optional - Whether or not this dependency is required or contingent on user configuration.
-   * @property {string} s9pk - A path or url to an s9pk of the dependency to extract metadata at build time
-   * @example
-   * ```
-    dependencies: {
-      'hello-world': {
-        description: 'A moon needs a world',
-        optional: false,
-        s9pk: '',
-      },
-    },
-   * ```
-   */
-  readonly dependencies: Record<string, ManifestDependency>
-  /**
    * @description (optional) A set of hardware requirements for this service. A machine that does
    *   not meet them is not offered this service at all — so tightening a requirement on an
    *   already-published package cuts hosts below it off from further updates.
@@ -152,12 +142,16 @@ export type SDKManifest = {
   readonly virtualNetworking?: boolean
 
   /**
+   * @description Grants /dev/kvm when present. The opening process must run as container root.
+   */
+  readonly hardwareVirtualization?: boolean
+
+  /**
    * @description Enable OS plugins
    */
   readonly plugins?: T.PluginId[]
 }
 
-// this is hacky but idk a more elegant way
 type ArchOptions = {
   0: ['x86_64', 'aarch64', 'riscv64']
   1: ['aarch64', 'x86_64', 'riscv64']
@@ -179,9 +173,8 @@ export type SDKImageInputSpec = {
   [A in keyof ArchOptions]: {
     source: Exclude<ImageSource, 'packed'>
     arch?: ArchOptions[A]
-    emulateMissingAs?: ArchOptions[A][number] | null
+    /** Run an available image under CPU emulation on other architectures. Defaults to true. */
+    emulateMissing?: boolean
     nvidiaContainer?: boolean
   }
 }[keyof ArchOptions]
-
-export type ManifestDependency = T.Manifest['dependencies'][string]

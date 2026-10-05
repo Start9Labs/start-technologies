@@ -14,7 +14,12 @@ import { CheckIconComponent } from 'src/app/routes/portal/components/check-icon.
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { formatPortRange } from 'src/app/utils/format-port-range'
-import { dnsAllPass, getGua, portAllPass } from 'src/app/utils/gua'
+import {
+  dnsAllPass,
+  externalAllPass,
+  getGua,
+  portAllPass,
+} from 'src/app/utils/gua'
 import { parse } from 'tldts'
 import {
   PortCheckField,
@@ -28,6 +33,9 @@ export type DnsGateway = T.NetworkInterfaceInfo & {
   ipInfo: T.IpInfo
 }
 
+// Mirrors `ACME_CHALLENGE_PORT` in the backend.
+export const CHALLENGE_PORT = 443
+
 export type DomainValidationData = {
   fqdn: string
   gateway: DnsGateway
@@ -35,6 +43,10 @@ export type DomainValidationData = {
   count: number
   packageId: string
   addSsl: boolean
+  // The domain's ACME authority. Such a domain also needs 443 reachable.
+  acme: T.AcmeProvider | null
+  // Probe results for 443. Null where the domain does not need it.
+  challenge: T.CheckChallengeRes | null
   initialResults?: {
     dns: T.QueryDnsRes | null
     portResult: T.CheckPortRes | null
@@ -145,6 +157,51 @@ export type DomainValidationData = {
         [disabled]="testDisabled()"
         (test)="testPortV6()"
       />
+    }
+
+    @if (showChallenge) {
+      <h3 tuiHeader="h6">{{ 'Certificate Authority' | i18n }}</h3>
+      <p>
+        {{
+          'Your certificate authority proves you control this domain by connecting to it on port 443, regardless of which port the address itself uses.'
+            | i18n
+        }}
+      </p>
+      <p>
+        {{ 'In your gateway' | i18n }} "{{ gatewayName }}",
+        {{ 'create this port forwarding rule' | i18n }}
+      </p>
+      <p>
+        {{
+          'Or enable automatic port forwarding (UPnP / NAT-PMP / PCP) on the gateway.'
+            | i18n
+        }}
+      </p>
+
+      <port-check-test
+        [fields]="challengeFields"
+        [result]="challengeResult()"
+        [loading]="challengeLoading()"
+        [local]="false"
+        (test)="testChallenge()"
+      />
+
+      @if (gua) {
+        <p>
+          {{
+            'Over IPv6 there is nothing to forward — your gateway firewall must allow inbound connections to this port instead.'
+              | i18n
+          }}
+        </p>
+
+        <port-check-test
+          [fields]="challengeV6Fields"
+          [result]="challengeV6Result()"
+          [loading]="challengeV6Loading()"
+          [local]="false"
+          (test)="testChallengeV6()"
+        />
+      }
     }
 
     @if (!isRange && testDisabled()) {
@@ -282,12 +339,39 @@ export class DomainValidationComponent {
     { label: 'Address', value: this.ipv6Addr },
   ]
 
+  readonly isManualMode = !this.context.data.initialResults
+
+  private readonly challengeApplies =
+    !this.isRange &&
+    !!this.context.data.acme &&
+    this.context.data.port !== CHALLENGE_PORT
+  // Only the backend can say; the certificate store never reaches the browser.
+  private readonly challengeOutstanding = !!this.context.data.challenge
+  // A view that reaches a verdict shows only what is outstanding.
+  readonly showChallenge = this.isManualMode
+    ? this.challengeApplies
+    : this.challengeOutstanding
+  readonly challengeFields: readonly PortCheckField[] = [
+    { label: 'External Port', value: `${CHALLENGE_PORT}` },
+    { label: 'Internal Port', value: `${CHALLENGE_PORT}` },
+  ]
+  readonly challengeV6Fields: readonly PortCheckField[] = [
+    {
+      label: 'Address',
+      value: this.gua ? `[${this.gua}]:${CHALLENGE_PORT}` : '',
+    },
+  ]
+
   readonly dnsLoading = signal(false)
   readonly portLoading = signal(false)
   readonly portV6Loading = signal(false)
+  readonly challengeLoading = signal(false)
+  readonly challengeV6Loading = signal(false)
   readonly dnsResult = signal<T.QueryDnsRes | undefined>(undefined)
   readonly portResult = signal<T.CheckPortRes | undefined>(undefined)
   readonly portV6Result = signal<T.CheckPortV6Res | undefined>(undefined)
+  readonly challengeResult = signal<T.CheckPortRes | undefined>(undefined)
+  readonly challengeV6Result = signal<T.CheckPortV6Res | undefined>(undefined)
 
   readonly dnsV4Pass = computed(() => {
     const dns = this.dnsResult()
@@ -302,12 +386,22 @@ export class DomainValidationComponent {
     () =>
       dnsAllPass(this.dnsResult(), this.wanIp, this.gua) &&
       (this.isRange ||
-        portAllPass(this.portResult(), this.portV6Result(), this.gua)),
+        portAllPass(this.portResult(), this.portV6Result(), this.gua)) &&
+      (!this.challengeOutstanding ||
+        externalAllPass(
+          this.challengeResult(),
+          this.challengeV6Result(),
+          this.gua,
+        )),
   )
 
-  readonly isManualMode = !this.context.data.initialResults
-
   constructor() {
+    const challenge = this.context.data.challenge
+    if (challenge) {
+      this.challengeResult.set(challenge.port ?? undefined)
+      this.challengeV6Result.set(challenge.portV6 ?? undefined)
+    }
+
     const initial = this.context.data.initialResults
     if (initial) {
       if (initial.dns) this.dnsResult.set(initial.dns)
@@ -363,6 +457,40 @@ export class DomainValidationComponent {
       this.errorService.handleError(e)
     } finally {
       this.portV6Loading.set(false)
+    }
+  }
+
+  async testChallenge() {
+    this.challengeLoading.set(true)
+
+    try {
+      this.challengeResult.set(
+        await this.api.checkPort({
+          gateway: this.context.data.gateway.id,
+          port: CHALLENGE_PORT,
+        }),
+      )
+    } catch (e: any) {
+      this.errorService.handleError(e)
+    } finally {
+      this.challengeLoading.set(false)
+    }
+  }
+
+  async testChallengeV6() {
+    this.challengeV6Loading.set(true)
+
+    try {
+      this.challengeV6Result.set(
+        (await this.api.checkPortV6({
+          gateway: this.context.data.gateway.id,
+          port: CHALLENGE_PORT,
+        })) ?? undefined,
+      )
+    } catch (e: any) {
+      this.errorService.handleError(e)
+    } finally {
+      this.challengeV6Loading.set(false)
     }
   }
 }

@@ -13,4 +13,8 @@ export type PortForward = {
    * existing single-port `PortForward`s.
    */
   count: number
+  /**
+   * Whether this forward receives local traffic. Used to gate hairpinning check.
+   */
+  local: boolean
 }

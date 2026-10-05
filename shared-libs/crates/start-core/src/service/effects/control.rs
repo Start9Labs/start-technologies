@@ -7,7 +7,7 @@ use crate::PackageId;
 use crate::service::RebuildParams;
 use crate::service::effects::prelude::*;
 use crate::service::rpc::CallbackId;
-use crate::status::{DesiredStatus, StatusInfo};
+use crate::status::StatusInfo;
 use crate::util::FromStrParser;
 
 pub async fn rebuild(context: EffectContext) -> Result<(), Error> {
@@ -157,12 +157,7 @@ pub async fn set_main_status(
                 SetMainStatusStatus::Stopped => None,
             })?;
             if prev.is_none() && status == SetMainStatusStatus::Running {
-                s.as_desired_mut().map_mutate(|s| {
-                    Ok(match s {
-                        DesiredStatus::Restarting { .. } => DesiredStatus::Running,
-                        x => x,
-                    })
-                })?;
+                s.as_desired_mut().map_mutate(|s| Ok(s.started()))?;
             }
 
             Ok(())

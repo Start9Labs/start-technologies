@@ -11,13 +11,16 @@ fn main() {
 
     // Prefer STARTWRT_GIT_HASH from the environment (set by build-rust.sh on
     // the host before entering the Docker container). Fall back to running git
-    // directly for local dev builds.
+    // directly for local dev builds — same format as build/env/check-git-hash.sh
+    // (full hash + "-modified" when dirty): the UI compares its baked-in
+    // config.json gitHash against this value to detect a stale cached bundle,
+    // so every stamp must produce the identical string.
     let hash = std::env::var("STARTWRT_GIT_HASH")
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| {
-            let short = Command::new("git")
-                .args(["rev-parse", "--short", "HEAD"])
+            let full = Command::new("git")
+                .args(["rev-parse", "HEAD"])
                 .output()
                 .ok()
                 .filter(|o| o.status.success())
@@ -35,9 +38,9 @@ fn main() {
                 .unwrap_or(false);
 
             if dirty {
-                format!("{short}-dirty")
+                format!("{full}-modified")
             } else {
-                short
+                full
             }
         });
 

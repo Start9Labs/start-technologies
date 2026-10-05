@@ -1,10 +1,8 @@
 # AGENTS.md — start-registry
 
-Product wrapper for the **Start Registry** server inside the `start-os` monorepo. Crate `start-registry`, multi-call binary `registrybox`. Almost all logic lives in `start-core` — this dir is just the bin entry point, the systemd unit, and docs.
+Product wrapper for the **Start Registry** server inside the `start-technologies` monorepo. Crate `start-registry`, multi-call binary `registrybox`. Almost all logic lives in `start-core` — this dir is just the bin entry point, the systemd unit, and docs.
 
-CLAUDE.md is a one-line `@AGENTS.md` import. See [ARCHITECTURE.md](./ARCHITECTURE.md) and [CONTRIBUTING.md](./CONTRIBUTING.md).
-
-**Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
+CLAUDE.md is a one-line `@AGENTS.md` import. See [ARCHITECTURE.md](./ARCHITECTURE.md) for structure.
 
 ## Layout
 
@@ -35,7 +33,7 @@ Feature flags are forwarded to `start-core`: `beta`, `console`, `dev`, `test`, `
 
 - **Don't put logic here.** New registry behavior belongs in `shared-libs/crates/start-core/src/registry/`. This crate should stay a wrapper.
 - **`registrybox` (bin) vs `start-registry`/`start-registryd` (install names).** The Cargo bin is `registrybox`; the runtime names are symlinks created at install time. The service file references `/usr/bin/start-registryd`, which only exists after `start-registry-install` symlinks it.
-- **Version:** `start-registry` is versioned **independently** in `Cargo.toml` (currently `1.0.0`), no longer tied to the StartOS release line. The `.deb` version and `basename.sh` read it straight from the manifest; bump it on its own cadence.
+- **Version:** `start-registry` is versioned **independently** in `Cargo.toml`, no longer tied to the StartOS release line. The `.deb` version and `basename.sh` read it straight from the manifest; bump it on its own cadence.
 - **`registry_api` is shared by server and CLI.** Adding a subcommand in `registry/mod.rs` with `with_call_remote::<CliContext>()` exposes it both over RPC and through the `start-registry` CLI.
 - **Auth:** the RPC route uses local + signature auth; admin-only commands (e.g. metrics) are tagged `with_metadata("admin", true)`.
 - **Cross-platform builds.** CI builds musl targets for x86_64/aarch64/riscv64; local `cargo check` is host-only, so platform-specific breaks can slip through (verify against `start-core` CI when touching deps/platform APIs).
@@ -60,6 +58,19 @@ cargo build -p start-registry --bin registrybox
 
 Defaults: listen `127.0.0.1:5959`, datadir `/var/lib/startos` (state in `<datadir>/registry.db` + a SQLite metrics DB + hosted assets). Useful flags: `-l/--listen`, `-H/--hostname`, `-p/--tor-proxy`, `-d/--datadir`, `-c/--config`.
 
-## Docs to update with changes
+## Documentation
 
-If you change a flag, the API surface, the data model, or the install/run flow, update this dir's `README.md` / `ARCHITECTURE.md`, add a `CHANGELOG.md` entry, and check the OS-level packaging docs (`projects/start-os/docs/`) plus the marketplace UI if the API contract changed.
+This dir's `README.md` / `ARCHITECTURE.md` cover registry usage and internals. OS-level packaging and registry documentation lives in `projects/start-os/docs/`. API contract changes also require checking the marketplace UI.
+
+## Container images
+
+CI builds the Debian packages and a multi-architecture container image. Fork pull requests validate the container build locally on the runner; same-repository pull requests and branch builds also publish an image to GHCR. A manual workflow dispatch can select one architecture with the **arch** input or build all three with **ALL**.
+
+Every master build is also tagged `sha-<commit>`. Pushing a `start-registry/v<version>` tag makes [`start-registry-release-image.yaml`](../../.github/workflows/start-registry-release-image.yaml) tag that commit's image `v<version>` rather than rebuild it, and it refuses to move a `v<version>` tag that already exists. A release commit with no `sha-` image is tagged by dispatching that workflow with the image's digest as **source**.
+
+## API and schema changes
+
+Add subcommands in `registry/mod.rs`; use `with_call_remote::<CliContext>()` for
+CLI exposure and `with_about(...)` for localized help. Tag admin-only commands
+with `with_metadata("admin", true)`. Changes to `RegistryDatabase` or index types
+need a migration in `shared-libs/crates/start-core/src/registry/migrations/`.

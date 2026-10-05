@@ -180,6 +180,13 @@ impl<T> SyncRwLock<T> {
     }
 }
 
+impl<T: Clone> SyncRwLock<T> {
+    #[cfg_attr(feature = "unstable", inline(never))]
+    pub fn read(&self) -> T {
+        self.peek(Clone::clone)
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct AsyncMutex<T>(tokio::sync::Mutex<T>);
 impl<T> AsyncMutex<T> {

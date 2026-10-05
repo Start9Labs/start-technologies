@@ -1,5 +1,6 @@
 import { inject, Injectable } from '@angular/core'
 import { T, utils } from '@start9labs/start-core'
+import { selectLaunchableAddress } from '@start9labs/start-core/util/selectLaunchableAddress'
 import { tuiDefaultSort } from '@taiga-ui/cdk'
 import { ConfigService } from 'src/app/services/config.service'
 import { GatewayPlus } from 'src/app/services/gateway.service'
@@ -10,10 +11,6 @@ import {
 } from 'src/app/services/pkg-status-rendering.service'
 import { toAuthorityName } from 'src/app/utils/acme'
 import { getManifest } from 'src/app/utils/get-package-data'
-
-function isPublicIp(h: T.HostnameInfo): boolean {
-  return h.public && (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6')
-}
 
 // An IPv6 global-unicast address (GUA) — not loopback / ULA (fc00::/7) /
 // link-local (fe80::/10). Mirrors the backend's `ipv6_is_local` complement, so
@@ -31,19 +28,9 @@ function isGua(h: T.HostnameInfo): boolean {
   return !isUla && !isLinkLocal
 }
 
-function isEnabled(addr: T.DerivedAddressInfo, h: T.HostnameInfo): boolean {
-  if (isPublicIp(h)) {
-    if (h.port === null) return true
-    const sa =
-      h.metadata.kind === 'ipv6'
-        ? `[${h.hostname}]:${h.port}`
-        : `${h.hostname}:${h.port}`
-    return addr.enabled.includes(sa)
-  } else {
-    return !addr.disabled.some(
-      ([hostname, port]) => hostname === h.hostname && port === (h.port ?? 0),
-    )
-  }
+// A public IPv6 row is a GUA, which the name resolves to like any LAN IP.
+function servesMdns(h: T.HostnameInfo): boolean {
+  return h.metadata.kind === 'ipv6' || (h.metadata.kind === 'ipv4' && !h.public)
 }
 
 function getGatewayIds(h: T.HostnameInfo): string[] {
@@ -68,15 +55,21 @@ function getCertificate(
 ): string {
   if (!h.ssl) return '-'
 
-  if (h.metadata.kind === 'public-domain') {
-    const config = host.publicDomains[h.hostname]
-    return config ? toAuthorityName(config.acme) : toAuthorityName(null)
-  }
+  // The service holds its own certificate on a binding StartOS does not
+  // terminate, whatever authority a domain on this host names.
+  if (!addSsl) return secure?.ssl ? 'Self signed' : '-'
 
-  if (addSsl) return toAuthorityName(null)
-  if (secure?.ssl) return 'Self signed'
+  return toAuthorityName(getAcmeProvider(h, host, addSsl))
+}
 
-  return '-'
+// Null unless StartOS terminates this address's TLS and issues its certificate.
+function getAcmeProvider(
+  h: T.HostnameInfo,
+  host: T.Host,
+  addSsl: T.AddSslOptions | null,
+): T.AcmeProvider | null {
+  if (!h.ssl || !addSsl || h.metadata.kind !== 'public-domain') return null
+  return host.publicDomains[h.hostname]?.acme ?? null
 }
 
 function sortDomainsFirst(a: GatewayAddress, b: GatewayAddress): number {
@@ -281,7 +274,8 @@ export class InterfaceService {
         const list = groupMap.get(gid)
         if (!list) continue
         list.push({
-          enabled: isEnabled(addr, h),
+          enabled: utils.isAddressEnabled(addr, h),
+          allIpsDisabled: false,
           gua: isGua(h),
           type: getAddressType(h),
           access: h.public ? 'public' : 'private',
@@ -299,6 +293,7 @@ export class InterfaceService {
             h.metadata.kind === 'private-domain' ||
             h.metadata.kind === 'public-domain',
           certificate: getCertificate(h, host, addSsl, secure),
+          acme: getAcmeProvider(h, host, addSsl),
           count,
         })
       }
@@ -309,13 +304,18 @@ export class InterfaceService {
       .map(g => {
         const addresses = groupMap.get(g.id)!.sort(sortDomainsFirst)
 
-        // mDNS resolves only via enabled LAN IPs on this gateway
-        const enabledHostnames = addresses
-          .filter(a => a.enabled)
-          .map(a => a.hostnameInfo)
-        for (const a of addresses) {
-          if (a.hostnameInfo.metadata.kind === 'mdns') {
-            a.enabled = utils.mdnsResolvable(a.hostnameInfo, enabledHostnames)
+        for (const mdns of addresses) {
+          if (
+            mdns.enabled &&
+            !mdns.hostnameInfo.ssl &&
+            mdns.hostnameInfo.metadata.kind === 'mdns'
+          ) {
+            const ips = addresses.filter(
+              a =>
+                a.hostnameInfo.port === mdns.hostnameInfo.port &&
+                servesMdns(a.hostnameInfo),
+            )
+            mdns.allIpsDisabled = !!ips.length && ips.every(a => !a.enabled)
           }
         }
 
@@ -406,82 +406,17 @@ export class InterfaceService {
   }
 
   launchableAddress(ui: T.ServiceInterface, host: T.Host): string {
-    const addresses = utils.filledAddress(host, ui.addressInfo)
-
-    if (!addresses.hostnames.length) return ''
-
-    const publicDomains = addresses.filter({
-      kind: 'domain',
-      visibility: 'public',
+    return selectLaunchableAddress(ui, host, {
+      accessType: this.config.accessType,
+      hostname: this.config.hostname,
     })
-    const wanIp = addresses.filter({ kind: 'ipv4', visibility: 'public' })
-    const bestPublic = [publicDomains, wanIp].flatMap(h =>
-      h.format('urlstring'),
-    )[0]
-    const privateDomains = addresses.filter({
-      kind: 'domain',
-      visibility: 'private',
-    })
-    const mdns = addresses.filter({ kind: 'mdns' })
-    const bestPrivate = [privateDomains, mdns].flatMap(h =>
-      h.format('urlstring'),
-    )[0]
-
-    let matching
-    let onLan = false
-    switch (this.config.accessType) {
-      case 'ipv4':
-        matching = addresses.nonLocal
-          .filter({
-            kind: 'ipv4',
-            predicate: h => h.hostname === this.config.hostname,
-          })
-          .format('urlstring')[0]
-        onLan = true
-        break
-      case 'ipv6':
-        matching = addresses.nonLocal
-          .filter({
-            kind: 'ipv6',
-            predicate: h => h.hostname === this.config.hostname,
-          })
-          .format('urlstring')[0]
-        break
-      case 'localhost':
-        matching = addresses
-          .filter({ kind: 'localhost' })
-          .format('urlstring')[0]
-        onLan = true
-        break
-      case 'mdns':
-        matching = mdns.format('urlstring')[0]
-        onLan = true
-        break
-      case 'domain':
-        matching = publicDomains.format('urlstring')[0]
-        break
-      case 'tor':
-        matching = addresses
-          .filter({
-            pluginId: 'tor',
-          })
-          .format('urlstring')[0]
-        break
-      case 'wan-ipv4':
-        matching = wanIp.format('urlstring')[0]
-        break
-    }
-
-    if (matching) return matching
-    if (onLan && bestPrivate) return bestPrivate
-    if (bestPublic) return bestPublic
-    if (bestPrivate) return bestPrivate
-    return ''
   }
 }
 
 export type GatewayAddress = {
   enabled: boolean
+  // An enabled non-SSL mDNS address whose gateway has IPs, none of them enabled.
+  allIpsDisabled: boolean
   // An IPv6 GUA gets a Local/Public dropdown in the access column (its WAN
   // opt-in, carried by `hostnameInfo.public`); other addresses are read-only.
   gua: boolean
@@ -493,6 +428,8 @@ export type GatewayAddress = {
   ui: boolean
   deletable: boolean
   certificate: string
+  // The address's ACME authority. Such an address also needs 443 reachable.
+  acme: T.AcmeProvider | null
   // Number of forwarded ports: 1 for a single-port binding, the range span for
   // a port range. Drives the port-span shown in forwarding rules.
   count: number

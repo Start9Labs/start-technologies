@@ -36,7 +36,7 @@ const NOT_AUTHORIZED: u8 = 2;
 const MALFORMED_REQUEST: u8 = 3;
 const UNSUPP_OPCODE: u8 = 4;
 const MALFORMED_OPTION: u8 = 6;
-const NO_RESOURCES: u8 = 8;
+use crate::net::port_map::pcp::RESULT_NO_RESOURCES as NO_RESOURCES;
 const CANNOT_PROVIDE_EXTERNAL: u8 = 11;
 
 /// PCP protocol field value for TCP (the only transport the SNI demux handles).
@@ -45,12 +45,28 @@ const PROTO_TCP: u8 = 6;
 /// fewer than requested; the client skips the range if it can't get them all).
 const MAX_PORT_SET: u16 = 1024;
 
+/// One mapping a gateway holds, as the UPnP IGD query actions report it.
+/// `protocol` is the IGD spelling (`TCP`/`UDP`); a forward covering both is
+/// reported once per transport, since a client asks about one at a time.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MappingEntry {
+    pub external_port: u16,
+    pub internal: SocketAddrV4,
+    pub protocol: &'static str,
+    pub description: String,
+    /// Remaining lease in seconds; `0` means "permanent" in IGD terms.
+    pub lease_seconds: u32,
+}
+
 /// Per-gateway I/O and forward backend for the shared PCP server.
 pub trait GatewayBackend: Send + Sync {
     /// Create or refresh a forward of `count` contiguous ports from `source`
     /// (the external address) to `target`, on behalf of `peer`. `lifetime` is
     /// the granted lease in seconds for a PCP mapping (renewed by the client
     /// before it lapses), or `None` for a permanent forward (manual / UPnP).
+    /// A lease-tracking backend must expire the forward on that schedule —
+    /// holding it longer means the reported lifetime was a lie and the port
+    /// stays open after the client believes it dead.
     /// `Err(code)` is the UPnP/IGD error code (e.g. 718 ConflictInMappingEntry);
     /// PCP maps any error to NO_RESOURCES.
     fn add_forward(
@@ -116,8 +132,25 @@ pub trait GatewayBackend: Send + Sync {
         async {}
     }
 
-    /// The SNI demultiplexer used for HOSTNAME-bound shared-port mappings.
-    fn sni(&self) -> &Arc<SniDemux>;
+    /// The mappings this gateway currently holds on behalf of `peer`, for the
+    /// IGD query actions. Scoped to the peer's own mappings so one device can't
+    /// enumerate another's — the same ownership rule `remove_forward_by_source`
+    /// applies. The default reports none, which answers those actions with
+    /// `NoSuchEntryInArray` rather than inventing entries; a backend that can
+    /// enumerate should override it, since clients verify a mapping by reading
+    /// it back and treat a failed read as a failed mapping.
+    fn list_forwards(&self, _peer: Ipv4Addr) -> impl Future<Output = Vec<MappingEntry>> + Send {
+        async { Vec::new() }
+    }
+
+    /// The SNI demultiplexer used for HOSTNAME-bound shared-port mappings, or
+    /// `None` on a gateway with no SNI dataplane. `None` makes the hostname
+    /// capability impossible to advertise by accident: the ANNOUNCE reply omits
+    /// the Start9 capability marker and MAP requests carrying HOSTNAME options
+    /// are refused — otherwise the default [`GatewayBackend::add_sni_forward`]
+    /// would "succeed" into a demux nothing listens on, and the client would
+    /// record a mapping that routes nothing.
+    fn sni(&self) -> Option<&Arc<SniDemux>>;
 
     /// Register SNI-demuxed hostname routes on `source` (the shared external
     /// address) to `target`, owned by `target`. `lifetime` is `None` for a
@@ -131,8 +164,11 @@ pub trait GatewayBackend: Send + Sync {
         lifetime: Option<u32>,
     ) -> impl Future<Output = Result<(), u8>> + Send {
         async move {
-            self.sni()
-                .register(*source.ip(), source.port(), hostnames, target, lifetime)
+            let Some(sni) = self.sni() else {
+                return Err(RESULT_UNSUPP_HOSTNAME);
+            };
+            sni.prepare().await?;
+            sni.register(*source.ip(), source.port(), hostnames, target, lifetime)
         }
     }
 
@@ -144,8 +180,9 @@ pub trait GatewayBackend: Send + Sync {
         hostnames: &[String],
     ) -> impl Future<Output = ()> + Send {
         async move {
-            self.sni()
-                .unregister(*source.ip(), source.port(), hostnames, target);
+            if let Some(sni) = self.sni() {
+                sni.unregister(*source.ip(), source.port(), hostnames, target);
+            }
         }
     }
 }
@@ -169,15 +206,18 @@ fn error_response(opcode: u8, result: u8, epoch: u32) -> Vec<u8> {
     r
 }
 
-/// An ANNOUNCE response carrying the Start9 capability marker, so a client can
-/// confirm this gateway speaks the HOSTNAME extension before emitting it.
-fn announce_response(epoch: u32) -> Vec<u8> {
+/// An ANNOUNCE response, carrying the Start9 capability marker only when the
+/// gateway really speaks the HOSTNAME extension — a client checks the marker
+/// before emitting the (Private-Use) option, so it must never be a lie.
+fn announce_response(epoch: u32, supports_hostname: bool) -> Vec<u8> {
     let mut r = vec![0u8; HEADER_LEN];
     r[0] = PCP_VERSION;
     r[1] = RESPONSE_BIT | OPCODE_ANNOUNCE;
     r[3] = SUCCESS;
     r[8..12].copy_from_slice(&epoch.to_be_bytes());
-    encode_start9_capability_option(&mut r);
+    if supports_hostname {
+        encode_start9_capability_option(&mut r);
+    }
     r
 }
 
@@ -309,8 +349,8 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
     // Answer ANNOUNCE for any peer (the marker only reveals "I speak HOSTNAME");
     // it must precede the MAP-only check, which would otherwise reject opcode 0.
     if opcode == OPCODE_ANNOUNCE {
-        tracing::debug!("PCP ANNOUNCE from {peer}: replying with Start9 capability marker");
-        return Some(announce_response(epoch));
+        tracing::debug!("PCP ANNOUNCE from {peer}");
+        return Some(announce_response(epoch, backend.sni().is_some()));
     }
     if opcode != OPCODE_MAP {
         return Some(error_response(opcode, UNSUPP_OPCODE, epoch));
@@ -381,6 +421,20 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
         }
     };
     if !hostnames.is_empty() {
+        // Refuse rather than register into an unwired demux; a well-behaved
+        // client never gets here (no marker was advertised), but the refusal
+        // keeps a misbehaving one from believing a dead mapping is live.
+        if backend.sni().is_none() {
+            return Some(map_response(
+                RESULT_UNSUPP_HOSTNAME,
+                req,
+                internal_port,
+                external_port,
+                external_ip,
+                0,
+                epoch,
+            ));
+        }
         if req[36] != PROTO_TCP {
             return Some(map_response(
                 RESULT_UNSUPP_HOSTNAME,
@@ -583,8 +637,8 @@ pub async fn handle6<B: GatewayBackend + ?Sized>(
         return Some(error_response(opcode, UNSUPP_VERSION, epoch));
     }
     if opcode == OPCODE_ANNOUNCE {
-        tracing::debug!("PCP ANNOUNCE from {peer}: replying with Start9 capability marker");
-        return Some(announce_response(epoch));
+        tracing::debug!("PCP ANNOUNCE from {peer}");
+        return Some(announce_response(epoch, backend.sni().is_some()));
     }
     if opcode != OPCODE_MAP {
         return Some(error_response(opcode, UNSUPP_OPCODE, epoch));
@@ -734,13 +788,23 @@ mod tests {
     #[test]
     fn announce_response_carries_marker() {
         use crate::net::port_map::pcp::capability::has_start9_capability;
-        let r = announce_response(42);
+        let r = announce_response(42, true);
         assert_eq!(r.len(), HEADER_LEN + 8);
         assert_eq!(r[0], PCP_VERSION);
         assert_eq!(r[1], RESPONSE_BIT | OPCODE_ANNOUNCE);
         assert_eq!(r[3], SUCCESS);
         assert_eq!(u32::from_be_bytes([r[8], r[9], r[10], r[11]]), 42);
         assert!(has_start9_capability(&r[HEADER_LEN..]));
+    }
+
+    #[test]
+    fn announce_response_omits_marker_without_hostname_support() {
+        use crate::net::port_map::pcp::capability::has_start9_capability;
+        let r = announce_response(42, false);
+        assert_eq!(r.len(), HEADER_LEN, "no options appended");
+        assert_eq!(r[1], RESPONSE_BIT | OPCODE_ANNOUNCE);
+        assert_eq!(r[3], SUCCESS);
+        assert!(!has_start9_capability(&r[HEADER_LEN..]));
     }
 
     struct Stub(Arc<SniDemux>);
@@ -771,8 +835,8 @@ mod tests {
         fn is_known_client(&self, _: Ipv4Addr) -> impl Future<Output = bool> + Send {
             async { false }
         }
-        fn sni(&self) -> &Arc<SniDemux> {
-            &self.0
+        fn sni(&self) -> Option<&Arc<SniDemux>> {
+            Some(&self.0)
         }
     }
 
@@ -835,8 +899,8 @@ mod tests {
         fn is_known_client(&self, _: Ipv4Addr) -> impl Future<Output = bool> + Send {
             async { true }
         }
-        fn sni(&self) -> &Arc<SniDemux> {
-            &self.sni
+        fn sni(&self) -> Option<&Arc<SniDemux>> {
+            Some(&self.sni)
         }
     }
 
@@ -949,8 +1013,8 @@ mod tests {
             self.removed.lock().unwrap().push((gua, external_port));
             async {}
         }
-        fn sni(&self) -> &Arc<SniDemux> {
-            &self.sni
+        fn sni(&self) -> Option<&Arc<SniDemux>> {
+            Some(&self.sni)
         }
     }
 
@@ -1001,5 +1065,90 @@ mod tests {
         assert_eq!(resp[3], SUCCESS);
         assert_eq!(*stub.removed.lock().unwrap(), vec![(TEST_GUA, 80)]);
         assert!(stub.pinholes.lock().unwrap().is_empty());
+    }
+
+    /// A router-style backend: authorizes the peer but has no SNI dataplane.
+    struct NoSniStub;
+    impl GatewayBackend for NoSniStub {
+        fn add_forward(
+            &self,
+            _: SocketAddrV4,
+            _: SocketAddrV4,
+            _: u16,
+            _: Ipv4Addr,
+            _: Option<u32>,
+        ) -> impl Future<Output = Result<(), u16>> + Send {
+            async { Ok(()) }
+        }
+        fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
+            async {}
+        }
+        fn remove_forward_by_source(
+            &self,
+            _: SocketAddrV4,
+            _: Ipv4Addr,
+        ) -> impl Future<Output = bool> + Send {
+            async { false }
+        }
+        fn external_ipv4(&self, _: Ipv4Addr) -> impl Future<Output = Option<Ipv4Addr>> + Send {
+            async { Some(Ipv4Addr::new(203, 0, 113, 1)) }
+        }
+        fn is_known_client(&self, _: Ipv4Addr) -> impl Future<Output = bool> + Send {
+            async { true }
+        }
+        fn sni(&self) -> Option<&Arc<SniDemux>> {
+            None
+        }
+        // The refusal must happen before any registration is attempted.
+        fn add_sni_forward(
+            &self,
+            _: SocketAddrV4,
+            _: SocketAddrV4,
+            _: &[String],
+            _: Option<u32>,
+        ) -> impl Future<Output = Result<(), u8>> + Send {
+            async { panic!("add_sni_forward reached on a backend without an SNI dataplane") }
+        }
+    }
+
+    // A backend without an SNI dataplane must not advertise the capability
+    // marker — a truthful ANNOUNCE is what keeps clients from requesting
+    // hostname mappings that would silently route nothing.
+    #[tokio::test]
+    async fn handle_announce_omits_marker_without_hostname_support() {
+        use crate::net::port_map::pcp::capability::has_start9_capability;
+        let stub = NoSniStub;
+        let mut req = vec![0u8; HEADER_LEN];
+        req[0] = PCP_VERSION;
+        req[1] = OPCODE_ANNOUNCE;
+        let resp = handle(&stub, Ipv4Addr::new(10, 59, 0, 2), &req, 7)
+            .await
+            .expect("ANNOUNCE answered");
+        assert_eq!(resp[3], SUCCESS);
+        assert!(!has_start9_capability(&resp[HEADER_LEN..]));
+    }
+
+    // ...and if a client sends HOSTNAME anyway, the map is refused (no echo, no
+    // silent stub registration) while plain MAPs still succeed.
+    #[tokio::test]
+    async fn handle_refuses_hostname_map_without_hostname_support() {
+        use crate::net::port_map::pcp::hostname::encode_hostname_option;
+        let stub = NoSniStub;
+        let peer = Ipv4Addr::new(10, 59, 0, 2);
+
+        let mut req = map_request([7u8; 12], 3600, 443, 443);
+        encode_hostname_option(&mut req, "alice.example.com");
+        let resp = handle(&stub, peer, &req, 7).await.expect("MAP answered");
+        assert_eq!(resp[3], RESULT_UNSUPP_HOSTNAME);
+        assert!(
+            parse_hostname_options(&resp[MAP_RESPONSE_LEN..])
+                .expect("well-formed response")
+                .is_empty(),
+            "refusal must not echo the HOSTNAME option"
+        );
+
+        let plain = map_request([8u8; 12], 3600, 443, 443);
+        let resp = handle(&stub, peer, &plain, 7).await.expect("MAP answered");
+        assert_eq!(resp[3], SUCCESS, "plain forwards still work");
     }
 }

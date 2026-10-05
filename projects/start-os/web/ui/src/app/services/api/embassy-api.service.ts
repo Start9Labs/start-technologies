@@ -110,10 +110,9 @@ export abstract class ApiService {
 
   abstract followServerMetrics(params: {}): Promise<T.MetricsFollowResponse>
 
-  abstract updateServer(params: {
-    registry: string
-    targetVersion: string
-  }): Promise<'updating' | 'no-updates'>
+  abstract updateServer(
+    params: T.UpdateSystemParams,
+  ): Promise<T.UpdateSystemRes>
 
   abstract restartServer(params: Partial<T.ShutdownParams>): Promise<null>
 
@@ -140,6 +139,10 @@ export abstract class ApiService {
   abstract checkPortV6(
     params: T.CheckPortParams,
   ): Promise<T.CheckPortV6Res | null>
+
+  abstract checkChallenge(
+    params: T.CheckChallengeParams,
+  ): Promise<T.CheckChallengeRes | null>
 
   abstract checkDns(params: T.CheckDnsParams): Promise<CheckDnsRes>
 

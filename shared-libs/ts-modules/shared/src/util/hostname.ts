@@ -1,31 +1,36 @@
-/**
- * TS port of the Rust `normalize()` function from core/src/hostname.rs.
- * Strips non-alphanumeric characters and produces a raw hostname string.
- */
-export function normalizeHostnameRaw(name: string): string {
-  let prevWasDash = true
-  let normalized = ''
+import { inject } from '@angular/core'
+import { AbstractControl, ValidationErrors } from '@angular/forms'
+import { i18nPipe } from '../i18n/i18n.pipe'
 
-  for (const c of name) {
-    if (/[a-zA-Z0-9]/.test(c)) {
-      prevWasDash = false
-      normalized += c.toLowerCase()
-    } else if ((c === '-' || /\s/.test(c)) && !prevWasDash) {
-      prevWasDash = true
-      normalized += '-'
-    }
+const MAX_LENGTH = 32
+const CHARACTERS = /^[a-z0-9-]+$/
+
+/** Validates after trimming; callers must submit the trimmed value. */
+export function hostnameValidator(
+  control: AbstractControl,
+): ValidationErrors | null {
+  const hostname: string = (control.value || '').trim()
+  if (!hostname) return { required: true }
+
+  if (!CHARACTERS.test(hostname)) return { hostnameCharacters: true }
+  if (hostname.length > MAX_LENGTH) return { hostnameMaxLength: true }
+  if (hostname.startsWith('-') || hostname.endsWith('-')) {
+    return { hostnameHyphenEdge: true }
   }
 
-  while (normalized.endsWith('-')) {
-    normalized = normalized.slice(0, -1)
-  }
-
-  return normalized
+  return null
 }
 
-/**
- * Converts a free-text name into a valid hostname, with 'start9' fallback.
- */
-export function normalizeHostname(name: string): string {
-  return normalizeHostnameRaw(name) || 'start9'
+/** Returns localized hostname errors. Must run within an injection context. */
+export function hostnameValidationErrors(): Record<string, string> {
+  const i18n = inject(i18nPipe)
+
+  return {
+    required: i18n.transform('Required'),
+    hostnameCharacters: i18n.transform(
+      'Lowercase letters, numbers, and hyphens only',
+    ),
+    hostnameMaxLength: i18n.transform('Must be 32 characters or less'),
+    hostnameHyphenEdge: i18n.transform('Cannot start or end with a hyphen'),
+  }
 }

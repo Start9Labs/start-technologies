@@ -8,7 +8,13 @@ import {
 } from './api/api.service'
 import { AuthService } from './auth.service'
 import { ConnectionService, isNetworkError } from './connection.service'
+import { StaleUiService } from './stale-ui.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { fill } from 'src/app/i18n/validation-errors'
+
+// sessionStorage key carrying the "Updated to vX" confirmation across the
+// post-update reload (the reload discards the JS context that owns the toast).
+const UPDATED_TO_KEY = 'startwrt.updated-to'
 
 @Injectable({
   providedIn: 'root',
@@ -18,6 +24,7 @@ export class SystemService {
   private readonly auth = inject(AuthService)
   private readonly alerts = inject(TuiNotificationService)
   private readonly connection = inject(ConnectionService)
+  private readonly staleUi = inject(StaleUiService)
   private readonly i18n = inject(i18nPipe)
   private ws: WebSocket | null = null
   private targetVersion = ''
@@ -28,14 +35,51 @@ export class SystemService {
   readonly updating = signal(false)
   readonly rebooting = signal(false)
 
+  constructor() {
+    // Detection floor for idle pages: stale-UI detection rides the
+    // x-startwrt-git-hash header on RPC responses, but non-FormService pages
+    // (e.g. Settings General) make no requests while idle, so a firmware
+    // deploy would go unnoticed until navigation. Skipped while hidden
+    // (background tabs throttle timers anyway), while the in-tab update flow
+    // owns polling (preserves its latch-then-reload-synchronously invariant,
+    // no dialog flash), and while the reconnect loop is already probing
+    // system.info every 3s.
+    setInterval(() => {
+      if (
+        document.visibilityState === 'hidden' ||
+        this.updating() ||
+        this.rebooting() ||
+        this.connection.unreachable()
+      ) {
+        return
+      }
+      // Silent: form pollers and user actions own unreachable reporting.
+      this.refresh().catch(() => {})
+    }, 30_000)
+  }
+
   async init(): Promise<void> {
+    // Confirmation deferred across the post-update reload in pollForReconnect.
+    const updatedTo = sessionStorage.getItem(UPDATED_TO_KEY)
+    if (updatedTo) {
+      sessionStorage.removeItem(UPDATED_TO_KEY)
+      this.alerts
+        .open(
+          fill(this.i18n.transform('Updated to v{version}'), {
+            version: updatedTo,
+          }),
+          { appearance: 'positive' },
+        )
+        .subscribe()
+    }
+
     try {
       const [info, newerVersions] = await Promise.all([
         this.api.systemInfo(),
         this.api.systemNewerVersions(),
       ])
 
-      this.info.set(info)
+      this.setInfo(info)
       this.newerVersions.set(newerVersions)
       this.updateAvailable.set(newerVersions.length > 0)
     } catch (e) {
@@ -44,8 +88,12 @@ export class SystemService {
   }
 
   async refresh(): Promise<void> {
-    const info = await this.api.systemInfo()
+    this.setInfo(await this.api.systemInfo())
+  }
+
+  private setInfo(info: SystemInfoRes): void {
     this.info.set(info)
+    this.staleUi.check(info)
   }
 
   async startUpdate(targetVersion: string): Promise<void> {
@@ -140,18 +188,31 @@ export class SystemService {
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(r => setTimeout(r, 5000))
       try {
-        await this.api.systemInfo()
+        const info = await this.api.systemInfo()
         // Device is reachable again.
         this.rebooting.set(false)
         this.connection.resume()
         if (wentOffline) {
-          // It really rebooted — sysupgrade wiped the session store. Confirm
-          // success, then send the user to login rather than waiting for
-          // their next action to 401.
+          // It really rebooted — sysupgrade wiped the session store, so the
+          // user is headed to login either way. If the new firmware ships a
+          // different UI bundle, reload outright to land there on the NEW
+          // bundle (index.html revalidates its ETag, so the reload is
+          // guaranteed fresh); the confirmation toast rides sessionStorage
+          // across the reload and init() shows it after login.
+          if (this.staleUi.isStale(info)) {
+            sessionStorage.setItem(UPDATED_TO_KEY, this.targetVersion)
+            window.location.reload()
+            return
+          }
+          // Same-bundle update (e.g. a re-flash): confirm success, then send
+          // the user to login rather than waiting for their next action to 401.
           this.alerts
-            .open(`Updated to v${this.targetVersion}`, {
-              appearance: 'positive',
-            })
+            .open(
+              fill(this.i18n.transform('Updated to v{version}'), {
+                version: this.targetVersion,
+              }),
+              { appearance: 'positive' },
+            )
             .subscribe()
           this.auth.setUnverified()
         } else {

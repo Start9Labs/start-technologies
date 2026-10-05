@@ -185,10 +185,7 @@ export class MarketplacePreviewComponent {
   )
 
   private satisfiesWithAliases(pkg: MarketplacePkg, range: string): boolean {
-    return (
-      this.exver.satisfies(pkg.version, range) ||
-      (pkg.satisfies || []).some(v => this.exver.satisfies(v, range))
-    )
+    return this.exver.releaseSatisfies(pkg.version, pkg.satisfies || [], range)
   }
 
   readonly flavors$ = this.flavor$.pipe(

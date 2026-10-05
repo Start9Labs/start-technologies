@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -35,6 +35,7 @@ pub enum PartitionTable {
 #[serde(rename_all = "camelCase")]
 pub struct DiskInfo {
     pub logicalname: PathBuf,
+    pub stable_path: PathBuf,
     pub partition_table: Option<PartitionTable>,
     pub vendor: Option<String>,
     pub model: Option<String>,
@@ -49,6 +50,7 @@ pub struct DiskInfo {
 #[serde(rename_all = "camelCase")]
 pub struct PartitionInfo {
     pub logicalname: PathBuf,
+    pub stable_path: PathBuf,
     pub label: Option<String>,
     #[ts(type = "number")]
     pub capacity: u64,
@@ -186,15 +188,29 @@ pub async fn get_model<P: AsRef<Path>>(path: P) -> Result<Option<String>, Error>
 
 #[instrument(skip_all)]
 pub async fn get_capacity<P: AsRef<Path>>(path: P) -> Result<u64, Error> {
-    Ok(String::from_utf8(
-        Command::new("blockdev")
-            .arg("--getsize64")
-            .arg(path.as_ref())
-            .invoke(crate::ErrorKind::BlockDevice)
-            .await?,
-    )?
-    .trim()
-    .parse::<u64>()?)
+    let path = path.as_ref();
+    let canonical = tokio::fs::canonicalize(path)
+        .await
+        .with_ctx(|_| (crate::ErrorKind::BlockDevice, path.display().to_string()))?;
+    let name = canonical.file_name().ok_or_else(|| {
+        Error::new(
+            eyre!("invalid block device path: {}", path.display()),
+            crate::ErrorKind::BlockDevice,
+        )
+    })?;
+    let size_path = Path::new("/sys/class/block").join(name).join("size");
+    // Sysfs counts 512-byte sectors whatever the device's logical block size.
+    let sectors: u64 = tokio::fs::read_to_string(&size_path)
+        .await
+        .with_ctx(|_| {
+            (
+                crate::ErrorKind::BlockDevice,
+                size_path.display().to_string(),
+            )
+        })?
+        .trim()
+        .parse()?;
+    Ok(sectors * 512)
 }
 
 #[instrument(skip_all)]
@@ -361,7 +377,8 @@ pub async fn get_mount_source(mountpoint: impl AsRef<Path>) -> Result<Option<Pat
 #[instrument(skip_all)]
 pub async fn list(os: &OsPartitionInfo, server_id: Option<&str>) -> Result<Vec<DiskInfo>, Error> {
     struct DiskIndex {
-        parts: BTreeSet<PathBuf>,
+        stable_path: PathBuf,
+        parts: BTreeMap<PathBuf, PathBuf>,
         internal: bool,
     }
     let disk_guids = pvscan().await?;
@@ -391,39 +408,48 @@ pub async fn list(os: &OsPartitionInfo, server_id: Option<&str>) -> Result<Vec<D
                 } else {
                     (disk_path, None)
                 };
-                let disk_path = Path::new(DISK_PATH).join(disk_path);
-                let disk = tokio::fs::canonicalize(&disk_path).await.with_ctx(|_| {
+                let stable_path = Path::new(DISK_PATH).join(disk_path);
+                let disk = tokio::fs::canonicalize(&stable_path).await.with_ctx(|_| {
                     (
                         crate::ErrorKind::Filesystem,
-                        disk_path.display().to_string(),
+                        stable_path.display().to_string(),
                     )
                 })?;
                 let part = if let Some(part_path) = part_path {
-                    let part_path = Path::new(DISK_PATH).join(part_path);
-                    let part = tokio::fs::canonicalize(&part_path).await.with_ctx(|_| {
-                        (
-                            crate::ErrorKind::Filesystem,
-                            part_path.display().to_string(),
-                        )
-                    })?;
-                    Some(part)
+                    let stable_part_path = Path::new(DISK_PATH).join(part_path);
+                    let part = tokio::fs::canonicalize(&stable_part_path)
+                        .await
+                        .with_ctx(|_| {
+                            (
+                                crate::ErrorKind::Filesystem,
+                                stable_part_path.display().to_string(),
+                            )
+                        })?;
+                    Some((part, stable_part_path))
                 } else {
                     None
                 };
-                if !disks.contains_key(&disk) {
-                    disks.insert(
-                        disk.clone(),
-                        DiskIndex {
-                            parts: BTreeSet::new(),
-                            internal: false,
-                        },
-                    );
+                let index = disks.entry(disk.clone()).or_insert_with(|| DiskIndex {
+                    stable_path: stable_path.clone(),
+                    parts: BTreeMap::new(),
+                    internal: false,
+                });
+                if stable_path < index.stable_path {
+                    index.stable_path = stable_path;
                 }
-                if let Some(part) = part {
+                if let Some((part, stable_part_path)) = part {
                     if os.contains(&part) {
-                        disks.get_mut(&disk).unwrap().internal = true;
+                        index.internal = true;
                     } else {
-                        disks.get_mut(&disk).unwrap().parts.insert(part);
+                        index
+                            .parts
+                            .entry(part)
+                            .and_modify(|path| {
+                                if stable_part_path < *path {
+                                    *path = stable_part_path.clone();
+                                }
+                            })
+                            .or_insert(stable_part_path);
                     }
                 }
             }
@@ -435,26 +461,28 @@ pub async fn list(os: &OsPartitionInfo, server_id: Option<&str>) -> Result<Vec<D
     let mut res = Vec::with_capacity(disks.len());
     for (disk, index) in disks {
         if index.internal {
-            for part in index.parts {
-                let mut disk_info = disk_info(disk.clone()).await;
+            for (part, stable_part_path) in index.parts {
+                let mut disk_info = disk_info(disk.clone(), index.stable_path.clone()).await;
                 if let Some(g) = disk_guids.get(&part) {
-                    let pi = lvm_pv_part_info(part, g.clone()).await;
+                    let pi = lvm_pv_part_info(part, stable_part_path, g.clone()).await;
                     disk_info.logicalname = pi.logicalname;
+                    disk_info.stable_path = pi.stable_path;
                     disk_info.capacity = pi.capacity;
                     disk_info.guid = pi.guid;
                     disk_info.filesystem = pi.filesystem;
                 } else {
-                    let Some(part_info) = part_info(part, server_id).await else {
+                    let Some(part_info) = part_info(part, stable_part_path, server_id).await else {
                         continue;
                     };
                     disk_info.logicalname = part_info.logicalname.clone();
+                    disk_info.stable_path = part_info.stable_path.clone();
                     disk_info.capacity = part_info.capacity;
                     disk_info.partitions = vec![part_info];
                 }
                 res.push(disk_info);
             }
         } else {
-            let mut disk_info = disk_info(disk).await;
+            let mut disk_info = disk_info(disk, index.stable_path).await;
             disk_info.partitions = Vec::with_capacity(index.parts.len());
             if let Some(g) = disk_guids.get(&disk_info.logicalname) {
                 disk_info.guid = g.clone();
@@ -467,11 +495,11 @@ pub async fn list(os: &OsPartitionInfo, server_id: Option<&str>) -> Result<Vec<D
                         });
                 }
             } else {
-                for part in index.parts {
+                for (part, stable_part_path) in index.parts {
                     let part_info = if let Some(g) = disk_guids.get(&part) {
-                        lvm_pv_part_info(part, g.clone()).await
+                        lvm_pv_part_info(part, stable_part_path, g.clone()).await
                     } else {
-                        let Some(pi) = part_info(part, server_id).await else {
+                        let Some(pi) = part_info(part, stable_part_path, server_id).await else {
                             continue;
                         };
                         pi
@@ -486,7 +514,7 @@ pub async fn list(os: &OsPartitionInfo, server_id: Option<&str>) -> Result<Vec<D
     Ok(res)
 }
 
-async fn disk_info(disk: PathBuf) -> DiskInfo {
+async fn disk_info(disk: PathBuf, stable_path: PathBuf) -> DiskInfo {
     let partition_table = get_partition_table(&disk)
         .await
         .map_err(|e| {
@@ -541,6 +569,7 @@ async fn disk_info(disk: PathBuf) -> DiskInfo {
         .unwrap_or_default();
     DiskInfo {
         logicalname: disk,
+        stable_path,
         partition_table,
         vendor,
         model,
@@ -551,7 +580,11 @@ async fn disk_info(disk: PathBuf) -> DiskInfo {
     }
 }
 
-async fn lvm_pv_part_info(part: PathBuf, guid: Option<InternedString>) -> PartitionInfo {
+async fn lvm_pv_part_info(
+    part: PathBuf,
+    stable_path: PathBuf,
+    guid: Option<InternedString>,
+) -> PartitionInfo {
     let capacity = get_capacity(&part)
         .await
         .map_err(|e| {
@@ -577,6 +610,7 @@ async fn lvm_pv_part_info(part: PathBuf, guid: Option<InternedString>) -> Partit
     };
     PartitionInfo {
         logicalname: part,
+        stable_path,
         label: None,
         capacity,
         used: None,
@@ -588,7 +622,11 @@ async fn lvm_pv_part_info(part: PathBuf, guid: Option<InternedString>) -> Partit
     }
 }
 
-async fn part_info(part: PathBuf, server_id: Option<&str>) -> Option<PartitionInfo> {
+async fn part_info(
+    part: PathBuf,
+    stable_path: PathBuf,
+    server_id: Option<&str>,
+) -> Option<PartitionInfo> {
     let part_type = get_part_type(&part)
         .await
         .map_err(|e| {
@@ -708,6 +746,7 @@ async fn part_info(part: PathBuf, server_id: Option<&str>) -> Option<PartitionIn
 
     Some(PartitionInfo {
         logicalname: part,
+        stable_path,
         label,
         capacity,
         used,

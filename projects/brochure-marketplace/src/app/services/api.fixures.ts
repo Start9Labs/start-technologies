@@ -16,6 +16,8 @@ export namespace Mock {
   export const RegistryInfo: T.RegistryInfo = {
     name: 'Start9 Registry',
     icon: REGISTRY_ICON,
+    description:
+      'Every service here is packaged, tested, and supported by **Start9**. Read the [docs](https://docs.start9.com) before installing.',
     categories: {
       ai: {
         name: 'AI',
@@ -159,6 +161,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
           hardwareAcceleration: false,
           userspaceFilesystems: false,
           virtualNetworking: false,
+          hardwareVirtualization: false,
           plugins: [],
         },
         '#knots:27.1.0:0': {
@@ -196,6 +199,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
           hardwareAcceleration: false,
           userspaceFilesystems: false,
           virtualNetworking: false,
+          hardwareVirtualization: false,
           plugins: [],
         },
       },
@@ -246,6 +250,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
           hardwareAcceleration: false,
           userspaceFilesystems: false,
           virtualNetworking: false,
+          hardwareVirtualization: false,
           plugins: [],
         },
       },
@@ -295,6 +300,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
           hardwareAcceleration: false,
           userspaceFilesystems: false,
           virtualNetworking: false,
+          hardwareVirtualization: false,
           plugins: [],
         },
         '#test:0.5.0:0': {
@@ -331,6 +337,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
           hardwareAcceleration: false,
           userspaceFilesystems: false,
           virtualNetworking: false,
+          hardwareVirtualization: false,
           plugins: [],
         },
       },

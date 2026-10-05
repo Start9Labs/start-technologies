@@ -127,6 +127,10 @@ export interface MockDeviceDef {
   status: 'online' | 'offline'
   speed: { up: number; down: number } | null
   dataUsage: number
+  // Simulates the backend's derived label (DHCP-fingerprint OS or MAC-OUI
+  // vendor) for a device that advertises no hostname — the rung between the
+  // name cache and the `device-<mac>` placeholder.
+  identLabel?: string
 }
 
 export const MOCK_DEVICE_DEFS: MockDeviceDef[] = [
@@ -191,6 +195,19 @@ export const MOCK_DEVICE_DEFS: MockDeviceDef[] = [
     status: 'online',
     speed: { up: 0.5, down: 5.0 },
     dataUsage: 12.0,
+  },
+  {
+    // No hostname either, but identifiable — exercises the derived-label rung
+    // (the Chromebook-on-Ethernet case: no DHCP option 12, no mDNS, real MAC).
+    mac: '3C:5A:B4:11:22:33',
+    hostname: '*',
+    hostOctet: 112,
+    profileInterface: 'lan',
+    connection: 'Ethernet',
+    status: 'online',
+    speed: { up: 0.3, down: 8.1 },
+    dataUsage: 5.4,
+    identLabel: 'Google device (112233)',
   },
 ]
 

@@ -121,4 +121,9 @@ platform_do_upgrade() {
 		echo "Resetting overlay /dev/$partdev..."
 		mkfs.ext4 -F -L rootfs_data "/dev/$partdev"
 	fi
+
+	# Converge the eMMC hardware boot partitions (boot0/boot1) to this
+	# image's bootinfo + FSBL, now on disk at the fsbl/bootfs partitions
+	# (see /lib/upgrade/spacemit_boot0.sh). Never aborts the upgrade.
+	spacemit_provision_boot0 "$diskdev"
 }

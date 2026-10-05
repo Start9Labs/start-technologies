@@ -79,8 +79,18 @@ export const localUrl = new ComposableRegex(
 // https://ihateregex.io/expr/ascii/
 export const ascii = new ComposableRegex(/[ -~]*/)
 
-/** Composable regex for matching fully qualified domain names. */
-export const domain = new ComposableRegex(/[A-Za-z0-9.-]+\.[A-Za-z]{2,}/)
+/**
+ * Composable regex for matching fully qualified domain names.
+ *
+ * Each label is 1-63 characters, starts and ends alphanumeric, and may contain
+ * hyphens internally. The final label must start with a letter, which keeps a
+ * dotted-decimal IPv4 literal from parsing as a domain (RFC 1123 § 2.1) while
+ * still admitting digits and hyphens in the TLD, as IDN A-labels (`xn--p1ai`)
+ * and non-delegated private TLDs both require.
+ */
+export const domain = new ComposableRegex(
+  /([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?/,
+)
 
 /** Composable regex for matching email addresses. */
 // https://www.regular-expressions.info/email.html

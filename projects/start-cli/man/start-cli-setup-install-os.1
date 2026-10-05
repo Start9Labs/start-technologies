@@ -1,16 +1,16 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH start-cli-setup-install-os 1  "install-os " 
+.TH start-cli-setup-install-os 1  "install-os "
 .SH NAME
 start\-cli\-setup\-install\-os \- Install StartOS to a disk over the network
 .SH SYNOPSIS
-\fBstart\-cli setup install\-os\fR [\fB\-\-data\-drive\fR] [\fB\-\-wipe\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIOS_DRIVE\fR> 
+\fBstart\-cli setup install\-os\fR [\fB\-\-data\-drive\fR] [\fB\-\-wipe\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIOS_DRIVE\fR>
 .SH DESCRIPTION
 Install StartOS to a disk over the network
 .SH OPTIONS
 .TP
 \fB\-\-data\-drive\fR \fI<DATA_DRIVE>\fR
-Path to the data drive (omit for an OS\-only install). May be the same logical name as <OS_DRIVE>; the installer will carve a data partition out of the same disk
+Stable path to the data drive; may match the OS drive
 .TP
 \fB\-\-wipe\fR
 Wipe the data drive before use
@@ -19,4 +19,4 @@ Wipe the data drive before use
 Print help
 .TP
 <\fIOS_DRIVE\fR>
-Path to the OS drive
+Stable path to the OS drive

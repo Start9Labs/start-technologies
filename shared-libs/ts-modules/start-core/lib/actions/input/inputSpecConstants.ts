@@ -185,17 +185,19 @@ export const smtpInputSpec = Value.dynamicUnion(async ({ effects }) => {
 }, smtpVariants.validator)
 
 const securityShape = z
-  .object({
+  .looseObject({
     selection: z.enum(['tls', 'starttls']).catch('tls'),
-    value: z.object({ port: z.string().catch('465') }).catch({ port: '465' }),
+    value: z
+      .looseObject({ port: z.string().catch('465') })
+      .catch({ port: '465' }),
   })
   .catch({ selection: 'tls' as const, value: { port: '465' } })
 
 const providerShape = z
-  .object({
+  .looseObject({
     selection: z.string().catch('other'),
     value: z
-      .object({
+      .looseObject({
         host: z.string().catch(''),
         from: z.string().catch(''),
         username: z.string().catch(''),
@@ -249,20 +251,22 @@ export type SmtpSelection =
  */
 export const smtpShape: z.ZodType<SmtpSelection> = z
   .discriminatedUnion('selection', [
-    z.object({
+    z.looseObject({
       selection: z.literal('disabled'),
-      value: z.object({}).catch({}),
+      value: z.looseObject({}).catch({}),
     }),
-    z.object({
+    z.looseObject({
       selection: z.literal('system'),
       value: z
-        .object({ customFrom: z.string().nullable().optional().catch(null) })
+        .looseObject({
+          customFrom: z.string().nullable().optional().catch(null),
+        })
         .catch({ customFrom: null }),
     }),
-    z.object({
+    z.looseObject({
       selection: z.literal('custom'),
       value: z
-        .object({ provider: providerShape })
+        .looseObject({ provider: providerShape })
         .catch({ provider: providerShape.parse(undefined) }),
     }),
   ])

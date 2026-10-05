@@ -22,7 +22,7 @@ export type RecoverySource =
             password: string | null
           }
       serverId: string
-      password: string // plaintext, will be encrypted before sending
+      password: string // Plaintext until `executeSetup` encrypts it.
     }
 
 @Injectable({
@@ -32,30 +32,24 @@ export class StateService {
   private readonly api = inject(ApiService)
   private readonly router = inject(Router)
 
-  // Determined at app init
+  // Initialized from the browser hostname during app startup.
   kiosk = false
 
-  // Set during install flow, or loaded from status response
   language = ''
   keyboard = ''
 
-  // From install response or status response (incomplete)
+  // Populated by OS installation or a resumed incomplete setup.
   dataDriveGuid = ''
   attach = false
   mokEnrolled = false
 
-  // Set when the device is pre-installed: the OS drive is fixed to the disk
-  // the running OS booted from, and the wizard only asks for a data drive.
+  // A pre-installed system fixes this to its boot disk.
   osDrive = ''
 
-  // Set during setup flow
   setupType?: SetupType
   recoverySource?: RecoverySource
 
-  /**
-   * Navigate to the appropriate step after language/keyboard selection.
-   * Keyboard selection is only needed in kiosk mode.
-   */
+  // Kiosk callers must collect the keyboard before calling this.
   async navigateAfterLocale(): Promise<void> {
     if (this.dataDriveGuid) {
       if (this.attach) {
@@ -69,9 +63,6 @@ export class StateService {
     }
   }
 
-  /**
-   * Called for attach flow (existing data drive)
-   */
   async attachDrive(password: string | null): Promise<void> {
     await this.api.attach({
       guid: this.dataDriveGuid,
@@ -80,22 +71,14 @@ export class StateService {
     })
   }
 
-  /**
-   * Called for fresh, restore, and transfer flows
-   * Password is required for fresh, optional for restore/transfer
-   */
-  async executeSetup(
-    password: string | null,
-    name: string,
-    hostname: string,
-  ): Promise<void> {
+  // Fresh setup requires a password; restore and transfer allow null.
+  async executeSetup(password: string | null, hostname: string): Promise<void> {
     let recoverySource: T.RecoverySource<T.EncryptedWire> | null = null
 
     if (this.recoverySource) {
       if (this.recoverySource.type === 'migrate') {
         recoverySource = this.recoverySource
       } else {
-        // backup type - need to encrypt the backup password
         recoverySource = {
           type: 'backup',
           target: this.recoverySource.target,
@@ -108,16 +91,12 @@ export class StateService {
     await this.api.execute({
       guid: this.dataDriveGuid,
       password: password ? await this.api.encrypt(password) : null,
-      name,
       hostname,
       recoverySource,
       kiosk: this.kiosk,
     })
   }
 
-  /**
-   * Reset state for a fresh start
-   */
   reset(): void {
     this.language = ''
     this.keyboard = ''

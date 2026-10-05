@@ -42,7 +42,7 @@ export const appConfig: ApplicationConfig = {
     provideTaiga({ mode: 'dark' }), // or 'light'; omit mode for runtime TUI_DARK_MODE theming
     // Design-system tuning lives HERE, once, as option providers:
     tuiButtonOptionsProvider({ size: 'm' }),
-    tuiTextfieldOptionsProvider({ size: signal('m'), cleaner: signal(false) }),
+    tuiTextfieldOptionsProvider({ size: signal('m') }),
     tuiCardOptionsProvider({ space: 'compact', appearance: 'floating' }),
     tuiDialogOptionsProvider({ size: 's' }),
     tuiValidationErrorsProvider({
@@ -108,7 +108,10 @@ The failure mode: a **hand-curated partial registry** breaks the icons Taiga com
 _internally_ (select chevrons, dropdown arrows) — exactly such a registry was deleted from
 start9-store for this reason. If you inline-register (wrt style), you own keeping the set complete; everywhere
 else, serve the whole directory and stop thinking about it. Non-Taiga SVGs ship as plain assets
-and are referenced by path, including in icon slots (`iconStart="/x-logo.svg"`).
+and are referenced by path, including in icon slots (`iconStart="/x-logo.svg"`) — that renders
+the file as a `currentColor` mask, so it suits a monochrome logo only. A full-colour raster or
+SVG (a package icon from `icon_url`) goes through the same slot as `iconStart="@img.<url>"`,
+which draws it as a background at the slot's icon size instead of masking it.
 
 ### Theming and branding
 
@@ -129,8 +132,3 @@ Hex colors live **only** in the theme sheet. Components use `var(--tui-...)` exc
 `--tui-text-secondary`, `--tui-status-negative`, `--tui-background-neutral-1`,
 `--tui-border-normal`, `font: var(--tui-typography-body-l)`, `var(--tui-radius-m)`. A hex
 literal in a component is a review comment waiting to happen.
-
-Breakpoints: Taiga's `TUI_BREAKPOINT` signal and `tui-root._mobile` follow `TUI_MEDIA` — which
-an app may override when its header demands it (store: `mobile: 1120`, **measured** — if you add
-a nav item, re-measure and raise it). Components that shouldn't collapse at the app-wide
-threshold use their own `@media` — deliberately, with a comment.

@@ -45,7 +45,7 @@ impl SigningContext for UnsignedRegistry {
 pub async fn update_system(
     ctx: DiagnosticContext,
     UpdateSystemParams {
-        target,
+        target_version: target,
         registry,
         progress: report_progress,
     }: UpdateSystemParams,

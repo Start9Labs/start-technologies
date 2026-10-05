@@ -28,6 +28,74 @@ describe('host', () => {
     }
   })
 
+  describe('Origin.export', () => {
+    async function uiOrigin(effects: Effects) {
+      return sdk.MultiHost.of(effects, 'ui').bindPort(80, {
+        protocol: 'http' as const,
+        preferredExternalPort: 80,
+      })
+    }
+
+    // Inline literals preserve excess-property checking.
+    test('carries a nominated launcher address through to the effect', async () => {
+      const exportServiceInterface = jest.fn(async () => null)
+      const effects = {
+        bind: jest.fn(async () => null),
+        exportServiceInterface,
+      } as unknown as Effects
+      const origin = await uiOrigin(effects)
+
+      await origin.export([
+        sdk.createInterface(effects, {
+          name: 'Web UI',
+          id: 'ui',
+          description: 'The web interface',
+          type: 'ui',
+          masked: false,
+          schemeOverride: null,
+          username: null,
+          path: '',
+          query: {},
+          preferredLauncherAddress: 'https://pad.example.com',
+        }),
+      ])
+
+      expect(exportServiceInterface).toHaveBeenCalledWith(
+        expect.objectContaining({
+          preferredLauncherAddress: 'https://pad.example.com',
+        }),
+      )
+    })
+
+    test('nominates nothing when the option is omitted', async () => {
+      const exportServiceInterface = jest.fn(async () => null)
+      const effects = {
+        bind: jest.fn(async () => null),
+        exportServiceInterface,
+      } as unknown as Effects
+      const origin = await uiOrigin(effects)
+
+      await origin.export([
+        sdk.createInterface(effects, {
+          name: 'Web UI',
+          id: 'ui',
+          description: 'The web interface',
+          type: 'ui',
+          masked: false,
+          schemeOverride: null,
+          username: null,
+          path: '',
+          query: {},
+        }),
+      ])
+
+      const [params] = exportServiceInterface.mock.calls[0] as unknown as [
+        Record<string, unknown>,
+      ]
+      expect(params['preferredLauncherAddress']).toBeUndefined()
+    })
+  })
+
   test('host.get returns interfaces whose addressInfo is pre-filled', () => {
     async function _typecheck(effects: Effects) {
       const host = await sdk.host.getOwn(effects, 'ui').const()

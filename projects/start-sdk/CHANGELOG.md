@@ -1,16 +1,91 @@
 # Changelog
 
-## 2.0.10 — StartOS 0.4.0.2
+## 3.0.0 — StartOS 0.4.0.2
+
+### Security
+
+- **Update SDK build and test dependencies with security fixes.**
 
 ### Changed
 
-- **Minimum StartOS version bumped to `0.4.0.2`.** The 2.0 line had declared
-  `0.4.0-beta.10` since 2.0.0, against a 0.4.0 that has since shipped. `0.4.0.2`
-  is the release carrying the effects behind `MultiHost.retire()` /
-  `retirePort()` below, and it is what a package built with this SDK now writes
-  as its manifest `osVersion` — so the registry offers that package to servers
-  on 0.4.0.2 or later, and a server too old to run a retire migration is never
-  offered the package that would attempt one
+- **Breaking — read-only volume and asset mounts are enforced.** Writes through a volume mount declared `readonly: true`, or through any asset mount, fail with `EROFS`. Mount volumes writable wherever the service writes to them. Copy assets that need modification into a writable volume
+
+- **Breaking — `Watchable<A>` takes only the type it reads.** A reader that
+  maps a raw value extends `MappedWatchable<Raw, Mapped>` and implements
+  `fetchRaw`/`produceRaw` in place of `fetch`/`produce`. A type written
+  `Watchable<Raw, Mapped>` becomes `Watchable<Mapped>`
+
+- **Breaking — define dependencies once in `dependencies.ts`.** Create each base with `sdk.Dependency.required` or `.optional` (including metadata, version range, kind and health checks), add it to `sdk.Dependencies.of()`, and pass the builder to `buildManifest(versionGraph, sdkManifest, dependencies)` and `setupInit`. Move runtime conditions to `enabled` and `withDynamicNarrowing`, tasks to `withInit`, and use `dependencies.check(effects)` in place of `sdk.checkDependencies(effects)`. The base version range, kind, and health checks are also included in the package manifest and registry metadata, allowing StartOS to record required dependencies independently of init effects and enforce the published base for enabled optional dependencies. `enabled`, the narrowing, and each `.withInit` handler rerun independently when a watched value changes; the requirements are republished only when they change, and init handlers run only while the dependency is enabled. StartOS hides the tasks a service created on a dependency while that dependency is disabled.
+
+- **Breaking — `sdk.action.run` opens the action's form and passes it to
+  `input`.** `input` is a function from the opened form to the input to submit;
+  a plain value is no longer accepted. The run then answers that form, which is
+  what lets a service run an action that takes input — another service's that
+  `access` admits, via the new `packageId`, or its own. `prefill` seeds the
+  form. Underneath, `effects.action.getInput` accepts `prefill`, and the form
+  and the run that answers it share the calling procedure's event id
+
+- **Breaking — a filled address lists the server's `.local` name whenever the
+  user has it enabled, and `utils.mdnsResolvable` is removed.** `.local` was
+  left out while no LAN IP on its gateways was enabled, which dropped it
+  whenever the network did and made a stored URL compare as removed. The
+  Interfaces tab and a filled address now agree on every address.
+
+- **Minimum StartOS version is now `0.4.0.2`**, which is what a package built
+  with this SDK writes as its manifest `osVersion`
+
+- **Breaking — image architecture fallback is now `emulateMissing: boolean`.**
+  Remove `emulateMissingAs`; StartOS selects the image available in the s9pk,
+  so a cross-architecture restore runs the backed-up image under emulation. The
+  new field defaults to `true`; set it to
+  `false` when an image cannot run under emulation. Existing s9pks retain their
+  fallback behavior when read
+
+- **Breaking — `z.object` strips unknown keys.** Every file-model shape must use
+  `z.looseObject`, at every nesting level, or the next `merge()` discards
+  whatever the user's config file holds that the shape doesn't declare. Replace
+  `z.object(` with `z.looseObject(` throughout `startos/`, keeping `z.object`
+  only where unknown keys should be dropped. A `.loose()` or `.passthrough()`
+  already on a shape is now redundant and can go. Every other `z` export,
+  `z.deepLoose` and `z.deepPartial` included, is unchanged
+
+- **Breaking — the SDK supplies the package toolchain.** TypeScript, Prettier,
+  ESLint and `@vercel/ncc` install with `@start9labs/start-sdk`, so a package
+  declares the SDK and nothing else. Drop `typescript`, `@types/node`,
+  `@vercel/ncc` and `prettier` from `devDependencies`, drop the `build`,
+  `check` and `prettier` scripts and the `prettier` config block, and add a
+  `.prettierrc` containing `"@start9labs/start-sdk/prettier.config.json"` so
+  your editor formats the way the build gate checks. `s9pk.mk` runs each step
+  itself through `TS_CHECK`, `FORMAT_CHECK` and `JS_BUNDLE`, any of which a
+  `Makefile` can override above the include
+
+- **The build gate rejects unformatted `startos/`.** `make format` writes. The
+  shared config is the four settings every package already declared, so nothing
+  that was formatted needs reformatting
+
+- **`@start9labs/start-core` is the only bundled dependency.** Everything else
+  installs normally, so a package can clear a security advisory anywhere in the
+  SDK's dependency tree with its own `overrides` entry rather than waiting for
+  an SDK release
+
+- **Breaking — `mountDependency` no longer accepts `type`.** A dependency mount
+  has been a directory since StartOS 0.4.0-alpha.16 disabled file mounts on
+  dependencies, so the option was silently doing nothing; passing it is now a
+  compile error. To reach a single file, mount the directory holding it.
+  `mountVolume` and `mountAssets` still take `type`
+
+- **Breaking — MySQL and MariaDB use separate dump builders.** MySQL callers
+  keep `Backups.withMysqlDump`; `engine: 'mysql'` remains accepted but is
+  optional. MariaDB callers use `Backups.withMariadbDump`, remove
+  `engine: 'mariadb'`, and rename `mysqldOptions` to `mariadbdOptions`
+
+- **`addSsl.alpn` is written as the list of protocols itself: `['h2']`, or
+  `null` for no filter.** It used to be `{ specified: ['h2'] }` or the string
+  `'reflect'`, and setting either changed how StartOS dialled the container —
+  so `'reflect'` and leaving the option unset said the same thing once that
+  stopped being true. Both older forms are gone. A binding that wrote
+  `{ specified: [...] }` writes the list, and one that wrote `'reflect'` writes
+  `null`; bindings already stored on a server are converted on update.
 
 - **`effects.getServicePortForward` resolves `null` instead of throwing when
   the binding does not exist.** It is the one host effect with no `callback`,
@@ -21,206 +96,236 @@
   difference. Prefer `sdk.host.getBridgeAddress` to reach a dependency; this is
   raw allocator metadata
 
-- **The scaffolded `build.yml` no longer passes `DEV_KEY`.** A PR build only
-  compiles and packs, and the reusable workflow already falls back to
-  `init-key` when no key is present, so the secret bought nothing and put the
-  real signing key on a runner executing branch-authored code. `release.yml`
-  and `tagAndRelease.yml` publish, and still take it. Existing packages should
-  drop the `secrets:` block from their own `build.yml`
+- **The scaffolded `build.yml` no longer passes `DEV_KEY`** — a PR build only
+  compiles and packs, so it never needed the signing key. Existing packages
+  should drop the `secrets:` block from their own `build.yml`
 
-- **`SubContainer.exec` / `execFail` take `timeout` and `abort` as named
-  options rather than as third and fourth positional arguments.**
+- **Breaking — `SubContainer.exec` / `execFail` take `timeout` and `abort` as
+  named options** rather than as third and fourth positional arguments:
   `sub.execFail(cmd, { user: 'root' }, null)` becomes
-  `sub.execFail(cmd, { user: 'root', timeout: null })`. A bare `null` in the
-  third position gave no hint which of the two knobs it was setting or what it
-  meant, and reaching the fourth argument meant supplying the third. Both moved
-  together because dropping only `timeout` would have left `abort` sliding
-  into a position whose type it does not match. Passing either positionally is
-  now a compile error, so anything that needs updating says so at build time
+  `sub.execFail(cmd, { user: 'root', timeout: null })`. Passing either
+  positionally is now a compile error
+
+- **StartOS 0.4.0.2 collects the processes a daemon orphans**, so a daemon that
+  shells out to helper programs no longer needs its command wrapped in
+  `tini -s`. Set `runAsInit: true` to opt out and take PID 1 yourself, which
+  suits images built around `s6-overlay`, `tini`, `dumb-init` or `supervisord`
+
+- `assets/` and `startos/fileModels/` are scaffolded with a `.gitkeep` rather
+  than a `README.md`
 
 ### Added
 
-- **Scaffolded packages get a fourth workflow, `syncNext.yml`, which keeps the
-  `next` iteration branch in step with the base branch it stacks on.** Nothing
-  else moves `next`, so a base branch advancing leaves it behind indefinitely
-  and work resumed there starts from a stale tree. The paired
-  branch is derived rather than configured (an explicit `next/<base>` where one
-  exists, otherwise the default branch pairs with a plain `next`), and a repo
-  with no `next` gets one created at the base tip on the first run. Neither
-  `next` nor the base is force-pushed: `next` is fast-forwarded when merely
-  behind, merged when it carries unmerged work, and left alone with a PR opened
-  for a human only when that merge conflicts. That PR is headed by a throwaway
-  `sync-next/<base>` branch rather than the base itself, because GitHub's web
-  conflict editor commits to the head branch — and it wants a merge commit, not
-  a squash, or `next` comes out without the base as an ancestor and the
-  following sync conflicts again
+- **`waitFor` takes an optional `AbortSignal`**, as `watch` does, and rejects
+  with `AbortedError` when it aborts, including while waiting for a file or
+  its parent directory to be created. Pass one to cancel a wait you race against
+  a timeout. `watch` and `waitFor` end at once on a signal that has already
+  aborted.
 
-- **`addDaemon()` / `addOneshot()` accept a `uses` value that
-  `Daemons.dynamic` folds into the entry's `configHash`.** The reconciler's
-  diff key covers only structural fields; closures (`exec.fn`, `ready.fn`,
-  `ready.trigger`) and pre-built `Daemon` instances are invisible to it, so a
-  value captured by a closure could change without the reconciler restarting
-  the daemon. Declare the value as `uses` and any change restarts the
-  daemon/oneshot on the next reconcile. Only JSON-serializable values are
-  useful, and anything else normalizes rather than failing a reconcile:
-  functions, symbols, cycles and `undefined` hash as distinct
-  `UNSERIALIZABLE:*` sentinels (so a change visible only there triggers no
-  restart), and BigInts hash as their decimal string. The `exec` options
-  object is now canonicalized in full rather than whitelisted, so a
-  fn-form exec's `sigtermTimeout` and a command exec's `onStdout`/`onStderr`
-  callbacks participate in the hash (the callbacks themselves hash as
-  constant sentinels — added or removed restarts, one closure swapped for
-  another does not)
+- **`FileHelper.update(effects, change)`** computes a complete replacement under the writer lock. The callback receives the validated current value and returns the replacement or `null` to skip writing. Reads inside it remain reentrant; nested writes, merges, or updates to the same file throw immediately. The callback has a five-second deadline, which also bounds file access it starts; a timed-out callback cannot commit later.
+
+- **`preDownloadAlert` in `setupManifest()`** displays a localized Markdown confirmation before downloading an update from an installed version matching `when.sourceVersion`.
+
+- **An `env` variable set to `undefined` is removed from the process**,
+  including one the image or StartOS would otherwise supply, such as `LANG`.
+
+- **An action learns who is running it.** The `run` handler, the prefill
+  function and a function-valued input spec each receive `caller`: the id of
+  the service that reached the action through `effects.action`, or `null` when
+  the user did. An action with `access: 'dependent'` or `'public'` can act on
+  the caller's own resources instead of trusting a package id in its input
+
+- **`utils.isAddressEnabled(addresses, hostname)`** reports whether the user's
+  overrides leave one of a binding's addresses on
+
+- **Scaffolded packages get a fourth workflow, `syncNext.yml`**, which keeps the
+  `next` iteration branch in step with the base branch it stacks on. A repo with
+  no `next` gets one created at the base tip on the first run
+
+- **`addDaemon()` / `addOneshot()` accept a `uses` value** that
+  `Daemons.dynamic` folds into the entry's `configHash`, so a value a closure
+  captures can restart the daemon on the next reconcile. Only JSON-serializable
+  values are useful
 
 - **`MultiHost.retire()` and `MultiHost.retirePort()` permanently remove a host
-  or a binding.** `setupInterfaces` ends each pass by
-  _disabling_ whatever it did not declare, which keeps the row, the external
-  port number and the user's per-address choices so a conditionally-declared
-  binding returns at the address they bookmarked. A binding dropped for good
-  therefore stayed behind: its external port stayed claimed for as long as the
-  service was installed, and a dependency resolving it through
-  `getBridgeAddress` still got a `10.0.3.1:<port>` that nothing listens on.
-  Retiring deletes the host or binding and its exported service interfaces —
-  and, for a whole host, the user's domains for it — returning the external
-  ports to the server's pool. Call it from the `up()` of the version that stops
-  binding; it resolves `false` where there was nothing to remove, so a re-run is
-  safe. See
+  or a binding**, returning its external ports to the server's pool — where
+  `setupInterfaces` otherwise only _disables_ what it did not declare. Call it
+  from the `up()` of the version that stops binding; re-running is safe. See
   [Retiring a Host or Binding](https://docs.start9.com/packaging/interfaces.html#retiring-a-host-or-binding)
 
-- **`sdk.getRootCa(effects)` returns this server's root CA certificate.** A
-  service that dials an address the _user_ supplies — a monitor target, a
-  notification endpoint, a webhook — gets whatever address StartOS showed them,
-  which on the LAN is always HTTPS with a certificate chaining to this server's
-  root CA. No container trusts that root, so the dial fails verification, and
-  the only way to obtain the root was to mint a certificate you didn't want and
-  take the last link of the chain. Packages doing that by hand have taken the
-  wrong link: installing `[0]`, the leaf, as a trust anchor silently trusts
-  nothing while looking correct. `getRootCa` returns the root directly. See
+- **`sdk.getRootCa(effects)` returns this server's root CA certificate**, for a
+  service that has to dial a user-supplied LAN address over HTTPS. See
   [Trusting this server's certificates](https://docs.start9.com/packaging/service-to-service.html#trusting-this-servers-certificates)
+
+- **`hardwareVirtualization: true` in the manifest exposes `/dev/kvm`**, for a
+  service that runs its own virtual machines — QEMU/KVM, Firecracker, a device
+  emulator. The device appears only on a host whose CPU supports virtualization,
+  so handle its absence. See
+  [Hardware Virtualization (KVM)](https://docs.start9.com/packaging/manifest.html#hardware-virtualization-kvm)
+
+- **`Watchable.combine(effects, [a, b], map?, eq?)` builds one reader from
+  several.** Its raw value is the tuple of the sources' values, and `map`/`eq`
+  work as on any reader: it emits when `map`'s result differs from the last by
+  `eq`. `Watchable.from(effects, source, eq?)` makes a reader of a single
+  source. A source is any `WatchSource` (`once()` and `watch(abort)`), which
+  every `Watchable` is
+
+- **`sdk.setupPrimaryUrl()` replaces the hand-rolled "Set Primary URL" action
+  and watcher.** Give it the interface the URL belongs to, a reader for the
+  stored choice (`storeJson.read(s => s.primaryUrl)`) and a function that
+  writes it. It returns the action to register;
+  `bestUsable(effects)`, a reader for the stored URL while its hostname is one
+  of the interface's addresses and the `.local` address otherwise; and
+  `setupTask(severity, options)`, an init script that keeps a task raised while
+  the stored URL is unset or gone, which StartOS clears once it is back. See
+  [Set a Primary URL](https://docs.start9.com/packaging/recipe-primary-url.html)
+
+- **`createInterface` accepts `preferredLauncherAddress`.** A UI interface can
+  nominate the absolute URL that StartOS should open when a service depends on
+  one canonical origin. See
+  [Nominating an Address to Open](https://docs.start9.com/packaging/interfaces.html#nominating-an-address-to-open).
+
+- **`Value.select`, `Value.dynamicSelect`, `Value.union` and `Value.dynamicUnion`
+  accept `default: null`**, which renders the field unselected and holds the form
+  unsubmittable until the user picks one
+
+- **`launchable` on a `single` action result opens the value in a new tab**, for
+  a result that hands the user a link — an authorization URL, an admin panel.
+  The value must be an `http(s)` URL. `copyable`, `qr` and `masked` are optional
+  alongside it and default to `false`. See
+  [Single Value](https://docs.start9.com/packaging/actions.html#single-value)
+
+- **An action result can be a `multiline` value**: a read-only monospace box
+  that keeps its line breaks, taking the same optional `copyable` / `qr` /
+  `masked` flags as `single`, plus an optional `filename` that offers it as a
+  download. A `single` value is one line, and a newline in one is not rendered.
+  See [Result Types](https://docs.start9.com/packaging/actions.html#result-types)
 
 ### Fixed
 
-- **A text field's `patterns` are now enforced on every path into an action,
-  not only by the web form.** The regexes reached the browser and nothing else,
-  so an action invoked over `start-cli` or RPC arrived at the handler with a
-  value that had never been tested — a field's own declaration that a value is
-  invalid was ignored precisely where no human was reading the form. The check
-  now lives in the input spec's parser, which `Action.run` already applies to
-  the submitted input. It mirrors the form: a pattern is **anchored** unless it
-  already is, so `[a-z]+` constrains the whole value rather than a substring,
-  and an **empty value passes**, left to `required`. Covers `Value.text`,
-  `Value.textarea`, `List.text` and their dynamic variants
+- **An awaited `waitFor` waits until its predicate holds.** Awaiting
+  `waitFor` on a status, file or other reader no longer fails with
+  `AbortedError` after garbage collection while the condition is still false.
 
-- **A build whose `start-cli s9pk list-ingredients` fails now stops instead of
-  silently repacking the previous s9pk.** That command produces the s9pk's
-  entire source-dependency list, `javascript/index.js` included — nothing else
-  in `s9pk.mk` ties the package to your TypeScript. `$(shell)` discards exit
-  status, so any failure left `INGREDIENTS` empty, detaching every source file
-  from the target's prerequisites; make then found the existing s9pk newer than
-  its only surviving prerequisites (`.git/HEAD`, `.git/index`) and declared it up
-  to date, while the recipe still printed `✅ Build Complete!` and exited 0. The
-  result was a package that omitted the changes just made to it, with no
-  indication anything was wrong — most easily hit by editing a source file and
-  rebuilding without touching git in between, on a workspace whose
-  `.startos/config.yaml` names a host that no longer resolves
-- **`hardwareRequirements.ram` is documented in bytes, which is what StartOS
-  actually compares it against.** Its TSDoc claimed megabytes and its
-  `@example` showed `ram: 8192`, so packages following it declared an 8 KiB
-  floor that every machine satisfies and that therefore gated nothing. The
-  example now writes the value as `8 * 1024 ** 3`, and the packaging guide's
-  manifest page gained a Minimum RAM section covering the unit and the fact
-  that raising a floor on a published package cuts smaller hosts off from
-  updates. The same example's device filter is corrected too — it still showed
-  the `devices` / `pattern` / `patternDescription` shape replaced by `device`
-  and `DeviceFilter` in 2.0.0
-- **A `runUntilSuccess` timeout now says which daemon failed and why.** It
-  reported a bare list of ids, which cannot distinguish a daemon that is slow to
-  start from one that is crash-looping, and leaked the internal sentinel
-  daemon's id as if it were a component — a package whose Postgres died on every
-  start reported only this, after burning its full thirty-minute budget:
+- **A file model's reads see every change to the file.** `watch`, `const` and
+  `waitFor` no longer miss a write made while the previous value was being
+  read or handled, or a file created just as the wait began.
 
-  ```
-  Timed out waiting for postgres,upgrade,__RUN_UNTIL_SUCCESS
-  ```
+- **FileHelper writes replace files atomically.** Writers hold a cross-process lock on the file, waiting up to ten seconds for it, and `merge()` and `update()` hold it through their complete read-modify-write; replacements retain the file's owner and permissions.
 
-  The message now carries each un-ready daemon's health result and message, the
-  count and cause of any abnormal exits, and the budget that elapsed:
+- **Own-volume file mounts follow atomic source replacement in running subcontainers.** Refreshes preserve idmaps and readonly settings and run before FileHelper operations return and commands launch. Refresh failures propagate to the caller, including after a write has replaced the source. Existing descriptors retain the previous inode until the application reopens the file.
 
-  ```
-  Timed out after 1800000ms waiting for postgres (loading; 47 failed exit(s), last: docker-entrypoint.sh exited with code 1), upgrade (waiting; postgres)
-  ```
+- **Reactive init re-runs receive `kind: null`** after the initial install,
+  update, or restore pass. Lifecycle-only work guarded by `kind` runs once for
+  that event, even when a watched value changes.
 
-  The sentinel is excluded — it depends on every other daemon, so it is never
-  ready when anything else isn't. A crash-looping daemon's exit error was
-  previously swallowed by the restart loop, so this is the only place it reaches
-  the caller: `Daemon` now retains it as `lastExitError` alongside a
-  `failedExits` count, and `HealthDaemon` appends the cause to its
-  `<id> daemon crashed` health message. Reporting the exit count next to the
-  current health matters because they disagree in exactly the case that hurts —
-  a `ready` check that returns `loading` on a failed probe keeps overwriting the
-  crash back to `loading` between restarts
+- **Lazy subcontainers retry filesystem materialization after a transient
+  failure**, allowing daemons to recover without a service restart
+
+- **`Backups.withMariadbDump` works against MariaDB 11 images**, official or
+  packaged from a distribution
+
+- `import { backup } from '@start9labs/start-sdk'` exposes `backup.Backups`
+  and `backup.mountBackupTarget`
+
+- **Scaffolded package CI builds a draft PR when it becomes ready and rebuilds
+  against every new base after retargeting.** Metadata edits preserve active
+  builds and their conclusions
+
+- **`merge()` given a value of `undefined` removes the key from an `.env` file
+  model**, the way it already did for every other format. It wrote the literal
+  `KEY=undefined`, which a shape's `.catch()` then masked on read — so the file
+  the service actually parses held the word while the model reported the default
+
+- **`VersionGraph` reports a missing migration path in terms a service owner can
+  act on**, rather than as an assertion about the version range the host handed
+  it
+
+- `i18n()` no longer throws when a number or a `Date` is interpolated: a service
+  container's `LANG=C.UTF-8` reduces to a locale `Intl` rejects
+
+- `SubContainer.exec` closes the child's stdin when it has no input to write,
+  instead of leaving a command that reads stdin blocked until the timeout
+
+- **A text field's `patterns` are enforced on every path into an action**, not
+  only by the web form. A pattern is anchored unless it already is, and an empty
+  value passes, left to `required`. Covers `Value.text`, `Value.textarea`,
+  `List.text` and their dynamic variants
+
+- **A build whose `start-cli s9pk list-ingredients` fails now stops**, rather
+  than silently repacking the previous s9pk and reporting success
+
+- **`hardwareRequirements.ram` is documented in bytes**, not the megabytes its
+  TSDoc claimed — a package following the old `ram: 8192` example declared an
+  8 KiB floor that gated nothing. The example now writes `8 * 1024 ** 3`, and
+  the manifest page gained a Minimum RAM section
+
+- **A `runUntilSuccess` timeout names each un-ready daemon** with its health
+  result, the count and cause of any abnormal exits, and the budget that
+  elapsed, rather than a bare list of ids
 
 - **Package template cleanup.** Dropped the `alerts` manifest block, removed in
-  2.0.0, that the template still scaffolded, and the `hello-world` guard job
-  from `release.yml` / `tagAndRelease.yml`. Its workflows are now identical to
-  a real package's
+  2.0.0, and the `hello-world` guard job from `release.yml` / `tagAndRelease.yml`
 
-- **`make install` no longer announces "Initializing StartOS developer
-  environment…" on every run.** `check-init` guarded on
-  `~/.startos/developer.key.pem`, which start-cli 1.1.0 renamed to
-  `id.key.pem`, so the guard stopped matching and ran `start-cli init-key`
-  unconditionally. The condition is removed rather than repointed at the new
-  name: `init-key` already checks for an existing key and prints that it found
-  one, so the guard only duplicated that check while giving the filename a
-  second place to go stale. Cosmetic — no build ever failed over it
+- `make install` no longer announces "Initializing StartOS developer
+  environment…" on every run
 
 - **A database dump backup or restore is no longer killed after exactly thirty
-  seconds.** Steps in `Backups.withPgDump` / `Backups.withMysqlDump` run under
-  `SubContainer.exec`'s default 30 s cap unless they opt out, and 1.5.2 — which
-  began staging the dump in `/tmp` and copying it to the backup target, rather
-  than dumping onto the target directly — left the opt-out on `pg_dump` and
-  gave the new `cp` none. The copy's duration is set by the size of the dump and
-  the speed of the target. So a backup that had succeeded for months began
-  failing the first time that copy crossed thirty seconds, with nothing to point
-  at the cause:
-
-  ```
-  Failed: Unknown Error: Error: cp terminated with signal SIGKILL:
-  ```
-
-  Restore stages the dump off the target through the same kind of copy, under
-  the same cap — so a database whose dump took longer than thirty seconds to
-  copy could not be restored at all, which is discovered during recovery, when
-  the backup is all the user has. Every step of a dump or restore whose
-  duration follows the data now opts out: both copies, `pg_ctl start` and
-  `pg_ctl stop` (which wait on the cluster's crash recovery and its shutdown
-  checkpoint), the recursive `chown`s over the data directory, `initdb`,
-  `mysql_install_db` / `mysqld --initialize-insecure`, and the foreground
-  `mysqld` MariaDB runs for the length of the dump.
-
-  The two `pg_ctl` steps keep a bound, because `pg_ctl` has its own: `-w` is its
-  default and it gives up after `-t` seconds, which was 60 regardless of what
-  the SDK allowed. `PgDumpConfig.readyTimeout` — the knob 2.0.1 added for
-  clusters that need longer — now supplies that `-t`, so raising it reaches the
-  step that actually blocks instead of stopping at the readiness poll. Its
-  default is 60 000 ms, which is `pg_ctl`'s own default, so nothing changes
-  until you raise it. Fixes
+  seconds.** Every step of `Backups.withPgDump`, `withMysqlDump` and
+  `withMariadbDump` whose duration
+  follows the size of the data now opts out of `SubContainer.exec`'s 30 s cap,
+  and `PgDumpConfig.readyTimeout` supplies `pg_ctl`'s `-t` so that raising it
+  reaches the step that actually blocks. Fixes
   [#3636](https://github.com/Start9Labs/start-technologies/issues/3636)
 
-- **A command killed by `SubContainer.exec`'s own timeout now says that it timed
-  out.** The error was built from the signal alone, so the SDK's timer read
-  exactly like an OOM kill, a cgroup kill, or an operator's `kill -9` — and
-  since `cp` writes nothing to stderr when it is killed, the whole user-facing
-  notification was `cp terminated with signal SIGKILL:`. The message now names
-  the timeout and the limit that elapsed:
+- **A command killed by `SubContainer.exec`'s own timeout now says it timed
+  out**, where the bare signal had read like an OOM kill. `exec`'s result
+  carries `timedOutAfter` alongside `exitCode` and `exitSignal`
 
-  ```
-  cp timed out after 30000ms and was killed with SIGKILL:
-  ```
+- **`checkDependencies(...)`'s boolean version check honours the dependency's
+  `satisfies` list**, matching `throwIfNotSatisfied()` and the web UI.
+  `satisfied()` and `installedVersionSatisfied()` compared only the installed
+  version against the declared range, ignoring the versions that release stands
+  in for. This matters most for a flavor, which is incomparable to an unflavored
+  version: a `#knots` Bitcoin or a `#quantum` File Browser read as unsatisfied
+  while the throwing surface passed
 
-  `exec`'s result carries `timedOutAfter` — the limit that fired, or `null`
-  when the process was not killed by this timer — alongside `exitCode` and
-  `exitSignal`
+- **A dependency release is matched against `versionRange` as one set of declared versions.**
+  One installed or aliased version must satisfy a complete conjunction. `!=`
+  and negated ranges exclude the release when a declared version satisfies the
+  complete excluded range. `VersionRange.satisfiedByRelease` is the evaluator
+  behind the SDK, dependency warnings and marketplace, and `normalize()`
+  preserves the same answer. Numeric
+  prerelease identifiers retain exact ordering and serialization beyond
+  JavaScript's safe-integer limit
+
+- **`checkDependencies(...)`'s `satisfied()` takes an optional package id, and
+  `healthCheckSatisfied()`'s is optional.** Both were declared narrower than the
+  functions behind them, so `deps.satisfied('bitcoind')` was a compile error for
+  a call that has always worked, and the only way to check one dependency was to
+  reimplement the predicate
+
+- **A prerelease segment may mix letters, digits and hyphens**, matching the
+  grammar StartOS parses. `1.0.0-rc1:0` and `1.0.0-alpha-1:0` threw a parse error
+  out of `ExtendedVersion.parse` where the OS accepted them, so a dependency
+  published on such a version crashed a dependent's `checkDependencies`. A
+  numeric segment with a leading zero is rejected, as it already was on the OS
+  side
+
+- **Backup and restore progress no longer falls back mid-sync**
+
+- **`checkPortListening` counts a TCP port as listening only while a socket is
+  in the `LISTEN` state.** It matched any socket on the port, so the
+  connections a process leaves in `TIME_WAIT` when it exits kept its port
+  reading as listening for up to a minute: a daemon's `ready` check passed, and
+  the health checks that require it ran, while nothing was listening
+
+### Security
+
+- **ESLint and typescript-eslint carry patched `brace-expansion` and
+  `js-yaml`.** A package scaffolded from the template now reports
+  `found 0 vulnerabilities` from `npm audit --omit=dev`. Fixes
+  [#3592](https://github.com/Start9Labs/start-technologies/issues/3592)
 
 ## 2.0.9 — StartOS 0.4.0-beta.10 (2026-07-25)
 

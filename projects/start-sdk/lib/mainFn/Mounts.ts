@@ -60,7 +60,7 @@ type DependencyOpts<Manifest extends T.SDKManifest> = {
   volumeId: Manifest['volumes'][number]
   /** Whether or not the resource should be readonly for this subcontainer */
   readonly: boolean
-} & SharedOptions
+} & Omit<SharedOptions, 'type'>
 
 /**
  * Immutable builder for declaring filesystem mounts into a subcontainer.
@@ -112,7 +112,11 @@ export class Mounts<Manifest extends T.SDKManifest> {
   }
 
   /**
-   * Add a mount from a dependency package's volume.
+   * Add a mount from a dependency package's volume. The mount is always a
+   * directory — StartOS does not bind a dependency's file. To reach a single
+   * file, mount the directory holding it. The volume must exist when the
+   * container starts; a missing dependency fails the start.
+   *
    * @param options - Dependency ID, volume ID, mountpoint, readonly flag, and optional subpath
    * @returns A new Mounts instance with this dependency mount added
    */
@@ -178,7 +182,6 @@ export class Mounts<Manifest extends T.SDKManifest> {
             volumeId: d.volumeId,
             subpath: d.subpath,
             readonly: d.readonly,
-            filetype: d.type ?? 'directory',
             idmap: normalizeIdmap(d.idmap),
           },
         })),

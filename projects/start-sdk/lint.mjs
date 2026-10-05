@@ -1,8 +1,5 @@
 #!/usr/bin/env node
-// SDK-bundled lint runner. Invoked from a package dir (cwd = package) by
-// s9pk.mk as part of the build gate: `node node_modules/@start9labs/start-sdk/lint.mjs`.
-// Resolves eslint + the shared config from the SDK's own node_modules, so packages
-// need no eslint devDep (which would clobber the npm-linked SDK symlink).
+// Invoked by s9pk.mk from the package directory; the glob below is relative to that cwd.
 import { ESLint } from 'eslint'
 import config from './eslint.config.base.mjs'
 

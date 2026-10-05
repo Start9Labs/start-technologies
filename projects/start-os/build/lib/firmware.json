@@ -7,7 +7,7 @@
       "semver-prefix": "PureBoot-Release-",
       "semver-range": "<29"
     },
-    "url": "https://source.puri.sm/firmware/releases/-/raw/75631ad6dcf7e6ee73e06a517ac7dc4e017518b7/librem_mini_v2/custom/pureboot-librem_mini_v2-basic_usb_autoboot_blob_jail-Release-29.rom.gz",
+    "url": "https://github.com/Start9Labs/pureboot/releases/download/Release-29/pureboot-librem_mini_v2-basic_usb_autoboot_blob_jail-Release-29.rom.gz",
     "shasum": "96ec04f21b1cfe8e28d9a2418f1ff533efe21f9bbbbf16e162f7c814761b068b"
   }
 ]

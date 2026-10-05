@@ -36,4 +36,10 @@ Configure IPv6 addressing on the LAN.
 > While any enabled [Published Ports](published-ports.md) rule forwards over IPv6, IPv6 cannot be disabled — devices would lose the addresses those rules depend on. Disable or delete those rules first.
 
 > [!NOTE]
+> If you are updating from an older version, this page may have read **Disabled** while some [Security Profiles](security-profiles.md) were still handing out IPv6 addresses. That is corrected on the first start after the update: IPv6 is turned off for those profiles too, and the correction is recorded in [Activity](settings.md). Enable IPv6 here to turn it back on — it now applies to the LAN and every profile together.
+
+> [!NOTE]
+> Because devices choose their own IPv6 addresses, disabling IPv6 asks them to drop the ones they hold rather than taking the addresses away directly. Devices that are connected at the time drop them immediately. A device that is asleep, off the network, or misses the notice keeps its address until it expires on its own — up to about 90 minutes — and reconnecting or rebooting it clears the address right away.
+
+> [!NOTE]
 > If the Admin profile routes through an IPv4-only [Outbound VPN](outbound-vpn.md), LAN devices still receive their IPv6 addresses, but IPv6 internet traffic is blocked by the kill switch so it cannot leak around the tunnel. IPv6 connectivity resumes when the profile routes through an IPv6-capable VPN or directly to the Internet.

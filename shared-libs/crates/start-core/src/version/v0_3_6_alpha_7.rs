@@ -52,7 +52,7 @@ impl VersionT for Version {
             .arg("--root=/media/startos/config/overlay/")
             .arg(
                 ctx.account
-                    .peek(|a| format!("--hostname={}", a.hostname.hostname.as_ref())),
+                    .peek(|a| format!("--hostname={}", a.hostname.as_ref())),
             )
             .invoke(ErrorKind::ParseSysInfo)
             .await?;

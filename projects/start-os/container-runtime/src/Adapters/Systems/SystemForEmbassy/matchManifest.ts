@@ -2,7 +2,7 @@ import { z } from '@start9labs/start-sdk'
 import { matchVolume } from './matchVolume'
 import { matchDockerProcedure } from '../../../Models/DockerProcedure'
 
-const matchJsProcedure = z.object({
+const matchJsProcedure = z.looseObject({
   type: z.literal('script'),
   args: z.array(z.unknown()).nullable().optional().default([]),
 })
@@ -15,7 +15,7 @@ const healthCheckFields = {
   'success-message': z.string().nullable().optional(),
 }
 
-const matchAction = z.object({
+const matchAction = z.looseObject({
   name: z.string(),
   description: z.string(),
   warning: z.string().nullable().optional(),
@@ -23,13 +23,13 @@ const matchAction = z.object({
   'allowed-statuses': z.array(z.enum(['running', 'stopped'])),
   'input-spec': z.unknown().nullable().optional(),
 })
-export const matchManifest = z.object({
+export const matchManifest = z.looseObject({
   id: z.string(),
   title: z.string(),
   version: z.string(),
   main: matchDockerProcedure,
   assets: z
-    .object({
+    .looseObject({
       assets: z.string().nullable().optional(),
       scripts: z.string().nullable().optional(),
     })
@@ -43,7 +43,7 @@ export const matchManifest = z.object({
     ]),
   ),
   config: z
-    .object({
+    .looseObject({
       get: matchProcedure,
       set: matchProcedure,
     })
@@ -53,11 +53,11 @@ export const matchManifest = z.object({
   volumes: z.record(z.string(), matchVolume),
   interfaces: z.record(
     z.string(),
-    z.object({
+    z.looseObject({
       name: z.string(),
       description: z.string(),
       'tor-config': z
-        .object({
+        .looseObject({
           'port-mapping': z.record(z.string(), z.string()),
         })
         .nullable()
@@ -65,7 +65,7 @@ export const matchManifest = z.object({
       'lan-config': z
         .record(
           z.string(),
-          z.object({
+          z.looseObject({
             ssl: z.boolean(),
             internal: z.number(),
           }),
@@ -76,12 +76,12 @@ export const matchManifest = z.object({
       protocols: z.array(z.string()),
     }),
   ),
-  backup: z.object({
+  backup: z.looseObject({
     create: matchProcedure,
     restore: matchProcedure,
   }),
   migrations: z
-    .object({
+    .looseObject({
       to: z.record(z.string(), matchProcedure),
       from: z.record(z.string(), matchProcedure),
     })
@@ -90,24 +90,24 @@ export const matchManifest = z.object({
   dependencies: z.record(
     z.string(),
     z
-      .object({
+      .looseObject({
         version: z.string(),
         requirement: z.union([
-          z.object({
+          z.looseObject({
             type: z.literal('opt-in'),
             how: z.string(),
           }),
-          z.object({
+          z.looseObject({
             type: z.literal('opt-out'),
             how: z.string(),
           }),
-          z.object({
+          z.looseObject({
             type: z.literal('required'),
           }),
         ]),
         description: z.string().nullable().optional(),
         config: z
-          .object({
+          .looseObject({
             check: matchProcedure,
             'auto-configure': matchProcedure,
           })

@@ -1,5 +1,6 @@
 module.exports = {
-  '**/*.{js,ts,html,md,json}': 'prettier --write',
+  '**/*.{js,ts,html,md,json}':
+    'prettier --write --ignore-path ../../.prettierignore',
   '*.ts': 'tslint --fix',
   'projects/ui/**/*.ts': () => 'npm run check:ui',
   'projects/shared/**/*.ts': () => 'npm run check:shared',

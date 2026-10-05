@@ -6,8 +6,10 @@ pub mod activity;
 pub mod auth;
 pub mod backup;
 pub mod bins;
+pub mod boot0;
 pub mod captive;
 pub mod continuations;
+pub mod device_ident;
 pub mod device_names;
 pub mod devices;
 pub mod diagnostics;
@@ -18,12 +20,14 @@ pub mod ethernet;
 pub mod exec;
 pub mod files;
 pub mod flash;
+pub mod http_redirect;
 pub mod init;
 pub mod ipv6_tracker;
 pub mod lan;
 pub mod logs;
 pub mod luci_proxy;
 pub mod middleware;
+pub mod port_control;
 pub mod profiles;
 pub mod progress;
 pub mod published_ports;
@@ -97,6 +101,15 @@ use rpc_toolkit::{
 pub trait CtrlContext: Context + Clone {
     fn uci_root(&self) -> PathBuf;
     fn effectful(&self) -> bool;
+    /// The router's WAN IPv4 addresses: the public side of every IPv4
+    /// published port. Empty when unknown.
+    fn wan_ipv4_addrs(&self) -> Vec<std::net::Ipv4Addr> {
+        if self.effectful() {
+            crate::system::wan_ipv4_addrs()
+        } else {
+            Vec::new()
+        }
+    }
 }
 
 fn cookies_path() -> PathBuf {
@@ -113,8 +126,9 @@ pub struct CliArgs {
     pub config_root: PathBuf,
     #[clap(long)]
     pub configs_only: bool,
-    #[clap(long, default_value = "http://router.lan/rpc/v1")]
-    pub host: Url,
+    /// Server URL [default: http://127.0.0.1/rpc/v1 on the router, else http://router.lan/rpc/v1]
+    #[clap(long)]
+    pub host: Option<Url>,
 }
 
 /// Inner context with cookie persistence on Drop
@@ -186,6 +200,31 @@ impl Deref for CliContext {
     }
 }
 
+fn default_host(on_router: bool) -> Url {
+    if on_router {
+        "http://127.0.0.1/rpc/v1"
+    } else {
+        "http://router.lan/rpc/v1"
+    }
+    .parse()
+    .unwrap()
+}
+
+/// Skips non-loopback hosts.
+fn insert_local_auth_cookie(store: &mut CookieStore, host: &Url, token: &str) {
+    if !startos::middleware::auth::local::is_loopback(host) {
+        return;
+    }
+    let domain = host.host_str().unwrap_or("localhost");
+    let cookie_value = format!(
+        "local={}; Domain={domain}; Path=/; SameSite=Strict",
+        token.trim()
+    );
+    if let Ok(cookie) = cookie_store::RawCookie::parse(cookie_value) {
+        store.insert_raw(&cookie, host).ok();
+    }
+}
+
 impl CliContext {
     pub fn init(args: CliArgs) -> Result<Self, Error> {
         let cookie_path = cookies_path();
@@ -203,20 +242,12 @@ impl CliContext {
             CookieStore::default()
         }));
 
-        // If the local auth cookie exists (running on the router), inject it
-        // so the server's auth middleware trusts us without a session.
-        if let Ok(local_token) = std::fs::read_to_string(crate::auth::LOCAL_AUTH_COOKIE_PATH) {
-            let local_token = local_token.trim();
-            let domain = args.host.host_str().unwrap_or("localhost");
-            let cookie_value =
-                format!("local={local_token}; Domain={domain}; Path=/; SameSite=Strict");
-            if let Ok(cookie) = cookie_store::RawCookie::parse(cookie_value) {
-                cookie_store
-                    .lock()
-                    .unwrap()
-                    .insert_raw(&cookie, &args.host)
-                    .ok();
-            }
+        let local_token = std::fs::read_to_string(crate::auth::LOCAL_AUTH_COOKIE_PATH).ok();
+        let host = args
+            .host
+            .unwrap_or_else(|| default_host(local_token.is_some()));
+        if let Some(local_token) = &local_token {
+            insert_local_auth_cookie(&mut cookie_store.lock().unwrap(), &host, local_token);
         }
 
         let client = Client::builder()
@@ -232,7 +263,7 @@ impl CliContext {
         Ok(Self(Arc::new(CliContextSeed {
             config_root: args.config_root,
             configs_only: args.configs_only,
-            host: args.host,
+            host,
             client,
             cookie_store,
             cookie_path,
@@ -346,7 +377,7 @@ impl CallRemote<ServerContext> for CliContext {
         // feature-unification forces on for the whole build. The rpc-toolkit
         // HTTP server only ever parses JSON request bodies, so a CBOR body
         // fails to parse before any handler runs. Auth is carried by the
-        // cookie store on `self.client` (local auth cookie / loopback), so we
+        // cookie store on `self.client` (session or local auth cookie), so we
         // don't need start-os's signature header.
         let rpc_req = RpcRequest {
             id: Some(Id::Number(0.into())),
@@ -475,6 +506,36 @@ pub async fn run_quiet_async(
         .await
 }
 
+/// Make odhcpd re-read its config, and give it a moment to act on the change,
+/// **before** the network is torn down or reconfigured.
+///
+/// This is the only way to revoke an IPv6 prefix from LAN clients. SLAAC has no
+/// lease to expire, so a prefix is withdrawn by advertising it one last time
+/// with zero lifetimes (RFC 9096 §3.5). odhcpd emits that RA from
+/// `router_setup_interface(iface, false)`, which it reaches when a config reload
+/// finds RA newly disabled on an interface — i.e. on **SIGHUP**, which is what
+/// `/etc/init.d/odhcpd reload` sends. A `restart` does not: odhcpd's exit path
+/// tears down the process without touching the interfaces, so the old process
+/// dies silently and the new one starts with RA already off, having never told
+/// anyone. Clients then keep the address for the rest of its advertised valid
+/// lifetime (odhcpd caps this at 5400 s), which is why "IPv6 disabled" used to
+/// leave devices holding addresses for up to 90 minutes.
+///
+/// Two ordering constraints make this a helper rather than a one-line call:
+///
+/// * The UCI change must already be on disk — the reload is what reads it.
+/// * The prefix must still be on the interface, so this has to run *before*
+///   `network restart`/`reload`. There is nothing to wait on (`procd_send_signal`
+///   returns as soon as the signal is delivered, while the RA goes out later
+///   from odhcpd's event loop), so we settle for a fixed pause.
+///
+/// Best-effort by nature: odhcpd sends exactly one final RA, and a client that
+/// misses it — or is asleep — falls back to waiting out the valid lifetime.
+pub async fn deprecate_odhcpd_prefixes() {
+    let _ = run_quiet_async(tokio::process::Command::new("/etc/init.d/odhcpd").arg("reload")).await;
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+}
+
 pub fn init_logging(name: &str) {
     use std::ffi::CString;
 
@@ -505,4 +566,44 @@ pub fn init_logging(name: &str) {
         .with(filter);
     tracing::subscriber::set_global_default(subscriber)
         .expect("failed to set global tracing subscriber");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sends_token(host: &str) -> bool {
+        let url: Url = host.parse().unwrap();
+        let mut store = CookieStore::default();
+        insert_local_auth_cookie(&mut store, &url, "token\n");
+        store
+            .matches(&url)
+            .iter()
+            .any(|c| c.name() == "local" && c.value() == "token")
+    }
+
+    #[test]
+    fn default_host_on_router_receives_local_auth_cookie() {
+        assert!(sends_token(default_host(true).as_str()));
+        assert!(!sends_token(default_host(false).as_str()));
+    }
+
+    #[test]
+    fn local_auth_cookie_only_for_loopback_hosts() {
+        for host in [
+            "http://localhost",
+            "http://127.0.0.1",
+            "http://127.0.0.1:8080/rpc/v1",
+        ] {
+            assert!(sends_token(host), "{host}");
+        }
+        for host in [
+            "http://192.168.0.1",
+            "https://router.lan",
+            "http://example.com",
+            "http://10.0.0.1:80",
+        ] {
+            assert!(!sends_token(host), "{host}");
+        }
+    }
 }

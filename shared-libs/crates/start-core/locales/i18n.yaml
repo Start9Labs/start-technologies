@@ -7,6 +7,27 @@ acme.invalid-contact:
   fr_FR: "Contact ACME invalide %{contact} : doit être un URI « mailto: » contenant une adresse e-mail (par exemple « mailto:vous@example.com »)"
   pl_PL: "Nieprawidłowy kontakt ACME %{contact}: musi być URI „mailto:” zawierającym adres e-mail (np. „mailto:ty@example.com”)"
 
+acme.order-failed-message:
+  en_US: "%{error}. The address does not answer until a certificate is issued: check that its DNS record points at this server, and that port 443 reaches it — a certificate authority validates on port 443 whatever port the address itself serves."
+  de_DE: "%{error}. Die Adresse antwortet erst, wenn ein Zertifikat ausgestellt ist: Prüfen Sie, ob ihr DNS-Eintrag auf diesen Server zeigt und Port 443 ihn erreicht — eine Zertifizierungsstelle validiert über Port 443, unabhängig davon, über welchen Port die Adresse selbst bereitgestellt wird."
+  es_ES: "%{error}. La dirección no responde hasta que se emita un certificado: comprueba que su registro DNS apunte a este servidor y que el puerto 443 llegue hasta él; una autoridad de certificación valida por el puerto 443 sea cual sea el puerto en el que se sirva la dirección."
+  fr_FR: "%{error}. L'adresse ne répond pas tant qu'un certificat n'est pas émis : vérifiez que son enregistrement DNS pointe vers ce serveur et que le port 443 l'atteint — une autorité de certification valide sur le port 443, quel que soit le port sur lequel l'adresse est servie."
+  pl_PL: "%{error}. Adres nie odpowiada, dopóki certyfikat nie zostanie wydany: sprawdź, czy jego rekord DNS wskazuje ten serwer i czy port 443 do niego dociera — urząd certyfikacji weryfikuje przez port 443, niezależnie od portu, na którym serwowany jest sam adres."
+
+acme.order-failed-title:
+  en_US: "Could not get a certificate for %{domain}"
+  de_DE: "Zertifikat für %{domain} konnte nicht bezogen werden"
+  es_ES: "No se ha podido obtener un certificado para %{domain}"
+  fr_FR: "Impossible d'obtenir un certificat pour %{domain}"
+  pl_PL: "Nie udało się uzyskać certyfikatu dla %{domain}"
+
+acme.order-timed-out:
+  en_US: "The certificate authority did not answer in time"
+  de_DE: "Die Zertifizierungsstelle hat nicht rechtzeitig geantwortet"
+  es_ES: "La autoridad de certificación no respondió a tiempo"
+  fr_FR: "L'autorité de certification n'a pas répondu à temps"
+  pl_PL: "Urząd certyfikacji nie odpowiedział na czas"
+
 bins.deprecated.renamed:
   en_US: "%{old} has been renamed to %{new}"
   de_DE: "%{old} wurde in %{new} umbenannt"
@@ -148,6 +169,20 @@ s9pk.init.cloning-guide:
   fr_FR: "Clonage du monorepo Start9 (guide d'empaquetage, sources du SDK et de l'OS)…"
   pl_PL: "Klonowanie monorepo Start9 (przewodnik pakowania, kod źródłowy SDK i OS)…"
 
+s9pk.init.guide-linked-off-branch:
+  en_US: "%{path} links to %{target}, which is on branch `%{branch}`, not `%{expected}`: its guide and package template may describe an `@start9labs/start-sdk` that npm cannot resolve. Rather than switching that checkout, remove the link and %{next} to give the workspace a checkout of its own."
+  de_DE: "%{path} verweist auf %{target}, das auf dem Branch `%{branch}` steht, nicht `%{expected}`: Leitfaden und Paketvorlage könnten ein `@start9labs/start-sdk` beschreiben, das npm nicht auflösen kann. Statt diesen Checkout umzuschalten, entferne den Link und %{next}, damit der Arbeitsbereich einen eigenen Checkout erhält."
+  es_ES: "%{path} enlaza a %{target}, que está en la rama `%{branch}`, no en `%{expected}`: su guía y su plantilla de paquete pueden describir un `@start9labs/start-sdk` que npm no puede resolver. En lugar de cambiar ese checkout, elimina el enlace y %{next} para que el espacio de trabajo tenga un checkout propio."
+  fr_FR: "%{path} pointe vers %{target}, qui est sur la branche `%{branch}`, pas `%{expected}` : son guide et son modèle de paquet peuvent décrire un `@start9labs/start-sdk` que npm ne peut pas résoudre. Plutôt que de changer la branche de ce dépôt, supprimez le lien et %{next} pour donner à l'espace de travail son propre clone."
+  pl_PL: "%{path} wskazuje na %{target}, który jest na gałęzi `%{branch}`, a nie `%{expected}`: jego przewodnik i szablon pakietu mogą opisywać `@start9labs/start-sdk`, którego npm nie może rozwiązać. Zamiast przełączać tamto repozytorium, usuń link i %{next}, aby obszar roboczy otrzymał własną kopię."
+
+s9pk.init.guide-off-branch:
+  en_US: "%{path} is on branch `%{branch}`, not `%{expected}`: its guide and package template may describe an `@start9labs/start-sdk` that npm cannot resolve. Move it out of the workspace, then %{next} to clone a fresh checkout on `%{expected}`."
+  de_DE: "%{path} steht auf dem Branch `%{branch}`, nicht `%{expected}`: Leitfaden und Paketvorlage könnten ein `@start9labs/start-sdk` beschreiben, das npm nicht auflösen kann. Verschiebe es aus dem Arbeitsbereich und %{next}, um einen frischen Checkout auf `%{expected}` zu klonen."
+  es_ES: "%{path} está en la rama `%{branch}`, no en `%{expected}`: su guía y su plantilla de paquete pueden describir un `@start9labs/start-sdk` que npm no puede resolver. Sácalo del espacio de trabajo y después %{next} para clonar un checkout nuevo en `%{expected}`."
+  fr_FR: "%{path} est sur la branche `%{branch}`, pas `%{expected}` : son guide et son modèle de paquet peuvent décrire un `@start9labs/start-sdk` que npm ne peut pas résoudre. Déplacez-le hors de l'espace de travail, puis %{next} pour cloner un nouveau dépôt sur `%{expected}`."
+  pl_PL: "%{path} jest na gałęzi `%{branch}`, a nie `%{expected}`: jego przewodnik i szablon pakietu mogą opisywać `@start9labs/start-sdk`, którego npm nie może rozwiązać. Przenieś go poza obszar roboczy, a następnie %{next}, aby sklonować świeżą kopię na `%{expected}`."
+
 s9pk.init.installing-deps:
   en_US: "Installing dependencies (npm install)…"
   de_DE: "Abhängigkeiten werden installiert (npm install)…"
@@ -170,11 +205,11 @@ s9pk.init.not-in-workspace:
   pl_PL: "Nie jesteś w obszarze roboczym pakowania. Najpierw uruchom `start-cli s9pk init-workspace`."
 
 s9pk.init.package-created:
-  en_US: "Created %{id} at %{path}. Next: work the checklist in TODO.md."
-  de_DE: "%{id} wurde unter %{path} erstellt. Nächster Schritt: Arbeite die Checkliste in TODO.md ab."
-  es_ES: "Se creó %{id} en %{path}. Siguiente: completa la lista de tareas en TODO.md."
-  fr_FR: "%{id} créé dans %{path}. Étape suivante : suivez la liste de tâches dans TODO.md."
-  pl_PL: "Utworzono %{id} w %{path}. Następnie: wykonaj listę zadań w TODO.md."
+  en_US: "Created %{id} at %{path}. Next: work the New Package Checklist (docs.start9.com/packaging/new-package-checklist.html)."
+  de_DE: "%{id} wurde unter %{path} erstellt. Nächster Schritt: Arbeite die Checkliste für neue Pakete ab (docs.start9.com/packaging/new-package-checklist.html)."
+  es_ES: "Se creó %{id} en %{path}. Siguiente: completa la lista de comprobación para paquetes nuevos (docs.start9.com/packaging/new-package-checklist.html)."
+  fr_FR: "%{id} créé dans %{path}. Étape suivante : suivez la liste de contrôle pour nouveaux paquets (docs.start9.com/packaging/new-package-checklist.html)."
+  pl_PL: "Utworzono %{id} w %{path}. Następnie: wykonaj listę kontrolną nowego pakietu (docs.start9.com/packaging/new-package-checklist.html)."
 
 s9pk.init.package-exists:
   en_US: "%{path} already exists; choose a different name or remove it."
@@ -182,6 +217,20 @@ s9pk.init.package-exists:
   es_ES: "%{path} ya existe; elige otro nombre o elimínalo."
   fr_FR: "%{path} existe déjà ; choisissez un autre nom ou supprimez-le."
   pl_PL: "%{path} już istnieje; wybierz inną nazwę lub usuń je."
+
+s9pk.init.run-init-workspace:
+  en_US: "run `%{command}`"
+  de_DE: "führe `%{command}` aus"
+  es_ES: "ejecuta `%{command}`"
+  fr_FR: "exécutez `%{command}`"
+  pl_PL: "uruchom `%{command}`"
+
+s9pk.init.run-init-workspace-in-root:
+  en_US: "run `start-cli s9pk init-workspace` from the workspace root"
+  de_DE: "führe `start-cli s9pk init-workspace` im Wurzelverzeichnis des Arbeitsbereichs aus"
+  es_ES: "ejecuta `start-cli s9pk init-workspace` desde la raíz del espacio de trabajo"
+  fr_FR: "exécutez `start-cli s9pk init-workspace` depuis la racine de l'espace de travail"
+  pl_PL: "uruchom `start-cli s9pk init-workspace` w katalogu głównym obszaru roboczego"
 
 s9pk.init.template-missing:
   en_US: "Package template not found at %{path}. Re-run `start-cli s9pk init-workspace` to restore the packaging guide."
@@ -218,6 +267,13 @@ s9pk.init.no-workspace-in-package-repo:
   fr_FR: "Aucun espace de travail d'empaquetage trouvé. %{repo} est un dépôt de paquet ; un espace de travail est le répertoire qui *contient* vos dépôts de paquets (et fournit le guide d'empaquetage pour l'IA). Créez-en un dans son répertoire parent, puis réessayez : `cd %{parent} && start-cli s9pk init-workspace`. Guide de configuration : %{docs}"
   pl_PL: "Nie znaleziono obszaru roboczego pakowania. %{repo} to repozytorium pakietu; obszar roboczy to katalog, który *zawiera* twoje repozytoria pakietów (i udostępnia przewodnik pakowania dla AI). Utwórz jeden w jego katalogu nadrzędnym, a następnie spróbuj ponownie: `cd %{parent} && start-cli s9pk init-workspace`. Przewodnik konfiguracji: %{docs}"
 
+s9pk.init.start-cli-outdated:
+  en_US: "start-cli %{running} is behind the published %{published}. Update it with `apt upgrade` on Debian, or by re-running `curl -fsSL https://start9.com/start-cli/install.sh | sh`."
+  de_DE: "start-cli %{running} liegt hinter der veröffentlichten Version %{published}. Aktualisiere es unter Debian mit `apt upgrade`, sonst durch erneutes Ausführen von `curl -fsSL https://start9.com/start-cli/install.sh | sh`."
+  es_ES: "start-cli %{running} está por detrás de la versión publicada %{published}. Actualízalo con `apt upgrade` en Debian, o volviendo a ejecutar `curl -fsSL https://start9.com/start-cli/install.sh | sh`."
+  fr_FR: "start-cli %{running} est en retard sur la version publiée %{published}. Mettez-le à jour avec `apt upgrade` sous Debian, ou en relançant `curl -fsSL https://start9.com/start-cli/install.sh | sh`."
+  pl_PL: "start-cli %{running} jest starszy niż opublikowana wersja %{published}. Zaktualizuj go poleceniem `apt upgrade` w Debianie lub uruchamiając ponownie `curl -fsSL https://start9.com/start-cli/install.sh | sh`."
+
 # s9pk/v2/pack.rs
 s9pk.pack.git-hash-omitted:
   en_US: "No git commit found in %{path} — building without a commit hash in the manifest. Commit your work (or check that git is set up) to include it."
@@ -225,6 +281,27 @@ s9pk.pack.git-hash-omitted:
   es_ES: "No se encontró ningún commit de git en %{path}; la compilación no incluye un hash de commit en el manifiesto. Haz un commit de tu trabajo (o comprueba que git esté configurado) para incluirlo."
   fr_FR: "Aucun commit git trouvé dans %{path} — la construction n'inclut pas de hash de commit dans le manifeste. Faites un commit de votre travail (ou vérifiez que git est configuré) pour l'inclure."
   pl_PL: "Nie znaleziono commita git w %{path} — kompilacja nie zawiera hasha commita w manifeście. Zatwierdź swoją pracę (lub sprawdź, czy git jest skonfigurowany), aby go dołączyć."
+
+s9pk.pack.image-unavailable-emulating:
+  en_US: "Image %{image} is not available for %{requested}, emulating as %{emulated}"
+  de_DE: "Image %{image} ist für %{requested} nicht verfügbar; Emulation als %{emulated}"
+  es_ES: "La imagen %{image} no está disponible para %{requested}; se emula como %{emulated}"
+  fr_FR: "L'image %{image} n'est pas disponible pour %{requested} ; émulation en tant que %{emulated}"
+  pl_PL: "Obraz %{image} nie jest dostępny dla %{requested}; emulowanie jako %{emulated}"
+
+s9pk.pack.image-no-architecture-to-emulate:
+  en_US: "Image %{image} has no architecture available to emulate"
+  de_DE: "Für Image %{image} ist keine Architektur zum Emulieren verfügbar"
+  es_ES: "La imagen %{image} no tiene ninguna arquitectura disponible para emular"
+  fr_FR: "Aucune architecture n'est disponible pour émuler l'image %{image}"
+  pl_PL: "Obraz %{image} nie ma architektury dostępnej do emulacji"
+
+s9pk.pack.image-unavailable:
+  en_US: "Image %{image} is not available for %{requested}"
+  de_DE: "Image %{image} ist für %{requested} nicht verfügbar"
+  es_ES: "La imagen %{image} no está disponible para %{requested}"
+  fr_FR: "L'image %{image} n'est pas disponible pour %{requested}"
+  pl_PL: "Obraz %{image} nie jest dostępny dla %{requested}"
 
 # setup.rs
 setup.opening-data-drive:
@@ -283,6 +360,13 @@ setup.restoring-backup:
   fr_FR: "Restauration de la sauvegarde"
   pl_PL: "Przywracanie kopii zapasowej"
 
+setup.transfer-source-is-destination:
+  en_US: "The transfer source and destination must be different drives"
+  de_DE: "Quell- und Ziellaufwerk der Übertragung müssen unterschiedlich sein"
+  es_ES: "Las unidades de origen y destino de la transferencia deben ser diferentes"
+  fr_FR: "Les disques source et destination du transfert doivent être différents"
+  pl_PL: "Dysk źródłowy i docelowy transferu muszą być różne"
+
 setup.transferring-data:
   en_US: "Transferring data"
   de_DE: "Daten werden übertragen"
@@ -298,6 +382,13 @@ setup.password-required:
   pl_PL: "Hasło jest wymagane do nowej konfiguracji"
 
 # system.rs
+system.epp-not-available:
+  en_US: "Energy performance preference %{epp} not available"
+  de_DE: "Energie-Leistungs-Präferenz %{epp} nicht verfügbar"
+  es_ES: "La preferencia de energía/rendimiento %{epp} no está disponible"
+  fr_FR: "La préférence énergie/performance %{epp} n'est pas disponible"
+  pl_PL: "Preferencja energii/wydajności %{epp} nie jest dostępna"
+
 system.governor-not-available:
   en_US: "Governor %{governor} not available"
   de_DE: "Governor %{governor} nicht verfügbar"
@@ -402,6 +493,34 @@ system.field-missing-from-meminfo:
   es_ES: "%{field} falta en /proc/meminfo"
   fr_FR: "%{field} manquant dans /proc/meminfo"
   pl_PL: "%{field} brakuje w /proc/meminfo"
+
+system.trust-ca.fingerprint:
+  en_US: "SHA-256 fingerprint"
+  de_DE: "SHA-256-Fingerabdruck"
+  es_ES: "Huella digital SHA-256"
+  fr_FR: "Empreinte SHA-256"
+  pl_PL: "Odcisk SHA-256"
+
+system.trust-ca.not-ca:
+  en_US: "The certificate is not a CA"
+  de_DE: "Das Zertifikat ist keine Zertifizierungsstelle"
+  es_ES: "El certificado no es una CA"
+  fr_FR: "Le certificat n’est pas une autorité de certification"
+  pl_PL: "Certyfikat nie jest certyfikatem CA"
+
+system.trust-ca.not-self-signed-root:
+  en_US: "The certificate is not a self-signed root CA"
+  de_DE: "Das Zertifikat ist keine selbstsignierte Stammzertifizierungsstelle"
+  es_ES: "El certificado no es una CA raíz autofirmada"
+  fr_FR: "Le certificat n’est pas une autorité de certification racine autosignée"
+  pl_PL: "Certyfikat nie jest samopodpisanym głównym certyfikatem CA"
+
+system.trust-ca.subject:
+  en_US: "Subject"
+  de_DE: "Subjekt"
+  es_ES: "Sujeto"
+  fr_FR: "Sujet"
+  pl_PL: "Podmiot"
 
 # error.rs - ErrorKind strings
 error.unknown:
@@ -965,6 +1084,20 @@ error.backup-password-mismatch:
   pl_PL: "Niezgodne Hasło Kopii Zapasowej"
 
 # disk/main.rs
+disk.main.defrag-failed:
+  en_US: "Filesystem optimization failed; continuing with the converted filesystem."
+  de_DE: "Die Dateisystemoptimierung ist fehlgeschlagen; die Konvertierung wird fortgesetzt."
+  es_ES: "La optimización del sistema de archivos falló; se continúa con el sistema de archivos convertido."
+  fr_FR: "L'optimisation du système de fichiers a échoué ; la conversion se poursuit."
+  pl_PL: "Optymalizacja systemu plików nie powiodła się; konwersja będzie kontynuowana."
+
+disk.main.defrag-skipped:
+  en_US: "Skipping filesystem optimization to preserve free space."
+  de_DE: "Die Dateisystemoptimierung wird übersprungen, um freien Speicherplatz zu erhalten."
+  es_ES: "Se omite la optimización del sistema de archivos para conservar espacio libre."
+  fr_FR: "L'optimisation du système de fichiers est ignorée afin de préserver l'espace libre."
+  pl_PL: "Pominięto optymalizację systemu plików, aby zachować wolne miejsce."
+
 disk.main.disk-not-found:
   en_US: "StartOS disk not found."
   de_DE: "StartOS-Festplatte nicht gefunden."
@@ -1171,6 +1304,21 @@ disk.mount.binding:
   fr_FR: "Liaison de %{src} à %{dst}"
   pl_PL: "Wiązanie %{src} do %{dst}"
 
+# os_install/mod.rs
+os-install.invalid-partuuid:
+  en_US: "Unable to resolve a valid partition UUID for %{partition}"
+  de_DE: "Für %{partition} konnte keine gültige Partitions-UUID ermittelt werden"
+  es_ES: "No se pudo resolver un UUID de partición válido para %{partition}"
+  fr_FR: "Impossible de résoudre un UUID de partition valide pour %{partition}"
+  pl_PL: "Nie udało się ustalić prawidłowego UUID partycji dla %{partition}"
+
+os-install.unknown-disk:
+  en_US: "No connected drive has the stable path %{disk}"
+  de_DE: "Kein angeschlossenes Laufwerk hat den stabilen Pfad %{disk}"
+  es_ES: "Ninguna unidad conectada tiene la ruta estable %{disk}"
+  fr_FR: "Aucun disque connecté n’a le chemin stable %{disk}"
+  pl_PL: "Żaden podłączony dysk nie ma stabilnej ścieżki %{disk}"
+
 # os_install/gpt.rs
 os-install.no-free-space-for-os-root:
   en_US: "No free space left on device for OS root partition"
@@ -1232,6 +1380,13 @@ hostname.empty:
   fr_FR: "Le nom d'hôte ne peut pas être vide"
   pl_PL: "Nazwa hosta nie może być pusta"
 
+hostname.hyphen-edge:
+  en_US: "Hostname cannot start or end with a hyphen"
+  de_DE: "Der Hostname darf nicht mit einem Bindestrich beginnen oder enden"
+  es_ES: "El nombre de host no puede empezar ni terminar con un guion"
+  fr_FR: "Le nom d'hôte ne peut pas commencer ni finir par un trait d'union"
+  pl_PL: "Nazwa hosta nie może zaczynać się ani kończyć myślnikiem"
+
 hostname.invalid-character:
   en_US: "Invalid character in hostname: %{char}"
   de_DE: "Ungültiges Zeichen im Hostnamen: %{char}"
@@ -1239,12 +1394,12 @@ hostname.invalid-character:
   fr_FR: "Caractère invalide dans le nom d'hôte : %{char}"
   pl_PL: "Nieprawidłowy znak w nazwie hosta: %{char}"
 
-hostname.must-provide-name-or-hostname:
-  en_US: "Must provide at least one of: name, hostname"
-  de_DE: "Es muss mindestens eines angegeben werden: name, hostname"
-  es_ES: "Se debe proporcionar al menos uno de: name, hostname"
-  fr_FR: "Vous devez fournir au moins l'un des éléments suivants : name, hostname"
-  pl_PL: "Należy podać co najmniej jedno z: name, hostname"
+hostname.too-long:
+  en_US: "Hostname must be %{max} characters or fewer"
+  de_DE: "Der Hostname darf höchstens %{max} Zeichen lang sein"
+  es_ES: "El nombre de host debe tener %{max} caracteres o menos"
+  fr_FR: "Le nom d'hôte doit comporter au maximum %{max} caractères"
+  pl_PL: "Nazwa hosta może mieć maksymalnie %{max} znaków"
 
 # init.rs
 init.running-preinit:
@@ -1366,12 +1521,26 @@ init.error-running-script:
   fr_FR: "Erreur lors de l'exécution de %{script} : %{error}"
   pl_PL: "Błąd uruchamiania %{script}: %{error}"
 
+init.cpu-epp-not-available:
+  en_US: 'CPU Energy Performance Preference "%{epp}" Not Available'
+  de_DE: 'CPU-Energie-Leistungs-Präferenz "%{epp}" nicht verfügbar'
+  es_ES: 'Preferencia de energía/rendimiento de CPU "%{epp}" no disponible'
+  fr_FR: 'Préférence énergie/performance CPU "%{epp}" non disponible'
+  pl_PL: 'Preferencja energii/wydajności CPU "%{epp}" niedostępna'
+
 init.cpu-governor-not-available:
   en_US: 'CPU Governor "%{governor}" Not Available'
   de_DE: 'CPU-Governor "%{governor}" nicht verfügbar'
   es_ES: 'CPU Governor "%{governor}" no disponible'
   fr_FR: 'Gouverneur CPU "%{governor}" non disponible'
   pl_PL: 'Governor CPU "%{governor}" niedostępny'
+
+init.setting-cpu-epp:
+  en_US: 'Setting CPU Energy Performance Preference to "%{epp}"'
+  de_DE: 'Setze CPU-Energie-Leistungs-Präferenz auf "%{epp}"'
+  es_ES: 'Configurando la preferencia de energía/rendimiento de CPU a "%{epp}"'
+  fr_FR: 'Configuration de la préférence énergie/performance CPU à "%{epp}"'
+  pl_PL: 'Ustawianie preferencji energii/wydajności CPU na "%{epp}"'
 
 init.setting-cpu-governor:
   en_US: 'Setting CPU Governor to "%{governor}"'
@@ -1500,6 +1669,13 @@ backup.bulk.service-not-ready:
   fr_FR: "Impossible de créer une sauvegarde d'un service encore en cours d'initialisation ou en état d'erreur"
   pl_PL: "Nie można utworzyć kopii zapasowej usługi, która jest jeszcze inicjalizowana lub znajduje się w stanie błędu"
 
+backup.bulk.powering-down:
+  en_US: "Server is shutting down or restarting"
+  de_DE: "Server wird heruntergefahren oder neu gestartet"
+  es_ES: "El servidor se está apagando o reiniciando"
+  fr_FR: "Le serveur est en cours d'arrêt ou de redémarrage"
+  pl_PL: "Serwer jest wyłączany lub uruchamiany ponownie"
+
 backup.bulk.reclaim-failed:
   en_US: "Failed to reclaim old-backup space: %{error}"
   de_DE: "Speicherplatz der alten Sicherung konnte nicht freigegeben werden: %{error}"
@@ -1587,6 +1763,99 @@ net.plugin.binding-not-found:
   es_ES: "enlace no encontrado: %{binding}"
   fr_FR: "liaison introuvable : %{binding}"
   pl_PL: "powiązanie nie znalezione: %{binding}"
+
+# net/host/address.rs
+net.host.private-domain-is-server-mdns:
+  en_US: '"%{domain}" is the server mDNS name and cannot be assigned as a private domain'
+  de_DE: '„%{domain}“ ist der mDNS-Name des Servers und kann nicht als private Domain zugewiesen werden'
+  es_ES: '«%{domain}» es el nombre mDNS del servidor y no se puede asignar como dominio privado'
+  fr_FR: '« %{domain} » est le nom mDNS du serveur et ne peut pas être attribué comme domaine privé'
+  pl_PL: '„%{domain}” jest nazwą mDNS serwera i nie może zostać przypisana jako domena prywatna'
+
+# net/host/binding.rs
+net.host.binding.address-not-found:
+  en_US: "%{address} is not an address of binding %{port}. Its addresses are:"
+  de_DE: "%{address} ist keine Adresse der Bindung %{port}. Ihre Adressen sind:"
+  es_ES: "%{address} no es una dirección del vínculo %{port}. Sus direcciones son:"
+  fr_FR: "%{address} n'est pas une adresse de la liaison %{port}. Ses adresses sont :"
+  pl_PL: "%{address} nie jest adresem powiązania %{port}. Jego adresy to:"
+
+net.host.binding.choose-address:
+  en_US: "%{address} matches several addresses of binding %{port}; choose one:"
+  de_DE: "%{address} passt auf mehrere Adressen der Bindung %{port}; wählen Sie eine aus:"
+  es_ES: "%{address} coincide con varias direcciones del vínculo %{port}; elija una:"
+  fr_FR: "%{address} correspond à plusieurs adresses de la liaison %{port} ; choisissez-en une :"
+  pl_PL: "%{address} pasuje do kilku adresów powiązania %{port}; wybierz jeden:"
+
+net.host.binding.address-kind-ipv4:
+  en_US: "IPv4"
+  de_DE: "IPv4"
+  es_ES: "IPv4"
+  fr_FR: "IPv4"
+  pl_PL: "IPv4"
+
+net.host.binding.address-kind-ipv6:
+  en_US: "IPv6"
+  de_DE: "IPv6"
+  es_ES: "IPv6"
+  fr_FR: "IPv6"
+  pl_PL: "IPv6"
+
+net.host.binding.address-kind-mdns:
+  en_US: "mDNS"
+  de_DE: "mDNS"
+  es_ES: "mDNS"
+  fr_FR: "mDNS"
+  pl_PL: "mDNS"
+
+net.host.binding.address-kind-private-domain:
+  en_US: "private domain"
+  de_DE: "private Domain"
+  es_ES: "dominio privado"
+  fr_FR: "domaine privé"
+  pl_PL: "domena prywatna"
+
+net.host.binding.address-kind-public-domain:
+  en_US: "public domain"
+  de_DE: "öffentliche Domain"
+  es_ES: "dominio público"
+  fr_FR: "domaine public"
+  pl_PL: "domena publiczna"
+
+net.host.binding.address-kind-plugin:
+  en_US: "plugin"
+  de_DE: "Plugin"
+  es_ES: "plugin"
+  fr_FR: "plugin"
+  pl_PL: "wtyczka"
+
+net.host.binding.address-via:
+  en_US: "via %{gateways}"
+  de_DE: "über %{gateways}"
+  es_ES: "a través de %{gateways}"
+  fr_FR: "via %{gateways}"
+  pl_PL: "przez %{gateways}"
+
+net.host.binding.address-public:
+  en_US: "public"
+  de_DE: "öffentlich"
+  es_ES: "pública"
+  fr_FR: "publique"
+  pl_PL: "publiczny"
+
+net.host.binding.address-private:
+  en_US: "private"
+  de_DE: "privat"
+  es_ES: "privada"
+  fr_FR: "privée"
+  pl_PL: "prywatny"
+
+net.host.binding.address-ssl:
+  en_US: "SSL"
+  de_DE: "SSL"
+  es_ES: "SSL"
+  fr_FR: "SSL"
+  pl_PL: "SSL"
 
 # net/ssl.rs
 net.ssl.unreachable:
@@ -1881,6 +2150,13 @@ net.gateway.error-syncing-ip-info:
   fr_FR: "Erreur de synchronisation des infos IP vers la BDD : %{error}"
   pl_PL: "Błąd synchronizacji informacji IP z bazą danych: %{error}"
 
+net.gateway.network-settle-timeout:
+  en_US: "Timed out waiting for the network to settle. Starting services anyway..."
+  de_DE: "Zeitüberschreitung beim Warten auf ein stabiles Netzwerk. Dienste werden trotzdem gestartet..."
+  es_ES: "Se agotó el tiempo de espera para que la red se estabilizara. Iniciando los servicios de todos modos..."
+  fr_FR: "Délai d'attente dépassé pour la stabilisation du réseau. Démarrage des services malgré tout..."
+  pl_PL: "Przekroczono czas oczekiwania na ustabilizowanie sieci. Usługi zostaną uruchomione mimo to..."
+
 net.gateway.cannot-forget-connected-interface:
   en_US: "Cannot forget currently connected interface"
   de_DE: "Aktuell verbundene Schnittstelle kann nicht vergessen werden"
@@ -2002,6 +2278,21 @@ lxc.mod.cleaned-up-containers:
   fr_FR: "Conteneurs LXC orphelins nettoyés avec succès"
   pl_PL: "Pomyślnie wyczyszczono wiszące kontenery LXC"
 
+# version/release_notes.rs
+release-notes.welcome-message:
+  en_US: "Click \"View details\" for what's new in this release."
+  de_DE: "Klicken Sie auf \"Details anzeigen\", um zu sehen, was in dieser Version neu ist."
+  es_ES: "Haz clic en \"Ver detalles\" para conocer las novedades de esta versión."
+  fr_FR: "Cliquez sur \"Voir les détails\" pour découvrir les nouveautés de cette version."
+  pl_PL: "Kliknij \"Zobacz szczegóły\", aby zobaczyć nowości w tej wersji."
+
+release-notes.welcome-title:
+  en_US: "Welcome to StartOS %{version}!"
+  de_DE: "Willkommen bei StartOS %{version}!"
+  es_ES: "¡Bienvenido a StartOS %{version}!"
+  fr_FR: "Bienvenue dans StartOS %{version} !"
+  pl_PL: "Witamy w StartOS %{version}!"
+
 # version/v0_3_6_alpha_0.rs
 migration.migrating-package:
   en_US: "Migrating package %{package}..."
@@ -2097,6 +2388,14 @@ registry.context.unauthorized:
   es_ES: "No autorizado"
   fr_FR: "Non autorisé"
   pl_PL: "Brak autoryzacji"
+
+# registry/db.rs
+registry.db.pointer-outside-index:
+  en_US: "Subscription pointer must be at or below /index"
+  de_DE: "Der Abonnement-Zeiger muss auf oder unter /index liegen"
+  es_ES: "El puntero de suscripción debe estar en /index o por debajo"
+  fr_FR: "Le pointeur d'abonnement doit être situé au niveau ou en dessous de /index"
+  pl_PL: "Wskaźnik subskrypcji musi znajdować się w /index lub poniżej"
 
 # registry/os/asset/add.rs
 registry.os.asset.commitment-mismatch:
@@ -2445,6 +2744,26 @@ service.effects.dependency.unknown-dependency-kind:
   es_ES: "tipo de dependencia desconocido %{kind}"
   fr_FR: "type de dépendance inconnu %{kind}"
   pl_PL: "nieznany rodzaj zależności %{kind}"
+service.effects.dependency.volume-missing:
+  en_US: "volume %{volume} of %{package} does not exist — is %{package} installed?"
+  de_DE: "Volume %{volume} von %{package} existiert nicht — ist %{package} installiert?"
+  es_ES: "el volumen %{volume} de %{package} no existe — ¿está instalado %{package}?"
+  fr_FR: "le volume %{volume} de %{package} n'existe pas — %{package} est-il installé ?"
+  pl_PL: "wolumin %{volume} pakietu %{package} nie istnieje — czy %{package} jest zainstalowany?"
+
+service.effects.subcontainer.sync.unknown-group:
+  en_US: "unknown group: %{group}"
+  de_DE: "unbekannte Gruppe: %{group}"
+  es_ES: "grupo desconocido: %{group}"
+  fr_FR: "groupe inconnu : %{group}"
+  pl_PL: "nieznana grupa: %{group}"
+
+service.effects.subcontainer.sync.unknown-user:
+  en_US: "unknown user: %{user}"
+  de_DE: "unbekannter Benutzer: %{user}"
+  es_ES: "usuario desconocido: %{user}"
+  fr_FR: "utilisateur inconnu : %{user}"
+  pl_PL: "nieznany użytkownik: %{user}"
 
 # service/service_actor.rs
 service.service-actor.error-synchronizing-state:
@@ -2504,6 +2823,20 @@ service.service-map.installing-failed:
   es_ES: "Instalación fallida"
   fr_FR: "Échec de l'installation"
   pl_PL: "Instalacja nie powiodła się"
+
+service.service-map.no-downgrade-path:
+  en_US: "This service cannot be downgraded from %{from} to %{to}: it provides no migration path back to %{to}, so the data it has now cannot be carried over. To return to %{to}, uninstall the service — which deletes its data — and restore a backup made while it was running %{to}."
+  de_DE: "Dieser Dienst kann nicht von %{from} auf %{to} herabgestuft werden: Es gibt keinen Migrationspfad zurück zu %{to}, sodass die vorhandenen Daten nicht übernommen werden können. Um zu %{to} zurückzukehren, deinstallieren Sie den Dienst — dabei werden seine Daten gelöscht — und stellen Sie eine Sicherung wieder her, die unter %{to} erstellt wurde."
+  es_ES: "Este servicio no puede volver de %{from} a %{to}: no ofrece una ruta de migración de regreso a %{to}, por lo que los datos actuales no se pueden conservar. Para volver a %{to}, desinstale el servicio — lo que borra sus datos — y restaure un respaldo hecho mientras ejecutaba %{to}."
+  fr_FR: "Ce service ne peut pas être rétrogradé de %{from} vers %{to} : il ne fournit aucun chemin de migration de retour vers %{to}, donc ses données actuelles ne peuvent pas être reprises. Pour revenir à %{to}, désinstallez le service — ce qui supprime ses données — puis restaurez une sauvegarde effectuée sous %{to}."
+  pl_PL: "Tej usługi nie można cofnąć z %{from} do %{to}: nie udostępnia ścieżki migracji z powrotem do %{to}, więc obecnych danych nie da się przenieść. Aby wrócić do %{to}, odinstaluj usługę — co usunie jej dane — i przywróć kopię zapasową wykonaną na wersji %{to}."
+
+service.service-map.no-migration-path:
+  en_US: "This service cannot go from %{from} to %{to}: it provides no migration path between those versions, so the data it has now cannot be carried over. Try a version in between, or uninstall the service — which deletes its data — and restore a backup made while it was running %{to}."
+  de_DE: "Dieser Dienst kann nicht von %{from} zu %{to} wechseln: Zwischen diesen Versionen gibt es keinen Migrationspfad, sodass die vorhandenen Daten nicht übernommen werden können. Versuchen Sie eine Version dazwischen oder deinstallieren Sie den Dienst — dabei werden seine Daten gelöscht — und stellen Sie eine Sicherung wieder her, die unter %{to} erstellt wurde."
+  es_ES: "Este servicio no puede pasar de %{from} a %{to}: no ofrece una ruta de migración entre esas versiones, por lo que los datos actuales no se pueden conservar. Pruebe una versión intermedia, o desinstale el servicio — lo que borra sus datos — y restaure un respaldo hecho mientras ejecutaba %{to}."
+  fr_FR: "Ce service ne peut pas passer de %{from} à %{to} : aucun chemin de migration n'existe entre ces versions, donc ses données actuelles ne peuvent pas être reprises. Essayez une version intermédiaire, ou désinstallez le service — ce qui supprime ses données — puis restaurez une sauvegarde effectuée sous %{to}."
+  pl_PL: "Ta usługa nie może przejść z %{from} do %{to}: nie udostępnia ścieżki migracji między tymi wersjami, więc obecnych danych nie da się przenieść. Spróbuj wersji pośredniej albo odinstaluj usługę — co usunie jej dane — i przywróć kopię zapasową wykonaną na wersji %{to}."
 
 service.service-map.operation-failed:
   en_US: "%{operation} Failed"
@@ -2648,6 +2981,12 @@ context.cli.profile-cycle:
   es_ES: "«%{value}» forma parte de un ciclo de referencias de perfil"
   fr_FR: "« %{value} » fait partie d'un cycle de références de profil"
   pl_PL: "„%{value}” jest częścią cyklu odwołań profili"
+context.cli.not-logged-in:
+  en_US: "Not logged in to %{host}; enter the server password to log in."
+  de_DE: "Nicht bei %{host} angemeldet; geben Sie das Server-Passwort ein, um sich anzumelden."
+  es_ES: "No ha iniciado sesión en %{host}; introduzca la contraseña del servidor para iniciar sesión."
+  fr_FR: "Non connecté à %{host} ; saisissez le mot de passe du serveur pour vous connecter."
+  pl_PL: "Nie zalogowano do %{host}; wprowadź hasło serwera, aby się zalogować."
 
 # context/rpc.rs
 context.rpc.rpc-context-dropped:
@@ -3144,11 +3483,12 @@ help.arg.add-signer-key:
   pl_PL: "Dodaj klucz publiczny do sygnatariusza"
 
 help.arg.address:
-  en_US: "Network address"
-  de_DE: "Netzwerkadresse"
-  es_ES: "Dirección de red"
-  fr_FR: "Adresse réseau"
-  pl_PL: "Adres sieciowy"
+  en_US: "One of the binding's addresses (IP, <name>.local or domain), with :port when it serves several ports; a JSON HostnameInfo also works"
+  de_DE: "Eine Adresse der Bindung (IP, <name>.local oder Domain), mit :port, wenn sie mehrere Ports bedient; auch ein JSON-HostnameInfo wird akzeptiert"
+  es_ES: "Una dirección del vínculo (IP, <nombre>.local o dominio), con :puerto si sirve varios puertos; también se acepta un HostnameInfo en JSON"
+  fr_FR: "Une adresse de la liaison (IP, <nom>.local ou domaine), avec :port si elle dessert plusieurs ports ; un HostnameInfo en JSON est aussi accepté"
+  pl_PL: "Jeden z adresów powiązania (IP, <nazwa>.local lub domena), z :port, gdy obsługuje kilka portów; przyjmowany jest też HostnameInfo w JSON"
+
 
 help.arg.gua-wan:
   en_US: "Expose the IPv6 GUA to the WAN (false = LAN-only)"
@@ -3206,6 +3546,13 @@ help.arg.binding-enabled:
   fr_FR: "Activer ou désactiver cette liaison"
   pl_PL: "Włącz lub wyłącz to powiązanie"
 
+help.arg.ca-certificate:
+  en_US: "PEM-encoded CA certificate"
+  de_DE: "PEM-codiertes CA-Zertifikat"
+  es_ES: "Certificado de CA codificado en PEM"
+  fr_FR: "Certificat d’autorité encodé en PEM"
+  pl_PL: "Certyfikat CA zakodowany w formacie PEM"
+
 help.arg.cert-subject-alt-names:
   en_US: "Subject Alternative Name(s) for certificate"
   de_DE: "Alternative Subjektnamen für das Zertifikat"
@@ -3220,6 +3567,13 @@ help.arg.command-to-execute:
   fr_FR: "Commande à exécuter dans le conteneur"
   pl_PL: "Polecenie do wykonania w kontenerze"
 
+help.arg.completions-shell:
+  en_US: "Shell to generate the completion script for"
+  de_DE: "Shell, für die das Vervollständigungsskript erzeugt wird"
+  es_ES: "Shell para la que generar el script de autocompletado"
+  fr_FR: "Shell pour lequel générer le script de complétion"
+  pl_PL: "Powłoka, dla której ma zostać wygenerowany skrypt uzupełniania"
+
 help.arg.config-file-path:
   en_US: "Path to configuration file"
   de_DE: "Pfad zur Konfigurationsdatei"
@@ -3228,11 +3582,11 @@ help.arg.config-file-path:
   pl_PL: "Ścieżka do pliku konfiguracyjnego"
 
 help.arg.container-name:
-  en_US: "Name of the container"
-  de_DE: "Name des Containers"
-  es_ES: "Nombre del contenedor"
-  fr_FR: "Nom du conteneur"
-  pl_PL: "Nazwa kontenera"
+  en_US: "Name of the subcontainer"
+  de_DE: "Name des Subcontainers"
+  es_ES: "Nombre del subcontenedor"
+  fr_FR: "Nom du sous-conteneur"
+  pl_PL: "Nazwa podkontenera"
 
 help.arg.data-directory:
   en_US: "Path to data directory"
@@ -3242,11 +3596,11 @@ help.arg.data-directory:
   pl_PL: "Ścieżka do katalogu danych"
 
 help.arg.data-drive-path:
-  en_US: "Path to the data drive"
-  de_DE: "Pfad zum Datenlaufwerk"
-  es_ES: "Ruta a la unidad de datos"
-  fr_FR: "Chemin vers le disque de données"
-  pl_PL: "Ścieżka do dysku danych"
+  en_US: "Stable path to the data drive; may match the OS drive"
+  de_DE: "Stabiler Pfad zum Datenlaufwerk; kann dem Betriebssystemlaufwerk entsprechen"
+  es_ES: "Ruta estable a la unidad de datos; puede coincidir con la unidad del sistema operativo"
+  fr_FR: "Chemin stable vers le disque de données ; peut être identique au disque du système d’exploitation"
+  pl_PL: "Stabilna ścieżka do dysku danych; może być taka sama jak ścieżka dysku systemowego"
 
 help.arg.db-pointer:
   en_US: "JSON pointer to object in database to dump"
@@ -3318,13 +3672,6 @@ help.arg.ed25519:
   fr_FR: "Utiliser Ed25519 au lieu de NIST P-256"
   pl_PL: "Użyj Ed25519 zamiast NIST P-256"
 
-help.arg.emulate-missing-arch:
-  en_US: "Emulate missing architecture using this one"
-  de_DE: "Fehlende Architektur mit dieser emulieren"
-  es_ES: "Emular arquitectura faltante usando esta"
-  fr_FR: "Émuler l'architecture manquante avec celle-ci"
-  pl_PL: "Emuluj brakującą architekturę używając tej"
-
 help.arg.env-file-path:
   en_US: "Path to environment file"
   de_DE: "Pfad zur Umgebungsdatei"
@@ -3345,6 +3692,13 @@ help.arg.event-id:
   es_ES: "Identificador único de evento"
   fr_FR: "Identifiant unique de l'événement"
   pl_PL: "Unikalny identyfikator zdarzenia"
+
+help.arg.epp-name:
+  en_US: "CPU energy performance preference"
+  de_DE: "CPU-Energie-Leistungs-Präferenz"
+  es_ES: "Preferencia de energía/rendimiento de CPU"
+  fr_FR: "Préférence énergie/performance du CPU"
+  pl_PL: "Preferencja energii/wydajności CPU"
 
 help.arg.except-actions:
   en_US: "Action IDs to exclude"
@@ -3422,6 +3776,13 @@ help.arg.host-url:
   es_ES: "URL del servidor StartOS"
   fr_FR: "URL du serveur StartOS"
   pl_PL: "URL serwera StartOS"
+
+help.arg.hostname:
+  en_US: "The server's .local hostname: up to 32 lowercase letters, numbers, and hyphens, not starting or ending with a hyphen"
+  de_DE: "Der .local-Hostname des Servers: bis zu 32 Kleinbuchstaben, Ziffern und Bindestriche, nicht mit einem Bindestrich beginnend oder endend"
+  es_ES: "El nombre de host .local del servidor: hasta 32 letras minúsculas, números y guiones, sin empezar ni terminar con un guion"
+  fr_FR: "Le nom d'hôte .local du serveur : jusqu'à 32 lettres minuscules, chiffres et traits d'union, ne commençant ni ne finissant par un trait d'union"
+  pl_PL: "Nazwa hosta .local serwera: do 32 małych liter, cyfr i myślników, nierozpoczynająca się ani niekończąca myślnikiem"
 
 help.arg.hostnames:
   en_US: "Hostnames to include in the certificate"
@@ -3577,6 +3938,13 @@ help.arg.mirror-url:
   fr_FR: "URL du miroir"
   pl_PL: "URL serwera lustrzanego"
 
+help.arg.mount-beneath:
+  en_US: "Insert beneath the top mount; detaching the top reveals this mount"
+  de_DE: "Unter der obersten Einhängung einfügen; deren Aushängen legt diese Einhängung frei"
+  es_ES: "Insertar debajo del montaje superior; al desmontarlo se revela este montaje"
+  fr_FR: "Insérer sous le montage supérieur ; son démontage révèle ce montage"
+  pl_PL: "Umieść pod najwyższym montowaniem; jego odmontowanie odsłoni to montowanie"
+
 help.arg.multi-arch-s9pks:
   en_US: "Enable multi-architecture s9pk support"
   de_DE: "Multi-Architektur-s9pk-Unterstützung aktivieren"
@@ -3590,6 +3958,13 @@ help.arg.no-assets:
   es_ES: "Construir sin directorio de recursos"
   fr_FR: "Construire sans répertoire de ressources"
   pl_PL: "Zbuduj bez katalogu zasobów"
+
+help.arg.no-emulation:
+  en_US: "Require a native image for the requested architecture"
+  de_DE: "Ein natives Image für die angeforderte Architektur voraussetzen"
+  es_ES: "Requerir una imagen nativa para la arquitectura solicitada"
+  fr_FR: "Exiger une image native pour l’architecture demandée"
+  pl_PL: "Wymagaj natywnego obrazu dla żądanej architektury"
 
 help.arg.no-mmap:
   en_US: "Disable memory-mapped file I/O"
@@ -3724,6 +4099,13 @@ help.arg.registry-listen-address:
   es_ES: "Dirección en la que escucha el registro"
   fr_FR: "Adresse d'écoute du registre"
   pl_PL: "Adres nasłuchiwania rejestru"
+
+help.arg.registry-description:
+  en_US: "Description of the registry, as markdown"
+  de_DE: "Beschreibung des Registrys, als Markdown"
+  es_ES: "Descripción del registro, en Markdown"
+  fr_FR: "Description du registre, en Markdown"
+  pl_PL: "Opis rejestru, w formacie Markdown"
 
 help.arg.registry-name:
   en_US: "Name of the registry"
@@ -3901,11 +4283,11 @@ help.arg.squashfs-image-path:
   pl_PL: "Ścieżka do pliku obrazu squashfs"
 
 help.arg.subcontainer-name:
-  en_US: "Name of the subcontainer"
-  de_DE: "Name des Subcontainers"
-  es_ES: "Nombre del subcontenedor"
-  fr_FR: "Nom du sous-conteneur"
-  pl_PL: "Nazwa podkontenera"
+  en_US: "Guid of the subcontainer, or a prefix; use --name to select by name"
+  de_DE: "Guid des Subcontainers oder ein Präfix davon; --name wählt nach Name aus"
+  es_ES: "Guid del subcontenedor, o un prefijo; use --name para seleccionar por nombre"
+  fr_FR: "Guid du sous-conteneur, ou un préfixe ; utilisez --name pour sélectionner par nom"
+  pl_PL: "Guid podkontenera lub jego prefiks; użyj --name, aby wybrać według nazwy"
 
 help.arg.target-disk:
   en_US: "Target disk for installation"
@@ -4336,11 +4718,11 @@ help.arg.onion-secret-key:
   pl_PL: "Tajny klucz onion Tor"
 
 help.arg.os-drive-path:
-  en_US: "Path to OS drive"
-  de_DE: "Pfad zum Betriebssystemlaufwerk"
-  es_ES: "Ruta a la unidad del sistema operativo"
-  fr_FR: "Chemin vers le disque du système d'exploitation"
-  pl_PL: "Ścieżka do dysku systemu operacyjnego"
+  en_US: "Stable path to the OS drive"
+  de_DE: "Stabiler Pfad zum Betriebssystemlaufwerk"
+  es_ES: "Ruta estable a la unidad del sistema operativo"
+  fr_FR: "Chemin stable vers le disque du système d’exploitation"
+  pl_PL: "Stabilna ścieżka do dysku systemu operacyjnego"
 
 help.arg.package-display-name:
   en_US: "Human-readable package name (e.g. \"Hello World\")"
@@ -4771,6 +5153,13 @@ about.cancel-install-package:
   fr_FR: "Annuler l'installation d'un paquet"
   pl_PL: "Anuluj instalację pakietu"
 
+about.check-acme-challenge-reachability:
+  en_US: "Check if the port a certificate authority validates on is reachable"
+  de_DE: "Prüfen, ob der Port erreichbar ist, über den eine Zertifizierungsstelle validiert"
+  es_ES: "Comprobar si el puerto en el que valida una autoridad de certificación es accesible"
+  fr_FR: "Vérifier si le port sur lequel une autorité de certification valide est accessible"
+  pl_PL: "Sprawdź, czy port, na którym weryfikuje urząd certyfikacji, jest osiągalny"
+
 about.check-dns-configuration:
   en_US: "Check DNS configuration for a gateway"
   de_DE: "DNS-Konfiguration für ein Gateway prüfen"
@@ -4961,11 +5350,11 @@ about.command-set-country:
   pl_PL: "Polecenie ustawienia kraju"
 
 about.commands-experimental:
-  en_US: "Commands related to configuring experimental options such as zram and cpu governor"
-  de_DE: "Befehle zur Konfiguration experimenteller Optionen wie zram und CPU-Governor"
-  es_ES: "Comandos relacionados con la configuración de opciones experimentales como zram y gobernador de CPU"
-  fr_FR: "Commandes liées à la configuration d'options expérimentales comme zram et le gouverneur CPU"
-  pl_PL: "Polecenia konfiguracji opcji eksperymentalnych jak zram i regulator CPU"
+  en_US: "Commands related to configuring experimental options"
+  de_DE: "Befehle zur Konfiguration experimenteller Optionen"
+  es_ES: "Comandos relacionados con la configuración de opciones experimentales"
+  fr_FR: "Commandes liées à la configuration d'options expérimentales"
+  pl_PL: "Polecenia konfiguracji opcji eksperymentalnych"
 
 about.commands-host-address-domain:
   en_US: "Commands for managing host address domains"
@@ -5561,6 +5950,13 @@ about.get-id-pubkey:
   es_ES: "Obtener la clave pública de identidad"
   fr_FR: "Obtenir la clé publique d'identité"
   pl_PL: "Pobierz klucz publiczny tożsamości"
+
+about.print-shell-completions:
+  en_US: "Print a shell completion script"
+  de_DE: "Ein Shell-Vervollständigungsskript ausgeben"
+  es_ES: "Imprimir un script de autocompletado para el shell"
+  fr_FR: "Afficher un script de complétion pour le shell"
+  pl_PL: "Wyświetl skrypt uzupełniania dla powłoki"
 
 about.get-initialization-progress:
   en_US: "Get initialization progress"
@@ -6376,6 +6772,13 @@ about.set-registry-icon:
   fr_FR: "Définir l'icône du registre"
   pl_PL: "Ustaw ikonę rejestru"
 
+about.set-registry-description:
+  en_US: "Set the registry description"
+  de_DE: "Die Registry-Beschreibung festlegen"
+  es_ES: "Establecer la descripción del registro"
+  fr_FR: "Définir la description du registre"
+  pl_PL: "Ustaw opis rejestru"
+
 about.set-registry-name:
   en_US: "Set the registry name"
   de_DE: "Den Registry-Namen festlegen"
@@ -6502,6 +6905,13 @@ about.setup-status:
   fr_FR: "Afficher l'état actuel de l'assistant d'installation"
   pl_PL: "Wyświetl obecny stan kreatora konfiguracji"
 
+about.show-cpu-epp:
+  en_US: "Show CPU energy performance preferences"
+  de_DE: "CPU-Energie-Leistungs-Präferenzen anzeigen"
+  es_ES: "Mostrar preferencias de energía/rendimiento de CPU"
+  fr_FR: "Afficher les préférences énergie/performance du CPU"
+  pl_PL: "Pokaż preferencje energii/wydajności CPU"
+
 about.show-cpu-governors:
   en_US: "Show CPU governors"
   de_DE: "CPU-Governors anzeigen"
@@ -6592,6 +7002,13 @@ about.tor-commands:
   es_ES: "Comandos de Tor"
   fr_FR: "Commandes Tor"
   pl_PL: "Polecenia Tora"
+
+about.trust-custom-ca-root:
+  en_US: "Trust a custom CA root for StartOS host processes"
+  de_DE: "Einer benutzerdefinierten CA-Wurzel für StartOS-Hostprozesse vertrauen"
+  es_ES: "Confiar en una raíz de CA personalizada para los procesos del host de StartOS"
+  fr_FR: "Approuver une autorité de certification racine personnalisée pour les processus hôtes de StartOS"
+  pl_PL: "Zaufaj niestandardowemu certyfikatowi głównemu CA dla procesów hosta StartOS"
 
 about.unmount-backup-target:
   en_US: "Unmount a backup target"

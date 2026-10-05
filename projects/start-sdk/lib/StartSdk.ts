@@ -17,15 +17,6 @@ import {
   MaybeFn,
   Run,
 } from '@start9labs/start-core/actions/setupActions'
-import {
-  CheckDependencies,
-  checkDependencies,
-} from '@start9labs/start-core/dependencies/dependencies'
-import {
-  CurrentDependenciesResult,
-  ValidateVersionRanges,
-  setupDependencies,
-} from '@start9labs/start-core/dependencies/setupDependencies'
 import { testTypeVersion } from '@start9labs/start-core/exver'
 import {
   setupInit,
@@ -49,7 +40,12 @@ import {
 import { GetStatus } from '@start9labs/start-core/util/GetStatus'
 import * as patterns from '@start9labs/start-core/util/patterns'
 import { Backups } from './backup/Backups'
+import { Dependencies, Dependency } from './dependencies'
 import { SetupBackupsParams, setupBackups } from './backup/setupBackups'
+import {
+  SetupPrimaryUrlParams,
+  setupPrimaryUrl,
+} from './primaryUrl/setupPrimaryUrl'
 import { checkWebUrl, runHealthScript } from './health/checkFns'
 import { checkPortListening } from './health/checkFns/checkPortListening'
 import { setupMain } from './mainFn'
@@ -192,6 +188,8 @@ export class StartSdk<Manifest extends T.SDKManifest> {
     return {
       /** The bound service manifest */
       manifest: this.manifest,
+      Dependency,
+      Dependencies,
       /** Volume path helpers derived from the manifest volume definitions */
       volumes: createVolumes(this.manifest),
       ...startSdkEffectWrapper,
@@ -283,19 +281,6 @@ export class StartSdk<Manifest extends T.SDKManifest> {
         create: (effects: T.Effects, options: T.CreateNotificationParams) =>
           effects.notification.create(options),
       },
-      /**
-       * Check whether the specified (or all) dependencies are satisfied.
-       * @param effects - The effects context
-       * @param packageIds - Optional subset of dependency IDs to check; defaults to all
-       * @returns An object describing which dependencies are satisfied and which are not
-       */
-      checkDependencies: checkDependencies as <
-        DependencyId extends keyof Manifest['dependencies'] & T.PackageId =
-          keyof Manifest['dependencies'] & T.PackageId,
-      >(
-        effects: Effects,
-        packageIds?: DependencyId[],
-      ) => Promise<CheckDependencies<DependencyId>>,
       host: {
         /**
          * Retrieve one of this package's own hosts by id, with reactive read
@@ -560,6 +545,11 @@ export class StartSdk<Manifest extends T.SDKManifest> {
           schemeOverride: { ssl: Scheme; noSsl: Scheme } | null
           /** mask the url (recommended if it contains credentials such as an API key or password) */
           masked: boolean
+          /** An absolute interface URL that StartOS should prefer for Open UI.
+           *
+           * @see {@link https://docs.start9.com/packaging/interfaces.html#nominating-an-address-to-open Nominating an Address to Open}
+           */
+          preferredLauncherAddress?: string | null
         },
       ) => new ServiceInterfaceBuilder({ ...options, effects }),
       /**
@@ -689,29 +679,44 @@ export class StartSdk<Manifest extends T.SDKManifest> {
       setupBackups: (options: SetupBackupsParams<Manifest>) =>
         setupBackups<Manifest>(options),
       /**
-       * @description Use this function to set dependency information.
-       * @example
-       * In this example, we create a dependency on Hello World >=1.0.0:0, where Hello World must be running and passing its "primary" health check.
+       * @description Let the user choose which of an interface's URLs the service advertises as its own — the one it puts in the links, invites and callbacks it generates. The package stores the choice: `get` is its reader, in the shape `FileHelper.read()` returns, and `set` writes it.
        *
+       *    Returns `action` (add it to `sdk.Actions.of()`); `bestUsable(effects)`, a reader for the URL the service should use; and `setupTask(severity, options)`, an init script (add it to `sdk.setupInit()`) that keeps a task raised while the stored URL is unset or no longer one of the interface's addresses.
+       * @example
        * ```
-        export const setDependencies = sdk.setupDependencies(
-          async ({ effects }) => {
-            return {
-              'hello-world': {
-                kind: 'running',
-                versionRange: '>=1.0.0',
-                healthChecks: ['primary'],
-              },
-            }
+        import { sdk } from './sdk'
+        import { i18n } from './i18n'
+        import { storeJson } from './fileModels/store.json'
+
+        export const primaryUrl = sdk.setupPrimaryUrl({
+          id: 'set-primary-url',
+          hostId: 'ui-multi',
+          interfaceId: 'ui',
+          metadata: {
+            name: i18n('Set Primary URL'),
+            description: i18n('Choose the URL Immich puts in the share links it generates'),
+            warning: null,
+            allowedStatuses: 'any',
+            group: null,
+            visibility: 'enabled',
           },
-        )
+          field: { name: i18n('URL'), description: null },
+          get: storeJson.read(s => s.primaryUrl),
+          set: (effects, url) => storeJson.merge(effects, { primaryUrl: url }),
+        })
+
+        // init/index.ts, after `actions`
+        primaryUrl.setupTask('important', {
+          reason: i18n('Choose the URL Immich puts in its share links'),
+        })
+
+        // main.ts, and interfaces.ts for `preferredLauncherAddress`
+        const url = await primaryUrl.bestUsable(effects).const()
        * ```
        */
-      setupDependencies: <const R extends CurrentDependenciesResult<Manifest>>(
-        fn: (options: {
-          effects: T.Effects
-        }) => Promise<R & ValidateVersionRanges<R>>,
-      ) => setupDependencies<Manifest, R>(fn),
+      setupPrimaryUrl: <Id extends T.ActionId>(
+        params: SetupPrimaryUrlParams<Id>,
+      ) => setupPrimaryUrl<Id>(this.manifest.id, params),
       /**
        * @description Use this function to create an InitScript that runs every time the service initializes (install, update, restore, rebuild, and server bootup)
        */
@@ -734,9 +739,9 @@ export class StartSdk<Manifest extends T.SDKManifest> {
         export const init = sdk.setupInit(
           restoreInit,
           versions,
-          setDependencies,
           setInterfaces,
           actions,
+          dependencies,
           postInstall,
         )
        * ```
@@ -891,12 +896,10 @@ export class StartSdk<Manifest extends T.SDKManifest> {
          * additional volumes in the backup.
          */
         withPgDump: Backups.withPgDump<Manifest>,
-        /**
-         * Create a Backups configuration that uses mysqldump/mysql instead of
-         * rsyncing the raw MySQL/MariaDB data directory. Chain `.addVolume()` to
-         * include additional volumes in the backup.
-         */
+        /** Back up and restore a MySQL database through a logical dump. */
         withMysqlDump: Backups.withMysqlDump<Manifest>,
+        /** Back up and restore a MariaDB database through a logical dump. */
+        withMariadbDump: Backups.withMariadbDump<Manifest>,
       },
       InputSpec: {
         /**

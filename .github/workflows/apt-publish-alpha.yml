@@ -91,7 +91,7 @@ jobs:
             exit 1
           fi
           echo "Publishing:"
-          find debs -name '*.deb' | sort | sed 's/^/  /'
+          find debs -type f -name '*.deb' | sort | sed 's/^/  /'
 
       - uses: ./.github/actions/publish-apt
         with:

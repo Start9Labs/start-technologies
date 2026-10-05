@@ -21,7 +21,7 @@ body:
     attributes:
       label: SDK version
       description: From your package's `package.json`, or `npm ls @start9labs/start-sdk`.
-      placeholder: 2.0.10
+      placeholder: 3.0.0
     validations:
       required: true
 

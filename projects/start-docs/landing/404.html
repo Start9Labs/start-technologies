@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Start9 Docs</title>
+    <script>
+      // The static host serves this page for every path it has no file for;
+      // the rules below are the ones the docs' nginx used to apply first.
+      ;(function () {
+        var books = /*BOOKS*/ {}
+        var legacy = {
+          '/0.3.5.x/umbrel-compare':
+            '/0.3.5.x/support/faq/umbrel-compare#umbrel-compare',
+          '/0.3.5.x/support/contact': 'https://start9.com/contact',
+          '/0.3.5.x/user-manual/connecting/connecting-lan':
+            '/0.3.5.x/user-manual/getting-started/trust-ca',
+          '/0.3.5.x/user-manual/connecting/connecting-tor':
+            '/0.3.5.x/guides/device-guides/index',
+          '/0.3.5.x/user-manual/backups/backup-setup/backup-physical':
+            '/0.3.5.x/user-manual/overview/backup-restore/index',
+          '/0.3.5.x/user-manual/reset-password':
+            '/0.3.5.x/guides/reset-password',
+          '/0.3.5.x/support/faq/faq-embassy':
+            '/0.3.5.x/support/faq/faq-startos',
+        }
+        var path = location.pathname
+        var tail = location.search + location.hash
+        var go = function (to) {
+          location.replace(to + (to.indexOf('#') === -1 ? tail : ''))
+        }
+        var bare = path.replace(/\/$/, '')
+        var m
+        if (legacy[bare]) return go(legacy[bare])
+        if (
+          (m = path.match(
+            /^\/0\.3\.5\.x\/user-manual\/(service-guides|flashing)\/(.*)$/,
+          ))
+        )
+          return go('/0.3.5.x/guides/' + m[1] + '/' + m[2])
+        if (path === '/latest' || path.indexOf('/latest/') === 0)
+          return go('/0.3.5.x/' + path.slice(8))
+        if (
+          path === '/packaging-guide' ||
+          path.indexOf('/packaging-guide/') === 0
+        )
+          return go('/packaging' + path.slice('/packaging-guide'.length))
+        var book = path.split('/')[1]
+        if (!book) return
+        if (books[book]) {
+          if (!/\.[A-Za-z0-9]+$/.test(path) && path.slice(-1) !== '/')
+            return go(path + '.html')
+          return
+        }
+        if (book !== '0.3.5.x') return go('/0.3.5.x' + path)
+      })()
+    </script>
+    <style>
+      :root {
+        --bg: #0f1419;
+        --text: #e6edf3;
+        --text-muted: #8b949e;
+        --accent: #58a6ff;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica,
+          Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+        text-align: center;
+      }
+
+      h1 {
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+      }
+
+      p {
+        color: var(--text-muted);
+        font-size: 1.1rem;
+        margin-bottom: 2rem;
+      }
+
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Page not found</h1>
+    <p>There is no page at this address.</p>
+    <a href="/">Start9 Docs</a>
+  </body>
+</html>

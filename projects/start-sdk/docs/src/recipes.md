@@ -4,7 +4,7 @@ This is the primary entry point for StartOS service packaging — for both you a
 
 If you're using [Claude Code](https://claude.com/claude-code) (recommended), point your agent at the recipe for your objective and let it follow the reference and package links from there.
 
-> **Starting a brand-new package?** Scaffold it first with `start-cli s9pk init-package "My Service"`, then work the generated `TODO.md` from top to bottom — don't hand-assemble files by copying another package. If you're wrapping an existing upstream Docker image (the common case), read [Package a Prebuilt Docker Image](recipe-prebuilt-image.md) before you start.
+> **Starting a brand-new package?** Scaffold it first with `start-cli s9pk init-package "My Service"`, then work the [New Package Checklist](new-package-checklist.md) from top to bottom — don't hand-assemble files by copying another package. If you're wrapping an existing upstream Docker image (the common case), read [Package a Prebuilt Docker Image](recipe-prebuilt-image.md) before you start.
 
 ## Configuration
 

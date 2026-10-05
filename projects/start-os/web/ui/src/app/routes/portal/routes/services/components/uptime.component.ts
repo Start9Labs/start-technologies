@@ -67,7 +67,8 @@ import { distinctUntilChanged } from 'rxjs/operators'
       }
 
       :host-context(table),
-      :host-context(service-status) {
+      :host-context(service-status),
+      :host-context(.service-tile) {
         padding: 0;
 
         header {
@@ -98,13 +99,6 @@ import { distinctUntilChanged } from 'rxjs/operators'
           &:first-letter {
             font-size: 0.75rem;
           }
-        }
-      }
-
-      :host-context(tui-root._mobile table) {
-        section {
-          min-height: 1.25rem;
-          align-items: flex-end;
         }
       }
     `,

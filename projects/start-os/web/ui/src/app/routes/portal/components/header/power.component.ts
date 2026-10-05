@@ -33,6 +33,13 @@ const COUNTDOWN = 30
       </button>
     </footer>
   `,
+  styles: `
+    button {
+      white-space: normal;
+      block-size: auto;
+      min-block-size: var(--tui-height-m);
+    }
+  `,
   imports: [TuiButton, i18nPipe],
 })
 export class PowerComponent {
@@ -43,7 +50,6 @@ export class PowerComponent {
   protected readonly seconds = signal(COUNTDOWN)
 
   constructor() {
-    // One timer, so the choice is made exactly when the label says it will be.
     timer(0, 1000)
       .pipe(take(COUNTDOWN + 1), takeUntilDestroyed())
       .subscribe(tick => {

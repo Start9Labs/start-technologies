@@ -1,5 +1,6 @@
 import { Component, inject } from '@angular/core'
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop'
+import { Meta } from '@angular/platform-browser'
 import { RouterOutlet } from '@angular/router'
 import { i18nService } from '@start9labs/shared'
 import { TuiRoot } from '@taiga-ui/core'
@@ -33,6 +34,7 @@ import { PatchMonitorService } from './services/patch-monitor.service'
 })
 export class AppComponent {
   private readonly i18n = inject(i18nService)
+  private readonly meta = inject(Meta)
 
   readonly subscription = merge(
     inject(PatchDataService),
@@ -46,5 +48,16 @@ export class AppComponent {
     .pipe(takeUntilDestroyed())
     .subscribe(language => {
       this.i18n.setLangLocal(language || 'en_US')
+    })
+
+  // Safari takes the Home Screen name from this meta tag, not the manifest.
+  readonly appName = inject<PatchDB<DataModel>>(PatchDB)
+    .watch$('serverInfo', 'hostname')
+    .pipe(takeUntilDestroyed())
+    .subscribe(hostname => {
+      this.meta.updateTag({
+        name: 'apple-mobile-web-app-title',
+        content: hostname || 'StartOS',
+      })
     })
 }

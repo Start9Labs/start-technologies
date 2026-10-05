@@ -205,7 +205,8 @@ impl CallRemote<RegistryContext> for CliContext {
     ) -> Result<Value, RpcError> {
         let local_auth = local_auth_header::<RegistryContext>().await;
 
-        let (url, is_local) = if let Some(url) = self.registry_url.clone() {
+        let (url, is_local) = if let Some(url) = &self.registry_url {
+            let url = url.get()?.clone();
             let is_local = is_loopback(&url);
             (url, is_local)
         } else if local_auth.is_some() || !self.registry_hostname.is_empty() {
@@ -287,8 +288,9 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
         let sig_context = registry.host_str().map(InternedString::from);
         let is_onion = registry.host_str().map_or(false, |h| h.ends_with(".onion"));
 
-        let mut res = match crate::middleware::auth::signature::call_remote(
+        let mut res = match crate::middleware::auth::signature::call_remote_with_client(
             self,
+            self.client.get(),
             registry,
             headers,
             sig_context.as_deref(),

@@ -16,7 +16,7 @@ After unboxing your Start9 router or completing a fresh install, follow these st
 
 1. Confirm the password and click "Set Password".
 
-1. The page will confirm "Setup complete. You can close this window." Normal Internet access will resume, and you can open the StartWRT web interface at `router.lan` — you are already logged in.
+1. The page will confirm "Setup complete" and normal Internet access will resume. Click "Open router.lan" to continue to [Trust Your Root CA](#trust-your-root-ca). If it opens inside the captive portal popup, open `router.lan` in your browser instead to download the certificate.
 
 > [!IMPORTANT]
 > All Internet access is blocked until you set an admin password. If you dismiss the captive portal popup, open any browser and navigate to `router.lan`.
@@ -28,7 +28,7 @@ After unboxing your Start9 router or completing a fresh install, follow these st
 
 To access the web interface securely over HTTPS, download and trust your router's Root Certificate Authority (Root CA).
 
-1. Navigate to `System > Settings > General` and click "Download Root CA".
+1. Open `router.lan` in your browser and follow the steps to download your Root CA.
 
 1. Follow the instructions for [Trusting Your Root CA](trust-ca.md) on each device you want to connect to the router's web interface.
 
@@ -36,11 +36,11 @@ To access the web interface securely over HTTPS, download and trust your router'
 
 The StartWRT web interface is organized into five sections:
 
-- **Internet** — WAN settings, published ports, outbound VPNs
-- **Network** — LAN settings, connected devices
-- **Security Profiles** — Create and manage access control profiles
-- **Points of Entry** — Ethernet ports, Wi-Fi passwords, inbound VPN servers
-- **System** — General settings, SSH keys, backups, logs
+- **Internet** — [WAN settings](wan.md), [published ports](published-ports.md), [outbound VPNs](outbound-vpn.md)
+- **Network** — [LAN settings](lan.md), [connected devices](devices.md)
+- **Security Profiles** — [Create and manage access control profiles](security-profiles.md)
+- **Points of Entry** — [Ethernet ports](ethernet.md), [Wi-Fi passwords](wifi.md), [inbound VPN servers](inbound-vpn.md)
+- **System** — [General settings](settings.md), [SSH keys](ssh.md), [backups](backups.md), [logs](settings.md#logs)
 
 > [!TIP]
 > Toggle **Help Mode** from the header to get a plain-language explanation of everything on the current page, including links to external resources.
@@ -48,5 +48,6 @@ The StartWRT web interface is organized into five sections:
 ## Next Steps
 
 - [Security Profiles](security-profiles.md) — Understand the core concept behind StartWRT
+- [Wi-Fi Settings](wifi.md#settings) — Select your country so the router uses the Wi-Fi channels and transmit power permitted there
 - [Wi-Fi](wifi.md) — Set up additional Wi-Fi passwords for different profiles
 - [Settings](settings.md) — Configure timezone, language, and other preferences

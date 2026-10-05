@@ -20,17 +20,15 @@ import { getErrorMessage } from '../services/error.service'
     }
 
     @if (content(); as result) {
-      <div safeLinks [innerHTML]="result | markdown | dompurify"></div>
+      <div
+        class="g-markdown"
+        safeLinks
+        [innerHTML]="result | markdown | dompurify"
+      ></div>
     } @else {
       @if (!error()) {
         <tui-loader textContent="Loading" [style.height.%]="100" />
       }
-    }
-  `,
-  styles: `
-    :host ::ng-deep pre {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
     }
   `,
   host: { class: 'g-subpage' },

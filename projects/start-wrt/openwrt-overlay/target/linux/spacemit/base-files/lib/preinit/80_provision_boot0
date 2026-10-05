@@ -1,0 +1,23 @@
+# Converge the eMMC hardware boot partitions (boot0/boot1) to the running
+# image's bootinfo + FSBL on every boot — the boot-time trigger of
+# /lib/upgrade/spacemit_boot0.sh (sysupgrade stage2 is the other). It exists
+# because stage2 runs the OLD system's upgrade scripts: the release that
+# introduces a new FSBL cannot converge the fleet during its own installation,
+# only on the first boot afterwards — and a boot-time converge also self-heals
+# damaged or interrupted boot-firmware writes. A converged board costs three
+# region reads and writes nothing.
+#
+# Output lands in /tmp/spacemit_boot0.log (syslog is not up during preinit).
+
+boot0_provision() {
+	local diskdev
+
+	. /lib/upgrade/common.sh
+	. /lib/upgrade/spacemit_boot0.sh
+
+	export_bootdevice && export_partdevice diskdev 0 || return 0
+	spacemit_provision_boot0 "$diskdev" >/tmp/spacemit_boot0.log 2>&1
+	return 0
+}
+
+boot_hook_add preinit_mount_root boot0_provision

@@ -5,7 +5,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 ## Tech Stack
 
 - **Backend:** Rust (async/Tokio, Axum web framework)
-- **Frontend:** Angular 22 + TypeScript 6 + Taiga UI v5
+- **Frontend:** Angular + TypeScript + Taiga UI
 - **Router OS:** OpenWrt (SpacemiT K1 / BananaPi F3 target)
 - **Config storage:** UCI files (`/etc/config/`) — no separate database
 - **API:** JSON-RPC 2.0 over HTTP POST at `/rpc/v1`
@@ -25,7 +25,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 │   ├── config_experiments/ # Reference UCI configs for testing
 │   └── notes/           # Research notes
 │
-├── web/                 # Angular 22 SPA
+├── web/                 # Angular SPA
 │   └── src/app/
 │       ├── services/    # API, auth, form, RPC, connection, system
 │       ├── components/  # Shared UI (footer, masked, copy, schedule, etc.)
@@ -46,7 +46,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 
 - **`backend/`** — Rust daemon and CLI. Produces a single binary `startwrt` that is symlinked as `startwrt-ctrld` (daemon) and `startwrt-cli` (CLI). Handles all backend logic: RPC API, security profiles, WiFi, Ethernet, VPN, authentication, and UCI config management. See [backend/ARCHITECTURE.md](backend/ARCHITECTURE.md).
 
-- **`web/`** — Angular 22 SPA using Taiga UI v5. Signal-based state, zoneless change detection, standalone components. Communicates with the backend exclusively via JSON-RPC 2.0. Embeds contextual help on every page. See [web/ARCHITECTURE.md](web/ARCHITECTURE.md).
+- **`web/`** — Angular SPA using Taiga UI. Signal-based state, zoneless change detection, standalone components. Communicates with the backend exclusively via JSON-RPC 2.0. Embeds contextual help on every page. See [web/ARCHITECTURE.md](web/ARCHITECTURE.md).
 
 - **`openwrt/`** — Disposable build workspace (plain directory, no git repo) rebuilt by `build/openwrt-setup.sh` from the sha256-pinned upstream OpenWrt release tarball (`build/openwrt-version`) plus the Start9 delta: `openwrt-patches/` modifies a handful of upstream build-infra files, `openwrt-overlay/` adds the SpacemiT K1 target (`target/linux/spacemit/`) and boot packages (`opensbi-spacemit`, `uboot-spacemit`). The build system compiles the Rust backend + Angular frontend, stages them into `openwrt/files/`, and produces a flashable image.
 
@@ -68,9 +68,31 @@ Additional HTTP routes:
 - `GET /api/logs` — WebSocket for live log streaming
 - `POST /api/setup/flash` — NDJSON streaming for setup wizard
 - `GET|POST /rest/rpc/{guid}` — Continuation endpoint for backup/restore/diagnostics
-- `GET /static/root-ca.crt` — Root CA download (no auth)
+- `GET /static/local-root-ca.crt`, `GET /static/local-root-ca.mobileconfig` — Root CA download, as a certificate or an Apple configuration profile (no auth)
 - `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` — LuCI reverse proxy (localhost:8080)
 - Fallback — Serves embedded web UI
+
+The daemon also runs **port-control servers** (`ctrl/src/port_control.rs`) for
+automatic port forwarding: a PCP server (UDP 5351), a UPnP IGD server (SSDP
+responder on UDP 1900 + HTTP control on 49001), and a lease-expiry sweep. The
+protocol cores are shared from `start-core` (`net::port_map::server`, also used
+by StartTunnel); StartWRT's `GatewayBackend` impl maps forwards onto tagged UCI
+`redirect` sections (`_apf_*` options, invisible to manual published ports) and
+authorizes per device via a default-off DHCP-host flag (`_allow_pcp`). Renewals
+are tracked in memory to avoid flash writes; UCI is only written on
+create/change/remove. The OpenWrt image must **not** ship `miniupnpd` — it
+would conflict on these ports and manage forwards outside the UCI model.
+
+**Open problem — LAN source spoofing.** PCP authorization resolves the claimed
+UDP source address through the neighbor table, so a LAN host can act as an
+authorized neighbor: opening ports that expose _that_ device, or tearing its
+mappings down. StartTunnel avoids this only because WireGuard authenticates the
+source address; a LAN bridge has no equivalent, no standard addresses it (RFC
+6887 assumes a trusted internal network; RFC 7652 authentication is unused in
+practice; miniupnpd does nothing here), and the mitigations we know of are
+unsatisfying. Deliberately unsolved and wanting a better idea — the per-device,
+default-off permission bounds it to explicitly trusted devices. Detail and the
+candidate approaches are in the `port_control.rs` module doc.
 
 ## Security Profiles
 

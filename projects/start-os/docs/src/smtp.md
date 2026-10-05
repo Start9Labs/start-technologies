@@ -44,10 +44,34 @@ The guides below are for using Gmail, Amazon SES, or Proton Mail for SMTP, but y
 To use Amazon SES you will need:
 
 - An Amazon Web Services (AWS) account. If you don't have one, you can [register here](https://aws.amazon.com/) for free.
-- To set up Amazon Simple Email Service (SES) on AWS, from [inside your AWS](https://aws.amazon.com/ses) console, also free for a time within [certain limits](https://aws.amazon.com/ses/pricing/).
-- Optional: To purchase your own domain name to send emails from, then add the domain records Amazon provides you. This will allow you to request 'Production Access' to send emails to unverified addresses (i.e. to more than just your own email address).
+- Amazon Simple Email Service (SES) set up from [inside your AWS console](https://console.aws.amazon.com/ses/), free for a time within [certain limits](https://aws.amazon.com/ses/pricing/).
+- A verified identity to send from: either your own domain name (add the DNS records Amazon gives you) or a single email address, under **Identities** in the SES console.
 
-You can then refer to the [Amazon SES docs](https://docs.aws.amazon.com/ses/latest/dg/smtp-credentials.html) to create a SMTP user.
+New SES accounts start in the _sandbox_, which can only send to addresses you have also verified. To send to anyone else, request production access from the SES **Account dashboard**.
+
+1. Open the [SES console](https://console.aws.amazon.com/ses/) and check the **region** selected in the top bar. Credentials, verified identities, and the SMTP host are all specific to this region, so use the same one throughout.
+
+1. Choose **SMTP settings** in the left navigation pane. The page shows two cards: **Mail Manager SMTP** (marked "Recommended") and **IAM SMTP credentials**.
+
+1. In the **IAM SMTP credentials** card, click **Create IAM credentials**. The IAM console opens. Do not use the Mail Manager card's **Create SMTP credentials** button: it creates an _ingress endpoint_, a separately billed product that is not needed.
+
+1. Enter a user name (or keep the default) and click **Create user**.
+
+1. Click **Show** under _SMTP password_, then **Download .csv file**. The SMTP user name and password are shown only once; save them somewhere secure, such as your Vaultwarden password manager. The user name is an access key ID (starts with `AKIA`); the password is _not_ your AWS secret access key.
+
+1. In StartOS, go to **System > SMTP**, select **Amazon SES** as the provider, and enter the values below. Choosing Amazon SES pre-fills the host for `us-east-1` and defaults to TLS on port 465.
+
+   | Parameter           | Value                                                                          |
+   | ------------------- | ------------------------------------------------------------------------------ |
+   | Host                | `email-smtp.<region>.amazonaws.com`, e.g. `email-smtp.us-east-1.amazonaws.com` |
+   | Connection Security | TLS                                                                            |
+   | Port                | 465                                                                            |
+   | From Address        | an address at your verified domain, or your verified email address             |
+   | Username            | your SMTP user name (from above)                                               |
+   | Password            | your SMTP password (from above)                                                |
+
+   > [!NOTE]
+   > Replace `<region>` in the **Host** with the region you created the credentials in, e.g. `email-smtp.eu-west-1.amazonaws.com`. The SMTP settings page in the SES console shows the exact hostname for that region. To use STARTTLS instead, set **Connection Security** to **STARTTLS** and the **Port** becomes **587**. The **From Address** may optionally include a display name, e.g. `Your Name <you@yourdomain.com>`.
 
 {{#endtab}}
 

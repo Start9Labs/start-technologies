@@ -32,6 +32,8 @@ import { T } from '@start9labs/start-core'
 export class PortCheckWarningsComponent {
   // Either a full IPv4 check or the IPv6 sub-result.
   readonly result = input<T.CheckPortRes | T.CheckPortV6Res>()
+  // Whether this port receives local traffic. Gates the hairpinning warning.
+  readonly local = input(true)
 
   // Explains the icon's warning triangle, so it must match its condition: a
   // port that answered externally is reachable regardless of what the internal
@@ -44,6 +46,10 @@ export class PortCheckWarningsComponent {
   // Hairpinning is an IPv4 NAT artifact; the IPv6 sub-result has no such field.
   readonly hairpinning = computed(
     (res = this.result()) =>
-      !!res && 'hairpinning' in res && res.openExternally && !res.hairpinning,
+      this.local() &&
+      !!res &&
+      'hairpinning' in res &&
+      res.openExternally &&
+      !res.hairpinning,
   )
 }

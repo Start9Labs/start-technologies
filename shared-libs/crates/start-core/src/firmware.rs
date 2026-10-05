@@ -49,9 +49,8 @@ pub fn display_firmware_update_result(result: RequiresReboot) {
     }
 }
 
-#[instrument]
-pub async fn check_for_firmware_update() -> Result<Option<Firmware>, Error> {
-    let system_product_name = String::from_utf8(
+pub(crate) async fn system_product_name() -> Result<String, Error> {
+    Ok(String::from_utf8(
         Command::new("dmidecode")
             .arg("-s")
             .arg("system-product-name")
@@ -59,7 +58,12 @@ pub async fn check_for_firmware_update() -> Result<Option<Firmware>, Error> {
             .await?,
     )?
     .trim()
-    .to_owned();
+    .to_owned())
+}
+
+#[instrument]
+pub async fn check_for_firmware_update() -> Result<Option<Firmware>, Error> {
+    let system_product_name = system_product_name().await?;
     let bios_version = String::from_utf8(
         Command::new("dmidecode")
             .arg("-s")

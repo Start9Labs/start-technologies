@@ -8,8 +8,6 @@ use imbl::{OrdMap, OrdSet};
 use imbl_value::InternedString;
 use ipnet::IpNet;
 use isocountry::CountryCode;
-use itertools::Itertools;
-use openssl::hash::MessageDigest;
 use patch_db::{HasModel, Value};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -24,11 +22,12 @@ use crate::net::host::Host;
 use crate::net::host::binding::{
     AddSslOptions, BindInfo, BindOptions, Bindings, DerivedAddressInfo, NetInfo,
 };
+use crate::net::ssl::x509_sha256_fingerprint;
 use crate::net::vhost::{AlpnInfo, PassthroughInfo};
 use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::system::{KeyboardOptions, SmtpValue};
-use crate::util::cpupower::Governor;
+use crate::util::cpupower::{Epp, Governor};
 use crate::util::lshw::LshwDevice;
 use crate::util::serde::MaybeUtf8String;
 use crate::version::{Current, VersionT};
@@ -57,11 +56,11 @@ impl Public {
             server_info: ServerInfo {
                 id: account.server_id.clone(),
                 version: Current::default().semver(),
-                name: account.hostname.name.clone(),
-                hostname: (*account.hostname.hostname).clone(),
+                hostname: (*account.hostname).clone(),
                 last_backup: None,
                 package_version_compat: Current::default().compat().clone(),
                 post_init_migration_todos: BTreeMap::new(),
+                latest_migration_revision: Current::default().migration_revision(),
                 network: NetworkInfo {
                     host: Host {
                         bindings: Bindings(
@@ -74,7 +73,7 @@ impl Public {
                                         add_ssl: Some(AddSslOptions {
                                             preferred_external_port: 443,
                                             add_x_forwarded_headers: false,
-                                            alpn: Some(AlpnInfo::Specified(vec![
+                                            alpn: Some(AlpnInfo(vec![
                                                 MaybeUtf8String("h2".into()),
                                                 MaybeUtf8String("http/1.1".into()),
                                             ])),
@@ -137,16 +136,11 @@ impl Public {
                 pubkey: ssh_key::PublicKey::from(&account.ssh_key)
                     .to_openssh()
                     .unwrap(),
-                ca_fingerprint: account
-                    .root_ca_cert
-                    .digest(MessageDigest::sha256())
-                    .unwrap()
-                    .iter()
-                    .map(|x| format!("{x:02X}"))
-                    .join(":"),
+                ca_fingerprint: x509_sha256_fingerprint(&account.root_ca_cert).unwrap(),
                 ntp_synced: false,
-                zram: true,
+                zram: false,
                 governor: None,
+                epp: None,
                 smtp: None,
                 echoip_urls: default_echoip_urls(),
                 ram: 0,
@@ -175,7 +169,6 @@ pub fn default_echoip_urls() -> Vec<Url> {
 #[ts(export)]
 pub struct ServerInfo {
     pub id: String,
-    pub name: InternedString,
     pub hostname: InternedString,
     #[ts(type = "string")]
     pub version: Version,
@@ -183,6 +176,8 @@ pub struct ServerInfo {
     pub package_version_compat: VersionRange,
     #[ts(type = "Record<string, unknown>")]
     pub post_init_migration_todos: BTreeMap<Version, Value>,
+    #[serde(default)]
+    pub latest_migration_revision: usize,
     #[ts(type = "string | null")]
     pub last_backup: Option<DateTime<Utc>>,
     pub network: NetworkInfo,
@@ -197,6 +192,8 @@ pub struct ServerInfo {
     #[serde(default)]
     pub zram: bool,
     pub governor: Option<Governor>,
+    #[serde(default)]
+    pub epp: Option<Epp>,
     pub smtp: Option<SmtpValue>,
     #[serde(default = "default_echoip_urls")]
     #[ts(type = "string[]")]

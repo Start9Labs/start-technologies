@@ -9,6 +9,11 @@ import { MarketplacePkg, StoreDataWithUrl, StoreIdentity } from '../types'
  * localStorage and hits registries' RPC directly.
  */
 export abstract class AbstractMarketplaceService {
+  /** Icons fetched from registry info. */
+  abstract readonly registryIcons$: Observable<
+    { url: string; icon: string | null }[]
+  >
+
   /** The registry currently being browsed (info + packages + url). */
   abstract readonly currentRegistry$: Observable<StoreDataWithUrl>
 

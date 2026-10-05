@@ -15,10 +15,10 @@ use rpc_toolkit::Server;
 use serde::Deserialize;
 use startos::net::tls::TlsListener;
 use startos::net::web_server::{Accept, Acceptor, DynAccept, MetadataVisitor, WebServer};
-use tokio::net::TcpListener;
 use tokio::signal::unix::SignalKind;
 use tokio::sync::mpsc;
 use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
+use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::instrument;
 use visit_rs::Visit;
 
@@ -130,16 +130,19 @@ async fn setup_flash_handler(
         .unwrap()
 }
 
-/// GET /static/root-ca.crt — serves the Root CA certificate for download (no auth required).
-async fn root_ca_handler() -> Response<Body> {
-    match ssl::read_root_ca_pem() {
-        Ok(pem) => Response::builder()
-            .header(header::CONTENT_TYPE, "application/x-pem-file")
+fn root_ca_response(
+    file: Result<String, Error>,
+    content_type: &'static str,
+    filename: &'static str,
+) -> Response<Body> {
+    match file {
+        Ok(body) => Response::builder()
+            .header(header::CONTENT_TYPE, content_type)
             .header(
                 header::CONTENT_DISPOSITION,
-                "attachment; filename=\"startwrt-ca.crt\"",
+                format!("attachment; filename=\"{filename}\""),
             )
-            .body(Body::from(pem))
+            .body(Body::from(body))
             .unwrap(),
         Err(_) => Response::builder()
             .status(500)
@@ -187,7 +190,7 @@ async fn init_ssl() -> bool {
 /// connection. Plumbed through `WebServer`'s metadata pipeline so request
 /// extensions can inspect it if needed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum WebserverListener {
+pub enum WebserverListener {
     Http,
     Https,
 }
@@ -272,8 +275,37 @@ async fn inner_main() -> Result<(), Error> {
         if let Err(e) = crate::profiles::bootstrap_admin_profile("/etc/config").await {
             tracing::error!("Admin profile bootstrap failed: {e}");
         }
+        // Must follow bootstrap_admin_profile: the heal enumerates profiles from
+        // the `startwrt` config, so the admin profile has to be registered first.
+        if let Err(e) = crate::profiles::heal_ipv6_state("/etc/config").await {
+            tracing::error!("IPv6 state repair failed: {e}");
+        }
+        // Installs the hairpin accept and re-derives every hairpin projection
+        // (fw4 drops a redirect whose list names a deleted zone). Reloads the
+        // firewall only when something changed.
+        if let Err(e) = crate::published_ports::heal_hairpin("/etc/config").await {
+            tracing::error!("Hairpin repair failed: {e}");
+        }
+        if let Err(e) = crate::vpn_client::heal_vpn_clients("/etc/config").await {
+            tracing::error!("Outbound VPN repair failed: {e}");
+        }
         if let Err(e) = crate::system::apply_remote_access(ServerContext::default()).await {
             tracing::error!("Remote access rule apply failed: {e}");
+        }
+        if let Err(e) = crate::dns::heal_smartdns_conf("/etc/config").await {
+            tracing::error!("SmartDNS config repair failed: {e}");
+        }
+        // Repairs a reservation name from a release that let one through, which
+        // dnsmasq refuses to start on. Must precede the fingerprint hook: both
+        // reload dnsmasq, and this one decides whether it can come up at all.
+        if let Err(e) = crate::devices::heal_dhcp_host_names("/etc/config").await {
+            tracing::error!("DHCP reservation name repair failed: {e}");
+        }
+        // Install the DHCP-fingerprint hook (script + `dhcpscript` on every
+        // dnsmasq section) — daemon-side so OTA-updated routers converge on
+        // first boot. Reloads dnsmasq only when something actually changed.
+        if let Err(e) = crate::device_ident::ensure_dhcp_fingerprint_hook().await {
+            tracing::error!("DHCP fingerprint hook setup failed: {e}");
         }
         // Apply WAN schedule enforcement (UCI firewall rules)
         if let Err(e) =
@@ -334,6 +366,29 @@ async fn inner_main() -> Result<(), Error> {
     // Initialize SSL: ensure Root CA and server cert exist
     let tls_ready = init_ssl().await;
 
+    if !setup_mode {
+        // The IGD UUID derives from the initialized root CA.
+        // Configure reply diversion before constructing the SNI demux.
+        startos::net::transparent::set_divert_config(startos::net::transparent::DivertConfig {
+            route_table: startos::net::transparent::DIVERT_TABLE,
+            rule_priority: 49,
+            masked_fwmark: true,
+            manage_nft: false,
+        })
+        .map_err(|config| {
+            Error::new(
+                eyre!("SNI divert config rejected: {config:?}"),
+                ErrorKind::Network,
+            )
+        })?;
+        // Seeded before port control raises the gate.
+        crate::http_redirect::seed("/etc/config".into()).await;
+        let pc = crate::port_control::PortControl::new("/etc/config".into());
+        if crate::port_control::PORT_CONTROL.set(pc.clone()).is_ok() {
+            tokio::spawn(crate::port_control::run(pc));
+        }
+    }
+
     let ctx = ServerContext {
         continuations: continuations.clone(),
         open_authed_continuations: open_authed,
@@ -352,15 +407,29 @@ async fn inner_main() -> Result<(), Error> {
             .expect("failed to build proxy HTTP client"),
     );
 
+    // Firmware build stamp on every RPC response. The UI checks it against its
+    // baked-in config.json gitHash on each response, so an open tab notices a
+    // firmware update within one background poll (~5s) even when the daemon
+    // restart was too quick to drop any request (e.g. a CLI deploy). Exposed
+    // through CORS for the cross-origin dev serve.
+    let git_hash_header = header::HeaderName::from_static("x-startwrt-git-hash");
+
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::mirror_request())
         .allow_methods(AllowMethods::mirror_request())
         .allow_headers(AllowHeaders::mirror_request())
+        .expose_headers([git_hash_header.clone()])
         .allow_credentials(true);
 
     let app = Router::new()
         // RPC API at /rpc/v1 (matches frontend's RELATIVE_URL)
-        .route("/rpc/v1", post(handler))
+        .route(
+            "/rpc/v1",
+            post(handler).layer(SetResponseHeaderLayer::overriding(
+                git_hash_header,
+                header::HeaderValue::from_static(env!("STARTWRT_GIT_HASH")),
+            )),
+        )
         // RPC continuation endpoint (binary I/O for backup/restore/diagnostics)
         .route(
             "/rest/rpc/{guid}",
@@ -379,7 +448,26 @@ async fn inner_main() -> Result<(), Error> {
         // being rejected with 405 by the method router.
         .route("/api/logs", any(crate::logs::logs_ws_handler))
         // Root CA download (no auth required)
-        .route("/static/root-ca.crt", get(root_ca_handler))
+        .route(
+            "/static/local-root-ca.crt",
+            get(|| async {
+                root_ca_response(
+                    ssl::read_root_ca_pem(),
+                    "application/x-x509-ca-cert",
+                    "startwrt-ca.crt",
+                )
+            }),
+        )
+        .route(
+            "/static/local-root-ca.mobileconfig",
+            get(|| async {
+                root_ca_response(
+                    ssl::read_root_ca_mobileconfig(),
+                    "application/x-apple-aspen-config",
+                    "startwrt-ca.mobileconfig",
+                )
+            }),
+        )
         // LuCI reverse proxy — forwards to uhttpd on localhost:8080
         .route("/cgi-bin/{*rest}", any(luci_proxy::handler))
         .route("/luci-static/{*rest}", any(luci_proxy::handler))
@@ -398,17 +486,12 @@ async fn inner_main() -> Result<(), Error> {
         .layer(Extension(proxy_client))
         .layer(Extension(app_state));
 
-    // Build the listener map. start-os's `WebServer` provides the connection-
-    // lifecycle defenses we used to need to hand-roll: TCP keepalive on each
-    // accepted socket, HTTP/2 PING keepalives (25s/300s), accept retry with
-    // backoff on transient errors (EMFILE/ENFILE), GracefulShutdown tracking
-    // of in-flight connections, and RFC 8441 extended CONNECT for h2
-    // WebSocket upgrades. `TlsListener` adds slow-loris-resistant handshake
-    // timeouts (5s ClientHello, 15s full handshake) and runs each handshake
-    // in a per-connection task so a stalled client cannot block accept.
+    // Must stay outermost.
+    let app = crate::http_redirect::redirect_public_http(app);
+
+    // WAN-specific demux listeners require every wildcard listener to use SO_REUSEPORT.
     let http_addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 80));
-    let http_listener = TcpListener::bind(http_addr)
-        .await
+    let http_listener = startos::net::utils::bind_tokio_listener_reuse_port(http_addr)
         .with_kind(ErrorKind::Network)?;
     tracing::info!("HTTP listening on {}", http_addr);
 
@@ -418,8 +501,7 @@ async fn inner_main() -> Result<(), Error> {
     if tls_ready {
         let materials = ssl::init_tls_materials()?;
         let https_addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 443));
-        let https_listener = TcpListener::bind(https_addr)
-            .await
+        let https_listener = startos::net::utils::bind_tokio_listener_reuse_port(https_addr)
             .with_kind(ErrorKind::Network)?;
         tracing::info!("HTTPS listening on {}", https_addr);
         let tls = TlsListener::new(https_listener, ssl::StaticTlsHandler::new(materials));

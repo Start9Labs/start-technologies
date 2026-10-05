@@ -196,6 +196,9 @@ pub struct ServiceInterface {
     pub address_info: AddressInfo,
     #[serde(rename = "type")]
     pub interface_type: ServiceInterfaceType,
+    /// The interface address Open UI should prefer.
+    #[ts(optional = nullable)]
+    pub preferred_launcher_address: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]

@@ -88,9 +88,6 @@ Flavor
 FlavorString
   = [a-z]* { return text() }
 
-String
-  = [a-zA-Z]+ { return text(); }
-
 Version
   = number:VersionNumber prerelease: PreRelease? {
     return {
@@ -105,8 +102,10 @@ PreRelease
   }
 
 PreReleaseSegment
-  = "."? segment:(Digit / String) {
-    return segment;
+  = segment:$([0-9a-zA-Z-]+) &{ return !/^0[0-9]+$/.test(segment); } {
+    if (!/^[0-9]+$/.test(segment)) return segment;
+    const value = Number(segment);
+    return Number.isSafeInteger(value) ? value : segment;
   }
 
 VersionNumber

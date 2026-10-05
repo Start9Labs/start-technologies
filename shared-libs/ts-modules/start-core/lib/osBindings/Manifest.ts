@@ -8,6 +8,7 @@ import type { ImageId } from './ImageId'
 import type { LocaleString } from './LocaleString'
 import type { PackageId } from './PackageId'
 import type { PluginId } from './PluginId'
+import type { PreDownloadAlert } from './PreDownloadAlert'
 import type { Version } from './Version'
 import type { VolumeId } from './VolumeId'
 
@@ -23,6 +24,7 @@ export type Manifest = {
   title: string
   description: Description
   releaseNotes: LocaleString
+  preDownloadAlert?: PreDownloadAlert
   gitHash: GitHash | null
   license: string
   packageRepo: string
@@ -33,15 +35,17 @@ export type Manifest = {
   sdkVersion: string | null
   hardwareAcceleration: boolean
   /**
-   * Mount /dev/fuse for fuse-overlayfs storage (the rootless storage
-   * driver used by a nested OCI runtime).
+   * Grants access to `/dev/fuse`.
    */
   userspaceFilesystems: boolean
   /**
-   * Mount /dev/net/tun so the service can create kernel tunnel interfaces
-   * (VPN / WireGuard / tun-class workloads).
+   * Grants access to `/dev/net/tun`.
    */
   virtualNetworking: boolean
+  /**
+   * Grants /dev/kvm when present. The opening process must run as container root.
+   */
+  hardwareVirtualization: boolean
   plugins: Array<PluginId>
   satisfies: Array<Version>
 }

@@ -26,6 +26,8 @@ type PortForwardRow = {
   internalPort: string
   /** Start port — single-port forwards equal `externalPort`; range forwards expose the first port for the "Test" button. */
   testPort: number
+  /** Whether this forward receives local traffic. Used to gate hairpinning check. */
+  local: boolean
 }
 
 function parseSocketAddr(s: string): { ip: string; port: number } {
@@ -59,7 +61,7 @@ function parseSocketAddr(s: string): { ip: string; port: number } {
             @for (iface of row.interfaces; track iface) {
               <div>{{ iface }}</div>
             }
-            <port-check-warnings [result]="results()[i]" />
+            <port-check-warnings [result]="results()[i]" [local]="row.local" />
           </td>
           <td class="status">
             <port-check-icon
@@ -168,6 +170,7 @@ export class PortForwardsModalComponent {
           dst: string
           gateway: string
           count: number
+          local: boolean
           interfaces: string[]
         }> = []
 
@@ -222,6 +225,7 @@ export class PortForwardsModalComponent {
 
         const existing = grouped.get(key)
         if (existing) {
+          existing.local ||= pf.local
           for (const iface of pf.interfaces) {
             if (!existing.interfaces.includes(iface)) {
               existing.interfaces.push(iface)
@@ -230,6 +234,7 @@ export class PortForwardsModalComponent {
         } else {
           grouped.set(key, {
             interfaces: [...pf.interfaces],
+            local: pf.local,
             externalPort: formatPortRange(src.port, count),
             internalPort: formatPortRange(dst.port, count),
             testPort: src.port,

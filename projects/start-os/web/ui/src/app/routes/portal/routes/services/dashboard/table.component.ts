@@ -1,106 +1,60 @@
 import { Component, inject, input } from '@angular/core'
-import { FormsModule } from '@angular/forms'
-import { TableComponent } from 'src/app/routes/portal/components/table.component'
-import { T } from '@start9labs/start-core'
-import {
-  PackageDataEntry,
-  StateInfo,
-} from 'src/app/services/patch-db/data-model'
-import { ServiceComponent } from './service.component'
-import { TuiComparator, TuiTable } from '@taiga-ui/addon-table'
-import { getInstalledPrimaryStatus } from 'src/app/services/pkg-status-rendering.service'
-import { getManifest } from 'src/app/utils/get-package-data'
-import { ToManifestPipe } from '../../../pipes/to-manifest'
 import { toSignal } from '@angular/core/rxjs-interop'
-import { DepErrorService } from 'src/app/services/dep-error.service'
-import { i18nPipe } from '@start9labs/shared'
-import { TuiSkeleton } from '@taiga-ui/kit'
-import { PlaceholderComponent } from '../../../components/placeholder.component'
-import { TuiButton } from '@taiga-ui/core'
+import { FormsModule } from '@angular/forms'
 import { RouterLink } from '@angular/router'
+import { i18nPipe } from '@start9labs/shared'
+import { TuiTable } from '@taiga-ui/addon-table'
+import { TuiSkeleton } from '@taiga-ui/kit'
+import { TableComponent } from 'src/app/routes/portal/components/table.component'
+import { DepErrorService } from 'src/app/services/dep-error.service'
+import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
+import { ToManifestPipe } from '../../../pipes/to-manifest'
+import { ServiceComponent } from './service.component'
+import { byName, byStatus } from './sorters'
 
 @Component({
   selector: '[services]',
   template: `
-    @if (services()?.length === 0) {
-      <app-placeholder>
-        <h1 [style.margin-bottom]="0">
-          {{ 'Welcome to' | i18n }}
-          <span>StartOS!</span>
-        </h1>
-
-        <p>
-          {{
-            'To get started, visit the Marketplace and download your first service'
-              | i18n
-          }}
-        </p>
-
-        <a
-          style="margin: 1.5rem 0;"
-          tuiButton
-          size="m"
-          iconStart="@tui.shopping-cart"
-          routerLink="../marketplace"
-        >
-          {{ 'View Marketplace' | i18n }}
-        </a>
-      </app-placeholder>
-    } @else {
-      <table
-        [sorter]="name"
-        [appTable]="[null, 'Service', 'Status', 'Version', 'Uptime']"
-        [appTableSorters]="[null, name, status]"
-      >
-        @for (service of services() | tuiTableSort; track $index) {
-          <tr
-            appService
-            [routerLink]="'/services/' + (service | toManifest)?.id"
-            [pkg]="service"
-            [depErrors]="errors()?.[(service | toManifest).id] || {}"
-          ></tr>
-        } @empty {
-          @for (_ of ['', '']; track $index) {
-            <tr>
-              <td colspan="5">
-                <div [tuiSkeleton]="true">{{ 'Loading' | i18n }}</div>
-              </td>
-            </tr>
-          }
+    <table
+      [appTable]="[null, 'Service', 'Status', 'Version', 'Uptime']"
+      [appTableSorters]="[null, byName, byStatus]"
+      [sorter]="byName"
+    >
+      @for (service of services() | tuiTableSort; track $index) {
+        <tr
+          appService
+          [depErrors]="errors()?.[(service | toManifest).id] || {}"
+          [pkg]="service"
+          [routerLink]="'/services/' + (service | toManifest)?.id"
+        ></tr>
+      } @empty {
+        @for (_ of ['', '']; track $index) {
+          <tr>
+            <td colspan="5">
+              <div [tuiSkeleton]="true">{{ 'Loading' | i18n }}</div>
+            </td>
+          </tr>
         }
-      </table>
-    }
+      }
+    </table>
   `,
   imports: [
     FormsModule,
-    TableComponent,
-    ServiceComponent,
-    ToManifestPipe,
-    i18nPipe,
-    TuiSkeleton,
-    PlaceholderComponent,
-    TuiButton,
     RouterLink,
+    ServiceComponent,
+    TableComponent,
+    ToManifestPipe,
+    TuiSkeleton,
     TuiTable,
+    i18nPipe,
   ],
 })
-export class ServicesTableComponent<
-  T extends T.PackageDataEntry & {
-    stateInfo: StateInfo
-  },
-> {
-  readonly errors = toSignal(inject(DepErrorService).depErrors$)
+export class ServicesTableComponent {
+  private readonly depErrors = inject(DepErrorService)
 
-  readonly services = input.required<readonly T[] | null>()
+  readonly services = input.required<readonly PackageDataEntry[] | null>()
 
-  readonly name: TuiComparator<PackageDataEntry> = byName
-
-  readonly status: TuiComparator<PackageDataEntry> = (a, b) =>
-    getInstalledPrimaryStatus(b) > getInstalledPrimaryStatus(a) ? -1 : 1
-}
-
-function byName(a: PackageDataEntry, b: PackageDataEntry) {
-  return getManifest(b).title.toLowerCase() > getManifest(a).title.toLowerCase()
-    ? -1
-    : 1
+  protected readonly errors = toSignal(this.depErrors.depErrors$)
+  protected readonly byName = byName
+  protected readonly byStatus = byStatus
 }

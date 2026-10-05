@@ -5,6 +5,7 @@ import { fromEvent, merge, Subscription } from 'rxjs'
 import { filter, skip } from 'rxjs/operators'
 import { ApiService } from 'src/app/services/api/api.service'
 import { NetworkService } from 'src/app/services/network.service'
+import { StaleUiService } from 'src/app/services/stale-ui.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { IS_MOCK } from 'src/app/utils/workspace-config'
 
@@ -96,6 +97,7 @@ export class ConnectionService {
   private readonly api = inject(ApiService)
   private readonly i18n = inject(i18nPipe)
   private readonly isMock = inject(IS_MOCK)
+  private readonly staleUi = inject(StaleUiService)
 
   /** True while the sticky "Reconnecting" indicator is shown. */
   readonly unreachable = signal(false)
@@ -257,7 +259,14 @@ export class ConnectionService {
       return
     }
     try {
-      await this.api.systemInfo(PROBE_TIMEOUT_MS)
+      // The recovery probe doubles as stale-UI detection for disruptive
+      // updates (a sysupgrade reboot lands here once a request fails), and
+      // system.info is no_auth so the check works even when the update wiped
+      // the session. It is only a fallback: primary detection is the
+      // x-startwrt-git-hash header HttpService checks on every RPC response —
+      // a quick daemon restart (CLI deploy) never drops a request, so this
+      // path alone would miss it.
+      this.staleUi.check(await this.api.systemInfo(PROBE_TIMEOUT_MS))
     } catch (e) {
       // Still unreachable only on a network-level failure; any RPC/HTTP
       // response (even an error) means the router is answering again.
@@ -273,7 +282,7 @@ export class ConnectionService {
    * the page's scheme (no mixed-content block) and the cert is reissued for the
    * new IP and router.lan, so https validates once the router is back.
    *
-   * Probes the tiny no-auth /static/root-ca.crt rather than the ~100KB SPA index
+   * Probes the tiny no-auth /static/local-root-ca.crt rather than the ~100KB SPA index
    * so a 3s poll stays cheap.
    *
    * Edge case: an untrusted self-signed HTTPS target (a client that hasn't
@@ -287,7 +296,7 @@ export class ConnectionService {
     // the flow recovers (recover() skips the actual navigation under mock too).
     if (this.isMock) return true
     try {
-      await fetch(`${url}/static/root-ca.crt?_probe=${Date.now()}`, {
+      await fetch(`${url}/static/local-root-ca.crt?_probe=${Date.now()}`, {
         mode: 'no-cors',
         cache: 'no-store',
         // Bound each probe so an unroutable destination (the new subnet before

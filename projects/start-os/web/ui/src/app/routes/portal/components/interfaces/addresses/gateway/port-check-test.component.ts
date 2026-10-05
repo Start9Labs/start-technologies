@@ -45,7 +45,7 @@ export type PortCheckField = { label: i18nKey; value: string }
       </tr>
     </table>
 
-    <port-check-warnings [result]="result()" />
+    <port-check-warnings [result]="result()" [local]="local()" />
   `,
   styles: `
     table {
@@ -114,6 +114,7 @@ export class PortCheckTestComponent {
   readonly result = input<T.CheckPortRes | T.CheckPortV6Res>()
   readonly loading = input(false)
   readonly disabled = input(false)
+  readonly local = input(true)
   readonly test = output<void>()
 
   // A testable row brackets its value columns with a status icon and a Test

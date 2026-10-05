@@ -19,11 +19,6 @@ import { tuiIsNumber } from '@taiga-ui/cdk'
     }
   `,
   imports: [TuiNotification, i18nPipe],
-  styles: `
-    tui-notification {
-      margin-bottom: 1.5rem;
-    }
-  `,
 })
 export class TaskInfoComponent implements OnInit {
   @Input()

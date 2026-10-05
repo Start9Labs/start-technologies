@@ -261,7 +261,7 @@ export class VersionGraph<CurrentVersion extends string>
       }
     }
     throw new Error(
-      `cannot migrate from ${from.toString()} to ${to.toString()}`,
+      `this service has no migration path from ${from.toString()} to ${to.toString()}, so its data cannot be carried over`,
     )
   }
   /**
@@ -346,7 +346,7 @@ export class VersionGraph<CurrentVersion extends string>
     if (target) {
       if (isRange(target) && !target.satisfiable()) {
         throw new Error(
-          `uninit target range \`${target.toString()}\` is unsatisfiable — no version can satisfy it (host contract violation)`,
+          `this service has no migration path to the version being installed, so its data cannot be carried over`,
         )
       }
       const from = await getDataVersion(effects)

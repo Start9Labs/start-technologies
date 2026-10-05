@@ -42,7 +42,7 @@ pub fn resolve_registry_url(explicit: Option<&Url>, ctx: &CliContext) -> Result<
     if let Some(url) = explicit {
         registry_rpc_url(url)
     } else if let Some(url) = &ctx.registry_url {
-        Ok(url.clone())
+        Ok(url.get()?.clone())
     } else {
         Err(Error::new(
             eyre!("{}", t!("registry.context.registry-required")),

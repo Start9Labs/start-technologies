@@ -348,7 +348,7 @@ impl AsyncSeek for HttpReader {
 
 #[tokio::test]
 async fn main_test() {
-    let http_url = Url::parse("https://start9.com/latest/_static/css/main.css").unwrap();
+    let http_url = Url::parse("https://docs.start9.com/llms.txt").unwrap();
 
     println!("Getting this resource: {}", http_url);
     let mut test_reader = HttpReader::new(http_url).await.unwrap();

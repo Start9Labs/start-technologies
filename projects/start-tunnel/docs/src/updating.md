@@ -1,10 +1,10 @@
 # Updating
 
-Keep StartTunnel up to date using the web UI, CLI, or install script.
+Keep StartTunnel up to date using the web UI, CLI, or install script. Run the CLI and install script on your VPS as `root`.
 
 ## Web UI
 
-Navigate to **Settings > Version > Check for Updates**.
+Navigate to **Settings > Version > Check for Updates**. After the update finishes, reload any open StartTunnel page. When updating an interface that predates automatic revalidation, perform one hard refresh to load the current interface.
 
 ## CLI
 

@@ -2,12 +2,24 @@
 
 In order to establish a secure (HTTPS) connection with your router on the local network, it is necessary to download and trust your router's Root Certificate Authority (Root CA).
 
+Your router creates its Root CA during setup and keeps it across updates that preserve its settings. Devices that already trust it remain trusted after such an update.
+
 > [!NOTE]
 > You must repeat this guide for each device you want to connect to the router's web interface over HTTPS.
 
 ## Step 1 - Download
 
-Navigate to `System > Settings > General` and click "Download Root CA". This saves the certificate as `startwrt-ca.crt`. When you inspect or install it, the certificate is named "StartWRT Local Root CA" followed by a short random identifier (e.g. "StartWRT Local Root CA 3f8a1b2c") — each router generates a unique one so a reflashed device's new CA won't collide with one you already trust.
+There are two ways to download your router's Root CA.
+
+- ### Option 1: HTTP LAN
+
+  Visit `http://router.lan` (_not_ HTTPS) or your router's LAN IP address (`http://192.168.0.1` by default) and click "Download".
+
+- ### Option 2: StartWRT Dashboard
+
+  If you are logged in, navigate to `System > Settings > General` and click "Download Root CA".
+
+On an iPhone or iPad this downloads a configuration profile; everywhere else it saves the certificate as `startwrt-ca.crt`. When you inspect or install it, the certificate is named "StartWRT Local Root CA" followed by a short random identifier (e.g. "StartWRT Local Root CA 3f8a1b2c") — each router generates a unique one so a reflashed device's new CA won't collide with one you already trust.
 
 ## Step 2 - Trust
 
@@ -20,9 +32,11 @@ Select your platform:
 
 1. Press Command + Spacebar to launch a program, type in Keychain Access and select the resulting Keychain Access program to open it.
 
+1. In the Keychain Access program, make sure **System** is selected on the left-hand side under **System Keychains**
+
 1. Your router's CA certificate will be displayed among the imported certificates in Keychain Access. Right-click on the imported CA cert and select _Get Info_.
 
-1. The details of your CA certificate will be displayed in a new dialog window. Click the "Trust" heading, then select "Always Trust" on **Secure Sockets Layer (SSL)** and **X.509 Basic Policy**.
+1. The details of your CA certificate will be displayed in a new dialog window. Expand the "Trust" heading, then select "Always Trust" on **Secure Sockets Layer (SSL)** and **X.509 Basic Policy**.
 
    Click the red (x) button at the top left of the dialog window.
 
@@ -62,25 +76,24 @@ Select your platform:
 {{#endtab }}
 {{#tab name="iOS" }}
 
-1. Open your Downloads folder and click on the certificate. It will display a dialog box that says `Profile Downloaded`. Click "Close".
+> [!NOTE]
+> Download your Root CA in **Safari**. iOS and iPadOS only install certificate profiles downloaded through Safari — Chrome, Firefox, and other browsers cannot complete this step.
+
+1. Tap "Download". Safari will ask permission to download a configuration profile — tap "Allow". When the `Profile Downloaded` dialog appears, tap "Close".
 
 1. Head to _Settings > General > VPN & Device Management_.
 
-1. Under "DOWNLOADED PROFILE", click your Root CA.
+1. Under "DOWNLOADED PROFILE", tap your `StartWRT Root CA` profile.
 
-1. Click "Install".
+1. Tap "Install" in the top-right corner and enter your passcode if prompted.
 
-1. Click "Install" again.
-
-1. Click "Install" for a 3rd time.
-
-1. You should see green text with a check-mark saying "Verified" under the Profile Installed dialog.
+1. Your Root CA is self-signed, so iOS warns that the profile is unsigned before continuing. This is expected. Tap "Install" again, then "Install" a final time to confirm.
 
 1. Tap "Done".
 
-1. Go to `General > About > Certificate Trust Settings` and enable your Root CA.
+1. Go to `Settings > General > About > Certificate Trust Settings` and enable full trust for your Root CA.
 
-1. Click "Continue".
+1. Tap "Continue".
 
 {{#endtab }}
 {{#tab name="Android / Graphene" }}
@@ -90,6 +103,25 @@ This guide applies to Android 13+, GrapheneOS, CalyxOS, and LineageOS.
 1. Go to `Settings > Security > More security settings > Encryption & credentials > Install a certificate > CA Certificate > Install Anyway`, then select your Root CA certificate.
 
 1. If using Firefox, you must use [Firefox Beta](https://play.google.com/store/apps/details?id=org.mozilla.firefox_beta), then complete [this final step](#3-mozilla-apps-firefox-thunderbird-librewolf).
+
+{{#endtab }}
+{{#tab name="ChromeOS" }}
+
+1. Open Chrome and enter `chrome://certificate-manager` in the address bar. (Equivalently: `Settings > Privacy and security > Security > Manage certificates`.)
+
+1. Under "Local certificates", select "Custom", then expand "Installed by you".
+
+1. Click "Import" and select `startwrt-ca.crt` from your Downloads folder.
+
+1. Verify that "StartWRT Local Root CA" (followed by your router's identifier) now appears in the list and is trusted for identifying websites.
+
+> [!NOTE]
+> On older ChromeOS versions, "Manage certificates" opens a dialog with an "Authorities" tab instead. Click "Import" there, select the certificate, and check "Trust this certificate for identifying websites".
+
+> [!TIP]
+> ChromeOS only imports PEM-encoded certificates. Your Root CA is already PEM-encoded despite its `.crt` extension, so it imports as-is — but if you see a "file type unsupported" error, rename the file to `startwrt-ca.pem` and try again.
+
+Certificates imported here are trusted by the Chrome browser. If you use the Linux development environment (Crostini) on your Chromebook, it keeps its own certificate store — to trust the CA there too, follow the "Debian / Ubuntu" instructions on the Linux tab from inside the Linux terminal.
 
 {{#endtab }}
 {{#tab name="Linux" }}

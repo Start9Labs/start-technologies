@@ -8,6 +8,7 @@ use ts_rs::TS;
 
 use crate::context::RpcContext;
 use crate::db::model::public::{RestartReason, ServerInfo};
+use crate::net::host::all_hosts;
 use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::io::{copy_file, write_file_atomic};
@@ -26,6 +27,8 @@ impl AsRef<str> for ServerHostname {
         &***self
     }
 }
+
+const MAX_LEN: usize = 32;
 
 impl ServerHostname {
     fn validate(&self) -> Result<(), Error> {
@@ -54,12 +57,54 @@ impl ServerHostname {
         Ok(res)
     }
 
-    pub fn lan_address(&self) -> InternedString {
-        InternedString::from_display(&lazy_format!("https://{}.local", self.0))
+    /// Validates a user-supplied hostname.
+    pub fn new_from_input(hostname: InternedString) -> Result<Self, Error> {
+        let res = Self::new(hostname)?;
+        if res.0.chars().count() > MAX_LEN {
+            return Err(Error::new(
+                eyre!("{}", t!("hostname.too-long", max = MAX_LEN)),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        if res.0.starts_with('-') || res.0.ends_with('-') {
+            return Err(Error::new(
+                eyre!("{}", t!("hostname.hyphen-edge")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        Ok(res)
+    }
+
+    fn is_usable(&self) -> bool {
+        self.validate().is_ok()
+            && self.0.len() <= MAX_LEN
+            && !self.0.starts_with('-')
+            && !self.0.ends_with('-')
+    }
+
+    /// Treats an empty hostname as absent.
+    pub fn new_opt(hostname: Option<InternedString>) -> Result<Option<Self>, Error> {
+        hostname
+            .filter(|h| !h.is_empty())
+            .map(Self::new_from_input)
+            .transpose()
     }
 
     pub fn local_domain_name(&self) -> InternedString {
         InternedString::from_display(&lazy_format!("{}.local", self.0))
+    }
+
+    pub fn reject_private_domain(&self, domain: &str) -> Result<(), Error> {
+        if domain.trim_end_matches('.') == &*self.local_domain_name() {
+            return Err(Error::new(
+                eyre!(
+                    "{}",
+                    t!("net.host.private-domain-is-server-mdns", domain = domain)
+                ),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        Ok(())
     }
 
     pub fn load(server_info: &Model<ServerInfo>) -> Result<Self, Error> {
@@ -71,120 +116,24 @@ impl ServerHostname {
     }
 }
 
-#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize, ts_rs::TS)]
-#[ts(type = "string")]
-pub struct ServerHostnameInfo {
-    pub name: InternedString,
-    pub hostname: ServerHostname,
-}
-
-lazy_static::lazy_static! {
-    static ref ADJECTIVES: Vec<String> = include_str!("./assets/adjectives.txt").lines().map(|x| x.to_string()).collect();
-    static ref NOUNS: Vec<String> = include_str!("./assets/nouns.txt").lines().map(|x| x.to_string()).collect();
-}
-impl AsRef<str> for ServerHostnameInfo {
-    fn as_ref(&self) -> &str {
-        &self.hostname
+/// Returns a bootable, TLS-servable hostname, preserving usable stored names.
+pub fn repair_hostname(stored: &str) -> ServerHostname {
+    let stored = ServerHostname(InternedString::intern(stored));
+    if stored.is_usable() {
+        return stored;
     }
-}
-
-fn normalize(s: &str) -> InternedString {
-    let mut prev_was_dash = true;
-    let mut normalized = s
+    let usable: String = stored
+        .0
         .chars()
-        .filter_map(|c| {
-            if c.is_alphanumeric() {
-                prev_was_dash = false;
-                Some(c.to_ascii_lowercase())
-            } else if (c == '-' || c.is_whitespace()) && !prev_was_dash {
-                prev_was_dash = true;
-                Some('-')
-            } else {
-                None
-            }
-        })
-        .collect::<String>();
-    while normalized.ends_with('-') {
-        normalized.pop();
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    let mut repaired: String = usable.trim_matches('-').chars().take(MAX_LEN).collect();
+    while repaired.ends_with('-') {
+        repaired.pop();
     }
-    if normalized.len() < 4 {
-        generate_hostname().0
-    } else {
-        normalized.into()
-    }
-}
-
-fn denormalize(s: &str) -> InternedString {
-    let mut cap = true;
-    s.chars()
-        .map(|c| {
-            if c == '-' {
-                cap = true;
-                ' '
-            } else if cap {
-                cap = false;
-                c.to_ascii_uppercase()
-            } else {
-                c
-            }
-        })
-        .collect::<String>()
-        .into()
-}
-
-impl ServerHostnameInfo {
-    pub fn new(
-        name: Option<InternedString>,
-        hostname: Option<InternedString>,
-    ) -> Result<Self, Error> {
-        Self::new_opt(name, hostname)
-            .map(|h| h.unwrap_or_else(|| ServerHostnameInfo::from_hostname(generate_hostname())))
-    }
-
-    pub fn new_opt(
-        name: Option<InternedString>,
-        hostname: Option<InternedString>,
-    ) -> Result<Option<Self>, Error> {
-        let name = name.filter(|n| !n.is_empty());
-        let hostname = hostname.filter(|h| !h.is_empty());
-        Ok(match (name, hostname) {
-            (Some(name), Some(hostname)) => Some(ServerHostnameInfo {
-                name,
-                hostname: ServerHostname::new(hostname)?,
-            }),
-            (Some(name), None) => Some(ServerHostnameInfo::from_name(name)),
-            (None, Some(hostname)) => Some(ServerHostnameInfo::from_hostname(ServerHostname::new(
-                hostname,
-            )?)),
-            (None, None) => None,
-        })
-    }
-
-    pub fn from_hostname(hostname: ServerHostname) -> Self {
-        Self {
-            name: denormalize(&**hostname),
-            hostname,
-        }
-    }
-
-    pub fn from_name(name: InternedString) -> Self {
-        Self {
-            hostname: ServerHostname(normalize(&*name)),
-            name,
-        }
-    }
-
-    pub fn load(server_info: &Model<ServerInfo>) -> Result<Self, Error> {
-        Ok(Self {
-            name: server_info.as_name().de()?,
-            hostname: ServerHostname::load(server_info)?,
-        })
-    }
-
-    pub fn save(&self, server_info: &mut Model<ServerInfo>) -> Result<(), Error> {
-        server_info.as_name_mut().ser(&self.name)?;
-        self.hostname.save(server_info)
-    }
+    ServerHostname::new_from_input(InternedString::from_display(&repaired))
+        .unwrap_or_else(|_| generate_hostname())
 }
 
 pub fn generate_hostname() -> ServerHostname {
@@ -212,12 +161,7 @@ pub async fn get_current_hostname() -> Result<InternedString, Error> {
 pub async fn set_hostname(hostname: &ServerHostname) -> Result<(), Error> {
     hostname.validate()?;
     let hostname = &***hostname;
-    // Set the hostname ourselves rather than via `hostnamectl`: it delegates the
-    // static-file write to sandboxed systemd-hostnamed, which can't copy-up
-    // /etc/hostname from the read-only squashfs lower (EACCES on the Pi kernel).
-    // We already own /etc/hosts and persistence below, so the only thing we'd
-    // lose is hostnamed's D-Bus change signal, whose one consumer (avahi) we
-    // restart explicitly in sync_hostname.
+    // `systemd-hostnamed` cannot copy up `/etc/hostname` from the squashfs lower.
     write_file_atomic("/etc/hostname", format!("{hostname}\n")).await?;
     nix::unistd::sethostname(hostname).map_err(|e| {
         Error::new(
@@ -259,52 +203,145 @@ pub async fn sync_hostname(hostname: &ServerHostname) -> Result<(), Error> {
 #[command(rename_all = "kebab-case")]
 #[ts(export)]
 pub struct SetServerHostnameParams {
-    name: Option<InternedString>,
-    hostname: Option<InternedString>,
+    /// The server's `.local` hostname: up to 32 lowercase letters, numbers, and
+    /// hyphens, not starting or ending with a hyphen
+    #[arg(help = "help.arg.hostname")]
+    hostname: InternedString,
 }
 
 pub async fn set_hostname_rpc(
     ctx: RpcContext,
-    SetServerHostnameParams { name, hostname }: SetServerHostnameParams,
+    SetServerHostnameParams { hostname }: SetServerHostnameParams,
 ) -> Result<(), Error> {
-    let name = name.filter(|n| !n.is_empty());
-    let hostname = hostname
-        .filter(|h| !h.is_empty())
-        .map(ServerHostname::new)
-        .transpose()?;
-    if name.is_none() && hostname.is_none() {
-        return Err(Error::new(
-            eyre!("{}", t!("hostname.must-provide-name-or-hostname")),
-            ErrorKind::InvalidRequest,
-        ));
-    };
-    let info = ctx
-        .db
+    let hostname = ServerHostname::new_from_input(hostname)?;
+    ctx.db
         .mutate(|db| {
+            let reserved = hostname.local_domain_name();
+            for host in all_hosts(db) {
+                if host?.as_private_domains().contains_key(&reserved)? {
+                    hostname.reject_private_domain(&reserved)?;
+                }
+            }
             let server_info = db.as_public_mut().as_server_info_mut();
-            if let Some(name) = name {
-                server_info.as_name_mut().ser(&name)?;
-            }
-            if let Some(hostname) = &hostname {
-                hostname.save(server_info)?;
-                server_info
-                    .as_status_info_mut()
-                    .as_restart_mut()
-                    .ser(&Some(RestartReason::Mdns))?;
-            }
-            ServerHostnameInfo::load(server_info)
+            hostname.save(server_info)?;
+            server_info
+                .as_status_info_mut()
+                .as_restart_mut()
+                .ser(&Some(RestartReason::Mdns))
         })
         .await
         .result?;
-    ctx.account.mutate(|a| a.hostname = info.clone());
-    if let Some(h) = hostname {
-        sync_hostname(&h).await?;
-    }
+    ctx.account.mutate(|a| a.hostname = hostname.clone());
+    sync_hostname(&hostname).await?;
 
     Ok(())
 }
 
-#[test]
-fn test_generate_hostname() {
-    assert_eq!(dbg!(generate_hostname().0).len(), 12);
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn validate(hostname: &str) -> Result<(), Error> {
+        ServerHostname::new(InternedString::intern(hostname)).map(|_| ())
+    }
+
+    fn validate_input(hostname: &str) -> Result<(), Error> {
+        ServerHostname::new_from_input(InternedString::intern(hostname)).map(|_| ())
+    }
+
+    #[test]
+    fn test_generate_hostname() {
+        let generated = dbg!(generate_hostname());
+        assert_eq!(generated.0.len(), 12);
+        generated.validate().unwrap();
+    }
+
+    #[test]
+    fn accepts_lowercase_digits_and_hyphens() {
+        validate("my-cool-server-2").unwrap();
+    }
+
+    #[test]
+    fn rejects_empty_uppercase_spaces_and_underscores() {
+        validate("").unwrap_err();
+        validate("My Cool Server").unwrap_err();
+        validate("my_cool_server").unwrap_err();
+    }
+
+    #[test]
+    fn input_enforces_the_operator_length_and_dns_label_edges() {
+        validate_input(&"a".repeat(32)).unwrap();
+        validate_input(&"a".repeat(33)).unwrap_err();
+        validate_input("-my-server").unwrap_err();
+        validate_input("my-server-").unwrap_err();
+        validate_input("-").unwrap_err();
+    }
+
+    #[test]
+    fn legacy_hostnames_load_before_repair() {
+        validate(&"a".repeat(MAX_LEN + 1)).unwrap();
+        validate("-my-server").unwrap();
+    }
+
+    #[test]
+    fn the_longest_allowed_hostname_fits_the_root_ca_common_name() {
+        let root_cert = |len: usize| {
+            crate::net::ssl::make_root_cert(
+                &crate::net::ssl::gen_nistp256().unwrap(),
+                &crate::net::ssl::CertBranding::start_os(&"a".repeat(len)),
+                std::time::SystemTime::now(),
+            )
+        };
+        root_cert(MAX_LEN).unwrap();
+    }
+
+    #[test]
+    fn the_longest_allowed_hostname_fits_a_leaf_common_name() {
+        let root_key = crate::net::ssl::gen_nistp256().unwrap();
+        let branding = crate::net::ssl::CertBranding::start_os("startos");
+        let root =
+            crate::net::ssl::make_root_cert(&root_key, &branding, std::time::SystemTime::now())
+                .unwrap();
+        let leaf_key = crate::net::ssl::gen_nistp256().unwrap();
+        let leaf_cert = |len: usize| {
+            let hostname = ServerHostname(InternedString::from_display(&"a".repeat(len)));
+            let names = [hostname.local_domain_name()].into_iter().collect();
+            crate::net::ssl::make_leaf_cert(
+                (&root_key, &root),
+                (&leaf_key, &crate::net::ssl::SANInfo::new(&names)),
+                &branding,
+            )
+        };
+        leaf_cert(MAX_LEN).unwrap();
+    }
+
+    #[test]
+    fn generated_hostnames_are_valid_input() {
+        validate_input(&generate_hostname()).unwrap();
+    }
+
+    #[test]
+    fn repair_leaves_a_usable_hostname_alone() {
+        assert_eq!(&*repair_hostname("my-cool-server"), "my-cool-server");
+    }
+
+    #[test]
+    fn repair_keeps_as_much_of_an_unusable_hostname_as_it_can() {
+        assert_eq!(&*repair_hostname("My_Cool Server"), "mycoolserver");
+        assert_eq!(&*repair_hostname("-my-server-"), "my-server");
+        assert_eq!(
+            repair_hostname(&"a".repeat(MAX_LEN + 1)).chars().count(),
+            MAX_LEN
+        );
+        assert_eq!(
+            &*repair_hostname(&("-".repeat(MAX_LEN) + "my_server")),
+            "myserver"
+        );
+    }
+
+    #[test]
+    fn repair_generates_a_hostname_when_nothing_usable_remains() {
+        validate_input(&repair_hostname(&"_".repeat(70))).unwrap();
+        validate_input(&repair_hostname("")).unwrap();
+    }
 }

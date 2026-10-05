@@ -3,7 +3,7 @@ import { Component, inject, Input } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { CopyService, i18nPipe } from '@start9labs/shared'
 import { TuiButton, TuiInput } from '@taiga-ui/core'
-import { QRComponent } from 'src/app/components/qr.component'
+import { QRComponent } from 'src/app/routes/portal/components/qr.component'
 import { SingleResult } from './types'
 
 @Component({
@@ -46,6 +46,21 @@ import { SingleResult } from './types'
         >
           {{ 'Copy' | i18n }}
         </button>
+      }
+      @if (single.launchable) {
+        <a
+          tuiIconButton
+          appearance="icon"
+          size="s"
+          target="_blank"
+          rel="noreferrer"
+          tabindex="-1"
+          iconStart="@tui.external-link"
+          [href]="single.value"
+          [style.pointer-events]="'auto'"
+        >
+          {{ 'Open' | i18n }}
+        </a>
       }
     </tui-textfield>
     <ng-template #qr>

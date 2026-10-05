@@ -80,7 +80,7 @@ Update the server firmware.
 
 ### `start-cli server logs`
 
-Display StartOS system logs.
+Display StartOS system logs. These are also readable and downloadable in the web interface under **System** — see [Logs](logs.md).
 
 - `-l, --limit <N>` — Max entries
 - `-f, --follow` — Stream in real-time
@@ -114,9 +114,30 @@ Display hardware and device information.
 
 Tear down and rebuild all service containers.
 
-### `start-cli server set-hostname [NAME] [HOSTNAME]`
+### `start-cli server trust-ca --cert <PEM>`
 
-Set the server's name and hostname.
+Add a PEM-encoded CA root to the StartOS host trust store. Pass the certificate text with `--cert`.
+Use shell substitution to read it from a file or standard input:
+
+```sh
+start-cli --host https://server.local server trust-ca --cert="$(cat company-root.crt)"
+cat company-root.crt | start-cli --host https://server.local server trust-ca --cert="$(cat)"
+```
+
+The command requires authentication and reports the certificate subject and SHA-256 fingerprint.
+StartOS identifies the root by that fingerprint, so installing the same certificate again keeps a
+single copy. StartOS's own HTTPS connections, such as registry, update, and package downloads, trust
+the root immediately, and it persists across reboots and OS updates. It is added alongside the
+StartOS local Root CA and the distribution trust bundle.
+
+This command changes the host trust store. Services use the trust store provided by their package,
+so configure custom roots within a service separately when supported.
+
+- `--format` — Output format
+
+### `start-cli server set-hostname <HOSTNAME>`
+
+Set the server's name, which is its `.local` address without the `.local` on the end.
 
 ### `start-cli server set-smtp`
 
@@ -157,9 +178,16 @@ Set the keyboard layout.
 
 Set the Echo IP service URLs used for external IP detection.
 
-### `start-cli server experimental governor [SET]`
+### `start-cli server governor [SET]`
 
 View or set the CPU governor (e.g., `performance`, `powersave`).
+
+- `--format` — Output format
+
+### `start-cli server epp [SET]`
+
+View or set the CPU energy/performance preference. StartOS applies `balance_power`
+on Librem Mini v2 systems when no preference is saved and the setting is available.
 
 - `--format` — Output format
 
@@ -238,7 +266,9 @@ Stop a running service.
 
 ### `start-cli package restart <ID>`
 
-Restart a running service.
+Restart a running service. If the service is still starting, StartOS lets startup
+complete, then stops and starts the service again. Repeated restart requests during
+the same startup coalesce into one additional restart.
 
 ### `start-cli package uninstall <ID>`
 
@@ -246,7 +276,7 @@ Remove a package and its data.
 
 ### `start-cli package logs <ID>`
 
-Display logs from a service.
+Display logs from a service. These are also readable and downloadable on the service's **Logs** tab in the web interface — see [Logs](logs.md).
 
 - `-l, --limit <N>` — Max entries
 - `-f, --follow` — Stream in real-time
@@ -254,19 +284,19 @@ Display logs from a service.
 - `-B, --before` — Show logs before cursor
 - `-b, --boot <ID>` — Filter by boot ID
 
-### `start-cli package attach <ID> [COMMAND]`
+### `start-cli package attach <ID> [-- COMMAND]`
 
 Open a shell inside a service's subcontainer (within the LXC container), or run a one-off command. If the service has only one subcontainer, you are placed directly into it; if there are multiple, you will be prompted to choose. See [Accessing Service Containers](service-containers.md) for details.
 
-- `-s, --subcontainer <NAME>` — Target a specific subcontainer
-- `-n, --name <NAME>` — Container name
-- `-u, --user <USER>` — Run as a specific user
-- `-i, --image-id <ID>` — Image identifier
+- `-n, --name <NAME>` — Select the subcontainer by name; the package's README lists them
+- `-s, --subcontainer <GUID>` — Select the subcontainer by its internal Guid, or a prefix of it (names go to `-n`)
+- `-i, --image-id <ID>` — Select the subcontainer by the image it runs
+- `-u, --user <USER>` — Run as this user instead of the image's default
 - `--force-tty` — Force TTY mode
 
-### `start-cli package stats <ID>`
+### `start-cli package stats`
 
-Display LXC container resource usage.
+Display LXC container resource usage for every installed service.
 
 - `--format` — Output format
 
@@ -286,7 +316,7 @@ Cancel a pending install or download.
 
 ### `start-cli package set-outbound-gateway <PACKAGE> [GATEWAY]`
 
-Override the outbound gateway for a specific service.
+Override the outbound gateway for a specific service, taking precedence over the system-wide default.
 
 ### `start-cli package action run <PACKAGE_ID> <ACTION_ID> <INPUT>`
 
@@ -421,7 +451,7 @@ Rename a gateway.
 
 ### `start-cli net gateway set-default-outbound <GATEWAY>`
 
-Set the default outbound gateway for all services.
+Set the system-wide default outbound gateway, used by every service without its own override.
 
 ### `start-cli net gateway set-secure <GATEWAY> [SECURE]`
 
@@ -484,6 +514,18 @@ Initialize ACME (Let's Encrypt) certificate provisioning.
 Remove ACME certificate configuration.
 
 - `--provider <PROVIDER>` — ACME provider to remove (required)
+
+### `start-cli net acme check-challenge <FQDN> <GATEWAY>`
+
+Test whether a certificate authority can reach the domain to validate it. An
+ACME authority connects on port `443` regardless of which port the address
+itself is served on, so this tests `443` — over IPv4, and over IPv6 where the
+gateway has a global address. Reports nothing when the domain needs no such
+test: it holds a certificate with life left in it. A domain with no ACME
+authority, or one already served on `443`, has no question to ask here.
+
+- `--acme <PROVIDER>` — ACME provider identifier or URL (required)
+- `--format` — Output format
 
 ### `start-cli net tunnel add <NAME> <CONFIG> [GATEWAY_TYPE]`
 
@@ -725,7 +767,7 @@ Build, inspect, edit, and publish service packages.
 
 ### `start-cli s9pk init-workspace [PATH]`
 
-Initialize a StartOS packaging workspace in PATH (default: the current directory). Clones the packaging guide, writes the agent-context files (`AGENTS.md`, `AGENTS.local.md`, `CLAUDE.md`), and creates a `.startos/` directory holding the workspace signing key and host/registry config. Nesting is allowed; it refuses to run inside a package repo. See [Set Up Your Packaging Workspace](/packaging/environment-setup.html#set-up-your-packaging-workspace).
+Initialize a StartOS packaging workspace in PATH (default: the current directory). Clones the monorepo's `live-docs` branch — what every product has published — writes the agent-context files (`AGENTS.md`, `AGENTS.local.md`, `CLAUDE.md`), and creates a `.startos/` directory holding the workspace signing key and host/registry config. Nesting is allowed; it refuses to run inside a package repo. See [Set Up Your Packaging Workspace](/packaging/environment-setup.html#set-up-your-packaging-workspace).
 
 ### `start-cli s9pk init-package <NAME>`
 

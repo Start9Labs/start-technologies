@@ -1,13 +1,10 @@
 # AGENTS.md — yasi
 
-`yasi` ("Yet Another String Interner") is a small first-party Rust library in the start-os
+`yasi` ("Yet Another String Interner") is a small first-party Rust library in the start-technologies
 monorepo at `shared-libs/crates/yasi`. It deduplicates strings behind `Arc`, computing `Hash`
 and `Eq` through `Display` so any `Display` value can be interned without allocating unless it's
 new. `CLAUDE.md` is a one-line `@AGENTS.md` import; edit this file, not that one. See
-[ARCHITECTURE.md](ARCHITECTURE.md) for internals and [CONTRIBUTING.md](CONTRIBUTING.md) for the
-contributor workflow.
-
-**Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
+[ARCHITECTURE.md](ARCHITECTURE.md) for internals.
 
 ## Layout
 
@@ -15,7 +12,7 @@ contributor workflow.
   internal `StringRepr` enum (`Heap`/`Stack`/`Static`), `StringRef` table entry, `DisplayHasher`
   and `DisplayEq` (Display-based hashing/equality), `TableString` (the heap-owned string with the
   table-eviction `Drop`), and the `lazy_static` global `TABLE: RwLock<RawTable<StringRef>>`.
-  Holds the two unit tests, including the `intern → drop` deadlock regression test.
+  Holds the unit tests, including the `intern → drop` deadlock regression test.
 - `src/serde.rs` — feature-gated (`serde`): `Serialize`/`Deserialize` for `InternedString` via an
   `InternedStringVisitor` (deserializes any string/bytes form by interning it).
 - `src/ts_rs.rs` — feature-gated (`ts-rs`): `ts_rs::TS` impl that reports the type as `"string"`,
@@ -35,7 +32,7 @@ make start-core-format-check               # CI read-only format check
 ## Gotchas
 
 - `Cargo.toml` declares `edition = "2024"` and the code uses 2024 features (let-chains in `eq`
-  closures). Build with a toolchain that supports edition 2024; sibling `exver` is still on 2021.
+  closures). Build with a toolchain that supports edition 2024.
 - Features `serde` and `ts-rs` are **not** in `default`. Consumers opt in (e.g. `imbl-value`
   enables `serde` and forwards `ts-rs`); plain `cargo test -p yasi` exercises neither module.
 - Strings of 20 bytes or fewer (`STACK_STR_SIZE`) are inlined in `StringRepr::Stack` and never

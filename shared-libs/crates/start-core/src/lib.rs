@@ -236,6 +236,12 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
             from_fn_blocking(developer::pubkey).with_about("about.get-id-pubkey"),
         )
         .subcommand(
+            "completions",
+            from_fn(bins::start_cli::completions)
+                .no_display()
+                .with_about("about.print-shell-completions"),
+        )
+        .subcommand(
             "diagnostic",
             diagnostic::diagnostic::<C>().with_about("about.commands-diagnostic"),
         )
@@ -285,6 +291,26 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                     .with_about("about.get-device-info")
                     .with_call_remote::<CliContext>(),
             ),
+        )
+        .subcommand(
+            "governor",
+            from_fn_async(system::governor)
+                .with_display_serializable()
+                .with_custom_display_fn(|handle, result| {
+                    system::display_governor_info(handle.params, result)
+                })
+                .with_about("about.show-cpu-governors")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "epp",
+            from_fn_async(system::epp)
+                .with_display_serializable()
+                .with_custom_display_fn(|handle, result| {
+                    system::display_epp_info(handle.params, result)
+                })
+                .with_about("about.show-cpu-epp")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "experimental",
@@ -381,6 +407,16 @@ pub fn server<C: Context>() -> ParentHandler<C> {
             })
             .with_about("about.update-firmware")
             .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "trust-ca",
+            from_fn_async(system::trust_ca::install)
+                .with_display_serializable()
+                .with_custom_display_fn(|handle, result| {
+                    system::trust_ca::display(handle.params, result)
+                })
+                .with_about("about.trust-custom-ca-root")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "set-smtp",

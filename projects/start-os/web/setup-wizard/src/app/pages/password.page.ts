@@ -1,17 +1,17 @@
 import { Component, inject } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
 import {
   AbstractControl,
-  FormControl,
-  FormGroup,
+  NonNullableFormBuilder,
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms'
 import { Router } from '@angular/router'
 import {
+  hostnameValidationErrors,
+  hostnameValidator,
   i18nPipe,
-  normalizeHostname,
-  randomServerName,
-  serverNameValidator,
+  randomHostname,
   TaskService,
 } from '@start9labs/shared'
 import { TuiMapperPipe, TuiValidator } from '@taiga-ui/cdk'
@@ -25,6 +25,7 @@ import {
 } from '@taiga-ui/core'
 import { TuiPassword } from '@taiga-ui/kit'
 import { TuiCardLarge, TuiForm, TuiHeader } from '@taiga-ui/layout'
+import { map } from 'rxjs'
 import { StateService } from '../services/state.service'
 
 @Component({
@@ -48,18 +49,18 @@ import { StateService } from '../services/state.service'
       @if (isFresh) {
         <tui-textfield>
           <label tuiLabel>{{ 'Server Name' | i18n }}</label>
-          <input tuiInput formControlName="name" />
+          <input tuiInput autocapitalize="off" formControlName="hostname" />
           <button
             tuiIconButton
             type="button"
             appearance="icon"
             iconStart="@tui.refresh-cw"
-            (click)="randomizeName()"
+            (click)="randomizeHostname()"
           ></button>
         </tui-textfield>
-        <tui-error formControlName="name" />
-        @if (form.controls.name.value?.trim() && !form.controls.name.errors) {
-          <tui-error class="g-secondary" error="{{ derivedHostname }}.local" />
+        <tui-error formControlName="hostname" />
+        @if (form.controls.hostname.valid) {
+          <tui-error class="g-secondary" error="{{ hostname() }}.local" />
         }
       }
 
@@ -125,13 +126,16 @@ import { StateService } from '../services/state.service'
     i18nPipe,
   ],
   providers: [
-    tuiValidationErrorsProvider({
-      required: 'Required',
-      minlength: 'Must be 12 characters or greater',
-      maxlength: 'Must be 64 character or less',
-      match: 'Passwords do not match',
-      hostnameMinLength: 'Hostname must be at least 4 characters',
-      hostnameMaxLength: 'Hostname must be 63 characters or less',
+    tuiValidationErrorsProvider(() => {
+      const i18n = inject(i18nPipe)
+
+      return {
+        ...hostnameValidationErrors(),
+        required: i18n.transform('Required'),
+        minlength: i18n.transform('Must be 12 characters or greater'),
+        maxlength: i18n.transform('Must be 64 character or less'),
+        match: i18n.transform('Passwords do not match'),
+      }
     }),
   ],
 })
@@ -141,20 +145,22 @@ export default class PasswordPage {
   private readonly stateService = inject(StateService)
   private readonly i18n = inject(i18nPipe)
 
-  // Fresh install requires password and name
   readonly isFresh = this.stateService.setupType === 'fresh'
 
-  readonly form = new FormGroup({
-    password: new FormControl('', [
-      ...(this.isFresh ? [Validators.required] : []),
-      Validators.minLength(12),
-      Validators.maxLength(64),
-    ]),
-    confirm: new FormControl(''),
-    name: new FormControl(
-      this.isFresh ? randomServerName() : '',
-      this.isFresh ? [Validators.required, serverNameValidator] : [],
-    ),
+  readonly form = inject(NonNullableFormBuilder).group({
+    password: [
+      '',
+      [
+        ...(this.isFresh ? [Validators.required] : []),
+        Validators.minLength(12),
+        Validators.maxLength(64),
+      ],
+    ],
+    confirm: [''],
+    hostname: [
+      this.isFresh ? randomHostname() : '',
+      this.isFresh ? [hostnameValidator] : [],
+    ],
   })
 
   readonly validator = (value: string) => (control: AbstractControl) =>
@@ -162,16 +168,16 @@ export default class PasswordPage {
       ? null
       : { match: this.i18n.transform('Passwords do not match') }
 
-  randomizeName() {
-    this.form.controls.name.setValue(randomServerName())
-  }
+  readonly hostname = toSignal(
+    this.form.controls.hostname.valueChanges.pipe(map(value => value.trim())),
+    { initialValue: this.form.getRawValue().hostname.trim() },
+  )
 
-  get derivedHostname(): string {
-    return normalizeHostname(this.form.controls.name.value || '')
+  randomizeHostname() {
+    this.form.controls.hostname.setValue(randomHostname())
   }
 
   async skip() {
-    // Skip means no new password - pass null
     await this.executeSetup(null)
   }
 
@@ -180,15 +186,13 @@ export default class PasswordPage {
   }
 
   private async executeSetup(password: string | null) {
-    const name = this.form.controls.name.value || ''
-    const hostname = normalizeHostname(name)
+    const hostname = this.hostname()
 
     this.tasks.run(async () => {
       if (this.stateService.setupType === 'attach') {
         await this.stateService.attachDrive(password)
       } else {
-        // fresh, restore, or transfer - all use execute
-        await this.stateService.executeSetup(password, name, hostname)
+        await this.stateService.executeSetup(password, hostname)
       }
 
       await this.router.navigate(['/loading'])

@@ -67,6 +67,10 @@ platform_do_upgrade() {
 		partx -d - "/dev/$diskdev"
 		partx -a - "/dev/$diskdev"
 
+		# Converge the eMMC boot partitions (boot0/boot1) to this image's
+		# bootinfo + FSBL (see /lib/upgrade/spacemit_boot0.sh).
+		spacemit_provision_boot0 "$diskdev"
+
 		return 0
 	fi
 
@@ -83,4 +87,8 @@ platform_do_upgrade() {
 	#copy partition uuid
 	echo "Writing new UUID to /dev/$diskdev..."
 	get_image "$@" | dd of="/dev/$diskdev" bs=1 skip=440 count=4 seek=440 conv=fsync
+
+	# Converge the eMMC boot partitions (boot0/boot1) to this image's
+	# bootinfo + FSBL (see /lib/upgrade/spacemit_boot0.sh).
+	spacemit_provision_boot0 "$diskdev"
 }

@@ -10,14 +10,14 @@ import { Effects } from '../Models/Effects'
 
 import { CallbackHolder } from '../Models/CallbackHolder'
 import { asError } from '@start9labs/start-core/util'
-const matchRpcError = z.object({
-  error: z.object({
+const matchRpcError = z.looseObject({
+  error: z.looseObject({
     code: z.number(),
     message: z.string(),
     data: z
       .union([
         z.string(),
-        z.object({
+        z.looseObject({
           details: z.string(),
           debug: z.string().nullable().optional(),
         }),
@@ -29,7 +29,7 @@ const matchRpcError = z.object({
 function testRpcError(v: unknown): v is RpcError {
   return matchRpcError.safeParse(v).success
 }
-const matchRpcResult = z.object({
+const matchRpcResult = z.looseObject({
   result: z.unknown(),
 })
 function testRpcResult(v: unknown): v is z.infer<typeof matchRpcResult> {

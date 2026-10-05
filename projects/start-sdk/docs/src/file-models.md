@@ -30,21 +30,26 @@ When done correctly, the shape itself eliminates the need for separate default c
 
 ### store.json.ts (Common Pattern)
 
-The most common file model is `store.json`, used to persist internal service state:
+`store.json` holds StartOS-side state that the upstream service's own configuration has no place for — a generated database password, a secret key, a backend the user selected, a flag an action toggles. Where the service does read a config file of its own, model that file directly instead: see [Prefer Direct FileModel Over store.json](#prefer-direct-filemodel-over-storejson--environment-variables).
+
+**It belongs on a volume of its own, named `startos`, that no subcontainer mounts.** Nothing inside the container reads it, and keeping it off the data volume keeps package-generated credentials out of a directory the application can read.
 
 ```typescript
 import { FileHelper, z } from '@start9labs/start-sdk'
 import { sdk } from '../sdk'
 
-const shape = z.object({
+const shape = z.looseObject({
   adminPassword: z.string().optional().catch(undefined),
   secretKey: z.string().optional().catch(undefined),
   someNumber: z.number().catch(0),
   someFlag: z.boolean().catch(false),
 })
 
-export const storeJson = FileHelper.json({ base: sdk.volumes.main, subpath: './store.json' }, shape)
+export const storeJson = FileHelper.json({ base: sdk.volumes.startos, subpath: 'store.json' }, shape)
 ```
+
+- **Declare the volume** in the manifest — `volumes: ['main', 'startos']` — and give it no mountpoint.
+- **Back it up.** `sdk.Backups.ofVolumes('main', 'startos')`. Restoring the data volume alone brings back an install whose generated secrets are gone; where one of them is an encryption key, the restored data is unreadable.
 
 ### YAML Configuration
 
@@ -52,12 +57,12 @@ export const storeJson = FileHelper.json({ base: sdk.volumes.main, subpath: './s
 import { FileHelper, z } from '@start9labs/start-sdk'
 import { sdk } from '../sdk'
 
-const serverSchema = z.object({
+const serverSchema = z.looseObject({
   host: z.string().catch('localhost'),
   port: z.number().catch(8080),
 })
 
-const shape = z.object({
+const shape = z.looseObject({
   server: serverSchema.catch(() => serverSchema.parse({})),
   features: z.array(z.string()).catch([]),
 })
@@ -71,7 +76,7 @@ export const configYaml = FileHelper.yaml({ base: sdk.volumes.main, subpath: 'co
 import { FileHelper, z } from '@start9labs/start-sdk'
 import { sdk } from '../sdk'
 
-const shape = z.object({
+const shape = z.looseObject({
   api_bind: z.literal('0.0.0.0').catch('0.0.0.0'),
   api_port: z.literal(9814).catch(9814),
   debug: z.literal(false).catch(false),
@@ -89,18 +94,18 @@ XML support includes options for controlling array detection during parsing:
 import { FileHelper, z } from '@start9labs/start-sdk'
 import { sdk } from '../sdk'
 
-const knownProxiesSchema = z.object({
+const knownProxiesSchema = z.looseObject({
   // 10.0.3.1 is the OS bridge gateway — the reverse proxy this container should
   // trust. It is the OS's own fixed address (see Service-to-Service Networking),
   // not a dependency dial, so the literal is correct here.
   string: z.literal('10.0.3.1').array().catch(['10.0.3.1']),
 })
 
-const networkConfigSchema = z.object({
+const networkConfigSchema = z.looseObject({
   KnownProxies: knownProxiesSchema.catch(() => knownProxiesSchema.parse({})),
 })
 
-const shape = z.object({
+const shape = z.looseObject({
   NetworkConfiguration: networkConfigSchema.catch(() => networkConfigSchema.parse({})),
 })
 
@@ -116,16 +121,18 @@ export const networkXml = FileHelper.xml({ base: sdk.volumes.config, subpath: 'n
 
 ### Reading Methods
 
-| Method                         | Purpose                                                |
-| ------------------------------ | ------------------------------------------------------ |
-| `.once()`                      | Read once, no reactivity                               |
-| `.const(effects)`              | Read and re-run the enclosing context if value changes |
-| `.onChange(effects, callback)` | Register a callback for value changes                  |
-| `.watch(effects)`              | Create an async iterator of new values                 |
-| `.waitFor(effects, predicate)` | Block until the value satisfies a predicate            |
+| Method                                  | Purpose                                                |
+| --------------------------------------- | ------------------------------------------------------ |
+| `.once()`                               | Read once, no reactivity                               |
+| `.const(effects)`                       | Read and re-run the enclosing context if value changes |
+| `.onChange(effects, callback)`          | Register a callback for value changes                  |
+| `.watch(effects, signal?)`              | Create an async iterator of new values                 |
+| `.waitFor(effects, predicate, signal?)` | Block until the value satisfies a predicate            |
 
 > [!NOTE]
 > All read methods return `null` if the file doesn't exist. Do NOT use try-catch for missing files.
+
+The enclosing context is whichever handler made the read — `setupMain`, where a re-run rebuilds the daemon spec and restarts the daemons whose spec changed, or a `setupOnInit` handler, where it re-invokes that handler alone ([Init Handlers Are Reactive](./init.md#init-handlers-are-reactive)). The examples below say "daemon restarts" because they are written from `setupMain`; the mechanism is the same in both.
 
 ### Use the Map Function
 
@@ -163,7 +170,12 @@ const serverHost = await configYaml.read(c => c.server.host).once()
 
 // Wait until a condition is met (blocks until predicate returns true)
 const syncedStore = await storeJson.read(s => s.fullySynced).waitFor(effects, synced => synced === true)
+
+// Give up after a minute; the signal stops the wait (it rejects with AbortedError)
+const syncedInTime = await storeJson.read(s => s.fullySynced).waitFor(effects, synced => synced === true, AbortSignal.timeout(60_000))
 ```
+
+The signal also cancels waits for a file or its parent directory to be created.
 
 ## Writing File Models
 
@@ -171,7 +183,7 @@ const syncedStore = await storeJson.read(s => s.fullySynced).waitFor(effects, sy
 
 Use `merge()` for almost all writes. It has two major advantages:
 
-1. **Preserves unknown keys**: `merge()` only updates the fields you specify, leaving everything else intact — including keys that the upstream service uses but your file model doesn't define. `write()` replaces the entire file, destroying any keys not in your schema. See [Unknown Key Preservation](#unknown-key-preservation) for details and migration implications.
+1. **Preserves unknown keys**: `merge()` only updates the fields you specify, leaving everything else intact — including keys that the upstream service uses but your file model doesn't define. `write()` replaces the entire file with exactly the data you pass: a key you leave out is gone, and a key you pass survives whether or not your schema names it — so reading a file with `read()` and writing the result back strips nothing. See [Unknown Key Preservation](#unknown-key-preservation) for details, and for how to delete a stale key.
 2. **Defaults come from the schema**: When every key in your zod schema has a `.catch()`, the schema _is_ the default. You can seed a file on first install with `merge(effects, {})` — the `.catch()` values fill in every missing field. No need to define a separate defaults object and pass it to `write()`.
 
 ```typescript
@@ -195,6 +207,22 @@ await storeJson.write(effects, {
   smtp: { selection: 'disabled', value: {} },
 })
 ```
+
+### Changing the Current Value
+
+Use `update()` when the next value depends on the current file, including toggles and deleting entries from a typed record:
+
+```typescript
+await configToml.update(effects, current => (current === null ? null : { ...current, allow_registration: !current.allow_registration }))
+```
+
+The callback receives the same validated value as `read().once()`. Return a complete replacement or `null` to skip writing. An unchanged serialized value also skips writing. The callback may be asynchronous. Reads inside it remain reentrant; calling `write()`, `merge()`, or `update()` on the same file, including through a symlink alias, throws immediately.
+
+The callback has five seconds to return, and file access it starts on other files counts against the same deadline. On timeout, `update()` rejects and releases the lock; the callback cannot commit its return value or start further SDK file operations. Keep callbacks short: an in-process timer cannot interrupt synchronous code that blocks Node's event loop or undo side effects performed directly by the callback.
+
+`write()`, `merge()`, and `update()` hold a cross-process advisory lock on each target, so other SDK runtimes writing the same file through a mounted directory wait their turn. A writer waits up to ten seconds for the lock, then rejects; a service that holds its own `flock` on the file for longer blocks every SDK write to it. `merge()` and `update()` hold it through the entire read-modify-write. The lock is taken on the file itself; creating a missing file locks a hidden `.<name>.tmp` temp file that is renamed into place. A write interrupted by a crash or power loss can leave a hidden `.<name>.<random>.tmp` file beside the target; the first write to that file after the service restarts removes it. An interrupted create leaves `.<name>.tmp`, which the next create reuses.
+
+Writes replace the file atomically, preserving its owner, access ACL, permissions, and extended attributes. New files inherit their directory's default ACL. Own-volume file mounts follow replacement while their subcontainer is alive, and commands synchronize these mounts before launching. Reads, writes, and commands reject when their mount cannot be refreshed. A write may have replaced the source before refresh fails; rejection does not imply that the file is unchanged. A deleted source leaves the mount on its last file. A target that is itself a bind mount is written in place. Existing open descriptors retain the previous inode; applications must reopen the pathname to read the replacement.
 
 ### What an Empty `merge()` Does
 
@@ -224,7 +252,7 @@ import { sdk } from '../sdk'
 
 export const defaultMaxUpload = '50M'
 
-const shape = z.object({
+const shape = z.looseObject({
   max_upload_size: z.string().catch(defaultMaxUpload),
   allow_registration: z.boolean().catch(false),
 })
@@ -254,7 +282,7 @@ This keeps the default defined in exactly one place.
 Give every key a `.catch()` default. This makes your file model self-healing — invalid or missing values are automatically corrected, and `merge(effects, {})` works for initialization.
 
 ```typescript
-const shape = z.object({
+const shape = z.looseObject({
   host: z.string().catch('localhost'),
   port: z.number().catch(8080),
   debug: z.boolean().catch(false),
@@ -271,8 +299,8 @@ const shape = z.object({
 
 ```typescript
 // BROKEN: inner .catch() values never fire when "server" is missing
-const shape = z.object({
-  server: z.object({
+const shape = z.looseObject({
+  server: z.looseObject({
     host: z.string().catch('localhost'),
     port: z.number().catch(8080),
   }),
@@ -285,12 +313,12 @@ shape.parse({})
 **The fix:** Extract child schemas into variables and use `.catch(() => childSchema.parse({}))`:
 
 ```typescript
-const serverSchema = z.object({
+const serverSchema = z.looseObject({
   host: z.string().catch('localhost'),
   port: z.number().catch(8080),
 })
 
-const shape = z.object({
+const shape = z.looseObject({
   server: serverSchema.catch(() => serverSchema.parse({})),
 })
 
@@ -314,7 +342,7 @@ import { sdk } from '../sdk'
 // Level 2: nested object
 const dbDefault = { path: '/data/app.db', journal_mode: 'wal' }
 const dbShape = z
-  .object({
+  .looseObject({
     path: z.literal('/data/app.db').catch(dbDefault.path),
     journal_mode: z.string().catch(dbDefault.journal_mode),
   })
@@ -323,14 +351,14 @@ const dbShape = z
 // Level 2: array item
 const endpointDefault = { port: 8080, tls: false }
 const endpointShape = z
-  .object({
+  .looseObject({
     port: z.number().catch(endpointDefault.port),
     tls: z.boolean().catch(endpointDefault.tls),
   })
   .catch(endpointDefault)
 
 // Top level
-const shape = z.object({
+const shape = z.looseObject({
   database: dbShape,
   endpoints: z.array(endpointShape).catch([endpointDefault]),
   log_level: z.string().catch('info'),
@@ -347,7 +375,7 @@ The key technique: define each nested level's default and shape separately, then
 For values that should always be a specific literal and never change (e.g., internal ports, paths, auth modes), use `z.literal().catch()`. If the file ends up with a different value (e.g., user edits it manually), it is corrected on the next `merge()`:
 
 ```typescript
-const shape = z.object({
+const shape = z.looseObject({
   // Enforced — always corrected back to these values
   api_bind: z.literal('0.0.0.0').catch('0.0.0.0'),
   api_port: z.literal(9814).catch(9814),
@@ -366,7 +394,7 @@ This pattern is especially useful for upstream config files where you need to lo
 When a `FileHelper.ini` uses an `InputSpec`'s `partialValidator` as its validator and exposes the raw file as `raw: Value.hidden(shape)`, `formToFile` must reparse `rawInput` through `shape` before spreading it. Otherwise, the first install seed writes an empty file — the enforced `.catch()` defaults in `shape` never fire, and the daemon starts with upstream defaults instead of the locked-down values.
 
 ```typescript
-export const shape = z.object({
+export const shape = z.looseObject({
   'rpc-bind-ip': z.literal('0.0.0.0').catch('0.0.0.0'),
   'rpc-bind-port': z.literal(18081).catch(18081),
   // ...more enforced + configurable keys
@@ -406,12 +434,12 @@ export const confFile = FileHelper.ini(
 
 ### Unknown Key Preservation
 
-The SDK patches `z.object()` to use loose mode by default — unknown keys in the parsed data are **preserved**, not stripped, at **every nesting level**. This is intentional: upstream config files often contain keys your schema doesn't model (auto-generated secrets, internal state, plugin settings, etc.), and stripping them would break the service.
+A file model must **preserve** unknown keys, not strip them: upstream config files carry keys your schema doesn't model (auto-generated secrets, internal state, plugin settings), and dropping them breaks the service.
 
 > [!IMPORTANT]
-> Import `z` from `@start9labs/start-sdk` and use `z.object`. **You never need `z.looseObject`.** Plain zod's `z.object` strips unknown keys, so a reader who knows zod reaches for `looseObject` to protect a two-way-bound config file — but the SDK's `z.object` already preserves them, deeply. `z.looseObject` is still exported and still compiles; it is not the convention.
+> **Build every file-model shape with `z.looseObject`, at every nesting level.** A shape built with `z.object` silently discards the rest of the user's file on the next `merge()`. Reach for `z.object` only where StartOS produces the data and you want unknown keys gone.
 
-This has two important consequences:
+Preserving unknown keys has two consequences:
 
 1. **`merge()` never removes keys you don't mention.** Only keys explicitly passed to `merge()` are updated. Everything else — including keys outside your schema — passes through untouched.
 2. **Stale keys from previous versions persist.** If an earlier version of your package wrote keys that the current version no longer uses, those keys survive across updates. They are not automatically cleaned up by `merge()` or by the zod schema.
@@ -426,16 +454,14 @@ await configToml.merge(effects, {
 })
 ```
 
-When stale keys are outside your schema's type, cast the merge data:
+A key outside your schema needs no cast:
 
 ```typescript
-await configToml.merge(effects, {
-  legacy_key: undefined,
-} as any)
+await configToml.merge(effects, { legacy_key: undefined })
 ```
 
 > [!WARNING]
-> This removes a stale key your schema doesn't model. It cannot surgically delete one entry of a _typed_ collection that has a `.catch()` default. `merge({ users: { bob: undefined } })` against `users: z.record(...).catch({})` makes the whole `users` value fail validation, so the `.catch({})` replaces the **entire** record with `{}` — every entry is wiped, not just `bob`. To drop one entry while keeping the rest, rebuild the value in code and `write()` it.
+> This removes a stale key your schema doesn't model. It cannot surgically delete one entry of a _typed_ collection that has a `.catch()` default. `merge({ users: { bob: undefined } })` against `users: z.record(...).catch({})` makes the whole `users` value fail validation, so the `.catch({})` replaces the **entire** record with `{}` — every entry is wiped, not just `bob`. To drop one entry while keeping the rest, rebuild the complete value inside `update()`.
 
 ### Arrays Are Replaced, Not Merged
 
@@ -463,7 +489,7 @@ For complex types like SMTP, use the SDK's built-in zod schemas. See [Actions](.
 ```typescript
 import { smtpShape, z } from '@start9labs/start-sdk'
 
-const shape = z.object({
+const shape = z.looseObject({
   adminPassword: z.string().optional().catch(undefined),
   smtp: smtpShape,
 })
@@ -471,7 +497,7 @@ const shape = z.object({
 
 ### Don't Call `.strip()` on Your Shape
 
-The SDK intentionally patches `z.object()` to loose mode (see [Unknown Key Preservation](#unknown-key-preservation)) so unknown keys from the upstream service survive. Calling `.strip()` on your shape disables that protection and will silently destroy user data on the next `merge()` — keys outside your schema get discarded. Leave the default alone; only use `.strict()` if you have a specific reason to reject unknowns.
+`.strip()` undoes `z.looseObject` (see [Unknown Key Preservation](#unknown-key-preservation)) and will silently destroy user data on the next `merge()` — keys outside your schema get discarded. Use `.strict()` only if you have a specific reason to reject unknowns.
 
 ## Migration Gotchas
 
@@ -496,7 +522,7 @@ When an upstream service reads a config file (TOML, YAML, JSON, XML, etc.), mode
 - **Simpler main.ts**: Mount the config file from the volume into the subcontainer. No need to read and regenerate it.
 - **Easy user configuration**: Exposing config options via Actions is as simple as `configToml.merge(effects, { key: newValue })`.
 
-Use `store.json` only for internal package state that has no upstream config file equivalent (e.g., a generated PostgreSQL password that the upstream service doesn't read from its own config file).
+Use `store.json` only for internal package state that has no upstream config file equivalent (e.g., a generated PostgreSQL password that the upstream service doesn't read from its own config file) — on [its own `startos` volume](#storejsonts-common-pattern), not the data volume.
 
 ```typescript
 // GOOD: Model the upstream config directly
@@ -520,7 +546,7 @@ const appSub = sdk.SubContainer.of(
 await configToml.read(c => c.some_mutable_setting).const(effects)
 
 // In an action, toggle a setting directly
-await configToml.merge(effects, { allow_registration: !current })
+await configToml.update(effects, current => (current === null ? null : { ...current, allow_registration: !current.allow_registration }))
 ```
 
 > [!WARNING]

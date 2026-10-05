@@ -30,6 +30,7 @@ export abstract class ApiService {
   abstract wifiGet(): Promise<WifiConfig>
   abstract wifiSet(params: WifiConfig): Promise<WifiSetResult>
   abstract wifiGeneratePassword(): Promise<string>
+  abstract wifiRegulatory(): Promise<WifiRegulatory>
   abstract wifiBlackoutGet(): Promise<ScheduleWindow[]>
   abstract wifiBlackoutSet(params: ScheduleWindow[]): Promise<null>
   abstract profilesList(): Promise<ProfileId[]>
@@ -53,6 +54,10 @@ export abstract class ApiService {
   abstract systemLogs(): Promise<LogsResponse>
   abstract devicesList(): Promise<DeviceFromApi[]>
   abstract devicesUpdate(params: DeviceUpdateReq): Promise<null>
+  abstract devicesSetAutoForward(params: {
+    mac: string
+    allow: boolean
+  }): Promise<null>
   abstract devicesForget(params: { mac: string }): Promise<null>
   abstract devicesDataUsage(
     params: DeviceDataUsageReq,
@@ -72,7 +77,10 @@ export abstract class ApiService {
   abstract wanDdnsGet(): Promise<WanDdnsResponse>
   abstract wanDdnsSet(params: WanDdnsSetRequest): Promise<null>
   abstract publishedPortsList(): Promise<PublishedPortFromApi[]>
-  abstract publishedPortsSet(params: PublishedPortsSetRequest): Promise<null>
+  abstract publishedPortsSet(
+    params: PublishedPortsSetRequest,
+  ): Promise<PublishedPortsSetResult>
+  abstract publishedPortsAutoList(): Promise<AutomaticPortUseFromApi[]>
   abstract vpnClientList(): Promise<OutboundVpn[]>
   abstract vpnClientCreate(
     params: OutboundVpnCreateRequest,
@@ -217,6 +225,7 @@ export type SetUciRes<T extends string[]> = {
 
 export type SystemInfoRes = {
   version: string
+  gitHash: string
   language: string
   date: string
   theme: 'dark' | 'light' | 'system'
@@ -354,6 +363,8 @@ export interface WifiProfileId {
 export interface WifiConfig {
   ssid: string
   broadcastSeparately: boolean
+  // ISO 3166-1 alpha-2; null leaves the radios on the world domain.
+  country: string | null
   radios: Record<string, WifiRadio>
   passwords: WifiPassword[]
   // When true, authorize deleting the published ports listed in a prior
@@ -364,6 +375,12 @@ export interface WifiConfig {
 export interface WifiSetResult {
   // Non-empty (and nothing applied) when confirmation is required; empty once applied.
   pendingPublishedPortDeletions: AffectedPublishedPort[]
+}
+
+export interface WifiRegulatory {
+  countries: string[]
+  // Channels an access point may use under the current country, by band ('2g', '5g').
+  channels: Record<string, number[]>
 }
 
 export interface ScheduleWindow {
@@ -466,12 +483,16 @@ export interface SetupFlashEvent {
 export interface DeviceFromApi {
   mac: string | null
   name: string
+  /** The name assigned in the router; null when `name` is resolved from elsewhere. */
+  custom_name: string | null
   hostname: string | null
   status: 'online' | 'offline'
   connection: string | null
   ipv4: string | null
   ipv6: string | null
   ipv4_static: boolean
+  /** May auto-create port forwards via PCP/UPnP (default off). */
+  allow_auto_port_forward: boolean
   security_profile: string | null
   speed: { up: number; down: number } | null
   data_usage: number | null
@@ -479,7 +500,8 @@ export interface DeviceFromApi {
 
 export interface DeviceUpdateReq {
   mac: string
-  name: string
+  /** Omitted leaves the assigned name untouched; empty clears it. */
+  name?: string
   ipv4_static: boolean
   ipv4: string
 }
@@ -626,6 +648,7 @@ export interface PublishedPortFromApi {
   ipv6: boolean
   ipv4_public_port: string | null
   source: string
+  override_wan_ports: boolean
   status: PublishedPortStatusValue
   status_reason: string | null
   device_name: string | null
@@ -644,10 +667,43 @@ export interface PublishedPortInputForApi {
   ipv6: boolean
   ipv4_public_port?: string | null
   source: string
+  /** Confirms an enabled IPv4 WAN collision. */
+  override_wan_ports: boolean
 }
 
 export type PublishedPortsSetRequest = {
   ports: PublishedPortInputForApi[]
+}
+
+export interface WanPortCollision {
+  id: string
+  label: string
+  router_service_ports: string[]
+  hostname_route_ports: SniPortUse[]
+}
+
+export interface SniPortUse {
+  ports: string
+  hostnames: string[]
+  devices: string[]
+}
+
+export type PublishedPortsSetResult = {
+  pending_wan_port_collisions: WanPortCollision[]
+}
+
+export type AutomaticPortUseKind = 'PCP' | 'UPnP' | 'SNI'
+
+export interface AutomaticPortUseFromApi {
+  id: string
+  kind: AutomaticPortUseKind
+  device_mac: string
+  device_name: string | null
+  internal_ip: string | null
+  ports: string
+  public_ports: string
+  expires_secs: number | null
+  hostname: string | null
 }
 
 // Outbound VPN (WireGuard Client) types
@@ -661,6 +717,8 @@ export interface OutboundVpn {
   supports_ipv6: boolean
   /** Interface MTU, or null to inherit the kernel default (~1420). */
   mtu: number | null
+  /** The server is named by hostname; only 'Internet' is a valid target. */
+  hostname_endpoint: boolean
 }
 
 export interface OutboundVpnCreateRequest {
@@ -677,7 +735,7 @@ export interface OutboundVpnUpdateRequest {
   id: string
   label: string
   target: string
-  /** Desired MTU; null clears it (inherit default). Always sent by the form. */
+  /** Desired MTU; null restores the default: the chain MTU for a chained VPN, else the kernel's (~1420). Always sent by the form. */
   mtu: number | null
 }
 

@@ -15,7 +15,7 @@ pub struct KeyStore {
 }
 impl KeyStore {
     pub fn new(account: &AccountInfo) -> Result<Self, Error> {
-        let branding = CertBranding::start_os(account.hostname.hostname.as_ref());
+        let branding = CertBranding::start_os(account.hostname.as_ref());
         Ok(Self {
             local_certs: CertStore::new(account, &branding)?,
             acme: AcmeCertStore::new(),

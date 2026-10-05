@@ -18,6 +18,11 @@ import { MarkdownPipe } from '@start9labs/shared'
     :host {
       position: relative;
       width: 20.75rem;
+      // Grid items default to min-height auto: without this, long help content
+      // sets the shell's 1fr row minimum and pushes the shell past the viewport
+      // (clipping the nav footer and the main scrollport's bottom) — even when
+      // closed, since [inert] only collapses the column, not the row.
+      min-block-size: 0;
       background: var(--tui-background-base);
       box-shadow:
         inset 0.25rem 0 var(--tui-theme-color),
@@ -40,6 +45,12 @@ import { MarkdownPipe } from '@start9labs/shared'
       &[inert] {
         transform: translate3d(100%, 0, 0);
       }
+    }
+
+    // Definite height so the core scrollbar's max-block-size resolves and long
+    // help scrolls internally instead of growing the host.
+    tui-scrollbar {
+      block-size: 100%;
     }
 
     :host-context(tui-root._mobile) {

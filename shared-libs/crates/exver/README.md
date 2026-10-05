@@ -42,7 +42,7 @@ and is considered strictly less significant than the upstream version.
 
 An `ExtendedVersion` can also be parsed from a string like `#flavor:0.1.2-beta.1:0`. They can also be serialized to strings.
 The relevant parse function for `ExtendedVersion` is `ExtendedVersion::from_str`. It can be applied to a `&str` and will
-produce a `Result<Version, ParseError>`.
+produce a `Result<ExtendedVersion, ParseError>`.
 
 The other half of this library deals with the type `VersionRange`. A `VersionRange` is a set that is either anchored at
 a particular `ExtendedVersion` with some sort of comparison operator: `= >= <= > <` or it is described as a conjunction,
@@ -53,7 +53,7 @@ immediately evaluate the identities and annihilators as opposed to building up t
 
 For convenience, there are two Monoid wrappers exposed: (`AnyRange`, `AllRange`). This allows you to `fold` an `Iterable`
 with the `combine` operation seeded with the `empty` value. The semantic differences are whether or not `combine` uses
-`and` or `or` respectively.
+`or` or `and` respectively.
 
 Most of the time you will want to parse these values from strings, but the internals are exposed for the rarer cases.
 Some of the grammar from `semver` is supported (^1.2.3, ~2.3.4) as well.
@@ -69,7 +69,7 @@ obs.satisfies(a) === obs.satisfies(b). These laws simply mean that it is always 
 the LHS for a term on the RHS without changing the meaning of your program.
 
 - `And` is commutative: and(a,b) === and(b,a)
-- `Or` is commutative: and(a,b) === or(b,a)
+- `Or` is commutative: or(a,b) === or(b,a)
 - `And` is associative: and(and(a,b),c) === and(a,and(b,c))
 - `Or` is associative: or(or(a,b),c) === or(a,or(b,c))
 - `Any` is identity of `And`: and(a, Any) === a
@@ -86,8 +86,6 @@ the LHS for a term on the RHS without changing the meaning of your program.
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — how the crate works internally (types, parsing,
   satisfiability, and its relationship to the TypeScript reimplementation).
-- [CONTRIBUTING.md](./CONTRIBUTING.md) — toolchain, build/test, and PR conventions.
-- [AGENTS.md](./AGENTS.md) — agent-facing rules and gotchas (`CLAUDE.md` is a one-line
-  `@AGENTS.md` import).
+- [AGENTS.md](./AGENTS.md) — toolchain, build/test, and PR conventions.
 
 Licensed under MIT (see `Cargo.toml`).

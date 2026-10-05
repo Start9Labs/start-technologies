@@ -1,44 +1,63 @@
-import { Component } from '@angular/core'
-import { FormsModule } from '@angular/forms'
+import { Component, inject } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
+import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms'
 import {
+  hostnameValidationErrors,
+  hostnameValidator,
   i18nPipe,
-  normalizeHostname,
-  normalizeHostnameRaw,
-  randomServerName,
+  randomHostname,
 } from '@start9labs/shared'
-import { TuiButton, TuiDialogContext, TuiError, TuiInput } from '@taiga-ui/core'
+import {
+  TuiButton,
+  TuiDialogContext,
+  TuiError,
+  TuiInput,
+  tuiValidationErrorsProvider,
+} from '@taiga-ui/core'
 import { injectContext } from '@taiga-ui/polymorpheus'
+import { map } from 'rxjs'
 
 @Component({
   template: `
-    <tui-textfield>
-      <label tuiLabel>{{ 'Server Name' | i18n }}</label>
-      <input tuiInput [(ngModel)]="name" />
-      <button
-        tuiIconButton
-        type="button"
-        appearance="icon"
-        iconStart="@tui.refresh-cw"
-        (click)="randomizeName()"
-      ></button>
-    </tui-textfield>
-    @if (hostnameError) {
-      <tui-error [error]="hostnameError" />
-    } @else if (name.trim()) {
-      <p class="hostname-preview">{{ normalizeHostname(name) }}.local</p>
-    }
-    <footer>
-      <button tuiButton appearance="secondary" (click)="cancel()">
-        {{ 'Cancel' | i18n }}
-      </button>
-      <button
-        tuiButton
-        [disabled]="!name.trim() || hostnameError"
-        (click)="confirm()"
-      >
-        {{ 'Save' | i18n }}
-      </button>
-    </footer>
+    <form [formGroup]="form" (submit.prevent)="save()">
+      <tui-textfield>
+        <label tuiLabel>{{ 'Server Name' | i18n }}</label>
+        <input tuiInput autocapitalize="off" formControlName="hostname" />
+        <button
+          tuiIconButton
+          type="button"
+          appearance="icon"
+          iconStart="@tui.refresh-cw"
+          (click)="randomize()"
+        ></button>
+      </tui-textfield>
+      <tui-error formControlName="hostname" />
+      @if (form.valid) {
+        <p class="hostname-preview">{{ hostname() }}.local</p>
+      }
+      <div class="used-for">
+        <p>{{ 'Used for:' | i18n }}</p>
+        <ul>
+          <li>{{ 'The address of your server' | i18n }}</li>
+          <li>{{ 'The local address of every installed service' | i18n }}</li>
+          <li>
+            {{ 'The browser tab and the name of the installed app' | i18n }}
+          </li>
+          <li>{{ 'SSH and system logs' | i18n }}</li>
+        </ul>
+      </div>
+      <footer>
+        <button
+          tuiButton
+          type="button"
+          appearance="secondary"
+          (click)="context.completeWith(null)"
+        >
+          {{ 'Cancel' | i18n }}
+        </button>
+        <button tuiButton [disabled]="form.invalid">{{ 'Save' | i18n }}</button>
+      </footer>
+    </form>
   `,
   styles: `
     .hostname-preview {
@@ -47,51 +66,53 @@ import { injectContext } from '@taiga-ui/polymorpheus'
       margin-top: 0.25rem;
     }
 
+    .used-for {
+      color: var(--tui-text-secondary);
+      font: var(--tui-typography-body-s);
+      margin-top: 1rem;
+
+      p {
+        margin: 0;
+      }
+
+      ul {
+        margin: 0.25rem 0 0;
+        padding-inline-start: 1.25rem;
+      }
+    }
+
     footer {
       display: flex;
       gap: 1rem;
       margin-top: 1.5rem;
     }
   `,
-  imports: [FormsModule, TuiButton, TuiError, TuiInput, i18nPipe],
+  imports: [ReactiveFormsModule, TuiButton, TuiError, TuiInput, i18nPipe],
+  providers: [tuiValidationErrorsProvider(hostnameValidationErrors)],
 })
 export class ServerNameDialog {
-  private readonly context =
-    injectContext<
-      TuiDialogContext<
-        { name: string; hostname: string } | null,
-        { initialName: string }
-      >
-    >()
+  protected readonly context =
+    injectContext<TuiDialogContext<string | null, { hostname: string }>>()
 
-  name = this.context.data.initialName
-  readonly normalizeHostname = normalizeHostname
+  protected readonly form = inject(NonNullableFormBuilder).group({
+    hostname: [this.context.data.hostname, hostnameValidator],
+  })
 
-  get hostnameError(): string | null {
-    const name = this.name.trim()
-    if (!name) return null
+  protected readonly hostname = toSignal(
+    this.form.controls.hostname.valueChanges.pipe(map(value => value.trim())),
+    { initialValue: this.context.data.hostname.trim() },
+  )
 
-    const hostname = normalizeHostnameRaw(name)
-
-    if (hostname.length < 4) return 'Hostname must be at least 4 characters'
-    if (hostname.length > 63) return 'Hostname must be 63 characters or less'
-
-    return null
+  constructor() {
+    // `tui-error` renders nothing until the control is touched.
+    if (this.form.invalid) this.form.markAllAsTouched()
   }
 
-  randomizeName() {
-    this.name = randomServerName()
+  protected randomize() {
+    this.form.controls.hostname.setValue(randomHostname())
   }
 
-  cancel() {
-    this.context.completeWith(null)
-  }
-
-  confirm() {
-    const name = this.name.trim()
-    this.context.completeWith({
-      name,
-      hostname: normalizeHostname(name),
-    })
+  protected save() {
+    this.context.completeWith(this.hostname())
   }
 }

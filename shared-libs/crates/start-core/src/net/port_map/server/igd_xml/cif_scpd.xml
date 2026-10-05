@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<scpd xmlns="urn:schemas-upnp-org:service-1-0">
+  <specVersion><major>1</major><minor>0</minor></specVersion>
+  <actionList>
+    <action>
+      <name>GetCommonLinkProperties</name>
+      <argumentList>
+        <argument>
+          <name>NewWANAccessType</name>
+          <direction>out</direction>
+          <relatedStateVariable>WANAccessType</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewLayer1UpstreamMaxBitRate</name>
+          <direction>out</direction>
+          <relatedStateVariable>Layer1UpstreamMaxBitRate</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewLayer1DownstreamMaxBitRate</name>
+          <direction>out</direction>
+          <relatedStateVariable>Layer1DownstreamMaxBitRate</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewPhysicalLinkStatus</name>
+          <direction>out</direction>
+          <relatedStateVariable>PhysicalLinkStatus</relatedStateVariable>
+        </argument>
+      </argumentList>
+    </action>
+  </actionList>
+  <serviceStateTable>
+    <stateVariable sendEvents="no">
+      <name>WANAccessType</name>
+      <dataType>string</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>Layer1UpstreamMaxBitRate</name>
+      <dataType>ui4</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>Layer1DownstreamMaxBitRate</name>
+      <dataType>ui4</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>PhysicalLinkStatus</name>
+      <dataType>string</dataType>
+    </stateVariable>
+  </serviceStateTable>
+</scpd>

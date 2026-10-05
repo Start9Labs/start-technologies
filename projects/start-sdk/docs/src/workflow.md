@@ -65,9 +65,21 @@ When you don't know a fact, find it; don't invent it and move on. The failure mo
 
 - **Image names and tags.** Confirm the repository and tag exist in the registry before pinning `dockerTag` — don't guess `org/name` from memory. (See [Package a Prebuilt Docker Image](recipe-prebuilt-image.md).)
 - **Upstream internals** — config-file formats, credential hashing schemes, file paths. Read them from the app or its docs, or apply them through the app's own CLI/API. Hand-writing a format you assumed (e.g. a bare hash where the app expects salted PBKDF2) fails silently.
-- **Brand assets.** Never ship an invented `icon.svg` or logo. Fetch the real asset from upstream, or leave the placeholder and flag that it still needs the real icon.
+- **Brand assets.** Never ship an invented `icon.svg` or logo. Fetch the real asset from upstream, or leave the placeholder and say that it still needs the real icon.
 
-When you can't verify something, surface it as an open question or a `TODO.md` item — don't paper over it with confident prose in the README.
+When you can't verify something, say so — raise it as an open question, or open an issue if it needs tracking beyond this session. Don't paper over it with confident prose in the README.
+
+## Fix what you find; file only what needs deciding
+
+A defect you spot while you already have the package open is a fix in the branch you are already on, not a report for someone else to pick up. That holds whether or not it is related to what you came to do: you have the code in front of you and the context to be sure, and the next person has neither. Describe what you fixed, and why, in the PR body.
+
+Open **a GitHub issue on the package repo** when the call is not yours to make — you cannot pin the cause down, two defensible fixes exist and choosing between them needs a human, or the change is too large to ride on the work in hand. Say what you found and what you would need decided. Then reference the issue in a line of the PR body if a PR is open; don't write the finding out in full in both places, or the two copies immediately start to disagree.
+
+The tracker in the other direction is not an invitation. An open issue is somebody's report, not a queue you may pick from — take one on when you were asked to, or when it carries the `Approved` label, which is a maintainer saying it is ready for a PR. Then implement it in the branch you already have and put `Closes #<n>` in the PR body.
+
+Nothing else in the repo is a place to record work. Don't create a `TODO.md`, a `NOTES.md`, a `PLAN.md`, or a results log at the bottom of a doc: a file like that is invisible to everyone who isn't reading the repo, it accumulates session notes nobody can act on, and it goes stale the moment the session ends.
+
+What is neither a fix nor an issue: what you verified, what you tried, what you decided and why. That is the commit message and the PR body's job, where it stays attached to the change that motivated it.
 
 ## Search the SDK before deciding something is impossible
 
@@ -89,7 +101,7 @@ Your workspace's `start-technologies/` is a checkout of the whole Start9 monorep
 
 This is a **last resort, not a starting point.** Drop into the source only to answer a specific question those layers can't — exactly what an SDK call does, how an OS effect behaves — and read the one file that settles it instead of browsing.
 
-When the answer turns out to be a bug rather than a misunderstanding, fix it there: that checkout is a full git repo, so you can branch, commit, and open a pull request without leaving the workspace.
+When the answer turns out to be a bug rather than a misunderstanding, fix it there: that checkout is a full git repo, so you can branch, commit, and open a pull request without leaving the workspace. Branch from `origin/master` — the checkout itself sits on `live-docs`, which carries what is published — and switch it back when you're done.
 
 ## Don't create unnecessary version files
 

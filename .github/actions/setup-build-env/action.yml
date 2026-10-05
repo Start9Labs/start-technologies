@@ -10,7 +10,8 @@ runs:
 
     - name: Install dependencies
       run: |
-        sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
+        # The runner image's Microsoft apt sources 403 intermittently, and one failing source fails the whole update.
+        grep -rl 'packages\.microsoft\.com' /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -r rm -f || true
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
           build-essential \

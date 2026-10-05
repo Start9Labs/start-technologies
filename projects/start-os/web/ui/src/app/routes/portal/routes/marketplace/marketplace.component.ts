@@ -43,7 +43,9 @@ import { MarketplaceControlsComponent } from './components/controls.component'
       display: flex;
       overflow: hidden;
       padding: 1px;
-      background: #1c1d26;
+      --tui-background-base: #1c1d26;
+
+      background: var(--tui-background-base);
     }
   `,
   imports: [

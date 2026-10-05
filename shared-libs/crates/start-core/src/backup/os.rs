@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use ssh_key::private::Ed25519Keypair;
 
 use crate::account::AccountInfo;
-use crate::hostname::{ServerHostname, ServerHostnameInfo, generate_hostname, generate_id};
+use crate::hostname::{ServerHostname, generate_hostname, generate_id};
 use crate::prelude::*;
 use crate::util::serde::{Base32, Base64, Pem};
 
@@ -78,7 +78,7 @@ impl OsBackupV0 {
         Ok(OsBackup {
             account: AccountInfo {
                 server_id: generate_id(),
-                hostname: ServerHostnameInfo::from_hostname(generate_hostname()),
+                hostname: generate_hostname(),
                 password: Default::default(),
                 root_ca_key: self.root_ca_key.0,
                 root_ca_cert: self.root_ca_cert.0,
@@ -111,7 +111,7 @@ impl OsBackupV1 {
         Ok(OsBackup {
             account: AccountInfo {
                 server_id: self.server_id,
-                hostname: ServerHostnameInfo::from_hostname(ServerHostname::new(self.hostname)?),
+                hostname: ServerHostname::new(self.hostname)?,
                 password: Default::default(),
                 root_ca_key: self.root_ca_key.0,
                 root_ca_cert: self.root_ca_cert.0,
@@ -128,20 +128,20 @@ impl OsBackupV1 {
 #[serde(rename = "kebab-case")]
 
 struct OsBackupV2 {
-    server_id: String,                               // uuidv4
-    hostname: InternedString,                        // <adjective>-<noun>
-    root_ca_key: Pem<PKey<Private>>,                 // PEM Encoded OpenSSL Key
-    root_ca_cert: Pem<X509>,                         // PEM Encoded OpenSSL X509 Certificate
-    ssh_key: Pem<ssh_key::PrivateKey>,               // PEM Encoded OpenSSH Key
+    server_id: String, // uuidv4
+    hostname: InternedString,
+    root_ca_key: Pem<PKey<Private>>,   // PEM Encoded OpenSSL Key
+    root_ca_cert: Pem<X509>,           // PEM Encoded OpenSSL X509 Certificate
+    ssh_key: Pem<ssh_key::PrivateKey>, // PEM Encoded OpenSSH Key
     compat_s9pk_key: Pem<ed25519_dalek::SigningKey>, // PEM Encoded ED25519 Key
-    ui: Value,                                       // JSON Value
+    ui: Value,                         // JSON Value
 }
 impl OsBackupV2 {
     fn project(self) -> Result<OsBackup, Error> {
         Ok(OsBackup {
             account: AccountInfo {
                 server_id: self.server_id,
-                hostname: ServerHostnameInfo::from_hostname(ServerHostname::new(self.hostname)?),
+                hostname: ServerHostname::new(self.hostname)?,
                 password: Default::default(),
                 root_ca_key: self.root_ca_key.0,
                 root_ca_cert: self.root_ca_cert.0,
@@ -154,7 +154,7 @@ impl OsBackupV2 {
     fn unproject(backup: &OsBackup) -> Self {
         Self {
             server_id: backup.account.server_id.clone(),
-            hostname: (*backup.account.hostname.hostname).clone(),
+            hostname: (*backup.account.hostname).clone(),
             root_ca_key: Pem(backup.account.root_ca_key.clone()),
             root_ca_cert: Pem(backup.account.root_ca_cert.clone()),
             ssh_key: Pem(backup.account.ssh_key.clone()),

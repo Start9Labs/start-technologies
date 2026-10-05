@@ -147,7 +147,7 @@ export class Variants<
       staticValidators[key] = value.spec.validator
     }
     const other = z
-      .object(
+      .looseObject(
         Object.fromEntries(
           Object.entries(staticValidators).map(([k, v]) => [
             k,
@@ -179,7 +179,7 @@ export class Variants<
           validators[key] = built.validator
         }
         const other = z
-          .object(
+          .looseObject(
             Object.fromEntries(
               Object.entries(validators).map(([k, v]) => [
                 k,
@@ -192,7 +192,7 @@ export class Variants<
           spec: variants,
           validator: z.union(
             Object.entries(validators).map(([k, v]) =>
-              z.object({
+              z.looseObject({
                 selection: z.literal(k),
                 value: v,
                 other,
@@ -203,7 +203,7 @@ export class Variants<
       },
       z.union(
         Object.entries(staticValidators).map(([k, v]) =>
-          z.object({
+          z.looseObject({
             selection: z.literal(k),
             value: v,
             other,

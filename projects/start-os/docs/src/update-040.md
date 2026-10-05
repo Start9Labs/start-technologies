@@ -27,13 +27,15 @@ The following services cannot be migrated automatically. Review these before sta
 
 - **Ghost** — Completely redesigned for StartOS 0.4.0 and incompatible with the old version. Before updating, open your old Ghost admin UI and use Ghost's built-in **Export** tool to download your content. After updating, install the new Ghost from the marketplace and use Ghost's built-in **Import** tool to restore your content.
 
+- **Monero** — Carried over as **Monero (Legacy)**, which will not be offered an update. The 0.4.0 Monero is a separate package that installs alongside it and does not pick up the old blockchain or the built-in wallet: it syncs from scratch. Before updating, if you use Monero's built-in wallet (the Wallet RPC interface), record its seed and move any funds you cannot afford to have stranded. After updating, install Monero from the marketplace, and uninstall Monero (Legacy) only once the new node is running and you have everything you need from it.
+
 - **Synapse** — The old Synapse was Tor-only. The new Synapse is clearnet-only. These are different services now with no migration path.
 
 - **Jam** — Jam's backend, JoinMarket, is being replaced by a separate reimplementation (JoinMarket NG) for technical and security reasons, making Jam defunct on StartOS v0.3.5.1 and unavailable on v0.4.0 until that backend matures and a new version of Jam is built for it. You should back up your seed, move out any spendable funds (fidelity-bond funds stay locked until expiry), and uninstall Jam prior to updating to v0.4.0.
 
 ### LAN addresses are changing
 
-In StartOS 0.3.x, each service had its own `.local` address (e.g. `longexamplepublickey.local`). In 0.4.0, services are accessed on unique ports of your server's main `.local` address (e.g. `adjective-noun.local:4545`). Your old per-service `.local` addresses will no longer exist after the update.
+In StartOS 0.3.x, each service had its own `.local` address (e.g. `longexamplepublickey.local`). In 0.4.0, services are accessed on unique ports of your server's main `.local` address (e.g. `server-name.local:4545`). Your old per-service `.local` addresses will no longer exist after the update.
 
 If you use a password manager, before updating, make sure your saved passwords have clear names/labels (not just the current `.local` URLs) so that you can identify them later and save the new URLs.
 
@@ -93,14 +95,14 @@ Pick your method below. Everything above applies to both, and the two paths rejo
 1. Flash the 0.4.0 installer to a USB drive from any computer, following the [Download](installing-startos.md#download) and [Flash](installing-startos.md#flash) sections of the install guide. Your server can keep running while you do this.
 
    > [!NOTE]
-   > On a Raspberry Pi, there is no USB installer — flash the 0.4.0 Raspberry Pi image to the Pi's microSD card instead. Follow the [Raspberry Pi flashing instructions](installing-startos.md#raspberry-pi) in place of the steps below, then continue with [Step 8](#step-8-wait-for-the-migration) — a Pi reaches the same migration progress screen.
+   > On a Raspberry Pi, there is no USB installer — flash the 0.4.0 Raspberry Pi image to the Pi's microSD card instead, following the [Raspberry Pi flashing instructions](installing-startos.md#raspberry-pi). Power the Pi on and rejoin the steps below at the language selection. The microSD card is already the OS drive, so you select a data drive only; everything after that is the same.
 
 1. Shut down your server through the StartOS UI.
 
 1. Insert the flashed USB drive into your server and power it on. The installer should boot from the USB drive and become available at `http://start.local`.
 
    > [!TIP]
-   > If the installer fails to boot and instead your normal StartOS boots, it means you will need to attach a monitor and keyboard (Kiosk mode) in order to enter the BIOS settings to change the boot priorities. The Server Pure should always boot from USB if present. For the Server One, this is done by hitting the ESC key repeatedly at boot time until the BIOS appears. Arrow over to the boot tab, and change Boot Option #1 to your inserted USB thumb drive, then restart.
+   > If your normal StartOS boots instead of the installer, see [My server boots into StartOS instead of the USB installer](faq.md#my-server-boots-into-startos-instead-of-the-usb-installer).
 
 1. Select your language.
 
@@ -109,12 +111,14 @@ Pick your method below. Everything above applies to both, and the two paths rejo
    > [!WARNING]
    > You must select the **same drive layout** you had on 0.3.5.1. If 0.3.5.1 (OS and data) lived on a single drive, select **that same drive for both** the OS drive and the data drive. If your 0.3.5.1 data was on a separate drive, select a different drive for the OS. Choosing a different layout than your existing install cannot preserve your data, and the installer will refuse rather than erase the drive.
 
-1. When prompted, select **Preserve** to keep your existing data.
+1. Selecting a data drive that holds StartOS data opens the **StartOS Data Detected** dialog. Choose **Preserve** to keep your existing data.
+
+   A 0.3.5.1 data drive is formatted ext4, which 0.4.0 converts to btrfs. Because of that conversion the dialog asks you to confirm you have a backup, and **Preserve** stays greyed out until you check **I have a backup of my data** — the backup you made in [Step 6](#step-6-create-a-full-system-backup).
 
    > [!WARNING]
    > If you do not select "Preserve", all data on the drive will be erased.
 
-1. Optionally set a new password, or skip to keep your current password. The migration begins — continue with [Step 8](#step-8-wait-for-the-migration).
+1. Optionally set a new password, or skip to keep your current password. If you have forgotten your password, this is where you set a new one. The migration begins — continue with [Step 8](#step-8-wait-for-the-migration).
 
 {{#endtab}}
 {{#tab name="Over the Air"}}
@@ -139,9 +143,9 @@ Both methods converge here: your server is migrating, and shows its progress at 
    > [!TIP]
    > Expect progress to sit at **85%** for a long time — potentially hours. This is when your installed packages are being migrated to the 0.4.0 format, and the time scales with how many packages you have and how much data each one contains. It is not stuck.
 
-1. When the migration is complete, follow the on-screen instructions to reboot. If you updated from a USB installer, remove the drive first — a Pi's microSD card stays in.
+1. When the migration is complete, follow the on-screen instructions to reboot. If you updated from a USB installer, remove the USB thumb drive when prompted, before you reboot — a Pi's microSD card stays in.
 
-1. Once your server has rebooted, go to your server's own address (`https://adjective-noun.local`) — the address you used on 0.3.5.1, not `start.local`.
+1. Once your server has rebooted, go to your server's own address (`https://server-name.local`) — the address you used on 0.3.5.1, not `start.local`.
 
    **If you get the old 0.3.5.1 interface, a blank page, or a "cannot connect" error, your browser is serving you its cached copy of the old UI.** The server is fine; the page is stale. Any of these will get you the 0.4.0 UI:
    - Open the address in a new private/incognito window.
@@ -160,6 +164,9 @@ When you can sign in, continue below.
 ### Step 9: Update All Services
 
 Every installed service will have an update available for the 0.4.0 marketplace. Update **all** of them — including Bitcoin (again, to the latest **minor** of your selected **major** version) — before doing anything else. The 0.4.0 versions are repackaged for the new system, even if the underlying software version is the same.
+
+> [!NOTE]
+> Bitcoin Knots updates to **Bitcoin Knots (pre-RDTS)** from the Community Registry. The update keeps your blockchain, and you can switch it to Bitcoin Core afterwards if you prefer.
 
 ### Step 10: Start All Services
 
@@ -184,7 +191,11 @@ Depending on the speed of your drive, plan on 3-5 minutes per GB of backup data.
 
 Check your notifications. A service that fails to migrate raises a notification naming the service and the reason it failed, and a summary notification lists everything that needs re-installing.
 
-Your data is safe — it stays on disk where the service left it. Install the service again from the marketplace and it will pick that data back up.
+StartOS keeps the service's volume on disk if migration fails. Install the service again from the marketplace and it will pick that data back up.
+
+### Legacy Services
+
+Services that remain marked **Legacy** after migration run on servers that have a public IP or use StartTunnel. Their package-managed certificate covers the service's secure addresses.
 
 ### Tor Cleanup
 

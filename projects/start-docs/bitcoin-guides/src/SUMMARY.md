@@ -9,4 +9,5 @@
 - [Connecting a Wallet](connecting-wallets.md)
 - [Bitcoin Wallets](bitcoin-wallets.md)
 - [Lightning Wallets](lightning-wallets.md)
+- [Continuous Backups](continuous-backups.md)
 - [Migrating LND to StartOS](lnd-migration.md)

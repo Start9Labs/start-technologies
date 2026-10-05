@@ -71,6 +71,10 @@ LND will then sync and reconnect to your peers with the migrated channel state.
 >
 > Never restart your old node after the migration has completed. If you need to go back to your old node for any reason, do **not** start LND on StartOS first.
 
+### 6. Back Up
+
+Take a [StartOS backup](/start-os/backup-create.html), and set up [continuous backups](continuous-backups.md). Your channel funds are recoverable only from LND's static channel backup, and a StartOS backup holds it only as of the moment it was taken — a continuous backup keeps a copy current on storage you choose.
+
 ## Other Platforms
 
 There is no built-in migration for platforms outside the list above — including RaspiBlitz, which earlier StartOS releases supported and current ones do not.

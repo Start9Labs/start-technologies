@@ -64,8 +64,13 @@ export class MarketplaceService extends AbstractMarketplaceService {
       ]),
     )
 
-  readonly newRegistry$ = this.registries$.pipe(
-    startWith<StoreIdentity[]>([]),
+  readonly newRegistry$ = this.patch.watch$('ui', 'registries').pipe(
+    map(registries =>
+      [start9, community, ...Object.keys(registries)]
+        .filter((url, i, all) => all.findIndex(u => sameUrl(u, url)) === i)
+        .map(url => ({ url, name: registries[url] ?? null })),
+    ),
+    startWith<{ url: string; name: string | null }[]>([]),
     pairwise(),
     mergeMap(([p, c]) => c.filter(a => !p.find(b => sameUrl(a.url, b.url)))),
   )
@@ -117,6 +122,18 @@ export class MarketplaceService extends AbstractMarketplaceService {
     map(([all, url, current]) => current || all[url]),
     filter(Boolean),
     shareReplay(1),
+  )
+
+  readonly registryIcons$ = combineLatest([
+    this.currentRegistry$,
+    this.marketplace$,
+  ]).pipe(
+    map(([current, marketplace]) => [
+      { url: current.url, icon: current.info.icon },
+      ...Object.values(marketplace).flatMap(registry =>
+        registry ? [{ url: registry.url, icon: registry.info.icon }] : [],
+      ),
+    ]),
   )
 
   getPackage$(
@@ -286,8 +303,8 @@ export class MarketplaceService extends AbstractMarketplaceService {
     }
 
     // validates the registry is reachable and provides a display name
-    const { name } = await firstValueFrom(this.fetchInfo$(url))
-    await this.api.setDbValue<string | null>(['registries', url], name)
+    const info = await firstValueFrom(this.fetchInfo$(url))
+    await this.api.setDbValue<string | null>(['registries', url], info.name)
 
     return url
   }

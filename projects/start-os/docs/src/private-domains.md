@@ -47,7 +47,7 @@ You can add the _same_ domain as both a [clearnet](clearnet.md) (public) domain 
 - When you are on your LAN or connected over [VPN](inbound-vpn.md), StartOS resolves the domain to your server's local IP address, so traffic stays on your network at full LAN speed.
 - When you are away, the same domain resolves through public DNS to your StartTunnel gateway, so the service is reachable over the internet.
 
-It's the same domain and the same TLS certificate either way, with no [hairpin routing](https://en.wikipedia.org/wiki/Hairpinning) (LAN traffic looping out to the gateway and back).
+It's the same domain and the same TLS certificate either way, with no [hairpin routing](https://en.wikipedia.org/wiki/Hairpinning) (LAN traffic looping out to the gateway and back). The two sides are served separately, so the local side keeps working on your server's Root CA certificate while a public certificate for the same domain has yet to be issued.
 
 > [!TIP]
 > This is especially useful for services that embed their access URL in generated links, such as Nextcloud or Immich share links. Configure the service with the public domain so the links work for external recipients, and you'll still get direct LAN-speed access when you're home.

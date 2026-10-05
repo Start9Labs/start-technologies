@@ -4,9 +4,7 @@ use std::io;
 
 use fuser::{Errno, ReplyEntry};
 use libc::c_int;
-use log::{debug, warn};
-
-use crate::error;
+use log::{log, Level};
 
 pub fn to_libc_err(e: &io::Error) -> c_int {
     e.raw_os_error().unwrap_or_else(|| libc::EIO)
@@ -25,6 +23,17 @@ pub enum BkfsErrorKind {
     /// operator-facing message that must survive conversion to `io::Error`.
     UnsupportedFormat(String),
     Multiple(Vec<BkfsErrorKind>),
+}
+
+impl BkfsErrorKind {
+    pub(crate) fn severity(&self) -> Level {
+        match self {
+            Self::Io(err) if err.raw_os_error().is_some() => Level::Debug,
+            Self::Io(_) => Level::Warn,
+            Self::Multiple(errs) => errs.iter().map(Self::severity).min().unwrap_or(Level::Warn),
+            _ => Level::Error,
+        }
+    }
 }
 
 impl Display for BkfsErrorKind {
@@ -70,17 +79,7 @@ impl BkfsError {
 
     pub fn to_errno_log(&self) -> c_int {
         let no = self.to_errno();
-        match &self.kind {
-            BkfsErrorKind::Io(io) if io.raw_os_error().is_some() => {
-                debug!("{self:?}");
-            }
-            BkfsErrorKind::Io(_) | BkfsErrorKind::Multiple(_) => {
-                warn!("{self:?}");
-            }
-            _ => {
-                error!("{self:?}");
-            }
-        }
+        log!(self.kind.severity(), "{self:?}");
         no
     }
 
@@ -213,5 +212,39 @@ impl<T> BkfsResultExt<T> for BkfsResult<T> {
                 backtrace,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod non_fuse_tests {
+    use std::io;
+
+    use log::Level;
+
+    use super::BkfsErrorKind;
+
+    #[test]
+    fn multiple_uses_its_highest_error_severity_recursively() {
+        let errors = BkfsErrorKind::Multiple(vec![
+            BkfsErrorKind::Io(io::Error::from_raw_os_error(libc::EIO)),
+            BkfsErrorKind::Multiple(vec![
+                BkfsErrorKind::Io(io::Error::other("failure")),
+                BkfsErrorKind::BadChecksum,
+            ]),
+        ]);
+
+        assert_eq!(errors.severity(), Level::Error);
+        assert_eq!(
+            BkfsErrorKind::Multiple(vec![BkfsErrorKind::Io(io::Error::other("failure"))])
+                .severity(),
+            Level::Warn
+        );
+        assert_eq!(
+            BkfsErrorKind::Multiple(vec![BkfsErrorKind::Io(io::Error::from_raw_os_error(
+                libc::EIO
+            ))])
+            .severity(),
+            Level::Debug
+        );
     }
 }

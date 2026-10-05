@@ -4,13 +4,124 @@ All notable changes to the StartOS OS product are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and StartOS
 uses an [extended version](https://docs.start9.com) of semantic versioning.
 
-Full per-release notes are published on the
-[GitHub releases page](https://github.com/Start9Labs/start-technologies/releases). This
-file tracks notable changes since the move to the monorepo.
+This file tracks notable changes since the move to the monorepo, and is what each
+[GitHub release](https://github.com/Start9Labs/start-technologies/releases) links to
+for the detail behind its highlights.
+
+## [0.4.0.3]
+
+### Added
+
+- **Restarting or shutting down during a backup offers to wait for it to
+  finish.** The prompt defaults to waiting after a countdown. A bar shows the
+  pending action and lets you cancel it. Pressing the physical power button
+  during a backup also waits. Over the CLI, `start-cli server restart` and
+  `server shutdown` take `--after-backup`, and
+  `start-cli server cancel-deferred-power` cancels the pending action. StartOS
+  refuses new backups once a restart or shutdown is committed. See
+  [Creating Backups](https://docs.start9.com/start-os/backup-create.html).
+
+### Fixed
+
+- **Restarting the StartOS daemon clears interrupted backup, update, restart,
+  and shutdown indicators**, including any pending power action. An interrupted
+  operation no longer appears to be running after the daemon starts again.
 
 ## [0.4.0.2]
 
+### Security
+
+- **Update dependencies with security fixes**, including Angular, DOMPurify, networking libraries, and the service runtime. Replace the unmaintained YAML library while preserving configuration formats.
+
+### Fixed
+
+- **Large packages sideload successfully in the UI over slow connections.** A failed upload shows an error message.
+
+- **Restart requests during service startup take effect after startup completes.**
+
+- **Starting a StartOS update from the UI installs the release whose notes it shows.** It previously installed whatever version the registry listed last.
+
+- **Forwarded IPv4 UDP ports retain their outbound mapping.** UDP traffic a
+  service starts from a forwarded port leaves through that forward's gateway
+  with its external address and port, keeping peer-to-peer services such as
+  HyperDHT directly reachable under load.
+
+- **Required service dependencies appear from the package manifest during initialization.** StartOS shows their base version and health requirements even if the service has not reported runtime dependencies; active runtime requirements can tighten the base, including for optional dependencies. While a service is not using an optional dependency, its tasks for that dependency are hidden and do not prevent it from starting.
+
+- **Freshly generated Root CAs carry an Authority Key Identifier conforming to RFC 5280 and the CA/Browser Forum Baseline Requirements.** Existing servers retain their trusted Root CA when updated.
+
+- **Timed-out or aborted service commands stop running inside their subcontainer.**
+  StartOS kills the command when its exec wrapper dies, including during health
+  checks.
+
+- **Services start from images without `/etc/passwd` or `/etc/group`.**
+
+- **A service command set to run as a user or group its image does not define
+  fails instead of running as root.**
+
+- **Upgrades from 0.3.5.1 succeed on nearly full data drives.** StartOS skips
+  the optional filesystem optimization when a drive lacks room for it.
+
+- **Services log at the level their package sets.** A service process no
+  longer inherits the container runtime's environment, including its
+  `RUST_LOG`, when its package passes no environment variables. Every service
+  process receives the server's language as `LANG` unless its package sets
+  one.
+
+- **IPv4 public domains work on servers with IPv6 disabled.** StartOS sets up
+  the IPv4 reply path for source-preserving TLS routing on those servers.
+
+- **An update's loading indicator stays on the service being updated** when you
+  switch registries in the Updates tab.
+
+- **A service installed again after a failed install is reachable without
+  restarting the server.**
+
 ### Added
+
+- **Administrators can add a custom CA root to the host trust store with
+  `start-cli server trust-ca`.** The root takes effect immediately and persists
+  across reboots and OS updates. Services keep the trust store their package
+  provides.
+
+- **Packages can show a localized pre-download alert before an update.** A matching installed version prompts for confirmation in the Marketplace and Updates tab before StartOS fetches the package. The alert supports Markdown formatting.
+
+- **UEFI installations carry a standard fallback bootloader.** StartOS remains
+  bootable if firmware loses its saved boot entry while retaining the normal
+  entry and StartOS's automatic priority for a plugged-in installer.
+
+- **Typing a service's domain without `https://` opens its web interface over
+  HTTPS.** This works on each network where the domain is assigned. Server IP
+  addresses and domains assigned to the StartOS UI retain their existing
+  behavior. The server's own `.local` name remains reserved for StartOS. See
+  [Private Domains](https://docs.start9.com/start-os/private-domains.html).
+
+- **Open UI can honor a service's configured address.** Services that depend on
+  one canonical origin can now direct Open UI to that address while it remains
+  enabled and compatible with the current browser session.
+
+- **Private-domain routes on a shared port survive a network path that blocks
+  PCP.** When you bind a private domain through a Start9 gateway, StartOS asks
+  the gateway to route the hostname by TLS SNI — previously only over PCP, so
+  a network that filters UDP 5351 between your server and the gateway kept
+  ordinary port forwards working while the domain silently stopped being
+  routed. StartOS now falls back to asking over UPnP (a Start9 vendor action
+  the gateway advertises), so the route comes up either way; PCP remains
+  preferred when it gets through.
+
+- **WireGuard configs can declare inbound gateway support.** A config containing
+  `# inbound: yes` is classified as an inbound/outbound gateway when imported.
+  Existing StartTunnel configs remain recognizable by their StartTunnel header;
+  configs without either marker are classified as outbound-only.
+
+- **A registry's description appears at the top of the marketplace** while that
+  registry is selected.
+
+- **`start-cli server epp` shows and sets the CPU's
+  energy/performance preference**, persisted across reboots the way the governor
+  is. On Librem Mini v2 systems without a saved preference, StartOS applies
+  `balance_power` when available. Without a saved preference, all other systems
+  retain their current value.
 
 - **A service can permanently retire a network host or a port it no longer
   uses, and the port numbers it held become available again.** A service that
@@ -22,6 +133,12 @@ file tracks notable changes since the move to the monorepo.
   a retired host is removed with it, so check the service's release notes and
   assign it to one of the service's current interfaces.
 
+- **Services that run virtual machines can use the CPU's virtualization
+  support.** Packages for emulators, CI runners, and development tools can
+  request the hardware interface (`/dev/kvm`) for QEMU, Firecracker, and similar
+  workloads. StartOS grants it only to packages that request it and only on
+  servers whose processors provide it.
+
 - **A gateway can be marked secure, so services' plaintext addresses are offered
   over it.** `start-cli net gateway set-secure <GATEWAY>` records that you trust
   the network on the other side of a gateway; `unset-secure` hands the decision
@@ -30,27 +147,72 @@ file tracks notable changes since the move to the monorepo.
   server: every installed service's non-SSL addresses — the server's LAN IP
   addresses, its `.local` name and its private domains — are offered on that
   network at once and enabled immediately. An address unlocked this way reaches
-  only devices on that gateway's own network segment; it is never opened to the
-  public internet. Mark a gateway secure only when you control every device on
-  the network it reaches: anything on it can read and alter traffic to a
-  plaintext address, including the passwords typed into it. See
+  devices on that gateway's own network and, over IPv4, on any private network
+  routed to it; it is never opened to the public internet. Mark a gateway
+  secure only when you control every device on those networks: anything on
+  them can read and alter traffic to a plaintext address, including the
+  passwords typed into it. See
   [Gateways](https://docs.start9.com/start-os/gateways.html).
 
-- **Restarting or shutting down while a backup is running now asks first, and
-  can wait for the backup to finish.** Powering the server off part-way through
-  a backup can corrupt the backup of whichever service is being written at that
-  moment. Choosing `Restart` or `Shutdown` during a backup now offers to wait
-  for the backup instead, and waiting is what happens if you walk away — the
-  prompt counts down and takes that option for you. StartOS then carries out
-  the restart or shutdown as soon as the backup completes, and until then a bar
-  along the bottom of the screen says what is coming and lets you cancel it.
-  Pressing the server's physical power button during a backup waits for the
-  backup too, rather than powering off immediately. Over the CLI,
-  `start-cli server restart` and `server shutdown` take `--after-backup` for
-  the same behavior and `start-cli server cancel-deferred-power` calls it off.
-  See [Creating Backups](https://docs.start9.com/start-os/backup-create.html).
+- **An action result that hands you a link can be opened in a new tab.** Where a
+  service returns a URL — an authorization link, an admin panel — the result
+  shows an open-in-new-tab button beside it.
+
+- **Installed services can be shown as a grid of tiles.** A toggle at the top of
+  the page switches between the grid and the list, and your choice follows you to
+  any browser pointed at this server. Narrow windows and phones always show the
+  grid.
+
+- **A notification welcomes you to a new version after your server restarts.**
+  It names the version you landed on and carries that release's highlights and
+  important follow-up instructions. Pre-update warnings appear before updating.
+
+- **An action can return a multi-line value** — a diagnostic report, a
+  generated config file, an exported key block. It appears as a read-only
+  monospace box that keeps its line breaks, and, where the service asks for it,
+  can be copied, shown as a QR code, or saved to a file.
 
 ### Changed
+
+- **A service's `.local` address has its own switch, and its LAN IP addresses
+  follow it.** A LAN IP you switch yourself keeps that setting. Every other one,
+  including an address your server is assigned later, is on while `.local` is on
+  and off while it is off. On an interface served without TLS, switching on a
+  LAN IP switches `.local` on, and switching `.local` off switches its LAN IPs
+  off. There, a `.local` address left on beside a gateway's IP addresses, all
+  of them off, shows a warning.
+
+- **ZRAM compressed swap is now off by default, and updating turns it off on
+  your server.** With it on, services under heavy memory load could take the RAM
+  StartOS reserves for itself and leave the server unreachable. A server that
+  leaned on ZRAM to fit its services has less memory to work with after the
+  update. `start-cli server experimental zram --enable` turns it back on.
+
+- **Your server's name is now its `.local` address, without the `.local` on the
+  end.** A server previously carried two names: a display label shown in the
+  browser tab, and the `.local` address derived from it by lowercasing and
+  hyphenating — so the tab could say "My Cool Server" while every address you
+  actually typed said `my-cool-server.local`. There is now one name. The
+  `Server Name` field under `System > General Settings` edits the `.local`
+  address directly, and accepts lowercase letters, numbers and hyphens — up to 32
+  of them, not starting or ending with a hyphen. On update, an existing name
+  outside those rules is repaired to fit; every other address stays unchanged.
+  The browser tab now shows that address instead of the old display label. **Two `start-cli`
+  commands change with it**, so an unattended-install or provisioning script
+  needs updating: `setup execute` no longer takes `--name`, and
+  `server set-hostname` now takes one required hostname where it used to take an
+  optional name and hostname. Setting it moves the `.local` address, where
+  passing only a name used to change the label alone.
+
+- **Installing the StartOS UI as an app names it after your server.** Adding it
+  to a phone's home screen or installing it from a desktop browser labels it
+  with the server name in place of `StartOS`. An app installed before this
+  update, or before a rename, may keep the name it was installed with — remove
+  it and install it again to pick up the current one.
+
+- **Switching registries no longer opens a warning dialog.** A banner atop the
+  marketplace carries the caveat while a registry Start9 does not operate is
+  selected.
 
 - **The NVIDIA images now use NVIDIA's open kernel modules, which support GeForce
   RTX 20-series, Quadro RTX and newer.** This is what makes current cards work at
@@ -62,6 +224,156 @@ file tracks notable changes since the move to the monorepo.
   driver still provides display output without GPU compute.
 
 ### Fixed
+
+- **You can sign in to the StartOS UI, and log in with `start-cli`, at one of
+  your server's IPv6 addresses**, such as `https://[2001:db8::1]`.
+
+- **A port forward takes effect for peers that were already sending to it.**
+  A peer that sent to a port while it had no forward, such as after a
+  gateway's public address changed or during a service update, kept reaching
+  the server instead of the service, and the service's own connections to that
+  peer could leave from a different port. Services on raw UDP ports were the
+  most affected.
+
+- **You can sign in to the StartOS UI at any loopback address**, such as
+  `http://127.1.1.19:8989` through a Holesail tunnel.
+
+- **Switching off a service's LAN IP address closes it.** The address kept
+  answering for as long as the service's `.local` address was on. On an
+  interface served over TLS, `.local` and the service's domains still answer
+  there by name.
+
+- **A service keeps its `.local` address while your server has no LAN address.**
+  The address left the service's list whenever the network dropped, and a
+  service that checks the URL you chose for it could stop and ask for it again.
+
+- **Services the 0.3.5.1 update renames keep their onion addresses.** Nostr,
+  Ghost, Synapse, Monero and Fedimint addresses carry over under the services'
+  new package ids. A server that already updated recovers them on its next
+  start.
+
+- **Services start once StartOS has detected the network, and an interface
+  that loses its connection drops its addresses right away.** A service
+  reading its own addresses as it starts sees the server's LAN addresses.
+  Startup waits up to 30 seconds for NetworkManager to finish connecting.
+
+- **The Raspberry Pi 4 image includes the Broadcom firmware needed for its
+  built-in WiFi interface.**
+
+- **Raspberry Pi images use all space allocated to the StartOS filesystem.**
+  First boot expands the filesystem to fill its partition before setup begins.
+
+- **Fallback service-container cleanup finishes after an unresponsive
+  runtime.** StartOS bounds the fallback shutdown waits so it can release the
+  container's network routes and continue teardown.
+
+- **A service keeps reacting to changes after several land at once.** A burst of
+  changes to a value a service watches, such as its addresses, a dependency's
+  status, or its outbound gateway, could permanently stop StartOS from notifying
+  it. Its generated files, certificates, and registrations then stayed stale
+  until the container was rebuilt.
+
+- **Services keep resolving domain names when the network provides no separate
+  DNS server.** StartOS uses its built-in Cloudflare fallback instead of leaving
+  service containers without a working resolver.
+
+- **A backup made on one CPU architecture restores on another.** StartOS runs
+  backed-up service images under emulation. Reinstalling or updating a service
+  lets StartOS select its marketplace package for the server architecture.
+
+- **Requested restarts and shutdowns complete when concurrent service teardown has already removed a mountpoint.**
+
+- **A service migrated from 0.3.5.1 keeps its data when an install or update
+  fails.** A failed update rolls back to the data it started with, which
+  previously took a reboot after the upgrade, and a failed install leaves
+  existing data in place.
+
+- **Nextcloud (Legacy) and other migrated 0.3.5.1 services with a
+  package-managed certificate start when the server has a public IP or uses
+  StartTunnel.**
+
+- **Service interfaces show addresses only for gateways that accept inbound
+  connections.** Commercial VPNs remain available for system-wide and
+  per-service outbound routing.
+
+- **A service's plain (non-SSL) port accepts connections from other private
+  networks routed to the server.** From a second VLAN, a wired/wireless split
+  or a routed IoT network, a service's web interface opened but a plain port
+  such as a mining pool's stratum port refused the connection, so the service
+  looked down from that network. A private IPv4 address now admits every
+  private (RFC 1918) source on its plain ports, as it already did on its web
+  interfaces.
+
+- **StartOS keeps using the selected drive when Linux enumerates disks in a
+  different order.** Fresh installs and updated servers also keep mounting
+  their OS partitions when device names change.
+
+- **The port-forwarding test reports a port as open to the Internet only where
+  it is reachable from the Internet.** Where StartOS's port-forward request was
+  granted by a router that sits behind another router, the test could pass a
+  port that nothing outside could reach, and two otherwise identical setups
+  could disagree depending on which forwarding protocol the router spoke.
+  StartOS now measures the port from the Internet in that case and reports
+  what it finds.
+
+- **Port forwards left behind by an earlier run of the server are cleared at
+  startup.** After a crash, or a restart during which the server's address
+  changed, a stale forward could keep sending a port to an old address until
+  the next reboot.
+
+- **Client connections through StartOS's TLS-terminating reverse proxy now fail
+  within 15 seconds if StartOS cannot connect to the service or complete a
+  required TLS handshake with it.**
+
+- **A port mapping StartOS opens on a UPnP router closes on its own within an
+  hour of the server going away.** It was requested as a permanent mapping, so
+  it stayed on the router after the server was powered off or moved to another
+  network. A router that grants only permanent mappings still gets one.
+
+- **Transfers preserve the source filesystem format.** StartOS mounts source
+  filesystems read-only while copying persistent data, repairing ext4 only when
+  needed to mount it. This leaves the source drive available as a fallback.
+
+- **Transfers preserve file permissions.** Files copied from the previous drive
+  lost their modes, which left a WireGuard gateway such as StartTunnel
+  disconnected after a transfer until its profile was made private again by hand.
+
+- **An app that remembers your server's certificate sees the same certificate
+  across every route to that name.** Wallets and other apps that pin the first
+  certificate they are shown — Sparrow and the Electrum clients most visibly —
+  raised a man-in-the-middle warning when the same name resolved through a
+  different address or the server's public IP changed. StartOS now reuses one
+  certificate per name until renewal.
+
+  This changes how one address behaves, on a server reached through a NAT
+  router: typing its public IP address while on the same network as the server
+  now produces a certificate warning, because the router rewrites such a
+  connection to the LAN address and the server cannot see which of the two you
+  asked for. Reach it from inside your own network by its `.local` name, by a
+  domain you have assigned to it, or by its LAN IP address. A server that holds
+  its public address directly, or that is reached over StartTunnel, is
+  unaffected. See [Public IP](https://docs.start9.com/start-os/public-ip.html).
+
+- **`--format json` on `start-cli server governor` and
+  `start-cli ssh list` returns the result** it was asked for.
+
+- **A downgrade to a version that cannot take over the service's data is refused
+  before anything is downloaded or stopped**, with an explanation of what to do
+  instead.
+
+- **A service that fails to install, update, restore or uninstall says so right
+  away.** The notification naming what went wrong was held back until StartOS had
+  finished cleaning up after the attempt, which can take several minutes. It now
+  arrives as soon as the operation fails, while that cleanup is still running.
+
+- **`start-cli package install --sideload` reports long service installation
+  errors in its progress output.** Very long messages are shortened safely to
+  fit the progress stream.
+
+- **Restoring from a backup, or transferring to a new drive, keeps your server's
+  name.** Both flows renamed the server to `start9`, so the restored server
+  answered at `start9.local` rather than the address it had before — and two
+  servers restored on the same network collided on that one name.
 
 - **Apps that hold a connection open — desktop sync clients, API pollers — stop
   dropping in and out.** Nextcloud Desktop and clients like it showed a
@@ -76,6 +388,79 @@ file tracks notable changes since the move to the monorepo.
 
 - Trim whitespace on form inputs.
 
+- **Marketplace search matches anywhere in a package's name, ID or
+  description, and ranks results by how closely they match.** Searching
+  `cloud` finds Nextcloud.
+
+- **Restoring a service from a backup is many times faster.** A restore reads
+  the service's whole package out of the backup, and the encrypted backup
+  filesystem stores file contents as sealed 1 MiB blocks that it fetches and
+  decodes whole. It kept none of them, so each 8 KiB read along the package
+  fetched and decoded the enclosing block over again — dragging roughly 72 GB
+  across a network share to deliver a 480 MB package, and turning a restore
+  that should take a couple of minutes into 42. A block is now decoded once
+  for the run of reads inside it, which for reading a file start to finish is
+  once per block.
+
+- **A service that reads back a region of a file it has only partly written
+  no longer fails its backup.** Inside a backup or restore, a service's own
+  procedure works against the encrypted backup filesystem directly, and a
+  program that writes at one offset and then reads a little further on —
+  a database extending a file, an image being assembled — asked for bytes
+  that the pending write had not reached. That read failed with an I/O
+  error, and closing the file afterwards left the whole backup filesystem
+  unresponsive, so the operation hung rather than finishing. Such a read
+  now returns the zeros it should.
+
+- **File operations within a backup handle end-of-file and partial failures
+  correctly.** Reads past the end return no bytes, large copies use bounded
+  memory, and a copy interrupted by an error reports the bytes it completed.
+  A failed write during a storage-layout change preserves a readable inode,
+  its length, and every successfully written prefix byte.
+
+- **Helper processes a service starts are cleared away once they finish.** A
+  service that shells out to other programs — a media downloader calling
+  `yt-dlp` and `ffmpeg`, an agent running tool subprocesses — orphans a helper
+  whenever the program that started it exits first. Those finished helpers
+  stayed listed inside the service's container as `<defunct>`, each still
+  holding a process slot, for as long as the service ran — so a service that
+  starts many of them built them up without limit, and only a restart cleared
+  them. The container's first process now collects them as they finish.
+
+- **A Let's Encrypt certificate is issued even when the authority takes longer
+  than a second to check your domain.** StartOS asked Let's Encrypt to run the
+  check and then, one second later, asked it to run the check again — which
+  Let's Encrypt refuses, because the one it was already running had not
+  finished. The whole request failed there, and the retry a minute later failed
+  the same way, so a domain could sit without a certificate indefinitely. Let's
+  Encrypt validates from several vantage points around the world and routinely
+  takes longer than a second, so this affected almost every domain. StartOS now
+  waits for the answer instead of asking again.
+
+- **A Let's Encrypt domain works on an interface served on a port other than
+  `443`** — an Electrum server on `50002`, a TURN server on `5349`. Let's
+  Encrypt proves you control a name by connecting to it on port `443` whatever
+  port the service behind it uses, and nothing on your server answered there for
+  that name: the certificate was never issued, so the address served your
+  server's Root CA instead and clients that validate against public authorities
+  could not connect at all. StartOS now answers the challenge on port `443` for
+  every domain it holds an authority for, and claims that port automatically
+  wherever the domain is public — over StartTunnel, and as an IPv6 firewall
+  pinhole on a gateway that opens one. On a router, forward `443` to your server
+  as you would for a standard domain — the domain's own port is not enough on
+  its own, and Port Forwards lists the `443` rule alongside it. The checks that
+  run when you add or enable such a domain cover port `443` as well, so a domain
+  that would refuse every connection is reported before you go looking for it,
+  with its own row in the setup modal. Such a domain is served on its own port
+  only, so reach it as `https://<name>:<port>`; `443` carries the certificate
+  authority's checks and nothing else.
+
+- **A service that presents its own TLS certificate is shown as presenting
+  it.** StartOS does not terminate such a connection, so the certificate the
+  client checks is the service's — but a domain on that interface reported
+  whichever certificate authority had been chosen for it. Those addresses now
+  report `Self signed`.
+
 - **Services that run their own containers or a VPN can reach the devices they
   were granted.** A service opting into `userspaceFilesystems` or
   `virtualNetworking` is handed `/dev/fuse` and `/dev/net/tun` inside its
@@ -85,6 +470,7 @@ file tracks notable changes since the move to the monorepo.
   produced, and only the container's boot-time device pass — which races with
   the grant — widened them; on the losing side of that race a CI runner's jobs
   failed to start with `Failed to open() /dev/net/tun: Permission denied`.
+
 - **Reinstalling with "Preserve" copies your server's configuration before it
   rewrites the drive, so the configuration survives.** The copy used to be taken
   afterwards, by which point there was nothing left to read — so the server came
@@ -133,8 +519,9 @@ file tracks notable changes since the move to the monorepo.
   your dashboard, along with a certificate for that name signed by your server's
   Root CA. Logging in was never possible under those names, so the page could
   not be used for anything, but it should not have been reachable. Your server
-  now serves its `.local` address, the domains you have assigned to it, and
-  direct connections to its IP address.
+  now serves its `.local` address, the domains you have assigned to it, the
+  addresses a service such as Tor has added for it, and direct connections to
+  its IP address.
 
 - **Image upgrades verify their checksum again.** `upgrade` compared the image's
   blake3 hash only when it was given a second positional argument, which no
@@ -142,10 +529,8 @@ file tracks notable changes since the move to the monorepo.
   image would be installed without complaint. It now verifies whenever
   `CHECKSUM` is set.
 
-- **Large QR codes render instead of coming up blank.** The encoder was pinned
-  to correction level `M`, which has no version left past about 2.3 kB — so a
-  longer value threw and the dialog opened empty, with only a console error to
-  say why. Those codes now encode at level `L`, which carries about 2.9 kB.
+- **Large QR codes render, and a value too long for any QR code says so rather
+  than opening an empty dialog.** Copy that value instead of scanning it.
 
 - **Removing a domain from a service leaves its network settings otherwise
   untouched.** Naming a network host the service does not have — a stale id, or
@@ -160,13 +545,6 @@ file tracks notable changes since the move to the monorepo.
   appears in the service's own log next to the procedure that raised it, and
   StartOS labels a failure that came from the runtime `Service Runtime Error`
   rather than `Unknown Error`.
-
-- **A service that adds an SSL port keeps the address you already had.** When a
-  service gained an SSL port alongside a plaintext one it already had, the new
-  SSL port took over the existing number and the plaintext port was moved to an
-  arbitrary one — changing an address you may have saved. Each now keeps its
-  own: the port you already had stays where it is, and the one being added takes
-  the port the service asks for.
 
 - **The StartOS UI is served over plain HTTP on port 80.** Servers set up before
   0.4.0.1 gave the interface a high-numbered port instead, and nothing answered
@@ -194,6 +572,15 @@ file tracks notable changes since the move to the monorepo.
 - **The copy taken before an update is now made with the service stopped**, so it can
   no longer capture a database mid-write.
 
+- **A service's outbound gateway takes precedence over the system-wide
+  default.** You can keep one gateway pinned under **System > Gateways >
+  Outbound Traffic** while sending selected services through another gateway
+  with **Set Outbound Gateway**. A service given its own gateway while a
+  system-wide gateway was pinned has been following the system-wide one, and
+  switches to its own when you update. Changing or clearing the service's
+  selection also drops its established outbound connections, so new connections
+  use the newly selected gateway.
+
 - **A service reached over IPv6 through a tunnel now answers.** StartOS sends a
   reply back out the interface its connection arrived on by restoring a
   connection mark, but the kernel routes the reply that _opens_ a connection
@@ -203,6 +590,14 @@ file tracks notable changes since the move to the monorepo.
   sent, so an inbound IPv6 connection to a tunnel-delegated address hung until
   it timed out. A reply from an interface's own global IPv6 address now leaves
   by that interface. IPv4, and traffic forwarded to a service container, were
+  unaffected.
+
+- **A tunnel's IPv6 address now loads from a device on the server's own
+  network.** A phone or computer sharing the server's network connected to an
+  IPv6 address delegated through a tunnel — directly, or through a public domain
+  pointing at it — and then hung until the request timed out, while devices
+  everywhere else loaded it normally. The connection itself appeared to succeed,
+  so a domain that also had an IPv4 address never fell back to it. IPv4 was
   unaffected.
 
 - **Notification selection checkboxes no longer cover text on phones.** When
@@ -234,10 +629,98 @@ file tracks notable changes since the move to the monorepo.
   settings excluded. StartOS now rejects the overlapping claim and names both
   ports, so the service reports the conflict instead of serving it.
 
+- **An interface whose service encrypts its own end now loads when the binding
+  pins the protocols it offers.** Setting `alpn` changed how StartOS dialled
+  the service as well as which protocols it put forward, so the service
+  received plaintext on a port expecting TLS. The setting now narrows only the protocols on offer —
+  the service chooses among the ones the client also asked for, and both ends of
+  the connection carry the one it chose.
+
+- **A service that speaks HTTP/2 to StartOS now loads in a browser.** StartOS
+  opens a fresh TLS connection to a service that encrypts its own end, and
+  offers it the client's own list of application protocols. Where the service
+  chose HTTP/2 from that list, every request on that connection ended in a
+  connection error. The client's own connection had been offered nothing and
+  settled on HTTP/1.1, so StartOS wrote HTTP/1 requests onto a connection the
+  service was reading as HTTP/2. StartOS now offers the client exactly the
+  protocol the service chose, so both halves of the connection carry the same
+  one. For HTTP/2, StartOS advertises WebSocket extended CONNECT when the
+  service includes support in its opening settings. If the service connection
+  ends, StartOS sends GOAWAY so the browser follows HTTP/2's orderly shutdown.
+
+- **Dependency releases satisfy one complete version-range branch.** A release
+  may use an installed or aliased version, but one version must satisfy every
+  term in a conjunction. An exclusion rules out its branch when a declared
+  version satisfies the complete excluded range. Dependency warnings, update
+  checks and marketplace filtering now agree on that evaluation.
+
+- **Versions of different flavors sort in a stable order.** Comparing across
+  flavors produced no answer, so a list mixing Bitcoin Core with Bitcoin Knots
+  kept whatever order it arrived in.
+
+- **Marketplace, service-package and OS-update downloads fall back to IPv4
+  within a fraction of a second when a host's IPv6 does not answer.** StartOS
+  tries a host's IPv6 and IPv4 addresses a quarter of a second apart and uses
+  the first connection that succeeds.
+
+- **The OS log stays focused on actionable errors on a network whose router
+  advertises a route with more than one next hop.**
+
+- **A service that mounts a dependency's files read-write fails to start when
+  that dependency is not installed**, naming the missing volume.
+
+- **The Refresh Needed dialog offers a Refresh button in browser tabs.** Select
+  it to open the updated interface.
+
+- **A TLS passthrough added with `start-cli net vhost add-passthrough` answers
+  on every public IPv6 address of its gateway.** It answered on the addresses
+  the gateway held at the moment the passthrough was registered — at boot, often
+  not all of them — and refused the rest with a TLS `unrecognized name` error
+  while IPv4 kept working.
+
+- **A TLS passthrough whose hostname was entered with capital letters receives
+  its traffic.** One added as `Cloud.Example.com` was listed while every
+  connection to it was dropped. Hostnames match in any case, and a passthrough
+  saved that way starts working once the update is installed.
+
 ### Security
+
+- **A selected outbound gateway acts as a kill switch if it disconnects.**
+  StartOS rejects the system-wide or per-service traffic assigned to that
+  gateway until it reconnects, protecting the server's ISP address from
+  fallback traffic.
 
 - **Service mount paths are validated and confined to their intended
   directories.**
+
+- **An address you assigned to a public certificate authority serves that
+  authority's certificate and nothing else.** When StartOS could not obtain the
+  certificate, the address fell back to one signed by your server's Root CA
+  while still listing Let's Encrypt as its authority — so the fallback was
+  invisible from the server itself, whose own trust store contains that Root CA.
+  Your Root CA chain is the same on every address your server exposes, which
+  makes it a value that links them all to one server, handed to anyone who
+  connects. Such an address now refuses the connection until its certificate is
+  available, and tells you so: a notification names the domain and why issuance
+  failed, once per domain until a certificate lands. A certificate already
+  issued keeps being served through its last 30 days while renewal is retried,
+  so a renewal that begins failing does not take the address down, and a domain
+  you also reach on your local network keeps answering there with your server's
+  own certificate.
+
+- **Outbound IPv6 uses an address assigned to the selected gateway.** Traffic
+  through a gateway that has an IPv6 router but no IPv6 address of its own
+  fails immediately.
+
+- **A service's outbound gateway carries its IPv6 as well as its IPv4.** A
+  service sent through its own gateway with **Set Outbound Gateway** kept using
+  the system-wide default for IPv6, so those connections left under a different
+  address than the one you chose. When the service's gateway can't carry IPv6,
+  the service's IPv6 is dropped.
+
+- **A service's outbound gateway applies from the moment the service starts.**
+  A service that had just started or restarted used the system-wide default
+  until a gateway next changed.
 
 ## [0.4.0.1]
 

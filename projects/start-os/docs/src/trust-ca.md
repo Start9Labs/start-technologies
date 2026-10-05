@@ -2,6 +2,8 @@
 
 In order to establish a secure (HTTPS) connection with your server on the local network, it is necessary to download and trust your server's Root Certificate Authority (Root CA).
 
+Your server creates its Root CA during setup and keeps it across updates. Devices that already trust it remain trusted when you update StartOS.
+
 > [!Note]
 > You must repeat this guide for each device you want to connect to the server locally or using a VPN. This guide is _not_ necessary for devices that will connect using Tor or clearnet.
 
@@ -36,9 +38,11 @@ Select your platform:
 
 1. Press Command + Spacebar to launch a program, type in Keychain Access and select the resulting Keychain Access program to open it.
 
+1. In the Keychain Access program, make sure **System** is selected on the left-hand side under **System Keychains**
+
 1. Your server's CA certificate will be displayed among the imported certificates in Keychain Access. Right-click on the imported CA cert and select _Get Info_:
 
-1. The details of your CA certificate will be displayed in a new dialog window. Click the "Trust" heading, then select "Always Trust" on **Secure Sockets Layer (SSL)** and **X.509 Basic Policy**.
+1. The details of your CA certificate will be displayed in a new dialog window. Expand the "Trust" heading, then select "Always Trust" on **Secure Sockets Layer (SSL)** and **X.509 Basic Policy**.
 
    Click the red (x) button at the top left of the Local Root CA dialog window.
 
@@ -107,6 +111,25 @@ This guide applies to Android 13+, GrapheneOS, CalyxOS, and LineageOS.
 1. Go to `Settings > Security > More security settings > Encryption & credentials > Install a certificate > CA Certificate > Install Anyway`, then select your custom-named `your-server-name.crt` certificate.
 
 1. If using Firefox, you must use [Firefox Beta](https://play.google.com/store/apps/details?id=org.mozilla.firefox_beta), then complete [this final step](#android--graphene).
+
+{{#endtab }}
+{{#tab name="ChromeOS" }}
+
+1. Open Chrome and enter `chrome://certificate-manager` in the address bar. (Equivalently: `Settings > Privacy and security > Security > Manage certificates`.)
+
+1. Under "Local certificates", select "Custom", then expand "Installed by you".
+
+1. Click "Import" and select your `your-server-name.crt` certificate from your Downloads folder.
+
+1. Verify that your server's `<your-server-name> Local Root CA` certificate now appears in the list and is trusted for identifying websites.
+
+> [!NOTE]
+> On older ChromeOS versions, "Manage certificates" opens a dialog with an "Authorities" tab instead. Click "Import" there, select the certificate, and check "Trust this certificate for identifying websites".
+
+> [!TIP]
+> ChromeOS only imports PEM-encoded certificates. Your Root CA is already PEM-encoded despite its `.crt` extension, so it imports as-is — but if you see a "file type unsupported" error, rename the file's extension to `.pem` and try again.
+
+Certificates imported here are trusted by the Chrome browser. If you use the Linux development environment (Crostini) on your Chromebook, it keeps its own certificate store — to trust the CA there too, follow the "Debian / Ubuntu" instructions on the Linux tab from inside the Linux terminal.
 
 {{#endtab }}
 {{#tab name="Linux" }}

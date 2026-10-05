@@ -14,6 +14,7 @@ import {
   i18nService,
   registryUrl,
   sameUrl,
+  toUrl,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import {
@@ -32,6 +33,7 @@ import {
   filter,
   map,
   shareReplay,
+  startWith,
   switchMap,
   tap,
 } from 'rxjs/operators'
@@ -82,16 +84,31 @@ export class MarketplaceService extends AbstractMarketplaceService {
 
   readonly currentRegistryUrl$ = new ReplaySubject<string>(1)
 
-  // Fetches ANY url — saved or arbitrary — so deep links to unsaved registries
-  // load directly. On success, caches the registry's name for the picker.
+  private readonly fetched = new Map<string, StoreDataWithUrl>()
+
+  // Fetches any url, saved or not, so a deep link to an unsaved registry loads.
   readonly currentRegistry$: Observable<StoreDataWithUrl> =
     this.currentRegistryUrl$.pipe(
       distinctUntilChanged((a: string, b: string) => sameUrl(a, b)),
-      switchMap(url => this.fetchRegistry$(url)),
+      switchMap(url =>
+        this.fetchRegistry$(url).pipe(startWith(this.fetched.get(toUrl(url)))),
+      ),
       filter((r): r is StoreDataWithUrl => !!r),
-      tap(reg => this.cacheName(reg.url, reg.info.name)),
+      tap(reg => {
+        this.fetched.set(toUrl(reg.url), reg)
+        this.cacheName(reg.url, reg.info.name)
+      }),
       shareReplay(1),
     )
+
+  readonly registryIcons$ = this.currentRegistry$.pipe(
+    map(() =>
+      [...this.fetched.values()].map(({ url, info }) => ({
+        url,
+        icon: info.icon,
+      })),
+    ),
+  )
 
   getPackage$(
     id: string,
@@ -140,8 +157,8 @@ export class MarketplaceService extends AbstractMarketplaceService {
     }
 
     // validates the registry is reachable and provides a display name
-    const { name } = await firstValueFrom(this.fetchInfo$(url))
-    this.setCustom({ ...this.custom$.value, [url]: name })
+    const info = await firstValueFrom(this.fetchInfo$(url))
+    this.setCustom({ ...this.custom$.value, [url]: info.name })
 
     return url
   }

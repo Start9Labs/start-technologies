@@ -13,7 +13,7 @@ From the user's perspective, everyone connects to the same network name — the 
 The Wi-Fi password printed on the sticker on the bottom of your router is the default password. It maps to the default Security Profile (typically "Admin" with full access). This password is set during manufacturing and stored in the router's EEPROM. The EEPROM value is only authoritative on a [factory reset](factory-reset.md), when it is re-read to restore the default password. During normal operation the active password is whatever is in the router's running configuration: you can delete the **Default** entry and create a new one, and that new password is respected regardless of the EEPROM value. It also appears on the `Points of Entry > Wi-Fi > Passwords` page as the **Default** entry (mapped to the Admin profile), where you can reveal or copy it.
 
 > [!NOTE]
-> Keep the sticker password safe. On a DIY or unprogrammed board with no EEPROM Wi-Fi password, set one in the GUI (if connected via ethernet) or with `startwrt-cli set-wifi-password`. See [Installing StartWRT](installing.md#diy-and-unprogrammed-boards).
+> Keep the sticker password safe. On a DIY or unprogrammed board with no EEPROM Wi-Fi password, connect via Ethernet and set one in the web interface. See [Installing StartWRT](installing.md#diy-and-unprogrammed-boards).
 
 ## Adding a Wi-Fi Password
 
@@ -47,6 +47,8 @@ Select "Edit" from a password's actions menu to change its label or move it to a
 
 Configure the Wi-Fi radio hardware under `Points of Entry > Wi-Fi > Settings`:
 
+- **Country** — The country whose Wi-Fi regulations the router follows. It determines which channels each band may use and the maximum transmit power. Select the country the router is physically located in; if you move, change it. Until a country is selected the router runs on a conservative worldwide subset — 2.4 GHz channels 1–11 and 5 GHz channels 36–48, at 20 dBm — so setting it is the first thing to do after setup. Changing the country resets both channel selections to Auto.
+
 - **Enable Wi-Fi** — Global toggle to turn the wireless radio on or off. When disabled, no devices can connect via Wi-Fi.
 
 - **SSID** — The network name that devices see when scanning for Wi-Fi (default: `StartWRT`). All passwords share this single SSID.
@@ -57,7 +59,7 @@ Configure the Wi-Fi radio hardware under `Points of Entry > Wi-Fi > Settings`:
 
 - **Broadcast Separately** — Shown only when Band is "Both". When enabled, the 5 GHz band gets a separate SSID with a `-5G` suffix (e.g. `StartWRT` and `StartWRT-5G`). Useful if you want to control which band a device connects to.
 
-- **Channel** — Separate dropdowns for each band. **Auto** (recommended) lets the router select a channel automatically. You can also select a specific channel: 1–11 for 2.4 GHz, or 36–165 for 5 GHz.
+- **Channel** — Separate dropdowns for each band. **Auto** (recommended) lets the router select a channel automatically. You can also select a specific channel; the dropdowns list the channels the selected country permits. **Auto** skips radar-detection (DFS) channels. You can pick one by hand, but the 5 GHz network then takes a minute or more to appear each time the router starts while it listens for radar.
 
 > [!WARNING]
 > Changing the SSID disconnects all Wi-Fi clients. You will be prompted to confirm before the change is applied.

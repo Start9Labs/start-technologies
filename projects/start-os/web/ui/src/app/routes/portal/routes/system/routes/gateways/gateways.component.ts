@@ -172,8 +172,12 @@ export default class GatewaysComponent {
   readonly outboundOptions = computed(() => {
     const gateways = this.gatewayService.gateways()
     if (!gateways) return null
+    const selected = this.gatewayService.defaultOutboundGateway()
     return [
       this.autoOption,
+      ...(selected && !gateways.some(g => g.id === selected.id)
+        ? [selected]
+        : []),
       ...gateways.map(g => ({ id: g.id as string | null, name: g.name })),
     ]
   })

@@ -38,7 +38,7 @@ Nothing here is about contributing to the package. Build workflow, repo conventi
 
 **Open every H2 with prose.** One or two sentences between the heading and the first table or subsection, describing what the section covers. This text is extracted as the section's summary in the generated index, and it is what an agent reads to decide whether to fetch the section at all.
 
-**No version numbers anywhere.** Not upstream versions, not image tags, not dependency version ranges. The manifest and `setupDependencies()` are the source of truth; a copy here is wrong from the next bump onward.
+**No version numbers anywhere.** Not upstream versions, not image tags, not dependency version ranges. The dependency builder in `dependencies.ts` is the source of truth; a copy here is wrong from the next bump onward.
 
 ## Required structure
 
@@ -104,6 +104,7 @@ startos_managed_env_vars:
 dependencies: [list or "none"]
 interfaces:
   interface_id: { type: ui | api | p2p, port: number }
+  range_interface_id: { type: api, port: number, port_range: number } # first port, number of ports
 actions:
   - action-id
 tasks:
@@ -170,11 +171,11 @@ What this service needs from other services.
 
 For each dependency: its name, whether it is required or optional, the health checks that must pass before this service starts, any mounted volume (with mount point and read-only status), and why it is needed.
 
-Do **not** restate the version range — `setupDependencies()` declares it, and a copy goes stale the first time you raise the floor. If the service has no dependencies, state "None" explicitly.
+Do **not** restate the version range — `dependencies.ts` declares it, and a copy goes stale the first time you raise the floor. If the service has no dependencies, state "None" explicitly.
 
 ### Network Access and Interfaces
 
-What the service exposes. For each interface: its id, type (`ui`/`api`/`p2p`), port, protocol, and purpose.
+What the service exposes. For each interface: its id, type (`ui`/`api`/`p2p`), port (the full span, for a port range), protocol, and purpose.
 
 Describe what the interface serves, not how StartOS interface controls work — LAN/Tor/domain addressing is a platform feature documented once, not per package.
 
@@ -222,7 +223,7 @@ For each check: what it probes, its grace period, and — most importantly — *
 
 What survives a backup, and what a restored instance has to rebuild.
 
-Lead with the **strategy**, because it decides what the guarantee actually is: volumes copied wholesale (`ofVolumes`), a database dumped and replayed rather than copied (`withPgDump` / `withMysqlDump`), or a mix. A volume that is dumped is not a volume that is backed up — its files are never captured, and restore reconstructs it by starting the engine and replaying the dump. Saying only that it is "included" tells a reader the opposite of what happens.
+Lead with the **strategy**, because it decides what the guarantee actually is: volumes copied wholesale (`ofVolumes`), a database dumped and replayed rather than copied (`withPgDump` / `withMysqlDump` / `withMariadbDump`), or a mix. A volume that is dumped is not a volume that is backed up — its files are never captured, and restore reconstructs it by starting the engine and replaying the dump. Saying only that it is "included" tells a reader the opposite of what happens.
 
 Then: what is deliberately excluded and why (a cache or an index that rebuilds is a feature, not a gap), and what a restored instance still has to do before it is usable — a resync from a dependency, a credential to re-enter, a dependency that must be present first.
 

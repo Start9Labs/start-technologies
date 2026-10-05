@@ -6,12 +6,14 @@
 `DownloadHTMLService`, `Exver` (version algebra façade), `SetupLogsService` +
 `provideSetupLogsService(Api)`, `i18nService`/`i18nPipe`/`LocalizePipe` + `I18N_PROVIDERS`,
 `MarkdownComponent`/`MARKDOWN` + `PromptModal`/`PROMPT` (ready `PolymorpheusComponent` dialogs),
-`InitializingComponent`/`LogsWindowComponent`, `DocsLinkDirective` (+`VERSION`),
+`InitializingComponent`/`LogsWindowComponent`, `CaWizard` (+`CA_TRUST_CHECK`),
+`DocsLinkDirective` (+`VERSION`, optional),
 `SafeLinksDirective`, pipes (`convertBytes`, `empty`, `compareExver`, `leafProgress`,
 `markdown`, `trustUrl`), `RELATIVE_URL` token, `HttpError`/`RpcError`, disk/RPC/http types,
 utils (`convertAnsi`, `formatProgress`, `getPkgId`, `pauseFor`, `@debounce`, `sameUrl`,
-`isValidHttpUrl`, `registryUrl`, hostname normalization + `randomServerName` +
-`serverNameValidator`, keyboards/languages data, `defaultRegistries`/`knownRegistries`).
+`isValidHttpUrl`, `registryUrl`, `hostnameValidator`, `hostnameValidationErrors`,
+`randomHostname`, keyboards/languages data,
+`defaultRegistries`/`knownRegistries`).
 
 `@start9labs/marketplace`: the whole storefront kit (shell, tile, preview drawer, about/
 release-notes/flavors/dependencies/links, registry picker) abstracted over
@@ -28,5 +30,6 @@ utils, zod re-export. **Never hand-edit `osBindings/*.ts`** — change the Rust 
 Library authoring (when you add to `shared`/`marketplace`): configurability layers in order —
 signal inputs → content projection/`contentChild(TemplateRef)`/`PolymorpheusContent` → abstract
 class as DI contract → optional hook tokens → `provide*` factories → Taiga option providers.
-Style with `--tui-*` vars, `:host { display: contents }` for pure-composition components; no
-theme definitions inside components.
+Style with `--tui-*` vars, `:host { display: contents }` for a component composing several
+siblings (one wrapping a single Taiga primitive becomes it via `hostDirectives`); no theme
+definitions inside components.

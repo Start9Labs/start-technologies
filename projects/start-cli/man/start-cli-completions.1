@@ -1,0 +1,32 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-completions 1  "completions "
+.SH NAME
+start\-cli\-completions \- Print a shell completion script
+.SH SYNOPSIS
+\fBstart\-cli completions\fR [\fB\-h\fR|\fB\-\-help\fR] <\fISHELL\fR>
+.SH DESCRIPTION
+Print a shell completion script
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fISHELL\fR>
+Shell to generate the completion script for
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+bash
+.IP \(bu 2
+elvish
+.IP \(bu 2
+fish
+.IP \(bu 2
+powershell
+.IP \(bu 2
+zsh
+.RE

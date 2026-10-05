@@ -4,7 +4,7 @@
 
 ## Network Reachability
 
-Your package declares _what_ it exposes. The **user** decides _where_ it is reachable. An interface is bound to the server's [gateways](/start-os/gateways.html), and the user enables or disables each resulting address individually from the service's **Interfaces** tab. LAN addresses (the `.local` hostname, the LAN IP) are enabled by default; public IPv4 addresses are **off** by default.
+Your package declares _what_ it exposes. The **user** decides _where_ it is reachable. An interface is bound to the server's [gateways](/start-os/gateways.html), and the user enables or disables each resulting address individually from the service's **Interfaces** tab. LAN addresses (the `.local` hostname, the LAN IP) are enabled by default; public IPv4 addresses are **off** by default. A LAN IP the user has not switched follows the `.local` hostname, and on an interface served without TLS `.local` is on while one of its LAN IPs is, so switching it off switches them off. A filled address lists every address the user has enabled, the `.local` hostname included while the server has no LAN IP for it to resolve to.
 
 **A public domain belongs to the host, but is enabled per binding.** The user adds it naming one internal port, and its addresses — the plain one and, where the binding has `addSsl`, the TLS one — are enabled on **that** binding straight away. Every other binding on the same `MultiHost` also gains the domain, but **off by default**, to be switched on individually like any other address. So a host that binds two ports needs the domain enabled twice, and a package that starts binding a second port later does not inherit the user's earlier choice for it.
 
@@ -167,6 +167,48 @@ The key steps are:
 2. Create one or more interfaces using `sdk.createInterface()`
 3. Export the interfaces from the origin and return the receipt(s)
 
+## Conditional exports
+
+A `setupInterfaces` handler is not additive. It runs your body, then revokes everything the body did **not** export on that pass — `clearBindings({ except })` followed by `clearServiceInterfaces({ except })`. Re-exporting an interface with the same id is an in-place update with no gap, but an id you skip is removed.
+
+That makes a conditional export a live piece of state, not a one-time decision, because the handler re-runs on every change to anything it `.const()`s:
+
+```typescript
+// the interface disappears whenever this file does
+const rune = await FileHelper.string(runePath).read().const(effects)
+if (rune) {
+  receipts.push(
+    await origin.export([
+      sdk.createInterface(effects, {
+        /* … query: { rune } */
+      }),
+    ]),
+  )
+}
+```
+
+If that file is deleted and rewritten — a credential rotation, an action that mints a replacement — the interface is revoked for as long as the gap lasts. Anything reactive downstream sees it vanish and then reappear: your own init handlers, and dependents in other packages, which read your interfaces across the package boundary.
+
+Two rules follow.
+
+**Gate on the narrowest thing.** An early return at the top of the handler (`if (!conf) return []`) revokes _every_ interface on the host, including ones that never read `conf`. Put the guard on the exports that actually need the value.
+
+**Watch for a replacement, not for the gap.** Where the export depends on a file that is deleted before it is rewritten, pass an equality that treats an absent value as unchanged, so the deletion does not re-run the handler at all:
+
+```typescript
+const rune = await FileHelper.string(runePath)
+  .read(
+    v => v,
+    (prev, next) => next === null || prev === next,
+  )
+  .const(effects)
+```
+
+The handler then re-runs when the new value lands, updating the interface in place, and never for the moment in between. A first run still sees `null` and correctly exports nothing.
+
+> [!WARNING]
+> Reading another package's interface has the same hazard from the other side. `sdk.host.get(…)` mapped through `host.bindings[…].interfaces[…]` with a `?? null` fallback cannot tell "not exported right now" from "gone", and a `.const()` on it in `main` restarts your service when the dependency rotates a credential. Take an address from `sdk.host.getBridgeAddress`, which resolves off the binding and works with no exported interface at all; only where you need something the interface alone publishes — a scheme, or a credential in its `suffix` — read the interface, and pass the same null-tolerant equality.
+
 ## bindPort Options
 
 | Option                          | Type                                                  | Description                                                                                                                                                                                                                 |
@@ -174,12 +216,14 @@ The key steps are:
 | `protocol`                      | `'http'` \| `'https'` \| `null`                       | The protocol. Use `null` for raw TCP (non-HTTP).                                                                                                                                                                            |
 | `preferredExternalPort`         | `number`                                              | The port users will see in their URLs.                                                                                                                                                                                      |
 | `addSsl`                        | `object` \| `null`                                    | SSL termination options for HTTPS. Set to `null` for no SSL.                                                                                                                                                                |
-| `addSsl.alpn`                   | `string` \| `null`                                    | ALPN protocol negotiation (e.g., `'h2'`). Usually `null`.                                                                                                                                                                   |
+| `addSsl.alpn`                   | `string[]` \| `null`                                  | The ALPN protocols StartOS answers a client with, from those it asked for. `null`, the usual choice, answers with whatever it asked for.                                                                                    |
 | `addSsl.preferredExternalPort`  | `number`                                              | External port for SSL connections.                                                                                                                                                                                          |
 | `addSsl.addXForwardedHeaders`   | `boolean`                                             | Whether to add `X-Forwarded-*` headers.                                                                                                                                                                                     |
 | `addSsl.auth`                   | `ProxyAuth` \| `null`                                 | Optional auth gate enforced by the OS reverse proxy. See [Authenticating at the Proxy](#authenticating-at-the-proxy).                                                                                                       |
 | `addSsl.upstreamCertValidation` | `'disable'` \| `{ certificate: string }` \| _omitted_ | How the OS validates your container's TLS cert when it [rewraps SSL](#rewrapping-ssl-to-a-tls-container). Omit to validate against the StartOS root CA (default). See [Rewrapping SSL](#rewrapping-ssl-to-a-tls-container). |
-| `secure`                        | `{ ssl: boolean }` \| `null`                          | For non-HTTP protocols, whether the connection is secure. `{ ssl: true }` with `addSsl: null` serves your container's own TLS end to end — see [Serving Your Own TLS](#serving-your-own-tls-passthrough).                   |
+| `secure`                        | `{ ssl: boolean }` \| `null`                          | Whether the port is safe to expose on networks StartOS does not trust, and whether it speaks TLS itself. See [Choosing `secure`](#choosing-secure).                                                                         |
+
+An `addSsl` binding on any port can carry a Let's Encrypt certificate — issuance is per name, not per port. The user's side of that is one extra requirement: Let's Encrypt validates on port `443` whatever port you bind, so StartOS asks their gateway to route `443` for the domain as well. On a gateway that cannot do it automatically they forward `443` by hand. Worth a line in your instructions for an interface on a non-standard port that users will reach from software validating against public roots — an Electrum client, say.
 
 ## Interface Options
 
@@ -194,23 +238,116 @@ sdk.createInterface(effects, {
   username: null, // Auth username embedded in URL
   path: '/some/path/', // URL path
   query: {}, // URL query params
+  preferredLauncherAddress: null, // Address Open UI should prefer (see below)
 })
 ```
 
-| Option           | Type                                                       | Description                                                                                                                                                                    |
-| ---------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `name`           | `string`                                                   | Display name shown to the user. Wrap with `i18n()`.                                                                                                                            |
-| `id`             | `string`                                                   | Unique identifier. How you find this interface at runtime, by walking the host from `sdk.host.getOwn()` (see [main.ts](./main.md)).                                            |
-| `description`    | `string`                                                   | Description shown to the user. Wrap with `i18n()`.                                                                                                                             |
-| `type`           | `'ui'`, `'api'`, or `'p2p'`                                | `'ui'` for browser interfaces, `'api'` for programmatic endpoints, `'p2p'` for peer-to-peer connections.                                                                       |
-| `masked`         | `boolean`                                                  | If `true`, the interface URL is shown as a copyable secret. Use for URLs containing credentials or tokens.                                                                     |
-| `schemeOverride` | `{ ssl: string \| null; noSsl: string \| null }` \| `null` | Override the URL scheme for custom protocols. For example, `{ ssl: 'lndconnect', noSsl: 'lndconnect' }` produces `lndconnect://` URLs. Use `null` for standard `http`/`https`. |
-| `username`       | `string` \| `null`                                         | Username embedded in the URL (e.g., for `smp://fingerprint:password@host`).                                                                                                    |
-| `path`           | `string`                                                   | URL path appended to the base address (e.g., `'/admin/'`).                                                                                                                     |
-| `query`          | `object`                                                   | URL query parameters as key-value pairs (e.g., `{ macaroon: 'abc123' }`).                                                                                                      |
+| Option                     | Type                                                       | Description                                                                                                                                                                    |
+| -------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`                     | `string`                                                   | Display name shown to the user. Wrap with `i18n()`.                                                                                                                            |
+| `id`                       | `string`                                                   | Unique identifier. How you find this interface at runtime, by walking the host from `sdk.host.getOwn()` (see [main.ts](./main.md)).                                            |
+| `description`              | `string`                                                   | Description shown to the user. Wrap with `i18n()`.                                                                                                                             |
+| `type`                     | `'ui'`, `'api'`, or `'p2p'`                                | `'ui'` for browser interfaces, `'api'` for programmatic endpoints, `'p2p'` for peer-to-peer connections.                                                                       |
+| `masked`                   | `boolean`                                                  | If `true`, the interface URL is shown as a copyable secret. Use for URLs containing credentials or tokens.                                                                     |
+| `schemeOverride`           | `{ ssl: string \| null; noSsl: string \| null }` \| `null` | Override the URL scheme for custom protocols. For example, `{ ssl: 'lndconnect', noSsl: 'lndconnect' }` produces `lndconnect://` URLs. Use `null` for standard `http`/`https`. |
+| `username`                 | `string` \| `null`                                         | Username embedded in the URL (e.g., for `smp://fingerprint:password@host`).                                                                                                    |
+| `path`                     | `string`                                                   | URL path appended to the base address (e.g., `'/admin/'`).                                                                                                                     |
+| `query`                    | `object`                                                   | URL query parameters as key-value pairs (e.g., `{ macaroon: 'abc123' }`).                                                                                                      |
+| `preferredLauncherAddress` | `string` \| `null` \| _omitted_                            | The URL of the address StartOS's **Open UI** control should prefer for this interface. See [Nominating an Address to Open](#nominating-an-address-to-open).                    |
 
 > [!TIP]
 > The `id` you assign to an interface is what you use in `main.ts` to retrieve hostnames for it. Interfaces are reached through their **host**: `sdk.host.getOwn(effects, hostId)` returns the host, and the interface lives at `host.bindings[internalPort].interfaces[id]`. See [Main](./main.md#getting-hostnames) for details.
+
+## Nominating an Address to Open
+
+StartOS's **Open UI** control picks the address that suits how the admin is reaching StartOS at that moment — a `.local` name for a `.local` session, an onion address for a Tor session — so it usually lands on a link that resolves in the browser they are already using.
+
+A few services work at exactly one origin. CryptPad derives account keys from the origin it is loaded at, so opening it at a second, perfectly reachable address rejects the right password; Ghost, Gitea and Vaultwarden each build links or callbacks from one configured URL. Such a service already asks the user which URL to treat as primary — see [Set a Primary URL](./recipe-primary-url.md) — and `preferredLauncherAddress` passes that answer on, so **Open UI** opens the address the service was configured for.
+
+Nominate on the interface the user opens, which is the one carrying the control: **Open UI** appears only for a `type: 'ui'` interface whose `scheme` is `http` or whose `sslScheme` is `https`, so a nomination on an `api` or `p2p` interface is stored and never acted on. Some services keep their canonical URL on an interface that is not the web UI — Synapse's server name belongs to its federation interface, and its admin UI is a separate one on another host. There the stored URL is not this interface's address and nominating it would match nothing, so nominate only where the URL the user picked is an address of the interface carrying the control.
+
+Read the user's choice reactively, so re-running the action re-runs `setupInterfaces` and re-nominates:
+
+```typescript
+import { primaryUrl } from './primaryUrl'
+
+export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
+  const url = await primaryUrl.bestUsable(effects).const()
+
+  const uiMulti = sdk.MultiHost.of(effects, 'ui-multi')
+  const uiOrigin = await uiMulti.bindPort(uiPort, { protocol: 'http' })
+
+  const ui = sdk.createInterface(effects, {
+    name: i18n('Web UI'),
+    id: 'ui',
+    description: i18n('The web interface'),
+    type: 'ui',
+    masked: false,
+    schemeOverride: null,
+    username: null,
+    path: '',
+    query: {},
+    preferredLauncherAddress: url,
+  })
+
+  return [await uiOrigin.export([ui])]
+})
+```
+
+Pass an absolute URL carrying a scheme and a host. Omitting `preferredLauncherAddress`, setting it to `null`, or passing a blank, whitespace-only, or malformed value leaves **Open UI** on its usual address-selection behavior.
+
+StartOS compares the scheme, hostname and port of what you pass against the addresses this interface has right now, and opens the match. The nomination outranks the connection-based choice, because a service that works at one origin is better served by the address its user picked than by one derived from the admin's connection — so **Open UI** stays on it until the user disables that address, at which point the choice reverts.
+
+Some addresses are left out of the comparison, in the cases where StartOS can tell the session asking could not resolve them. Everywhere else it takes your word for it:
+
+- **An address a plugin publishes is honored only from a session on that plugin.** `accessType` recognizes Tor by the `.onion` the browser is on, and no other plugin's session, so an onion nomination is honored from a Tor session and every other plugin address reverts to the usual choice.
+- **A Tor session honors only an onion address or a public one.** Tor Browser reaches neither a `.local` name nor a LAN IP.
+- **Loopback, IPv6 link-local and the container bridge are never nominated.** The primary-URL select a user picks from can list them, and none is reachable from another machine.
+
+> [!WARNING]
+> Nominate an address the people who use the service can actually reach, because StartOS opens it rather than second-guessing them. A public domain nominated on a home network needs the router to loop LAN traffic back to it, and a `.local` name nominated for a service reached from outside resolves for nobody who is away.
+
+> [!NOTE]
+> Only the origin has to match. The path and query of the opened URL come from this interface's own `path` and `query`, so changing either leaves the nomination standing — what pins it is the scheme, hostname and port, which is the part an origin-sensitive app checks. That also means reassigning the interface's external port unseats the nomination, which is correct: the origin the app was configured for changed too. A nomination read from `primaryUrl.bestUsable` follows the chosen hostname to its new port; a service whose URL is permanent has nothing to follow it.
+
+## Choosing a Primary URL
+
+A service that builds links, invites or callbacks from one URL asks the user which of its addresses that is. `sdk.setupPrimaryUrl()` builds the "Set Primary URL" action over a reader and a writer for the choice, wherever the package keeps it — a field of `store.json`, or the service's own config file:
+
+```typescript
+// primaryUrl.ts
+import { sdk } from './sdk'
+import { i18n } from './i18n'
+import { storeJson } from './fileModels/store.json'
+
+export const primaryUrl = sdk.setupPrimaryUrl({
+  id: 'set-primary-url',
+  hostId: 'ui-multi',
+  interfaceId: 'ui',
+  metadata: {
+    name: i18n('Set Primary URL'),
+    description: i18n('Choose the URL Ghost puts in the links it generates. Ghost restarts to apply the change.'),
+    warning: null,
+    allowedStatuses: 'any',
+    group: null,
+    visibility: 'enabled',
+  },
+  field: { name: i18n('URL'), description: null },
+  get: storeJson.read(s => s.primaryUrl),
+  set: (effects, url) => storeJson.merge(effects, { primaryUrl: url }),
+})
+
+// init/primaryUrlTask.ts — list it after `actions` in setupInit
+export const primaryUrlTask = primaryUrl.setupTask('important', {
+  reason: i18n('The primary URL is no longer one of Ghost’s addresses. Choose a new one.'),
+})
+```
+
+Register `primaryUrl.action` with `sdk.Actions.of()`. It offers the interface's addresses (the `nonLocal` view, so loopback, link-local and the container bridge are left out), pre-selects the `.local` one, and pre-fills the stored URL. `get` takes a file model's reader as-is; any object with the same `once()` and `watch()` works.
+
+`primaryUrl.bestUsable(effects)` reads the URL to give the service, with the usual `const()`, `once()`, `watch()`, `onChange()` and `waitFor()` — `await primaryUrl.bestUsable(effects).const()` in `setupMain` and for **Open UI** above. It resolves to the stored URL at its hostname's current port and scheme; the `.local` address when that hostname is not one of the interface's addresses or nothing is stored; the first address when there is no `.local` one. It leaves the store as the user set it, so a chosen address that comes back is used again.
+
+`primaryUrl.setupTask(severity, options)` is an init script that keeps a task on the action raised while the stored URL is unset or its hostname is not one of the interface's addresses, pre-filled with the `.local` address. It re-runs when the addresses change and declares the addresses as the task's accepted input (`input-not-matches`, see [Options](tasks.md#options)), so StartOS clears the task when the user picks one or the stored address returns. An IP address leaves the interface's addresses while its network link is down, so an IP choice raises the task then too. `important` suits most services: a `critical` task stops the service while it is active, which is right only for a service that cannot run without a valid URL. Keep `id` equal to the id of an action the package already ships, so its tasks' replay key survives (see [Retiring a replay key](tasks.md#retiring-a-replay-key)).
 
 ## Port Ranges
 
@@ -344,6 +481,14 @@ return 200 '{"api_url":"https://$host/api"}';
 
 This applies to any configuration file generated in `setupMain` or any runtime response that includes absolute URLs — not just nginx. When in doubt, hardcode `https://`.
 
+### Application protocols
+
+`addSsl.alpn` is the list of protocols StartOS will answer a client with, chosen from the ones that client asked for. Unset — the usual case — it answers with whatever the client asked for. A client left with nothing is refused; a client that asks for no protocol at all is served as it would be without ALPN.
+
+StartOS answers from that list itself, because it terminates the client's TLS and forwards plain HTTP. Your container never sees the negotiation, so the list is the only thing holding a client to a protocol your container can serve — which is why `protocol: 'http'` and `'ws'` set it to `http/1.1`.
+
+A container serving its own TLS does get a say; see [Rewrapping SSL to a TLS container](#rewrapping-ssl-to-a-tls-container).
+
 ## Rewrapping SSL to a TLS container
 
 The guidance above ("do not configure in-container HTTPS") applies when StartOS terminates TLS and forwards plain HTTP — the `http`/`ws` protocols. The `https`/`wss` protocols are different: the container serves its **own** TLS, StartOS terminates the client's TLS at the edge, and then opens a **fresh TLS connection to your container** (a "rewrap"). This happens whenever `addSsl` is set and the protocol's `secure.ssl` is `true`.
@@ -368,6 +513,12 @@ const origin = await multi.bindPort(443, {
 > [!NOTE]
 > For `{ certificate }`, StartOS connects to the container by IP, so the pinned certificate must be valid for that internal IP (present in its SANs). If it isn't, use `'disable'` instead.
 
+Your container chooses the application protocol here, which is the one thing the rewrap adds to [Application protocols](#application-protocols) above. StartOS offers it whichever of `addSsl.alpn` the client also asked for and answers the client with its choice, so both ends of the connection carry one protocol — a container advertising `h2` is reached over `h2` by a client that asked for `h2`, and one that selects nothing leaves the client with no negotiated protocol, which an HTTP client treats as HTTP/1.1. Leave `alpn` unset unless you need to keep this binding off a protocol your container would otherwise select.
+
+Advertise exactly the protocols your container can serve on its own listener. The client is only ever given one your container selects, so a list narrower than what your container speaks costs clients the better protocol — and a client sharing none of them is refused by your container, which reaches the client as a TLS alert naming the hostname rather than the protocol.
+
+Advertising `h2` is the case to think about twice, and worth re-checking on a container that advertises it today: it has to answer extended CONNECT. It commits your container to serving every HTTP/2 client, including WebSockets. On an `https` or `wss` binding StartOS advertises HTTP/2 extended CONNECT ([RFC 8441](https://www.rfc-editor.org/rfc/rfc8441)) to the client whether or not your container implements it, so a browser opens its WebSocket that way and your container has to answer it. A container that advertises only `http/1.1` keeps those clients on HTTP/1.1, where a WebSocket is an ordinary `Upgrade`.
+
 ## Serving Your Own TLS (Passthrough)
 
 There is a third arrangement, distinct from both plain termination and the rewrap: **passthrough**, where your container's certificate reaches the client unmodified. Set `secure: { ssl: true }` with **no** `addSsl`:
@@ -381,14 +532,16 @@ const origin = await multi.bindPort(10009, {
 })
 ```
 
-StartOS still fronts the port with one of its TLS listeners, but that listener pipes the raw TLS stream through instead of terminating it, so nothing about the handshake is rewritten. The container sees the client's real source address rather than the proxy's — except for a client on the box itself, which appears as the bridge IP.
+StartOS still fronts the port with one of its TLS listeners, but that listener pipes the raw TLS stream through instead of terminating it, so nothing about the handshake is rewritten. The container sees the client's real source address rather than the proxy's — except for a client on the box itself, which appears as the bridge IP. The listener routes on the client's TLS ClientHello, so the first bytes a client sends must be one: a protocol that opens in plaintext and upgrades in-band is dropped here, and its port is `ssl: false`.
+
+The listener routes by the name the client asks for (its TLS SNI). It answers for the names enabled on the binding — its domains and the server's `.local` — and for a client that asks for no name or an IP address. It refuses every other name before the connection reaches your container. A daemon whose certificate carries a fixed name that its clients ask for binds the port `secure: { ssl: false }` instead: StartOS forwards the TCP stream untouched, whatever the name, and the daemon's TLS still runs end to end.
 
 ### When to use it
 
 Reach for passthrough only when the rewrap genuinely cannot serve, which is one of two cases:
 
 1. **The client must verify your container's own certificate.** A wallet that pins a certificate carried in a connection URI can only do so if the certificate it pins is the one actually served.
-2. **The handshake carries something a rewrap does not.** ALPN is the concrete case: StartOS negotiates no ALPN with the client across an `addSsl` rewrap, and gRPC-go rejects a connection with no selected ALPN (`missing selected ALPN property`). LND binds its gRPC interface this way for exactly that reason.
+2. **The client must see a protocol your container never selects.** A rewrap hands the client whatever your container chose, so a client that requires one — gRPC-go rejects a connection with no selected ALPN (`missing selected ALPN property`) — is served as long as your container's listener advertises it. Reach for passthrough here only when your container's listener cannot be made to advertise it. LND binds its gRPC interface as a passthrough.
 
 Otherwise prefer `addSsl`. Passthrough gives up everything the proxy does on your behalf:
 
@@ -410,11 +563,27 @@ Otherwise prefer `addSsl`. Passthrough gives up everything the proxy does on you
 - `sdk.getOsIp` (`10.0.3.1`) — the bridge, where other services reach you
 - `127.0.0.1` — your own subcontainers, which share the service's network namespace
 - `sdk.getContainerIp` — the container itself
-- any other address you expect a client to use
+- **every address the interface is published at** — LAN IPs, the server's `.local` name, private and public domains, and any onion a plugin has exported
+
+Those three constants are the internal half, and naming only them is the mistake to avoid: an off-box client dialing the LAN address or the `.local` name gets a certificate matching none of them. Take the external half from the **binding**, so it follows the addresses the operator adds and removes:
 
 ```typescript
 export const setupCerts = sdk.setupOnInit(async effects => {
-  const hostnames = [await sdk.getContainerIp(effects).const(), '127.0.0.1', await sdk.getOsIp(effects)]
+  const served = await sdk.host
+    .getOwn(effects, 'grpc', host =>
+      host
+        ? utils
+            .filledAddress(host, { hostId: 'grpc', internalPort: 10009, username: null, scheme: null, sslScheme: null, suffix: '' })
+            // everything except the WAN IPv4, which the box does not hold
+            .matchesAny([{ visibility: 'private' }, { exclude: { kind: 'ipv4' } }])
+            // nothing dials loopback or link-local; 127.0.0.1 is added below
+            .filter({ exclude: { kind: ['localhost', 'link-local'] } })
+            .hostnames.map(h => h.hostname)
+        : [],
+    )
+    .const()
+
+  const hostnames = [await sdk.getContainerIp(effects).const(), '127.0.0.1', await sdk.getOsIp(effects), ...served]
   const cert = (await sdk.getSslCertificate(effects, hostnames).const()).join('')
   const key = await sdk.getSslKey(effects, { hostnames })
   await writeFile('/media/startos/volumes/main/tls.cert', cert)
@@ -422,12 +591,30 @@ export const setupCerts = sdk.setupOnInit(async effects => {
 })
 ```
 
+**Read the addresses off the binding, never off an exported interface.** They belong to the binding: `utils.filledAddress` looks the binding up by `internalPort` and derives the hostnames from it, and the `AddressInfo` you pass supplies nothing else unless you call `toUrl`/`format`. An interface is a _view_ of that list, and it disappears whenever a `setupInterfaces` pass does not export it — a handler that skips an export while a credential file is missing, or returns early when a config reads as null, revokes it (see [Conditional exports](#conditional-exports)). Walking `host.bindings[…].interfaces[…]` and falling back to `[]` therefore turns "I cannot see the interface right now" into "this host has no addresses", which silently narrows the certificate.
+
+That distinction has teeth because reissuing the certificate restarts the service: a SAN set that collapses takes the daemon down with it.
+
+`getSslCertificate` signs an IP the **box itself holds** — one in the container bridge subnet, or an address on one of the server's own gateways. A WAN IPv4 fails the whole call because that address belongs to the router, not to you; an IPv6 GUA is configured on the box and is signed. See [Narrowing the set](main.md#narrowing-the-set) for why that exclusion is a union rather than a two-field `exclude`.
+
 Read the container IP with `.const()` rather than `.once()`: a container that comes back on a new IP must reissue the certificate, or every client dialing the old one fails verification.
+
+Most daemons read their TLS pair once at startup, so reissuing the file is only half the job — something has to restart the service, or it keeps serving the old certificate against the new address set. Whatever you key that restart on must not blink: a value that momentarily reads empty will restart the daemon for nothing, and if the restart can feed back into the value, it will not converge.
 
 > [!WARNING]
 > Do **not** add a `<package-id>.startos` DNS name to the SANs. That overlay DNS is deprecated and slated for removal, and it resolves to the container IP rather than the bridge — so it bypasses the platform entirely. Dependents reach you through the bridge; see [Service-to-Service Networking](service-to-service.md).
 
 A passthrough port carries its external port in `net.assignedSslPort`, the same as an `addSsl` port — which of the two fields is populated says whether the port speaks TLS, not who terminates it. Dependents should read neither field directly; `sdk.host.getBridgeAddress` resolves the binding's derived address and is correct under every arrangement on this page.
+
+## Choosing `secure`
+
+On a raw-TCP binding (`protocol: null`), `secure` says whether the protocol is safe to expose, as it is, on networks StartOS does not trust — the LAN and the internet — and `ssl` says whether it does that with TLS from its first byte:
+
+| `secure`         | The protocol                                                                                                                                                                                            | Where StartOS publishes the port                                                                                                                                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `null`           | Is not safe to expose on its own                                                                                                                                                                        | Only where StartOS trusts the path: the server itself — your subcontainers and other services — and a gateway marked secure, which none is by default. Never on the internet, so off-box clients reach the service through `addSsl`. |
+| `{ ssl: false }` | Is secure without TLS from its first byte: it encrypts some other way (SSH, LND's peer protocol, or TLS negotiated after a plaintext opening, like Postgres), or it is safe to expose unencrypted (DNS) | As a plain port, on every address the user enables — LAN and public alike.                                                                                                                                                           |
+| `{ ssl: true }`  | Speaks TLS from its first byte                                                                                                                                                                          | On every address the user enables, as a TLS port. With `addSsl: null`, StartOS passes the TLS through to your container — see [Serving Your Own TLS](#serving-your-own-tls-passthrough).                                             |
 
 ## Authenticating at the Proxy
 

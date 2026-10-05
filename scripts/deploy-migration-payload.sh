@@ -160,7 +160,7 @@ StartOS 0.4.0 is a completely new operating system. This update replaces StartOS
 
 **2. Prepare for new service addresses**
 
-On 0.4.0, each service no longer has its own `.local` address (e.g. `longexamplepublickey.local`); services are reached on unique ports of your server's main `.local` address (e.g. `adjective-noun.local:4545`). Your old per-service `.local` addresses will no longer exist after the update. If you use a password manager, give your saved passwords clear names now — not just the old `.local` URLs — so you can identify them later and save the new URLs.
+On 0.4.0, each service no longer has its own `.local` address (e.g. `longexamplepublickey.local`); services are reached on unique ports of your server's main `.local` address (e.g. `server-name.local:4545`). Your old per-service `.local` addresses will no longer exist after the update. If you use a password manager, give your saved passwords clear names now — not just the old `.local` URLs — so you can identify them later and save the new URLs.
 
 **3. Update ALL services**
 

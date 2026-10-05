@@ -1,39 +1,48 @@
 import { Component, Input } from '@angular/core'
 import { TuiAccordion, TuiFade } from '@taiga-ui/kit'
 import { ActionSuccessMemberComponent } from './action-success-member.component'
+import { ActionSuccessMultilineComponent } from './action-success-multiline.component'
 import { GroupResult } from './types'
 
 @Component({
   selector: 'app-action-success-group',
   template: `
     @for (member of group.value; track $index) {
-      <p>
-        @if (member.type === 'single') {
-          <app-action-success-member [member]="member" />
-        }
-        @if (member.type === 'group') {
-          <tui-accordion>
-            <button tuiAccordion>
-              <span tuiFade>{{ member.name }}</span>
-            </button>
-            <tui-expand>
-              <app-action-success-group [group]="member" />
-            </tui-expand>
-          </tui-accordion>
-        }
-      </p>
+      @if (member.type === 'single') {
+        <app-action-success-member [member]="member" />
+      }
+      @if (member.type === 'multiline') {
+        <app-action-success-multiline
+          [multiline]="member"
+          [name]="member.name"
+          [description]="member.description || ''"
+        />
+      }
+      @if (member.type === 'group') {
+        <tui-accordion>
+          <button tuiAccordion>
+            <span tuiFade>{{ member.name }}</span>
+          </button>
+          <tui-expand>
+            <app-action-success-group [group]="member" />
+          </tui-expand>
+        </tui-accordion>
+      }
     }
   `,
   styles: `
-    p:first-child {
-      margin-top: 0;
-    }
-
-    p:last-child {
-      margin-bottom: 0;
+    :host {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
     }
   `,
-  imports: [ActionSuccessMemberComponent, TuiAccordion, TuiFade],
+  imports: [
+    ActionSuccessMemberComponent,
+    ActionSuccessMultilineComponent,
+    TuiAccordion,
+    TuiFade,
+  ],
 })
 export class ActionSuccessGroupComponent {
   @Input()

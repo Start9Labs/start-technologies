@@ -15,6 +15,21 @@
 type ParamValue = string | number | Date
 
 /**
+ * The first candidate `Intl` will construct with, or `undefined` for the
+ * runtime default — which is always valid. POSIX locale names (`C`, `POSIX`)
+ * are rejected by `Intl` even though they are perfectly valid `LANG` values.
+ */
+function firstUsableLocale(...candidates: string[]): string | undefined {
+  for (const candidate of candidates) {
+    try {
+      new Intl.NumberFormat(candidate)
+      return candidate
+    } catch {}
+  }
+  return undefined
+}
+
+/**
  * Creates a typed i18n function for a package.
  *
  * @param defaultDict - The default language dictionary mapping strings to numeric indices
@@ -28,8 +43,16 @@ export function setupI18n<
 >(defaultDict: Dict, translations: Translations, defaultLang: string) {
   const lang = process.env.LANG?.replace(/\.UTF-8$/, '') || defaultLang
 
-  // Convert locale format from en_US to en-US for Intl APIs
-  const intlLocale = lang.replace('_', '-')
+  // Convert locale format from en_US to en-US for Intl APIs, and settle on one
+  // Intl will actually accept. A service container runs with LANG=C.UTF-8, and
+  // `new Intl.NumberFormat('C')` throws RangeError — so without this every
+  // number or Date interpolated into a translated string throws at runtime, on
+  // the server only, having worked on the developer's machine. Resolved once
+  // here rather than guarded at each call site.
+  const intlLocale = firstUsableLocale(
+    lang.replace('_', '-'),
+    defaultLang.replace('_', '-'),
+  )
 
   function getTranslation(): Record<number, string> | null {
     if (lang === defaultLang) return null

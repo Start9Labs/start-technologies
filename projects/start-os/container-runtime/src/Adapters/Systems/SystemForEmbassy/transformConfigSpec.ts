@@ -380,11 +380,11 @@ export const matchOldConfigSpec: z.ZodType<OldConfigSpec> = z.lazy(() =>
 )
 export const matchOldDefaultString = z.union([
   z.string(),
-  z.object({ charset: z.string(), len: z.number() }),
+  z.looseObject({ charset: z.string(), len: z.number() }),
 ])
 type OldDefaultString = z.infer<typeof matchOldDefaultString>
 
-export const matchOldValueSpecString = z.object({
+export const matchOldValueSpecString = z.looseObject({
   type: z.enum(['string']),
   name: z.string(),
   masked: z.boolean().nullable().optional(),
@@ -399,7 +399,7 @@ export const matchOldValueSpecString = z.object({
   warning: z.string().nullable().optional(),
 })
 
-export const matchOldValueSpecNumber = z.object({
+export const matchOldValueSpecNumber = z.looseObject({
   type: z.enum(['number']),
   nullable: z.boolean(),
   name: z.string(),
@@ -413,7 +413,7 @@ export const matchOldValueSpecNumber = z.object({
 })
 type OldValueSpecNumber = z.infer<typeof matchOldValueSpecNumber>
 
-export const matchOldValueSpecBoolean = z.object({
+export const matchOldValueSpecBoolean = z.looseObject({
   type: z.enum(['boolean']),
   default: z.boolean(),
   name: z.string(),
@@ -429,7 +429,7 @@ type OldValueSpecObject = {
   description?: string | null
   warning?: string | null
 }
-const matchOldValueSpecObject: z.ZodType<OldValueSpecObject> = z.object({
+const matchOldValueSpecObject: z.ZodType<OldValueSpecObject> = z.looseObject({
   type: z.enum(['object']),
   spec: z.lazy(() => matchOldConfigSpec),
   name: z.string(),
@@ -437,7 +437,7 @@ const matchOldValueSpecObject: z.ZodType<OldValueSpecObject> = z.object({
   warning: z.string().nullable().optional(),
 })
 
-const matchOldValueSpecEnum = z.object({
+const matchOldValueSpecEnum = z.looseObject({
   values: z.array(z.string()),
   'value-names': z.record(z.string(), z.string()),
   type: z.enum(['enum']),
@@ -448,7 +448,7 @@ const matchOldValueSpecEnum = z.object({
 })
 type OldValueSpecEnum = z.infer<typeof matchOldValueSpecEnum>
 
-const matchOldUnionTagSpec = z.object({
+const matchOldUnionTagSpec = z.looseObject({
   id: z.string(), // The name of the field containing one of the union variants
   'variant-names': z.record(z.string(), z.string()), // The name of each variant
   name: z.string(),
@@ -461,7 +461,7 @@ type OldValueSpecUnion = {
   variants: Record<string, OldConfigSpec>
   default: string
 }
-const matchOldValueSpecUnion: z.ZodType<OldValueSpecUnion> = z.object({
+const matchOldValueSpecUnion: z.ZodType<OldValueSpecUnion> = z.looseObject({
   type: z.enum(['union']),
   tag: matchOldUnionTagSpec,
   variants: z.record(
@@ -481,8 +481,8 @@ const matchOldUniqueBy: z.ZodType<OldUniqueBy> = z.lazy(() =>
   z.union([
     z.null(),
     z.string(),
-    z.object({ any: z.array(matchOldUniqueBy) }),
-    z.object({ all: z.array(matchOldUniqueBy) }),
+    z.looseObject({ any: z.array(matchOldUniqueBy) }),
+    z.looseObject({ all: z.array(matchOldUniqueBy) }),
   ]),
 )
 
@@ -491,29 +491,29 @@ type OldListValueSpecObject = {
   'unique-by'?: OldUniqueBy | null
   'display-as'?: string | null
 }
-const matchOldListValueSpecObject: z.ZodType<OldListValueSpecObject> = z.object(
-  {
+const matchOldListValueSpecObject: z.ZodType<OldListValueSpecObject> =
+  z.looseObject({
     spec: z.lazy(() => matchOldConfigSpec), // this is a mapped type of the config object at this level, replacing the object's values with specs on those values
     'unique-by': matchOldUniqueBy.nullable().optional(), // indicates whether duplicates can be permitted in the list
     'display-as': z.string().nullable().optional(), // this should be a handlebars template which can make use of the entire config which corresponds to 'spec'
-  },
-)
+  })
 type OldListValueSpecUnion = {
   'unique-by'?: OldUniqueBy | null
   'display-as'?: string | null
   tag: z.infer<typeof matchOldUnionTagSpec>
   variants: Record<string, OldConfigSpec>
 }
-const matchOldListValueSpecUnion: z.ZodType<OldListValueSpecUnion> = z.object({
-  'unique-by': matchOldUniqueBy.nullable().optional(),
-  'display-as': z.string().nullable().optional(),
-  tag: matchOldUnionTagSpec,
-  variants: z.record(
-    z.string(),
-    z.lazy(() => matchOldConfigSpec),
-  ),
-})
-const matchOldListValueSpecString = z.object({
+const matchOldListValueSpecUnion: z.ZodType<OldListValueSpecUnion> =
+  z.looseObject({
+    'unique-by': matchOldUniqueBy.nullable().optional(),
+    'display-as': z.string().nullable().optional(),
+    tag: matchOldUnionTagSpec,
+    variants: z.record(
+      z.string(),
+      z.lazy(() => matchOldConfigSpec),
+    ),
+  })
+const matchOldListValueSpecString = z.looseObject({
   masked: z.boolean().nullable().optional(),
   copyable: z.boolean().nullable().optional(),
   pattern: z.string().nullable().optional(),
@@ -521,11 +521,11 @@ const matchOldListValueSpecString = z.object({
   placeholder: z.string().nullable().optional(),
 })
 
-const matchOldListValueSpecEnum = z.object({
+const matchOldListValueSpecEnum = z.looseObject({
   values: z.array(z.string()),
   'value-names': z.record(z.string(), z.string()),
 })
-const matchOldListValueSpecNumber = z.object({
+const matchOldListValueSpecNumber = z.looseObject({
   range: z.string(),
   integral: z.boolean(),
   units: z.string().nullable().optional(),
@@ -553,37 +553,37 @@ type OldValueSpecList = OldValueSpecListBase &
 // represents a spec for a list
 export const matchOldValueSpecList: z.ZodType<OldValueSpecList> =
   z.intersection(
-    z.object({
+    z.looseObject({
       type: z.enum(['list']),
       range: z.string(), // '[0,1]' (inclusive) OR '[0,*)' (right unbounded), normal math rules
       default: z.union([
         z.array(z.string()),
         z.array(z.number()),
         z.array(matchOldDefaultString),
-        z.array(z.object({}).passthrough()),
+        z.array(z.looseObject({}).passthrough()),
       ]),
       name: z.string(),
       description: z.string().nullable().optional(),
       warning: z.string().nullable().optional(),
     }),
     z.union([
-      z.object({
+      z.looseObject({
         subtype: z.enum(['string']),
         spec: matchOldListValueSpecString,
       }),
-      z.object({
+      z.looseObject({
         subtype: z.enum(['enum']),
         spec: matchOldListValueSpecEnum,
       }),
-      z.object({
+      z.looseObject({
         subtype: z.enum(['object']),
         spec: matchOldListValueSpecObject,
       }),
-      z.object({
+      z.looseObject({
         subtype: z.enum(['number']),
         spec: matchOldListValueSpecNumber,
       }),
-      z.object({
+      z.looseObject({
         subtype: z.enum(['union']),
         spec: matchOldListValueSpecUnion,
       }),
@@ -608,17 +608,17 @@ type OldValueSpecPointer = {
     }
 )
 const matchOldValueSpecPointer: z.ZodType<OldValueSpecPointer> = z.intersection(
-  z.object({
+  z.looseObject({
     type: z.literal('pointer'),
   }),
   z.union([
-    z.object({
+    z.looseObject({
       subtype: z.literal('package'),
       target: z.enum(['tor-key', 'tor-address', 'lan-address']),
       'package-id': z.string(),
       interface: z.string(),
     }),
-    z.object({
+    z.looseObject({
       subtype: z.literal('package'),
       target: z.enum(['config']),
       'package-id': z.string(),

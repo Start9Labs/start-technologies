@@ -1,7 +1,7 @@
 import { Component } from '@angular/core'
 import { TuiDialogContext } from '@taiga-ui/core'
 import { injectContext } from '@taiga-ui/polymorpheus'
-import { QRComponent } from 'src/app/components/qr.component'
+import { QRComponent } from 'src/app/routes/portal/components/qr.component'
 
 @Component({
   selector: 'qr',

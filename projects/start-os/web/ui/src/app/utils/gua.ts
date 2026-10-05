@@ -29,18 +29,21 @@ export function dnsAllPass(
   return (!wanIp || dns.ipv4 === wanIp) && (!gua || dns.ipv6 === gua)
 }
 
-/**
- * Whether the port is reachable for every family the gateway offers: IPv4 open
- * externally + hairpinning, and (if a GUA exists) the v6 port open externally.
- * v6 is NAT-free, so it has no hairpinning requirement.
- */
-export function portAllPass(
+/** Whether the port is reachable from outside for every family the gateway offers. */
+export function externalAllPass(
   port: T.CheckPortRes | null | undefined,
   portV6: T.CheckPortV6Res | null | undefined,
   gua: string | null,
 ): boolean {
   if (!port) return false
-  const v4Ok = port.openExternally && port.hairpinning
-  const v6Ok = !gua || !!portV6?.openExternally
-  return v4Ok && v6Ok
+  return port.openExternally && (!gua || !!portV6?.openExternally)
+}
+
+/** Whether the port is reachable from outside and from this network. */
+export function portAllPass(
+  port: T.CheckPortRes | null | undefined,
+  portV6: T.CheckPortV6Res | null | undefined,
+  gua: string | null,
+): boolean {
+  return externalAllPass(port, portV6, gua) && !!port?.hairpinning
 }

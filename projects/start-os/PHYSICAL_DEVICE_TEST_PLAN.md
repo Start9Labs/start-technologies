@@ -98,7 +98,7 @@ In the laptop browser at `http://start.local`.
 ### 2.3 Mode: Start Fresh
 
 - [ ] Enter password `QaTestPass!1`, confirm, and submit
-- [ ] Enter server name `QA Test` and submit
+- [ ] Enter server name `qa-test` and submit
 - [ ] Success page shows "Setup complete"
 
 ### 2.4 Post-setup reachability
@@ -179,7 +179,7 @@ Plug the external USB backup drive into the target device. In the setup wizard o
 - [ ] Login succeeds
 - [ ] Services page lists the previously installed service from the source device in its previous state (running/stopped)
 - [ ] Clicking the service and opening its interface loads its UI, and the user-visible data noted in §4.1 is present
-- [ ] System → About shows the hostname of the source device
+- [ ] System → General Settings → Server Name shows the hostname of the source device
 
 ---
 
@@ -213,14 +213,15 @@ In the setup wizard on the laptop browser:
 
 - [ ] A warning dialog appears containing the text "do not attempt to boot into it again as a Start9 Server"
 
-3. Click **Continue**. Enter `QaTestPass!1` as the new admin password and `QA Test Xfer` as the new server name. Submit.
+3. Click **Continue**. Enter `QaTestPass!1` as the new admin password. Submit. (A transfer offers no server-name field — the transferred server keeps the name it had.)
 
 - [ ] Transfer progresses, no errors
 - [ ] Device reboots into the admin UI on completion
 
-4. Browse to `http://qa-test-xfer.local` and log in with `QaTestPass!1`.
+4. Browse to `http://<source-hostname>.local` — the transferred server keeps the source device's name — and log in with `QaTestPass!1`.
 
 - [ ] Login succeeds with the new password (not the old source password)
+- [ ] System → General Settings → Server Name shows the hostname of the source device
 - [ ] Services page lists the same service that was on the source device
 - [ ] The service's interface loads and the user-visible data noted in §4.1 is present
 

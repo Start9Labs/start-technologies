@@ -20,6 +20,14 @@ book_dir() {
   esac
 }
 
+# A page that sends the browser on, fragment included.
+stub() {
+  cat > "$1" <<EOF
+<!doctype html><meta http-equiv="refresh" content="0; url=$2"><script>location.replace("$2"+location.hash)</script>
+EOF
+}
+
+books='{'
 # Build each book listed in versions.conf
 while IFS='=' read -r book version; do
   [[ -z "$book" || "$book" =~ ^# ]] && continue
@@ -27,13 +35,20 @@ while IFS='=' read -r book version; do
   (cd "$(book_dir "$book")" && MDBOOK_OUTPUT__HTML__SITE_URL="/$book/$version/" \
     mdbook build -d "$OUT/$book/$version")
 
-  # Redirect stub: /book/ → /book/version/
-  cat > "$OUT/$book/index.html" <<EOF
-<!doctype html><meta http-equiv="refresh" content="0; url=/$book/$version/">
-EOF
+  # Unversioned URLs go to the current version: /book/ and every /book/page.html
+  stub "$OUT/$book/index.html" "/$book/$version/"
+  for page in "$OUT/$book/$version"/*.html; do
+    page=$(basename "$page")
+    [ "$page" = index.html ] || stub "$OUT/$book/$page" "/$book/$version/$page"
+  done
+  books="$books\"$book\":\"$version\","
 done < versions.conf
 
-# Landing page
+# Landing page, and the 404 page with the book list its redirects need
 cp landing/index.html "$OUT/index.html"
+sed "s|/\*BOOKS\*/ {}|${books%,}}|" landing/404.html > "$OUT/404.html"
+
+# llms.txt for the site and for each book
+(cd scripts && { [ -d node_modules ] || npm ci; } && npm run generate-llms-txt)
 
 echo "Build complete: $OUT"

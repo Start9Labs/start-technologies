@@ -3,11 +3,11 @@
   <specVersion><major>1</major><minor>0</minor></specVersion>
   <device>
     <deviceType>{device_type}</deviceType>
-    <friendlyName>StartTunnel</friendlyName>
+    <friendlyName>{product}</friendlyName>
     <manufacturer>Start9</manufacturer>
     <manufacturerURL>https://start9.com</manufacturerURL>
-    <modelDescription>StartTunnel Internet Gateway Device</modelDescription>
-    <modelName>StartTunnel</modelName>
+    <modelDescription>{product} Internet Gateway Device</modelDescription>
+    <modelName>{product}</modelName>
     <modelNumber>1</modelNumber>
     <serialNumber>00000000</serialNumber>
     <UDN>uuid:{uuid}</UDN>
@@ -16,14 +16,23 @@
         <deviceType>urn:schemas-upnp-org:device:WANDevice:1</deviceType>
         <friendlyName>WANDevice</friendlyName>
         <manufacturer>Start9</manufacturer>
-        <modelName>StartTunnel</modelName>
+        <modelName>{product}</modelName>
         <UDN>uuid:{uuid}-wan</UDN>
+        <serviceList>
+          <service>
+            <serviceType>{cif_service}</serviceType>
+            <serviceId>urn:upnp-org:serviceId:WANCommonIFC1</serviceId>
+            <controlURL>{control}</controlURL>
+            <eventSubURL></eventSubURL>
+            <SCPDURL>{cif_scpd}</SCPDURL>
+          </service>
+        </serviceList>
         <deviceList>
           <device>
             <deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:1</deviceType>
             <friendlyName>WANConnectionDevice</friendlyName>
             <manufacturer>Start9</manufacturer>
-            <modelName>StartTunnel</modelName>
+            <modelName>{product}</modelName>
             <UDN>uuid:{uuid}-wanconn</UDN>
             <serviceList>
               <service>

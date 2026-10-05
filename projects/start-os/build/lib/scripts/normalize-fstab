@@ -1,0 +1,93 @@
+#!/bin/bash
+
+set -euo pipefail
+
+if [ "$#" -gt 1 ]; then
+    >&2 echo "Usage: $0 [fstab]"
+    exit 1
+fi
+
+fstab=$(realpath -- "${1:-/etc/fstab}")
+dir=$(dirname -- "$fstab")
+tmp=$(mktemp "$dir/.$(basename -- "$fstab").XXXXXX")
+trap 'rm -f -- "$tmp"' EXIT
+
+mounted_device() {
+    local target=$1 source
+    source=$(findmnt -n -o SOURCE --mountpoint "$target") || return 1
+    source=${source%%\[*}
+    [[ $source = /dev/* ]] || return 1
+    readlink -f -- "$source"
+}
+
+partuuid_for_target() {
+    local target=$1 device root partuuid
+    local -a matches
+    device=$(mounted_device "$target") || {
+        >&2 echo "Nothing mounted at $target"
+        return 1
+    }
+    root=$(mounted_device /media/startos/root) || {
+        >&2 echo "Unable to establish the installed root partition"
+        return 1
+    }
+    if [ "$(lsblk -nro PKNAME "$device")" != "$(lsblk -nro PKNAME "$root")" ]; then
+        >&2 echo "$target is not mounted from the installed disk"
+        return 1
+    fi
+    if ! partuuid=$(blkid -p -s PART_ENTRY_UUID -o value "$device") ||
+        [ -z "$partuuid" ] || [[ $partuuid =~ [[:space:]] ]]; then
+        >&2 echo "Unable to resolve PARTUUID for $target"
+        return 1
+    fi
+    mapfile -t matches < <(blkid -t "PARTUUID=$partuuid" -o device)
+    if [ "${#matches[@]}" -ne 1 ] ||
+        [ "$(readlink -f -- "${matches[0]}")" != "$device" ]; then
+        >&2 echo "PARTUUID for $target does not resolve uniquely to its device"
+        return 1
+    fi
+    printf '%s\n' "$partuuid"
+}
+
+declare -A partuuids=()
+ends_with_newline=0
+if [ -s "$fstab" ] &&
+    [ "$(tail -c 1 -- "$fstab" | od -An -t x1 | tr -d '[:space:]')" = 0a ]; then
+    ends_with_newline=1
+fi
+
+while IFS= read -r line || [ -n "$line" ]; do
+    if [[ $line =~ ^([[:blank:]]*)(/dev/[^[:blank:]]+)([[:blank:]]+)([^[:blank:]]+)(.*)$ ]]; then
+        leading=${BASH_REMATCH[1]}
+        separator=${BASH_REMATCH[3]}
+        target=${BASH_REMATCH[4]}
+        remainder=${BASH_REMATCH[5]}
+        case "$target" in
+            /boot|/boot/efi)
+                if [ -z "${partuuids[$target]:-}" ]; then
+                    partuuids[$target]=$(partuuid_for_target "$target") || exit 1
+                fi
+                printf '%sPARTUUID=%s%s%s%s\n' \
+                    "$leading" "${partuuids[$target]}" "$separator" "$target" "$remainder"
+                continue
+                ;;
+        esac
+    fi
+    printf '%s\n' "$line"
+done < "$fstab" > "$tmp"
+
+if [ -s "$fstab" ] && [ "$ends_with_newline" -eq 0 ]; then
+    truncate -s -1 "$tmp"
+fi
+
+if cmp -- "$fstab" "$tmp" >/dev/null; then
+    exit 0
+elif [ "$?" -ne 1 ]; then
+    exit 1
+fi
+
+cp --attributes-only --preserve=mode,ownership,timestamps,xattr -- "$fstab" "$tmp"
+sync "$tmp"
+mv -f -- "$tmp" "$fstab"
+sync "$dir"
+trap - EXIT

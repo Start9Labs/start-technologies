@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 use std::u32;
 
 use chrono::Utc;
@@ -10,6 +11,7 @@ use ts_rs::TS;
 use url::Url;
 
 use crate::PackageId;
+use crate::db::model::package::CurrentDependencyKind;
 use crate::prelude::*;
 use crate::registry::asset::RegistryAsset;
 use crate::registry::context::RegistryContext;
@@ -53,15 +55,46 @@ pub struct Category {
     pub name: LocaleString,
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel, TS, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, HasModel, PartialEq)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct DependencyMetadata {
     pub title: Option<LocaleString>,
     pub icon: Option<DataUrl<'static>>,
     pub description: Option<LocaleString>,
     pub optional: bool,
+    #[serde(default)]
+    pub version_range: Option<VersionRange>,
+    #[serde(flatten)]
+    pub kind: Option<CurrentDependencyKind>,
+}
+impl TS for DependencyMetadata {
+    type WithoutGenerics = Self;
+    fn decl() -> String {
+        format!("type {} = {}", Self::name(), Self::inline())
+    }
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
+    fn name() -> String {
+        "DependencyMetadata".into()
+    }
+    fn inline() -> String {
+        "{ title: LocaleString | null, icon: DataUrl | null, description: LocaleString | null, optional: boolean, versionRange?: string | null, kind?: 'exists' | 'running' | null, healthChecks?: string[] }".into()
+    }
+    fn inline_flattened() -> String {
+        Self::inline()
+    }
+    fn visit_dependencies(v: &mut impl ts_rs::TypeVisitor)
+    where
+        Self: 'static,
+    {
+        v.visit::<LocaleString>();
+        v.visit::<DataUrl<'static>>();
+    }
+    fn output_path() -> Option<&'static Path> {
+        Some(Path::new("DependencyMetadata.ts"))
+    }
 }
 impl DependencyMetadata {
     pub fn localize_for(&mut self, locale: &str) {
@@ -74,6 +107,22 @@ fn placeholder_url() -> Url {
     "https://example.com".parse().unwrap()
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PreDownloadAlertWhen {
+    #[ts(type = "string")]
+    pub source_version: VersionRange,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PreDownloadAlert {
+    pub message: LocaleString,
+    pub when: PreDownloadAlertWhen,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, HasModel, TS, PartialEq)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
@@ -82,6 +131,9 @@ pub struct PackageMetadata {
     pub title: InternedString,
     pub description: Description,
     pub release_notes: LocaleString,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pre_download_alert: Option<PreDownloadAlert>,
     pub git_hash: Option<GitHash>,
     #[ts(type = "string")]
     pub license: InternedString,
@@ -101,14 +153,15 @@ pub struct PackageMetadata {
     pub sdk_version: Option<Version>,
     #[serde(default)]
     pub hardware_acceleration: bool,
-    /// Mount /dev/fuse for fuse-overlayfs storage (the rootless storage
-    /// driver used by a nested OCI runtime).
+    /// Grants access to `/dev/fuse`.
     #[serde(default)]
     pub userspace_filesystems: bool,
-    /// Mount /dev/net/tun so the service can create kernel tunnel interfaces
-    /// (VPN / WireGuard / tun-class workloads).
+    /// Grants access to `/dev/net/tun`.
     #[serde(default)]
     pub virtual_networking: bool,
+    /// Grants /dev/kvm when present. The opening process must run as container root.
+    #[serde(default)]
+    pub hardware_virtualization: bool,
     #[serde(default)]
     pub plugins: BTreeSet<PluginId>,
     #[serde(default)]
@@ -145,6 +198,8 @@ impl PackageVersionInfo {
                     icon: s9pk.dependency_icon_data_url(id).await?,
                     description: info.description.clone(),
                     optional: info.optional,
+                    version_range: info.version_range.clone(),
+                    kind: info.kind.clone(),
                 },
             );
         }
@@ -152,7 +207,7 @@ impl PackageVersionInfo {
             metadata: manifest.metadata.clone(),
             icon,
             dependency_metadata,
-            source_version: None, // TODO
+            source_version: Some(manifest.can_migrate_from.clone()),
             s9pks: vec![(
                 manifest.hardware_requirements.clone(),
                 RegistryAsset {
@@ -288,6 +343,14 @@ impl Model<PackageVersionInfo> {
                 self.as_metadata_mut()
                     .as_release_notes_mut()
                     .mutate(|r| Ok(r.localize_for(locale)))?;
+                self.as_metadata_mut()
+                    .as_pre_download_alert_mut()
+                    .mutate(|alert| {
+                        if let Some(alert) = alert {
+                            alert.message.localize_for(locale);
+                        }
+                        Ok(())
+                    })?;
             }
         }
 
@@ -297,4 +360,111 @@ impl Model<PackageVersionInfo> {
 
 pub async fn get_package_index(ctx: RegistryContext) -> Result<PackageIndex, Error> {
     ctx.db.peek().await.into_index().into_package().de()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registry_dependency_metadata_preserves_base_requirement() {
+        let metadata: DependencyMetadata = serde_json::from_str(
+            r#"{"title":"Bitcoin","icon":null,"description":null,"optional":false,"versionRange":">=31.1:17","kind":"running","healthChecks":["bitcoind"]}"#,
+        )
+        .unwrap();
+        assert!(
+            matches!(metadata.kind, Some(CurrentDependencyKind::Running { ref health_checks }) if health_checks.contains(&"bitcoind".parse().unwrap()))
+        );
+        let json = serde_json::to_value(&metadata).unwrap();
+        assert_eq!(json["kind"], "running");
+        assert_eq!(json["healthChecks"], serde_json::json!(["bitcoind"]));
+        assert_eq!(json["versionRange"], ">=31.1:17");
+
+        let old: DependencyMetadata = serde_json::from_str(
+            r#"{"title":"Bitcoin","icon":null,"description":null,"optional":false}"#,
+        )
+        .unwrap();
+        assert!(old.kind.is_none());
+        assert!(old.version_range.is_none());
+    }
+
+    #[test]
+    fn old_manifest_defaults_hardware_virtualization_to_false() {
+        let metadata = PackageMetadata {
+            title: "Test Package".into(),
+            description: Description {
+                short: LocaleString::Translated("Short".into()),
+                long: LocaleString::Translated("Long".into()),
+            },
+            release_notes: LocaleString::Translated("Notes".into()),
+            pre_download_alert: Some(PreDownloadAlert {
+                message: LocaleString::Translated("Back up before updating".into()),
+                when: PreDownloadAlertWhen {
+                    source_version: ">=1.0.0:0".parse().unwrap(),
+                },
+            }),
+            git_hash: None,
+            license: "MIT".into(),
+            package_repo: "https://example.com/package".parse().unwrap(),
+            upstream_repo: "https://example.com/upstream".parse().unwrap(),
+            marketing_url: None,
+            donation_url: None,
+            os_version: current_version(),
+            sdk_version: None,
+            hardware_acceleration: false,
+            userspace_filesystems: false,
+            virtual_networking: false,
+            hardware_virtualization: true,
+            plugins: BTreeSet::new(),
+            satisfies: BTreeSet::new(),
+        };
+        let mut old_manifest = serde_json::to_value(metadata).unwrap();
+        assert_eq!(
+            old_manifest["preDownloadAlert"]["message"],
+            "Back up before updating"
+        );
+        old_manifest
+            .as_object_mut()
+            .unwrap()
+            .remove("hardwareVirtualization");
+        old_manifest
+            .as_object_mut()
+            .unwrap()
+            .remove("preDownloadAlert");
+
+        let parsed: PackageMetadata = serde_json::from_value(old_manifest).unwrap();
+
+        assert!(!parsed.hardware_virtualization);
+        assert!(parsed.pre_download_alert.is_none());
+    }
+
+    #[test]
+    fn pre_download_alert_round_trips() {
+        let alert = PreDownloadAlert {
+            message: LocaleString::LanguageMap(
+                [
+                    ("en_US".into(), "Back up before updating".into()),
+                    ("fr_FR".into(), "Sauvegardez avant la mise à jour".into()),
+                ]
+                .into_iter()
+                .collect(),
+            ),
+            when: PreDownloadAlertWhen {
+                source_version: ">=1.0.0:0 && <2.0.0:0".parse().unwrap(),
+            },
+        };
+        let encoded = serde_json::to_value(&alert).unwrap();
+        assert_eq!(encoded["when"]["sourceVersion"], ">=1.0.0:0 <2.0.0:0");
+        assert_eq!(
+            encoded["message"]["fr_FR"],
+            "Sauvegardez avant la mise à jour"
+        );
+        let mut localized = serde_json::from_value::<PreDownloadAlert>(encoded).unwrap();
+        assert_eq!(localized, alert);
+        localized.message.localize_for("fr_FR");
+        assert_eq!(
+            localized.message,
+            LocaleString::Translated("Sauvegardez avant la mise à jour".into())
+        );
+    }
 }

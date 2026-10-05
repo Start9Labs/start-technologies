@@ -94,13 +94,13 @@ A package keeps StartOS state in a single `store.json` file model (see [File Mod
 
 ```typescript
 // store.json.ts — StartOS state, kept out of the upstream config
-const shape = z.object({
+const shape = z.looseObject({
   indexer: z.enum(['electrs', 'fulcrum']).optional().catch(undefined),
 })
 export const storeJson = FileHelper.json({ base: sdk.volumes.startos, subpath: '/store.json' }, shape)
 ```
 
-Declare the volume in the manifest (`volumes: [..., 'startos']`) and add it to the backup set if the choice must survive a restore. `setupDependencies` and the selection action read/write `store.json`; `init` reads the choice, resolves _that_ backend's bridge address, and writes only the real upstream keys into the app config. It is a bug to add a discriminator field (`INDEXER`, `BACKEND_CHOICE`, …) to a file model that maps the upstream service's own config file.
+Declare the volume in the manifest (`volumes: [..., 'startos']`) and add it to the backup set if the choice must survive a restore. the dependency `enabled` functions and the selection action read/write `store.json`; `init` reads the choice, resolves _that_ backend's bridge address, and writes only the real upstream keys into the app config. It is a bug to add a discriminator field (`INDEXER`, `BACKEND_CHOICE`, …) to a file model that maps the upstream service's own config file.
 
 ## Exposing a bridge-only port
 

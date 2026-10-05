@@ -140,14 +140,26 @@ cp "$PROJECT_DIR"/backend/hotplug/99-startwrt-proxy-arp "${FILES_DIR}/etc/hotplu
 chmod +x "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-proxy-arp"
 cp "$PROJECT_DIR"/backend/hotplug/99-startwrt-published-ports "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-published-ports"
 chmod +x "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-published-ports"
+cp "$PROJECT_DIR"/backend/hotplug/99-startwrt-port-control "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-port-control"
+chmod +x "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-port-control"
 
-# Custom nftables rules auto-included by fw4 (/etc/nftables.d/*.nft).
-# 10-startwrt-dnat-mark.nft marks DNAT-state reply traffic so port-forward
-# replies route via the main table instead of a VPN tunnel.
-mkdir -p "${FILES_DIR}/etc/nftables.d"
+# fw4 auto-includes these into `table inet fw4`. They must not go in
+# /etc/nftables.d, which sysupgrade restores over the image.
+mkdir -p "${FILES_DIR}/usr/share/nftables.d/table-pre"
 for f in "$PROJECT_DIR"/backend/nftables/*.nft; do
-    cp "$f" "${FILES_DIR}/etc/nftables.d/$(basename "$f")"
+    cp "$f" "${FILES_DIR}/usr/share/nftables.d/table-pre/$(basename "$f")"
 done
+
+# Deletes the copies earlier images staged in /etc/nftables.d. fw4 would load
+# them alongside the ones above.
+mkdir -p "${FILES_DIR}/etc/uci-defaults"
+cat > "${FILES_DIR}/etc/uci-defaults/90-startwrt-nftables" << 'NFTEOF'
+#!/bin/sh
+rm -f /etc/nftables.d/10-startwrt-dnat-mark.nft \
+	/etc/nftables.d/11-startwrt-inbound6-mark.nft \
+	/etc/nftables.d/12-startwrt-sni-divert.nft \
+	/etc/nftables.d/13-startwrt-dns-update-divert.nft
+NFTEOF
 
 # sysupgrade keep.d — additional files to include in config backups
 mkdir -p "${FILES_DIR}/lib/upgrade/keep.d"
@@ -160,9 +172,13 @@ cat > "${FILES_DIR}/lib/upgrade/keep.d/startwrt" << 'KEEPEOF'
 /etc/ssl/private/startwrt-server.key
 /etc/nlbwmon/data/
 /etc/startwrt/pending-update
-# Persistent device-name cache. Written atomically (temp + rename), so a live
-# `sysupgrade --create-backup` always captures one complete JSON document.
+# Persistent device-identity cache (hostnames + DHCP fingerprints). Written
+# atomically (temp + rename), so a live `sysupgrade --create-backup` always
+# captures one complete JSON document.
 /etc/startwrt/device_names.json
+# dnsmasq dhcp-script hook (fingerprint capture). The daemon rewrites it every
+# boot regardless; keeping it just spares one dnsmasq reload after sysupgrade.
+/etc/startwrt/dhcp-fingerprint.sh
 # Per-device IPv6 address history (same atomic-write pattern) — the stability
 # evidence the ipv6_tracker's election needs across reboots.
 /etc/startwrt/ipv6_neighbors.json

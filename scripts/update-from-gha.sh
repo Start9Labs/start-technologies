@@ -4,11 +4,11 @@
 #
 # This is `make start-os-update-squashfs` with the squashfs fetched from CI
 # instead of results/: prune, upload to /media/startos/images/next.rootfs, and
-# run the checksummed upgrade. The server reboots into the new image.
+# run the checksummed upgrade. The server uses the new image after its next reboot.
 #
 # Usage: scripts/update-from-gha.sh [options] <remote>
 #
-#   <remote>            ssh destination of the server, e.g. root@adjective-noun.local
+#   <remote>            ssh destination of the server, e.g. root@server-name.local
 #
 # Options:
 #   --run <id|url>      GitHub Actions run to take the image from. Accepts a run
@@ -63,7 +63,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$REMOTE" ]; then
-    >&2 echo "Must specify the server to update (e.g. root@adjective-noun.local)"
+    >&2 echo "Must specify the server to update (e.g. root@server-name.local)"
     usage 2
 fi
 
@@ -130,7 +130,7 @@ cat << EOF
   Run:       $RUN_ID — $RUN_BRANCH @ ${RUN_SHA:0:7}, $RUN_DATE
   Repo:      $REPO
 
-This replaces the server's OS image and reboots it.
+This stages the server's OS image for its next reboot.
 EOF
 
 if [ "$ASSUME_YES" -ne 1 ]; then
@@ -178,6 +178,9 @@ echo "Uploading the image..."
 # exactly this file's worth of space.
 remote_sh 'sudo tee /media/startos/images/next.rootfs > /dev/null' < "$SQUASHFS"
 
+echo "Installing the incoming updater..."
+remote_sh 'sudo unsquashfs -n -f -d / /media/startos/images/next.rootfs /usr/lib/startos/scripts/upgrade'
+
 echo "Upgrading..."
 # The checksum is passed twice on purpose. Servers running an older image carry
 # an `upgrade` that only compares when a second positional argument is present,
@@ -186,4 +189,4 @@ echo "Upgrading..."
 remote_sh "sudo CHECKSUM=$SQFS_SUM /usr/lib/startos/scripts/upgrade /media/startos/images/next.rootfs $SQFS_SUM"
 
 echo
-echo "Done — $REMOTE is running ${RUN_SHA:0:7} after it reboots."
+echo "Done — $REMOTE will run ${RUN_SHA:0:7} after it reboots."

@@ -14,6 +14,7 @@ use crate::db::model::Database;
 use crate::prelude::*;
 use crate::progress::PhaseProgressTrackerHandle;
 
+mod release_notes;
 mod v0_3_5;
 mod v0_3_5_1;
 mod v0_3_5_2;
@@ -41,6 +42,7 @@ mod v0_3_6_alpha_18;
 mod v0_4_0;
 mod v0_4_0_1;
 mod v0_4_0_2;
+mod v0_4_0_3;
 mod v0_4_0_alpha_0;
 mod v0_4_0_alpha_1;
 mod v0_4_0_alpha_2;
@@ -78,13 +80,14 @@ mod v0_4_0_beta_7;
 mod v0_4_0_beta_8;
 mod v0_4_0_beta_9;
 
-pub type Current = v0_4_0_2::Version; // VERSION_BUMP
+pub type Current = v0_4_0_3::Version; // VERSION_BUMP
 
 impl Current {
     #[instrument(skip(self, db))]
     pub async fn pre_init(self, db: &PatchDb) -> Result<(), Error> {
+        let mut dump = db.dump(&ROOT).await;
         let from = from_value::<Version>(
-            version_accessor(&mut db.dump(&ROOT).await.value)
+            version_accessor(&mut dump.value)
                 .or_not_found("`version` in db")?
                 .clone(),
         )?
@@ -108,11 +111,22 @@ impl Current {
                 .result?;
             }
             Ordering::Equal => {
-                db.apply_function(|db| {
-                    Ok::<_, Error>((to_value(&from_value::<Database>(db.clone())?)?, ()))
-                })
-                .await
-                .result?;
+                if applied_migration_revision(&mut dump.value)? == self.migration_revision() {
+                    db.apply_function(|db| {
+                        Ok::<_, Error>((to_value(&from_value::<Database>(db.clone())?)?, ()))
+                    })
+                    .await
+                    .result?;
+                } else {
+                    let pre_up = self.pre_up().await?;
+                    db.apply_function(|mut db| {
+                        let res = self.up(&mut db, pre_up)?;
+                        self.commit(&mut db, res)?;
+                        Ok::<_, Error>((to_value(&from_value::<Database>(db.clone())?)?, ()))
+                    })
+                    .await
+                    .result?;
+                }
             }
         }
         Ok(())
@@ -154,6 +168,7 @@ pub async fn post_init(
                 .await
                 .result?;
         }
+        release_notes::welcome(ctx).await?;
     }
     progress.complete();
     Ok(())
@@ -223,7 +238,8 @@ enum Version {
     V0_4_0_beta_10(Wrapper<v0_4_0_beta_10::Version>),
     V0_4_0(Wrapper<v0_4_0::Version>),
     V0_4_0_1(Wrapper<v0_4_0_1::Version>),
-    V0_4_0_2(Wrapper<v0_4_0_2::Version>), // VERSION_BUMP
+    V0_4_0_2(Wrapper<v0_4_0_2::Version>),
+    V0_4_0_3(Wrapper<v0_4_0_3::Version>), // VERSION_BUMP
     Other(exver::Version),
 }
 
@@ -303,7 +319,8 @@ impl Version {
             Self::V0_4_0_beta_10(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_0(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_0_1(v) => DynVersion(Box::new(v.0)),
-            Self::V0_4_0_2(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP
+            Self::V0_4_0_2(v) => DynVersion(Box::new(v.0)),
+            Self::V0_4_0_3(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP
             Self::Other(v) => {
                 return Err(Error::new(
                     eyre!("unknown version {v}"),
@@ -375,7 +392,8 @@ impl Version {
             Version::V0_4_0_beta_10(Wrapper(x)) => x.semver(),
             Version::V0_4_0(Wrapper(x)) => x.semver(),
             Version::V0_4_0_1(Wrapper(x)) => x.semver(),
-            Version::V0_4_0_2(Wrapper(x)) => x.semver(), // VERSION_BUMP
+            Version::V0_4_0_2(Wrapper(x)) => x.semver(),
+            Version::V0_4_0_3(Wrapper(x)) => x.semver(), // VERSION_BUMP
             Version::Other(x) => x.clone(),
         }
     }
@@ -429,6 +447,28 @@ fn post_init_migration_todos_accessor(db: &mut Value) -> Option<&mut Value> {
         );
     }
     server_info.get_mut("postInitMigrationTodos")
+}
+
+#[instrument(skip_all)]
+fn latest_migration_revision_accessor(db: &mut Value) -> Option<&mut Value> {
+    let server_info = if db.get("public").is_some() {
+        db.get_mut("public")?.get_mut("serverInfo")?
+    } else {
+        db.get_mut("server-info")?
+    };
+    if server_info.get("latestMigrationRevision").is_none() {
+        server_info
+            .as_object_mut()?
+            .insert("latestMigrationRevision".into(), Value::from(0usize));
+    }
+    server_info.get_mut("latestMigrationRevision")
+}
+
+fn applied_migration_revision(db: &mut Value) -> Result<usize, Error> {
+    latest_migration_revision_accessor(db)
+        .map(|v| from_value::<usize>(v.clone()))
+        .transpose()
+        .map(Option::unwrap_or_default)
 }
 
 struct PreUps {
@@ -523,6 +563,12 @@ where
     type PreUpRes: Send + UnwindSafe;
     fn semver(self) -> exver::Version;
     fn compat(self) -> &'static exver::VersionRange;
+    /// Bump when `up` or `post_up` changes after this version has been published to a channel.
+    /// Both then re-run over a db the previous revision already migrated, so they MUST be
+    /// idempotent with it.
+    fn migration_revision(self) -> usize {
+        0
+    }
     /// MUST be idempotent, and is run before *all* db migrations
     fn pre_up(self) -> impl Future<Output = Result<Self::PreUpRes, Error>> + Send + 'static;
     fn up(self, db: &mut Value, input: Self::PreUpRes) -> Result<Value, Error> {
@@ -564,6 +610,9 @@ where
                 ErrorKind::Database,
             ));
         }
+        *latest_migration_revision_accessor(db)
+            .or_not_found("`public.serverInfo.latestMigrationRevision` in db")? =
+            to_value(&self.migration_revision())?;
         Ok(())
     }
 }
@@ -716,6 +765,7 @@ pub fn git_info() -> Result<InternedString, Error> {
 
 #[cfg(test)]
 mod tests {
+    use imbl_value::json;
     use proptest::prelude::*;
 
     use super::*;
@@ -728,6 +778,69 @@ mod tests {
         assert_eq!(
             Current::default().semver().to_string(),
             crate::bins::startos_version(),
+        );
+    }
+
+    #[tokio::test]
+    async fn revision_three_upgrades_and_rolls_back_to_revision_two() {
+        let previous = v0_4_0_2::Version;
+        let current = Current::default();
+        let resolved = Version::from_exver_version(current.semver());
+        assert!(matches!(resolved, Version::V0_4_0_3(_)));
+        let target = resolved.as_version_t().unwrap();
+        let mut db = json!({ "public": { "serverInfo": {
+            "version": "0.4.0.2",
+            "packageVersionCompat": ">=0.3.0 <0.5.0",
+            "postInitMigrationTodos": {},
+            "latestMigrationRevision": 4,
+        } }, "payload": { "unchanged": true } });
+        let payload = db["payload"].clone();
+        let pre_ups = PreUps::load(&previous, &target).await.unwrap();
+        migrate_from_unchecked(&previous, &target, pre_ups, &mut db).unwrap();
+        assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.0.3"));
+        assert_eq!(
+            db["public"]["serverInfo"]["packageVersionCompat"],
+            to_value(previous.compat()).unwrap()
+        );
+        assert_eq!(
+            db["public"]["serverInfo"]["postInitMigrationTodos"]["0.4.0.3"],
+            Value::Null
+        );
+        assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
+        assert_eq!(db["payload"], payload);
+        rollback_to_unchecked(&target, &previous, &mut db).unwrap();
+        assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.0.2"));
+        assert_eq!(applied_migration_revision(&mut db).unwrap(), 4);
+        assert_eq!(db["payload"], payload);
+    }
+
+    #[test]
+    fn a_db_that_predates_revisions_reads_as_revision_zero() {
+        let mut db = json!({ "public": { "serverInfo": {} } });
+        assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
+        assert_eq!(
+            db["public"]["serverInfo"]["latestMigrationRevision"],
+            json!(0)
+        );
+    }
+
+    #[test]
+    fn commit_records_the_revision_of_the_migration_it_applied() {
+        let mut db = json!({ "public": { "serverInfo": {
+            "version": "0.4.0.1",
+            "packageVersionCompat": ">=0.3.0 <0.5.0",
+            "postInitMigrationTodos": {},
+            "latestMigrationRevision": 7,
+        } } });
+        let current = Current::default();
+        current.commit(&mut db, Value::Null).unwrap();
+        assert_eq!(
+            applied_migration_revision(&mut db).unwrap(),
+            current.migration_revision()
+        );
+        assert_eq!(
+            db["public"]["serverInfo"]["version"],
+            json!(current.semver().to_string())
         );
     }
 

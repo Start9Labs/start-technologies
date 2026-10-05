@@ -1,14 +1,52 @@
-import { inject, Injectable } from '@angular/core'
-import { MarketplacePkgBase } from '@start9labs/marketplace'
+import { Component, inject, Injectable } from '@angular/core'
 import {
   DialogService,
+  Exver,
   i18nKey,
   i18nPipe,
-  knownRegistries,
+  LocalizePipe,
+  MarkdownPipe,
+  SafeLinksDirective,
   sameUrl,
 } from '@start9labs/shared'
+import { T } from '@start9labs/start-core'
+import { TuiDialogContext, TuiNotification } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
+import { TuiConfirmData } from '@taiga-ui/kit'
+import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { defaultIfEmpty, firstValueFrom } from 'rxjs'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
+
+type PreDownloadDialogData = TuiConfirmData & {
+  content: PolymorpheusComponent<PreDownloadMessage>
+  message: T.LocaleString
+}
+
+@Component({
+  template: `
+    <div tuiNotification appearance="warning">
+      <div
+        class="g-markdown"
+        safeLinks
+        [innerHTML]="message | localize | markdown | dompurify"
+      ></div>
+    </div>
+  `,
+  imports: [
+    LocalizePipe,
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
+    TuiNotification,
+  ],
+})
+class PreDownloadMessage {
+  protected readonly message =
+    injectContext<TuiDialogContext<boolean, PreDownloadDialogData>>().data
+      .message
+}
+
+const PRE_DOWNLOAD_MESSAGE = new PolymorpheusComponent(PreDownloadMessage)
 
 @Injectable({
   providedIn: 'root',
@@ -17,16 +55,7 @@ export class MarketplaceAlertsService {
   private readonly dialog = inject(DialogService)
   private readonly marketplaceService = inject(MarketplaceService)
   private readonly i18n = inject(i18nPipe)
-
-  // Show the registry's caveat when switching to anything other than the
-  // official Start9 registry. Replaces the old persistent notification banner.
-  alertRegistryChange(url: string): void {
-    const message = registryWarning(url)
-
-    if (message) {
-      this.dialog.openAlert(message, { label: 'Warning' }).subscribe()
-    }
-  }
+  private readonly exver = inject(Exver)
 
   async alertMarketplace(
     url: string,
@@ -56,6 +85,32 @@ export class MarketplaceAlertsService {
     })
   }
 
+  async alertPreDownload(
+    alert: T.PreDownloadAlert | null | undefined,
+    sourceVersion: string | null,
+  ): Promise<boolean> {
+    if (
+      !alert ||
+      !sourceVersion ||
+      !this.exver.satisfies(sourceVersion, alert.when.sourceVersion)
+    ) {
+      return true
+    }
+
+    const data: PreDownloadDialogData = {
+      content: PRE_DOWNLOAD_MESSAGE,
+      message: alert.message,
+      yes: 'Continue',
+      no: 'Cancel',
+    }
+
+    return firstValueFrom(
+      this.dialog
+        .openConfirm({ label: 'Wait!', size: 's', data })
+        .pipe(defaultIfEmpty(false)),
+    )
+  }
+
   async alertBreakages(breakages: string[]): Promise<boolean> {
     let content =
       `${this.i18n.transform('As a result of this update, the following services will no longer work properly and may crash')}:<ul>` as i18nKey
@@ -77,29 +132,4 @@ export class MarketplaceAlertsService {
         .subscribe(response => resolve(response))
     })
   }
-}
-
-// The official Start9 registry needs no warning; every other registry carries
-// a caveat the user should acknowledge when connecting to it.
-function registryWarning(url: string): i18nKey | null {
-  const { start9, community, start9Beta, communityBeta, start9Alpha } =
-    knownRegistries
-
-  if (sameUrl(url, start9)) {
-    return null
-  }
-
-  if (sameUrl(url, community)) {
-    return 'Services from this registry are packaged and maintained by members of the Start9 community. Install at your own risk. If you experience an issue or have a question related to a service in this marketplace, please reach out to the package developer for assistance.'
-  }
-
-  if (sameUrl(url, start9Beta) || sameUrl(url, communityBeta)) {
-    return 'Services from this registry are undergoing beta testing and may contain bugs. Install at your own risk.'
-  }
-
-  if (sameUrl(url, start9Alpha)) {
-    return 'Services from this registry are undergoing alpha testing. They are expected to contain bugs and could damage your system. Install at your own risk.'
-  }
-
-  return 'This is a Custom Registry. Start9 cannot verify the integrity or functionality of services from this registry, and they could damage your system. Install at your own risk.'
 }

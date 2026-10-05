@@ -24,11 +24,11 @@ The Start SDK builds on a shared core library to form a layered architecture: **
 └─────────────────────────────────────────────────────────────┘
 ```
 
-The SDK follows [Semantic Versioning](https://semver.org/) and is versioned independently of StartOS (the current `@start9labs/start-sdk` 2.0.10 targets StartOS 0.4.0). Each `CHANGELOG.md` heading records the SDK version and the StartOS release it targets.
+The SDK follows [Semantic Versioning](https://semver.org/) and is versioned independently of StartOS. Each `CHANGELOG.md` heading records the SDK version and the StartOS release it targets.
 
 ## Place in the monorepo
 
-The SDK lives at `projects/start-sdk/` inside the start-technologies monorepo, flattened so its source is directly under `lib/`. Its foundational layer was extracted into its own shared lib, `@start9labs/start-core` (`shared-libs/ts-modules/start-core/`), which is versionless and not published to npm on its own. Service-package developers consume the single published `@start9labs/start-sdk` from npm (its built `dist/` bundles `@start9labs/start-core` via npm `bundleDependencies`, so they install only one package); the container-runtime project in this monorepo consumes the built `dist/` (not the source), while web consumes `@start9labs/start-core` directly. The OS bindings in start-core mirror Rust types in `shared-libs/crates/start-core`.
+The SDK lives at `projects/start-sdk/` inside the start-technologies monorepo, flattened so its source is directly under `lib/`. Its foundational layer was extracted into its own shared lib, `@start9labs/start-core` (`shared-libs/ts-modules/start-core/`), which is versionless and not published to npm on its own. Service-package developers consume the single published `@start9labs/start-sdk` from npm (its built `dist/` bundles only `@start9labs/start-core`, which is never published separately, and carries the package toolchain — TypeScript, Prettier, ESLint, ncc — as ordinary dependencies, so a package declares just the SDK); the container-runtime project in this monorepo consumes the built `dist/` (not the source), while web consumes `@start9labs/start-core` directly. The OS bindings in start-core mirror Rust types in `shared-libs/crates/start-core`.
 
 ## Core Library (`@start9labs/start-core`)
 
@@ -132,10 +132,10 @@ Supported field types via `Value`:
 - `object` — Nested sub-form
 - `union` / `dynamicUnion` — Conditional fields based on a discriminator
 
-### Dependencies (`shared-libs/ts-modules/start-core/lib/dependencies/`)
+### Dependencies
 
-- `setupDependencies.ts` — Declare what the service depends on (package IDs, version ranges, health checks)
-- `dependencies.ts` — Runtime dependency checking via `checkDependencies()`
+- `lib/dependencies.ts` — Builder for published base requirements and reactive runtime requirements
+- `shared-libs/ts-modules/start-core/lib/dependencies/dependencies.ts` — Runtime satisfaction checks used by the builder
 
 ### Interfaces (`shared-libs/ts-modules/start-core/lib/interfaces/`)
 
@@ -176,11 +176,11 @@ Parser and verifier for `.s9pk` service package archives:
 
 ### Utilities (`shared-libs/ts-modules/start-core/lib/util/`)
 
-~28 utility modules including:
+Utility modules including:
 
 **Reactive subscription wrappers** — Each wraps an Effects callback-based method into a consistent reactive API:
 
-- `Watchable` — Base class providing `const()`, `once()`, `watch()`, `onChange()`, `waitFor()`
+- `Watchable<A>` — Base class providing `const()`, `once()`, `watch()`, `onChange()`, `waitFor()`; `MappedWatchable<Raw, Mapped>` adds a `map` over a raw value; `Watchable.from` and `Watchable.combine` build readers from `WatchSource`s
 - `GetContainerIp`, `GetStatus`, `GetSystemSmtp`, `GetOutboundGateway`, `GetSslCertificate`, `GetHostInfo`, `GetServiceManifest` — Typed wrappers for specific Effects methods
 
 **General utilities:**
@@ -213,7 +213,8 @@ The `.build()` method returns an object containing the entire SDK surface area, 
 | **Health**       | `healthCheck.checkPortListening`, `.checkWebUrl`, `.runHealthScript`                                                                | Built-in health checks                            |
 | **Interfaces**   | `createInterface`, `MultiHost.of`, `setupInterfaces`, `serviceInterface.*`                                                          | Network endpoint management                       |
 | **Backups**      | `setupBackups`, `Backups.ofVolumes`, `Backups.ofSyncs`, `Backups.withOptions`                                                       | Backup configuration                              |
-| **Dependencies** | `setupDependencies`, `checkDependencies`                                                                                            | Dependency declaration and verification           |
+| **Primary URL**  | `setupPrimaryUrl`                                                                                                                   | The URL a service advertises as its own           |
+| **Dependencies** | `Dependency.required`, `Dependency.optional`, `Dependencies.of`                                                                     | Published and runtime requirements                |
 | **Init/Uninit**  | `setupInit`, `setupUninit`, `setupOnInit`, `setupOnUninit`                                                                          | Lifecycle hooks                                   |
 | **Containers**   | `SubContainer.of`, `SubContainer.withTemp`, `Mounts.of`                                                                             | Container execution with mounts                   |
 | **Forms**        | `InputSpec.of`, `Value`, `Variants`, `List`                                                                                         | Form input builders                               |
@@ -258,29 +259,34 @@ Features:
 - Graceful shutdown with configurable signals and timeouts
 - One-shot commands that run before daemons start
 
-Internally the builder is record-then-materialize: `.addDaemon()` appends a recorded entry, `Daemons.build()` walks the entries to construct `HealthDaemon`s with correct dependency wiring and runs `updateStatus()`. Side-effects start at `build()`, so the timing is identical to the prior eager builder for `setupMain` users.
+Internally the builder is record-then-materialize: `.addDaemon()` appends a recorded entry, `Daemons.build()` walks the entries to construct `HealthDaemon`s with correct dependency wiring and runs `updateStatus()`. Side-effects start at `build()`.
 
 **`Daemons.dynamic`** makes the daemon set a reactive function of on-disk state. `main` is always `setupMain`; `Daemons.dynamic(effects, fn)` returns a `DaemonsReconciler` — a `T.DaemonBuildable`, exactly like a static `Daemons.of(...)` chain — which you return from `setupMain`. The builder `fn` returns a regular `Daemons.of(...).addDaemon(...)` chain; the reconciler diffs its entries against the running set on every `effects.constRetry` trigger. Inside the builder, `constRetry` is bound to a rerun-and-reconcile rather than `effects.restart()`, so a change reconciles in place and the service stays `running`:
 
 ```typescript
 export const main = sdk.setupMain(async ({ effects }) => {
   return sdk.Daemons.dynamic(effects, async ({ effects }) => {
-    const { instances } = (await instancesYaml.read().const(effects)) ?? { instances: [] }
-    let daemons = sdk.Daemons.of<Manifest>({ effects })
-    for (const inst of instances) {
-      daemons = daemons.addDaemon(`reg-${inst.id}`, {
-        subcontainer: sdk.SubContainer.of(effects, { imageId: 'reg', sharedRun: true }, mounts, `reg-${inst.id}-sub`),
-        exec: { command: ['start-registryd'] },
-        ready: { display: inst.label, fn: () => sdk.healthCheck.checkPortListening(effects, inst.port, {}) },
-        requires: [],
-      })
-    }
-    return daemons
+    const config = await registryYaml.read().const(effects)
+    const daemons = sdk.Daemons.of(effects)
+    if (!config?.enabled) return daemons
+    return daemons.addDaemon('registry', {
+      subcontainer: sdk.SubContainer.of(effects, { imageId: 'reg', sharedRun: true }, mounts, 'registry-sub'),
+      exec: { command: ['start-registryd'] },
+      ready: {
+        display: 'Registry',
+        fn: () =>
+          sdk.healthCheck.checkPortListening(effects, 80, {
+            successMessage: 'Registry is ready',
+            errorMessage: 'Registry is not listening',
+          }),
+      },
+      requires: [],
+    })
   })
 })
 ```
 
-Diff semantics per id: absent→present **start**, present→absent **stop**, same `configHash` **leave alone**, different `configHash` **restart**. Dependents of any restarted/stopped daemon are also restarted. `configHash` is a canonical-JSON hash over the subcontainer descriptor (`imageId`, `sharedRun`, `name`, `mounts.build()`), exec, `requires`, and the structural parts of `ready` — closures (`ready.fn`, `ready.trigger`) are excluded so a watched-file touch with unchanged content doesn't bounce every daemon. Lazy `SubContainer`s ({@link SubContainer.of}) are required under `Daemons.dynamic`; eager handles produced inside the builder would defeat the "leave alone" guarantee and the reconciler throws if it sees one.
+Diff semantics per id: absent→present **start**, present→absent **stop**, same `configHash` **leave alone**, different `configHash` **restart**. Dependents of any restarted/stopped daemon are also restarted. `configHash` is a canonical-JSON hash over the subcontainer descriptor (`imageId`, `sharedRun`, `name`, `mounts.build()`), exec, `requires`, `uses`, and the structural parts of `ready` — closures (`ready.fn`, `ready.trigger`) are excluded so a watched-file touch with unchanged content doesn't bounce every daemon. Captured values that must trigger a restart belong in the entry's `uses`. Lazy `SubContainer`s (`SubContainer.of`) are required under `Daemons.dynamic`; eager handles produced inside the builder would defeat the "leave alone" guarantee and the reconciler throws if it sees one.
 
 **SubContainers** come in two flavors:
 
@@ -292,7 +298,7 @@ The unified `SubContainer<M>` interface widens `rootfs` / `guid` / `subpath()` t
 **Mounts** declares what to attach to a container:
 
 ```typescript
-sdk.Mounts.of().mountVolume('main', '/data').mountAssets('scripts', '/scripts').mountDependency('bitcoind', 'main', '/bitcoin-data', { readonly: true }).mountBackup('/backup')
+sdk.Mounts.of().mountVolume({ volumeId: 'main', subpath: null, mountpoint: '/data', readonly: false }).mountAssets({ subpath: 'scripts', mountpoint: '/scripts' }).mountDependency({ dependencyId: 'bitcoind', volumeId: 'main', subpath: null, mountpoint: '/bitcoin-data', readonly: true })
 ```
 
 ### Health Checks (`lib/health/`)
@@ -312,6 +318,10 @@ Health checks are paired with **triggers** that control polling behavior:
 - `cooldownTrigger` — Fixed interval between checks
 - `statusTrigger` — Per-status polling intervals with a default fallback
 
+### Primary URL (`lib/primaryUrl/`)
+
+`setupPrimaryUrl.ts` builds the action behind `sdk.setupPrimaryUrl` over the package's `get`/`set`, plus `bestUsable` and `setupTask`. Both judge the stored URL against the interface's `nonLocal` addresses. `bestUsable` is a `Watchable.combine` over the package's `get` reader and the host, so the caller picks the read strategy; it resolves the URL when read, leaving the store as the user set it. `setupTask` is an init script that passes those addresses to StartOS as an `input-not-matches` task's accepted input, and StartOS decides when the task is active.
+
 ### Backup System (`lib/backup/`)
 
 ```
@@ -320,33 +330,45 @@ backup/
 └── Backups.ts      — Volume selection and rsync options
 ```
 
-Three builder patterns:
+Builder patterns:
 
 - `Backups.ofVolumes('main', 'data')` — Back up entire volumes
 - `Backups.ofSyncs([{ dataPath, backupPath }])` — Custom sync pairs
 - `Backups.withOptions({ exclude: ['cache/'] })` — Rsync options
+- `Backups.withPgDump({ ... })` — PostgreSQL logical dump and restore
+- `Backups.withMysqlDump({ ... })` — MySQL logical dump and restore
+- `Backups.withMariadbDump({ ... })` — MariaDB logical dump and restore
+
+The package also exports these as the `backup` namespace (`Backups`,
+`mountBackupTarget`, `setupBackups`).
 
 ### File Helpers (`lib/util/fileHelper.ts`)
 
 Type-safe configuration file management:
 
 ```typescript
-const configFile = FileHelper.yaml(effects, sdk.volumes.main.path('config.yml'), {
-  port: 8080,
-  debug: false,
-})
+const configFile = FileHelper.yaml(
+  { base: sdk.volumes.main, subpath: 'config.yml' },
+  z.looseObject({
+    port: z.number().catch(8080),
+    debug: z.boolean().catch(false),
+  }),
+)
 
 // Reactive reading
-const config = await configFile.read.const(effects)
+const config = await configFile.read().const(effects)
 
 // Partial merge
-await configFile.merge({ debug: true })
+await configFile.merge(effects, { debug: true })
 
 // Full write
-await configFile.write({ port: 9090, debug: true })
+await configFile.write(effects, { port: 9090, debug: true })
 ```
 
-Supported formats: JSON, YAML, TOML, INI, ENV, and custom parsers.
+Supported formats: JSON, YAML, TOML, XML, INI, ENV, strings, and custom parsers.
+
+- `fileAccess.ts` owns canonical paths, the process-local queue, temp-file replacement, and the cross-process `flock` that every write takes, held through the complete `merge()`/`update()` read-modify-write. Reads reenter the queue; nested same-file mutations reject. The lock is on the file itself, or on a fixed `.<name>.tmp` temp that becomes the file when it is missing; acquirers retry inode races and reject permanent open errors. An `update()` callback's five-second abort signal is pushed as a lock-context frame, so file access started inside the callback inherits it and a timed-out callback cannot commit or mutate later. Lock acquisition has a ten-second deadline of its own, which bounds a wait on a lock held outside the SDK. The first write to each existing target per process removes the random-named temps of dead writers; a create removes a leftover attribute template. A temp that is no longer the inode written is never renamed into place.
+- `fileMounts.ts` owns own-volume file registrations, directory watches, inode reconciliation, and teardown. Subcontainers register after a file bind is created, make their rootfs mount tree recursively shared, so rebinds under a directory mount reach exec namespaces too, and synchronize before commands launch. Rebinds insert the prepared mount beneath the old one before detaching it, keeping pathname reads on a complete file. FileHelper refreshes local registrations before returning a write or a changed reactive read. Reconciliation gives up after three rebinds that leave the mount on a stale inode and propagates failures, including after the source file has been replaced. Directory-watch failures are logged; explicit reads, writes, and commands can retry reconciliation.
 
 ### Subcontainers (`lib/util/SubContainer.ts`)
 
@@ -354,7 +376,7 @@ Execute commands in isolated container environments:
 
 ```typescript
 // Long-lived subcontainer
-const container = await sdk.SubContainer.of(effects, { imageId: 'main' }, mounts, 'app')
+const container = sdk.SubContainer.of(effects, { imageId: 'main' }, mounts, 'app')
 
 // One-shot execution
 await sdk.SubContainer.withTemp(effects, { imageId: 'main' }, mounts, 'migrate', async c => {
@@ -371,15 +393,14 @@ const manifest = setupManifest({
   license: 'MIT',
   description: { short: '...', long: '...' },
   images: { main: { source: { dockerTag: 'myimage:1.0' } } },
-  volumes: { main: {} },
-  dependencies: {},
+  volumes: ['main'],
   // ...
 })
 
-export default buildManifest(manifest)
+export default buildManifest(versionGraph, manifest, dependencies)
 ```
 
-`buildManifest()` finalizes the manifest with the current SDK version, OS version compatibility, and migration version ranges.
+`buildManifest()` finalizes the manifest with the current SDK version, OS version compatibility, migration version ranges, and dependency definitions from the same builder that runs during init.
 
 ### Versioning (`lib/version/`)
 
@@ -395,8 +416,8 @@ Used in init scripts to track which migration version the service's data has bee
 ### Internationalization (`lib/i18n/`)
 
 ```typescript
-const t = setupI18n({ en_US: enStrings, es_ES: esStrings })
-const greeting = t('hello', { name: 'World' }) // "Hello, World!" or "Hola, World!"
+const t = setupI18n({ 'Hello, ${name}!': 0 }, { es_ES: { 0: '¡Hola, ${name}!' } }, 'en_US')
+const greeting = t('Hello, ${name}!', { name: 'World' })
 ```
 
 Supports locale fallback and Intl-based formatting.
@@ -425,7 +446,7 @@ A typical service package lifecycle:
 1. INSTALL / UPDATE / RESTORE
    ├── init({ effects, kind })
    │   ├── Version migrations (if update)
-   │   ├── setupDependencies()
+   │   ├── dependencies.init()
    │   ├── setupInterfaces() → bind ports, export interfaces
    │   └── Actions registration → export actions to OS
    │
@@ -459,11 +480,15 @@ All runtime interactions go through the `Effects` object rather than direct syst
 
 The `Watchable` base class provides a consistent API for values that can change over time:
 
-- `const(effects)` — Read once; if the value changes, triggers a retry of the enclosing context
+- `const()` — Read once; if the value changes, triggers a retry of the enclosing context
 - `once()` — Read once without reactivity
 - `watch()` — Async generator yielding on each change
 - `onChange(callback)` — Invoke callback on each change
 - `waitFor(predicate)` — Block until a condition is met
+
+`FileHelper.read()` provides a deferred reader instead: pass the context to its `.const(effects)`, `.watch(effects)`, `.onChange(effects, callback)`, or `.waitFor(effects, predicate)` method.
+
+`Watchable<A>` is typed only by the value it reads. A reader that maps a raw value extends `MappedWatchable<Raw, Mapped>`, implementing `fetchRaw`/`produceRaw`. `Watchable.from(effects, source)` and `Watchable.combine(effects, sources, map?, eq?)` build readers from any `WatchSource` (`once()` + `watch(abort)`), which every `Watchable` is.
 
 ### Type-safe Manifest Threading
 
@@ -472,6 +497,5 @@ The manifest type flows through the entire SDK via generics. When you call `Star
 ## Further reading
 
 - [README.md](README.md) — overview and quickstart
-- [AGENTS.md](AGENTS.md) — build, test, release, and contribution workflow
 - [AGENTS.md](AGENTS.md) — agent/dev instructions (`CLAUDE.md` is a one-line `@AGENTS.md` import)
 - [Packaging docs](https://docs.start9.com/packaging) — the developer-facing reference (mdbook in `docs/`)
