@@ -220,6 +220,7 @@ typed-builder = "0.23.2"
 url = { version = "2.4.1", features = ["serde"] }
 uuid = { version = "1.4.1", features = ["v4"] }
 visit-rs = "0.1.1"
+xattr = "1.6.1"
 x25519-dalek = { version = "3.0.0-rc.1", features = ["static_secrets"] }
 xmltree = "0.10"
 zbus = "5.1.1"

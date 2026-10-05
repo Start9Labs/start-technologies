@@ -7711,6 +7711,7 @@ dependencies = [
  "uuid",
  "visit-rs",
  "x25519-dalek 3.0.0-rc.1",
+ "xattr",
  "xmltree",
  "yaml_serde",
  "zbus",
