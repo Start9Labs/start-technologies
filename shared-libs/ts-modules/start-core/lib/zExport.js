@@ -24,7 +24,7 @@ function deepLoose(schema) {
       return zod_1.z.array(deepLoose(def.element))
     case 'union': {
       const options = def.options.map(o => deepLoose(o))
-      return def.discriminator
+      return def.discriminator !== undefined
         ? zod_1.z.discriminatedUnion(def.discriminator, options, {
             unionFallback: def.unionFallback,
           })

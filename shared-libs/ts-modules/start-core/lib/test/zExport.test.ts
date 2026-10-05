@@ -39,16 +39,24 @@ describe('the z re-export', () => {
     })
   })
 
-  test('z.deepLoose keeps a discriminated union keyed on its discriminator', () => {
-    const schema = z.discriminatedUnion('type', [
-      z.object({ type: z.literal('a').catch('a'), x: z.string().catch('') }),
-      z.object({ type: z.literal('b').catch('b') }),
-    ])
-    expect(z.deepLoose(schema).parse({ type: 'b', y: 1 })).toEqual({
-      type: 'b',
-      y: 1,
-    })
-  })
+  test.each(['type', ''])(
+    'z.deepLoose keeps a discriminated union keyed on %j',
+    discriminator => {
+      const schema = z.discriminatedUnion(discriminator, [
+        z.object({
+          [discriminator]: z.literal('a').catch('a'),
+          x: z.string().catch(''),
+        }),
+        z.object({ [discriminator]: z.literal('b').catch('b') }),
+      ])
+      expect(z.deepLoose(schema).parse({ [discriminator]: 'b', y: 1 })).toEqual(
+        {
+          [discriminator]: 'b',
+          y: 1,
+        },
+      )
+    },
+  )
 
   test('z.deepPartial makes every level optional and loose', () => {
     const schema = z.object({
