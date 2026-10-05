@@ -7715,6 +7715,7 @@ dependencies = [
  "xmltree",
  "yaml_serde",
  "zbus",
+ "zstd",
 ]
 
 [[package]]

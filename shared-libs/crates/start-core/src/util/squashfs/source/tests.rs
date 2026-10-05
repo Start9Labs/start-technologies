@@ -335,10 +335,9 @@ async fn drains_large_transport_padding() {
     append(&mut tar, b"file", b'0', b"data", None);
     finish(&mut tar);
     tar.resize(tar.len() + 1024 * 1024, 0);
-    let (image, written) = tokio::join!(Squashfs::from_tar(reader), async {
+    let (image, _) = tokio::join!(Squashfs::from_tar(reader), async {
         writer.write_all(&tar).await.unwrap();
         writer.shutdown().await.unwrap();
     });
-    let _ = written;
     assert_eq!(file_bytes(&image.unwrap(), "file").await, b"data");
 }

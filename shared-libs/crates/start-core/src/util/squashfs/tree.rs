@@ -245,7 +245,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             block_size: 131072,
-            compression_level: 3,
+            compression_level: 15,
             modification_time: 0,
             deduplicate: true,
         }

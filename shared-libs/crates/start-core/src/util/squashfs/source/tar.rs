@@ -125,10 +125,10 @@ fn metadata(header: &Header, pax: &Pax) -> std::io::Result<Metadata> {
             let bytes = bytes.strip_prefix(b"+").unwrap_or(bytes);
             let mut parts = bytes.splitn(2, |b| *b == b'.');
             let whole = decimal(parts.next().unwrap())?;
-            if let Some(frac) = parts.next() {
-                if frac.is_empty() || !frac.iter().all(u8::is_ascii_digit) {
-                    return Err(invalid("invalid PAX fractional timestamp"));
-                }
+            if let Some(frac) = parts.next()
+                && (frac.is_empty() || !frac.iter().all(u8::is_ascii_digit))
+            {
+                return Err(invalid("invalid PAX fractional timestamp"));
             }
             whole
         }
@@ -231,10 +231,11 @@ async fn sparse_map<R: AsyncRead + Unpin>(
             Err(invalid("missing sparse real size"))
         })
     })?;
-    if let Some(major) = pax.get(b"GNU.sparse.major".as_slice()) {
-        if major != b"0" && major != b"1" {
-            return Err(invalid("unsupported GNU sparse version"));
-        }
+    if let Some(major) = pax.get(b"GNU.sparse.major".as_slice())
+        && major != b"0"
+        && major != b"1"
+    {
+        return Err(invalid("unsupported GNU sparse version"));
     }
     if pax.get(b"GNU.sparse.major".as_slice()).map(Vec::as_slice) == Some(b"1") {
         if pax.get(b"GNU.sparse.minor".as_slice()).map(Vec::as_slice) != Some(b"0") {
@@ -287,10 +288,10 @@ async fn sparse_map<R: AsyncRead + Unpin>(
             return Err(invalid("incomplete sparse extent"));
         }
     }
-    if let Some(count) = pax.get(b"GNU.sparse.numblocks".as_slice()) {
-        if decimal(count)? != map.len() as u64 {
-            return Err(invalid("sparse extent count mismatch"));
-        }
+    if let Some(count) = pax.get(b"GNU.sparse.numblocks".as_slice())
+        && decimal(count)? != map.len() as u64
+    {
+        return Err(invalid("sparse extent count mismatch"));
     }
     Ok(Some((logical, map)))
 }

@@ -93,8 +93,7 @@ async fn independent_inline_and_out_of_line_xattrs_and_bad_references() {
                 let (&physical, &base) = image
                     .xattr_blocks
                     .iter()
-                    .filter(|(_, base)| **base <= logical)
-                    .next_back()
+                    .rfind(|(_, base)| **base <= logical)
                     .unwrap();
                 let offset = (logical - base) as usize;
                 if offset + 8 <= METADATA_SIZE {

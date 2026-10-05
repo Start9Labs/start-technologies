@@ -46,6 +46,46 @@ fn block_boundaries() {
 }
 
 #[test]
+fn compressed_frames_fit_kernel_block_workspace() {
+    for level in [3, 15, 22] {
+        for size in [
+            32,
+            1024,
+            8191,
+            METADATA_SIZE,
+            65536,
+            131071,
+            131072,
+            1048576,
+        ] {
+            let block = encode_block(&vec![b'a'; size], level).unwrap();
+            assert!(block.compressed);
+            let content_size = zstd::zstd_safe::get_frame_content_size(&block.bytes)
+                .unwrap()
+                .unwrap();
+            assert_eq!(content_size, size as u64);
+            let single_segment = block.bytes[4] & 0x20 != 0;
+            let window_size = if single_segment {
+                content_size
+            } else {
+                let descriptor = block.bytes[5];
+                let base = 1u64 << (10 + (descriptor >> 3));
+                base + (base / 8) * u64::from(descriptor & 7)
+            };
+            assert!(window_size <= size.max(1024) as u64);
+        }
+    }
+}
+
+#[test]
+fn incompressible_blocks_preserve_raw_fallback() {
+    let bytes: Vec<u8> = (0..=255).collect();
+    let block = encode_block(&bytes, 15).unwrap();
+    assert!(!block.compressed);
+    assert_eq!(block.bytes, bytes);
+}
+
+#[test]
 fn flushes_append_without_gaps() {
     let mut writer = MetadataBlocksWriter::new(Cursor::new(Vec::new()));
     let mut expected = Vec::new();

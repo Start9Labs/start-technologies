@@ -2,7 +2,7 @@ use std::io::{self, Read, Write};
 use std::pin::Pin;
 use std::task::{Context, Poll, ready};
 
-use async_compression::codecs::{Decode, Encode, ZstdDecoder, ZstdEncoder};
+use async_compression::codecs::{Decode, ZstdDecoder};
 use async_compression::core::util::PartialBuffer;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
@@ -20,33 +20,18 @@ pub(super) struct EncodedBlock {
 }
 
 pub(super) fn encode_block(bytes: &[u8], level: i32) -> io::Result<EncodedBlock> {
-    let mut encoder = ZstdEncoder::new(level);
-    let mut input = PartialBuffer::new(bytes);
-    let mut result = Vec::new();
-    loop {
-        let mut output = PartialBuffer::new([0; METADATA_SIZE]);
-        encoder.encode(&mut input, &mut output)?;
-        result.extend_from_slice(output.written());
-        if input.unwritten().is_empty() {
-            break;
-        }
-    }
-    loop {
-        let mut output = PartialBuffer::new([0; METADATA_SIZE]);
-        let done = encoder.finish(&mut output)?;
-        result.extend_from_slice(output.written());
-        if result.len() >= bytes.len() {
-            return Ok(EncodedBlock {
-                bytes: bytes.to_vec(),
-                compressed: false,
-            });
-        }
-        if done {
-            return Ok(EncodedBlock {
-                bytes: result,
-                compressed: true,
-            });
-        }
+    // Known source size bounds the frame window to the kernel's block workspace.
+    let result = zstd::bulk::compress(bytes, level)?;
+    if result.len() >= bytes.len() {
+        Ok(EncodedBlock {
+            bytes: bytes.to_vec(),
+            compressed: false,
+        })
+    } else {
+        Ok(EncodedBlock {
+            bytes: result,
+            compressed: true,
+        })
     }
 }
 
@@ -94,7 +79,7 @@ impl<W> MetadataBlocksWriter<W> {
             input: Vec::with_capacity(METADATA_SIZE),
             output: Vec::new(),
             output_position: 0,
-            level: 3,
+            level: super::tree::Options::default().compression_level(),
         }
     }
 

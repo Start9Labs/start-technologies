@@ -566,10 +566,10 @@ impl<S: ArchiveSource> Image<S> {
         if header.mode & !0o7777 != 0 || header.number == 0 || header.number > sb.inode_count {
             return Err(invalid("invalid inode header").into());
         }
-        if let Some(exports) = &self.exports {
-            if exports[header.number as usize - 1] != reference {
-                return Err(invalid("export table disagrees with inode reference").into());
-            }
+        if let Some(exports) = &self.exports
+            && exports[header.number as usize - 1] != reference
+        {
+            return Err(invalid("export table disagrees with inode reference").into());
         }
         let uid = *self
             .ids
