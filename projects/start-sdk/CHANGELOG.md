@@ -203,6 +203,10 @@
 
 ### Fixed
 
+- **A file model parses a `z.discriminatedUnion` by its discriminator.** A
+  value is read and merged as the variant its discriminator names, even when
+  an earlier variant's fields carry `.catch()` defaults.
+
 - **An awaited `waitFor` waits until its predicate holds.** Awaiting
   `waitFor` on a status, file or other reader no longer fails with
   `AbortedError` after garbage collection while the condition is still false.
