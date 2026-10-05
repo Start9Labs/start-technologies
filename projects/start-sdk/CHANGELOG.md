@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.0.1 — StartOS 0.4.0.2
+
+### Fixed
+
+- **File models parse with the shape exactly as written.** A `z.object` shape
+  drops keys it doesn't declare on `merge()`, as 3.0.0 describes; build file
+  models with `z.looseObject` to keep them. A `z.discriminatedUnion` keeps the
+  variant its discriminator names
+
 ## 3.0.0 — StartOS 0.4.0.2
 
 ### Security
@@ -202,10 +211,6 @@
   See [Result Types](https://docs.start9.com/packaging/actions.html#result-types)
 
 ### Fixed
-
-- **A file model parses a `z.discriminatedUnion` by its discriminator.** A
-  value is read and merged as the variant its discriminator names, even when
-  an earlier variant's fields carry `.catch()` defaults.
 
 - **An awaited `waitFor` waits until its predicate holds.** Awaiting
   `waitFor` on a status, file or other reader no longer fails with

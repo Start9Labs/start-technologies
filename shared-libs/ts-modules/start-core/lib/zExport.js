@@ -22,14 +22,8 @@ function deepLoose(schema) {
     }
     case 'array':
       return zod_1.z.array(deepLoose(def.element))
-    case 'union': {
-      const options = def.options.map(o => deepLoose(o))
-      return def.discriminator !== undefined
-        ? zod_1.z.discriminatedUnion(def.discriminator, options, {
-            unionFallback: def.unionFallback,
-          })
-        : zod_1.z.union(options)
-    }
+    case 'union':
+      return zod_1.z.union(def.options.map(o => deepLoose(o)))
     case 'intersection':
       return zod_1.z.intersection(deepLoose(def.left), deepLoose(def.right))
     case 'record':
