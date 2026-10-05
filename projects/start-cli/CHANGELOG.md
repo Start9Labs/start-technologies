@@ -9,6 +9,12 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [2.3.0]
+
+### Added
+
+- **`server restart` and `server shutdown` accept `--after-backup`** to wait for a running backup to finish. `server cancel-deferred-power` cancels the pending action. These commands require StartOS 0.4.0.3 or later.
+
 ## [2.2.0]
 
 ### Security
