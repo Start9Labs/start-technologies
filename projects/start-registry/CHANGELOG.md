@@ -4,6 +4,9 @@ All notable changes to `start-registry` (the Start Registry server) are document
 
 ## [1.1.1]
 
+- **`package get` lists only the newest revision of each upstream version.** Pass `--all-revisions`
+  (`allRevisions: true` over RPC) to list every revision the registry holds.
+
 - **Update shared dependencies with security fixes** and replace the unmaintained YAML parser.
 
 - **Each release's container image is published as `ghcr.io/start9labs/startos-registry:v<version>`**, the same image alpha ran for that commit.

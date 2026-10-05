@@ -69,6 +69,9 @@ pub struct GetPackageParams {
     pub device_info: Option<DeviceInfo>,
     #[arg(default_value = "none", help = "help.arg.other-versions-detail")]
     pub other_versions: Option<PackageDetailLevel>,
+    #[arg(long, help = "help.arg.all-revisions")]
+    #[serde(default)]
+    pub all_revisions: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, TS, HasModel)]
@@ -210,6 +213,25 @@ fn get_matching_models(
     .collect()
 }
 
+fn hide_superseded_revisions(
+    best: Option<&BTreeMap<VersionString, Model<PackageVersionInfo>>>,
+    other: &mut BTreeMap<VersionString, Model<PackageVersionInfo>>,
+) {
+    let group = |v: &VersionString| (v.flavor().map(str::to_owned), v.upstream().clone());
+    let mut newest: BTreeMap<_, VersionString> = BTreeMap::new();
+    for v in best.into_iter().flat_map(|b| b.keys()).chain(other.keys()) {
+        newest
+            .entry(group(v))
+            .and_modify(|n| {
+                if **v > **n {
+                    *n = v.clone();
+                }
+            })
+            .or_insert_with(|| v.clone());
+    }
+    other.retain(|v, _| newest.get(&group(v)) == Some(v));
+}
+
 pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Result<Value, Error> {
     let peek = ctx.db.peek().await;
     let mut best: BTreeMap<PackageId, BTreeMap<VersionString, Model<PackageVersionInfo>>> =
@@ -233,6 +255,11 @@ pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Resu
             package_best.insert(version.into(), info);
         } else {
             package_other.insert(version.into(), info);
+        }
+    }
+    if !params.all_revisions {
+        for (id, package_other) in &mut other {
+            hide_superseded_revisions(best.get(id), package_other);
         }
     }
     if let Some(id) = &params.id {

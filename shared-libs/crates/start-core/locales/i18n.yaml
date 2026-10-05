@@ -3490,6 +3490,13 @@ help.arg.gua-wan:
   fr_FR: "Exposer la GUA IPv6 au WAN (false = LAN uniquement)"
   pl_PL: "Udostępnij GUA IPv6 w sieci WAN (false = tylko LAN)"
 
+help.arg.all-revisions:
+  en_US: "Include superseded revisions of each upstream version"
+  de_DE: "Überholte Revisionen jeder Upstream-Version einschließen"
+  es_ES: "Incluir revisiones reemplazadas de cada versión upstream"
+  fr_FR: "Inclure les révisions remplacées de chaque version amont"
+  pl_PL: "Uwzględnij zastąpione rewizje każdej wersji upstream"
+
 help.arg.allow-model-mismatch:
   en_US: "Allow database model mismatch"
   de_DE: "Datenbankmodell-Abweichung erlauben"
