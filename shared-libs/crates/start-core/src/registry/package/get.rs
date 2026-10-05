@@ -218,18 +218,14 @@ fn hide_superseded_revisions(
     other: &mut BTreeMap<VersionString, Model<PackageVersionInfo>>,
 ) {
     let group = |v: &VersionString| (v.flavor().map(str::to_owned), v.upstream().clone());
-    let mut newest: BTreeMap<_, VersionString> = BTreeMap::new();
-    for v in best.into_iter().flat_map(|b| b.keys()).chain(other.keys()) {
-        newest
-            .entry(group(v))
-            .and_modify(|n| {
-                if **v > **n {
-                    *n = v.clone();
-                }
-            })
-            .or_insert_with(|| v.clone());
-    }
-    other.retain(|v, _| newest.get(&group(v)) == Some(v));
+    let mut seen: BTreeSet<_> = best.into_iter().flat_map(|b| b.keys()).map(group).collect();
+    let newest: BTreeSet<VersionString> = other
+        .keys()
+        .rev()
+        .filter(|v| seen.insert(group(v)))
+        .cloned()
+        .collect();
+    other.retain(|v, _| newest.contains(v));
 }
 
 pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Result<Value, Error> {
@@ -633,6 +629,121 @@ pub async fn cli_download(
     println!("{}", t!("registry.package.get.download-complete"));
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn versions(entries: &[&str]) -> BTreeMap<VersionString, Model<PackageVersionInfo>> {
+        entries
+            .iter()
+            .map(|v| (v.parse().unwrap(), json!({ "releaseNotes": v }).into()))
+            .collect()
+    }
+
+    fn assert_versions(
+        actual: BTreeMap<VersionString, Model<PackageVersionInfo>>,
+        expected: &[&str],
+    ) {
+        let values = |entries: BTreeMap<VersionString, Model<PackageVersionInfo>>| {
+            entries
+                .into_iter()
+                .map(|(version, info)| (version, Value::from(info)))
+                .collect::<BTreeMap<_, _>>()
+        };
+        assert_eq!(values(actual), values(versions(expected)));
+    }
+
+    #[test]
+    fn hide_superseded_revisions_orders_revisions_numerically() {
+        let mut other = versions(&["1.0.0:2", "1.0.0:10"]);
+
+        hide_superseded_revisions(None, &mut other);
+
+        assert_versions(other, &["1.0.0:10"]);
+    }
+
+    #[test]
+    fn hide_superseded_revisions_keeps_flavors_and_upstreams_separate() {
+        let mut other = versions(&[
+            "1.0.0:2",
+            "1.0.0:10",
+            "2.0.0:1",
+            "2.0.0:3",
+            "#alpha:1.0.0:1",
+            "#alpha:1.0.0:2",
+            "#beta:1.0.0:1",
+            "#alpha:1.0.0-rc.1:1",
+            "#alpha:1.0.0-rc.1:2",
+        ]);
+
+        hide_superseded_revisions(None, &mut other);
+
+        assert_versions(
+            other,
+            &[
+                "1.0.0:10",
+                "2.0.0:3",
+                "#alpha:1.0.0:2",
+                "#beta:1.0.0:1",
+                "#alpha:1.0.0-rc.1:2",
+            ],
+        );
+    }
+
+    #[test]
+    fn hide_superseded_revisions_uses_best_without_changing_it() {
+        let best = versions(&["2.0.0:10", "#alpha:1.0.0:10"]);
+        let mut other = versions(&[
+            "2.0.0:2",
+            "1.0.0:2",
+            "1.0.0:10",
+            "#alpha:1.0.0:2",
+            "#beta:1.0.0:2",
+        ]);
+
+        hide_superseded_revisions(Some(&best), &mut other);
+
+        assert_versions(other, &["1.0.0:10", "#beta:1.0.0:2"]);
+        assert_versions(best, &["2.0.0:10", "#alpha:1.0.0:10"]);
+    }
+
+    #[test]
+    fn hide_superseded_revisions_accepts_empty_maps() {
+        let best = BTreeMap::new();
+        let mut other = BTreeMap::new();
+
+        hide_superseded_revisions(None, &mut other);
+        assert!(other.is_empty());
+        hide_superseded_revisions(Some(&best), &mut other);
+        assert!(other.is_empty());
+        hide_superseded_revisions(Some(&versions(&["1.0.0:10"])), &mut other);
+        assert!(other.is_empty());
+    }
+
+    #[test]
+    fn all_revisions_json_defaults_to_false_and_accepts_true() {
+        for input in [json!({}), json!({ "allRevisions": false })] {
+            let params: GetPackageParams = from_value(input).unwrap();
+            assert!(!params.all_revisions);
+            assert_eq!(to_value(&params).unwrap()["allRevisions"], json!(false));
+        }
+
+        let params: GetPackageParams = from_value(json!({ "allRevisions": true })).unwrap();
+        assert!(params.all_revisions);
+        assert_eq!(to_value(&params).unwrap()["allRevisions"], json!(true));
+    }
+
+    #[test]
+    fn all_revisions_cli_defaults_to_false_and_supports_flag() {
+        let params = GetPackageParams::try_parse_from(["get"]).unwrap();
+        assert!(!params.all_revisions);
+        assert_eq!(params.other_versions, Some(PackageDetailLevel::None));
+
+        let params = GetPackageParams::try_parse_from(["get", "--all-revisions"]).unwrap();
+        assert!(params.all_revisions);
+    }
 }
 
 #[test]
