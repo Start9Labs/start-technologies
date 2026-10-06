@@ -439,11 +439,7 @@ pub async fn set_dependencies(
                 .as_idx_mut(id)
                 .or_not_found(id)?;
             let deps = CurrentDependencies(deps);
-            let blocked = pde.has_blocking_task(id)?;
             pde.as_current_dependencies_mut().ser(&deps)?;
-            if !blocked && pde.has_blocking_task(id)? {
-                pde.as_status_info_mut().stop()?;
-            }
             Ok(())
         })
         .await

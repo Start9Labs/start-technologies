@@ -346,13 +346,9 @@ impl Service {
                 for (action_id, input) in &action_input {
                     for (_, pde) in db.as_public_mut().as_package_data_mut().as_entries_mut()? {
                         pde.as_tasks_mut().mutate(|tasks| {
-                            Ok(update_tasks(tasks, service_id, action_id, input, false))
+                            update_tasks(tasks, service_id, action_id, input, false);
+                            Ok(())
                         })?;
-                    }
-                }
-                for (id, pde) in db.as_public_mut().as_package_data_mut().as_entries_mut()? {
-                    if pde.has_blocking_task(&id)? {
-                        pde.as_status_info_mut().stop()?;
                     }
                 }
                 Ok(())
@@ -749,9 +745,6 @@ impl Service {
                     });
                     Ok(())
                 })?;
-                if entry.has_blocking_task(&manifest.id)? {
-                    entry.as_status_info_mut().stop()?;
-                }
                 entry
                     .as_state_info_mut()
                     .ser(&PackageState::Installed(InstalledState { manifest }))?;
