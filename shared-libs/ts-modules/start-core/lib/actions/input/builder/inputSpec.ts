@@ -52,7 +52,7 @@ function deepPartial(schema: z.ZodType): any {
     case 'intersection':
       return z.intersection(deepPartial(def.left), deepPartial(def.right))
     case 'record':
-      return z.record(def.keyType, deepPartial(def.valueType))
+      return z.partialRecord(def.keyType, deepPartial(def.valueType))
     case 'tuple':
       return z.tuple(def.items.map(deepPartial))
     case 'lazy':

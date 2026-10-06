@@ -131,7 +131,7 @@ export function setupPrimaryUrl<Id extends T.ActionId>(
   const resolve = ([stored, { urls, preferred }]: [Stored, Offered]) =>
     fallback
       ? (follow(stored, urls) ?? preferred ?? (stored || null))
-      : (follow(stored, urls) ?? (urls.length ? null : stored || null))
+      : (follow(stored, urls) ?? null)
 
   const action = Action.withInput(
     id,

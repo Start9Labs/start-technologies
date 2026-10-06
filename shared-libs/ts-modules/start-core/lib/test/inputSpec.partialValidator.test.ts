@@ -67,6 +67,20 @@ describe('InputSpec.partialValidator', () => {
     ).toThrow()
   })
 
+  test('accepts a subset of enum record keys and validates supplied entries', () => {
+    const record = InputSpec.of({
+      raw: Value.hidden(z.record(z.enum(['a', 'b']), z.string())),
+    })
+    expect(record.partialValidator.parse({ raw: { a: 'kept' } })).toEqual({
+      raw: { a: 'kept' },
+    })
+    expect(record.partialValidator.parse({ raw: {} })).toEqual({ raw: {} })
+    expect(() => record.partialValidator.parse({ raw: { a: 1 } })).toThrow()
+    expect(() =>
+      record.partialValidator.parse({ raw: { c: 'unknown' } }),
+    ).toThrow()
+  })
+
   test('reaches inside a .catch() and keeps its fallback', () => {
     const caught = InputSpec.of({
       raw: Value.hidden(

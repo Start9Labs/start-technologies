@@ -323,6 +323,30 @@ describe('setupPrimaryUrl', () => {
       expect(await p.primaryUrl.bestUsable(p.effects).once()).toBeNull()
     })
 
+    test.each([null, []] as (T.HostnameInfo[] | null)[])(
+      'without a fallback, is null when the host has no offers (%j)',
+      async available => {
+        const p = setup(available, 'http://box.local:8080', {
+          fallback: false,
+        })
+        expect(await p.primaryUrl.bestUsable(p.effects).once()).toBeNull()
+      },
+    )
+
+    test.each([
+      { filter: { exclude: { kind: 'mdns' as const } } },
+      { ssl: true },
+    ])(
+      'without a fallback, is null when options exclude all offers (%j)',
+      async options => {
+        const p = setup([local], 'http://box.local:8080', {
+          ...options,
+          fallback: false,
+        })
+        expect(await p.primaryUrl.bestUsable(p.effects).once()).toBeNull()
+      },
+    )
+
     test('without a fallback, still follows the stored hostname', async () => {
       const p = setup([lan, local], 'http://box.local:9090', {
         fallback: false,
