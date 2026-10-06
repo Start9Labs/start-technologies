@@ -231,6 +231,13 @@ first matching rule wins.
 UDP-only, so no TCP variant is needed (TCP DNS's 2-byte length prefix plus a
 variable TCP header length makes the offset non-constant anyway).
 
+> **Amended in review: TCP is diverted whole.** Unsigned updates must arrive
+> over TCP (see the policy amendment below), and a SYN carries no opcode, so
+> two more rules redirect every TCP connection to the router's port 53 to the
+> same ports, split the same way by `iifname "wg_*"`. The daemon relays
+> non-UPDATE messages to the profile's dnsmasq. The listeners run for every
+> profile whether or not any device holds the permission.
+
 Every clause earns its place:
 
 - **`fib daddr type local` confines the divert to UPDATEs addressed to the
@@ -639,6 +646,11 @@ visibility, so injection must create one. Three parts:
   With an empty `server` list and `noresolv` unset the instance falls back to
   `/tmp/resolv.conf.d/resolv.conf.auto`, the same upstreams the main instance
   uses, so ordinary queries behave identically.
+
+  > **Amended in implementation: the predicate is box-wide.** A device's
+  > profile is a runtime fact (its lease or neighbor entry), not something
+  > the UCI rewrite can read, so `has_dns_injection(cfgs)` is true when any
+  > device holds the permission, and every profile gets its instance.
 
 - **Scope the new instance to its own interface, or it will serve every
   profile's DHCP.** A `config dhcp` pool with no `option instance` is picked up
