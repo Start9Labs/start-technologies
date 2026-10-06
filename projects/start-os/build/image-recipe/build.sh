@@ -233,15 +233,7 @@ Pin-Priority: -1
 EOF
 else
 cat > config/archives/backports.pref <<-EOF
-Package: linux-image-*
-Pin: release n=${IB_SUITE}-backports
-Pin-Priority: 500
-
-Package: linux-headers-*
-Pin: release n=${IB_SUITE}-backports
-Pin-Priority: 500
-
-Package: *nvidia*
+Package: linux-image-* linux-headers-* linux-base *nvidia*
 Pin: release n=${IB_SUITE}-backports
 Pin-Priority: 500
 EOF
