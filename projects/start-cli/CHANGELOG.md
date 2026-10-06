@@ -9,6 +9,14 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [2.2.1]
+
+### Fixed
+
+- **WireGuard configs can use a separate endpoint on NAT'd StartTunnel hosts.**
+  `tunnel device show-config --endpoint-ip` supplies the IPv4 or IPv6 endpoint
+  independently of the local WAN assignment. Requires StartTunnel 1.3.2 or later.
+
 ## [2.2.0]
 
 ### Security
