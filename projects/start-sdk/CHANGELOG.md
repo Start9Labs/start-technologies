@@ -23,6 +23,9 @@
   spec does not declare**, at every level the spec builds with
   `z.looseObject`, and a `z.discriminatedUnion` in a hidden field keeps the
   variant its discriminator names. Drop a `z.deepLoose()` wrapped around it
+- **`setupPrimaryUrl`'s task exists only while the URL is unresolved**, so
+  updating a running service to a release that adds a critical one leaves it
+  running
 - **A YAML file model keeps custom tags that parse to class instances**, such
   as `!include` and `!secret`, when it writes
 - **`setupPrimaryUrl` treats an empty stored URL as unset**

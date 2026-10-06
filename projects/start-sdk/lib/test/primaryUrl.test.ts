@@ -112,6 +112,7 @@ const setup = (
   let rows = available
   const hostCallbacks: { holder: Holder; callback: () => void }[] = []
   const createTask = jest.fn(async (_: unknown) => null)
+  const clearTasks = jest.fn(async (_: unknown) => null)
   const set = jest.fn((effects: T.Effects, url: string) =>
     file.merge(effects, { primaryUrl: url }),
   )
@@ -129,7 +130,7 @@ const setup = (
         if (callback) hostCallbacks.push({ holder, callback })
         return rows && host(rows)
       },
-      action: { createTask },
+      action: { createTask, clearTasks },
     }
     holder.leaveFns.push(() => {
       effects.constRetry = undefined
@@ -168,6 +169,7 @@ const setup = (
     effects,
     makeEffects,
     createTask,
+    clearTasks,
     set,
     primaryUrl,
     stored,
@@ -446,7 +448,7 @@ describe('setupPrimaryUrl', () => {
     ) => p.primaryUrl.setupTask(...args).init(p.effects, null)
 
     test('declares the addresses the stored URL must be one of', async () => {
-      const p = setup([lan, local, onion], 'http://box.local:8080')
+      const p = setup([lan, local, onion], 'http://gone.example:8080')
       await run(p, 'important', { reason: 'Choose a URL' })
       expect(p.createTask).toHaveBeenCalledWith({
         actionId: 'set-primary-url',
@@ -505,6 +507,33 @@ describe('setupPrimaryUrl', () => {
           input: { kind: 'partial', accept: [], set: {} },
         }),
       )
+    })
+
+    test('clears the task while the stored URL resolves', async () => {
+      const p = setup([lan, local], 'http://box.local:8080')
+      await run(p, 'critical', { replayId: 'primary-url' })
+      expect(p.clearTasks).toHaveBeenCalledWith({ only: ['primary-url'] })
+      expect(p.createTask).not.toHaveBeenCalled()
+    })
+
+    test('clears the default replay id', async () => {
+      const p = setup([lan, local], 'http://box.local:9090')
+      await run(p, 'critical')
+      expect(p.clearTasks).toHaveBeenCalledWith({
+        only: ['testOutput:set-primary-url'],
+      })
+    })
+
+    test('re-runs when the stored URL changes', async () => {
+      const p = setup([lan, local])
+      const constRetry = jest.fn()
+      await p.primaryUrl
+        .setupTask('critical')
+        .init(p.makeEffects(constRetry), null)
+      expect(p.createTask).toHaveBeenCalledTimes(1)
+      await p.set(p.effects, 'http://box.local:8080')
+      await tick()
+      expect(constRetry).toHaveBeenCalledTimes(1)
     })
 
     test('re-runs when the addresses change', async () => {
