@@ -3,7 +3,7 @@ edition = "2024"
 license = "MIT"
 name = "start-os"
 repository = "https://github.com/Start9Labs/start-technologies"
-# Root package.json owns the OS version; Cargo carries a SemVer-compatible label.
+# Root package.json owns the OS version; this SemVer label cannot express a fourth segment.
 version = "0.4.0-rev.3" # VERSION_BUMP
 
 [[bin]]

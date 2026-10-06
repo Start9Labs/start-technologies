@@ -260,7 +260,7 @@ export const toggleRegistrations = sdk.Action.withoutInput(
     return {
       name: allowed ? i18n('Disable Registrations') : i18n('Enable Registrations'),
       description: allowed ? i18n('Registrations are currently enabled. Run this action to disable them.') : i18n('Registrations are currently disabled. Run this action to enable them.'),
-      warning: allowed ? null : i18n('Anyone with your URL will be able to create an account.'),
+      warning: allowed ? i18n('New accounts can no longer be created. Existing accounts are unaffected.') : i18n('Anyone with your URL will be able to create an account.'),
       allowedStatuses: 'any',
       group: null,
       visibility: 'enabled',
@@ -367,6 +367,12 @@ password: Value.text({
 `default` also takes a plain string when you want a fixed literal. The same `RandomString` shape is what [`utils.getDefaultString`](recipe-admin-credentials.md#never-roll-your-own-password-rng) resolves in a `withoutInput` handler — between the two, package code never needs its own random-string generator.
 
 ## Conventions
+
+### Confirm Before a No-Input Action Changes State
+
+A no-input action runs on click, so one that changes state sets `warning`, and the UI asks the user to confirm first. That holds for a reversible toggle too: the point is to prevent unexpected execution, not only damage. The warning names what changes — what is replaced, stops working, restarts or becomes exposed — never just "Are you sure?". An action with input needs no warning, since the form is the confirmation, and an action that only reports (credentials, node info) needs neither.
+
+A create-or-update action, such as setting an admin password or token, warns only when it replaces an existing value and sets `warning: null` on first creation, as [Action Without Input](#action-without-input) shows.
 
 ### Wrap User-Facing Strings in `i18n()`
 

@@ -1,6 +1,1 @@
-{
-  "trailingComma": "all",
-  "tabWidth": 2,
-  "semi": false,
-  "singleQuote": true
-}
+"@start9labs/start-sdk/prettier.config.json"

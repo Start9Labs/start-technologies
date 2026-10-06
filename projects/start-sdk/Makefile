@@ -56,10 +56,10 @@ check: node_modules
 	npm run check
 
 fmt: node_modules
-	npx prettier "**/*.ts" --write
+	npx prettier --config ../../.prettierrc.json "**/*.ts" --write
 
 check-fmt: node_modules
-	npx prettier "**/*.ts" --check
+	npx prettier --config ../../.prettierrc.json "**/*.ts" --check
 
 # Touch after install: npm may leave these no newer than their prereqs, so without
 # it make reruns npm every build (node_modules was also .PHONY, forcing npm ci always).

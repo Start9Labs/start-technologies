@@ -27,6 +27,15 @@ const onion = row('abc.onion', {
   info: null,
 })
 const bridge = row('10.0.3.1', { kind: 'ipv4', gateway: 'lxcbr0' })
+const domain = (ssl: boolean): T.HostnameInfo => ({
+  ...row(
+    'app.example.com',
+    { kind: 'public-domain', gateway: 'eth0' },
+    ssl ? 443 : 80,
+    ssl,
+  ),
+  public: true,
+})
 
 const host = (available: T.HostnameInfo[]): T.Host => ({
   bindings: {
@@ -86,12 +95,20 @@ class Holder {
   }
 }
 
-const setup = (available: T.HostnameInfo[] | null, chosen?: string) => {
+const setup = (
+  available: T.HostnameInfo[] | null,
+  chosen?: string,
+  options: Pick<
+    Parameters<typeof sdk.setupPrimaryUrl>[0],
+    'filter' | 'ssl' | 'fallback'
+  > = {},
+) => {
   const file = FileHelper.json(
     join(mkdtempSync(join(dir, 'case-')), 'store.json'),
     shape,
   )
-  if (chosen) writeFileSync(file.path, JSON.stringify({ primaryUrl: chosen }))
+  if (chosen !== undefined)
+    writeFileSync(file.path, JSON.stringify({ primaryUrl: chosen }))
   let rows = available
   const hostCallbacks: { holder: Holder; callback: () => void }[] = []
   const createTask = jest.fn(async (_: unknown) => null)
@@ -136,9 +153,10 @@ const setup = (available: T.HostnameInfo[] | null, chosen?: string) => {
     field: { name: 'URL', description: null },
     get: file.read(s => s.primaryUrl),
     set,
+    ...options,
   })
   const stored = () =>
-    chosen || set.mock.calls.length
+    chosen !== undefined || set.mock.calls.length
       ? JSON.parse(readFileSync(file.path, 'utf-8')).primaryUrl
       : undefined
   const changeRows = (r: T.HostnameInfo[]) => {
@@ -190,6 +208,43 @@ describe('setupPrimaryUrl', () => {
       expect(input.value).toEqual({ url: 'https://app.example.com' })
     })
 
+    test('preselects a public domain over .local, HTTPS first', async () => {
+      const p = setup([lan, local, domain(false), domain(true)])
+      const input = await p.primaryUrl.action.getInput({
+        effects: p.effects,
+        prefill: null,
+      })
+      expect((input.spec as any).url.default).toBe('https://app.example.com')
+    })
+
+    test('preselects nothing without a fallback', async () => {
+      const p = setup([lan, local], undefined, { fallback: false })
+      const input = await p.primaryUrl.action.getInput({
+        effects: p.effects,
+        prefill: null,
+      })
+      expect((input.spec as any).url.default).toBeNull()
+      expect(input.value).toEqual({ url: undefined })
+    })
+
+    test('offers only what the filter and ssl leave', async () => {
+      const p = setup(
+        [lan, local, onion, domain(false), domain(true)],
+        undefined,
+        {
+          filter: { exclude: { kind: 'ipv4' } },
+          ssl: true,
+        },
+      )
+      const input = await p.primaryUrl.action.getInput({
+        effects: p.effects,
+        prefill: null,
+      })
+      expect(Object.keys((input.spec as any).url.values)).toEqual([
+        'https://app.example.com',
+      ])
+    })
+
     test('stores the chosen URL through set', async () => {
       const p = setup([lan, local, onion])
       await p.primaryUrl.action.getInput({ effects: p.effects, prefill: null })
@@ -237,6 +292,65 @@ describe('setupPrimaryUrl', () => {
 
     test('is the .local address when nothing is stored', async () => {
       const p = setup([onion, lan, local])
+      expect(await p.primaryUrl.bestUsable(p.effects).once()).toBe(
+        'http://box.local:8080',
+      )
+    })
+
+    test('treats an empty stored URL as unset', async () => {
+      const p = setup([onion, lan, local], '')
+      expect(await p.primaryUrl.bestUsable(p.effects).once()).toBe(
+        'http://box.local:8080',
+      )
+    })
+
+    test('is a public domain over .local when nothing is stored', async () => {
+      const p = setup([lan, local, domain(false)])
+      expect(await p.primaryUrl.bestUsable(p.effects).once()).toBe(
+        'http://app.example.com',
+      )
+    })
+
+    test('without a fallback, is null while nothing is stored', async () => {
+      const p = setup([lan, local], '', { fallback: false })
+      expect(await p.primaryUrl.bestUsable(p.effects).once()).toBeNull()
+    })
+
+    test('without a fallback, is null once the stored hostname is gone', async () => {
+      const p = setup([lan, local], 'https://app.example.com', {
+        fallback: false,
+      })
+      expect(await p.primaryUrl.bestUsable(p.effects).once()).toBeNull()
+    })
+
+    test.each([null, []] as (T.HostnameInfo[] | null)[])(
+      'without a fallback, is null when the host has no offers (%j)',
+      async available => {
+        const p = setup(available, 'http://box.local:8080', {
+          fallback: false,
+        })
+        expect(await p.primaryUrl.bestUsable(p.effects).once()).toBeNull()
+      },
+    )
+
+    test.each([
+      { filter: { exclude: { kind: 'mdns' as const } } },
+      { ssl: true },
+    ])(
+      'without a fallback, is null when options exclude all offers (%j)',
+      async options => {
+        const p = setup([local], 'http://box.local:8080', {
+          ...options,
+          fallback: false,
+        })
+        expect(await p.primaryUrl.bestUsable(p.effects).once()).toBeNull()
+      },
+    )
+
+    test('without a fallback, still follows the stored hostname', async () => {
+      const p = setup([lan, local], 'http://box.local:9090', {
+        fallback: false,
+      })
       expect(await p.primaryUrl.bestUsable(p.effects).once()).toBe(
         'http://box.local:8080',
       )
@@ -365,10 +479,32 @@ describe('setupPrimaryUrl', () => {
       )
     })
 
-    test('raises nothing while the interface has no addresses', async () => {
+    test('pre-fills nothing without a fallback', async () => {
+      const p = setup([lan, local], undefined, { fallback: false })
+      await run(p, 'critical')
+      expect(p.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          input: {
+            kind: 'partial',
+            accept: [
+              { url: 'http://192.168.1.10:8080' },
+              { url: 'http://box.local:8080' },
+            ],
+            set: {},
+          },
+        }),
+      )
+    })
+
+    test('raises a task no input satisfies while the interface has no addresses', async () => {
       const p = setup(null, 'http://box.local:8080')
-      await run(p, 'important')
-      expect(p.createTask).not.toHaveBeenCalled()
+      await run(p, 'critical')
+      expect(p.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          severity: 'critical',
+          input: { kind: 'partial', accept: [], set: {} },
+        }),
+      )
     })
 
     test('re-runs when the addresses change', async () => {

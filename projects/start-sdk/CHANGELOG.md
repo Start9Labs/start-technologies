@@ -1,5 +1,46 @@
 # Changelog
 
+## 3.0.3 — StartOS 0.4.0.2
+
+### Added
+
+- **`setupPrimaryUrl` takes `filter`, `ssl` and `fallback`.** `filter` and
+  `ssl` narrow the addresses offered. `fallback: false` starts the form and
+  the task with nothing selected, and makes `bestUsable` `null` while nothing
+  is stored or the stored hostname is gone
+
+### Changed
+
+- **`setupPrimaryUrl` prefers a public domain.** With nothing stored, or the
+  stored hostname gone, the form, the task and `bestUsable` use a public
+  domain, HTTPS first, ahead of the `.local` address
+- **`setupPrimaryUrl`'s task is raised even when the interface offers no
+  address**, and stays active until one is offered and chosen
+
+### Fixed
+
+- **A file model built on an `InputSpec`'s `partialValidator` keeps keys the
+  spec does not declare**, at every level the spec builds with
+  `z.looseObject`, and a `z.discriminatedUnion` in a hidden field keeps the
+  variant its discriminator names. Drop a `z.deepLoose()` wrapped around it
+- **A YAML file model keeps custom tags that parse to class instances**, such
+  as `!include` and `!secret`, when it writes
+- **`setupPrimaryUrl` treats an empty stored URL as unset**
+- **`i18n()` inserts a parameter value verbatim, at every occurrence.** A
+  value containing `$&`, `` $` `` or `$'` was rewritten, and a placeholder
+  used twice was filled only once
+
+## 3.0.2 — StartOS 0.4.0.2
+
+### Fixed
+
+- **A flavor switch records the exact version installed as the service's
+  data version**, so the receiving package's later migrations run. A range
+  recorded by an earlier switch is replaced by the current version at the
+  next initialization; the migrations it skipped are not replayed, so a
+  package that needs one of them on such an install has to do that work
+  outside a migration
+
 ## 3.0.1 — StartOS 0.4.0.2
 
 ### Changed
