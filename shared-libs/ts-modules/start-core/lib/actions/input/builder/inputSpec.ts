@@ -3,9 +3,64 @@ import { Value } from './value'
 import { _ } from '../../../util'
 import { Effects } from '../../../Effects'
 import { z } from '../../../zExport'
-import { zodDeepPartial } from 'zod-deep-partial'
 import { DeepPartial } from '../../../types'
 import { InputSpecTools, createInputSpecTools } from './inputSpecTools'
+
+/** Makes every key optional at every level; each object keeps its own unknown-key mode and a discriminated union its discriminator. */
+function deepPartial(schema: z.ZodType): any {
+  const def = (schema as any)._zod.def
+  switch (def.type) {
+    case 'optional':
+      return deepPartial(def.innerType).optional()
+    case 'nullable':
+      return deepPartial(def.innerType).nullable()
+    case 'default':
+      return deepPartial(def.innerType).default(def.defaultValue)
+    case 'prefault':
+      return deepPartial(def.innerType).prefault(def.defaultValue)
+    case 'catch':
+      return deepPartial(def.innerType).catch(def.catchValue)
+    case 'nonoptional':
+      return deepPartial(def.innerType).nonoptional()
+    case 'readonly':
+      return deepPartial(def.innerType).readonly()
+    case 'object': {
+      const shape = Object.fromEntries(
+        Object.entries(def.shape).map(([k, v]) => [
+          k,
+          deepPartial(v as z.ZodType).optional(),
+        ]),
+      )
+      const object = z.object(shape)
+      return def.catchall ? object.catchall(def.catchall) : object
+    }
+    case 'array':
+      return z.array(deepPartial(def.element))
+    case 'union': {
+      const options = def.options.map((o: z.ZodType) => {
+        const d = (o as any)._zod.def
+        if (!def.discriminator || d.type !== 'object') return deepPartial(o)
+        const partial = deepPartial(o)
+        return partial.extend({
+          [def.discriminator]: d.shape[def.discriminator],
+        })
+      })
+      return def.discriminator
+        ? z.discriminatedUnion(def.discriminator, options)
+        : z.union(options)
+    }
+    case 'intersection':
+      return z.intersection(deepPartial(def.left), deepPartial(def.right))
+    case 'record':
+      return z.record(def.keyType, deepPartial(def.valueType))
+    case 'tuple':
+      return z.tuple(def.items.map(deepPartial))
+    case 'lazy':
+      return z.lazy(() => deepPartial(def.getter()))
+    default:
+      return schema
+  }
+}
 
 /** Options passed to a lazy builder function when resolving dynamic form field values. */
 export type LazyBuildOptions<Type> = {
@@ -164,7 +219,7 @@ export class InputSpec<
   public _TYPE: Type = null as any as Type
   public _PARTIAL: DeepPartial<Type> = null as any as DeepPartial<Type>
   public readonly partialValidator: z.ZodType<DeepPartial<StaticValidatedAs>> =
-    zodDeepPartial(this.validator) as any
+    deepPartial(this.validator)
   /**
    * Builds the runtime form specification and combined Zod validator from this InputSpec's fields.
    *
