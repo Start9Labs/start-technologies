@@ -496,10 +496,15 @@ describe('setupPrimaryUrl', () => {
       )
     })
 
-    test('raises nothing while the interface has no addresses', async () => {
+    test('raises a task no input satisfies while the interface has no addresses', async () => {
       const p = setup(null, 'http://box.local:8080')
-      await run(p, 'important')
-      expect(p.createTask).not.toHaveBeenCalled()
+      await run(p, 'critical')
+      expect(p.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          severity: 'critical',
+          input: { kind: 'partial', accept: [], set: {} },
+        }),
+      )
     })
 
     test('re-runs when the addresses change', async () => {

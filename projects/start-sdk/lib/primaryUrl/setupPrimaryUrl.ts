@@ -173,7 +173,6 @@ export function setupPrimaryUrl<Id extends T.ActionId>(
     setupTask: (severity, options) =>
       setupOnInit(async effects => {
         const { urls, preferred } = await offered(effects).const()
-        if (!urls.length) return
         await createTask<ActionInfo<T.ActionId, { url: string }>>({
           effects,
           packageId,
@@ -185,7 +184,7 @@ export function setupPrimaryUrl<Id extends T.ActionId>(
             input: {
               kind: 'partial',
               accept: urls.map(url => ({ url })),
-              set: fallback ? { url: preferred } : {},
+              set: fallback && preferred ? { url: preferred } : {},
             },
           },
         })

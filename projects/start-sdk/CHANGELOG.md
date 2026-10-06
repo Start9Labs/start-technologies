@@ -14,6 +14,8 @@
 - **`setupPrimaryUrl` prefers a public domain.** With nothing stored, or the
   stored hostname gone, the form, the task and `bestUsable` use a public
   domain, HTTPS first, ahead of the `.local` address
+- **`setupPrimaryUrl`'s task is raised even when the interface offers no
+  address**, and stays active until one is offered and chosen
 
 ### Fixed
 
