@@ -404,6 +404,48 @@ impl IoFormat {
     }
 }
 
+#[cfg(test)]
+mod yaml_tests {
+    use imbl_value::Value;
+
+    use super::IoFormat;
+
+    #[tokio::test]
+    async fn yaml_io_preserves_configuration_values() {
+        let input = b"host: https://server.local\nport: 443\npassword: 'null'\nenabled: true\noptional: null\npackages:\n  - id: bitcoind\n    version: '28.0.0:1'\nmessage: |\n  first line\n  second line\n";
+        let expected: Value = serde_json::from_str(
+            r#"{"host":"https://server.local","port":443,"password":"null","enabled":true,"optional":null,"packages":[{"id":"bitcoind","version":"28.0.0:1"}],"message":"first line\nsecond line\n"}"#,
+        )
+        .unwrap();
+        let format = IoFormat::Yaml;
+        assert_eq!(format.from_slice::<Value>(input).unwrap(), expected);
+        assert_eq!(
+            format.from_reader::<_, Value>(&input[..]).unwrap(),
+            expected
+        );
+        assert_eq!(
+            format
+                .from_async_reader::<_, Value>(&input[..])
+                .await
+                .unwrap(),
+            expected
+        );
+        let encoded = format.to_vec(&expected).unwrap();
+        assert_eq!(format.from_slice::<Value>(&encoded).unwrap(), expected);
+        let mut written = Vec::new();
+        format.to_writer(&mut written, &expected).unwrap();
+        assert_eq!(written, encoded);
+    }
+
+    #[test]
+    fn yaml_rejects_invalid_configuration() {
+        for input in [b"key: [unterminated".as_slice(), b"key: *missing_anchor\n"] {
+            assert!(IoFormat::Yaml.from_slice::<Value>(input).is_err());
+            assert!(IoFormat::Yaml.from_reader::<_, Value>(input).is_err());
+        }
+    }
+}
+
 pub fn display_serializable<T: Serialize>(format: IoFormat, result: T) -> Result<(), Error> {
     format.to_writer(std::io::stdout(), &result)?;
     if format == IoFormat::JsonPretty {

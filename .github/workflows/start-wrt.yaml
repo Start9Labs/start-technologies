@@ -3,7 +3,7 @@ name: start-wrt
 # CI-UNVALIDATED: the make targets these jobs wrap are proven locally (riscv
 # cross-build, image build, sysupgrade OTA), but no job here has been run yet.
 # Validate `compile` first, then `image` (build-image=true), then `deploy` (S3
-# upload + beta-registry register). See projects/start-wrt/CONTRIBUTING.md.
+# upload + beta-registry register). See projects/start-wrt/AGENTS.md.
 
 on:
   workflow_call:

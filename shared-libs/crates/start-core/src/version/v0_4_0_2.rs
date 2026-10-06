@@ -1,6 +1,9 @@
+use std::path::Path;
+
 use exver::VersionRange;
 
 use super::v0_3_5::V0_3_0_COMPAT;
+use super::v0_3_6_alpha_0::migrated_id_str;
 use super::{VersionT, v0_4_0_1};
 use crate::hostname::repair_hostname;
 use crate::prelude::*;
@@ -10,6 +13,7 @@ lazy_static::lazy_static! {
 }
 
 const UI_PORT: u64 = 80;
+const TOR_MIGRATION_DIR: &str = "/media/startos/data/package-data/volumes/tor/data/startos";
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Version;
@@ -19,7 +23,7 @@ impl VersionT for Version {
     type PreUpRes = ();
 
     async fn pre_up(self) -> Result<Self::PreUpRes, Error> {
-        Ok(())
+        recover_renamed_onion_addresses(Path::new(TOR_MIGRATION_DIR)).await
     }
     fn semver(self) -> exver::Version {
         V0_4_0_2.clone()
@@ -28,7 +32,7 @@ impl VersionT for Version {
         &V0_3_0_COMPAT
     }
     fn migration_revision(self) -> usize {
-        2
+        4
     }
     #[instrument(skip_all)]
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
@@ -47,6 +51,7 @@ impl VersionT for Version {
                 .unwrap_or(Value::Null);
         });
         repair_unusable_hostname(db);
+        default_lan_enabled(db);
         Ok(Value::Null)
     }
     fn down(self, db: &mut Value) -> Result<(), Error> {
@@ -63,23 +68,7 @@ impl VersionT for Version {
     }
 }
 
-fn for_each_alpn(db: &mut Value, mut f: impl FnMut(&mut Value)) {
-    let mut visit = |host: &mut Value| {
-        let Some(bindings) = host.get_mut("bindings").and_then(|b| b.as_object_mut()) else {
-            return;
-        };
-        for (_, binding) in bindings.iter_mut() {
-            let Some(alpn) = binding
-                .get_mut("options")
-                .and_then(|o| o.get_mut("addSsl"))
-                .and_then(|s| s.get_mut("alpn"))
-                .filter(|a| !a.is_null())
-            else {
-                continue;
-            };
-            f(alpn);
-        }
-    };
+fn for_each_host(db: &mut Value, mut visit: impl FnMut(&mut Value)) {
     if let Some(host) = db
         .get_mut("public")
         .and_then(|p| p.get_mut("serverInfo"))
@@ -101,6 +90,42 @@ fn for_each_alpn(db: &mut Value, mut f: impl FnMut(&mut Value)) {
             }
         }
     }
+}
+
+fn for_each_alpn(db: &mut Value, mut f: impl FnMut(&mut Value)) {
+    for_each_host(db, |host| {
+        let Some(bindings) = host.get_mut("bindings").and_then(|b| b.as_object_mut()) else {
+            return;
+        };
+        for (_, binding) in bindings.iter_mut() {
+            let Some(alpn) = binding
+                .get_mut("options")
+                .and_then(|o| o.get_mut("addSsl"))
+                .and_then(|s| s.get_mut("alpn"))
+                .filter(|a| !a.is_null())
+            else {
+                continue;
+            };
+            f(alpn);
+        }
+    });
+}
+
+fn default_lan_enabled(db: &mut Value) {
+    for_each_host(db, |host| {
+        for binds in ["bindings", "bindingRanges"] {
+            let Some(binds) = host.get_mut(binds).and_then(|b| b.as_object_mut()) else {
+                continue;
+            };
+            for (_, bind) in binds.iter_mut() {
+                if let Some(addresses) = bind.get_mut("addresses").and_then(|a| a.as_object_mut()) {
+                    if !addresses.contains_key("lanEnabled") {
+                        addresses.insert("lanEnabled".into(), Value::Array(Default::default()));
+                    }
+                }
+            }
+        }
+    });
 }
 
 fn server_info_mut(db: &mut Value) -> Option<&mut imbl_value::InOMap<InternedString, Value>> {
@@ -166,6 +191,55 @@ fn title_case(hostname: &str) -> String {
             }
         })
         .collect()
+}
+
+async fn recover_renamed_onion_addresses(dir: &Path) -> Result<(), Error> {
+    let handoff = dir.join("onion-migration.json");
+    let (raw, imported) = if let Some(raw) =
+        crate::util::io::maybe_read_file_to_string(&handoff).await?
+    {
+        (raw, false)
+    } else if let Some(raw) =
+        crate::util::io::maybe_read_file_to_string(dir.join(".onion-migration.json.bak")).await?
+    {
+        (raw, true)
+    } else {
+        return Ok(());
+    };
+    let mut migration = serde_json::from_str(&raw).with_kind(ErrorKind::Deserialization)?;
+    if !rename_onion_packages(&mut migration, imported) {
+        return Ok(());
+    }
+    let json = serde_json::to_string(&migration).with_kind(ErrorKind::Serialization)?;
+    crate::util::io::write_file_atomic(handoff, json).await
+}
+
+/// An imported handoff keeps only the entries under an old id, which Tor skipped.
+fn rename_onion_packages(migration: &mut serde_json::Value, imported: bool) -> bool {
+    let Some(addresses) = migration
+        .get_mut("addresses")
+        .and_then(|a| a.as_array_mut())
+    else {
+        return false;
+    };
+    let mut renamed = false;
+    addresses.retain_mut(|entry| {
+        let Some(id) = entry
+            .get("packageId")
+            .and_then(|p| p.as_str())
+            .map(str::to_owned)
+        else {
+            return !imported;
+        };
+        let migrated = migrated_id_str(&id);
+        if migrated == id {
+            return !imported;
+        }
+        entry["packageId"] = migrated.into();
+        renamed = true;
+        true
+    });
+    renamed
 }
 
 fn rehome_admin_ui_port(db: &mut Value) {
@@ -422,9 +496,59 @@ mod test {
     }
 
     #[test]
+    fn renames_pending_entries_and_reissues_only_skipped_ones() {
+        let handoff = serde_json::json!({ "addresses": [
+            { "packageId": "nostr", "hostId": "relay" },
+            { "packageId": "bitcoind", "hostId": "main" },
+        ] });
+
+        let mut pending = handoff.clone();
+        assert!(rename_onion_packages(&mut pending, false));
+        assert_eq!(
+            pending,
+            serde_json::json!({ "addresses": [
+                { "packageId": "nostr-rs-relay", "hostId": "relay" },
+                { "packageId": "bitcoind", "hostId": "main" },
+            ] })
+        );
+
+        let mut imported = handoff;
+        assert!(rename_onion_packages(&mut imported, true));
+        assert_eq!(
+            imported,
+            serde_json::json!({ "addresses": [
+                { "packageId": "nostr-rs-relay", "hostId": "relay" },
+            ] })
+        );
+        assert!(!rename_onion_packages(&mut imported, true));
+    }
+
+    #[test]
     fn rollback_names_a_server_whose_hostname_is_missing() {
         let mut db = json!({ "public": { "serverInfo": {} } });
         restore_server_name(&mut db);
         assert_eq!(db["public"]["serverInfo"]["name"], json!("StartOS"));
+    }
+
+    #[test]
+    fn lan_enabled_defaults_empty_and_keeps_a_stored_value() {
+        let kept = json!([["192.0.2.10", 8443]]);
+        let mut db = json!({ "public": { "packageData": { "pkg": { "hosts": { "main": {
+            "bindings": {
+                "80": { "addresses": {} },
+                "443": { "addresses": { "lanEnabled": kept.clone() } },
+            },
+            "bindingRanges": { "5000": { "addresses": {} } },
+        } } } } } });
+
+        default_lan_enabled(&mut db);
+
+        let host = &db["public"]["packageData"]["pkg"]["hosts"]["main"];
+        assert_eq!(host["bindings"]["80"]["addresses"]["lanEnabled"], json!([]));
+        assert_eq!(host["bindings"]["443"]["addresses"]["lanEnabled"], kept);
+        assert_eq!(
+            host["bindingRanges"]["5000"]["addresses"]["lanEnabled"],
+            json!([])
+        );
     }
 }

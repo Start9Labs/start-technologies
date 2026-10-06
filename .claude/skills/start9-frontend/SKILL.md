@@ -35,16 +35,16 @@ exactly what this skill exists to eliminate. Never guess a Taiga API: verify aga
 
 ## The fleet
 
-| App                    | Location                                        | Angular | Taiga | Zone                       | Theme                                | i18n               | Backend                                                          |
-| ---------------------- | ----------------------------------------------- | ------- | ----- | -------------------------- | ------------------------------------ | ------------------ | ---------------------------------------------------------------- |
-| StartOS `ui`           | `start-technologies` `projects/start-os/web/ui` | 22      | 5.11  | zone.js (zoneless pending) | dark, `provideTaiga({mode})`         | yes (shared dicts) | JSON-RPC + PatchDB push                                          |
-| `setup-wizard`         | `projects/start-os/web/setup-wizard`            | 22      | 5.11  | zone.js                    | dark                                 | yes (shared)       | JSON-RPC                                                         |
-| `start-tunnel`         | `projects/start-tunnel/web`                     | 22      | 5.11  | **zoneless**               | dark                                 | yes (local dicts)  | JSON-RPC + PatchDB                                               |
-| `start-wrt`            | `projects/start-wrt/web`                        | 22      | 5.11  | **zoneless**               | dual (`TUI_DARK_MODE`)               | yes (local dicts)  | JSON-RPC, own HTTP stack, 5s polling                             |
-| `brochure-marketplace` | `projects/brochure-marketplace`                 | 22      | 5.11  | zone.js (legacy)           | dark                                 | yes (shared)       | registry RPC direct                                              |
-| `start9-store`         | `ops/start9-store/web`                          | 22      | 5.22  | **zoneless**               | light                                | no                 | REST + Zod via `/api` BFF, **SSR**                               |
-| `ops-server`           | `ops/ops-server/web`                            | 22      | 5.14  | **zoneless**               | dark, `#07a4ff`, Montserrat          | no                 | REST `/_api`, same-origin Express                                |
-| `support-server`       | `ops/support-server/web`                        | 22      | 5.22  | **zoneless**               | dual (theme setting), StartOS tokens | yes (local dicts)  | Frappe `/api/method` + socket.io, same-origin; `web/mock` in dev |
+| App                    | Location                                        | Angular | Taiga | Zone                       | Theme                                | i18n               | Backend                                             |
+| ---------------------- | ----------------------------------------------- | ------- | ----- | -------------------------- | ------------------------------------ | ------------------ | --------------------------------------------------- |
+| StartOS `ui`           | `start-technologies` `projects/start-os/web/ui` | 22      | 5.11  | zone.js (zoneless pending) | dark, `provideTaiga({mode})`         | yes (shared dicts) | JSON-RPC + PatchDB push                             |
+| `setup-wizard`         | `projects/start-os/web/setup-wizard`            | 22      | 5.11  | zone.js                    | dark                                 | yes (shared)       | JSON-RPC                                            |
+| `start-tunnel`         | `projects/start-tunnel/web`                     | 22      | 5.11  | **zoneless**               | dark                                 | yes (local dicts)  | JSON-RPC + PatchDB                                  |
+| `start-wrt`            | `projects/start-wrt/web`                        | 22      | 5.11  | **zoneless**               | dual (`TUI_DARK_MODE`)               | yes (local dicts)  | JSON-RPC, own HTTP stack, 5s polling                |
+| `brochure-marketplace` | `projects/brochure-marketplace`                 | 22      | 5.11  | zone.js (legacy)           | dark                                 | yes (shared)       | registry RPC direct                                 |
+| `start9-store`         | `ops/start9-store/web`                          | 22      | 5.22  | **zoneless**               | light                                | no                 | REST + Zod via `/api` BFF, **SSR**                  |
+| `ops-server`           | `ops/ops-server/web`                            | 22      | 5.14  | **zoneless**               | dark, `#07a4ff`, Montserrat          | no                 | REST `/_api`, same-origin Express                   |
+| `support-server`       | `ops/support-server/portal/web`                 | 22      | 5.25  | **zoneless**               | dual (theme setting), StartOS tokens | yes (local dicts)  | RPC `/api` + socket.io, same-origin; `mock/` in dev |
 
 TypeScript ~6.0, rxjs ~7.8 everywhere. Taiga is **pinned exact** — bump only with the
 maintainer's blessing. Monorepo apps share **one Angular workspace rooted at the repo root**;
@@ -109,6 +109,9 @@ it with every Angular/Taiga bump (other repos' docs deliberately carry no versio
   `[(ngModel)]="signal"` for single ad-hoc fields.
 - **No icons inside switches.** `tuiSwitchOptionsProvider({ showIcons: false })` in the
   app config; a toggle is a track and a thumb.
+- **No autofocus on phones.** A focused field opens the keyboard over the page. Bind
+  `[tuiAutoFocus]="!isMobile"` with `isMobile = inject(WA_IS_MOBILE)`, the device rather than
+  the breakpoint.
 - **No cleaner on a select.** `[tuiTextfieldCleaner]="false"` on every `tui-textfield` holding
   an `input[tuiSelect]`; the default is on, and it also lets Backspace clear the choice.
 - **No route-level `providers`,** no resolvers, few guards (inline `canMatch` arrows).
@@ -147,9 +150,13 @@ ngOnInit                    setTimeout                    .subscribe( [outside a
 window. / document. / localStorage [outside infrastructure]
 providers: [ on a route     track $index [on entity lists]
 input<T | null>(null)       display: grid on :host of a wrapper around one child
+display: contents [on :host around one Taiga primitive]   outline: none
+[(tuiDropdownOpen)] [for a plain menu]                     .trim() [in a submit handler]
 ```
 
 Softer review questions: does a `computed` just reshape for the template (→ pipe)? Is a value
-named but used once (→ inline)? Is the same appearance/size attribute repeated (→ option
-provider)? Is there a second DOM for mobile (→ one DOM + `_mobile` CSS)? Did copy ship in
-Title Case (→ sentence case)? Is a Taiga API used that you didn't verify against the docs?
+named but used once (→ inline)? Does a field alias a service's signal or a method wrap its call
+(→ expose the service to the template)? Do form controls rename the API's fields (→ same names,
+no mapping)? Is the same appearance/size attribute repeated (→ option provider)? Is there a
+second DOM for mobile (→ one DOM + `_mobile` CSS)? Did copy ship in Title Case (→ sentence
+case)? Is a Taiga API used that you didn't verify against the docs?

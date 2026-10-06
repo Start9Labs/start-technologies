@@ -102,7 +102,6 @@ pub struct SniRoute {
 type OnChange = Box<dyn Fn(u16, bool) + Send + Sync>;
 
 /// Resolves a target's local subnet prefix for hairpin detection.
-/// `None` preserves the client source address.
 pub type LocalPrefix = Arc<dyn Fn(Ipv4Addr) -> BoxFuture<'static, Option<u8>> + Send + Sync>;
 
 /// A registration that can restore the exact prior bindings.
@@ -212,6 +211,7 @@ impl SniDemux {
         target: SocketAddrV4,
         lifetime_secs: Option<u32>,
     ) -> Result<SniRegistration, u8> {
+        let hostnames = &lowercased(hostnames);
         let now = Instant::now();
         let applied = Binding {
             target,
@@ -285,6 +285,7 @@ impl SniDemux {
         hostnames: &[String],
         target: SocketAddrV4,
     ) {
+        let hostnames = &lowercased(hostnames);
         let key = (ext_ip, ext_port);
         self.ports.mutate(|ports| {
             if let Some(entry) = ports.get_mut(&key) {
@@ -604,7 +605,6 @@ async fn handle_conn(
     let Some((target, transparent)) = selected else {
         return;
     };
-    // Same-subnet clients need the gateway source address for return traffic.
     let transparent = transparent && !is_hairpin(&local_prefix, *peer.ip(), *target.ip()).await;
     let mut upstream = if transparent {
         // A failed source-preserving connection must not fall back to gateway source.
@@ -635,8 +635,10 @@ async fn handle_conn(
     let _ = copy_bidirectional(&mut conn, &mut upstream).await;
 }
 
-/// Whether the peer and target share a known local subnet.
 async fn is_hairpin(local_prefix: &Option<LocalPrefix>, peer: Ipv4Addr, target: Ipv4Addr) -> bool {
+    if peer == target {
+        return true;
+    }
     let Some(resolve) = local_prefix else {
         return false;
     };
@@ -649,6 +651,10 @@ async fn is_hairpin(local_prefix: &Option<LocalPrefix>, peer: Ipv4Addr, target: 
 /// Whether `buf` holds at least one complete TLS handshake record.
 fn record_complete(buf: &[u8]) -> bool {
     buf.len() >= 5 && buf.len() >= 5 + u16::from_be_bytes([buf[3], buf[4]]) as usize
+}
+
+fn lowercased(hostnames: &[String]) -> Vec<String> {
+    hostnames.iter().map(|h| h.to_ascii_lowercase()).collect()
 }
 
 /// Extract the (lowercased) SNI host_name from a buffered TLS ClientHello via
@@ -849,6 +855,34 @@ mod tests {
             .unwrap();
         assert_eq!(demux.snapshot().len(), 1);
         assert_eq!(events.peek(|e| e.clone()), vec![(port, true)]);
+    }
+
+    #[tokio::test]
+    async fn hostnames_match_in_any_case() {
+        let wildcard =
+            crate::net::utils::bind_tokio_listener_reuse_port((Ipv4Addr::UNSPECIFIED, 0).into())
+                .unwrap();
+        let port = wildcard.local_addr().unwrap().port();
+        let key = (Ipv4Addr::LOCALHOST, port);
+        let target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
+        let demux = SniDemux::new();
+        demux
+            .register(
+                key.0,
+                port,
+                &["Cloud.Example.com".to_string()],
+                target,
+                None,
+            )
+            .unwrap();
+        demux.ports.peek(|p| {
+            assert_eq!(
+                p[&key].select(Some("cloud.example.com"), Ipv4Addr::LOCALHOST),
+                Some((target, true))
+            );
+        });
+        demux.unregister(key.0, port, &["CLOUD.example.com".to_string()], target);
+        assert!(demux.snapshot().is_empty());
     }
 
     #[tokio::test]
@@ -1097,6 +1131,65 @@ mod tests {
         let before = events.peek(|e| e.len());
         demux.rekey_ipv4(new_ip);
         assert_eq!(events.peek(|e| e.len()), before);
+    }
+
+    #[tokio::test]
+    async fn self_hairpin_needs_no_subnet_resolver() {
+        let target = Ipv4Addr::new(10, 59, 0, 2);
+        assert!(is_hairpin(&None, target, target).await);
+        assert!(!is_hairpin(&None, Ipv4Addr::new(10, 59, 0, 3), target).await);
+        let unknown: LocalPrefix = Arc::new(|_| Box::pin(async { None }));
+        assert!(is_hairpin(&Some(unknown), target, target).await);
+    }
+
+    #[tokio::test]
+    async fn self_hairpin_relays_hostname_and_fallback_traffic() {
+        for named in [true, false] {
+            let backend = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+                .await
+                .unwrap();
+            let SocketAddr::V4(target) = backend.local_addr().unwrap() else {
+                unreachable!();
+            };
+            let probe = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            let port = probe.local_addr().unwrap().port();
+            drop(probe);
+            let demux = SniDemux::new();
+            if named {
+                demux
+                    .register(
+                        Ipv4Addr::LOCALHOST,
+                        port,
+                        &["probe.example.com".into()],
+                        target,
+                        None,
+                    )
+                    .unwrap();
+            } else {
+                demux
+                    .register_fallback(Ipv4Addr::LOCALHOST, port, target)
+                    .unwrap();
+            }
+            timeout(Duration::from_secs(3), async {
+                let hello = real_client_hello("probe.example.com");
+                let mut client = TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+                    .await
+                    .unwrap();
+                client.write_all(&hello).await.unwrap();
+                let (mut upstream, _) = backend.accept().await.unwrap();
+                let mut received = vec![0; hello.len()];
+                upstream.read_exact(&mut received).await.unwrap();
+                assert_eq!(received, hello);
+                upstream.write_all(b"reply").await.unwrap();
+                let mut reply = [0; 5];
+                client.read_exact(&mut reply).await.unwrap();
+                assert_eq!(&reply, b"reply");
+                client.shutdown().await.unwrap();
+                upstream.shutdown().await.unwrap();
+            })
+            .await
+            .expect("self-hairpin relay timed out");
+        }
     }
 
     #[tokio::test]

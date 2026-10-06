@@ -5,6 +5,7 @@
 export * from './classes/http-error'
 export * from './classes/rpc-error'
 
+export * from './components/ca-wizard'
 export * from './components/initializing/logs-window.component'
 export * from './components/initializing/initializing.component'
 export * from './components/markdown.component'

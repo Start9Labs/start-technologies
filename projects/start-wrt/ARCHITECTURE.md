@@ -5,7 +5,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 ## Tech Stack
 
 - **Backend:** Rust (async/Tokio, Axum web framework)
-- **Frontend:** Angular 22 + TypeScript 6 + Taiga UI v5
+- **Frontend:** Angular + TypeScript + Taiga UI
 - **Router OS:** OpenWrt (SpacemiT K1 / BananaPi F3 target)
 - **Config storage:** UCI files (`/etc/config/`) — no separate database
 - **API:** JSON-RPC 2.0 over HTTP POST at `/rpc/v1`
@@ -25,7 +25,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 │   ├── config_experiments/ # Reference UCI configs for testing
 │   └── notes/           # Research notes
 │
-├── web/                 # Angular 22 SPA
+├── web/                 # Angular SPA
 │   └── src/app/
 │       ├── services/    # API, auth, form, RPC, connection, system
 │       ├── components/  # Shared UI (footer, masked, copy, schedule, etc.)
@@ -46,7 +46,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 
 - **`backend/`** — Rust daemon and CLI. Produces a single binary `startwrt` that is symlinked as `startwrt-ctrld` (daemon) and `startwrt-cli` (CLI). Handles all backend logic: RPC API, security profiles, WiFi, Ethernet, VPN, authentication, and UCI config management. See [backend/ARCHITECTURE.md](backend/ARCHITECTURE.md).
 
-- **`web/`** — Angular 22 SPA using Taiga UI v5. Signal-based state, zoneless change detection, standalone components. Communicates with the backend exclusively via JSON-RPC 2.0. Embeds contextual help on every page. See [web/ARCHITECTURE.md](web/ARCHITECTURE.md).
+- **`web/`** — Angular SPA using Taiga UI. Signal-based state, zoneless change detection, standalone components. Communicates with the backend exclusively via JSON-RPC 2.0. Embeds contextual help on every page. See [web/ARCHITECTURE.md](web/ARCHITECTURE.md).
 
 - **`openwrt/`** — Disposable build workspace (plain directory, no git repo) rebuilt by `build/openwrt-setup.sh` from the sha256-pinned upstream OpenWrt release tarball (`build/openwrt-version`) plus the Start9 delta: `openwrt-patches/` modifies a handful of upstream build-infra files, `openwrt-overlay/` adds the SpacemiT K1 target (`target/linux/spacemit/`) and boot packages (`opensbi-spacemit`, `uboot-spacemit`). The build system compiles the Rust backend + Angular frontend, stages them into `openwrt/files/`, and produces a flashable image.
 
@@ -68,7 +68,7 @@ Additional HTTP routes:
 - `GET /api/logs` — WebSocket for live log streaming
 - `POST /api/setup/flash` — NDJSON streaming for setup wizard
 - `GET|POST /rest/rpc/{guid}` — Continuation endpoint for backup/restore/diagnostics
-- `GET /static/root-ca.crt` — Root CA download (no auth)
+- `GET /static/local-root-ca.crt`, `GET /static/local-root-ca.mobileconfig` — Root CA download, as a certificate or an Apple configuration profile (no auth)
 - `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` — LuCI reverse proxy (localhost:8080)
 - Fallback — Serves embedded web UI
 

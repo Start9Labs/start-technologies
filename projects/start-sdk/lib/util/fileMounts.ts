@@ -1,0 +1,134 @@
+import { watch, type FSWatcher, type Stats } from 'node:fs'
+import * as fs from 'node:fs/promises'
+import { basename, dirname } from 'node:path'
+import { outsideFileLocks, withFileQueue } from './fileAccess'
+
+const mounts = new Map<string, Set<FileMount>>()
+const MAX_REBINDS = 3
+
+type FileMount = {
+  active: boolean
+  refresh: (signal: AbortSignal) => Promise<void>
+  pending: Set<Promise<void>>
+}
+
+async function track(mount: FileMount, pending: Promise<void>): Promise<void> {
+  mount.pending.add(pending)
+  try {
+    await pending
+  } finally {
+    mount.pending.delete(pending)
+  }
+}
+
+export function hasFileMounts(path: string): boolean {
+  return mounts.has(path)
+}
+
+/** The caller must hold the source's `withFileQueue` through refresh. */
+export async function refreshFileMounts(
+  path: string,
+  signal: AbortSignal,
+): Promise<void> {
+  for (const mount of mounts.get(path) ?? []) {
+    if (mount.active) await mount.refresh(signal)
+  }
+}
+
+async function sourceStat(path: string): Promise<Stats | null> {
+  return fs.stat(path).catch(error => {
+    if (error.code !== 'ENOENT') throw error
+    return null
+  })
+}
+
+export class FileMounts {
+  private readonly registrations: {
+    path: string
+    mount: FileMount
+    watcher: FSWatcher
+  }[] = []
+
+  async add(
+    source: string,
+    target: string,
+    rebind: (signal: AbortSignal) => Promise<void>,
+  ): Promise<void> {
+    await withFileQueue(source, async (path, signal) => {
+      const mount: FileMount = {
+        active: true,
+        pending: new Set(),
+        refresh: async signal => {
+          const pending = (async () => {
+            for (let rebinds = 0; mount.active; rebinds++) {
+              signal.throwIfAborted()
+              const [from, to] = await Promise.all([
+                sourceStat(path),
+                fs.stat(target),
+              ])
+              if (!from || (from.dev === to.dev && from.ino === to.ino)) return
+              if (rebinds === MAX_REBINDS) {
+                throw new Error(`File mount ${target} does not follow ${path}`)
+              }
+              await rebind(signal)
+            }
+          })()
+          await track(mount, pending)
+        },
+      }
+      const watcher = outsideFileLocks(() =>
+        watch(dirname(path), { persistent: false }, (_, name) => {
+          if (
+            !mount.active ||
+            (name !== null && name.toString() !== basename(path))
+          )
+            return
+          void track(
+            mount,
+            withFileQueue(path, async (_, signal) => {
+              if (mount.active) await mount.refresh(signal)
+            }),
+          ).catch(error => {
+            if (mount.active) console.error(error)
+          })
+        }),
+      )
+      watcher.on('error', error => console.error(error))
+      let set = mounts.get(path)
+      if (!set) {
+        set = new Set()
+        mounts.set(path, set)
+      }
+      set.add(mount)
+      this.registrations.push({ path, mount, watcher })
+      await mount.refresh(signal)
+    })
+  }
+
+  async sync(): Promise<void> {
+    for (const { path, mount } of this.registrations) {
+      await track(
+        mount,
+        withFileQueue(path, async (_, signal) => {
+          if (mount.active) await mount.refresh(signal)
+        }),
+      )
+    }
+  }
+
+  async close(): Promise<void> {
+    const registrations = this.registrations.splice(0)
+    for (const { path, mount, watcher } of registrations) {
+      mount.active = false
+      watcher.close()
+      const set = mounts.get(path)
+      set?.delete(mount)
+      if (!set?.size) mounts.delete(path)
+    }
+    await Promise.all(
+      registrations.flatMap(({ mount }) =>
+        [...mount.pending].map(pending => pending.catch(() => {})),
+      ),
+    )
+  }
+}

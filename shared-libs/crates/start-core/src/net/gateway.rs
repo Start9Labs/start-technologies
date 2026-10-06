@@ -1092,6 +1092,9 @@ trait NetworkManager {
     #[zbus(property)]
     fn all_devices(&self) -> Result<Vec<OwnedObjectPath>, Error>;
 
+    #[zbus(property)]
+    fn startup(&self) -> Result<bool, Error>;
+
     #[zbus(signal)]
     fn device_added(&self) -> Result<(), Error>;
 
@@ -1851,6 +1854,16 @@ async fn reconcile_local_outbound_mark(selected: bool) -> Result<(), Error> {
     Ok(())
 }
 
+/// An interface absent from the table stays absent.
+fn disconnected(write_to: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>, iface: &GatewayId) {
+    write_to.send_if_modified(|m| {
+        m.get_mut(iface)
+            .filter(|i| i.ip_info.is_some())
+            .map(|i| i.ip_info = None)
+            .is_some()
+    });
+}
+
 #[instrument(skip(connection, device_proxy, write_to, db))]
 async fn watch_ip(
     connection: &Connection,
@@ -1893,10 +1906,12 @@ async fn watch_ip(
 
                 let managed = device_proxy.managed().await?;
                 if !managed {
+                    disconnected(write_to, &iface);
                     return Ok(());
                 }
                 let dac = device_proxy.active_connection().await?;
                 if &*dac == "/" {
+                    disconnected(write_to, &iface);
                     return Ok(());
                 }
 
@@ -2737,12 +2752,56 @@ impl NetworkInterfaceWatcher {
     }
 }
 
+const SETTLE_TIMEOUT: Duration = Duration::from_secs(30);
+
 pub struct NetworkInterfaceController {
     db: TypedPatchDb<Database>,
     pub watcher: NetworkInterfaceWatcher,
+    synced: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
     _sync: NonDetachingJoinHandle<()>,
 }
 impl NetworkInterfaceController {
+    /// Returns once the database lists every connection NetworkManager activated at startup.
+    pub async fn settle(&self) {
+        match tokio::time::timeout(SETTLE_TIMEOUT, self.settled()).await {
+            Ok(res) => {
+                res.log_err();
+            }
+            Err(_) => tracing::warn!("{}", t!("net.gateway.network-settle-timeout")),
+        }
+    }
+
+    async fn settled(&self) -> Result<(), Error> {
+        let connection = Connection::system().await?;
+        let netman_proxy = NetworkManagerProxy::new(&connection).await?;
+        let mut startup_changed = netman_proxy.receive_startup_changed().await;
+        while netman_proxy.startup().await? {
+            startup_changed.next().await;
+        }
+
+        let mut connected = BTreeSet::new();
+        for device in netman_proxy.all_devices().await? {
+            let device_proxy = DeviceProxy::new(&connection, device).await?;
+            let iface = device_proxy.ip_interface().await?;
+            if !iface.is_empty()
+                && device_proxy.managed().await?
+                && &*device_proxy.active_connection().await? != "/"
+            {
+                connected.insert(GatewayId::from(InternedString::intern(iface)));
+            }
+        }
+
+        self.synced
+            .clone()
+            .wait_for(|synced| {
+                connected
+                    .iter()
+                    .all(|iface| synced.get(iface).is_some_and(|i| i.ip_info.is_some()))
+            })
+            .await;
+        Ok(())
+    }
+
     async fn sync(
         db: &TypedPatchDb<Database>,
         info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
@@ -2941,9 +3000,11 @@ impl NetworkInterfaceController {
         );
         let mut ip_info_watch = watcher.subscribe();
         ip_info_watch.mark_seen();
+        let synced = Watch::new(OrdMap::new());
         Self {
             db: db.clone(),
             watcher,
+            synced: synced.clone(),
             _sync: tokio::spawn(async move {
                 let res: Result<(), Error> = async {
                     let mut ip_info = seeded.await.ok();
@@ -2958,6 +3019,7 @@ impl NetworkInterfaceController {
                         if let Err(e) = async {
                             if let Some(ref ip_info) = ip_info {
                                 Self::sync(&db, ip_info).boxed().await?;
+                                synced.send(ip_info.clone());
                             }
                             if let Some(ref ip_info) = ip_info {
                                 let default_outbound: Option<GatewayId> = db

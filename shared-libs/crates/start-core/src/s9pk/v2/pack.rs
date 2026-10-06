@@ -578,15 +578,17 @@ impl ImageSource {
                         .pipe(Command::new(*CONTAINER_TOOL).arg("load"))
                         .invoke(ErrorKind::Docker)
                         .await?;
-                    ImageSource::DockerTag(tag.clone())
+                    let loaded = ImageSource::DockerTag(tag.clone())
                         .load(tmp_dir, id, version, image_id, arch, into)
-                        .await?;
-                    Command::new(*CONTAINER_TOOL)
+                        .await;
+                    let removed = Command::new(*CONTAINER_TOOL)
                         .arg("rmi")
                         .arg("-f")
                         .arg(&tag)
                         .invoke(ErrorKind::Docker)
-                        .await?;
+                        .await;
+                    loaded?;
+                    removed?;
                     Ok(())
                 }
                 ImageSource::DockerTag(tag) => {
@@ -602,80 +604,98 @@ impl ImageSource {
                             .arg("create")
                             .arg(&docker_platform)
                             .arg(&tag)
+                            .arg("/startos-pack-placeholder")
                             .invoke(ErrorKind::Docker)
                             .await?,
                     )?;
                     let container = container.trim();
-                    let config = serde_json::from_slice::<DockerImageConfig>(
-                        &Command::new(*CONTAINER_TOOL)
-                            .arg("container")
-                            .arg("inspect")
-                            .arg("--format")
-                            .arg("{{json .Config}}")
-                            .arg(container)
-                            .invoke(ErrorKind::Docker)
-                            .await?,
-                    )
-                    .with_kind(ErrorKind::Deserialization)?;
-                    let base_path = Path::new("images").join(arch).join(image_id);
-                    into.insert_path(
-                        base_path.with_extension("json"),
-                        Entry::file(
-                            TmpSource::new(
-                                tmp_dir.clone(),
-                                PackSource::Buffered(
-                                    serde_json::to_vec(&ImageMetadata {
-                                        workdir: if config.working_dir == Path::new("") {
-                                            "/".into()
-                                        } else {
-                                            config.working_dir
-                                        },
-                                        user: if config.user.is_empty() {
-                                            "root".into()
-                                        } else {
-                                            config.user.into()
-                                        },
-                                        entrypoint: config.entrypoint,
-                                        cmd: config.cmd,
-                                    })
-                                    .with_kind(ErrorKind::Serialization)?
-                                    .into(),
-                                ),
-                            )
-                            .into(),
-                        ),
-                    )?;
-                    into.insert_path(
-                        base_path.with_extension("env"),
-                        Entry::file(
-                            TmpSource::new(
-                                tmp_dir.clone(),
-                                PackSource::Buffered(config.env.join("\n").into_bytes().into()),
-                            )
-                            .into(),
-                        ),
-                    )?;
-                    let dest = tmp_dir
-                        .join(Guid::new().as_ref())
-                        .with_extension("squashfs");
+                    let packed = async {
+                        let image = String::from_utf8(
+                            Command::new(*CONTAINER_TOOL)
+                                .arg("container")
+                                .arg("inspect")
+                                .arg("--format")
+                                .arg("{{.Image}}")
+                                .arg(container)
+                                .invoke(ErrorKind::Docker)
+                                .await?,
+                        )?;
+                        let config = serde_json::from_slice::<DockerImageConfig>(
+                            &Command::new(*CONTAINER_TOOL)
+                                .arg("image")
+                                .arg("inspect")
+                                .arg("--format")
+                                .arg("{{json .Config}}")
+                                .arg(image.trim())
+                                .invoke(ErrorKind::Docker)
+                                .await?,
+                        )
+                        .with_kind(ErrorKind::Deserialization)?;
+                        let base_path = Path::new("images").join(arch).join(image_id);
+                        into.insert_path(
+                            base_path.with_extension("json"),
+                            Entry::file(
+                                TmpSource::new(
+                                    tmp_dir.clone(),
+                                    PackSource::Buffered(
+                                        serde_json::to_vec(&ImageMetadata {
+                                            workdir: if config.working_dir == Path::new("") {
+                                                "/".into()
+                                            } else {
+                                                config.working_dir
+                                            },
+                                            user: if config.user.is_empty() {
+                                                "root".into()
+                                            } else {
+                                                config.user.into()
+                                            },
+                                            entrypoint: config.entrypoint,
+                                            cmd: config.cmd,
+                                        })
+                                        .with_kind(ErrorKind::Serialization)?
+                                        .into(),
+                                    ),
+                                )
+                                .into(),
+                            ),
+                        )?;
+                        into.insert_path(
+                            base_path.with_extension("env"),
+                            Entry::file(
+                                TmpSource::new(
+                                    tmp_dir.clone(),
+                                    PackSource::Buffered(config.env.join("\n").into_bytes().into()),
+                                )
+                                .into(),
+                            ),
+                        )?;
+                        let dest = tmp_dir
+                            .join(Guid::new().as_ref())
+                            .with_extension("squashfs");
 
-                    Command::new(*CONTAINER_TOOL)
-                        .arg("export")
-                        .arg(container)
-                        .pipe(&mut tar2sqfs(&dest)?)
-                        .capture(false)
-                        .invoke(ErrorKind::Docker)
-                        .await?;
-                    Command::new(*CONTAINER_TOOL)
+                        Command::new(*CONTAINER_TOOL)
+                            .arg("export")
+                            .arg(container)
+                            .pipe(&mut tar2sqfs(&dest)?)
+                            .capture(false)
+                            .invoke(ErrorKind::Docker)
+                            .await?;
+                        into.insert_path(
+                            base_path.with_extension("squashfs"),
+                            Entry::file(
+                                TmpSource::new(tmp_dir.clone(), PackSource::File(dest)).into(),
+                            ),
+                        )?;
+                        Ok::<_, Error>(())
+                    }
+                    .await;
+                    let removed = Command::new(*CONTAINER_TOOL)
                         .arg("rm")
                         .arg(container)
                         .invoke(ErrorKind::Docker)
-                        .await?;
-                    into.insert_path(
-                        base_path.with_extension("squashfs"),
-                        Entry::file(TmpSource::new(tmp_dir.clone(), PackSource::File(dest)).into()),
-                    )?;
-
+                        .await;
+                    packed?;
+                    removed?;
                     Ok(())
                 }
             }

@@ -9,7 +9,7 @@ Route your network's Internet traffic through one or more WireGuard VPN provider
 1. Configure the VPN:
    - **Label** — A descriptive name (e.g. "Mullvad Sweden", "Proton US").
    - **Config File** — Upload a WireGuard `.conf` file from your VPN provider — drop it into the dialog or click to browse. Most providers (Mullvad, ProtonVPN, IVPN, etc.) offer WireGuard config file downloads from their account dashboard.
-   - **Target** — Where this VPN's traffic should be routed. The dropdown lists **Internet** along with your existing VPNs. Select **Internet** to exit directly to the Internet through this VPN, or select another VPN to chain through it first for additional privacy.
+   - **Target** — How this VPN reaches its own server. The dropdown lists **Internet** along with your existing VPNs. Select **Internet** to connect over your WAN, or select another VPN to carry this one's tunnel, so traffic passes through that VPN first for additional privacy.
 
 1. Click "Add VPN".
 
@@ -20,16 +20,29 @@ Route your network's Internet traffic through one or more WireGuard VPN provider
 
 VPN chaining routes traffic through multiple VPN providers in sequence, so no single provider sees both your identity and your destination. This achieves multi-jurisdictional resilience — the providers would need to collaborate across different legal jurisdictions to correlate your activity.
 
-Chaining is configured through the **Target** field. When you set a VPN's target to another VPN instead of "Internet", traffic flows through both:
+Chaining is configured through the **Target** field. A VPN's target carries that VPN's own tunnel, so the target is the hop nearer your WAN and the VPN itself is the hop nearer the Internet. Traffic leaves your network wrapped in both tunnels and is unwrapped one server at a time:
 
 ```
-Your device → StartWRT → First VPN → Second VPN → Internet
+Your device → StartWRT → Target VPN → This VPN → Internet
 ```
 
-For example, if "Mullvad" targets "Proton" and "Proton" targets "Internet":
+For example, if "Mullvad" targets "Proton" and "Proton" targets "Internet", a profile routed through Mullvad reaches Proton's server first and exits at Mullvad's:
 
-- Mullvad knows your home IP but not your destination.
-- Proton knows your destination but sees Mullvad's IP, not yours.
+- Proton knows your home IP, and sees only that you are connecting to Mullvad — never your destination.
+- Mullvad knows your destination, and sees Proton's IP as the source — never yours.
+- The site you visit sees Mullvad's IP.
+
+Neither provider holds both halves. To link you to your destination they would have to compare logs with each other, across whatever jurisdictions they operate in.
+
+A VPN can connect through another only when:
+
+- Its config's `Endpoint` is an IP address, not a hostname. A VPN whose server is a hostname offers only **Internet** as its target.
+- The target VPN's tunnel can carry it: the target has an address of the same family (IPv4 or IPv6) and its `AllowedIPs` include this VPN's server address.
+- No other VPN uses the same server address.
+
+If the target VPN goes down, the VPN connecting through it stops rather than reconnecting to its server over your WAN, so your home IP is never shown to the provider you meant to hide it from.
+
+Each tunnel in a chain adds its own headers, so a VPN that connects through another gets a smaller MTU: its target's MTU less 60 bytes for an IPv4 server, or 80 for an IPv6 one (1360 through a target at the default 1420). You can still set the MTU yourself on its detail page.
 
 > [!NOTE]
 > VPN chaining adds latency since traffic passes through multiple servers. For most users, a single VPN provider is sufficient.
@@ -51,11 +64,11 @@ A kill switch protects every VPN-routed profile: both IPv4 and IPv6 fail closed.
 Click a VPN label in the table to open its detail page, which shows:
 
 - **Status** — Whether the VPN is connected or disabled.
-- **Connection Path** — The full route traffic takes from this VPN to the Internet (e.g. "Mullvad → Proton → Internet").
+- **Connection Path** — This VPN's chain outward to your WAN, each hop carrying the one before it (e.g. "Mullvad → Proton → Internet" means Mullvad's tunnel runs through Proton, and Proton connects over the WAN). Traffic routed here exits at the first VPN listed.
 - **Used by** — Which [Security Profiles](security-profiles.md) currently route their traffic through this VPN. Check this before making changes to understand the impact.
 - **Label** — Edit the display name.
 - **Connects to** — Change the target (Internet or another VPN). Only targets that would not create a circular chain are offered.
-- **MTU** — The tunnel's packet size limit. Leave blank to use the default (~1420). Lower it — down to a minimum of 1280 — if the VPN connects but requests time out.
+- **MTU** — The tunnel's packet size limit. Leave blank to use the default: ~1420, or for a VPN connecting through another, the chained MTU described under [VPN Chaining](#vpn-chaining). Lower it — down to a minimum of 1280 — if the VPN connects but requests time out.
 
 To delete a VPN, click "Delete" on its detail page. If any Security Profiles route through the VPN, you will be asked to confirm — those profiles will switch to the regular WAN connection.
 

@@ -269,6 +269,51 @@ pub async fn export<P: AsRef<Path>>(guid: &str, datadir: P) -> Result<(), Error>
     Ok(())
 }
 
+/// Requires free space for a second copy of the used data, plus a reserve of
+/// 5% or 1 GiB, whichever is larger. Defragmenting a converted filesystem does
+/// not free the extents it replaces.
+fn has_defrag_headroom(path: &Path) -> Result<bool, Error> {
+    let stat = nix::sys::statvfs::statvfs(path).with_kind(ErrorKind::Filesystem)?;
+    let blocks = u64::from(stat.blocks());
+    let used = blocks.saturating_sub(u64::from(stat.blocks_free()));
+    let reserve = (blocks / 20).max((1 << 30) / u64::from(stat.fragment_size()));
+    Ok(u64::from(stat.blocks_available()) >= used.saturating_add(reserve))
+}
+
+async fn finalize_conversion(tmp_mount: &Path) -> Result<(), Error> {
+    tracing::info!("{}", t!("disk.main.clearing-duplicate-files"));
+    Command::new("btrfs")
+        .args(["subvolume", "delete"])
+        .arg(tmp_mount.join("ext2_saved"))
+        .invoke(ErrorKind::DiskManagement)
+        .await?;
+    Command::new("btrfs")
+        .args(["subvolume", "sync"])
+        .arg(tmp_mount)
+        .invoke(ErrorKind::DiskManagement)
+        .await?;
+    if !has_defrag_headroom(tmp_mount)? {
+        tracing::warn!("{}", t!("disk.main.defrag-skipped"));
+        return Ok(());
+    }
+    tracing::info!("{}", t!("disk.main.optimizing-filesystem"));
+    if let Err(error) = Command::new("btrfs")
+        .args(["filesystem", "defragment", "-r"])
+        .arg(tmp_mount)
+        .invoke(ErrorKind::DiskManagement)
+        .await
+    {
+        tracing::warn!(?error, "{}", t!("disk.main.defrag-failed"));
+    }
+    Ok(())
+}
+
+async fn cleanup_conversion_mount(tmp_mount: &Path) -> Result<(), Error> {
+    unmount(tmp_mount, false).await?;
+    tokio::fs::remove_dir(tmp_mount).await?;
+    Ok(())
+}
+
 fn record_cleanup_error(first_error: &mut Option<Error>, result: Result<(), Error>) {
     if let Err(error) = result {
         if first_error.is_none() {
@@ -440,20 +485,13 @@ pub(crate) async fn mount_fs<P: AsRef<Path>>(
         BlockDev::new(&blockdev_path)
             .mount(&tmp_mount, ReadWrite)
             .await?;
-        tracing::info!("{}", t!("disk.main.clearing-duplicate-files"));
-        Command::new("btrfs")
-            .args(["subvolume", "delete"])
-            .arg(tmp_mount.join("ext2_saved"))
-            .invoke(ErrorKind::DiskManagement)
-            .await?;
-        tracing::info!("{}", t!("disk.main.optimizing-filesystem"));
-        Command::new("btrfs")
-            .args(["filesystem", "defragment", "-r"])
-            .arg(&tmp_mount)
-            .invoke(ErrorKind::DiskManagement)
-            .await?;
-        unmount(&tmp_mount, false).await?;
-        tokio::fs::remove_dir(&tmp_mount).await?;
+        let conversion_result = finalize_conversion(&tmp_mount).await;
+        let cleanup_result = cleanup_conversion_mount(&tmp_mount).await;
+        if let Err(error) = conversion_result {
+            cleanup_result.log_err();
+            return Err(error);
+        }
+        cleanup_result?;
         if let Some(ref mut phase) = convert_phase {
             phase.complete();
         }

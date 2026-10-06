@@ -38,7 +38,7 @@ Ask what the research made live. Skip what it settled.
 
 - **Which image**, when more than one is credible — upstream official vs `linuxserver/*`
   vs a community build. Give the trade-off in one line each.
-- **Pin a version tag or track a moving one.** Recommend a pinned semver tag; say what
+- **Pin a version tag or track a moving one.** Recommend a pinned upstream release tag; say what
   `UPDATING.md` will tell a future maintainer to watch.
 - **Prebuilt image vs a `Dockerfile`**, when no prebuilt image covers both arches or
   upstream ships none.

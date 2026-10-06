@@ -13,6 +13,8 @@ Publishing a port exposes a device's port to the public Internet. StartTunnel ca
 - An **IPv4** published port is a DNAT: clients connect to your VPS's public IPv4 on the external port, and the tunnel rewrites the destination to the device's tunnel IP and internal port.
 - An **IPv6** published port is a _pinhole_: the device already has a globally-routable address (its GUA — see [IPv6](./ipv6.md)), so there is no NAT. The tunnel simply permits inbound to `[GUA]:port`. If you pick an external port different from the internal port (e.g. an `80 → 443` redirect) it becomes a port-only translation on that same address.
 
+IPv4 UDP traffic initiated by the device from a forwarded internal port leaves through the forward's public interface using its public address and corresponding external port. A forwarded range maps each internal port to its matching external port.
+
 Because each device has its own IPv6 address, two different devices can both publish on the same external port over IPv6 (whereas over IPv4 they share one public address, so external ports must be unique).
 
 > [!NOTE]
@@ -42,5 +44,7 @@ Deleting a device or demoting it to a client clears all of its published ports (
 ## SNI hostnames (IPv4 only)
 
 When IP Version includes IPv4 (`IPv4` or `IPv4 + IPv6`), an optional **Hostname** routes by TLS SNI so several hostnames can share one external port. SNI demultiplexing is IPv4-only — in `IPv4 + IPv6` mode it applies to the IPv4 side only, and the IPv6 side is a plain pinhole (each device already has its own address, so no demux is needed) — and it cannot be combined with a port range.
+
+A device can access its own service through its published SNI hostname or the shared port's fallback. For these hairpin connections, the service sees StartTunnel's in-tunnel address as the client. Connections from other devices retain their original client address.
 
 Connected devices can also create SNI hostname routes **automatically**, the same way they open automatic ports. A device asks over PCP (preferred) or, when PCP can't get through, over a UPnP vendor action the tunnel advertises (`X_START9_AddHostnameMapping`). Either way the route appears in the **Automatic** table, carries a lease, and expires on its own if the device stops renewing it — and, like every automatic mapping, it can only point at the requesting device's own address.

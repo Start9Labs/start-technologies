@@ -4,8 +4,6 @@ Operating rules for AI developers working in `start-os/`. `CLAUDE.md` is a
 one-line `@AGENTS.md` import. See the root [AGENTS.md](../../AGENTS.md) for
 monorepo-wide rules and [ARCHITECTURE.md](ARCHITECTURE.md) for how this product is wired.
 
-**Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
-
 ## Layout
 
 - `src/bin/startbox.rs`, `src/bin/start-container.rs` — the only Rust in this
@@ -75,36 +73,25 @@ monorepo-wide rules and [ARCHITECTURE.md](ARCHITECTURE.md) for how this product 
   forwards to `start-core`'s `beta` feature — keep both seeds in sync when you
   change seed shape.
 
-## Docs are part of the change
-
-User-facing changes (UI, CLI output/flags, install/setup flow) must update the
-matching page under `docs/` in the same change. Keep this AGENTS, README, and
-ARCHITECTURE current when you change structure, build steps, or conventions.
-
 ## Contributor workflow
 
 This guide covers building and contributing to the **StartOS OS product** in `projects/start-os/` — the `startbox` / `start-container` bins, the web UIs, the container runtime, and the bootable OS image. It is the source of truth for the OS-image toolchain and the build/deploy targets.
 
-Start from the root [CONTRIBUTING.md](../../CONTRIBUTING.md) for the shared toolchain (Rust, Node 24, Docker, Make, git), branch policy, and the repo-wide commit/PR conventions; this section adds the StartOS-specific setup on top.
+Start from the root [AGENTS.md](../../AGENTS.md) for the shared toolchain (Rust, Node 24, Docker, Make, git), branch policy, and the repo-wide commit/PR conventions; this section adds the StartOS-specific setup on top.
 
 If you want to **package a service** for StartOS instead, see the [packaging guide](https://docs.start9.com/packaging). For other ways to help, see [start9.com/contribute](https://start9.com/contribute).
 
 ### Documentation
 
-User-facing changes (UI, CLI, install/setup flow) must update the end-user docs under `docs/` (an mdbook served at `/start-os/`) in the same change. This product's docs: [README.md](README.md) (what it is / usage), [ARCHITECTURE.md](ARCHITECTURE.md) (how it's wired), [AGENTS.md](AGENTS.md) (agent rules and contributor workflow; `CLAUDE.md` is a one-line `@AGENTS.md` import).
-
-### Collaboration
-
-- [Matrix](https://matrix.to/#/#dev-startos:matrix.start9labs.com)
-- Security issues: [security@start9.com](mailto:security@start9.com) — see [SECURITY.md](../../SECURITY.md)
+The end-user book lives under `docs/` and is served at `/start-os/`. This product's repo docs: [README.md](README.md) (what it is / usage), [ARCHITECTURE.md](ARCHITECTURE.md) (how it's wired), [AGENTS.md](AGENTS.md) (agent rules and contributor workflow; `CLAUDE.md` is a one-line `@AGENTS.md` import).
 
 ### Prerequisites
 
 The OS product is a thin wrapper over the shared `start-core` crate (`shared-libs/crates/start-core`), the shared TypeScript modules (`shared-libs/ts-modules`), and the SDK (`projects/start-sdk`). Build commands run from the **repo root** unless noted; the product dir is `projects/start-os`.
 
-If you're only working on the admin UI or setup-wizard, you don't need the OS-image toolchain below — the web apps build and run standalone against mock data. See [`shared-libs/ts-modules/CONTRIBUTING.md`](../../shared-libs/ts-modules/CONTRIBUTING.md).
+If you're only working on the admin UI or setup-wizard, you don't need the OS-image toolchain below — the web apps build and run standalone against mock data. See [`shared-libs/ts-modules/AGENTS.md`](../../shared-libs/ts-modules/AGENTS.md).
 
-Beyond the shared toolchain in the [root CONTRIBUTING](../../CONTRIBUTING.md#environment-setup), **building the OS image needs multi-arch emulation and image-packaging tools** (Debian/Ubuntu):
+Beyond the shared toolchain in the [root AGENTS](../../AGENTS.md#environment-setup), **building the OS image needs multi-arch emulation and image-packaging tools** (Debian/Ubuntu):
 
 ```sh
 sudo apt install -y qemu-user-static binfmt-support squashfs-tools b3sum
@@ -126,11 +113,12 @@ This sets `ENVIRONMENT=dev` and `GIT_BRANCH_AS_HASH=1` to prevent rebuilds on ev
 
 ### Build configuration
 
-OS builds use the repo-wide build variables (`PLATFORM`, `ENVIRONMENT`, `PROFILE`, `GIT_BRANCH_AS_HASH` — see the [root CONTRIBUTING](../../CONTRIBUTING.md#build-configuration)). The OS-specific values:
+OS builds use the repo-wide build variables (`PLATFORM`, `ENVIRONMENT`, `PROFILE`, `GIT_BRANCH_AS_HASH` — see the [root AGENTS](../../AGENTS.md#build-configuration)). The OS-specific values:
 
-**`PLATFORM`:** `x86_64`, `x86_64-nonfree`, `aarch64`, `aarch64-nonfree`, `riscv64`, `raspberrypi`.
+**`PLATFORM`:** `x86_64`, `x86_64-nonfree`, `x86_64-nvidia`, `aarch64`, `aarch64-nonfree`, `aarch64-nvidia`, `riscv64`, `riscv64-nonfree`, `rockchip64`, `raspberrypi`.
 
 - `-nonfree` variants include proprietary firmware and drivers
+- `-nvidia` variants add NVIDIA drivers
 - `raspberrypi` includes non-free components by necessity
 - Platform is remembered between builds if not specified
 
@@ -142,9 +130,10 @@ OS builds use the repo-wide build variables (`PLATFORM`, `ENVIRONMENT`, `PROFILE
 
 ### Building
 
-The web UIs are embedded into `startbox` at compile time (`include_dir!`), so the web build must precede the Rust build — always go through the `Makefile`, which encodes the ordering. For faster web iteration use `npm run start:ui` (see [`shared-libs/ts-modules/CONTRIBUTING.md`](../../shared-libs/ts-modules/CONTRIBUTING.md)).
+The web UIs are embedded into `startbox` at compile time (`include_dir!`), so the web build must precede the Rust build — always go through the `Makefile`, which encodes the ordering. For faster web iteration use `npm run start:ui` (see [`shared-libs/ts-modules/AGENTS.md`](../../shared-libs/ts-modules/AGENTS.md)).
 
 ```sh
+make start-os-uis              # build both embedded UIs first
 cargo check -p start-os        # verify the OS bins compile (startbox, start-container)
 make start-os-ui                # build the admin UI (start-os-uis for ui + setup-wizard)
 make start-os                   # build all OS artifacts (bins + web + container-runtime image)
@@ -218,7 +207,7 @@ make backup-fs-test                  # backup-fs library tests except the /dev/f
 make start-os-scripts-test           # shell scripts under build/lib/scripts (suite in build/tests/)
 ```
 
-The container-runtime has its own test suite — see [container-runtime/CONTRIBUTING.md](container-runtime/CONTRIBUTING.md). Note CI builds a multi-platform matrix (apple-darwin + aarch64/x86_64/riscv64 musl); local `cargo check` is linux-only, so consider platform-specific impact.
+The container-runtime has its own test suite — see [container-runtime/AGENTS.md](container-runtime/AGENTS.md). Note CI builds a multi-platform matrix (apple-darwin + aarch64/x86_64/riscv64 musl); local `cargo check` is linux-only, so consider platform-specific impact.
 
 ### Formatting
 
@@ -230,10 +219,5 @@ make web-format                 # prettier (root config) — covers web + contai
 
 ### Cross-layer changes
 
-When a change crosses Rust → bindings → SDK → web/runtime, verify in order:
-
-1. `cargo check -p start-os`
-2. `make start-core-ts-bindings` — regenerate ts-rs types from `start-core`
-3. `cd projects/start-sdk && make bundle` — rebuild the SDK `dist` (builds `@start9labs/start-core` first and bundles it; required before the web apps / runtime can see new bindings)
-4. `npm run check:ui && npm run check:setup`
-5. `cd projects/start-os/container-runtime && npm run check`
+Follow the root cross-layer verification order. Backend-only checks target
+`cargo check -p start-core`; building `startbox` also requires both embedded UIs.

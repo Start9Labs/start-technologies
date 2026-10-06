@@ -81,6 +81,14 @@ export class DropPromise<T> implements Promise<T> {
   static ref<T>(promise: Promise<T>, dropRef: DropRef): DropPromise<T> {
     return new DropPromise(promise, dropRef)
   }
+  /** A subscriber holds the drop until the promise settles. */
+  private retain() {
+    const dropRef = this.dropRef
+    this.promise.then(
+      () => dropRef,
+      () => dropRef,
+    )
+  }
   then<TResult1 = T, TResult2 = never>(
     onfulfilled?:
       | ((value: T) => TResult1 | PromiseLike<TResult1>)
@@ -91,6 +99,7 @@ export class DropPromise<T> implements Promise<T> {
       | null
       | undefined,
   ): Promise<TResult1 | TResult2> {
+    this.retain()
     return DropPromise.ref(
       this.promise.then(onfulfilled, onrejected),
       this.dropRef,
@@ -102,9 +111,11 @@ export class DropPromise<T> implements Promise<T> {
       | null
       | undefined,
   ): Promise<T | TResult> {
+    this.retain()
     return DropPromise.ref(this.promise.catch(onrejected), this.dropRef)
   }
   finally(onfinally?: (() => void) | null | undefined): Promise<T> {
+    this.retain()
     return DropPromise.ref(this.promise.finally(onfinally), this.dropRef)
   }
 }

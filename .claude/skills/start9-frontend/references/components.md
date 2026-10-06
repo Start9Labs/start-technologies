@@ -38,7 +38,11 @@ export class ThingComponent {
   fine (a dialog + its `PolymorpheusComponent` const; a toast component inside a service file).
 - **Member conventions:** injected deps `private readonly`; template-facing members
   `protected readonly`; signal inputs/outputs `readonly` (public only when a parent binds them).
-  No `public` keyword noise otherwise.
+  No `public` keyword noise otherwise. A dependency the template reads is itself
+  `protected readonly` — `verification.loading()`, `verification.resend()`,
+  `breakpoint() === 'mobile'` in the template — not re-aliased into fields
+  (`loading = this.verification.loading`), wrapped in methods, or reshaped into a one-use
+  `computed` (`mobile = computed(() => this.breakpoint() === 'mobile')`).
 - **Routed and dialog components have no selector** (instantiated by router/Polymorpheus) and
   routed ones are `export default class` so `loadComponent: () => import('./x')` needs no `.then`.
 
@@ -64,7 +68,15 @@ A component that **is** a control (button, link, badge, row, card, shell chrome)
 **Stamp the host directive's own attribute** (`host: { tuiButton: '' }`) — Taiga's CSS is keyed
 on `[tuiButton]`, `[tuiChip]`, `[tuiBadge]`, and a host directive does not add its selector to
 the element. Skip it and the directive runs with none of its styling, silently: no chrome, no
-`iconStart`. `TuiCell` and `TuiCardLarge` stamp theirs; `TuiButton`, `TuiChip`, `TuiBadge` don't.
+`iconStart`. `TuiCell`, `TuiCardLarge` and `TuiAvatar` stamp theirs; `TuiButton`, `TuiChip`,
+`TuiBadge` don't.
+
+**A component that dresses up one Taiga primitive becomes it.** An avatar wrapper is
+`hostDirectives: [{ directive: TuiAvatar, inputs: ['size'] }]` with the picture or
+`{{ name | tuiInitials }}` as its content — never `:host { display: contents }` around an inner
+`<span tuiAvatar [size]="size()">`. Forward the primitive's inputs through `inputs: [...]` rather
+than redeclaring them, and drive the rest from signals in the class:
+`tuiAppearance(computed(() => …))`, `tuiIconStart(computed(() => …))` (`@taiga-ui/core`).
 
 Real fleet examples: `header[appHeader]`, `footer[appFooter]`, `button[marketplaceTile]`
 (+`TuiCardLarge`), `button[server]` (+`TuiCell`), `table[appTable]`
@@ -111,7 +123,10 @@ host: {
 - Outputs: `output()` — rare; prefer `model()` or URL state.
 - Queries: `viewChild()`, `contentChild()` — e.g.
   `contentChild<TemplateRef<{ $implicit: Pkg }>>(TemplateRef)` for app-supplied fragments.
-- Derivation: `computed()`. Reset-on-source-change: `linkedSignal`:
+- Derivation: `computed()`. A computation that reads one signal several times names it as a
+  default parameter instead of opening a block:
+  `computed((chat = this.opened.conversation()) => !!chat && !chat.escalated)`.
+  Reset-on-source-change: `linkedSignal`, never an `effect` that `untracked`-sets a signal:
 
 ```ts
 // Drawer auto-closes on navigation or resize — zero per-link handlers:
@@ -160,6 +175,8 @@ validation`).
   `(click.self)="close()"`, `.stop`, `.capture`, `.once`, `.passive`.
 - **Template reference variables replace trivial state**: `#input` +
   `(input)="onQuery(input.value)"`; `#carousel` + `carousel.next()`.
+- **Object literals take shorthand**: `fill(message, { email })`, and
+  `@for ($implicit of items(); track $implicit.key)` feeds `context: { $implicit }`.
 - **Attribute order** on an element: `*structuralDirective`, `#templateRef`, `booleanAttr`,
   `stringAttr="value"`, `[input]="value"`, `[(twoWay)]="value"`, `(output)="handler($event)"`.
 - **The URL is component state** for anything shareable: drawers open when query params match
@@ -171,3 +188,21 @@ validation`).
   `safeLinks` directive (forces `target="_blank" rel="noreferrer"` on external links).
 - Text stacks use `tuiTitle`/`tuiSubtitle` with `<b>` for the title — never custom
   heading/caption CSS: `<span tuiTitle><b>{{ title }}</b><span tuiSubtitle>{{ sub }}</span></span>`.
+- **A cell's children sit flat in the `[tuiCell]`.** A single-line title is one element,
+  `<span tuiTitle tuiFade>`, with no inner span. Trailing `<time tuiSubtitle>`, badges and
+  statuses are direct children, and the title's own flex pushes them to the end. Taiga already
+  lays these out, so `[tuiTitle] { flex: 1; min-inline-size: 0 }`, a `[tuiAccessories]` gap and
+  per-row `white-space: nowrap` all get deleted. Set `nowrap` once on the element that wraps the
+  rows, never on a host that also renders empty or error states.
+
+### Sticky page headers
+
+A scrolling page puts its header **inside** the `tui-scrollbar`, as its first child, made
+sticky and translucent by a global utility (support-server's `g-header`: sticky, padded,
+`backdrop-filter` over a `color-mix()` of the page background). A header in a flex column above
+the scrollbar, wrapped in a `.page`/`.chat` div, gets rewritten. When a child component owns the
+scrollbar, it renders the `<header tuiHeader class="g-header"><ng-content /></header>` and the
+route projects the title and accessories into it. The route then styles its semantic children
+directly (`header, section { inline-size: min(100%, 48rem); margin-inline: auto }`). A back link
+goes above the title, as a `<p tuiCaption>` in the header's `hgroup`. Inside the `<h1>` it
+becomes part of the heading's accessible name.

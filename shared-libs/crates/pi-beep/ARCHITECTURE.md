@@ -51,5 +51,4 @@ so any sysfs failure aborts the process.
 ## Further reading
 
 - [README.txt](README.txt) — CLI usage and option defaults.
-- [CONTRIBUTING.md](CONTRIBUTING.md) — how to build, test, and contribute.
-- [AGENTS.md](AGENTS.md) — agent/dev operating rules (`CLAUDE.md` imports it).
+- [AGENTS.md](AGENTS.md) — how to build, test, and contribute.

@@ -2,7 +2,7 @@
 edition = "2021"
 license = "MIT"
 name = "startwrt-core"
-version = "1.2.0"      # VERSION_BUMP
+version = "1.2.2"      # VERSION_BUMP
 
 [lib]
 name = "startwrt"
@@ -13,10 +13,6 @@ name = "startwrt"
 path = "src/bin/startwrt.rs"
 
 [dependencies]
-num_enum = "0.7"
-# `start-core` is the monorepo's shared backend lib (was the embedded start-os
-# submodule's `core/` crate). Aliased to `startos` so the existing `use startos::…`
-# imports resolve unchanged.
 arc-swap = "1.7"
 async_cell = "0.2.2"
 axum = { version = "0.8.6", features = ["ws", "multipart", "http2"] }
@@ -59,6 +55,7 @@ nix = { version = "0.29.0", features = [
   "socket",
   "uio",
 ] }
+num_enum = "0.7"
 openssh-keys = "0.6.2"
 openssl = { version = "0.10", features = ["vendored"] }
 pkcs8 = { version = "0.10", features = ["pem"] }

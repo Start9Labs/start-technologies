@@ -64,9 +64,7 @@ MIT OR Apache-2.0; those portions are used here under MIT. See [LICENSE](LICENSE
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how it works: the `Value` enum, module map, `InOMap`, and features.
-- [CONTRIBUTING.md](CONTRIBUTING.md) — toolchain, build/test, and PR conventions.
-- [AGENTS.md](AGENTS.md) — layout, commands, and gotchas for agents. `CLAUDE.md` is a one-line `@AGENTS.md`
-  import.
+- [AGENTS.md](AGENTS.md) — toolchain, build/test, and PR conventions.
 
 ## License
 

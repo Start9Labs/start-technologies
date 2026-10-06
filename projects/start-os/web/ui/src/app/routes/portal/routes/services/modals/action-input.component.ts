@@ -26,7 +26,11 @@ import { ActionService } from 'src/app/services/action.service'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { PrimaryStatus } from 'src/app/services/pkg-status-rendering.service'
-import { getAllPackages, getManifest } from 'src/app/utils/get-package-data'
+import {
+  getAllPackages,
+  getLiveTasks,
+  getManifest,
+} from 'src/app/utils/get-package-data'
 
 export type PackageActionData = {
   pkgInfo: {
@@ -178,8 +182,8 @@ export class ActionInputModal {
       .filter(
         id =>
           id !== this.pkgInfo.id &&
-          Object.values(packages[id]!.tasks).some(
-            ({ task, active }) =>
+          getLiveTasks(packages[id]!).some(
+            ([_, { task, active }]) =>
               !active &&
               task.severity === 'critical' &&
               task.packageId === this.pkgInfo.id &&

@@ -74,7 +74,7 @@ db.watch$('settings', 'theme').subscribe(theme => {
 ## Further reading
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — project structure, crate/package details, data flow, storage format
-- [CONTRIBUTING.md](CONTRIBUTING.md) — environment setup, build commands, testing, code style
+- [AGENTS.md](AGENTS.md) — environment setup, build commands, testing, code style
 
 ## License
 

@@ -4,6 +4,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::db::model::package::CurrentDependencyKind;
 use crate::prelude::*;
 use crate::s9pk::manifest::LocaleString;
 use crate::util::PathOrUrl;
@@ -30,6 +31,10 @@ impl Map for Dependencies {
 pub struct DepInfo {
     pub description: Option<LocaleString>,
     pub optional: bool,
+    #[serde(default)]
+    pub version_range: Option<exver::VersionRange>,
+    #[serde(flatten)]
+    pub kind: Option<CurrentDependencyKind>,
     #[serde(flatten)]
     pub metadata: Option<MetadataSrc>,
 }
@@ -45,7 +50,7 @@ impl TS for DepInfo {
         "DepInfo".into()
     }
     fn inline() -> String {
-        "{ description: LocaleString | null, optional: boolean } & MetadataSrc".into()
+        "{ description: LocaleString | null, optional: boolean, versionRange?: string | null, kind?: 'exists' | 'running' | null, healthChecks?: string[] } & MetadataSrc".into()
     }
     fn inline_flattened() -> String {
         Self::inline()
@@ -84,4 +89,31 @@ pub struct Metadata {
 pub struct DependencyMetadata {
     #[ts(type = "string")]
     pub title: LocaleString,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_dependency_has_unknown_range() {
+        let dep: DepInfo = serde_json::from_str(
+            r#"{"description":null,"optional":false,"metadata":{"title":"Bitcoin","icon":"https://example.com/icon.png"}}"#,
+        )
+        .unwrap();
+        assert!(dep.version_range.is_none());
+        assert!(dep.kind.is_none());
+    }
+
+    #[test]
+    fn published_dependency_range_round_trips() {
+        let dep: DepInfo = serde_json::from_str(
+            r#"{"description":null,"optional":false,"versionRange":">=31.1:17","kind":"running","healthChecks":["bitcoind"],"metadata":{"title":"Bitcoin","icon":"https://example.com/icon.png"}}"#,
+        )
+        .unwrap();
+        assert_eq!(dep.version_range.unwrap().to_string(), ">=31.1:17");
+        assert!(
+            matches!(dep.kind, Some(CurrentDependencyKind::Running { health_checks }) if health_checks.contains(&"bitcoind".parse().unwrap()))
+        );
+    }
 }

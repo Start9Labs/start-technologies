@@ -12,6 +12,8 @@
 #   - sport != dport: a per-port verdict map mapping each external port to its
 #     offset internal port (one rule, <count> map elements). This is what lets
 #     bindPortRange use different external/internal bases.
+#
+# Outbound UDP uses the forward's external address and corresponding port.
 
 if [ -z "$sip" ] || [ -z "$dip" ] || [ -z "$dprefix" ] || [ -z "$sport" ] || [ -z "$dport" ]; then
     >&2 echo 'missing required env var'
@@ -53,18 +55,36 @@ else
     dport_match="${dport}-${dport_end}"
 fi
 
+if [ "$count" -eq 1 ]; then
+    snat="th sport $dport snat to $sip:$sport"
+else
+    map=""; sep=""
+    for ((i = 0; i < count; i++)); do
+        map+="${sep}$((dport + i)) : $sip . $((sport + i))"; sep=", "
+    done
+    snat="th sport $dport_match snat to th sport map { $map }"
+fi
+
+# The interface holding $sip. None for an address traffic never leaves by
+# (loopback, the container bridge), which gets no outbound rule.
+sip_iface="$(ip -o -4 addr show | awk -v ip="$sip" '{ split($4, a, "/"); if (a[1] == ip) { print $2; exit } }')"
+case "$sip_iface" in
+    lo | lxcbr0) sip_iface= ;;
+esac
+
 # Base table/chains are owned by PortForwardController init; ensure defensively.
 nft -f - <<'EOF'
 add table ip startos
 add chain ip startos prerouting { type nat hook prerouting priority dstnat; policy accept; }
 add chain ip startos output { type nat hook output priority -100; policy accept; }
 add chain ip startos postrouting { type nat hook postrouting priority srcnat; policy accept; }
+add chain ip startos forward_snat { type nat hook postrouting priority srcnat - 1; policy accept; }
 add chain ip startos forward { type filter hook forward priority filter; policy drop; }
 EOF
 
 delete_tagged() {
     local chain
-    for chain in prerouting output postrouting forward; do
+    for chain in prerouting output postrouting forward forward_snat; do
         nft -a list chain ip startos "$chain" 2>/dev/null | awk -v chain="$chain" -v tag="comment \"$TAG\"" '
             index($0, tag) {
                 for (i = 1; i <= NF; i++) if ($i == "handle") print "delete rule ip startos " chain " handle " $(i+1)
@@ -90,14 +110,22 @@ delete_tagged() {
         # Masquerade hairpin replies so they reverse through this host.
         echo "add rule ip startos postrouting fib saddr type local ct original ip daddr $sip ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
         echo "add rule ip startos postrouting ip saddr $dip/$dprefix ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
+        if [ -n "$sip_iface" ]; then
+            echo "add rule ip startos forward_snat ip saddr $dip oifname \"$sip_iface\" meta l4proto udp $snat comment \"$TAG\""
+        fi
     fi
 } | nft -f -
 
+# Tracked flows keep the NAT they started with.
+# A daemon restart reinstalls forwards whose flows are still live.
+# Install clears only the flows the host answers itself.
 if [ "${UNDO:-0}" = 1 ]; then
-    # conntrack returns 1 when no flows match; ignore. -D takes no port range,
-    # so iterate (a 500-port range still completes well under a second).
-    for ((p = sport; p <= sport_end; p++)); do
-        conntrack -D -p tcp -d "$sip" --dport "$p" 2> /dev/null || true
-        conntrack -D -p udp -d "$sip" --dport "$p" 2> /dev/null || true
-    done
+    match=(-d "$sip" --dport)
+else
+    match=(-r "$sip" --reply-port-src)
 fi
+# conntrack -D takes a single port and exits 1 when nothing matches.
+for ((p = sport; p <= sport_end; p++)); do
+    conntrack -D -p tcp "${match[@]}" "$p" 2> /dev/null || true
+    conntrack -D -p udp "${match[@]}" "$p" 2> /dev/null || true
+done

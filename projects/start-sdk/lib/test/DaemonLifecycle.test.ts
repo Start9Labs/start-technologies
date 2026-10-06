@@ -33,7 +33,7 @@ class FakeSub {
   identity = Symbol('fake-sub')
   holdCount = 0
   destroyed = false
-  destroyPending = false
+  destroyRequested = false
   destroyFsCount = 0
   detached = false
 
@@ -52,11 +52,11 @@ class FakeSub {
       if (released) return
       released = true
       this.holdCount--
-      if (this.holdCount === 0 && this.destroyPending) await this._destroy()
+      if (this.holdCount === 0 && this.destroyRequested) await this._destroy()
     }
   }
   async destroy(): Promise<void> {
-    this.destroyPending = true
+    this.destroyRequested = true
     if (this.holdCount === 0) await this._destroy()
   }
   private async _destroy(): Promise<void> {

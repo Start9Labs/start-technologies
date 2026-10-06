@@ -1,8 +1,90 @@
 # Changelog
 
-## 3.0.0 — StartOS 0.4.0.2
+## 3.0.3 — StartOS 0.4.0.2
+
+### Added
+
+- **`setupPrimaryUrl` takes `filter`, `ssl` and `fallback`.** `filter` and
+  `ssl` narrow the addresses offered. `fallback: false` starts the form and
+  the task with nothing selected, and makes `bestUsable` `null` while nothing
+  is stored or the stored hostname is gone
 
 ### Changed
+
+- **`setupPrimaryUrl` prefers a public domain.** With nothing stored, or the
+  stored hostname gone, the form, the task and `bestUsable` use a public
+  domain, HTTPS first, ahead of the `.local` address
+- **`setupPrimaryUrl`'s task is raised even when the interface offers no
+  address**, and stays active until one is offered and chosen
+
+### Fixed
+
+- **A file model built on an `InputSpec`'s `partialValidator` keeps keys the
+  spec does not declare**, at every level the spec builds with
+  `z.looseObject`, and a `z.discriminatedUnion` in a hidden field keeps the
+  variant its discriminator names. Drop a `z.deepLoose()` wrapped around it
+- **`setupPrimaryUrl`'s task exists only while the URL is unresolved**, so
+  updating a running service to a release that adds a critical one leaves it
+  running
+- **A YAML file model keeps custom tags that parse to class instances**, such
+  as `!include` and `!secret`, when it writes
+- **`setupPrimaryUrl` treats an empty stored URL as unset**
+- **`i18n()` inserts a parameter value verbatim, at every occurrence.** A
+  value containing `$&`, `` $` `` or `$'` was rewritten, and a placeholder
+  used twice was filled only once
+
+## 3.0.2 — StartOS 0.4.0.2
+
+### Fixed
+
+- **A flavor switch records the exact version installed as the service's
+  data version**, so the receiving package's later migrations run. A range
+  recorded by an earlier switch is replaced by the current version at the
+  next initialization; the migrations it skipped are not replayed, so a
+  package that needs one of them on such an install has to do that work
+  outside a migration
+
+## 3.0.1 — StartOS 0.4.0.2
+
+### Changed
+
+- **Breaking — file models parse with their shape exactly as written.** A
+  `z.object` shape deletes every key it doesn't declare on the next `merge()`,
+  `write()` or `update()`. Build every file model with `z.looseObject` at every
+  nesting level; use `z.object` only for a file you have fully modeled and will
+  always keep fully modeled. A `z.discriminatedUnion` keeps the variant its
+  discriminator names
+
+## 3.0.0 — StartOS 0.4.0.2
+
+### Security
+
+- **Update SDK build and test dependencies with security fixes.**
+
+### Changed
+
+- **Breaking — read-only volume and asset mounts are enforced.** Writes through a volume mount declared `readonly: true`, or through any asset mount, fail with `EROFS`. Mount volumes writable wherever the service writes to them. Copy assets that need modification into a writable volume
+
+- **Breaking — `Watchable<A>` takes only the type it reads.** A reader that
+  maps a raw value extends `MappedWatchable<Raw, Mapped>` and implements
+  `fetchRaw`/`produceRaw` in place of `fetch`/`produce`. A type written
+  `Watchable<Raw, Mapped>` becomes `Watchable<Mapped>`
+
+- **Breaking — define dependencies once in `dependencies.ts`.** Create each base with `sdk.Dependency.required` or `.optional` (including metadata, version range, kind and health checks), add it to `sdk.Dependencies.of()`, and pass the builder to `buildManifest(versionGraph, sdkManifest, dependencies)` and `setupInit`. Move runtime conditions to `enabled` and `withDynamicNarrowing`, tasks to `withInit`, and use `dependencies.check(effects)` in place of `sdk.checkDependencies(effects)`. The base version range, kind, and health checks are also included in the package manifest and registry metadata, allowing StartOS to record required dependencies independently of init effects and enforce the published base for enabled optional dependencies. `enabled`, the narrowing, and each `.withInit` handler rerun independently when a watched value changes; the requirements are republished only when they change, and init handlers run only while the dependency is enabled. StartOS hides the tasks a service created on a dependency while that dependency is disabled.
+
+- **Breaking — `sdk.action.run` opens the action's form and passes it to
+  `input`.** `input` is a function from the opened form to the input to submit;
+  a plain value is no longer accepted. The run then answers that form, which is
+  what lets a service run an action that takes input — another service's that
+  `access` admits, via the new `packageId`, or its own. `prefill` seeds the
+  form. Underneath, `effects.action.getInput` accepts `prefill`, and the form
+  and the run that answers it share the calling procedure's event id
+
+- **Breaking — a filled address lists the server's `.local` name whenever the
+  user has it enabled, and `utils.mdnsResolvable` is removed.** `.local` was
+  left out while no LAN IP on its gateways was enabled, which dropped it
+  whenever the network did and made a stored URL compare as removed. The
+  Interfaces tab and a filled address now agree on every address.
 
 - **Minimum StartOS version is now `0.4.0.2`**, which is what a package built
   with this SDK writes as its manifest `osVersion`
@@ -89,6 +171,28 @@
 
 ### Added
 
+- **`waitFor` takes an optional `AbortSignal`**, as `watch` does, and rejects
+  with `AbortedError` when it aborts, including while waiting for a file or
+  its parent directory to be created. Pass one to cancel a wait you race against
+  a timeout. `watch` and `waitFor` end at once on a signal that has already
+  aborted.
+
+- **`FileHelper.update(effects, change)`** computes a complete replacement under the writer lock. The callback receives the validated current value and returns the replacement or `null` to skip writing. Reads inside it remain reentrant; nested writes, merges, or updates to the same file throw immediately. The callback has a five-second deadline, which also bounds file access it starts; a timed-out callback cannot commit later.
+
+- **`preDownloadAlert` in `setupManifest()`** displays a localized Markdown confirmation before downloading an update from an installed version matching `when.sourceVersion`.
+
+- **An `env` variable set to `undefined` is removed from the process**,
+  including one the image or StartOS would otherwise supply, such as `LANG`.
+
+- **An action learns who is running it.** The `run` handler, the prefill
+  function and a function-valued input spec each receive `caller`: the id of
+  the service that reached the action through `effects.action`, or `null` when
+  the user did. An action with `access: 'dependent'` or `'public'` can act on
+  the caller's own resources instead of trusting a package id in its input
+
+- **`utils.isAddressEnabled(addresses, hostname)`** reports whether the user's
+  overrides leave one of a binding's addresses on
+
 - **Scaffolded packages get a fourth workflow, `syncNext.yml`**, which keeps the
   `next` iteration branch in step with the base branch it stacks on. A repo with
   no `next` gets one created at the base tip on the first run
@@ -114,6 +218,23 @@
   so handle its absence. See
   [Hardware Virtualization (KVM)](https://docs.start9.com/packaging/manifest.html#hardware-virtualization-kvm)
 
+- **`Watchable.combine(effects, [a, b], map?, eq?)` builds one reader from
+  several.** Its raw value is the tuple of the sources' values, and `map`/`eq`
+  work as on any reader: it emits when `map`'s result differs from the last by
+  `eq`. `Watchable.from(effects, source, eq?)` makes a reader of a single
+  source. A source is any `WatchSource` (`once()` and `watch(abort)`), which
+  every `Watchable` is
+
+- **`sdk.setupPrimaryUrl()` replaces the hand-rolled "Set Primary URL" action
+  and watcher.** Give it the interface the URL belongs to, a reader for the
+  stored choice (`storeJson.read(s => s.primaryUrl)`) and a function that
+  writes it. It returns the action to register;
+  `bestUsable(effects)`, a reader for the stored URL while its hostname is one
+  of the interface's addresses and the `.local` address otherwise; and
+  `setupTask(severity, options)`, an init script that keeps a task raised while
+  the stored URL is unset or gone, which StartOS clears once it is back. See
+  [Set a Primary URL](https://docs.start9.com/packaging/recipe-primary-url.html)
+
 - **`createInterface` accepts `preferredLauncherAddress`.** A UI interface can
   nominate the absolute URL that StartOS should open when a service depends on
   one canonical origin. See
@@ -136,6 +257,25 @@
   See [Result Types](https://docs.start9.com/packaging/actions.html#result-types)
 
 ### Fixed
+
+- **An awaited `waitFor` waits until its predicate holds.** Awaiting
+  `waitFor` on a status, file or other reader no longer fails with
+  `AbortedError` after garbage collection while the condition is still false.
+
+- **A file model's reads see every change to the file.** `watch`, `const` and
+  `waitFor` no longer miss a write made while the previous value was being
+  read or handled, or a file created just as the wait began.
+
+- **FileHelper writes replace files atomically.** Writers hold a cross-process lock on the file, waiting up to ten seconds for it, and `merge()` and `update()` hold it through their complete read-modify-write; replacements retain the file's owner and permissions.
+
+- **Own-volume file mounts follow atomic source replacement in running subcontainers.** Refreshes preserve idmaps and readonly settings and run before FileHelper operations return and commands launch. Refresh failures propagate to the caller, including after a write has replaced the source. Existing descriptors retain the previous inode until the application reopens the file.
+
+- **Reactive init re-runs receive `kind: null`** after the initial install,
+  update, or restore pass. Lifecycle-only work guarded by `kind` runs once for
+  that event, even when a watched value changes.
+
+- **Lazy subcontainers retry filesystem materialization after a transient
+  failure**, allowing daemons to recover without a service restart
 
 - **`Backups.withMariadbDump` works against MariaDB 11 images**, official or
   packaged from a distribution
@@ -228,6 +368,12 @@
   side
 
 - **Backup and restore progress no longer falls back mid-sync**
+
+- **`checkPortListening` counts a TCP port as listening only while a socket is
+  in the `LISTEN` state.** It matched any socket on the port, so the
+  connections a process leaves in `TIME_WAIT` when it exits kept its port
+  reading as listening for up to a minute: a daemon's `ready` check passed, and
+  the health checks that require it ran, while nothing was listening
 
 ### Security
 

@@ -121,13 +121,13 @@ export const networkXml = FileHelper.xml({ base: sdk.volumes.config, subpath: 'n
 
 ### Reading Methods
 
-| Method                         | Purpose                                                |
-| ------------------------------ | ------------------------------------------------------ |
-| `.once()`                      | Read once, no reactivity                               |
-| `.const(effects)`              | Read and re-run the enclosing context if value changes |
-| `.onChange(effects, callback)` | Register a callback for value changes                  |
-| `.watch(effects)`              | Create an async iterator of new values                 |
-| `.waitFor(effects, predicate)` | Block until the value satisfies a predicate            |
+| Method                                  | Purpose                                                |
+| --------------------------------------- | ------------------------------------------------------ |
+| `.once()`                               | Read once, no reactivity                               |
+| `.const(effects)`                       | Read and re-run the enclosing context if value changes |
+| `.onChange(effects, callback)`          | Register a callback for value changes                  |
+| `.watch(effects, signal?)`              | Create an async iterator of new values                 |
+| `.waitFor(effects, predicate, signal?)` | Block until the value satisfies a predicate            |
 
 > [!NOTE]
 > All read methods return `null` if the file doesn't exist. Do NOT use try-catch for missing files.
@@ -170,7 +170,12 @@ const serverHost = await configYaml.read(c => c.server.host).once()
 
 // Wait until a condition is met (blocks until predicate returns true)
 const syncedStore = await storeJson.read(s => s.fullySynced).waitFor(effects, synced => synced === true)
+
+// Give up after a minute; the signal stops the wait (it rejects with AbortedError)
+const syncedInTime = await storeJson.read(s => s.fullySynced).waitFor(effects, synced => synced === true, AbortSignal.timeout(60_000))
 ```
+
+The signal also cancels waits for a file or its parent directory to be created.
 
 ## Writing File Models
 
@@ -202,6 +207,22 @@ await storeJson.write(effects, {
   smtp: { selection: 'disabled', value: {} },
 })
 ```
+
+### Changing the Current Value
+
+Use `update()` when the next value depends on the current file, including toggles and deleting entries from a typed record:
+
+```typescript
+await configToml.update(effects, current => (current === null ? null : { ...current, allow_registration: !current.allow_registration }))
+```
+
+The callback receives the same validated value as `read().once()`. Return a complete replacement or `null` to skip writing. An unchanged serialized value also skips writing. The callback may be asynchronous. Reads inside it remain reentrant; calling `write()`, `merge()`, or `update()` on the same file, including through a symlink alias, throws immediately.
+
+The callback has five seconds to return, and file access it starts on other files counts against the same deadline. On timeout, `update()` rejects and releases the lock; the callback cannot commit its return value or start further SDK file operations. Keep callbacks short: an in-process timer cannot interrupt synchronous code that blocks Node's event loop or undo side effects performed directly by the callback.
+
+`write()`, `merge()`, and `update()` hold a cross-process advisory lock on each target, so other SDK runtimes writing the same file through a mounted directory wait their turn. A writer waits up to ten seconds for the lock, then rejects; a service that holds its own `flock` on the file for longer blocks every SDK write to it. `merge()` and `update()` hold it through the entire read-modify-write. The lock is taken on the file itself; creating a missing file locks a hidden `.<name>.tmp` temp file that is renamed into place. A write interrupted by a crash or power loss can leave a hidden `.<name>.<random>.tmp` file beside the target; the first write to that file after the service restarts removes it. An interrupted create leaves `.<name>.tmp`, which the next create reuses.
+
+Writes replace the file atomically, preserving its owner, access ACL, permissions, and extended attributes. New files inherit their directory's default ACL. Own-volume file mounts follow replacement while their subcontainer is alive, and commands synchronize these mounts before launching. Reads, writes, and commands reject when their mount cannot be refreshed. A write may have replaced the source before refresh fails; rejection does not imply that the file is unchanged. A deleted source leaves the mount on its last file. A target that is itself a bind mount is written in place. Existing open descriptors retain the previous inode; applications must reopen the pathname to read the replacement.
 
 ### What an Empty `merge()` Does
 
@@ -416,11 +437,13 @@ export const confFile = FileHelper.ini(
 A file model must **preserve** unknown keys, not strip them: upstream config files carry keys your schema doesn't model (auto-generated secrets, internal state, plugin settings), and dropping them breaks the service.
 
 > [!IMPORTANT]
-> **Build every file-model shape with `z.looseObject`, at every nesting level.** A shape built with `z.object` silently discards the rest of the user's file on the next `merge()`. Reach for `z.object` only where StartOS produces the data and you want unknown keys gone.
+> **Never use `z.object` in a file model. Use `z.looseObject`, at every nesting level.** A `z.object` shape deletes every key it doesn't declare the next time the file is written — by `merge()`, `write()`, or `update()` — with no error and no warning.
+>
+> The one exception is a file you have **fully** modeled — every key it can ever hold — and will **always** keep fully modeled, so that a key added later by an upstream release, a plugin, or a user's edit lands in your shape before it lands in the file. That is the only case in which deleting unknown keys is what you want. If you are not certain, it is `z.looseObject`.
 
 Preserving unknown keys has two consequences:
 
-1. **`merge()` never removes keys you don't mention.** Only keys explicitly passed to `merge()` are updated. Everything else — including keys outside your schema — passes through untouched.
+1. **`merge()` never removes keys you don't mention.** Only keys explicitly passed to `merge()` are updated. Everything else — including keys outside your schema, as long as every level is a `z.looseObject` — passes through untouched.
 2. **Stale keys from previous versions persist.** If an earlier version of your package wrote keys that the current version no longer uses, those keys survive across updates. They are not automatically cleaned up by `merge()` or by the zod schema.
 
 To **delete a stale key**, pass it as `undefined` in a `merge()` call:
@@ -440,7 +463,7 @@ await configToml.merge(effects, { legacy_key: undefined })
 ```
 
 > [!WARNING]
-> This removes a stale key your schema doesn't model. It cannot surgically delete one entry of a _typed_ collection that has a `.catch()` default. `merge({ users: { bob: undefined } })` against `users: z.record(...).catch({})` makes the whole `users` value fail validation, so the `.catch({})` replaces the **entire** record with `{}` — every entry is wiped, not just `bob`. To drop one entry while keeping the rest, rebuild the value in code and `write()` it.
+> This removes a stale key your schema doesn't model. It cannot surgically delete one entry of a _typed_ collection that has a `.catch()` default. `merge({ users: { bob: undefined } })` against `users: z.record(...).catch({})` makes the whole `users` value fail validation, so the `.catch({})` replaces the **entire** record with `{}` — every entry is wiped, not just `bob`. To drop one entry while keeping the rest, rebuild the complete value inside `update()`.
 
 ### Arrays Are Replaced, Not Merged
 
@@ -525,7 +548,7 @@ const appSub = sdk.SubContainer.of(
 await configToml.read(c => c.some_mutable_setting).const(effects)
 
 // In an action, toggle a setting directly
-await configToml.merge(effects, { allow_registration: !current })
+await configToml.update(effects, current => (current === null ? null : { ...current, allow_registration: !current.allow_registration }))
 ```
 
 > [!WARNING]

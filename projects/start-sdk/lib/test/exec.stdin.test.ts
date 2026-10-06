@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import * as cp from 'child_process'
 import { SubContainerEager } from '../util/SubContainer'
+import { FileMounts } from '../util/fileMounts'
 
 jest.mock('child_process', () => ({
   ...jest.requireActual('child_process'),
@@ -37,6 +38,7 @@ function subContainer() {
   sub.imageId = 'test-image'
   sub.rootfs = '/tmp/does-not-exist'
   sub.waitProc = async () => {}
+  sub.fileMounts = new FileMounts()
   return sub as SubContainerEager<any>
 }
 

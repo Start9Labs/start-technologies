@@ -6,14 +6,22 @@ import { InputSpec } from './input/builder'
 import { ExtractInputSpecType } from './input/builder/inputSpec'
 
 type MaybeInputSpec<Type> = {} extends Type ? null : InputSpec<Type>
+/**
+ * The service that reached the action through `effects.action`, which may be
+ * this one. `null` for the user, and for StartOS evaluating a task.
+ */
+export type ActionCaller = T.PackageId | null
+
 export type Run<A extends Record<string, any>> = (options: {
   effects: T.Effects
   input: A
   spec: T.inputSpecTypes.InputSpec
+  caller: ActionCaller
 }) => Promise<(T.ActionResult & { version: '1' }) | null | void | undefined>
 export type GetInput<A extends Record<string, any>> = (options: {
   effects: T.Effects
   prefill: T.DeepPartial<A> | null
+  caller: ActionCaller
 }) => Promise<null | void | undefined | T.DeepPartial<A>>
 
 export type MaybeFn<T, Opts = { effects: T.Effects }> =
@@ -56,10 +64,12 @@ export interface Action<
   getInput(options: {
     effects: T.Effects
     prefill: T.DeepPartial<Type> | null
+    caller?: ActionCaller
   }): Promise<T.ActionInput>
   run(options: {
     effects: T.Effects
     input: Type
+    caller?: ActionCaller
   }): Promise<T.ActionResult | null>
 }
 
@@ -80,6 +90,7 @@ class ActionImpl<
       {
         effects: T.Effects
         prefill: unknown | null
+        caller: ActionCaller
       }
     >,
     private readonly getInputFn: GetInput<Type>,
@@ -98,10 +109,15 @@ class ActionImpl<
     await options.effects.action.export({ id: this.id, metadata })
     return metadata
   }
-  async getInput(options: {
+  async getInput({
+    caller = null,
+    ...rest
+  }: {
     effects: T.Effects
     prefill: T.DeepPartial<Type> | null
+    caller?: ActionCaller
   }): Promise<T.ActionInput> {
+    const options = { ...rest, caller }
     let spec = {}
     if (this.inputSpec) {
       const inputSpec = await callMaybeFn(this.inputSpec, options)
@@ -124,6 +140,7 @@ class ActionImpl<
   async run(options: {
     effects: T.Effects
     input: Type
+    caller?: ActionCaller
   }): Promise<T.ActionResult | null> {
     let spec = {}
     if (this.inputSpec) {
@@ -141,6 +158,7 @@ class ActionImpl<
         effects: options.effects,
         input: options.input,
         spec,
+        caller: options.caller ?? null,
       })) ?? null
     )
   }
@@ -158,6 +176,7 @@ export const Action = {
       {
         effects: T.Effects
         prefill: unknown | null
+        caller: ActionCaller
       }
     >,
     getInput: GetInput<ExtractInputSpecType<InputSpecType>>,

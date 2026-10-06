@@ -258,26 +258,29 @@ pub(crate) async fn get_wan_ipv4() -> Result<Option<Ipv4Addr>, Error> {
 /// Every IPv4 address on the `wan` interface, in ubus order. Empty when the
 /// interface is down or ubus is unavailable.
 pub(crate) fn wan_ipv4_addrs() -> Vec<Ipv4Addr> {
-    let Ok(out) = StdCommand::new("ubus")
+    read_wan_ipv4_addrs().unwrap_or_default()
+}
+
+/// `None` when ubus is unavailable; empty when the interface is down.
+pub(crate) fn read_wan_ipv4_addrs() -> Option<Vec<Ipv4Addr>> {
+    let out = StdCommand::new("ubus")
         .args(["call", "network.interface.wan", "status"])
         .output()
-    else {
-        return Vec::new();
-    };
+        .ok()?;
     if !out.status.success() {
-        return Vec::new();
+        return None;
     }
-    let Ok(json) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
-        return Vec::new();
-    };
-    json.get("ipv4-address")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|e| e.get("address")?.as_str()?.parse().ok())
-                .collect()
-        })
-        .unwrap_or_default()
+    let json = serde_json::from_slice::<serde_json::Value>(&out.stdout).ok()?;
+    Some(
+        json.get("ipv4-address")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|e| e.get("address")?.as_str()?.parse().ok())
+                    .collect()
+            })
+            .unwrap_or_default(),
+    )
 }
 
 pub async fn get_wan_ipv6s() -> Result<Vec<Ipv6Addr>, Error> {
@@ -970,9 +973,7 @@ pub fn system<C: CtrlContext>() -> ParentHandler<C> {
         )
         .subcommand(
             "apply-remote-access",
-            from_fn_async_local(apply_remote_access::<C>)
-                .with_metadata("no_auth", Value::Bool(true))
-                .no_display(),
+            from_fn_async_local(apply_remote_access::<C>).no_display(),
         )
         .subcommand(
             "restart",
@@ -990,9 +991,7 @@ pub fn system<C: CtrlContext>() -> ParentHandler<C> {
         )
         .subcommand(
             "set-timezone",
-            from_fn_async(set_timezone::<C>)
-                .with_metadata("no_auth", Value::Bool(true))
-                .no_display(),
+            from_fn_async(set_timezone::<C>).no_display(),
         )
         .subcommand(
             "get-timezones",

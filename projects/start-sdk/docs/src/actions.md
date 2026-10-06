@@ -72,13 +72,59 @@ The action is paired with a `setupOnInit` watcher that surfaces a critical task 
 
 ### Controlling Access
 
-The optional **`access`** field on the metadata controls who may invoke the action **directly** via `effects.action.run({ packageId, actionId, input })`:
+The optional **`access`** field on the metadata controls who may invoke the action **directly**, with `sdk.action.run` (see [Running Another Service's Action](#running-another-services-action)):
 
 - `'user'` (default) — only the user; another service must request it through a task (`effects.action.createTask(...)`).
 - `'dependent'` — only services that declare this package as a current dependency.
 - `'public'` — any installed package.
 
 `access` is independent of `visibility` (whether the action is shown/enabled) and `allowedStatuses` (which run states permit it); a direct cross-package run is rejected if `access` denies the caller.
+
+### Knowing Who Is Calling
+
+`access` decides _whether_ another service may run the action. **`caller`** tells the action _which_ service is running it, so it can decide what that service is allowed to touch. The `run` handler, the prefill function, and an input spec written as a function each receive it:
+
+- a package id — the service that reached the action through `effects.action.run` or `effects.action.getInput`. A service that runs one of its own actions that way sees its own id.
+- `null` — the user ran it, or StartOS is reading the form to evaluate a task.
+
+StartOS supplies `caller`; the calling service cannot set or forge it. **Take identity from `caller`, never from the input.** An action that lets a service register something against "its own" host must not accept a package id as a field — any service allowed to call it could name another:
+
+```typescript
+export const registerEndpoint = sdk.Action.withInput(
+  'register-endpoint',
+  async () => ({
+    name: i18n('Register Endpoint'),
+    description: i18n('Register a host of the calling service'),
+    warning: null,
+    allowedStatuses: 'any',
+    group: null,
+    visibility: 'hidden',
+    access: 'dependent',
+  }),
+  InputSpec.of({ hostId: Value.text({ name: 'Host', required: true, default: null }) }),
+  async () => null,
+  async ({ effects, input, caller }) => {
+    if (caller === null) throw new Error('Only a service can register an endpoint')
+    // `caller` is who asked; `input.hostId` is which of its hosts.
+    await register(effects, { packageId: caller, hostId: input.hostId })
+  },
+)
+```
+
+### Running Another Service's Action
+
+`sdk.action.run` runs one of this service's own actions, or another service's that its `access` admits. An action that takes input is run the way the user runs it: its form is opened first, and the input is checked against that form. So `input` is a function. It receives the opened form — its `spec`, and the `value` the action's prefill function supplied — and returns the input to submit. `prefill` seeds the form, including the values its dynamic fields are computed from.
+
+```typescript
+await sdk.action.run({
+  effects,
+  packageId: 'directory',
+  actionId: 'register-endpoint',
+  input: ({ value }) => ({ ...value, hostId: 'api' }),
+})
+```
+
+An action without input takes no `input`, and runs without a form. Calling the effects directly works the same way: the target keys the form `effects.action.getInput` opens by the calling procedure's event id, so the `effects.action.run` that answers it must come from the same procedure, one form at a time.
 
 ## Registering Actions
 
@@ -214,7 +260,7 @@ export const toggleRegistrations = sdk.Action.withoutInput(
     return {
       name: allowed ? i18n('Disable Registrations') : i18n('Enable Registrations'),
       description: allowed ? i18n('Registrations are currently enabled. Run this action to disable them.') : i18n('Registrations are currently disabled. Run this action to enable them.'),
-      warning: allowed ? null : i18n('Anyone with your URL will be able to create an account.'),
+      warning: allowed ? i18n('New accounts can no longer be created. Existing accounts are unaffected.') : i18n('Anyone with your URL will be able to create an account.'),
       allowedStatuses: 'any',
       group: null,
       visibility: 'enabled',
@@ -321,6 +367,12 @@ password: Value.text({
 `default` also takes a plain string when you want a fixed literal. The same `RandomString` shape is what [`utils.getDefaultString`](recipe-admin-credentials.md#never-roll-your-own-password-rng) resolves in a `withoutInput` handler — between the two, package code never needs its own random-string generator.
 
 ## Conventions
+
+### Confirm Before a No-Input Action Changes State
+
+A no-input action runs on click, so one that changes state sets `warning`, and the UI asks the user to confirm first. That holds for a reversible toggle too: the point is to prevent unexpected execution, not only damage. The warning names what changes — what is replaced, stops working, restarts or becomes exposed — never just "Are you sure?". An action with input needs no warning, since the form is the confirmation, and an action that only reports (credentials, node info) needs neither.
+
+A create-or-update action, such as setting an admin password or token, warns only when it replaces an existing value and sets `warning: null` on first creation, as [Action Without Input](#action-without-input) shows.
 
 ### Wrap User-Facing Strings in `i18n()`
 

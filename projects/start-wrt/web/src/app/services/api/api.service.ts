@@ -741,6 +741,8 @@ export interface OutboundVpn {
   supports_ipv6: boolean
   /** Interface MTU, or null to inherit the kernel default (~1420). */
   mtu: number | null
+  /** The server is named by hostname; only 'Internet' is a valid target. */
+  hostname_endpoint: boolean
 }
 
 export interface OutboundVpnCreateRequest {
@@ -757,7 +759,7 @@ export interface OutboundVpnUpdateRequest {
   id: string
   label: string
   target: string
-  /** Desired MTU; null clears it (inherit default). Always sent by the form. */
+  /** Desired MTU; null restores the default: the chain MTU for a chained VPN, else the kernel's (~1420). Always sent by the form. */
   mtu: number | null
 }
 

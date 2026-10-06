@@ -2,21 +2,23 @@
 
 Agent/developer operating rules for the **start-technologies monorepo root**. This repo is the monorepo for all Start9 products. `CLAUDE.md` is a one-line `@AGENTS.md` import — do not edit it.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the layout and [CONTRIBUTING.md](CONTRIBUTING.md) for the build/test/format workflow.
+This file owns the shared contributor workflow and operating rules. See [README.md](README.md) for product context and [ARCHITECTURE.md](ARCHITECTURE.md) for the layout.
 
-**Keep these docs current.** Every scope carries `AGENTS.md` / `ARCHITECTURE.md` / `README.md` (and `CLAUDE.md`, a one-line `@AGENTS.md` import). When a change alters structure, conventions, the build/test/release flow, or product context, update the matching doc(s) in the **same change** — never defer. These docs are **hierarchical**: each scope's docs cover only what is specific to it and must not repeat anything already stated at a higher scope (e.g. commit/PR conventions live only in this root `CONTRIBUTING.md`).
+**Keep these docs current.** Every scope carries `AGENTS.md` / `ARCHITECTURE.md` / `README.md` (and `CLAUDE.md`, a one-line `@AGENTS.md` import). When a change makes a documented statement about structure, conventions, the build/test/release flow, or product context inaccurate, correct it in the **same change** — never defer. Leave accurate text alone. These docs are **hierarchical**: each scope's docs cover only what is specific to it and must not repeat anything already stated at a higher scope (e.g. commit/PR conventions live only in this root `AGENTS.md`).
 
-**Anything an agent must follow belongs _in_ `AGENTS.md`, not behind a link from it.** The `AGENTS.md` standard is plain Markdown with **no import syntax** — unlike `CLAUDE.md`, whose `@file` imports expand into context at launch. So a pointer in `AGENTS.md` ("see X for the release process") is just a suggestion that the agent spend a tool call, and agents routinely don't: that is exactly how start-sdk 2.0.4 and 2.0.5 shipped untagged. Inline the rule; link only to _reference_ material an agent can safely skip (`ARCHITECTURE.md`, a product book). `CLAUDE.md` stays a one-line `@AGENTS.md` import — Claude Code does not read `AGENTS.md` natively.
+**Required scope rules belong in `AGENTS.md`.** It is plain Markdown, with no import syntax; a link does not load its target. Inline the workflow rather than hiding it behind a contribution guide. For shared skills and topical references, state explicitly when they must be read instead of duplicating their contents. `CLAUDE.md` stays a one-line `@AGENTS.md` import.
 
-**So `CONTRIBUTING.md` is being folded into `AGENTS.md` — in every scope _but_ the root.** A sub-scope `CONTRIBUTING.md` earns nothing (GitHub gives it no special treatment) and costs an agent a hop, so its contents belong in that scope's `AGENTS.md`. When you next do substantial work in a scope that hasn't migrated, fold its `CONTRIBUTING.md` into its `AGENTS.md`, delete it, and repoint every inbound link in the same change — don't leave dangling cross-references, and don't migrate scopes you aren't otherwise touching. **The root [`CONTRIBUTING.md`](CONTRIBUTING.md) stays**: GitHub surfaces it (the contributing prompt on new issues/PRs, the community profile), so it remains the human-facing front door — the social layer, and a pointer _to_ `AGENTS.md` for the mechanics. That pointer runs one way; a human will follow a link, an agent won't.
+**Contributor instructions live in `AGENTS.md` at every scope.** Do not create separate contribution guides. Each `AGENTS.md` must have a sibling `CLAUDE.md` containing exactly `@AGENTS.md` and a newline. Put project context in `README.md`, structural reference in `ARCHITECTURE.md`, and required workflows and rules here.
 
-**A product's user docs and changelog ship with the code.** Any change that alters user-visible behavior **must** update that product's user-facing documentation book (its `docs/` directory — e.g. `projects/start-os/docs/`, `projects/start-tunnel/docs/`, `projects/start-sdk/docs/`) in the **same change**, and **must** add a `CHANGELOG.md` entry for that product (a version bump always pairs with its changelog). Don't land code and defer its docs or changelog to a follow-up. The conventions for authoring **any** of those books — mdBook versions, admonitions, tabs, `SUMMARY.md`, the shared `theme/` — live in [`projects/start-docs/AGENTS.md`](projects/start-docs/AGENTS.md) and its `CONTRIBUTING.md`. That project is a sibling, not an ancestor, so nothing loads it for you: read it before editing book pages anywhere in the repo.
+**Documentation follows accuracy, not the diff.** For user-facing books and developer-facing references, change existing text only when the change makes it inaccurate or misleading. If the docs remain accurate, leave them unchanged: touching a feature does not make it more important or warrant a special callout, caveat, or explanation of the fix. The exception is a new feature readers would not otherwise discover and that would have belonged in the docs had it existed when they were written; document it in the appropriate existing page or section, at the same level of emphasis as comparable features. Required documentation changes ship with the code in the **same change**, in the owning product's `docs/` directory (e.g. `projects/start-os/docs/`, `projects/start-tunnel/docs/`, `projects/start-sdk/docs/`).
+
+**Changelog requirements are separate.** Any change that alters user-visible behavior **must** add a `CHANGELOG.md` entry for that product in the **same change**, whether or not its documentation needs editing. A version bump always pairs with its changelog. Don't defer a required docs or changelog update to a follow-up.
+
+**Book authoring conventions.** The conventions for authoring **any** product book — mdBook versions, admonitions, tabs, `SUMMARY.md`, the shared `theme/` — live in [`projects/start-docs/AGENTS.md`](projects/start-docs/AGENTS.md). That project is a sibling, not an ancestor, so nothing loads it for you: read it before editing book pages anywhere in the repo.
 
 **The changelog's top heading is the prospective _next_ version, and git tags decide released-vs-unreleased.** **Before deciding where a changelog entry goes, freshly pull tags from origin _first_** — run `git fetch --tags origin` (or query origin live: `git ls-remote --tags origin '<product>/v*'`, `gh release list`), every time; never trust stale local tags, and never infer release state from the changelog file, a `## [x.y.z]` heading, or a manifest constant. Those origin tags (`<product>/v<version>`) are the only source of truth for what has shipped. Keep the top `CHANGELOG.md` heading set to the **actual prospective next version** (e.g. `## [1.1.1]`) matching the product manifest — not a bare `## [Unreleased]` — because the number itself signals the tier of change accumulated (patch/minor/major). When that top version has **no matching origin tag it is unreleased: add your entry _under_ it** (in the right `### Added`/`### Changed`/`### Fixed`/`### Security` subsection), and raise both the heading and the manifest a tier only if your change warrants it (a fix leaves an accumulating `1.1.1` alone; a breaking change bumps it to `2.0.0`). **If your change fixes or refines a feature that was _added in that same still-unreleased version_, edit that feature's existing entry** (only where its wording needs it) rather than adding a separate `### Fixed` line — to the user the feature simply ships correct, so there is no fix to a thing they never received. **Only cut a _new_ heading — and bump the manifest — once the current top heading is a cut origin tag** (that line is fully released). The release tooling turns that prospective heading into the shipped one when it cuts the tag.
 
 **An entry says what changed; the commit says why.** It is read by someone deciding whether an upgrade affects them and wanting a high-level sense of what the release did — so an entry runs as long as it takes to convey that, and stops there. A breaking change that needs a migration instruction gets one; a fix nobody could observe does not need its mechanism explained. What never belongs is the material that explains the change to whoever reviewed it: the root cause, the implementation detail, the alternatives you rejected, the story of how you found it. That goes in the commit message and the PR body, where it stays attached to the diff.
-
-**Read [CONTRIBUTING.md](CONTRIBUTING.md) before making _any_ code changes.** It carries the build/test/format workflow and the commit/PR conventions every change must follow — read it first, before you touch code. This is hierarchical like `AGENTS.md`: if a subdirectory you touch carries its own `CONTRIBUTING.md`, read that one too — and any further nested `CONTRIBUTING.md` on the way down to the files you're editing — before changing anything there.
 
 **Read down into what you touch.** When you work in a subdirectory, first read its `AGENTS.md` — and any further nested `AGENTS.md` on the way down to the files you're editing — before changing anything. Each scope's docs assume you've read the scopes above it, so a subdir's `AGENTS.md` adds only its own rules on top of this root.
 
@@ -26,23 +28,149 @@ Each product lives under `projects/` as a thin wrapper; the bulk of the code liv
 
 - `projects/start-os/` — OS product. Rust bins `startbox` + `start-container` (`src/bin/*.rs`), `web/` (Angular UI + setup-wizard), `container-runtime/` (Node LXC service runtime), bin build scripts + OS image build (`build/`), Debian control (`debian/`), VM-setup `assets/`, `backup-fs/`, `docs/`, `*.service`.
 - `projects/start-cli/` — `start-cli` bin (`src/main.rs`); thin wrapper over `start-core`.
-- `projects/start-registry/` — `registrybox` bin; registry server, serves the shared marketplace UI lib.
+- `projects/start-registry/` — `registrybox` bin; registry API and asset server, consumed by the shared marketplace UI lib.
 - `projects/start-tunnel/` — `tunnelbox` bin + `web/` (StartTunnel UI).
 - `projects/start-wrt/` — StartWRT, an OpenWrt-based router OS. Rust backend (`startwrt` bin: RPC daemon + CLI, crates `ctrl`/`uciedit`/`uciedit_macros`) building on shared `start-core`; an Angular `web/` UI (a project in the root Angular workspace) embedded into the binary; a build-managed `openwrt/` workspace (pinned upstream OpenWrt tarball + the Start9 delta in `openwrt-patches/` + `openwrt-overlay/`); flashable image for the SpaceMiT K1.
 - `projects/start-sdk/` — `@start9labs/start-sdk` (source in `lib/`; imports the shared `@start9labs/start-core` lib and bundles it into its published `dist/`) + `Makefile`/`s9pk.mk` + `docs/` (packaging mdbook).
-- `projects/brochure-marketplace/` — public marketplace/landing Angular app (deploys to marketplace.start9.com).
+- `projects/brochure-marketplace/` — public marketplace Angular app (deploys to marketplace.start9.com).
 - `projects/start-docs/` — the documentation website (build infra + landing + Bitcoin guides; each product's own book lives in its `docs/`).
 - `shared-libs/crates/start-core/` — the **entire** Rust backend lib (package `start-core`, lib name `start_core`). All six bins depend on it.
 - `shared-libs/ts-modules/` — shared **TypeScript** modules (the common thread is just that they are TS — not Angular-specific). These are the Angular libs `shared/` (`@start9labs/shared`) and `marketplace/` (`@start9labs/marketplace`), plus the non-Angular `start-core/` (`@start9labs/start-core`: SDK core types/ABI/effects/OS bindings, the TS projection of the `start-core` crate, consumed by web and bundled into the SDK; versionless, not published separately). The Angular workspace is rooted at the repo root (`angular.json`/`package.json`). Product apps reference the libs by package name.
 - Agent skills, in the Agent Skills format, live in two places by who reads them. `.claude/skills/` holds the skills for work in this repo (`start9-frontend`); Claude Code loads them as project skills and `.agents/skills` symlinks the directory for Codex. `projects/start-sdk/docs/skills/` holds the packaging skills (`package-service`): guide content that reaches `live-docs` the way a page does, and that packaging workspaces and helix read from their guide checkout. Nothing at the repo root refers to them: a packaging skill is reached through a packaging workspace, never installed on its own. A skill that is Start9's own procedure rather than doctrine for every packager ships with helix, not here. A skill states what to do, never which tool does it — it is read by agents with different tool sets.
 - Top level also holds the shared build infra (`build/`, `Makefile`), `apt/`, the shared `debian/build.sh`, `scripts/` (maintainer release tooling — `manage-release.sh <subcommand> <project>` drives a product through pre-check/tag/release/sign/publish; `deploy-migration-payload.sh` publishes a 0.3.5.1 → 0.4.0 migration OTA payload to a legacy registry), `rfcs/` (protocol drafts), and `shared-libs/crates/patch-db/` (first-party crate, consumed by `start-core` and web).
 
-## Build & test (run from the repo root)
+## Collaboration
 
-- **Use `make` recipes when they exist** rather than re-deriving the underlying commands. The root `Makefile` is a thin orchestrator that `include`s `build/common.mk` (shared vars/macros) and one `<project>/build.mk` per product (`projects/<name>/build.mk`, `shared-libs/*/build.mk`) — run everything from the repo root (`make start-os`, `make start-registry`, etc.); a product's targets live in its `build.mk`. There is no default target — bare `make` prints `help`.
-- **Build a single product** with `cargo build -p <crate> --bin <bin>` (bins: `startbox`/`start-container` in package `start-os`; `start-cli`; `registrybox` in `start-registry`; `tunnelbox` in `start-tunnel`; `startwrt` in package `startwrt-core` for `start-wrt`).
-- **Tests:** `make test` (all), `make start-core-test` / `make start-sdk-test` / `make backup-fs-test` (all backup-fs library tests except the mount-based `/dev/fuse` suite) / `make container-runtime-test` / `make start-os-scripts-test` (the shell suite for `projects/start-os/build/lib/scripts`) (scoped). A single Rust test: `cd shared-libs/crates/start-core && cargo test <test_name> --features=test`.
-- **Format:** `make format` (rustfmt in a pinned-nightly container + prettier + taplo, both native); CI runs `make format-check`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full build/test/format workflow.
+- [Matrix](https://matrix.to/#/#dev-startos:matrix.start9labs.com)
+- Security issues: [security@start9.com](mailto:security@start9.com) — see [SECURITY.md](SECURITY.md)
+
+## Environment Setup
+
+> Debian/Ubuntu is the only officially supported build environment.
+> MacOS has limited build capabilities and Windows requires [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install).
+
+The shared toolchain below is enough to build the Rust bins and the web apps. **Individual products need more** — most notably the StartOS OS image, which adds multi-arch emulation and image-packaging tooling. See each product's `AGENTS.md` for its additional system dependencies.
+
+**Web-UI work skips most of this.** The Angular front ends build and run standalone against mock data — they need only Node 24 and Make, no Rust, Docker, or OS-image tooling. See [`shared-libs/ts-modules/AGENTS.md`](shared-libs/ts-modules/AGENTS.md).
+
+```bash
+# Common build tooling
+sudo apt update
+sudo apt install -y ca-certificates curl gpg build-essential git \
+  sed grep gawk jq gzip brotli rsync
+
+# Rust (stable; rustfmt runs in a pinned-nightly container — see Formatting)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh # proceed with default installation
+
+# Node.js 24 (shared web toolchain)
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash
+source ~/.bashrc
+nvm install 24
+nvm use 24
+nvm alias default 24 # this prevents your machine from reverting back to another version
+```
+
+Install Docker using the [instructions for the host distribution](https://docs.docker.com/engine/install/). OS-image and cross-compilation recipes use it; local `.s9pk` packaging can also use Podman.
+
+### Cloning
+
+```bash
+git clone https://github.com/Start9Labs/start-technologies.git
+cd start-technologies
+```
+
+## Building
+
+**Use `make` recipes when they exist** rather than re-deriving underlying commands. This is a monorepo: one root Cargo workspace and one Angular workspace, both rooted at the repo root. The root `Makefile` is a thin orchestrator (it `include`s each product's `build.mk`) — run `make` with no target to print a help summary; the default target is `help`. Run build commands from the repo root.
+
+- **A single Rust bin:** `cargo build -p <crate> --bin <bin>` — crates are `start-os` (`startbox` / `start-container`), `start-cli`, `start-registry` (`registrybox`), `start-tunnel` (`tunnelbox`), and `startwrt-core` (`startwrt`).
+- **A whole product** (bins + UI + packaging) has its own `make` targets and build instructions in its `AGENTS.md`:
+
+| Product                                | Primary build target                                                                                          | Build & deploy docs                                                               |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| StartOS (OS image, UIs, device deploy) | `make start-os`                                                                                               | [`projects/start-os/AGENTS.md`](projects/start-os/AGENTS.md#contributor-workflow) |
+| start-cli                              | `make start-cli`                                                                                              | [`projects/start-cli/AGENTS.md`](projects/start-cli/AGENTS.md)                    |
+| start-registry                         | `make start-registry`                                                                                         | [`projects/start-registry/AGENTS.md`](projects/start-registry/AGENTS.md)          |
+| StartTunnel                            | `make start-tunnel`                                                                                           | [`projects/start-tunnel/AGENTS.md`](projects/start-tunnel/AGENTS.md)              |
+| StartWRT                               | `make start-wrt` (`make start-wrt-image` for the full OpenWrt image — hours, fetches the pinned OpenWrt tree) | [`projects/start-wrt/AGENTS.md`](projects/start-wrt/AGENTS.md)                    |
+| Start SDK                              | `make bundle` (from `projects/start-sdk`)                                                                     | [`projects/start-sdk/AGENTS.md`](projects/start-sdk/AGENTS.md)                    |
+| Web (shared libs + app UIs)            | `npm run build:ui`                                                                                            | [`shared-libs/ts-modules/AGENTS.md`](shared-libs/ts-modules/AGENTS.md)            |
+
+`make start-core-ts-bindings` regenerates the TypeScript bindings from the Rust types, and `make clean` removes all compiled artifacts (ask before running it). Cross-layer changes (Rust → bindings → SDK → web/runtime) are described in [ARCHITECTURE.md](ARCHITECTURE.md#build-pipeline).
+
+### Build configuration
+
+The shared build recipes accept these environment variables. StartWRT pins its router architecture in `projects/start-wrt/build.mk` rather than deriving it from `PLATFORM`:
+
+| Variable             | Description                                                                                        |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| `PLATFORM`           | Target platform (e.g. `x86_64`, `aarch64`, `riscv64`). For non-OS products it only derives `ARCH`. |
+| `ENVIRONMENT`        | Hyphen-separated feature flags; the available options depend on the product.                       |
+| `PROFILE`            | Build profile: `release` (default) or `dev`.                                                       |
+| `GIT_BRANCH_AS_HASH` | Set to `1` to use the git branch name as the version hash (avoids rebuilds).                       |
+
+Each product's `AGENTS.md` documents the `PLATFORM` values and `ENVIRONMENT` flags it actually supports.
+
+## Testing
+
+```bash
+make test                    # all tests
+make start-core-test         # Rust (shared-libs/crates/start-core)
+make start-sdk-test          # SDK
+make backup-fs-test          # backup-fs library tests except the /dev/fuse suite
+make container-runtime-test  # container runtime
+make start-os-scripts-test   # StartOS shell scripts (projects/start-os/build/tests)
+make start-wrt-test          # StartWRT Rust crates
+make release-notes-test      # release-note composition
+
+# Run a specific Rust test
+cd shared-libs/crates/start-core && cargo test <test_name> --features=test
+```
+
+Each product's `AGENTS.md` covers its own scoped tests.
+
+## Formatting
+
+Three tools, one config each at the repo root: **rustfmt** (`rustfmt.toml`) for Rust,
+**prettier** (`.prettierrc.json`) for TS/JS/HTML/SCSS/Markdown/YAML/JSON, and **taplo**
+(`taplo.toml`) for TOML.
+
+Every prettier invocation passes `--config .prettierrc.json`. The package template's
+`.prettierrc` names the published SDK's config, which resolves only in a scaffolded package,
+so config discovery fails on any template file.
+
+```bash
+make format          # format the whole repo
+make format-check    # read-only check (what CI runs)
+```
+
+rustfmt uses options that are still nightly-only, so to keep output identical for
+everyone it runs in a pinned-nightly container — `build/fmt/fmtenv.Dockerfile`, which
+adds the pinned nightly to `start9/cargo-zigbuild` (the same image the Rust build
+uses) and is built on first use. prettier and taplo are pinned via npm
+devDependencies and run natively. To bump a version, edit the Dockerfile's
+`RUSTFMT_TOOLCHAIN` (rustfmt) or `package.json` (prettier / `@taplo/cli`).
+
+If you already have the pinned nightly installed and want to skip Docker:
+
+```bash
+FMT_NATIVE=1 make format
+```
+
+Or scope Rust formatting to one crate (still through the container):
+
+```bash
+make start-core-format   # shared Rust crates
+make start-cli-format    # also start-registry-format / start-tunnel-format / start-os-format / start-wrt-format
+make web-format          # prettier over the whole repo
+```
+
+Run the formatters before committing. A git pre-commit hook (husky + lint-staged)
+auto-runs prettier on staged files once you've run `npm ci`, so a missed format
+won't reach CI; it no-ops when dependencies aren't installed. CI enforces
+formatting regardless: a fast `prettier --check` gate runs on every pull request
+(including docs-only ones) and blocks the slower jobs, with `make format-check` as
+the source of truth.
 
 ## Branches and channels
 
@@ -55,25 +183,25 @@ Each product lives under `projects/` as a thin wrapper; the bulk of the code liv
 - **A deb release tags the commit alpha built, which is often not `HEAD`.** The build is identified by the `Git-Hash` control field [`debian/build.sh`](debian/build.sh) writes (`Version` cannot identify it — every master build of a version publishes under the same one). Each product's workflow is **path-filtered**, so master advances on changes elsewhere without rebuilding that product, and `alpha` legitimately holds a build of an older commit while no build of `HEAD` exists or ever will. Rather than demanding one, `pull-alpha` **adopts** alpha's commit and tags there — the tag has to point at the commit that produced the artifact. It says so on the way past, and prints the `git checkout` to put a tree on that commit; `./scripts/manage-release.sh alpha-commit <project>` prints the same hash for scripting. Adoption is confined to a commit already in the current branch's history, and an explicit `COMMIT=` is never overridden — it fails instead, because that is someone asserting a different intent. start-cli's per-triple binaries are the one thing that cannot be promoted — they are only ever GitHub release assets, so that half still needs the run. To put a CI build on a server without building locally: `make start-os-update-from-gha REMOTE=start9@<ip>` (latest master build) or `RUN_ID=<id|url>` for a specific run.
 - **`live-docs` is what every product has published, and is not a development branch.** docs.start9.com serves it, and `start-cli s9pk init-workspace` clones it — a packaging workspace reads its guide, package template, and SDK source from that branch, so what is on it must be true of shipped software. master's `docs/` books describe the version that has not shipped yet. Never merge a docs change into `live-docs` that isn't already true of the _published_ software.
 - **A pull request to `live-docs` may only change published book files.** The code on that branch is written by [`docs-sync-on-tag.yml`](.github/workflows/docs-sync-on-tag.yml) alone, on a release — a PR that carried code would put a tree there that no release produced, and [`docs-backport.yml`](.github/workflows/docs-backport.yml) would then push it onto master unattended, unreviewed as a code change. [`live-docs-guard.yml`](.github/workflows/live-docs-guard.yml) fails any PR touching a path outside `projects/<product>/docs/` and `projects/start-docs/`, and rejects `projects/start-sdk/docs/package-template/` as well. That lives under `docs/` but is the code `s9pk init-package` scaffolds from, read out of the workspace's checkout at scaffold time rather than built into `start-cli` — so a merge there changes what every new package is built from at once, without facing the `manage-release.sh pre-check start-sdk` gate on its SDK pin.
-- **A book change ships with its code on `master`; a book-only fix goes to `live-docs`.** This routing governs the **published books only** — `projects/<product>/docs/**` and `projects/start-docs/**`, the paths [`docs-deploy.yml`](.github/workflows/docs-deploy.yml) triggers on. Every other markdown in the repo — `AGENTS.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`, `README.md`, at any scope — is ordinary repo content that nothing publishes, and lands on master like code. For the books, the test is whether the change accompanies code. A book edit describing a change you are making belongs in the same PR as that change, on master, and reaches the site when that product is tagged. A change that only corrects a book — stale text, a dead link, a wrong path, anything already wrong on the published site — belongs on `live-docs`: it deploys on merge, and [`docs-backport.yml`](.github/workflows/docs-backport.yml) then pushes the same commit to master unattended. A book-only PR opened against master instead sits unpublished until the next tag. Where part of such a change touches book text that exists **only** on master (a section describing unshipped behavior), split that part into its own master PR — never write the same fix in both places, because one of the two will conflict and the conflict falls to a human.
+- **A book change ships with its code on `master`; a book-only fix goes to `live-docs`.** This routing governs the **published books only** — `projects/<product>/docs/**` and `projects/start-docs/**`, the paths [`docs-deploy.yml`](.github/workflows/docs-deploy.yml) triggers on. Every other markdown in the repo — `AGENTS.md`, `ARCHITECTURE.md`, `README.md`, at any scope — is ordinary repo content that nothing publishes, and lands on master like code. For the books, the test is whether the change accompanies code. A book edit describing a change you are making belongs in the same PR as that change, on master, and reaches the site when that product is tagged. A change that only corrects a book — stale text, a dead link, a wrong path, anything already wrong on the published site — belongs on `live-docs`: it deploys on merge, and [`docs-backport.yml`](.github/workflows/docs-backport.yml) then pushes the same commit to master unattended. A book-only PR opened against master instead sits unpublished until the next tag. Where part of such a change touches book text that exists **only** on master (a section describing unshipped behavior), split that part into its own master PR — never write the same fix in both places, because one of the two will conflict and the conflict falls to a human.
 - **A green `Conflict Markers` check does not mean a backport is clean.** Where git cannot merge a file line by line — a page deleted on one side, an image changed on both — the backport keeps one side and leaves no marker, so compare the PR against `live-docs` before merging it.
 
 ## Releases
 
 - **Cutting `<project>/v<version>` is what advances `live-docs` for that product.** [`.github/workflows/docs-sync-on-tag.yml`](.github/workflows/docs-sync-on-tag.yml) takes the tagged tree **whole**, then puts every _other_ `projects/*` back on the release it is on. So a tag moves its own project, the shared libraries beneath it (`shared-libs/`), and the repo root — and nothing another product owns. The shared `projects/start-docs/` site tree rides along only with a product that ships a book, `versions.conf` included, so `versions.conf` must already name the version you are about to publish **before** you tag; it is hand-maintained and the sync will not fix it for you. A bookless release (start-cli, start-registry) still advances its own project and the shared tree; it just leaves the site alone, so no deploy fires. Nothing moves backwards: a tag behind a release already synced — a deb release adopts the commit alpha built, often older than a tag cut before it — still advances its own project but leaves the shared trees where the newer release put them, and a tag behind its own product's last release publishes its book alone.
 - **Cut every release with [`scripts/manage-release.sh`](scripts/manage-release.sh)** — `./scripts/manage-release.sh release <project>` (`start-os`, `start-cli`, `start-tunnel`, `start-registry`, `start-sdk`, `start-wrt`); `--help` lists the individual subcommands and env vars. A product's version is read from its manifest (`Cargo.toml`, or `package.json` for the SDK), and its git tag / GitHub release is `<project>/v<version>`. **StartOS is the exception:** its version carries a revision segment SemVer cannot express (`0.4.0.1`), so the **root `package.json`** holds it and `projects/start-os/Cargo.toml` carries only a `0.4.0-rev.1` label — never a comparand, since a SemVer prerelease sorts _below_ its release. Read it via `build/env/version.sh`; see [`shared-libs/crates/start-core/VERSION_BUMP.md`](shared-libs/crates/start-core/VERSION_BUMP.md).
-- **A release's curated notes live at `projects/<product>/release-notes/<version>.md`, and that file is their only home.** `manage-release.sh` composes the GitHub release body from it — appending the full-changelog link to its `## Highlights` section — and both deploy workflows register it as the version's `releaseNotes`, which is what a server shows before it updates. `pre-check` fails without it. Structure: a lede, an optional `## ⚠️ Before You Update`, `## Highlights`, an optional `## Important`. The CHANGELOG carries every change; these notes carry the ones a user would decide on.
-- **A notes-only master change must publish matching channel metadata.** `pull-alpha` tags the commit that built `start-cli`, `start-tunnel`, or `start-registry` and refuses to publish notes that differ from that commit; StartWRT's alpha registry records the notes from its build commit. Their workflow `push.paths` therefore re-include each product's `release-notes/**` after the global Markdown exclusion. Keep this exception out of `pull_request.paths`: these notes are not binary inputs and the PR build does not consume them.
+- **A release's curated notes live at `projects/<product>/release-notes/<version>.md`.** Structure: a lede, `## Highlights`, an optional `## Important`. Put pre-update instructions in an optional sibling `<version>.pre-update.md`, headed `## ⚠️ Before You Update`. `manage-release.sh` prefixes that companion to the main notes for the registry and GitHub release, appending the full-changelog link to `## Highlights`. The StartOS image packages the main notes alone for its post-update welcome. `pre-check` fails without the main file. Keep already-released notes as published. The CHANGELOG carries every change; these notes carry the ones a user would decide on.
+- **A notes-only master change must publish matching channel metadata.** `pull-alpha` tags the commit that built `start-cli`, `start-tunnel`, or `start-registry` and refuses to publish notes (including the optional pre-update companion) that differ from that commit; StartWRT's alpha registry records the notes from its build commit. Their workflow `push.paths` therefore re-include each product's `release-notes/**` after the global Markdown exclusion. Keep this exception out of `pull_request.paths`: these notes are not binary inputs and the PR build does not consume them.
 - **Never invoke a product's publish step directly** (`make publish`, an upload, a registry index). The pipelines differ per product — npm for the SDK, apt + GitHub release for the debs, S3 + registry promotion for the OS and StartWRT — but all of them run the **idempotent steps (tag, GitHub release) _before_ the irreversible one**. Skip the pipeline and you strand a released version with no tag and no GitHub release, which for npm cannot be undone (`pre-check` then refuses the version and npm won't republish it). This is exactly how start-sdk 2.0.4 and 2.0.5 shipped, and they had to be backfilled. Reach for individual subcommands only to repair a partial release.
 - **Release from a merged, up-to-date `master`.** The tag is a claim that a commit on `master` produced the artifact, so cut it where that's true. Nothing enforces this — publishing out of band from an unmerged branch is deliberately still possible, and sometimes the right call — but it is a **debt, not a shortcut**: the commit you published from will be squashed or orphaned when the branch merges, leaving the tag nowhere honest to point. If you take it, you owe the follow-up in the same sitting — merge the branch, then tag and release at the resulting `master` commit, having checked that its shipped subtree still matches the artifact you published. start-sdk 2.0.5 went out this way and had to be reconstructed after the fact.
-- Per-product prerequisites and specifics live in that product's scope — e.g. [`projects/start-sdk/AGENTS.md`](projects/start-sdk/AGENTS.md#cutting-a-release), [`projects/start-wrt/CONTRIBUTING.md`](projects/start-wrt/CONTRIBUTING.md#cutting-a-release).
+- Per-product prerequisites and specifics live in that product's scope — e.g. [`projects/start-sdk/AGENTS.md`](projects/start-sdk/AGENTS.md#cutting-a-release), [`projects/start-wrt/AGENTS.md`](projects/start-wrt/AGENTS.md#cutting-a-release).
 
 ## Filing issues
 
-- **The issue forms are the human path, and you will never see them.** `.github/ISSUE_TEMPLATE/*.yml` binds the web UI only — `gh issue create` does not consult a template, so nothing sets the type or the label on your behalf. Pass both yourself (`gh issue create --type Bug --label StartOS`) and write the body from the spec below; don't go open a form to find out what it wants. An issue filed without both is gated: [`issue-triage.yml`](.github/workflows/issue-triage.yml) labels it `needs-triage`, comments the `gh issue edit` that fixes it, and lifts the gate once both are set — until then it is outside every per-project view.
+- **The issue forms are the human path, and you will never see them.** `.github/ISSUE_TEMPLATE/*.yml` binds the web UI only — `gh issue create` does not consult a template, so nothing sets the type or the label on your behalf. Pass both yourself (`gh issue create --type Bug --label StartOS`) and write the body from the spec below; don't go open a form to find out what it wants. An issue filed without both is gated: [`issue-triage.yml`](.github/workflows/issue-triage.yml) labels it `needs-triage` and lifts the gate once both are set — until then it is outside every per-project view.
 - **Type is a GitHub issue type, not a label.** `Bug`, `Feature`, or `Task`, defined at the org level and passed as `--type`. There is no `bug` or `enhancement` label — don't invent one.
 - **Take the project label from this exact set.** The casing is inconsistent and is matched literally: `StartOS`, `start-cli`, `StartSDK`, `StartWRT`, `StartTunnel`, `start-registry`, `start-docs`, `brochure`, and `repo` (build, CI, and release tooling). One label is the norm — reach for a second only when a defect genuinely spans two products. The shared libraries — `start-core`, `patch-db`, `exver`, `ts-modules` — have none of their own, so label them with the product the defect is most visible in.
-- **The status labels are not the filer's.** `Approved` means signed off and ready for a PR; `Known Solution` means the fix is identified but unimplemented — both are the maintainer's. `needs-triage` is the workflow's: it applies and removes it itself, so never set or clear it by hand.
+- **The status labels are not the filer's.** `Approved` means signed off and ready for a PR; `Known Solution` means the fix is identified but unimplemented; `verified` means Start9 has confirmed the defect is real — all three are the maintainer's. `needs-triage` is the workflow's: it applies and removes it itself, so never set or clear it by hand.
 - **Don't pass `--assignee`.** [`.github/workflows/issue-triage.yml`](.github/workflows/issue-triage.yml) routes the issue to its owner from the project label you set, and features to the maintainer regardless of project. Getting the label right is therefore what gets the issue in front of the right person: a gated issue sits with `TRIAGE_OWNER` until it is typed and labelled, then moves to its project's owner.
 - **Title the issue as the finding, not the symptom.** Once you have traced the cause, `<what breaks> — <why> (<file:line>)` beats a bare description of what you saw.
 - **A bug in a packaged service is not a bug in this repo.** Defects in Bitcoin Core, LND, Nextcloud and the rest belong in that package's own `*-startos` repo. File here only when the fault is in StartOS, the SDK, or another product in this monorepo.
@@ -114,25 +242,87 @@ What `### Environment` carries, by project:
 ## Opening PRs
 
 - **Label every PR with the project(s) it modifies.** Nothing labels it for you: [`issue-triage.yml`](.github/workflows/issue-triage.yml) is bound to `issues:` alone, and no workflow reads a PR's diff. Pass them when you open it — `gh pr create --label StartOS --label StartSDK` — or add them after with `gh pr edit <n> --add-label repo`. Take them from the same set as an issue, listed under [Filing issues](#filing-issues); `gh` fails on a label the repo doesn't have, and the casing is matched literally.
+- **No "Test plan" section in the body.** Summarize what the change does and why, plus executed verification and its results. CI supplies an additional test record; a list of checks someone should run does not.
 - **The diff decides, so a PR takes as many labels as it needs.** An issue carries the one product a defect surfaces in; a PR carries every project whose files it changes, because that is what tells a reviewer and a release what a merge can break. Build, CI, and release tooling — `.github/`, `build/`, `scripts/`, `Makefile`, `debian/`, `apt/`, and the repo-root docs — is `repo`. A `shared-libs/` change has no label of its own: label the products whose behavior it changes.
 
+## Commits
+
+Use [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer]
+```
+
+**Types:**
+
+- `feat` - New feature
+- `fix` - Bug fix
+- `docs` - Documentation only
+- `style` - Formatting, no code change
+- `refactor` - Code change that neither fixes a bug nor adds a feature
+- `test` - Adding or updating tests
+- `chore` - Build process, dependencies, etc.
+
+**Examples:**
+
+```
+feat(web): add dark mode toggle
+fix(core): resolve race condition in service startup
+docs(repo): update contributor workflow
+refactor(sdk): simplify package validation logic
+```
+
+## Licensing
+
+This repository is MIT. By contributing you agree your work is licensed under
+the MIT License in [LICENSE](LICENSE), and that you have the right to license it
+that way.
+
+If a change vendors third-party code into the tree, it must keep the upstream
+copyright notice and be added to [NOTICE.md](NOTICE.md) in the same PR. Prefer a
+build-time dependency over a checked-in copy.
+
+Don't link GPL or AGPL code into a StartOS binary: the combined work would have
+to be conveyed under those terms. LGPL and MPL-2.0 code may be linked — both
+permit it — but each carries obligations we then owe downstream, so raise it
+before adding one. `deny.toml` encodes which licenses are accepted.
+
 ## Code style
+
+**Frontend work uses the `start9-frontend` skill.** Read [`.claude/skills/start9-frontend/SKILL.md`](.claude/skills/start9-frontend/SKILL.md) and its relevant references before writing or reviewing Angular components, templates, styles, forms, dialogs, routes, state, or i18n. The skill owns frontend conventions and stack-version facts; neighbouring code may predate them. Verify Taiga APIs against its reference rather than guessing. Update the skill in the same change when conventions or stack versions change; sibling Start9 repositories consume this copy through symlinks.
 
 - **Default to zero comments.** A comment must protect a caller or reader from a mistake the code cannot — a wrong input, a misread return, a hazard that bites later. If nobody would go wrong without it, there is no comment, on a self-explanatory helper most of all. Try the rename or the restructure that would make the comment unnecessary first.
 - **A comment is a predicate, not a paragraph.** `Saturates at 255 rather than wrapping.` One clause, one restriction, stated bare — twelve words is a budget, not a target. Never enumerate the cases that trigger the rule: `Bad input zeroes the accumulator.`, not a list of the inputs that are bad. Never `only X counts`; state what counts. An error path that degrades into the default is the default — don't narrate it. Where the declaration supplies the subject, a bare clause is complete.
 - **Leave the signature out of the prose.** The parameter names sit on the screen next to the comment; echoing them repeats the declaration. Say what an argument means by its role, not its identifier. A formal term — a checksum, a timestamp, a `Host` header — is not re-explained; the reader is owed only what the term does not imply.
 - **State the fact, don't argue it.** No `so`, `because`, or `which means`; no clause about what other code is thereby spared. Keep the precise noun, drop the explanation of it: `Filters the application protocols the client asks for. Unset filters none of them.`
 - **Say what is true, not when you wrote it.** No `currently`, `new`, `for now`, or `temporary until X lands`; no `// was: …` changelog; no pointer at a PR, a ticket, or a caller. Git holds the history, and a `// TODO` belongs in an issue (see [Filing issues](#filing-issues)). Write nothing about what the code or the product does _not_ do — a capability that turned out to be unnecessary, a behaviour that was removed, a check that is skipped. That holds in user-facing copy exactly as it holds in code.
-- **Doc comments on a public surface are documentation, and they stay.** A `///` on an exported item, a JSDoc on an SDK type a package author reads in their editor — write those, keep them accurate, and hold them to the predicate rule above rather than to the book's voice. A `///` on a `#[ts(export)]` type ships to package authors as a generated binding; member docs are glosses, and the mdbook is where a concept gets taught.
+- **Published API documentation is not commentary.** Document exported SDK types and public crate items accurately for callers reading them in an editor. A module or type overview may need more than one clause; keep implementation commentary to the budget above. A `///` on a `#[ts(export)]` type also changes the generated TypeScript binding — regenerate it.
 - **The comments around you are not a style reference.** Most of the doc comments in this repo were written by an agent, including many that blame attributes to a maintainer. Follow these rules, not the neighbours.
 - **Fix the comments you pass, only in files you are already changing.** Delete one the code now says, and cut a three-idea one to its one idea. Read the code first — some carry a constraint the code can't show. Don't open files to hunt, and don't let the cleanup outgrow the change it rides on.
+
+## Working in the repo
+
+- **Fix stale docs as part of the change that made them stale.** A version, a command, a path, a described behavior — correct it in the same change instead of reporting it as a follow-up. Grep the stale value across every scope's `README.md`, `ARCHITECTURE.md`, and `AGENTS.md`, and check open PR branches that rewrite the same doc.
+- **A token swap is not a doc fix.** After renaming a symbol in prose, read each changed sentence and fix the claim around it, not just the name.
+- **Reuse before designing.** Search production code, dependencies, and platform facilities for the existing owner of a concept. Prefer direct use, extension, or composition; establish the semantic limitation before introducing a parallel mechanism.
+- **One source of truth per rule.** Consolidate repeated decisions, defaults, validation, mappings, and transitions in the smallest production owner; make every caller use it. Share the common primitive, not a flag-driven function that selects between unrelated workflows.
+- **Establish the contract and ownership.** Trace caller-visible success, failure, cancellation, retry, and shutdown behavior. Separate persisted intent, observed availability, and derived values. Additional state, tasks, locks, or lifecycle hooks need a reachable condition, an owner, a lifetime, and a guarantee existing mechanisms cannot supply.
+- **No defensive patches without a diagnosis.** Never add a safety net, retry, or idempotency guard for a bug whose root cause you can't explain. Say what you've ruled out and what you'd look at next instead.
+- **Verify before handoff.** Run the applicable typechecks, lint, tests, builds, and formatting checks exposed by the affected scopes. Exercise supported callers and artifacts directly; regression tests must fail against the previous behavior. Provision fixtures, containers, or VMs when needed rather than delegating verification to a reviewer.
+- **Report failures as failures.** A check, test, or build that fails is reported and fixed before the work is called done — pre-existing or unrelated failures included. Record executed checks and results in the PR; do not substitute manual-testing instructions or bypass hooks.
+- **Keep commits focused.** Commit finished, verified work with conventional messages; squash local fixups before opening the PR. Do not rewrite another contributor's commits or discard unpreserved changes.
+- **Uncommitted changes you didn't make are not yours to sort.** Ask whether they belong in the commit before staging anything — don't fold them in, and don't leave them behind silently.
 
 ## Gotchas
 
 - **Polyglot repo.** Per-component gotchas live in component-level `AGENTS.md` files — read the relevant one before operating on that component (see Sub-scopes).
 - **Verify cross-layer changes in order.** Rust → start-core-ts-bindings → SDK rebuild → web/container-runtime type checks. See [ARCHITECTURE.md](ARCHITECTURE.md#cross-layer-verification). Editing `shared-libs/ts-modules/start-core/lib/osBindings/*.ts` alone is NOT sufficient — start-core (and the SDK bundle, for container-runtime) must be rebuilt before web/container-runtime will see the change.
 - **Ask before destructive `make` recipes.** Image flashing, deploy targets (`update*`, `reflash`, `wormhole*`), and `make clean*` consume hours and disk — confirm with the user first.
-- **No git submodules.** `projects/start-wrt/openwrt/` looks like vendored source but is a **disposable, gitignored build workspace** (no git repo inside — think `node_modules/`): `make start-wrt-openwrt-setup` rebuilds it from the sha256-pinned upstream OpenWrt release tarball (`projects/start-wrt/build/openwrt-version`) plus the Start9 delta from `openwrt-patches/` (modified upstream files) + `openwrt-overlay/` (added files). Never keep work inside it — every run rebuilds it; change the patch/overlay dirs instead (see [`projects/start-wrt/CONTRIBUTING.md`](projects/start-wrt/CONTRIBUTING.md) "OpenWrt tree"). Only start-wrt's full _image_ build needs it — every other product, and start-wrt's own binary build, does not.
+- **No git submodules.** `projects/start-wrt/openwrt/` looks like vendored source but is a **disposable, gitignored build workspace** (no git repo inside — think `node_modules/`): `make start-wrt-openwrt-setup` rebuilds it from the sha256-pinned upstream OpenWrt release tarball (`projects/start-wrt/build/openwrt-version`) plus the Start9 delta from `openwrt-patches/` (modified upstream files) + `openwrt-overlay/` (added files). Never keep work inside it — every run rebuilds it; change the patch/overlay dirs instead (see [`projects/start-wrt/AGENTS.md`](projects/start-wrt/AGENTS.md) "OpenWrt tree"). Only start-wrt's full _image_ build needs it — every other product, and start-wrt's own binary build, does not.
 - **Stale-path watch.** Old docs referenced `core/`, `web/`, `sdk/`, `container-runtime/`, `patch-db/` at the repo root, and the products + `shared/` directly at the root. Those are gone — products now live under `projects/`, the shared libs under `shared-libs/`; use the locations above.
 
 ## Coupled changes (keep in sync)
@@ -167,7 +357,6 @@ Already enforced or checked elsewhere (listed here for completeness; documented 
 - **Root `package.json` ↔ `projects/start-os/Cargo.toml`'s label ↔ `version::Current`** — the three spellings of the StartOS version. `manage-release.sh pre-check start-os` fails on a stale label, and `version::tests::current_matches_manifest` fails if `Current` drifts from `package.json`.
 - **StartOS install/update docs' GitHub release link ↔ the OS release.** `projects/start-os/docs/src/installing-startos.md` and `update-040.md` pin the release URL to the shipping version — a repo-wide `releases/latest` resolves to whichever product released most recently (e.g. StartTunnel), not StartOS. `manage-release.sh pre-check start-os` fails if a doc still links to `releases/latest` or pins a stale version, so bump these links with the release like the changelog.
 - **The package template's SDK pin ↔ the prospective SDK version.** `projects/start-sdk/docs/package-template/package.json` pins the `@start9labs/start-sdk` version scaffolded packages build against. Bump it with `make -C projects/start-sdk sync-template` in the same change as `projects/start-sdk/package.json`; packaging workspaces track `live-docs`, so changing `master` does not update their template. The SDK tag advances it. `manage-release.sh pre-check start-sdk` fails if it pins a different version than the release being cut, or if the template commits a `package-lock.json` (a generated artifact that only rots against the pin).
-- **User-facing changes ↔ that product's `docs/`** — docs are part of the change (see each product's AGENTS/CONTRIBUTING).
 
 ## Sub-scopes
 
@@ -180,5 +369,5 @@ Already enforced or checked elsewhere (listed here for completeness; documented 
 - [`projects/start-sdk/AGENTS.md`](projects/start-sdk/AGENTS.md) — TypeScript service-packaging SDK, plus the packaging mdbook in `docs/`
 - [`projects/brochure-marketplace/AGENTS.md`](projects/brochure-marketplace/AGENTS.md) — public marketplace site
 - [`projects/start-docs/AGENTS.md`](projects/start-docs/AGENTS.md) — documentation website; also the authoring conventions for every product book
-- [`shared-libs/AGENTS.md`](shared-libs/AGENTS.md) — shared libs container: [`crates/start-core`](shared-libs/crates/start-core/AGENTS.md) (Rust backend), [`web`](shared-libs/ts-modules/AGENTS.md) (Angular workspace + UI/setup-wizard/shared libs)
+- [`shared-libs/AGENTS.md`](shared-libs/AGENTS.md) — shared libs container: [`crates/start-core`](shared-libs/crates/start-core/AGENTS.md) (Rust backend), [`ts-modules`](shared-libs/ts-modules/AGENTS.md) (Angular workspace + UI/setup-wizard/shared libs)
 - `shared-libs/crates/patch-db/` — first-party crate (maintained in-tree)

@@ -5,6 +5,60 @@ All notable changes to StartWRT are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2]
+
+### Security
+
+- **Update the web interface and shared dependencies with security fixes**, including Angular and DOMPurify, and replace the unmaintained YAML parser.
+
+## [1.2.1]
+
+### Fixed
+
+- **A chained VPN no longer falls back to a single hop.** If the VPN it
+  connects through went down, or had not come up yet after a reboot, a chained
+  VPN reconnected to its server directly over your WAN, showing that provider
+  your home IP while every screen still reported the chain. It now stops until
+  its target is back. Existing chains are protected on the first boot of this
+  version.
+
+- **Outbound VPNs with an IPv6 server address connect.** A config whose
+  `Endpoint` was a bracketed IPv6 address, such as `[2001:db8::1]:51820`,
+  imported without error but its tunnel never came up. Existing VPNs are
+  repaired on the first boot of this version.
+
+- **VPN chaining refuses setups it cannot route.** A VPN can connect through
+  another only when its config's `Endpoint` is an IP address, the target VPN
+  can carry that address (it has an address of the same family and its
+  `AllowedIPs` include it), and no other VPN uses the same server address.
+  Previously these were accepted and the VPN either skipped the chain or could
+  not connect. Renaming a VPN while pointing it at a VPN that connects through
+  it is also refused as a circular chain. A VPN with a hostname `Endpoint`
+  offers only Internet as its target.
+
+- **VPN chains that could not route are switched to connect over the
+  Internet.** A VPN chained with a hostname `Endpoint` connected directly over
+  your WAN while every screen still reported the chain. On the first boot of
+  this version it is set to connect over the Internet, and the change appears
+  in the activity log. To chain it again, import a config whose `Endpoint` is
+  an IP address.
+
+- **A VPN connecting through another gets a fitting MTU.** With no MTU in its
+  config, or with the field left blank, it uses its target's MTU less the
+  chained tunnel's headers instead of 1420, avoiding fragmented packets.
+
+- **Custom DNS works after an update.** On a router using custom system DNS
+  or a profile DNS override, devices could not resolve names after an update
+  until a DNS setting was saved again. DNS lookups over TCP, used for answers
+  too large for UDP, also failed under custom DNS.
+
+### Security
+
+- Hardens authentication for local clients
+- Removes a third-party root certificate (`dc.com-CA`), inherited from the
+  board vendor's base image, from the router's system certificate store.
+  Routers drop it on their next update.
+
 ## [1.2.0]
 
 ### Added
@@ -34,7 +88,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names and DNS overrides resolve there too. DoH a user turned on explicitly
   is untouched.
 
+- **Root CA profile for iPhone and iPad.** Downloading the Root CA in Safari
+  on iOS or iPadOS now fetches a configuration profile that installs through
+  Settings.
+
+### Changed
+
+- **Setup ends with a link to `router.lan`.** After you set the admin
+  password, the confirmation page links to `router.lan` to trust your Root
+  CA, instead of saying the window can be closed.
+
+- **The Root CA walkthrough matches StartOS.** It links to the instructions
+  for each platform and no longer asks you to bookmark the page. The Root CA
+  downloads from `/static/local-root-ca.crt`, the path StartOS uses.
+
 ### Fixed
+
+- **A published domain typed without `https://` now reaches the published
+  service, not the router.** While port 443 is published to a device — by a
+  Published Port or a device's hostname routes — plain HTTP at the router's
+  public address is answered with a redirect to `https://` instead of the
+  router's web interface, from inside the network and from the Internet under
+  every Remote Access setting. A Published Port or a hostname route on 80
+  takes precedence.
+
+- **Freshly generated Root CAs carry an Authority Key Identifier conforming to RFC 5280 and the CA/Browser Forum Baseline Requirements.** Existing routers retain their trusted Root CA when updated with settings preserved.
 
 - **Publishing a port no longer names the device after its generated label,
   which could stop the router's DHCP server.** Publishing a port to a device

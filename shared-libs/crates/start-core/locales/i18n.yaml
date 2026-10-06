@@ -494,6 +494,34 @@ system.field-missing-from-meminfo:
   fr_FR: "%{field} manquant dans /proc/meminfo"
   pl_PL: "%{field} brakuje w /proc/meminfo"
 
+system.trust-ca.fingerprint:
+  en_US: "SHA-256 fingerprint"
+  de_DE: "SHA-256-Fingerabdruck"
+  es_ES: "Huella digital SHA-256"
+  fr_FR: "Empreinte SHA-256"
+  pl_PL: "Odcisk SHA-256"
+
+system.trust-ca.not-ca:
+  en_US: "The certificate is not a CA"
+  de_DE: "Das Zertifikat ist keine Zertifizierungsstelle"
+  es_ES: "El certificado no es una CA"
+  fr_FR: "Le certificat n’est pas une autorité de certification"
+  pl_PL: "Certyfikat nie jest certyfikatem CA"
+
+system.trust-ca.not-self-signed-root:
+  en_US: "The certificate is not a self-signed root CA"
+  de_DE: "Das Zertifikat ist keine selbstsignierte Stammzertifizierungsstelle"
+  es_ES: "El certificado no es una CA raíz autofirmada"
+  fr_FR: "Le certificat n’est pas une autorité de certification racine autosignée"
+  pl_PL: "Certyfikat nie jest samopodpisanym głównym certyfikatem CA"
+
+system.trust-ca.subject:
+  en_US: "Subject"
+  de_DE: "Subjekt"
+  es_ES: "Sujeto"
+  fr_FR: "Sujet"
+  pl_PL: "Podmiot"
+
 # error.rs - ErrorKind strings
 error.unknown:
   en_US: "Unknown Error"
@@ -1056,6 +1084,20 @@ error.backup-password-mismatch:
   pl_PL: "Niezgodne Hasło Kopii Zapasowej"
 
 # disk/main.rs
+disk.main.defrag-failed:
+  en_US: "Filesystem optimization failed; continuing with the converted filesystem."
+  de_DE: "Die Dateisystemoptimierung ist fehlgeschlagen; die Konvertierung wird fortgesetzt."
+  es_ES: "La optimización del sistema de archivos falló; se continúa con el sistema de archivos convertido."
+  fr_FR: "L'optimisation du système de fichiers a échoué ; la conversion se poursuit."
+  pl_PL: "Optymalizacja systemu plików nie powiodła się; konwersja będzie kontynuowana."
+
+disk.main.defrag-skipped:
+  en_US: "Skipping filesystem optimization to preserve free space."
+  de_DE: "Die Dateisystemoptimierung wird übersprungen, um freien Speicherplatz zu erhalten."
+  es_ES: "Se omite la optimización del sistema de archivos para conservar espacio libre."
+  fr_FR: "L'optimisation du système de fichiers est ignorée afin de préserver l'espace libre."
+  pl_PL: "Pominięto optymalizację systemu plików, aby zachować wolne miejsce."
+
 disk.main.disk-not-found:
   en_US: "StartOS disk not found."
   de_DE: "StartOS-Festplatte nicht gefunden."
@@ -2101,6 +2143,13 @@ net.gateway.error-syncing-ip-info:
   fr_FR: "Erreur de synchronisation des infos IP vers la BDD : %{error}"
   pl_PL: "Błąd synchronizacji informacji IP z bazą danych: %{error}"
 
+net.gateway.network-settle-timeout:
+  en_US: "Timed out waiting for the network to settle. Starting services anyway..."
+  de_DE: "Zeitüberschreitung beim Warten auf ein stabiles Netzwerk. Dienste werden trotzdem gestartet..."
+  es_ES: "Se agotó el tiempo de espera para que la red se estabilizara. Iniciando los servicios de todos modos..."
+  fr_FR: "Délai d'attente dépassé pour la stabilisation du réseau. Démarrage des services malgré tout..."
+  pl_PL: "Przekroczono czas oczekiwania na ustabilizowanie sieci. Usługi zostaną uruchomione mimo to..."
+
 net.gateway.cannot-forget-connected-interface:
   en_US: "Cannot forget currently connected interface"
   de_DE: "Aktuell verbundene Schnittstelle kann nicht vergessen werden"
@@ -2694,6 +2743,20 @@ service.effects.dependency.volume-missing:
   es_ES: "el volumen %{volume} de %{package} no existe — ¿está instalado %{package}?"
   fr_FR: "le volume %{volume} de %{package} n'existe pas — %{package} est-il installé ?"
   pl_PL: "wolumin %{volume} pakietu %{package} nie istnieje — czy %{package} jest zainstalowany?"
+
+service.effects.subcontainer.sync.unknown-group:
+  en_US: "unknown group: %{group}"
+  de_DE: "unbekannte Gruppe: %{group}"
+  es_ES: "grupo desconocido: %{group}"
+  fr_FR: "groupe inconnu : %{group}"
+  pl_PL: "nieznana grupa: %{group}"
+
+service.effects.subcontainer.sync.unknown-user:
+  en_US: "unknown user: %{user}"
+  de_DE: "unbekannter Benutzer: %{user}"
+  es_ES: "usuario desconocido: %{user}"
+  fr_FR: "utilisateur inconnu : %{user}"
+  pl_PL: "nieznany użytkownik: %{user}"
 
 # service/service_actor.rs
 service.service-actor.error-synchronizing-state:
@@ -3427,6 +3490,13 @@ help.arg.gua-wan:
   fr_FR: "Exposer la GUA IPv6 au WAN (false = LAN uniquement)"
   pl_PL: "Udostępnij GUA IPv6 w sieci WAN (false = tylko LAN)"
 
+help.arg.all-revisions:
+  en_US: "Include superseded revisions of each upstream version"
+  de_DE: "Überholte Revisionen jeder Upstream-Version einschließen"
+  es_ES: "Incluir revisiones reemplazadas de cada versión upstream"
+  fr_FR: "Inclure les révisions remplacées de chaque version amont"
+  pl_PL: "Uwzględnij zastąpione rewizje każdej wersji upstream"
+
 help.arg.allow-model-mismatch:
   en_US: "Allow database model mismatch"
   de_DE: "Datenbankmodell-Abweichung erlauben"
@@ -3468,6 +3538,13 @@ help.arg.binding-enabled:
   es_ES: "Habilitar o deshabilitar este enlace"
   fr_FR: "Activer ou désactiver cette liaison"
   pl_PL: "Włącz lub wyłącz to powiązanie"
+
+help.arg.ca-certificate:
+  en_US: "PEM-encoded CA certificate"
+  de_DE: "PEM-codiertes CA-Zertifikat"
+  es_ES: "Certificado de CA codificado en PEM"
+  fr_FR: "Certificat d’autorité encodé en PEM"
+  pl_PL: "Certyfikat CA zakodowany w formacie PEM"
 
 help.arg.cert-subject-alt-names:
   en_US: "Subject Alternative Name(s) for certificate"
@@ -3853,6 +3930,13 @@ help.arg.mirror-url:
   es_ES: "URL del espejo"
   fr_FR: "URL du miroir"
   pl_PL: "URL serwera lustrzanego"
+
+help.arg.mount-beneath:
+  en_US: "Insert beneath the top mount; detaching the top reveals this mount"
+  de_DE: "Unter der obersten Einhängung einfügen; deren Aushängen legt diese Einhängung frei"
+  es_ES: "Insertar debajo del montaje superior; al desmontarlo se revela este montaje"
+  fr_FR: "Insérer sous le montage supérieur ; son démontage révèle ce montage"
+  pl_PL: "Umieść pod najwyższym montowaniem; jego odmontowanie odsłoni to montowanie"
 
 help.arg.multi-arch-s9pks:
   en_US: "Enable multi-architecture s9pk support"
@@ -6904,6 +6988,13 @@ about.tor-commands:
   es_ES: "Comandos de Tor"
   fr_FR: "Commandes Tor"
   pl_PL: "Polecenia Tora"
+
+about.trust-custom-ca-root:
+  en_US: "Trust a custom CA root for StartOS host processes"
+  de_DE: "Einer benutzerdefinierten CA-Wurzel für StartOS-Hostprozesse vertrauen"
+  es_ES: "Confiar en una raíz de CA personalizada para los procesos del host de StartOS"
+  fr_FR: "Approuver une autorité de certification racine personnalisée pour les processus hôtes de StartOS"
+  pl_PL: "Zaufaj niestandardowemu certyfikatowi głównemu CA dla procesów hosta StartOS"
 
 about.unmount-backup-target:
   en_US: "Unmount a backup target"

@@ -87,4 +87,3 @@ typed against the same handler tree the server runs.
 
 - [README.md](README.md) — what the crate is and a usage sketch.
 - [AGENTS.md](AGENTS.md) — file map and contributor gotchas.
-- [CONTRIBUTING.md](CONTRIBUTING.md) — build/test/format and PR conventions.

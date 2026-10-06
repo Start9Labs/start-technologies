@@ -88,7 +88,7 @@ pub async fn get_action_input(
         .await
         .as_ref()
         .or_not_found(lazy_format!("Manager for {}", package_id))?
-        .get_action_input(Guid::new(), action_id, prefill.unwrap_or(Value::Null))
+        .get_action_input(Guid::new(), action_id, prefill.unwrap_or(Value::Null), None)
         .await
 }
 
@@ -393,6 +393,7 @@ pub async fn run_action(
             event_id.unwrap_or_default(),
             action_id,
             input.unwrap_or_default(),
+            None,
         )
         .await
         .map(|res| res.map(ActionResult::upcast))

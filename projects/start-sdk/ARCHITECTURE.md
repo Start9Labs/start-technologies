@@ -132,10 +132,10 @@ Supported field types via `Value`:
 - `object` — Nested sub-form
 - `union` / `dynamicUnion` — Conditional fields based on a discriminator
 
-### Dependencies (`shared-libs/ts-modules/start-core/lib/dependencies/`)
+### Dependencies
 
-- `setupDependencies.ts` — Declare what the service depends on (package IDs, version ranges, health checks)
-- `dependencies.ts` — Runtime dependency checking via `checkDependencies()`
+- `lib/dependencies.ts` — Builder for published base requirements and reactive runtime requirements
+- `shared-libs/ts-modules/start-core/lib/dependencies/dependencies.ts` — Runtime satisfaction checks used by the builder
 
 ### Interfaces (`shared-libs/ts-modules/start-core/lib/interfaces/`)
 
@@ -180,7 +180,7 @@ Utility modules including:
 
 **Reactive subscription wrappers** — Each wraps an Effects callback-based method into a consistent reactive API:
 
-- `Watchable` — Base class providing `const()`, `once()`, `watch()`, `onChange()`, `waitFor()`
+- `Watchable<A>` — Base class providing `const()`, `once()`, `watch()`, `onChange()`, `waitFor()`; `MappedWatchable<Raw, Mapped>` adds a `map` over a raw value; `Watchable.from` and `Watchable.combine` build readers from `WatchSource`s
 - `GetContainerIp`, `GetStatus`, `GetSystemSmtp`, `GetOutboundGateway`, `GetSslCertificate`, `GetHostInfo`, `GetServiceManifest` — Typed wrappers for specific Effects methods
 
 **General utilities:**
@@ -213,7 +213,8 @@ The `.build()` method returns an object containing the entire SDK surface area, 
 | **Health**       | `healthCheck.checkPortListening`, `.checkWebUrl`, `.runHealthScript`                                                                | Built-in health checks                            |
 | **Interfaces**   | `createInterface`, `MultiHost.of`, `setupInterfaces`, `serviceInterface.*`                                                          | Network endpoint management                       |
 | **Backups**      | `setupBackups`, `Backups.ofVolumes`, `Backups.ofSyncs`, `Backups.withOptions`                                                       | Backup configuration                              |
-| **Dependencies** | `setupDependencies`, `checkDependencies`                                                                                            | Dependency declaration and verification           |
+| **Primary URL**  | `setupPrimaryUrl`                                                                                                                   | The URL a service advertises as its own           |
+| **Dependencies** | `Dependency.required`, `Dependency.optional`, `Dependencies.of`                                                                     | Published and runtime requirements                |
 | **Init/Uninit**  | `setupInit`, `setupUninit`, `setupOnInit`, `setupOnUninit`                                                                          | Lifecycle hooks                                   |
 | **Containers**   | `SubContainer.of`, `SubContainer.withTemp`, `Mounts.of`                                                                             | Container execution with mounts                   |
 | **Forms**        | `InputSpec.of`, `Value`, `Variants`, `List`                                                                                         | Form input builders                               |
@@ -265,22 +266,27 @@ Internally the builder is record-then-materialize: `.addDaemon()` appends a reco
 ```typescript
 export const main = sdk.setupMain(async ({ effects }) => {
   return sdk.Daemons.dynamic(effects, async ({ effects }) => {
-    const { instances } = (await instancesYaml.read().const(effects)) ?? { instances: [] }
-    let daemons = sdk.Daemons.of<Manifest>({ effects })
-    for (const inst of instances) {
-      daemons = daemons.addDaemon(`reg-${inst.id}`, {
-        subcontainer: sdk.SubContainer.of(effects, { imageId: 'reg', sharedRun: true }, mounts, `reg-${inst.id}-sub`),
-        exec: { command: ['start-registryd'] },
-        ready: { display: inst.label, fn: () => sdk.healthCheck.checkPortListening(effects, inst.port, {}) },
-        requires: [],
-      })
-    }
-    return daemons
+    const config = await registryYaml.read().const(effects)
+    const daemons = sdk.Daemons.of(effects)
+    if (!config?.enabled) return daemons
+    return daemons.addDaemon('registry', {
+      subcontainer: sdk.SubContainer.of(effects, { imageId: 'reg', sharedRun: true }, mounts, 'registry-sub'),
+      exec: { command: ['start-registryd'] },
+      ready: {
+        display: 'Registry',
+        fn: () =>
+          sdk.healthCheck.checkPortListening(effects, 80, {
+            successMessage: 'Registry is ready',
+            errorMessage: 'Registry is not listening',
+          }),
+      },
+      requires: [],
+    })
   })
 })
 ```
 
-Diff semantics per id: absent→present **start**, present→absent **stop**, same `configHash` **leave alone**, different `configHash` **restart**. Dependents of any restarted/stopped daemon are also restarted. `configHash` is a canonical-JSON hash over the subcontainer descriptor (`imageId`, `sharedRun`, `name`, `mounts.build()`), exec, `requires`, and the structural parts of `ready` — closures (`ready.fn`, `ready.trigger`) are excluded so a watched-file touch with unchanged content doesn't bounce every daemon. Lazy `SubContainer`s ({@link SubContainer.of}) are required under `Daemons.dynamic`; eager handles produced inside the builder would defeat the "leave alone" guarantee and the reconciler throws if it sees one.
+Diff semantics per id: absent→present **start**, present→absent **stop**, same `configHash` **leave alone**, different `configHash` **restart**. Dependents of any restarted/stopped daemon are also restarted. `configHash` is a canonical-JSON hash over the subcontainer descriptor (`imageId`, `sharedRun`, `name`, `mounts.build()`), exec, `requires`, `uses`, and the structural parts of `ready` — closures (`ready.fn`, `ready.trigger`) are excluded so a watched-file touch with unchanged content doesn't bounce every daemon. Captured values that must trigger a restart belong in the entry's `uses`. Lazy `SubContainer`s (`SubContainer.of`) are required under `Daemons.dynamic`; eager handles produced inside the builder would defeat the "leave alone" guarantee and the reconciler throws if it sees one.
 
 **SubContainers** come in two flavors:
 
@@ -292,7 +298,7 @@ The unified `SubContainer<M>` interface widens `rootfs` / `guid` / `subpath()` t
 **Mounts** declares what to attach to a container:
 
 ```typescript
-sdk.Mounts.of().mountVolume('main', '/data').mountAssets('scripts', '/scripts').mountDependency('bitcoind', 'main', '/bitcoin-data', { readonly: true }).mountBackup('/backup')
+sdk.Mounts.of().mountVolume({ volumeId: 'main', subpath: null, mountpoint: '/data', readonly: false }).mountAssets({ subpath: 'scripts', mountpoint: '/scripts' }).mountDependency({ dependencyId: 'bitcoind', volumeId: 'main', subpath: null, mountpoint: '/bitcoin-data', readonly: true })
 ```
 
 ### Health Checks (`lib/health/`)
@@ -311,6 +317,10 @@ Health checks are paired with **triggers** that control polling behavior:
 - `defaultTrigger` — 1 s while pending (`starting`/`waiting`/`failure`), 30 s otherwise
 - `cooldownTrigger` — Fixed interval between checks
 - `statusTrigger` — Per-status polling intervals with a default fallback
+
+### Primary URL (`lib/primaryUrl/`)
+
+`setupPrimaryUrl.ts` builds the action behind `sdk.setupPrimaryUrl` over the package's `get`/`set`, plus `bestUsable` and `setupTask`. Both judge the stored URL against the interface's `nonLocal` addresses. `bestUsable` is a `Watchable.combine` over the package's `get` reader and the host, so the caller picks the read strategy; it resolves the URL when read, leaving the store as the user set it. `setupTask` is an init script that watches both and creates a plain task while the URL is unresolved, clearing it otherwise. It never hands StartOS an `input-not-matches` condition: StartOS evaluates one by asking the service for its action input, which it cannot do while that service initializes, so it would assume a new task active and a critical one would stop the service.
 
 ### Backup System (`lib/backup/`)
 
@@ -337,22 +347,28 @@ The package also exports these as the `backup` namespace (`Backups`,
 Type-safe configuration file management:
 
 ```typescript
-const configFile = FileHelper.yaml(effects, sdk.volumes.main.path('config.yml'), {
-  port: 8080,
-  debug: false,
-})
+const configFile = FileHelper.yaml(
+  { base: sdk.volumes.main, subpath: 'config.yml' },
+  z.looseObject({
+    port: z.number().catch(8080),
+    debug: z.boolean().catch(false),
+  }),
+)
 
 // Reactive reading
-const config = await configFile.read.const(effects)
+const config = await configFile.read().const(effects)
 
 // Partial merge
-await configFile.merge({ debug: true })
+await configFile.merge(effects, { debug: true })
 
 // Full write
-await configFile.write({ port: 9090, debug: true })
+await configFile.write(effects, { port: 9090, debug: true })
 ```
 
-Supported formats: JSON, YAML, TOML, INI, ENV, and custom parsers.
+Supported formats: JSON, YAML, TOML, XML, INI, ENV, strings, and custom parsers.
+
+- `fileAccess.ts` owns canonical paths, the process-local queue, temp-file replacement, and the cross-process `flock` that every write takes, held through the complete `merge()`/`update()` read-modify-write. Reads reenter the queue; nested same-file mutations reject. The lock is on the file itself, or on a fixed `.<name>.tmp` temp that becomes the file when it is missing; acquirers retry inode races and reject permanent open errors. An `update()` callback's five-second abort signal is pushed as a lock-context frame, so file access started inside the callback inherits it and a timed-out callback cannot commit or mutate later. Lock acquisition has a ten-second deadline of its own, which bounds a wait on a lock held outside the SDK. The first write to each existing target per process removes the random-named temps of dead writers; a create removes a leftover attribute template. A temp that is no longer the inode written is never renamed into place.
+- `fileMounts.ts` owns own-volume file registrations, directory watches, inode reconciliation, and teardown. Subcontainers register after a file bind is created, make their rootfs mount tree recursively shared, so rebinds under a directory mount reach exec namespaces too, and synchronize before commands launch. Rebinds insert the prepared mount beneath the old one before detaching it, keeping pathname reads on a complete file. FileHelper refreshes local registrations before returning a write or a changed reactive read. Reconciliation gives up after three rebinds that leave the mount on a stale inode and propagates failures, including after the source file has been replaced. Directory-watch failures are logged; explicit reads, writes, and commands can retry reconciliation.
 
 ### Subcontainers (`lib/util/SubContainer.ts`)
 
@@ -360,7 +376,7 @@ Execute commands in isolated container environments:
 
 ```typescript
 // Long-lived subcontainer
-const container = await sdk.SubContainer.of(effects, { imageId: 'main' }, mounts, 'app')
+const container = sdk.SubContainer.of(effects, { imageId: 'main' }, mounts, 'app')
 
 // One-shot execution
 await sdk.SubContainer.withTemp(effects, { imageId: 'main' }, mounts, 'migrate', async c => {
@@ -377,15 +393,14 @@ const manifest = setupManifest({
   license: 'MIT',
   description: { short: '...', long: '...' },
   images: { main: { source: { dockerTag: 'myimage:1.0' } } },
-  volumes: { main: {} },
-  dependencies: {},
+  volumes: ['main'],
   // ...
 })
 
-export default buildManifest(manifest)
+export default buildManifest(versionGraph, manifest, dependencies)
 ```
 
-`buildManifest()` finalizes the manifest with the current SDK version, OS version compatibility, and migration version ranges.
+`buildManifest()` finalizes the manifest with the current SDK version, OS version compatibility, migration version ranges, and dependency definitions from the same builder that runs during init.
 
 ### Versioning (`lib/version/`)
 
@@ -401,8 +416,8 @@ Used in init scripts to track which migration version the service's data has bee
 ### Internationalization (`lib/i18n/`)
 
 ```typescript
-const t = setupI18n({ en_US: enStrings, es_ES: esStrings })
-const greeting = t('hello', { name: 'World' }) // "Hello, World!" or "Hola, World!"
+const t = setupI18n({ 'Hello, ${name}!': 0 }, { es_ES: { 0: '¡Hola, ${name}!' } }, 'en_US')
+const greeting = t('Hello, ${name}!', { name: 'World' })
 ```
 
 Supports locale fallback and Intl-based formatting.
@@ -431,7 +446,7 @@ A typical service package lifecycle:
 1. INSTALL / UPDATE / RESTORE
    ├── init({ effects, kind })
    │   ├── Version migrations (if update)
-   │   ├── setupDependencies()
+   │   ├── dependencies.init()
    │   ├── setupInterfaces() → bind ports, export interfaces
    │   └── Actions registration → export actions to OS
    │
@@ -465,11 +480,15 @@ All runtime interactions go through the `Effects` object rather than direct syst
 
 The `Watchable` base class provides a consistent API for values that can change over time:
 
-- `const(effects)` — Read once; if the value changes, triggers a retry of the enclosing context
+- `const()` — Read once; if the value changes, triggers a retry of the enclosing context
 - `once()` — Read once without reactivity
 - `watch()` — Async generator yielding on each change
 - `onChange(callback)` — Invoke callback on each change
 - `waitFor(predicate)` — Block until a condition is met
+
+`FileHelper.read()` provides a deferred reader instead: pass the context to its `.const(effects)`, `.watch(effects)`, `.onChange(effects, callback)`, or `.waitFor(effects, predicate)` method.
+
+`Watchable<A>` is typed only by the value it reads. A reader that maps a raw value extends `MappedWatchable<Raw, Mapped>`, implementing `fetchRaw`/`produceRaw`. `Watchable.from(effects, source)` and `Watchable.combine(effects, sources, map?, eq?)` build readers from any `WatchSource` (`once()` + `watch(abort)`), which every `Watchable` is.
 
 ### Type-safe Manifest Threading
 

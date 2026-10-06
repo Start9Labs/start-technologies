@@ -23,7 +23,7 @@ flat-grayscale | outline-grayscale | action-grayscale | …"` on buttons/badges/
 5. **`g-*` global utilities** (shared stylesheet only — never re-declared per app/component):
    layout (`g-page`, `g-form`, `g-table`, `g-aside`, `g-buttons`, store's `g-band`/`g-wrap`
    marketing system) and text colors (`g-positive/negative/warning/info/secondary/primary`) for
-   things with no appearance input (`tui-icon`). Their `!important` is by design; nowhere else.
+   things with no appearance input (`tui-icon`).
 6. **`:host` layout CSS last**: `display: grid/flex`, `gap`, sizing. Modern CSS is expected —
    logical properties (`inline-size`, `margin-block`, `inset-inline-start`), `:has()`,
    `color-mix()`, `clamp()`, container queries, `dvh`. Fluid sizing via `min(36rem, 90vw)`.
@@ -37,6 +37,20 @@ DOM pairs get rewritten (the CSS-only responsive table: cells carry `[attr.data-
 restyles with `td[data-label]::before { content: attr(data-label) ': ' }`). A component that
 must diverge from the app threshold uses its own `@media` with a comment saying so.
 
-`::ng-deep`: tolerated only at shell seams (piercing `tui-scrollbar` internals, styling
-`[innerHTML]` content) — never component-to-component. `!important`: `g-*` utilities and
-documented Taiga-collision one-offs only. Both are review flags otherwise.
+**A child carries no layout for its parent.** Where a reusable component sits (a resizer's
+`inset-inline`) is the parent's rule, not a `side="start"` variant on the child; a shell that
+wants its routed pages to flow into its card says so once,
+`::ng-deep > :last-child { display: contents }`, not through a `g-*` class every page puts on
+its host. The same goes for the side gutter. A row component carries no inline padding; the
+column gives its children `inline-size: min(100% - 2rem, 56rem); margin-inline: auto`. When the
+padding moves out of a row, grep for every host that renders it, since each one now owes the row
+a gutter. Hiding an element on phones is `display: none` under
+`:host-context(tui-root._mobile)`; an `@if` on the breakpoint is for branches that differ.
+
+A grid or flex item whose `overflow` isn't `visible` already has a zero minimum size, so
+`min-inline-size: 0` beside it is noise. Never `outline: none` — the focus ring stays.
+
+`::ng-deep`: tolerated only at shell seams (piercing `tui-scrollbar` internals, a shell laying
+out its routed child, styling `[innerHTML]` content) — never component-to-component.
+`!important`: `g-*` utilities and documented Taiga-collision one-offs only. Both are review
+flags otherwise.

@@ -439,6 +439,14 @@ export namespace Mock {
             upstreamRepo: 'https://github.com/bitcoin/bitcoin',
             marketingUrl: 'https://bitcoin.org',
             releaseNotes: 'Even better support for Bitcoin and wallets!',
+            preDownloadAlert: {
+              message: {
+                en_US: '**Back up Bitcoin Core** before updating.',
+                es_ES:
+                  '**Haga una copia de seguridad de Bitcoin Core** antes de actualizarlo.',
+              },
+              when: { sourceVersion: '<27.0.0:0' },
+            },
             osVersion: '0.4.0',
             sdkVersion: '0.4.0-beta.49',
             gitHash: 'fakehash',
@@ -829,6 +837,14 @@ For users running Bitcoin Core as a service behind a reverse proxy, note that th
 - The \`listtransactions\` RPC may return duplicate entries when called with \`include_watchonly=true\` on descriptor wallets that share derivation paths across multiple descriptors.
 
 For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/release-notes/release-notes-27.0.0.md#full-changelog-with-detailed-descriptions-of-every-commit-and-pull-request-merged`,
+          preDownloadAlert: {
+            message: {
+              en_US: '**Back up Bitcoin Core** before updating.',
+              es_ES:
+                '**Haga una copia de seguridad de Bitcoin Core** antes de actualizarlo.',
+            },
+            when: { sourceVersion: '<27.0.0:0' },
+          },
           osVersion: '0.4.0',
           sdkVersion: '0.4.0-beta.49',
           gitHash: 'fakehash',
@@ -2455,6 +2471,7 @@ PersistentKeepalive = 25`
               enabled: ['[2001:db8:abcd::a3b:2]:1234'],
               disabled: [],
               guaWan: ['[2001:db8:abcd::a3b:2]:1234'],
+              lanEnabled: [],
               available: [
                 {
                   ssl: true,
@@ -2545,6 +2562,7 @@ PersistentKeepalive = 25`
               enabled: [],
               disabled: [],
               guaWan: [],
+              lanEnabled: [],
               available: [],
             },
             options: {
@@ -2589,6 +2607,7 @@ PersistentKeepalive = 25`
               enabled: [],
               disabled: [],
               guaWan: [],
+              lanEnabled: [],
               available: [],
             },
             options: {

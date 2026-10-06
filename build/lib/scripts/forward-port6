@@ -66,8 +66,14 @@ delete_tagged() {
     fi
 } | nft -f -
 
+# Tracked flows keep the NAT they started with.
+# A daemon restart reinstalls forwards whose flows are still live.
+# Install clears only the flows the host answers itself.
 if [ "${UNDO:-0}" = 1 ]; then
-    # conntrack returns 1 when no flows match; ignore.
-    conntrack -D -f ipv6 -p tcp -d "$sip" --dport "$sport" 2> /dev/null || true
-    conntrack -D -f ipv6 -p udp -d "$sip" --dport "$sport" 2> /dev/null || true
+    match=(-d "$sip" --dport "$sport")
+else
+    match=(-r "$sip" --reply-port-src "$sport")
 fi
+# conntrack -D exits 1 when nothing matches.
+conntrack -D -f ipv6 -p tcp "${match[@]}" 2> /dev/null || true
+conntrack -D -f ipv6 -p udp "${match[@]}" 2> /dev/null || true

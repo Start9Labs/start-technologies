@@ -41,9 +41,17 @@ function passwordsMatch(control: AbstractControl): ValidationErrors | null {
       <header tuiHeader>
         <hgroup tuiTitle>
           <h2>{{ 'Setup complete' | i18n }}</h2>
-          <p tuiSubtitle>{{ 'You can close this window.' | i18n }}</p>
+          <p tuiSubtitle>
+            {{
+              'Open router.lan in your browser to secure your connection to your router.'
+                | i18n
+            }}
+          </p>
         </hgroup>
       </header>
+      <a tuiButton href="http://router.lan" target="_blank">
+        {{ 'Open router.lan' | i18n }}
+      </a>
     } @else {
       <header tuiHeader>
         <h2 tuiTitle>{{ 'Create admin password' | i18n }}</h2>

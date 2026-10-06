@@ -338,7 +338,7 @@ The `startos/` directory is where you take advantage of the StartOS SDK and APIs
 
 #### dependencies.ts
 
-`setupDependencies()` is where you define any dependencies of this package, including their versions, whether or not they need to be running or simply installed, and which health checks, if any, need to be passing for this package to be satisfied.
+Define each dependency with `sdk.Dependency.required()` or `.optional()` and add it to `sdk.Dependencies.of()`. The builder supplies both the published manifest requirements and reactive runtime requirements. See [Dependencies](dependencies.md).
 
 #### index.ts
 
@@ -362,7 +362,7 @@ This file is plumbing, used to imbue the generic Start SDK with package-specific
 
 #### utils.ts
 
-This file is for defining constants and functions specific to your package that are used throughout the code base. Many packages will not make use of this file.
+This file holds the package's own constants and helper functions. **A constant or function that doesn't belong in one of the files above goes here, not in a new file of its own.** A new top-level file under `startos/` is warranted only for a large, self-contained unit — a subsystem of several cooperating functions, or a long generated table — never for a single function or constant. Many packages will not make use of this file.
 
 ### Subdirectories
 
@@ -432,7 +432,7 @@ Container initialization takes place under the following circumstances:
 `setupInit()` is where you define the specific order in which functions will be executed when your container initializes.
 
 - `restoreInit` and `versionGraph` must remain first and second. Do not move them.
-- `setInterfaces`, `setDependencies`, `actions` are recommended to remain in this order, but could be rearranged if necessary.
+- Put `actions` before `dependencies` so dependency init handlers can create tasks for registered actions; `setInterfaces` precedes both.
 - Any custom init functions can be appended to the list of built-in functions, or even inserted between them. Most custom init functions are simply appended to the list.
 
 It is possible to limit the execution of custom init functions to specific _kinds_ of initialization. For example, if you only wanted to run a particular init function on fresh install and ignore it for updates and restores, `setupOnInit()` provides a `kind` variable (one of `install`, `update`, `restore`) that you can use for conditional logic. `kind` can also be null, which means the container is being initialized due to a server restart or manual container rebuild, rather than installation.
