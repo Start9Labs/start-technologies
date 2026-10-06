@@ -56,9 +56,10 @@ export type PrimaryUrl<Id extends T.ActionId> = {
   bestUsable: (effects: T.Effects) => Watchable<string | null>
   /**
    * Raises a task on `action` while the stored URL is unset or no longer one
-   * of the interface's addresses, pre-filled with the preferred address: a
-   * public domain, HTTPS first; else the `.local` address; else the first.
-   * Clears it otherwise. Register it with `sdk.setupInit()`, after the actions.
+   * of the interface's addresses, and clears it otherwise. Unless `fallback`
+   * is `false`, the task pre-fills the preferred address: a public domain,
+   * HTTPS first; else the `.local` address; else the first. Register it
+   * with `sdk.setupInit()`, after the actions.
    */
   setupTask: (
     severity: T.TaskSeverity,
@@ -177,7 +178,6 @@ export function setupPrimaryUrl<Id extends T.ActionId>(
           effects,
           sources(effects),
         ).const()
-        // A task created while the service initializes is assumed active, and a critical one stops it.
         if (follow(stored, urls))
           return effects.action.clearTasks({
             only: [options?.replayId || `${packageId}:${id}`],
@@ -189,12 +189,10 @@ export function setupPrimaryUrl<Id extends T.ActionId>(
           severity,
           options: {
             ...options,
-            when: { condition: 'input-not-matches', once: false },
-            input: {
-              kind: 'partial',
-              accept: urls.map(url => ({ url })),
-              set: fallback && preferred ? { url: preferred } : {},
-            },
+            ...(fallback &&
+              preferred && {
+                input: { kind: 'partial', accept: [], set: { url: preferred } },
+              }),
           },
         })
       }),

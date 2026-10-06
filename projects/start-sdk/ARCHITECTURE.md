@@ -320,7 +320,7 @@ Health checks are paired with **triggers** that control polling behavior:
 
 ### Primary URL (`lib/primaryUrl/`)
 
-`setupPrimaryUrl.ts` builds the action behind `sdk.setupPrimaryUrl` over the package's `get`/`set`, plus `bestUsable` and `setupTask`. Both judge the stored URL against the interface's `nonLocal` addresses. `bestUsable` is a `Watchable.combine` over the package's `get` reader and the host, so the caller picks the read strategy; it resolves the URL when read, leaving the store as the user set it. `setupTask` is an init script that passes those addresses to StartOS as an `input-not-matches` task's accepted input, and StartOS decides when the task is active.
+`setupPrimaryUrl.ts` builds the action behind `sdk.setupPrimaryUrl` over the package's `get`/`set`, plus `bestUsable` and `setupTask`. Both judge the stored URL against the interface's `nonLocal` addresses. `bestUsable` is a `Watchable.combine` over the package's `get` reader and the host, so the caller picks the read strategy; it resolves the URL when read, leaving the store as the user set it. `setupTask` is an init script that watches both and creates a plain task while the URL is unresolved, clearing it otherwise. It never hands StartOS an `input-not-matches` condition: StartOS evaluates one by asking the service for its action input, which it cannot do while that service initializes, so it would assume a new task active and a critical one would stop the service.
 
 ### Backup System (`lib/backup/`)
 

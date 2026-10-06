@@ -447,7 +447,7 @@ describe('setupPrimaryUrl', () => {
       ...args: Parameters<ReturnType<typeof setup>['primaryUrl']['setupTask']>
     ) => p.primaryUrl.setupTask(...args).init(p.effects, null)
 
-    test('declares the addresses the stored URL must be one of', async () => {
+    test('raises a task pre-filled with the preferred address while the stored URL is gone', async () => {
       const p = setup([lan, local, onion], 'http://gone.example:8080')
       await run(p, 'important', { reason: 'Choose a URL' })
       expect(p.createTask).toHaveBeenCalledWith({
@@ -456,17 +456,13 @@ describe('setupPrimaryUrl', () => {
         replayId: 'testOutput:set-primary-url',
         severity: 'important',
         reason: 'Choose a URL',
-        when: { condition: 'input-not-matches', once: false },
         input: {
           kind: 'partial',
-          accept: [
-            { url: 'http://192.168.1.10:8080' },
-            { url: 'http://box.local:8080' },
-            { url: 'http://abc.onion:8080' },
-          ],
+          accept: [],
           set: { url: 'http://box.local:8080' },
         },
       })
+      expect(p.clearTasks).not.toHaveBeenCalled()
       expect(p.set).not.toHaveBeenCalled()
     })
 
@@ -485,28 +481,17 @@ describe('setupPrimaryUrl', () => {
       const p = setup([lan, local], undefined, { fallback: false })
       await run(p, 'critical')
       expect(p.createTask).toHaveBeenCalledWith(
-        expect.objectContaining({
-          input: {
-            kind: 'partial',
-            accept: [
-              { url: 'http://192.168.1.10:8080' },
-              { url: 'http://box.local:8080' },
-            ],
-            set: {},
-          },
-        }),
+        expect.not.objectContaining({ input: expect.anything() }),
       )
     })
 
-    test('raises a task no input satisfies while the interface has no addresses', async () => {
+    test('raises a task while the interface has no addresses', async () => {
       const p = setup(null, 'http://box.local:8080')
       await run(p, 'critical')
       expect(p.createTask).toHaveBeenCalledWith(
-        expect.objectContaining({
-          severity: 'critical',
-          input: { kind: 'partial', accept: [], set: {} },
-        }),
+        expect.objectContaining({ severity: 'critical' }),
       )
+      expect(p.clearTasks).not.toHaveBeenCalled()
     })
 
     test('clears the task while the stored URL resolves', async () => {
