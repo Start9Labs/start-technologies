@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.0.2 — StartOS 0.4.0.2
+
+### Fixed
+
+- **A flavor switch records the exact version installed as the service's
+  data version**, so the receiving package's later migrations run. A range
+  recorded by an earlier switch is replaced by the current version at the
+  next initialization; the migrations it skipped are not replayed, so a
+  package that needs one of them on such an install has to do that work
+  outside a migration
+
 ## 3.0.1 — StartOS 0.4.0.2
 
 ### Changed

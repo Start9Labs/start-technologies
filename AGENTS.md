@@ -135,6 +135,10 @@ Three tools, one config each at the repo root: **rustfmt** (`rustfmt.toml`) for 
 **prettier** (`.prettierrc.json`) for TS/JS/HTML/SCSS/Markdown/YAML/JSON, and **taplo**
 (`taplo.toml`) for TOML.
 
+Every prettier invocation passes `--config .prettierrc.json`. The package template's
+`.prettierrc` names the published SDK's config, which resolves only in a scaffolded package,
+so config discovery fails on any template file.
+
 ```bash
 make format          # format the whole repo
 make format-check    # read-only check (what CI runs)

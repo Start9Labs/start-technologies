@@ -13,6 +13,7 @@ for the detail behind its highlights.
 ### Changed
 
 - **Legacy v1 package conversion creates SquashFS images natively**, preserving container filesystem ownership and permissions.
+- **NVIDIA images include driver 580.178.04**, with Linux 7.2 compatibility.
 
 ## [0.4.0.2]
 
