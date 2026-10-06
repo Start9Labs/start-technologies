@@ -9,9 +9,8 @@
 //! `policy` decides two tiers. A TSIG-signed UPDATE (an inbound WireGuard
 //! peer, key derived from its PSK) may publish any A/AAAA/CNAME/TXT record.
 //! An unsigned one (a LAN device with the permission) must arrive over TCP
-//! and may publish A/AAAA records. Both are refused a name under `lan.` and
-//! a name public DNS resolves anywhere but this router's WAN address. A name
-//! belongs to the first owner that claims it.
+//! and may publish A/AAAA records. Both are refused a name under `lan.`.
+//! A name belongs to the first owner that claims it.
 //!
 //! Listeners bind each profile's gateway address and outlive the interface
 //! being recreated. Records, ownership and the directory live in memory;
@@ -23,16 +22,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use futures::future::BoxFuture;
-use futures::FutureExt;
-use hickory_server::net::runtime::TokioRuntimeProvider;
 use hickory_server::proto::op::ResponseCode;
 use hickory_server::proto::rr::{DNSClass, LowerName, Name, RData, Record, RecordType};
-use hickory_server::resolver::config::{
-    ConnectionConfig, LookupIpStrategy, NameServerConfig, ResolveHosts, ResolverConfig,
-    ResolverOpts,
-};
-use hickory_server::resolver::Resolver;
 use hickory_server::server::Server;
 use rpc_toolkit::{from_fn_async_local, HandlerExt as _, ParentHandler};
 use serde::{Deserialize, Serialize};
@@ -72,19 +63,6 @@ const TCP_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
 const TCP_MAX_CLIENTS: usize = 16;
 /// Refusal log lines per second, box-wide.
 const REFUSAL_LOG_RATE: u32 = 20;
-const PUBLIC_LOOKUP_TIMEOUT: Duration = Duration::from_secs(3);
-/// The WAN resolvers the main dnsmasq reads in ISP mode.
-const RESOLV_AUTO: &str = "/tmp/resolv.conf.d/resolv.conf.auto";
-/// Special-use zones, which public DNS never delegates.
-const PRIVATE_ZONES: &[&str] = &[
-    "local.",
-    "home.arpa.",
-    "internal.",
-    "test.",
-    "invalid.",
-    "localhost.",
-    "example.",
-];
 const INJECT_FILE_PREFIX: &str = "startwrt-dns-inject.dns_";
 
 /// The daemon's DNS-injection service; unset in CLI / `--configs-only` mode.
@@ -138,20 +116,7 @@ struct Directory {
     /// `(viewer zone, source zone)` pairs the firewall forwards. A record is
     /// served only to zones that can reach its source.
     reach: BTreeSet<(String, String)>,
-    /// The router's WAN addresses.
-    wan: BTreeSet<IpAddr>,
 }
-
-/// A name's standing in public DNS.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum PublicAnswer {
-    /// NXDOMAIN, or no address records.
-    Absent,
-    Addrs(Vec<IpAddr>),
-    Failed(String),
-}
-
-type PublicLookup = Arc<dyn Fn(Name) -> BoxFuture<'static, PublicAnswer> + Send + Sync>;
 
 /// What the refresher learns from one UCI pass, before live lease/neighbor
 /// data joins it.
@@ -194,10 +159,6 @@ impl DnsInject {
         let directory = Arc::new(SyncMutex::new(Directory::default()));
         let (tx, rx) = tokio::sync::watch::channel(Vec::new());
         let render_tx = tx.clone();
-        let public: PublicLookup = {
-            let uci_root = uci_root.clone();
-            Arc::new(move |name| upstream_lookup(uci_root.clone(), name))
-        };
         let injector = {
             let key_dir = directory.clone();
             let policy_dir = directory.clone();
@@ -211,8 +172,7 @@ impl DnsInject {
                 },
                 move |src, updates: Vec<Record>, auth| {
                     let directory = policy_dir.clone();
-                    let public = public.clone();
-                    async move { policy(&directory, &public, src, &updates, auth).await }
+                    async move { policy(&directory, src, &updates, auth) }
                 },
             )
         };
@@ -283,21 +243,6 @@ async fn refresh(di: &Arc<DnsInject>) -> Result<(), Error> {
         .and_then(|out| String::from_utf8(out).ok())
         .unwrap_or_default();
     let neighbors = crate::devices::parse_neigh_output(&neigh);
-    let mut wan: BTreeSet<IpAddr> = crate::system::get_wan_ipv4()
-        .await
-        .ok()
-        .flatten()
-        .map(IpAddr::V4)
-        .into_iter()
-        .collect();
-    wan.extend(
-        crate::system::get_wan_ipv6s()
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(IpAddr::V6),
-    );
-
     // Candidate addresses per allowed MAC: reservation, lease, neighbor entry.
     let mut by_ip: BTreeMap<IpAddr, Injector> = BTreeMap::new();
     let mut wg_keys = BTreeMap::new();
@@ -345,7 +290,6 @@ async fn refresh(di: &Arc<DnsInject>) -> Result<(), Error> {
         d.wg_keys = wg_keys;
         d.profiles = snapshot.profiles.clone();
         d.reach = snapshot.reach.clone();
-        d.wan = wan;
         sweep_owners(d, &snapshot, &leases, &neighbors, &di.injector.list())
     });
     // The daemon's default filter is `warn`.
@@ -522,9 +466,8 @@ fn read_snapshot(cfgs: &Configs) -> Result<NetSnapshot, Error> {
 
 /// The tiered `pre_update` policy. Every record is validated before any
 /// ownership is claimed.
-async fn policy(
+fn policy(
     directory: &SyncMutex<Directory>,
-    public: &PublicLookup,
     src: IpAddr,
     updates: &[Record],
     auth: UpdateAuth,
@@ -534,20 +477,6 @@ async fn policy(
         log_refusal(src, &why);
         ResponseCode::Refused
     };
-    let wan = match directory.peek(|d| check(d, src, updates, auth).map(|_| d.wan.clone())) {
-        Ok(wan) => wan,
-        Err(why) => return refuse(why),
-    };
-    let added: BTreeMap<LowerName, &Name> = updates
-        .iter()
-        .filter(|r| r.dns_class == DNSClass::IN)
-        .map(|r| (LowerName::from(&r.name), &r.name))
-        .collect();
-    for (lower, name) in added {
-        if let Err(why) = publicly_claimable(public, &lower, name, &wan).await {
-            return refuse(why);
-        }
-    }
     directory.mutate(|d| match check(d, src, updates, auth) {
         Ok(owner) => {
             claim(d, &owner, updates);
@@ -629,98 +558,6 @@ fn claim(d: &mut Directory, owner: &Owner, updates: &[Record]) {
             _ => {}
         }
     }
-}
-
-/// Refuses a name public DNS resolves to anything but a WAN address. A failed
-/// lookup refuses too.
-async fn publicly_claimable(
-    public: &PublicLookup,
-    lower: &LowerName,
-    name: &Name,
-    wan: &BTreeSet<IpAddr>,
-) -> Result<(), String> {
-    if PRIVATE_ZONES
-        .iter()
-        .any(|z| LowerName::from(Name::from_ascii(z).expect("static valid name")).zone_of(lower))
-    {
-        return Ok(());
-    }
-    match public(name.clone()).await {
-        PublicAnswer::Absent => Ok(()),
-        PublicAnswer::Addrs(addrs) => match addrs.iter().find(|a| !wan.contains(a)) {
-            None => Ok(()),
-            Some(addr) => Err(format!(
-                "{name} publicly resolves to {addr}, not this router"
-            )),
-        },
-        PublicAnswer::Failed(e) => Err(format!("{name}: public lookup failed: {e}")),
-    }
-}
-
-/// SmartDNS's system group when system DNS is set, else the WAN resolvers.
-fn main_upstreams(system_dns: bool, resolv_auto: &str) -> Vec<SocketAddr> {
-    if system_dns {
-        return vec![SocketAddr::from((
-            Ipv4Addr::LOCALHOST,
-            crate::dns::SMARTDNS_SYSTEM_PORT,
-        ))];
-    }
-    resolv_auto
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix("nameserver"))
-        .filter_map(|ip| ip.trim().parse::<IpAddr>().ok())
-        .map(|ip| SocketAddr::new(ip, 53))
-        .collect()
-}
-
-/// Asks the main dnsmasq's current upstreams directly: dnsmasq's rebind
-/// filter drops public answers that name private addresses.
-fn upstream_lookup(uci_root: PathBuf, name: Name) -> BoxFuture<'static, PublicAnswer> {
-    async move {
-        let system_dns = uci_task(move || async move {
-            let arena = Arena::new();
-            let cfgs = parse_all(&uci_root, &arena, &["startwrt"]).await?;
-            Ok(!crate::dns::get_system_dns_servers(&cfgs).is_empty())
-        })
-        .await;
-        let system_dns = match system_dns {
-            Ok(system_dns) => system_dns,
-            Err(e) => return PublicAnswer::Failed(e.to_string()),
-        };
-        let resolv_auto = tokio::fs::read_to_string(RESOLV_AUTO)
-            .await
-            .unwrap_or_default();
-        let upstreams = main_upstreams(system_dns, &resolv_auto);
-        if upstreams.is_empty() {
-            return PublicAnswer::Failed("no upstream DNS server".into());
-        }
-        let mut config = ResolverConfig::from_parts(None, Vec::new(), Vec::new());
-        for upstream in upstreams {
-            let mut udp = ConnectionConfig::udp();
-            udp.port = upstream.port();
-            let mut tcp = ConnectionConfig::tcp();
-            tcp.port = upstream.port();
-            config.add_name_server(NameServerConfig::new(upstream.ip(), true, vec![udp, tcp]));
-        }
-        let mut opts = ResolverOpts::default();
-        opts.timeout = PUBLIC_LOOKUP_TIMEOUT;
-        opts.attempts = 1;
-        opts.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
-        opts.use_hosts_file = ResolveHosts::Never;
-        let resolver = match Resolver::builder_with_config(config, TokioRuntimeProvider::default())
-            .with_options(opts)
-            .build()
-        {
-            Ok(resolver) => resolver,
-            Err(e) => return PublicAnswer::Failed(e.to_string()),
-        };
-        match resolver.lookup_ip(name).await {
-            Ok(lookup) => PublicAnswer::Addrs(lookup.iter().collect()),
-            Err(e) if e.is_nx_domain() || e.is_no_records_found() => PublicAnswer::Absent,
-            Err(e) => PublicAnswer::Failed(e.to_string()),
-        }
-    }
-    .boxed()
 }
 
 fn lan_zone() -> LowerName {
@@ -1313,18 +1150,13 @@ mod tests {
         tcp: false,
     };
 
-    fn public(answer: PublicAnswer) -> PublicLookup {
-        Arc::new(move |_| futures::future::ready(answer.clone()).boxed())
-    }
-
-    /// `policy` with public DNS answering nothing.
     async fn admit(
         dir: &SyncMutex<Directory>,
         src: IpAddr,
         updates: &[Record],
         auth: UpdateAuth,
     ) -> ResponseCode {
-        policy(dir, &public(PublicAnswer::Absent), src, updates, auth).await
+        policy(dir, src, updates, auth)
     }
 
     fn lan_ip(host: u8) -> Ipv4Addr {
@@ -1358,6 +1190,73 @@ mod tests {
         SyncMutex::new(d)
     }
 
+    async fn publish_public_name_offline(signed: bool) {
+        use hickory_server::proto::op::update_message::append;
+        use hickory_server::proto::op::Message;
+        use hickory_server::proto::rr::RecordSet;
+
+        let root = tempfile::tempdir().unwrap();
+        for file in ["startwrt", "network", "dhcp", "firewall"] {
+            std::fs::write(root.path().join(file), "").unwrap();
+        }
+        let di = DnsInject::new(root.path().to_path_buf());
+        let src = IpAddr::V4(lan_ip(if signed { 200 } else { 50 }));
+        let key = derive_tsig_key(&[7u8; 32]);
+        di.directory.mutate(|d| {
+            d.by_ip = directory().peek(|fixture| fixture.by_ip.clone());
+            d.wg_keys.insert(src, key);
+        });
+        let name = "service.example.com";
+        let record = if signed {
+            Record::from_rdata(fqdn(name), 300, RData::CNAME(CNAME(fqdn("nas.internal"))))
+        } else {
+            a_record(name, lan_ip(99))
+        };
+        let mut rrset = RecordSet::new(record.name.clone(), record.record_type(), 0);
+        rrset.insert(record.clone(), 0);
+        let mut update = append(rrset, fqdn("example.com"), false, false);
+        if signed {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let signer = hickory_server::proto::rr::TSigner::new(
+                key.to_vec(),
+                hickory_server::proto::rr::rdata::tsig::TsigAlgorithm::HmacSha256,
+                fqdn("startos-dns-update"),
+                300,
+            )
+            .unwrap();
+            update.finalize(&signer, now).unwrap();
+        }
+        let bytes = update.to_vec().unwrap();
+        let response = di
+            .injector
+            .answer_update(src, &bytes, !signed)
+            .await
+            .unwrap();
+        let response = Message::from_vec(&response).unwrap();
+        assert_eq!(response.metadata.response_code, ResponseCode::NoError);
+        let stored = di.injector.list();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].name, record.name);
+        assert_eq!(stored[0].rdata, record.data);
+        assert_eq!(stored[0].source, src);
+        assert!(di.directory.peek(|d| d
+            .owners
+            .contains_key(&(LowerName::from(&record.name), record.record_type()))));
+    }
+
+    #[tokio::test]
+    async fn unsigned_tcp_publishes_public_name_offline() {
+        publish_public_name_offline(false).await;
+    }
+
+    #[tokio::test]
+    async fn valid_tsig_publishes_public_name_offline() {
+        publish_public_name_offline(true).await;
+    }
+
     #[tokio::test]
     async fn unsigned_tier_publishes_addresses_only() {
         let dir = directory();
@@ -1376,109 +1275,6 @@ mod tests {
             admit(&dir, src, &[cname], TCP).await,
             ResponseCode::Refused,
             "unsigned tier is A/AAAA only"
-        );
-    }
-
-    /// A name public DNS answers is claimable only where it points at the
-    /// router's WAN. Special-use zones and deletes skip the lookup.
-    #[tokio::test]
-    async fn public_names_must_point_at_this_router() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        let dir = directory();
-        let wan = Ipv4Addr::new(203, 0, 113, 5);
-        dir.mutate(|d| {
-            d.wan.insert(IpAddr::V4(wan));
-        });
-        let src = IpAddr::V4(lan_ip(50));
-        let publish = |name: &str| [a_record(name, lan_ip(50))];
-        let run = |answer: PublicAnswer, updates: Vec<Record>| {
-            let dir = &dir;
-            async move { policy(dir, &public(answer), src, &updates, TCP).await }
-        };
-
-        assert_eq!(
-            run(
-                PublicAnswer::Addrs(vec![IpAddr::V4(Ipv4Addr::new(142, 250, 0, 1))]),
-                publish("www.google.com").to_vec()
-            )
-            .await,
-            ResponseCode::Refused,
-            "a name that resolves elsewhere cannot be hijacked"
-        );
-        assert_eq!(
-            run(
-                PublicAnswer::Addrs(vec![IpAddr::V4(wan), IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4))]),
-                publish("mixed.example.com").to_vec()
-            )
-            .await,
-            ResponseCode::Refused,
-            "every public address must be the router's"
-        );
-        assert_eq!(
-            run(
-                PublicAnswer::Failed("timeout".into()),
-                publish("unknown.example.com").to_vec()
-            )
-            .await,
-            ResponseCode::Refused,
-            "an unanswered lookup refuses"
-        );
-        assert_eq!(
-            run(
-                PublicAnswer::Addrs(vec![IpAddr::V4(wan)]),
-                publish("home.example.com").to_vec()
-            )
-            .await,
-            ResponseCode::NoError,
-            "a name already routed to this router"
-        );
-        assert_eq!(
-            run(PublicAnswer::Absent, publish("nextcloud.server").to_vec()).await,
-            ResponseCode::NoError,
-            "a name with no public records"
-        );
-
-        let asked = Arc::new(AtomicUsize::new(0));
-        let counting: PublicLookup = {
-            let asked = asked.clone();
-            Arc::new(move |_| {
-                asked.fetch_add(1, Ordering::SeqCst);
-                futures::future::ready(PublicAnswer::Failed("offline".into())).boxed()
-            })
-        };
-        for name in ["nas.local", "nas.home.arpa", "nas.internal"] {
-            assert_eq!(
-                policy(&dir, &counting, src, &publish(name), TCP).await,
-                ResponseCode::NoError,
-                "{name} never resolves publicly"
-            );
-        }
-        let mut delete = Record::update0(fqdn("www.google.com"), 0, RecordType::ANY);
-        delete.dns_class = DNSClass::ANY;
-        assert_eq!(
-            policy(&dir, &counting, src, &[delete], TCP).await,
-            ResponseCode::NoError
-        );
-        assert_eq!(asked.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn main_upstreams_follow_the_system_dns_mode() {
-        let auto = "# Interface wan\nnameserver 192.0.2.53\nsearch lan\n# Interface wan6\nnameserver fd00::1\n";
-        assert_eq!(
-            main_upstreams(false, auto),
-            vec![
-                "192.0.2.53:53".parse().unwrap(),
-                "[fd00::1]:53".parse().unwrap()
-            ]
-        );
-        assert_eq!(
-            main_upstreams(true, auto),
-            vec![SocketAddr::from((
-                Ipv4Addr::LOCALHOST,
-                crate::dns::SMARTDNS_SYSTEM_PORT
-            ))]
         );
     }
 

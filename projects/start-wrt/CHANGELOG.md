@@ -76,8 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolves them. A StartOS server uses it for its private domains, and one
   joined over the inbound VPN publishes without the toggle, which also makes
   its `.local` name resolve for VPN devices. An update from the LAN must
-  arrive over TCP (`nsupdate -v`). A name that already resolves on the
-  Internet is refused unless it points at this router, names under `.lan` are
+  arrive over TCP (`nsupdate -v`). Names under `.lan` are
   refused, and a name is served only to networks whose Security Profile can
   reach the publishing device. The router drops a record whose device loses
   the address it published from, and revoking the permission removes the

@@ -427,19 +427,16 @@ costs one comparison and is worth stating as an invariant in the module doc.
 > profile's dnsmasq. `pre_update` receives the transport alongside the TSIG
 > verdict.
 >
-> **Amended in review: the public view, not the source address, limits the
-> name.** With the source proven, rdata-equals-source no longer guards
-> anything: a hijacker points a name at itself, which is exactly the shape
-> the rule allows. The dangerous names are ones that already resolve
-> publicly. Both tiers are now refused a name the router's upstream DNS
-> resolves to anything but its own WAN address, and a failed lookup refuses
-> too. The lookup goes to the main dnsmasq's upstreams directly, since
-> dnsmasq's rebind protection would hide a public answer naming a private
-> address. Special-use zones (`local.`, `home.arpa.`, `internal.` and the RFC 6761
-> names) skip the lookup. The unsigned tier stays A/AAAA-only but may point
-> at any address, and the sweep keys a record's life to the address it was
-> published from. The private half of a StartOS split-DNS domain is refused
-> as a consequence.
+> **Amended in review: publishing is a trusted-device permission.** A
+> malicious publisher can direct clients to itself even when records must
+> point at its own address. Grant publishing permission only to trusted
+> devices. Both tiers may publish names independently of public DNS and
+> the router's WAN addresses, supporting the private half of a StartOS
+> split-DNS domain and publication while upstream DNS is unavailable. The
+> unsigned tier stays A/AAAA-only but may point at any address. The sweep
+> keys a record's life to the address it was published from. TCP source
+> verification, TSIG validation, ownership checks and the `lan.` reservation
+> remain in place.
 
 **Enforce it inside `apply_update`, not in the `authorize` closure.** The
 handler verifies TSIG _before_ calling into the store (`rfc2136.rs:332-336`), and
