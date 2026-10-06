@@ -254,7 +254,7 @@ if [ "${NVIDIA}" = "1" ]; then
     # install a specific NVIDIA driver version
 
     # ---------------- configuration ----------------
-    NVIDIA_DRIVER_VERSION="\${NVIDIA_DRIVER_VERSION:-580.173.02}"
+    NVIDIA_DRIVER_VERSION="\${NVIDIA_DRIVER_VERSION:-580.178.04}"
 
     BASE_URL="https://download.nvidia.com/XFree86/Linux-${QEMU_ARCH}"
 
@@ -350,7 +350,7 @@ if [ "${NVIDIA}" = "1" ]; then
 
     # initramfs-tools copies the firmware every included module declares, blacklist or
     # not, so nouveau's GSP reaches the initramfs the bootloader must read. The 535 GSP
-    # serves Debian's driver; the .run ships its own under nvidia/580.173.02.
+    # serves Debian's driver; the .run supplies matching firmware.
     echo "[nvidia-hook] Removing unusable NVIDIA GSP firmware..." >&2
     apt-get purge -y firmware-nvidia-graphics firmware-nvidia-tesla-535-gsp
 

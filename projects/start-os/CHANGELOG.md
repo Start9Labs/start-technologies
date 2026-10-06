@@ -8,6 +8,12 @@ This file tracks notable changes since the move to the monorepo, and is what eac
 [GitHub release](https://github.com/Start9Labs/start-technologies/releases) links to
 for the detail behind its highlights.
 
+## [0.4.0.3]
+
+### Changed
+
+- **NVIDIA images include driver 580.178.04**, with Linux 7.2 compatibility.
+
 ## [0.4.0.2]
 
 ### Security
