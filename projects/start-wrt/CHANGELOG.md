@@ -5,7 +5,26 @@ All notable changes to StartWRT are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.2]
+## [1.3.0]
+
+### Added
+
+- **DNS record publishing (RFC 2136).** A device with the new **Allow DNS record
+  publishing** permission (off by default, on its device page) can publish DNS
+  names for itself into the router, and every device on the network resolves
+  them. A StartOS server uses it for its private domains, and one joined over
+  the inbound VPN publishes without the toggle, which also makes its `.local`
+  name resolve for VPN devices. An update from the LAN must arrive over TCP
+  (`nsupdate -v`). Names under `.lan` are refused, and a name is served only to
+  networks whose Security Profile can reach the publishing device. The router
+  drops a record whose device loses the address it published from, and revoking
+  the permission removes the device's names immediately. A read-only table on
+  the device page shows what a device has published.
+
+- **Firefox's default DNS-over-HTTPS steps aside.** Each network's DNS answers
+  Firefox's DNS-over-HTTPS canary domain, so Firefox's default-enabled DoH steps
+  aside on these networks and published names and DNS overrides resolve there
+  too. DoH a user turned on explicitly is untouched.
 
 ### Security
 
@@ -70,22 +89,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (DFS) channels, which take a minute or more to come up. With no country selected the router runs on a conservative
   worldwide subset (2.4 GHz channels 1–11, 5 GHz channels 36–48, 20 dBm), so
   select yours after setup.
-- DNS record publishing (RFC 2136). A device with the new **Allow DNS record
-  publishing** permission (off by default, on its device page) can publish
-  DNS names for itself into the router, and every device on the network
-  resolves them. A StartOS server uses it for its private domains, and one
-  joined over the inbound VPN publishes without the toggle, which also makes
-  its `.local` name resolve for VPN devices. An update from the LAN must
-  arrive over TCP (`nsupdate -v`). Names under `.lan` are
-  refused, and a name is served only to networks whose Security Profile can
-  reach the publishing device. The router drops a record whose device loses
-  the address it published from, and revoking the permission removes the
-  device's names immediately. A
-  read-only table on the device page shows what a device has published.
-- Each network's DNS answers Firefox's DNS-over-HTTPS canary domain, so
-  Firefox's default-enabled DoH steps aside on these networks and published
-  names and DNS overrides resolve there too. DoH a user turned on explicitly
-  is untouched.
 
 - **Root CA profile for iPhone and iPad.** Downloading the Root CA in Safari
   on iOS or iPadOS now fetches a configuration profile that installs through
