@@ -14,6 +14,10 @@ for the detail behind its highlights.
 
 - **NVIDIA images include driver 580.178.04**, with Linux 7.2 compatibility.
 
+### Fixed
+
+- **Large HTTP responses arrive complete through service HTTPS addresses when the backend closes the connection.**
+
 ## [0.4.0.2]
 
 ### Security
