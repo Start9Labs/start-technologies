@@ -2992,6 +2992,121 @@ mod upstream_alpn_tests {
     }
 
     #[tokio::test]
+    async fn disabling_an_address_disconnects_its_stream_and_gates_new_arrivals() {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let backend = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+            let backend_addr = backend.local_addr().unwrap();
+            let acceptor = TlsAcceptor::from(Arc::new(config_advertising(&[])));
+            let _backend_task: NonDetachingJoinHandle<()> = tokio::spawn(async move {
+                loop {
+                    let (tcp, _) = backend.accept().await.unwrap();
+                    let acceptor = acceptor.clone();
+                    tokio::spawn(async move {
+                        let mut tls = acceptor.accept(tcp).await.unwrap();
+                        let mut byte = [0];
+                        while tls.read_exact(&mut byte).await.is_ok() {
+                            if tls.write_all(&byte).await.is_err() || tls.flush().await.is_err() {
+                                break;
+                            }
+                        }
+                    });
+                }
+            })
+            .into();
+            let old_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+            let old_addr = old_listener.local_addr().unwrap();
+            let new_addr = SocketAddr::new(Ipv4Addr::new(127, 0, 0, 2).into(), old_addr.port());
+            let new_listener = TcpListener::bind(new_addr).await.unwrap();
+            let gateway_id: GatewayId = "127.0.0.1:443".parse().unwrap();
+            let info = NetworkInterfaceInfo {
+                ip_info: Some(Arc::new(crate::db::model::public::IpInfo {
+                    subnets: ["127.0.0.1/8", "127.0.0.2/8"]
+                        .into_iter()
+                        .map(|subnet| subnet.parse::<IpNet>().unwrap())
+                        .collect(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            let gateway = GatewayInfo {
+                id: gateway_id.clone(),
+                info: info.clone(),
+            };
+            let bind_reqs = Watch::new(VHostBindRequirements::default());
+            let listener = VHostBindListener {
+                ip_info: Watch::new([(gateway_id, info)].into_iter().collect()),
+                port: old_addr.port(),
+                bind_reqs: bind_reqs.clone_unseen(),
+                listeners: BTreeMap::from([
+                    (old_addr, (old_listener, gateway.clone())),
+                    (new_addr, (new_listener, gateway)),
+                ]),
+                retry: None,
+            };
+            let temp = tempfile::tempdir().unwrap();
+            let db = TypedPatchDb::<Database>::load_unchecked(
+                patch_db::PatchDb::open(temp.path().join("db"))
+                    .await
+                    .unwrap(),
+            );
+            let server = VHostServer::new(
+                listener,
+                bind_reqs,
+                db,
+                provider(),
+                CertBranding::start_os("loopback"),
+                Arc::new(SyncMutex::new(BTreeMap::new())),
+                Arc::new(|_, _| async {}.boxed()),
+            );
+            server.set_challenge_bind_reqs(VHostBindRequirements {
+                private_ips: BTreeSet::from([old_addr.ip(), new_addr.ip()]),
+                ..Default::default()
+            });
+            let mut before = target(backend_addr, None, None);
+            before.private = BTreeSet::from([old_addr.ip(), new_addr.ip()]);
+            before.passthrough = true;
+            before.add_x_forwarded_headers = false;
+            let owner = server
+                .add(None, DynVHostTarget::new(before.clone()), 4)
+                .unwrap();
+            let connector =
+                TlsConnector::from(Arc::new(client_config_no_verify(provider()).unwrap()));
+            let name = ServerName::IpAddress(Ipv4Addr::LOCALHOST.into());
+            let mut established = connector
+                .connect(name.clone(), TcpStream::connect(old_addr).await.unwrap())
+                .await
+                .unwrap();
+            established.write_all(b"a").await.unwrap();
+            established.flush().await.unwrap();
+            let mut byte = [0];
+            established.read_exact(&mut byte).await.unwrap();
+            assert_eq!(&byte, b"a");
+            let mut after = before;
+            after.private = BTreeSet::from([new_addr.ip()]);
+            drop(owner);
+            let _replacement_owner = server.add(None, DynVHostTarget::new(after), 4).unwrap();
+            assert!(
+                established.read_exact(&mut byte).await.is_err(),
+                "disabling an address ends the established stream"
+            );
+            let refused = TcpStream::connect(old_addr)
+                .await
+                .expect("the old address remains bound");
+            assert!(connector.connect(name.clone(), refused).await.is_err());
+            let mut fresh = connector
+                .connect(name, TcpStream::connect(new_addr).await.unwrap())
+                .await
+                .unwrap();
+            fresh.write_all(b"c").await.unwrap();
+            fresh.flush().await.unwrap();
+            fresh.read_exact(&mut byte).await.unwrap();
+            assert_eq!(&byte, b"c");
+        })
+        .await
+        .expect("address disable disconnects the stream and gates arrivals within 10s");
+    }
+
+    #[tokio::test]
     async fn the_client_lands_on_the_protocol_the_backend_chose() {
         assert_eq!(
             negotiate(&["h2", "http/1.1"], &["h2", "http/1.1"]).await,

@@ -4,6 +4,8 @@ All notable changes to `start-registry` (the Start Registry server) are document
 
 ## [1.1.1]
 
+- **`info set-icon` and `info set-description` accept `--clear` to remove a registry's icon and description.** Supply either a value or `--clear`, but not both. Over RPC, the existing setters accept `null` in their `icon` or `description` field to clear it; existing values still set it.
+
 - **`package get` hides a revision once a newer revision of the same upstream version runs on all
   the same hardware.** Use `package get <id> full --all-revisions` (`allRevisions: true`,
   `otherVersions: "full"` over RPC) to list every revision the registry holds.

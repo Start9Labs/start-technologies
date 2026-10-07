@@ -18,6 +18,11 @@ for the detail behind its highlights.
   has no WireGuard key to sign the update with.** A router that accepts DNS
   UPDATE only over UDP no longer receives these records.
 
+### Fixed
+
+- **Services keep their internal IPv6 bridge address enabled.** Address switches
+  affect access from other networks while service-to-service access stays available.
+
 ## [0.4.0.2]
 
 ### Security

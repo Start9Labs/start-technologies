@@ -52,21 +52,25 @@ jobs:
 
       # `make print-TARGETS` parses the Makefile, whose `include
       # node_modules/@start9labs/start-sdk/s9pk.mk` (SDK 2.0+) only exists after
-      # a dependency install. Without this the include is unresolvable, make
-      # can't parse, and discovery falls back to a single-runner build.
+      # a dependency install, and whose SDK 3 version runs `start-cli` while
+      # parsing. Without either, make can't parse, and discovery falls back to
+      # a single-runner build that emulates every other arch.
       - name: Install package dependencies
         run: npm ci
         shell: bash
 
+      - name: Install start-cli
+        uses: Start9Labs/start-technologies/.github/actions/install-start-cli@master
+
       - name: Discover build matrix
         id: discover
         run: |
-          if TARGETS=$(make -s print-TARGETS 2>/dev/null) && [ -n "$TARGETS" ]; then
+          if TARGETS=$(make -s print-TARGETS) && [ -n "$TARGETS" ]; then
             # Space-separated list of make-target names -> JSON array of strings.
             MATRIX=$(printf '%s\n' $TARGETS | jq -Rc 'select(length>0)' | jq -sc '.')
             echo "Discovered build matrix: $MATRIX"
           else
-            echo "::warning::Package has no 'print-TARGETS' (s9pk.mk not yet synced); falling back to a single-entry matrix (one runner builds everything)."
+            echo "::warning::\`make print-TARGETS\` failed (see above); falling back to a single-entry matrix (one runner builds everything)."
             MATRIX='[""]'
           fi
           echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
