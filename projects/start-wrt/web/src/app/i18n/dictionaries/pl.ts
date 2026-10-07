@@ -535,4 +535,13 @@ export default {
   557: 'Nie ustawiono',
   558: 'Otwórz router.lan w przeglądarce, aby zabezpieczyć połączenie z routerem.',
   559: 'Otwórz router.lan',
+  560: 'Zezwól na publikowanie rekordów DNS',
+  561: 'Pozwala temu urządzeniu publikować w routerze nazwy DNS wskazujące na nie samo, dzięki czemu każde urządzenie w Twojej sieci może je rozwiązywać (używane przez serwery StartOS dla domen prywatnych). Domyślnie wyłączone; opublikowane nazwy pojawiają się poniżej.',
+  562: 'Zezwolić na publikowanie rekordów DNS?',
+  563: 'To urządzenie będzie mogło publikować nazwy DNS rozwiązywane w całej Twojej sieci. Przyznawaj to tylko zaufanemu urządzeniu, na przykład własnemu serwerowi StartOS.',
+  564: 'Zezwól',
+  565: 'Opublikowane rekordy DNS',
+  566: 'Nazwy opublikowane przez to urządzenie w routerze. Wygasają samoczynnie, gdy urządzenie przestaje je publikować; wyłączenie uprawnienia usuwa je natychmiast.',
+  567: 'Typ',
+  568: 'Wskazuje na',
 } satisfies i18n
