@@ -10,6 +10,14 @@ for the detail behind its highlights.
 
 ## [0.4.0.3]
 
+### Added
+
+- **Network UPS Tools can monitor a directly connected or network-hosted UPS
+  and shut StartOS down before its battery is exhausted.** The System settings
+  page configures server and client modes, preserves settings while monitoring
+  is disabled, and displays the UPS variables reported by NUT. Direct mode can
+  also expose the UPS to secondary NUT clients on the network.
+
 ### Changed
 
 - **NVIDIA images include driver 580.178.04**, with Linux 7.2 compatibility.
