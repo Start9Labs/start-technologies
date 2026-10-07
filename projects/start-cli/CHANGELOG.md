@@ -9,6 +9,17 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [2.3.0]
+
+### Added
+
+- **`registry package get --all-revisions` lists every revision a registry holds.** Without it,
+  a registry running start-registry 1.1.1 or later hides a revision once a newer revision of the
+  same upstream version runs on the same hardware.
+
+- **`registry info set-icon --clear` and `registry info set-description --clear` remove a
+  registry's icon and description.**
+
 ## [2.2.0]
 
 ### Security
