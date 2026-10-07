@@ -26,6 +26,10 @@ for the detail behind its highlights.
 - **Services keep their internal IPv6 bridge address enabled.** Address switches
   affect access from other networks while service-to-service access stays available.
 
+### Fixed
+
+- **Failed service updates no longer restore stale data from an earlier update** when a new rollback snapshot cannot be created.
+
 ## [0.4.0.2]
 
 ### Security
