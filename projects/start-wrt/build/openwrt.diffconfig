@@ -135,6 +135,7 @@ CONFIG_PACKAGE_kmod-nft-socket=y
 # CONFIG_PACKAGE_kmod-ppp is not set
 CONFIG_PACKAGE_kmod-sched-core=y
 CONFIG_PACKAGE_kmod-thermal=y
+CONFIG_PACKAGE_kmod-veth=y
 CONFIG_PACKAGE_kmod-wireguard=y
 # CONFIG_PACKAGE_knot-resolver_dnstap is not set
 CONFIG_PACKAGE_libatomic=y

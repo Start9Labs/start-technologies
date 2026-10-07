@@ -38,6 +38,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 ├── openwrt-patches/     # Start9 patches to upstream OpenWrt files (patch -p1 at setup)
 ├── openwrt-overlay/     # Start9 additions to the OpenWrt tree (spacemit target, boot pkgs; rsynced at setup)
 ├── build/               # Build scripts, OpenWrt diffconfig + version pin
+├── bench/               # Live-bench driver for a physical test router (see AGENTS.md "Live bench")
 ├── docs/                # User-facing docs book (src/, book.toml) + cross-cutting specs/proposals
 └── API_CONTRACT.md      # Complete RPC endpoint contract with Rust types
 ```
