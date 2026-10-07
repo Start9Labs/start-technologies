@@ -457,6 +457,8 @@ impl UploadHandle {
                 .log_err();
             self.progress.send_modify(|p| p.tracker.set_total(total));
         }
+        // tokio's write_all returns mid-write and finishes it before taking the next chunk.
+        let mut in_flight = 0;
         while let Some(next) = body.next().await {
             let chunk = match next.map_err(std::io::Error::other) {
                 Ok(chunk) => chunk,
@@ -465,26 +467,18 @@ impl UploadHandle {
                     break;
                 }
             };
-            // tokio's write_all returns before the bytes reach the file; readers open their own handle.
-            if let Err(e) = async {
-                self.file.write_all(&chunk).await?;
-                self.file.flush().await
-            }
-            .await
-            {
+            if let Err(e) = self.file.write_all(&chunk).await {
                 self.progress.send_if_modified(|p| p.handle_error(&e));
                 break;
             }
-            let len = chunk.len() as u64;
-            self.progress.send_modify(|p| {
-                p.written += len;
-                p.tracker += len;
-            });
-            let written = self.progress.borrow().written;
-            self.pacer.pace(written).await.log_err();
+            let written = std::mem::replace(&mut in_flight, chunk.len() as u64);
+            report_written(&self.progress, &mut self.pacer, written).await;
         }
-        if let Err(e) = self.file.sync_all().await {
-            self.progress.send_if_modified(|p| p.handle_error(&e));
+        match self.file.sync_all().await {
+            Ok(()) => report_written(&self.progress, &mut self.pacer, in_flight).await,
+            Err(e) => {
+                self.progress.send_if_modified(|p| p.handle_error(&e));
+            }
         }
     }
 }
@@ -492,6 +486,18 @@ impl Drop for UploadHandle {
     fn drop(&mut self) {
         self.progress.send_if_modified(|p| p.complete());
     }
+}
+
+async fn report_written(progress: &watch::Sender<Progress>, pacer: &mut WritebackPacer, len: u64) {
+    if len == 0 {
+        return;
+    }
+    progress.send_modify(|p| {
+        p.written += len;
+        p.tracker += len;
+    });
+    let written = progress.borrow().written;
+    pacer.pace(written).await.log_err();
 }
 
 pub struct DownloadAttemptContext {
@@ -598,24 +604,22 @@ impl DownloadHandle {
 
             let stream_result: Result<(), Error> = async {
                 let mut stream = response.bytes_stream();
+                // tokio's write_all returns mid-write and finishes it before taking the next chunk.
+                let mut in_flight = 0;
                 while let Some(next) = stream.next().await {
                     let chunk = next.map_err(|e| Error::new(e, ErrorKind::Network))?;
                     self.file
                         .write_all(&chunk)
                         .await
                         .map_err(|e| Error::new(e, ErrorKind::Filesystem))?;
-                    self.file
-                        .flush()
-                        .await
-                        .map_err(|e| Error::new(e, ErrorKind::Filesystem))?;
-                    let len = chunk.len() as u64;
-                    self.progress.send_modify(|p| {
-                        p.written += len;
-                        p.tracker += len;
-                    });
-                    let written = self.progress.borrow().written;
-                    self.pacer.pace(written).await.log_err();
+                    let written = std::mem::replace(&mut in_flight, chunk.len() as u64);
+                    report_written(&self.progress, &mut self.pacer, written).await;
                 }
+                self.file
+                    .flush()
+                    .await
+                    .map_err(|e| Error::new(e, ErrorKind::Filesystem))?;
+                report_written(&self.progress, &mut self.pacer, in_flight).await;
                 Ok(())
             }
             .await;
