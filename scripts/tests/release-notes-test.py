@@ -20,6 +20,8 @@ class ReleaseNotesTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         (self.root / "scripts").mkdir()
         shutil.copy2(ROOT / "scripts/manage-release.sh", self.root / "scripts")
+        for script in ("changelog.py", "changelog_version.py"):
+            shutil.copy2(ROOT / f"scripts/{script}", self.root / "scripts")
         self.notes = self.root / "projects/start-sdk/release-notes"
         self.notes.mkdir(parents=True)
         self.main = self.notes / f"{VERSION}.md"
@@ -47,7 +49,16 @@ class ReleaseNotesTests(unittest.TestCase):
         self.assertEqual(combined, PRE_UPDATE + "\n\n" + without)
         self.assertLess(combined.index("Full changelog"), combined.index("## Important"))
         self.assertEqual(combined.count("Full changelog"), 1)
-        self.assertIn("/blob/fixture-ref/", combined)
+        self.assertIn("/tree/fixture-ref/projects/start-sdk/changelog", combined)
+
+    def test_reads_canonical_version_without_override(self):
+        del self.env["VERSION"]
+        (self.root / "projects/start-sdk/package.json").write_text('{"version":"1.2.3"}')
+        self.assertIn("v1.2.3", self.run_script().stdout)
+
+    def test_release_links_compiled_attachment(self):
+        del self.env["CHANGELOG_REF"]
+        self.assertIn("/releases/download/start-sdk/v1.2.3/CHANGELOG.md", self.run_script().stdout)
 
     def test_github_and_registry_share_composition(self):
         self.pre_update.write_text(PRE_UPDATE)
@@ -81,17 +92,23 @@ class ReleaseNotesTests(unittest.TestCase):
         commit()
         adopted = subprocess.check_output(git + ["rev-parse", "HEAD"], text=True).strip()
         script = self.root / "scripts/manage-release.sh"
-        command = '''source <(awk '/^# --- Dispatch ---/{exit} {print}' "$1")
+        command = '''source <(awk '/^SUBCOMMAND=/{exit} {print}' "$1")
 REPO_ROOT="$2"; PROJECT=start-sdk; VERSION=1.2.3; COMMIT="$3"
 assert_metadata_matches_adopted'''
 
-        def assert_blocked():
+        def assert_blocked(name="1.2.3.pre-update.md"):
             result = subprocess.run(["bash", "-c", command, "test", str(script), str(self.root), adopted],
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("1.2.3.pre-update.md differs", result.stderr)
+            self.assertIn(f"{name} differs", result.stderr)
 
         self.pre_update.write_text(PRE_UPDATE)
+        assert_blocked()
+        subprocess.run(git + ["add", str(self.pre_update)], check=True)
+        assert_blocked()
+        self.main.write_text(MAIN + "Uncommitted instruction.\n")
+        assert_blocked("1.2.3.md")
+        self.main.write_text(MAIN)
         commit()
         assert_blocked()
         adopted = subprocess.check_output(git + ["rev-parse", "HEAD"], text=True).strip()
@@ -102,6 +119,87 @@ assert_metadata_matches_adopted'''
         self.pre_update.unlink()
         commit()
         assert_blocked()
+        adopted = subprocess.check_output(git + ["rev-parse", "HEAD"], text=True).strip()
+        history = self.root / "projects/start-sdk/CHANGELOG.md"
+        history.write_text("# Generated history\n")
+        commit()
+        result = subprocess.run(["bash", "-c", command, "test", str(script), str(self.root), adopted],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        fragments = self.root / "projects/start-sdk/changelog"
+        fragments.mkdir()
+        fragment = fragments / "patch-fixed-example.md"
+        fragment.write_text("- Fixed a released feature.\n")
+        commit()
+        result = subprocess.run(["bash", "-c", command, "test", str(script), str(self.root), adopted],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("changelog differs", result.stderr)
+
+    def test_release_uploads_changelog_from_tag_before_publication(self):
+        subprocess.run(["git", "init", "-q", self.root], check=True)
+        product = self.root / "projects/start-sdk"
+        (product / "CHANGELOG.md").write_text("# Changelog\n\n## [1.2.2]\n\n- Old change.\n")
+        fragments = product / "changelog"
+        fragments.mkdir()
+        (fragments / "patch-fixed-example.md").write_text("- Fixed the released feature.\n")
+        git = ["git", "-C", str(self.root)]
+        subprocess.run(git + ["add", "."], check=True)
+        subprocess.run(git + ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                              "-c", "commit.gpgsign=false", "commit", "-qm", "fixture"], check=True)
+        subprocess.run(git + ["-c", "tag.gpgsign=false", "tag", "start-sdk/v1.2.3"], check=True)
+        remote = self.root / "origin.git"
+        subprocess.run(["git", "init", "--bare", "-q", remote], check=True)
+        subprocess.run(git + ["remote", "add", "origin", str(remote)], check=True)
+        subprocess.run(git + ["push", "-q", "origin", "HEAD:master", "--tags"], check=True)
+        (fragments / "minor-added-later.md").write_text("- Later change.\n")
+        subprocess.run(git + ["add", "projects"], check=True)
+        subprocess.run(git + ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                              "-c", "commit.gpgsign=false", "commit", "-qm", "later"], check=True)
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir()
+        gh = bin_dir / "gh"
+        captured = self.root / "uploaded.md"
+        gh.write_text('''#!/usr/bin/env python3
+import os, pathlib, sys
+args = sys.argv[1:]
+with open(os.environ["CALLS"], "a") as calls:
+    calls.write(" ".join(args) + "\\n")
+if args[:2] == ["release", "view"]:
+    sys.exit(0 if os.environ.get("EXISTING_RELEASE") else 1)
+if args[:2] == ["release", "upload"]:
+    source = next(pathlib.Path(arg) for arg in args if arg.endswith("/CHANGELOG.md"))
+    pathlib.Path(os.environ["CAPTURE"]).write_text(source.read_text())
+''')
+        gh.chmod(0o755)
+        calls = self.root / "gh-calls"
+        self.env.update(PATH=f"{bin_dir}:{os.environ['PATH']}", CAPTURE=str(captured), CALLS=str(calls))
+        self.run_script("create-gh-release")
+        self.assertIn("release create", calls.read_text())
+        calls.unlink()
+        self.env["EXISTING_RELEASE"] = "1"
+        self.run_script("create-gh-release")
+        self.assertIn("release edit", calls.read_text())
+        text = captured.read_text()
+        self.assertIn("## [1.2.3]", text)
+        self.assertIn("Fixed the released feature.", text)
+        self.assertIn("Old change.", text)
+        self.assertNotIn("Later change.", text)
+        (fragments / "patch-fixed-example.md").write_text("invalid fragment\n")
+        subprocess.run(git + ["add", "projects"], check=True)
+        subprocess.run(git + ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                              "-c", "commit.gpgsign=false", "commit", "-qm", "invalid"], check=True)
+        subprocess.run(git + ["-c", "tag.gpgsign=false", "tag", "-f", "start-sdk/v1.2.3"], check=True)
+        subprocess.run(git + ["push", "-q", "--force", "origin", "refs/tags/start-sdk/v1.2.3"], check=True)
+        captured.unlink()
+        for existing in ("", "1"):
+            with self.subTest(existing_release=bool(existing)):
+                self.env["EXISTING_RELEASE"] = existing
+                if calls.exists():
+                    calls.unlink()
+                self.run_script("create-gh-release", success=False)
+                self.assertFalse(captured.exists())
+                self.assertFalse(calls.exists())
 
     def test_startos_registry_and_packaged_welcome(self):
         version = "0.4.0.2"
