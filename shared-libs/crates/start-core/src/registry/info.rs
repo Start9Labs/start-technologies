@@ -41,6 +41,14 @@ pub fn info_api<C: Context>() -> ParentHandler<C, WithIoFormat<Empty>> {
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
+            "clear-description",
+            from_fn_async(clear_description)
+                .with_metadata("admin", Value::Bool(true))
+                .no_display()
+                .with_about("about.clear-registry-description")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
             "set-icon",
             from_fn_async(set_icon)
                 .with_metadata("admin", Value::Bool(true))
@@ -51,6 +59,14 @@ pub fn info_api<C: Context>() -> ParentHandler<C, WithIoFormat<Empty>> {
             from_fn_async(cli_set_icon)
                 .no_display()
                 .with_about("about.set-registry-icon"),
+        )
+        .subcommand(
+            "clear-icon",
+            from_fn_async(clear_icon)
+                .with_metadata("admin", Value::Bool(true))
+                .no_display()
+                .with_about("about.clear-registry-icon")
+                .with_call_remote::<CliContext>(),
         )
 }
 
@@ -119,6 +135,13 @@ pub async fn set_description(
         .result
 }
 
+pub async fn clear_description(ctx: RegistryContext) -> Result<(), Error> {
+    ctx.db
+        .mutate(|db| db.as_index_mut().as_description_mut().ser(&None))
+        .await
+        .result
+}
+
 #[derive(Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -132,6 +155,13 @@ pub async fn set_icon(
 ) -> Result<(), Error> {
     ctx.db
         .mutate(|db| db.as_index_mut().as_icon_mut().ser(&Some(icon)))
+        .await
+        .result
+}
+
+pub async fn clear_icon(ctx: RegistryContext) -> Result<(), Error> {
+    ctx.db
+        .mutate(|db| db.as_index_mut().as_icon_mut().ser(&None))
         .await
         .result
 }

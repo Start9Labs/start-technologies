@@ -6772,6 +6772,20 @@ about.set-registry-name:
   fr_FR: "Définir le nom du registre"
   pl_PL: "Ustaw nazwę rejestru"
 
+about.clear-registry-icon:
+  en_US: "Remove the registry icon"
+  de_DE: "Das Registry-Symbol entfernen"
+  es_ES: "Eliminar el icono del registro"
+  fr_FR: "Supprimer l'icône du registre"
+  pl_PL: "Usuń ikonę rejestru"
+
+about.clear-registry-description:
+  en_US: "Remove the registry description"
+  de_DE: "Die Registry-Beschreibung entfernen"
+  es_ES: "Eliminar la descripción del registro"
+  fr_FR: "Supprimer la description du registre"
+  pl_PL: "Usuń opis rejestru"
+
 about.set-smtp:
   en_US: "Set SMTP configuration"
   de_DE: "SMTP-Konfiguration festlegen"
