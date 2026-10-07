@@ -10,6 +10,10 @@ for the detail behind its highlights.
 
 ## [0.4.0.3]
 
+### Fixed
+
+- **Required tasks preserve a service's desired running status.** Services resume automatically when the last blocking task clears, unless explicitly stopped. CLI `package start` records running intent and warns while critical tasks block execution.
+
 ### Changed
 
 - **NVIDIA images include driver 580.178.04**, with Linux 7.2 compatibility.

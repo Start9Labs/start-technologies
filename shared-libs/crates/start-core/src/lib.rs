@@ -521,9 +521,13 @@ pub fn package<C: Context>() -> ParentHandler<C> {
             "start",
             from_fn_async(control::start)
                 .with_metadata("sync_db", Value::Bool(true))
+                .no_cli(),
+        )
+        .subcommand(
+            "start",
+            from_fn_async(control::cli_start)
                 .no_display()
-                .with_about("about.start-service")
-                .with_call_remote::<CliContext>(),
+                .with_about("about.start-service"),
         )
         .subcommand(
             "stop",

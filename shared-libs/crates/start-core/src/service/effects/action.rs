@@ -5,7 +5,7 @@ use rust_i18n::t;
 
 use crate::action::{ActionInput, ActionResult, display_action_result};
 use crate::db::model::package::{
-    ActionAccess, ActionMetadata, Task, TaskCondition, TaskEntry, TaskSeverity, TaskTrigger,
+    ActionAccess, ActionMetadata, Task, TaskCondition, TaskEntry, TaskTrigger,
 };
 use crate::service::cli::ContainerCliContext;
 use crate::service::effects::prelude::*;
@@ -328,11 +328,6 @@ async fn create_task(
                         Some(true)
                     }
                 } else {
-                    // Action or service not available (e.g. still initializing during
-                    // server boot), so the condition can't be evaluated yet. Resolved
-                    // below from the prior entry for this replay_id; retested when the
-                    // action is exported (export_action) or the service's init
-                    // completes (Service::recheck_tasks).
                     None
                 }
             }
@@ -351,25 +346,12 @@ async fn create_task(
                 .or_not_found(src_id)?;
             let active = match active {
                 Some(active) => active,
-                // Unknown: a replayed task keeps its previous state rather than
-                // force-stopping the service on an assumption (the common case is
-                // server boot, where the target service initializes later and the
-                // recheck then corrects the state). A brand new task is
-                // conservatively active.
+                // Uninitialized actions retain replayed activity until `Service::recheck_tasks`.
                 None => match pde.as_tasks().as_idx(&replay_id) {
                     Some(entry) => entry.as_active().de()?,
                     None => true,
                 },
             };
-            if active
-                && task.severity == TaskSeverity::Critical
-                && pde
-                    .as_current_dependencies()
-                    .de()?
-                    .is_task_target(src_id, &task.package_id)
-            {
-                pde.as_status_info_mut().stop()?;
-            }
             pde.as_tasks_mut()
                 .insert(&replay_id, &TaskEntry { active, task })
         })

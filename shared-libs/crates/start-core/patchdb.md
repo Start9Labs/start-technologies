@@ -103,5 +103,5 @@ loop {
 
 - `net_controller.rs:469` — Watch `Hosts` for package network changes
 - `net_controller.rs:493` — Watch `Host` for main UI network changes
-- `service_actor.rs:37` — Watch `StatusInfo` for service state transitions
+- `service_actor.rs` — Watch `PackageDataEntry` for service state, task, and dependency changes
 - `gateway.rs:1212` — Wait for DB migrations to complete before syncing

@@ -9,6 +9,12 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [3.0.0]
+
+### Changed
+
+- **`package start` records running intent while critical tasks block execution and prints a warning.** The service starts when those tasks clear. The `--force` flag is removed; remove it from scripts.
+
 ## [2.3.0]
 
 ### Added
