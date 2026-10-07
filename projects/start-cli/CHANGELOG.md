@@ -20,6 +20,10 @@ or the CLI's externally observable behavior.
 - **`registry info set-icon --clear` and `registry info set-description --clear` remove a
   registry's icon and description.**
 
+### Fixed
+
+- **`s9pk pack` packs a multi-architecture image for an architecture other than the host's.**
+
 ## [2.2.0]
 
 ### Security
