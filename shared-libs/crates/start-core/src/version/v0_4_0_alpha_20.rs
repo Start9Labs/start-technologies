@@ -286,14 +286,8 @@ impl VersionT for Version {
                     .result?;
 
                 // The onion addresses it carries over only answer while tor runs.
-                crate::control::start(
-                    ctx.clone(),
-                    crate::control::StartParams {
-                        id: tor_id,
-                        force: false,
-                    },
-                )
-                .await?;
+                crate::control::start(ctx.clone(), crate::control::ControlParams { id: tor_id })
+                    .await?;
 
                 Ok::<_, Error>(())
             }

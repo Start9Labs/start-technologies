@@ -3245,11 +3245,18 @@ update.failed-title:
 
 # control.rs
 control.start-critical-task:
-  en_US: "Service %{id} has an unresolved critical task; use --force to request startup when blocking tasks clear"
-  de_DE: "Der Dienst %{id} hat eine ungelöste kritische Aufgabe; verwenden Sie --force, um den Start nach Erledigung der blockierenden Aufgaben anzufordern"
-  es_ES: "El servicio %{id} tiene una tarea crítica sin resolver; use --force para solicitar el inicio cuando se resuelvan las tareas que lo bloquean"
-  fr_FR: "Le service %{id} a une tâche critique non résolue ; utilisez --force pour demander le démarrage après résolution des tâches bloquantes"
-  pl_PL: "Usługa %{id} ma nierozwiązane zadanie krytyczne; użyj --force, aby zażądać uruchomienia po usunięciu blokujących zadań"
+  en_US: "Warning: startup requested for service %{id}; unresolved critical tasks block runtime startup until they are resolved"
+  de_DE: "Warnung: Start für Dienst %{id} angefordert; ungelöste kritische Aufgaben blockieren den Start bis zu ihrer Erledigung"
+  es_ES: "Advertencia: se solicitó el inicio del servicio %{id}; las tareas críticas pendientes bloquean el inicio hasta que se resuelvan"
+  fr_FR: "Avertissement : démarrage demandé pour le service %{id} ; les tâches critiques non résolues bloquent le démarrage jusqu’à leur résolution"
+  pl_PL: "Ostrzeżenie: zażądano uruchomienia usługi %{id}; nierozwiązane zadania krytyczne blokują uruchomienie do czasu ich rozwiązania"
+
+control.start-critical-task-check-failed:
+  en_US: "Warning: startup requested for service %{id}, but checking for blocking critical tasks failed"
+  de_DE: "Warnung: Start für Dienst %{id} angefordert, aber die Prüfung auf blockierende kritische Aufgaben ist fehlgeschlagen"
+  es_ES: "Advertencia: se solicitó el inicio del servicio %{id}, pero falló la comprobación de tareas críticas bloqueantes"
+  fr_FR: "Avertissement : démarrage demandé pour le service %{id}, mais la vérification des tâches critiques bloquantes a échoué"
+  pl_PL: "Ostrzeżenie: zażądano uruchomienia usługi %{id}, ale sprawdzenie blokujących zadań krytycznych nie powiodło się"
 
 # shutdown.rs
 shutdown.beginning-restart:
@@ -3742,13 +3749,6 @@ help.arg.force-remove-package:
   es_ES: "Forzar la eliminación aunque el paquete tenga versiones"
   fr_FR: "Forcer la suppression même si le paquet a des versions"
   pl_PL: "Wymuś usunięcie nawet jeśli pakiet ma wersje"
-
-help.arg.force-start:
-  en_US: "Request startup when blocking critical tasks clear"
-  de_DE: "Den Start nach Erledigung der blockierenden kritischen Aufgaben anfordern"
-  es_ES: "Solicitar el inicio cuando se resuelvan las tareas críticas que lo bloquean"
-  fr_FR: "Demander le démarrage après résolution des tâches critiques bloquantes"
-  pl_PL: "Zażądaj uruchomienia po usunięciu blokujących zadań krytycznych"
 
 help.arg.force-stderr-tty:
   en_US: "Force stderr to be treated as a TTY"

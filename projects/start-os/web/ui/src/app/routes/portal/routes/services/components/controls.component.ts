@@ -8,17 +8,14 @@ import { map } from 'rxjs'
 import { ControlsService } from 'src/app/services/controls.service'
 import { DepErrorService } from 'src/app/services/dep-error.service'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
-import {
-  getInstalledBaseStatus,
-  PrimaryStatus,
-} from 'src/app/services/pkg-status-rendering.service'
+import { PrimaryStatus } from 'src/app/services/pkg-status-rendering.service'
 import { getManifest } from 'src/app/utils/get-package-data'
 import { InterfaceService } from '../../../components/interfaces/interface.service'
 
 @Component({
   selector: 'service-controls',
   template: `
-    @if (stoppable()) {
+    @if (['running', 'starting', 'restarting'].includes(status()!)) {
       <button
         tuiButton
         appearance="primary-destructive"
@@ -140,11 +137,6 @@ export class ServiceControlsComponent {
   readonly status = input<PrimaryStatus>()
   readonly manifest = computed(() => getManifest(this.pkg()))
   readonly controls = inject(ControlsService)
-  protected readonly stoppable = computed(() =>
-    ['running', 'starting', 'restarting'].includes(
-      getInstalledBaseStatus(this.pkg().statusInfo),
-    ),
-  )
 
   readonly hasUnmet = computed(() =>
     this.errors.getPkgDepErrors$(this.manifest().id).pipe(

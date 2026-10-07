@@ -246,9 +246,7 @@ Install a package from the registry or sideload a local `.s9pk` file.
 
 ### `start-cli package start <ID>`
 
-Request that a service run. An active critical task blocks this request unless `--force` is passed. The service remains stopped until its blocking tasks clear.
-
-- `--force` — Record running intent while critical tasks are active; start automatically when they clear
+Request that a service run. If active critical tasks block execution, the CLI warns and records running intent. The service starts automatically when its blocking tasks clear.
 
 ### `start-cli package stop <ID>`
 

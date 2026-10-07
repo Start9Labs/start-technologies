@@ -12,7 +12,7 @@ for the detail behind its highlights.
 
 ### Fixed
 
-- **Required tasks preserve a service's desired running status.** Services resume automatically when the last blocking task clears, unless explicitly stopped. `start --force` requests startup after blocking tasks clear.
+- **Required tasks preserve a service's desired running status.** Services resume automatically when the last blocking task clears, unless explicitly stopped. CLI `package start` records running intent and warns while critical tasks block execution.
 
 ### Changed
 
