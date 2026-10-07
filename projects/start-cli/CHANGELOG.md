@@ -24,6 +24,9 @@ or the CLI's externally observable behavior.
 
 - **`s9pk pack` packs a multi-architecture image for an architecture other than the host's.**
 
+- **`package install` reports a package missing from the registry it asked**, naming that
+  registry, instead of prompting to choose from an empty list of flavors.
+
 ## [2.2.0]
 
 ### Security
