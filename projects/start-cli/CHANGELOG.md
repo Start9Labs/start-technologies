@@ -22,7 +22,9 @@ or the CLI's externally observable behavior.
 
 ### Fixed
 
-- **`s9pk pack` packs a multi-architecture image for an architecture other than the host's.**
+- **`s9pk pack` and `s9pk edit add-image` preserve the requested platform's image configuration**, including its default command, with Docker and Podman. Docker packaging requires Docker 28.1+ (API 1.49+).
+
+- **`s9pk edit add-image` signs the updated archive**, keeping the edited package readable and valid.
 
 - **`package install` reports a package missing from the registry it asked**, naming that
   registry, instead of prompting to choose from an empty list of flavors.
