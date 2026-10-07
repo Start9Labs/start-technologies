@@ -34,9 +34,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          # A rename counts at both ends: moving a file out of a book is a change outside it.
-          changed=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" \
-            --jq '.[] | .filename, (.previous_filename // empty)' | sort -u)
+          expected=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '.changed_files')
+          files=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR/files")
+
+          # The files API caps responses at 3,000 files, including paginated responses.
+          if ! jq -e --argjson expected "$expected" 'add | length == $expected' <<<"$files" >/dev/null; then
+            echo "::error::The changed-file list is incomplete; this pull request cannot be validated."
+            exit 1
+          fi
+
+          # Both rename endpoints must be published book paths.
+          changed=$(jq -r '.[][] | .filename, (.previous_filename // empty)' <<<"$files" | sort -u)
 
           # A rule, not a mirror of docs-deploy.yml's paths: a new product's book
           # matches the moment it exists, with nothing to keep in step.
