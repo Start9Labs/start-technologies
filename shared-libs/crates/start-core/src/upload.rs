@@ -465,7 +465,13 @@ impl UploadHandle {
                     break;
                 }
             };
-            if let Err(e) = self.file.write_all(&chunk).await {
+            // tokio's write_all returns before the bytes reach the file; readers open their own handle.
+            if let Err(e) = async {
+                self.file.write_all(&chunk).await?;
+                self.file.flush().await
+            }
+            .await
+            {
                 self.progress.send_if_modified(|p| p.handle_error(&e));
                 break;
             }
@@ -596,6 +602,10 @@ impl DownloadHandle {
                     let chunk = next.map_err(|e| Error::new(e, ErrorKind::Network))?;
                     self.file
                         .write_all(&chunk)
+                        .await
+                        .map_err(|e| Error::new(e, ErrorKind::Filesystem))?;
+                    self.file
+                        .flush()
                         .await
                         .map_err(|e| Error::new(e, ErrorKind::Filesystem))?;
                     let len = chunk.len() as u64;
