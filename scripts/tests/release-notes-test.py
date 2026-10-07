@@ -56,9 +56,20 @@ class ReleaseNotesTests(unittest.TestCase):
         (self.root / "projects/start-sdk/package.json").write_text('{"version":"1.2.3"}')
         self.assertIn("v1.2.3", self.run_script().stdout)
 
-    def test_release_links_compiled_attachment(self):
+    def test_release_links_rendered_changelog(self):
         del self.env["CHANGELOG_REF"]
-        self.assertIn("/releases/download/start-sdk/v1.2.3/CHANGELOG.md", self.run_script().stdout)
+        for project, version, anchor in (("start-sdk", "1.2.3", "123"),
+                                         ("start-os", "0.4.0.3", "0403"),
+                                         ("start-os", "0.4.1", "041"),
+                                         ("start-sdk", "1.2.3-RC.1+Build.2", "123-rc1build2")):
+            with self.subTest(project=project, version=version):
+                self.env["VERSION"] = version
+                notes = self.root / "projects" / project / "release-notes" / f"{version}.md"
+                notes.parent.mkdir(parents=True, exist_ok=True)
+                notes.write_text(MAIN)
+                output = self.run_script(project=project).stdout
+                self.assertIn(f"/blob/master/projects/{project}/CHANGELOG.md#{anchor}", output)
+                self.assertNotIn("/releases/download/", output)
 
     def test_github_and_registry_share_composition(self):
         self.pre_update.write_text(PRE_UPDATE)

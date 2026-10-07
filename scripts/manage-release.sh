@@ -119,7 +119,9 @@ changelog_link() {
     if [ -n "${CHANGELOG_REF:-}" ]; then
         echo "${CHANGELOG_LINK_PREFIX} fragments for v${VERSION}](https://github.com/${REPO}/tree/${CHANGELOG_REF}/projects/${PROJECT}/changelog)** — changes awaiting release."
     else
-        echo "${CHANGELOG_LINK_PREFIX} for v${VERSION}](https://github.com/${REPO}/releases/download/${TAG}/CHANGELOG.md)** — every change in this release."
+        local anchor="${VERSION//./}"
+        anchor="${anchor//+/}"
+        echo "${CHANGELOG_LINK_PREFIX} for v${VERSION}](https://github.com/${REPO}/blob/master/projects/${PROJECT}/CHANGELOG.md#${anchor,,})** — every change in this release."
     fi
 }
 
@@ -1653,7 +1655,7 @@ Subcommands:
 Environment variables:
   VERSION                  Override the version (default: read from the manifest)
   CHANGELOG_REF            Link to change fragments at this ref (CI passes the
-                           built commit). Unset links to the release attachment.
+                           built commit). Unset links to compiled history on master.
   RUN_ID                   GitHub Actions run id/url for pull-gha
   COMMIT                   Commit to tag (default: HEAD)
   FORCE                    Set to 1 to re-release an already-released version:

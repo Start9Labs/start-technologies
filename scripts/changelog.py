@@ -257,6 +257,17 @@ def check_manifest_version(product, version=None):
                          f"from latest stable origin release {baseline!r} and pending fragments")
 
 
+def changed_products(base):
+    paths = set(git("diff", "--name-only", "-z", "--no-renames", f"{base}...HEAD").split(b"\0"))
+    products = []
+    for name, manifest in MANIFESTS.items():
+        directory = f"projects/{name}/changelog".encode()
+        if (manifest.encode() in paths or directory in paths
+                or any(path.startswith(directory + b"/") for path in paths)):
+            products.append(f"projects/{name}")
+    return products
+
+
 def sync():
     releases = origin_releases("HEAD")
     updates = []
@@ -285,6 +296,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("projects")
+    changed_parser = commands.add_parser("changed")
+    changed_parser.add_argument("base")
     validate_parser = commands.add_parser("validate")
     validate_parser.add_argument("product")
     render_parser = commands.add_parser("render")
@@ -301,6 +314,8 @@ def main():
     try:
         if args.command == "projects":
             print(" ".join(MANIFESTS))
+        elif args.command == "changed":
+            print(" ".join(changed_products(args.base)))
         elif args.command == "validate":
             working_fragments(product_path(args.product))
         elif args.command == "version":

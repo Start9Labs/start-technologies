@@ -342,6 +342,113 @@ class ChangelogTests(unittest.TestCase):
                 self.assertIn(expected.encode(), result.stderr)
                 fragment.unlink()
 
+    def test_changed_unrelated_pr_after_ancestor_cli_release(self):
+        product = "projects/start-cli"
+        self.manifest("2.3.0", product)
+        release_commit = self.commit()
+        directory = self.root / product / "changelog"
+        directory.mkdir()
+        fragment = directory / "patch-fixed-pending.md"
+        fragment.write_text("- Pending CLI fix.\n")
+        base = self.commit()
+        self.git("tag", "start-cli/v2.3.0", release_commit)
+        (self.root / "README.md").write_text("Unrelated PR.\n")
+        unrelated = self.commit()
+        self.assertEqual(self.run_script("changed", base).stdout, b"\n")
+        result = self.run_script("check-version", product, success=False)
+        self.assertIn(b"expected '2.3.1'", result.stderr)
+        fragment.write_text("- Revised pending CLI fix.\n")
+        self.commit()
+        self.assertEqual(self.run_script("changed", unrelated).stdout, b"projects/start-cli\n")
+        result = self.run_script("check-version", product, success=False)
+        self.assertIn(b"expected '2.3.1'", result.stderr)
+        fragment_head = self.git("rev-parse", "HEAD")
+        self.manifest("2.3.0+metadata", product)
+        self.commit()
+        self.assertEqual(self.run_script("changed", fragment_head).stdout, b"projects/start-cli\n")
+        result = self.run_script("check-version", product, success=False)
+        self.assertIn(b"expected '2.3.1'", result.stderr)
+
+    def test_changed_uses_merge_base_not_base_tip(self):
+        base = self.commit()
+        self.git("checkout", "-qb", "base")
+        self.manifest("1.2.3", "projects/start-sdk")
+        base_tip = self.commit()
+        self.git("checkout", "-q", "master")
+        (self.root / "README.md").write_text("PR-only change.\n")
+        self.commit()
+        self.assertEqual(self.run_script("changed", base_tip).stdout, b"\n")
+        self.fragment()
+        self.commit()
+        self.assertEqual(self.run_script("changed", base_tip).stdout, b"projects/start-os\n")
+        self.assertEqual(self.run_script("changed", base).stdout, b"projects/start-os\n")
+
+    def test_changed_deletion_rename_and_multiple_products(self):
+        deleted = self.fragment("patch-fixed-deleted.md")
+        renamed = self.fragment("patch-fixed-renamed.md")
+        base = self.commit()
+        deleted.unlink()
+        destination = self.root / "projects/start-sdk/changelog/patch-fixed-renamed.md"
+        destination.parent.mkdir(parents=True)
+        renamed.rename(destination)
+        self.commit()
+        self.assertEqual(self.run_script("changed", base).stdout,
+                         b"projects/start-os projects/start-sdk\n")
+        deletion_base = self.git("rev-parse", "HEAD")
+        destination.unlink()
+        self.commit()
+        self.assertEqual(self.run_script("changed", deletion_base).stdout, b"projects/start-sdk\n")
+        self.manifest("1.2.3", "projects/start-cli")
+        manifest_base = self.commit()
+        (self.root / "projects/start-cli/Cargo.toml").rename(self.root / "removed-manifest.toml")
+        self.commit()
+        self.assertEqual(self.run_script("changed", manifest_base).stdout, b"projects/start-cli\n")
+
+    def test_changed_selects_changelog_directory_replacements(self):
+        base = self.git("rev-parse", "HEAD")
+        self.fragments.rmdir()
+        self.fragments.symlink_to(self.root, target_is_directory=True)
+        self.commit()
+        self.assertEqual(self.run_script("changed", base).stdout, b"projects/start-os\n")
+        self.fragments.unlink()
+        self.fragments.write_text("Not a directory.\n")
+        replacement_base = self.git("rev-parse", "HEAD")
+        self.commit()
+        self.assertEqual(self.run_script("changed", replacement_base).stdout, b"projects/start-os\n")
+        deletion_base = self.git("rev-parse", "HEAD")
+        self.fragments.unlink()
+        self.commit()
+        self.assertEqual(self.run_script("changed", deletion_base).stdout, b"projects/start-os\n")
+
+    def test_changed_matches_canonical_manifest_paths_exactly(self):
+        for product in ("projects/start-os", "projects/start-sdk", "projects/start-cli",
+                        "projects/start-tunnel", "projects/start-registry", "projects/start-wrt"):
+            with self.subTest(product=product):
+                base = self.git("rev-parse", "HEAD")
+                self.manifest("0.4.0.3" if product == PRODUCT else "1.2.3", product)
+                self.commit()
+                self.assertEqual(self.run_script("changed", base).stdout, f"{product}\n".encode())
+        base = self.git("rev-parse", "HEAD")
+        for name in ("projects/start-os/Cargo.toml", "projects/start-os/package.json",
+                     "projects/start-wrt/Cargo.toml", "projects/start-sdk/package.json.backup",
+                     "projects/start-cli/changelog-backup/patch-fixed-example.md"):
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("Unrelated path.\n")
+        self.commit()
+        self.assertEqual(self.run_script("changed", base).stdout, b"\n")
+
+    def test_changed_handles_nul_delimited_paths(self):
+        base = self.git("rev-parse", "HEAD")
+        self.fragment("patch-fixed-name\nwith-newline.md")
+        self.commit()
+        self.assertEqual(self.run_script("changed", base).stdout, b"projects/start-os\n")
+        self.run_script("changed", "nonexistent-base", success=False)
+
+    def test_projects_preserves_release_caller_contract(self):
+        self.assertEqual(self.run_script("projects").stdout,
+                         b"start-os start-sdk start-cli start-tunnel start-registry start-wrt\n")
+
     def test_mixed_tiers_use_highest_and_omit_startos_zero_revision(self):
         self.tag("0.4.0.3")
         self.fragment("patch-fixed-small.md")

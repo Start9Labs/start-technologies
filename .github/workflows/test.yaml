@@ -54,14 +54,23 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
       - name: Validate fragments and release severity
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
           git fetch --tags origin
-          for changelog in projects/*/CHANGELOG.md; do
-            python3 scripts/changelog.py check-version "$(dirname "$changelog")"
+          if [ -n "$PR_BASE_SHA" ]; then
+            git fetch --no-tags origin "$PR_BASE_SHA"
+            products=$(python3 scripts/changelog.py changed "$PR_BASE_SHA")
+          else
+            products=$(python3 scripts/changelog.py projects)
+          fi
+          for product in $products; do
+            python3 scripts/changelog.py check-version "projects/${product#projects/}"
           done
       - name: Check changelog and release tooling
         run: make release-notes-test
