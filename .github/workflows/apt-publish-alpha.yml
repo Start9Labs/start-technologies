@@ -70,14 +70,22 @@ jobs:
             # that name — this job would then collect and sign attacker-built
             # .debs into alpha. It also excludes workflow_dispatch builds, which
             # may be dev-flavoured or partial-arch.
-            run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$wf/runs?per_page=100" \
-              --jq '[.workflow_runs[]
-                | select(.event == "push" and .head_branch == "master"
-                    and .conclusion == "success"
-                    and .head_repository.full_name == env.GITHUB_REPOSITORY)]
-                | max_by(.created_at) | .id')
-            if [ -z "$run_id" ] || [ "$run_id" = null ]; then
-              echo "::warning::$product has no successful master run among its last 100; the suite keeps whatever version it already holds."
+            page=1
+            while :; do
+              selection=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$wf/runs?per_page=100&page=$page" \
+                --jq '[(.workflow_runs | length), ([.workflow_runs[]
+                  | select(.event == "push" and .head_branch == "master"
+                      and .conclusion == "success"
+                      and .head_repository.full_name == env.GITHUB_REPOSITORY)]
+                  | max_by(.created_at) | .id)] | @tsv')
+              read -r run_count run_id <<< "$selection"
+              if [ -n "$run_id" ] || [ "$run_count" -eq 0 ]; then
+                break
+              fi
+              page=$((page + 1))
+            done
+            if [ -z "$run_id" ]; then
+              echo "::warning::$product has no successful master run; the suite keeps whatever version it already holds."
               continue
             fi
             # Artifacts expire (14 days), so a product whose last successful
