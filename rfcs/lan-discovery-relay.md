@@ -396,8 +396,9 @@ decided for the grant before the traffic classes they govern are relayed.
    NetBIOS answer reaches the LAN as sent. NAT changes the source address, not
    the names in the payload. Which of these a granted package may send, and
    how that is enforced, is undecided. Relaying them is what lets an
-   application publish its own services and hostname (`homeassistant.local`)
-   with its own probing and conflict handling.
+   application publish its own service records (`_hap._tcp`,
+   `_home-assistant._tcp`) and the hostnames they target, with its own probing
+   and conflict handling.
 2. **Router mappings on the relayed path.** A granted package can learn the
    router's IGD control URL through a relayed M-SEARCH. The mapping requests
    that follow meet the forward-chain IGD endpoint drop, and the relay refuses
