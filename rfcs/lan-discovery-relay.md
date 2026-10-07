@@ -386,8 +386,10 @@ not:
   A query that fan-in delivers can ask for a unicast answer (the mDNS QU bit,
   every LLMNR and NetBIOS answer, every SSDP M-SEARCH response), and the
   responder's answer then leaves as an ordinary outbound flow the relay never
-  sees. Discovery queries from those ports are multicast and go through the
-  relay, so the rule costs discovery nothing.
+  sees. The rule drops every forwarded UDP datagram from those ports, a
+  unicast query an application sends from a socket bound to one of them
+  included. Multicast queries from them go through the relay and are
+  unaffected.
 
 These rules cover traffic the container sends through the `forward` chain. The
 relay's re-sent queries leave from host sockets and do not pass through it, so
@@ -516,6 +518,9 @@ implementation, not this spec:
 - Matter controllers fall back from a device's link-local address.
 - Home Assistant's `dhcp` integration works from broadcasts delivered into its
   veth.
+- No supported application sends unicast UDP from source port 137, 1900, 5353
+  or 5355 to a LAN destination (a UPnP 1.1 unicast M-SEARCH, a NetBIOS query
+  to a WINS server).
 
 ## Testing
 
