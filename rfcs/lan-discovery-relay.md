@@ -223,16 +223,17 @@ port is a one-shot legacy query and is relayed as an ordinary flow.
 
 **Refused.** The relay drops, before re-sending:
 
-| Traffic              | Reason                             |
-| -------------------- | ---------------------------------- |
-| UDP 67, 68, 546, 547 | DHCP and DHCPv6 servers and relays |
+| Traffic              | Reason                                                |
+| -------------------- | ----------------------------------------------------- |
+| UDP 67, 68, 546, 547 | DHCP and DHCPv6 servers and relays                    |
+| UDP 5351             | PCP and NAT-PMP; only startd requests router mappings |
 
-ICMP and ICMPv6 never reach the relay: it handles UDP only, so router
-advertisements and redirects cannot be sent. Name-service answers and
-advertisements a package sends (mDNS responses and probes, SSDP `NOTIFY`,
-LLMNR and NetBIOS answers) are relayed or refused according to policy decision
-
-1.
+The egress guard's 5351 drop is in the `forward` chain, which re-sent traffic
+does not pass through, so the relay enforces it itself. ICMP and ICMPv6 never
+reach the relay: it handles UDP only, so router advertisements and redirects
+cannot be sent. Name-service answers and advertisements a package sends (mDNS
+responses and probes, SSDP `NOTIFY`, LLMNR and NetBIOS answers) are relayed or
+refused according to the first policy decision.
 
 **Limits.** Per package: a cap on open flows and on packets per second, with
 excess dropped and counted.
@@ -367,9 +368,11 @@ it over TCP and request mappings to the server's address.
 
 These rules cover traffic the container sends through the `forward` chain. The
 relay's re-sent queries leave from host sockets and do not pass through it, so
-the existing UDP 1900 drop does not stop a granted package's M-SEARCH, and its
-replies, including the router's IGD description, reach the package. What
-enforces host-owned router mappings on that path is policy decision 2.
+the existing UDP 1900 drop does not stop a granted package's M-SEARCH, and the
+router's IGD description reaches the package. Learning the control URL does not
+create a mapping: the request that would is unicast TCP from the container,
+which passes through `forward` and meets the endpoint drop. The relay refuses
+UDP 5351 itself (see Refused).
 
 ### Interaction with existing rules
 
@@ -395,10 +398,11 @@ decided for the grant before the traffic classes they govern are relayed.
    how that is enforced, is undecided. Relaying them is what lets an
    application publish its own services and hostname (`homeassistant.local`)
    with its own probing and conflict handling.
-2. **Router mappings on the relayed path.** A granted package's M-SEARCH draws
-   the router's IGD description, and the relay sends it from the server's
-   address. Whether the forward-chain IGD endpoint drop suffices, or the relayed
-   path needs its own enforcement, is undecided.
+2. **Router mappings on the relayed path.** A granted package can learn the
+   router's IGD control URL through a relayed M-SEARCH. The mapping requests
+   that follow meet the forward-chain IGD endpoint drop, and the relay refuses
+   PCP and NAT-PMP. Whether those two rules suffice to keep router mappings
+   host-owned is undecided.
 
 ## Deferred translation
 
@@ -509,6 +513,7 @@ implementation, not this spec:
   - nothing received on a gateway is re-sent to it or to another gateway;
   - the refused classes are dropped, DHCP broadcasts are delivered and
     outbound 67/68 is dropped;
+  - a granted container's multicast or broadcast to UDP 5351 is not re-sent;
   - the IGD endpoint drop holds for every container;
   - UDP flows from a granted container carry the 3600 s conntrack timeout;
   - a gateway address change moves the relay to the new address;
