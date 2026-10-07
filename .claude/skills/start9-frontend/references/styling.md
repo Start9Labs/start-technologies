@@ -49,9 +49,10 @@ padding moves out of a row, grep for every host that renders it, since each one 
 a gutter. Hiding an element on phones is `display: none` under
 `:host-context(tui-root._mobile)`; an `@if` on the breakpoint is for branches that differ.
 
-A grid or flex item whose `overflow` isn't `visible` — `tui-scrollbar` is one — already has a
-zero minimum size, so `min-inline-size: 0` or `min-block-size: 0` beside it is noise. Never
-`outline: none` — the focus ring stays.
+A scroll container — computed `overflow` of `hidden`, `auto` or `scroll`, as `tui-scrollbar`
+is — has a zero automatic minimum as a grid item, and on its main axis as a flex item, so a
+zero `min-*-size` on that axis is noise. `overflow: clip` is not one and keeps its content-based
+minimum. Never `outline: none` — the focus ring stays.
 
 `::ng-deep`: tolerated only at shell seams (piercing `tui-scrollbar` internals, a shell laying
 out its routed child, styling `[innerHTML]` content) — never component-to-component.

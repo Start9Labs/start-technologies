@@ -56,6 +56,7 @@ appearance="…">` (host-directive form, not the element form). A banner that as
 - **Hints**: `[tuiHint]` (template content allowed), tuned globally via `tuiHintOptionsProvider`.
 - **Drawers/sheets**: `<tui-drawer *tuiPopup="open()" (click.self)="toggle(false)">` with
   URL-driven `open` state.
-- Every dialog closes on route activation — `TUI_DIALOGS_CLOSE`'s default — so a dialog never
-  watches the router to close itself. StartOS overrides the token to close on a server crash
-  too: app-level policy expressed as one token override.
+- Dialogs close on route activation — `TUI_DIALOGS_CLOSE`'s default — so a dialog doesn't watch
+  the router to close itself. The exception is a mobile sheet opened with `closable: false`,
+  which gates the token through `closable` and stays open. StartOS overrides the token to close
+  on a server crash too: app-level policy expressed as one token override.
