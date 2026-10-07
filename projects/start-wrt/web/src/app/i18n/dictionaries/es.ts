@@ -535,4 +535,13 @@ export default {
   557: 'Sin establecer',
   558: 'Abre router.lan en tu navegador para proteger la conexión con tu router.',
   559: 'Abrir router.lan',
+  560: 'Permitir publicación de registros DNS',
+  561: 'Permite a este dispositivo publicar nombres DNS para sí mismo en el router, de modo que todos los dispositivos de su red puedan resolverlos (lo usan los servidores StartOS para dominios privados). Desactivado por defecto; los nombres publicados aparecen abajo.',
+  562: '¿Permitir la publicación de registros DNS?',
+  563: 'Este dispositivo podrá publicar nombres DNS que se resuelven en toda su red. Conceda esto solo a un dispositivo de confianza, como su propio servidor StartOS.',
+  564: 'Permitir',
+  565: 'Registros DNS publicados',
+  566: 'Nombres que este dispositivo ha publicado en el router. Caducan por sí solos cuando el dispositivo deja de publicarlos; al desactivar el permiso se eliminan de inmediato.',
+  567: 'Tipo',
+  568: 'Resuelve a',
 } satisfies i18n

@@ -3,19 +3,15 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV
 use std::sync::Arc;
 use std::time::Duration;
 
-use hickory_server::proto::rr::Name;
 use hickory_server::resolver as hickory_resolver;
-use hickory_server::resolver::config::{NameServerConfig, ResolverConfig, ResolverOpts};
+use hickory_server::resolver::config::ResolverConfig;
 use hickory_server::server::Server;
-use hickory_server::store::forwarder::{ForwardConfig, ForwardZoneHandler};
-use hickory_server::zone_handler::{Catalog, ZoneHandler};
 use ipnet::Ipv4Net;
 use tokio::net::{TcpListener, UdpSocket};
 use tokio_util::sync::CancellationToken;
 
-use crate::net::dns::{
-    DNS_RESPONSE_BUFFER_SIZE, forward_name_server, name_server_socket_addr, parse_resolv_conf,
-};
+use crate::net::dns::{DNS_RESPONSE_BUFFER_SIZE, name_server_socket_addr, parse_resolv_conf};
+use crate::net::dns_update::forwarding_catalog;
 use crate::net::dns_update::rfc2136::{DnsInjector, InjectingHandler};
 use crate::prelude::*;
 use crate::tunnel::wg::{DnsConfig, WgServer};
@@ -170,7 +166,7 @@ async fn bind_proxy(
 
     let mut server = Server::new(InjectingHandler::new(
         injector,
-        forwarding_catalog(upstreams)?,
+        forwarding_catalog(upstreams, FORWARD_TIMEOUT)?,
     ));
     server.register_socket(udp);
     server.register_listener(tcp, FORWARD_TIMEOUT, DNS_RESPONSE_BUFFER_SIZE);
@@ -201,25 +197,4 @@ async fn bind_proxy(
     })
     .into();
     Ok(ProxyHandle { shutdown, task })
-}
-
-/// A `Catalog` whose root zone is a single `ForwardAuthority` pointed at
-/// `upstreams` (UDP + TCP per server). `Catalog` itself implements
-/// `RequestHandler`, so no custom handler is needed for a pure forwarder.
-fn forwarding_catalog(upstreams: Vec<SocketAddr>) -> Result<Catalog, Error> {
-    let name_servers: Vec<NameServerConfig> =
-        upstreams.into_iter().map(forward_name_server).collect();
-    let mut opts = ResolverOpts::default();
-    opts.timeout = FORWARD_TIMEOUT;
-    let authority = ForwardZoneHandler::builder_tokio(ForwardConfig {
-        name_servers,
-        options: Some(opts),
-    })
-    .build()
-    .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Network))?;
-
-    let mut catalog = Catalog::new();
-    let auth: Vec<Arc<dyn ZoneHandler>> = vec![Arc::new(authority)];
-    catalog.upsert(Name::root().into(), auth);
-    Ok(catalog)
 }
