@@ -28,6 +28,8 @@ The options control direct WAN-side access only:
 - **Never** — No WAN-side access at all, even from an upstream private network. The web interface is reachable only from the local network (including through an Inbound VPN).
 - **Always** — WAN-side connections are accepted from any address. With a public IP, the web interface is reachable from anywhere on the Internet via the WAN IP or a [Dynamic DNS](ddns.md) domain.
 
+Changing the setting ends any open WAN-side SSH session from an address the new setting does not accept. Sessions from addresses it still accepts stay open.
+
 > [!WARNING]
 > Selecting "Always" exposes your router's admin interface to the public Internet. Only use this if you understand the security implications and have a strong admin password.
 
