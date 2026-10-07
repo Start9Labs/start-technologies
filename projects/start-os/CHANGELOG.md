@@ -13,6 +13,7 @@ for the detail behind its highlights.
 ### Changed
 
 - **NVIDIA images include driver 580.178.04**, with Linux 7.2 compatibility.
+- **Static DNS servers that point back at the server itself are refused**, such as `0.0.0.0`, `::`, or a loopback address.
 
 ## [0.4.0.2]
 

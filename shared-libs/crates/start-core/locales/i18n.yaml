@@ -2207,6 +2207,13 @@ net.dns.server-thread-exited:
   fr_FR: "Le thread du serveur DNS s'est terminé"
   pl_PL: "Wątek serwera DNS zakończył się"
 
+net.dns.static-server-is-self:
+  en_US: "%{server} points back at this server and cannot be used as an upstream DNS server"
+  de_DE: "%{server} verweist auf diesen Server selbst und kann nicht als Upstream-DNS-Server verwendet werden"
+  es_ES: "%{server} apunta a este mismo servidor y no puede usarse como servidor DNS de origen"
+  fr_FR: "%{server} renvoie vers ce serveur lui-même et ne peut pas être utilisé comme serveur DNS amont"
+  pl_PL: "%{server} wskazuje na ten serwer i nie może być użyty jako nadrzędny serwer DNS"
+
 # lxc/mod.rs
 lxc.mod.rootfs-not-empty:
   en_US: "rootfs is not empty, refusing to delete"
