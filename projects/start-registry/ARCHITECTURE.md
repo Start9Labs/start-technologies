@@ -1,6 +1,6 @@
 # Architecture — start-registry
 
-`start-registry` is one of the product wrappers in the `start-os` monorepo. The wrapper itself is tiny; nearly all logic lives in the shared backend crate `start-core` (`shared-libs/crates/start-core`, package `start-core`, lib name `start_core`).
+`start-registry` is one of the product wrappers in the `start-technologies` monorepo. The wrapper itself is tiny; nearly all logic lives in the shared backend crate `start-core` (`shared-libs/crates/start-core`, package `start-core`, lib name `start_core`).
 
 ## Place in the monorepo
 
@@ -85,5 +85,4 @@ The registry has no bundled UI of its own; the browsing/search/download UI is th
 ## Further reading
 
 - [README.md](./README.md) — what the registry is and how to run it.
-- [CONTRIBUTING.md](./CONTRIBUTING.md) — build, test, and contribution workflow.
-- [AGENTS.md](./AGENTS.md) — rules for agents working in this dir.
+- [AGENTS.md](./AGENTS.md) — build, test, and contribution workflow.

@@ -2,6 +2,23 @@
 
 All notable changes to `start-registry` (the Start Registry server) are documented here. This project is versioned **independently** (starting at `1.0.0`); its version lives in `Cargo.toml`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.1.1]
+
+- **`info set-icon` and `info set-description` accept `--clear` to remove a registry's icon and description.** Supply either a value or `--clear`, but not both. Over RPC, the existing setters accept `null` in their `icon` or `description` field to clear it; existing values still set it.
+
+- **`package get` hides a revision once a newer revision of the same upstream version runs on all
+  the same hardware.** Use `package get <id> full --all-revisions` (`allRevisions: true`,
+  `otherVersions: "full"` over RPC) to list every revision the registry holds.
+
+- **Update shared dependencies with security fixes** and replace the unmaintained YAML parser.
+
+- **Each release's container image is published as `ghcr.io/start9labs/startos-registry:v<version>`**, the same image alpha ran for that commit.
+
+- **Fork pull requests validate the registry's multi-architecture container build.** Manual CI dispatches build the selected architecture.
+
+- **A registry accepts admin requests at any loopback address**, such as
+  `start-cli -r http://127.0.0.1:5959` on the registry's own host.
+
 ## [1.1.0]
 
 - **A registry can declare a description.** `info set-description` stores markdown (a
