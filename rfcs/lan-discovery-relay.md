@@ -228,19 +228,22 @@ port is a one-shot legacy query and is relayed as an ordinary flow.
 
 **Refused.** The relay drops, before re-sending:
 
-| Traffic                                                             | Reason                                                |
-| ------------------------------------------------------------------- | ----------------------------------------------------- |
-| UDP 67, 68, 546, 547                                                | DHCP and DHCPv6 servers and relays                    |
-| UDP 5351                                                            | PCP and NAT-PMP; only startd requests router mappings |
-| mDNS responses and probes, SSDP `NOTIFY`, LLMNR and NetBIOS answers | Names on the LAN are host-owned (see Non-goals)       |
+| Traffic                                                             | Reason                                                     |
+| ------------------------------------------------------------------- | ---------------------------------------------------------- |
+| UDP 67, 68, 546, 547                                                | DHCP and DHCPv6 servers and relays                         |
+| UDP 5351                                                            | PCP and NAT-PMP; only startd requests router mappings      |
+| mDNS responses and probes, SSDP `NOTIFY`, LLMNR and NetBIOS answers | Packages publish through #4187 only (see Policy decisions) |
 
 The egress guard's 5351 drop is in the `forward` chain, which re-sent traffic
-does not pass through, so the relay enforces it itself. Answers and
-advertisements are told from queries by the protocol's own header, not its
-payload: mDNS and LLMNR answers by the QR bit, mDNS probes by a non-empty
-authority section, SSDP by the start line, NetBIOS by the opcode. ICMP and
-ICMPv6 never reach the relay: it handles UDP only, so router advertisements and
-redirects cannot be sent.
+does not pass through, so the relay enforces it itself. Refusing answers and
+advertisements is protocol-aware filtering, not translation: each is told from
+a query by its protocol's header, with the payload untouched. mDNS and LLMNR
+answers carry the QR bit, an mDNS probe a non-empty authority section, SSDP a
+`NOTIFY` start line, NetBIOS a response opcode. This covers what the relay
+captures, which is multicast and broadcast; the unicast answers a responder
+sends are the egress guard's (see Egress guard). ICMP and ICMPv6 never reach
+the relay: it handles UDP only, so router advertisements and redirects cannot
+be sent.
 
 **Limits.** Per package: a cap on open flows and on packets per second, with
 excess dropped and counted.
@@ -371,11 +374,20 @@ Matter controllers document that bridge networking does not work
 
 ### Egress guard
 
-Existing rules are kept. One rule is added for every container, granted or not:
-drop forwarded traffic from `lxcbr0` to each gateway's IGD control endpoint.
-startd already discovers the address and control URL (`net/port_map/upnp.rs`);
-the rule follows it. Today a container that guesses the control URL can reach
-it over TCP and request mappings to the server's address.
+Existing rules are kept. Two rules are added for every container, granted or
+not:
+
+- Drop forwarded traffic from `lxcbr0` to each gateway's IGD control endpoint.
+  startd already discovers the address and control URL
+  (`net/port_map/upnp.rs`); the rule follows it. Today a container that guesses
+  the control URL can reach it over TCP and request mappings to the server's
+  address.
+- Drop forwarded UDP from `lxcbr0` with source port 137, 1900, 5353 or 5355.
+  A query that fan-in delivers can ask for a unicast answer (the mDNS QU bit,
+  every LLMNR and NetBIOS answer, every SSDP M-SEARCH response), and the
+  responder's answer then leaves as an ordinary outbound flow the relay never
+  sees. Discovery queries from those ports are multicast and go through the
+  relay, so the rule costs discovery nothing.
 
 These rules cover traffic the container sends through the `forward` chain. The
 relay's re-sent queries leave from host sockets and do not pass through it, so
@@ -397,17 +409,25 @@ UDP 5351 itself (see Refused).
 - A package's unicast traffic to devices keeps following its outbound
   selection; LAN destinations are reachable under it by the same invariant.
 
-## Policy decision
+## Policy decisions
 
-Opaque forwarding does not carry the guarantees a translator would. Names are
-settled by refusing advertisements (see Refused). One decision remains before
-the traffic it governs is relayed.
+Opaque forwarding does not carry the guarantees a translator would. Each class
+of traffic these govern is relayed only once its decision is made.
 
-**Router mappings on the relayed path.** A granted package can learn the
-router's IGD control URL through a relayed M-SEARCH. The mapping requests that
-follow meet the forward-chain IGD endpoint drop, and the relay refuses PCP and
-NAT-PMP. Whether those two rules suffice to keep router mappings host-owned is
-undecided.
+1. **Names and advertisements. Decided.** A relayed mDNS response can assert
+   any name, including the server's own `.local`, and a package's SSDP `NOTIFY`,
+   LLMNR or NetBIOS answer reaches the LAN as sent; NAT changes the source
+   address, not the names in the payload. The alternatives were to relay them
+   once the application is configured with a reachable endpoint, or to refuse
+   them and publish declared records from the host. dr-bonez chose the second:
+   a package publishes through #4187 and in no other way. The relay refuses
+   the multicast and broadcast forms (see Refused) and the egress guard drops
+   the unicast ones (see Egress guard).
+2. **Router mappings on the relayed path.** A granted package can learn the
+   router's IGD control URL through a relayed M-SEARCH. The mapping requests
+   that follow meet the forward-chain IGD endpoint drop, and the relay refuses
+   PCP and NAT-PMP. Whether those two rules suffice to keep router mappings
+   host-owned is undecided.
 
 ## Deferred translation
 
@@ -420,7 +440,7 @@ first. Failure alone does not make translation the remedy.
 | --------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | Clearing the QU bit on relayed mDNS queries               | QU-query unicast answers that cannot reach the package with the payload intact. |
 | Removing link-local AAAA records from mDNS into a package | A Matter controller that does not fall back from an unreachable `fe80::`.       |
-| SSDP content filtering                                    | The policy decision requiring it.                                               |
+| SSDP content filtering                                    | Policy decision 2 requiring it.                                                 |
 | SSDP `LOCATION` or GENA `CALLBACK` rewriting              | An application with no callback override.                                       |
 
 ## Limitations and tradeoffs
@@ -437,6 +457,11 @@ admission.
 **Package work.** An application that advertises itself or registers callbacks
 works only once its package configures the advertised endpoint. Discovery
 alone needs no package change.
+
+**SSDP-advertised services.** #4187 publishes DNS-SD. A service that
+advertises itself only over SSDP, such as a DLNA media server, is not
+advertised on StartOS: its `NOTIFY` is refused and its M-SEARCH answers are
+dropped.
 
 **Addresses inside payloads.** Payloads with no override carry `10.0.3.x` (see
 Endpoint configuration). AirPlay audio streaming (pyatv's RAOP control and
@@ -521,6 +546,9 @@ implementation, not this spec:
   - a granted container's multicast or broadcast to UDP 5351 is not re-sent;
   - a granted container's mDNS response and probe, SSDP `NOTIFY` and LLMNR
     answer are not re-sent, while its queries from the same sockets are;
+  - a unicast answer from source port 137, 1900, 5353 or 5355 is dropped in
+    `forward` for every container, and reply admission still delivers answers
+    to a granted container's queries;
   - the IGD endpoint drop holds for every container;
   - UDP flows from a granted container carry the 3600 s conntrack timeout;
   - a gateway address change moves the relay to the new address;
@@ -539,7 +567,8 @@ implementation, not this spec:
 
 ## Rollout
 
-1. The IGD endpoint drop. Independent of the rest; it closes an existing gap.
+1. The egress guard rules. Independent of the rest; the IGD endpoint drop
+   closes an existing gap.
 2. Grant (the `PackageDataEntry` field, TS bindings and the service page),
    outbound relay and reply admission.
 3. Fan-in, once the mechanism is chosen.
