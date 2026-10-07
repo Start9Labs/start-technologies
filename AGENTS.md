@@ -96,6 +96,8 @@ cd start-technologies
 | Start SDK                              | `make bundle` (from `projects/start-sdk`)                                                                     | [`projects/start-sdk/AGENTS.md`](projects/start-sdk/AGENTS.md)                    |
 | Web (shared libs + app UIs)            | `npm run build:ui`                                                                                            | [`shared-libs/ts-modules/AGENTS.md`](shared-libs/ts-modules/AGENTS.md)            |
 
+**Compiling `start-core` is CI's job.** `cargo build`/`check`/`test` of `start-core` or any product bin, `make manpages`, `make start-core-ts-bindings` and every `make <product>` compile the whole backend. Push and let `test.yaml` and the product workflows run them. When `Generated Artifacts` fails, commit the files from its `generated-artifacts` upload instead of regenerating them. Build locally only to diagnose a CI failure its log doesn't explain.
+
 `make start-core-ts-bindings` regenerates the TypeScript bindings from the Rust types, and `make clean` removes all compiled artifacts (ask before running it). Cross-layer changes (Rust → bindings → SDK → web/runtime) are described in [ARCHITECTURE.md](ARCHITECTURE.md#build-pipeline).
 
 ### Build configuration
