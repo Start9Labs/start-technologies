@@ -116,12 +116,13 @@ pre_update_notes_path() {
 }
 
 changelog_link() {
-    if [ -n "${CHANGELOG_REF:-}" ]; then
-        echo "${CHANGELOG_LINK_PREFIX} fragments for v${VERSION}](https://github.com/${REPO}/tree/${CHANGELOG_REF}/projects/${PROJECT}/changelog)** — changes awaiting release."
+    local ref="${CHANGELOG_REF:-master}"
+    if [ -n "${CHANGELOG_REF:-}" ] && (cd "$REPO_ROOT" && git cat-file -e "${ref}:projects/${PROJECT}/changelog" 2>/dev/null); then
+        echo "${CHANGELOG_LINK_PREFIX} fragments for v${VERSION}](https://github.com/${REPO}/tree/${ref}/projects/${PROJECT}/changelog)** — changes awaiting release."
     else
         local anchor="${VERSION//./}"
         anchor="${anchor//+/}"
-        echo "${CHANGELOG_LINK_PREFIX} for v${VERSION}](https://github.com/${REPO}/blob/master/projects/${PROJECT}/CHANGELOG.md#${anchor,,})** — every change in this release."
+        echo "${CHANGELOG_LINK_PREFIX} for v${VERSION}](https://github.com/${REPO}/blob/${ref}/projects/${PROJECT}/CHANGELOG.md#${anchor,,})** — every change in this release."
     fi
 }
 

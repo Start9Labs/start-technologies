@@ -49,7 +49,7 @@ class ReleaseNotesTests(unittest.TestCase):
         self.assertEqual(combined, PRE_UPDATE + "\n\n" + without)
         self.assertLess(combined.index("Full changelog"), combined.index("## Important"))
         self.assertEqual(combined.count("Full changelog"), 1)
-        self.assertIn("/tree/fixture-ref/projects/start-sdk/changelog", combined)
+        self.assertIn("/blob/fixture-ref/projects/start-sdk/CHANGELOG.md#123", combined)
 
     def test_reads_canonical_version_without_override(self):
         del self.env["VERSION"]
@@ -70,6 +70,29 @@ class ReleaseNotesTests(unittest.TestCase):
                 output = self.run_script(project=project).stdout
                 self.assertIn(f"/blob/master/projects/{project}/CHANGELOG.md#{anchor}", output)
                 self.assertNotIn("/releases/download/", output)
+
+    def test_source_links_survive_fragment_consumption(self):
+        git = ["git", "-C", str(self.root)]
+        subprocess.run(git + ["init", "-q"], check=True)
+        fragments = self.root / "projects/start-sdk/changelog"
+        fragments.mkdir()
+        fragment = fragments / "patch-fixed-example.md"
+        fragment.write_text("- Fixed feature.\n")
+        history = self.root / "projects/start-sdk/CHANGELOG.md"
+        history.write_text("# Changelog\n\n## [1.2.2]\n\n- Previous release.\n")
+        subprocess.run(git + ["add", "."], check=True)
+        commit = git + ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                        "-c", "commit.gpgsign=false", "commit", "-qm", "fixture"]
+        subprocess.run(commit, check=True)
+        self.env["CHANGELOG_REF"] = "HEAD"
+        self.assertIn("/tree/HEAD/projects/start-sdk/changelog", self.run_script().stdout)
+        subprocess.run(git + ["rm", str(fragment)], check=True)
+        history.write_text("# Changelog\n\n## [1.2.3]\n\n- Fixed feature.\n")
+        subprocess.run(git + ["add", str(history)], check=True)
+        subprocess.run(commit, check=True)
+        output = self.run_script().stdout
+        self.assertIn("/blob/HEAD/projects/start-sdk/CHANGELOG.md#123", output)
+        self.assertNotIn("/tree/", output)
 
     def test_github_and_registry_share_composition(self):
         self.pre_update.write_text(PRE_UPDATE)
