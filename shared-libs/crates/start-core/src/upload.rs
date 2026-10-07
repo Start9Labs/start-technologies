@@ -457,9 +457,24 @@ impl UploadHandle {
                 .log_err();
             self.progress.send_modify(|p| p.tracker.set_total(total));
         }
-        // tokio's write_all returns mid-write and finishes it before taking the next chunk.
         let mut in_flight = 0;
-        while let Some(next) = body.next().await {
+        loop {
+            let next = match next_chunk(
+                &mut body,
+                &mut self.file,
+                &self.progress,
+                &mut self.pacer,
+                &mut in_flight,
+            )
+            .await
+            {
+                Ok(Some(next)) => next,
+                Ok(None) => break,
+                Err(e) => {
+                    self.progress.send_if_modified(|p| p.handle_error(&e));
+                    break;
+                }
+            };
             let chunk = match next.map_err(std::io::Error::other) {
                 Ok(chunk) => chunk,
                 Err(e) => {
@@ -467,6 +482,9 @@ impl UploadHandle {
                     break;
                 }
             };
+            if chunk.is_empty() {
+                continue;
+            }
             if let Err(e) = self.file.write_all(&chunk).await {
                 self.progress.send_if_modified(|p| p.handle_error(&e));
                 break;
@@ -486,6 +504,28 @@ impl Drop for UploadHandle {
     fn drop(&mut self) {
         self.progress.send_if_modified(|p| p.complete());
     }
+}
+
+/// tokio's `write_all` returns mid-write and finishes that write before accepting the next
+/// nonempty one; this reports it while the network is idle, unless a chunk is already waiting.
+async fn next_chunk<S: Stream + Unpin>(
+    stream: &mut S,
+    file: &mut tokio::fs::File,
+    progress: &watch::Sender<Progress>,
+    pacer: &mut WritebackPacer,
+    in_flight: &mut u64,
+) -> std::io::Result<Option<S::Item>> {
+    if *in_flight > 0 {
+        tokio::select! {
+            biased;
+            next = stream.next() => return Ok(next),
+            res = file.flush() => {
+                res?;
+                report_written(progress, pacer, std::mem::take(in_flight)).await;
+            }
+        }
+    }
+    Ok(stream.next().await)
 }
 
 async fn report_written(progress: &watch::Sender<Progress>, pacer: &mut WritebackPacer, len: u64) {
@@ -604,10 +644,21 @@ impl DownloadHandle {
 
             let stream_result: Result<(), Error> = async {
                 let mut stream = response.bytes_stream();
-                // tokio's write_all returns mid-write and finishes it before taking the next chunk.
                 let mut in_flight = 0;
-                while let Some(next) = stream.next().await {
+                while let Some(next) = next_chunk(
+                    &mut stream,
+                    &mut self.file,
+                    &self.progress,
+                    &mut self.pacer,
+                    &mut in_flight,
+                )
+                .await
+                .map_err(|e| Error::new(e, ErrorKind::Filesystem))?
+                {
                     let chunk = next.map_err(|e| Error::new(e, ErrorKind::Network))?;
+                    if chunk.is_empty() {
+                        continue;
+                    }
                     self.file
                         .write_all(&chunk)
                         .await
