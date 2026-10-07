@@ -16,8 +16,7 @@ for the detail behind its highlights.
 
 ### Fixed
 
-- **Installing a package no longer fails intermittently while it is still downloading or
-  uploading.**
+- **A package installs reliably while it is still downloading or uploading.**
 
 - **Services keep their internal IPv6 bridge address enabled.** Address switches
   affect access from other networks while service-to-service access stays available.
