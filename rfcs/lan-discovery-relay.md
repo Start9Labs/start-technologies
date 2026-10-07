@@ -52,6 +52,10 @@ advertised endpoint needs no upstream change; its package may need one.
 
 ## Non-goals
 
+- Advertising a package's services on the LAN. A service interface declares
+  its DNS-SD records and StartOS publishes them through avahi under the
+  server's name and the binding's external port; that is a separate feature
+  (#4187). The relay carries no name-service answers or advertisements.
 - Translating application protocols: rewriting mDNS records, SSDP headers or
   callback URLs (see Deferred translation).
 - Unicast and wide-area DNS-SD.
@@ -118,11 +122,12 @@ NAT.
 
 ### Translating application protocols
 
-A relay that parses mDNS and republishes a package's services through avahi
-under the server's name and the binding's external port, strips link-local
-AAAA records, and filters SSDP on content. It needs no package change, but it
-puts a protocol translator in startd before any application has been shown to
-fail with correct endpoint configuration. See Deferred translation.
+A relay that parses a package's mDNS and republishes it under the server's
+name, strips link-local AAAA records, and filters SSDP on content. It needs no
+package change, but it puts a protocol translator in startd before any
+application has been shown to fail with correct endpoint configuration.
+Publishing what a service interface declares needs no parser; see Non-goals.
+The rest is in Deferred translation.
 
 ## Design
 
@@ -223,17 +228,19 @@ port is a one-shot legacy query and is relayed as an ordinary flow.
 
 **Refused.** The relay drops, before re-sending:
 
-| Traffic              | Reason                                                |
-| -------------------- | ----------------------------------------------------- |
-| UDP 67, 68, 546, 547 | DHCP and DHCPv6 servers and relays                    |
-| UDP 5351             | PCP and NAT-PMP; only startd requests router mappings |
+| Traffic                                                             | Reason                                                |
+| ------------------------------------------------------------------- | ----------------------------------------------------- |
+| UDP 67, 68, 546, 547                                                | DHCP and DHCPv6 servers and relays                    |
+| UDP 5351                                                            | PCP and NAT-PMP; only startd requests router mappings |
+| mDNS responses and probes, SSDP `NOTIFY`, LLMNR and NetBIOS answers | Names on the LAN are host-owned (see Non-goals)       |
 
 The egress guard's 5351 drop is in the `forward` chain, which re-sent traffic
-does not pass through, so the relay enforces it itself. ICMP and ICMPv6 never
-reach the relay: it handles UDP only, so router advertisements and redirects
-cannot be sent. Name-service answers and advertisements a package sends (mDNS
-responses and probes, SSDP `NOTIFY`, LLMNR and NetBIOS answers) are relayed or
-refused according to the first policy decision.
+does not pass through, so the relay enforces it itself. Answers and
+advertisements are told from queries by the protocol's own header, not its
+payload: mDNS and LLMNR answers by the QR bit, mDNS probes by a non-empty
+authority section, SSDP by the start line, NetBIOS by the opcode. ICMP and
+ICMPv6 never reach the relay: it handles UDP only, so router advertisements and
+redirects cannot be sent.
 
 **Limits.** Per package: a cap on open flows and on packets per second, with
 excess dropped and counted.
@@ -321,10 +328,14 @@ is not this endpoint.
 
 Examples of the configuration this uses:
 
-- Home Assistant HomeKit Bridge: `advertise_ip` and `port`.
 - Home Assistant's internal URL, which Shelly Gen2 devices and media URLs use.
 - Sonos `advertise_addr`, with a binding whose external port equals its
   internal port.
+
+An application clients find by DNS-SD (HomeKit Bridge's `_hap._tcp`, the
+companion app's `_home-assistant._tcp`) is advertised by the DNS-SD feature
+(#4187), not by the relay; its package declares the record on the binding's
+interface.
 
 Whether an application accepts its advertised endpoint is a property of that
 application and is checked per package. Payloads that carry the controller's
@@ -386,24 +397,17 @@ UDP 5351 itself (see Refused).
 - A package's unicast traffic to devices keeps following its outbound
   selection; LAN destinations are reachable under it by the same invariant.
 
-## Policy decisions
+## Policy decision
 
-Opaque forwarding does not carry the guarantees a translator would. These are
-decided for the grant before the traffic classes they govern are relayed.
+Opaque forwarding does not carry the guarantees a translator would. Names are
+settled by refusing advertisements (see Refused). One decision remains before
+the traffic it governs is relayed.
 
-1. **Names and advertisements.** A relayed mDNS response can assert any name,
-   including the server's own `.local`, and a package's SSDP `NOTIFY`, LLMNR or
-   NetBIOS answer reaches the LAN as sent. NAT changes the source address, not
-   the names in the payload. Which of these a granted package may send, and
-   how that is enforced, is undecided. Relaying them is what lets an
-   application publish its own service records (`_hap._tcp`,
-   `_home-assistant._tcp`) and the hostnames they target, with its own probing
-   and conflict handling.
-2. **Router mappings on the relayed path.** A granted package can learn the
-   router's IGD control URL through a relayed M-SEARCH. The mapping requests
-   that follow meet the forward-chain IGD endpoint drop, and the relay refuses
-   PCP and NAT-PMP. Whether those two rules suffice to keep router mappings
-   host-owned is undecided.
+**Router mappings on the relayed path.** A granted package can learn the
+router's IGD control URL through a relayed M-SEARCH. The mapping requests that
+follow meet the forward-chain IGD endpoint drop, and the relay refuses PCP and
+NAT-PMP. Whether those two rules suffice to keep router mappings host-owned is
+undecided.
 
 ## Deferred translation
 
@@ -414,10 +418,9 @@ first. Failure alone does not make translation the remedy.
 
 | Translation                                               | Evidence that would raise it                                                    |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Republishing a package's mDNS services through avahi      | An application that cannot be configured to advertise the server's endpoint.    |
 | Clearing the QU bit on relayed mDNS queries               | QU-query unicast answers that cannot reach the package with the payload intact. |
 | Removing link-local AAAA records from mDNS into a package | A Matter controller that does not fall back from an unreachable `fe80::`.       |
-| SSDP content filtering                                    | Policy decision 2 requiring it.                                                 |
+| SSDP content filtering                                    | The policy decision requiring it.                                               |
 | SSDP `LOCATION` or GENA `CALLBACK` rewriting              | An application with no callback override.                                       |
 
 ## Limitations and tradeoffs
@@ -427,8 +430,9 @@ each granted LAN, including the MAC address, hostname and vendor class of every
 device that broadcasts a DHCP request. It can send any multicast or broadcast
 UDP payload outside the refused list, which includes payloads aimed at buggy
 device parsers, and its traffic is attributed to the server on the LAN. It
-cannot send router advertisements or DHCP, or receive inbound connections
-outside its bindings and reply admission.
+cannot send router advertisements, DHCP, or name-service answers and
+advertisements, or receive inbound connections outside its bindings and reply
+admission.
 
 **Package work.** An application that advertises itself or registers callbacks
 works only once its package configures the advertised endpoint. Discovery
@@ -515,6 +519,8 @@ implementation, not this spec:
   - the refused classes are dropped, DHCP broadcasts are delivered and
     outbound 67/68 is dropped;
   - a granted container's multicast or broadcast to UDP 5351 is not re-sent;
+  - a granted container's mDNS response and probe, SSDP `NOTIFY` and LLMNR
+    answer are not re-sent, while its queries from the same sockets are;
   - the IGD endpoint drop holds for every container;
   - UDP flows from a granted container carry the 3600 s conntrack timeout;
   - a gateway address change moves the relay to the new address;
@@ -522,9 +528,11 @@ implementation, not this spec:
     close flows, empty the map and leave no conntrack entry that admits a
     reply.
 - Application exercises over real bindings, with each package's endpoint
-  configuration: a HomeKit Bridge paired from an iPhone, Matter over Wi-Fi and
-  over Thread commissioned from the Home Assistant app, Sonos events, and
-  Home Assistant's internal URL from a Shelly Gen2 device.
+  configuration: Matter over Wi-Fi and over Thread commissioned from the Home
+  Assistant app, Sonos events, and Home Assistant's internal URL from a Shelly
+  Gen2 device. A HomeKit Bridge paired from an iPhone and the companion app
+  finding the instance need the DNS-SD feature as well, and are exercised once
+  it exists.
 - Device validation on a bench: Govee, Tapo, Kasa, WiZ, Magic Home, Tuya,
   Shelly, Hue (SSDP and mDNS), Chromecast, ESPHome, and DHCP-based discovery in
   Home Assistant.
@@ -535,8 +543,7 @@ implementation, not this spec:
 2. Grant (the `PackageDataEntry` field, TS bindings and the service page),
    outbound relay and reply admission.
 3. Fan-in, once the mechanism is chosen.
-4. Advertisement traffic, once policy decision 1 is made, and endpoint
-   configuration in the Home Assistant package.
+4. Endpoint configuration in the Home Assistant package.
 
 ## Open questions
 
