@@ -251,7 +251,7 @@ List every base branch the package maintains under `branches:`, and note this is
 
 `AGENTS.md` is the package's agent-context file. Generic packaging knowledge — SDK patterns, the disciplines on the [Development Workflow](./workflow.md) page, the rules throughout this guide — lives in one canonical place: the packaging guide, **not** copied into each package repo where duplicates would drift out of sync. `AGENTS.md` carries only what's specific to _this_ repo.
 
-Keep it short and repo-specific: state that this is a StartOS service package, give the doc-sync rule (keep `README.md` and `instructions.md` in step with every change), and capture any package-specific gotchas — in short, how to work in _this_ repo. Do **not** restate generic guide content or turn it into a web-fetch driver (don't instruct the agent to pull guide pages over the web up front).
+Keep it short and repo-specific: state that this is a StartOS service package and capture any package-specific gotchas — in short, how to work in _this_ repo. Do **not** restate generic guide content or turn it into a web-fetch driver (don't instruct the agent to pull guide pages over the web up front).
 
 It is also the one package document with a single reader, so it must not restate `README.md` or `instructions.md` either — anyone changing the package has both. That leaves it carrying only what has no home in them:
 
