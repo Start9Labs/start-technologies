@@ -517,7 +517,8 @@ pub async fn cli_install(
                             )
                         ),
                         ErrorKind::NotFound,
-                    ));
+                    )
+                    .into());
                 }
                 1 => packages.best.pop_first().map(|(k, _)| k).unwrap(),
                 _ => {
