@@ -14,6 +14,10 @@ for the detail behind its highlights.
 
 - **NVIDIA images include driver 580.178.04**, with Linux 7.2 compatibility.
 
+### Fixed
+
+- **Failed service updates no longer restore stale data from an earlier update** when a new rollback snapshot cannot be created.
+
 ## [0.4.0.2]
 
 ### Security
