@@ -16,6 +16,9 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **`start-cli package install` reports a package missing from the registry it asked**, naming
+  that registry, instead of prompting to choose from an empty list of flavors.
+
 - **Services keep their internal IPv6 bridge address enabled.** Address switches
   affect access from other networks while service-to-service access stays available.
 

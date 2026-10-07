@@ -1304,6 +1304,14 @@ disk.mount.binding:
   fr_FR: "Liaison de %{src} à %{dst}"
   pl_PL: "Wiązanie %{src} do %{dst}"
 
+# install/mod.rs
+install.version-not-found-on-registry:
+  en_US: "No version of %{id} that satisfies %{version} is available from %{registry}"
+  de_DE: "Keine Version von %{id}, die %{version} erfüllt, ist bei %{registry} verfügbar"
+  es_ES: "Ninguna versión de %{id} que satisfaga %{version} está disponible en %{registry}"
+  fr_FR: "Aucune version de %{id} satisfaisant %{version} n'est disponible sur %{registry}"
+  pl_PL: "Żadna wersja %{id} spełniająca %{version} nie jest dostępna w %{registry}"
+
 # os_install/mod.rs
 os-install.invalid-partuuid:
   en_US: "Unable to resolve a valid partition UUID for %{partition}"
