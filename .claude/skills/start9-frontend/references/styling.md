@@ -23,7 +23,9 @@ flat-grayscale | outline-grayscale | action-grayscale | …"` on buttons/badges/
 5. **`g-*` global utilities** (shared stylesheet only — never re-declared per app/component):
    layout (`g-page`, `g-form`, `g-table`, `g-aside`, `g-buttons`, store's `g-band`/`g-wrap`
    marketing system) and text colors (`g-positive/negative/warning/info/secondary/primary`) for
-   things with no appearance input (`tui-icon`).
+   things with no appearance input (`tui-icon`), and the selected state, `g-active`
+   (`routerLinkActive="g-active"`, `[class.g-active]`): a selected button keeps its appearance
+   instead of swapping it in an `[appearance]` ternary.
 6. **`:host` layout CSS last**: `display: grid/flex`, `gap`, sizing. Modern CSS is expected —
    logical properties (`inline-size`, `margin-block`, `inset-inline-start`), `:has()`,
    `color-mix()`, `clamp()`, container queries, `dvh`. Fluid sizing via `min(36rem, 90vw)`.
@@ -47,8 +49,9 @@ padding moves out of a row, grep for every host that renders it, since each one 
 a gutter. Hiding an element on phones is `display: none` under
 `:host-context(tui-root._mobile)`; an `@if` on the breakpoint is for branches that differ.
 
-A grid or flex item whose `overflow` isn't `visible` already has a zero minimum size, so
-`min-inline-size: 0` beside it is noise. Never `outline: none` — the focus ring stays.
+A grid or flex item whose `overflow` isn't `visible` — `tui-scrollbar` is one — already has a
+zero minimum size, so `min-inline-size: 0` or `min-block-size: 0` beside it is noise. Never
+`outline: none` — the focus ring stays.
 
 `::ng-deep`: tolerated only at shell seams (piercing `tui-scrollbar` internals, a shell laying
 out its routed child, styling `[innerHTML]` content) — never component-to-component.

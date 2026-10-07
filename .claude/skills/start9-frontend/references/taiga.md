@@ -41,8 +41,8 @@ nothing may import it. When in doubt: the official MCP
   `tuiInjectElement()`, `tuiWindowSize`, `tuiIsPresent`/`tuiIsString`, `tuiSetSignal`,
   `TUI_TRUE_HANDLER`/`TUI_FALSE_HANDLER`; `TuiMapperPipe` (`value | tuiMapper: fn : args` —
   pure template mapping without component methods), `TuiFilterPipe`, `TuiObfuscatePipe`;
-  `TUI_DEFAULT_MATCHER(item, search)` for a case-insensitive "contains" filter (it doesn't trim
-  `search`).
+  `TUI_DEFAULT_MATCHER(item, search)` for a case-insensitive "contains" filter (it trims
+  `search` from 5.27; on older pins, trim it yourself).
 - Types: `TuiBooleanHandler`, `TuiStringHandler`, `TuiContext<T>`, `TuiStringMatcher`,
   `TuiIdentityMatcher`, `TuiValidationError`.
 
@@ -80,11 +80,10 @@ nothing may import it. When in doubt: the official MCP
   `tui-line-clamp` for truncation, and `tuiFade="vertical"` on a scroll container fades the
   edges its content overflows; `<tui-scrollbar>` for themed scrollbars
   (`provideTaiga({ scrollbars: 'native' })` opts out — the fleet's embedded UIs do).
-  `tui-scrollbar`'s inner `.t-content` is `min-inline-size: fit-content`, so one
-  `white-space: nowrap` descendant widens the whole scroll area and pushes a row's trailing
-  content out of view — pair `tuiFade` truncation inside a scrollbar with
-  `:host ::ng-deep tui-scrollbar > .t-content { min-inline-size: 0 }` (`.t-content` alone ties
-  on specificity and loses).
+  On 5.22–5.25 `tui-scrollbar`'s inner `.t-content` is `min-inline-size: fit-content`, so one
+  `white-space: nowrap` descendant widens the whole scroll area. On those pins `tuiFade`
+  truncation inside a scrollbar needs `.t-content` reset to `min-inline-size: 0` through
+  `:host ::ng-deep tui-scrollbar > .t-content`; the override goes with the bump to 5.26+.
 
 ### Overlay facts
 
@@ -172,6 +171,8 @@ Handles paste/drop/autofill/predictive keyboards; SSR-safe. Never keydown-regex 
 | High-frequency events                           | melting change detection                | `.zoneless` / `.debounce~` / `.throttle~` modifiers                                                             |
 | `preventDefault`                                | `$event.preventDefault()` in TS         | `(event.prevent)` modifier                                                                                      |
 | Configurable content slot                       | fork the component                      | `PolymorpheusContent` input                                                                                     |
+| Long press                                      | pointer timers + a movement slop        | `(longtap)` — off iOS that is `contextmenu`, so a right-click fires it unless `(contextmenu.capture)` stops it  |
+| Icon or avatar beside a label                   | `display: flex; align-items: center`    | `tuiCell="s"`; on a component, `hostDirectives: [TuiCell]` + `tuiCellOptionsProvider({ size: 's' })`            |
 | Initials avatar                                 | `initial(name)` util                    | `name \| tuiInitials` (kit) as `tuiAvatar` content; an `<img>` beside it falls back to them when it fails       |
 | Radio group                                     | `tuiGroup` of `tuiRadio` rows           | `tui-radio-list` + `[items]` + `[itemContent]`                                                                  |
 | Full-width row in a dialog/card                 | `inline-size: 100%` + padding CSS       | `tuiCell` + `tuiCellStretch`                                                                                    |
