@@ -26,7 +26,8 @@ Install stable Rust and Docker. `rust-analyzer` is recommended.
 
 - `cargo check -p start-core` — type-check the library.
 - `make start-core-test` — run the test suite (wraps `run-tests.sh`, which uses the `rust-zig-builder`
-  container and the `test` feature; skips `export_` tests). Or run a single test directly:
+  test image and the `test` feature; skips `export_` tests). The image adds Node.js and SquashFS
+  tools for s9pk integration tests. Or run a single test directly:
   `cargo test -p start-core <name> --features=test`.
 - `make start-core-format` — format the shared Rust crates with the pinned nightly container (`make start-core-format-check` checks formatting). Set `FMT_NATIVE=1` only when that nightly is installed locally.
 - `cargo build -p start-os --bin startbox` (or the other product crate/bin) to build a binary.

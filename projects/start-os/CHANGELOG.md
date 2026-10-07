@@ -14,6 +14,11 @@ for the detail behind its highlights.
 
 - **NVIDIA images include driver 580.178.04**, with Linux 7.2 compatibility.
 
+### Fixed
+
+- **`s9pk pack` produces readable JavaScript even under a restrictive umask**, preserving
+  executable bits and leaving source permissions unchanged.
+
 ## [0.4.0.2]
 
 ### Security

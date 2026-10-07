@@ -9,6 +9,13 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [2.2.1]
+
+### Fixed
+
+- **`s9pk pack` produces readable JavaScript even under a restrictive umask**, preserving
+  executable bits and leaving source permissions unchanged.
+
 ## [2.2.0]
 
 ### Security

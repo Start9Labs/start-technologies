@@ -1,10 +1,14 @@
 #!/bin/bash
 
+set -ea
+
 cd "$(dirname "${BASH_SOURCE[0]}")/../../.."
+
+RUST_ZIG_BUILDER_IMAGE=start9/cargo-zigbuild-test
+docker build -t "$RUST_ZIG_BUILDER_IMAGE" -f build/test/testenv.Dockerfile build/test
 
 source ./build/builder-alias.sh
 
-set -ea
 shopt -s expand_aliases
 
 PROFILE=${PROFILE:-release}
