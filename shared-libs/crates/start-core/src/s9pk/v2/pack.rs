@@ -508,7 +508,7 @@ impl ImageSource {
         #[derive(Deserialize)]
         #[serde(rename_all = "PascalCase")]
         struct DockerImageConfig {
-            env: Vec<String>,
+            env: Option<Vec<String>>,
             #[serde(default)]
             working_dir: PathBuf,
             #[serde(default)]
@@ -599,38 +599,44 @@ impl ImageSource {
                     } else {
                         format!("--platform=linux/{arch}")
                     };
-                    let container = String::from_utf8(
-                        Command::new(*CONTAINER_TOOL)
-                            .arg("create")
-                            .arg(&docker_platform)
-                            .arg(&tag)
-                            .arg("/startos-pack-placeholder")
-                            .invoke(ErrorKind::Docker)
-                            .await?,
-                    )?;
+                    // Inspecting the image by id resolves a multi-arch index to the host's platform.
+                    // `create` needs a command only for an image with neither Entrypoint nor Cmd.
+                    let (container, placeholder) = match Command::new(*CONTAINER_TOOL)
+                        .arg("create")
+                        .arg(&docker_platform)
+                        .arg(&tag)
+                        .invoke(ErrorKind::Docker)
+                        .await
+                    {
+                        Ok(container) => (container, false),
+                        Err(_) => (
+                            Command::new(*CONTAINER_TOOL)
+                                .arg("create")
+                                .arg(&docker_platform)
+                                .arg(&tag)
+                                .arg("/startos-pack-placeholder")
+                                .invoke(ErrorKind::Docker)
+                                .await?,
+                            true,
+                        ),
+                    };
+                    let container = String::from_utf8(container)?;
                     let container = container.trim();
                     let packed = async {
-                        let image = String::from_utf8(
-                            Command::new(*CONTAINER_TOOL)
+                        let mut config = serde_json::from_slice::<DockerImageConfig>(
+                            &Command::new(*CONTAINER_TOOL)
                                 .arg("container")
                                 .arg("inspect")
                                 .arg("--format")
-                                .arg("{{.Image}}")
-                                .arg(container)
-                                .invoke(ErrorKind::Docker)
-                                .await?,
-                        )?;
-                        let config = serde_json::from_slice::<DockerImageConfig>(
-                            &Command::new(*CONTAINER_TOOL)
-                                .arg("image")
-                                .arg("inspect")
-                                .arg("--format")
                                 .arg("{{json .Config}}")
-                                .arg(image.trim())
+                                .arg(container)
                                 .invoke(ErrorKind::Docker)
                                 .await?,
                         )
                         .with_kind(ErrorKind::Deserialization)?;
+                        if placeholder {
+                            config.cmd = None;
+                        }
                         let base_path = Path::new("images").join(arch).join(image_id);
                         into.insert_path(
                             base_path.with_extension("json"),
@@ -664,7 +670,14 @@ impl ImageSource {
                             Entry::file(
                                 TmpSource::new(
                                     tmp_dir.clone(),
-                                    PackSource::Buffered(config.env.join("\n").into_bytes().into()),
+                                    PackSource::Buffered(
+                                        config
+                                            .env
+                                            .unwrap_or_default()
+                                            .join("\n")
+                                            .into_bytes()
+                                            .into(),
+                                    ),
                                 )
                                 .into(),
                             ),
