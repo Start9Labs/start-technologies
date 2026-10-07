@@ -13,9 +13,9 @@ or the CLI's externally observable behavior.
 
 ### Added
 
-- **`registry package get --all-revisions` lists every revision a registry holds.** Without it,
-  a registry running start-registry 1.1.1 or later hides a revision once a newer revision of the
-  same upstream version runs on the same hardware.
+- **`registry package get <ID> full --all-revisions` lists every revision of a package a registry
+  holds.** Without `--all-revisions`, a registry running start-registry 1.1.1 or later hides a
+  revision once a newer revision of the same upstream version runs on the same hardware.
 
 - **`registry info set-icon --clear` and `registry info set-description --clear` remove a
   registry's icon and description.**
