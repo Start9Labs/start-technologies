@@ -851,21 +851,21 @@ Display the registry name, icon, and description.
 
 Set the registry's display name.
 
-### `start-cli registry info set-icon <ICON>`
+### `start-cli registry info set-icon [ICON] [--clear]`
 
-Set the registry's icon from a file path, an http(s) URL, or a data URL.
+Set the registry's icon from a file path, an http(s) URL, or a data URL. Supply either `ICON` or `--clear`, but not both.
 
-### `start-cli registry info set-description <DESCRIPTION>`
+- `--clear` — Remove the registry's icon
 
-Set the registry's description (markdown), shown above its services in the marketplace.
+Over RPC, pass `null` in the setter's `icon` field to clear it; a value sets it.
 
-### `start-cli registry info clear-icon`
+### `start-cli registry info set-description [DESCRIPTION] [--clear]`
 
-Remove the registry's icon.
+Set the registry's description (markdown), shown above its services in the marketplace. Supply either `DESCRIPTION` or `--clear`, but not both.
 
-### `start-cli registry info clear-description`
+- `--clear` — Remove the registry's description
 
-Remove the registry's description.
+Over RPC, pass `null` in the setter's `description` field to clear it; a value sets it.
 
 ### Registry Admin Management
 

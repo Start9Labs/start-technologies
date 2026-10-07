@@ -4464,6 +4464,20 @@ help.arg.cifs-username:
   fr_FR: "Nom d'utilisateur d'authentification CIFS"
   pl_PL: "Nazwa użytkownika uwierzytelniania CIFS"
 
+help.arg.clear-registry-description:
+  en_US: "Remove the registry description"
+  de_DE: "Die Registry-Beschreibung entfernen"
+  es_ES: "Eliminar la descripción del registro"
+  fr_FR: "Supprimer la description du registre"
+  pl_PL: "Usuń opis rejestru"
+
+help.arg.clear-registry-icon:
+  en_US: "Remove the registry icon"
+  de_DE: "Das Registry-Symbol entfernen"
+  es_ES: "Eliminar el icono del registro"
+  fr_FR: "Supprimer l'icône du registre"
+  pl_PL: "Usuń ikonę rejestru"
+
 help.arg.database-path:
   en_US: "Path to the database file"
   de_DE: "Pfad zur Datenbankdatei"
@@ -6771,20 +6785,6 @@ about.set-registry-name:
   es_ES: "Establecer el nombre del registro"
   fr_FR: "Définir le nom du registre"
   pl_PL: "Ustaw nazwę rejestru"
-
-about.clear-registry-icon:
-  en_US: "Remove the registry icon"
-  de_DE: "Das Registry-Symbol entfernen"
-  es_ES: "Eliminar el icono del registro"
-  fr_FR: "Supprimer l'icône du registre"
-  pl_PL: "Usuń ikonę rejestru"
-
-about.clear-registry-description:
-  en_US: "Remove the registry description"
-  de_DE: "Die Registry-Beschreibung entfernen"
-  es_ES: "Eliminar la descripción del registro"
-  fr_FR: "Supprimer la description du registre"
-  pl_PL: "Usuń opis rejestru"
 
 about.set-smtp:
   en_US: "Set SMTP configuration"
