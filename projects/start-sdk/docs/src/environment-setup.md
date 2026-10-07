@@ -83,32 +83,6 @@ nvm use 22
 
 Alternatively, download Node.js v22 (or newer) directly from [nodejs.org](https://nodejs.org/) — make sure `node --version` reports v22+ afterward.
 
-## SquashFS
-
-SquashFS is used to create compressed filesystem images that package your compiled service code.
-
-{{#tabs global="platform"}}
-
-{{#tab name="Linux"}}
-
-```sh
-sudo apt install squashfs-tools squashfs-tools-ng
-```
-
-{{#endtab}}
-
-{{#tab name="Mac"}}
-
-Requires [Homebrew](https://brew.sh/):
-
-```sh
-brew install squashfs
-```
-
-{{#endtab}}
-
-{{#endtabs}}
-
 ## cURL
 
 [cURL](https://curl.se/) downloads the `start-cli` installer script in the next step. It is pre-installed on macOS and most Linux systems; install it if missing.
@@ -201,7 +175,6 @@ docker run --rm hello-world   # confirms the daemon is running and you have acce
 make --version
 node --version                # must be v22 or newer
 npm --version
-mksquashfs -version
 git --version
 curl --version
 jq --version

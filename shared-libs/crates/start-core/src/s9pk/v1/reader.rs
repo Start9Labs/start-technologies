@@ -44,11 +44,10 @@ impl<'a, R: AsyncRead + Unpin> AsyncRead for ReadHandle<'a, R> {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         let this = self.project();
-        let start = buf.filled().len();
         let mut take_buf = buf.take(this.range.end.saturating_sub(**this.pos) as usize);
         let res = AsyncRead::poll_read(this.rdr, cx, &mut take_buf);
         let n = take_buf.filled().len();
-        unsafe { buf.assume_init(start + n) };
+        unsafe { buf.assume_init(n) };
         buf.advance(n);
         **this.pos += n as u64;
         res
@@ -78,6 +77,9 @@ impl<'a, R: AsyncSeek + Unpin> AsyncSeek for ReadHandle<'a, R> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug)]
 pub struct ImageTag {

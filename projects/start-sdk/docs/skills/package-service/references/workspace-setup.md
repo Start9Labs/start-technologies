@@ -40,7 +40,6 @@ docker --version && docker run --rm hello-world >/dev/null && echo "docker ok"
 make --version | head -1
 node --version          # must be v22+
 npm --version
-mksquashfs -version | head -1
 git --version
 curl --version | head -1
 jq --version
@@ -52,7 +51,6 @@ start-cli --version
 | docker          | the [official install guide](https://docs.docker.com/engine/install/), then `sudo usermod -aG docker $USER` and **a full logout** |
 | make            | `sudo apt install build-essential`                                                                                                |
 | node v22+       | `nvm install 22 && nvm use 22`, or a v22+ build from nodejs.org                                                                   |
-| mksquashfs      | `sudo apt install squashfs-tools squashfs-tools-ng`                                                                               |
 | git · curl · jq | `sudo apt install git curl jq`                                                                                                    |
 | start-cli       | `curl -fsSL https://start9.com/start-cli/install.sh \| sh`                                                                        |
 

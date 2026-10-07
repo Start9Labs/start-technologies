@@ -190,42 +190,36 @@ fn test_parse() {
 async fn test_rsync() {
     use futures::StreamExt;
     use tokio::fs;
-    let mut seen_zero = false;
-    let mut seen_in_between = false;
-    let mut seen_hundred = false;
-    fs::remove_dir_all("/tmp/test_rsync")
-        .await
-        .unwrap_or_default();
-    fs::create_dir_all("/tmp/test_rsync/a").await.unwrap();
-    fs::create_dir_all("/tmp/test_rsync/b").await.unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let src = workspace.path().join("a");
+    let dst = workspace.path().join("b");
+    fs::create_dir_all(&src).await.unwrap();
+    fs::create_dir_all(&dst).await.unwrap();
     for i in 0..100 {
         tokio::io::copy(
             &mut fs::File::open("/dev/urandom").await.unwrap().take(100_000),
-            &mut fs::File::create(format!("/tmp/test_rsync/a/sample.{i}.bin"))
+            &mut fs::File::create(src.join(format!("sample.{i}.bin")))
                 .await
                 .unwrap(),
         )
         .await
         .unwrap();
     }
-    let mut rsync = Rsync::new(
-        "/tmp/test_rsync/a/",
-        "/tmp/test_rsync/b/",
-        Default::default(),
-    )
-    .await
-    .unwrap();
+    let mut rsync = Rsync::new(src.join(""), dst.join(""), Default::default())
+        .await
+        .unwrap();
+    let mut latest = None;
     while let Some(progress) = rsync.progress.next().await {
-        if progress <= 0.05 {
-            seen_zero = true;
-        } else if progress > 0.05 && progress < 1.0 {
-            seen_in_between = true
-        } else {
-            seen_hundred = true;
-        }
+        assert!((0.0..=1.0).contains(&progress));
+        latest = Some(progress);
     }
     rsync.wait().await.unwrap();
-    assert!(seen_zero, "seen zero");
-    assert!(seen_in_between, "seen in between 0 and 100");
-    assert!(seen_hundred, "seen 100");
+    assert_eq!(latest, Some(1.0));
+    for i in 0..100 {
+        let name = format!("sample.{i}.bin");
+        assert_eq!(
+            fs::read(src.join(&name)).await.unwrap(),
+            fs::read(dst.join(&name)).await.unwrap()
+        );
+    }
 }

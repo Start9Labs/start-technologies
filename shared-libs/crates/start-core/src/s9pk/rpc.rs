@@ -22,6 +22,9 @@ use crate::util::io::{TmpDir, create_file, open_file};
 use crate::util::serde::{HandlerExtSerde, apply_expr};
 use crate::util::{Apply, Invoke};
 
+#[cfg(test)]
+mod tests;
+
 pub const SKIP_ENV: &[&str] = &["TERM", "container", "HOME", "HOSTNAME"];
 
 pub fn s9pk() -> ParentHandler<CliContext> {
@@ -177,6 +180,8 @@ async fn add_image(
     let tmp_dir = Arc::new(TmpDir::new().await?);
     s9pk.load_images(tmp_dir.clone()).await?;
     s9pk.validate_and_filter(None)?;
+    s9pk.as_archive_mut()
+        .set_signer(ctx.build_key()?, SIG_CONTEXT);
     let tmp_path = s9pk_path.with_extension("s9pk.tmp");
     let mut tmp_file = create_file(&tmp_path).await?;
     s9pk.serialize(&mut tmp_file, true).await?;
