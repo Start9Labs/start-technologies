@@ -51,7 +51,7 @@ format-check:
 release-notes-test:
 	python3 scripts/tests/release-notes-test.py
 	python3 scripts/tests/changelog-test.py
-	python3 scripts/tests/changelog-version-test.py
+	node --test scripts/tests/changelog-version-test.mjs
 	python3 scripts/tests/commit-staged-test.py
 
 test: | start-core-test start-sdk-test backup-fs-test container-runtime-test start-os-scripts-test start-wrt-test release-notes-test

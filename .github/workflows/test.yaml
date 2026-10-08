@@ -57,6 +57,9 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODEJS_VERSION }}
       - name: Validate fragments and release severity
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -65,12 +68,12 @@ jobs:
           git fetch --tags origin
           if [ -n "$PR_BASE_SHA" ]; then
             git fetch --no-tags origin "$PR_BASE_SHA"
-            products=$(python3 scripts/changelog.py changed "$PR_BASE_SHA")
+            products=$(node scripts/changelog.mjs changed "$PR_BASE_SHA")
           else
-            products=$(python3 scripts/changelog.py projects)
+            products=$(node scripts/changelog.mjs projects)
           fi
           for product in $products; do
-            python3 scripts/changelog.py check-version "projects/${product#projects/}"
+            node scripts/changelog.mjs check-version "projects/${product#projects/}"
           done
       - name: Check changelog and release tooling
         run: make release-notes-test

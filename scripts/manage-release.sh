@@ -98,13 +98,13 @@ project_kind() {
 }
 
 derive_version() {
-    (cd "$REPO_ROOT" && python3 scripts/changelog.py version "projects/$1")
+    (cd "$REPO_ROOT" && node scripts/changelog.mjs version "projects/$1")
 }
 
 check_changelog_version() (
     cd "$REPO_ROOT"
     git fetch --tags origin
-    python3 scripts/changelog.py check-version "projects/$PROJECT" "$VERSION"
+    node scripts/changelog.mjs check-version "projects/$PROJECT" "$VERSION"
 )
 
 notes_path() { echo "$REPO_ROOT/projects/$1/release-notes/${VERSION}.md"; }
@@ -1173,7 +1173,7 @@ cmd_create_gh_release() (
     notes=$(release_body)
     changelog_dir=$(mktemp -d)
     trap 'rm -rf "$changelog_dir"' EXIT
-    (cd "$REPO_ROOT" && python3 scripts/changelog.py render "projects/$PROJECT" "$VERSION" --ref "$TAG") > "$changelog_dir/CHANGELOG.md"
+    (cd "$REPO_ROOT" && node scripts/changelog.mjs render "projects/$PROJECT" "$VERSION" --ref "$TAG") > "$changelog_dir/CHANGELOG.md"
     echo "Creating GitHub release ${TAG}..."
     if gh release view -R "$REPO" "$TAG" >/dev/null 2>&1; then
         gh release edit -R "$REPO" "$TAG" --title "$(project_display_name "$PROJECT") v${VERSION}" --notes "$notes"
@@ -1690,7 +1690,7 @@ fi
 
 if ! KIND=$(project_kind "$PROJECT"); then
     >&2 echo "Unknown or missing project: '${PROJECT}'"
-    >&2 echo "Projects: $(python3 "$SCRIPT_DIR/changelog.py" projects)"
+    >&2 echo "Projects: $(node "$SCRIPT_DIR/changelog.mjs" projects)"
     exit 2
 fi
 

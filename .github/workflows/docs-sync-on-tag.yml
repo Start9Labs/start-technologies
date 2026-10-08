@@ -57,6 +57,10 @@ jobs:
           fetch-tags: true
           token: ${{ steps.app-token.outputs.token }}
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.17.0'
+
       - name: Compile released changelogs onto master
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -65,18 +69,18 @@ jobs:
           git fetch origin master --tags
           SRC=$(git rev-list -n1 "$GITHUB_REF_NAME")
           git merge-base --is-ancestor "$SRC" origin/master
-          git show origin/master:scripts/changelog.py > "$RUNNER_TEMP/changelog.py"
-          git show origin/master:scripts/changelog_version.py > "$RUNNER_TEMP/changelog_version.py"
-          git show origin/master:scripts/commit-staged.py > "$RUNNER_TEMP/commit-staged.py"
           for attempt in 1 2 3; do
             git fetch --no-tags origin master
             git checkout --detach origin/master
             BASE=$(git rev-parse HEAD)
-            python3 "$RUNNER_TEMP/changelog.py" sync
+            for script in changelog.mjs changelog-version.mjs commit-staged.mjs; do
+              git show "origin/master:scripts/$script" > "$RUNNER_TEMP/$script"
+            done
+            node "$RUNNER_TEMP/changelog.mjs" sync
             git add -- projects/
             if git diff --cached --quiet; then break; fi
             printf 'chore: compile released changelog fragments\n' > "$RUNNER_TEMP/changelog-message"
-            if python3 "$RUNNER_TEMP/commit-staged.py" "$RUNNER_TEMP/changelog-message" master "$BASE"; then
+            if node "$RUNNER_TEMP/commit-staged.mjs" "$RUNNER_TEMP/changelog-message" master "$BASE"; then
               break
             fi
             if [ "$attempt" = 3 ]; then exit 1; fi

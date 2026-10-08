@@ -67,6 +67,10 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.17.0'
+
       - name: Warn about a stray skip marker
         if: ${{ contains(github.event.head_commit.message, '[skip-backport]') }}
         run: |
@@ -131,7 +135,7 @@ jobs:
               git log --reverse --format='- %h %s' "$RANGE"
             } > /tmp/backport-msg
 
-            if python3 scripts/commit-staged.py /tmp/backport-msg master "$BASE" > /tmp/commit-result; then
+            if node scripts/commit-staged.mjs /tmp/backport-msg master "$BASE" > /tmp/commit-result; then
               echo "Committed to master: $(cat /tmp/commit-result)"
               exit 0
             else

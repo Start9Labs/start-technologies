@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 
-SCRIPT = Path(__file__).resolve().parents[1] / "commit-staged.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "commit-staged.mjs"
 
 
 class CommitStagedTests(unittest.TestCase):
@@ -17,6 +17,7 @@ class CommitStagedTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        self.env = dict(os.environ, GIT_CONFIG_COUNT="0", GIT_CONFIG_NOSYSTEM="1")
         self.git("init", "-q")
         self.git("config", "user.name", "Fixture")
         self.git("config", "user.email", "fixture@example.com")
@@ -40,14 +41,14 @@ else:
         self.capture = self.root / "payload.json"
         self.message = self.root / "message"
         self.message.write_text("chore: archive fragments\n\nDetails.\n")
-        self.env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}",
+        self.env.update(PATH=f"{self.bin}:{os.environ['PATH']}",
                         GITHUB_REPOSITORY="Start9Labs/fixture", CAPTURE=str(self.capture))
 
     def git(self, *args):
-        return subprocess.check_output(["git", *args], cwd=self.root, text=True)
+        return subprocess.check_output(["git", *args], cwd=self.root, env=self.env, text=True)
 
     def run_script(self):
-        return subprocess.run(["python3", str(SCRIPT), str(self.message), "master", self.base],
+        return subprocess.run(["node", str(SCRIPT), str(self.message), "master", self.base],
                               cwd=self.root, env=self.env, capture_output=True, text=True)
 
     def test_rename_large_content_and_index_ownership(self):
@@ -66,6 +67,18 @@ else:
         addition, = payload["fileChanges"]["additions"]
         self.assertEqual(addition["path"], "name with spaces.md")
         self.assertEqual(base64.b64decode(addition["contents"]).decode(), contents)
+
+    def test_staged_binary_blob_over_one_mib(self):
+        contents = bytes(range(256)) * 8192
+        (self.root / "large.bin").write_bytes(contents)
+        self.git("add", "large.bin")
+        (self.root / "large.bin").write_bytes(b"unstaged")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "signed-oid\n")
+        additions = json.loads(self.capture.read_text())["variables"]["input"]["fileChanges"]["additions"]
+        self.assertEqual(additions[0]["path"], "large.bin")
+        self.assertEqual(base64.b64decode(additions[0]["contents"]), contents)
 
     def test_modes_are_not_silently_rewritten(self):
         for mode in ("symlink", "executable"):
@@ -139,15 +152,19 @@ else:
         repo_root = SCRIPT.parents[1]
         scripts = self.root / "scripts"
         scripts.mkdir()
-        for name in ("changelog.py", "changelog_version.py", "commit-staged.py"):
+        for name in ("changelog.mjs", "changelog-version.mjs", "commit-staged.mjs"):
             shutil.copy2(repo_root / "scripts" / name, scripts / name)
+        shutil.copy2(repo_root / ".prettierrc.json", self.root / ".prettierrc.json")
+        pin = json.loads((repo_root / "package.json").read_text())["devDependencies"]["prettier"]
+        (self.root / "package.json").write_text(json.dumps({"devDependencies": {"prettier": pin}}))
         product = self.root / "projects/start-sdk"
         fragments = product / "changelog"
         fragments.mkdir(parents=True)
         fragment = fragments / "patch-fixed-released.md"
-        fragment.write_text("- Released fix.\n")
+        fragment.write_text("- Released fix.\n\n- Second released fix.\n")
+        (fragments / "patch-fixed-second-released.md").write_text("- Third released fix.\n")
         (product / "CHANGELOG.md").write_text("# Changelog\n")
-        self.git("add", "scripts", "projects")
+        self.git("add", "scripts", "projects", "package.json", ".prettierrc.json")
         self.git("commit", "-qm", "release")
         self.git("-c", "tag.gpgsign=false", "tag", "start-sdk/v1.2.3")
         remote = self.root / "origin.git"
@@ -204,12 +221,18 @@ else:
         self.assertEqual(self.git("status", "--porcelain", "--untracked-files=no"), "")
         self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/live-docs"))
         history = self.git("show", "origin/master:projects/start-sdk/CHANGELOG.md")
-        self.assertIn("## [1.2.3]", history)
-        self.assertIn("Released fix.", history)
+        self.assertEqual(history, "# Changelog\n\n## [1.2.3]\n\n### Fixed\n\n"
+                                 "- Released fix.\n\n- Second released fix.\n\n- Third released fix.\n")
         self.assertNotIn("patch-fixed-released.md", self.git("ls-tree", "-r", "--name-only", "origin/master", "projects"))
         self.assertIn("New work after the tag.", self.git("show", "origin/master:projects/start-sdk/changelog/patch-fixed-after-tag.md"))
         self.assertNotIn("New work after the tag.", history)
         self.assertIn("head moved", result.stderr)
+        master = self.git("rev-parse", "origin/master")
+        result = subprocess.run(["bash", "-c", shell], cwd=self.root, env=self.env,
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.git("rev-parse", "origin/master"), master)
+        self.assertEqual(self.git("show", "origin/master:projects/start-sdk/CHANGELOG.md"), history)
 
     def test_empty_index_makes_no_request(self):
         self.assertEqual(self.run_script().returncode, 0)

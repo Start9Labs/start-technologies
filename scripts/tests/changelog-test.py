@@ -3,12 +3,13 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import unittest
 
 
-SCRIPT = Path(__file__).resolve().parents[1] / "changelog.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "changelog.mjs"
+REPO = SCRIPT.parent.parent
+PRETTIER = json.loads((REPO / "package.json").read_text())["devDependencies"]["prettier"]
 PRODUCT = "projects/start-os"
 HISTORY = b"# Changelog\r\n\r\n## [0.3.0]\r\n\r\n### Fixed\r\n\r\n- Historical bytes.\r\n"
 
@@ -31,6 +32,8 @@ class ChangelogTests(unittest.TestCase):
         self.fragments.mkdir(parents=True)
         self.history = self.product / "CHANGELOG.md"
         self.history.write_bytes(HISTORY)
+        (self.root / ".prettierrc.json").write_bytes((REPO / ".prettierrc.json").read_bytes())
+        (self.root / "package.json").write_text(json.dumps({"devDependencies": {"prettier": PRETTIER}}))
         self.commit()
 
     def git(self, *args, env=None):
@@ -57,7 +60,7 @@ class ChangelogTests(unittest.TestCase):
 
     def run_script(self, *args, success=True):
         result = subprocess.run(
-            [sys.executable, str(SCRIPT), *args], cwd=self.root, env=self.env,
+            ["node", str(SCRIPT), *args], cwd=self.root, env=self.env,
             capture_output=True,
         )
         if success:
@@ -79,15 +82,82 @@ class ChangelogTests(unittest.TestCase):
         self.fragment("patch-changed-a.md", "- Changed.\n")
         self.fragment("patch-fixed-a.md", "- Fixed.\n")
         expected = (
-            b"# Changelog\r\n\r\n## [0.4.0.1]\n\n"
-            b"### Added\n\n* Alpha.\n\n- Zed.\n  Continued **Markdown**.\n\n- Second.\n\n"
+            b"# Changelog\n\n## [0.4.0.1]\n\n"
+            b"### Added\n\n- Alpha.\n\n* Zed.\n  Continued **Markdown**.\n\n* Second.\n\n"
             b"### Changed\n\n- Changed.\n\n### Deprecated\n\n- Deprecated.\n\n"
             b"### Removed\n\n- Removed.\n\n### Fixed\n\n- Fixed.\n\n"
             b"### Security\n\n- Security.\n\n"
-            + HISTORY[HISTORY.index(b"## "):]
+            + HISTORY[HISTORY.index(b"## "):].replace(b"\r\n", b"\n")
         )
         self.assertEqual(self.render(), expected)
         self.assertEqual(self.render(), expected)
+
+    def test_assembled_loose_list_is_formatted_and_sync_is_idempotent(self):
+        self.history.write_bytes(b"")
+        self.fragment("patch-fixed-a.md", "- First.\n\n- Second.\n")
+        self.fragment("patch-fixed-b.md", "- Third.\n")
+        self.commit()
+        tag = self.tag("0.4.0.1")
+        rendered = self.render(ref=tag)
+        self.assertEqual(rendered, b"## [0.4.0.1]\n\n### Fixed\n\n- First.\n\n- Second.\n\n- Third.\n")
+        self.run_script("sync")
+        self.assertEqual(self.history.read_bytes(), rendered)
+        self.run_script("sync")
+        self.assertEqual(self.history.read_bytes(), rendered)
+        self.commit()
+        self.fragment("patch-fixed-a.md", "- Genuinely changed.\n\n- Second.\n")
+        self.fragment("patch-fixed-b.md", "- Third.\n")
+        self.commit()
+        self.git("tag", "-f", tag)
+        self.run_script("sync", success=False)
+        self.assertEqual(self.history.read_bytes(), rendered)
+
+    def test_formatted_marker_changes_are_idempotent(self):
+        self.history.write_bytes(b"")
+        self.fragment("patch-fixed-a.md", "* Alpha.\n")
+        self.fragment("patch-fixed-b.md", "- Beta.\n")
+        self.commit()
+        self.tag("0.4.0.1")
+        self.run_script("sync")
+        expected = b"## [0.4.0.1]\n\n### Fixed\n\n- Alpha.\n\n* Beta.\n"
+        self.assertEqual(self.history.read_bytes(), expected)
+        self.commit()
+        self.run_script("sync")
+        self.assertEqual(self.history.read_bytes(), expected)
+        self.assertEqual(self.git("diff", "HEAD"), "")
+
+    def test_invalid_utf8_is_rejected(self):
+        path = self.fragment()
+        path.write_bytes(b"- Invalid \xff.\n")
+        self.run_script("validate", PRODUCT, success=False)
+        self.commit()
+        tag = self.tag("0.4.0.1")
+        self.run_script("render", PRODUCT, "0.4.0.1", "--ref", tag, success=False)
+
+    def test_tagged_large_blob_and_render_stdout_are_not_truncated(self):
+        body = "- " + "x" * (1024 * 1024 + 100) + ".\n"
+        self.fragment(body=body)
+        self.commit()
+        tag = self.tag("0.4.0.1")
+        self.assertIn(body.encode(), self.render(ref=tag))
+
+    def test_noncompiling_commands_do_not_require_formatter_configuration(self):
+        (self.root / ".prettierrc.json").unlink()
+        self.manifest("0.4.0.3")
+        (self.root / "package.json").write_text('{"version":"0.4.0.3"}')
+        self.fragment()
+        self.run_script("projects")
+        self.run_script("version", PRODUCT)
+        self.run_script("validate", PRODUCT)
+        self.run_script("check-version", PRODUCT)
+        self.run_script("changed", "HEAD")
+
+    def test_command_help(self):
+        for args in (("--help",), ("-h",), ("render", "--help")):
+            with self.subTest(args=args):
+                output = self.run_script(*args).stdout.decode()
+                self.assertIn("render PRODUCT VERSION [--ref REF]", output)
+                self.assertIn("check-version PRODUCT [VERSION]", output)
 
     def test_invalid_filenames(self):
         for name in ("fixed-name.md", "patch-Fixed-name.md", "patch-other-name.md",
@@ -319,7 +389,7 @@ class ChangelogTests(unittest.TestCase):
         else:
             path = self.root / product / "Cargo.toml"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"version": version}) if path.suffix == ".json"
+        path.write_text(json.dumps({"version": version, "devDependencies": {"prettier": PRETTIER}}) if path.suffix == ".json"
                         else f'[package]\nversion = "{version}"\n')
 
     def test_version_reads_canonical_manifests_from_absolute_script(self):
