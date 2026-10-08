@@ -2413,6 +2413,7 @@ PersistentKeepalive = 25`
     icon: '/assets/img/service-icons/bitcoin-core.svg',
     lastBackup: null,
     statusInfo: {
+      forceStopAt: null,
       error: null,
       desired: { main: 'running' },
       started: new Date().toISOString(),
@@ -2678,6 +2679,7 @@ PersistentKeepalive = 25`
     icon: '/assets/img/service-icons/btc-rpc-proxy.png',
     lastBackup: null,
     statusInfo: {
+      forceStopAt: null,
       desired: { main: 'stopped' },
       started: null,
       health: {},
@@ -2711,6 +2713,7 @@ PersistentKeepalive = 25`
     icon: '/assets/img/service-icons/lnd.png',
     lastBackup: null,
     statusInfo: {
+      forceStopAt: null,
       desired: { main: 'stopped' },
       error: null,
       health: {},

@@ -8,11 +8,20 @@ import {
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
-import { defaultIfEmpty, defer, filter, firstValueFrom, of } from 'rxjs'
+import {
+  defaultIfEmpty,
+  defer,
+  filter,
+  firstValueFrom,
+  Observable,
+  of,
+} from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { getAllPackages } from 'src/app/utils/get-package-data'
 import { hasCurrentDeps } from 'src/app/utils/has-deps'
+import { confirmForceStop, forceStopAt$ } from './force-stop'
+import { TimeService } from './time.service'
 
 @Injectable({
   providedIn: 'root',
@@ -24,6 +33,33 @@ export class ControlsService {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly i18n = inject(i18nPipe)
   private readonly i18nService = inject(i18nService)
+  private readonly time = inject(TimeService)
+
+  forceStopAt$(status$: Observable<T.StatusInfo>) {
+    return forceStopAt$(status$, this.time.now$)
+  }
+
+  forceStop(params: T.ForceStopParams) {
+    return confirmForceStop(
+      params,
+      () =>
+        this.dialog.openConfirm({
+          label: 'Warning',
+          size: 's',
+          data: {
+            content:
+              'Force stopping may cause data loss or leave the service in a bad state. Are you sure you want to force stop?',
+            yes: 'Force stop',
+            no: 'Cancel',
+          },
+        }),
+      request =>
+        this.tasks.run(
+          () => this.api.forceStopPackage(request),
+          'Force stopping',
+        ),
+    )
+  }
 
   async start({ title, id }: T.Manifest, unmet: boolean) {
     const deps =

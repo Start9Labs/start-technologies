@@ -184,6 +184,15 @@ Yes, but it is not officially supported. StartOS identifies a service by its pac
 
 The fork is a separate service with its own settings, addresses, data and [backups](backup-create.md), and starts empty.
 
+## A service is stuck stopping
+
+After clicking **Stop**, allow the service time to finish writing its data. If it is still stopping after 30 seconds, a **Force stop** button appears on its service page. Click it and confirm the warning to terminate the service immediately. The service remains stopped; if its runtime cannot finish shutdown, StartOS rebuilds its container while retaining its data.
+
+> [!WARNING]
+> Force stopping can lose data or leave the service in a bad state. Prefer a normal shutdown whenever possible.
+
+To change when the button appears, set `force-stop-delay-seconds` in `/media/startos/config/config.yaml` and restart the server. The value is a nonnegative number of seconds; `0` makes force stop available as soon as shutdown begins.
+
 ## Issue with a particular service
 
 If a service is misbehaving or crashing, check the [logs](logs.md) for that service — open the service and select its **Logs** tab. Look for any errors that might explain the problem. Often, the solution is to restart the service by clicking "Restart". If the issue persist, [contact support](https://start9.com/contact).

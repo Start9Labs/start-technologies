@@ -31,6 +31,7 @@ pub struct StartParams {
 
 #[instrument(skip_all)]
 pub async fn start(ctx: RpcContext, StartParams { id, force }: StartParams) -> Result<(), Error> {
+    let _service = ctx.services.get_mut(&id).await;
     ctx.db
         .mutate(|db| {
             let entry = db
@@ -44,10 +45,7 @@ pub async fn start(ctx: RpcContext, StartParams { id, force }: StartParams) -> R
                     ErrorKind::InvalidRequest,
                 ));
             }
-            entry
-                .as_status_info_mut()
-                .as_desired_mut()
-                .map_mutate(|s| Ok(s.start()))
+            entry.as_status_info_mut().start()
         })
         .await
         .result?;
@@ -56,6 +54,7 @@ pub async fn start(ctx: RpcContext, StartParams { id, force }: StartParams) -> R
 }
 
 pub async fn stop(ctx: RpcContext, ControlParams { id }: ControlParams) -> Result<(), Error> {
+    let _service = ctx.services.get_mut(&id).await;
     ctx.db
         .mutate(|db| {
             db.as_public_mut()
@@ -71,7 +70,25 @@ pub async fn stop(ctx: RpcContext, ControlParams { id }: ControlParams) -> Resul
     Ok(())
 }
 
+#[derive(Deserialize, Serialize, Parser, TS)]
+#[group(skip)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct ForceStopParams {
+    pub id: PackageId,
+    #[ts(type = "string")]
+    pub force_stop_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn force_stop(
+    ctx: RpcContext,
+    ForceStopParams { id, force_stop_at }: ForceStopParams,
+) -> Result<(), Error> {
+    ctx.services.force_stop(&ctx, &id, force_stop_at).await
+}
+
 pub async fn restart(ctx: RpcContext, ControlParams { id }: ControlParams) -> Result<(), Error> {
+    let _service = ctx.services.get_mut(&id).await;
     ctx.db
         .mutate(|db| {
             db.as_public_mut()

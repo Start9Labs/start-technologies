@@ -216,7 +216,7 @@ impl<A: Actor + Clone> ConcurrentActor<A> {
         self.queue(id, message).await
     }
 
-    pub async fn shutdown(self, strategy: PendingMessageStrategy) {
+    pub async fn shutdown(mut self, strategy: PendingMessageStrategy) {
         drop(self.messenger);
         let timeout = match strategy {
             PendingMessageStrategy::CancelAll => {
@@ -240,8 +240,8 @@ impl<A: Actor + Clone> ConcurrentActor<A> {
             futures::future::pending().boxed()
         };
         tokio::select! {
-            _ = aborter => (),
-            _ = self.runtime => (),
+            _ = aborter => { let _ = (&mut self.runtime).await; },
+            _ = &mut self.runtime => (),
         }
     }
 }
@@ -297,6 +297,40 @@ mod test {
         ) -> Self::Response {
         }
     }
+    #[derive(Clone)]
+    struct HeldActor(std::sync::Arc<()>);
+    impl Actor for HeldActor {
+        fn init(&mut self, jobs: &BackgroundJobQueue) {
+            let held = self.0.clone();
+            jobs.add_job(async move {
+                let _held = held;
+                futures::future::pending::<()>().await;
+            });
+        }
+    }
+    impl Handler<Pending> for HeldActor {
+        type Response = ();
+        fn conflicts_with(_: &Pending) -> ConflictBuilder<Self> {
+            ConflictBuilder::everything()
+        }
+        async fn handle(&mut self, _: Guid, _: Pending, _: &BackgroundJobQueue) {
+            futures::future::pending::<()>().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn force_stop_actor_cancellation_releases_seed_before_returning() {
+        let held = std::sync::Arc::new(());
+        let actor = super::ConcurrentActor::new(HeldActor(held.clone()));
+        drop(actor.queue(Guid::new(), Pending));
+        tokio::task::yield_now().await;
+        assert!(std::sync::Arc::strong_count(&held) > 1);
+        actor
+            .shutdown(crate::util::actor::PendingMessageStrategy::CancelAll)
+            .await;
+        assert_eq!(std::sync::Arc::strong_count(&held), 1);
+    }
+
     #[tokio::test]
     async fn test_conflicts() {
         let actor = super::ConcurrentActor::new(CActor);

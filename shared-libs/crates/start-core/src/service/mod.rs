@@ -59,6 +59,7 @@ use crate::{ActionId, CAP_1_KiB, DATA_DIR, ImageId, PackageId};
 pub mod action;
 pub mod cli;
 pub mod effects;
+mod force_stop;
 pub mod persistent_container;
 pub mod procedure_name;
 mod rpc;
@@ -224,6 +225,51 @@ impl ServiceRef {
         }
         .boxed())
     }
+    pub(super) async fn drain_effects(&self) -> Result<(), Error> {
+        if let Some((hdl, shutdown)) = self.seed.persistent_container.rpc_server.send_replace(None)
+        {
+            shutdown.shutdown();
+            hdl.wait_for_abort().await.ok();
+        }
+        Ok(())
+    }
+
+    pub(super) async fn kill_container(&self) -> Result<(), Error> {
+        self.seed
+            .persistent_container
+            .lxc_container
+            .get()
+            .or_not_found("lxc container")?
+            .kill()
+            .await
+    }
+
+    pub(super) async fn hard_shutdown(self) -> Result<(), Error> {
+        let service = Arc::try_unwrap(self.0).map_err(|_| {
+            Error::new(
+                eyre!("{}", t!("service.mod.service-actor-held-after-shutdown")),
+                ErrorKind::Unknown,
+            )
+        })?;
+        service
+            .actor
+            .shutdown(crate::util::actor::PendingMessageStrategy::CancelAll)
+            .await;
+        Arc::try_unwrap(service.seed)
+            .map_err(|_| {
+                Error::new(
+                    eyre!(
+                        "{}",
+                        t!("service.mod.service-actor-seed-held-after-shutdown")
+                    ),
+                    ErrorKind::Unknown,
+                )
+            })?
+            .persistent_container
+            .hard_exit()
+            .await
+    }
+
     pub async fn shutdown(self, uninit: Option<ExitParams>) -> Result<(), Error> {
         if let Some((hdl, shutdown)) = self.seed.persistent_container.rpc_server.send_replace(None)
         {

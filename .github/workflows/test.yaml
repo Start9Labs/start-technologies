@@ -136,6 +136,8 @@ jobs:
           npm --prefix projects/start-sdk ci
       - name: Validate web lockfile
         run: npm ci
+      - name: Check UI logic
+        run: npm run test:ui
       # rustfmt runs in start9/fmt-env (pinned nightly); prettier + taplo run
       # natively. Building the image here means run-fmt.sh reuses it.
       - name: Build rustfmt container

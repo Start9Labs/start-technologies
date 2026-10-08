@@ -9,4 +9,5 @@ export type StatusInfo = {
   error: ErrorData | null
   started: string | null
   desired: DesiredStatus
+  forceStopAt: string | null
 }

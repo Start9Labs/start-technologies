@@ -534,6 +534,12 @@ pub fn package<C: Context>() -> ParentHandler<C> {
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
+            "force-stop",
+            from_fn_async(control::force_stop)
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_cli(),
+        )
+        .subcommand(
             "restart",
             from_fn_async(control::restart)
                 .with_metadata("sync_db", Value::Bool(true))
