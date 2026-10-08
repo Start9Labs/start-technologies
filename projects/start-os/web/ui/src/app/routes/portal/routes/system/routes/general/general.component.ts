@@ -18,7 +18,6 @@ import {
   LANGUAGES,
   TaskService,
 } from '@start9labs/shared'
-import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import { TuiAnimated } from '@taiga-ui/cdk'
 import {
   TuiAppearance,
@@ -269,7 +268,6 @@ import { UPDATE } from './update.component'
   ],
 })
 export default class SystemGeneralComponent {
-  private readonly dialogs = inject(TuiResponsiveDialogService)
   private readonly tasks = inject(TaskService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly api = inject(ApiService)
@@ -299,12 +297,8 @@ export default class SystemGeneralComponent {
     this.i18nService.setLang(language.name)
   }
 
-  // Expose shared utilities for template use
   readonly getKeyboardName = getKeyboardName
 
-  /**
-   * Open keyboard selection dialog to change keyboard layout
-   */
   onChangeKeyboard() {
     const server = this.server()
     if (!server) return
@@ -342,7 +336,7 @@ export default class SystemGeneralComponent {
   }
 
   onUpdate() {
-    if (this.os.updateAvailable$.value) {
+    if (this.os.updateCandidates().length) {
       this.update()
     } else {
       this.check()
@@ -435,20 +429,16 @@ export default class SystemGeneralComponent {
 
     const kiosk = server.kiosk
 
-    // If disabling kiosk, just disable it
     if (kiosk) {
       await this.disableKiosk()
       return
     }
 
-    // Enabling kiosk - check if keyboard is already set
     if (server.keyboard) {
-      // Keyboard already set, just enable kiosk
       await this.enableKiosk()
       return
     }
 
-    // No keyboard set - prompt user to select from all keyboards
     const keyboards = getAllKeyboardsSorted(LANGUAGE_TO_CODE[server.language])
     this.promptKeyboardSelection(keyboards)
   }
@@ -491,9 +481,9 @@ export default class SystemGeneralComponent {
   }
 
   private update() {
-    this.dialogs
-      .open(UPDATE, { data: { currentVersion: this.server()?.version } })
-      .subscribe()
+    if (!this.os.updateCandidates().length) return
+
+    this.dialog.openComponent(UPDATE).subscribe()
   }
 
   private async check(): Promise<void> {
@@ -502,7 +492,7 @@ export default class SystemGeneralComponent {
       'Checking for updates',
     )
 
-    if (this.os.updateAvailable$.value) {
+    if (this.os.updateCandidates().length) {
       this.update()
     } else if (success) {
       this.dialog

@@ -1,4 +1,6 @@
 import { inject, Injectable } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
+import { T, Version } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import {
   BehaviorSubject,
@@ -11,7 +13,6 @@ import {
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { getServerInfo } from 'src/app/utils/get-server-info'
 import { DataModel } from './patch-db/data-model'
-import { T, Version } from '@start9labs/start-core'
 
 @Injectable({
   providedIn: 'root',
@@ -20,8 +21,31 @@ export class OSService {
   private readonly api = inject(ApiService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
 
-  osUpdate?: T.OsVersionInfoMap
-  readonly updateAvailable$ = new BehaviorSubject<boolean>(false)
+  private readonly catalog$ = new BehaviorSubject<T.OsVersionInfoMap>({})
+
+  readonly updateCandidates$ = combineLatest([
+    this.catalog$,
+    this.patch.watch$('serverInfo', 'version'),
+  ]).pipe(
+    map(([catalog, installed]) => {
+      const current = Version.parse(installed)
+      return Object.entries(catalog)
+        .filter(
+          ([version]) => Version.parse(version).compare(current) === 'greater',
+        )
+        .sort(([a], [b]) => Version.parse(b).compareForSort(Version.parse(a)))
+        .map(([version, info]) => ({ version, notes: info.releaseNotes }))
+    }),
+    shareReplay({ bufferSize: 1, refCount: true }),
+  )
+
+  readonly updateCandidates = toSignal(this.updateCandidates$, {
+    initialValue: [],
+  })
+  readonly updateAvailable$ = this.updateCandidates$.pipe(
+    map(candidates => candidates.length > 0),
+    distinctUntilChanged(),
+  )
 
   private readonly statusInfo$ = this.patch
     .watch$('serverInfo', 'statusInfo')
@@ -48,20 +72,14 @@ export class OSService {
   ]).pipe(map(([available, updating]) => available && !updating))
 
   async loadOS(): Promise<void> {
-    const { version, id } = await getServerInfo(this.patch)
+    const { id } = await getServerInfo(this.patch)
     const { startosRegistry } = await firstValueFrom(this.patch.watch$('ui'))
 
-    this.osUpdate = await this.api.checkOSUpdate({
-      registry: startosRegistry,
-      serverId: id,
-    })
-
-    const latest = Object.entries(this.osUpdate).at(-1)?.[0]
-
-    this.updateAvailable$.next(
-      latest
-        ? Version.parse(latest).compare(Version.parse(version)) === 'greater'
-        : false,
+    this.catalog$.next(
+      await this.api.checkOSUpdate({
+        registry: startosRegistry,
+        serverId: id,
+      }),
     )
   }
 }
