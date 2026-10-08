@@ -31,7 +31,6 @@ pub struct StartParams {
 
 #[instrument(skip_all)]
 pub async fn start(ctx: RpcContext, StartParams { id, force }: StartParams) -> Result<(), Error> {
-    let _service = ctx.services.get_mut(&id).await;
     ctx.db
         .mutate(|db| {
             let entry = db
@@ -54,7 +53,6 @@ pub async fn start(ctx: RpcContext, StartParams { id, force }: StartParams) -> R
 }
 
 pub async fn stop(ctx: RpcContext, ControlParams { id }: ControlParams) -> Result<(), Error> {
-    let _service = ctx.services.get_mut(&id).await;
     ctx.db
         .mutate(|db| {
             db.as_public_mut()
@@ -88,7 +86,6 @@ pub async fn force_stop(
 }
 
 pub async fn restart(ctx: RpcContext, ControlParams { id }: ControlParams) -> Result<(), Error> {
-    let _service = ctx.services.get_mut(&id).await;
     ctx.db
         .mutate(|db| {
             db.as_public_mut()

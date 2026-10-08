@@ -92,14 +92,12 @@ impl super::force_stop::ForceStopTarget for ServiceForceStop<'_> {
         self.ctx
             .db
             .mutate(|db| {
-                let status = db
-                    .as_public_mut()
+                db.as_public_mut()
                     .as_package_data_mut()
                     .as_idx_mut(self.id)
                     .or_not_found(self.id)?
-                    .as_status_info_mut();
-                status.stop()?;
-                status.stopped()
+                    .as_status_info_mut()
+                    .stopped()
             })
             .await
             .result?;
@@ -305,12 +303,12 @@ impl ServiceMap {
             })
             .await
             .result?;
-        super::force_stop::force_stop(&mut ServiceForceStop {
+        let res = super::force_stop::force_stop(&mut ServiceForceStop {
             ctx,
             id,
             service: &mut service,
         })
-        .await?;
+        .await;
         if let Some(service) = service.as_ref() {
             service
                 .seed
@@ -318,7 +316,7 @@ impl ServiceMap {
                 .forcing_stop
                 .store(false, std::sync::atomic::Ordering::SeqCst);
         }
-        Ok(())
+        res
     }
 
     #[instrument(skip_all)]
