@@ -6,7 +6,6 @@ import {
   SafeLinksDirective,
   TaskService,
 } from '@start9labs/shared'
-import { Version } from '@start9labs/start-core'
 import { TuiButton, TuiDialogContext, TuiScrollbar } from '@taiga-ui/core'
 import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
@@ -20,12 +19,17 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
   template: `
     <h2 style="margin-top: 0">{{ 'Release notes' | i18n | titlecase }}</h2>
     <tui-scrollbar style="margin-bottom: 24px; max-height: 50vh;">
-      @for (v of versions; track $index) {
+      @for (v of os.updateCandidates(); track v.version) {
         <h4 class="version-header">{{ v.version }}</h4>
         <div safeLinks [innerHTML]="v.notes | markdown | dompurify"></div>
       }
     </tui-scrollbar>
-    <button tuiButton style="float: right;" (click)="update()">
+    <button
+      tuiButton
+      style="float: right;"
+      [disabled]="!os.updateCandidates().length"
+      (click)="update()"
+    >
       {{ 'Begin Update' | i18n }}
     </button>
   `,
@@ -51,27 +55,21 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
 export class SystemUpdateModal {
   private readonly tasks = inject(TaskService)
   private readonly embassyApi = inject(ApiService)
-  private readonly os = inject(OSService)
+  protected readonly os = inject(OSService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
-  private readonly context =
-    injectContext<TuiDialogContext<void, { currentVersion: string }>>()
-
-  readonly versions = Object.entries(this.os.osUpdate!)
-    .filter(
-      ([version]) =>
-        Version.parse(version).compare(
-          Version.parse(this.context.data.currentVersion),
-        ) === 'greater',
-    )
-    .sort(([a], [b]) => Version.parse(b).compareForSort(Version.parse(a)))
-    .map(([version, info]) => ({ version, notes: info.releaseNotes }))
+  private readonly context = injectContext<TuiDialogContext<void>>()
 
   async update() {
+    if (!this.os.updateCandidates().length) return
+
     const { startosRegistry } = await firstValueFrom(this.patch.watch$('ui'))
 
     this.tasks.run(async () => {
+      const latest = this.os.updateCandidates()[0]
+      if (!latest) return
+
       await this.embassyApi.updateServer({
-        targetVersion: `=${this.versions[0]!.version}`,
+        targetVersion: `=${latest.version}`,
         registry: startosRegistry,
         progress: false,
       })

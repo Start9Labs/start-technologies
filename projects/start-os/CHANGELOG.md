@@ -21,6 +21,8 @@ for the detail behind its highlights.
 
 ### Fixed
 
+- **The Software Update badge clears after an OS update, and the update dialog opens only when a newer release is available.**
+
 - **`start-cli package install` reports a package missing from the registry it asked**, naming
   that registry, instead of prompting to choose from an empty list of flavors.
 
@@ -28,8 +30,6 @@ for the detail behind its highlights.
 
 - **Services keep their internal IPv6 bridge address enabled.** Address switches
   affect access from other networks while service-to-service access stays available.
-
-### Fixed
 
 - **Large HTTP responses arrive complete through service HTTPS addresses when the backend closes the connection.**
 
