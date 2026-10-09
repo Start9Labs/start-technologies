@@ -1,0 +1,1 @@
+- **Package icons are served at `/icons/<id>/<version>`**, and a dependency's icon at `/icons/<id>/<version>/dependencies/<dependency>`. `package get` leaves icons out of its response for StartOS 0.4.0.3 and later, which load them from these routes. A reverse proxy in front of the registry must forward `/icons/`.

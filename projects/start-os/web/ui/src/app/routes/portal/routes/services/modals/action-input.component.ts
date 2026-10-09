@@ -1,3 +1,4 @@
+import { AsyncPipe } from '@angular/common'
 import { Component, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import {
@@ -22,6 +23,7 @@ import {
   FormComponent,
 } from 'src/app/routes/portal/components/form.component'
 import { InvalidService } from 'src/app/routes/portal/components/form/containers/control.directive'
+import { PkgIconPipe } from 'src/app/routes/portal/pipes/pkg-icon'
 import { ActionService } from 'src/app/services/action.service'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
@@ -36,7 +38,6 @@ export type PackageActionData = {
   pkgInfo: {
     id: string
     title: string
-    icon: string
     status: PrimaryStatus
   }
   actionInfo: {
@@ -49,7 +50,7 @@ export type PackageActionData = {
 @Component({
   template: `
     <div class="service-title">
-      <img [src]="pkgInfo.icon" alt="" />
+      <img [src]="pkgInfo.id | pkgIcon | async" alt="" />
       <h4>{{ pkgInfo.title }}</h4>
     </div>
     @if (error()) {
@@ -100,7 +101,15 @@ export type PackageActionData = {
       }
     }
   `,
-  imports: [TuiNotification, TuiLoader, TuiButton, FormComponent, i18nPipe],
+  imports: [
+    TuiNotification,
+    TuiLoader,
+    TuiButton,
+    FormComponent,
+    i18nPipe,
+    AsyncPipe,
+    PkgIconPipe,
+  ],
   providers: [InvalidService],
 })
 export class ActionInputModal {

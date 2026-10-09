@@ -15,7 +15,6 @@ use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::s9pk::manifest::{LocaleString, Manifest};
 use crate::status::StatusInfo;
-use crate::util::DataUrl;
 use crate::util::serde::{Pem, is_partial_of};
 use crate::{ActionId, GatewayId, HealthCheckId, HostId, PackageId, ReplayId};
 
@@ -391,7 +390,6 @@ pub struct PackageDataEntry {
     pub registry: Option<Url>,
     #[ts(type = "string")]
     pub developer_key: Pem<ed25519_dalek::VerifyingKey>,
-    pub icon: DataUrl<'static>,
     #[ts(type = "string | null")]
     pub last_backup: Option<DateTime<Utc>>,
     pub current_dependencies: CurrentDependencies,
@@ -462,7 +460,6 @@ impl Map for CurrentDependencies {
 #[model = "Model<Self>"]
 pub struct CurrentDependencyInfo {
     pub title: Option<LocaleString>,
-    pub icon: Option<DataUrl<'static>>,
     #[serde(flatten)]
     pub kind: CurrentDependencyKind,
     #[ts(type = "string")]

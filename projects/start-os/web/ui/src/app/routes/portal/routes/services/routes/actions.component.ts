@@ -35,7 +35,7 @@ import { ServiceActionComponent } from '../components/action.component'
               tuiCell
               [action]="a"
               [inactive]="inactive"
-              (click)="handle(pkg.status, pkg.icon, pkg.manifest, a)"
+              (click)="handle(pkg.status, pkg.manifest, a)"
             ></button>
           }
         </section>
@@ -99,7 +99,6 @@ export default class ServiceActionsRoute {
         const status = getInstalledBaseStatus(pkg.statusInfo)
         return {
           status,
-          icon: pkg.icon,
           manifest: getManifest(pkg),
           outboundGateway: pkg.outboundGateway,
           actions: Object.entries(pkg.actions)
@@ -172,12 +171,11 @@ export default class ServiceActionsRoute {
 
   handle(
     status: BaseStatus,
-    icon: string,
     { id, title }: T.Manifest,
     action: T.ActionMetadata & { id: string },
   ) {
     this.actions.present({
-      pkgInfo: { id, title, icon, status },
+      pkgInfo: { id, title, status },
       actionInfo: { id: action.id, metadata: action },
     })
   }

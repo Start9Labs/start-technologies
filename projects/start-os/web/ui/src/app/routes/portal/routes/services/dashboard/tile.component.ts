@@ -1,7 +1,9 @@
+import { AsyncPipe } from '@angular/common'
 import { Component, computed, input } from '@angular/core'
 import { TuiCell, TuiTitle } from '@taiga-ui/core'
 import { TuiAvatar } from '@taiga-ui/kit'
 import { TuiCardLarge, tuiCardOptionsProvider } from '@taiga-ui/layout'
+import { PkgIconPipe } from 'src/app/routes/portal/pipes/pkg-icon'
 import { ServiceUptimeComponent } from 'src/app/routes/portal/routes/services/components/uptime.component'
 import { PkgDependencyErrors } from 'src/app/services/dep-error.service'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
@@ -13,7 +15,7 @@ import { StatusComponent } from './status.component'
   template: `
     <span tuiCell>
       <span tuiAvatar [round]="false">
-        <img alt="" [src]="pkg().icon" />
+        <img alt="" [src]="pkg() | pkgIcon | async" />
       </span>
       <span tuiTitle>
         <b>{{ manifest().title }}</b>
@@ -55,6 +57,8 @@ import { StatusComponent } from './status.component'
     ServiceUptimeComponent,
     StatusComponent,
     TuiAvatar,
+    AsyncPipe,
+    PkgIconPipe,
     TuiCell,
     TuiTitle,
   ],

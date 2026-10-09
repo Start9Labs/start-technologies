@@ -1,3 +1,4 @@
+import { AsyncPipe } from '@angular/common'
 import { Component, computed, inject, input } from '@angular/core'
 import { DialogService, i18nPipe, TaskService } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
@@ -7,6 +8,7 @@ import { filter } from 'rxjs'
 import { ServiceTasksComponent } from 'src/app/routes/portal/routes/services/components/tasks.component'
 import { ActionService } from 'src/app/services/action.service'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
+import { PackageIconService } from 'src/app/services/package-icon.service'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
 import {
   ALLOWED_STATUSES,
@@ -26,7 +28,7 @@ import { getManifest } from 'src/app/utils/get-package-data'
         [round]="false"
         [title]="title() || fallback()?.title"
       >
-        <img [src]="pkg()?.icon || fallback()?.icon" alt="" />
+        <img [src]="icon() | async" alt="" />
       </i>
       <strong>
         {{
@@ -132,7 +134,7 @@ import { getManifest } from 'src/app/utils/get-package-data'
   host: {
     '[style.opacity]': '!disabled() ? null : "var(--tui-disabled-opacity)"',
   },
-  imports: [TuiButton, TuiAvatar, i18nPipe, TuiFade],
+  imports: [TuiButton, TuiAvatar, i18nPipe, TuiFade, AsyncPipe],
 })
 export class ServiceTaskComponent {
   private readonly actionService = inject(ActionService)
@@ -141,12 +143,19 @@ export class ServiceTaskComponent {
   private readonly tasks = inject(TaskService)
   private readonly component = inject(ServiceTasksComponent)
   private readonly i18n = inject(i18nPipe)
+  private readonly icons = inject(PackageIconService)
 
   readonly task = input.required<T.Task & { replayId: string }>()
   readonly services = input.required<Record<string, PackageDataEntry>>()
 
   readonly pkg = computed(() => this.services()[this.task().packageId])
   readonly title = computed((pkg = this.pkg()) => pkg && getManifest(pkg).title)
+
+  readonly icon = computed((pkg = this.pkg()) =>
+    pkg
+      ? this.icons.get(pkg)
+      : this.icons.get(this.component.pkg(), this.task().packageId),
+  )
 
   readonly fallback = computed(
     () => this.component.pkg().currentDependencies[this.task().packageId],
@@ -200,7 +209,6 @@ export class ServiceTaskComponent {
           id: task.packageId,
           title,
           status: getInstalledBaseStatus(pkg.statusInfo),
-          icon: pkg.icon,
         },
         actionInfo: { id: task.actionId, metadata },
         prefill: task.input?.set,

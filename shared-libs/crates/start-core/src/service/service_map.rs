@@ -227,7 +227,6 @@ impl ServiceMap {
                 ErrorKind::InvalidRequest,
             ));
         }
-        let icon = s9pk.icon_data_url().await?;
         let developer_key = s9pk.as_archive().signer();
         let mut service = self.get_mut(&id).await;
         // Fail before the download and before the service is quiesced.
@@ -308,7 +307,6 @@ impl ServiceMap {
                                         status_info: StatusInfo::default(),
                                         registry,
                                         developer_key: Pem::new(developer_key),
-                                        icon,
                                         last_backup: None,
                                         current_dependencies: Default::default(),
                                         actions: Default::default(),

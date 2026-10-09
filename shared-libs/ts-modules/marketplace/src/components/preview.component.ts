@@ -40,6 +40,7 @@ import { MarketplacePkg } from '../types'
 import { MarketplaceAboutComponent } from './about.component'
 import { MarketplaceDependenciesComponent } from './dependencies.component'
 import { MarketplaceFlavorsComponent } from './flavors.component'
+import { MarketplaceIconDirective } from './icon.directive'
 import { MarketplaceLinksComponent } from './links.component'
 import { MarketplaceReleaseNotesComponent } from './release-notes.component'
 
@@ -56,10 +57,7 @@ import { MarketplaceReleaseNotesComponent } from './release-notes.component'
     } @else if (pkg$ | async; as pkg) {
       <header tuiHeader>
         <span tuiAvatar [round]="false">
-          <img
-            alt=""
-            [src]="pkg.icon || 'assets/img/service-icons/fallback.png'"
-          />
+          <img [marketplaceIcon]="pkg" />
         </span>
         <span tuiTitle tuiFade>{{ pkg.title }}</span>
         <span tuiAccessories><ng-content /></span>
@@ -116,6 +114,7 @@ import { MarketplaceReleaseNotesComponent } from './release-notes.component'
     MarketplaceFlavorsComponent,
     MarketplaceAboutComponent,
     MarketplaceReleaseNotesComponent,
+    MarketplaceIconDirective,
     i18nPipe,
   ],
 })

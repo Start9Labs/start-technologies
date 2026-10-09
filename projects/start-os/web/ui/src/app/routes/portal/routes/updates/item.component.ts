@@ -1,7 +1,10 @@
 import { DatePipe } from '@angular/common'
 import { Component, inject, input, signal } from '@angular/core'
 import { RouterLink } from '@angular/router'
-import { MarketplacePkg } from '@start9labs/marketplace'
+import {
+  MarketplaceIconDirective,
+  MarketplacePkg,
+} from '@start9labs/marketplace'
 import {
   DialogService,
   i18nPipe,
@@ -48,7 +51,10 @@ import UpdatesComponent from './updates.component'
             size="s"
             [round]="false"
           >
-            <img alt="" [src]="item().icon" />
+            <img
+              [marketplaceIcon]="item()"
+              [registry]="parent.current()?.url"
+            />
           </span>
           <span tuiTitle [style.margin]="'-0.125rem 0 0'">
             <b tuiFade>{{ item().title }}</b>
@@ -255,6 +261,7 @@ import UpdatesComponent from './updates.component'
     }
   `,
   imports: [
+    MarketplaceIconDirective,
     RouterLink,
     TuiExpand,
     TuiButton,

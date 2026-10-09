@@ -1,10 +1,11 @@
 import { Component, input, Input } from '@angular/core'
 import { RouterLink } from '@angular/router'
-import { i18nPipe, TrustUrlPipe } from '@start9labs/shared'
+import { i18nPipe } from '@start9labs/shared'
 import { TuiTitle, TuiCell } from '@taiga-ui/core'
 import { TuiAvatar } from '@taiga-ui/kit'
 import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
 import { MarketplacePkg } from '../types'
+import { MarketplaceIconDirective } from './icon.directive'
 
 @Component({
   selector: 'marketplace-flavors',
@@ -18,7 +19,7 @@ import { MarketplacePkg } from '../types'
         [queryParams]="{ id: pkg.id, flavor: pkg.flavor }"
       >
         <span tuiAvatar appearance="action-grayscale" [round]="false">
-          <img alt="" [src]="pkg.icon | trustUrl" />
+          <img [marketplaceIcon]="pkg" />
         </span>
         <span tuiTitle>
           {{ pkg.title }}
@@ -32,7 +33,7 @@ import { MarketplacePkg } from '../types'
     RouterLink,
     TuiCell,
     TuiTitle,
-    TrustUrlPipe,
+    MarketplaceIconDirective,
     TuiAvatar,
     i18nPipe,
     TuiHeader,

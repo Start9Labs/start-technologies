@@ -1,13 +1,15 @@
+import { AsyncPipe } from '@angular/common'
 import { Component } from '@angular/core'
 import { i18nPipe } from '@start9labs/shared'
 import { TuiButton, TuiDialogContext, TuiNotification } from '@taiga-ui/core'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
+import { PkgIconPipe } from 'src/app/routes/portal/pipes/pkg-icon'
 import { PackageActionData } from './action-input.component'
 
 @Component({
   template: `
     <div class="service-title">
-      <img [src]="pkgInfo.icon" alt="" />
+      <img [src]="pkgInfo.id | pkgIcon | async" alt="" />
       <h4>{{ pkgInfo.title }}</h4>
     </div>
     <div tuiNotification appearance="warning">
@@ -43,7 +45,7 @@ import { PackageActionData } from './action-input.component'
       margin-top: 1.5rem;
     }
   `,
-  imports: [TuiButton, TuiNotification, i18nPipe],
+  imports: [TuiButton, TuiNotification, i18nPipe, AsyncPipe, PkgIconPipe],
 })
 export class ActionConfirmModal {
   readonly context =

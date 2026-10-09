@@ -1,6 +1,10 @@
 import { inject, Injectable } from '@angular/core'
 import { WA_SESSION_STORAGE } from '@ng-web-apis/common'
-import { GetPackageRes, GetPackagesRes } from '@start9labs/marketplace'
+import {
+  FALLBACK_ICON,
+  GetPackageRes,
+  GetPackagesRes,
+} from '@start9labs/marketplace'
 import {
   FullKeyboard,
   pauseFor,
@@ -32,6 +36,7 @@ import {
 import { toAuthorityUrl } from 'src/app/utils/acme'
 import { AuthService } from '../auth.service'
 import { Mock } from './api.fixures'
+import { BTC_ICON, LND_ICON, PROXY_ICON } from './api-icons'
 import {
   ActionRes,
   CheckDnsRes,
@@ -126,6 +131,18 @@ export class MockApiService extends ApiService {
   ): Promise<string> {
     await pauseFor(2000)
     return markdown
+  }
+
+  async getStaticObjectUrl(url: string): Promise<string> {
+    await pauseFor(500)
+    const id = url.match(/([^/]+?)(\.s9pk)?\/icon$/)?.[1] || ''
+    const icons: Record<string, string> = {
+      bitcoind: BTC_ICON,
+      lnd: LND_ICON,
+      'btc-rpc-proxy': PROXY_ICON,
+    }
+
+    return icons[id] || FALLBACK_ICON
   }
 
   // websocket

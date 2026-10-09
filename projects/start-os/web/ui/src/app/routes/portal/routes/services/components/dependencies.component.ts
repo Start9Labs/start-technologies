@@ -1,4 +1,4 @@
-import { KeyValuePipe } from '@angular/common'
+import { AsyncPipe, KeyValuePipe } from '@angular/common'
 import { Component, input } from '@angular/core'
 import { RouterLink } from '@angular/router'
 import { i18nKey, i18nPipe } from '@start9labs/shared'
@@ -7,6 +7,7 @@ import { TuiAvatar } from '@taiga-ui/kit'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
 import { PkgDependencyErrors } from 'src/app/services/dep-error.service'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
+import { PkgIconPipe } from '../../../pipes/pkg-icon'
 import { ToManifestPipe } from '../../../pipes/to-manifest'
 
 @Component({
@@ -35,9 +36,10 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
           <img
             alt=""
             [src]="
-              services[d.key]?.icon ||
-              d.value.icon ||
-              'assets/img/service-icons/fallback.png'
+              (services[d.key]
+                ? (services[d.key]! | pkgIcon)
+                : (pkg() | pkgIcon: d.key)
+              ) | async
             "
           />
         </span>
@@ -88,6 +90,8 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
     PlaceholderComponent,
     i18nPipe,
     ToManifestPipe,
+    PkgIconPipe,
+    AsyncPipe,
   ],
 })
 export class ServiceDependenciesComponent {

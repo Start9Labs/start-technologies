@@ -371,7 +371,6 @@ async fn dependency_info(
 ) -> Result<CurrentDependencyInfo, Error> {
     Ok(CurrentDependencyInfo {
         title: s9pk.dependency_metadata(dep_id).await?.map(|m| m.title),
-        icon: s9pk.dependency_icon_data_url(dep_id).await?,
         kind,
         version_range,
     })
