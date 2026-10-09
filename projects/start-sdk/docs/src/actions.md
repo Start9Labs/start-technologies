@@ -124,7 +124,7 @@ await sdk.action.run({
 })
 ```
 
-An action without input takes no `input`, and runs without a form. Calling the effects directly works the same way: the target keys the form `effects.action.getInput` opens by the calling procedure's event id, so the `effects.action.run` that answers it must come from the same procedure, one form at a time.
+An action without input takes no `input`, and runs without a form. The target pairs a form with its submission by event ID. `sdk.action.run` reuses the caller's event ID when present, so run one input action at a time from an action handler. Without a caller event ID, each call gets its own ID. When calling `effects.action.getInput` and `effects.action.run` directly, pass the same `eventId` to both, or omit it to use the caller's event ID.
 
 ## Registering Actions
 
