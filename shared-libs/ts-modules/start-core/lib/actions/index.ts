@@ -29,27 +29,37 @@ export const runAction = async <
   const { effects, packageId, actionId } = options
   if (!options.input) return effects.action.run({ packageId, actionId })
   const eventId = effects.eventId ?? crypto.randomUUID()
-  const form = await effects.action.getInput({
-    packageId,
-    actionId,
-    eventId,
-    prefill: (options.prefill ?? null) as Record<string, unknown> | null,
-  })
+  const form = await effects.action.getInput(
+    actionParams({
+      packageId,
+      actionId,
+      eventId,
+      prefill: (options.prefill ?? null) as Record<string, unknown> | null,
+    }),
+  )
   if (!form) {
     throw new Error(
       `Action ${actionId} of ${packageId ?? 'this service'} has no input form`,
     )
   }
-  return effects.action.run({
-    packageId,
-    actionId,
-    eventId,
-    input: options.input({
-      spec: form.spec as IST.InputSpec,
-      value: form.value as T.DeepPartial<Input> | null,
+  return effects.action.run(
+    actionParams({
+      packageId,
+      actionId,
+      eventId,
+      input: options.input({
+        spec: form.spec as IST.InputSpec,
+        value: form.value as T.DeepPartial<Input> | null,
+      }),
     }),
-  })
+  )
 }
+
+function actionParams<Request extends { eventId: string }>(request: Request) {
+  // StartOS 0.4.0.2 overwrites action event IDs before JSON serialization.
+  return { ...request, toJSON: () => request }
+}
+
 type GetActionInputType<A extends ActionInfo<T.ActionId, any>> =
   A extends ActionInfo<T.ActionId, infer I> ? I : never
 

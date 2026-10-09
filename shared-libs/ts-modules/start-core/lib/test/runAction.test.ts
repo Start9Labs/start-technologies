@@ -14,6 +14,15 @@ const metadata = {
   access: 'public' as const,
 }
 
+function legacyActionParams<Request extends object>(
+  request: Request,
+  eventId: string | null,
+): Request & { eventId?: string } {
+  return JSON.parse(
+    JSON.stringify({ ...request, eventId: eventId ?? undefined }),
+  )
+}
+
 function callerEffects(
   action: ReturnType<typeof attachAction>,
   caller: string,
@@ -27,23 +36,26 @@ function callerEffects(
     eventId,
     action: {
       getInput: jest.fn(
-        async (options: Parameters<Effects['action']['getInput']>[0]) =>
-          action.getInput({
-            effects: targetEffects(options.eventId),
-            prefill: (options.prefill ?? null) as {
+        async (options: Parameters<Effects['action']['getInput']>[0]) => {
+          const request = legacyActionParams(options, eventId)
+          return action.getInput({
+            effects: targetEffects(request.eventId),
+            prefill: (request.prefill ?? null) as {
               hostId?: string
               address?: string
             } | null,
             caller,
-          }),
+          })
+        },
       ),
-      run: jest.fn(async (options: Parameters<Effects['action']['run']>[0]) =>
-        action.run({
-          effects: targetEffects(options.eventId),
-          input: options.input as { hostId: string; address: string },
+      run: jest.fn(async (options: Parameters<Effects['action']['run']>[0]) => {
+        const request = legacyActionParams(options, eventId)
+        return action.run({
+          effects: targetEffects(request.eventId),
+          input: request.input as { hostId: string; address: string },
           caller,
-        }),
-      ),
+        })
+      }),
     },
   }) as unknown as Effects
 }
@@ -96,12 +108,14 @@ describe('runAction', () => {
       packageId: 'tor',
       actionId: 'attach',
       eventId: 'action-event',
+      toJSON: expect.any(Function),
       prefill: { hostId: 'peer' },
     })
     expect(effects.action.run).toHaveBeenCalledWith({
       packageId: 'tor',
       actionId: 'attach',
       eventId: 'action-event',
+      toJSON: expect.any(Function),
       input: { hostId: 'peer', address: 'peer-0' },
     })
     expect(effects.eventId).toBe('action-event')
@@ -140,13 +154,30 @@ describe('runAction', () => {
       }),
     ).resolves.toBeNull()
 
-    const eventId = (effects.action.getInput as jest.Mock).mock.calls[0][0]
-      .eventId
+    const getInputRequest = (effects.action.getInput as jest.Mock).mock
+      .calls[0][0]
+    const runRequest = (effects.action.run as jest.Mock).mock.calls[0][0]
+    const serializedGetInput = legacyActionParams(getInputRequest, null)
+    const serializedRun = legacyActionParams(runRequest, null)
+    const eventId = serializedGetInput.eventId
     expect(eventId).toEqual(expect.any(String))
+    expect(serializedGetInput).toEqual({
+      actionId: 'attach',
+      eventId,
+      prefill: { hostId: 'peer' },
+    })
+    expect(serializedRun).toEqual({
+      actionId: 'attach',
+      eventId,
+      input: { hostId: 'peer', address: 'peer-0' },
+    })
+    expect(serializedGetInput).not.toHaveProperty('toJSON')
+    expect(serializedRun).not.toHaveProperty('toJSON')
     expect(effects.action.run).toHaveBeenCalledWith({
       packageId: undefined,
       actionId: 'attach',
       eventId,
+      toJSON: expect.any(Function),
       input: { hostId: 'peer', address: 'peer-0' },
     })
     expect(effects.eventId).toBeNull()
@@ -177,13 +208,13 @@ describe('runAction', () => {
       }
 
       const eventIds = (effects.action.getInput as jest.Mock).mock.calls.map(
-        ([options]) => options.eventId,
+        ([options]) => legacyActionParams(options, null).eventId,
       )
       expect(eventIds).toEqual([expect.any(String), expect.any(String)])
       expect(new Set(eventIds).size).toBe(2)
       expect(
         (effects.action.run as jest.Mock).mock.calls.map(
-          ([options]) => options.eventId,
+          ([options]) => legacyActionParams(options, null).eventId,
         ),
       ).toEqual(eventIds)
       expect(ran).toHaveBeenCalledWith(
@@ -198,7 +229,7 @@ describe('runAction', () => {
     },
   )
 
-  test('a null-event transport needs an explicit ID to reuse a form', async () => {
+  test('a null-event transport cannot pair direct input calls', async () => {
     const ran = jest.fn()
     const effects = callerEffects(attachAction(ran), 'bitcoind', null)
     await effects.action.getInput({ actionId: 'attach' })
@@ -216,7 +247,9 @@ describe('runAction', () => {
     'an action with no input leaves event %s unchanged',
     async eventId => {
       const result = { version: '1' as const, message: 'Done' }
-      const run = jest.fn(async () => result)
+      const run = jest.fn(
+        async (_options: Parameters<Effects['action']['run']>[0]) => result,
+      )
       const effects = Object.freeze({
         eventId,
         action: { getInput: jest.fn(), run },
@@ -228,6 +261,7 @@ describe('runAction', () => {
 
       expect(effects.action.getInput).not.toHaveBeenCalled()
       expect(run).toHaveBeenCalledWith({ packageId: 'tor', actionId: 'reset' })
+      expect(run.mock.calls[0][0]).not.toHaveProperty('toJSON')
       expect(effects.eventId).toBe(eventId)
     },
   )

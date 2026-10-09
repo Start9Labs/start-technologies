@@ -1,3 +1,5 @@
+import { setupManifest, StartSdk } from '@start9labs/start-sdk'
+import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
 import * as net from 'net'
 import { CallbackHolder } from '../Models/CallbackHolder'
@@ -5,21 +7,127 @@ import { makeEffects } from './EffectCreator'
 
 jest.mock('net', () => ({ createConnection: jest.fn() }))
 
-describe('makeEffects action event identity', () => {
-  let writes: string[]
+const sdk = StartSdk.of()
+  .withManifest(
+    setupManifest({
+      id: 'caller',
+      title: '',
+      license: '',
+      packageRepo: '',
+      upstreamRepo: '',
+      marketingUrl: '',
+      donationUrl: null,
+      description: { short: '', long: '' },
+      images: {},
+      volumes: [],
+    }),
+  )
+  .build(true)
+
+const metadata = {
+  name: 'Attach',
+  description: '',
+  warning: null,
+  allowedStatuses: 'any' as const,
+  group: null,
+  visibility: 'hidden' as const,
+  access: 'public' as const,
+}
+
+type Input = { hostId: string; address: string }
+type Request = {
+  id: number
+  method: string
+  params: {
+    packageId?: string
+    actionId?: string
+    eventId?: string
+    prefill?: Partial<Input> | null
+    input?: Input
+  }
+}
+
+function attachAction(ran: jest.Mock) {
+  return sdk.Action.withInput(
+    'attach',
+    metadata,
+    async ({ prefill }) =>
+      sdk.InputSpec.of({
+        hostId: sdk.Value.hidden<string>(),
+        address: sdk.Value.select({
+          name: 'Address',
+          default: 'new',
+          values: {
+            new: 'New',
+            [`${(prefill as Partial<Input> | null)?.hostId}-0`]: 'Existing',
+          },
+        }),
+      }),
+    async () => null,
+    async ({ input, caller }) => {
+      ran(input, caller)
+      return null
+    },
+  )
+}
+
+describe('sdk.action.run through makeEffects', () => {
+  let requests: Request[]
+  let ran: jest.Mock
 
   beforeEach(() => {
-    writes = []
+    requests = []
+    ran = jest.fn()
+    const attach = attachAction(ran)
+    const reset = sdk.Action.withoutInput('reset', metadata, async () => {
+      ran()
+      return null
+    })
+    const dispatch = async ({ method, params }: Request) => {
+      const effects = makeEffects({
+        eventId: params.eventId ?? randomUUID(),
+      })
+      switch (method) {
+        case 'action.get-input':
+          expect(params.packageId).toBe('target')
+          expect(params.actionId).toBe('attach')
+          return attach.getInput({
+            effects,
+            prefill: params.prefill ?? null,
+            caller: 'caller',
+          })
+        case 'action.run':
+          expect(params.packageId).toBe('target')
+          return params.actionId === 'reset'
+            ? reset.run({ effects, input: {}, caller: 'caller' })
+            : attach.run({
+                effects,
+                input: params.input!,
+                caller: 'caller',
+              })
+        case 'get-os-ip':
+          return '127.0.0.1'
+        default:
+          throw new Error(`Unexpected RPC ${method}`)
+      }
+    }
     jest
       .mocked(net.createConnection)
       .mockImplementation((...args: unknown[]) => {
         const onConnect = args[1] as () => void
         const socket = Object.assign(new EventEmitter(), {
           write: jest.fn((data: string) => {
-            writes.push(data)
-            queueMicrotask(() => {
-              socket.emit('data', Buffer.from('{"result":null}\n'))
-            })
+            expect(data.endsWith('\n')).toBe(true)
+            const request: Request = JSON.parse(data)
+            requests.push(request)
+            void dispatch(request).then(
+              result =>
+                socket.emit(
+                  'data',
+                  Buffer.from(JSON.stringify({ result }) + '\n'),
+                ),
+              error => socket.emit('error', error),
+            )
             return true
           }),
           end: jest.fn(),
@@ -29,84 +137,47 @@ describe('makeEffects action event identity', () => {
       })
   })
 
-  describe.each([
-    ['getInput', 'action.get-input'],
-    ['run', 'action.run'],
-  ] as const)('%s', (effectMethod, rpcMethod) => {
-    test.each([
-      {
-        contextId: null,
-        override: 'generated-event',
-        expected: 'generated-event',
+  const run = (effects: ReturnType<typeof makeEffects>, hostId: string) =>
+    sdk.action.run({
+      effects,
+      packageId: 'target',
+      actionId: 'attach',
+      prefill: { hostId },
+      input: ({ spec, value }) => {
+        expect(
+          Object.keys((spec.address as { values: object }).values),
+        ).toEqual(['new', `${hostId}-0`])
+        expect(value).toBeNull()
+        return { hostId, address: `${hostId}-0` }
       },
-      {
-        contextId: 'caller-event',
-        override: undefined,
-        expected: 'caller-event',
-      },
-      {
-        contextId: 'caller-event',
-        override: 'explicit-event',
-        expected: 'explicit-event',
-      },
-      { contextId: null, override: undefined, expected: undefined },
-    ])(
-      'serializes $expected with context $contextId and override $override',
-      async ({ contextId, override, expected }) => {
-        const context = { eventId: contextId }
-        const effects = makeEffects(context)
-        const options = {
-          packageId: 'target',
-          actionId: 'configure',
-          ...(override === undefined ? {} : { eventId: override }),
-        }
+    })
 
-        await effects.action[effectMethod](options)
-
-        expect(writes).toHaveLength(1)
-        expect(writes[0].endsWith('\n')).toBe(true)
-        expect(JSON.parse(writes[0])).toEqual({
-          id: expect.any(Number),
-          method: rpcMethod,
-          params: {
-            packageId: 'target',
-            actionId: 'configure',
-            ...(expected === undefined ? {} : { eventId: expected }),
-          },
-        })
-        expect(context.eventId).toBe(contextId)
-        expect(effects.eventId).toBe(contextId)
-      },
-    )
-  })
-
-  test('action overrides leave unrelated RPCs and callback ownership in the caller context', async () => {
+  test('pairs the serialized form and submission without changing the caller context', async () => {
     const callbacks = new CallbackHolder()
     const constRetry = jest.fn()
-    const context = { eventId: 'caller-event', callbacks, constRetry }
+    const context = { eventId: null, callbacks, constRetry }
     const effects = makeEffects(context)
     const onLeave = jest.fn()
     effects.onLeaveContext(onLeave)
 
-    await effects.action.getInput({
-      actionId: 'configure',
-      eventId: 'action-event',
-    })
-    await effects.action.run({
-      actionId: 'configure',
-      eventId: 'action-event',
-    })
-    await effects.action.clear({ except: [] })
-    await effects.getOsIp()
-
-    expect(writes.map(data => JSON.parse(data).params.eventId)).toEqual([
-      'action-event',
-      'action-event',
-      'caller-event',
-      'caller-event',
+    await expect(run(effects, 'peer')).resolves.toBeNull()
+    expect(requests.map(request => request.method)).toEqual([
+      'action.get-input',
+      'action.run',
     ])
-    expect(context).toEqual({ eventId: 'caller-event', callbacks, constRetry })
-    expect(effects.eventId).toBe('caller-event')
+    const eventId = requests[0].params.eventId
+    expect(eventId).toEqual(expect.any(String))
+    expect(eventId).not.toBe('')
+    expect(requests[1].params.eventId).toBe(eventId)
+    expect(ran).toHaveBeenCalledWith(
+      { hostId: 'peer', address: 'peer-0' },
+      'caller',
+    )
+
+    await effects.getOsIp()
+    expect(requests[2].params).not.toHaveProperty('eventId')
+    expect(context).toEqual({ eventId: null, callbacks, constRetry })
+    expect(effects.eventId).toBeNull()
     expect(effects.constRetry).toBe(constRetry)
     expect(effects.isInContext).toBe(true)
     expect(onLeave).not.toHaveBeenCalled()
@@ -115,4 +186,94 @@ describe('makeEffects action event identity', () => {
     expect(effects.isInContext).toBe(false)
     expect(effects.constRetry).toBeUndefined()
   })
+
+  test.each(['sequential', 'concurrent'])(
+    '%s calls from one null-event caller keep independent dynamic forms',
+    async mode => {
+      const effects = makeEffects({ eventId: null })
+      if (mode === 'concurrent') {
+        await Promise.all([run(effects, 'first'), run(effects, 'second')])
+      } else {
+        await run(effects, 'first')
+        await run(effects, 'second')
+      }
+
+      const opened = requests.filter(
+        request => request.method === 'action.get-input',
+      )
+      const submitted = requests.filter(
+        request => request.method === 'action.run',
+      )
+      const eventIds = opened.map(request => request.params.eventId)
+      expect(eventIds).toEqual([expect.any(String), expect.any(String)])
+      expect(new Set(eventIds).size).toBe(2)
+      for (const request of submitted) {
+        expect(request.params.eventId).toBe(
+          opened.find(
+            form =>
+              form.params.prefill?.hostId === request.params.input?.hostId,
+          )?.params.eventId,
+        )
+      }
+      expect(submitted).toHaveLength(2)
+      expect(ran).toHaveBeenCalledTimes(2)
+      for (const hostId of ['first', 'second']) {
+        expect(ran).toHaveBeenCalledWith(
+          { hostId, address: `${hostId}-0` },
+          'caller',
+        )
+      }
+      expect(effects.eventId).toBeNull()
+    },
+  )
+
+  test('retains an existing caller event ID on the wire', async () => {
+    const effects = makeEffects({ eventId: 'caller-event' })
+    await run(effects, 'peer')
+    expect(requests.map(request => request.params.eventId)).toEqual([
+      'caller-event',
+      'caller-event',
+    ])
+    expect(effects.eventId).toBe('caller-event')
+    expect(ran).toHaveBeenCalledTimes(1)
+  })
+
+  test('rejects a submission outside the dynamic form opened on the wire', async () => {
+    await expect(
+      sdk.action.run({
+        effects: makeEffects({ eventId: null }),
+        packageId: 'target',
+        actionId: 'attach',
+        prefill: { hostId: 'peer' },
+        input: () => ({ hostId: 'peer', address: 'other-0' }),
+      }),
+    ).rejects.toThrow()
+    expect(requests).toHaveLength(2)
+    expect(requests[0].params.eventId).toEqual(expect.any(String))
+    expect(requests[1].params.eventId).toBe(requests[0].params.eventId)
+    expect(ran).not.toHaveBeenCalled()
+  })
+
+  test.each([null, 'caller-event'])(
+    'no-input calls preserve caller event %s',
+    async eventId => {
+      const effects = makeEffects({ eventId })
+      await expect(
+        sdk.action.run({ effects, packageId: 'target', actionId: 'reset' }),
+      ).resolves.toBeNull()
+      expect(requests).toEqual([
+        {
+          id: expect.any(Number),
+          method: 'action.run',
+          params: {
+            packageId: 'target',
+            actionId: 'reset',
+            ...(eventId === null ? {} : { eventId }),
+          },
+        },
+      ])
+      expect(ran).toHaveBeenCalledTimes(1)
+      expect(effects.eventId).toBe(eventId)
+    },
+  )
 })

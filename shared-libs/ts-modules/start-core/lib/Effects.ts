@@ -53,16 +53,12 @@ export type Effects = {
     getInput(options: {
       packageId?: PackageId
       actionId: ActionId
-      /** Overrides the caller event ID for this action's form. */
-      eventId?: string
       /** Seeds the form, including the values its dynamic fields are computed from. */
       prefill?: Record<string, unknown> | null
     }): Promise<ActionInput | null>
     run<Input extends Record<string, unknown>>(options: {
       packageId?: PackageId
       actionId: ActionId
-      /** Overrides the caller event ID; input actions must reuse their form's ID. */
-      eventId?: string
       input?: Input
     }): Promise<ActionResult | null>
     createTask(options: CreateTaskParams): Promise<null>
