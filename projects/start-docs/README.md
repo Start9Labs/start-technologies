@@ -1,10 +1,10 @@
 # Start9 Docs Site
 
-The documentation site for [Start9](https://start9.com) products — StartOS, StartTunnel, StartWRT, Service Packaging, and Bitcoin Guides.
+The documentation site for [Start9](https://start9.com) products — StartOS, StartTunnel, StartWRT, Service Packaging, Bitcoin Guides, and Start9 Support.
 
 **Live site:** [docs.start9.com](https://docs.start9.com)
 
-This project (the `projects/start-docs/` directory of the `start-technologies` monorepo) owns the **site build infrastructure**, the **landing page**, and the **Bitcoin Guides** book. The per-product mdBooks now live in their own product directories; this project's build wires them together into one deployed site.
+This project (the `projects/start-docs/` directory of the `start-technologies` monorepo) owns the **site build infrastructure**, the **landing page**, and the **Bitcoin Guides** and **Start9 Support** books. The per-product mdBooks now live in their own product directories; this project's build wires them together into one deployed site.
 
 ## Books and where they live
 
@@ -15,8 +15,9 @@ This project (the `projects/start-docs/` directory of the `start-technologies` m
 | StartWRT          | [docs.start9.com/start-wrt](https://docs.start9.com/start-wrt/)           | `../start-wrt/docs/`    | Router setup, Security Profiles, VPNs, published ports       |
 | Service Packaging | [docs.start9.com/packaging](https://docs.start9.com/packaging/)           | `../start-sdk/docs/`    | Developer guide for building and publishing StartOS services |
 | Bitcoin Guides    | [docs.start9.com/bitcoin-guides](https://docs.start9.com/bitcoin-guides/) | `bitcoin-guides/`       | Running Bitcoin and related services on StartOS              |
+| Start9 Support    | [docs.start9.com/support](https://docs.start9.com/support/)               | `support/`              | Using support.start9.com: chats, notifications, account      |
 
-The product books live in their product dirs so each book sits next to the code it documents. `build.sh` maps each book name to its source dir, so build output and deployed URLs are unchanged. Only `bitcoin-guides` still lives here.
+The product books live in their product dirs so each book sits next to the code it documents. `build.sh` maps each book name to its source dir, so build output and deployed URLs are unchanged. Only `bitcoin-guides` and `support` live here.
 
 ## What's in this project
 
@@ -28,6 +29,7 @@ projects/start-docs/
 ├── theme/             ← shared mdBook theme (CSS/JS/favicon), symlinked by every book
 ├── landing/           ← static landing page served at docs.start9.com/
 ├── bitcoin-guides/    ← the Bitcoin Guides mdBook
+├── support/           ← the Start9 Support mdBook
 └── scripts/           ← build-time tooling (llms.txt generator)
 ```
 
