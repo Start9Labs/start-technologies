@@ -101,9 +101,13 @@ for filename in TARGETS:
         jobs = source.split('\njobs:', 1)[1]
         changes = block(jobs, 'changes', 2)
         assert "github.base_ref != 'live-docs'" in changes
+        changelog = block(jobs, 'changelog', 2)
+        assert "github.base_ref != 'live-docs'" in changelog
+        assert not re.search(r'^    needs:', changelog, re.MULTILINE)
         for test_job in set(re.findall(r'^  ([\w-]+):$', jobs, re.MULTILINE)) - {
             'prettier',
             'changes',
+            'changelog',
         }:
             test_body = block(jobs, test_job, 2)
             assert re.search(r'^    needs: \[[^]]*\bchanges\b[^]]*\]$', test_body, re.MULTILINE)

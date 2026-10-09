@@ -20,7 +20,7 @@ StartOS versions carry an optional fourth **revision** segment — `0.4.0.1` —
 
 ## Changelog
 
-A version bump **pairs with a `CHANGELOG.md` entry** in the same change. Placement follows the repo-wide rule in the root [`AGENTS.md`](../../../AGENTS.md): freshly pull tags from origin first, keep the changelog's top heading at the prospective version (never `## [Unreleased]`), add your entry under it while that version is untagged, and cut a new heading only once it is a tagged release.
+A version bump pairs with fragments in `projects/start-os/changelog/` and release notes in the same change. Follow the root [`AGENTS.md`](../../../AGENTS.md) fragment rules and freshly query origin tags to establish what has shipped. Set root `package.json` to the fragment-derived version under those rules; it remains the canonical manifest. `CHANGELOG.md` is generated release history.
 
 ## Files to update
 
@@ -122,7 +122,7 @@ cargo test -p start-core --features test version::   # incl. current_matches_man
 - [ ] Update the `projects/start-os/Cargo.toml` label; `cargo check` to refresh `Cargo.lock`
 - [ ] Create `shared-libs/crates/start-core/src/version/vX_Y_Z_N.rs`
 - [ ] Update `shared-libs/crates/start-core/src/version/mod.rs` in 5 locations
-- [ ] Add the `CHANGELOG.md` entry under a new heading
+- [ ] Add the StartOS changelog fragments
 - [ ] Write `projects/start-os/release-notes/X.Y.Z.N.md` (the image won't build without it), plus `X.Y.Z.N.pre-update.md` for any pre-update instructions
 - [ ] Bump the release link in `projects/start-os/docs/src/`
 - [ ] Update `projects/start-sdk/lib/StartSdk.ts` `OSVersion` — **only** on breaking SDK changes

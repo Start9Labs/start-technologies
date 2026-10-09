@@ -49,6 +49,6 @@ format-check:
 
 .PHONY: release-notes-test
 release-notes-test:
-	python3 scripts/tests/release-notes-test.py
+	node --test scripts/tests/*-test.mjs
 
 test: | start-core-test start-sdk-test backup-fs-test container-runtime-test start-os-scripts-test start-wrt-test release-notes-test
