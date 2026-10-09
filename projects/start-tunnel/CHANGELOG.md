@@ -5,15 +5,6 @@ All notable changes to StartTunnel are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.3.2]
-
-### Fixed
-
-- **WireGuard configs can use a separate endpoint when StartTunnel is behind NAT.**
-  CLI `device show-config --endpoint-ip` accepts IPv4 or IPv6 independently of
-  the WAN address used for SNAT and port forwarding. Non-public WAN overrides
-  require an explicit endpoint instead of silently generating a private one.
-
 ## [1.3.1]
 
 ### Security

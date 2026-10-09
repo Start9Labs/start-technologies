@@ -15,7 +15,7 @@ Node.js v22+ (nvm recommended), npm, and GNU Make.
 - `Makefile` — build orchestration for the SDK itself.
 - `s9pk.mk`, `tsconfig.base.json` — build plumbing shipped _inside_ the published package for service packages to `include`/`extends`. Marked DO NOT EDIT in the consuming-package contract; edits here change the contract for every package.
 - `docs/` — the "Service Packaging" mdbook (`book.toml`), published at docs.start9.com/packaging. Also carries `package-template/` and the workspace agent context. See [Docs](#the-docs-mdbook).
-- `CHANGELOG.md` — Keep a Changelog style, headings `## <sdk-version> — StartOS <os-version> (<date>)`.
+- `changelog/` — pending release fragments; `CHANGELOG.md` — generated release history.
 
 ## Build & test (run from `projects/start-sdk/`)
 
@@ -49,7 +49,7 @@ This symlinks the built `dist/` into your global `node_modules`, so the package 
 
 The SDK is a first-class project of the monorepo-wide release tool, [`scripts/manage-release.sh`](../../scripts/manage-release.sh) (the `npm` kind). The version is read from `package.json`; the git tag / GitHub release is `start-sdk/v<version>`. Only `dist/` ships to npm (compiled JavaScript, declarations, bundled dependencies, package metadata).
 
-1. Bump `package.json`, add the matching `CHANGELOG.md` entry, write `release-notes/<version>.md` (lede, `## Highlights`, optional `## Important`), and run `make sync-template` to move the [package template](docs/package-template)'s `@start9labs/start-sdk` pin to the same version. Land them together on `master`. `pre-check` enforces the match, so a stale pin fails the release before anything is tagged or published. Packaging workspaces track `live-docs`, so changing `master` does not update their template; the SDK tag advances it.
+1. Bump `package.json`, add the matching changelog fragment, write `release-notes/<version>.md` (lede, `## Highlights`, optional `## Important`), and run `make sync-template` to move the [package template](docs/package-template)'s `@start9labs/start-sdk` pin to the same version. Land them together on `master`. `pre-check` enforces the match, so a stale pin fails the release before anything is tagged or published. Packaging workspaces track `live-docs`, so changing `master` does not update their template; the SDK tag advances it.
 2. Cut the release from the repo root (needs `gh` and an npm login with publish rights):
 
    ```bash
@@ -76,7 +76,7 @@ If that commit never landed on `master` (e.g. the publish was cut from an unmerg
 ## Gotchas
 
 - **Releasing is `./scripts/manage-release.sh release start-sdk`, not `make publish`.** The pipeline is pre-check → tag → GitHub release → `npm publish`, in that order because npm publish is the one step that can never be redone. `make publish` is _only_ that last step: run it on its own and the version lands on npm with no git tag and no GitHub release, and the normal flow can't recover (pre-check then refuses the version, and npm won't republish it). 2.0.4 and 2.0.5 shipped this way and had to be backfilled. See [Cutting a release](#cutting-a-release) above, which also documents the backfill.
-- **Bumping the version requires a CHANGELOG entry and `release-notes/<version>.md`.** Freshly check what's shipped first (`git ls-remote --tags origin 'start-sdk/v*'`, or `npm view @start9labs/start-sdk versions`); the top `CHANGELOG.md` heading is the prospective next SDK version. If it has no matching `start-sdk/v<version>` tag it is unreleased — add your entry under it (`### Added/Changed/Fixed/Security/Removed`), raising the number and `package.json` `version` only for a larger tier (see the root [`AGENTS.md`](../../AGENTS.md) changelog rule). Write the notes in the same change as the bump (format: root [`AGENTS.md`](../../AGENTS.md#releases) § Releases); `pre-check` fails without them. Reviews reject version bumps without a changelog entry.
+- **Version bumps pair with fragments and `release-notes/<version>.md`.** Follow the root changelog rules; `package.json` owns the SDK version. `pre-check` fails without the curated notes.
 - **`make bundle` verifies nothing.** It builds `dist/` and stops — `test` and `check-fmt` are deliberately not prerequisites (consumers like the OS build would otherwise re-run jest every build). Run `make test` and `make check-fmt` explicitly. And `check-fmt` is `npx prettier "**/*.ts" --check` — TypeScript only. The CI gate is repo-root `prettier --check .` across every file type, so a CHANGELOG or docs edit that passes here still breaks master.
 - **Typecheck a consumer before publishing, not just the SDK.** `tsc` here cannot exercise the SDK's own public API — nothing internal calls it. Use the [`make link` + `npm link`](#testing-sdk-changes-against-a-service-package) flow from a service package and run that package's `tsc`. 2.0.8 shipped `sdk.host.getBridgeAddress` missing its `fallbackPort` overload this way: the SDK compiled clean, and twelve packages then couldn't.
 - **Consumers read the built output.** After editing the SDK or `@start9labs/start-core`, run `make bundle` before checking container-runtime.

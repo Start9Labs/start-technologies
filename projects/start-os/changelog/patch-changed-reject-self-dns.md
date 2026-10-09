@@ -1,0 +1,1 @@
+- **Static DNS servers that point back at the server itself are refused**, such as `0.0.0.0`, `::`, or a loopback address.

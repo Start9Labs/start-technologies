@@ -90,11 +90,8 @@ StartWRT is a first-class project of the monorepo-wide release tool,
 read from `backend/ctrl/Cargo.toml`; the git tag / GitHub release is `start-wrt/v<version>`.
 Releases stage through a beta registry before promotion to production, mirroring the OS.
 
-1. Ensure `backend/ctrl/Cargo.toml` and the top `CHANGELOG.md` heading both name the prospective
-   version being released — the changelog's top heading is that prospective version
-   (`## [<version>]`), never `## [Unreleased]`, and `pre-check` requires an explicit heading
-   matching the manifest (see the root [`AGENTS.md`](../../AGENTS.md) changelog rule). Land that
-   on `master`.
+1. Set the release version in `backend/ctrl/Cargo.toml`, add changelog fragments under the
+   root rules, and write `release-notes/<version>.md`. Land them on `master`.
 2. Run the **start-wrt** workflow with `deploy: release`. It builds the OpenWrt image, uploads
    the images to `s3://startwrt-images`, and registers + indexes the version into the **beta
    registry** (signing with the `DEV_KEY` repo secret). Beta routers — any router whose UCI
@@ -165,5 +162,5 @@ version and the sha256 of its tag tarball — download it once and `sha256sum` i
 affected file in the workspace by hand and regenerate that patch as above; either way, refresh
 each patch's `Applies to:` header line to the new version. The overlay needs
 attention only if upstream grew a conflicting path (the spacemit target dir is ours alone, so
-this is rare). Commit the pin bump + refreshed patches + a `CHANGELOG.md` entry as one
+this is rare). Commit the pin bump + refreshed patches + a changelog fragment as one
 ordinary PR.
