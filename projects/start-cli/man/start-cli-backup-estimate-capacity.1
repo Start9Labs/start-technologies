@@ -1,0 +1,47 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-backup-estimate-capacity 1  "estimate-capacity "
+.SH NAME
+start\-cli\-backup\-estimate\-capacity \- Estimate automatic backup storage requirements
+.SH SYNOPSIS
+\fBstart\-cli backup estimate\-capacity\fR [\fB\-\-package\-ids\fR] [\fB\-\-exclude\-package\-ids\fR] [\fB\-\-system\-data\fR] [\fB\-\-keep\-rule\fR] [\fB\-\-service\-keep\-rule\fR] [\fB\-\-service\-latest\-only\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET_ID\fR>
+.SH DESCRIPTION
+Estimate automatic backup storage requirements
+.SH OPTIONS
+.TP
+\fB\-\-package\-ids\fR \fI<PACKAGE_IDS>\fR
+Package IDs to include in the automatic backup
+.TP
+\fB\-\-exclude\-package\-ids\fR \fI<EXCLUDE_PACKAGE_IDS>\fR
+Package IDs to exclude from current and future services
+.TP
+\fB\-\-system\-data\fR \fI<SYSTEM_DATA>\fR
+Include or exclude StartOS System data
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+include
+.IP \(bu 2
+exclude
+.RE
+.TP
+\fB\-\-keep\-rule\fR \fI<INTERVAL:COVERAGE>\fR
+Version\-history rule INTERVAL:COVERAGE; accepts s, m, h, d, or w and may repeat
+.TP
+\fB\-\-service\-keep\-rule\fR \fI<PACKAGE_ID=INTERVAL:COVERAGE>\fR
+Version\-history rule PACKAGE_ID=INTERVAL:COVERAGE; use x_system for System data; may repeat
+.TP
+\fB\-\-service\-latest\-only\fR \fI<PACKAGE_ID>\fR
+Service IDs, or x_system for System data, that should keep only their latest checkpoint
+.TP
+\fB\-\-format\fR
+
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fITARGET_ID\fR>
+Backup target identifier

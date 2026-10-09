@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::{BackupTarget, BackupTargetId};
+use crate::backup::scheduled::BackupJob;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::DatabaseModel;
 use crate::disk::mount::filesystem::ReadOnly;
@@ -261,7 +262,35 @@ pub async fn remove(
         ));
     };
     ctx.db
-        .mutate(|db| db.as_private_mut().as_cifs_mut().remove(&id))
+        .mutate(|db| {
+            let target_id = BackupTargetId::Cifs { id };
+            let jobs: Vec<String> = db
+                .as_public()
+                .as_scheduled_backups()
+                .as_jobs()
+                .as_entries()?
+                .into_iter()
+                .map(|(_, job)| job.de())
+                .collect::<Result<Vec<BackupJob>, Error>>()?
+                .into_iter()
+                .filter(|job| job.target_id == target_id)
+                .map(|job| job.name)
+                .collect();
+            if !jobs.is_empty() {
+                return Err(Error::new(
+                    eyre!(
+                        "{}",
+                        t!("backup.target.cifs.target-in-use", jobs = jobs.join(", "))
+                    ),
+                    ErrorKind::InvalidRequest,
+                ));
+            }
+            db.as_private_mut().as_cifs_mut().remove(&id)?;
+            db.as_private_mut()
+                .as_scheduled_backup_credentials_mut()
+                .remove(&target_id.to_string())?;
+            Ok(())
+        })
         .await
         .result?;
     Ok(())

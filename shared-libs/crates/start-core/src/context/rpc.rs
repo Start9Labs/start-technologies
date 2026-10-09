@@ -15,7 +15,7 @@ use reqwest::{Client, Proxy};
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{CallRemote, Context, Empty};
 use tokio::process::Command;
-use tokio::sync::{RwLock, broadcast, oneshot, watch};
+use tokio::sync::{Mutex, RwLock, broadcast, oneshot, watch};
 use tokio::time::Instant;
 use tracing::instrument;
 
@@ -79,6 +79,7 @@ pub struct RpcContextSeed {
     pub client: ReloadableHttpClient,
     pub start_time: Instant,
     pub crons: SyncMutex<BTreeMap<Guid, NonDetachingJoinHandle<()>>>,
+    pub backup_coordinator: Arc<Mutex<()>>,
 }
 impl Drop for RpcContextSeed {
     fn drop(&mut self) {
@@ -439,6 +440,7 @@ impl RpcContext {
             client: ReloadableHttpClient::new(socks_proxy_url)?,
             start_time: Instant::now(),
             crons,
+            backup_coordinator: Arc::new(Mutex::new(())),
         });
 
         let res = Self(seed.clone());
@@ -447,6 +449,7 @@ impl RpcContext {
 
         crate::version::post_init(&res, run_migrations).await?;
         tracing::info!("{}", t!("context.rpc.completed-migrations"));
+        crate::backup::scheduled::start_scheduler(&res).await?;
         Ok(res)
     }
 

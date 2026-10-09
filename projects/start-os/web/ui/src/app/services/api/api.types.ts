@@ -173,7 +173,7 @@ declare global {
 
 //   // ** automated backups **
 
-//   export type GetBackupTargetsReq = {} // backup.target.list
+//   export type GetBackupTargetsReq = {} // backup.targets
 //   export type GetBackupTargetsRes = {
 //     unknownDisks: UnknownDisk[]
 //     saved: Record<string, BackupTarget>

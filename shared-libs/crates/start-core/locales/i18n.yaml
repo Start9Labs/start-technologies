@@ -1260,6 +1260,13 @@ disk.util.failed-to-parse-pvscan:
   fr_FR: "Échec de l'analyse de la ligne de sortie pvscan : %{line}"
   pl_PL: "Nie udało się przeanalizować linii wyjścia pvscan: %{line}"
 
+disk.util.too-many-recovery-entries:
+  en_US: "Backup location %{path} contains more than %{limit} recovery entries. Use a location with fewer entries."
+  de_DE: "Der Sicherungsort %{path} enthält mehr als %{limit} Wiederherstellungseinträge. Verwenden Sie einen Ort mit weniger Einträgen."
+  es_ES: "La ubicación de copia de seguridad %{path} contiene más de %{limit} entradas de recuperación. Utilice una ubicación con menos entradas."
+  fr_FR: "L’emplacement de sauvegarde %{path} contient plus de %{limit} entrées de récupération. Utilisez un emplacement contenant moins d’entrées."
+  pl_PL: "Lokalizacja kopii zapasowej %{path} zawiera więcej niż %{limit} wpisów odzyskiwania. Użyj lokalizacji z mniejszą liczbą wpisów."
+
 # disk/fsck/ext4.rs
 disk.fsck.process-terminated-by-signal:
   en_US: "e2fsck: process terminated by signal"
@@ -1593,6 +1600,20 @@ init.initializing:
   pl_PL: "Inicjalizowanie..."
 
 # backup/backup_bulk.rs
+backup.activity.interrupted:
+  en_US: "Backup or restore ended before completion"
+  de_DE: "Die Sicherung oder Wiederherstellung wurde vor dem Abschluss beendet"
+  es_ES: "La copia de seguridad o restauración terminó antes de completarse"
+  fr_FR: "La sauvegarde ou la restauration s'est terminée avant d'être achevée"
+  pl_PL: "Tworzenie lub przywracanie kopii zapasowej zakończyło się przed ukończeniem"
+
+backup.activity.manual-interrupted:
+  en_US: "Manual backup ended before completion"
+  de_DE: "Die manuelle Sicherung wurde vor dem Abschluss beendet"
+  es_ES: "La copia de seguridad manual terminó antes de completarse"
+  fr_FR: "La sauvegarde manuelle s'est terminée avant d'être achevée"
+  pl_PL: "Ręczna kopia zapasowa zakończyła się przed ukończeniem"
+
 backup.bulk.complete-title:
   en_US: "Backup Complete"
   de_DE: "Sicherung abgeschlossen"
@@ -1657,11 +1678,11 @@ backup.bulk.password-mismatch:
   pl_PL: "Istniejąca kopia zapasowa w tym celu została zaszyfrowana innym hasłem. Podaj hasło, które zostało użyte do jej utworzenia."
 
 backup.bulk.already-backing-up:
-  en_US: "Server is already backing up!"
-  de_DE: "Server führt bereits eine Sicherung durch!"
-  es_ES: "¡El servidor ya está realizando una copia de seguridad!"
-  fr_FR: "Le serveur est déjà en cours de sauvegarde !"
-  pl_PL: "Serwer już wykonuje kopię zapasową!"
+  en_US: "A backup or restore is already in progress."
+  de_DE: "Eine Sicherung oder Wiederherstellung wird bereits ausgeführt."
+  es_ES: "Ya hay una copia de seguridad o restauración en curso."
+  fr_FR: "Une sauvegarde ou une restauration est déjà en cours."
+  pl_PL: "Kopia zapasowa lub przywracanie jest już w toku."
 
 backup.bulk.leaked-reference:
   en_US: "leaked reference to BackupMountGuard"
@@ -1728,12 +1749,26 @@ backup.trash.reclaimed-title:
   pl_PL: "Odzyskano miejsce po kopii zapasowej"
 
 # backup/restore.rs
+backup.restore.duplicate-checkpoint:
+  en_US: "A service may be restored from only one checkpoint"
+  de_DE: "Ein Dienst kann nur von einem Wiederherstellungspunkt wiederhergestellt werden"
+  es_ES: "Un servicio solo puede restaurarse desde un punto de restauración"
+  fr_FR: "Un service ne peut être restauré qu'à partir d'un seul point de restauration"
+  pl_PL: "Usługę można przywrócić tylko z jednego punktu przywracania"
+
 backup.restore.package-error:
   en_US: "Error restoring package %{id}: %{error}"
   de_DE: "Fehler beim Wiederherstellen des Pakets %{id}: %{error}"
   es_ES: "Error al restaurar el paquete %{id}: %{error}"
   fr_FR: "Erreur lors de la restauration du paquet %{id} : %{error}"
   pl_PL: "Błąd przywracania pakietu %{id}: %{error}"
+
+backup.restore.select-service:
+  en_US: "Select at least one service to restore"
+  de_DE: "Wähle mindestens einen Dienst zur Wiederherstellung aus"
+  es_ES: "Selecciona al menos un servicio para restaurar"
+  fr_FR: "Sélectionnez au moins un service à restaurer"
+  pl_PL: "Wybierz co najmniej jedną usługę do przywrócenia"
 
 # backup/target/cifs.rs
 backup.target.cifs.target-not-found:
@@ -1750,6 +1785,406 @@ backup.target.cifs.target-not-found-id:
   fr_FR: "ID de cible de sauvegarde %{id} non trouvé"
   pl_PL: "Nie znaleziono ID celu kopii zapasowej %{id}"
 
+backup.target.cifs.target-in-use:
+  en_US: "Backup target is referenced by scheduled jobs: %{jobs}"
+  de_DE: "Das Sicherungsziel wird von geplanten Aufträgen verwendet: %{jobs}"
+  es_ES: "El destino de copia es utilizado por tareas programadas: %{jobs}"
+  fr_FR: "La cible de sauvegarde est utilisée par des tâches planifiées : %{jobs}"
+  pl_PL: "Cel kopii jest używany przez zaplanowane zadania: %{jobs}"
+
+# backup/scheduled
+backup.scheduled.capacity-message:
+  en_US: "Job %{job} could not start because target %{target} does not have enough free space. Free space, edit the job, reassign it, or delete it."
+  de_DE: "Auftrag %{job} konnte nicht starten, da Ziel %{target} nicht genügend freien Speicher hat. Geben Sie Speicher frei, bearbeiten oder verschieben Sie den Auftrag oder löschen Sie ihn."
+  es_ES: "La tarea %{job} no pudo iniciarse porque el destino %{target} no tiene espacio libre suficiente. Libere espacio, edite, reasigne o elimine la tarea."
+  fr_FR: "La tâche %{job} n'a pas pu démarrer car la cible %{target} manque d'espace. Libérez de l'espace, modifiez, réaffectez ou supprimez la tâche."
+  pl_PL: "Zadanie %{job} nie mogło się rozpocząć, ponieważ cel %{target} nie ma wystarczającej ilości miejsca. Zwolnij miejsce, edytuj, przenieś lub usuń zadanie."
+
+backup.scheduled.capacity-overflow:
+  en_US: "Scheduled backup capacity estimate overflowed"
+  de_DE: "Die Kapazitätsschätzung der geplanten Sicherung ist übergelaufen"
+  es_ES: "La estimación de capacidad de la copia programada se desbordó"
+  fr_FR: "L'estimation de capacité de la sauvegarde planifiée a débordé"
+  pl_PL: "Przepełnienie oszacowania pojemności zaplanowanej kopii"
+
+backup.scheduled.capacity-title:
+  en_US: "Scheduled Backup Needs More Space"
+  de_DE: "Geplante Sicherung benötigt mehr Speicherplatz"
+  es_ES: "La copia programada necesita más espacio"
+  fr_FR: "La sauvegarde planifiée nécessite plus d'espace"
+  pl_PL: "Zaplanowana kopia wymaga więcej miejsca"
+
+backup.scheduled.decode-key-failed:
+  en_US: "Failed to decode scheduled backup key"
+  de_DE: "Schlüssel der geplanten Sicherung konnte nicht dekodiert werden"
+  es_ES: "No se pudo decodificar la clave de copia programada"
+  fr_FR: "Impossible de décoder la clé de sauvegarde planifiée"
+  pl_PL: "Nie udało się zdekodować klucza zaplanowanej kopii"
+
+backup.scheduled.delete-active-history:
+  en_US: "Only archived scheduled checkpoints can be deleted"
+  de_DE: "Nur archivierte geplante Prüfpunkte können gelöscht werden"
+  es_ES: "Solo se pueden eliminar puntos programados archivados"
+  fr_FR: "Seuls les points planifiés archivés peuvent être supprimés"
+  pl_PL: "Można usuwać tylko zarchiwizowane zaplanowane punkty"
+
+backup.scheduled.device-key-unavailable:
+  en_US: "Scheduled backup device key is unavailable"
+  de_DE: "Geräteschlüssel der geplanten Sicherung ist nicht verfügbar"
+  es_ES: "La clave del dispositivo para copias programadas no está disponible"
+  fr_FR: "La clé de l'appareil pour les sauvegardes planifiées est indisponible"
+  pl_PL: "Klucz urządzenia dla zaplanowanych kopii jest niedostępny"
+
+backup.scheduled.duplicate-job-name:
+  en_US: "A backup schedule with that name already exists"
+  de_DE: "Ein Sicherungszeitplan mit diesem Namen ist bereits vorhanden"
+  es_ES: "Ya existe una programación de copias de seguridad con ese nombre"
+  fr_FR: "Un planning de sauvegarde portant ce nom existe déjà"
+  pl_PL: "Harmonogram kopii zapasowych o tej nazwie już istnieje"
+
+backup.scheduled.five-field-cron:
+  en_US: "Scheduled backups require a five-field cron expression"
+  de_DE: "Geplante Sicherungen benötigen einen Cron-Ausdruck mit fünf Feldern"
+  es_ES: "Las copias programadas requieren una expresión cron de cinco campos"
+  fr_FR: "Les sauvegardes planifiées nécessitent une expression cron à cinq champs"
+  pl_PL: "Zaplanowane kopie wymagają pięciopolowego wyrażenia cron"
+
+backup.scheduled.hourly-limit:
+  en_US: "Scheduled backups cannot run more than once per hour"
+  de_DE: "Geplante Sicherungen können höchstens einmal pro Stunde ausgeführt werden"
+  es_ES: "Las copias programadas no pueden ejecutarse más de una vez por hora"
+  fr_FR: "Les sauvegardes planifiées ne peuvent pas s'exécuter plus d'une fois par heure"
+  pl_PL: "Zaplanowane kopie nie mogą być uruchamiane częściej niż raz na godzinę"
+
+backup.scheduled.identity-message:
+  en_US: "Job %{job} is paused because %{target} is not the target originally assigned. Reconnect the original target, retry, reassign, or delete the job."
+  de_DE: "Auftrag %{job} ist pausiert, da %{target} nicht das ursprünglich zugewiesene Ziel ist. Verbinden Sie das ursprüngliche Ziel erneut, versuchen Sie es erneut, weisen Sie neu zu oder löschen Sie den Auftrag."
+  es_ES: "La tarea %{job} está en pausa porque %{target} no es el destino asignado originalmente. Reconecte el destino original, reintente, reasigne o elimine la tarea."
+  fr_FR: "La tâche %{job} est en pause car %{target} n'est pas la cible attribuée initialement. Reconnectez la cible d'origine, réessayez, réaffectez ou supprimez la tâche."
+  pl_PL: "Zadanie %{job} jest wstrzymane, ponieważ %{target} nie jest pierwotnie przypisanym celem. Podłącz pierwotny cel, ponów próbę, przenieś lub usuń zadanie."
+
+backup.scheduled.identity-title:
+  en_US: "Backup Target Identity Changed"
+  de_DE: "Identität des Sicherungsziels geändert"
+  es_ES: "Cambió la identidad del destino de copia"
+  fr_FR: "L'identité de la cible de sauvegarde a changé"
+  pl_PL: "Tożsamość celu kopii uległa zmianie"
+
+backup.scheduled.insufficient-capacity:
+  en_US: "Scheduled backup requires %{required} bytes but the target has %{available} bytes available"
+  de_DE: "Die geplante Sicherung benötigt %{required} Byte, am Ziel sind aber nur %{available} Byte verfügbar"
+  es_ES: "La copia programada requiere %{required} bytes, pero el destino tiene %{available} bytes disponibles"
+  fr_FR: "La sauvegarde planifiée nécessite %{required} octets, mais la cible ne dispose que de %{available} octets"
+  pl_PL: "Zaplanowana kopia wymaga %{required} bajtów, a cel ma dostępne %{available} bajtów"
+
+backup.scheduled.invalid-checkpoint-selection:
+  en_US: "Checkpoint selection must use PACKAGE_ID=SNAPSHOT_ID"
+  de_DE: "Die Prüfpunkt-Auswahl muss PACKAGE_ID=SNAPSHOT_ID verwenden"
+  es_ES: "La selección del punto debe usar PACKAGE_ID=SNAPSHOT_ID"
+  fr_FR: "La sélection du point doit utiliser PACKAGE_ID=SNAPSHOT_ID"
+  pl_PL: "Wybór punktu musi używać formatu PACKAGE_ID=SNAPSHOT_ID"
+
+backup.scheduled.invalid-credential:
+  en_US: "Scheduled backup credential is invalid"
+  de_DE: "Anmeldedaten der geplanten Sicherung sind ungültig"
+  es_ES: "La credencial de copia programada no es válida"
+  fr_FR: "L'identifiant de sauvegarde planifiée est invalide"
+  pl_PL: "Poświadczenie zaplanowanej kopii jest nieprawidłowe"
+
+backup.scheduled.invalid-cron-field:
+  en_US: "Invalid cron field: %{field}"
+  de_DE: "Ungültiges Cron-Feld: %{field}"
+  es_ES: "Campo cron no válido: %{field}"
+  fr_FR: "Champ cron invalide : %{field}"
+  pl_PL: "Nieprawidłowe pole cron: %{field}"
+
+backup.scheduled.invalid-duration:
+  en_US: "Invalid duration: %{value}"
+  de_DE: "Ungültige Dauer: %{value}"
+  es_ES: "Duración no válida: %{value}"
+  fr_FR: "Durée invalide : %{value}"
+  pl_PL: "Nieprawidłowy czas trwania: %{value}"
+
+backup.scheduled.invalid-duration-unit:
+  en_US: "Invalid duration unit in %{value}; use s, m, h, d, or w"
+  de_DE: "Ungültige Dauereinheit in %{value}; s, m, h, d oder w verwenden"
+  es_ES: "Unidad de duración no válida en %{value}; use s, m, h, d o w"
+  fr_FR: "Unité de durée invalide dans %{value} ; utilisez s, m, h, d ou w"
+  pl_PL: "Nieprawidłowa jednostka czasu w %{value}; użyj s, m, h, d lub w"
+
+backup.scheduled.invalid-job-name:
+  en_US: "Backup job name must contain 1 to 80 characters"
+  de_DE: "Der Name des Sicherungsauftrags muss 1 bis 80 Zeichen enthalten"
+  es_ES: "El nombre de la tarea debe tener entre 1 y 80 caracteres"
+  fr_FR: "Le nom de la tâche doit contenir entre 1 et 80 caractères"
+  pl_PL: "Nazwa zadania kopii musi zawierać od 1 do 80 znaków"
+
+backup.scheduled.invalid-retention-override:
+  en_US: "Per-service retention must use PACKAGE_ID=INTERVAL:COVERAGE"
+  de_DE: "Die dienstbezogene Aufbewahrung muss PACKAGE_ID=INTERVAL:COVERAGE verwenden"
+  es_ES: "La retención por servicio debe usar PACKAGE_ID=INTERVAL:COVERAGE"
+  fr_FR: "La rétention par service doit utiliser PACKAGE_ID=INTERVAL:COVERAGE"
+  pl_PL: "Retencja usługi musi używać formatu PACKAGE_ID=INTERVAL:COVERAGE"
+
+backup.scheduled.invalid-retention-tiers:
+  en_US: "Version-history rules must have progressively coarser intervals and increasing coverage"
+  de_DE: "Regeln für den Versionsverlauf müssen zunehmend größere Intervalle und Zeiträume haben"
+  es_ES: "Las reglas del historial de versiones deben tener intervalos progresivamente mayores y una cobertura creciente"
+  fr_FR: "Les règles d'historique des versions doivent avoir des intervalles progressivement plus larges et une couverture croissante"
+  pl_PL: "Reguły historii wersji muszą mieć coraz większe interwały i rosnący zakres"
+
+backup.scheduled.invalid-retention-timezone:
+  en_US: "Invalid retention timezone"
+  de_DE: "Ungültige Zeitzone für die Aufbewahrung"
+  es_ES: "Zona horaria de retención no válida"
+  fr_FR: "Fuseau horaire de rétention invalide"
+  pl_PL: "Nieprawidłowa strefa czasowa retencji"
+
+backup.scheduled.invalid-review-decision:
+  en_US: "Decision must use JOB_ID=add or JOB_ID=skip"
+  de_DE: "Die Entscheidung muss JOB_ID=add oder JOB_ID=skip verwenden"
+  es_ES: "La decisión debe usar JOB_ID=add o JOB_ID=skip"
+  fr_FR: "La décision doit utiliser JOB_ID=add ou JOB_ID=skip"
+  pl_PL: "Decyzja musi używać formatu JOB_ID=add lub JOB_ID=skip"
+
+backup.scheduled.invalid-timezone:
+  en_US: "Invalid IANA timezone: %{timezone}"
+  de_DE: "Ungültige IANA-Zeitzone: %{timezone}"
+  es_ES: "Zona horaria IANA no válida: %{timezone}"
+  fr_FR: "Fuseau horaire IANA invalide : %{timezone}"
+  pl_PL: "Nieprawidłowa strefa czasowa IANA: %{timezone}"
+
+backup.scheduled.invalid-version-history-rule:
+  en_US: "Version-history rule must use INTERVAL:COVERAGE, for example 1d:7d"
+  de_DE: "Die Versionsverlaufsregel muss INTERVAL:COVERAGE verwenden, zum Beispiel 1d:7d"
+  es_ES: "La regla del historial debe usar INTERVAL:COVERAGE, por ejemplo 1d:7d"
+  fr_FR: "La règle d'historique doit utiliser INTERVAL:COVERAGE, par exemple 1d:7d"
+  pl_PL: "Reguła historii wersji musi używać INTERVAL:COVERAGE, na przykład 1d:7d"
+
+backup.scheduled.job-paused:
+  en_US: "Scheduled backup job is paused"
+  de_DE: "Der geplante Sicherungsauftrag ist pausiert"
+  es_ES: "La tarea de copia programada está en pausa"
+  fr_FR: "La tâche de sauvegarde planifiée est en pause"
+  pl_PL: "Zaplanowane zadanie kopii jest wstrzymane"
+
+backup.scheduled.leaked-reference:
+  en_US: "Scheduled backup leaked a storage reference"
+  de_DE: "Die geplante Sicherung hat eine Speicherreferenz verloren"
+  es_ES: "La copia programada perdió una referencia de almacenamiento"
+  fr_FR: "La sauvegarde planifiée a perdu une référence de stockage"
+  pl_PL: "Zaplanowana kopia utraciła odwołanie do pamięci"
+
+backup.scheduled.metadata-identity-mismatch:
+  en_US: "Scheduled backup target metadata identity does not match"
+  de_DE: "Metadatenidentität des Sicherungsziels stimmt nicht überein"
+  es_ES: "La identidad de metadatos del destino no coincide"
+  fr_FR: "L'identité des métadonnées de la cible ne correspond pas"
+  pl_PL: "Tożsamość metadanych celu kopii nie jest zgodna"
+
+backup.scheduled.no-installed-services:
+  en_US: "The schedule has no installed services to back up"
+  de_DE: "Der Zeitplan enthält keine installierten Dienste zum Sichern"
+  es_ES: "La programación no tiene servicios instalados para respaldar"
+  fr_FR: "La planification ne contient aucun service installé à sauvegarder"
+  pl_PL: "Harmonogram nie zawiera zainstalowanych usług do utworzenia kopii"
+
+backup.scheduled.no-installed-services-message:
+  en_US: "The schedule %{job} has no installed services to back up, so it was paused. Delete it if it is no longer needed, or edit it to select installed services."
+  de_DE: "Der Zeitplan %{job} enthält keine installierten Dienste zum Sichern und wurde daher pausiert. Löschen Sie ihn, wenn er nicht mehr benötigt wird, oder wählen Sie installierte Dienste aus."
+  es_ES: "La programación %{job} no tiene servicios instalados que respaldar, por lo que se ha pausado. Elimínela si ya no la necesita o edítela para seleccionar servicios instalados."
+  fr_FR: "La planification %{job} ne contient aucun service installé à sauvegarder et a donc été mise en pause. Supprimez-la si elle n'est plus nécessaire ou sélectionnez des services installés."
+  pl_PL: "Harmonogram %{job} nie zawiera zainstalowanych usług do utworzenia kopii, więc został wstrzymany. Usuń go, jeśli nie jest już potrzebny, albo wybierz zainstalowane usługi."
+
+backup.scheduled.no-installed-services-title:
+  en_US: "Backup Schedule Has No Services"
+  de_DE: "Sicherungszeitplan enthält keine Dienste"
+  es_ES: "La programación de copias no tiene servicios"
+  fr_FR: "La planification de sauvegarde ne contient aucun service"
+  pl_PL: "Harmonogram kopii nie zawiera usług"
+
+backup.scheduled.prune-confirmation-stale:
+  en_US: "Retention pruning confirmation is stale or incomplete"
+  de_DE: "Bestätigung zum Kürzen der Aufbewahrung ist veraltet oder unvollständig"
+  es_ES: "La confirmación de reducción de retención está desactualizada o incompleta"
+  fr_FR: "La confirmation de réduction de rétention est obsolète ou incomplète"
+  pl_PL: "Potwierdzenie przycinania retencji jest nieaktualne lub niekompletne"
+
+backup.scheduled.reauth-message:
+  en_US: "Job %{job} is paused because the credential for target %{target} must be reauthorized. Retry with your password, reassign the target, or delete the job."
+  de_DE: "Auftrag %{job} ist pausiert, weil Ziel %{target} erneut autorisiert werden muss. Versuchen Sie es mit Ihrem Passwort erneut, ändern Sie das Ziel oder löschen Sie den Auftrag."
+  es_ES: "La tarea %{job} está en pausa porque debe volver a autorizar el destino %{target}. Reintente con su contraseña, reasigne el destino o elimine la tarea."
+  fr_FR: "La tâche %{job} est en pause car la cible %{target} doit être réautorisée. Réessayez avec votre mot de passe, réaffectez la cible ou supprimez la tâche."
+  pl_PL: "Zadanie %{job} jest wstrzymane, ponieważ cel %{target} wymaga ponownej autoryzacji. Ponów próbę z hasłem, zmień cel lub usuń zadanie."
+
+backup.scheduled.reauth-required:
+  en_US: "Scheduled backup credential requires reauthentication"
+  de_DE: "Anmeldedaten der geplanten Sicherung müssen erneut authentifiziert werden"
+  es_ES: "La credencial de copia programada requiere nueva autenticación"
+  fr_FR: "L'identifiant de sauvegarde planifiée nécessite une nouvelle authentification"
+  pl_PL: "Poświadczenie zaplanowanej kopii wymaga ponownego uwierzytelnienia"
+
+backup.scheduled.reauth-title:
+  en_US: "Backup Target Requires Authentication"
+  de_DE: "Sicherungsziel erfordert Authentifizierung"
+  es_ES: "El destino de copia requiere autenticación"
+  fr_FR: "La cible de sauvegarde nécessite une authentification"
+  pl_PL: "Cel kopii wymaga uwierzytelnienia"
+
+backup.scheduled.retry-before-resume:
+  en_US: "Verify the backup target with Retry before resuming this job"
+  de_DE: "Überprüfen Sie das Sicherungsziel mit Erneut versuchen, bevor Sie diesen Auftrag fortsetzen"
+  es_ES: "Verifique el destino con Reintentar antes de reanudar esta tarea"
+  fr_FR: "Vérifiez la cible avec Réessayer avant de reprendre cette tâche"
+  pl_PL: "Przed wznowieniem zadania zweryfikuj cel za pomocą opcji Ponów próbę"
+
+backup.scheduled.review-incomplete:
+  en_US: "A decision is required for every current automatic backup job"
+  de_DE: "Für jeden aktuellen automatischen Sicherungsauftrag ist eine Entscheidung erforderlich"
+  es_ES: "Se requiere una decisión para cada tarea actual de copia automática"
+  fr_FR: "Une décision est requise pour chaque tâche de sauvegarde automatique actuelle"
+  pl_PL: "Wymagana jest decyzja dla każdego bieżącego zadania automatycznej kopii"
+
+backup.scheduled.review-task-reason:
+  en_US: "Review which automatic backup schedules should include this service."
+  de_DE: "Prüfen Sie, welche automatischen Sicherungszeitpläne diesen Dienst einschließen sollen."
+  es_ES: "Revise qué programaciones de copias automáticas deben incluir este servicio."
+  fr_FR: "Vérifiez quelles planifications de sauvegarde automatique doivent inclure ce service."
+  pl_PL: "Sprawdź, które harmonogramy automatycznych kopii powinny obejmować tę usługę."
+
+backup.scheduled.run-failed-message:
+  en_US: "Job %{job} on target %{target} failed for: %{services}. Previous checkpoints remain available."
+  de_DE: "Auftrag %{job} auf Ziel %{target} ist fehlgeschlagen für: %{services}. Frühere Prüfpunkte bleiben verfügbar."
+  es_ES: "La tarea %{job} en el destino %{target} falló para: %{services}. Los puntos anteriores siguen disponibles."
+  fr_FR: "La tâche %{job} sur la cible %{target} a échoué pour : %{services}. Les points précédents restent disponibles."
+  pl_PL: "Zadanie %{job} na celu %{target} nie powiodło się dla: %{services}. Poprzednie punkty pozostają dostępne."
+
+backup.scheduled.run-failed-title:
+  en_US: "Scheduled Backup Had Failures"
+  de_DE: "Fehler bei geplanter Sicherung"
+  es_ES: "La copia programada tuvo errores"
+  fr_FR: "La sauvegarde planifiée a rencontré des erreurs"
+  pl_PL: "Błędy zaplanowanej kopii"
+
+backup.scheduled.schedule-invalid-cursor:
+  en_US: "Invalid scheduled backup cursor"
+  de_DE: "Ungültiger Cursor für geplante Sicherung"
+  es_ES: "Cursor de copia programada no válido"
+  fr_FR: "Curseur de sauvegarde planifiée invalide"
+  pl_PL: "Nieprawidłowy kursor zaplanowanej kopii"
+
+backup.scheduled.schedule-no-occurrence:
+  en_US: "Schedule has no occurrence in the next five years"
+  de_DE: "Der Zeitplan hat in den nächsten fünf Jahren keinen Termin"
+  es_ES: "La programación no tiene ejecuciones en los próximos cinco años"
+  fr_FR: "La planification ne comporte aucune occurrence dans les cinq prochaines années"
+  pl_PL: "Harmonogram nie ma wystąpień w ciągu następnych pięciu lat"
+
+backup.scheduled.schedule-unsupported:
+  en_US: "Scheduled backups support hourly, daily, weekly, or monthly intervals"
+  de_DE: "Geplante Sicherungen unterstützen stündliche, tägliche, wöchentliche oder monatliche Intervalle"
+  es_ES: "Las copias programadas admiten intervalos horarios, diarios, semanales o mensuales"
+  fr_FR: "Les sauvegardes planifiées prennent en charge les intervalles horaires, quotidiens, hebdomadaires ou mensuels"
+  pl_PL: "Zaplanowane kopie obsługują interwały godzinowe, dzienne, tygodniowe lub miesięczne"
+
+backup.scheduled.service-not-ready:
+  en_US: "Service is not ready for backup"
+  de_DE: "Der Dienst ist nicht für eine Sicherung bereit"
+  es_ES: "El servicio no está listo para la copia"
+  fr_FR: "Le service n'est pas prêt pour la sauvegarde"
+  pl_PL: "Usługa nie jest gotowa do utworzenia kopii"
+
+backup.scheduled.snapshot-delete-stale:
+  en_US: "Scheduled backup snapshot deletion set is stale"
+  de_DE: "Die Auswahl zum Löschen geplanter Prüfpunkte ist veraltet"
+  es_ES: "La selección para eliminar puntos programados está desactualizada"
+  fr_FR: "La sélection de suppression des points planifiés est obsolète"
+  pl_PL: "Zestaw usuwanych punktów zaplanowanej kopii jest nieaktualny"
+
+backup.scheduled.snapshot-not-found:
+  en_US: "Scheduled backup snapshot does not exist"
+  de_DE: "Geplanter Sicherungspunkt ist nicht vorhanden"
+  es_ES: "El punto de copia programada no existe"
+  fr_FR: "Le point de sauvegarde planifiée n'existe pas"
+  pl_PL: "Punkt zaplanowanej kopii nie istnieje"
+
+backup.scheduled.system-snapshot-not-found:
+  en_US: "Scheduled System backup does not exist"
+  de_DE: "Die geplante Systemsicherung ist nicht vorhanden"
+  es_ES: "La copia programada del sistema no existe"
+  fr_FR: "La sauvegarde système planifiée n'existe pas"
+  pl_PL: "Zaplanowana kopia systemu nie istnieje"
+
+
+backup.scheduled.stored-timezone-invalid:
+  en_US: "Stored scheduled backup timezone is invalid"
+  de_DE: "Gespeicherte Zeitzone der geplanten Sicherung ist ungültig"
+  es_ES: "La zona horaria guardada de la copia programada no es válida"
+  fr_FR: "Le fuseau horaire enregistré de la sauvegarde planifiée est invalide"
+  pl_PL: "Zapisana strefa czasowa zaplanowanej kopii jest nieprawidłowa"
+
+backup.scheduled.system:
+  en_US: "System"
+  de_DE: "System"
+  es_ES: "Sistema"
+  fr_FR: "Système"
+  pl_PL: "System"
+
+backup.scheduled.target-already-configured:
+  en_US: "This backup location is already used by %{jobs}. Select its existing location entry."
+  de_DE: "Dieser Sicherungsort wird bereits von %{jobs} verwendet. Wählen Sie den vorhandenen Eintrag aus."
+  es_ES: "Esta ubicación de copia de seguridad ya la utiliza %{jobs}. Seleccione la entrada existente de la ubicación."
+  fr_FR: "Cet emplacement de sauvegarde est déjà utilisé par %{jobs}. Sélectionnez son entrée existante."
+  pl_PL: "Ta lokalizacja kopii zapasowych jest już używana przez %{jobs}. Wybierz jej istniejący wpis."
+
+backup.scheduled.target-identity-mismatch:
+  en_US: "Scheduled backup target identity does not match"
+  de_DE: "Identität des Sicherungsziels stimmt nicht überein"
+  es_ES: "La identidad del destino de copia no coincide"
+  fr_FR: "L'identité de la cible de sauvegarde ne correspond pas"
+  pl_PL: "Tożsamość celu kopii nie jest zgodna"
+
+backup.scheduled.target-location-identity-mismatch:
+  en_US: "This location entry belongs to another backup history. Reconnect the original location, or select a separate location entry for the replacement."
+  de_DE: "Dieser Standorteintrag gehört zu einem anderen Sicherungsverlauf. Verbinden Sie den ursprünglichen Speicherort erneut oder wählen Sie einen separaten Eintrag für den Ersatz."
+  es_ES: "Esta entrada de ubicación pertenece a otro historial de copias de seguridad. Vuelva a conectar la ubicación original o seleccione una entrada distinta para la ubicación de reemplazo."
+  fr_FR: "Cette entrée d'emplacement appartient à un autre historique de sauvegarde. Reconnectez l'emplacement d'origine ou sélectionnez une entrée distincte pour son remplacement."
+  pl_PL: "Ten wpis lokalizacji należy do innej historii kopii zapasowych. Podłącz ponownie pierwotną lokalizację lub wybierz osobny wpis dla zastępczej lokalizacji."
+
+backup.scheduled.target-unavailable-message:
+  en_US: "Target %{target} failed three consecutive connection attempts. Its jobs are paused. Retry now, select another target, or delete the affected jobs."
+  de_DE: "Drei Verbindungsversuche zu Ziel %{target} sind fehlgeschlagen. Die Aufträge sind pausiert. Versuchen Sie es erneut, wählen Sie ein anderes Ziel oder löschen Sie die Aufträge."
+  es_ES: "El destino %{target} falló tres conexiones consecutivas. Sus tareas están en pausa. Reintente, seleccione otro destino o elimine las tareas."
+  fr_FR: "La cible %{target} a échoué trois connexions consécutives. Ses tâches sont en pause. Réessayez, choisissez une autre cible ou supprimez les tâches."
+  pl_PL: "Cel %{target} nie połączył się trzy razy z rzędu. Zadania są wstrzymane. Ponów próbę, wybierz inny cel lub usuń zadania."
+
+backup.scheduled.target-unavailable-title:
+  en_US: "Backup Target Unavailable"
+  de_DE: "Sicherungsziel nicht verfügbar"
+  es_ES: "Destino de copia no disponible"
+  fr_FR: "Cible de sauvegarde indisponible"
+  pl_PL: "Cel kopii niedostępny"
+
+backup.scheduled.unreadable-message:
+  en_US: "Job %{job} is paused because StartOS could not read the automatic backups on %{target}. Check the location and its backup metadata, review the technical details in Backup history, then retry."
+  de_DE: "Auftrag %{job} ist pausiert, da StartOS die automatischen Sicherungen auf %{target} nicht lesen konnte. Prüfen Sie den Speicherort und die Sicherungsmetadaten sowie die technischen Details im Sicherungsverlauf und versuchen Sie es erneut."
+  es_ES: "La tarea %{job} está en pausa porque StartOS no pudo leer las copias automáticas en %{target}. Compruebe la ubicación y los metadatos, revise los detalles técnicos en el historial de copias y reintente."
+  fr_FR: "La tâche %{job} est en pause car StartOS n'a pas pu lire les sauvegardes automatiques sur %{target}. Vérifiez l'emplacement et les métadonnées, consultez les détails techniques dans l'historique des sauvegardes, puis réessayez."
+  pl_PL: "Zadanie %{job} jest wstrzymane, ponieważ StartOS nie mógł odczytać automatycznych kopii w %{target}. Sprawdź lokalizację i metadane kopii, przejrzyj szczegóły techniczne w historii kopii i ponów próbę."
+
+backup.scheduled.unreadable-title:
+  en_US: "Backup location unreadable"
+  de_DE: "Sicherungsort nicht lesbar"
+  es_ES: "No se puede leer la ubicación de las copias"
+  fr_FR: "Emplacement de sauvegarde illisible"
+  pl_PL: "Nie można odczytać lokalizacji kopii"
+
+backup.scheduled.unreasonable-retention:
+  en_US: "Retention policy or capacity estimate is unreasonably large"
+  de_DE: "Aufbewahrungsrichtlinie oder Kapazitätsschätzung ist unangemessen groß"
+  es_ES: "La política de retención o la estimación de capacidad es demasiado grande"
+  fr_FR: "La politique de rétention ou l'estimation de capacité est déraisonnablement grande"
+  pl_PL: "Polityka retencji lub oszacowanie pojemności jest zbyt duże"
 # service/effects/net/plugin.rs
 net.plugin.manifest-missing-plugin:
   en_US: "manifest does not declare the \"%{plugin}\" plugin"
@@ -2890,12 +3325,33 @@ service.uninstall.invalid-package-state-for-cleanup:
   pl_PL: "Nieprawidłowy stan pakietu do czyszczenia: %{state}"
 
 # service/transition/backup.rs
+service.transition.backup.cleanup-blocked-message:
+  en_US: "The backup for %{service} timed out. StartOS is retrying runtime shutdown before cleaning up the backup. Check OS logs; restart the server if shutdown continues to fail."
+  de_DE: "Die Sicherung für %{service} hat das Zeitlimit überschritten. StartOS versucht erneut, die Laufzeitumgebung vor der Bereinigung der Sicherung zu stoppen. Prüfen Sie die Betriebssystemprotokolle; starten Sie den Server neu, wenn das Stoppen weiterhin fehlschlägt."
+  es_ES: "La copia de seguridad de %{service} agotó el tiempo de espera. StartOS está reintentando detener el entorno de ejecución antes de limpiar la copia. Consulta los registros del sistema; reinicia el servidor si sigue fallando."
+  fr_FR: "La sauvegarde de %{service} a dépassé le délai. StartOS réessaie d’arrêter l’environnement d’exécution avant de nettoyer la sauvegarde. Consultez les journaux du système ; redémarrez le serveur si l’arrêt continue d’échouer."
+  pl_PL: "Kopia zapasowa usługi %{service} przekroczyła limit czasu. StartOS ponawia zatrzymanie środowiska wykonawczego przed posprzątaniem kopii. Sprawdź dzienniki systemu; uruchom serwer ponownie, jeśli zatrzymanie nadal się nie udaje."
+
+service.transition.backup.cleanup-blocked-title:
+  en_US: "Backup cleanup needs attention"
+  de_DE: "Sicherungsbereinigung erfordert Aufmerksamkeit"
+  es_ES: "La limpieza de la copia de seguridad requiere atención"
+  fr_FR: "Le nettoyage de la sauvegarde nécessite une intervention"
+  pl_PL: "Porządkowanie kopii zapasowej wymaga uwagi"
+
 service.transition.backup.no-backup-to-resume:
   en_US: "No backup to resume"
   de_DE: "Keine Sicherung zum Fortsetzen"
   es_ES: "No hay respaldo para reanudar"
   fr_FR: "Aucune sauvegarde à reprendre"
   pl_PL: "Brak kopii zapasowej do wznowienia"
+
+service.transition.backup.runtime-recovery-failed:
+  en_US: "The runtime for %{service} could not recover after its backup timed out. The service remains stopped. Check OS logs and restart the server, then start the service."
+  de_DE: "Die Laufzeitumgebung für %{service} konnte nach dem Zeitlimit der Sicherung nicht wiederhergestellt werden. Der Dienst bleibt gestoppt. Prüfen Sie die Betriebssystemprotokolle und starten Sie den Server neu, dann starten Sie den Dienst."
+  es_ES: "El entorno de ejecución de %{service} no pudo recuperarse tras agotarse el tiempo de la copia de seguridad. El servicio permanece detenido. Consulta los registros del sistema y reinicia el servidor; después, inicia el servicio."
+  fr_FR: "L’environnement d’exécution de %{service} n’a pas pu être rétabli après l’expiration du délai de sauvegarde. Le service reste arrêté. Consultez les journaux du système et redémarrez le serveur, puis démarrez le service."
+  pl_PL: "Nie udało się przywrócić środowiska wykonawczego usługi %{service} po przekroczeniu limitu czasu kopii zapasowej. Usługa pozostaje zatrzymana. Sprawdź dzienniki systemu i uruchom serwer ponownie, a następnie uruchom usługę."
 
 # context/setup.rs
 context.setup.couldnt-generate-ec-key:
@@ -3394,6 +3850,13 @@ util.serde.invalid-units-for-duration:
   es_ES: "Unidades inválidas para la duración"
   fr_FR: "Unités invalides pour la durée"
   pl_PL: "Nieprawidłowe jednostki dla czasu trwania"
+
+util.serde.json-file-too-large:
+  en_US: "JSON file exceeds the %{max_bytes}-byte size limit"
+  de_DE: "JSON-Datei überschreitet die Größenbeschränkung von %{max_bytes} Byte"
+  es_ES: "El archivo JSON supera el límite de tamaño de %{max_bytes} bytes"
+  fr_FR: "Le fichier JSON dépasse la limite de %{max_bytes} octets"
+  pl_PL: "Plik JSON przekracza limit rozmiaru %{max_bytes} bajtów"
 
 util.serde.failed-to-create-from-buffer:
   en_US: "failed to create from buffer"
@@ -4430,6 +4893,146 @@ help.arg.asset-url:
   fr_FR: "URL de la ressource"
   pl_PL: "URL zasobu"
 
+help.arg.automatic-backup-all-services:
+  en_US: "Back up every current and future service"
+  de_DE: "Alle aktuellen und zukünftigen Dienste sichern"
+  es_ES: "Respaldar todos los servicios actuales y futuros"
+  fr_FR: "Sauvegarder tous les services actuels et futurs"
+  pl_PL: "Twórz kopie wszystkich obecnych i przyszłych usług"
+
+help.arg.automatic-backup-checkpoint-selection:
+  en_US: "Checkpoint as PACKAGE_ID=SNAPSHOT_ID; repeat for multiple services"
+  de_DE: "Prüfpunkt als PACKAGE_ID=SNAPSHOT_ID; für mehrere Dienste wiederholen"
+  es_ES: "Punto como PACKAGE_ID=SNAPSHOT_ID; repetir para varios servicios"
+  fr_FR: "Point au format PACKAGE_ID=SNAPSHOT_ID ; répéter pour plusieurs services"
+  pl_PL: "Punkt jako PACKAGE_ID=SNAPSHOT_ID; powtórz dla wielu usług"
+
+help.arg.automatic-backup-confirm-removal:
+  en_US: "Checkpoint ID reported by preview-change; repeat for every removal"
+  de_DE: "Von preview-change gemeldete Prüfpunkt-ID; für jede Löschung wiederholen"
+  es_ES: "ID de punto indicado por preview-change; repetir para cada eliminación"
+  fr_FR: "ID de point indiqué par preview-change ; répéter pour chaque suppression"
+  pl_PL: "Identyfikator punktu podany przez preview-change; powtórz dla każdego usunięcia"
+
+help.arg.automatic-backup-cron:
+  en_US: "Five-field cron schedule (minute, hour, day of month, month, weekday)"
+  de_DE: "Cron-Zeitplan mit fünf Feldern (Minute, Stunde, Monatstag, Monat, Wochentag)"
+  es_ES: "Programación cron de cinco campos (minuto, hora, día del mes, mes, día de la semana)"
+  fr_FR: "Planification cron à cinq champs (minute, heure, jour du mois, mois, jour de semaine)"
+  pl_PL: "Pięciopolowy harmonogram cron (minuta, godzina, dzień miesiąca, miesiąc, dzień tygodnia)"
+
+help.arg.automatic-backup-disabled:
+  en_US: "Create the automatic backup job paused"
+  de_DE: "Automatischen Sicherungsauftrag pausiert erstellen"
+  es_ES: "Crear la tarea de copia automática en pausa"
+  fr_FR: "Créer la tâche de sauvegarde automatique en pause"
+  pl_PL: "Utwórz wstrzymane zadanie automatycznej kopii"
+
+help.arg.automatic-backup-excluded-package-ids:
+  en_US: "Package IDs to exclude from current and future services"
+  de_DE: "Paket-IDs, die von aktuellen und zukünftigen Diensten ausgeschlossen werden"
+  es_ES: "IDs de paquetes que se excluirán de los servicios actuales y futuros"
+  fr_FR: "IDs de paquets à exclure des services actuels et futurs"
+  pl_PL: "Identyfikatory pakietów wykluczonych z obecnych i przyszłych usług"
+
+help.arg.automatic-backup-job-id:
+  en_US: "Automatic backup job identifier"
+  de_DE: "Kennung des automatischen Sicherungsauftrags"
+  es_ES: "Identificador de la tarea de copia automática"
+  fr_FR: "Identifiant de la tâche de sauvegarde automatique"
+  pl_PL: "Identyfikator zadania automatycznej kopii"
+
+help.arg.automatic-backup-job-name:
+  en_US: "Human-readable automatic backup job name"
+  de_DE: "Lesbarer Name des automatischen Sicherungsauftrags"
+  es_ES: "Nombre legible de la tarea de copia automática"
+  fr_FR: "Nom lisible de la tâche de sauvegarde automatique"
+  pl_PL: "Czytelna nazwa zadania automatycznej kopii"
+
+help.arg.automatic-backup-latest-only:
+  en_US: "Keep only the latest automatic checkpoint"
+  de_DE: "Nur den neuesten automatischen Prüfpunkt behalten"
+  es_ES: "Conservar solo el punto automático más reciente"
+  fr_FR: "Ne conserver que le dernier point automatique"
+  pl_PL: "Zachowaj tylko najnowszy automatyczny punkt"
+
+help.arg.automatic-backup-package-ids:
+  en_US: "Package IDs to include in the automatic backup"
+  de_DE: "Paket-IDs für die automatische Sicherung"
+  es_ES: "IDs de paquetes que se incluirán en la copia automática"
+  fr_FR: "IDs de paquets à inclure dans la sauvegarde automatique"
+  pl_PL: "Identyfikatory pakietów uwzględnionych w automatycznej kopii"
+
+help.arg.automatic-backup-retention-tier:
+  en_US: "Version-history rule INTERVAL:COVERAGE; accepts s, m, h, d, or w and may repeat"
+  de_DE: "Versionsverlaufsregel INTERVAL:COVERAGE; s, m, h, d oder w; wiederholbar"
+  es_ES: "Regla de historial INTERVAL:COVERAGE; admite s, m, h, d o w y se puede repetir"
+  fr_FR: "Règle d'historique INTERVAL:COVERAGE ; accepte s, m, h, d ou w et peut être répétée"
+  pl_PL: "Reguła historii INTERVAL:COVERAGE; obsługuje s, m, h, d lub w i może się powtarzać"
+
+help.arg.automatic-backup-review-decision:
+  en_US: "Decision as JOB_ID=add or JOB_ID=skip; repeat for every current job, or omit when none exist"
+  de_DE: "Entscheidung als JOB_ID=add oder JOB_ID=skip; für jeden aktuellen Auftrag wiederholen oder weglassen, wenn keiner existiert"
+  es_ES: "Decisión como JOB_ID=add o JOB_ID=skip; repetir para cada tarea actual u omitir si no existe ninguna"
+  fr_FR: "Décision au format JOB_ID=add ou JOB_ID=skip ; répéter pour chaque tâche actuelle ou omettre s'il n'y en a aucune"
+  pl_PL: "Decyzja jako JOB_ID=add lub JOB_ID=skip; powtórz dla każdego bieżącego zadania lub pomiń, gdy nie ma żadnego"
+
+help.arg.automatic-backup-service-latest-only:
+  en_US: "Service IDs, or x_system for System data, that should keep only their latest checkpoint"
+  de_DE: "Dienst-IDs oder x_system für Systemdaten, die nur ihren neuesten Prüfpunkt behalten sollen"
+  es_ES: "IDs de servicios, o x_system para los datos del sistema, que conservarán solo su punto más reciente"
+  fr_FR: "IDs de services, ou x_system pour les données système, qui ne conserveront que leur dernier point"
+  pl_PL: "Identyfikatory usług lub x_system dla danych systemowych zachowujących tylko najnowszy punkt"
+
+help.arg.automatic-backup-service-retention-tier:
+  en_US: "Version-history rule PACKAGE_ID=INTERVAL:COVERAGE; use x_system for System data; may repeat"
+  de_DE: "Versionsverlaufsregel PACKAGE_ID=INTERVAL:COVERAGE; x_system für Systemdaten; wiederholbar"
+  es_ES: "Regla de historial PACKAGE_ID=INTERVAL:COVERAGE; use x_system para los datos del sistema; se puede repetir"
+  fr_FR: "Règle d'historique PACKAGE_ID=INTERVAL:COVERAGE ; utilisez x_system pour les données système ; peut être répétée"
+  pl_PL: "Reguła historii wersji PACKAGE_ID=INTERVAL:COVERAGE; użyj x_system dla danych systemowych; może się powtarzać"
+
+help.arg.automatic-backup-snapshot-ids:
+  en_US: "Automatic checkpoint IDs to delete"
+  de_DE: "Zu löschende automatische Prüfpunkt-IDs"
+  es_ES: "IDs de puntos automáticos que se eliminarán"
+  fr_FR: "IDs des points automatiques à supprimer"
+  pl_PL: "Identyfikatory automatycznych punktów do usunięcia"
+
+help.arg.automatic-backup-system-data:
+  en_US: "Include or exclude StartOS System data"
+  de_DE: "StartOS-Systemdaten ein- oder ausschließen"
+  es_ES: "Incluir o excluir los datos del sistema StartOS"
+  fr_FR: "Inclure ou exclure les données système de StartOS"
+  pl_PL: "Uwzględnij lub wyklucz dane systemowe StartOS"
+
+help.arg.automatic-backup-timezone:
+  en_US: "IANA timezone for the automatic backup schedule"
+  de_DE: "IANA-Zeitzone für den automatischen Sicherungszeitplan"
+  es_ES: "Zona horaria IANA para la programación de copias automáticas"
+  fr_FR: "Fuseau horaire IANA de la planification des sauvegardes automatiques"
+  pl_PL: "Strefa czasowa IANA harmonogramu automatycznych kopii"
+
+help.arg.automatic-backup-use-default-retention:
+  en_US: "Service IDs, or x_system for System data, that should use the job's default retention"
+  de_DE: "Dienst-IDs oder x_system für Systemdaten, die die Standardaufbewahrung des Auftrags verwenden sollen"
+  es_ES: "IDs de servicios, o x_system para los datos del sistema, que usarán la retención predeterminada de la tarea"
+  fr_FR: "IDs de services, ou x_system pour les données système, qui utiliseront la rétention par défaut de la tâche"
+  pl_PL: "Identyfikatory usług lub x_system dla danych systemowych używających domyślnej retencji zadania"
+
+help.arg.automatic-backup-wait-for-schedule:
+  en_US: "Wait for the next scheduled time instead of running on the new target now"
+  de_DE: "Auf den nächsten Termin warten, statt jetzt am neuen Ziel zu starten"
+  es_ES: "Esperar a la próxima hora programada en vez de ejecutar ahora en el destino nuevo"
+  fr_FR: "Attendre la prochaine heure planifiée au lieu d'exécuter maintenant sur la nouvelle cible"
+  pl_PL: "Poczekaj na następny termin zamiast uruchamiać teraz w nowym miejscu"
+
+help.arg.backup-item-id:
+  en_US: "Service identifier, or x_system for System data"
+  de_DE: "Dienst-Kennung oder x_system für Systemdaten"
+  es_ES: "Identificador de servicio, o x_system para los datos del sistema"
+  fr_FR: "Identifiant du service, ou x_system pour les données système"
+  pl_PL: "Identyfikator usługi lub x_system dla danych systemowych"
+
 help.arg.backup-password:
   en_US: "Password for backup encryption"
   de_DE: "Passwort für Backup-Verschlüsselung"
@@ -4936,6 +5539,13 @@ about.add-asset-registry:
   fr_FR: "Ajouter un actif au registre"
   pl_PL: "Dodaj zasób do rejestru"
 
+about.add-automatic-backup-job:
+  en_US: "Add an automatic backup job"
+  de_DE: "Automatischen Sicherungsauftrag hinzufügen"
+  es_ES: "Añadir una tarea de copia de seguridad automática"
+  fr_FR: "Ajouter une tâche de sauvegarde automatique"
+  pl_PL: "Dodaj zadanie automatycznej kopii zapasowej"
+
 about.add-category-registry:
   en_US: "Add a category to the registry"
   de_DE: "Eine Kategorie zum Registry hinzufügen"
@@ -5154,6 +5764,13 @@ about.apply-available-update:
   fr_FR: "Appliquer la mise à jour disponible"
   pl_PL: "Zastosuj dostępną aktualizację"
 
+about.apply-backup-retention-policy:
+  en_US: "Apply an automatic backup retention policy"
+  de_DE: "Aufbewahrungsrichtlinie für automatische Sicherungen anwenden"
+  es_ES: "Aplicar una política de retención de copias de seguridad automáticas"
+  fr_FR: "Appliquer une politique de rétention des sauvegardes automatiques"
+  pl_PL: "Zastosuj zasady przechowywania automatycznych kopii zapasowych"
+
 about.calculate-blake3-hash-for-file:
   en_US: "Calculate blake3 hash for a file"
   de_DE: "Blake3-Hash für eine Datei berechnen"
@@ -5308,12 +5925,47 @@ about.commands-authorized-keys:
   fr_FR: "Commandes pour gérer les clés autorisées"
   pl_PL: "Polecenia do zarządzania autoryzowanymi kluczami"
 
+about.commands-automatic-backup-jobs:
+  en_US: "Commands to manage automatic backup jobs"
+  de_DE: "Befehle zum Verwalten automatischer Sicherungsaufträge"
+  es_ES: "Comandos para gestionar tareas de copias de seguridad automáticas"
+  fr_FR: "Commandes pour gérer les tâches de sauvegarde automatique"
+  pl_PL: "Polecenia do zarządzania zadaniami automatycznych kopii zapasowych"
+
 about.commands-backup:
-  en_US: "Commands related to backup creation and backup targets"
-  de_DE: "Befehle zur Backup-Erstellung und Backup-Zielen"
-  es_ES: "Comandos relacionados con la creación de respaldos y destinos de respaldo"
-  fr_FR: "Commandes liées à la création de sauvegardes et aux cibles de sauvegarde"
-  pl_PL: "Polecenia związane z tworzeniem kopii zapasowych i celami kopii zapasowych"
+  en_US: "Commands to create, schedule, inspect, and restore backups"
+  de_DE: "Befehle zum Erstellen, Planen, Prüfen und Wiederherstellen von Sicherungen"
+  es_ES: "Comandos para crear, programar, consultar y restaurar copias de seguridad"
+  fr_FR: "Commandes pour créer, planifier, consulter et restaurer des sauvegardes"
+  pl_PL: "Polecenia do tworzenia, planowania, sprawdzania i przywracania kopii zapasowych"
+
+about.commands-backup-activity:
+  en_US: "Commands to inspect backup and restore activity"
+  de_DE: "Befehle zum Prüfen von Sicherungs- und Wiederherstellungsaktivitäten"
+  es_ES: "Comandos para consultar la actividad de copias y restauraciones"
+  fr_FR: "Commandes pour consulter l’activité des sauvegardes et restaurations"
+  pl_PL: "Polecenia do sprawdzania aktywności kopii i przywracania"
+
+about.commands-backup-history:
+  en_US: "Commands to inspect automatic backup checkpoint history"
+  de_DE: "Befehle zum Prüfen des Verlaufs automatischer Sicherungspunkte"
+  es_ES: "Comandos para consultar el historial de puntos de copias automáticas"
+  fr_FR: "Commandes pour consulter l’historique des points de sauvegarde automatique"
+  pl_PL: "Polecenia do sprawdzania historii punktów automatycznych kopii"
+
+about.commands-backup-policy:
+  en_US: "Commands to preview and apply automatic backup retention policies"
+  de_DE: "Befehle zur Vorschau und Anwendung von Aufbewahrungsrichtlinien für automatische Sicherungen"
+  es_ES: "Comandos para previsualizar y aplicar políticas de retención de copias de seguridad automáticas"
+  fr_FR: "Commandes pour prévisualiser et appliquer les politiques de rétention des sauvegardes automatiques"
+  pl_PL: "Polecenia do podglądu i stosowania zasad przechowywania automatycznych kopii zapasowych"
+
+about.commands-backup-review:
+  en_US: "Commands to resolve automatic backup decisions for new services"
+  de_DE: "Befehle zum Abschließen automatischer Sicherungsentscheidungen für neue Dienste"
+  es_ES: "Comandos para resolver decisiones de copias automáticas para servicios nuevos"
+  fr_FR: "Commandes pour résoudre les décisions de sauvegarde automatique des nouveaux services"
+  pl_PL: "Polecenia do rozstrzygania decyzji o automatycznych kopiach nowych usług"
 
 about.commands-backup-target:
   en_US: "Commands related to a backup target"
@@ -5623,12 +6275,33 @@ about.create-id-key:
   fr_FR: "Créer une nouvelle clé d'identité"
   pl_PL: "Utwórz nowy klucz tożsamości"
 
+about.delete-archived-backup-checkpoints:
+  en_US: "Delete selected archived automatic backup checkpoints"
+  de_DE: "Ausgewählte archivierte automatische Sicherungspunkte löschen"
+  es_ES: "Eliminar los puntos archivados seleccionados de copias automáticas"
+  fr_FR: "Supprimer les points archivés sélectionnés des sauvegardes automatiques"
+  pl_PL: "Usuń wybrane zarchiwizowane punkty automatycznych kopii zapasowych"
+
+about.delete-automatic-backup-job:
+  en_US: "Delete an automatic backup job"
+  de_DE: "Automatischen Sicherungsauftrag löschen"
+  es_ES: "Eliminar una tarea de copia de seguridad automática"
+  fr_FR: "Supprimer une tâche de sauvegarde automatique"
+  pl_PL: "Usuń zadanie automatycznej kopii zapasowej"
+
 about.delete-legacy-backup:
   en_US: "Delete the legacy (V1) backup from a backup target; its space is reclaimed in the background"
   de_DE: "Die alte (V1) Sicherung von einem Sicherungsziel löschen; ihr Speicherplatz wird im Hintergrund freigegeben"
   es_ES: "Eliminar la copia de seguridad heredada (V1) de un destino de copia de seguridad; su espacio se recupera en segundo plano"
   fr_FR: "Supprimer la sauvegarde héritée (V1) d'une cible de sauvegarde ; son espace est récupéré en arrière-plan"
   pl_PL: "Usuń starą kopię zapasową (V1) z celu kopii zapasowej; jej miejsce jest odzyskiwane w tle"
+
+about.disable-automatic-backup-job:
+  en_US: "Disable an automatic backup job without deleting its checkpoints"
+  de_DE: "Automatischen Sicherungsauftrag deaktivieren, ohne seine Sicherungspunkte zu löschen"
+  es_ES: "Desactivar una tarea de copia automática sin eliminar sus puntos"
+  fr_FR: "Désactiver une tâche de sauvegarde automatique sans supprimer ses points"
+  pl_PL: "Wyłącz zadanie automatycznej kopii bez usuwania jego punktów"
 
 about.disable-kiosk-mode:
   en_US: "Disable kiosk mode"
@@ -5643,6 +6316,13 @@ about.disable-webserver:
   es_ES: "Desactivar el servidor web"
   fr_FR: "Désactiver le serveur web"
   pl_PL: "Wyłącz serwer internetowy"
+
+about.discover-automatic-backup-history:
+  en_US: "Discover automatic backup history stored on a backup target"
+  de_DE: "Automatischen Sicherungsverlauf auf einem Sicherungsziel ermitteln"
+  es_ES: "Descubrir el historial de copias automáticas almacenado en un destino"
+  fr_FR: "Découvrir l’historique des sauvegardes automatiques stocké sur une cible"
+  pl_PL: "Odkryj historię automatycznych kopii zapisaną w lokalizacji kopii"
 
 about.display-all-auth-sessions:
   en_US: "Display all auth sessions"
@@ -5826,6 +6506,13 @@ about.echo-message:
   fr_FR: "Renvoyer un message"
   pl_PL: "Odzew wiadomości"
 
+about.edit-automatic-backup-job:
+  en_US: "Edit an automatic backup job"
+  de_DE: "Automatischen Sicherungsauftrag bearbeiten"
+  es_ES: "Editar una tarea de copia de seguridad automática"
+  fr_FR: "Modifier une tâche de sauvegarde automatique"
+  pl_PL: "Edytuj zadanie automatycznej kopii zapasowej"
+
 about.edit-s9pk-manifest:
   en_US: "Edit s9pk manifest"
   de_DE: "s9pk-Manifest bearbeiten"
@@ -5839,6 +6526,13 @@ about.edit-signer:
   es_ES: "Editar información del firmante"
   fr_FR: "Modifier les informations du signataire"
   pl_PL: "Edytuj informacje o podpisującym"
+
+about.enable-automatic-backup-job:
+  en_US: "Enable an automatic backup job"
+  de_DE: "Automatischen Sicherungsauftrag aktivieren"
+  es_ES: "Activar una tarea de copia de seguridad automática"
+  fr_FR: "Activer une tâche de sauvegarde automatique"
+  pl_PL: "Włącz zadanie automatycznej kopii zapasowej"
 
 about.enable-disable-wifi:
   en_US: "Enable or disable wifi"
@@ -5881,6 +6575,13 @@ about.enable-zram:
   es_ES: "Activar ZRAM"
   fr_FR: "Activer ZRAM"
   pl_PL: "Włącz ZRAM"
+
+about.estimate-backup-capacity:
+  en_US: "Estimate automatic backup storage requirements"
+  de_DE: "Speicherbedarf automatischer Sicherungen schätzen"
+  es_ES: "Estimar los requisitos de almacenamiento de las copias de seguridad automáticas"
+  fr_FR: "Estimer les besoins de stockage des sauvegardes automatiques"
+  pl_PL: "Oszacuj wymagania dotyczące miejsca dla automatycznych kopii zapasowych"
 
 about.execute-commands-container:
   en_US: "Execute commands in container"
@@ -6072,12 +6773,40 @@ about.list-authorized-keys:
   fr_FR: "Lister les clés autorisées"
   pl_PL: "Wyświetl autoryzowane klucze"
 
+about.list-automatic-backup-history:
+  en_US: "List automatic backup checkpoint history"
+  de_DE: "Verlauf automatischer Sicherungspunkte auflisten"
+  es_ES: "Listar el historial de puntos de copias automáticas"
+  fr_FR: "Lister l’historique des points de sauvegarde automatique"
+  pl_PL: "Wyświetl historię punktów automatycznych kopii zapasowych"
+
+about.list-automatic-backup-jobs:
+  en_US: "List automatic backup jobs"
+  de_DE: "Automatische Sicherungsaufträge auflisten"
+  es_ES: "Listar tareas de copias de seguridad automáticas"
+  fr_FR: "Lister les tâches de sauvegarde automatique"
+  pl_PL: "Wyświetl zadania automatycznych kopii zapasowych"
+
 about.list-available-wifi-networks:
   en_US: "List available wifi networks"
   de_DE: "Verfügbare WLAN-Netzwerke auflisten"
   es_ES: "Listar redes wifi disponibles"
   fr_FR: "Lister les réseaux wifi disponibles"
   pl_PL: "Wyświetl dostępne sieci wifi"
+
+about.list-backup-activity:
+  en_US: "List manual backup, automatic backup, and restore activity"
+  de_DE: "Manuelle Sicherungen, automatische Sicherungen und Wiederherstellungen auflisten"
+  es_ES: "Listar la actividad de copias manuales, automáticas y restauraciones"
+  fr_FR: "Lister l’activité des sauvegardes manuelles, automatiques et des restaurations"
+  pl_PL: "Wyświetl aktywność ręcznych i automatycznych kopii oraz przywracania"
+
+about.list-backup-service-reviews:
+  en_US: "List pending automatic backup decisions for newly installed services"
+  de_DE: "Ausstehende Entscheidungen zu automatischen Sicherungen neuer Dienste auflisten"
+  es_ES: "Listar decisiones pendientes de copias automáticas para servicios nuevos"
+  fr_FR: "Lister les décisions de sauvegarde automatique en attente pour les nouveaux services"
+  pl_PL: "Wyświetl oczekujące decyzje o automatycznych kopiach nowych usług"
 
 about.list-bindings-for-host:
   en_US: "List bindings for a host"
@@ -6352,6 +7081,13 @@ about.persist-new-notification:
   fr_FR: "Persister une nouvelle notification"
   pl_PL: "Utrwal nowe powiadomienie"
 
+about.preview-backup-retention-change:
+  en_US: "Preview an automatic backup retention policy change"
+  de_DE: "Änderung einer Aufbewahrungsrichtlinie für automatische Sicherungen in der Vorschau anzeigen"
+  es_ES: "Previsualizar un cambio en la política de retención de copias de seguridad automáticas"
+  fr_FR: "Prévisualiser une modification de la politique de rétention des sauvegardes automatiques"
+  pl_PL: "Wyświetl podgląd zmiany zasad przechowywania automatycznych kopii zapasowych"
+
 about.promote-or-demote-device-kind:
   en_US: "Promote a device to a server or demote it to a client"
   de_DE: "Ein Gerät zu einem Server hochstufen oder zu einem Client herabstufen"
@@ -6386,6 +7122,13 @@ about.select-s9pk-for-device:
   es_ES: "Seleccionar el s9pk más compatible para un dispositivo destino"
   fr_FR: "Sélectionner le meilleur s9pk compatible pour un appareil cible"
   pl_PL: "Wybierz najlepiej kompatybilny s9pk dla urządzenia docelowego"
+
+about.reassign-automatic-backup-target:
+  en_US: "Move an automatic backup job to another target"
+  de_DE: "Automatischen Sicherungsauftrag auf ein anderes Ziel verschieben"
+  es_ES: "Mover una tarea de copia automática a otro destino"
+  fr_FR: "Déplacer une tâche de sauvegarde automatique vers une autre cible"
+  pl_PL: "Przenieś zadanie automatycznej kopii do innej lokalizacji"
 
 about.rebuild-service-container:
   en_US: "Rebuild service container"
@@ -6646,6 +7389,13 @@ about.uninitialize-webserver:
   fr_FR: "Désinitialiser le serveur web"
   pl_PL: "Zdezinicjalizuj serwer internetowy"
 
+about.resolve-backup-service-review:
+  en_US: "Resolve automatic backup decisions for a newly installed service"
+  de_DE: "Entscheidungen zur automatischen Sicherung eines neuen Dienstes abschließen"
+  es_ES: "Resolver decisiones de copia automática para un servicio recién instalado"
+  fr_FR: "Résoudre les décisions de sauvegarde automatique pour un nouveau service"
+  pl_PL: "Rozstrzygnij decyzje o automatycznej kopii nowo zainstalowanej usługi"
+
 about.restart-server:
   en_US: "Restart the server"
   de_DE: "Den Server neu starten"
@@ -6667,12 +7417,40 @@ about.restart-tunnel:
   fr_FR: "Redémarrer le serveur tunnel"
   pl_PL: "Uruchom ponownie serwer tunelu"
 
+about.restore-automatic-backup-checkpoints:
+  en_US: "Restore services from selected automatic backup checkpoints"
+  de_DE: "Dienste aus ausgewählten automatischen Sicherungspunkten wiederherstellen"
+  es_ES: "Restaurar servicios desde puntos seleccionados de copias automáticas"
+  fr_FR: "Restaurer des services depuis des points de sauvegarde automatique sélectionnés"
+  pl_PL: "Przywróć usługi z wybranych punktów automatycznych kopii zapasowych"
+
+about.restore-mixed-backup-checkpoints:
+  en_US: "Restore one selection of manual and automatic backup checkpoints"
+  de_DE: "Eine Auswahl manueller und automatischer Sicherungspunkte wiederherstellen"
+  es_ES: "Restaurar una selección de puntos manuales y automáticos"
+  fr_FR: "Restaurer une sélection de points de sauvegarde manuels et automatiques"
+  pl_PL: "Przywróć wybrane ręczne i automatyczne punkty kopii zapasowych"
+
 about.restore-packages-from-backup:
   en_US: "Restore packages from backup"
   de_DE: "Pakete aus Backup wiederherstellen"
   es_ES: "Restaurar paquetes desde copia de seguridad"
   fr_FR: "Restaurer les packages depuis la sauvegarde"
   pl_PL: "Przywróć pakiety z kopii zapasowej"
+
+about.retry-automatic-backup-target:
+  en_US: "Reconnect an automatic backup target and resume its jobs"
+  de_DE: "Automatisches Sicherungsziel erneut verbinden und seine Aufträge fortsetzen"
+  es_ES: "Volver a conectar un destino de copias automáticas y reanudar sus tareas"
+  fr_FR: "Reconnecter une cible de sauvegarde automatique et reprendre ses tâches"
+  pl_PL: "Połącz ponownie lokalizację automatycznych kopii i wznów jej zadania"
+
+about.run-automatic-backup-job-now:
+  en_US: "Run an automatic backup job now"
+  de_DE: "Automatischen Sicherungsauftrag jetzt ausführen"
+  es_ES: "Ejecutar ahora una tarea de copia de seguridad automática"
+  fr_FR: "Exécuter maintenant une tâche de sauvegarde automatique"
+  pl_PL: "Uruchom teraz zadanie automatycznej kopii zapasowej"
 
 about.run-service-action:
   en_US: "Run a service action"

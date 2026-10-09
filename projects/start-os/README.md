@@ -55,8 +55,8 @@ full ISO/img build.
 ## Quickstart
 
 Build commands run from the **repo root** (one Cargo workspace, one Angular
-workspace). See [AGENTS.md](AGENTS.md#contributor-workflow) for environment
-setup (including the OS-image toolchain) and the full build/test workflow.
+workspace). See [AGENTS.md](AGENTS.md) for environment setup
+(including the OS-image toolchain) and the full build/test workflow.
 
 ```sh
 # from the repo root

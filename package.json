@@ -10,7 +10,7 @@
     "check:shared": "tsc --project shared-libs/ts-modules/shared/tsconfig.json --noEmit --skipLibCheck",
     "check:marketplace": "tsc --project shared-libs/ts-modules/marketplace/tsconfig.json --noEmit --skipLibCheck",
     "check:setup": "tsc --project projects/start-os/web/setup-wizard/tsconfig.json --noEmit --skipLibCheck",
-    "check:ui": "tsc --project projects/start-os/web/ui/tsconfig.json --noEmit --skipLibCheck",
+    "check:ui": "tsc --project projects/start-os/web/ui/tsconfig.json --noEmit --skipLibCheck && node --test projects/start-os/web/ui/scripts/*.test.mjs",
     "check:tunnel": "tsc --project projects/start-tunnel/web/tsconfig.json --noEmit --skipLibCheck",
     "check:brochure": "tsc --project projects/brochure-marketplace/tsconfig.json --noEmit --skipLibCheck",
     "check:wrt": "tsc --project projects/start-wrt/web/tsconfig.json --noEmit --skipLibCheck",

@@ -11,6 +11,8 @@ Use `sdk.setupBackups()` with the appropriate builder. `sdk.Backups.ofVolumes('m
 
 > [!NOTE]
 > Progress is reported per phase, weighted so the rsync copy — the slow part — dominates the bar (`DEFAULT_SYNC_WEIGHT` = 80 per sync, `DEFAULT_HOOK_WEIGHT` = 10 per pre/post hook). A pre/post phase appears only when you set that hook. Override any phase's weight with the optional `weight` argument to `setPreBackup` / `setPostBackup` / `setPreRestore` / `setPostRestore`, or the `weight` field on a sync (`addSync` / `addVolume`).
+>
+> Custom backup functions may return no result. Standard volume and sync backups report the bytes transferred to StartOS as recent transfer metadata. Automatic-backup capacity remains based on full checkpoint size because each retained checkpoint is a full copy. Adding custom pre- or post-backup behavior makes the transfer measurement unknown because the SDK cannot measure storage written by custom code.
 
 **Reference:** [Main](main.md) · [File Models](file-models.md)
 

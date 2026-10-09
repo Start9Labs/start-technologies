@@ -47,7 +47,11 @@ StartOS is a sovereign computing platform that makes it easy to run a personal s
 
 ## Backups
 
+Use automatic backups for ongoing protection, create a one-time manual backup,
+or restore a service from an earlier checkpoint.
+
 - [Creating Backups](backup-create.md)
+- [Automatic Backups](backup-automatic.md)
 - [Restoring Backups](backup-restore.md)
 
 ## System

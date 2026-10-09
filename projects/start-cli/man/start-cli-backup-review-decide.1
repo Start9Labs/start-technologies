@@ -1,0 +1,19 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-backup-review-decide 1  "decide "
+.SH NAME
+start\-cli\-backup\-review\-decide \- Resolve automatic backup decisions for a newly installed service
+.SH SYNOPSIS
+\fBstart\-cli backup review decide\fR [\fB\-\-decision\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIPACKAGE_ID\fR>
+.SH DESCRIPTION
+Resolve automatic backup decisions for a newly installed service
+.SH OPTIONS
+.TP
+\fB\-\-decision\fR \fI<DECISIONS>\fR
+Decision as JOB_ID=add or JOB_ID=skip; repeat for every current job, or omit when none exist
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIPACKAGE_ID\fR>
+Package identifier

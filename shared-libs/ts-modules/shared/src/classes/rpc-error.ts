@@ -1,22 +1,21 @@
-import { RPCErrorDetails } from '../types/rpc.types'
+import type { RPCErrorDetails } from '../types/rpc.types'
 
-export class RpcError {
-  constructor(private readonly error: RPCErrorDetails) {}
+export class RpcError extends Error {
+  readonly code: number
 
-  readonly code = this.error.code
-  readonly message = this.getMessage()
-
-  private getMessage(): string {
+  constructor(error: RPCErrorDetails) {
     let message: string
 
-    if (typeof this.error.data === 'string') {
-      message = `${this.error.message}\n\n${this.error.data}`
+    if (typeof error.data === 'string') {
+      message = `${error.message}\n\n${error.data}`
     } else {
-      message = this.error.data?.details
-        ? `${this.error.message}\n\n${this.error.data.details}`
-        : this.error.message
+      message = error.data?.details
+        ? `${error.message}\n\n${error.data.details}`
+        : error.message
     }
 
-    return `RPC ERROR: ${message}`
+    super(`RPC ERROR: ${message}`)
+    this.name = 'RpcError'
+    this.code = error.code
   }
 }

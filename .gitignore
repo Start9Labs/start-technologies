@@ -44,6 +44,17 @@ docs/USER.md
 /projects/start-tunnel/web/dist/
 /projects/brochure-marketplace/dist/
 
+# pre-monorepo build artifacts; source now lives under projects/ and shared-libs/
+/container-runtime/
+/core/
+/patch-db/
+/sdk/
+/web/
+/build/lib/conflicts
+/build/lib/depends
+/build/lib/firmware/
+/build/lib/migration-images/
+
 # migrated mdbook standalone build outputs
 /projects/start-os/docs/book/
 /projects/start-tunnel/docs/book/

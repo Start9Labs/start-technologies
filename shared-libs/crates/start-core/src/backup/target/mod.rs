@@ -64,6 +64,15 @@ impl BackupTargetId {
             BackupTargetId::Cifs { id } => BackupTargetFS::Cifs(cifs::load(db, id)?),
         })
     }
+
+    pub fn user_facing_name(&self, db: &DatabaseModel) -> String {
+        match self {
+            BackupTargetId::Disk { logicalname } => logicalname.display().to_string(),
+            BackupTargetId::Cifs { id } => cifs::load(db, *id)
+                .map(|target| format!("//{}{}", target.hostname, target.path.display()))
+                .unwrap_or_else(|_| self.to_string()),
+        }
+    }
 }
 impl std::fmt::Display for BackupTargetId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

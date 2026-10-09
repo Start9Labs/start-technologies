@@ -5,6 +5,7 @@ use std::time::Duration;
 use clap::Parser;
 use color_eyre::eyre::eyre;
 use const_format::formatcp;
+use futures::future::BoxFuture;
 use itertools::Itertools;
 use josekit::jwk::Jwk;
 use patch_db::json_ptr::ROOT;
@@ -167,7 +168,10 @@ pub async fn list_disks(_ctx: SetupContext) -> Result<Vec<DiskInfo>, Error> {
     )
     .await?;
 
-    // Filter out the disk containing the live medium (installer USB)
+    for partition in disks.iter_mut().flat_map(|disk| &mut disk.partitions) {
+        retain_full_server_backups(&mut partition.start_os);
+    }
+
     if let Ok(Some(live_medium_source)) =
         crate::disk::util::get_mount_source(LIVE_MEDIUM_PATH).await
     {
@@ -175,6 +179,47 @@ pub async fn list_disks(_ctx: SetupContext) -> Result<Vec<DiskInfo>, Error> {
     }
 
     Ok(disks)
+}
+
+fn retain_full_server_backups(backups: &mut BTreeMap<String, StartOsRecoveryInfo>) {
+    backups.retain(|_, info| info.has_system_backup != Some(false));
+}
+
+#[test]
+fn full_server_recovery_excludes_service_only_backups() {
+    let mut backups = BTreeMap::from([
+        ("manual".to_owned(), StartOsRecoveryInfo::default()),
+        (
+            "legacy.automatic".to_owned(),
+            StartOsRecoveryInfo {
+                scheduled: true,
+                ..Default::default()
+            },
+        ),
+        (
+            "system.automatic".to_owned(),
+            StartOsRecoveryInfo {
+                scheduled: true,
+                has_system_backup: Some(true),
+                ..Default::default()
+            },
+        ),
+        (
+            "services.automatic".to_owned(),
+            StartOsRecoveryInfo {
+                scheduled: true,
+                has_system_backup: Some(false),
+                ..Default::default()
+            },
+        ),
+    ]);
+
+    retain_full_server_backups(&mut backups);
+
+    assert_eq!(backups.len(), 3);
+    assert!(backups.contains_key("manual"));
+    assert!(backups.contains_key("legacy.automatic"));
+    assert!(backups.contains_key("system.automatic"));
 }
 
 fn setup_hostname(existing: ServerHostname, requested: Option<ServerHostname>) -> ServerHostname {
@@ -450,8 +495,9 @@ pub async fn verify_cifs(
         ReadWrite,
     )
     .await?;
-    let start_os = recovery_info(guard.path()).await?;
+    let mut start_os = recovery_info(guard.path()).await?;
     guard.unmount().await?;
+    retain_full_server_backups(&mut start_os);
     if start_os.is_empty() {
         return Err(Error::new(
             eyre!("{}", t!("setup.no-backup-found")),
@@ -473,6 +519,8 @@ pub enum RecoverySource<Password> {
         target: BackupTargetFS,
         password: Password,
         server_id: String,
+        #[serde(default)]
+        scheduled: bool,
     },
 }
 
@@ -785,6 +833,7 @@ pub async fn execute(
             target,
             password,
             server_id,
+            scheduled,
         }) => Some(RecoverySource::Backup {
             target,
             password: password.decrypt(&ctx).ok_or_else(|| {
@@ -794,6 +843,7 @@ pub async fn execute(
                 )
             })?,
             server_id,
+            scheduled,
         }),
         Some(RecoverySource::Migrate { guid }) => Some(RecoverySource::Migrate { guid }),
         None => None,
@@ -949,6 +999,7 @@ pub async fn execute_inner(
             target,
             password: recovery_password,
             server_id,
+            scheduled,
         }) => {
             recover(
                 &ctx,
@@ -957,6 +1008,7 @@ pub async fn execute_inner(
                 target,
                 server_id,
                 recovery_password,
+                scheduled,
                 kiosk,
                 hostname,
                 progress,
@@ -1056,23 +1108,38 @@ async fn recover(
     recovery_source: BackupTargetFS,
     server_id: String,
     recovery_password: String,
+    scheduled: bool,
     kiosk: bool,
     hostname: Option<ServerHostname>,
     progress: SetupExecuteProgress,
 ) -> Result<(SetupResult, RpcContext), Error> {
     let recovery_source = TmpMountGuard::mount(&recovery_source, ReadWrite).await?;
-    recover_full_server(
-        ctx,
-        guid.clone(),
-        password,
-        recovery_source,
-        &server_id,
-        &recovery_password,
-        kiosk,
-        hostname,
-        progress,
-    )
-    .await
+    let recovery: BoxFuture<'_, Result<(SetupResult, RpcContext), Error>> = if scheduled {
+        Box::pin(crate::backup::restore::recover_full_server_from_scheduled(
+            ctx,
+            guid.clone(),
+            password,
+            recovery_source,
+            &server_id,
+            &recovery_password,
+            kiosk,
+            hostname,
+            progress,
+        ))
+    } else {
+        Box::pin(recover_full_server(
+            ctx,
+            guid.clone(),
+            password,
+            recovery_source,
+            &server_id,
+            &recovery_password,
+            kiosk,
+            hostname,
+            progress,
+        ))
+    };
+    recovery.await
 }
 
 #[instrument(skip_all)]

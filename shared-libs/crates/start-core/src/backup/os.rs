@@ -1,18 +1,64 @@
+use std::path::{Path, PathBuf};
+
 use imbl_value::InternedString;
 use openssl::pkey::{PKey, Private};
 use openssl::x509::X509;
 use patch_db::Value;
 use serde::{Deserialize, Serialize};
 use ssh_key::private::Ed25519Keypair;
+use tokio::io::AsyncWriteExt;
 
 use crate::account::AccountInfo;
+use crate::context::RpcContext;
 use crate::hostname::{ServerHostname, generate_hostname, generate_id};
 use crate::prelude::*;
-use crate::util::serde::{Base32, Base64, Pem};
+use crate::util::io::{AtomicFile, delete_dir, dir_copy, dir_size, rename};
+use crate::util::serde::{Base32, Base64, IoFormat, Pem};
 
 pub struct OsBackup {
     pub account: AccountInfo,
     pub ui: Value,
+}
+
+pub(crate) async fn backup_system(ctx: &RpcContext, destination: &Path) -> Result<(), Error> {
+    let mut os_backup_file =
+        AtomicFile::new(destination.join("os-backup.json"), None::<PathBuf>).await?;
+    os_backup_file
+        .write_all(&system_metadata(ctx).await?)
+        .await?;
+    os_backup_file.save().await?;
+
+    let old = destination.join("luks.old");
+    delete_dir(&old).await?;
+    let backup = destination.join("luks");
+    if tokio::fs::metadata(&backup).await.is_ok() {
+        rename(&backup, &old).await?;
+    }
+    let source = Path::new("/media/startos/config/luks");
+    if tokio::fs::metadata(source).await.is_ok() {
+        dir_copy(source, &backup, None).await?;
+    }
+    Ok(())
+}
+
+pub(crate) async fn system_logical_size(ctx: &RpcContext) -> Result<u64, Error> {
+    let metadata_bytes = system_metadata(ctx).await?.len() as u64;
+    let luks = Path::new("/media/startos/config/luks");
+    let luks_bytes = if tokio::fs::metadata(luks).await.is_ok() {
+        dir_size(luks, None).await?
+    } else {
+        0
+    };
+    // The completed backup keeps the previous LUKS copy beside the current one.
+    Ok(metadata_bytes.saturating_add(luks_bytes.saturating_mul(2)))
+}
+
+async fn system_metadata(ctx: &RpcContext) -> Result<Vec<u8>, Error> {
+    let ui = ctx.db.peek().await.into_public().into_ui().de()?;
+    IoFormat::Json.to_vec(&OsBackup {
+        account: ctx.account.peek(Clone::clone),
+        ui,
+    })
 }
 impl<'de> Deserialize<'de> for OsBackup {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

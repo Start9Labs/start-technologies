@@ -5,6 +5,8 @@ Back up your server's data to a physical drive or a network folder.
 > [!IMPORTANT]
 > Creating backups is an essential responsibility of self-hosting. If you do not make backups, you _will_ eventually lose your data.
 
+Existing links to the manual-backup page open the manual backup controls directly.
+
 ## Watch The Video
 
 <div class="yt-video" data-id="omHymkqroRk" data-title="Creating Backups"></div>
@@ -25,7 +27,7 @@ Back up your server's data to a physical drive or a network folder.
 
 1. Wait for the `Backup Complete` notification before unplugging a backup drive. StartOS writes out the last of the backup and unmounts the drive before raising that notification, so the drive is safe to remove once it appears. The `Backup Progress` card reads `Complete` first, while StartOS is still finishing — the notification is the one to wait for.
 
-1. Backups are differential — each new backup to the same target overwrites the previous one. To maintain multiple backup points, use multiple backup targets.
+1. A manual backup replaces the previous manual checkpoint for each selected service. Automatic backups are stored separately and can retain additional checkpoints according to the version-history setting.
 
 1. The backup targets list shows the free space available on each drive and network folder, so you can confirm your backup will fit before you start.
 
@@ -48,6 +50,16 @@ Even with proper backups the risk of data corruption is always non-zero. Therefo
 - If backing up to multiple targets make sure all backups are up to date.
 - Set up [continuous backups](/bitcoin-guides/continuous-backups.html) where a service offers them. A StartOS backup holds LND's channel backup only as of the moment it was taken, and leaves Bark Wallet's database out entirely; a continuous backup keeps a current, encrypted copy on storage you choose.
 
+## Automatic Backups
+
+Automatic backups protect selected services on hourly, daily, weekly, or
+monthly schedules. They support future-service selection, version history,
+capacity estimates, archived checkpoints, target recovery, and per-service
+restore choices while keeping the latest manual checkpoint separate.
+
+See [Automatic Backups](./backup-automatic.md) for schedules, retention,
+storage, failure recovery, and command-line administration.
+
 ## Physical Drive
 
 `EXT4` is the recommended format of your backup drive. `fat32` and `exFAT` are _not_ recommended and may not work.
@@ -59,7 +71,7 @@ Even with proper backups the risk of data corruption is always non-zero. Therefo
 
 1. Plug the drive into your server.
 
-1. In StartOS, go to `System > Create Backup`. The drive appears under `Physical Drives`; if it doesn't, click "Refresh".
+1. In StartOS, go to `System > Backups` and open **Create a manual backup**. If the drive does not appear, refresh the page.
 
 1. Click the drive.
 
@@ -359,7 +371,7 @@ A network folder backup sends your encrypted backup over the LAN to a shared fol
 
 ### Step 2. Connect from StartOS
 
-1. In StartOS, go to `System > Create Backup`.
+1. In StartOS, go to `System > Backups` and open **Manage backup locations**.
 
 1. Under `Network Folders`, click "New".
 
@@ -445,11 +457,13 @@ A network folder backup sends your encrypted backup over the LAN to a shared fol
 {{#endtabs}}
 
 > [!WARNING]
-> If you receive `Filesystem I/O Error mount error(13): Permission denied`, ensure you have entered the correct values. The hostname can be particularly tricky.
+> If StartOS cannot connect, it identifies whether the network folder rejected
+> the credentials or could not be reached. Check the hostname, path, sharing
+> permissions, and credentials.
 
 ### Step 3. Back Up
 
-1. Click the folder under `Network Folders`.
+1. Open **Create a manual backup** and select the network folder.
 
 1. Select the services to back up, or click "Toggle all", then click "Done".
 

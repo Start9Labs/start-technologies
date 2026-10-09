@@ -1,0 +1,31 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-backup-job-reassign-target 1  "reassign-target "
+.SH NAME
+start\-cli\-backup\-job\-reassign\-target \- Move an automatic backup job to another target
+.SH SYNOPSIS
+\fBstart\-cli backup job reassign\-target\fR [\fB\-\-old\-password\fR] [\fB\-\-wait\-for\-schedule\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIID\fR> <\fITARGET_ID\fR> <\fIPASSWORD\fR>
+.SH DESCRIPTION
+Move an automatic backup job to another target
+.SH OPTIONS
+.TP
+\fB\-\-old\-password\fR \fI<OLD_PASSWORD>\fR
+Previous backup password
+.TP
+\fB\-\-wait\-for\-schedule\fR
+Wait for the next scheduled time instead of running on the new target now
+.TP
+\fB\-\-format\fR
+
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIID\fR>
+Automatic backup job identifier
+.TP
+<\fITARGET_ID\fR>
+Backup target identifier
+.TP
+<\fIPASSWORD\fR>
+Password for backup encryption

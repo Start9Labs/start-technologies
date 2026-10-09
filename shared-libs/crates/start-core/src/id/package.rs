@@ -86,7 +86,12 @@ impl<'de> Deserialize<'de> for PackageId {
     where
         D: serde::de::Deserializer<'de>,
     {
-        Ok(PackageId(Deserialize::deserialize(deserializer)?))
+        let value = String::deserialize(deserializer)?;
+        if value == SYSTEM_ID.as_ref() {
+            Ok(SYSTEM_PACKAGE_ID.clone())
+        } else {
+            PackageId::from_str(&value).map_err(serde::de::Error::custom)
+        }
     }
 }
 impl Serialize for PackageId {

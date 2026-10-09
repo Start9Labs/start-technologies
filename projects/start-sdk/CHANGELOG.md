@@ -192,6 +192,10 @@
 - **An `env` variable set to `undefined` is removed from the process**,
   including one the image or StartOS would otherwise supply, such as `LANG`.
 
+- **Backup reports include rsync transfer size when it can be measured.**
+  StartOS uses the measurement alongside automatic-backup capacity estimates.
+  Custom backup functions can omit it; unavailable measurements remain unknown.
+
 - **An action learns who is running it.** The `run` handler, the prefill
   function and a function-valued input spec each receive `caller`: the id of
   the service that reached the action through `effects.action`, or `null` when

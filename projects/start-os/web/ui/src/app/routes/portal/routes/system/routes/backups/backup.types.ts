@@ -11,16 +11,32 @@ export type BackupContext = TuiDialogContext<
   MappedBackupTarget<CifsBackupTarget | DiskBackupTarget>
 >
 
-export interface RecoverOption extends T.PackageBackupInfo {
+export interface RecoverCheckpoint {
+  key: string
+  source: 'manual' | 'scheduled'
+  version: string
+  timestamp: string
+  jobName?: string
+  snapshotId?: string
+  runId?: string
+  archived?: boolean
+}
+
+export interface RecoverOption {
   id: string
+  title: string
   checked: boolean
   installed: boolean
   newerOs: boolean
+  selectedKey: string
+  checkpoints: RecoverCheckpoint[]
 }
 
 export interface RecoverData {
   targetId: string
   serverId: string
   backupInfo: T.BackupInfo
+  scheduledHistories: T.ServiceTargetHistory[]
   password: string
+  unavailableSources?: string[]
 }

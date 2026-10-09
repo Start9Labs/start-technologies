@@ -1,4 +1,6 @@
 import { inject, Injectable } from '@angular/core'
+import { leafProgress } from '@start9labs/shared'
+import { T, Version } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import {
   BehaviorSubject,
@@ -8,10 +10,10 @@ import {
   map,
   shareReplay,
 } from 'rxjs'
+
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { getServerInfo } from 'src/app/utils/get-server-info'
 import { DataModel } from './patch-db/data-model'
-import { T, Version } from '@start9labs/start-core'
 
 @Injectable({
   providedIn: 'root',
@@ -33,7 +35,7 @@ export class OSService {
   )
 
   readonly backingUp$ = this.statusInfo$.pipe(
-    map(status => !!status.backupProgress),
+    map(status => isBackupProgressActive(status.backupProgress)),
     distinctUntilChanged(),
   )
 
@@ -64,4 +66,19 @@ export class OSService {
         : false,
     )
   }
+}
+
+export function isBackupProgressActive(
+  progress: T.ServerStatus['backupProgress'],
+): boolean {
+  if (!progress) return false
+
+  const overall = leafProgress(progress.overall)
+  if (overall === true) return false
+  if (overall && typeof overall === 'object') return true
+
+  return progress.phases.some(phase => {
+    const phaseProgress = leafProgress(phase.progress)
+    return phaseProgress !== null && phaseProgress !== true
+  })
 }

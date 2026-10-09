@@ -22,7 +22,7 @@ use crate::disk::mount::guard::GenericMountGuard;
 use crate::hostname::ServerHostname;
 use crate::prelude::*;
 use crate::util::Invoke;
-use crate::util::serde::IoFormat;
+use crate::util::serde::read_json_file_bounded;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,9 +64,6 @@ pub struct PartitionInfo {
     pub filesystem: Option<String>,
 }
 
-/// Whether this server's pre-V2 `StartOSBackups/<server_id>` backup is present
-/// on a mounted target. Scoped to `server_id` so a target shared by several
-/// servers only flags (and later deletes) this server's own legacy backup.
 pub async fn has_legacy_backup(mountpoint: impl AsRef<Path>, server_id: &str) -> bool {
     tokio::fs::metadata(
         mountpoint
@@ -79,11 +76,7 @@ pub async fn has_legacy_backup(mountpoint: impl AsRef<Path>, server_id: &str) ->
     .unwrap_or(false)
 }
 
-/// `unencrypted-metadata.json` as stored on a backup target, and the only place
-/// `password_hash`/`wrapped_key` may live. Together they are exactly what an attacker
-/// needs to crack the password offline and then unwrap the backup's encryption key, so
-/// this type must never be serialized to a client — the API hands out
-/// [`StartOsRecoveryInfo`] instead.
+/// Contains key material; client responses use `StartOsRecoveryInfo`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupUnencryptedMetadata {
@@ -99,12 +92,13 @@ impl From<BackupUnencryptedMetadata> for StartOsRecoveryInfo {
             hostname: meta.hostname,
             version: meta.version,
             timestamp: meta.timestamp,
+            scheduled: false,
+            server_id: None,
+            has_system_backup: Some(true),
         }
     }
 }
 
-/// The public view of a backup found on a target: enough to identify it, and none of
-/// [`BackupUnencryptedMetadata`]'s key material.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, ts_rs::TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
@@ -114,13 +108,26 @@ pub struct StartOsRecoveryInfo {
     pub version: exver::Version,
     #[ts(type = "string")]
     pub timestamp: DateTime<Utc>,
+    #[serde(default)]
+    pub scheduled: bool,
+    #[serde(default)]
+    #[ts(optional)]
+    pub server_id: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub has_system_backup: Option<bool>,
 }
 
 const DISK_PATH: &str = "/dev/disk/by-path";
 const SYS_BLOCK_PATH: &str = "/sys/block";
-/// EFI System Partition type ids as reported by `lsblk -no PARTTYPE`: the GPT
-/// partition type GUID and the MBR partition type.
+/// GPT and MBR partition types reported by `lsblk -no PARTTYPE`.
 const ESP_PART_TYPES: [&str; 2] = ["c12a7328-f81f-11d2-ba4b-00a0c93ec93b", "0xef"];
+
+/// Recovery metadata contains only scalar identity and key-wrapping fields.
+pub(crate) const MAX_BACKUP_RECOVERY_METADATA_BYTES: u64 = 1024 * 1024;
+/// Encrypted target metadata may contain histories for many services and snapshots.
+pub(crate) const MAX_BACKUP_TARGET_METADATA_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_BACKUP_RECOVERY_ENTRIES: usize = 1024;
 
 lazy_static::lazy_static! {
     static ref PARTITION_REGEX: Regex = Regex::new("-part[0-9]+$").unwrap();
@@ -314,12 +321,55 @@ pub async fn pvscan() -> Result<BTreeMap<PathBuf, Option<InternedString>>, Error
 pub async fn recovery_info(
     mountpoint: impl AsRef<Path>,
 ) -> Result<BTreeMap<String, StartOsRecoveryInfo>, Error> {
-    let backup_root = mountpoint.as_ref().join(super::BACKUP_DIR_NAME);
+    recovery_info_with_limit(mountpoint.as_ref(), MAX_BACKUP_RECOVERY_ENTRIES).await
+}
+
+async fn recovery_info_with_limit(
+    mountpoint: &Path,
+    max_entries: usize,
+) -> Result<BTreeMap<String, StartOsRecoveryInfo>, Error> {
+    let backup_root = mountpoint.join(super::BACKUP_DIR_NAME);
     let mut res = BTreeMap::new();
     if tokio::fs::metadata(&backup_root).await.is_ok() {
         let mut dir = tokio::fs::read_dir(&backup_root).await?;
+        let mut entry_count = 0usize;
         while let Some(entry) = dir.next_entry().await? {
+            entry_count = entry_count.saturating_add(1);
+            if entry_count > max_entries {
+                return Err(Error::new(
+                    eyre!(
+                        "{}",
+                        t!(
+                            "disk.util.too-many-recovery-entries",
+                            limit = max_entries,
+                            path = backup_root.display()
+                        )
+                    ),
+                    ErrorKind::Backup,
+                ));
+            }
             let server_id = entry.file_name().to_string_lossy().into_owned();
+            if server_id.ends_with(".automatic") {
+                let base_server_id = server_id.trim_end_matches(".automatic").to_owned();
+                let metadata_path = entry.path().join("unencrypted-metadata.json");
+                if tokio::fs::metadata(&metadata_path).await.is_ok() {
+                    let scheduled: crate::backup::scheduled::ScheduledBackupRecoveryInfo =
+                        read_json_file_bounded(&metadata_path, MAX_BACKUP_RECOVERY_METADATA_BYTES)
+                            .await?;
+                    res.insert(
+                        server_id,
+                        StartOsRecoveryInfo {
+                            hostname: scheduled.hostname,
+                            version: scheduled.version,
+                            timestamp: scheduled.timestamp,
+                            scheduled: true,
+                            server_id: Some(base_server_id),
+                            has_system_backup: scheduled.has_system_backup,
+                        },
+                    );
+                }
+                continue;
+            }
             let backup_unencrypted_metadata_path = backup_root
                 .join(&server_id)
                 .join("unencrypted-metadata.json");
@@ -327,21 +377,14 @@ pub async fn recovery_info(
                 .await
                 .is_ok()
             {
-                res.insert(
-                    server_id,
-                    IoFormat::Json
-                        .from_slice::<BackupUnencryptedMetadata>(
-                            &tokio::fs::read(&backup_unencrypted_metadata_path)
-                                .await
-                                .with_ctx(|_| {
-                                    (
-                                        crate::ErrorKind::Filesystem,
-                                        backup_unencrypted_metadata_path.display().to_string(),
-                                    )
-                                })?,
-                        )?
-                        .into(),
-                );
+                let metadata: BackupUnencryptedMetadata = read_json_file_bounded(
+                    &backup_unencrypted_metadata_path,
+                    MAX_BACKUP_RECOVERY_METADATA_BYTES,
+                )
+                .await?;
+                let mut info: StartOsRecoveryInfo = metadata.into();
+                info.server_id = Some(server_id.clone());
+                res.insert(server_id, info);
             }
         }
     }
@@ -349,8 +392,6 @@ pub async fn recovery_info(
     Ok(res)
 }
 
-/// Returns the canonical path of the source device for a given mount point,
-/// or None if the mount point doesn't exist or isn't mounted.
 #[instrument(skip_all)]
 pub async fn get_mount_source(mountpoint: impl AsRef<Path>) -> Result<Option<PathBuf>, Error> {
     let mounts_content = tokio::fs::read_to_string("/proc/mounts")
@@ -364,7 +405,6 @@ pub async fn get_mount_source(mountpoint: impl AsRef<Path>) -> Result<Option<Pat
         let mount = parts.next();
         if let (Some(source), Some(mount)) = (source, mount) {
             if Path::new(mount) == mountpoint {
-                // Try to canonicalize the source path
                 if let Ok(canonical) = tokio::fs::canonicalize(source).await {
                     return Ok(Some(canonical));
                 }
@@ -810,4 +850,124 @@ fn test_pvscan_parser() {
     println!("{:?}", parse_pvscan_output(s2));
     println!("{:?}", parse_pvscan_output(s3));
     println!("{:?}", parse_pvscan_output(s4));
+}
+
+#[tokio::test]
+async fn recovery_info_rejects_oversized_scheduled_and_legacy_metadata() {
+    let root = PathBuf::from(format!(
+        "/tmp/start-core-recovery-metadata-{}",
+        std::process::id()
+    ));
+    let backup_root = root.join(super::BACKUP_DIR_NAME);
+    let oversized = vec![b' '; MAX_BACKUP_RECOVERY_METADATA_BYTES as usize + 1];
+
+    let scheduled = backup_root.join("server.automatic");
+    tokio::fs::create_dir_all(&scheduled).await.unwrap();
+    tokio::fs::write(scheduled.join("unencrypted-metadata.json"), &oversized)
+        .await
+        .unwrap();
+    let error = recovery_info(&root).await.unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Filesystem);
+    assert!(error.to_string().contains("size limit"));
+
+    tokio::fs::remove_dir_all(&backup_root).await.unwrap();
+    let legacy = backup_root.join("server");
+    tokio::fs::create_dir_all(&legacy).await.unwrap();
+    tokio::fs::write(legacy.join("unencrypted-metadata.json"), &oversized)
+        .await
+        .unwrap();
+    let error = recovery_info(&root).await.unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Filesystem);
+    assert!(error.to_string().contains("size limit"));
+
+    tokio::fs::remove_dir_all(root).await.unwrap();
+}
+
+#[tokio::test]
+async fn recovery_info_rejects_entry_limit_plus_one() {
+    let root = PathBuf::from(format!(
+        "/tmp/start-core-recovery-entries-{}",
+        std::process::id()
+    ));
+    let backup_root = root.join(super::BACKUP_DIR_NAME);
+    tokio::fs::create_dir_all(&backup_root).await.unwrap();
+    for entry in ["one", "two", "three"] {
+        tokio::fs::create_dir(backup_root.join(entry))
+            .await
+            .unwrap();
+    }
+
+    let error = recovery_info_with_limit(&root, 2).await.unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Backup);
+    assert!(
+        error.to_string().contains(
+            t!(
+                "disk.util.too-many-recovery-entries",
+                limit = 2,
+                path = backup_root.display()
+            )
+            .as_ref()
+        )
+    );
+
+    tokio::fs::remove_dir_all(root).await.unwrap();
+}
+
+#[tokio::test]
+async fn recovery_info_marks_scheduled_backups() {
+    let root = PathBuf::from(format!(
+        "/tmp/start-core-scheduled-recovery-info-{}",
+        std::process::id()
+    ));
+    let scheduled = root.join(super::BACKUP_DIR_NAME).join("server.automatic");
+    tokio::fs::create_dir_all(&scheduled).await.unwrap();
+    tokio::fs::write(
+        scheduled.join("unencrypted-metadata.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "targetInstanceId": "target",
+            "hostname": "server",
+            "version": "0.4.0",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "passwordHash": "hash",
+            "wrappedKey": "key",
+            "hasSystemBackup": true
+        }))
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+    let service_only = root
+        .join(super::BACKUP_DIR_NAME)
+        .join("service-only.automatic");
+    tokio::fs::create_dir_all(&service_only).await.unwrap();
+    tokio::fs::write(
+        service_only.join("unencrypted-metadata.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "targetInstanceId": "target",
+            "hostname": "service-only",
+            "version": "0.4.0",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "passwordHash": "hash",
+            "wrappedKey": "key",
+            "hasSystemBackup": false
+        }))
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let info = recovery_info(&root).await.unwrap();
+    assert!(info["server.automatic"].scheduled);
+    assert_eq!(
+        info["server.automatic"].server_id.as_deref(),
+        Some("server")
+    );
+    assert_eq!(info["server.automatic"].has_system_backup, Some(true));
+    assert!(info["service-only.automatic"].scheduled);
+    assert_eq!(
+        info["service-only.automatic"].has_system_backup,
+        Some(false)
+    );
+
+    tokio::fs::remove_dir_all(root).await.unwrap();
 }

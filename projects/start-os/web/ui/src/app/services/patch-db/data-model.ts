@@ -8,6 +8,7 @@ export type DataModel = {
     keyboard: FullKeyboard | null
   }
   packageData: AllPackageData
+  scheduledBackups: T.ScheduledBackupState
 }
 
 export type UIData = {

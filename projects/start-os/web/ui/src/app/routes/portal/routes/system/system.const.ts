@@ -10,14 +10,9 @@ export const SYSTEM_MENU = [
   ],
   [
     {
-      icon: '@tui.copy-plus',
-      item: 'Create Backup',
-      link: 'backup',
-    },
-    {
-      icon: '@tui.database-backup',
-      item: 'Restore Backup',
-      link: 'restore',
+      icon: '@tui.save',
+      item: 'Backups',
+      link: 'backups',
     },
   ],
   [

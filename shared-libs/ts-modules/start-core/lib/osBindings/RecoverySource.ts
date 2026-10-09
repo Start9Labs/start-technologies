@@ -8,4 +8,5 @@ export type RecoverySource<Password> =
       target: BackupTargetFS
       password: Password
       serverId: string
+      scheduled: boolean
     }

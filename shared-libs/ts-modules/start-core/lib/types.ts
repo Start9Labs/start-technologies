@@ -44,7 +44,9 @@ export type MaybePromise<A> = Promise<A> | A
  */
 export namespace ExpectedExports {
   /** For backing up service data though the startOS UI */
-  export type createBackup = (options: { effects: Effects }) => Promise<unknown>
+  export type createBackup = (options: {
+    effects: Effects
+  }) => Promise<PackageBackupOutput | void>
 
   /**
    * This is the entrypoint for the main container. Used to start up something like the service that the
@@ -73,6 +75,11 @@ export namespace ExpectedExports {
 
   /** The map of user-invocable actions defined by this service. */
   export type actions = Actions<Record<ActionId, Action<ActionId, any>>>
+}
+
+export interface PackageBackupOutput {
+  /** Bytes reported by rsync as transferred during this backup. */
+  changedBytes: number | null
 }
 /**
  * The complete ABI (Application Binary Interface) for a StartOS service package.

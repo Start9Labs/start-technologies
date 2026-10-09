@@ -104,6 +104,37 @@ for the detail behind its highlights.
   `balance_power` when available. Without a saved preference, all other systems
   retain their current value.
 
+- **Automatic backups.** Protect System data and selected current or future
+  services on hourly, daily, weekly, or monthly schedules through the web UI
+  and CLI. Runs started with **Run now** continue if the client disconnects.
+  Service selection and new-service reviews support individual or
+  bulk choices. Schedule setup flags duplicate names inline and brings the name
+  field into view on phones while keeping the keyboard closed until a field is
+  selected. Schedule names stay as entered across UI languages. Schedules
+  preserve CLI schedule timing when edited in the UI and support timezones, daylight-saving changes, capacity
+  estimates, and configurable version history. Custom CLI retention rules
+  display their saved intervals in the web UI. Pause schedules, run them
+  immediately, move them to another location, or delete them while keeping
+  their checkpoints archived. Replacement locations keep their history separate
+  from the original location's checkpoints. Retention changes preview the
+  checkpoints they will remove for services and System data. Searchable history
+  keeps the latest 1,000 completed operations,
+  with navigation that fits small screens, failure notifications, and technical
+  details for troubleshooting. Backup panels stay selected when sharing an address,
+  refreshing, or navigating back and forward.
+  Restore services from a mix of manual and automatic checkpoints, or recover
+  a server during initial setup from its latest automatic checkpoints.
+  Unreadable service archives appear in restore history while other selected
+  services continue restoring.
+  Restore warns when a checkpoint source cannot be opened. Deleting a schedule
+  together with its checkpoints verifies credentials before removing it.
+  Existing locations can be unlocked with their original backup password
+  after a server password change. Interrupted backups preserve completed
+  checkpoints and reclaim incomplete backup data before later runs.
+  Capacity checks reserve full copies for the complete run before stopping services.
+  A stalled service backup procedure times out after six hours. Failed runtime
+  shutdowns notify the administrator and retry before cleanup.
+
 - **A service can permanently retire a network host or a port it no longer
   uses, and the port numbers it held become available again.** A service that
   reorganizes its interfaces across an update — renaming a host, dropping a

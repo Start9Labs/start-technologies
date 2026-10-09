@@ -15,6 +15,7 @@ import { T } from '@start9labs/start-core'
 import { Dump, pathFromArray } from 'patch-db-client'
 import { filter, firstValueFrom, Observable } from 'rxjs'
 import { webSocket, WebSocketSubject } from 'rxjs/webSocket'
+
 import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { AuthService } from '../auth.service'
 import { DataModel } from '../patch-db/data-model'
@@ -470,7 +471,7 @@ export class LiveApiService extends ApiService {
   async getBackupTargets(params: {}): Promise<{
     [id: string]: T.BackupTarget
   }> {
-    return this.rpcRequest({ method: 'backup.target.list', params })
+    return this.rpcRequest({ method: 'backup.targets', params })
   }
 
   async addBackupTarget(
@@ -499,6 +500,154 @@ export class LiveApiService extends ApiService {
 
   async createBackup(params: T.BackupParams): Promise<null> {
     return this.rpcRequest({ method: 'backup.create', params })
+  }
+
+  async getScheduledBackupJobs(params: {}): Promise<T.BackupJob[]> {
+    return this.rpcRequest({ method: 'backup.job.list', params })
+  }
+
+  async createScheduledBackupJob(
+    params: T.CreateBackupJobParams,
+  ): Promise<T.BackupJob> {
+    return this.rpcRequest({ method: 'backup.job.create', params })
+  }
+
+  async updateScheduledBackupJob(
+    params: T.UpdateBackupJobParams,
+  ): Promise<T.BackupJob> {
+    return this.rpcRequest({ method: 'backup.job.update', params })
+  }
+
+  async validateScheduledBackupJob(
+    params: T.ValidateBackupJobParams,
+  ): Promise<null> {
+    return this.rpcRequest({ method: 'backup.job.validate', params })
+  }
+
+  async setScheduledBackupJobEnabled(
+    params: T.SetBackupJobEnabledParams,
+  ): Promise<T.BackupJob> {
+    return this.rpcRequest({ method: 'backup.job.set-enabled', params })
+  }
+
+  async setScheduledBackupJobsEnabled(
+    params: T.SetBackupJobsEnabledParams,
+  ): Promise<T.BackupJob[]> {
+    return this.rpcRequest({ method: 'backup.job.set-enabled-bulk', params })
+  }
+
+  async deleteScheduledBackupJob(
+    params: T.DeleteBackupJobParams,
+  ): Promise<null> {
+    return this.rpcRequest({ method: 'backup.job.delete', params })
+  }
+
+  async runScheduledBackupJob(
+    params: T.RunBackupJobNowParams,
+  ): Promise<T.BackupRun> {
+    return this.rpcRequest({ method: 'backup.job.run-now', params })
+  }
+
+  async deleteScheduledBackupJobWithBackups(
+    params: T.DeleteBackupJobWithBackupsParams,
+  ): Promise<null> {
+    return this.rpcRequest({ method: 'backup.job.delete-with-backups', params })
+  }
+
+  async getScheduledBackupHistories(params: {}): Promise<
+    T.ServiceTargetHistory[]
+  > {
+    return this.rpcRequest({ method: 'backup.history.list', params })
+  }
+
+  async refreshScheduledBackupHistories(params: {
+    targetId: T.BackupTargetId
+  }): Promise<T.ServiceTargetHistory[]> {
+    return this.rpcRequest({ method: 'backup.history.refresh', params })
+  }
+
+  async discoverScheduledBackupHistories(
+    params: T.DiscoverScheduledBackupsParams,
+  ): Promise<T.ServiceTargetHistory[]> {
+    return this.rpcRequest({ method: 'backup.history.discover', params })
+  }
+
+  async estimateScheduledBackupCapacity(
+    params: T.EstimateBackupCapacityParams,
+  ): Promise<T.BackupServiceCapacityEstimate[]> {
+    return this.rpcRequest({ method: 'backup.policy.estimate', params })
+  }
+
+  async previewScheduledRetention(
+    params: T.PreviewRetentionPolicyParams,
+  ): Promise<T.RetentionPolicyChangePreview> {
+    return this.rpcRequest({ method: 'backup.policy.preview', params })
+  }
+
+  async updateScheduledRetention(
+    params: T.UpdateRetentionPolicyParams,
+  ): Promise<T.ServiceTargetHistory> {
+    return this.rpcRequest({ method: 'backup.policy.update', params })
+  }
+
+  async deleteArchivedBackupSnapshots(
+    params: T.DeleteArchivedSnapshotsParams,
+  ): Promise<T.ServiceTargetHistory> {
+    return this.rpcRequest({
+      method: 'backup.history.delete-archived-snapshots',
+      params,
+    })
+  }
+
+  async deleteArchivedBackupSnapshotsBulk(
+    params: T.DeleteArchivedSnapshotsBulkParams,
+  ): Promise<T.ServiceTargetHistory[]> {
+    return this.rpcRequest({
+      method: 'backup.history.delete-archived-snapshots-bulk',
+      params,
+    })
+  }
+
+  async retryScheduledBackupTarget(
+    params: T.RetryBackupTargetParams,
+  ): Promise<T.BackupJob[]> {
+    return this.rpcRequest({ method: 'backup.job.retry-target', params })
+  }
+
+  async reassignScheduledBackupTarget(
+    params: T.ReassignBackupTargetParams,
+  ): Promise<T.BackupJob> {
+    return this.rpcRequest({ method: 'backup.job.reassign-target', params })
+  }
+
+  async getNewServiceBackupReviews(params: {}): Promise<
+    T.NewServiceBackupReview[]
+  > {
+    return this.rpcRequest({ method: 'backup.review.list', params })
+  }
+
+  async resolveNewServiceBackupReview(
+    params: T.ResolveNewServiceBackupReviewParams,
+  ): Promise<null> {
+    return this.rpcRequest({ method: 'backup.review.resolve', params })
+  }
+
+  async restoreScheduledBackup(
+    params: T.RestoreScheduledPackagesParams,
+  ): Promise<null> {
+    return this.rpcRequest({
+      method: 'package.backup.restore-scheduled',
+      params,
+    })
+  }
+
+  async restoreBackupSelection(
+    params: T.RestoreSelectionParams,
+  ): Promise<null> {
+    return this.rpcRequest({
+      method: 'package.backup.restore-selection',
+      params,
+    })
   }
 
   // async addBackupTarget(

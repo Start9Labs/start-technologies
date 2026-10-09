@@ -1,0 +1,31 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-backup-history-delete-archived 1  "delete-archived "
+.SH NAME
+start\-cli\-backup\-history\-delete\-archived \- Delete selected archived automatic backup checkpoints
+.SH SYNOPSIS
+\fBstart\-cli backup history delete\-archived\fR <\fB\-\-password\fR> [\fB\-\-old\-password\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET_ID\fR> <\fIPACKAGE_ID\fR> <\fISNAPSHOT_IDS\fR>
+.SH DESCRIPTION
+Delete selected archived automatic backup checkpoints
+.SH OPTIONS
+.TP
+\fB\-\-password\fR \fI<PASSWORD>\fR
+Password for backup encryption
+.TP
+\fB\-\-old\-password\fR \fI<OLD_PASSWORD>\fR
+Previous backup password
+.TP
+\fB\-\-format\fR
+
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fITARGET_ID\fR>
+Backup target identifier
+.TP
+<\fIPACKAGE_ID\fR>
+Service identifier, or x_system for System data
+.TP
+<\fISNAPSHOT_IDS\fR>
+Automatic checkpoint IDs to delete

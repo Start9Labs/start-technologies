@@ -41,6 +41,25 @@ or the CLI's externally observable behavior.
   the PEM certificate text directly or use shell substitution to read a file. The command
   prints its subject and SHA-256 fingerprint.
 
+- **Complete automatic-backup administration.** Create, edit, enable, disable,
+  delete, and immediately run automatic jobs; reconnect or reassign their
+  targets; inspect activity and checkpoint history; delete archived checkpoints;
+  estimate capacity for proposed retention rules; resolve new-service reviews;
+  and restore selected checkpoints.
+  Replacement locations use separate entries to preserve the original history.
+  Unreadable service archives appear in restore history while other selected
+  services continue restoring.
+  Schedule edits and resumes preserve completed daylight-saving occurrences.
+  Capacity checks reserve full copies for the complete run before stopping services.
+  Immediate runs continue safely if the client disconnects.
+  Service selection includes System data and future services independently.
+  Use `--old-password` when an existing backup location uses a password different
+  from the current server password.
+- **Safe version-history commands.** Preview rule-based or latest-only retention
+  changes and apply the exact previewed checkpoint removals for services and
+  System data, including per-item overrides and histories awaiting their first
+  checkpoint. Interrupted deletion keeps recovery choices consistent.
+
 - **`s9pk edit add-image` enables CPU emulation by default** when the server uses
   another architecture. Use `--no-emulation` for images that require a native architecture.
 

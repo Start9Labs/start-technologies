@@ -106,6 +106,57 @@ eval (start-cli completions elvish | slurp)                   # elvish
 start-cli completions powershell | Out-String | Invoke-Expression   # PowerShell
 ```
 
+## Automatic backup administration
+
+The backup command tree covers the full automatic-backup lifecycle: create and
+edit jobs, run or pause them, recover or reassign targets, inspect activity and
+checkpoint history, preview and safely apply retention changes, resolve
+new-service reviews, and restore selected checkpoints.
+
+For example, this creates an hourly job while retaining hourly checkpoints for
+one day and daily checkpoints for one week, then starts its first run:
+
+```sh
+start-cli backup estimate-capacity cifs-0 \
+  --keep-rule 1h:1d \
+  --keep-rule 1d:1w \
+  --service-latest-only lnd
+start-cli backup job add "Hourly backups" cifs-0 '<MASTER_PASSWORD>' \
+  --cron '15 * * * *' \
+  --timezone 'America/New_York' \
+  --keep-rule 1h:1d \
+  --keep-rule 1d:1w \
+  --service-latest-only lnd
+start-cli backup job list
+start-cli backup job run-now <JOB_ID>
+```
+
+Use `start-cli backup history list` to obtain checkpoint IDs and
+`start-cli package backup restore-checkpoint` to restore them. Retention-policy
+updates intentionally use a two-step `backup policy preview-change` then
+`backup policy apply` flow; the apply command accepts the exact checkpoint IDs
+reported by the preview, preventing a stale policy change from deleting a
+different set.
+
+Use repeatable
+`--service-keep-rule PACKAGE_ID=INTERVAL:COVERAGE` options or
+`--service-latest-only PACKAGE_ID` when a service needs different retention
+from the job default. On `backup job edit`,
+`--use-default-retention PACKAGE_ID` removes an override.
+Use `--system-data include|exclude` with `backup estimate-capacity`, `backup job
+add`, or `backup job edit` to control StartOS System data independently from
+the current and future service filters.
+
+`start-cli backup review list` always reports the current automatic schedules,
+including schedules created after the reviewed service was installed. Pass one
+`--decision JOB_ID=add|skip` for every currently listed job to `backup review
+decide`; StartOS rejects stale or partial decision sets. When no schedules are
+listed, omit `--decision` to dismiss the review just as the UI can.
+
+The user-oriented command guide is in the StartOS
+[`start-cli Reference`](../start-os/docs/src/cli-reference.md#backups), while the
+generated option-level reference is committed under [`man/`](./man/).
+
 ## Features
 
 Cargo features forward to `start-core`: `beta`, `console`, `dev`, `test`, `unstable`.
