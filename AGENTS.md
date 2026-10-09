@@ -57,7 +57,7 @@ The shared toolchain below is enough to build the Rust bins and the web apps. **
 # Common build tooling
 sudo apt update
 sudo apt install -y ca-certificates curl gpg build-essential git \
-  sed grep gawk jq gzip brotli rsync python3
+  sed grep gawk jq gzip brotli rsync
 
 # Rust (stable; rustfmt runs in a pinned-nightly container — see Formatting)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh # proceed with default installation
@@ -296,6 +296,7 @@ before adding one. `deny.toml` encodes which licenses are accepted.
 
 **Frontend work uses the `start9-frontend` skill.** Read [`.claude/skills/start9-frontend/SKILL.md`](.claude/skills/start9-frontend/SKILL.md) and its relevant references before writing or reviewing Angular components, templates, styles, forms, dialogs, routes, state, or i18n. The skill owns frontend conventions and stack-version facts; neighbouring code may predate them. Verify Taiga APIs against its reference rather than guessing. Update the skill in the same change when conventions or stack versions change; sibling Start9 repositories consume this copy through symlinks.
 
+- **Local scripting uses Bash or Node.js.** Developer tools and test harnesses must not require Python. Python is permitted only for CI-only checks.
 - **Default to zero comments.** A comment must protect a caller or reader from a mistake the code cannot — a wrong input, a misread return, a hazard that bites later. If nobody would go wrong without it, there is no comment, on a self-explanatory helper most of all. Try the rename or the restructure that would make the comment unnecessary first.
 - **A comment is a predicate, not a paragraph.** `Saturates at 255 rather than wrapping.` One clause, one restriction, stated bare — twelve words is a budget, not a target. Never enumerate the cases that trigger the rule: `Bad input zeroes the accumulator.`, not a list of the inputs that are bad. Never `only X counts`; state what counts. An error path that degrades into the default is the default — don't narrate it. Where the declaration supplies the subject, a bare clause is complete.
 - **Leave the signature out of the prose.** The parameter names sit on the screen next to the comment; echoing them repeats the declaration. Say what an argument means by its role, not its identifier. A formal term — a checksum, a timestamp, a `Host` header — is not re-explained; the reader is owed only what the term does not imply.

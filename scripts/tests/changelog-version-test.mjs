@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
 import { test } from 'node:test'
+import { fixture } from './fixtures.mjs'
 import {
   MANIFESTS,
   latestRelease,
@@ -37,19 +35,6 @@ function* permutations(values) {
         yield [values[i], ...rest]
 }
 
-function fixture(t) {
-  const root = mkdtempSync(join(tmpdir(), 'changelog-version-'))
-  t.after(() => rmSync(root, { recursive: true, force: true }))
-  return {
-    root,
-    write(path, text) {
-      const target = join(root, path)
-      mkdirSync(dirname(target), { recursive: true })
-      writeFileSync(target, text)
-    },
-  }
-}
-
 test('public parser normalizes StartOS and preserves prerelease', () => {
   assert.deepEqual(parseVersion('start-os', '0.4.1'), [[4n, 1n, 0n], null])
   assert.deepEqual(parseVersion('start-os', '0.4.0.3-rc.1'), [
@@ -75,13 +60,19 @@ test('all tier combinations and orders', () => {
     ['start-os', '0.4.0.3', ['0.4.0.4', '0.4.1', '0.5.0']],
     ['start-sdk', '4.0.3', ['4.0.4', '4.1.0', '5.0.0']],
   ]) {
-    for (let length = 1; length < 5; length++)
-      for (const tiers of combinations(TIERS, length)) {
-        assert.equal(
-          nextVersion(project, baseline, tiers.values()),
-          results[Math.max(...tiers.map(tier => TIERS.indexOf(tier)))],
-        )
-      }
+    for (const [allowed, expected] of [
+      [['patch'], results[0]],
+      [['patch', 'minor'], results[1]],
+      [['patch', 'minor', 'major'], results[2]],
+    ]) {
+      for (let length = 1; length < 5; length++)
+        for (const tiers of combinations(allowed, length))
+          if (tiers.includes(allowed.at(-1)))
+            assert.equal(
+              nextVersion(project, baseline, tiers.values()),
+              expected,
+            )
+    }
   }
 })
 test('empty fragments preserve exact version', () => {
