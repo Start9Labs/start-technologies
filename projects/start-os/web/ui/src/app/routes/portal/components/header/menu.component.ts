@@ -5,8 +5,8 @@ import {
   DocsLinkDirective,
   i18nPipe,
   SafeLinksDirective,
-  TaskService,
 } from '@start9labs/shared'
+import { T } from '@start9labs/start-core'
 import {
   TuiButton,
   TuiDataList,
@@ -17,6 +17,7 @@ import {
 import { filter } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { AuthService } from 'src/app/services/auth.service'
+import { PowerService } from 'src/app/services/power.service'
 import { STATUS } from 'src/app/services/status.service'
 import { ABOUT } from './about.component'
 
@@ -138,8 +139,8 @@ import { ABOUT } from './about.component'
 export class HeaderMenuComponent {
   private readonly api = inject(ApiService)
   private readonly auth = inject(AuthService)
-  private readonly tasks = inject(TaskService)
   private readonly dialog = inject(DialogService)
+  private readonly power = inject(PowerService)
 
   open = false
 
@@ -149,7 +150,11 @@ export class HeaderMenuComponent {
     this.dialog.openComponent(ABOUT, { label: 'About this server' }).subscribe()
   }
 
-  async promptPower(action: 'restart' | 'shutdown') {
+  async promptPower(action: T.PowerAction) {
+    // During a backup the choice on offer is a different one, and asking it is
+    // confirmation enough.
+    if (this.power.backingUp()) return this.power.power(action).subscribe()
+
     this.dialog
       .openConfirm(
         action === 'restart'
@@ -175,15 +180,7 @@ export class HeaderMenuComponent {
             },
       )
       .pipe(filter(Boolean))
-      .subscribe(() =>
-        this.tasks.run(
-          async () =>
-            await this.api[
-              action === 'restart' ? 'restartServer' : 'shutdownServer'
-            ]({}),
-          `Beginning ${action}`,
-        ),
-      )
+      .subscribe(() => this.power.power(action).subscribe())
   }
 
   logout() {

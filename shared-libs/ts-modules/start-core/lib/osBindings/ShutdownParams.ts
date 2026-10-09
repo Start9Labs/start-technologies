@@ -6,6 +6,11 @@ export type ShutdownParams = {
    * frontend omits this and gets an immediate reply). Cleared with
    * `--nowait`. The wait can't outlive the webserver teardown that follows
    * container shutdown, so the connection drops once services are stopped.
+   * A deferred action replies immediately, before teardown begins.
    */
   wait: boolean
+  /**
+   * Interrupt a running backup instead of waiting for it to finish.
+   */
+  force: boolean
 }

@@ -13,9 +13,12 @@ import {
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { Dump, pathFromArray } from 'patch-db-client'
-import { filter, firstValueFrom, Observable } from 'rxjs'
+import { Observable } from 'rxjs'
 import { webSocket, WebSocketSubject } from 'rxjs/webSocket'
-import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
+import {
+  PATCH_CACHE,
+  waitForPatchSequence,
+} from 'src/app/services/patch-db/patch-db-source'
 import { AuthService } from '../auth.service'
 import { DataModel } from '../patch-db/data-model'
 import {
@@ -235,12 +238,16 @@ export class LiveApiService extends ApiService {
     return this.rpcRequest({ method: 'server.update', params })
   }
 
-  async restartServer(params: {}): Promise<null> {
+  async restartServer(params: Partial<T.ShutdownParams>): Promise<null> {
     return this.rpcRequest({ method: 'server.restart', params })
   }
 
-  async shutdownServer(params: {}): Promise<null> {
+  async shutdownServer(params: Partial<T.ShutdownParams>): Promise<null> {
     return this.rpcRequest({ method: 'server.shutdown', params })
+  }
+
+  async cancelDeferredPower(params: {}): Promise<null> {
+    return this.rpcRequest({ method: 'server.cancel-deferred-power', params })
   }
 
   async repairDisk(params: {}): Promise<null> {
@@ -780,9 +787,7 @@ export class LiveApiService extends ApiService {
 
     const patchSequence = res.headers.get('x-patch-sequence')
     if (patchSequence)
-      await firstValueFrom(
-        this.cache$.pipe(filter(({ id }) => id >= Number(patchSequence))),
-      )
+      await waitForPatchSequence(this.cache$, Number(patchSequence))
 
     return body.result
   }

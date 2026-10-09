@@ -825,4 +825,9 @@ export default {
   933: 'Tu router usa su CA raíz para generar certificados SSL/TLS para sí mismo. Estos certificados se utilizan para cifrar el tráfico de red con tus dispositivos cliente.',
   934: 'Sigue las instrucciones para tu sistema operativo. Al confiar en tu CA raíz, tu dispositivo puede verificar la autenticidad de las comunicaciones cifradas con tu router.',
   935: 'Tendrás que repetir esto en cada dispositivo que uses para acceder a la interfaz de StartWRT.',
+  936: 'Hay una copia de seguridad en curso. Interrumpirla ahora puede dañar la copia de seguridad del servicio que se está escribiendo.',
+  937: 'Esperar a que termine la copia de seguridad',
+  938: 'Apagar ahora',
+  939: 'Hay una copia de seguridad en curso. Su servidor se reiniciará cuando termine.',
+  940: 'Hay una copia de seguridad en curso. Su servidor se apagará cuando termine.',
 } satisfies i18n

@@ -826,4 +826,9 @@ export const ENGLISH: Record<string, number> = {
   'Your router uses its Root CA to generate SSL/TLS certificates for itself. These certificates are then used to encrypt network traffic with your client devices.': 933,
   'Follow instructions for your OS. By trusting your Root CA, your device can verify the authenticity of encrypted communications with your router.': 934,
   'You will need to repeat this on every device you use to connect to the StartWRT UI.': 935,
+  'A backup is currently running. Interrupting it now can corrupt the backup of the service being written.': 936,
+  'Wait for backup to complete': 937,
+  'Shut down now': 938,
+  'A backup is running. Your server will restart when it finishes.': 939,
+  'A backup is running. Your server will shut down when it finishes.': 940,
 }

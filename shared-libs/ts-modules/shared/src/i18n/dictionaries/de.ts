@@ -825,4 +825,9 @@ export default {
   933: 'Ihr Router verwendet seine Root-Zertifizierungsstelle, um SSL/TLS-Zertifikate für sich selbst zu erstellen. Diese Zertifikate werden verwendet, um die Netzwerkverbindung mit Ihren Geräten zu verschlüsseln.',
   934: 'Befolgen Sie die Anweisungen für Ihr Betriebssystem. Wenn Sie Ihrer Root-Zertifizierungsstelle vertrauen, kann Ihr Gerät die Echtheit der verschlüsselten Kommunikation mit Ihrem Router überprüfen.',
   935: 'Dies müssen Sie auf jedem Gerät wiederholen, mit dem Sie die StartWRT-Oberfläche aufrufen.',
+  936: 'Derzeit läuft eine Sicherung. Eine Unterbrechung kann jetzt die Sicherung des gerade geschriebenen Dienstes beschädigen.',
+  937: 'Auf Abschluss der Sicherung warten',
+  938: 'Jetzt herunterfahren',
+  939: 'Eine Sicherung läuft. Ihr Server wird nach deren Abschluss neu gestartet.',
+  940: 'Eine Sicherung läuft. Ihr Server wird nach deren Abschluss heruntergefahren.',
 } satisfies i18n

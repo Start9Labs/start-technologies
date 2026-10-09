@@ -2,7 +2,7 @@ import { Component, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { RouterOutlet } from '@angular/router'
 import { WA_IS_MOBILE } from '@ng-web-apis/platform'
-import { i18nPipe, LeafProgressPipe, TaskService } from '@start9labs/shared'
+import { i18nPipe, LeafProgressPipe } from '@start9labs/shared'
 import {
   TuiButton,
   TuiCell,
@@ -14,10 +14,10 @@ import {
 import { TuiActionBar, TuiProgress } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
 import { TabsComponent } from 'src/app/routes/portal/components/tabs.component'
-import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { OSService } from 'src/app/services/os.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { PluginsService } from 'src/app/services/plugins.service'
+import { PowerService } from 'src/app/services/power.service'
 import { HeaderComponent } from './components/header/header.component'
 
 @Component({
@@ -30,7 +30,32 @@ import { HeaderComponent } from './components/header/header.component'
       </tui-scrollbar>
     </main>
     <app-tabs />
-    @if (update(); as update) {
+    @if (deferredPower(); as action) {
+      <tui-action-bar *tuiPopup="true">
+        <span tuiCell="m">
+          <tui-icon icon="@tui.power" />
+          @if (action === 'restart') {
+            {{
+              'A backup is running. Your server will restart when it finishes.'
+                | i18n
+            }}
+          } @else {
+            {{
+              'A backup is running. Your server will shut down when it finishes.'
+                | i18n
+            }}
+          }
+        </span>
+        <button
+          tuiButton
+          size="s"
+          appearance="secondary"
+          (click)="power.cancel()"
+        >
+          {{ 'Cancel' | i18n }}
+        </button>
+      </tui-action-bar>
+    } @else if (update(); as update) {
       <tui-action-bar *tuiPopup="bar()">
         <span tuiCell="m">
           @let leaf = update.overall | leafProgress;
@@ -49,8 +74,7 @@ import { HeaderComponent } from './components/header/header.component'
           }
         </span>
       </tui-action-bar>
-    }
-    @if (restartReason(); as reason) {
+    } @else if (restartReason(); as reason) {
       <tui-action-bar *tuiPopup="bar()">
         <span tuiCell="m">
           <tui-icon icon="@tui.refresh-cw" />
@@ -167,15 +191,17 @@ import { HeaderComponent } from './components/header/header.component'
   ],
 })
 export class PortalComponent {
-  private readonly tasks = inject(TaskService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
-  private readonly api = inject(ApiService)
+  protected readonly power = inject(PowerService)
 
   readonly mobile = inject(WA_IS_MOBILE)
   readonly plugins = inject(PluginsService)
   readonly update = toSignal(inject(OSService).updating$)
   readonly restartReason = toSignal(
     this.patch.watch$('serverInfo', 'statusInfo', 'restart'),
+  )
+  readonly deferredPower = toSignal(
+    this.patch.watch$('serverInfo', 'statusInfo', 'deferredPowerAction'),
   )
   readonly bar = signal(true)
 
@@ -184,9 +210,10 @@ export class PortalComponent {
   }
 
   restart() {
-    this.tasks.run(async () => {
-      this.bar.set(false)
-      await this.api.restartServer({})
-    }, 'Beginning restart')
+    // Only stop offering the restart once one is actually under way — a
+    // deferred or dismissed one leaves the reason for this bar in place.
+    this.power.power('restart').subscribe(deferred => {
+      if (!deferred) this.bar.set(false)
+    })
   }
 }

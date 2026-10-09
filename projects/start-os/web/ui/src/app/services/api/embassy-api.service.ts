@@ -114,9 +114,11 @@ export abstract class ApiService {
     params: T.UpdateSystemParams,
   ): Promise<T.UpdateSystemRes>
 
-  abstract restartServer(params: {}): Promise<null>
+  abstract restartServer(params: Partial<T.ShutdownParams>): Promise<null>
 
-  abstract shutdownServer(params: {}): Promise<null>
+  abstract shutdownServer(params: Partial<T.ShutdownParams>): Promise<null>
+
+  abstract cancelDeferredPower(params: {}): Promise<null>
 
   abstract repairDisk(params: {}): Promise<null>
 

@@ -825,4 +825,9 @@ export default {
   933: 'Votre routeur utilise son certificat racine pour générer des certificats SSL/TLS pour lui-même. Ces certificats servent ensuite à chiffrer le trafic réseau avec vos appareils clients.',
   934: 'Suivez les instructions pour votre système d’exploitation. En donnant votre confiance au certificat racine, votre appareil pourra vérifier l’authenticité des communications chiffrées avec votre routeur.',
   935: 'Vous devrez répéter cette opération sur chaque appareil utilisé pour accéder à l’interface de StartWRT.',
+  936: 'Une sauvegarde est en cours. L’interrompre maintenant peut corrompre la sauvegarde du service en cours d’écriture.',
+  937: 'Attendre la fin de la sauvegarde',
+  938: 'Éteindre maintenant',
+  939: 'Une sauvegarde est en cours. Votre serveur redémarrera une fois celle-ci terminée.',
+  940: 'Une sauvegarde est en cours. Votre serveur s’éteindra une fois celle-ci terminée.',
 } satisfies i18n

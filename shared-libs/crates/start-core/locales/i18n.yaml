@@ -1677,6 +1677,13 @@ backup.bulk.service-not-ready:
   fr_FR: "Impossible de créer une sauvegarde d'un service encore en cours d'initialisation ou en état d'erreur"
   pl_PL: "Nie można utworzyć kopii zapasowej usługi, która jest jeszcze inicjalizowana lub znajduje się w stanie błędu"
 
+backup.bulk.powering-down:
+  en_US: "Server is shutting down or restarting"
+  de_DE: "Server wird heruntergefahren oder neu gestartet"
+  es_ES: "El servidor se está apagando o reiniciando"
+  fr_FR: "Le serveur est en cours d'arrêt ou de redémarrage"
+  pl_PL: "Serwer jest wyłączany lub uruchamiany ponownie"
+
 backup.bulk.reclaim-failed:
   en_US: "Failed to reclaim old-backup space: %{error}"
   de_DE: "Speicherplatz der alten Sicherung konnte nicht freigegeben werden: %{error}"
@@ -3736,6 +3743,13 @@ help.arg.force-clear-task:
   fr_FR: "Forcer la suppression de la tâche même si elle est en cours"
   pl_PL: "Wymuś wyczyszczenie zadania nawet jeśli jest uruchomione"
 
+help.arg.force-power:
+  en_US: "Interrupt a running backup instead of waiting for it to finish"
+  de_DE: "Eine laufende Sicherung unterbrechen, statt auf ihren Abschluss zu warten"
+  es_ES: "Interrumpir una copia de seguridad en curso en lugar de esperar a que termine"
+  fr_FR: "Interrompre une sauvegarde en cours au lieu d'attendre sa fin"
+  pl_PL: "Przerwij trwającą kopię zapasową zamiast czekać na jej zakończenie"
+
 help.arg.force-remove-package:
   en_US: "Force removal even if the package has versions"
   de_DE: "Entfernung erzwingen, auch wenn das Paket Versionen hat"
@@ -5160,6 +5174,13 @@ about.calculate-blake3-hash-for-file:
   es_ES: "Calcular hash blake3 para un archivo"
   fr_FR: "Calculer le hachage blake3 d'un fichier"
   pl_PL: "Oblicz hash blake3 dla pliku"
+
+about.cancel-deferred-power:
+  en_US: "Cancel a restart or shutdown that is waiting for a backup to finish"
+  de_DE: "Einen Neustart oder ein Herunterfahren abbrechen, der bzw. das auf den Abschluss einer Sicherung wartet"
+  es_ES: "Cancelar un reinicio o apagado que está esperando a que termine una copia de seguridad"
+  fr_FR: "Annuler un redémarrage ou un arrêt en attente de la fin d'une sauvegarde"
+  pl_PL: "Anuluj ponowne uruchomienie lub wyłączenie oczekujące na zakończenie kopii zapasowej"
 
 about.cancel-install-package:
   en_US: "Cancel an install of a package"
