@@ -4,7 +4,7 @@ Operating instructions for AI developers working on the docs-site project (the `
 
 ## What this is
 
-This project owns the **site build infra** (`build.sh`, `serve.sh`, `versions.conf`, `theme/`, `scripts/`), the **landing page** (`landing/`), and the **Bitcoin Guides** book (`bitcoin-guides/`).
+This project owns the **site build infra** (`build.sh`, `serve.sh`, `versions.conf`, `theme/`, `scripts/`), the **landing page** (`landing/`), the **Bitcoin Guides** book (`bitcoin-guides/`), and the **Start9 Support** book (`support/`).
 
 ## Layout
 
