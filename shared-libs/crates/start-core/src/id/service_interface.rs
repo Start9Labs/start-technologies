@@ -3,14 +3,19 @@ use std::str::FromStr;
 
 use rpc_toolkit::clap::builder::ValueParserFactory;
 use serde::{Deserialize, Deserializer, Serialize};
-use ts_rs::TS;
 
 use crate::Id;
 use crate::util::FromStrParser;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, TS)]
-#[ts(export, type = "string")]
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, visit_rs::VisitFields,
+)]
+#[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+#[visit(opaque, type_attributes(visit::wire))]
 pub struct ServiceInterfaceId(Id);
+
+rpc_toolkit::reflect_ts!(ServiceInterfaceId);
+rpc_toolkit::ts_export!(ServiceInterfaceId, namespaces = [""]);
 impl From<Id> for ServiceInterfaceId {
     fn from(id: Id) -> Self {
         Self(id)

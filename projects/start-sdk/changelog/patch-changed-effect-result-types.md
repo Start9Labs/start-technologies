@@ -1,0 +1,1 @@
+- **Effects types describe their actual wire results.** `getContainerIp` may return `null` for an unavailable dependency, `getSslCertificate` returns a variable-length string array, and `mount` resolves to `null`, not a path.

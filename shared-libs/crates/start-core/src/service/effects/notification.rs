@@ -1,8 +1,7 @@
 use crate::notifications::{NotificationLevel, notify};
 use crate::service::effects::prelude::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateNotificationParams {
     pub level: NotificationLevel,
@@ -13,9 +12,13 @@ pub struct CreateNotificationParams {
     /// changelogs, structured error reports). When omitted, the notification
     /// has no extra payload.
     #[serde(default)]
-    #[ts(optional, type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub data: Option<String>,
 }
+
+rpc_toolkit::reflect_ts!(CreateNotificationParams);
+rpc_toolkit::ts_export!(CreateNotificationParams, namespaces = [""]);
 
 pub async fn create(
     context: EffectContext,

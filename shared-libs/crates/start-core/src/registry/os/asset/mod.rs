@@ -10,6 +10,7 @@ pub fn asset_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(add::cli_add_asset)
+                .no_ts()
                 .no_display()
                 .with_about("about.add-asset-registry"),
         )
@@ -21,6 +22,7 @@ pub fn asset_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "sign",
             from_fn_async(sign::cli_sign_asset)
+                .no_ts()
                 .no_display()
                 .with_about("about.sign-file-add-registry"),
         )

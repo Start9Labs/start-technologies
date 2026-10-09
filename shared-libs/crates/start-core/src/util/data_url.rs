@@ -8,17 +8,19 @@ use imbl_value::InternedString;
 use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt};
-use ts_rs::TS;
 
 use crate::util::mime::{mime, unmime};
 use crate::{Error, ErrorKind, ResultExt};
 
-#[derive(Clone, TS, PartialEq, Eq)]
-#[ts(type = "string")]
+#[derive(Clone, visit_rs::VisitFields, PartialEq, Eq)]
+#[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+#[visit(opaque, type_attributes(visit::wire))]
 pub struct DataUrl<'a> {
     pub mime: InternedString,
     pub data: Cow<'a, [u8]>,
 }
+
+rpc_toolkit::reflect_ts!(impl ['a] for DataUrl<'a> where []);
 impl<'a> DataUrl<'a> {
     pub const DEFAULT_MIME: &'static str = "application/octet-stream";
     pub const MAX_SIZE: u64 = 100 * 1024;

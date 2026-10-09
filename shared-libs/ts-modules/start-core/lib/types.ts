@@ -1,6 +1,7 @@
 export * as inputSpecTypes from './actions/input/inputSpecTypes'
 export * from './osBindings'
 export { SDKManifest } from './types/ManifestTypes'
+export type { RecoverySource, RegistryAsset } from './types/GenericWireTypes'
 export { Effects }
 import { InputSpec as InputSpecClass } from './actions/input/builder/inputSpec'
 

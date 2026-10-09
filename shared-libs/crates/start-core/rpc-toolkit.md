@@ -158,16 +158,21 @@ Different contexts for different execution environments:
 
 ## Parameter Structs
 
-Parameters use derive macros for JSON-RPC, CLI parsing, and TypeScript generation:
+Parameters derive JSON-RPC serialization, CLI parsing and generic raw reflection.
+RPC-owned consumer bridges normalize serde metadata and render TypeScript. Read
+[the TypeScript guide](../rpc-toolkit/docs/typescript.md) for wire hints, local typed
+selectors and opaque storage. Register standalone roots beside their owners:
 
 ```rust
-#[derive(Deserialize, Serialize, Parser, TS)]
-#[serde(rename_all = "camelCase")]  // JSON-RPC uses camelCase
-#[command(rename_all = "kebab-case")]  // CLI uses kebab-case
-#[ts(export)]  // Generate TypeScript types
+#[derive(Deserialize, Serialize, Parser, visit_rs::VisitFields)]
+#[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct MyParams {
     pub package_id: PackageId,
 }
+
+rpc_toolkit::reflect_ts!(MyParams);
+rpc_toolkit::ts_export!(MyParams, namespaces = [""]);
 ```
 
 ### Middleware Injection
@@ -175,27 +180,29 @@ pub struct MyParams {
 Auth middleware can inject values into params using special field names:
 
 ```rust
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, visit_rs::VisitFields)]
 pub struct MyParams {
-    #[ts(skip)]
-    #[serde(rename = "__Auth_session")]  // Injected by session auth
+    #[visit(opaque, ts(skip))]
+    #[serde(rename = "__Auth_session")]
     session: InternedString,
 
-    #[ts(skip)]
-    #[serde(rename = "__Auth_signer")]   // Injected by signature auth
+    #[visit(opaque, ts(skip))]
+    #[serde(rename = "__Auth_signer")]
     signer: AnyVerifyingKey,
 
-    #[ts(skip)]
-    #[serde(rename = "__Auth_userAgent")] // Injected during login
+    #[visit(opaque, ts(skip))]
+    #[serde(rename = "__Auth_userAgent")]
     user_agent: Option<String>,
 }
+
+rpc_toolkit::reflect_ts!(MyParams);
 ```
 
 ## Common Patterns
 
 ### Adding a New RPC Endpoint
 
-1. Define params struct with `Deserialize, Serialize, Parser, TS` (skip if no params needed)
+1. Define params struct with `Deserialize, Serialize, Parser, visit_rs::VisitFields` and an adjacent `rpc_toolkit::reflect_ts!` bridge (skip if no params needed)
 2. Choose handler type based on sync/async and thread-safety
 3. Write handler function taking `(Context, Params) -> Result<Response, Error>` (omit Params if none needed)
 4. Add to parent handler with appropriate extensions (display modifiers before `with_about`)

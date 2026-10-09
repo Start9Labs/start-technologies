@@ -6,7 +6,6 @@ use color_eyre::eyre::eyre;
 use exver::{Version, VersionRange};
 use imbl_value::{InOMap, InternedString};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 pub use crate::PackageId;
 use crate::dependencies::Dependencies;
@@ -25,16 +24,13 @@ pub(crate) fn current_version() -> Version {
     Current::default().semver()
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, HasModel, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct Manifest {
     pub id: PackageId,
     pub version: VersionString,
-    #[ts(type = "string")]
     pub can_migrate_to: VersionRange,
-    #[ts(type = "string")]
     pub can_migrate_from: VersionRange,
     #[serde(flatten)]
     pub metadata: PackageMetadata,
@@ -45,6 +41,9 @@ pub struct Manifest {
     #[serde(default)]
     pub hardware_requirements: HardwareRequirements,
 }
+
+rpc_toolkit::reflect_ts!(Manifest);
+rpc_toolkit::ts_export!(Manifest, namespaces = [""]);
 impl Manifest {
     pub fn validate_for<'a, T: Clone>(
         &self,
@@ -138,17 +137,24 @@ impl Manifest {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, TS, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, VisitFields, PartialEq)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct HardwareRequirements {
     #[serde(default)]
     pub device: Vec<DeviceFilter>,
-    #[ts(type = "number | null")]
+    #[visit(ts(type = "number | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub ram: Option<u64>,
-    #[ts(type = "string[] | null")]
+    #[visit(
+        ts(type = "string[] | null"),
+        wire = "Option<rpc_toolkit::ts::Unknown>"
+    )]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub arch: Option<BTreeSet<InternedString>>,
 }
+
+rpc_toolkit::reflect_ts!(HardwareRequirements);
+rpc_toolkit::ts_export!(HardwareRequirements, namespaces = [""]);
 impl HardwareRequirements {
     /// Returns true if this s9pk's hardware requirements are satisfied by the given hardware.
     pub fn is_compatible(&self, hw: &crate::registry::device_info::HardwareInfo) -> bool {
@@ -186,12 +192,18 @@ impl HardwareRequirements {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, TS)]
-#[ts(type = "string | Record<string, string>")]
+#[derive(Clone, Debug, PartialEq, VisitVariants)]
+#[visit(
+    ts(type = "string | Record<string, string>"),
+    wire = "rpc_toolkit::ts::Unknown"
+)]
+#[visit(opaque, type_attributes(visit::wire))]
 pub enum LocaleString {
     Translated(String),
     LanguageMap(InOMap<InternedString, String>),
 }
+
+rpc_toolkit::reflect_ts!(LocaleString);
 impl std::str::FromStr for LocaleString {
     type Err = std::convert::Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -298,22 +310,30 @@ impl ValueParserFactory for LocaleString {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct DeviceFilter {
     pub description: String,
-    #[ts(type = "\"processor\" | \"display\"")]
+    #[visit(
+        ts(type = "\"processor\" | \"display\""),
+        wire = "rpc_toolkit::ts::Unknown"
+    )]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub class: InternedString,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub product: Option<Regex>,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub vendor: Option<Regex>,
-    #[ts(optional)]
+
     pub capabilities: Option<BTreeSet<InternedString>>,
-    #[ts(optional)]
+
     pub driver: Option<InternedString>,
 }
+
+rpc_toolkit::reflect_ts!(DeviceFilter);
+rpc_toolkit::ts_export!(DeviceFilter, namespaces = [""]);
 // Omit description
 impl PartialEq for DeviceFilter {
     fn eq(&self, other: &Self) -> bool {
@@ -402,12 +422,14 @@ impl DeviceFilter {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq)]
-#[ts(export)]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields, PartialEq)]
 pub struct Description {
     pub short: LocaleString,
     pub long: LocaleString,
 }
+
+rpc_toolkit::reflect_ts!(Description);
+rpc_toolkit::ts_export!(Description, namespaces = [""]);
 impl Description {
     pub fn localize_for(&mut self, locale: &str) {
         self.short.localize_for(locale);

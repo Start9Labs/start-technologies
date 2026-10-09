@@ -12,14 +12,13 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::disk::mount::filesystem::idmapped::IdMap;
 use crate::disk::mount::filesystem::syscall::{self, DetachedMount};
 use crate::prelude::*;
 use crate::service::effects::ContainerCliContext;
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[command(rename_all = "kebab-case")]
 #[serde(rename_all = "camelCase")]
 pub struct BindMountParams {
@@ -49,6 +48,8 @@ pub struct BindMountParams {
     #[arg(long, value_parser = <IdMap as clap::builder::ValueParserFactory>::value_parser())]
     pub idmap: Vec<IdMap>,
 }
+
+rpc_toolkit::reflect_ts!(BindMountParams);
 
 // The concrete context type keeps this subcommand off the RPC server's tree:
 // `handler()` only retains subcommands whose context matches the serving one.

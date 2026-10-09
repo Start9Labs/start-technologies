@@ -29,7 +29,6 @@ use tokio_rustls::rustls::crypto::CryptoProvider;
 use tokio_rustls::rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio_rustls::rustls::server::ClientHello;
 use tracing::instrument;
-use ts_rs::TS;
 use visit_rs::Visit;
 
 use crate::SOURCE_DATE;
@@ -675,11 +674,10 @@ pub fn ssl_api<C: Context>() -> ParentHandler<C> {
     )
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 #[group(skip)]
-#[ts(export)]
 pub struct GenerateCertificateParams {
     #[arg(help = "help.arg.hostnames")]
     pub hostnames: Vec<String>,
@@ -688,13 +686,18 @@ pub struct GenerateCertificateParams {
     pub ed25519: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(GenerateCertificateParams);
+rpc_toolkit::ts_export!(GenerateCertificateParams, namespaces = [""]);
+
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct GenerateCertificateResponse {
     pub key: String,
     pub fullchain: String,
 }
+
+rpc_toolkit::reflect_ts!(GenerateCertificateResponse);
+rpc_toolkit::ts_export!(GenerateCertificateResponse, namespaces = [""]);
 
 pub async fn generate_certificate(
     ctx: RpcContext,

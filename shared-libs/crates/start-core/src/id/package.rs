@@ -4,16 +4,18 @@ use std::str::FromStr;
 
 use imbl_value::InternedString;
 use serde::{Deserialize, Serialize, Serializer};
-use ts_rs::TS;
 
 use crate::{Id, InvalidId, SYSTEM_ID};
 
 lazy_static::lazy_static! {
     pub static ref SYSTEM_PACKAGE_ID: PackageId = PackageId(SYSTEM_ID.clone());
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, TS)]
-#[ts(type = "string")]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, visit_rs::VisitFields)]
+#[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+#[visit(opaque, type_attributes(visit::wire))]
 pub struct PackageId(Id);
+
+rpc_toolkit::reflect_ts!(PackageId);
 impl PackageId {
     /// The reserved package id identifying StartOS itself — the owner of the
     /// server's own host (the admin UI). Not installable as a package.

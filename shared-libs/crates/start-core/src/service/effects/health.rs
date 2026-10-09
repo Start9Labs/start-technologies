@@ -2,14 +2,16 @@ use crate::HealthCheckId;
 use crate::service::effects::prelude::*;
 use crate::status::health_check::NamedHealthCheckResult;
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct SetHealth {
     id: HealthCheckId,
     #[serde(flatten)]
     result: NamedHealthCheckResult,
 }
+
+rpc_toolkit::reflect_ts!(SetHealth);
+rpc_toolkit::ts_export!(SetHealth, namespaces = [""]);
 pub async fn set_health(
     context: EffectContext,
     SetHealth { id, result }: SetHealth,

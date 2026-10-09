@@ -25,7 +25,7 @@ pub trait Digestable {
 
 /// Commitment to a file's contents: BLAKE3 hash + expected size.
 /// Wire-compatible with start-os's `Blake3Commitment`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct Blake3Commitment {
     /// BLAKE3 hash as base64-encoded 32-byte array.
@@ -33,6 +33,7 @@ pub struct Blake3Commitment {
     pub hash: [u8; 32],
     pub size: u64,
 }
+rpc_toolkit::reflect_ts!(Blake3Commitment);
 
 impl Digestable for Blake3Commitment {
     fn update<D: digest::Update>(&self, digest: &mut D) {

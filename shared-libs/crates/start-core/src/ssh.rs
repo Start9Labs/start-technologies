@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use tokio::fs::OpenOptions;
 use tokio::process::Command;
 use tracing::instrument;
-use ts_rs::TS;
 
 use crate::context::{CliContext, RpcContext};
 use crate::hostname::ServerHostname;
@@ -44,13 +43,16 @@ impl Map for SshKeys {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
-#[ts(type = "string")]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
+#[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+#[visit(opaque, type_attributes(visit::wire))]
 pub struct SshPubKey(
     #[serde(serialize_with = "crate::util::serde::serialize_display")]
     #[serde(deserialize_with = "crate::util::serde::deserialize_from_str")]
     pub openssh_keys::PublicKey,
 );
+
+rpc_toolkit::reflect_ts!(SshPubKey);
 impl ValueParserFactory for SshPubKey {
     type Parser = FromStrParser<Self>;
     fn value_parser() -> Self::Parser {
@@ -58,8 +60,7 @@ impl ValueParserFactory for SshPubKey {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, TS)]
-#[ts(export)]
+#[derive(serde::Serialize, serde::Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct SshKeyResponse {
     pub alg: String,
@@ -67,6 +68,9 @@ pub struct SshKeyResponse {
     pub hostname: String,
     pub created_at: String,
 }
+
+rpc_toolkit::reflect_ts!(SshKeyResponse);
+rpc_toolkit::ts_export!(SshKeyResponse, namespaces = [""]);
 impl std::fmt::Display for SshKeyResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
@@ -115,15 +119,17 @@ pub fn ssh<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct SshAddParams {
     #[arg(help = "help.arg.ssh-public-key")]
     key: SshPubKey,
 }
+
+rpc_toolkit::reflect_ts!(SshAddParams);
+rpc_toolkit::ts_export!(SshAddParams, namespaces = [""]);
 
 #[instrument(skip_all)]
 pub async fn add(
@@ -155,16 +161,17 @@ pub async fn add(
     Ok(res)
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct SshDeleteParams {
     #[arg(help = "help.arg.ssh-fingerprint")]
-    #[ts(type = "string")]
     fingerprint: InternedString,
 }
+
+rpc_toolkit::reflect_ts!(SshDeleteParams);
+rpc_toolkit::ts_export!(SshDeleteParams, namespaces = [""]);
 
 #[instrument(skip_all)]
 pub async fn remove(

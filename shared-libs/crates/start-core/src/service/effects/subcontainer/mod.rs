@@ -26,13 +26,15 @@ pub use sync::*;
 #[cfg(not(target_os = "linux"))]
 use sync_dummy as sync;
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, visit_rs::VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct DestroySubcontainerFsParams {
     guid: Guid,
 }
+
+rpc_toolkit::reflect_ts!(DestroySubcontainerFsParams);
+rpc_toolkit::ts_export!(DestroySubcontainerFsParams, namespaces = [""]);
 #[instrument(skip_all)]
 pub async fn destroy_subcontainer_fs(
     context: EffectContext,
@@ -74,15 +76,18 @@ pub async fn destroy_subcontainer_fs(
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, visit_rs::VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct CreateSubcontainerFsParams {
     image_id: ImageId,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     name: Option<InternedString>,
 }
+
+rpc_toolkit::reflect_ts!(CreateSubcontainerFsParams);
+rpc_toolkit::ts_export!(CreateSubcontainerFsParams, namespaces = [""]);
 #[instrument(skip_all)]
 pub async fn create_subcontainer_fs(
     context: EffectContext,

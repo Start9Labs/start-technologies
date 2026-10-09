@@ -271,12 +271,13 @@ impl From<rusqlite::Error> for Error {
 
 // --- RPC conversion ---
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, visit_rs::VisitFields)]
 pub struct ErrorData {
     pub details: String,
     #[serde(default)]
     pub info: Value,
 }
+rpc_toolkit::reflect_ts!(ErrorData);
 
 impl Display for ErrorData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

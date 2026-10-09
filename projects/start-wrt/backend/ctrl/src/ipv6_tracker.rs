@@ -75,7 +75,7 @@ const PROD_INTERVAL_SECS: u64 = 10 * 60;
 /// of neighbor events (device reboot, prefix change) yields one rewrite.
 const DEBOUNCE_SECS: u64 = 20;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 struct AddrRecord {
     first_seen: i64,
@@ -88,6 +88,7 @@ struct AddrRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     iface: Option<String>,
 }
+rpc_toolkit::reflect_ts!(AddrRecord);
 
 type AddrMap = HashMap<String, HashMap<String, AddrRecord>>;
 

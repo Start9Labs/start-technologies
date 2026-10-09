@@ -24,14 +24,16 @@ use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::serde::IoFormat;
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, VisitVariants)]
 #[serde(rename_all = "camelCase")]
 pub enum PartitionTable {
     Mbr,
     Gpt,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+rpc_toolkit::reflect_ts!(PartitionTable);
+
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct DiskInfo {
     pub logicalname: PathBuf,
@@ -45,24 +47,31 @@ pub struct DiskInfo {
     pub filesystem: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, ts_rs::TS)]
-#[ts(export)]
+rpc_toolkit::reflect_ts!(DiskInfo);
+
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct PartitionInfo {
     pub logicalname: PathBuf,
     pub stable_path: PathBuf,
     pub label: Option<String>,
-    #[ts(type = "number")]
+    #[visit(ts(type = "number"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub capacity: u64,
-    #[ts(type = "number | null")]
+    #[visit(ts(type = "number | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub used: Option<u64>,
-    #[ts(type = "number | null")]
+    #[visit(ts(type = "number | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub available: Option<u64>,
     pub start_os: BTreeMap<String, StartOsRecoveryInfo>,
     pub legacy_backup: bool,
     pub guid: Option<InternedString>,
     pub filesystem: Option<String>,
 }
+
+rpc_toolkit::reflect_ts!(PartitionInfo);
+rpc_toolkit::ts_export!(PartitionInfo, namespaces = [""]);
 
 /// Whether this server's pre-V2 `StartOSBackups/<server_id>` backup is present
 /// on a mounted target. Scoped to `server_id` so a target shared by several
@@ -105,16 +114,18 @@ impl From<BackupUnencryptedMetadata> for StartOsRecoveryInfo {
 
 /// The public view of a backup found on a target: enough to identify it, and none of
 /// [`BackupUnencryptedMetadata`]'s key material.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, ts_rs::TS)]
-#[ts(export)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct StartOsRecoveryInfo {
     pub hostname: ServerHostname,
-    #[ts(type = "string")]
     pub version: exver::Version,
-    #[ts(type = "string")]
+    #[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub timestamp: DateTime<Utc>,
 }
+
+rpc_toolkit::reflect_ts!(StartOsRecoveryInfo);
+rpc_toolkit::ts_export!(StartOsRecoveryInfo, namespaces = [""]);
 
 const DISK_PATH: &str = "/dev/disk/by-path";
 const SYS_BLOCK_PATH: &str = "/sys/block";

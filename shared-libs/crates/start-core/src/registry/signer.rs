@@ -4,7 +4,6 @@ use std::str::FromStr;
 use clap::builder::ValueParserFactory;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 use url::Url;
 
 use crate::prelude::*;
@@ -12,25 +11,34 @@ use crate::sign::commitment::Digestable;
 use crate::sign::{AnySignature, AnyVerifyingKey, SignatureScheme};
 use crate::util::FromStrParser;
 
-#[derive(Debug, Deserialize, Serialize, HasModel, TS)]
+#[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct SignerInfo {
     pub name: String,
     pub contact: Vec<ContactInfo>,
     pub keys: HashSet<AnyVerifyingKey>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+rpc_toolkit::reflect_ts!(SignerInfo);
+rpc_toolkit::ts_export!(SignerInfo, namespaces = [""]);
+
+#[derive(Clone, Debug, Deserialize, Serialize, VisitVariants, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
+
 // TODO: better types
 pub enum ContactInfo {
     Email(String),
     Matrix(String),
-    Website(#[ts(type = "string")] Url),
+    Website(
+        #[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+        #[visit(opaque, type_attributes(visit::wire))]
+        Url,
+    ),
 }
+
+rpc_toolkit::reflect_ts!(ContactInfo);
+rpc_toolkit::ts_export!(ContactInfo, namespaces = [""]);
 impl std::fmt::Display for ContactInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -59,16 +67,19 @@ impl ValueParserFactory for ContactInfo {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitVariants)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub enum AcceptSigners {
     #[serde(skip)]
+    #[visit(opaque)]
     Accepted,
     Signer(AnyVerifyingKey),
     Any(Vec<AcceptSigners>),
     All(Vec<AcceptSigners>),
 }
+
+rpc_toolkit::reflect_ts!(AcceptSigners);
+rpc_toolkit::ts_export!(AcceptSigners, namespaces = [""]);
 impl AcceptSigners {
     const fn null() -> Self {
         Self::Any(Vec::new())

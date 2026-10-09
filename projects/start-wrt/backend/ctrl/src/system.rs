@@ -31,7 +31,7 @@ pub(crate) struct UciPreferences {
     pub remote_access: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 struct SystemInfoResponse {
     version: String,
@@ -42,21 +42,24 @@ struct SystemInfoResponse {
     remote_access: String,
     timezone: String,
 }
+rpc_toolkit::reflect_ts!(SystemInfoResponse);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 struct VersionInfo {
     version: String,
     release_notes: String,
 }
+rpc_toolkit::reflect_ts!(VersionInfo);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 struct SetPreferencesReq {
     language: Option<String>,
     theme: Option<String>,
     remote_access: Option<String>,
 }
+rpc_toolkit::reflect_ts!(SetPreferencesReq);
 
 /// The `startwrt.preferences` section, defaulted when absent.
 pub(crate) fn preferences(cfg: &uciedit::Config<'_>) -> Result<UciPreferences, Error> {
@@ -797,12 +800,13 @@ async fn restart(_ctx: ServerContext) -> Result<(), Error> {
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 struct SetTimezoneParams {
     /// IANA timezone name, e.g. "America/New_York"
     timezone: String,
 }
+rpc_toolkit::reflect_ts!(SetTimezoneParams);
 
 /// Resolve a POSIX TZ string for an IANA name using the on-device LuCI
 /// zoneinfo table — the same authoritative source LuCI itself uses. The table

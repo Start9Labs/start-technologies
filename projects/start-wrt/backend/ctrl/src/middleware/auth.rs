@@ -29,7 +29,7 @@ impl<T> SyncMutex<T> {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, visit_rs::VisitFields)]
 pub struct Metadata {
     #[serde(default)]
     login: bool,
@@ -40,6 +40,7 @@ pub struct Metadata {
     #[serde(default)]
     no_auth: bool,
 }
+rpc_toolkit::reflect_ts!(Metadata);
 
 #[derive(Clone)]
 pub struct SessionAuth {

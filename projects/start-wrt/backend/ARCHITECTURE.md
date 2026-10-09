@@ -217,6 +217,20 @@ Low-level UCI, file, and shell access. These are vestigial — all features now 
 | `templates/`                      | `client.conf.template` — WireGuard peer client-config template                                                                                                                                                                                               |
 | `error.rs`                        | `ErrorKind` enum and `Error` type                                                                                                                                                                                                                            |
 
+## TypeScript bindings
+
+RPC structs derive `visit_rs::VisitFields` and enums derive
+`visit_rs::VisitVariants`, supplying raw facts and static traversal.
+Adjacent `rpc_toolkit::reflect_ts!` bridges normalize serde metadata and render TypeScript while retaining generic
+payload bounds and default generic inlining. RPC interprets raw `visit(ts(...))`
+hints; signing containers use explicit storage opacity and a `string` literal.
+Local `type_attributes` selectors collect compiler-resolved wire/conversion types
+from existing literals. Raw descriptors retain every member; serde skips and
+renames do not affect reflection. Streaming roots register beside their owners
+with `rpc_toolkit::ts_export!`;
+`ctrl/examples/generate_rpc_bindings.rs` collects the `events` namespace and
+traverses `main_api()` for the RPC tree.
+
 ## UCI Library (uciedit)
 
 ### Parsing

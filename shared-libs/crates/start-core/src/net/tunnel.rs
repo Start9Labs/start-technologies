@@ -5,7 +5,6 @@ use imbl_value::InternedString;
 use patch_db::json_ptr::JsonPointer;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
@@ -41,10 +40,9 @@ pub fn tunnel_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct AddTunnelParams {
     #[arg(help = "help.arg.tunnel-name")]
     name: InternedString,
@@ -56,6 +54,9 @@ pub struct AddTunnelParams {
     #[arg(long, help = "help.arg.set-as-default-outbound")]
     set_as_default_outbound: bool,
 }
+
+rpc_toolkit::reflect_ts!(AddTunnelParams);
+rpc_toolkit::ts_export!(AddTunnelParams, namespaces = [""]);
 
 pub async fn add_tunnel(
     ctx: RpcContext,
@@ -170,13 +171,15 @@ fn gateway_type_from_config(config: &str) -> GatewayType {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 pub struct RemoveTunnelParams {
     #[arg(help = "help.arg.gateway-id")]
     id: GatewayId,
 }
+
+rpc_toolkit::reflect_ts!(RemoveTunnelParams);
+rpc_toolkit::ts_export!(RemoveTunnelParams, namespaces = [""]);
 pub async fn remove_tunnel(
     ctx: RpcContext,
     RemoveTunnelParams { id }: RemoveTunnelParams,
@@ -281,15 +284,17 @@ pub async fn remove_tunnel(
     Ok(())
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 pub struct UpdateTunnelParams {
     #[arg(help = "help.arg.gateway-id")]
     id: GatewayId,
     #[arg(help = "help.arg.wireguard-config")]
     config: String,
 }
+
+rpc_toolkit::reflect_ts!(UpdateTunnelParams);
+rpc_toolkit::ts_export!(UpdateTunnelParams, namespaces = [""]);
 
 /// Replace the WireGuard config behind an existing gateway interface in place,
 /// keeping the gateway id and everything keyed to it (forwards, private/public

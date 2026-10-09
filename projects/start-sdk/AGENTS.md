@@ -32,6 +32,8 @@ Node.js v22+ (nvm recommended), npm, and GNU Make.
 
 Tests are jest + ts-jest, Node only (no browser). Test files use `.test.ts` and are excluded from compilation via `tsconfig.json`. Run one with `npx jest --testPathPatterns=host`. The bundled `@start9labs/start-core` has its own suite and build: `cd ../../shared-libs/ts-modules/start-core && make test` (or `make dist`). The ExVer parser is generated from that lib's `lib/exver/exver.pegjs` via Peggy (`make` runs this for you).
 
+Root `make start-sdk-test` also builds the SDK and checks editor documentation through generated core types and bundled SDK declarations.
+
 Both packages are strict TypeScript, ES2021 target, CommonJS output. [`ARCHITECTURE.md`](ARCHITECTURE.md#build-pipeline) covers what the build actually does.
 
 ## Testing SDK changes against a service package

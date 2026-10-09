@@ -3706,14 +3706,13 @@ dependencies = [
 
 [[package]]
 name = "imbl-value"
-version = "0.4.4"
+version = "0.5.0"
 dependencies = [
  "imbl 6.1.0",
  "proptest",
  "proptest-derive 0.6.0",
  "serde",
  "serde_json",
- "ts-rs",
  "yasi",
 ]
 
@@ -3851,6 +3850,15 @@ checksum = "14c00403deb17c3221a1fe4fb571b9ed0370b3dcd116553c77fa294a3d918699"
 dependencies = [
  "async-trait",
  "tokio",
+]
+
+[[package]]
+name = "inventory"
+version = "0.3.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4f0c30c76f2f4ccee3fe55a2435f691ca00c0e4bd87abe4f4a851b1d4dac39b"
+dependencies = [
+ "rustversion",
 ]
 
 [[package]]
@@ -5271,6 +5279,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-error",
+ "visit-rs",
 ]
 
 [[package]]
@@ -6501,31 +6510,42 @@ dependencies = [
 
 [[package]]
 name = "rpc-toolkit"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "async-stream",
  "async-trait",
  "axum",
+ "chrono",
  "clap",
+ "exver",
  "futures",
  "http",
  "http-body-util",
+ "imbl 6.1.0",
  "imbl-value",
+ "inventory",
+ "ipnet",
  "itertools 0.14.0",
+ "josekit",
  "lazy_format",
  "lazy_static",
  "openssl",
+ "patch-db",
  "pin-project",
  "reqwest",
  "serde",
  "serde_cbor",
+ "serde_derive_internals",
  "serde_json",
+ "syn 3.0.6",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
- "ts-rs",
  "url",
+ "visit-rs",
  "yajrc",
+ "yasi",
 ]
 
 [[package]]
@@ -6917,6 +6937,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "serde_derive_internals"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f852137cce035d6a4df67ccce505ff6b3e9fd3a10e3e52b24dc71e650bb1a9bd"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -7705,7 +7736,6 @@ dependencies = [
  "tracing-error",
  "tracing-journald",
  "tracing-subscriber",
- "ts-rs",
  "typed-builder",
  "url",
  "uuid",
@@ -7983,6 +8013,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "syn"
+version = "3.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-ident",
+]
+
+[[package]]
 name = "sync_wrapper"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8100,15 +8141,6 @@ dependencies = [
  "dirs-next",
  "rustversion",
  "winapi",
-]
-
-[[package]]
-name = "termcolor"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
-dependencies = [
- "winapi-util",
 ]
 
 [[package]]
@@ -8712,28 +8744,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
-name = "ts-rs"
-version = "9.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b44017f9f875786e543595076374b9ef7d13465a518dd93d6ccdbf5b432dde8c"
-dependencies = [
- "thiserror 1.0.69",
- "ts-rs-macros",
-]
-
-[[package]]
-name = "ts-rs-macros"
-version = "9.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c88cc88fd23b5a04528f3a8436024f20010a16ec18eb23c164b1242f65860130"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
- "termcolor",
-]
-
-[[package]]
 name = "tungstenite"
 version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9015,25 +9025,22 @@ checksum = "051eb1abcf10076295e815102942cc58f9d5e3b4560e46e53c21e8ff6f3af7b1"
 
 [[package]]
 name = "visit-rs"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f89c27f644c3e4ce302bc7bce5144e295405d569784e5f4921271404e600cecf"
+version = "0.2.0"
 dependencies = [
  "async-stream",
  "futures",
- "serde",
+ "tokio",
  "visit-rs-derive",
 ]
 
 [[package]]
 name = "visit-rs-derive"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a3bfb04fd13da4fc8df24709b7a0949667f43c63691d9fecddf1d3be8af5099"
+version = "0.2.0"
 dependencies = [
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
- "syn 2.0.117",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -10003,13 +10010,12 @@ checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 
 [[package]]
 name = "yasi"
-version = "0.1.12"
+version = "0.2.0"
 dependencies = [
  "hashbrown 0.13.2",
  "lazy_static",
  "serde",
  "tinyvec",
- "ts-rs",
  "xxhash-rust",
 ]
 

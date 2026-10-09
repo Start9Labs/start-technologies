@@ -24,7 +24,6 @@ use tokio::fs::File;
 use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
 use tokio::sync::{Mutex, OwnedMutexGuard, RwLock, oneshot};
 use tracing::instrument;
-use ts_rs::TS;
 use url::Url;
 
 use crate::shutdown::Shutdown;
@@ -691,12 +690,15 @@ pub fn lazy_display<F: Fn() -> D, D: fmt::Display>(f: F) -> LazyDisplay<F> {
     LazyDisplay::new(f)
 }
 
-#[derive(Debug, Clone, TS)]
-#[ts(type = "string")]
+#[derive(Debug, Clone, visit_rs::VisitVariants)]
+#[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+#[visit(opaque, type_attributes(visit::wire))]
 pub enum PathOrUrl {
     Path(PathBuf),
     Url(Url),
 }
+
+rpc_toolkit::reflect_ts!(PathOrUrl);
 impl FromStr for PathOrUrl {
     type Err = <PathBuf as FromStr>::Err;
     fn from_str(s: &str) -> Result<Self, Self::Err> {

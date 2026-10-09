@@ -8,7 +8,6 @@ use imbl_value::InternedString;
 use itertools::Itertools;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::context::CliContext;
 use crate::prelude::*;
@@ -47,19 +46,20 @@ pub fn sign_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct SignAssetParams {
-    #[ts(type = "string")]
     version: Version,
-    #[ts(type = "string")]
     platform: InternedString,
-    #[ts(skip)]
+    #[visit(ts(skip), wire = "rpc_toolkit::ts::Unknown")]
     #[serde(rename = "__Auth_signer")]
+    #[visit(opaque, type_attributes(visit::wire))]
     signer: AnyVerifyingKey,
     signature: AnySignature,
 }
+
+rpc_toolkit::reflect_ts!(SignAssetParams);
+rpc_toolkit::ts_export!(SignAssetParams, namespaces = [""]);
 
 async fn sign_asset(
     ctx: RegistryContext,

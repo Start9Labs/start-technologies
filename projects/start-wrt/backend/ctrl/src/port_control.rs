@@ -1982,7 +1982,7 @@ async fn run_sweep(pc: Arc<PortControl>) {
 }
 
 /// One automatic port use for the published-ports UI.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct AutomaticPortUse {
     /// UCI section name (`apf_<mac>_<extport>`).
     pub id: String,
@@ -2002,6 +2002,7 @@ pub struct AutomaticPortUse {
     /// Hostname for an SNI route; absent for plain forwards.
     pub hostname: Option<String>,
 }
+rpc_toolkit::reflect_ts!(AutomaticPortUse);
 
 /// Display names keyed by uppercase MAC; static UCI names take precedence.
 pub(crate) fn device_display_names(
@@ -2134,11 +2135,12 @@ pub async fn wan_changed(ctx: ServerContext) -> Result<Value, Error> {
     Ok(Value::Null)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct SetAutoForwardRequest {
     pub mac: String,
     pub allow: bool,
 }
+rpc_toolkit::reflect_ts!(SetAutoForwardRequest);
 
 /// Changes a device's default-off automatic port-use permission.
 #[instrument(skip_all)]

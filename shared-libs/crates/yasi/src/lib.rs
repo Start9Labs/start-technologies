@@ -15,9 +15,6 @@ use tinyvec::ArrayVec;
 #[cfg(feature = "serde")]
 mod serde;
 
-#[cfg(feature = "ts-rs")]
-mod ts_rs;
-
 #[inline]
 #[cold]
 fn cold() {}

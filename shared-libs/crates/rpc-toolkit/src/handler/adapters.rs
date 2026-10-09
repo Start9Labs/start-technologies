@@ -8,13 +8,25 @@ use imbl_value::imbl::OrdMap;
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+#[cfg(feature = "ts")]
+use visit_rs::{Static, Visit};
 use yajrc::RpcError;
 
+#[cfg(feature = "ts")]
+use crate::ts::{PassthroughChildrenTS, PassthroughParamsTS, PassthroughReturnTS, TSVisitor};
 use crate::util::{Flat, PhantomData};
+#[cfg(feature = "ts")]
+use crate::PassthroughCliBindings;
 use crate::{
     CallRemote, CallRemoteHandler, CliBindings, DynHandler, Handler, HandlerArgs, HandlerArgsFor,
-    HandlerFor, HandlerTypes, LeafHandler, OrEmpty, PrintCliResult, WithContext,
+    HandlerFor, HandlerTypes, LeafHandler, OrEmpty, PassthroughHandlerFor, PassthroughHandlerTypes,
+    PrintCliResult, WithContext,
 };
+
+pub trait Adapter {
+    type Inner;
+    fn as_inner(&self) -> &Self::Inner;
+}
 
 pub trait HandlerExt<Context: crate::Context>: HandlerFor<Context> + Sized {
     fn no_cli(self) -> NoCli<Self>;
@@ -44,9 +56,24 @@ pub trait HandlerExt<Context: crate::Context>: HandlerFor<Context> + Sized {
     fn with_about<M>(self, message: M) -> WithAbout<M, Self>
     where
         M: IntoResettable<StyledStr>;
+    #[cfg(feature = "ts")]
     fn no_ts(self) -> NoTS<Self>;
-    fn unknown_ts(self) -> UnknownTS<Self>;
-    fn custom_ts(self, params_ty: String, return_ty: String) -> CustomTS<Self>;
+    #[cfg(feature = "ts")]
+    fn override_params_ts<Params>(self, params_ty: Params) -> OverrideParamsTS<Self, Params>
+    where
+        Params: Visit<TSVisitor>;
+    #[cfg(feature = "ts")]
+    fn override_return_ts<Params>(self, params_ty: Params) -> OverrideReturnTS<Self, Params>
+    where
+        Params: Visit<TSVisitor>;
+    #[cfg(feature = "ts")]
+    fn override_params_ts_as<Params>(self) -> OverrideParamsTS<Self, Static<Params>>
+    where
+        Static<Params>: Visit<TSVisitor>;
+    #[cfg(feature = "ts")]
+    fn override_return_ts_as<Params>(self) -> OverrideReturnTS<Self, Static<Params>>
+    where
+        Static<Params>: Visit<TSVisitor>;
 }
 
 impl<Context: crate::Context, T: HandlerFor<Context> + Sized> HandlerExt<Context> for T {
@@ -111,97 +138,67 @@ impl<Context: crate::Context, T: HandlerFor<Context> + Sized> HandlerExt<Context
         }
     }
 
+    #[cfg(feature = "ts")]
     fn no_ts(self) -> NoTS<Self> {
         NoTS(self)
     }
 
-    fn unknown_ts(self) -> UnknownTS<Self> {
-        UnknownTS(self)
+    #[cfg(feature = "ts")]
+    fn override_params_ts<Params>(self, params_ty: Params) -> OverrideParamsTS<Self, Params>
+    where
+        Params: Visit<TSVisitor>,
+    {
+        OverrideParamsTS {
+            handler: self,
+            params_ts: params_ty,
+        }
     }
 
-    fn custom_ts(self, params_ty: String, return_ty: String) -> CustomTS<Self> {
-        CustomTS {
+    #[cfg(feature = "ts")]
+    fn override_return_ts<Return>(self, return_ty: Return) -> OverrideReturnTS<Self, Return>
+    where
+        Return: Visit<TSVisitor>,
+    {
+        OverrideReturnTS {
             handler: self,
-            params_ty,
             return_ty,
+        }
+    }
+
+    #[cfg(feature = "ts")]
+    fn override_params_ts_as<Params>(self) -> OverrideParamsTS<Self, Static<Params>>
+    where
+        Static<Params>: Visit<TSVisitor>,
+    {
+        OverrideParamsTS {
+            handler: self,
+            params_ts: Static::<Params>::new(),
+        }
+    }
+
+    #[cfg(feature = "ts")]
+    fn override_return_ts_as<Return>(self) -> OverrideReturnTS<Self, Static<Return>>
+    where
+        Static<Return>: Visit<TSVisitor>,
+    {
+        OverrideReturnTS {
+            handler: self,
+            return_ty: Static::<Return>::new(),
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct NoCli<H>(pub H);
-
+impl<H> Adapter for NoCli<H> {
+    type Inner = H;
+    fn as_inner(&self) -> &Self::Inner {
+        &self.0
+    }
+}
 impl<H: LeafHandler> LeafHandler for NoCli<H> {}
-
-impl<H: HandlerTypes> HandlerTypes for NoCli<H> {
-    type Params = H::Params;
-    type InheritedParams = H::InheritedParams;
-    type Ok = H::Ok;
-    type Err = H::Err;
-}
-#[cfg(feature = "ts-rs")]
-impl<H> crate::handler::HandlerTS for NoCli<H>
-where
-    H: crate::handler::HandlerTS,
-{
-    fn type_info(&self) -> Option<String> {
-        self.0.type_info()
-    }
-}
-impl<Context, H> HandlerFor<Context> for NoCli<H>
-where
-    Context: crate::Context,
-    H: HandlerFor<Context>,
-{
-    fn handle_sync(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.0.handle_sync(HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        })
-    }
-    async fn handle_async(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.0
-            .handle_async(HandlerArgs {
-                context,
-                parent_method,
-                method,
-                params,
-                inherited_params,
-                raw_params,
-            })
-            .await
-    }
-    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
-        self.0.metadata(method)
-    }
-    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
-        self.0.method_from_dots(method)
-    }
-}
+impl<H> PassthroughHandlerTypes for NoCli<H> {}
+impl<H> PassthroughHandlerFor for NoCli<H> {}
 impl<Context, H> CliBindings<Context> for NoCli<H>
 where
     Context: crate::Context,
@@ -221,82 +218,31 @@ where
         unimplemented!()
     }
 }
+#[cfg(feature = "ts")]
+impl<H> PassthroughParamsTS for NoCli<H> {}
+#[cfg(feature = "ts")]
+impl<H> PassthroughReturnTS for NoCli<H> {}
+#[cfg(feature = "ts")]
+impl<H> PassthroughChildrenTS for NoCli<H> {}
 
 #[derive(Debug, Clone)]
 pub struct NoDisplay<H>(pub H);
 
+impl<H> Adapter for NoDisplay<H> {
+    type Inner = H;
+    fn as_inner(&self) -> &Self::Inner {
+        &self.0
+    }
+}
 impl<H: LeafHandler> LeafHandler for NoDisplay<H> {}
-
-impl<H: HandlerTypes> HandlerTypes for NoDisplay<H> {
-    type Params = H::Params;
-    type InheritedParams = H::InheritedParams;
-    type Ok = H::Ok;
-    type Err = H::Err;
-}
-#[cfg(feature = "ts-rs")]
-impl<H> crate::handler::HandlerTS for NoDisplay<H>
-where
-    H: crate::handler::HandlerTS,
-{
-    fn type_info(&self) -> Option<String> {
-        self.0.type_info()
-    }
-}
-
-impl<Context, H> HandlerFor<Context> for NoDisplay<H>
-where
-    Context: crate::Context,
-    H: HandlerFor<Context>,
-{
-    fn handle_sync(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.0.handle_sync(HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        })
-    }
-    async fn handle_async(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.0
-            .handle_async(HandlerArgs {
-                context,
-                parent_method,
-                method,
-                params,
-                inherited_params,
-                raw_params,
-            })
-            .await
-    }
-    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
-        self.0.metadata(method)
-    }
-    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
-        self.0.method_from_dots(method)
-    }
-}
+impl<H> PassthroughHandlerTypes for NoDisplay<H> {}
+impl<H> PassthroughHandlerFor for NoDisplay<H> {}
+#[cfg(feature = "ts")]
+impl<H> PassthroughParamsTS for NoDisplay<H> {}
+#[cfg(feature = "ts")]
+impl<H> PassthroughReturnTS for NoDisplay<H> {}
+#[cfg(feature = "ts")]
+impl<H> PassthroughChildrenTS for NoDisplay<H> {}
 impl<Context, H> PrintCliResult<Context> for NoDisplay<H>
 where
     Context: crate::Context,
@@ -344,83 +290,24 @@ pub struct CustomDisplay<P, H> {
     handler: H,
 }
 
+impl<P, H> Adapter for CustomDisplay<P, H>
+where
+    P: Send + Sync + Clone + 'static,
+{
+    type Inner = H;
+    fn as_inner(&self) -> &Self::Inner {
+        &self.handler
+    }
+}
 impl<P, H: LeafHandler> LeafHandler for CustomDisplay<P, H> {}
-
-impl<P, H> HandlerTypes for CustomDisplay<P, H>
-where
-    H: HandlerTypes,
-{
-    type Params = H::Params;
-    type InheritedParams = H::InheritedParams;
-    type Ok = H::Ok;
-    type Err = H::Err;
-}
-#[cfg(feature = "ts-rs")]
-impl<P, H> crate::handler::HandlerTS for CustomDisplay<P, H>
-where
-    H: crate::handler::HandlerTS,
-    P: Send + Sync + Clone + 'static,
-{
-    fn type_info(&self) -> Option<String> {
-        self.handler.type_info()
-    }
-}
-
-impl<Context, P, H> HandlerFor<Context> for CustomDisplay<P, H>
-where
-    Context: crate::Context,
-    H: HandlerFor<Context>,
-    P: Send + Sync + Clone + 'static,
-{
-    fn handle_sync(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.handler.handle_sync(HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        })
-    }
-    async fn handle_async(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.handler
-            .handle_async(HandlerArgs {
-                context,
-                parent_method,
-                method,
-                params,
-                inherited_params,
-                raw_params,
-            })
-            .await
-    }
-    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
-        self.handler.metadata(method)
-    }
-    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
-        self.handler.method_from_dots(method)
-    }
-}
+impl<P, H> PassthroughHandlerTypes for CustomDisplay<P, H> where P: Send + Sync + Clone + 'static {}
+impl<P, H> PassthroughHandlerFor for CustomDisplay<P, H> where P: Send + Sync + Clone + 'static {}
+#[cfg(feature = "ts")]
+impl<P, H> PassthroughParamsTS for CustomDisplay<P, H> where P: Send + Sync + Clone + 'static {}
+#[cfg(feature = "ts")]
+impl<P, H> PassthroughReturnTS for CustomDisplay<P, H> where P: Send + Sync + Clone + 'static {}
+#[cfg(feature = "ts")]
+impl<P, H> PassthroughChildrenTS for CustomDisplay<P, H> where P: Send + Sync + Clone + 'static {}
 impl<Context, P, H> PrintCliResult<Context> for CustomDisplay<P, H>
 where
     Context: crate::Context,
@@ -498,6 +385,17 @@ pub struct CustomDisplayFn<F, H, Context> {
     handler: H,
 }
 
+impl<F, H, Context> Adapter for CustomDisplayFn<F, H, Context>
+where
+    F: Send + Sync + Clone + 'static,
+    Context: 'static,
+{
+    type Inner = H;
+    fn as_inner(&self) -> &Self::Inner {
+        &self.handler
+    }
+}
+
 impl<F, H: LeafHandler, Context> LeafHandler for CustomDisplayFn<F, H, Context> {}
 
 impl<Context, F: Clone, H: Clone> Clone for CustomDisplayFn<F, H, Context> {
@@ -517,82 +415,38 @@ impl<Context, F: Debug, H: Debug> Debug for CustomDisplayFn<F, H, Context> {
             .finish()
     }
 }
-impl<F, H, Context> HandlerTypes for CustomDisplayFn<F, H, Context>
+impl<F, H, Context> PassthroughHandlerTypes for CustomDisplayFn<F, H, Context>
 where
-    H: HandlerTypes,
-{
-    type Params = H::Params;
-    type InheritedParams = H::InheritedParams;
-    type Ok = H::Ok;
-    type Err = H::Err;
-}
-#[cfg(feature = "ts-rs")]
-impl<F, H, Context> crate::handler::HandlerTS for CustomDisplayFn<F, H, Context>
-where
-    H: crate::handler::HandlerTS,
     F: Send + Sync + Clone + 'static,
     Context: 'static,
 {
-    fn type_info(&self) -> Option<String> {
-        self.handler.type_info()
-    }
 }
-
-impl<Context, F, H, C> HandlerFor<Context> for CustomDisplayFn<F, H, C>
+impl<F, H, Context> PassthroughHandlerFor for CustomDisplayFn<F, H, Context>
 where
-    Context: crate::Context,
-    C: 'static,
-    H: HandlerFor<Context>,
     F: Send + Sync + Clone + 'static,
+    Context: 'static,
 {
-    fn handle_sync(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.handler.handle_sync(HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        })
-    }
-    async fn handle_async(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.handler
-            .handle_async(HandlerArgs {
-                context,
-                parent_method,
-                method,
-                params,
-                inherited_params,
-                raw_params,
-            })
-            .await
-    }
-    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
-        self.handler.metadata(method)
-    }
-    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
-        self.handler.method_from_dots(method)
-    }
+}
+#[cfg(feature = "ts")]
+impl<F, H, Context> PassthroughParamsTS for CustomDisplayFn<F, H, Context>
+where
+    F: Send + Sync + Clone + 'static,
+    Context: 'static,
+{
+}
+#[cfg(feature = "ts")]
+impl<F, H, Context> PassthroughReturnTS for CustomDisplayFn<F, H, Context>
+where
+    F: Send + Sync + Clone + 'static,
+    Context: 'static,
+{
+}
+#[cfg(feature = "ts")]
+impl<F, H, Context> PassthroughChildrenTS for CustomDisplayFn<F, H, Context>
+where
+    F: Send + Sync + Clone + 'static,
+    Context: 'static,
+{
 }
 impl<F, H, Context> PrintCliResult<Context> for CustomDisplayFn<F, H, Context>
 where
@@ -685,7 +539,7 @@ impl<Context, H, Inherited, RemoteContext> Handler<Inherited>
 where
     Context: crate::Context + CallRemote<RemoteContext>,
     RemoteContext: crate::Context,
-    H: HandlerFor<RemoteContext> + CliBindings<Context> + crate::handler::HandlerTS,
+    H: HandlerFor<RemoteContext> + CliBindings<Context> + crate::ts::HandlerTSBindings,
     H::Ok: Serialize + DeserializeOwned,
     H::Err: From<RpcError>,
     H::Params: Serialize + DeserializeOwned,
@@ -711,6 +565,18 @@ pub struct InheritanceHandler<Params, InheritedParams, H, F> {
     _phantom: PhantomData<(Params, InheritedParams)>,
     handler: H,
     inherit: F,
+}
+
+impl<Params, InheritedParams, H, F> Adapter for InheritanceHandler<Params, InheritedParams, H, F>
+where
+    Params: Send + Sync + 'static,
+    InheritedParams: Send + Sync + 'static,
+    F: Send + Sync + Clone + 'static,
+{
+    type Inner = H;
+    fn as_inner(&self) -> &Self::Inner {
+        &self.handler
+    }
 }
 
 impl<Params, InheritedParams, H: LeafHandler, F> LeafHandler
@@ -751,17 +617,32 @@ where
     type Err = H::Err;
 }
 
-#[cfg(feature = "ts-rs")]
-impl<Params, InheritedParams, H, F> crate::handler::HandlerTS
+#[cfg(feature = "ts")]
+impl<Params, InheritedParams, H, F> PassthroughParamsTS
     for InheritanceHandler<Params, InheritedParams, H, F>
 where
     Params: Send + Sync + 'static,
     InheritedParams: Send + Sync + 'static,
-    H: crate::handler::HandlerTS,
+    F: Send + Sync + Clone + 'static,
 {
-    fn type_info(&self) -> Option<String> {
-        self.handler.type_info()
-    }
+}
+#[cfg(feature = "ts")]
+impl<Params, InheritedParams, H, F> PassthroughReturnTS
+    for InheritanceHandler<Params, InheritedParams, H, F>
+where
+    Params: Send + Sync + 'static,
+    InheritedParams: Send + Sync + 'static,
+    F: Send + Sync + Clone + 'static,
+{
+}
+#[cfg(feature = "ts")]
+impl<Params, InheritedParams, H, F> PassthroughChildrenTS
+    for InheritanceHandler<Params, InheritedParams, H, F>
+where
+    Params: Send + Sync + 'static,
+    InheritedParams: Send + Sync + 'static,
+    F: Send + Sync + Clone + 'static,
+{
 }
 
 impl<Context, Params, InheritedParams, H, F> HandlerFor<Context>
@@ -873,87 +754,30 @@ pub struct WithAbout<M, H> {
     message: M,
 }
 
-impl<M, H: LeafHandler> LeafHandler for WithAbout<M, H> {}
+impl<M, H> Adapter for WithAbout<M, H>
+where
+    M: Clone + Send + Sync + 'static,
+{
+    type Inner = H;
+    fn as_inner(&self) -> &Self::Inner {
+        &self.handler
+    }
+}
 
-impl<M, H> HandlerTypes for WithAbout<M, H>
-where
-    H: HandlerTypes,
-{
-    type Params = H::Params;
-    type InheritedParams = H::InheritedParams;
-    type Ok = H::Ok;
-    type Err = H::Err;
-}
-#[cfg(feature = "ts-rs")]
-impl<M, H> crate::handler::HandlerTS for WithAbout<M, H>
-where
-    H: crate::handler::HandlerTS,
-    M: Clone + Send + Sync + 'static,
-{
-    fn type_info(&self) -> Option<String> {
-        self.handler.type_info()
-    }
-}
-impl<Context, M, H> HandlerFor<Context> for WithAbout<M, H>
-where
-    Context: crate::Context,
-    H: HandlerFor<Context>,
-    M: Clone + Send + Sync + 'static,
-{
-    fn handle_sync(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.handler.handle_sync(HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        })
-    }
-    async fn handle_async(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.handler
-            .handle_async(HandlerArgs {
-                context,
-                parent_method,
-                method,
-                params,
-                inherited_params,
-                raw_params,
-            })
-            .await
-    }
-    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
-        self.handler.metadata(method)
-    }
-    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
-        self.handler.method_from_dots(method)
-    }
-}
+impl<M, H: LeafHandler> LeafHandler for WithAbout<M, H> {}
+impl<M, H> PassthroughHandlerTypes for WithAbout<M, H> where M: Clone + Send + Sync + 'static {}
+impl<M, H> PassthroughHandlerFor for WithAbout<M, H> where M: Clone + Send + Sync + 'static {}
+#[cfg(feature = "ts")]
+impl<M, H> PassthroughParamsTS for WithAbout<M, H> where M: Clone + Send + Sync + 'static {}
+#[cfg(feature = "ts")]
+impl<M, H> PassthroughReturnTS for WithAbout<M, H> where M: Clone + Send + Sync + 'static {}
+#[cfg(feature = "ts")]
+impl<M, H> PassthroughChildrenTS for WithAbout<M, H> where M: Clone + Send + Sync + 'static {}
 impl<Context, M, H> CliBindings<Context> for WithAbout<M, H>
 where
     Context: crate::Context,
     H: CliBindings<Context>,
-    M: IntoResettable<StyledStr> + Clone,
+    M: IntoResettable<StyledStr> + Clone + Send + Sync + 'static,
 {
     fn cli_command(&self) -> clap::Command {
         self.handler.cli_command().about(self.message.clone())
@@ -973,309 +797,96 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct NoTS<H>(pub H);
+#[cfg(feature = "ts")]
+pub use ts::*;
 
-impl<H: LeafHandler> LeafHandler for NoTS<H> {}
+#[cfg(feature = "ts")]
+mod ts {
+    use super::*;
+    use crate::ts::{ChildrenTS, ParamsTS, ReturnTS};
 
-impl<H> HandlerTypes for NoTS<H>
-where
-    H: HandlerTypes,
-{
-    type Params = H::Params;
-    type InheritedParams = H::InheritedParams;
-    type Ok = H::Ok;
-    type Err = H::Err;
-}
+    #[derive(Debug, Clone)]
+    pub struct NoTS<H>(pub H);
+    impl<H> Adapter for NoTS<H> {
+        type Inner = H;
+        fn as_inner(&self) -> &Self::Inner {
+            &self.0
+        }
+    }
+    impl<H: LeafHandler> LeafHandler for NoTS<H> {}
+    impl<H> PassthroughHandlerTypes for NoTS<H> {}
+    impl<H> PassthroughHandlerFor for NoTS<H> {}
+    impl<H> PassthroughCliBindings for NoTS<H> {}
+    impl<H> ParamsTS for NoTS<H> {
+        fn params_ts(&self) -> Box<dyn Fn(&mut TSVisitor) + Send + Sync> {
+            Box::new(|v| v.ts.push_str("unknown"))
+        }
+    }
+    impl<H> ReturnTS for NoTS<H> {
+        fn return_ts(&self) -> Option<Box<dyn Fn(&mut TSVisitor) + Send + Sync>> {
+            Some(Box::new(|v| v.ts.push_str("unknown")))
+        }
+    }
+    impl<H> ChildrenTS for NoTS<H> {
+        fn ts_enabled(&self) -> bool {
+            false
+        }
+        fn children_ts(&self) -> Option<Box<dyn Fn(&mut TSVisitor) + Send + Sync>> {
+            None
+        }
+    }
 
-#[cfg(feature = "ts-rs")]
-impl<H> crate::handler::HandlerTS for NoTS<H> {
-    fn type_info(&self) -> Option<String> {
-        None
+    #[derive(Clone, Debug)]
+    pub struct OverrideParamsTS<H, P> {
+        pub(super) handler: H,
+        pub(super) params_ts: P,
     }
-}
+    impl<H, P> Adapter for OverrideParamsTS<H, P> {
+        type Inner = H;
+        fn as_inner(&self) -> &Self::Inner {
+            &self.handler
+        }
+    }
+    impl<H: LeafHandler, P> LeafHandler for OverrideParamsTS<H, P> {}
+    impl<H, P> PassthroughHandlerTypes for OverrideParamsTS<H, P> {}
+    impl<H, P> PassthroughHandlerFor for OverrideParamsTS<H, P> {}
+    impl<H, P> PassthroughCliBindings for OverrideParamsTS<H, P> {}
+    impl<H, P> ParamsTS for OverrideParamsTS<H, P>
+    where
+        H: Send + Sync,
+        P: Visit<TSVisitor> + Send + Sync,
+    {
+        fn params_ts<'a>(&'a self) -> Box<dyn Fn(&mut TSVisitor) + Send + Sync + 'a> {
+            Box::new(move |visitor| self.params_ts.visit(visitor))
+        }
+    }
+    impl<H, P> PassthroughReturnTS for OverrideParamsTS<H, P> where P: Clone + Send + Sync + 'static {}
+    impl<H, P> PassthroughChildrenTS for OverrideParamsTS<H, P> where P: Clone + Send + Sync + 'static {}
 
-impl<Context, H> HandlerFor<Context> for NoTS<H>
-where
-    Context: crate::Context,
-    H: HandlerFor<Context>,
-{
-    fn handle_sync(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.0.handle_sync(HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        })
+    #[derive(Clone, Debug)]
+    pub struct OverrideReturnTS<H, R> {
+        pub(super) handler: H,
+        pub(super) return_ty: R,
     }
-    async fn handle_async(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.0
-            .handle_async(HandlerArgs {
-                context,
-                parent_method,
-                method,
-                params,
-                inherited_params,
-                raw_params,
-            })
-            .await
+    impl<H, R> Adapter for OverrideReturnTS<H, R> {
+        type Inner = H;
+        fn as_inner(&self) -> &Self::Inner {
+            &self.handler
+        }
     }
-    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
-        self.0.metadata(method)
+    impl<H: LeafHandler, R> LeafHandler for OverrideReturnTS<H, R> {}
+    impl<H, R> PassthroughHandlerTypes for OverrideReturnTS<H, R> {}
+    impl<H, R> PassthroughHandlerFor for OverrideReturnTS<H, R> {}
+    impl<H, R> PassthroughCliBindings for OverrideReturnTS<H, R> {}
+    impl<H, R> PassthroughParamsTS for OverrideReturnTS<H, R> {}
+    impl<H, R> ReturnTS for OverrideReturnTS<H, R>
+    where
+        H: Send + Sync,
+        R: Visit<TSVisitor> + Send + Sync,
+    {
+        fn return_ts<'a>(&'a self) -> Option<Box<dyn Fn(&mut TSVisitor) + Send + Sync + 'a>> {
+            Some(Box::new(move |visitor| self.return_ty.visit(visitor)))
+        }
     }
-    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
-        self.0.method_from_dots(method)
-    }
-}
-
-impl<Context, H> CliBindings<Context> for NoTS<H>
-where
-    Context: crate::Context,
-    H: CliBindings<Context>,
-{
-    fn cli_command(&self) -> clap::Command {
-        self.0.cli_command()
-    }
-    fn cli_parse(
-        &self,
-        arg_matches: &clap::ArgMatches,
-    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
-        self.0.cli_parse(arg_matches)
-    }
-    fn cli_display(
-        &self,
-        handler: HandlerArgsFor<Context, Self>,
-        result: Self::Ok,
-    ) -> Result<(), Self::Err> {
-        self.0.cli_display(handler, result)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct UnknownTS<H>(pub H);
-
-impl<H: LeafHandler> LeafHandler for UnknownTS<H> {}
-
-impl<H> HandlerTypes for UnknownTS<H>
-where
-    H: HandlerTypes,
-{
-    type Params = H::Params;
-    type InheritedParams = H::InheritedParams;
-    type Ok = H::Ok;
-    type Err = H::Err;
-}
-
-#[cfg(feature = "ts-rs")]
-impl<H: LeafHandler> crate::handler::HandlerTS for UnknownTS<H> {
-    fn type_info(&self) -> Option<String> {
-        Some("{_PARAMS:unknown,_RETURN:unknown}".to_string())
-    }
-}
-
-impl<Context, H> HandlerFor<Context> for UnknownTS<H>
-where
-    Context: crate::Context,
-    H: HandlerFor<Context>,
-{
-    fn handle_sync(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.0.handle_sync(HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        })
-    }
-    async fn handle_async(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.0
-            .handle_async(HandlerArgs {
-                context,
-                parent_method,
-                method,
-                params,
-                inherited_params,
-                raw_params,
-            })
-            .await
-    }
-    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
-        self.0.metadata(method)
-    }
-    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
-        self.0.method_from_dots(method)
-    }
-}
-
-impl<Context, H> CliBindings<Context> for UnknownTS<H>
-where
-    Context: crate::Context,
-    H: CliBindings<Context>,
-{
-    fn cli_command(&self) -> clap::Command {
-        self.0.cli_command()
-    }
-    fn cli_parse(
-        &self,
-        arg_matches: &clap::ArgMatches,
-    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
-        self.0.cli_parse(arg_matches)
-    }
-    fn cli_display(
-        &self,
-        handler: HandlerArgsFor<Context, Self>,
-        result: Self::Ok,
-    ) -> Result<(), Self::Err> {
-        self.0.cli_display(handler, result)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct CustomTS<H> {
-    pub handler: H,
-    pub params_ty: String,
-    pub return_ty: String,
-}
-
-impl<H: LeafHandler> LeafHandler for CustomTS<H> {}
-
-impl<H> HandlerTypes for CustomTS<H>
-where
-    H: HandlerTypes,
-{
-    type Params = H::Params;
-    type InheritedParams = H::InheritedParams;
-    type Ok = H::Ok;
-    type Err = H::Err;
-}
-
-#[cfg(feature = "ts-rs")]
-impl<H: LeafHandler> crate::handler::HandlerTS for CustomTS<H> {
-    fn type_info(&self) -> Option<String> {
-        Some(format!(
-            "{{_PARAMS:{},_RETURN:{}}}",
-            self.params_ty, self.return_ty
-        ))
-    }
-}
-
-impl<Context, H> HandlerFor<Context> for CustomTS<H>
-where
-    Context: crate::Context,
-    H: HandlerFor<Context>,
-{
-    fn handle_sync(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.handler.handle_sync(HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        })
-    }
-    async fn handle_async(
-        &self,
-        HandlerArgs {
-            context,
-            parent_method,
-            method,
-            params,
-            inherited_params,
-            raw_params,
-        }: HandlerArgsFor<Context, Self>,
-    ) -> Result<Self::Ok, Self::Err> {
-        self.handler
-            .handle_async(HandlerArgs {
-                context,
-                parent_method,
-                method,
-                params,
-                inherited_params,
-                raw_params,
-            })
-            .await
-    }
-    fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
-        self.handler.metadata(method)
-    }
-    fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
-        self.handler.method_from_dots(method)
-    }
-}
-
-impl<Context, H> CliBindings<Context> for CustomTS<H>
-where
-    Context: crate::Context,
-    H: CliBindings<Context>,
-{
-    fn cli_command(&self) -> clap::Command {
-        self.handler.cli_command()
-    }
-    fn cli_parse(
-        &self,
-        arg_matches: &clap::ArgMatches,
-    ) -> Result<(VecDeque<&'static str>, Value), clap::Error> {
-        self.handler.cli_parse(arg_matches)
-    }
-    fn cli_display(
-        &self,
-        handler: HandlerArgsFor<Context, Self>,
-        result: Self::Ok,
-    ) -> Result<(), Self::Err> {
-        self.handler.cli_display(handler, result)
-    }
+    impl<H, R> PassthroughChildrenTS for OverrideReturnTS<H, R> {}
 }

@@ -9,7 +9,7 @@ already exist
 - **Path:** `shared-libs/crates/yasi`
 - **Package name:** `yasi` — build and test with `cargo … -p yasi` from the repo root.
 - **Consumers (first-party, direct path deps):** `exver` and `imbl-value` (the latter enables the
-  `serde` feature and forwards `ts-rs`).
+  `serde` feature).
 
 ## Usage
 
@@ -36,7 +36,9 @@ Strings of 20 bytes or fewer are inlined on the stack and skip the interning tab
 Optional features:
 
 - `serde` — `Serialize` / `Deserialize` for `InternedString`.
-- `ts-rs` — `ts_rs::TS` impl (renders as `string`).
+
+RPC's `ts` consumer supplies the `InternedString` string bridge; enable bindings
+on `rpc-toolkit`, not on this crate.
 
 ## Documentation
 

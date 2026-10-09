@@ -1,7 +1,9 @@
+#![recursion_limit = "512"]
+
 use clap::Parser;
-use rpc_toolkit::{
-    from_fn, from_fn_async, Context, Empty, HandlerExt, HandlerTS, ParentHandler, Server,
-};
+use rpc_toolkit::{from_fn, from_fn_async, Context, Empty, ParentHandler, Server};
+#[cfg(feature = "ts")]
+use rpc_toolkit::{reflect_ts, HandlerExt};
 use serde::{Deserialize, Serialize};
 use yajrc::RpcError;
 
@@ -11,10 +13,12 @@ struct TestContext;
 impl Context for TestContext {}
 
 #[derive(Debug, Deserialize, Serialize, Parser)]
-#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", derive(visit_rs::VisitFields))]
 struct Thing1Params {
     thing: String,
 }
+#[cfg(feature = "ts")]
+reflect_ts!(Thing1Params);
 
 #[derive(Debug, Deserialize, Serialize, Parser)]
 struct NoTSParams {
@@ -30,14 +34,19 @@ fn no_ts_handler(_ctx: TestContext, params: NoTSParams) -> Result<String, RpcErr
 }
 
 #[derive(Debug, Deserialize, Serialize, Parser)]
-#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", derive(visit_rs::VisitFields))]
 struct GroupParams {
     #[arg(short, long)]
     verbose: bool,
 }
+#[cfg(feature = "ts")]
+reflect_ts!(GroupParams);
 
 #[tokio::test]
 async fn test_basic_server() {
+    let no_ts = from_fn(no_ts_handler);
+    #[cfg(feature = "ts")]
+    let no_ts = no_ts.no_ts();
     let root_handler = ParentHandler::new()
         .subcommand("thing1", from_fn_async(thing1_handler))
         .subcommand(
@@ -50,14 +59,11 @@ async fn test_basic_server() {
                         Ok::<_, RpcError>(format!("verbose: {}", params.verbose))
                     }),
                 )
-                .subcommand("no-ts", from_fn(no_ts_handler).no_ts()),
+                .subcommand("no-ts", no_ts),
         );
-
-    println!("{}", root_handler.type_info().unwrap_or_default());
 
     let server = Server::new(|| async { Ok(TestContext) }, root_handler);
 
-    // Test calling thing1 directly
     let result = server
         .handle_command(
             "thing1",
@@ -72,7 +78,6 @@ async fn test_basic_server() {
     let response: String = imbl_value::from_value(result).unwrap();
     assert_eq!(response, "Thing1 is test");
 
-    // Test calling group.thing1
     let result = server
         .handle_command(
             "group.thing1",

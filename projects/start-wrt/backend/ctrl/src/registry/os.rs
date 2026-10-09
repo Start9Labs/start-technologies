@@ -11,7 +11,7 @@ pub const SIG_CONTEXT: &str = "startos";
 
 /// Information about a single OS version from the registry.
 /// Wire-compatible with start-os's `OsVersionInfo`.
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct OsVersionInfo {
     pub headline: String,
@@ -26,6 +26,7 @@ pub struct OsVersionInfo {
     #[serde(default)]
     pub img: BTreeMap<String, RegistryAsset<Blake3Commitment>>,
 }
+rpc_toolkit::reflect_ts!(OsVersionInfo);
 
 impl OsVersionInfo {
     /// Find the asset for a given platform, checking all asset type maps.

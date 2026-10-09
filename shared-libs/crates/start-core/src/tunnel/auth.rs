@@ -7,7 +7,6 @@ use itertools::Itertools;
 use patch_db::HasModel;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::auth::{AuthKeys, LoginContext, Session, check_password};
 use crate::context::CliContext;
@@ -144,13 +143,15 @@ impl LoginContext for TunnelContext {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, HasModel, TS, Parser)]
+#[derive(Clone, Debug, Deserialize, Serialize, HasModel, VisitFields, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct SignerInfo {
     pub name: InternedString,
 }
+
+rpc_toolkit::reflect_ts!(SignerInfo);
 
 pub fn auth_api<C: Context>() -> ParentHandler<C> {
     crate::auth::auth::<C, TunnelContext>()
@@ -211,13 +212,16 @@ pub fn auth_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct AddKeyParams {
     pub name: InternedString,
     pub key: AnyVerifyingKey,
 }
+
+rpc_toolkit::reflect_ts!(AddKeyParams);
+rpc_toolkit::ts_export!(AddKeyParams, namespaces = ["tunnel"]);
 
 pub async fn add_key(
     ctx: TunnelContext,
@@ -240,12 +244,15 @@ pub async fn add_key(
         .result
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoveKeyParams {
     pub key: AnyVerifyingKey,
 }
+
+rpc_toolkit::reflect_ts!(RemoveKeyParams);
+rpc_toolkit::ts_export!(RemoveKeyParams, namespaces = ["tunnel"]);
 
 pub async fn remove_key(
     ctx: TunnelContext,
@@ -259,10 +266,13 @@ pub async fn list_keys(ctx: TunnelContext) -> Result<AuthKeys, Error> {
     ctx.db.peek().await.into_session_pubkeys().de()
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 pub struct SetPasswordParams {
     pub password: String,
 }
+
+rpc_toolkit::reflect_ts!(SetPasswordParams);
+rpc_toolkit::ts_export!(SetPasswordParams, namespaces = ["tunnel"]);
 
 pub async fn set_password_rpc(
     ctx: TunnelContext,

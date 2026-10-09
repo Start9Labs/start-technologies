@@ -50,11 +50,11 @@ impl<Context: crate::Context> Server<Context> {
         &self,
         method: &str,
         params: Value,
-    ) -> impl Future<Output = Result<Value, RpcError>> + Send + 'static {
+    ) -> impl Future<Output = Result<Value, RpcError>> + Send + 'static + use<Context> {
         let (make_ctx, root_handler, method) = (
             self.make_ctx.clone(),
             self.root_handler.clone(),
-            self.root_handler.method_from_dots(method),
+            self.root_handler.method_from_dots(method.as_ref()),
         );
 
         async move {
@@ -74,14 +74,11 @@ impl<Context: crate::Context> Server<Context> {
         &self,
         RpcRequest { id, method, params }: RpcRequest,
     ) -> impl Future<Output = RpcResponse> + Send + 'static {
-        let handle = (|| Ok::<_, RpcError>(self.handle_command(method.as_str(), params)))();
+        let handle = self.handle_command(method.as_str(), params);
         async move {
             RpcResponse {
                 id,
-                result: match handle {
-                    Ok(handle) => handle.await,
-                    Err(e) => Err(e),
-                },
+                result: handle.await,
             }
         }
     }

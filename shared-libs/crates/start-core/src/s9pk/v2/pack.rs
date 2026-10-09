@@ -13,7 +13,6 @@ use tokio::process::Command;
 use tokio::sync::OnceCell;
 use tokio_stream::wrappers::ReadDirStream;
 use tracing::{debug, warn};
-use ts_rs::TS;
 
 use crate::context::CliContext;
 use crate::dependencies::{DependencyMetadata, MetadataSrc};
@@ -298,20 +297,24 @@ impl PackParams {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, TS)]
+#[derive(Debug, Default, Clone, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
+#[visit(input_wire = "ImageConfigRepr")]
+#[visit(type_attributes(visit::input_wire))]
 pub struct ImageConfig {
     pub source: ImageSource,
-    #[ts(type = "string[]")]
     pub arch: BTreeSet<InternedString>,
     pub emulate_missing: bool,
     #[serde(rename = "emulateMissingAs", skip_serializing_if = "Option::is_none")]
-    #[ts(skip)]
+    #[visit(ts(skip), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     legacy_emulate_missing_as: Option<InternedString>,
     #[serde(default)]
     pub nvidia_container: bool,
 }
+
+rpc_toolkit::reflect_ts!(ImageConfig);
+rpc_toolkit::ts_export!(ImageConfig, namespaces = [""]);
 impl ImageConfig {
     fn legacy_emulation_arch(&self) -> Option<&InternedString> {
         self.legacy_emulate_missing_as
@@ -352,9 +355,9 @@ impl ImageConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-struct ImageConfigInput {
+struct ImageConfigRepr {
     source: ImageSource,
     arch: BTreeSet<InternedString>,
     #[serde(default)]
@@ -365,12 +368,14 @@ struct ImageConfigInput {
     nvidia_container: bool,
 }
 
+rpc_toolkit::reflect_ts!(ImageConfigRepr);
+
 impl<'de> Deserialize<'de> for ImageConfig {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let input = ImageConfigInput::deserialize(deserializer)?;
+        let input = ImageConfigRepr::deserialize(deserializer)?;
         let legacy_emulate_missing_as = input
             .emulate_missing_as
             .filter(|arch| !arch.is_empty() && input.emulate_missing != Some(false));
@@ -444,33 +449,35 @@ impl clap::FromArgMatches for ImageConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, VisitVariants)]
 #[serde(rename_all = "camelCase")]
 #[serde(untagged)]
-#[ts(export)]
 pub enum BuildArg {
     String(String),
     EnvVar { env: String },
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(BuildArg);
+rpc_toolkit::ts_export!(BuildArg, namespaces = [""]);
+
+#[derive(Debug, Clone, Deserialize, Serialize, VisitVariants)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub enum ImageSource {
     Packed,
     #[serde(rename_all = "camelCase")]
     DockerBuild {
-        #[ts(optional)]
         workdir: Option<PathBuf>,
-        #[ts(optional)]
+
         dockerfile: Option<PathBuf>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
         build_args: Option<BTreeMap<String, BuildArg>>,
     },
     DockerTag(String),
     // Recipe(DirRecipe),
 }
+
+rpc_toolkit::reflect_ts!(ImageSource);
+rpc_toolkit::ts_export!(ImageSource, namespaces = [""]);
 impl Default for ImageSource {
     fn default() -> Self {
         ImageSource::Packed
@@ -752,16 +759,17 @@ fn tar2sqfs(dest: impl AsRef<Path>) -> Result<Command, Error> {
     })
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct ImageMetadata {
     pub workdir: PathBuf,
-    #[ts(type = "string")]
     pub user: InternedString,
     pub entrypoint: Option<Vec<String>>,
     pub cmd: Option<Vec<String>>,
 }
+
+rpc_toolkit::reflect_ts!(ImageMetadata);
+rpc_toolkit::ts_export!(ImageMetadata, namespaces = [""]);
 
 #[instrument(skip_all)]
 pub async fn pack(ctx: CliContext, params: PackParams) -> Result<(), Error> {
@@ -1088,6 +1096,69 @@ pub async fn list_ingredients(_: CliContext, params: PackParams) -> Result<Vec<P
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn image_config_input_binding_matches_the_custom_decoder() {
+        use rpc_toolkit::ts::{Direction, TSVisitor};
+
+        for (fields, expected) in [
+            (serde_json::json!({}), false),
+            (
+                serde_json::json!({"emulateMissing": null, "emulateMissingAs": null}),
+                false,
+            ),
+            (serde_json::json!({"emulateMissing": true}), true),
+            (serde_json::json!({"emulateMissingAs": "x86_64"}), true),
+            (
+                serde_json::json!({"emulateMissing": false, "emulateMissingAs": "x86_64"}),
+                false,
+            ),
+        ] {
+            let mut input = serde_json::json!({"source": "packed", "arch": ["x86_64"]});
+            input
+                .as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            let config: ImageConfig = serde_json::from_value(input).unwrap();
+            assert_eq!(config.emulate_missing, expected);
+            assert_eq!(
+                serde_json::to_value(config).unwrap()["emulateMissing"],
+                expected
+            );
+        }
+        for fields in [
+            serde_json::json!({"emulateMissing": "yes"}),
+            serde_json::json!({"emulateMissingAs": true}),
+            serde_json::json!({"nvidiaContainer": null}),
+        ] {
+            let mut input = serde_json::json!({"source": "packed", "arch": []});
+            input
+                .as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            assert!(serde_json::from_value::<ImageConfig>(input).is_err());
+        }
+
+        let mut visitor = TSVisitor::new();
+        visitor.with_direction(Direction::Input, |visitor| {
+            visitor.append_type::<ImageConfig>()
+        });
+        let input = visitor.into_declarations().unwrap();
+        assert!(input.contains("ImageConfigReprInput"), "{input}");
+        assert!(
+            input.contains("\"emulateMissing\"?:((boolean|null))"),
+            "{input}"
+        );
+        assert!(
+            input.contains("\"emulateMissingAs\"?:((string|null))"),
+            "{input}"
+        );
+        let mut visitor = TSVisitor::new();
+        visitor.append_type::<ImageConfig>();
+        let output = visitor.into_declarations().unwrap();
+        assert!(output.contains("\"emulateMissing\":(boolean)"), "{output}");
+        assert!(!output.contains("ImageConfigRepr"), "{output}");
+    }
 
     #[test]
     fn image_inspection_uses_the_requested_docker_platform() {

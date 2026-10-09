@@ -3,14 +3,16 @@ use std::path::Path;
 use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize};
-use ts_rs::TS;
 
 use crate::util::VersionString;
 use crate::{Id, InvalidId, PackageId};
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, TS)]
-#[ts(type = "string")]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, visit_rs::VisitFields)]
+#[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+#[visit(opaque, type_attributes(visit::wire))]
 pub struct ImageId(Id);
+
+rpc_toolkit::reflect_ts!(ImageId);
 impl AsRef<Path> for ImageId {
     fn as_ref(&self) -> &Path {
         self.0.as_ref().as_ref()

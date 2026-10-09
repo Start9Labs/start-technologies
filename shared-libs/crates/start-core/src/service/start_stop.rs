@@ -1,12 +1,13 @@
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize, visit_rs::VisitVariants)]
 #[serde(rename_all = "camelCase")]
 pub enum StartStop {
     Start,
     Stop,
 }
+
+rpc_toolkit::reflect_ts!(StartStop);
 
 impl StartStop {
     pub fn is_start(&self) -> bool {

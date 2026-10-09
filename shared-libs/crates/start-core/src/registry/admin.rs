@@ -6,7 +6,6 @@ use exver::VersionRange;
 use itertools::Itertools;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::context::CliContext;
 use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthContext};
@@ -33,6 +32,7 @@ pub fn admin_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(cli_add_admin)
+                .no_ts()
                 .no_display()
                 .with_about("about.add-admin-signer"),
         )
@@ -74,7 +74,9 @@ fn signers_api<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "add",
-            from_fn_async(cli_add_signer).with_about("about.add-signer"),
+            from_fn_async(cli_add_signer)
+                .no_ts()
+                .with_about("about.add-signer"),
         )
         .subcommand(
             "edit",
@@ -224,11 +226,10 @@ pub async fn add_signer(ctx: RegistryContext, signer: SignerInfo) -> Result<Guid
         .result
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
-#[ts(export)]
 pub struct EditSignerParams {
     #[arg(help = "help.arg.signer-id")]
     pub id: Guid,
@@ -243,6 +244,9 @@ pub struct EditSignerParams {
     #[arg(short = 'K', long, help = "help.arg.remove-signer-key")]
     pub remove_key: Vec<AnyVerifyingKey>,
 }
+
+rpc_toolkit::reflect_ts!(EditSignerParams);
+rpc_toolkit::ts_export!(EditSignerParams, namespaces = [""]);
 
 pub async fn edit_signer(
     ctx: RegistryContext,
@@ -292,15 +296,17 @@ pub async fn edit_signer(
         .result
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
-#[ts(export)]
 pub struct RemoveSignerParams {
     #[arg(help = "help.arg.signer-id")]
     pub id: Guid,
 }
+
+rpc_toolkit::reflect_ts!(RemoveSignerParams);
+rpc_toolkit::ts_export!(RemoveSignerParams, namespaces = [""]);
 
 pub async fn remove_signer(
     ctx: RegistryContext,
@@ -401,12 +407,14 @@ pub async fn cli_add_signer(
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct AddAdminParams {
     pub signer: Guid,
 }
+
+rpc_toolkit::reflect_ts!(AddAdminParams);
+rpc_toolkit::ts_export!(AddAdminParams, namespaces = [""]);
 
 pub async fn add_admin(
     ctx: RegistryContext,
@@ -426,14 +434,16 @@ pub async fn add_admin(
         .result
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct RemoveAdminParams {
     #[arg(help = "help.arg.signer-id")]
     pub signer: Guid,
 }
+
+rpc_toolkit::reflect_ts!(RemoveAdminParams);
+rpc_toolkit::ts_export!(RemoveAdminParams, namespaces = [""]);
 
 // TODO: don't allow removing self?
 pub async fn remove_admin(

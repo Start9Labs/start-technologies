@@ -3,16 +3,18 @@ use std::path::Path;
 use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize};
-use ts_rs::TS;
 
 use crate::{Id, InvalidId};
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, TS)]
-#[ts(type = "string")]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, visit_rs::VisitVariants)]
+#[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+#[visit(opaque, type_attributes(visit::wire))]
 pub enum VolumeId {
     Backup,
     Custom(Id),
 }
+
+rpc_toolkit::reflect_ts!(VolumeId);
 impl FromStr for VolumeId {
     type Err = InvalidId;
     fn from_str(s: &str) -> Result<Self, Self::Err> {

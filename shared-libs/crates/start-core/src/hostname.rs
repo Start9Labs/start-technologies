@@ -4,7 +4,6 @@ use lazy_format::lazy_format;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::instrument;
-use ts_rs::TS;
 
 use crate::context::RpcContext;
 use crate::db::model::public::{RestartReason, ServerInfo};
@@ -13,9 +12,12 @@ use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::io::{copy_file, write_file_atomic};
 
-#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize, ts_rs::TS)]
-#[ts(type = "string")]
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize, VisitFields)]
+#[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+#[visit(opaque, type_attributes(visit::wire))]
 pub struct ServerHostname(InternedString);
+
+rpc_toolkit::reflect_ts!(ServerHostname);
 impl std::ops::Deref for ServerHostname {
     type Target = InternedString;
     fn deref(&self) -> &Self::Target {
@@ -197,17 +199,19 @@ pub async fn sync_hostname(hostname: &ServerHostname) -> Result<(), Error> {
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
-#[ts(export)]
 pub struct SetServerHostnameParams {
     /// The server's `.local` hostname: up to 32 lowercase letters, numbers, and
     /// hyphens, not starting or ending with a hyphen
     #[arg(help = "help.arg.hostname")]
     hostname: InternedString,
 }
+
+rpc_toolkit::reflect_ts!(SetServerHostnameParams);
+rpc_toolkit::ts_export!(SetServerHostnameParams, namespaces = [""]);
 
 pub async fn set_hostname_rpc(
     ctx: RpcContext,

@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
 use std::u32;
 
 use chrono::Utc;
@@ -7,7 +6,6 @@ use exver::{Version, VersionRange};
 use imbl_value::InternedString;
 use patch_db::ModelExt;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 use url::Url;
 
 use crate::PackageId;
@@ -26,36 +24,44 @@ use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::sign::{AnySignature, AnyVerifyingKey};
 use crate::util::{DataUrl, VersionString};
 
-#[derive(Debug, Default, Deserialize, Serialize, HasModel, TS)]
+#[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct PackageIndex {
     pub categories: BTreeMap<InternedString, Category>,
     pub packages: BTreeMap<PackageId, PackageInfo>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize, HasModel, TS)]
+rpc_toolkit::reflect_ts!(PackageIndex);
+rpc_toolkit::ts_export!(PackageIndex, namespaces = [""]);
+
+#[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct PackageInfo {
-    #[ts(as = "BTreeMap::<Guid, String>")]
+    #[visit(wire = "BTreeMap::<Guid, String>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub authorized: BTreeMap<Guid, VersionRange>,
     pub versions: BTreeMap<VersionString, PackageVersionInfo>,
-    #[ts(type = "string[]")]
+    #[visit(ts(type = "string[]"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub categories: BTreeSet<InternedString>,
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel, TS)]
+rpc_toolkit::reflect_ts!(PackageInfo);
+rpc_toolkit::ts_export!(PackageInfo, namespaces = [""]);
+
+#[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct Category {
     pub name: LocaleString,
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel, PartialEq)]
+rpc_toolkit::reflect_ts!(Category);
+rpc_toolkit::ts_export!(Category, namespaces = [""]);
+
+#[derive(Debug, Deserialize, Serialize, HasModel, PartialEq, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct DependencyMetadata {
@@ -68,34 +74,10 @@ pub struct DependencyMetadata {
     #[serde(flatten)]
     pub kind: Option<CurrentDependencyKind>,
 }
-impl TS for DependencyMetadata {
-    type WithoutGenerics = Self;
-    fn decl() -> String {
-        format!("type {} = {}", Self::name(), Self::inline())
-    }
-    fn decl_concrete() -> String {
-        Self::decl()
-    }
-    fn name() -> String {
-        "DependencyMetadata".into()
-    }
-    fn inline() -> String {
-        "{ title: LocaleString | null, icon: DataUrl | null, description: LocaleString | null, optional: boolean, versionRange?: string | null, kind?: 'exists' | 'running' | null, healthChecks?: string[] }".into()
-    }
-    fn inline_flattened() -> String {
-        Self::inline()
-    }
-    fn visit_dependencies(v: &mut impl ts_rs::TypeVisitor)
-    where
-        Self: 'static,
-    {
-        v.visit::<LocaleString>();
-        v.visit::<DataUrl<'static>>();
-    }
-    fn output_path() -> Option<&'static Path> {
-        Some(Path::new("DependencyMetadata.ts"))
-    }
-}
+
+rpc_toolkit::reflect_ts!(DependencyMetadata);
+rpc_toolkit::ts_export!(DependencyMetadata, namespaces = [""]);
+
 impl DependencyMetadata {
     pub fn localize_for(&mut self, locale: &str) {
         self.title.as_mut().map(|t| t.localize_for(locale));
@@ -107,49 +89,49 @@ fn placeholder_url() -> Url {
     "https://example.com".parse().unwrap()
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields, PartialEq)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct PreDownloadAlertWhen {
-    #[ts(type = "string")]
     pub source_version: VersionRange,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq)]
+rpc_toolkit::reflect_ts!(PreDownloadAlertWhen);
+rpc_toolkit::ts_export!(PreDownloadAlertWhen, namespaces = [""]);
+
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields, PartialEq)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct PreDownloadAlert {
     pub message: LocaleString,
     pub when: PreDownloadAlertWhen,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, HasModel, TS, PartialEq)]
+rpc_toolkit::reflect_ts!(PreDownloadAlert);
+rpc_toolkit::ts_export!(PreDownloadAlert, namespaces = [""]);
+
+#[derive(Clone, Debug, Deserialize, Serialize, HasModel, VisitFields, PartialEq)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct PackageMetadata {
-    #[ts(type = "string")]
     pub title: InternedString,
     pub description: Description,
     pub release_notes: LocaleString,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub pre_download_alert: Option<PreDownloadAlert>,
     pub git_hash: Option<GitHash>,
-    #[ts(type = "string")]
     pub license: InternedString,
-    #[ts(type = "string")]
-    #[serde(default = "placeholder_url")] // TODO: remove
+    #[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+    #[serde(default = "placeholder_url")]
+    #[visit(opaque, type_attributes(visit::wire))] // TODO: remove
     pub package_repo: Url,
-    #[ts(type = "string")]
     pub upstream_repo: Url,
-    #[ts(type = "string")]
     pub marketing_url: Option<Url>,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub donation_url: Option<Url>,
     #[serde(default = "current_version")]
-    #[ts(type = "string")]
     pub os_version: Version,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub sdk_version: Option<Version>,
     #[serde(default)]
     pub hardware_acceleration: bool,
@@ -168,19 +150,24 @@ pub struct PackageMetadata {
     pub satisfies: BTreeSet<VersionString>,
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel, TS)]
+rpc_toolkit::reflect_ts!(PackageMetadata);
+
+#[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct PackageVersionInfo {
     #[serde(flatten)]
     pub metadata: PackageMetadata,
     pub icon: DataUrl<'static>,
     pub dependency_metadata: BTreeMap<PackageId, DependencyMetadata>,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub source_version: Option<VersionRange>,
     pub s9pks: Vec<(HardwareRequirements, RegistryAsset<MerkleArchiveCommitment>)>,
 }
+
+rpc_toolkit::reflect_ts!(PackageVersionInfo);
+rpc_toolkit::ts_export!(PackageVersionInfo, namespaces = [""]);
 impl PackageVersionInfo {
     pub async fn from_s9pk<S: FileSource + Clone>(
         s9pk: &S9pk<S>,

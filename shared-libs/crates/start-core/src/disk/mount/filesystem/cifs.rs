@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use tokio::process::Command;
 use tracing::instrument;
-use ts_rs::TS;
 
 use super::{BackupWrite, FileSystem, MountType, ReadOnly, ReadWrite};
 use crate::Error;
@@ -65,7 +64,7 @@ pub async fn mount_cifs(
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
+#[derive(Debug, Deserialize, Serialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct Cifs {
     pub hostname: String,
@@ -73,6 +72,8 @@ pub struct Cifs {
     pub username: String,
     pub password: Option<String>,
 }
+
+rpc_toolkit::reflect_ts!(Cifs);
 impl Cifs {
     pub async fn mountable(&self) -> Result<(), Error> {
         let guard = TmpMountGuard::mount(self, ReadOnly).await?;

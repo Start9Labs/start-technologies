@@ -5,7 +5,6 @@ use imbl_value::InternedString;
 use ipnet::{Ipv4Net, Ipv6Net};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
-use ts_rs::TS;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::prelude::*;
@@ -24,7 +23,7 @@ pub fn current_ifindex() -> u32 {
 /// Legacy marker retained for StartOS gateway auto-detection.
 pub const START_TUNNEL_MARKER: &str = "StartTunnel";
 
-#[derive(Deserialize, Serialize, HasModel, TS)]
+#[derive(Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct WgServer {
@@ -32,6 +31,8 @@ pub struct WgServer {
     pub key: Base64<WgKey>,
     pub subnets: WgSubnetMap,
 }
+
+rpc_toolkit::reflect_ts!(WgServer);
 impl Default for WgServer {
     fn default() -> Self {
         Self {
@@ -74,10 +75,14 @@ impl WgServer {
     }
 }
 
-#[derive(Default, Deserialize, Serialize, TS)]
+#[derive(Default, Deserialize, Serialize, VisitFields)]
 pub struct WgSubnetMap(
-    #[ts(as = "BTreeMap::<String, WgSubnetConfig>")] pub BTreeMap<Ipv4Net, WgSubnetConfig>,
+    #[visit(wire = "BTreeMap::<String, WgSubnetConfig>")]
+    #[visit(opaque, type_attributes(visit::wire))]
+    pub BTreeMap<Ipv4Net, WgSubnetConfig>,
 );
+
+rpc_toolkit::reflect_ts!(WgSubnetMap);
 impl Map for WgSubnetMap {
     type Key = Ipv4Net;
     type Value = WgSubnetConfig;
@@ -92,25 +97,25 @@ impl Map for WgSubnetMap {
 /// Per-subnet DNS proxy configuration. WireGuard clients on a subnet are pointed
 /// at the subnet's in-tunnel server address (`.1`) for DNS; the forward-only proxy
 /// listening there resolves every query against the upstream(s) selected here.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, VisitVariants)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum DnsConfig {
     /// Forward to the VPS's own system resolvers.
     #[default]
     Default,
     /// Forward to a device on this subnet (its WireGuard IP) on port 53.
-    Device {
-        #[ts(type = "string")]
-        ip: Ipv4Addr,
-    },
+    Device { ip: Ipv4Addr },
     /// Forward to operator-specified upstream servers (1-3, optional `:port`).
     Custom {
-        #[ts(type = "string[]")]
+        #[visit(ts(type = "string[]"), wire = "rpc_toolkit::ts::Unknown")]
+        #[visit(opaque, type_attributes(visit::wire))]
         servers: Vec<SocketAddr>,
     },
 }
 
-#[derive(Default, Deserialize, Serialize, HasModel, TS)]
+rpc_toolkit::reflect_ts!(DnsConfig);
+
+#[derive(Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct WgSubnetConfig {
@@ -121,15 +126,19 @@ pub struct WgSubnetConfig {
     /// SNAT this subnet's egress to this WAN IP instead of `masquerade`. `None`
     /// keeps the default masquerade; a per-device `wan_ip` overrides this.
     #[serde(default)]
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub wan_ip: Option<std::net::Ipv4Addr>,
     /// Routed IPv6 prefix delegated to this subnet, if any. Each host on the
     /// subnet (the server and every client) gets one `/128` out of it with its
     /// tunnel IPv4 embedded — see [`crate::tunnel::wg6`].
     #[serde(default)]
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub ipv6: Option<Ipv6Net>,
 }
+
+rpc_toolkit::reflect_ts!(WgSubnetConfig);
 impl WgSubnetConfig {
     pub fn new(name: InternedString) -> Self {
         Self {
@@ -139,8 +148,10 @@ impl WgSubnetConfig {
     }
 }
 
-#[derive(Default, Deserialize, Serialize, TS)]
+#[derive(Default, Deserialize, Serialize, VisitFields)]
 pub struct WgSubnetClients(pub BTreeMap<Ipv4Addr, WgConfig>);
+
+rpc_toolkit::reflect_ts!(WgSubnetClients);
 impl Map for WgSubnetClients {
     type Key = Ipv4Addr;
     type Value = WgConfig;
@@ -193,7 +204,16 @@ impl Base64<WgKey> {
 /// no autoconfig. Stored and sticky — toggling the capability flags never changes
 /// it; the migration backfills it from those flags.
 #[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, TS, clap::ValueEnum,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    VisitVariants,
+    clap::ValueEnum,
 )]
 #[serde(rename_all = "camelCase")]
 pub enum WgClientKind {
@@ -202,7 +222,9 @@ pub enum WgClientKind {
     Server,
 }
 
-#[derive(Clone, Deserialize, Serialize, HasModel, TS)]
+rpc_toolkit::reflect_ts!(WgClientKind);
+
+#[derive(Clone, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct WgConfig {
@@ -227,9 +249,12 @@ pub struct WgConfig {
     /// SNAT this device's egress to this WAN IP, overriding the subnet's
     /// `wan_ip` / the default masquerade. `None` falls back to the subnet rule.
     #[serde(default)]
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub wan_ip: Option<std::net::Ipv4Addr>,
 }
+
+rpc_toolkit::reflect_ts!(WgConfig);
 impl WgConfig {
     pub fn generate(name: InternedString, kind: WgClientKind) -> Self {
         // A Server gets gateway-autoconfig on by default; a Client gets nothing.

@@ -3,13 +3,11 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 
 use imbl_value::InternedString;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::prelude::*;
 use crate::{ActionId, GatewayId, HostId, PackageId, ServiceInterfaceId};
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, TS)]
-#[ts(export)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct HostnameInfo {
     pub ssl: bool,
@@ -19,8 +17,10 @@ pub struct HostnameInfo {
     pub metadata: HostnameMetadata,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, TS)]
-#[ts(export)]
+rpc_toolkit::reflect_ts!(HostnameInfo);
+rpc_toolkit::ts_export!(HostnameInfo, namespaces = [""]);
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, VisitVariants)]
 #[serde(rename_all = "kebab-case")]
 #[serde(rename_all_fields = "camelCase")]
 #[serde(tag = "kind")]
@@ -45,11 +45,15 @@ pub enum HostnameMetadata {
         package_id: PackageId,
         remove_action: Option<ActionId>,
         overflow_actions: Vec<ActionId>,
-        #[ts(type = "unknown")]
+        #[visit(ts(type = "unknown"), wire = "rpc_toolkit::ts::Unknown")]
         #[serde(default)]
+        #[visit(opaque, type_attributes(visit::wire))]
         info: Value,
     },
 }
+
+rpc_toolkit::reflect_ts!(HostnameMetadata);
+rpc_toolkit::ts_export!(HostnameMetadata, namespaces = [""]);
 
 impl HostnameInfo {
     pub fn to_socket_addr(&self) -> Option<SocketAddr> {
@@ -111,8 +115,7 @@ where
     Ok(Option::<PackageId>::deserialize(deserializer)?.unwrap_or_else(PackageId::start_os))
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, TS)]
-#[ts(export)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginHostnameInfo {
     /// [`PackageId::start_os`] identifies the server's own host (the StartOS UI).
@@ -120,18 +123,23 @@ pub struct PluginHostnameInfo {
         default = "PackageId::start_os",
         deserialize_with = "deserialize_os_ui_package_id"
     )]
+    #[visit(input_wire = "Option<PackageId>")]
+    #[visit(type_attributes(visit::input_wire))]
     pub package_id: PackageId,
     pub host_id: HostId,
     pub internal_port: u16,
     pub ssl: bool,
     pub public: bool,
-    #[ts(type = "string")]
     pub hostname: InternedString,
     pub port: Option<u16>,
-    #[ts(type = "unknown")]
+    #[visit(ts(type = "unknown"), wire = "rpc_toolkit::ts::Unknown")]
     #[serde(default)]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub info: Value,
 }
+
+rpc_toolkit::reflect_ts!(PluginHostnameInfo);
+rpc_toolkit::ts_export!(PluginHostnameInfo, namespaces = [""]);
 
 impl PluginHostnameInfo {
     /// Convert to a `HostnameInfo` with `Plugin` metadata, using the given plugin package ID.
@@ -174,8 +182,7 @@ impl PluginHostnameInfo {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, TS)]
-#[ts(export)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct GatewayInfo {
     pub id: GatewayId,
@@ -183,10 +190,12 @@ pub struct GatewayInfo {
     pub public: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, HasModel, TS)]
+rpc_toolkit::reflect_ts!(GatewayInfo);
+rpc_toolkit::ts_export!(GatewayInfo, namespaces = [""]);
+
+#[derive(Clone, Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct ServiceInterface {
     pub id: ServiceInterfaceId,
     pub name: String,
@@ -196,12 +205,13 @@ pub struct ServiceInterface {
     #[serde(rename = "type")]
     pub interface_type: ServiceInterfaceType,
     /// The interface address Open UI should prefer.
-    #[ts(optional = nullable)]
     pub preferred_launcher_address: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
-#[ts(export)]
+rpc_toolkit::reflect_ts!(ServiceInterface);
+rpc_toolkit::ts_export!(ServiceInterface, namespaces = [""]);
+
+#[derive(Clone, Debug, Deserialize, Serialize, VisitVariants)]
 #[serde(rename_all = "camelCase")]
 pub enum ServiceInterfaceType {
     Ui,
@@ -209,19 +219,26 @@ pub enum ServiceInterfaceType {
     Api,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
-#[ts(export)]
+rpc_toolkit::reflect_ts!(ServiceInterfaceType);
+rpc_toolkit::ts_export!(ServiceInterfaceType, namespaces = [""]);
+
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct AddressInfo {
     pub username: Option<String>,
     pub host_id: HostId,
     pub internal_port: u16,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub scheme: Option<InternedString>,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub ssl_scheme: Option<InternedString>,
     pub suffix: String,
 }
+
+rpc_toolkit::reflect_ts!(AddressInfo);
+rpc_toolkit::ts_export!(AddressInfo, namespaces = [""]);
 
 /// The single restricted service interface a port-range binding may export.
 ///
@@ -231,13 +248,16 @@ pub struct AddressInfo {
 /// span, taken from the [`RangeBindInfo`](crate::net::host::binding::RangeBindInfo)
 /// it lives under. `scheme` is an optional transport prefix (e.g. `tcp` for
 /// bitcoin ZMQ endpoints); most ranges (coturn RTP, FTP data) omit it.
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
-#[ts(export)]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct RangeServiceInterface {
     pub id: ServiceInterfaceId,
     pub name: String,
     pub description: String,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub scheme: Option<InternedString>,
 }
+
+rpc_toolkit::reflect_ts!(RangeServiceInterface);
+rpc_toolkit::ts_export!(RangeServiceInterface, namespaces = [""]);

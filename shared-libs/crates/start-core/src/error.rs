@@ -14,7 +14,6 @@ use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 use tokio_rustls::rustls;
-use ts_rs::TS;
 
 use crate::InvalidId;
 use crate::prelude::to_value;
@@ -442,13 +441,15 @@ impl From<patch_db::value::Error> for Error {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, TS)]
+#[derive(Clone, Deserialize, Serialize, visit_rs::VisitFields)]
 pub struct ErrorData {
     pub details: String,
     pub debug: String,
     #[serde(default)]
     pub info: Value,
 }
+
+rpc_toolkit::reflect_ts!(ErrorData);
 impl Display for ErrorData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Display::fmt(&self.details, f)

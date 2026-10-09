@@ -1,15 +1,13 @@
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
-use ts_rs::TS;
 
 use crate::context::RpcContext;
 use crate::prelude::*;
 use crate::{Error, PackageId};
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct ControlParams {
@@ -17,7 +15,10 @@ pub struct ControlParams {
     pub id: PackageId,
 }
 
-#[derive(Deserialize, Serialize, Parser)]
+rpc_toolkit::reflect_ts!(ControlParams);
+rpc_toolkit::ts_export!(ControlParams, namespaces = [""]);
+
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
@@ -28,6 +29,8 @@ pub struct StartParams {
     #[serde(default)]
     pub force: bool,
 }
+
+rpc_toolkit::reflect_ts!(StartParams);
 
 #[instrument(skip_all)]
 pub async fn start(ctx: RpcContext, StartParams { id, force }: StartParams) -> Result<(), Error> {

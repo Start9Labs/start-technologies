@@ -108,6 +108,9 @@ jobs:
           SCCACHE_GHA_ENABLED: on
           SCCACHE_GHA_VERSION: 0
 
+      - name: Check StartWRT bindings up to date
+        run: make start-wrt-rpc-bindings-check
+
       - uses: actions/upload-artifact@v7
         with:
           name: startwrt-riscv64

@@ -59,21 +59,23 @@ pub(crate) fn validate_lan_block(addr: Ipv4Addr) -> Result<(), Error> {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct LanIpv4Response {
     pub address: String,
     pub netmask: String,
 }
+rpc_toolkit::reflect_ts!(LanIpv4Response);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct LanIpv4SetRequest {
     pub address: String,
     /// When true, forcibly delete VPN peers that would break due to block change.
     #[serde(default)]
     pub force: bool,
 }
+rpc_toolkit::reflect_ts!(LanIpv4SetRequest);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct LanIpv6Response {
     pub slaac: bool,
     pub dhcpv6: bool,
@@ -84,13 +86,15 @@ pub struct LanIpv6Response {
     /// WAN prefix length (read-only context for the UI)
     pub wan_prefix: u8,
 }
+rpc_toolkit::reflect_ts!(LanIpv6Response);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct LanIpv6SetRequest {
     pub slaac: bool,
     pub dhcpv6: bool,
     pub prefix: u8,
 }
+rpc_toolkit::reflect_ts!(LanIpv6SetRequest);
 
 pub fn lan<C: CtrlContext + Clone>() -> ParentHandler<C> {
     ParentHandler::new()

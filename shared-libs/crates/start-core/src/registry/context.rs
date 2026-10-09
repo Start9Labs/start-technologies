@@ -19,7 +19,6 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::Sender;
 use tracing::instrument;
-use ts_rs::TS;
 use url::Url;
 
 use crate::context::config::{CONFIG_PATH, ContextConfig};
@@ -188,12 +187,14 @@ impl Deref for RegistryContext {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser)]
+#[derive(Debug, Deserialize, Serialize, VisitFields, Parser)]
 #[group(skip)]
 pub struct RegistryUrlParams {
     #[arg(help = "help.arg.registry-url")]
     pub registry: Url,
 }
+
+rpc_toolkit::reflect_ts!(RegistryUrlParams);
 
 impl CallRemote<RegistryContext> for CliContext {
     async fn call_remote(
@@ -339,14 +340,20 @@ pub struct RegistryAuthMetadata {
     admin: bool,
 }
 
-#[derive(Serialize, Deserialize, TS)]
+#[derive(Serialize, Deserialize, VisitFields)]
 pub struct AdminLogRecord {
     pub timestamp: String,
     pub name: String,
-    #[ts(type = "{ id: string | number | null; method: string; params: any }")]
+    #[visit(
+        ts(type = "{ id: string | number | null; method: string; params: any }"),
+        wire = "rpc_toolkit::ts::Unknown"
+    )]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub request: RpcRequest,
     pub key: AnyVerifyingKey,
 }
+
+rpc_toolkit::reflect_ts!(AdminLogRecord);
 
 impl DbContext for RegistryContext {
     type Database = RegistryDatabase;

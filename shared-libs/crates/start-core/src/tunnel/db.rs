@@ -15,12 +15,14 @@ use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
-use ts_rs::TS;
 
 use crate::GatewayId;
 use crate::auth::AuthKeys;
 use crate::context::CliContext;
 use crate::db::model::public::NetworkInterfaceInfo;
+pub use crate::db::{
+    ApplyWithPathParams as ApplyParams, DumpParams, SubscribeParams, SubscribeRes,
+};
 use crate::prelude::*;
 use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::tunnel::context::TunnelContext;
@@ -29,12 +31,13 @@ use crate::tunnel::web::WebserverInfo;
 use crate::tunnel::wg::{WgServer, WgSubnetConfig};
 use crate::util::serde::{HandlerExtSerde, apply_expr};
 
-#[derive(Default, Deserialize, Serialize, HasModel, TS)]
+#[derive(Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct TunnelDatabase {
     #[serde(default)]
-    #[ts(skip)]
+    #[visit(ts(skip), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub migrations: BTreeSet<InternedString>,
     pub webserver: WebserverInfo,
     pub password: Option<String>,
@@ -42,7 +45,8 @@ pub struct TunnelDatabase {
     /// default (empty — everyone signs in again) with no migration.
     #[serde(default)]
     pub session_pubkeys: AuthKeys,
-    #[ts(as = "std::collections::BTreeMap::<GatewayId, NetworkInterfaceInfo>")]
+    #[visit(wire = "std::collections::BTreeMap::<GatewayId, NetworkInterfaceInfo>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub gateways: OrdMap<GatewayId, NetworkInterfaceInfo>,
     pub wg: WgServer,
     pub port_forwards: PortForwards,
@@ -56,6 +60,9 @@ pub struct TunnelDatabase {
     #[serde(default)]
     pub http_redirects: HttpRedirects,
 }
+
+rpc_toolkit::reflect_ts!(TunnelDatabase);
+rpc_toolkit::ts_export!(TunnelDatabase, namespaces = ["tunnel"]);
 
 impl TunnelDatabase {
     pub fn init() -> Self {
@@ -132,47 +139,9 @@ pub struct GcForwards {
     pub dropped_fallbacks: Vec<(SocketAddrV4, SocketAddrV4)>,
 }
 
-#[test]
-fn export_bindings_tunnel_db() {
-    use crate::tunnel::api::*;
-    use crate::tunnel::auth::{AddKeyParams, RemoveKeyParams, SetPasswordParams};
-
-    TunnelDatabase::export_all_to("bindings/tunnel").unwrap();
-    SubnetParams::export_all_to("bindings/tunnel").unwrap();
-    AddSubnetParams::export_all_to("bindings/tunnel").unwrap();
-    SetSubnetDnsParams::export_all_to("bindings/tunnel").unwrap();
-    AddDeviceParams::export_all_to("bindings/tunnel").unwrap();
-    RemoveDeviceParams::export_all_to("bindings/tunnel").unwrap();
-    ListDevicesParams::export_all_to("bindings/tunnel").unwrap();
-    ShowConfigParams::export_all_to("bindings/tunnel").unwrap();
-    AddPortForwardParams::export_all_to("bindings/tunnel").unwrap();
-    RemovePortForwardParams::export_all_to("bindings/tunnel").unwrap();
-    UpdatePortForwardLabelParams::export_all_to("bindings/tunnel").unwrap();
-    SetPortForwardEnabledParams::export_all_to("bindings/tunnel").unwrap();
-    AddPinholeParams::export_all_to("bindings/tunnel").unwrap();
-    RemovePinholeParams::export_all_to("bindings/tunnel").unwrap();
-    UpdatePinholeLabelParams::export_all_to("bindings/tunnel").unwrap();
-    SetPinholeEnabledParams::export_all_to("bindings/tunnel").unwrap();
-    SetDnsInjectionParams::export_all_to("bindings/tunnel").unwrap();
-    SetAutoPortForwardParams::export_all_to("bindings/tunnel").unwrap();
-    SetSubnetWanParams::export_all_to("bindings/tunnel").unwrap();
-    SetSubnetIpv6Params::export_all_to("bindings/tunnel").unwrap();
-    SetDeviceWanParams::export_all_to("bindings/tunnel").unwrap();
-    SetDeviceKindParams::export_all_to("bindings/tunnel").unwrap();
-    AddDnsRecordParams::export_all_to("bindings/tunnel").unwrap();
-    RemoveDnsRecordParams::export_all_to("bindings/tunnel").unwrap();
-    DnsRecordEntry::export_all_to("bindings/tunnel").unwrap();
-    HttpRedirects::export_all_to("bindings/tunnel").unwrap();
-    SetHttpRedirectEnabledParams::export_all_to("bindings/tunnel").unwrap();
-    HttpRedirectStatus::export_all_to("bindings/tunnel").unwrap();
-    AddKeyParams::export_all_to("bindings/tunnel").unwrap();
-    RemoveKeyParams::export_all_to("bindings/tunnel").unwrap();
-    SetPasswordParams::export_all_to("bindings/tunnel").unwrap();
-}
-
 /// One external-port forward: an nftables DNAT or an SNI-demultiplexed shared
 /// port. Mutually exclusive for a given external address.
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitVariants)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PortForward {
     Dnat {
@@ -200,8 +169,10 @@ pub enum PortForward {
     },
 }
 
+rpc_toolkit::reflect_ts!(PortForward);
+
 /// One SNI-demultiplexed hostname route on a shared external port.
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct SniRoute {
     pub target: SocketAddrV4,
@@ -213,6 +184,8 @@ pub struct SniRoute {
     pub auto: bool,
 }
 
+rpc_toolkit::reflect_ts!(SniRoute);
+
 fn default_true() -> bool {
     true
 }
@@ -223,7 +196,7 @@ fn default_one() -> u16 {
 
 /// A DNS record served by the tunnel (injected via RFC 2136 or added manually).
 /// `value` is the rdata as text: an IP for A/AAAA, a name for CNAME, etc.
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct DnsRecordEntry {
     pub name: String,
@@ -236,8 +209,13 @@ pub struct DnsRecordEntry {
     pub source: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(DnsRecordEntry);
+rpc_toolkit::ts_export!(DnsRecordEntry, namespaces = ["tunnel"]);
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, VisitFields)]
 pub struct DnsRecords(pub Vec<DnsRecordEntry>);
+
+rpc_toolkit::reflect_ts!(DnsRecords);
 
 impl PortForward {
     /// Number of contiguous external ports this forward occupies: a DNAT spans
@@ -254,16 +232,22 @@ impl PortForward {
 /// every public IPv4 by default; this records the addresses where the user has
 /// turned it off (absence = on). The redirect also yields to any port-forward
 /// occupying port 80 on that IP, so the two never fight over the port.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpRedirects {
     #[serde(default)]
-    #[ts(type = "string[]")]
+    #[visit(ts(type = "string[]"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub disabled: BTreeSet<Ipv4Addr>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(HttpRedirects);
+rpc_toolkit::ts_export!(HttpRedirects, namespaces = ["tunnel"]);
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, VisitFields)]
 pub struct PortForwards(pub BTreeMap<SocketAddrV4, PortForward>);
+
+rpc_toolkit::reflect_ts!(PortForwards);
 impl Map for PortForwards {
     type Key = SocketAddrV4;
     type Value = PortForward;
@@ -280,7 +264,7 @@ impl Map for PortForwards {
 /// the key's port) it's a pure firewall pinhole — `ct state new accept`, no NAT.
 /// When it differs it's a port-only DNAT to `[GUA]:internal_port` (e.g. 80→443),
 /// the v6 analogue of a `PortForward::Dnat`.
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct Pinhole {
     pub label: Option<String>,
@@ -298,6 +282,8 @@ pub struct Pinhole {
     pub auto: bool,
 }
 
+rpc_toolkit::reflect_ts!(Pinhole);
+
 impl Pinhole {
     /// The destination port on the GUA: `internal_port` if remapped, else the
     /// external (key) port. `external` is `key.port()`.
@@ -310,8 +296,10 @@ impl Pinhole {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, VisitFields)]
 pub struct Pinholes6(pub BTreeMap<SocketAddrV6, Pinhole>);
+
+rpc_toolkit::reflect_ts!(Pinholes6);
 impl Map for Pinholes6 {
     type Key = SocketAddrV6;
     type Value = Pinhole;
@@ -386,6 +374,7 @@ pub fn db_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "dump",
             from_fn_async(cli_dump)
+                .no_ts()
                 .with_display_serializable()
                 .with_about("about.filter-query-db-display-tables-records"),
         )
@@ -404,6 +393,7 @@ pub fn db_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "apply",
             from_fn_async(cli_apply)
+                .no_ts()
                 .no_display()
                 .with_about("about.update-db-record"),
         )
@@ -448,16 +438,6 @@ async fn cli_dump(
     };
 
     Ok(dump)
-}
-
-#[derive(Deserialize, Serialize, Parser, TS)]
-#[group(skip)]
-#[serde(rename_all = "camelCase")]
-#[command(rename_all = "kebab-case")]
-pub struct DumpParams {
-    #[arg(long = "pointer", short = 'p', help = "help.arg.json-pointer")]
-    #[ts(type = "string | null")]
-    pointer: Option<JsonPointer>,
 }
 
 pub async fn dump(ctx: TunnelContext, DumpParams { pointer }: DumpParams) -> Result<Dump, Error> {
@@ -525,18 +505,13 @@ async fn cli_apply(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
-#[group(skip)]
-#[serde(rename_all = "camelCase")]
-#[command(rename_all = "kebab-case")]
-pub struct ApplyParams {
-    #[arg(help = "help.arg.db-apply-expr")]
-    expr: String,
-    #[arg(help = "help.arg.database-path")]
-    path: Option<PathBuf>,
-}
-
-pub async fn apply(ctx: TunnelContext, ApplyParams { expr, .. }: ApplyParams) -> Result<(), Error> {
+pub async fn apply(
+    ctx: TunnelContext,
+    ApplyParams {
+        expression: crate::db::ApplyParams { expr },
+        ..
+    }: ApplyParams,
+) -> Result<(), Error> {
     ctx.db
         .mutate(|db| {
             let res = apply_expr(
@@ -557,24 +532,6 @@ pub async fn apply(ctx: TunnelContext, ApplyParams { expr, .. }: ApplyParams) ->
         })
         .await
         .result
-}
-
-#[derive(Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct SubscribeParams {
-    #[ts(type = "string | null")]
-    pointer: Option<JsonPointer>,
-    #[ts(skip)]
-    #[serde(rename = "__Auth_signer")]
-    signer: Option<InternedString>,
-}
-
-#[derive(Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct SubscribeRes {
-    #[ts(type = "{ id: number; value: unknown }")]
-    pub dump: Dump,
-    pub guid: Guid,
 }
 
 pub async fn subscribe(

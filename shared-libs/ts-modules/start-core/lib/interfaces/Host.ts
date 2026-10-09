@@ -2,9 +2,9 @@ import { z } from '../zExport'
 import { Effects } from '../Effects'
 import { Origin } from './Origin'
 import { RangeOrigin } from './RangeOrigin'
-import { AddSslOptions } from '../osBindings'
+import { AddSslOptionsInput as AddSslOptions } from '../osBindings'
 import { Security } from '../osBindings'
-import { BindOptions } from '../osBindings'
+import { BindOptionsInput as BindOptions } from '../osBindings'
 import { AlpnInfo } from '../osBindings'
 import { ProxyAuth } from '../osBindings'
 import { BasicCredential } from '../osBindings'
@@ -295,14 +295,7 @@ export class MultiHost {
     })
   }
 
-  private async bindPortForUnknown(
-    internalPort: number,
-    options: {
-      preferredExternalPort: number
-      addSsl: AddSslOptions | null
-      secure: { ssl: boolean } | null
-    },
-  ) {
+  private async bindPortForUnknown(internalPort: number, options: BindOptions) {
     const binderOptions = {
       id: this.options.id,
       internalPort,

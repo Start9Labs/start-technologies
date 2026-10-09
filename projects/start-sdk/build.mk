@@ -1,6 +1,7 @@
-start-sdk-test: $(call ls-files, projects/start-sdk) shared-libs/ts-modules/start-core/lib/osBindings/index.ts shared-libs/ts-modules/start-core/dist/package.json
+start-sdk-test: $(call ls-files, projects/start-sdk) shared-libs/ts-modules/start-core/lib/osBindings/index.ts shared-libs/ts-modules/start-core/dist/package.json projects/start-sdk/dist/package.json shared-libs/ts-modules/scripts/test-rpc-docs.cjs
 	$(MAKE) -C shared-libs/ts-modules/start-core test
 	cd projects/start-sdk && make test
+	node --test shared-libs/ts-modules/scripts/test-rpc-docs.cjs
 
 projects/start-sdk/dist/package.json: $(call ls-files, projects/start-sdk) shared-libs/ts-modules/start-core/dist/package.json
 	(cd projects/start-sdk && make bundle)

@@ -6,7 +6,9 @@
   "license": "MIT",
   "scripts": {
     "ng": "ng",
-    "check": "npm run check:i18n && npm run check:i18n:tunnel && npm run check:i18n:wrt && npm run check:shared && npm run check:marketplace && npm run check:ui && npm run check:setup && npm run check:tunnel && npm run check:brochure && npm run check:wrt",
+    "check": "npm run check:rpc-clients && npm run check:i18n && npm run check:i18n:tunnel && npm run check:i18n:wrt && npm run check:shared && npm run check:marketplace && npm run check:ui && npm run check:setup && npm run check:tunnel && npm run check:brochure && npm run check:wrt",
+    "check:rpc-clients": "node --test shared-libs/ts-modules/scripts/test-rpc-clients.cjs",
+    "check:rpc-docs": "node --test shared-libs/ts-modules/scripts/test-rpc-docs.cjs",
     "check:shared": "tsc --project shared-libs/ts-modules/shared/tsconfig.json --noEmit --skipLibCheck",
     "check:marketplace": "tsc --project shared-libs/ts-modules/marketplace/tsconfig.json --noEmit --skipLibCheck",
     "check:setup": "tsc --project projects/start-os/web/setup-wizard/tsconfig.json --noEmit --skipLibCheck",

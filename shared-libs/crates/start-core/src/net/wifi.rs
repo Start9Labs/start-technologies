@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tokio::sync::{RwLockMappedWriteGuard, RwLockReadGuard, RwLockWriteGuard};
 use tracing::instrument;
-use ts_rs::TS;
 
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
@@ -154,15 +153,17 @@ pub fn wifi<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct SetWifiEnabledParams {
     #[arg(long, help = "help.arg.wifi-enabled")]
     pub enabled: bool,
 }
+
+rpc_toolkit::reflect_ts!(SetWifiEnabledParams);
+rpc_toolkit::ts_export!(SetWifiEnabledParams, namespaces = [""]);
 
 pub async fn set_enabled(
     ctx: RpcContext,
@@ -216,9 +217,8 @@ pub fn country<C: Context>() -> ParentHandler<C> {
     )
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct WifiAddParams {
@@ -227,6 +227,9 @@ pub struct WifiAddParams {
     #[arg(help = "help.arg.wifi-password")]
     password: String,
 }
+
+rpc_toolkit::reflect_ts!(WifiAddParams);
+rpc_toolkit::ts_export!(WifiAddParams, namespaces = [""]);
 #[instrument(skip_all)]
 pub async fn add(
     ctx: RpcContext,
@@ -274,15 +277,17 @@ pub async fn add(
         .result?;
     Ok(())
 }
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct WifiSsidParams {
     #[arg(help = "help.arg.wifi-ssid")]
     ssid: String,
 }
+
+rpc_toolkit::reflect_ts!(WifiSsidParams);
+rpc_toolkit::ts_export!(WifiSsidParams, namespaces = [""]);
 
 #[instrument(skip_all)]
 pub async fn connect(
@@ -381,31 +386,36 @@ pub async fn remove(ctx: RpcContext, WifiSsidParams { ssid }: WifiSsidParams) ->
         .result?;
     Ok(())
 }
-#[derive(serde::Serialize, serde::Deserialize, TS)]
-#[ts(export)]
+#[derive(serde::Serialize, serde::Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiListInfo {
     ssids: HashMap<Ssid, SignalStrength>,
     connected: Option<Ssid>,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     country: Option<CountryCode>,
     ethernet: bool,
     available_wifi: Vec<WifiListOut>,
 }
+
+rpc_toolkit::reflect_ts!(WifiListInfo);
+rpc_toolkit::ts_export!(WifiListInfo, namespaces = [""]);
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiListInfoLow {
     strength: SignalStrength,
     security: Vec<String>,
 }
-#[derive(serde::Serialize, serde::Deserialize, TS)]
-#[ts(export)]
+#[derive(serde::Serialize, serde::Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiListOut {
     ssid: Ssid,
     strength: SignalStrength,
     security: Vec<String>,
 }
+
+rpc_toolkit::reflect_ts!(WifiListOut);
+rpc_toolkit::ts_export!(WifiListOut, namespaces = [""]);
 pub type WifiList = HashMap<Ssid, WifiListInfoLow>;
 fn display_wifi_info(params: WithIoFormat<Empty>, info: WifiListInfo) -> Result<(), Error> {
     use prettytable::*;
@@ -570,16 +580,19 @@ pub async fn get_available(ctx: RpcContext, _: Empty) -> Result<Vec<WifiListOut>
     Ok(wifi_list)
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct SetCountryParams {
     #[arg(value_parser = CountryCodeParser, help = "help.arg.wifi-country-code")]
-    #[ts(type = "string")]
+    #[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     country: CountryCode,
 }
+
+rpc_toolkit::reflect_ts!(SetCountryParams);
+rpc_toolkit::ts_export!(SetCountryParams, namespaces = [""]);
 pub async fn set_country(
     ctx: RpcContext,
     SetCountryParams { country }: SetCountryParams,
@@ -611,9 +624,20 @@ pub struct NetworkId(String);
 
 /// Ssid are the names of the wifis, usually human readable.
 #[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize, TS,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    VisitFields,
 )]
 pub struct Ssid(String);
+
+rpc_toolkit::reflect_ts!(Ssid);
 
 /// So a signal strength is a number between 0-100, I want the null option to be 0 since there is no signal
 #[derive(
@@ -628,9 +652,11 @@ pub struct Ssid(String);
     Hash,
     serde::Serialize,
     serde::Deserialize,
-    TS,
+    VisitFields,
 )]
 pub struct SignalStrength(u8);
+
+rpc_toolkit::reflect_ts!(SignalStrength);
 
 impl SignalStrength {
     fn new(size: Option<u8>) -> Self {

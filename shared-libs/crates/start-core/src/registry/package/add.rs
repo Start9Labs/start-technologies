@@ -6,7 +6,6 @@ use imbl_value::InternedString;
 use itertools::Itertools;
 use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 use url::Url;
 
 use crate::PackageId;
@@ -26,18 +25,22 @@ use crate::util::VersionString;
 use crate::util::io::TrackingIO;
 use crate::util::serde::Base64;
 
-#[derive(Debug, Deserialize, Serialize, TS)]
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct AddPackageParams {
-    #[ts(type = "string[]")]
+    #[visit(ts(type = "string[]"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub urls: Vec<Url>,
-    #[ts(skip)]
+    #[visit(ts(skip), wire = "rpc_toolkit::ts::Unknown")]
     #[serde(rename = "__Auth_signer")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub uploader: AnyVerifyingKey,
     pub commitment: MerkleArchiveCommitment,
     pub signature: AnySignature,
 }
+
+rpc_toolkit::reflect_ts!(AddPackageParams);
+rpc_toolkit::ts_export!(AddPackageParams, namespaces = [""]);
 
 pub async fn add_package(
     ctx: RegistryContext,
@@ -218,10 +221,9 @@ pub async fn cli_add_package_impl(
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct RemovePackageParams {
     #[arg(help = "help.arg.package-id")]
     pub id: PackageId,
@@ -232,11 +234,15 @@ pub struct RemovePackageParams {
     #[arg(long, help = "help.arg.force-remove-package")]
     #[serde(default)]
     pub force: bool,
-    #[ts(skip)]
+    #[visit(ts(skip), wire = "rpc_toolkit::ts::Unknown")]
     #[arg(skip)]
     #[serde(rename = "__Auth_signer")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub signer: Option<AnyVerifyingKey>,
 }
+
+rpc_toolkit::reflect_ts!(RemovePackageParams);
+rpc_toolkit::ts_export!(RemovePackageParams, namespaces = [""]);
 
 pub async fn remove_package(
     ctx: RegistryContext,
@@ -336,18 +342,20 @@ pub async fn remove_package(
     rev.result.map(|_| rev.revision.is_some())
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct AddMirrorParams {
-    #[ts(type = "string")]
     pub url: Url,
-    #[ts(skip)]
+    #[visit(ts(skip), wire = "rpc_toolkit::ts::Unknown")]
     #[serde(rename = "__Auth_signer")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub uploader: AnyVerifyingKey,
     pub commitment: MerkleArchiveCommitment,
     pub signature: AnySignature,
 }
+
+rpc_toolkit::reflect_ts!(AddMirrorParams);
+rpc_toolkit::ts_export!(AddMirrorParams, namespaces = [""]);
 
 pub async fn add_mirror(
     ctx: RegistryContext,
@@ -497,23 +505,25 @@ pub async fn cli_add_mirror(
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct RemoveMirrorParams {
     #[arg(help = "help.arg.package-id")]
     pub id: PackageId,
     #[arg(help = "help.arg.package-version")]
     pub version: VersionString,
     #[arg(long, help = "help.arg.mirror-url")]
-    #[ts(type = "string")]
     pub url: Url,
-    #[ts(skip)]
+    #[visit(ts(skip), wire = "rpc_toolkit::ts::Unknown")]
     #[arg(skip)]
     #[serde(rename = "__Auth_signer")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub signer: Option<AnyVerifyingKey>,
 }
+
+rpc_toolkit::reflect_ts!(RemoveMirrorParams);
+rpc_toolkit::ts_export!(RemoveMirrorParams, namespaces = [""]);
 
 pub async fn remove_mirror(
     ctx: RegistryContext,

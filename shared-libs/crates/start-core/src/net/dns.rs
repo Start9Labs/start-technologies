@@ -27,7 +27,6 @@ use rpc_toolkit::{
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tracing::instrument;
-use ts_rs::TS;
 
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
@@ -100,26 +99,32 @@ pub fn dns_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 pub struct QueryDnsParams {
     #[arg(help = "help.arg.fqdn")]
     pub fqdn: InternedString,
 }
 
+rpc_toolkit::reflect_ts!(QueryDnsParams);
+rpc_toolkit::ts_export!(QueryDnsParams, namespaces = [""]);
+
 /// What a public domain currently resolves to, per address family. A public
 /// domain is DualStack: the operator points an `A` record at the gateway's WAN
 /// IPv4 and an `AAAA` at the box's IPv6 GUA. Either may be absent.
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct QueryDnsRes {
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub ipv4: Option<Ipv4Addr>,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub ipv6: Option<Ipv6Addr>,
 }
+
+rpc_toolkit::reflect_ts!(QueryDnsRes);
+rpc_toolkit::ts_export!(QueryDnsRes, namespaces = [""]);
 
 pub fn query_dns<C: Context>(
     _: C,
@@ -163,13 +168,15 @@ pub fn query_dns<C: Context>(
     Ok(res)
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 pub struct SetStaticDnsParams {
     #[arg(help = "help.arg.dns-servers")]
     pub servers: Option<Vec<String>>,
 }
+
+rpc_toolkit::reflect_ts!(SetStaticDnsParams);
+rpc_toolkit::ts_export!(SetStaticDnsParams, namespaces = [""]);
 
 pub async fn set_static_dns(
     ctx: RpcContext,

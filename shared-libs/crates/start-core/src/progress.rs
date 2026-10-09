@@ -11,7 +11,6 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncSeek, AsyncWrite};
 use tokio::sync::watch;
-use ts_rs::TS;
 
 use crate::db::model::{Database, DatabaseModel};
 use crate::prelude::*;
@@ -25,23 +24,28 @@ lazy_static::lazy_static! {
     static ref BYTES: ProgressStyle = ProgressStyle::with_template("{spinner} {wide_msg} [{bytes}/?] [{binary_bytes_per_sec} {elapsed}]").unwrap();
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, TS)]
+#[derive(
+    Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, VisitVariants,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProgressUnits {
     Bytes,
     Steps,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(ProgressUnits);
+
+#[derive(Debug, Clone, Deserialize, Serialize, VisitVariants)]
 #[serde(untagged)]
-#[ts(export)]
 pub enum Progress {
     NotStarted(()),
     Complete(bool),
     Progress {
-        #[ts(type = "number")]
+        #[visit(ts(type = "number"), wire = "rpc_toolkit::ts::Unknown")]
+        #[visit(opaque, type_attributes(visit::wire))]
         done: u64,
-        #[ts(type = "number | null")]
+        #[visit(ts(type = "number | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+        #[visit(opaque, type_attributes(visit::wire))]
         total: Option<u64>,
         units: Option<ProgressUnits>,
     },
@@ -50,6 +54,9 @@ pub enum Progress {
     /// expected to keep `FullProgress.overall` scalar (not nested again).
     Nested(Box<FullProgress>),
 }
+
+rpc_toolkit::reflect_ts!(Progress);
+rpc_toolkit::ts_export!(Progress, namespaces = [""]);
 impl Progress {
     pub fn new() -> Self {
         Progress::NotStarted(())
@@ -200,20 +207,23 @@ impl std::ops::AddAssign<u64> for Progress {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 pub struct NamedProgress {
-    #[ts(type = "string")]
     pub name: InternedString,
     pub progress: Progress,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
-#[ts(export)]
+rpc_toolkit::reflect_ts!(NamedProgress);
+rpc_toolkit::ts_export!(NamedProgress, namespaces = [""]);
+
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 pub struct FullProgress {
     pub overall: Progress,
     pub phases: Vec<NamedProgress>,
 }
+
+rpc_toolkit::reflect_ts!(FullProgress);
+rpc_toolkit::ts_export!(FullProgress, namespaces = [""]);
 impl FullProgress {
     pub fn new() -> Self {
         Self {

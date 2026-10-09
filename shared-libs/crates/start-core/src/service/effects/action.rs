@@ -43,13 +43,15 @@ pub fn action_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportActionParams {
     id: ActionId,
     metadata: ActionMetadata,
 }
+
+rpc_toolkit::reflect_ts!(ExportActionParams);
+rpc_toolkit::ts_export!(ExportActionParams, namespaces = [""]);
 pub async fn export_action(
     context: EffectContext,
     ExportActionParams { id, metadata }: ExportActionParams,
@@ -77,14 +79,16 @@ pub async fn export_action(
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct ClearActionsParams {
     #[arg(long, help = "help.arg.except-actions")]
     pub except: Vec<ActionId>,
 }
+
+rpc_toolkit::reflect_ts!(ClearActionsParams);
+rpc_toolkit::ts_export!(ClearActionsParams, namespaces = [""]);
 
 async fn clear_actions(
     context: EffectContext,
@@ -110,25 +114,31 @@ async fn clear_actions(
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct GetActionInputParams {
-    #[ts(optional)]
     #[arg(short, long, help = "help.arg.package-id")]
     package_id: Option<PackageId>,
     #[serde(flatten)]
-    #[ts(skip)]
+    #[visit(ts(skip), wire = "rpc_toolkit::ts::Unknown")]
     #[arg(skip)]
+    #[visit(opaque, type_attributes(visit::wire))]
     event: EventId,
     #[arg(help = "help.arg.action-id")]
     action_id: ActionId,
-    #[ts(type = "Record<string, unknown> | null")]
+    #[visit(
+        ts(type = "Record<string, unknown> | null"),
+        wire = "Option<rpc_toolkit::ts::Unknown>"
+    )]
     #[serde(default)]
     #[arg(skip)]
+    #[visit(opaque, type_attributes(visit::wire))]
     prefill: Option<Value>,
 }
+
+rpc_toolkit::reflect_ts!(GetActionInputParams);
+rpc_toolkit::ts_export!(GetActionInputParams, namespaces = [""]);
 async fn get_action_input(
     context: EffectContext,
     GetActionInputParams {
@@ -161,24 +171,26 @@ async fn get_action_input(
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, rename = "EffectsRunActionParams")]
+#[visit(ts(rename = "EffectsRunActionParams"))]
 pub struct RunActionParams {
-    #[ts(optional)]
     #[arg(short, long, help = "help.arg.package-id")]
     package_id: Option<PackageId>,
     #[serde(flatten)]
-    #[ts(skip)]
+    #[visit(ts(skip), wire = "rpc_toolkit::ts::Unknown")]
     #[command(flatten)]
+    #[visit(opaque, type_attributes(visit::wire))]
     event: EventId,
     #[arg(help = "help.arg.action-id")]
     action_id: ActionId,
-    #[ts(type = "any")]
     #[arg(help = "help.arg.action-input")]
     input: Value,
 }
+
+rpc_toolkit::reflect_ts!(RunActionParams);
+rpc_toolkit::ts_export!(RunActionParams, namespaces = [""]);
 async fn run_action(
     context: EffectContext,
     RunActionParams {
@@ -262,17 +274,20 @@ async fn run_action(
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct CreateTaskParams {
     #[serde(flatten)]
-    #[ts(skip)]
+    #[visit(ts(skip), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     event: EventId,
     replay_id: ReplayId,
     #[serde(flatten)]
     task: Task,
 }
+
+rpc_toolkit::reflect_ts!(CreateTaskParams);
+rpc_toolkit::ts_export!(CreateTaskParams, namespaces = [""]);
 async fn create_task(
     context: EffectContext,
     CreateTaskParams {
@@ -378,16 +393,22 @@ async fn create_task(
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
 #[group(skip)]
-#[ts(type = "{ only: string[] } | { except: string[] }")]
-#[ts(export)]
+#[visit(
+    ts(type = "{ only: string[] } | { except: string[] }"),
+    wire = "rpc_toolkit::ts::Unknown"
+)]
+#[visit(opaque, type_attributes(visit::wire))]
 pub struct ClearTasksParams {
     #[arg(long, conflicts_with = "except", help = "help.arg.only-tasks")]
     pub only: Option<Vec<ReplayId>>,
     #[arg(long, conflicts_with = "only", help = "help.arg.except-tasks")]
     pub except: Option<Vec<ReplayId>>,
 }
+
+rpc_toolkit::reflect_ts!(ClearTasksParams);
+rpc_toolkit::ts_export!(ClearTasksParams, namespaces = [""]);
 
 async fn clear_tasks(
     context: EffectContext,

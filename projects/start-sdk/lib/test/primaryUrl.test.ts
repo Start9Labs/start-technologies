@@ -57,6 +57,7 @@ const host = (available: T.HostnameInfo[]): T.Host => ({
           description: '',
           masked: false,
           type: 'ui',
+          preferredLauncherAddress: null,
           addressInfo: {
             username: null,
             hostId: 'ui-multi',

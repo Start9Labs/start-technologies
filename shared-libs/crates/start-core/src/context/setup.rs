@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 use tokio::sync::broadcast::Sender;
 use tracing::instrument;
-use ts_rs::TS;
 
 use crate::MAIN_DATA;
 use crate::context::RpcContext;
@@ -41,15 +40,18 @@ lazy_static::lazy_static! {
     });
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct SetupResult {
-    #[ts(type = "string")]
+    #[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub hostname: ServerHostname,
     pub root_ca: Pem<X509>,
     pub needs_restart: bool,
 }
+
+rpc_toolkit::reflect_ts!(SetupResult);
+rpc_toolkit::ts_export!(SetupResult, namespaces = [""]);
 
 pub struct SetupContextSeed {
     pub webserver: WebServerAcceptorSetter<WildcardListener>,

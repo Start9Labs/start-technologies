@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::HealthCheckId;
 use crate::error::ErrorData;
@@ -12,16 +11,19 @@ use crate::status::health_check::NamedHealthCheckResult;
 
 pub mod health_check;
 
-#[derive(Debug, Default, Deserialize, Serialize, HasModel, TS)]
+#[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct StatusInfo {
     pub health: BTreeMap<HealthCheckId, NamedHealthCheckResult>,
     pub error: Option<ErrorData>,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub started: Option<DateTime<Utc>>,
     pub desired: DesiredStatus,
 }
+
+rpc_toolkit::reflect_ts!(StatusInfo);
 impl StatusInfo {
     pub fn stop(&mut self) {
         self.desired = self.desired.stop();
@@ -81,7 +83,7 @@ impl Model<StatusInfo> {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, VisitVariants)]
 #[serde(tag = "main")]
 #[serde(rename_all = "kebab-case")]
 #[serde(rename_all_fields = "camelCase")]
@@ -99,6 +101,8 @@ pub enum DesiredStatus {
         on_complete: StartStop,
     },
 }
+
+rpc_toolkit::reflect_ts!(DesiredStatus);
 impl Default for DesiredStatus {
     fn default() -> Self {
         Self::Stopped

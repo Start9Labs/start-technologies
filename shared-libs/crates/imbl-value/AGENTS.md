@@ -24,7 +24,7 @@ not that one. See [ARCHITECTURE.md](ARCHITECTURE.md) for how it works.
 - `src/in_order_map/my_visitor.rs` — `MyVisitor`, the serde `Visitor` for deserializing an `InOMap`.
 - `src/arbitrary.rs` — proptest `Arbitrary` impl and `value_strategy`/`number_strategy`/`array_strategy`/`object_strategy`.
   Gated behind the `arbitrary` feature.
-- `src/ts_rs.rs` — `ts-rs` `TS` impls for `Value` and `InOMap` for TypeScript type generation. Gated behind the `ts-rs` feature.
+- RPC's `ts` consumer owns TypeScript bridges for `Value` (`unknown`) and `InOMap` (map).
 
 ## Build & test (run from the repo root)
 
@@ -32,7 +32,6 @@ not that one. See [ARCHITECTURE.md](ARCHITECTURE.md) for how it works.
 cargo build -p imbl-value                       # build the library
 cargo test  -p imbl-value                       # run the test suite
 cargo build -p imbl-value --features arbitrary  # build with the proptest strategies
-cargo build -p imbl-value --features ts-rs      # build with ts-rs TS impls
 ```
 
 ## Gotchas
@@ -49,8 +48,9 @@ cargo build -p imbl-value --features ts-rs      # build with ts-rs TS impls
   attribution lives in [LICENSE](LICENSE) — keep it if you touch these files.
 - **`json!` uses `local_inner_macros`** to avoid namespace pollution; the `json_internal_vec!` helper is
   defined outside that scope so `vec!` resolves correctly.
-- **Optional features:** `ts-rs` is required by the `start_core` consumer; `arbitrary` is used by `json-patch`
-  for proptest-based testing. Both are off by default.
+- **Optional feature:** `arbitrary` is used by `json-patch` for proptest-based testing
+  and is off by default. TypeScript bridges belong to RPC; keep dependencies
+  directed from that consumer to this crate.
 - **`Display` doubles as compact and pretty.** It adapts a `fmt::Formatter` as an `io::Write` sink; `{}` is
   compact and `{:#}` is pretty.
 

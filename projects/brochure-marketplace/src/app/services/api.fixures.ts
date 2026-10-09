@@ -50,8 +50,7 @@ export namespace Mock {
     title: 'Bitcoin',
     icon: BTC_ICON,
     optional: false,
-    // Localized (Record) form — mirrors what live registries return and
-    // exercises the LocaleString branch that used to render "[object Object]".
+    versionRange: null,
     description: {
       en_US: 'Needed to run',
       de_DE: 'Zum Ausführen erforderlich',
@@ -62,6 +61,7 @@ export namespace Mock {
     title: 'Bitcoin Proxy',
     icon: PROXY_ICON,
     optional: true,
+    versionRange: null,
     description: 'Needed to run',
   }
 

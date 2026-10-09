@@ -15,7 +15,6 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::try_join;
 use tracing::instrument;
-use ts_rs::TS;
 
 use crate::account::AccountInfo;
 use crate::auth::write_shadow;
@@ -65,6 +64,7 @@ pub fn setup<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "attach",
             from_fn_async(cli_attach)
+                .no_ts()
                 .no_display()
                 .with_about("about.setup-attach"),
         )
@@ -75,6 +75,7 @@ pub fn setup<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "install-os",
             from_fn_async(cli_install_os)
+                .no_ts()
                 .no_display()
                 .with_about("about.setup-install-os"),
         )
@@ -82,6 +83,7 @@ pub fn setup<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "execute",
             from_fn_async(cli_execute)
+                .no_ts()
                 .no_display()
                 .with_about("about.setup-execute"),
         )
@@ -112,6 +114,7 @@ pub fn setup<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "logs",
             from_fn_async(crate::logs::cli_logs::<SetupContext, Empty>)
+                .no_ts()
                 .no_display()
                 .with_about("about.display-os-logs"),
         )
@@ -234,14 +237,16 @@ async fn setup_init(
     Ok((account, init_result))
 }
 
-#[derive(Deserialize, Serialize, TS)]
+#[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct AttachParams {
     pub password: Option<EncryptedWire>,
     pub guid: InternedString,
     pub kiosk: bool,
 }
+
+rpc_toolkit::reflect_ts!(AttachParams);
+rpc_toolkit::ts_export!(AttachParams, namespaces = [""]);
 
 /// CLI-only flags for `setup attach`. The password is read from the
 /// PASSWORD environment variable (matching `start-cli auth login`),
@@ -351,9 +356,8 @@ pub async fn attach(
     Ok(ctx.progress().await)
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
+#[derive(Debug, Deserialize, Serialize, VisitVariants)]
 #[serde(rename_all = "kebab-case")]
-#[ts(export)]
 #[serde(tag = "status")]
 pub enum SetupStatusRes {
     NeedsInstall,
@@ -362,7 +366,10 @@ pub enum SetupStatusRes {
     Complete(SetupResult),
 }
 
-#[derive(Default, Debug, Clone, Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(SetupStatusRes);
+rpc_toolkit::ts_export!(SetupStatusRes, namespaces = [""]);
+
+#[derive(Default, Debug, Clone, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct SetupInfo {
     pub guid: Option<InternedString>,
@@ -376,13 +383,17 @@ pub struct SetupInfo {
     pub os_drive: Option<PathBuf>,
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(SetupInfo);
+
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct SetupProgress {
     pub progress: FullProgress,
     pub guid: Guid,
 }
+
+rpc_toolkit::reflect_ts!(SetupProgress);
+rpc_toolkit::ts_export!(SetupProgress, namespaces = [""]);
 
 pub async fn status(ctx: SetupContext) -> Result<SetupStatusRes, Error> {
     if let Some(res) = ctx.result.get() {
@@ -419,15 +430,17 @@ pub fn cifs<C: Context>() -> ParentHandler<C> {
     ParentHandler::new().subcommand("verify", from_fn_async(verify_cifs).no_cli())
 }
 
-#[derive(Deserialize, Serialize, TS)]
+#[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct VerifyCifsParams {
     hostname: String,
     path: PathBuf,
     username: String,
     password: Option<EncryptedWire>,
 }
+
+rpc_toolkit::reflect_ts!(VerifyCifsParams);
+rpc_toolkit::ts_export!(VerifyCifsParams, namespaces = [""]);
 
 // #[command(rename = "verify", rpc_only)]
 pub async fn verify_cifs(
@@ -461,7 +474,7 @@ pub async fn verify_cifs(
     Ok(start_os)
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
+#[derive(Debug, Deserialize, Serialize, VisitVariants)]
 #[serde(tag = "type")]
 #[serde(rename_all = "camelCase")]
 #[serde(rename_all_fields = "camelCase")]
@@ -475,6 +488,13 @@ pub enum RecoverySource<Password> {
         server_id: String,
     },
 }
+
+rpc_toolkit::reflect_ts!(impl [Password] for RecoverySource<Password> where [Password: rpc_toolkit::ts::TS]);
+rpc_toolkit::ts_export!(
+    RecoverySource<String>,
+    name = "RecoverySourceWire",
+    namespaces = [""]
+);
 
 pub async fn setup_data_drive(
     ctx: &SetupContext,
@@ -504,9 +524,8 @@ pub async fn setup_data_drive(
     Ok(guid)
 }
 
-#[derive(Deserialize, Serialize, TS)]
+#[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct SetupExecuteParams {
     guid: InternedString,
     password: Option<EncryptedWire>,
@@ -514,6 +533,9 @@ pub struct SetupExecuteParams {
     kiosk: bool,
     hostname: Option<InternedString>,
 }
+
+rpc_toolkit::reflect_ts!(SetupExecuteParams);
+rpc_toolkit::ts_export!(SetupExecuteParams, namespaces = [""]);
 
 /// CLI-only flags for `setup execute`. The password is read from the
 /// PASSWORD environment variable (matching `start-cli auth login`),

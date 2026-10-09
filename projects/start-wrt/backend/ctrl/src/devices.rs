@@ -42,14 +42,15 @@ pub fn devices<C: CtrlContext>() -> ParentHandler<C> {
 
 // --- Types ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitVariants)]
 #[serde(rename_all = "lowercase")]
 pub enum DeviceStatus {
     Online,
     Offline,
 }
+rpc_toolkit::reflect_ts!(DeviceStatus);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitFields)]
 pub struct Device {
     pub mac: Option<String>,
     /// Fully-resolved display name: UCI static name → live DHCP hostname →
@@ -75,14 +76,16 @@ pub struct Device {
     pub speed: Option<SpeedData>,
     pub data_usage: Option<f64>,
 }
+rpc_toolkit::reflect_ts!(Device);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitFields)]
 pub struct SpeedData {
     pub up: f64,
     pub down: f64,
 }
+rpc_toolkit::reflect_ts!(SpeedData);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct DeviceUpdateReq {
     pub mac: String,
     /// Absent leaves the assigned name untouched; empty clears it. Otherwise
@@ -92,13 +95,15 @@ pub struct DeviceUpdateReq {
     pub ipv4_static: bool,
     pub ipv4: String,
 }
+rpc_toolkit::reflect_ts!(DeviceUpdateReq);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct DeviceMacReq {
     pub mac: String,
 }
+rpc_toolkit::reflect_ts!(DeviceMacReq);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitVariants)]
 #[serde(rename_all = "lowercase")]
 pub enum DataUsagePeriod {
     Week,
@@ -106,19 +111,22 @@ pub enum DataUsagePeriod {
     #[serde(rename = "3months")]
     ThreeMonths,
 }
+rpc_toolkit::reflect_ts!(DataUsagePeriod);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct DataUsageReq {
     pub mac: String,
     pub period: DataUsagePeriod,
 }
+rpc_toolkit::reflect_ts!(DataUsageReq);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct DataUsagePoint {
     pub timestamp: u64,
     pub upload: u64,
     pub download: u64,
 }
+rpc_toolkit::reflect_ts!(DataUsagePoint);
 
 // --- Traffic cache for speed computation ---
 

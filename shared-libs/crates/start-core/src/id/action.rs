@@ -2,13 +2,15 @@ use std::path::Path;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::{Id, InvalidId};
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, TS)]
-#[ts(type = "string")]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, visit_rs::VisitFields)]
+#[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+#[visit(opaque, type_attributes(visit::wire))]
 pub struct ActionId(Id);
+
+rpc_toolkit::reflect_ts!(ActionId);
 impl FromStr for ActionId {
     type Err = InvalidId;
     fn from_str(s: &str) -> Result<Self, Self::Err> {

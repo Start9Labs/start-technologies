@@ -15,7 +15,6 @@ use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::instrument;
-use ts_rs::TS;
 
 pub mod diagnostic;
 
@@ -42,35 +41,41 @@ use crate::util::Invoke;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::AtomicFile;
 
-#[derive(Deserialize, Serialize, Parser, TS)]
-#[ts(export)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct UpdateSystemParams {
     #[arg(help = "help.arg.registry-url")]
-    #[ts(type = "string")]
     registry: Url,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
     #[arg(
         long = "to",
         value_name = "TARGET",
         help = "help.arg.update-target-version"
     )]
+    #[visit(opaque, type_attributes(visit::wire))]
     target_version: Option<VersionRange>,
     #[arg(long = "no-progress", action = ArgAction::SetFalse, help = "help.arg.no-progress")]
     #[serde(default)]
     progress: bool,
 }
 
-#[derive(Deserialize, Serialize, TS)]
-#[ts(export)]
+rpc_toolkit::reflect_ts!(UpdateSystemParams);
+rpc_toolkit::ts_export!(UpdateSystemParams, namespaces = [""]);
+
+#[derive(Deserialize, Serialize, VisitFields)]
 pub struct UpdateSystemRes {
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     target: Option<Version>,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     progress: Option<Guid>,
 }
+
+rpc_toolkit::reflect_ts!(UpdateSystemRes);
+rpc_toolkit::ts_export!(UpdateSystemRes, namespaces = [""]);
 
 /// An user/ daemon would call this to update the system to the latest version and do the updates available,
 /// and this will return something if there is an update, and in that case there will need to be a restart.

@@ -99,7 +99,6 @@ use rpc_toolkit::{
     from_fn_async_local, from_fn_blocking,
 };
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::context::{CliContext, DiagnosticContext, InitContext, RpcContext};
 use crate::disk::fsck::RequiresReboot;
@@ -108,28 +107,32 @@ use crate::system::kiosk;
 use crate::tunnel::context::TunnelUrlParams;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, visit_rs::VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
-#[ts(export)]
 pub struct EchoParams {
     #[arg(help = "help.arg.echo-message")]
     message: String,
 }
 
+rpc_toolkit::reflect_ts!(EchoParams);
+rpc_toolkit::ts_export!(EchoParams, namespaces = [""]);
+
 pub fn echo<C: Context>(_: C, EchoParams { message }: EchoParams) -> Result<String, RpcError> {
     Ok(message)
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
+#[derive(Debug, Deserialize, Serialize, visit_rs::VisitVariants)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub enum ApiState {
     Error,
     Initializing,
     Running,
 }
+
+rpc_toolkit::reflect_ts!(ApiState);
+rpc_toolkit::ts_export!(ApiState, namespaces = [""]);
 impl std::fmt::Display for ApiState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(&self, f)
@@ -236,6 +239,7 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "completions",
             from_fn(bins::start_cli::completions)
+                .no_ts()
                 .no_display()
                 .with_about("about.print-shell-completions"),
         )
@@ -259,6 +263,7 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
         api = api.subcommand(
             "flash-os",
             from_fn_async(os_install::cli_install_os)
+                .no_ts()
                 .no_display()
                 .with_about("about.flash-startos"),
         );
@@ -321,6 +326,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "logs",
             from_fn_async(logs::cli_logs::<RpcContext, Empty>)
+                .no_ts()
                 .no_display()
                 .with_about("about.display-os-logs"),
         )
@@ -331,6 +337,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "kernel-logs",
             from_fn_async(logs::cli_logs::<RpcContext, Empty>)
+                .no_ts()
                 .no_display()
                 .with_about("about.display-kernel-logs"),
         )
@@ -485,6 +492,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "install",
             from_fn_async_local(install::cli_install)
+                .no_ts()
                 .no_display()
                 .with_about("about.install-package"),
         )
@@ -597,6 +605,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "logs",
             from_fn_async(logs::cli_logs::<RpcContext, logs::PackageIdParams>)
+                .no_ts()
                 .no_display()
                 .with_about("about.display-package-logs"),
         )
@@ -614,6 +623,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "attach",
             from_fn_async_local(service::cli_attach)
+                .no_ts()
                 .no_display()
                 .with_about("about.execute-commands-container"),
         )

@@ -1,7 +1,6 @@
 use digest::Update;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWrite;
-use ts_rs::TS;
 
 use crate::prelude::*;
 use crate::s9pk::S9pk;
@@ -11,15 +10,18 @@ use crate::sign::commitment::{Commitment, Digestable};
 use crate::util::io::TrackingIO;
 use crate::util::serde::Base64;
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, HasModel, TS, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, HasModel, VisitFields, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct MerkleArchiveCommitment {
     pub root_sighash: Base64<[u8; 32]>,
-    #[ts(type = "number")]
+    #[visit(ts(type = "number"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub root_maxsize: u64,
 }
+
+rpc_toolkit::reflect_ts!(MerkleArchiveCommitment);
+rpc_toolkit::ts_export!(MerkleArchiveCommitment, namespaces = [""]);
 impl MerkleArchiveCommitment {
     pub fn from_query(query: &str) -> Result<Option<Self>, Error> {
         let mut root_sighash = None;

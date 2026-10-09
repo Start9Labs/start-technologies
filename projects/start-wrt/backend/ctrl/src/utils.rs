@@ -18,8 +18,9 @@ use crate::prelude::*;
 /// that adds a `CommandFactory` impl so it can be used directly as a handler
 /// `Params` type (rather than flattened inside a `#[derive(Parser)]` struct,
 /// which is how startos uses its version).
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone, visit_rs::VisitFields)]
 pub struct DeserializeStdin<T>(pub T);
+rpc_toolkit::reflect_ts!(impl [T] for DeserializeStdin<T> where [T: rpc_toolkit::ts::TS]);
 
 impl<T: Default> Default for DeserializeStdin<T> {
     fn default() -> Self {

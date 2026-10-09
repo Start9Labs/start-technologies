@@ -4,11 +4,13 @@ use std::str::FromStr;
 
 use imbl_value::InternedString;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, TS)]
-#[ts(type = "string")]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, visit_rs::VisitFields)]
+#[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+#[visit(opaque, type_attributes(visit::wire))]
 pub struct ReplayId(InternedString);
+
+rpc_toolkit::reflect_ts!(ReplayId);
 impl<T> From<T> for ReplayId
 where
     T: Into<InternedString>,

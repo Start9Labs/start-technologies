@@ -11,18 +11,20 @@ use crate::invoke::Invoke;
 use crate::prelude::*;
 use crate::ServerContext;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct LogEntry {
     pub timestamp: String,
     pub message: String,
 }
+rpc_toolkit::reflect_ts!(LogEntry);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct LogsResponse {
     pub entries: Vec<LogEntry>,
 }
+rpc_toolkit::reflect_ts!(LogsResponse);
 
 /// Parse a logread line into a LogEntry.
 ///

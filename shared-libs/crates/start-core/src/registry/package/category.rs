@@ -4,7 +4,6 @@ use clap::Parser;
 use imbl_value::InternedString;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::PackageId;
 use crate::context::CliContext;
@@ -61,16 +60,17 @@ pub fn category_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[command(rename_all = "kebab-case")]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct AddCategoryParams {
-    #[ts(type = "string")]
     pub id: InternedString,
     pub name: LocaleString,
 }
+
+rpc_toolkit::reflect_ts!(AddCategoryParams);
+rpc_toolkit::ts_export!(AddCategoryParams, namespaces = [""]);
 
 pub async fn add_category(
     ctx: RegistryContext,
@@ -88,15 +88,16 @@ pub async fn add_category(
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[command(rename_all = "kebab-case")]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct RemoveCategoryParams {
-    #[ts(type = "string")]
     pub id: InternedString,
 }
+
+rpc_toolkit::reflect_ts!(RemoveCategoryParams);
+rpc_toolkit::ts_export!(RemoveCategoryParams, namespaces = [""]);
 
 pub async fn remove_category(
     ctx: RegistryContext,
@@ -114,16 +115,17 @@ pub async fn remove_category(
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[command(rename_all = "kebab-case")]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct AddPackageToCategoryParams {
-    #[ts(type = "string")]
     pub id: InternedString,
     pub package: PackageId,
 }
+
+rpc_toolkit::reflect_ts!(AddPackageToCategoryParams);
+rpc_toolkit::ts_export!(AddPackageToCategoryParams, namespaces = [""]);
 
 pub async fn add_package(
     ctx: RegistryContext,
@@ -144,16 +146,17 @@ pub async fn add_package(
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[command(rename_all = "kebab-case")]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct RemovePackageFromCategoryParams {
-    #[ts(type = "string")]
     pub id: InternedString,
     pub package: PackageId,
 }
+
+rpc_toolkit::reflect_ts!(RemovePackageFromCategoryParams);
+rpc_toolkit::ts_export!(RemovePackageFromCategoryParams, namespaces = [""]);
 
 pub async fn remove_package(
     ctx: RegistryContext,

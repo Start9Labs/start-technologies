@@ -185,7 +185,7 @@ fn mark_overlay_ready(overlay_mount: &str) -> Result<(), Error> {
 // Disk state detection
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct DiskState {
     /// An eMMC device was found.
@@ -193,6 +193,7 @@ pub struct DiskState {
     /// The eMMC has existing firmware (rootfs partition present).
     pub has_firmware: bool,
 }
+rpc_toolkit::reflect_ts!(DiskState);
 
 pub async fn detect_disk_state() -> Result<DiskState, Error> {
     let boot_dev = match flash::boot_device().await {
@@ -570,15 +571,16 @@ async fn write_timezone(merged_mount: &str, iana: &str) -> Result<(), Error> {
 // Flash orchestration
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, visit_rs::VisitVariants)]
 #[serde(rename_all = "kebab-case")]
 pub enum FlashMode {
     Update,
     FreshStart,
 }
+rpc_toolkit::reflect_ts!(FlashMode);
 
 /// Streaming event sent to the frontend during flash.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, visit_rs::VisitVariants)]
 #[serde(
     tag = "phase",
     rename_all = "camelCase",
@@ -601,6 +603,8 @@ pub enum SetupEvent {
         message: String,
     },
 }
+rpc_toolkit::reflect_ts!(SetupEvent);
+rpc_toolkit::ts_export!(SetupEvent, namespaces = ["events"]);
 
 /// Run the full setup flash sequence (blocking).
 ///
@@ -785,12 +789,13 @@ async fn run_setup_flash_inner(
 // RPC endpoints
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct SetupStatusRes {
     pub setup_mode: bool,
     pub disk: DiskState,
 }
+rpc_toolkit::reflect_ts!(SetupStatusRes);
 
 #[instrument(skip_all)]
 async fn setup_status_impl(_ctx: ServerContext) -> Result<SetupStatusRes, Error> {

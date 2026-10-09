@@ -9,7 +9,6 @@ use http::HeaderValue;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWrite;
 use tokio_util::io::StreamReader;
-use ts_rs::TS;
 use url::Url;
 
 use crate::prelude::*;
@@ -17,19 +16,24 @@ use crate::s9pk::merkle_archive::hash::VerifyingWriter;
 use crate::sign::commitment::{Commitment, Digestable};
 use crate::util::serde::Base64;
 
-#[derive(Clone, Debug, Deserialize, Serialize, HasModel, PartialEq, Eq, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, HasModel, PartialEq, Eq, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct RequestCommitment {
-    #[ts(type = "number")]
+    #[visit(ts(type = "number"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub timestamp: i64,
-    #[ts(type = "number")]
+    #[visit(ts(type = "number"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub nonce: u64,
-    #[ts(type = "number")]
+    #[visit(ts(type = "number"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub size: u64,
     pub blake3: Base64<[u8; 32]>,
 }
+
+rpc_toolkit::reflect_ts!(RequestCommitment);
+rpc_toolkit::ts_export!(RequestCommitment, namespaces = [""]);
 impl RequestCommitment {
     pub fn append_query(&self, url: &mut Url) {
         use base64::Engine;

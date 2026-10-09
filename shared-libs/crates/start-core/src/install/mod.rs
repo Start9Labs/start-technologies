@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tracing::instrument;
-use ts_rs::TS;
 
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::package::{ManifestPreference, PackageStateMatchModelRef};
@@ -70,12 +69,14 @@ pub async fn list(ctx: RpcContext) -> Result<Vec<Value>, Error> {
         .collect())
 }
 
-#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize, TS)]
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize, VisitVariants)]
 #[serde(rename_all = "camelCase")]
 pub enum MinMax {
     Min,
     Max,
 }
+
+rpc_toolkit::reflect_ts!(MinMax);
 impl Default for MinMax {
     fn default() -> Self {
         MinMax::Max
@@ -109,15 +110,16 @@ impl std::fmt::Display for MinMax {
     }
 }
 
-#[derive(Deserialize, Serialize, TS)]
+#[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct InstallParams {
-    #[ts(type = "string")]
     registry: Url,
     id: PackageId,
     version: VersionString,
 }
+
+rpc_toolkit::reflect_ts!(InstallParams);
+rpc_toolkit::ts_export!(InstallParams, namespaces = [""]);
 
 #[instrument(skip_all)]
 pub async fn install(
@@ -176,22 +178,27 @@ pub async fn install(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, TS)]
-#[ts(export)]
+#[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct SideloadParams {
-    #[ts(skip)]
+    #[visit(ts(skip), wire = "rpc_toolkit::ts::Unknown")]
     #[serde(rename = "__Auth_signer")]
+    #[visit(opaque, type_attributes(visit::wire))]
     signer: Option<InternedString>,
 }
 
-#[derive(Deserialize, Serialize, TS)]
-#[ts(export)]
+rpc_toolkit::reflect_ts!(SideloadParams);
+rpc_toolkit::ts_export!(SideloadParams, namespaces = [""]);
+
+#[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct SideloadResponse {
     pub upload: Guid,
     pub progress: Guid,
 }
+
+rpc_toolkit::reflect_ts!(SideloadResponse);
+rpc_toolkit::ts_export!(SideloadResponse, namespaces = [""]);
 
 #[instrument(skip_all)]
 pub async fn sideload(
@@ -288,15 +295,17 @@ pub async fn sideload(
     Ok(SideloadResponse { upload, progress })
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct CancelInstallParams {
     #[arg(help = "help.arg.package-id")]
     pub id: PackageId,
 }
+
+rpc_toolkit::reflect_ts!(CancelInstallParams);
+rpc_toolkit::ts_export!(CancelInstallParams, namespaces = [""]);
 
 #[instrument(skip_all)]
 pub fn cancel_install(
@@ -369,13 +378,15 @@ impl FromArgMatches for CliInstallParams {
     }
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 pub struct InstalledVersionParams {
     #[arg(help = "help.arg.package-id")]
     id: PackageId,
 }
+
+rpc_toolkit::reflect_ts!(InstalledVersionParams);
+rpc_toolkit::ts_export!(InstalledVersionParams, namespaces = [""]);
 
 pub async fn installed_version(
     ctx: RpcContext,
@@ -551,9 +562,8 @@ pub async fn cli_install(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct UninstallParams {
@@ -566,6 +576,9 @@ pub struct UninstallParams {
     #[serde(default)]
     force: bool,
 }
+
+rpc_toolkit::reflect_ts!(UninstallParams);
+rpc_toolkit::ts_export!(UninstallParams, namespaces = [""]);
 
 pub async fn uninstall(
     ctx: RpcContext,

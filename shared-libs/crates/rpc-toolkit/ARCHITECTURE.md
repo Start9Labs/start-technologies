@@ -14,7 +14,7 @@ emitting TypeScript definitions for clients.
   no `[patch]` redirect.
 - **Notable deps:** `imbl-value` (sibling crate, path dep) for the value model, `yajrc` for the
   JSON-RPC wire types, `axum` for HTTP, `clap` for the CLI, `reqwest` for outbound remote calls,
-  and `ts-rs` (optional) for TypeScript generation.
+  and `visit-rs` (optional) for generic raw type reflection.
 
 ## Handlers
 
@@ -32,7 +32,7 @@ raw params, and inherited params.
 - **Adapters** decorate handlers through the `HandlerExt` extension trait: `NoCli` (server-only,
   hidden from the CLI), `NoDisplay` / `CustomDisplay` / `CustomDisplayFn` (control CLI output),
   `WithAbout` (clap help text), `RemoteCaller` / `InheritanceHandler` (delegation and param
-  inheritance), and the TS-output controls `NoTS` / `UnknownTS` / `CustomTS`.
+  inheritance), and `NoTS` / `OverrideParamsTS` / `OverrideReturnTS` for binding control.
 
 Erasure happens through the internal `AnyHandler` and the public `DynHandler`. `WithContext` plus
 `Handler::handler_for` do the runtime `TypeId`-checked context binding (see AGENTS.md "Gotchas").
@@ -78,12 +78,50 @@ param-flattening newtype, and the async plumbing (`JobRunner`, `StreamUntil`, `p
 
 ## TypeScript generation
 
-Under the `ts-rs` feature, handlers carry type info via `HandlerTS`, and `type_helpers()` returns
-the `src/type-helpers.ts` sidecar describing the generated tree (`RpcHandler`, `ParentHandler`,
-`LeafHandler`, and the `RpcParamType` / return-type helpers). This lets a TypeScript client be
-typed against the same handler tree the server runs.
+Under the opt-in `ts` feature, handler bindings compose parameter, return and child
+writers through `HandlerTSBindings`. Params traverse serde's input shape; returns
+traverse its output shape. RPC parses raw `DeclarationInfo::source` and owns one
+direction-aware normalization plan through pinned `serde_derive_internals` for
+handler and standalone roots. It owns layout, renames, skips, defaults, hooks,
+literals and docs. The parsed AST is normalization input, not a synthetic DTO or
+Rust implementation. Whole-root explicit wire overrides precede serde validation.
+
+`VisitFields` and `VisitVariants` supply unconditional `TypeInfo` declaration facts.
+RPC collects struct storage through `VisitFieldsStaticNamed`; enum storage uses
+`VisitVariantsStatic` and `VisitVariantFieldsStaticNamed`. `FieldInfo::visit_index`
+pairs filtered callbacks with original coordinates. RPC's `ShapeKind` dispatcher
+uses the method-free `StructKind` and `EnumKind` markers from `TypeInfo::Kind`.
+Explicit opacity produces ordinary `Opaque<T>` marker callbacks without storage
+bounds. Independent `visit_rs::VisitTypeAttributes` traversal at the runtime root
+visits `TypeAttribute<T>` carriers for locally selected metadata literals in their
+owner scope. Selected-target support does not constrain field visitors.
+RPC selects typed callbacks by
+metadata coordinate and registers definitions lazily, avoiding unused or
+literal-replaced dependencies. Typed `TS::IS_OPTION` propagates through aliases,
+references and Box/Arc/Rc/Cow and combines with serde policy. Hook JSON shape
+agreement remains the actual decoder/serializer and authored DTO hint contract.
+
+`rpc_toolkit::reflect_ts!`, `ts_export!` and `impl_ts_shape!` are consumer-owned
+`macro_rules!` bridges. Generic roots keep payload bounds and inline by default;
+borrowed types retain their lifetimes. Non-omitted fields require typed storage or
+selected-target facts, including literal replacements. Missing facts produce an
+error rather than guessed optionality. RPC owns scalar/external bridges:
+optional chrono/ipnet/josekit/url/yajrc/exver/patch-db integrations, CBOR integration,
+and imbl-value/yasi bridges. Dependency edges point from RPC to leaves; patch-db
+exposes generic `reflect` support rather than TypeScript facilities.
+
+`TSVisitor` owns the definition registry. It registers a named type before expanding
+its fields, enabling recursion, and rejects alias collisions across Rust types or
+directions. Input aliases receive an `Input` suffix. `handler_bindings()` assembles
+these definitions, the root alias and the `type-helpers.ts` inference helpers.
+Generation errors are returned rather than hidden in release builds.
+
+The helpers resolve every dotted segment against actual children, combine inherited
+parameters and distinguish namespaces from callable parents. Adapter passthrough
+preserves the binding opt-out regardless of decoration order. See
+[docs/typescript.md](docs/typescript.md) for the supported surface and overrides.
 
 ## Further reading
 
 - [README.md](README.md) — what the crate is and a usage sketch.
-- [AGENTS.md](AGENTS.md) — file map and contributor gotchas.
+- [AGENTS.md](AGENTS.md) — file map and build/test/format workflow.

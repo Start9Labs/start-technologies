@@ -28,7 +28,6 @@ use tokio_rustls::rustls::server::ClientHello;
 use tokio_rustls::rustls::{ClientConfig, ServerConfig};
 use tokio_util::sync::CancellationToken;
 use tracing::instrument;
-use ts_rs::TS;
 use visit_rs::Visit;
 
 use crate::context::{CliContext, RpcContext};
@@ -64,23 +63,25 @@ use crate::{GatewayId, HOST_IP, HostId, PackageId, ResultExt};
 /// *its own* hostnames on a shared external port, never another's.
 type HostMapOwner = (Option<PackageId>, HostId);
 
-#[derive(Debug, Clone, Deserialize, Serialize, HasModel, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct PassthroughInfo {
-    #[ts(type = "string")]
     pub hostname: InternedString,
     pub listen_port: u16,
-    #[ts(type = "string")]
     pub backend: SocketAddr,
-    #[ts(type = "string[]")]
+    #[visit(ts(type = "string[]"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub public_gateways: BTreeSet<GatewayId>,
-    #[ts(type = "string[]")]
+    #[visit(ts(type = "string[]"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub private_ips: BTreeSet<IpAddr>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser)]
+rpc_toolkit::reflect_ts!(PassthroughInfo);
+rpc_toolkit::ts_export!(PassthroughInfo, namespaces = [""]);
+
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "kebab-case")]
 struct AddPassthroughParams {
@@ -96,7 +97,9 @@ struct AddPassthroughParams {
     pub private_ip: Vec<IpAddr>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser)]
+rpc_toolkit::reflect_ts!(AddPassthroughParams);
+
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "kebab-case")]
 struct RemovePassthroughParams {
@@ -105,6 +108,8 @@ struct RemovePassthroughParams {
     #[arg(long)]
     pub listen_port: u16,
 }
+
+rpc_toolkit::reflect_ts!(RemovePassthroughParams);
 
 pub fn vhost_api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
@@ -1642,10 +1647,12 @@ impl ProxyContext {
 }
 
 /// The protocols a binding answers with, carried on the wire as the list itself.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, VisitFields)]
 #[serde(transparent)]
-#[ts(export)]
 pub struct AlpnInfo(pub Vec<MaybeUtf8String>);
+
+rpc_toolkit::reflect_ts!(AlpnInfo);
+rpc_toolkit::ts_export!(AlpnInfo, namespaces = [""]);
 
 #[cfg(test)]
 mod alpn_wire_format {

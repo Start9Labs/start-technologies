@@ -28,6 +28,7 @@ pub fn diagnostic<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "logs",
             from_fn_async(crate::logs::cli_logs::<DiagnosticContext, Empty>)
+                .no_ts()
                 .no_display()
                 .with_about("about.display-os-logs"),
         )
@@ -39,6 +40,7 @@ pub fn diagnostic<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "kernel-logs",
             from_fn_async(crate::logs::cli_logs::<DiagnosticContext, Empty>)
+                .no_ts()
                 .no_display()
                 .with_about("about.display-kernel-logs"),
         )

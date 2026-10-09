@@ -8,6 +8,8 @@ STARTWRT_ARCH := riscv64
 STARTWRT_BIN := target/$(STARTWRT_RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startwrt
 STARTWRT_WEB_DIST := $(STARTWRT_DIR)/web/dist/startwrt/browser/immutable-assets.txt
 STARTWRT_WEB_CONFIG := $(STARTWRT_DIR)/web/config.json
+STARTWRT_BINDINGS_DIR := $(STARTWRT_DIR)/web/src/app/services/api
+STARTWRT_BINDINGS := $(STARTWRT_BINDINGS_DIR)/bindings.ts $(STARTWRT_BINDINGS_DIR)/events.ts
 STARTWRT_GIT_HASH_FILE := $(STARTWRT_DIR)/build/env/GIT_HASH.txt
 
 # Refresh GIT_HASH.txt on every make invocation (parse-time side-effect) so the
@@ -21,9 +23,7 @@ STARTWRT_RUST_SRC := $(call ls-files, $(STARTWRT_DIR)/backend)
 # start-core (aliased `startos`, covered with patch-db by CORE_SRC from
 # build/common.mk), plus rpc-toolkit and imbl-value. Without these prereqs a
 # shared-crate edit leaves `make start-wrt`/`start-wrt-update` with a stale binary.
-STARTWRT_SHARED_RUST_SRC := $(CORE_SRC) \
-	$(call ls-files, shared-libs/crates/rpc-toolkit) \
-	$(call ls-files, shared-libs/crates/imbl-value)
+STARTWRT_SHARED_RUST_SRC := $(CORE_SRC)
 STARTWRT_WEB_SRC := $(call ls-files, $(STARTWRT_DIR)/web)
 
 STARTWRT_OPENWRT := $(STARTWRT_DIR)/openwrt
@@ -66,12 +66,24 @@ $(STARTWRT_BIN): $(STARTWRT_RUST_SRC) $(STARTWRT_SHARED_RUST_SRC) Cargo.toml Car
 	ARCH=$(STARTWRT_ARCH) RUST_ARCH=$(STARTWRT_RUST_ARCH) PROFILE=$(PROFILE) ./$(STARTWRT_DIR)/build/build-rust.sh
 	@touch $(STARTWRT_BIN)
 
-# --- web (Angular project in the root workspace; built via `npm run build:wrt`) ---
-# Shares the workspace deps/build:deps machinery with the other apps: WEB_SHARED_SRC
-# and .angular/.updated carry the shared libs + the @start9labs/start-core / patch-db
-# client file: deps (defined in shared-libs/ts-modules/build.mk). $(STARTWRT_WEB_CONFIG)
-# is start-wrt's own runtime config.json (separate from the root workspace config.json).
-$(STARTWRT_WEB_DIST): $(STARTWRT_WEB_SRC) $(WEB_SHARED_SRC) $(IMMUTABLE_ASSETS_GENERATOR) .angular/.updated $(STARTWRT_WEB_CONFIG)
+define STARTWRT_GENERATE_BINDINGS
+cargo run --profile bindings -p startwrt-core --example generate_rpc_bindings --locked -- $(STARTWRT_BINDINGS_DIR)/bindings.ts
+npm exec -- prettier -w $(STARTWRT_BINDINGS)
+endef
+
+.PHONY: start-wrt-rpc-bindings start-wrt-rpc-bindings-check
+start-wrt-rpc-bindings: node_modules/.package-lock.json
+	$(STARTWRT_GENERATE_BINDINGS)
+
+start-wrt-rpc-bindings-check: node_modules/.package-lock.json
+	$(STARTWRT_GENERATE_BINDINGS)
+	@if [ -n "$$(git status --porcelain -- $(STARTWRT_BINDINGS))" ]; then \
+		echo "StartWRT bindings are out of date — run 'make start-wrt-rpc-bindings' and commit the result:"; \
+		git --no-pager diff --stat -- $(STARTWRT_BINDINGS); git status --porcelain -- $(STARTWRT_BINDINGS); \
+		exit 1; \
+	fi
+
+$(STARTWRT_WEB_DIST): $(STARTWRT_WEB_SRC) $(STARTWRT_BINDINGS) $(WEB_SHARED_SRC) $(IMMUTABLE_ASSETS_GENERATOR) .angular/.updated $(STARTWRT_WEB_CONFIG)
 	npm --prefix . run build:wrt
 	touch $(STARTWRT_WEB_DIST)
 

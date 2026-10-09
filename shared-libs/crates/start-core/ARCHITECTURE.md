@@ -83,9 +83,16 @@ See [core-rust-patterns.md](core-rust-patterns.md) for common utilities (Invoke 
 
 ## Cross-layer verification
 
-Rust types marked `#[ts(export)]` are the source of truth for TypeScript consumers (the web UI
-and the package container-runtime, via the SDK). They do **not** propagate automatically. From
-the repo root:
+Rust structs derive `visit_rs::VisitFields` and enums derive
+`visit_rs::VisitVariants`, supplying raw facts and static traversal; RPC owns direction-aware serde
+normalization and TypeScript rendering through adjacent `rpc_toolkit::reflect_ts!`
+bridges. `rpc_toolkit::ts_export!` registrations beside those types own standalone
+namespace roots. Raw `visit(ts(...))` hints remain opaque to reflection. Local
+`type_attributes` selectors compile authoritative wire-hint/conversion literals in
+the owner scope; explicit `visit(opaque)` avoids hidden storage bounds. Actual
+decoder DTOs own hook fidelity, and typed `TS::IS_OPTION` combines with serde
+policy rather than syntactic field tests. The generated contracts serve the web UI and the package
+container-runtime through the SDK. They do **not** propagate automatically. From the repo root:
 
 1. `make start-core-ts-bindings` — regenerates `shared-libs/crates/start-core/bindings/` (via `build/build-ts.sh`),
    then rsyncs it into `shared-libs/ts-modules/start-core/lib/osBindings/`.
@@ -93,7 +100,7 @@ the repo root:
    `cd projects/start-sdk && make bundle` (the SDK bundle container-runtime imports) — rebuilds the
    TS bundles that downstream actually imports.
 
-Until both steps run, a changed `#[ts(export)]` type is out of sync with everything downstream.
+Until both steps run, a changed `ts_export!` type is out of sync with everything downstream.
 
 ## Further reading
 

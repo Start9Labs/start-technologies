@@ -6,7 +6,6 @@ use color_eyre::eyre::eyre;
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
-use ts_rs::TS;
 
 use crate::Error;
 use crate::context::config::ServerConfig;
@@ -110,7 +109,7 @@ async fn partition(
     }
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
@@ -121,7 +120,9 @@ pub struct InstallOsParams {
     data_drive: Option<DataDrive>,
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+rpc_toolkit::reflect_ts!(InstallOsParams);
+
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
@@ -131,6 +132,8 @@ struct DataDrive {
     #[arg(long, help = "help.arg.wipe-drive")]
     wipe: bool,
 }
+
+rpc_toolkit::reflect_ts!(DataDrive);
 
 fn is_startos_pool_guid(guid: &str) -> bool {
     guid.starts_with("EMBASSY_") || guid.starts_with("STARTOS_")

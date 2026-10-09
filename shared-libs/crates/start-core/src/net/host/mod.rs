@@ -10,7 +10,6 @@ use patch_db::DestructureMut;
 use patch_db::json_ptr::JsonPointer;
 use rpc_toolkit::{Context, Empty, HandlerExt, OrEmpty, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
@@ -31,10 +30,9 @@ use crate::{GatewayId, HostId, PackageId};
 pub mod address;
 pub mod binding;
 
-#[derive(Debug, Default, Deserialize, Serialize, HasModel, TS)]
+#[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct Host {
     pub bindings: Bindings,
     #[serde(default)]
@@ -46,17 +44,17 @@ pub struct Host {
     pub port_forwards: BTreeSet<PortForward>,
 }
 
+rpc_toolkit::reflect_ts!(Host);
+rpc_toolkit::ts_export!(Host, namespaces = [""]);
+
 fn default_port_forward_count() -> u16 {
     1
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct PortForward {
-    #[ts(type = "string")]
     pub src: SocketAddrV4,
-    #[ts(type = "string")]
     pub dst: SocketAddrV4,
     pub gateway: GatewayId,
     /// Number of contiguous ports covered by this forward (always >= 1).
@@ -70,6 +68,9 @@ pub struct PortForward {
     #[serde(default = "const_true")]
     pub local: bool,
 }
+
+rpc_toolkit::reflect_ts!(PortForward);
+rpc_toolkit::ts_export!(PortForward, namespaces = [""]);
 
 impl AsRef<Host> for Host {
     fn as_ref(&self) -> &Host {
@@ -567,10 +568,12 @@ impl Model<Host> {
     }
 }
 
-#[derive(Debug, Default, Deserialize, Serialize, HasModel, TS)]
+#[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct Hosts(pub BTreeMap<HostId, Host>);
+
+rpc_toolkit::reflect_ts!(Hosts);
+rpc_toolkit::ts_export!(Hosts, namespaces = [""]);
 
 impl Map for Hosts {
     type Key = HostId;
@@ -775,19 +778,23 @@ impl Model<Host> {
     }
 }
 
-#[derive(Deserialize, Serialize, Parser)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 pub struct RequiresPackageId {
     #[arg(help = "help.arg.package-id")]
     package: PackageId,
 }
 
-#[derive(Deserialize, Serialize, Parser)]
+rpc_toolkit::reflect_ts!(RequiresPackageId);
+
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 pub struct RequiresHostId {
     #[arg(help = "help.arg.host-id")]
     host: HostId,
 }
+
+rpc_toolkit::reflect_ts!(RequiresHostId);
 
 pub trait HostApiKind: 'static {
     type Params: Send + Sync + 'static;

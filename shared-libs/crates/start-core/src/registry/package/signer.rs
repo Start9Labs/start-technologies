@@ -4,7 +4,6 @@ use clap::Parser;
 use exver::VersionRange;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::PackageId;
 use crate::context::CliContext;
@@ -46,22 +45,25 @@ pub fn signer_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[command(rename_all = "kebab-case")]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct AddPackageSignerParams {
     #[arg(help = "help.arg.package-id")]
     pub id: PackageId,
     #[arg(help = "help.arg.signer-id")]
     pub signer: Guid,
     #[arg(long, help = "help.arg.version-range")]
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub versions: Option<VersionRange>,
     #[arg(long, help = "help.arg.merge")]
     pub merge: bool,
 }
+
+rpc_toolkit::reflect_ts!(AddPackageSignerParams);
+rpc_toolkit::ts_export!(AddPackageSignerParams, namespaces = [""]);
 
 pub async fn add_package_signer(
     ctx: RegistryContext,
@@ -103,17 +105,19 @@ pub async fn add_package_signer(
         .result
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[command(rename_all = "kebab-case")]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct RemovePackageSignerParams {
     #[arg(help = "help.arg.package-id")]
     pub id: PackageId,
     #[arg(help = "help.arg.signer-id")]
     pub signer: Guid,
 }
+
+rpc_toolkit::reflect_ts!(RemovePackageSignerParams);
+rpc_toolkit::ts_export!(RemovePackageSignerParams, namespaces = [""]);
 
 pub async fn remove_package_signer(
     ctx: RegistryContext,
@@ -150,15 +154,17 @@ pub async fn remove_package_signer(
         .result
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[command(rename_all = "kebab-case")]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct ListPackageSignersParams {
     #[arg(help = "help.arg.package-id")]
     pub id: PackageId,
 }
+
+rpc_toolkit::reflect_ts!(ListPackageSignersParams);
+rpc_toolkit::ts_export!(ListPackageSignersParams, namespaces = [""]);
 
 pub async fn list_package_signers(
     ctx: RegistryContext,

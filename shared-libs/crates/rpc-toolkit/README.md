@@ -5,7 +5,8 @@ A toolkit for creating JSON-RPC 2.0 servers with automatic CLI bindings.
 `rpc-toolkit` lets you write typed, composable RPC handlers once and use them two ways: served as a
 JSON-RPC 2.0 endpoint (over HTTP, a Unix socket, or TCP) and/or bound to a `clap` command-line
 application. Params and results flow through `imbl-value`; sync and async handlers are both
-supported; and an optional `ts-rs` feature emits TypeScript type definitions for the handler tree.
+supported; and an optional `ts` feature emits TypeScript bindings for the handler tree,
+using separate serde input and output shapes.
 
 ## Place in the monorepo
 
@@ -51,7 +52,23 @@ CLI subcommands, or served over HTTP via `HttpServer` / over a socket via `Serve
 ## Features
 
 - `cbor` _(default)_ — enables CBOR request/response encoding alongside JSON over HTTP.
-- `ts-rs` — emits TypeScript type definitions; exposes `type_helpers()`.
+- `ts` — enables `rpc_toolkit::ts::handler_bindings()` and the typed method tree.
+  Struct DTOs derive generic `visit_rs::VisitFields`; enums derive
+  `visit_rs::VisitVariants`. Both supply adjacent `rpc_toolkit::reflect_ts!`
+  consumer bridges. RPC owns serde normalization,
+  TypeScript rendering and typed `ts_export!` roots. See [the TypeScript guide](docs/typescript.md).
+
+Optional `chrono`, `ipnet`, `josekit`, `url`, `yajrc`, `exver` and `patch-db`
+features enable consumer-owned scalar/external bridges with `ts`; CBOR bridges
+follow `cbor`. Bridges for `imbl-value` and `yasi` use RPC's one-way dependencies.
+The `patch-db` bridge enables that crate's generic `reflect` feature. Leaves do
+not depend on RPC or expose TypeScript features.
+
+Generate the example module from the monorepo root:
+
+```sh
+cargo run -p rpc-toolkit --example generate_ts --features ts
+```
 
 ## License
 
@@ -60,4 +77,4 @@ MIT. See the `license` field in `Cargo.toml`.
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how the crate works internally.
-- [AGENTS.md](AGENTS.md) — build, test, format, and PR conventions.
+- [AGENTS.md](AGENTS.md) — file map and build/test/format workflow.

@@ -6,6 +6,7 @@ import {
   GetFileReq,
   GetFileRes,
   GetUciReq,
+  GetUciRes,
   LoginReq,
   SystemInfoRes,
   SetFileReq,
@@ -77,7 +78,7 @@ import {
   DiagnosticsCreateRes,
 } from './api.service'
 import { RpcService } from '../rpc.service'
-import { UciFile } from './types'
+import type { Api, RpcParamType, RpcReturnType } from './bindings'
 
 @Injectable({
   providedIn: 'root',
@@ -85,7 +86,7 @@ import { UciFile } from './types'
 export class LiveApiService extends ApiService {
   private readonly rpc = inject(RpcService)
 
-  async login(params: LoginReq): Promise<null> {
+  async login(params: LoginReq): Promise<RpcReturnType<Api, 'auth.login'>> {
     return this.rpc.request({ method: 'auth.login', params })
   }
 
@@ -113,13 +114,11 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'file.set', params })
   }
 
-  async getUci<T extends Record<string, UciFile<any>>>(
-    params: GetUciReq,
-  ): Promise<T> {
+  async getUci(params: GetUciReq): Promise<GetUciRes> {
     return this.rpc.request({ method: 'uci.get', params })
   }
 
-  async setUci<T extends string[]>(params: SetUciReq): Promise<SetUciRes<T>> {
+  async setUci(params: SetUciReq): Promise<SetUciRes> {
     return this.rpc.request({ method: 'uci.set', params })
   }
 
@@ -143,7 +142,9 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'auth.set-password', params })
   }
 
-  async setPreferences(params: SetPreferencesReq): Promise<null> {
+  async setPreferences(
+    params: SetPreferencesReq,
+  ): Promise<RpcReturnType<Api, 'system.set-preferences'>> {
     return this.rpc.request({ method: 'system.set-preferences', params })
   }
 
@@ -236,7 +237,9 @@ export class LiveApiService extends ApiService {
     })
   }
 
-  async setInitialPassword(params: SetInitialPasswordReq): Promise<null> {
+  async setInitialPassword(
+    params: SetInitialPasswordReq,
+  ): Promise<RpcReturnType<Api, 'auth.set-initial-password'>> {
     return this.rpc.request({
       method: 'auth.set-initial-password',
       params,
@@ -276,10 +279,9 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'devices.set-auto-forward', params })
   }
 
-  async devicesSetDnsInjection(params: {
-    mac: string
-    allow: boolean
-  }): Promise<null> {
+  async devicesSetDnsInjection(
+    params: RpcParamType<Api, 'devices.set-dns-injection'>,
+  ): Promise<RpcReturnType<Api, 'devices.set-dns-injection'>> {
     return this.rpc.request({ method: 'devices.set-dns-injection', params })
   }
 

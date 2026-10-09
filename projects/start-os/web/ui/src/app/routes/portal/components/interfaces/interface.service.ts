@@ -174,6 +174,7 @@ export class InterfaceService {
               description: iface.description,
               masked: false,
               type: 'api',
+              preferredLauncherAddress: null,
               addressInfo,
               gatewayGroups: this.getRangeGatewayGroups(
                 addressInfo,

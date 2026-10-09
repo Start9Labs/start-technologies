@@ -5,7 +5,6 @@ use qrcode::QrCode;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
-use ts_rs::TS;
 
 pub use crate::ActionId;
 use crate::context::{CliContext, RpcContext};
@@ -48,19 +47,29 @@ pub fn action_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionInput {
     #[serde(default)]
     pub event_id: Guid,
-    #[ts(type = "Record<string, unknown>")]
+    #[visit(
+        ts(type = "Record<string, unknown>"),
+        wire = "rpc_toolkit::ts::Unknown"
+    )]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub spec: Value,
-    #[ts(type = "Record<string, unknown> | null")]
+    #[visit(
+        ts(type = "Record<string, unknown> | null"),
+        wire = "Option<rpc_toolkit::ts::Unknown>"
+    )]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub value: Option<Value>,
 }
 
-#[derive(Deserialize, Serialize, TS, Parser)]
+rpc_toolkit::reflect_ts!(ActionInput);
+rpc_toolkit::ts_export!(ActionInput, namespaces = [""]);
+
+#[derive(Deserialize, Serialize, VisitFields, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct GetActionInputParams {
@@ -68,11 +77,17 @@ pub struct GetActionInputParams {
     pub package_id: PackageId,
     #[arg(help = "help.arg.action-id")]
     pub action_id: ActionId,
-    #[ts(type = "Record<string, unknown> | null")]
+    #[visit(
+        ts(type = "Record<string, unknown> | null"),
+        wire = "Option<rpc_toolkit::ts::Unknown>"
+    )]
     #[serde(default)]
     #[arg(skip)]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub prefill: Option<Value>,
 }
+
+rpc_toolkit::reflect_ts!(GetActionInputParams);
 
 #[instrument(skip_all)]
 pub async fn get_action_input(
@@ -92,15 +107,17 @@ pub async fn get_action_input(
         .await
 }
 
-#[derive(Debug, Serialize, Deserialize, TS)]
+#[derive(Debug, Serialize, Deserialize, VisitVariants)]
 #[serde(tag = "version")]
-#[ts(export)]
 pub enum ActionResult {
     #[serde(rename = "0")]
     V0(ActionResultV0),
     #[serde(rename = "1")]
     V1(ActionResultV1),
 }
+
+rpc_toolkit::reflect_ts!(ActionResult);
+rpc_toolkit::ts_export!(ActionResult, namespaces = [""]);
 impl ActionResult {
     pub fn upcast(self) -> Self {
         match self {
@@ -133,13 +150,15 @@ impl fmt::Display for ActionResult {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, TS)]
+#[derive(Debug, Serialize, Deserialize, VisitFields)]
 pub struct ActionResultV0 {
     pub message: String,
     pub value: Option<String>,
     pub copyable: bool,
     pub qr: bool,
 }
+
+rpc_toolkit::reflect_ts!(ActionResultV0);
 impl fmt::Display for ActionResultV0 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.message)?;
@@ -161,7 +180,7 @@ impl fmt::Display for ActionResultV0 {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, TS)]
+#[derive(Debug, Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionResultV1 {
     /// Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense
@@ -172,7 +191,9 @@ pub struct ActionResultV1 {
     pub result: Option<ActionResultValue>,
 }
 
-#[derive(Debug, Serialize, Deserialize, TS)]
+rpc_toolkit::reflect_ts!(ActionResultV1);
+
+#[derive(Debug, Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionResultMember {
     /// A human-readable name or title of the value, such as "Last Active" or "Login Password"
@@ -180,11 +201,12 @@ pub struct ActionResultMember {
     /// (optional) A description of the value, such as an explaining why it exists or how to use it
     pub description: Option<String>,
     #[serde(flatten)]
-    #[ts(flatten)]
     pub value: ActionResultValue,
 }
 
-#[derive(Debug, Serialize, Deserialize, TS)]
+rpc_toolkit::reflect_ts!(ActionResultMember);
+
+#[derive(Debug, Serialize, Deserialize, VisitVariants)]
 #[serde(rename_all = "camelCase")]
 #[serde(rename_all_fields = "camelCase")]
 #[serde(tag = "type")]
@@ -194,32 +216,24 @@ pub enum ActionResultValue {
         /// multi-line text belongs in a `multiline` value.
         value: String,
         /// (optional) Whether or not to include a copy to clipboard icon to copy the value
-        #[ts(optional)]
         copyable: Option<bool>,
         /// (optional) Whether or not to also display the value as a QR code
-        #[ts(optional)]
         qr: Option<bool>,
         /// (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
-        #[ts(optional)]
         masked: Option<bool>,
         /// (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
-        #[ts(optional)]
         launchable: Option<bool>,
     },
     Multiline {
         /// The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks
         value: String,
         /// (optional) Whether or not to include a copy to clipboard icon to copy the value
-        #[ts(optional)]
         copyable: Option<bool>,
         /// (optional) Whether or not to also display the value as a QR code
-        #[ts(optional)]
         qr: Option<bool>,
         /// (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
-        #[ts(optional)]
         masked: Option<bool>,
         /// (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
-        #[ts(optional)]
         filename: Option<String>,
     },
     Group {
@@ -227,6 +241,8 @@ pub enum ActionResultValue {
         value: Vec<ActionResultMember>,
     },
 }
+
+rpc_toolkit::reflect_ts!(ActionResultValue);
 impl ActionResultValue {
     fn fmt_rec(&self, f: &mut fmt::Formatter<'_>, indent: usize) -> fmt::Result {
         match self {
@@ -305,16 +321,17 @@ pub fn display_action_result<T: Serialize>(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, TS)]
-#[ts(export)]
+#[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct RunActionParams {
     pub package_id: PackageId,
     pub event_id: Option<Guid>,
     pub action_id: ActionId,
-    #[ts(optional, type = "any")]
     pub input: Option<Value>,
 }
+
+rpc_toolkit::reflect_ts!(RunActionParams);
+rpc_toolkit::ts_export!(RunActionParams, namespaces = [""]);
 
 #[derive(Parser)]
 #[group(skip)]
@@ -399,9 +416,8 @@ pub async fn run_action(
         .map(|res| res.map(ActionResult::upcast))
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct ClearTaskParams {
@@ -413,6 +429,9 @@ pub struct ClearTaskParams {
     #[serde(default)]
     pub force: bool,
 }
+
+rpc_toolkit::reflect_ts!(ClearTaskParams);
+rpc_toolkit::ts_export!(ClearTaskParams, namespaces = [""]);
 
 #[instrument(skip_all)]
 pub async fn clear_task(

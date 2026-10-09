@@ -12,25 +12,32 @@ use crate::service::effects::prelude::*;
 use crate::service::rpc::CallbackId;
 use crate::util::serde::Pem;
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, TS, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, serde::Serialize, serde::Deserialize, visit_rs::VisitVariants, PartialEq, Eq,
+)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub enum Algorithm {
     Ecdsa,
     Ed25519,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, TS)]
+rpc_toolkit::reflect_ts!(Algorithm);
+rpc_toolkit::ts_export!(Algorithm, namespaces = [""]);
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct GetSslCertificateParams {
-    #[ts(type = "string[]")]
+    #[visit(ts(type = "string[]"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     hostnames: BTreeSet<InternedString>,
-    #[ts(optional)]
+
     algorithm: Option<Algorithm>, //"ecdsa" | "ed25519"
-    #[ts(optional)]
+
     callback: Option<CallbackId>,
 }
+
+rpc_toolkit::reflect_ts!(GetSslCertificateParams);
+rpc_toolkit::ts_export!(GetSslCertificateParams, namespaces = [""]);
 pub async fn get_ssl_certificate(
     ctx: EffectContext,
     GetSslCertificateParams {
@@ -142,15 +149,18 @@ pub async fn get_ssl_certificate(
     Ok(res)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct GetSslKeyParams {
-    #[ts(type = "string[]")]
+    #[visit(ts(type = "string[]"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     hostnames: BTreeSet<InternedString>,
-    #[ts(optional)]
+
     algorithm: Option<Algorithm>, //"ecdsa" | "ed25519"
 }
+
+rpc_toolkit::reflect_ts!(GetSslKeyParams);
+rpc_toolkit::ts_export!(GetSslKeyParams, namespaces = [""]);
 pub async fn get_ssl_key(
     context: EffectContext,
     GetSslKeyParams {

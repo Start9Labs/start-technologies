@@ -10,7 +10,6 @@ use imbl_value::InternedString;
 use patch_db::TypedDbWatch;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
-use ts_rs::TS;
 
 use crate::db::model::package::PackageState;
 use crate::db::model::public::NetworkInterfaceInfo;
@@ -388,16 +387,22 @@ impl CallbackHandlers {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, VisitFields, Parser)]
 #[group(skip)]
-#[ts(type = "{ only: number[] } | { except: number[] }")]
-#[ts(export)]
+#[visit(
+    ts(type = "{ only: number[] } | { except: number[] }"),
+    wire = "rpc_toolkit::ts::Unknown"
+)]
+#[visit(opaque, type_attributes(visit::wire))]
 pub struct ClearCallbacksParams {
     #[arg(long, conflicts_with = "except", help = "help.arg.only-callbacks")]
     pub only: Option<Vec<CallbackId>>,
     #[arg(long, conflicts_with = "only", help = "help.arg.except-callbacks")]
     pub except: Option<Vec<CallbackId>>,
 }
+
+rpc_toolkit::reflect_ts!(ClearCallbacksParams);
+rpc_toolkit::ts_export!(ClearCallbacksParams, namespaces = [""]);
 
 pub(super) fn clear_callbacks(
     context: EffectContext,

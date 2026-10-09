@@ -10,7 +10,6 @@ use imbl_value::InternedString;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
-use ts_rs::TS;
 
 use crate::PackageId;
 use crate::backup::BackupReport;
@@ -74,19 +73,23 @@ pub fn notification<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct ListNotificationParams {
     #[arg(help = "help.arg.notification-before-id")]
-    #[ts(type = "number | null")]
+    #[visit(ts(type = "number | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     before: Option<u32>,
     #[arg(help = "help.arg.notification-limit")]
-    #[ts(type = "number | null")]
+    #[visit(ts(type = "number | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     limit: Option<usize>,
 }
+
+rpc_toolkit::reflect_ts!(ListNotificationParams);
+rpc_toolkit::ts_export!(ListNotificationParams, namespaces = [""]);
 // #[command(display(display_serializable))]
 #[instrument(skip_all)]
 pub async fn list(
@@ -141,16 +144,19 @@ pub async fn list(
         .result
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct ModifyNotificationParams {
     #[arg(help = "help.arg.notification-ids")]
-    #[ts(type = "number[]")]
+    #[visit(ts(type = "number[]"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     ids: Vec<u32>,
 }
+
+rpc_toolkit::reflect_ts!(ModifyNotificationParams);
+rpc_toolkit::ts_export!(ModifyNotificationParams, namespaces = [""]);
 
 pub async fn remove(
     ctx: RpcContext,
@@ -178,16 +184,19 @@ pub async fn remove(
         .result
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct ModifyNotificationBeforeParams {
     #[arg(help = "help.arg.notification-before-id")]
-    #[ts(type = "number")]
+    #[visit(ts(type = "number"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     before: u32,
 }
+
+rpc_toolkit::reflect_ts!(ModifyNotificationBeforeParams);
+rpc_toolkit::ts_export!(ModifyNotificationBeforeParams, namespaces = [""]);
 
 pub async fn remove_before(
     ctx: RpcContext,
@@ -302,7 +311,7 @@ pub async fn mark_unseen(
         .result
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
@@ -316,6 +325,8 @@ pub struct CreateParams {
     #[arg(help = "help.arg.notification-message")]
     message: String,
 }
+
+rpc_toolkit::reflect_ts!(CreateParams);
 
 pub async fn create(
     ctx: RpcContext,
@@ -332,8 +343,9 @@ pub async fn create(
         .result
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, TS)]
-#[ts(export)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, VisitVariants,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum NotificationLevel {
     Success,
@@ -341,6 +353,9 @@ pub enum NotificationLevel {
     Warning,
     Error,
 }
+
+rpc_toolkit::reflect_ts!(NotificationLevel);
+rpc_toolkit::ts_export!(NotificationLevel, namespaces = [""]);
 impl fmt::Display for NotificationLevel {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -404,33 +419,36 @@ impl Map for Notifications {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, HasModel, TS)]
-#[ts(export)]
+#[derive(Debug, Serialize, Deserialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct Notification {
     pub package_id: Option<PackageId>,
-    #[ts(type = "string")]
+    #[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub created_at: DateTime<Utc>,
     pub code: u32,
     pub level: NotificationLevel,
     pub title: String,
     pub message: String,
-    #[ts(type = "any")]
     pub data: Value,
     #[serde(default = "const_true")]
     pub seen: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, TS)]
-#[ts(export)]
+rpc_toolkit::reflect_ts!(Notification);
+rpc_toolkit::ts_export!(Notification, namespaces = [""]);
+
+#[derive(Debug, Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct NotificationWithId {
     id: u32,
     #[serde(flatten)]
-    #[ts(flatten)]
     notification: Notification,
 }
+
+rpc_toolkit::reflect_ts!(NotificationWithId);
+rpc_toolkit::ts_export!(NotificationWithId, namespaces = [""]);
 
 pub trait NotificationType:
     serde::Serialize + for<'de> serde::Deserialize<'de> + std::fmt::Debug

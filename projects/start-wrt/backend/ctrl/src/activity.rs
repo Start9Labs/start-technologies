@@ -36,7 +36,7 @@ static DB: LazyLock<Mutex<Connection>> = LazyLock::new(|| {
     Mutex::new(conn)
 });
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct ActivityEntry {
     pub id: i64,
     pub timestamp: String,
@@ -47,15 +47,17 @@ pub struct ActivityEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
+rpc_toolkit::reflect_ts!(ActivityEntry);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityListResponse {
     pub entries: Vec<ActivityEntry>,
     pub total: usize,
 }
+rpc_toolkit::reflect_ts!(ActivityListResponse);
 
-#[derive(Debug, Deserialize, Serialize, Default, Parser)]
+#[derive(Debug, Deserialize, Serialize, Default, Parser, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct ActivityListParams {
@@ -66,14 +68,16 @@ pub struct ActivityListParams {
     #[clap(long)]
     pub limit: Option<usize>,
 }
+rpc_toolkit::reflect_ts!(ActivityListParams);
 
-#[derive(Debug, Deserialize, Serialize, Parser)]
+#[derive(Debug, Deserialize, Serialize, Parser, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct ActivityDeleteParams {
     #[clap(long)]
     pub id: i64,
 }
+rpc_toolkit::reflect_ts!(ActivityDeleteParams);
 
 /// Log an activity entry. Best-effort — never propagates errors.
 pub fn log(category: &str, action: &str, success: bool, summary: &str, error: Option<&str>) {

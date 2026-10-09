@@ -10,11 +10,12 @@ use crate::CtrlContext;
 /// A single DNS server entry with protocol info.
 /// `ssl: false` = plain UDP on port 53.
 /// `ssl: true`  = DNS-over-HTTPS via SmartDNS (`server-https`).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, visit_rs::VisitFields)]
 pub struct DnsServer {
     pub address: String, // always an IPv4 address
     pub ssl: bool,
 }
+rpc_toolkit::reflect_ts!(DnsServer);
 
 /// SmartDNS bind port constants.
 pub const SMARTDNS_SYSTEM_PORT: u16 = 5300;

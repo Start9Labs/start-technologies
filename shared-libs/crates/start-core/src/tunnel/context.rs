@@ -879,12 +879,14 @@ impl CallRemote<TunnelContext> for CliContext {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser)]
+#[derive(Debug, Deserialize, Serialize, VisitFields, Parser)]
 #[group(skip)]
 pub struct TunnelUrlParams {
     #[arg(help = "help.arg.tunnel-url")]
     pub tunnel: Url,
 }
+
+rpc_toolkit::reflect_ts!(TunnelUrlParams);
 
 impl CallRemote<TunnelContext, TunnelUrlParams> for RpcContext {
     async fn call_remote(

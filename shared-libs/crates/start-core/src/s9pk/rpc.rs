@@ -6,7 +6,6 @@ use clap::Parser;
 use rpc_toolkit::{Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
-use ts_rs::TS;
 use url::Url;
 
 use crate::ImageId;
@@ -29,12 +28,14 @@ pub fn s9pk() -> ParentHandler<CliContext> {
         .subcommand(
             "pack",
             from_fn_async(super::v2::pack::pack)
+                .no_ts()
                 .no_display()
                 .with_about("about.package-s9pk-input-files-into-valid-s9pk"),
         )
         .subcommand(
             "list-ingredients",
             from_fn_async(super::v2::pack::list_ingredients)
+                .no_ts()
                 .with_custom_display_fn(|_, ingredients| {
                     ingredients
                         .into_iter()
@@ -55,12 +56,14 @@ pub fn s9pk() -> ParentHandler<CliContext> {
         .subcommand(
             "init-workspace",
             from_fn_async(super::init::init_workspace)
+                .no_ts()
                 .no_display()
                 .with_about("about.initialize-a-packaging-workspace"),
         )
         .subcommand(
             "init-package",
             from_fn_async(super::init::init_package)
+                .no_ts()
                 .no_display()
                 .with_about("about.scaffold-a-new-package-from-template"),
         )
@@ -75,18 +78,21 @@ pub fn s9pk() -> ParentHandler<CliContext> {
         .subcommand(
             "convert",
             from_fn_async(convert)
+                .no_ts()
                 .no_display()
                 .with_about("about.convert-s9pk-v1-to-v2"),
         )
         .subcommand(
             "publish",
             from_fn_async(publish)
+                .no_ts()
                 .no_display()
                 .with_about("about.publish-s9pk"),
         )
         .subcommand(
             "select",
             from_fn_async(select)
+                .no_ts()
                 .with_custom_display_fn(|_, path: PathBuf| {
                     println!("{}", path.display());
                     Ok(())
@@ -95,12 +101,14 @@ pub fn s9pk() -> ParentHandler<CliContext> {
         )
 }
 
-#[derive(Deserialize, Serialize, Parser)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 struct S9pkPath {
     #[arg(help = "help.arg.s9pk-file-path")]
     s9pk: PathBuf,
 }
+
+rpc_toolkit::reflect_ts!(S9pkPath);
 
 fn edit() -> ParentHandler<CliContext, S9pkPath> {
     let only_parent = |a, _| a;
@@ -154,7 +162,7 @@ fn inspect() -> ParentHandler<CliContext, S9pkPath> {
         )
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 struct AddImageParams {
     #[arg(help = "help.arg.image-id")]
@@ -162,6 +170,8 @@ struct AddImageParams {
     #[command(flatten)]
     config: ImageConfig,
 }
+
+rpc_toolkit::reflect_ts!(AddImageParams);
 async fn add_image(
     ctx: CliContext,
     AddImageParams { id, config }: AddImageParams,
@@ -191,12 +201,14 @@ async fn add_image(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 struct EditManifestParams {
     #[arg(help = "help.arg.db-apply-expr")]
     expression: String,
 }
+
+rpc_toolkit::reflect_ts!(EditManifestParams);
 async fn edit_manifest(
     ctx: CliContext,
     EditManifestParams { expression }: EditManifestParams,
@@ -237,7 +249,7 @@ async fn file_tree(
     Ok(s9pk.as_archive().contents().file_paths(""))
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
@@ -245,6 +257,8 @@ struct CatParams {
     #[arg(help = "help.arg.file-path")]
     file_path: PathBuf,
 }
+
+rpc_toolkit::reflect_ts!(CatParams);
 async fn cat(
     ctx: CliContext,
     CatParams { file_path }: CatParams,

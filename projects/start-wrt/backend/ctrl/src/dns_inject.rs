@@ -952,7 +952,7 @@ pub fn dns<C: CtrlContext>() -> ParentHandler<C> {
     )
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct InjectedDnsRecord {
     pub name: String,
     pub rtype: String,
@@ -969,6 +969,8 @@ pub struct InjectedDnsRecord {
     /// Profile interface whose subnet the record was injected from.
     pub profile: Option<String>,
 }
+
+rpc_toolkit::reflect_ts!(InjectedDnsRecord);
 
 /// The injected records, for the UI.
 #[instrument(skip_all)]
@@ -1013,11 +1015,13 @@ pub async fn injected_list(ctx: ServerContext) -> Result<Vec<InjectedDnsRecord>,
         .collect())
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct SetDnsInjectionReq {
     pub mac: String,
     pub allow: bool,
 }
+
+rpc_toolkit::reflect_ts!(SetDnsInjectionReq);
 
 /// Sets a device's DNS-injection permission on its DHCP host entry and
 /// rewrites the per-profile dnsmasq instances.

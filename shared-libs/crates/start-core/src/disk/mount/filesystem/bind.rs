@@ -4,21 +4,22 @@ use std::path::Path;
 use digest::Digest;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use ts_rs::TS;
 
 use super::FileSystem;
 use crate::disk::mount::filesystem::MountType;
 use crate::prelude::*;
 use crate::util::io::{canonicalize, create_file};
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, VisitVariants)]
 #[serde(rename_all = "kebab-case")]
 pub enum FileType {
     File,
     Directory,
     Infer,
 }
+
+rpc_toolkit::reflect_ts!(FileType);
+rpc_toolkit::ts_export!(FileType, namespaces = [""]);
 impl Default for FileType {
     fn default() -> Self {
         FileType::Directory

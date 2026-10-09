@@ -11,15 +11,17 @@ use crate::Error;
 /// - `All(vec)` — require ALL sub-conditions
 /// - `Any(vec)` — require at least one sub-condition
 /// - `Accepted` — already satisfied
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, visit_rs::VisitVariants)]
 #[serde(rename_all = "camelCase")]
 pub enum AcceptSigners {
     #[serde(skip)]
+    #[visit(opaque)]
     Accepted,
     Signer(AnyVerifyingKey),
     Any(Vec<AcceptSigners>),
     All(Vec<AcceptSigners>),
 }
+rpc_toolkit::reflect_ts!(AcceptSigners);
 
 impl AcceptSigners {
     const fn null() -> Self {

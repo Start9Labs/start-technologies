@@ -76,13 +76,15 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
             <small class="g-secondary">GB</small>
           </td>
           <td tuiTd>
-            @if (item.speed) {
+            @if (item.speed?.up != null) {
               <div tuiChip size="xs" iconStart="@tui.arrow-up">
                 <span>
                   {{ item.speed.up | tuiFormatNumber }}
                   <small class="g-secondary">MB/s</small>
                 </span>
               </div>
+            }
+            @if (item.speed?.down != null) {
               <div tuiChip size="xs" iconStart="@tui.arrow-down">
                 <span>
                   {{ item.speed.down | tuiFormatNumber }}

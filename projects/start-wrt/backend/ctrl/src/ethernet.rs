@@ -34,17 +34,19 @@ pub fn find_lan_bridge(cfgs: &Configs) -> Result<Option<NetworkDevice>, Error> {
 pub const DEFAULT_WAN_INTERFACE: &str = "wan";
 pub const DEFAULT_WAN6_INTERFACE: &str = "wan6";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct Port<Id: Ord = ProfileId> {
     pub profile: Option<Id>,
 }
+rpc_toolkit::reflect_ts!(impl [Id: Ord] for Port<Id> where [Option<Id>: rpc_toolkit::ts::TS]);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct Ethernet<Id: Ord = ProfileId> {
     pub wan_ipv6: bool,
     pub wan_port: Option<String>,
     pub ports: BTreeMap<String, Port<Id>>,
 }
+rpc_toolkit::reflect_ts!(impl [Id: Ord] for Ethernet<Id> where [BTreeMap<String, Port<Id>>: rpc_toolkit::ts::TS]);
 
 /// `ethernet.set` request: the desired port layout plus a confirmation flag.
 /// Reassigning a port to a different profile moves its devices to a new subnet,
@@ -52,20 +54,22 @@ pub struct Ethernet<Id: Ord = ProfileId> {
 /// and such ports exist, `set` applies nothing and returns them in
 /// `EthernetSetResult` for a confirmation dialog; with the flag true it deletes
 /// those published ports as part of the reassignment.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct EthernetSetRequest {
     #[serde(flatten)]
     pub ethernet: Ethernet<ProfileIdOpt>,
     #[serde(default)]
     pub confirm_published_port_deletion: bool,
 }
+rpc_toolkit::reflect_ts!(EthernetSetRequest);
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, visit_rs::VisitFields)]
 pub struct EthernetSetResult {
     /// Non-empty (and nothing applied) when published ports would be deleted and
     /// the caller hasn't confirmed yet. Empty once the change is applied.
     pub pending_published_port_deletions: Vec<crate::published_ports::AffectedPublishedPort>,
 }
+rpc_toolkit::reflect_ts!(EthernetSetResult);
 
 /// Names of ports whose profile (VLAN) assignment is changing: present in
 /// `old_ports` but resolving to a different VLAN than `requested`. Newly added

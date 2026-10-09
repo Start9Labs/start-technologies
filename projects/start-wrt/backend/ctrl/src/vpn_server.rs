@@ -70,7 +70,7 @@ pub struct UciVpnServer {
 // === Public API Types ===
 
 /// Peer configuration for VPN server
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct VpnServerPeer {
     /// Human-readable name for the peer
     pub name: String,
@@ -87,9 +87,10 @@ pub struct VpnServerPeer {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub route_all: Option<bool>,
 }
+rpc_toolkit::reflect_ts!(VpnServerPeer);
 
 /// VPN server configuration returned by list (excludes sensitive data)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct VpnServer {
     /// Profile interface name this VPN server is associated with (e.g., "lan", "guest")
     pub profile: String,
@@ -108,9 +109,10 @@ pub struct VpnServer {
     /// Connected peers
     pub peers: Vec<VpnServerPeer>,
 }
+rpc_toolkit::reflect_ts!(VpnServer);
 
 /// VPN server configuration for set/create requests
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct VpnServerConfig {
     /// Human-readable label for the VPN server
     pub label: String,
@@ -124,37 +126,42 @@ pub struct VpnServerConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub private_key: Option<String>,
 }
+rpc_toolkit::reflect_ts!(VpnServerConfig);
 
 /// Response containing all VPN servers
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct VpnServers {
     pub servers: Vec<VpnServer>,
 }
+rpc_toolkit::reflect_ts!(VpnServers);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct SetArgs {
     /// Profile interface name (e.g., "lan", "guest")
     pub profile: String,
     /// VPN server configuration
     pub config: VpnServerConfig,
 }
+rpc_toolkit::reflect_ts!(SetArgs);
 
-#[derive(Debug, Clone, Serialize, Deserialize, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, Parser, visit_rs::VisitFields)]
 pub struct DeleteArgs {
     /// Profile interface name
     #[clap(short, long)]
     pub profile: String,
 }
+rpc_toolkit::reflect_ts!(DeleteArgs);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct PeerAddArgs {
     /// Profile interface name (e.g., "lan", "guest")
     pub profile: String,
     /// Peer configuration
     pub peer: VpnServerPeer,
 }
+rpc_toolkit::reflect_ts!(PeerAddArgs);
 
-#[derive(Debug, Clone, Serialize, Deserialize, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, Parser, visit_rs::VisitFields)]
 pub struct PeerDeleteArgs {
     /// Profile interface name
     #[clap(short, long)]
@@ -163,9 +170,10 @@ pub struct PeerDeleteArgs {
     #[clap(long)]
     pub public_key: String,
 }
+rpc_toolkit::reflect_ts!(PeerDeleteArgs);
 
 /// Response from adding a peer, contains client config if keys were generated
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct PeerAddResponse {
     /// WireGuard client configuration (only present if keys were generated server-side)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -175,6 +183,7 @@ pub struct PeerAddResponse {
     /// The assigned IP address
     pub ip: Ipv4Addr,
 }
+rpc_toolkit::reflect_ts!(PeerAddResponse);
 
 // === API Handler ===
 

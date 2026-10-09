@@ -1,0 +1,19 @@
+[package]
+description = "Procedural macros for visit-rs"
+edition = "2024"
+license = "MIT"
+name = "visit-rs-derive"
+repository = "https://github.com/Start9Labs/start-technologies"
+version = "0.2.0"
+
+[lib]
+proc-macro = true
+
+[features]
+meta = []
+
+[dependencies]
+proc-macro-crate = "3.5"
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "3.0", features = ["extra-traits", "full"] }

@@ -934,15 +934,19 @@ fn err_has_exited<T>(_: T) -> Error {
     )
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 pub struct ForwardTable(pub BTreeMap<u16, ForwardTarget>);
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+rpc_toolkit::reflect_ts!(ForwardTable);
+
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 pub struct ForwardTarget {
     pub target: SocketAddrV4,
     pub target_prefix: u8,
     pub reqs: String,
 }
+
+rpc_toolkit::reflect_ts!(ForwardTarget);
 
 impl From<&InterfaceForwardState> for ForwardTable {
     fn from(value: &InterfaceForwardState) -> Self {

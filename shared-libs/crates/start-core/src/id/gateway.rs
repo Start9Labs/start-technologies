@@ -4,11 +4,14 @@ use std::str::FromStr;
 
 use imbl_value::InternedString;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, TS)]
-#[ts(type = "string")]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, visit_rs::VisitFields)]
+#[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+#[visit(opaque, type_attributes(visit::wire))]
 pub struct GatewayId(InternedString);
+
+rpc_toolkit::reflect_ts!(GatewayId);
+rpc_toolkit::ts_export!(GatewayId, namespaces = ["", "tunnel"]);
 impl GatewayId {
     pub fn as_str(&self) -> &str {
         &*self.0

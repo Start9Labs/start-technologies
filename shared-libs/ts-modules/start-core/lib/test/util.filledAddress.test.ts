@@ -43,6 +43,7 @@ const host = (fingerprint: string): Host => ({
           description: '',
           masked: true,
           type: 'api',
+          preferredLauncherAddress: null,
           addressInfo: {
             username: fingerprint,
             hostId: 'main',

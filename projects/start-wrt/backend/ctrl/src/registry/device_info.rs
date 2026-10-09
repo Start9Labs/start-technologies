@@ -7,14 +7,15 @@ pub const DEVICE_INFO_HEADER: &str = "X-StartOS-Device-Info";
 
 /// Device information sent to the registry in the X-StartOS-Device-Info header.
 /// Wire-compatible with start-os's `DeviceInfo`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
     pub os: OsInfo,
     pub hardware: Option<HardwareInfo>,
 }
+rpc_toolkit::reflect_ts!(DeviceInfo);
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct OsInfo {
     pub version: String,
@@ -22,13 +23,15 @@ pub struct OsInfo {
     pub compat: String,
     pub platform: String,
 }
+rpc_toolkit::reflect_ts!(OsInfo);
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct HardwareInfo {
     pub arch: String,
     pub ram: u64,
 }
+rpc_toolkit::reflect_ts!(HardwareInfo);
 
 impl DeviceInfo {
     /// Load device info from the running system.

@@ -11,7 +11,6 @@ use imbl_value::InternedString;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tracing::instrument;
-use ts_rs::TS;
 
 use super::PackageBackupReport;
 use super::target::{BackupTargetId, PackageBackupInfo};
@@ -32,9 +31,8 @@ use crate::util::io::{AtomicFile, dir_copy};
 use crate::util::serde::IoFormat;
 use crate::version::VersionT;
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct BackupParams {
@@ -47,6 +45,9 @@ pub struct BackupParams {
     #[arg(help = "help.arg.backup-password")]
     password: crate::auth::PasswordType,
 }
+
+rpc_toolkit::reflect_ts!(BackupParams);
+rpc_toolkit::ts_export!(BackupParams, namespaces = [""]);
 
 struct BackupStatusGuard(Option<TypedPatchDb<Database>>);
 impl BackupStatusGuard {

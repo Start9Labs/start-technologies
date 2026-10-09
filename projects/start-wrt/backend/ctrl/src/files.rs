@@ -30,23 +30,26 @@ pub fn file<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct FileContents {
     pub contents: String,
     pub modified: DateTime<Utc>,
 }
+rpc_toolkit::reflect_ts!(FileContents);
 
-#[derive(Parser, Serialize, Deserialize)]
+#[derive(Parser, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct GetFileArgs {
     pub path: PathBuf,
 }
+rpc_toolkit::reflect_ts!(GetFileArgs);
 
-#[derive(Parser, Serialize, Deserialize)]
+#[derive(Parser, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct SetFileArgs {
     pub path: PathBuf,
     pub contents: String,
     pub modified: Option<DateTime<Utc>>,
 }
+rpc_toolkit::reflect_ts!(SetFileArgs);
 
 async fn get_modified_time(path: &PathBuf) -> Result<DateTime<Utc>, Error> {
     tokio::fs::metadata(path)
@@ -139,7 +142,7 @@ pub fn dir<C: Context>() -> ParentHandler<C> {
     )
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, visit_rs::VisitVariants)]
 #[serde(rename_all = "kebab-case")]
 pub enum FileType {
     RegularFile,
@@ -150,8 +153,9 @@ pub enum FileType {
     Fifo,
     Socket,
 }
+rpc_toolkit::reflect_ts!(FileType);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct DirEntry {
     pub name: String,
     pub size: u64,
@@ -168,11 +172,13 @@ pub struct DirEntry {
     pub modify: DateTime<Utc>,
     pub change: DateTime<Utc>,
 }
+rpc_toolkit::reflect_ts!(DirEntry);
 
-#[derive(Parser, Serialize, Deserialize)]
+#[derive(Parser, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct DirGetArgs {
     pub path: PathBuf,
 }
+rpc_toolkit::reflect_ts!(DirGetArgs);
 
 fn file_type_from_mode(mode: u32) -> FileType {
     const S_IFMT: u32 = 0o170000;

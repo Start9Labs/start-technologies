@@ -7,15 +7,17 @@ use crate::{HostId, PackageId};
 /// Matched on the SDK side as `MAX_BIND_PORT_RANGE_SIZE`.
 pub const MAX_BIND_PORT_RANGE_SIZE: u16 = 500;
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct BindParams {
     id: HostId,
     internal_port: u16,
     #[serde(flatten)]
     options: BindOptions,
 }
+
+rpc_toolkit::reflect_ts!(BindParams);
+rpc_toolkit::ts_export!(BindParams, namespaces = [""]);
 pub async fn bind(
     context: EffectContext,
     BindParams {
@@ -33,15 +35,17 @@ pub async fn bind(
         .await
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct BindRangeParams {
     pub id: HostId,
     pub internal_start_port: u16,
     pub external_start_port: u16,
     pub number_of_ports: u16,
 }
+
+rpc_toolkit::reflect_ts!(BindRangeParams);
+rpc_toolkit::ts_export!(BindRangeParams, namespaces = [""]);
 
 pub async fn bind_range(
     context: EffectContext,
@@ -78,14 +82,16 @@ pub async fn bind_range(
         .await
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct ClearBindingsParams {
     #[serde(default)]
     pub except: Vec<BindId>,
 }
+
+rpc_toolkit::reflect_ts!(ClearBindingsParams);
+rpc_toolkit::ts_export!(ClearBindingsParams, namespaces = [""]);
 
 pub async fn clear_bindings(
     context: EffectContext,
@@ -101,12 +107,14 @@ pub async fn clear_bindings(
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct RetireHostParams {
     pub id: HostId,
 }
+
+rpc_toolkit::reflect_ts!(RetireHostParams);
+rpc_toolkit::ts_export!(RetireHostParams, namespaces = [""]);
 
 /// No `packageId`: a service may only retire its own hosts.
 pub async fn retire_host(
@@ -122,13 +130,15 @@ pub async fn retire_host(
         .await
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct RetireBindingParams {
     pub id: HostId,
     pub internal_port: u16,
 }
+
+rpc_toolkit::reflect_ts!(RetireBindingParams);
+rpc_toolkit::ts_export!(RetireBindingParams, namespaces = [""]);
 
 pub async fn retire_binding(
     context: EffectContext,
@@ -143,15 +153,16 @@ pub async fn retire_binding(
         .await
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct GetServicePortForwardParams {
-    #[ts(optional)]
     package_id: Option<PackageId>,
     host_id: HostId,
     internal_port: u16,
 }
+
+rpc_toolkit::reflect_ts!(GetServicePortForwardParams);
+rpc_toolkit::ts_export!(GetServicePortForwardParams, namespaces = [""]);
 pub async fn get_service_port_forward(
     context: EffectContext,
     GetServicePortForwardParams {

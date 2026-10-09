@@ -20,7 +20,6 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::process::Command;
 use tokio::sync::oneshot;
-use ts_rs::TS;
 use url::Url;
 use visit_rs::{Visit, VisitFields};
 use zbus::proxy::{PropertyChanged, PropertyStream, SignalStream};
@@ -183,13 +182,15 @@ async fn list_interfaces(
     Ok(ctx.net_controller.net_iface.watcher.ip_info())
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 struct ForgetGatewayParams {
     #[arg(help = "help.arg.gateway-id")]
     gateway: GatewayId,
 }
+
+rpc_toolkit::reflect_ts!(ForgetGatewayParams);
+rpc_toolkit::ts_export!(ForgetGatewayParams, namespaces = [""]);
 
 async fn forget_iface(
     ctx: RpcContext,
@@ -568,15 +569,17 @@ pub(crate) async fn add_wireguard_config(interface: &str, config: &str) -> Resul
     Ok(())
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 struct RenameGatewayParams {
     #[arg(help = "help.arg.gateway-id")]
     id: GatewayId,
     #[arg(help = "help.arg.gateway-name")]
     name: InternedString,
 }
+
+rpc_toolkit::reflect_ts!(RenameGatewayParams);
+rpc_toolkit::ts_export!(RenameGatewayParams, namespaces = [""]);
 
 async fn set_name(
     ctx: RpcContext,
@@ -585,16 +588,18 @@ async fn set_name(
     ctx.net_controller.net_iface.set_name(&id, name).await
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 struct SetGatewaySecureParams {
     #[arg(help = "help.arg.gateway-id")]
     gateway: GatewayId,
     #[arg(help = "help.arg.is-secure")]
     secure: Option<bool>,
 }
+
+rpc_toolkit::reflect_ts!(SetGatewaySecureParams);
+rpc_toolkit::ts_export!(SetGatewaySecureParams, namespaces = [""]);
 
 async fn set_secure(
     ctx: RpcContext,
@@ -606,14 +611,16 @@ async fn set_secure(
         .await
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 struct UnsetGatewaySecureParams {
     #[arg(help = "help.arg.gateway-id")]
     gateway: GatewayId,
 }
+
+rpc_toolkit::reflect_ts!(UnsetGatewaySecureParams);
+rpc_toolkit::ts_export!(UnsetGatewaySecureParams, namespaces = [""]);
 
 async fn unset_secure(
     ctx: RpcContext,
@@ -625,10 +632,9 @@ async fn unset_secure(
         .await
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct CheckPortParams {
     #[arg(help = "help.arg.port")]
     pub port: u16,
@@ -636,9 +642,11 @@ pub struct CheckPortParams {
     pub gateway: GatewayId,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(CheckPortParams);
+rpc_toolkit::ts_export!(CheckPortParams, namespaces = [""]);
+
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct CheckPortRes {
     pub ip: Ipv4Addr,
     pub port: u16,
@@ -647,17 +655,22 @@ pub struct CheckPortRes {
     pub hairpinning: bool,
 }
 
+rpc_toolkit::reflect_ts!(CheckPortRes);
+rpc_toolkit::ts_export!(CheckPortRes, namespaces = [""]);
+
 /// v6 reachability of the box's GUA at a port. v6 is NAT-free (the GUA is the
 /// box's own address), so there is no hairpinning. Queried separately from
 /// [`CheckPortRes`] so the IPv4 and IPv6 checks can run independently.
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct CheckPortV6Res {
     pub ip: Ipv6Addr,
     pub open_externally: bool,
     pub open_internally: bool,
 }
+
+rpc_toolkit::reflect_ts!(CheckPortV6Res);
+rpc_toolkit::ts_export!(CheckPortV6Res, namespaces = [""]);
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -929,16 +942,18 @@ async fn check_hairpin(_: GatewayId, _: Ipv4Addr, _: Ipv4Addr, _: u16) -> bool {
     false
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct CheckDnsParams {
     #[arg(help = "help.arg.gateway-id")]
     pub gateway: GatewayId,
     #[arg(help = "help.arg.fqdn")]
     pub fqdn: InternedString,
 }
+
+rpc_toolkit::reflect_ts!(CheckDnsParams);
+rpc_toolkit::ts_export!(CheckDnsParams, namespaces = [""]);
 
 /// Verify a private domain works on the LAN by asking the LAN's own DNS
 /// server(s) for `fqdn` and confirming the answer is one of this server's
@@ -996,14 +1011,16 @@ pub async fn check_dns(
     Ok(false)
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 struct SetDefaultOutboundParams {
     #[arg(help = "help.arg.gateway-id")]
     gateway: Option<GatewayId>,
 }
+
+rpc_toolkit::reflect_ts!(SetDefaultOutboundParams);
+rpc_toolkit::ts_export!(SetDefaultOutboundParams, namespaces = [""]);
 
 async fn set_default_outbound(
     ctx: RpcContext,
@@ -1032,16 +1049,18 @@ async fn set_default_outbound(
         .result
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct SetOutboundGatewayParams {
     #[arg(help = "help.arg.package-id")]
     package: PackageId,
     #[arg(help = "help.arg.gateway-id")]
     gateway: Option<GatewayId>,
 }
+
+rpc_toolkit::reflect_ts!(SetOutboundGatewayParams);
+rpc_toolkit::ts_export!(SetOutboundGatewayParams, namespaces = [""]);
 
 pub async fn set_outbound_gateway(
     ctx: RpcContext,

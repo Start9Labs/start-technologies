@@ -37,7 +37,7 @@ struct AppState {
     flash_in_progress: Arc<AtomicBool>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 struct FlashParams {
     mode: FlashMode,
@@ -48,6 +48,8 @@ struct FlashParams {
     #[serde(default)]
     timezone: Option<String>,
 }
+rpc_toolkit::reflect_ts!(FlashParams);
+rpc_toolkit::ts_export!(FlashParams, namespaces = ["events"]);
 
 fn ndjson_error(message: &str) -> Response<Body> {
     let event = SetupEvent::Error {

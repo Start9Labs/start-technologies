@@ -4,8 +4,10 @@ use std::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, visit_rs::VisitFields)]
 pub struct EqSet<T: Eq>(Vec<T>);
+
+rpc_toolkit::reflect_ts!(impl [T: Eq] for EqSet<T> where [Vec<T>: rpc_toolkit::ts::TS]);
 impl<T: Eq> Default for EqSet<T> {
     fn default() -> Self {
         Self(Default::default())

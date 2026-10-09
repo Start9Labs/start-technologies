@@ -7,13 +7,27 @@ keywords = ["json", "rpc", "cli"]
 license = "MIT"
 name = "rpc-toolkit"
 repository = "https://github.com/Start9Labs/start-technologies"
-version = "0.3.2"
+version = "0.4.0"
 
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
-cbor = ["serde_cbor"]
+cbor = ["dep:serde_cbor"]
+chrono = ["ts", "dep:chrono"]
 default = ["cbor"]
+exver = ["ts", "dep:exver"]
+ipnet = ["ts", "dep:ipnet"]
+josekit = ["ts", "dep:josekit"]
+patch-db = ["ts", "dep:patch-db"]
+ts = [
+  "dep:visit-rs",
+  "dep:serde_derive_internals",
+  "dep:syn",
+  "dep:inventory",
+  "dep:imbl",
+  "dep:yasi",
+]
+url = ["ts", "url/serde"]
+yajrc = ["ts"]
 
 [dependencies]
 async-stream = "0.3"
@@ -24,19 +38,45 @@ futures = "0.3"
 http = "1"
 http-body-util = "0.1"
 # hyper = { version = "1", features = ["server", "http1", "http2", "client"] }
+chrono = { version = "0.4", optional = true, default-features = false, features = [
+  "serde",
+] }
+exver = { path = "../exver", optional = true, features = ["serde"] }
+imbl = { version = "6", optional = true }
 imbl-value = { path = "../imbl-value" }
+inventory = { version = "0.3", optional = true }
+ipnet = { version = "2", optional = true, features = ["serde"] }
 itertools = "0.14"
+josekit = { version = "0.10", optional = true }
 lazy_format = "2"
 lazy_static = "1.4"
 openssl = { version = "0.10", features = ["vendored"] }
+patch-db = { path = "../patch-db/core", optional = true, default-features = false, features = [
+  "reflect",
+] }
 pin-project = "1"
 reqwest = { version = "0.12" }
 serde = { version = "1.0", features = ["derive"] }
 serde_cbor = { version = "0.11", optional = true }
+serde_derive_internals = { version = "=0.30.0", optional = true }
 serde_json = "1.0"
+syn = { version = "=3.0.6", features = [
+  "full",
+  "extra-traits",
+], optional = true }
 thiserror = "2.0"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["io-util", "net"] }
-ts-rs = { version = "9.0.1", optional = true }
 url = "2"
+visit-rs = { path = "../visit-rs", optional = true, default-features = false, features = [
+  "meta",
+] }
 yajrc = "0.1"
+yasi = { path = "../yasi", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[[example]]
+name = "generate_ts"
+required-features = ["ts"]

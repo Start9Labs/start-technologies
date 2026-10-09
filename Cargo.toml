@@ -5,6 +5,8 @@ members = [
   "shared-libs/crates/imbl-value",
   "shared-libs/crates/yasi",
   "shared-libs/crates/rpc-toolkit",
+  "shared-libs/crates/visit-rs",
+  "shared-libs/crates/visit-rs-derive",
   "shared-libs/crates/jsonpath",
   "shared-libs/crates/pi-beep",
   "shared-libs/crates/patch-db/core",
@@ -32,3 +34,9 @@ opt-level = 3
 
 [profile.dev.package.backtrace]
 opt-level = 3
+
+[profile.bindings]
+debug = 0
+incremental = false
+inherits = "dev"
+opt-level = 0

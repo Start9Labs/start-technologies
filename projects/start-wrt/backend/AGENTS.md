@@ -30,17 +30,19 @@ crates are members of the **root** Cargo workspace (build with `cargo build -p s
 1. **Define param/response types** in your module:
 
 ```rust
-#[derive(Deserialize, clap::Parser)]
+#[derive(Deserialize, clap::Parser, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 struct MyParams {
     name: String,
 }
+rpc_toolkit::reflect_ts!(MyParams);
 
-#[derive(Serialize)]
+#[derive(Serialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 struct MyResponse {
     success: bool,
 }
+rpc_toolkit::reflect_ts!(MyResponse);
 ```
 
 2. **Write the handler function:**
@@ -73,7 +75,27 @@ pub fn my_module<C: CtrlContext + Clone>() -> ParentHandler<C> {
 .subcommand("my-module", my_module::my_module::<C>())
 ```
 
-5. Update the RPC contract and frontend implementations together as required by the parent `AGENTS.md`.
+5. Run `make start-wrt-rpc-bindings`, then update the RPC contract and frontend implementations together as required by the parent `AGENTS.md`.
+
+## Production TypeScript generation
+
+Struct DTOs derive `visit_rs::VisitFields`; enum DTOs derive
+`visit_rs::VisitVariants`. Both supply raw facts and static traversal, with adjacent
+`rpc_toolkit::reflect_ts!` bridges. RPC owns serde normalization, TypeScript
+rendering and raw `visit(ts(...))` hint interpretation. Locally select authoritative
+type-valued conversion/wire literals with `visit(type_attributes(...))`; use
+explicit `visit(opaque)` for hidden storage. Typed `TS::IS_OPTION` combines with
+serde policy, including through aliases and wrappers. Generic bridges retain
+payload bounds and inline by default. Read the
+[TypeScript guide](../../../shared-libs/crates/rpc-toolkit/docs/typescript.md)
+before adding custom wire hints or projections.
+
+`ctrl/examples/generate_rpc_bindings.rs` generates the `Api` tree from
+`main_api::<ServerContext>()` into `web/src/app/services/api/bindings.ts` and
+near-owner `rpc_toolkit::ts_export!(Type, namespaces = ["events"])` streaming
+registrations collected by namespace into `events.ts`. Requests use input shapes; returns and streaming events use output
+shapes. Both files are generated build inputs — never hand-edit them. CLI-only
+backup callbacks use `no_ts()`; the RPC download/upload endpoints remain typed.
 
 ## Adding a Typed UCI Section
 

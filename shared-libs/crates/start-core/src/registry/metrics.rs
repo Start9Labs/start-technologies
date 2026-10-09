@@ -1,7 +1,6 @@
 use clap::Parser;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::context::CliContext;
 use crate::prelude::*;
@@ -41,17 +40,18 @@ pub fn metrics_api<C: Context>() -> ParentHandler<C> {
 
 // --- summary ---
 
-#[derive(Debug, Serialize, Deserialize, TS)]
+#[derive(Debug, Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct CountEntry {
     pub label: String,
     pub count: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize, TS)]
+rpc_toolkit::reflect_ts!(CountEntry);
+rpc_toolkit::ts_export!(CountEntry, namespaces = [""]);
+
+#[derive(Debug, Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct MetricsSummary {
     pub total_checkins: u64,
     pub unique_servers: u64,
@@ -59,6 +59,9 @@ pub struct MetricsSummary {
     pub by_arch: Vec<CountEntry>,
     pub by_os_version: Vec<CountEntry>,
 }
+
+rpc_toolkit::reflect_ts!(MetricsSummary);
+rpc_toolkit::ts_export!(MetricsSummary, namespaces = [""]);
 
 pub async fn get_summary(ctx: RegistryContext) -> Result<MetricsSummary, Error> {
     tokio::task::spawn_blocking(move || {
@@ -138,29 +141,35 @@ fn display_summary<T>(params: WithIoFormat<T>, summary: MetricsSummary) -> Resul
 
 // --- users ---
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[command(rename_all = "kebab-case")]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct GetUsersParams {
     /// Start of time range (RFC 3339)
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
     #[arg(long, help = "help.arg.metrics-after")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub after: Option<String>,
     /// End of time range (RFC 3339)
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
     #[arg(long, help = "help.arg.metrics-before")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub before: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, TS)]
+rpc_toolkit::reflect_ts!(GetUsersParams);
+rpc_toolkit::ts_export!(GetUsersParams, namespaces = [""]);
+
+#[derive(Debug, Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct UsersResponse {
     pub unique_servers: u64,
     pub total_checkins: u64,
 }
+
+rpc_toolkit::reflect_ts!(UsersResponse);
+rpc_toolkit::ts_export!(UsersResponse, namespaces = [""]);
 
 pub async fn get_users(
     ctx: RegistryContext,
@@ -209,47 +218,57 @@ fn display_users<T>(params: WithIoFormat<T>, response: UsersResponse) -> Result<
 
 // --- downloads ---
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[command(rename_all = "kebab-case")]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct GetDownloadsParams {
     /// Filter by package ID
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
     #[arg(long, help = "help.arg.metrics-pkg-id")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub pkg_id: Option<String>,
     /// Filter by version
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
     #[arg(long, help = "help.arg.metrics-version")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub version: Option<String>,
     /// Start of time range (RFC 3339)
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
     #[arg(long, help = "help.arg.metrics-after")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub after: Option<String>,
     /// End of time range (RFC 3339)
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
     #[arg(long, help = "help.arg.metrics-before")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub before: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, TS)]
+rpc_toolkit::reflect_ts!(GetDownloadsParams);
+rpc_toolkit::ts_export!(GetDownloadsParams, namespaces = [""]);
+
+#[derive(Debug, Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct PackageVersionCount {
     pub pkg_id: String,
     pub version: String,
     pub count: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize, TS)]
+rpc_toolkit::reflect_ts!(PackageVersionCount);
+rpc_toolkit::ts_export!(PackageVersionCount, namespaces = [""]);
+
+#[derive(Debug, Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct DownloadsResponse {
     pub total_requests: u64,
     pub by_package: Vec<CountEntry>,
     pub by_package_version: Vec<PackageVersionCount>,
 }
+
+rpc_toolkit::reflect_ts!(DownloadsResponse);
+rpc_toolkit::ts_export!(DownloadsResponse, namespaces = [""]);
 
 pub async fn get_downloads(
     ctx: RegistryContext,

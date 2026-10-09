@@ -23,6 +23,7 @@ impl Revision {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "reflect", derive(visit_rs::VisitFields))]
 pub struct Dump {
     pub id: u64,
     pub value: Value,
@@ -46,7 +47,7 @@ impl DiffPatch {
         (self.0).0.extend((other.0).0)
     }
 
-    // safe to assume dictionary style symantics for arrays since patches will always be rebased before being applied
+    // Array patches require rebasing before application.
     pub fn for_path<S: AsRef<str>, V: SegList>(&self, ptr: &JsonPointer<S, V>) -> DiffPatch {
         let DiffPatch(Patch(ops)) = self;
         DiffPatch(Patch(

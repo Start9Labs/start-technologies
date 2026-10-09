@@ -26,7 +26,6 @@ use tokio::io::{
 use tokio::net::TcpStream;
 use tokio::sync::{Notify, OwnedMutexGuard};
 use tokio::time::{Instant, Sleep};
-use ts_rs::TS;
 
 use crate::prelude::*;
 use crate::util::FromStrParser;
@@ -1638,12 +1637,14 @@ impl<T: std::io::Read> std::io::Read for SharedIO<T> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, VisitFields)]
 pub struct TermSize {
     pub rows: u16,
     pub cols: u16,
     pub pixels: Option<(u16, u16)>, // x, y
 }
+
+rpc_toolkit::reflect_ts!(TermSize);
 impl TermSize {
     pub fn get_current() -> Option<Self> {
         if let Some((cols, rows)) = termion::terminal_size().log_err() {

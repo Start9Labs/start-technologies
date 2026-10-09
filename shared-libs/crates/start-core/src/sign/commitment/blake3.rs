@@ -2,7 +2,6 @@ use blake3::Hash;
 use digest::Update;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWrite;
-use ts_rs::TS;
 
 use crate::CAP_10_MiB;
 use crate::prelude::*;
@@ -12,15 +11,18 @@ use crate::sign::commitment::{Commitment, Digestable};
 use crate::util::io::{ParallelBlake3Writer, TrackingIO};
 use crate::util::serde::Base64;
 
-#[derive(Clone, Debug, Deserialize, Serialize, HasModel, PartialEq, Eq, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, HasModel, PartialEq, Eq, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct Blake3Commitment {
     pub hash: Base64<[u8; 32]>,
-    #[ts(type = "number")]
+    #[visit(ts(type = "number"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub size: u64,
 }
+
+rpc_toolkit::reflect_ts!(Blake3Commitment);
+rpc_toolkit::ts_export!(Blake3Commitment, namespaces = [""]);
 impl Digestable for Blake3Commitment {
     fn update<D: Update>(&self, digest: &mut D) {
         digest.update(&*self.hash);

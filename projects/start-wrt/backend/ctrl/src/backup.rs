@@ -17,16 +17,18 @@ use crate::invoke::Invoke;
 use crate::prelude::*;
 use crate::{CliContext, ServerContext};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct BackupCreateRes {
     pub guid: Guid,
     pub filename: String,
 }
+rpc_toolkit::reflect_ts!(BackupCreateRes);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct BackupRestoreRes {
     pub upload: Guid,
 }
+rpc_toolkit::reflect_ts!(BackupRestoreRes);
 
 /// RPC handler: buffer backup, register download continuation, return guid + filename.
 #[instrument(skip_all)]
@@ -234,11 +236,12 @@ async fn restore(ctx: ServerContext) -> Result<BackupRestoreRes, Error> {
     Ok(BackupRestoreRes { upload: guid })
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser)]
+#[derive(Debug, Deserialize, Serialize, Parser, visit_rs::VisitFields)]
 struct RestoreParams {
     /// Path to the backup file
     file: PathBuf,
 }
+rpc_toolkit::reflect_ts!(RestoreParams);
 
 /// CLI handler: read local file, call backup.restore via RPC, upload the file.
 #[instrument(skip_all)]
@@ -286,6 +289,7 @@ pub fn backup<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "create",
             from_fn_async(cli_download)
+                .no_ts()
                 .no_display()
                 .with_about("Download a config backup"),
         )
@@ -293,6 +297,7 @@ pub fn backup<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "restore",
             from_fn_async(cli_upload)
+                .no_ts()
                 .no_display()
                 .with_about("Restore config backup from file"),
         )

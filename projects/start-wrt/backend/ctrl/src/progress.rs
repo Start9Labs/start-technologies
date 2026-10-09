@@ -8,7 +8,7 @@ use tokio::sync::watch;
 
 /// Progress state for a single phase or overall operation.
 /// Wire-compatible with start-os's `Progress` (serialized as untagged).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, visit_rs::VisitVariants)]
 #[serde(untagged)]
 pub enum Progress {
     /// Not started yet — serializes as `null`
@@ -22,6 +22,7 @@ pub enum Progress {
         units: Option<ProgressUnits>,
     },
 }
+rpc_toolkit::reflect_ts!(Progress);
 
 impl Progress {
     pub fn is_complete(&self) -> bool {
@@ -52,27 +53,31 @@ impl Default for Progress {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, visit_rs::VisitVariants)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProgressUnits {
     Bytes,
     Steps,
 }
+rpc_toolkit::reflect_ts!(ProgressUnits);
 
 // ── FullProgress ─────────────────────────────────────────────────────
 
 /// Snapshot of overall + per-phase progress, sent over WebSocket.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct FullProgress {
     pub overall: Progress,
     pub phases: Vec<NamedProgress>,
 }
+rpc_toolkit::reflect_ts!(FullProgress);
+rpc_toolkit::ts_export!(FullProgress, namespaces = ["events"]);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct NamedProgress {
     pub name: String,
     pub progress: Progress,
 }
+rpc_toolkit::reflect_ts!(NamedProgress);
 
 // ── FullProgressTracker ──────────────────────────────────────────────
 

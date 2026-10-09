@@ -5,7 +5,6 @@ use imbl_value::InternedString;
 use itertools::Itertools;
 use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::context::CliContext;
 use crate::prelude::*;
@@ -58,9 +57,8 @@ pub fn info_api<C: Context>() -> ParentHandler<C, WithIoFormat<Empty>> {
         )
 }
 
-#[derive(Debug, Default, Deserialize, Serialize, TS)]
+#[derive(Debug, Default, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct RegistryInfo {
     pub name: Option<String>,
     pub icon: Option<DataUrl<'static>>,
@@ -68,6 +66,9 @@ pub struct RegistryInfo {
     pub description: Option<LocaleString>,
     pub categories: BTreeMap<InternedString, Category>,
 }
+
+rpc_toolkit::reflect_ts!(RegistryInfo);
+rpc_toolkit::ts_export!(RegistryInfo, namespaces = [""]);
 
 pub async fn get_info(ctx: RegistryContext) -> Result<RegistryInfo, Error> {
     let peek = ctx.db.peek().await.into_index();
@@ -79,15 +80,17 @@ pub async fn get_info(ctx: RegistryContext) -> Result<RegistryInfo, Error> {
     })
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[command(rename_all = "kebab-case")]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct SetNameParams {
     #[arg(help = "help.arg.registry-name")]
     pub name: String,
 }
+
+rpc_toolkit::reflect_ts!(SetNameParams);
+rpc_toolkit::ts_export!(SetNameParams, namespaces = [""]);
 
 pub async fn set_name(
     ctx: RegistryContext,
@@ -99,13 +102,19 @@ pub async fn set_name(
         .result
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct SetDescriptionParams {
     #[serde(deserialize_with = "Option::deserialize")]
+    #[visit(
+        input_wire = "Option<LocaleString>",
+        type_attributes(visit::input_wire)
+    )]
     pub description: Option<LocaleString>,
 }
+
+rpc_toolkit::reflect_ts!(SetDescriptionParams);
+rpc_toolkit::ts_export!(SetDescriptionParams, namespaces = [""]);
 
 pub async fn set_description(
     ctx: RegistryContext,
@@ -117,11 +126,10 @@ pub async fn set_description(
         .result
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[command(rename_all = "kebab-case")]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct CliSetDescriptionParams {
     #[arg(
         help = "help.arg.registry-description",
@@ -132,6 +140,9 @@ pub struct CliSetDescriptionParams {
     #[arg(long, help = "help.arg.clear-registry-description")]
     pub clear: bool,
 }
+
+rpc_toolkit::reflect_ts!(CliSetDescriptionParams);
+rpc_toolkit::ts_export!(CliSetDescriptionParams, namespaces = [""]);
 
 pub async fn cli_set_description(
     HandlerArgs {
@@ -150,13 +161,19 @@ pub async fn cli_set_description(
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct SetIconParams {
     #[serde(deserialize_with = "Option::deserialize")]
+    #[visit(
+        input_wire = "Option<DataUrl<'static>>",
+        type_attributes(visit::input_wire)
+    )]
     pub icon: Option<DataUrl<'static>>,
 }
+
+rpc_toolkit::reflect_ts!(SetIconParams);
+rpc_toolkit::ts_export!(SetIconParams, namespaces = [""]);
 
 pub async fn set_icon(
     ctx: RegistryContext,
@@ -168,11 +185,10 @@ pub async fn set_icon(
         .result
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[command(rename_all = "kebab-case")]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct CliSetIconParams {
     #[arg(
         help = "help.arg.icon-source",
@@ -183,6 +199,9 @@ pub struct CliSetIconParams {
     #[arg(long, help = "help.arg.clear-registry-icon")]
     pub clear: bool,
 }
+
+rpc_toolkit::reflect_ts!(CliSetIconParams);
+rpc_toolkit::ts_export!(CliSetIconParams, namespaces = [""]);
 
 pub async fn cli_set_icon(
     HandlerArgs {
@@ -265,6 +284,35 @@ mod tests {
                 .is_err()
         );
         assert!(SetNameParams::try_parse_from(["set-name", "--clear"]).is_err());
+    }
+
+    #[test]
+    fn rpc_setter_bindings_require_nullable_values() {
+        use rpc_toolkit::ts::{Direction, TSVisitor};
+
+        let mut visitor = TSVisitor::new();
+        visitor.with_direction(Direction::Input, |visitor| {
+            visitor.append_type::<SetIconParams>();
+            visitor.append_type::<SetDescriptionParams>();
+        });
+        let declarations = visitor.into_declarations().unwrap();
+        for (field, target) in [
+            ("icon", "DataUrlInput"),
+            ("description", "LocaleStringInput"),
+        ] {
+            assert!(
+                declarations.contains(&format!("\"{field}\":")),
+                "{declarations}"
+            );
+            assert!(
+                !declarations.contains(&format!("\"{field}\"?:")),
+                "{declarations}"
+            );
+            assert!(
+                declarations.contains(&format!("{target}|null")),
+                "{declarations}"
+            );
+        }
     }
 
     #[test]

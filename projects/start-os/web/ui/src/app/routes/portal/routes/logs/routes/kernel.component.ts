@@ -32,6 +32,6 @@ export default class SystemKernelComponent {
   protected readonly follow = (params: FollowServerLogsReq) =>
     this.api.followKernelLogs(params)
 
-  protected readonly fetch = (params: T.LogsParams) =>
+  protected readonly fetch = (params: T.LogsParamsInput) =>
     this.api.getKernelLogs(params)
 }

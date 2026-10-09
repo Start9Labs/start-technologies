@@ -1,3 +1,4 @@
+import type { Api, Params } from './api.types'
 import { inject, Injectable } from '@angular/core'
 import { WA_SESSION_STORAGE } from '@ng-web-apis/common'
 import { GetPackageRes, GetPackagesRes } from '@start9labs/marketplace'
@@ -167,7 +168,7 @@ export class MockApiService extends ApiService {
 
   // state
 
-  async echo(params: T.EchoParams, url: string): Promise<string> {
+  async echo(params: Params<'echo'>, url: string): Promise<string> {
     if (url) {
       const num = Math.floor(Math.random() * 10) + 1
       if (num > 8) return params.message
@@ -188,7 +189,7 @@ export class MockApiService extends ApiService {
 
   // db
 
-  async subscribeToPatchDB(params: {}): Promise<{
+  async subscribeToPatchDB(): Promise<{
     dump: Dump<DataModel>
     guid: string
   }> {
@@ -225,7 +226,7 @@ export class MockApiService extends ApiService {
 
   // auth
 
-  async login(params: T.LoginParams): Promise<null> {
+  async login(params: Params<'auth.login'>): Promise<null> {
     await pauseFor(2000)
     return null
   }
@@ -240,12 +241,12 @@ export class MockApiService extends ApiService {
     return Mock.Sessions
   }
 
-  async killSessions(params: T.KillParams): Promise<null> {
+  async killSessions(params: Params<'auth.session.kill'>): Promise<null> {
     await pauseFor(2000)
     return null
   }
 
-  async resetPassword(params: T.ResetPasswordParams): Promise<null> {
+  async resetPassword(params: Params<'auth.reset-password'>): Promise<null> {
     await pauseFor(2000)
     return null
   }
@@ -270,19 +271,24 @@ export class MockApiService extends ApiService {
     }
   }
 
-  async diagnosticRestart(): Promise<void> {
+  async diagnosticRestart(): Promise<null> {
     await pauseFor(1000)
+    return null
   }
 
-  async diagnosticForgetDrive(): Promise<void> {
+  async diagnosticForgetDrive(): Promise<null> {
     await pauseFor(1000)
+    return null
   }
 
-  async diagnosticRepairDisk(): Promise<void> {
+  async diagnosticRepairDisk(): Promise<null> {
     await pauseFor(1000)
+    return null
   }
 
-  async diagnosticGetLogs(params: T.LogsParams): Promise<T.LogResponse> {
+  async diagnosticGetLogs(
+    params: Params<'diagnostic.logs'>,
+  ): Promise<T.LogResponse> {
     return this.getServerLogs(params)
   }
 
@@ -310,13 +316,13 @@ export class MockApiService extends ApiService {
     await pauseFor(2000)
     return {
       now: new Date().toUTCString(),
-      uptime: 1234567n,
+      uptime: 1234567,
     }
   }
 
-  async getServerLogs(params: T.LogsParams): Promise<T.LogResponse> {
+  async getServerLogs(params: Params<'server.logs'>): Promise<T.LogResponse> {
     await pauseFor(2000)
-    const entries = this.randomLogs(params.limit)
+    const entries = this.randomLogs(params.limit ?? undefined)
 
     return {
       entries,
@@ -325,9 +331,11 @@ export class MockApiService extends ApiService {
     }
   }
 
-  async getKernelLogs(params: T.LogsParams): Promise<T.LogResponse> {
+  async getKernelLogs(
+    params: Params<'server.kernel-logs'>,
+  ): Promise<T.LogResponse> {
     await pauseFor(2000)
-    const entries = this.randomLogs(params.limit)
+    const entries = this.randomLogs(params.limit ?? undefined)
 
     return {
       entries,
@@ -373,7 +381,9 @@ export class MockApiService extends ApiService {
     }
   }
 
-  async updateServer(params: T.UpdateSystemParams): Promise<T.UpdateSystemRes> {
+  async updateServer(
+    params: Params<'server.update'>,
+  ): Promise<T.UpdateSystemRes> {
     await pauseFor(2000)
     const initialProgress = {
       size: null,
@@ -477,7 +487,7 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async setHostname(params: T.SetServerHostnameParams): Promise<null> {
+  async setHostname(params: Params<'server.set-hostname'>): Promise<null> {
     await pauseFor(1000)
 
     this.mockRevision([
@@ -534,14 +544,14 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async setDns(params: T.SetStaticDnsParams): Promise<null> {
+  async setDns(params: Params<'net.dns.set-static'>): Promise<null> {
     await pauseFor(2000)
 
     const patch: ReplaceOperation<T.DnsSettings['staticServers']>[] = [
       {
         op: PatchOp.REPLACE,
         path: '/serverInfo/network/dns/staticServers',
-        value: params.servers,
+        value: params.servers ?? null,
       },
     ]
     this.mockRevision(patch)
@@ -549,13 +559,15 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async queryDns(params: T.QueryDnsParams): Promise<T.QueryDnsRes> {
+  async queryDns(params: Params<'net.dns.query'>): Promise<T.QueryDnsRes> {
     await pauseFor(2000)
 
     return { ipv4: null, ipv6: null }
   }
 
-  async checkPort(params: T.CheckPortParams): Promise<T.CheckPortRes> {
+  async checkPort(
+    params: Params<'net.gateway.check-port'>,
+  ): Promise<T.CheckPortRes> {
     await pauseFor(2000)
 
     return {
@@ -568,7 +580,7 @@ export class MockApiService extends ApiService {
   }
 
   async checkPortV6(
-    params: T.CheckPortParams,
+    params: Params<'net.gateway.check-port-v6'>,
   ): Promise<T.CheckPortV6Res | null> {
     await pauseFor(2000)
 
@@ -580,7 +592,7 @@ export class MockApiService extends ApiService {
   }
 
   async checkChallenge(
-    params: T.CheckChallengeParams,
+    params: Params<'net.acme.check-challenge'>,
   ): Promise<T.CheckChallengeRes | null> {
     await pauseFor(2000)
 
@@ -596,7 +608,9 @@ export class MockApiService extends ApiService {
     }
   }
 
-  async checkDns(params: T.CheckDnsParams): Promise<CheckDnsRes> {
+  async checkDns(
+    params: Params<'net.gateway.check-dns'>,
+  ): Promise<CheckDnsRes> {
     await pauseFor(2000)
 
     return false
@@ -649,34 +663,36 @@ export class MockApiService extends ApiService {
   // notification
 
   async getNotifications(
-    params: T.ListNotificationParams,
+    params: Params<'notification.list'>,
   ): Promise<T.NotificationWithId[]> {
     await pauseFor(2000)
 
     return Mock.Notifications
   }
 
-  async deleteNotifications(params: T.ModifyNotificationParams): Promise<null> {
+  async deleteNotifications(
+    params: Params<'notification.remove'>,
+  ): Promise<null> {
     await pauseFor(2000)
     return null
   }
 
   async markSeenNotifications(
-    params: T.ModifyNotificationParams,
+    params: Params<'notification.mark-seen'>,
   ): Promise<null> {
     await pauseFor(2000)
     return null
   }
 
   async markSeenAllNotifications(
-    params: T.ModifyNotificationBeforeParams,
+    params: Params<'notification.mark-seen-before'>,
   ): Promise<null> {
     await pauseFor(2000)
     return null
   }
 
   async markUnseenNotifications(
-    params: T.ModifyNotificationParams,
+    params: Params<'notification.mark-unseen'>,
   ): Promise<null> {
     await pauseFor(2000)
     return null
@@ -685,7 +701,7 @@ export class MockApiService extends ApiService {
   // proxies
 
   private proxyId = 0
-  async addTunnel(params: T.AddTunnelParams): Promise<{ id: string }> {
+  async addTunnel(params: Params<'net.tunnel.add'>): Promise<string> {
     await pauseFor(2000)
 
     const id = `wg${this.proxyId++}`
@@ -726,10 +742,10 @@ export class MockApiService extends ApiService {
 
     this.mockRevision(patch)
 
-    return { id }
+    return id
   }
 
-  async updateTunnel(params: T.RenameGatewayParams): Promise<null> {
+  async updateTunnel(params: Params<'net.gateway.set-name'>): Promise<null> {
     await pauseFor(2000)
 
     const patch: ReplaceOperation<string>[] = [
@@ -744,12 +760,12 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async updateTunnelConfig(params: T.UpdateTunnelParams): Promise<null> {
+  async updateTunnelConfig(params: Params<'net.tunnel.update'>): Promise<null> {
     await pauseFor(2000)
     return null
   }
 
-  async removeTunnel(params: T.RemoveTunnelParams): Promise<null> {
+  async removeTunnel(params: Params<'net.tunnel.remove'>): Promise<null> {
     await pauseFor(2000)
     const patch: RemoveOperation[] = [
       {
@@ -776,7 +792,9 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async setServiceOutbound(params: T.SetOutboundGatewayParams): Promise<null> {
+  async setServiceOutbound(
+    params: Params<'package.set-outbound-gateway'>,
+  ): Promise<null> {
     await pauseFor(2000)
     const patch = [
       {
@@ -792,7 +810,7 @@ export class MockApiService extends ApiService {
 
   // wifi
 
-  async enableWifi(params: T.SetWifiEnabledParams): Promise<null> {
+  async enableWifi(params: Params<'wifi.set-enabled'>): Promise<null> {
     await pauseFor(2000)
     const patch = [
       {
@@ -806,7 +824,7 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async setWifiCountry(params: T.SetCountryParams): Promise<null> {
+  async setWifiCountry(params: Params<'wifi.country.set'>): Promise<null> {
     await pauseFor(2000)
     return null
   }
@@ -816,24 +834,24 @@ export class MockApiService extends ApiService {
     return Mock.Wifi
   }
 
-  async addWifi(params: T.WifiAddParams): Promise<null> {
+  async addWifi(params: Params<'wifi.add'>): Promise<null> {
     await pauseFor(2000)
     return null
   }
 
-  async connectWifi(params: T.WifiSsidParams): Promise<null> {
+  async connectWifi(params: Params<'wifi.connect'>): Promise<null> {
     await pauseFor(2000)
     return null
   }
 
-  async deleteWifi(params: T.WifiSsidParams): Promise<null> {
+  async deleteWifi(params: Params<'wifi.remove'>): Promise<null> {
     await pauseFor(2000)
     return null
   }
 
   // smtp
 
-  async setSmtp(params: T.SmtpValue): Promise<null> {
+  async setSmtp(params: Params<'server.set-smtp'>): Promise<null> {
     await pauseFor(2000)
     const patch = [
       {
@@ -861,7 +879,7 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async testSmtp(params: T.TestSmtpParams): Promise<null> {
+  async testSmtp(params: Params<'server.test-smtp'>): Promise<null> {
     await pauseFor(2000)
     return null
   }
@@ -873,12 +891,12 @@ export class MockApiService extends ApiService {
     return Mock.SshKeys
   }
 
-  async addSshKey(params: T.SshAddParams): Promise<T.SshKeyResponse> {
+  async addSshKey(params: Params<'ssh.add'>): Promise<T.SshKeyResponse> {
     await pauseFor(2000)
     return Mock.SshKey
   }
 
-  async deleteSshKey(params: T.SshDeleteParams): Promise<null> {
+  async deleteSshKey(params: Params<'ssh.remove'>): Promise<null> {
     await pauseFor(2000)
     return null
   }
@@ -893,8 +911,8 @@ export class MockApiService extends ApiService {
   }
 
   async addBackupTarget(
-    params: T.CifsAddParams,
-  ): Promise<{ [id: string]: CifsBackupTarget }> {
+    params: Params<'backup.target.cifs.add'>,
+  ): Promise<Record<string, T.BackupTarget>> {
     await pauseFor(2000)
     const { hostname, path, username } = params
     return {
@@ -912,8 +930,8 @@ export class MockApiService extends ApiService {
   }
 
   async updateBackupTarget(
-    params: T.CifsUpdateParams,
-  ): Promise<{ [id: string]: CifsBackupTarget }> {
+    params: Params<'backup.target.cifs.update'>,
+  ): Promise<Record<string, T.BackupTarget>> {
     await pauseFor(2000)
     const { id, hostname, path, username } = params
     return {
@@ -926,24 +944,30 @@ export class MockApiService extends ApiService {
     }
   }
 
-  async removeBackupTarget(params: T.CifsRemoveParams): Promise<null> {
+  async removeBackupTarget(
+    params: Params<'backup.target.cifs.remove'>,
+  ): Promise<null> {
     await pauseFor(2000)
     return null
   }
 
-  async deleteLegacyBackup(params: T.DeleteLegacyParams): Promise<null> {
+  async deleteLegacyBackup(
+    params: Params<'backup.target.delete-legacy'>,
+  ): Promise<null> {
     await pauseFor(2000)
     const target = Mock.BackupTargets[params.targetId]
     if (target) target.legacyBackup = false
     return null
   }
 
-  async getBackupInfo(params: T.InfoParams): Promise<T.BackupInfo> {
+  async getBackupInfo(
+    params: Params<'backup.target.info'>,
+  ): Promise<T.BackupInfo> {
     await pauseFor(2000)
     return Mock.BackupInfo
   }
 
-  async createBackup(params: T.BackupParams): Promise<null> {
+  async createBackup(params: Params<'backup.create'>): Promise<null> {
     await pauseFor(2000)
     const serverPath = '/serverInfo/statusInfo/backupProgress'
     const ids = params.packageIds || []
@@ -1191,7 +1215,7 @@ export class MockApiService extends ApiService {
     }
   }
 
-  async installPackage(params: T.InstallParams): Promise<null> {
+  async installPackage(params: Params<'package.install'>): Promise<null> {
     await pauseFor(2000)
 
     const existing = mockPatchData.packageData[params.id]
@@ -1251,7 +1275,9 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async cancelInstallPackage(params: T.CancelInstallParams): Promise<null> {
+  async cancelInstallPackage(
+    params: Params<'package.cancel-install'>,
+  ): Promise<null> {
     await pauseFor(500)
 
     const patch: RemoveOperation[] = [
@@ -1266,7 +1292,7 @@ export class MockApiService extends ApiService {
   }
 
   async getActionInput(
-    params: T.GetActionInputParams,
+    params: Params<'package.action.get-input'>,
   ): Promise<GetActionInputRes> {
     await pauseFor(2000)
 
@@ -1296,7 +1322,7 @@ export class MockApiService extends ApiService {
     }
   }
 
-  async runAction(params: T.RunActionParams): Promise<ActionRes> {
+  async runAction(params: Params<'package.action.run'>): Promise<ActionRes> {
     await pauseFor(2000)
 
     const patch: ReplaceOperation<{ [key: string]: T.TaskEntry }>[] = [
@@ -1320,7 +1346,7 @@ export class MockApiService extends ApiService {
     return Mock.ActionResMessage
   }
 
-  async clearTask(params: T.ClearTaskParams): Promise<null> {
+  async clearTask(params: Params<'package.action.clear-task'>): Promise<null> {
     await pauseFor(2000)
 
     const patch: RemoveOperation[] = [
@@ -1334,7 +1360,9 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async restorePackages(params: T.RestorePackageParams): Promise<null> {
+  async restorePackages(
+    params: Params<'package.backup.restore'>,
+  ): Promise<null> {
     await pauseFor(2000)
     const patch: AddOperation<PackageDataEntry>[] = params.ids.map(id => {
       setTimeout(async () => {
@@ -1362,7 +1390,7 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async startPackage(params: T.ControlParams): Promise<null> {
+  async startPackage(params: Params<'package.start'>): Promise<null> {
     const path = `/packageData/${params.id}/statusInfo`
 
     await pauseFor(2000)
@@ -1428,7 +1456,7 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async restartPackage(params: T.ControlParams): Promise<null> {
+  async restartPackage(params: Params<'package.restart'>): Promise<null> {
     await pauseFor(2000)
     const path = `/packageData/${params.id}/statusInfo`
 
@@ -1492,7 +1520,7 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async stopPackage(params: T.ControlParams): Promise<null> {
+  async stopPackage(params: Params<'package.stop'>): Promise<null> {
     await pauseFor(2000)
     const path = `/packageData/${params.id}/statusInfo`
 
@@ -1530,11 +1558,11 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async rebuildPackage(params: T.RebuildParams): Promise<null> {
+  async rebuildPackage(params: Params<'package.rebuild'>): Promise<null> {
     return this.restartPackage(params)
   }
 
-  async uninstallPackage(params: T.UninstallParams): Promise<null> {
+  async uninstallPackage(params: Params<'package.uninstall'>): Promise<null> {
     await pauseFor(2000)
 
     setTimeout(async () => {
@@ -1584,7 +1612,7 @@ export class MockApiService extends ApiService {
   //   return null
   // }
 
-  async initAcme(params: T.InitAcmeParams): Promise<null> {
+  async initAcme(params: Params<'net.acme.init'>): Promise<null> {
     await pauseFor(2000)
 
     const patch = [
@@ -1601,7 +1629,7 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async removeAcme(params: T.RemoveAcmeParams): Promise<null> {
+  async removeAcme(params: Params<'net.acme.remove'>): Promise<null> {
     await pauseFor(2000)
 
     const regex = new RegExp('/', 'g')
@@ -1629,7 +1657,7 @@ export class MockApiService extends ApiService {
   }
 
   async osUiAddPublicDomain(
-    params: T.AddPublicDomainParams,
+    params: Params<'server.host.address.domain.public.add'>,
   ): Promise<T.AddPublicDomainRes> {
     await pauseFor(2000)
 
@@ -1669,7 +1697,9 @@ export class MockApiService extends ApiService {
     }
   }
 
-  async osUiRemovePublicDomain(params: T.RemoveDomainParams): Promise<null> {
+  async osUiRemovePublicDomain(
+    params: Params<'server.host.address.domain.public.remove'>,
+  ): Promise<null> {
     await pauseFor(2000)
 
     const patch: RemoveOperation[] = [
@@ -1684,7 +1714,7 @@ export class MockApiService extends ApiService {
   }
 
   async osUiAddPrivateDomain(
-    params: T.AddPrivateDomainParams,
+    params: Params<'server.host.address.domain.private.add'>,
   ): Promise<boolean> {
     await pauseFor(2000)
 
@@ -1711,7 +1741,9 @@ export class MockApiService extends ApiService {
     return false
   }
 
-  async osUiRemovePrivateDomain(params: T.RemoveDomainParams): Promise<null> {
+  async osUiRemovePrivateDomain(
+    params: Params<'server.host.address.domain.private.remove'>,
+  ): Promise<null> {
     await pauseFor(2000)
 
     const patch: RemoveOperation[] = [
@@ -2223,8 +2255,8 @@ export class MockApiService extends ApiService {
 
   private mockSetAddressEnabled(
     basePath: string,
-    h: T.HostnameInfo,
-    enabled: boolean | null,
+    h: T.HostnameInfoInput,
+    enabled: Params<'server.host.binding.set-address-enabled'>['enabled'],
   ): void {
     const isPublicIp =
       h.public && (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6')
@@ -2300,7 +2332,7 @@ export class MockApiService extends ApiService {
   // entry (what update_addresses does server-side).
   private mockSetGuaWan(
     basePath: string,
-    h: T.HostnameInfo,
+    h: T.HostnameInfoInput,
     wan: boolean,
   ): void {
     if (h.metadata.kind !== 'ipv6' || h.port === null) return

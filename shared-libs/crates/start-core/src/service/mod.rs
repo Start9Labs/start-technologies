@@ -24,7 +24,6 @@ use termion::raw::IntoRawMode;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-use ts_rs::TS;
 use url::Url;
 
 use crate::context::{CliContext, RpcContext};
@@ -126,8 +125,10 @@ async fn report_failed_rollback(
 
 struct RootCommand(pub String);
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default, VisitFields)]
 pub struct MiB(pub u64);
+
+rpc_toolkit::reflect_ts!(MiB);
 
 impl MiB {
     pub fn new(value: u64) -> Self {
@@ -145,12 +146,14 @@ impl std::fmt::Display for MiB {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default, VisitFields)]
 pub struct ServiceStats {
     pub container_id: Arc<ContainerId>,
     pub memory_usage: MiB,
     pub memory_limit: MiB,
 }
+
+rpc_toolkit::reflect_ts!(ServiceStats);
 
 pub struct ServiceRef(Arc<Service>);
 impl ServiceRef {
@@ -898,13 +901,15 @@ struct ServiceActorSeed {
     init_phase: SyncMutex<Option<crate::progress::PhaseProgressTrackerHandle>>,
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 pub struct RebuildParams {
     #[arg(help = "help.arg.package-id")]
     pub id: PackageId,
 }
+
+rpc_toolkit::reflect_ts!(RebuildParams);
+rpc_toolkit::ts_export!(RebuildParams, namespaces = [""]);
 pub async fn rebuild(ctx: RpcContext, RebuildParams { id }: RebuildParams) -> Result<(), Error> {
     ctx.services.load(&ctx, &id, LoadDisposition::Retry).await?;
     Ok(())
@@ -923,27 +928,35 @@ impl std::fmt::Display for SubcontainerInfo {
     }
 }
 
-#[derive(Deserialize, Serialize, TS)]
+#[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachParams {
     pub id: PackageId,
-    #[ts(type = "string[]")]
+    #[visit(ts(type = "string[]"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub command: Vec<OsString>,
     pub tty: bool,
     pub stderr_tty: bool,
     pub pty_size: Option<TermSize>,
-    #[ts(skip)]
+    #[visit(ts(skip), wire = "rpc_toolkit::ts::Unknown")]
     #[serde(rename = "__Auth_signer")]
+    #[visit(opaque, type_attributes(visit::wire))]
     signer: Option<InternedString>,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     subcontainer: Option<Guid>,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     name: Option<InternedString>,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     image_id: Option<ImageId>,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     user: Option<InternedString>,
 }
+
+rpc_toolkit::reflect_ts!(AttachParams);
 pub async fn attach(
     ctx: RpcContext,
     AttachParams {

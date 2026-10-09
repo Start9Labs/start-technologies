@@ -14,11 +14,12 @@ use crate::continuations::{self, Guid, RpcContinuation};
 use crate::prelude::*;
 use crate::{CliContext, ServerContext};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct DiagnosticsCreateRes {
     pub guid: Guid,
     pub filename: String,
 }
+rpc_toolkit::reflect_ts!(DiagnosticsCreateRes);
 
 /// RPC handler: read syslog, register download continuation, return guid + filename.
 #[instrument(skip_all)]

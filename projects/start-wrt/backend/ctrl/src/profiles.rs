@@ -32,7 +32,7 @@ pub const DEFAULT_WAN_ZONE: &str = "wan";
 /// Do NOT raise this without re-checking every interface-derived netdev name.
 pub const INTERFACE_NAME_LIMIT: usize = 5;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitVariants)]
 pub enum LanAccess<Id: Ord> {
     #[serde(rename = "ALL")]
     All,
@@ -41,8 +41,9 @@ pub enum LanAccess<Id: Ord> {
     #[serde(rename = "other_profiles")]
     OtherProfiles(BTreeSet<Id>),
 }
+rpc_toolkit::reflect_ts!(impl [Id: Ord] for LanAccess<Id> where [BTreeSet<Id>: rpc_toolkit::ts::TS]);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitVariants)]
 pub enum WanAccess {
     #[serde(rename = "ALL")]
     All,
@@ -53,22 +54,25 @@ pub enum WanAccess {
     #[serde(rename = "blacklist")]
     Blacklist(Vec<String>), // List of blocked destination IPs/CIDRs
 }
+rpc_toolkit::reflect_ts!(WanAccess);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduleWindow {
     pub start_time: String,
     pub end_time: String,
     pub days: [bool; 7],
 }
+rpc_toolkit::reflect_ts!(ScheduleWindow);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitFields)]
 pub struct ScheduleWindows {
     pub interface: String,
     pub windows: Vec<ScheduleWindow>,
 }
+rpc_toolkit::reflect_ts!(ScheduleWindows);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct Profile<Id: Ord = ProfileId> {
     #[serde(flatten)]
     pub id: Id,
@@ -83,14 +87,16 @@ pub struct Profile<Id: Ord = ProfileId> {
     pub access_to_new_profiles: bool,
     pub owns_lan: bool,
 }
+rpc_toolkit::reflect_ts!(impl [Id: Ord] for Profile<Id> where [Id: rpc_toolkit::ts::TS, LanAccess<Id>: rpc_toolkit::ts::TS]);
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, visit_rs::VisitFields)]
 pub struct ProfileSetRequest {
     #[serde(flatten)]
     pub profile: Profile<ProfileIdOpt>,
     #[serde(default)]
     pub force: bool,
 }
+rpc_toolkit::reflect_ts!(ProfileSetRequest);
 
 pub fn profiles<C: CtrlContext>() -> ParentHandler<C> {
     ParentHandler::new()
@@ -125,14 +131,38 @@ pub fn profiles<C: CtrlContext>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug,
+    Deserialize,
+    Serialize,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    visit_rs::VisitFields,
+)]
 pub struct ProfileId {
     pub fullname: String,
     pub interface: String,
     pub vlan_tag: u16,
 }
+rpc_toolkit::reflect_ts!(ProfileId);
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Parser)]
+#[derive(
+    Debug,
+    Deserialize,
+    Serialize,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Parser,
+    visit_rs::VisitFields,
+)]
 pub struct ProfileIdOpt {
     #[clap(short, long)]
     pub fullname: Option<String>,
@@ -141,6 +171,7 @@ pub struct ProfileIdOpt {
     #[clap(short, long)]
     pub vlan_tag: Option<u16>,
 }
+rpc_toolkit::reflect_ts!(ProfileIdOpt);
 
 impl From<ProfileId> for ProfileIdOpt {
     fn from(id: ProfileId) -> Self {
@@ -3148,13 +3179,14 @@ fn heal_ipv6_state_in_cfgs(cfgs: &mut Configs) -> Result<Vec<String>, Error> {
     Ok(repaired)
 }
 
-#[derive(Debug, Parser, Serialize, Deserialize)]
+#[derive(Debug, Parser, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct EditArgs {
     #[clap(flatten)]
     pub get: ProfileIdOpt,
     #[clap(long)]
     pub create: bool,
 }
+rpc_toolkit::reflect_ts!(EditArgs);
 
 #[instrument(skip_all)]
 pub async fn edit<C: CtrlContext>(ctx: C, args: EditArgs) -> Result<ProfileId, Error> {
@@ -3285,10 +3317,11 @@ fn parse_schedule_windows(raw: &[String]) -> Vec<ScheduleWindow> {
         .collect()
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, visit_rs::VisitFields)]
 pub struct ScheduleGetParams {
     interface: String,
 }
+rpc_toolkit::reflect_ts!(ScheduleGetParams);
 
 /// Read schedule data for a single profile from UCI.
 #[instrument(skip_all)]

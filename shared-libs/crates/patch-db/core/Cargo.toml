@@ -13,6 +13,7 @@ version = "0.1.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 debug = ["tracing"]
+reflect = ["dep:visit-rs"]
 trace = ["debug", "tracing-error"]
 unstable = []
 
@@ -33,6 +34,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "rt", "sync"] }
 tracing = { version = "0.1.29", optional = true }
 tracing-error = { version = "0.2.0", optional = true }
+visit-rs = { path = "../../visit-rs", optional = true, default-features = false }
 
 [dev-dependencies]
 proptest = "1.0.0"

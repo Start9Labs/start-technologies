@@ -4,7 +4,6 @@ use clap::Parser;
 use exver::Version;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::context::CliContext;
 use crate::prelude::*;
@@ -43,16 +42,17 @@ pub fn signer_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[command(rename_all = "kebab-case")]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct VersionSignerParams {
-    #[ts(type = "string")]
     pub version: Version,
     pub signer: Guid,
 }
+
+rpc_toolkit::reflect_ts!(VersionSignerParams);
+rpc_toolkit::ts_export!(VersionSignerParams, namespaces = [""]);
 
 pub async fn add_version_signer(
     ctx: RegistryContext,
@@ -114,15 +114,16 @@ pub async fn remove_version_signer(
         .result
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[command(rename_all = "kebab-case")]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct ListVersionSignersParams {
-    #[ts(type = "string")]
     pub version: Version,
 }
+
+rpc_toolkit::reflect_ts!(ListVersionSignersParams);
+rpc_toolkit::ts_export!(ListVersionSignersParams, namespaces = [""]);
 
 pub async fn list_version_signers(
     ctx: RegistryContext,

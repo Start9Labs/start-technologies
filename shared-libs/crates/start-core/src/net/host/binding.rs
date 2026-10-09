@@ -13,7 +13,6 @@ use rpc_toolkit::{
     Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async, from_fn_async_local,
 };
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::context::{CliContext, RpcContext};
 use crate::db::prelude::Map;
@@ -30,13 +29,15 @@ use crate::util::serde::{HandlerExtSerde, display_serializable};
 use crate::util::tui::choose_custom_display;
 use crate::{GatewayId, HostId, ServiceInterfaceId};
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct BindId {
     pub id: HostId,
     pub internal_port: u16,
 }
+
+rpc_toolkit::reflect_ts!(BindId);
+rpc_toolkit::ts_export!(BindId, namespaces = [""]);
 impl ValueParserFactory for BindId {
     type Parser = FromStrParser<Self>;
     fn value_parser() -> Self::Parser {
@@ -56,9 +57,8 @@ impl FromStr for BindId {
     }
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize, TS, HasModel)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize, VisitFields, HasModel)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 #[model = "Model<Self>"]
 pub struct DerivedAddressInfo {
     /// User override: enable these addresses (only for public IP & port)
@@ -77,6 +77,9 @@ pub struct DerivedAddressInfo {
     /// COMPUTED: NetServiceData::update — all possible addresses for this binding
     pub available: BTreeSet<HostnameInfo>,
 }
+
+rpc_toolkit::reflect_ts!(DerivedAddressInfo);
+rpc_toolkit::ts_export!(DerivedAddressInfo, namespaces = [""]);
 
 fn override_key(address: &HostnameInfo) -> (InternedString, u16) {
     // disablable addresses will always have a port
@@ -201,10 +204,12 @@ impl DerivedAddressInfo {
     }
 }
 
-#[derive(Debug, Default, Deserialize, Serialize, HasModel, TS)]
+#[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct Bindings(pub BTreeMap<u16, BindInfo>);
+
+rpc_toolkit::reflect_ts!(Bindings);
+rpc_toolkit::ts_export!(Bindings, namespaces = [""]);
 
 impl Map for Bindings {
     type Key = u16;
@@ -236,10 +241,9 @@ impl std::ops::DerefMut for Bindings {
 /// `internal_start_port..(internal_start_port + number_of_ports)` and is
 /// forwarded through a single iptables rule per protocol per gateway,
 /// preserving the destination port number.
-#[derive(Debug, Deserialize, Serialize, HasModel, TS)]
+#[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct RangeBindInfo {
     pub enabled: bool,
     pub external_start_port: u16,
@@ -258,10 +262,15 @@ pub struct RangeBindInfo {
     pub interface: Option<RangeServiceInterface>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize, HasModel, TS)]
+rpc_toolkit::reflect_ts!(RangeBindInfo);
+rpc_toolkit::ts_export!(RangeBindInfo, namespaces = [""]);
+
+#[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct BindingRanges(pub BTreeMap<u16, RangeBindInfo>);
+
+rpc_toolkit::reflect_ts!(BindingRanges);
+rpc_toolkit::ts_export!(BindingRanges, namespaces = [""]);
 
 impl Map for BindingRanges {
     type Key = u16;
@@ -377,10 +386,9 @@ impl RangeBindInfo {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel, TS)]
+#[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct BindInfo {
     pub enabled: bool,
     pub options: BindOptions,
@@ -393,13 +401,18 @@ pub struct BindInfo {
     pub interfaces: BTreeMap<ServiceInterfaceId, ServiceInterface>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq, PartialOrd, Ord)]
+rpc_toolkit::reflect_ts!(BindInfo);
+rpc_toolkit::ts_export!(BindInfo, namespaces = [""]);
+
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct NetInfo {
     pub assigned_port: Option<u16>,
     pub assigned_ssl_port: Option<u16>,
 }
+
+rpc_toolkit::reflect_ts!(NetInfo);
+rpc_toolkit::ts_export!(NetInfo, namespaces = [""]);
 impl BindInfo {
     /// Addresses actually served by this binding. A binding with no exported
     /// service interface listens internally only (lo / lxcbr0) — the operator's
@@ -504,21 +517,25 @@ impl BindInfo {
     }
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct Security {
     pub ssl: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(Security);
+rpc_toolkit::ts_export!(Security, namespaces = [""]);
+
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct BindOptions {
     pub preferred_external_port: u16,
     pub add_ssl: Option<AddSslOptions>,
     pub secure: Option<Security>,
 }
+
+rpc_toolkit::reflect_ts!(BindOptions);
+rpc_toolkit::ts_export!(BindOptions, namespaces = [""]);
 
 impl BindOptions {
     /// The container terminates TLS itself; the OS fronts its port with an
@@ -559,9 +576,8 @@ impl BindOptions {
 /// rewraps SSL (`add_ssl` set AND `secure.ssl == true`, so the OS terminates
 /// the client's TLS and initiates a fresh TLS connection to the container).
 /// Absent (`None`) means validate against the StartOS root CA — the default.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, VisitVariants)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub enum UpstreamCertValidation {
     /// Do not validate the container's certificate at all. Use when the
     /// container serves a self-signed cert on the trusted internal bridge.
@@ -571,9 +587,11 @@ pub enum UpstreamCertValidation {
     Certificate(String),
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, TS)]
+rpc_toolkit::reflect_ts!(UpstreamCertValidation);
+rpc_toolkit::ts_export!(UpstreamCertValidation, namespaces = [""]);
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct AddSslOptions {
     pub preferred_external_port: u16,
     /// When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
@@ -584,11 +602,12 @@ pub struct AddSslOptions {
     /// The application protocols StartOS answers a client with, from those it
     /// asked for. Unset answers with whatever it asked for.
     #[serde(default, deserialize_with = "legacy_alpn::deserialize")]
+    #[visit(input_wire = "Option<legacy_alpn::CompatibleAlpnInfo>")]
+    #[visit(type_attributes(visit::input_wire))]
     pub alpn: Option<AlpnInfo>,
     /// Certificate validation for the OS→container TLS leg when rewrapping.
     /// `None` (the default) validates against the StartOS root CA.
     #[serde(default)]
-    #[ts(optional)]
     pub upstream_cert_validation: Option<UpstreamCertValidation>,
     /// Optional reverse-proxy auth gate. When set, the OS reverse proxy
     /// will validate the `Authorization` header on incoming HTTP requests
@@ -601,25 +620,32 @@ pub struct AddSslOptions {
     pub auth: Option<ProxyAuth>,
 }
 
+rpc_toolkit::reflect_ts!(AddSslOptions);
+rpc_toolkit::ts_export!(AddSslOptions, namespaces = [""]);
+
 mod legacy_alpn {
     use serde::{Deserialize, Deserializer};
 
     use crate::net::vhost::AlpnInfo;
     use crate::util::serde::MaybeUtf8String;
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, visit_rs::VisitVariants)]
     #[serde(rename_all = "camelCase")]
-    enum LegacyAlpnInfo {
+    pub(super) enum LegacyAlpnInfo {
         Reflect,
         Specified(Vec<MaybeUtf8String>),
     }
 
-    #[derive(Deserialize)]
+    rpc_toolkit::reflect_ts!(LegacyAlpnInfo);
+
+    #[derive(Deserialize, visit_rs::VisitVariants)]
     #[serde(untagged)]
-    enum CompatibleAlpnInfo {
+    pub(super) enum CompatibleAlpnInfo {
         Current(Vec<MaybeUtf8String>),
         Legacy(LegacyAlpnInfo),
     }
+
+    rpc_toolkit::reflect_ts!(CompatibleAlpnInfo);
 
     pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<Option<AlpnInfo>, D::Error>
     where
@@ -649,9 +675,8 @@ mod legacy_alpn {
 /// §2.2). Defaults to `"StartOS"` when unset. Packages that share
 /// credentials across multiple bindings should pick a stable realm
 /// so that browsers reuse cached credentials across them.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, VisitVariants)]
 #[serde(rename_all = "camelCase", tag = "type")]
-#[ts(export)]
 pub enum ProxyAuth {
     Bearer {
         tokens: Vec<String>,
@@ -665,13 +690,18 @@ pub enum ProxyAuth {
     },
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, TS)]
+rpc_toolkit::reflect_ts!(ProxyAuth);
+rpc_toolkit::ts_export!(ProxyAuth, namespaces = [""]);
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct BasicCredential {
     pub username: String,
     pub password: String,
 }
+
+rpc_toolkit::reflect_ts!(BasicCredential);
+rpc_toolkit::ts_export!(BasicCredential, namespaces = [""]);
 
 pub fn binding<C: Context, Kind: HostApiKind>()
 -> ParentHandler<C, Kind::Params, Kind::InheritedParams> {
@@ -737,6 +767,7 @@ pub fn binding<C: Context, Kind: HostApiKind>()
         .subcommand(
             "set-address-enabled",
             from_fn_async_local(cli_set_address_enabled::<Kind>)
+                .no_ts()
                 .with_inherited(Kind::inheritance)
                 .no_display()
                 .with_about("about.set-address-enabled-for-binding"),
@@ -751,6 +782,7 @@ pub fn binding<C: Context, Kind: HostApiKind>()
         .subcommand(
             "set-range-address-enabled",
             from_fn_async_local(cli_set_range_address_enabled::<Kind>)
+                .no_ts()
                 .with_inherited(Kind::inheritance)
                 .no_display()
                 .with_about("about.set-range-address-enabled-for-binding"),
@@ -765,6 +797,7 @@ pub fn binding<C: Context, Kind: HostApiKind>()
         .subcommand(
             "set-gua-wan",
             from_fn_async_local(cli_set_gua_wan::<Kind>)
+                .no_ts()
                 .with_inherited(Kind::inheritance)
                 .no_display()
                 .with_about("about.set-gua-wan-for-binding"),
@@ -793,14 +826,16 @@ pub async fn list_bindings<Kind: HostApiKind>(
         .de()
 }
 
-#[derive(Deserialize, Serialize, TS)]
+#[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct BindingSetAddressEnabledParams {
     internal_port: u16,
     address: HostnameInfo,
     enabled: Option<bool>,
 }
+
+rpc_toolkit::reflect_ts!(BindingSetAddressEnabledParams);
+rpc_toolkit::ts_export!(BindingSetAddressEnabledParams, namespaces = [""]);
 
 #[derive(Deserialize, Serialize, Parser)]
 #[group(skip)]
@@ -1183,14 +1218,16 @@ pub async fn set_range_address_enabled<Kind: HostApiKind>(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, TS)]
+#[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct BindingSetGuaWanParams {
     internal_port: u16,
     address: HostnameInfo,
     wan: bool,
 }
+
+rpc_toolkit::reflect_ts!(BindingSetGuaWanParams);
+rpc_toolkit::ts_export!(BindingSetGuaWanParams, namespaces = [""]);
 
 #[derive(Deserialize, Serialize, Parser)]
 #[group(skip)]

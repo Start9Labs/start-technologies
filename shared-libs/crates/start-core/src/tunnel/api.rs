@@ -7,7 +7,6 @@ use imbl_value::InternedString;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::context::CliContext;
 use crate::db::model::public::NetworkInterfaceType;
@@ -177,13 +176,17 @@ pub async fn restart(ctx: TunnelContext) -> Result<(), Error> {
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SubnetParams {
-    #[ts(type = "string")]
+    #[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     subnet: Ipv4Net,
 }
+
+rpc_toolkit::reflect_ts!(SubnetParams);
+rpc_toolkit::ts_export!(SubnetParams, namespaces = ["tunnel"]);
 
 pub fn subnet_api<C: Context>() -> ParentHandler<C, SubnetParams> {
     ParentHandler::new()
@@ -316,17 +319,20 @@ pub fn device_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SetDnsInjectionParams {
-    #[ts(type = "string")]
+    #[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     subnet: Ipv4Net,
-    #[ts(type = "string")]
     ip: Ipv4Addr,
     #[arg(long)]
     enabled: bool,
 }
+
+rpc_toolkit::reflect_ts!(SetDnsInjectionParams);
+rpc_toolkit::ts_export!(SetDnsInjectionParams, namespaces = ["tunnel"]);
 
 /// Allow/deny a device to inject DNS records via RFC 2136. Off by default: an
 /// allowed device can add records the whole tunnel resolves, so trust only.
@@ -362,17 +368,20 @@ pub async fn set_dns_injection(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SetAutoPortForwardParams {
-    #[ts(type = "string")]
+    #[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     subnet: Ipv4Net,
-    #[ts(type = "string")]
     ip: Ipv4Addr,
     #[arg(long)]
     enabled: bool,
 }
+
+rpc_toolkit::reflect_ts!(SetAutoPortForwardParams);
+rpc_toolkit::ts_export!(SetAutoPortForwardParams, namespaces = ["tunnel"]);
 
 /// Allow/deny a device to auto-create port forwards via PCP/IGD. Off by
 /// default; paired with DNS injection under the gateway-autoconfig toggle.
@@ -407,17 +416,20 @@ pub async fn set_auto_port_forward(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SetDeviceKindParams {
-    #[ts(type = "string")]
+    #[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     subnet: Ipv4Net,
-    #[ts(type = "string")]
     ip: Ipv4Addr,
     #[arg(long, value_enum)]
     kind: WgClientKind,
 }
+
+rpc_toolkit::reflect_ts!(SetDeviceKindParams);
+rpc_toolkit::ts_export!(SetDeviceKindParams, namespaces = ["tunnel"]);
 
 /// Promote a device to Server or demote to Client. The role is sticky, but the
 /// transition resets both capability flags to the kind's default (Server: both
@@ -519,7 +531,7 @@ pub async fn list_dns_records(ctx: TunnelContext) -> Result<Vec<DnsRecordEntry>,
         .collect())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct AddDnsRecordParams {
@@ -531,6 +543,9 @@ pub struct AddDnsRecordParams {
     #[arg(long)]
     ttl: Option<u32>,
 }
+
+rpc_toolkit::reflect_ts!(AddDnsRecordParams);
+rpc_toolkit::ts_export!(AddDnsRecordParams, namespaces = ["tunnel"]);
 
 pub async fn add_dns_record(
     ctx: TunnelContext,
@@ -552,7 +567,7 @@ pub async fn add_dns_record(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoveDnsRecordParams {
@@ -561,6 +576,9 @@ pub struct RemoveDnsRecordParams {
     #[arg(long = "type")]
     rtype: Option<String>,
 }
+
+rpc_toolkit::reflect_ts!(RemoveDnsRecordParams);
+rpc_toolkit::ts_export!(RemoveDnsRecordParams, namespaces = ["tunnel"]);
 
 pub async fn remove_dns_record(
     ctx: TunnelContext,
@@ -577,12 +595,15 @@ pub async fn remove_dns_record(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct AddSubnetParams {
     name: InternedString,
 }
+
+rpc_toolkit::reflect_ts!(AddSubnetParams);
+rpc_toolkit::ts_export!(AddSubnetParams, namespaces = ["tunnel"]);
 
 pub async fn add_subnet(
     ctx: TunnelContext,
@@ -674,7 +695,7 @@ pub async fn remove_subnet(
 
 /// Which upstream a subnet's DNS proxy forwards to. `Device`/`Custom` draw
 /// their data from companion fields on [`SetSubnetDnsParams`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, TS, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, VisitVariants, ValueEnum)]
 #[serde(rename_all = "camelCase")]
 pub enum DnsMode {
     Default,
@@ -682,7 +703,9 @@ pub enum DnsMode {
     Custom,
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+rpc_toolkit::reflect_ts!(DnsMode);
+
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SetSubnetDnsParams {
@@ -690,13 +713,18 @@ pub struct SetSubnetDnsParams {
     mode: DnsMode,
     /// The selected device's WireGuard IP; required when `mode` is `device`.
     #[arg(long, help = "help.arg.dns-device-ip")]
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     device_ip: Option<Ipv4Addr>,
     /// Up to 3 upstream servers (bare IP or `ip:port`); used when `mode` is `custom`.
     #[arg(long = "server", action = clap::ArgAction::Append, help = "help.arg.dns-server")]
-    #[ts(type = "string[]")]
+    #[visit(ts(type = "string[]"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     servers: Vec<String>,
 }
+
+rpc_toolkit::reflect_ts!(SetSubnetDnsParams);
+rpc_toolkit::ts_export!(SetSubnetDnsParams, namespaces = ["tunnel"]);
 
 /// Parse a DNS upstream; a bare IP defaults to port 53.
 fn parse_dns_server(s: &str) -> Result<SocketAddr, Error> {
@@ -773,14 +801,18 @@ pub async fn set_subnet_dns(
     ctx.dns_proxy.sync(&server, ctx.dns_injector.clone()).await
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SetSubnetWanParams {
     #[arg(long)]
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     wan_ip: Option<Ipv4Addr>,
 }
+
+rpc_toolkit::reflect_ts!(SetSubnetWanParams);
+rpc_toolkit::ts_export!(SetSubnetWanParams, namespaces = ["tunnel"]);
 
 /// Pin the WAN IP a subnet's egress SNATs to; `null` falls back to masquerade.
 /// Per-device overrides still take precedence.
@@ -804,16 +836,20 @@ pub async fn set_subnet_wan(
     ctx.resync_forward_keys().await
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SetSubnetIpv6Params {
     /// The routed IPv6 prefix delegated to this subnet (e.g. a /64 from Hetzner,
     /// a /56 from Linode). `null` disables IPv6 on the subnet.
     #[arg(long)]
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     prefix: Option<Ipv6Net>,
 }
+
+rpc_toolkit::reflect_ts!(SetSubnetIpv6Params);
+rpc_toolkit::ts_export!(SetSubnetIpv6Params, namespaces = ["tunnel"]);
 
 /// Set (or, with `null`, clear) the routed IPv6 prefix delegated to a subnet.
 /// Every host on the subnet (the server and each client) is assigned one global
@@ -925,18 +961,22 @@ pub async fn set_subnet_ipv6(
     ctx.sync_network(&server).await
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SetDeviceWanParams {
-    #[ts(type = "string")]
+    #[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     subnet: Ipv4Net,
-    #[ts(type = "string")]
     ip: Ipv4Addr,
     #[arg(long)]
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     wan_ip: Option<Ipv4Addr>,
 }
+
+rpc_toolkit::reflect_ts!(SetDeviceWanParams);
+rpc_toolkit::ts_export!(SetDeviceWanParams, namespaces = ["tunnel"]);
 
 /// Pin the WAN IP a device's egress SNATs to, overriding its subnet's `wan_ip`.
 /// `null` falls back to the subnet rule / masquerade.
@@ -962,20 +1002,25 @@ pub async fn set_device_wan(
     ctx.resync_forward_keys().await
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct AddDeviceParams {
-    #[ts(type = "string")]
+    #[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     subnet: Ipv4Net,
     name: InternedString,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     ip: Option<Ipv4Addr>,
     /// Client (no autoconfig) or Server (gateway-autoconfig on by default).
     #[serde(default)]
     #[arg(long, value_enum, default_value = "client")]
     kind: WgClientKind,
 }
+
+rpc_toolkit::reflect_ts!(AddDeviceParams);
+rpc_toolkit::ts_export!(AddDeviceParams, namespaces = ["tunnel"]);
 
 pub async fn add_device(
     ctx: TunnelContext,
@@ -1074,15 +1119,18 @@ pub async fn add_device(
     ctx.sync_network(&server).await
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoveDeviceParams {
-    #[ts(type = "string")]
+    #[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     subnet: Ipv4Net,
-    #[ts(type = "string")]
     ip: Ipv4Addr,
 }
+
+rpc_toolkit::reflect_ts!(RemoveDeviceParams);
+rpc_toolkit::ts_export!(RemoveDeviceParams, namespaces = ["tunnel"]);
 
 pub async fn remove_device(
     ctx: TunnelContext,
@@ -1111,13 +1159,17 @@ pub async fn remove_device(
         .await
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct ListDevicesParams {
-    #[ts(type = "string")]
+    #[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     subnet: Ipv4Net,
 }
+
+rpc_toolkit::reflect_ts!(ListDevicesParams);
+rpc_toolkit::ts_export!(ListDevicesParams, namespaces = ["tunnel"]);
 
 pub async fn list_devices(
     ctx: TunnelContext,
@@ -1133,19 +1185,23 @@ pub async fn list_devices(
         .de()
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct ShowConfigParams {
-    #[ts(type = "string")]
+    #[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     subnet: Ipv4Net,
-    #[ts(type = "string")]
     ip: Ipv4Addr,
     #[serde(rename = "__ConnectInfo_local_addr")]
     #[arg(skip)]
-    #[ts(skip)]
+    #[visit(ts(skip), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     local_addr: Option<SocketAddr>,
 }
+
+rpc_toolkit::reflect_ts!(ShowConfigParams);
+rpc_toolkit::ts_export!(ShowConfigParams, namespaces = ["tunnel"]);
 
 pub async fn show_config(
     ctx: TunnelContext,
@@ -1202,14 +1258,13 @@ pub async fn show_config(
         .to_string())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct AddPortForwardParams {
     /// External (WAN) port to forward. The external IP is fixed to the target's
     /// WAN so return traffic stays symmetric.
     external_port: u16,
-    #[ts(type = "string")]
     target: SocketAddrV4,
     #[arg(long)]
     label: Option<String>,
@@ -1222,9 +1277,11 @@ pub struct AddPortForwardParams {
     /// together with SNI demux.
     #[arg(long)]
     #[serde(default)]
-    #[ts(optional)]
     count: Option<u16>,
 }
+
+rpc_toolkit::reflect_ts!(AddPortForwardParams);
+rpc_toolkit::ts_export!(AddPortForwardParams, namespaces = ["tunnel"]);
 
 pub async fn add_forward(
     ctx: TunnelContext,
@@ -1374,17 +1431,19 @@ pub async fn add_forward(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct RemovePortForwardParams {
-    #[ts(type = "string")]
     source: SocketAddrV4,
     /// Remove a single SNI route on `source`; omit to remove the whole forward.
     #[arg(long)]
     #[serde(default)]
     hostname: Option<String>,
 }
+
+rpc_toolkit::reflect_ts!(RemovePortForwardParams);
+rpc_toolkit::ts_export!(RemovePortForwardParams, namespaces = ["tunnel"]);
 
 pub async fn remove_forward(
     ctx: TunnelContext,
@@ -1435,11 +1494,10 @@ pub async fn remove_forward(
     }
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatePortForwardLabelParams {
-    #[ts(type = "string")]
     source: SocketAddrV4,
     label: Option<String>,
     /// Label a single SNI route on `source`; omit to label the DNAT forward.
@@ -1447,6 +1505,9 @@ pub struct UpdatePortForwardLabelParams {
     #[serde(default)]
     hostname: Option<String>,
 }
+
+rpc_toolkit::reflect_ts!(UpdatePortForwardLabelParams);
+rpc_toolkit::ts_export!(UpdatePortForwardLabelParams, namespaces = ["tunnel"]);
 
 pub async fn update_forward_label(
     ctx: TunnelContext,
@@ -1493,11 +1554,10 @@ pub async fn update_forward_label(
         .result
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SetPortForwardEnabledParams {
-    #[ts(type = "string")]
     source: SocketAddrV4,
     #[arg(long)]
     enabled: bool,
@@ -1506,6 +1566,9 @@ pub struct SetPortForwardEnabledParams {
     #[serde(default)]
     hostname: Option<String>,
 }
+
+rpc_toolkit::reflect_ts!(SetPortForwardEnabledParams);
+rpc_toolkit::ts_export!(SetPortForwardEnabledParams, namespaces = ["tunnel"]);
 
 /// Carries what the db.mutate selected so the dataplane action runs after it.
 enum ForwardToggle {
@@ -1609,13 +1672,12 @@ pub async fn set_forward_enabled(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct AddPinholeParams {
     /// The client's global IPv6 (GUA) to expose. Must be an address this tunnel
     /// delegates to a client — its subnet needs an IPv6 prefix.
-    #[ts(type = "string")]
     gua: Ipv6Addr,
     /// External port opened on the GUA.
     external_port: u16,
@@ -1623,16 +1685,17 @@ pub struct AddPinholeParams {
     /// external); set a different value for a port remap (e.g. 80 -> 443).
     #[arg(long)]
     #[serde(default)]
-    #[ts(optional)]
     internal_port: Option<u16>,
     #[arg(long)]
     label: Option<String>,
     /// Number of contiguous ports, counting up from external/internal. Default 1.
     #[arg(long)]
     #[serde(default)]
-    #[ts(optional)]
     count: Option<u16>,
 }
+
+rpc_toolkit::reflect_ts!(AddPinholeParams);
+rpc_toolkit::ts_export!(AddPinholeParams, namespaces = ["tunnel"]);
 
 pub async fn add_pinhole(
     ctx: TunnelContext,
@@ -1673,14 +1736,16 @@ pub async fn add_pinhole(
     pinhole::add_pinhole(&ctx, gua, external_port, internal, count, label, false).await
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct RemovePinholeParams {
-    #[ts(type = "string")]
     gua: Ipv6Addr,
     external_port: u16,
 }
+
+rpc_toolkit::reflect_ts!(RemovePinholeParams);
+rpc_toolkit::ts_export!(RemovePinholeParams, namespaces = ["tunnel"]);
 
 pub async fn remove_pinhole(
     ctx: TunnelContext,
@@ -1690,15 +1755,17 @@ pub async fn remove_pinhole(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatePinholeLabelParams {
-    #[ts(type = "string")]
     gua: Ipv6Addr,
     external_port: u16,
     label: Option<String>,
 }
+
+rpc_toolkit::reflect_ts!(UpdatePinholeLabelParams);
+rpc_toolkit::ts_export!(UpdatePinholeLabelParams, namespaces = ["tunnel"]);
 
 pub async fn update_pinhole_label(
     ctx: TunnelContext,
@@ -1711,16 +1778,18 @@ pub async fn update_pinhole_label(
     pinhole::set_pinhole_label(&ctx, gua, external_port, label).await
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SetPinholeEnabledParams {
-    #[ts(type = "string")]
     gua: Ipv6Addr,
     external_port: u16,
     #[arg(long)]
     enabled: bool,
 }
+
+rpc_toolkit::reflect_ts!(SetPinholeEnabledParams);
+rpc_toolkit::ts_export!(SetPinholeEnabledParams, namespaces = ["tunnel"]);
 
 pub async fn set_pinhole_enabled(
     ctx: TunnelContext,
@@ -1733,16 +1802,18 @@ pub async fn set_pinhole_enabled(
     pinhole::set_pinhole_enabled(&ctx, gua, external_port, enabled).await
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SetHttpRedirectEnabledParams {
     /// The public IPv4 whose default-on port-80 HTTP→HTTPS redirect to toggle.
-    #[ts(type = "string")]
     ip: Ipv4Addr,
     #[arg(long)]
     enabled: bool,
 }
+
+rpc_toolkit::reflect_ts!(SetHttpRedirectEnabledParams);
+rpc_toolkit::ts_export!(SetHttpRedirectEnabledParams, namespaces = ["tunnel"]);
 
 /// Turn the port-80 HTTP→HTTPS redirect on or off for one public IPv4. The
 /// listener set is reconciled reactively from the db, so the dataplane follows
@@ -1780,10 +1851,9 @@ pub async fn set_http_redirect_enabled(
         .result
 }
 
-#[derive(Deserialize, Serialize, TS)]
+#[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpRedirectStatus {
-    #[ts(type = "string")]
     ip: Ipv4Addr,
     /// Whether the redirect is on for this IP (default true).
     enabled: bool,
@@ -1791,6 +1861,9 @@ pub struct HttpRedirectStatus {
     /// the redirect yields and does not bind.
     forwarded: bool,
 }
+
+rpc_toolkit::reflect_ts!(HttpRedirectStatus);
+rpc_toolkit::ts_export!(HttpRedirectStatus, namespaces = ["tunnel"]);
 
 /// The port-80 HTTP→HTTPS redirect status of every public IPv4 this host holds.
 pub async fn list_http_redirects(ctx: TunnelContext) -> Result<Vec<HttpRedirectStatus>, Error> {

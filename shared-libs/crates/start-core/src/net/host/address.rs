@@ -5,7 +5,6 @@ use clap::Parser;
 use imbl_value::InternedString;
 use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
@@ -26,18 +25,23 @@ use crate::util::serde::{HandlerExtSerde, display_serializable};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[derive(VisitFields)]
 pub struct HostAddress {
     pub address: InternedString,
     pub public: Option<PublicDomainConfig>,
     pub private: Option<BTreeSet<GatewayId>>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
-#[ts(export)]
+rpc_toolkit::reflect_ts!(HostAddress);
+
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 pub struct PublicDomainConfig {
     pub gateway: GatewayId,
     pub acme: Option<AcmeProvider>,
 }
+
+rpc_toolkit::reflect_ts!(PublicDomainConfig);
+rpc_toolkit::ts_export!(PublicDomainConfig, namespaces = [""]);
 
 fn handle_duplicates(db: &mut DatabaseModel) -> Result<(), Error> {
     let mut domains = BTreeSet::<InternedString>::new();
@@ -210,10 +214,9 @@ pub fn address_api<C: Context, Kind: HostApiKind>()
         )
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct AddPublicDomainParams {
     #[arg(help = "help.arg.fqdn")]
     pub fqdn: InternedString,
@@ -225,9 +228,11 @@ pub struct AddPublicDomainParams {
     pub internal_port: u16,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(AddPublicDomainParams);
+rpc_toolkit::ts_export!(AddPublicDomainParams, namespaces = [""]);
+
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct AddPublicDomainRes {
     pub dns: QueryDnsRes,
     pub port: CheckPortRes,
@@ -235,6 +240,9 @@ pub struct AddPublicDomainRes {
     /// The authority's own reachability requirement, where the domain has one.
     pub challenge: Option<CheckChallengeRes>,
 }
+
+rpc_toolkit::reflect_ts!(AddPublicDomainRes);
+rpc_toolkit::ts_export!(AddPublicDomainRes, namespaces = [""]);
 
 /// Reconcile a public domain on a *sibling* binding or range — one the domain
 /// was not directly added to. A public domain is scoped to its target binding,
@@ -611,13 +619,15 @@ pub async fn add_public_domain<Kind: HostApiKind>(
     })
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 pub struct RemoveDomainParams {
     #[arg(help = "help.arg.fqdn")]
     pub fqdn: InternedString,
 }
+
+rpc_toolkit::reflect_ts!(RemoveDomainParams);
+rpc_toolkit::ts_export!(RemoveDomainParams, namespaces = [""]);
 
 pub async fn remove_public_domain<Kind: HostApiKind>(
     ctx: RpcContext,
@@ -647,14 +657,16 @@ pub async fn remove_public_domain<Kind: HostApiKind>(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 pub struct AddPrivateDomainParams {
     #[arg(help = "help.arg.fqdn")]
     pub fqdn: InternedString,
     pub gateway: GatewayId,
 }
+
+rpc_toolkit::reflect_ts!(AddPrivateDomainParams);
+rpc_toolkit::ts_export!(AddPrivateDomainParams, namespaces = [""]);
 
 pub async fn add_private_domain<Kind: HostApiKind>(
     ctx: RpcContext,

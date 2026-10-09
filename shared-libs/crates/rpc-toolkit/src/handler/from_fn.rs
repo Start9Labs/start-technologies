@@ -7,8 +7,6 @@ use imbl_value::imbl::OrdMap;
 use imbl_value::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-#[cfg(feature = "ts-rs")]
-use ts_rs::TS;
 
 use crate::util::PhantomData;
 use crate::{
@@ -48,21 +46,6 @@ impl<F, T, E, Args> std::fmt::Debug for FromFn<F, T, E, Args> {
     }
 }
 
-#[cfg(feature = "ts-rs")]
-impl<F, T, E, Args> crate::handler::HandlerTS for FromFn<F, T, E, Args>
-where
-    Self: HandlerTypes,
-    <Self as HandlerTypes>::Params: ts_rs::TS,
-    <Self as HandlerTypes>::Ok: ts_rs::TS,
-{
-    fn type_info(&self) -> Option<String> {
-        Some(format!(
-            "{{_PARAMS:{},_RETURN:{}}}",
-            <Self as HandlerTypes>::Params::inline_flattened(),
-            <Self as HandlerTypes>::Ok::inline_flattened(),
-        ))
-    }
-}
 impl<Context, F, T, E, Args> PrintCliResult<Context> for FromFn<F, T, E, Args>
 where
     Context: crate::Context,
@@ -173,21 +156,6 @@ impl<F, Fut, T, E, Args> std::fmt::Debug for FromFnAsync<F, Fut, T, E, Args> {
     }
 }
 
-#[cfg(feature = "ts-rs")]
-impl<F, Fut, T, E, Args> crate::handler::HandlerTS for FromFnAsync<F, Fut, T, E, Args>
-where
-    Self: HandlerTypes,
-    <Self as HandlerTypes>::Params: ts_rs::TS,
-    <Self as HandlerTypes>::Ok: ts_rs::TS,
-{
-    fn type_info(&self) -> Option<String> {
-        Some(format!(
-            "{{_PARAMS:{},_RETURN:{}}}",
-            <Self as HandlerTypes>::Params::inline_flattened(),
-            <Self as HandlerTypes>::Ok::inline_flattened(),
-        ))
-    }
-}
 impl<Context, F, Fut, T, E, Args> PrintCliResult<Context> for FromFnAsync<F, Fut, T, E, Args>
 where
     Context: crate::Context,
@@ -285,21 +253,6 @@ impl<F, Fut, T, E, Args> std::fmt::Debug for FromFnAsyncLocal<F, Fut, T, E, Args
     }
 }
 
-#[cfg(feature = "ts-rs")]
-impl<F, Fut, T, E, Args> crate::handler::HandlerTS for FromFnAsyncLocal<F, Fut, T, E, Args>
-where
-    Self: HandlerTypes,
-    <Self as HandlerTypes>::Params: ts_rs::TS,
-    <Self as HandlerTypes>::Ok: ts_rs::TS,
-{
-    fn type_info(&self) -> Option<String> {
-        Some(format!(
-            "{{_PARAMS:{},_RETURN:{}}}",
-            <Self as HandlerTypes>::Params::inline_flattened(),
-            <Self as HandlerTypes>::Ok::inline_flattened(),
-        ))
-    }
-}
 impl<Context, F, Fut, T, E, Args> PrintCliResult<Context> for FromFnAsyncLocal<F, Fut, T, E, Args>
 where
     Context: crate::Context,

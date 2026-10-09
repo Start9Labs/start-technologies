@@ -16,7 +16,6 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
-use ts_rs::TS;
 
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::bind::Bind;
@@ -70,10 +69,13 @@ fn match_device_patterns<'a>(path: &Path, matches: &[&'a str]) -> Option<Vec<&'a
 }
 
 #[derive(
-    Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq, PartialOrd, Ord, Hash, TS,
+    Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq, PartialOrd, Ord, Hash, VisitFields,
 )]
-#[ts(type = "string")]
+#[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+#[visit(opaque, type_attributes(visit::wire))]
 pub struct ContainerId(InternedString);
+
+rpc_toolkit::reflect_ts!(ContainerId);
 impl std::ops::Deref for ContainerId {
     type Target = str;
     fn deref(&self) -> &Self::Target {

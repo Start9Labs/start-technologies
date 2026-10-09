@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::PackageId;
 use crate::context::CliContext;
@@ -15,27 +14,34 @@ pub mod restore;
 pub mod target;
 pub mod trash;
 
-#[derive(Debug, Deserialize, Serialize, TS)]
-#[ts(export)]
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
 pub struct BackupReport {
     server: ServerBackupReport,
     packages: BTreeMap<PackageId, PackageBackupReport>,
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
-#[ts(export)]
+rpc_toolkit::reflect_ts!(BackupReport);
+rpc_toolkit::ts_export!(BackupReport, namespaces = [""]);
+
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
 pub struct ServerBackupReport {
     attempted: bool,
     error: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
-#[ts(export)]
+rpc_toolkit::reflect_ts!(ServerBackupReport);
+rpc_toolkit::ts_export!(ServerBackupReport, namespaces = [""]);
+
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
 pub struct PackageBackupReport {
     pub error: Option<String>,
-    #[ts(type = "number")]
+    #[visit(ts(type = "number"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     pub duration_ms: u64,
 }
+
+rpc_toolkit::reflect_ts!(PackageBackupReport);
+rpc_toolkit::ts_export!(PackageBackupReport, namespaces = [""]);
 
 // #[command(subcommands(backup_bulk::backup_all, target::target))]
 pub fn backup<C: Context>() -> ParentHandler<C> {

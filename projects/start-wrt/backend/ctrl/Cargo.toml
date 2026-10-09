@@ -71,7 +71,9 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 reqwest_cookie_store = "0.9"
 rpassword = "7.3.1"
-rpc-toolkit = { path = "../../../../shared-libs/crates/rpc-toolkit", default-features = false }
+rpc-toolkit = { path = "../../../../shared-libs/crates/rpc-toolkit", default-features = false, features = [
+  "ts",
+] }
 rusqlite = { version = "0.34", features = ["bundled"] }
 rustls = "0.23"
 rustls-pemfile = "2"
@@ -107,5 +109,5 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uciedit = { path = "../uciedit" }
 url = { version = "2", features = ["serde"] }
-visit-rs = "0.1"
+visit-rs = { path = "../../../../shared-libs/crates/visit-rs" }
 x25519-dalek = { version = "2", features = ["static_secrets"] }

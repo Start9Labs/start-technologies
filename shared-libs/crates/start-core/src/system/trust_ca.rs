@@ -22,7 +22,7 @@ const PERSISTENT_CA_DIRECTORY: &str =
     "/media/startos/config/overlay/usr/local/share/ca-certificates/startos-custom";
 static INSTALL_LOCK: Mutex<()> = Mutex::const_new(());
 
-#[derive(Debug, Deserialize, Serialize, Parser)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
@@ -31,12 +31,16 @@ pub(crate) struct TrustCaParams {
     cert: Pem<X509>,
 }
 
-#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+rpc_toolkit::reflect_ts!(TrustCaParams);
+
+#[derive(Debug, Deserialize, Eq, PartialEq, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TrustedCa {
     subject: String,
     fingerprint: String,
 }
+
+rpc_toolkit::reflect_ts!(TrustedCa);
 
 #[derive(Debug)]
 struct ParsedCa {

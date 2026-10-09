@@ -9,7 +9,6 @@ use imbl::Vector;
 use imbl_value::{InternedString, Value};
 use rpc_toolkit::Empty;
 use rpc_toolkit::yajrc::RpcMethod;
-use ts_rs::TS;
 
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
@@ -17,7 +16,7 @@ use crate::service::ProcedureName;
 use crate::service::persistent_container::PersistentContainer;
 use crate::util::{FromStrParser, Never};
 
-#[derive(Clone, serde::Deserialize, serde::Serialize, TS)]
+#[derive(Clone, serde::Deserialize, serde::Serialize, VisitVariants)]
 #[serde(rename_all = "kebab-case")]
 pub enum InitKind {
     Install,
@@ -25,12 +24,16 @@ pub enum InitKind {
     Restore,
 }
 
-#[derive(Clone, serde::Deserialize, serde::Serialize, TS)]
+rpc_toolkit::reflect_ts!(InitKind);
+
+#[derive(Clone, serde::Deserialize, serde::Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct InitParams {
     pub id: Guid,
     pub kind: Option<InitKind>,
 }
+
+rpc_toolkit::reflect_ts!(InitParams);
 
 #[derive(Clone)]
 pub struct Init;
@@ -86,14 +89,17 @@ impl serde::Serialize for Stop {
     }
 }
 
-#[derive(Clone, serde::Deserialize, serde::Serialize, TS)]
+#[derive(Clone, serde::Deserialize, serde::Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct ExitParams {
     id: Guid,
     /// VersionRange or ExtendedVersion
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     target: Option<InternedString>,
 }
+
+rpc_toolkit::reflect_ts!(ExitParams);
 impl ExitParams {
     pub fn target_version(version: &ExtendedVersion) -> Self {
         Self {
@@ -142,14 +148,15 @@ impl serde::Serialize for Exit {
     }
 }
 
-#[derive(Clone, serde::Deserialize, serde::Serialize, TS)]
+#[derive(Clone, serde::Deserialize, serde::Serialize, VisitFields)]
 pub struct ExecuteParams {
     id: Guid,
     procedure: String,
-    #[ts(type = "any")]
     input: Value,
     timeout: Option<u128>,
 }
+
+rpc_toolkit::reflect_ts!(ExecuteParams);
 impl ExecuteParams {
     pub fn new(
         id: Guid,
@@ -203,10 +210,22 @@ impl serde::Serialize for Sandbox {
 }
 
 #[derive(
-    Clone, Copy, Debug, serde::Deserialize, serde::Serialize, TS, PartialEq, Eq, PartialOrd, Ord,
+    Clone,
+    Copy,
+    Debug,
+    serde::Deserialize,
+    serde::Serialize,
+    VisitFields,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
 )]
-#[ts(type = "number")]
+#[visit(ts(type = "number"), wire = "rpc_toolkit::ts::Unknown")]
+#[visit(opaque, type_attributes(visit::wire))]
 pub struct CallbackId(u64);
+
+rpc_toolkit::reflect_ts!(CallbackId);
 impl CallbackId {
     pub fn register(self, container: &PersistentContainer) -> CallbackHandle {
         let this = Arc::new(self);
@@ -255,12 +274,15 @@ impl CallbackHandle {
     }
 }
 
-#[derive(Clone, serde::Deserialize, serde::Serialize, TS)]
+#[derive(Clone, serde::Deserialize, serde::Serialize, VisitFields)]
 pub struct CallbackParams {
     id: u64,
-    #[ts(type = "any[]")]
+    #[visit(ts(type = "any[]"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
     args: Vector<Value>,
 }
+
+rpc_toolkit::reflect_ts!(CallbackParams);
 impl CallbackParams {
     fn new(id: &CallbackId, args: Vector<Value>) -> Self {
         Self { id: id.0, args }

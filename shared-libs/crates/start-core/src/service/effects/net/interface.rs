@@ -14,8 +14,7 @@ use crate::service::rpc::CallbackId;
 use crate::{HostId, PackageId, ServiceInterfaceId};
 
 // Service interfaces are stored under the binding that exported them.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportServiceInterfaceParams {
     id: ServiceInterfaceId,
@@ -25,9 +24,11 @@ pub struct ExportServiceInterfaceParams {
     address_info: AddressInfo,
     r#type: ServiceInterfaceType,
     /// The interface address Open UI should prefer.
-    #[ts(optional = nullable)]
     preferred_launcher_address: Option<String>,
 }
+
+rpc_toolkit::reflect_ts!(ExportServiceInterfaceParams);
+rpc_toolkit::ts_export!(ExportServiceInterfaceParams, namespaces = [""]);
 
 pub async fn export_service_interface(
     context: EffectContext,
@@ -84,8 +85,7 @@ pub async fn export_service_interface(
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportRangeServiceInterfaceParams {
     host_id: HostId,
@@ -93,9 +93,13 @@ pub struct ExportRangeServiceInterfaceParams {
     id: ServiceInterfaceId,
     name: String,
     description: String,
-    #[ts(type = "string | null")]
+    #[visit(ts(type = "string | null"), wire = "Option<rpc_toolkit::ts::Unknown>")]
+    #[visit(opaque, type_attributes(visit::wire))]
     scheme: Option<InternedString>,
 }
+
+rpc_toolkit::reflect_ts!(ExportRangeServiceInterfaceParams);
+rpc_toolkit::ts_export!(ExportRangeServiceInterfaceParams, namespaces = [""]);
 pub async fn export_range_service_interface(
     context: EffectContext,
     ExportRangeServiceInterfaceParams {
@@ -259,16 +263,17 @@ fn interface_ptr(
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, TS)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct GetServiceInterfaceParams {
-    #[ts(optional)]
     package_id: Option<PackageId>,
     service_interface_id: ServiceInterfaceId,
-    #[ts(optional)]
+
     callback: Option<CallbackId>,
 }
+
+rpc_toolkit::reflect_ts!(GetServiceInterfaceParams);
+rpc_toolkit::ts_export!(GetServiceInterfaceParams, namespaces = [""]);
 pub async fn get_service_interface(
     context: EffectContext,
     GetServiceInterfaceParams {
@@ -332,15 +337,16 @@ pub async fn get_service_interface(
     Ok(res)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct ListServiceInterfacesParams {
-    #[ts(optional)]
     package_id: Option<PackageId>,
-    #[ts(optional)]
+
     callback: Option<CallbackId>,
 }
+
+rpc_toolkit::reflect_ts!(ListServiceInterfacesParams);
+rpc_toolkit::ts_export!(ListServiceInterfacesParams, namespaces = [""]);
 pub async fn list_service_interfaces(
     context: EffectContext,
     ListServiceInterfacesParams {
@@ -378,13 +384,15 @@ pub async fn list_service_interfaces(
     Ok(res)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct ClearServiceInterfacesParams {
     pub except: Vec<ServiceInterfaceId>,
 }
+
+rpc_toolkit::reflect_ts!(ClearServiceInterfacesParams);
+rpc_toolkit::ts_export!(ClearServiceInterfacesParams, namespaces = [""]);
 
 pub async fn clear_service_interfaces(
     context: EffectContext,

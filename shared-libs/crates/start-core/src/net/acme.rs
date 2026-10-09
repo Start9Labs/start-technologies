@@ -22,7 +22,6 @@ use tokio_rustls::rustls::crypto::CryptoProvider;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio_rustls::rustls::server::ClientHello;
 use tokio_rustls::rustls::sign::CertifiedKey;
-use ts_rs::TS;
 use url::Url;
 
 use crate::GatewayId;
@@ -568,10 +567,9 @@ pub fn acme_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct CheckChallengeParams {
     #[arg(help = "help.arg.fqdn")]
     pub fqdn: InternedString,
@@ -581,15 +579,20 @@ pub struct CheckChallengeParams {
     pub acme: AcmeProvider,
 }
 
+rpc_toolkit::reflect_ts!(CheckChallengeParams);
+rpc_toolkit::ts_export!(CheckChallengeParams, namespaces = [""]);
+
 /// Reachability of the port a certificate authority validates on. A null leg
 /// went unprobed.
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct CheckChallengeRes {
     pub port: Option<CheckPortRes>,
     pub port_v6: Option<CheckPortV6Res>,
 }
+
+rpc_toolkit::reflect_ts!(CheckChallengeRes);
+rpc_toolkit::ts_export!(CheckChallengeRes, namespaces = [""]);
 
 /// Probes the challenge port. `None` when the authority's certificate has life left.
 pub async fn check_challenge(
@@ -644,9 +647,12 @@ fn challenge_pending(
         .unwrap_or(false))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, TS)]
-#[ts(type = "string")]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, VisitFields)]
+#[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+#[visit(opaque, type_attributes(visit::wire))]
 pub struct AcmeProvider(pub Url);
+
+rpc_toolkit::reflect_ts!(AcmeProvider);
 impl FromStr for AcmeProvider {
     type Err = <Url as FromStr>::Err;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -697,15 +703,17 @@ impl ValueParserFactory for AcmeProvider {
     }
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 pub struct InitAcmeParams {
     #[arg(long, help = "help.arg.acme-provider")]
     pub provider: AcmeProvider,
     #[arg(long, help = "help.arg.acme-contact")]
     pub contact: Vec<String>,
 }
+
+rpc_toolkit::reflect_ts!(InitAcmeParams);
+rpc_toolkit::ts_export!(InitAcmeParams, namespaces = [""]);
 
 lazy_static::lazy_static! {
     // Pragmatic email match: local@domain, no whitespace, dot in domain.
@@ -773,13 +781,15 @@ pub async fn init(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 pub struct RemoveAcmeParams {
     #[arg(long, help = "help.arg.acme-provider")]
     pub provider: AcmeProvider,
 }
+
+rpc_toolkit::reflect_ts!(RemoveAcmeParams);
+rpc_toolkit::ts_export!(RemoveAcmeParams, namespaces = [""]);
 
 pub async fn remove(
     ctx: RpcContext,

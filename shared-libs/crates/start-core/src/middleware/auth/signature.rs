@@ -143,8 +143,10 @@ pub trait SignatureAuthContext: DbContext {
 /// and ephemeral signer stores with any continuations they opened killed.
 /// Obtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]
 /// from inside a db transaction.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, VisitFields)]
 pub struct HasUnenrolledKeys(());
+
+rpc_toolkit::reflect_ts!(HasUnenrolledKeys);
 impl HasUnenrolledKeys {
     /// For call sites already inside a db transaction. Taking the
     /// continuations map as a parameter is the point: unenrollment cannot be

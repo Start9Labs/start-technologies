@@ -13,7 +13,6 @@ use futures::future::BoxFuture;
 use futures::{Future, FutureExt};
 use imbl_value::InternedString;
 use tokio::sync::{Mutex as AsyncMutex, broadcast};
-use ts_rs::TS;
 
 #[allow(unused_imports)]
 use crate::prelude::*;
@@ -22,10 +21,13 @@ use crate::util::net::WebSocket;
 use crate::util::{FromStrParser, new_guid};
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, TS,
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, VisitFields,
 )]
-#[ts(type = "string")]
+#[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+#[visit(opaque, type_attributes(visit::wire))]
 pub struct Guid(InternedString);
+
+rpc_toolkit::reflect_ts!(Guid);
 impl Guid {
     pub fn new() -> Self {
         Self(new_guid())

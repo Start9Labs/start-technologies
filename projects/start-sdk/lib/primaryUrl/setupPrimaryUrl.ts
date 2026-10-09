@@ -26,7 +26,7 @@ export type SetupPrimaryUrlParams<Id extends T.ActionId> = {
   /** The exported interface whose addresses the user chooses from. */
   interfaceId: T.ServiceInterfaceId
   /** The action's metadata, as for `sdk.Action.withInput`. */
-  metadata: MaybeFn<Omit<T.ActionMetadata, 'hasInput'>>
+  metadata: MaybeFn<Omit<T.ActionMetadataInput, 'hasInput'>>
   /** The label and description of the URL select. */
   field: { name: string; description: string | null }
   /** Reads the stored URL, e.g. `storeJson.read(s => s.primaryUrl)`. */

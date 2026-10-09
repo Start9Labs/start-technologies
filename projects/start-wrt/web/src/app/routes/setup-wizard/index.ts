@@ -353,8 +353,9 @@ export default class SetupWizard {
   }
 
   private handleFlashEvent(event: SetupFlashEvent): void {
-    if (event.step) this.flashStep.set(event.step)
-    if (event.totalSteps) this.flashTotalSteps.set(event.totalSteps)
+    if ('step' in event && event.step) this.flashStep.set(event.step)
+    if ('totalSteps' in event && event.totalSteps)
+      this.flashTotalSteps.set(event.totalSteps)
 
     switch (event.phase) {
       case 'copying':

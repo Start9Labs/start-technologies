@@ -3,13 +3,15 @@ use std::str::FromStr;
 
 use imbl_value::InternedString;
 use serde::{Deserialize, Deserializer, Serialize};
-use ts_rs::TS;
 
 use crate::{Id, InvalidId};
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, TS)]
-#[ts(type = "string")]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, visit_rs::VisitFields)]
+#[visit(ts(type = "string"), wire = "rpc_toolkit::ts::Unknown")]
+#[visit(opaque, type_attributes(visit::wire))]
 pub struct HostId(Id);
+
+rpc_toolkit::reflect_ts!(HostId);
 impl FromStr for HostId {
     type Err = InvalidId;
     fn from_str(s: &str) -> Result<Self, Self::Err> {

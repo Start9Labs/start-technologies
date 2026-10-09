@@ -54,22 +54,24 @@ pub fn find_ap_interface_names(cfgs: &Configs) -> Result<Vec<String>, Error> {
     Ok(names)
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, visit_rs::VisitFields)]
 pub struct Password<Id: Ord> {
     pub label: String,
     pub profile: Option<Id>,
     pub password: String,
 }
+rpc_toolkit::reflect_ts!(impl [Id: Ord] for Password<Id> where [Option<Id>: rpc_toolkit::ts::TS]);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitFields)]
 pub struct WifiRadio {
     pub band: String,
     pub channel: String,
     pub enabled: bool,
     pub broadcast: bool,
 }
+rpc_toolkit::reflect_ts!(WifiRadio);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct Wifi<Id: Ord = ProfileId> {
     pub ssid: String,
@@ -79,6 +81,7 @@ pub struct Wifi<Id: Ord = ProfileId> {
     pub radios: BTreeMap<String, WifiRadio>,
     pub passwords: BTreeSet<Password<Id>>,
 }
+rpc_toolkit::reflect_ts!(impl [Id: Ord] for Wifi<Id> where [BTreeSet<Password<Id>>: rpc_toolkit::ts::TS]);
 
 /// `wifi.set` request: the desired WiFi config plus a confirmation flag.
 /// When a profile loses its last WiFi password its devices can no longer reach
@@ -87,7 +90,7 @@ pub struct Wifi<Id: Ord = ProfileId> {
 /// them. When the flag is false and such ports exist, `set` applies nothing and
 /// returns them in `WifiSetResult` for a confirmation dialog; with the flag true
 /// it deletes those published ports as part of the change.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiSetRequest {
     #[serde(flatten)]
@@ -95,16 +98,18 @@ pub struct WifiSetRequest {
     #[serde(default)]
     pub confirm_published_port_deletion: bool,
 }
+rpc_toolkit::reflect_ts!(WifiSetRequest);
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiSetResult {
     /// Non-empty (and nothing applied) when published ports would be deleted and
     /// the caller hasn't confirmed yet. Empty once the change is applied.
     pub pending_published_port_deletions: Vec<crate::published_ports::AffectedPublishedPort>,
 }
+rpc_toolkit::reflect_ts!(WifiSetResult);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiRegulatory {
     /// ISO 3166-1 alpha-2 codes the regulatory database defines.
@@ -112,19 +117,22 @@ pub struct WifiRegulatory {
     /// Channels an access point may use under the current country, by band.
     pub channels: BTreeMap<String, Vec<u32>>,
 }
+rpc_toolkit::reflect_ts!(WifiRegulatory);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct BlackoutWindow {
     pub start_time: String,
     pub end_time: String,
     pub days: [bool; 7],
 }
+rpc_toolkit::reflect_ts!(BlackoutWindow);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitFields)]
 pub struct BlackoutWindows {
     pub windows: Vec<BlackoutWindow>,
 }
+rpc_toolkit::reflect_ts!(BlackoutWindows);
 
 /// Canonical UCI store for WiFi blackout windows (singleton section
 /// `config wifi_blackout 'blackout'` in the `startwrt` config). The crontab is a

@@ -28,7 +28,7 @@ struct UciVpnClient {
 
 // === Public API Types ===
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct OutboundVpn {
     pub id: String,
     pub label: String,
@@ -45,21 +45,24 @@ pub struct OutboundVpn {
     /// The server is named by hostname; only `Internet` is a valid target.
     pub hostname_endpoint: bool,
 }
+rpc_toolkit::reflect_ts!(OutboundVpn);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct OutboundVpnCreateRequest {
     pub label: String,
     pub target: String,
     /// Raw WireGuard .conf file contents
     pub config: String,
 }
+rpc_toolkit::reflect_ts!(OutboundVpnCreateRequest);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct OutboundVpnCreateResponse {
     pub id: String,
 }
+rpc_toolkit::reflect_ts!(OutboundVpnCreateResponse);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct OutboundVpnUpdateRequest {
     pub id: String,
     pub label: String,
@@ -69,18 +72,21 @@ pub struct OutboundVpnUpdateRequest {
     #[serde(default)]
     pub mtu: Option<u16>,
 }
+rpc_toolkit::reflect_ts!(OutboundVpnUpdateRequest);
 
-#[derive(Debug, Clone, Serialize, Deserialize, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, Parser, visit_rs::VisitFields)]
 pub struct OutboundVpnDeleteRequest {
     #[clap(short, long)]
     pub id: String,
 }
+rpc_toolkit::reflect_ts!(OutboundVpnDeleteRequest);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct OutboundVpnSetEnabledRequest {
     pub id: String,
     pub enabled: bool,
 }
+rpc_toolkit::reflect_ts!(OutboundVpnSetEnabledRequest);
 
 // === Parsed WireGuard Config ===
 
