@@ -44,10 +44,7 @@ pub async fn start(ctx: RpcContext, StartParams { id, force }: StartParams) -> R
                     ErrorKind::InvalidRequest,
                 ));
             }
-            entry
-                .as_status_info_mut()
-                .as_desired_mut()
-                .map_mutate(|s| Ok(s.start()))
+            entry.as_status_info_mut().start()
         })
         .await
         .result?;
@@ -69,6 +66,23 @@ pub async fn stop(ctx: RpcContext, ControlParams { id }: ControlParams) -> Resul
         .result?;
 
     Ok(())
+}
+
+#[derive(Deserialize, Serialize, Parser, TS)]
+#[group(skip)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct ForceStopParams {
+    pub id: PackageId,
+    #[ts(type = "string")]
+    pub force_stop_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn force_stop(
+    ctx: RpcContext,
+    ForceStopParams { id, force_stop_at }: ForceStopParams,
+) -> Result<(), Error> {
+    ctx.services.force_stop(&ctx, &id, force_stop_at).await
 }
 
 pub async fn restart(ctx: RpcContext, ControlParams { id }: ControlParams) -> Result<(), Error> {

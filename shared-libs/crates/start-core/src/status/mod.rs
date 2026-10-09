@@ -21,8 +21,31 @@ pub struct StatusInfo {
     #[ts(type = "string | null")]
     pub started: Option<DateTime<Utc>>,
     pub desired: DesiredStatus,
+    #[serde(default)]
+    #[ts(type = "string | null")]
+    pub force_stop_at: Option<DateTime<Utc>>,
 }
 impl StatusInfo {
+    pub fn can_force_stop(&self, deadline: DateTime<Utc>, now: DateTime<Utc>) -> bool {
+        self.desired == DesiredStatus::Stopped
+            && self.started.is_some()
+            && self.force_stop_at == Some(deadline)
+            && now >= deadline
+    }
+
+    pub fn sync_force_stop_deadline(&mut self, now: DateTime<Utc>, delay: std::time::Duration) {
+        if self.desired == DesiredStatus::Stopped && self.started.is_some() {
+            self.force_stop_at.get_or_insert_with(|| {
+                chrono::TimeDelta::from_std(delay)
+                    .ok()
+                    .and_then(|delay| now.checked_add_signed(delay))
+                    .unwrap_or(DateTime::<Utc>::MAX_UTC)
+            });
+        } else {
+            self.force_stop_at = None;
+        }
+    }
+
     pub fn stop(&mut self) {
         self.desired = self.desired.stop();
         self.health.clear();
@@ -30,10 +53,12 @@ impl StatusInfo {
 }
 impl Model<StatusInfo> {
     pub fn start(&mut self) -> Result<(), Error> {
+        self.as_force_stop_at_mut().ser(&None)?;
         self.as_desired_mut().map_mutate(|s| Ok(s.start()))?;
         Ok(())
     }
     pub fn started(&mut self) -> Result<(), Error> {
+        self.as_force_stop_at_mut().ser(&None)?;
         self.as_started_mut()
             .map_mutate(|s| Ok(Some(s.unwrap_or_else(|| Utc::now()))))?;
         self.as_desired_mut().map_mutate(|s| Ok(s.started()))?;
@@ -45,11 +70,13 @@ impl Model<StatusInfo> {
         Ok(())
     }
     pub fn stopped(&mut self) -> Result<(), Error> {
+        self.as_force_stop_at_mut().ser(&None)?;
         self.as_started_mut().ser(&None)?;
         self.as_health_mut().ser(&Default::default())?;
         Ok(())
     }
     pub fn restart(&mut self) -> Result<(), Error> {
+        self.as_force_stop_at_mut().ser(&None)?;
         let started = self.as_started().transpose_ref().is_some();
         self.as_desired_mut()
             .map_mutate(|s| Ok(s.restart(started)))?;
@@ -200,6 +227,80 @@ impl DesiredStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn force_stop_eligibility_is_bound_to_the_stop_episode() {
+        let deadline = Utc::now();
+        let mut status = StatusInfo {
+            started: Some(deadline - chrono::TimeDelta::seconds(60)),
+            force_stop_at: Some(deadline),
+            ..Default::default()
+        };
+        assert!(status.can_force_stop(deadline, deadline));
+        assert!(!status.can_force_stop(deadline, deadline - chrono::TimeDelta::milliseconds(1)));
+        assert!(!status.can_force_stop(deadline - chrono::TimeDelta::seconds(1), deadline));
+        status.desired = DesiredStatus::Running;
+        assert!(!status.can_force_stop(deadline, deadline));
+        status.desired = DesiredStatus::Restarting {
+            restart_again: false,
+        };
+        assert!(!status.can_force_stop(deadline, deadline));
+        status.desired = DesiredStatus::Stopped;
+        status.started = None;
+        assert!(!status.can_force_stop(deadline, deadline));
+    }
+
+    #[test]
+    fn force_stop_deadline_clears_on_start_completion_and_cancellation() {
+        for operation in [
+            Model::<StatusInfo>::start,
+            Model::<StatusInfo>::started,
+            Model::<StatusInfo>::stopped,
+            Model::<StatusInfo>::restart,
+            Model::<StatusInfo>::init,
+        ] {
+            let mut status = Model::new(&StatusInfo {
+                force_stop_at: Some(Utc::now()),
+                ..Default::default()
+            })
+            .unwrap();
+            operation(&mut status).unwrap();
+            assert!(status.de().unwrap().force_stop_at.is_none());
+        }
+    }
+
+    #[test]
+    fn force_stop_deadline_preserves_retries_and_clears_canceled_stops() {
+        let now = Utc::now();
+        let delay = std::time::Duration::from_secs(30);
+        let mut status = StatusInfo {
+            started: Some(now),
+            ..Default::default()
+        };
+        status.sync_force_stop_deadline(now, delay);
+        let deadline = status.force_stop_at.unwrap();
+        assert_eq!(deadline, now + chrono::TimeDelta::seconds(30));
+        status.sync_force_stop_deadline(now + chrono::TimeDelta::seconds(10), delay);
+        assert_eq!(status.force_stop_at, Some(deadline));
+        status.desired = DesiredStatus::Running;
+        status.sync_force_stop_deadline(now, delay);
+        assert_eq!(status.force_stop_at, None);
+        status.desired = DesiredStatus::Stopped;
+        status.sync_force_stop_deadline(now + chrono::TimeDelta::seconds(20), delay);
+        assert_ne!(status.force_stop_at, Some(deadline));
+        status.started = None;
+        status.sync_force_stop_deadline(now, delay);
+        assert_eq!(status.force_stop_at, None);
+    }
+
+    #[test]
+    fn legacy_status_defaults_force_stop_deadline() {
+        let status: StatusInfo = serde_json::from_value(serde_json::json!({
+            "health": {}, "error": null, "started": null, "desired": {"main": "stopped"}
+        }))
+        .unwrap();
+        assert!(status.force_stop_at.is_none());
+    }
 
     #[test]
     fn restart_during_start_survives_completion() {

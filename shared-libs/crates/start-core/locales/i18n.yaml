@@ -3244,6 +3244,18 @@ update.failed-title:
   pl_PL: "Aktualizacja StartOS nie powiodła się"
 
 # control.rs
+control.force-stop-in-progress:
+  en_US: "The service is being force stopped"
+  de_DE: "Der Dienst wird zwangsweise gestoppt"
+  es_ES: "El servicio se está deteniendo de forma forzada"
+  fr_FR: "Le service est en cours d’arrêt forcé"
+  pl_PL: "Trwa wymuszone zatrzymywanie usługi"
+control.force-stop-unavailable:
+  en_US: "Force stop is not available for this stop request"
+  de_DE: "Erzwungenes Stoppen ist für diese Stoppanforderung nicht verfügbar"
+  es_ES: "La detención forzada no está disponible para esta solicitud"
+  fr_FR: "L’arrêt forcé n’est pas disponible pour cette demande d’arrêt"
+  pl_PL: "Wymuszone zatrzymanie nie jest dostępne dla tego żądania"
 control.start-critical-task:
   en_US: "Service %{id} has an unresolved critical task; use --force to start"
   de_DE: "Der Dienst %{id} hat eine ungelöste kritische Aufgabe; verwenden Sie --force zum Starten"

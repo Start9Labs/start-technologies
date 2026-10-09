@@ -39,39 +39,52 @@ pub async fn destroy_subcontainer_fs(
     DestroySubcontainerFsParams { guid }: DestroySubcontainerFsParams,
 ) -> Result<(), Error> {
     let context = context.deref()?;
-    if let Some(overlay) = context
-        .seed
-        .persistent_container
-        .subcontainers
-        .lock()
-        .await
-        .remove(&guid)
-    {
-        #[cfg(target_os = "linux")]
-        if tokio::fs::metadata(overlay.overlay.path().join("proc/1"))
-            .await
-            .is_ok()
-        {
-            let procfs = context
-                .seed
-                .persistent_container
-                .lxc_container
-                .get()
-                .or_not_found("lxc container")?
-                .rootfs_dir()
-                .join("proc");
-            let overlay_path = overlay.overlay.path().to_owned();
-            tokio::task::spawn_blocking(move || sync::kill_init(&procfs, &overlay_path))
-                .await
-                .with_kind(ErrorKind::Unknown)??;
-        }
-        overlay.overlay.unmount(true).await?;
+    let mut subcontainers = context.seed.persistent_container.subcontainers.lock().await;
+    if let Some(overlay) = subcontainers.get(&guid) {
+        kill_subcontainer(&context.seed.persistent_container, overlay).await?;
+        subcontainers
+            .remove(&guid)
+            .unwrap()
+            .overlay
+            .unmount(true)
+            .await?;
     } else {
         tracing::warn!(
             "Could not find a subcontainer fs to destroy; assumming that it already is destroyed and will be skipping"
         );
     }
     Ok(())
+}
+
+async fn kill_subcontainer(
+    container: &crate::service::persistent_container::PersistentContainer,
+    overlay: &Subcontainer,
+) -> Result<(), Error> {
+    #[cfg(target_os = "linux")]
+    {
+        let overlay_path = overlay.overlay.path().to_owned();
+        let cleanup = container.subcontainer_cleanup.clone().lock_owned().await;
+        tokio::task::spawn_blocking(move || {
+            let _cleanup = cleanup;
+            sync::kill_init(Path::new("/proc"), &overlay_path)
+        })
+        .await
+        .with_kind(ErrorKind::Unknown)??;
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = (container, overlay);
+    Ok(())
+}
+
+pub(in crate::service) async fn kill_all(
+    container: &crate::service::persistent_container::PersistentContainer,
+) -> Result<(), Error> {
+    let subcontainers = container.subcontainers.lock().await;
+    let mut errors = ErrorCollection::new();
+    for overlay in subcontainers.values() {
+        errors.handle(kill_subcontainer(container, overlay).await);
+    }
+    errors.into_result()
 }
 
 #[derive(Debug, Deserialize, Serialize, Parser, TS)]
@@ -89,6 +102,17 @@ pub async fn create_subcontainer_fs(
     CreateSubcontainerFsParams { image_id, name }: CreateSubcontainerFsParams,
 ) -> Result<(PathBuf, Guid), Error> {
     let context = context.deref()?;
+    let mut subcontainers = context.seed.persistent_container.subcontainers.lock().await;
+    ensure_code!(
+        !context
+            .seed
+            .persistent_container
+            .forcing_stop
+            .load(std::sync::atomic::Ordering::SeqCst),
+        ErrorKind::InvalidRequest,
+        "{}",
+        t!("control.force-stop-in-progress")
+    );
     if let Some(image) = context
         .seed
         .persistent_container
@@ -173,13 +197,7 @@ pub async fn create_subcontainer_fs(
         )
         .await?;
         tracing::info!("Mounted overlay {guid} for {image_id}");
-        context
-            .seed
-            .persistent_container
-            .subcontainers
-            .lock()
-            .await
-            .insert(guid.clone(), subcontainer_wrapper);
+        subcontainers.insert(guid.clone(), subcontainer_wrapper);
         Ok((container_mountpoint, guid))
     } else {
         Err(Error::new(

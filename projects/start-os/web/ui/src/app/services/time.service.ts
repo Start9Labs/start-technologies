@@ -1,33 +1,22 @@
 import { inject, Injectable } from '@angular/core'
 import { PatchDB } from 'patch-db-client'
-import { combineLatest, defer, map, shareReplay, switchMap, timer } from 'rxjs'
+import { map } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
+import { hostTime$ } from './host-time'
 
 @Injectable({
   providedIn: 'root',
 })
 export class TimeService {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
-  private readonly time$ = defer(() =>
-    inject(ApiService).getSystemTime({}),
-  ).pipe(
-    switchMap(({ now, uptime }) => {
-      const uptimeSecs = Number(uptime)
-      return timer(0, 1000).pipe(
-        map(index => ({
-          now: new Date(now).valueOf() + 1000 * index,
-          uptime: uptimeSecs + index,
-        })),
-      )
-    }),
-    shareReplay(1),
+  private readonly api = inject(ApiService)
+  private readonly time$ = hostTime$(
+    this.patch.watch$('serverInfo', 'ntpSynced'),
+    () => this.api.getSystemTime({}),
   )
 
-  readonly now$ = combineLatest([
-    this.time$,
-    this.patch.watch$('serverInfo', 'ntpSynced'),
-  ]).pipe(map(([{ now }, synced]) => ({ now, synced })))
+  readonly now$ = this.time$.pipe(map(({ now, synced }) => ({ now, synced })))
 
   readonly uptime$ = this.time$.pipe(
     map(({ uptime }) => {

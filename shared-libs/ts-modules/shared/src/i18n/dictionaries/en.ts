@@ -826,4 +826,7 @@ export const ENGLISH: Record<string, number> = {
   'Your router uses its Root CA to generate SSL/TLS certificates for itself. These certificates are then used to encrypt network traffic with your client devices.': 933,
   'Follow instructions for your OS. By trusting your Root CA, your device can verify the authenticity of encrypted communications with your router.': 934,
   'You will need to repeat this on every device you use to connect to the StartWRT UI.': 935,
+  'Force stop': 936,
+  'Force stopping': 937,
+  'Force stopping may cause data loss or leave the service in a bad state. Are you sure you want to force stop?': 938,
 }

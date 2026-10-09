@@ -35,6 +35,76 @@ use crate::util::future::NonDetachingJoinHandle;
 use crate::util::serde::{Base32, Pem};
 use crate::util::sync::SyncMutex;
 
+struct ServiceForceStop<'a> {
+    ctx: &'a RpcContext,
+    id: &'a PackageId,
+    service: &'a mut Option<ServiceRef>,
+}
+
+impl super::force_stop::ForceStopTarget for ServiceForceStop<'_> {
+    async fn kill_subcontainers(&mut self) -> Result<(), Error> {
+        self.service
+            .as_ref()
+            .unwrap()
+            .seed
+            .persistent_container
+            .force_stop()
+            .await
+    }
+
+    async fn wait_stopped(&mut self) -> Result<(), Error> {
+        let mut state = self
+            .service
+            .as_ref()
+            .unwrap()
+            .seed
+            .persistent_container
+            .state
+            .subscribe();
+        state
+            .wait_for(|state| state.stop_rpc_completed)
+            .await
+            .with_kind(ErrorKind::Cancelled)?;
+        let mut watch = self
+            .ctx
+            .db
+            .watch(
+                format!("/public/packageData/{}/statusInfo", self.id)
+                    .parse()
+                    .unwrap(),
+            )
+            .await
+            .typed::<StatusInfo>();
+        watch.wait_for(|status| status.started.is_none()).await?;
+        Ok(())
+    }
+
+    async fn drain_effects(&mut self) -> Result<(), Error> {
+        self.service.as_ref().unwrap().drain_effects().await
+    }
+
+    async fn kill_container(&mut self) -> Result<(), Error> {
+        self.service.as_ref().unwrap().kill_container().await
+    }
+
+    async fn replace_stopped(&mut self) -> Result<(), Error> {
+        self.service.take().unwrap().hard_shutdown().await?;
+        self.ctx
+            .db
+            .mutate(|db| {
+                db.as_public_mut()
+                    .as_package_data_mut()
+                    .as_idx_mut(self.id)
+                    .or_not_found(self.id)?
+                    .as_status_info_mut()
+                    .stopped()
+            })
+            .await
+            .result?;
+        ServiceMap::reload_locked(self.ctx, self.id, LoadDisposition::Retry, self.service).await
+    }
+}
+
 const SERVICE_INIT_CONCURRENCY: usize = 4;
 
 pub type DownloadInstallFuture = BoxFuture<'static, Result<InstallFuture, Error>>;
@@ -155,6 +225,17 @@ impl ServiceMap {
         if let Some(service) = service.take() {
             shutdown_err = service.shutdown(None).await;
         }
+        let load_result = Self::reload_locked(ctx, id, disposition, &mut service).await;
+        shutdown_err?;
+        load_result
+    }
+
+    async fn reload_locked(
+        ctx: &RpcContext,
+        id: &PackageId,
+        disposition: LoadDisposition,
+        service: &mut Option<ServiceRef>,
+    ) -> Result<(), Error> {
         match Service::load(ctx, id, disposition).await {
             Ok(s) => {
                 ctx.db
@@ -171,20 +252,71 @@ impl ServiceMap {
             Err(e) => {
                 tracing::error!("Error loading service: {e}");
                 tracing::debug!("{e:?}");
-                let e = ErrorData::from(e);
+                let error_data = ErrorData::from(e.clone_output());
                 ctx.db
                     .mutate(|db| {
                         if let Some(pde) = db.as_public_mut().as_package_data_mut().as_idx_mut(id) {
-                            pde.as_status_info_mut().as_error_mut().ser(&Some(e))?;
+                            pde.as_status_info_mut()
+                                .as_error_mut()
+                                .ser(&Some(error_data))?;
                         }
                         Ok(())
                     })
                     .await
                     .result?;
+                return Err(e);
             }
         }
-        shutdown_err?;
         Ok(())
+    }
+
+    pub async fn force_stop(
+        &self,
+        ctx: &RpcContext,
+        id: &PackageId,
+        deadline: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), Error> {
+        let mut service = self.get_mut(id).await;
+        let forcing_stop = &service
+            .as_ref()
+            .or_not_found(id)?
+            .seed
+            .persistent_container
+            .forcing_stop;
+        ctx.db
+            .mutate(|db| {
+                let status = db
+                    .as_public()
+                    .as_package_data()
+                    .as_idx(id)
+                    .or_not_found(id)?
+                    .as_status_info()
+                    .de()?;
+                ensure_code!(
+                    status.can_force_stop(deadline, chrono::Utc::now()),
+                    ErrorKind::InvalidRequest,
+                    "{}",
+                    t!("control.force-stop-unavailable")
+                );
+                forcing_stop.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            })
+            .await
+            .result?;
+        let res = super::force_stop::force_stop(&mut ServiceForceStop {
+            ctx,
+            id,
+            service: &mut service,
+        })
+        .await;
+        if let Some(service) = service.as_ref() {
+            service
+                .seed
+                .persistent_container
+                .forcing_stop
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+        res
     }
 
     #[instrument(skip_all)]

@@ -329,6 +329,8 @@ export abstract class ApiService {
 
   abstract stopPackage(params: T.ControlParams): Promise<null>
 
+  abstract forceStopPackage(params: T.ForceStopParams): Promise<null>
+
   abstract rebuildPackage(params: T.RebuildParams): Promise<null>
 
   abstract uninstallPackage(params: T.UninstallParams): Promise<null>

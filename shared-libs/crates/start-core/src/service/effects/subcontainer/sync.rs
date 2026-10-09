@@ -23,6 +23,7 @@ const FWD_SIGNALS: &[c_int] = &[
     SIGTSTP, SIGTTIN, SIGTTOU, SIGURG, SIGUSR1, SIGUSR2, SIGVTALRM,
 ];
 
+/// Procfs process IDs must belong to the caller's PID namespace.
 pub fn kill_init(procfs: &Path, chroot: &Path) -> Result<(), Error> {
     if chroot.join("proc/1").exists() {
         let ns_id = procfs::process::Process::new_with_root(chroot.join("proc/1"))
@@ -38,43 +39,111 @@ pub fn kill_init(procfs: &Path, chroot: &Path) -> Result<(), Error> {
         {
             let proc = proc.with_ctx(|_| (ErrorKind::Filesystem, "read single process details"))?;
             let pid = proc.pid();
-            if proc
-                .namespaces()
-                .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("read pid {} ns", pid)))?
-                .0
-                .get(OsStr::new("pid"))
-                .map_or(false, |ns| ns.identifier == ns_id)
-            {
-                let pids = proc.read::<_, NSPid>("status").with_ctx(|_| {
+            if is_subcontainer_init(&proc, ns_id)? {
+                match nix::sys::signal::kill(Pid::from_raw(pid), Some(nix::sys::signal::SIGKILL)) {
+                    Err(Errno::ESRCH) => Ok(()),
+                    a => a,
+                }
+                .with_ctx(|_| {
                     (
                         ErrorKind::Filesystem,
-                        lazy_format!("read pid {} NSpid", pid),
+                        lazy_format!("kill pid {} (determined to be pid 1 in subcontainer)", pid),
                     )
                 })?;
-                if pids.0.len() == 2 && pids.0[1] == 1 {
-                    match nix::sys::signal::kill(
-                        Pid::from_raw(pid),
-                        Some(nix::sys::signal::SIGKILL),
-                    ) {
-                        Err(Errno::ESRCH) => Ok(()),
-                        a => a,
-                    }
-                    .with_ctx(|_| {
-                        (
-                            ErrorKind::Filesystem,
-                            lazy_format!(
-                                "kill pid {} (determined to be pid 1 in subcontainer)",
-                                pid
-                            ),
-                        )
-                    })?;
-                }
             }
         }
         nix::mount::umount(&chroot.join("proc"))
             .with_ctx(|_| (ErrorKind::Filesystem, "unmounting subcontainer procfs"))?;
     }
     Ok(())
+}
+
+fn is_subcontainer_init(proc: &procfs::process::Process, ns_id: u64) -> Result<bool, Error> {
+    let pid = proc.pid();
+    if !proc
+        .namespaces()
+        .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("read pid {} ns", pid)))?
+        .0
+        .get(OsStr::new("pid"))
+        .is_some_and(|ns| ns.identifier == ns_id)
+    {
+        return Ok(false);
+    }
+    let pids = proc.read::<_, NSPid>("status").with_ctx(|_| {
+        (
+            ErrorKind::Filesystem,
+            lazy_format!("read pid {} NSpid", pid),
+        )
+    })?;
+    Ok(pids.0.last() == Some(&1))
+}
+
+#[cfg(test)]
+mod kill_init_tests {
+    use std::os::unix::fs::MetadataExt;
+
+    use super::*;
+
+    fn process_fixture(
+        status: &str,
+        with_namespace: bool,
+    ) -> (tempfile::TempDir, procfs::process::Process, u64) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("42");
+        std::fs::create_dir_all(root.join("ns")).unwrap();
+        let namespace = root.join("ns/pid");
+        if with_namespace {
+            std::fs::write(&namespace, "").unwrap();
+        }
+        let ns_id = std::fs::metadata(&namespace).map(|m| m.ino()).unwrap_or(0);
+        std::fs::write(root.join("status"), status).unwrap();
+        let proc = procfs::process::Process::new_with_root(root).unwrap();
+        (dir, proc, ns_id)
+    }
+
+    #[test]
+    fn selects_init_at_different_namespace_depths() {
+        for status in [
+            "NSpid:\t42\t1\n",
+            "Name:\tsleep\nNSpid:\t42\t7\t1\n",
+            "NSpid:\t42\t7\t3\t1\n",
+        ] {
+            let (_dir, proc, ns_id) = process_fixture(status, true);
+            assert!(is_subcontainer_init(&proc, ns_id).unwrap(), "{status}");
+        }
+    }
+
+    #[test]
+    fn rejects_noninit_and_empty_pid_stack() {
+        for status in [
+            "NSpid:\t42\t7\t2\n",
+            "NSpid:\t42\t1\t2\n",
+            "NSpid:\t42\n",
+            "NSpid:\n",
+        ] {
+            let (_dir, proc, ns_id) = process_fixture(status, true);
+            assert!(!is_subcontainer_init(&proc, ns_id).unwrap(), "{status}");
+        }
+    }
+
+    #[test]
+    fn rejects_missing_and_malformed_pid_status() {
+        for status in ["Name:\tsleep\n", "NSpid:\t42\tnot-a-pid\t1\n"] {
+            let (_dir, proc, ns_id) = process_fixture(status, true);
+            assert!(is_subcontainer_init(&proc, ns_id).is_err(), "{status}");
+        }
+    }
+
+    #[test]
+    fn rejects_other_or_missing_namespace_before_reading_status() {
+        let (dir, proc, ns_id) = process_fixture("NSpid:\t42\t7\t1\n", true);
+        assert!(!is_subcontainer_init(&proc, ns_id + 1).unwrap());
+        std::fs::remove_file(dir.path().join("42/status")).unwrap();
+        assert!(!is_subcontainer_init(&proc, ns_id + 1).unwrap());
+        assert!(is_subcontainer_init(&proc, ns_id).is_err());
+        let (_dir, proc, ns_id) = process_fixture("", false);
+        assert!(!is_subcontainer_init(&proc, ns_id).unwrap());
+    }
 }
 
 struct NSPid(Vec<i32>);

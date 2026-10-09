@@ -31,7 +31,7 @@ impl Actor for ServiceActor {
                     format!("/public/packageData/{}/statusInfo", seed.id)
                         .parse()
                         .unwrap(),
-                ) // TODO: typed pointers
+                )
                 .await
                 .typed::<StatusInfo>();
             let mut transition: Option<Transition> = None;
@@ -72,7 +72,7 @@ impl Actor for ServiceActor {
                 let transition_handler = async {
                     match &mut transition {
                         Some(Transition { future, .. }) => {
-                            let err = future.await.log_err().is_none(); // TODO: ideally this error should be sent to service logs
+                            let err = future.await.log_err().is_none();
                             transition.take();
                             if err {
                                 tokio::time::sleep(Duration::from_secs(
@@ -99,7 +99,28 @@ async fn service_actor_loop<'a>(
     transition: &mut Option<Transition<'a>>,
 ) -> Result<(), Error> {
     let status_model = watch.peek_and_mark_seen()?;
-    let status = status_model.de()?;
+    let mut status = status_model.de()?;
+    let id = &seed.id;
+    let previous_deadline = status.force_stop_at;
+    let delay = seed.ctx.force_stop_delay;
+    status.sync_force_stop_deadline(chrono::Utc::now(), delay);
+    if status.force_stop_at != previous_deadline {
+        seed.ctx
+            .db
+            .mutate(|db| {
+                db.as_public_mut()
+                    .as_package_data_mut()
+                    .as_idx_mut(id)
+                    .or_not_found(id)?
+                    .as_status_info_mut()
+                    .mutate(|status| {
+                        status.sync_force_stop_deadline(chrono::Utc::now(), delay);
+                        Ok(())
+                    })
+            })
+            .await
+            .result?;
+    }
 
     match status {
         StatusInfo {

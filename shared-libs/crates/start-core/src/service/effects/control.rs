@@ -26,11 +26,15 @@ pub async fn rebuild(context: EffectContext) -> Result<(), Error> {
 pub async fn restart(context: EffectContext) -> Result<(), Error> {
     let context = context.deref()?;
     let id = &context.seed.id;
+    let forcing_stop = &context.seed.persistent_container.forcing_stop;
     context
         .seed
         .ctx
         .db
         .mutate(|db| {
+            if forcing_stop.load(std::sync::atomic::Ordering::SeqCst) {
+                return Ok(());
+            }
             db.as_public_mut()
                 .as_package_data_mut()
                 .as_idx_mut(id)
@@ -141,6 +145,7 @@ pub async fn set_main_status(
 ) -> Result<(), Error> {
     let context = context.deref()?;
     let id = &context.seed.id;
+    let forcing_stop = &context.seed.persistent_container.forcing_stop;
     context
         .seed
         .ctx
@@ -152,6 +157,14 @@ pub async fn set_main_status(
                 .as_idx_mut(id)
                 .or_not_found(id)?
                 .as_status_info_mut();
+            if status == SetMainStatusStatus::Running
+                && forcing_stop.load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return Ok(());
+            }
+            if status == SetMainStatusStatus::Stopped {
+                s.as_force_stop_at_mut().ser(&None)?;
+            }
             let prev = s.as_started_mut().replace(&match status {
                 SetMainStatusStatus::Running => Some(Utc::now()),
                 SetMainStatusStatus::Stopped => None,

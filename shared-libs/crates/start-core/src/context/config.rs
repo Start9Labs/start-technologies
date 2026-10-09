@@ -15,7 +15,7 @@ use crate::prelude::*;
 use crate::util::serde::IoFormat;
 use crate::version::VersionT;
 
-pub const DEVICE_CONFIG_PATH: &str = "/media/startos/config/config.yaml"; // "/media/startos/config/config.yaml";
+pub const DEVICE_CONFIG_PATH: &str = "/media/startos/config/config.yaml";
 pub const CONFIG_PATH: &str = "/etc/startos/config.yaml";
 pub const CONFIG_PATH_LOCAL: &str = ".startos/config.yaml";
 
@@ -325,6 +325,8 @@ pub struct ServerConfig {
     pub id_key_path: Option<PathBuf>,
     #[arg(long, help = "help.arg.max-proxy-conns-per-target")]
     pub max_proxy_conns_per_target: Option<usize>,
+    #[arg(skip)]
+    pub force_stop_delay_seconds: Option<u64>,
 }
 impl ContextConfig for ServerConfig {
     fn next(&mut self) -> Option<PathBuf> {
@@ -343,10 +345,17 @@ impl ContextConfig for ServerConfig {
             .max_proxy_conns_per_target
             .take()
             .or(other.max_proxy_conns_per_target);
+        self.force_stop_delay_seconds = self
+            .force_stop_delay_seconds
+            .or(other.force_stop_delay_seconds);
     }
 }
 
 impl ServerConfig {
+    pub fn force_stop_delay(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.force_stop_delay_seconds.unwrap_or(30))
+    }
+
     pub fn load(mut self) -> Result<Self, Error> {
         let path = self.next();
         self.load_path_rec(path)?;
@@ -367,6 +376,33 @@ impl ServerConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn force_stop_config_default_and_merge() {
+        let mut config = ServerConfig::default();
+        assert_eq!(
+            config.force_stop_delay(),
+            std::time::Duration::from_secs(30)
+        );
+        let file: ServerConfig = IoFormat::Yaml
+            .from_reader("force-stop-delay-seconds: 12".as_bytes())
+            .unwrap();
+        config.merge_with(file);
+        assert_eq!(
+            config.force_stop_delay(),
+            std::time::Duration::from_secs(12)
+        );
+        config.merge_with(ServerConfig {
+            force_stop_delay_seconds: Some(45),
+            ..Default::default()
+        });
+        assert_eq!(
+            config.force_stop_delay(),
+            std::time::Duration::from_secs(12)
+        );
+        config.force_stop_delay_seconds = Some(0);
+        assert!(config.force_stop_delay().is_zero());
+    }
 
     fn profiles(pairs: &[(&str, &str)]) -> Profiles {
         Profiles(

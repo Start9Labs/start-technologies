@@ -608,6 +608,10 @@ export class LiveApiService extends ApiService {
     return this.rpcRequest({ method: 'package.stop', params })
   }
 
+  async forceStopPackage(params: T.ForceStopParams): Promise<null> {
+    return this.rpcRequest({ method: 'package.force-stop', params })
+  }
+
   async rebuildPackage(params: T.RebuildParams): Promise<null> {
     return this.rpcRequest({ method: 'package.rebuild', params })
   }
