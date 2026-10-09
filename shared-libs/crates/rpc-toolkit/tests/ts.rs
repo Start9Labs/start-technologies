@@ -173,3 +173,21 @@ fn enclosing_modules_own_their_reserved_names() {
     visitor.append_type::<String>();
     assert!(visitor.into_module("RpcHandler").is_ok());
 }
+
+struct Rejected;
+impl rpc_toolkit::ts::TS for Rejected {
+    fn visit_ts(visitor: &mut TSVisitor) {
+        visitor.error("Rejected has no JSON form");
+    }
+}
+
+#[test]
+fn custom_implementations_report_errors() {
+    let mut visitor = TSVisitor::new();
+    visitor.append_type::<Vec<Rejected>>();
+    assert!(visitor
+        .into_declarations()
+        .unwrap_err()
+        .to_string()
+        .contains("Rejected has no JSON form"));
+}

@@ -667,7 +667,7 @@ impl Target {
     ) -> Option<fn(&mut TSVisitor)> {
         let callback = self.callback(targets);
         if callback.is_none() {
-            visitor.unsupported(format!("Missing selected type metadata callback at {:?} for {}; add a local visit(type_attributes(...)) selector", self.position, self.path.join("::")));
+            visitor.error(format!("Missing selected type metadata callback at {:?} for {}; add a local visit(type_attributes(...)) selector", self.position, self.path.join("::")));
         }
         callback
     }
@@ -680,7 +680,7 @@ impl FieldPlan {
         targets: &[(TypeAttributeInfo, fn(&mut TSVisitor))],
     ) {
         if let Some(error) = self.error {
-            visitor.unsupported(error);
+            visitor.error(error);
             return;
         }
         let callback = if self.field.hints.skip {
@@ -712,7 +712,7 @@ impl Plan {
         } = self;
         visitor.errors.extend(hints.errors);
         if hints.skip {
-            visitor.unsupported("TypeScript skip requires a named field");
+            visitor.error("TypeScript skip requires a named field");
         }
         if let Some(literal) = hints.literal {
             visitor.ts.push_str(&literal);

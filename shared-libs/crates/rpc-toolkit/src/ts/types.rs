@@ -416,7 +416,8 @@ impl Visitor for TSVisitor {
 }
 
 impl TSVisitor {
-    pub(super) fn unsupported(&mut self, reason: impl Into<String>) {
+    /// Records an error that fails `into_declarations`.
+    pub fn error(&mut self, reason: impl Into<String>) {
         self.errors.push(reason.into());
     }
     pub(super) fn structure(&mut self, style: Style, fields: impl FnOnce(&mut Self)) {
@@ -504,7 +505,7 @@ impl TSVisitor {
             return;
         }
         let Some(callback) = callback else {
-            self.unsupported(format!("Opaque field {} requires a typed optionality fact from storage or a selected wire target", field.name));
+            self.error(format!("Opaque field {} requires a typed optionality fact from storage or a selected wire target", field.name));
             return;
         };
         let mut optional = false;
@@ -731,7 +732,7 @@ where
     let targets: Vec<_> = T::visit_type_attributes(&mut MetadataCollector::default()).collect();
     match super::normalize::normalize(&T::DECLARATION, visitor.direction) {
         Ok(plan) => plan.render(visitor, &children, &targets),
-        Err(error) => visitor.unsupported(error),
+        Err(error) => visitor.error(error),
     }
 }
 

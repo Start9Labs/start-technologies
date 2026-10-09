@@ -99,7 +99,8 @@ compose with CLI/display adapters. `.no_ts()` remains an opt-out through subsequ
 decorations.
 
 For individual field types with custom JSON representations, implement `TS`
-directly; `TSVisitor::direction()` identifies input versus output traversal.
+directly; `TSVisitor::direction()` identifies input versus output traversal, and
+`TSVisitor::error` rejects a type with no JSON form, failing generation.
 RPC interprets `visit(wire = "WireType")` for both directions, or `input_wire` /
 `output_wire` for one direction. Select the existing literal locally with
 `visit(type_attributes(visit::wire))` (or the corresponding directional path).
