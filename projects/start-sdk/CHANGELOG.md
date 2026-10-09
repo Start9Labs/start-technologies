@@ -1,11 +1,5 @@
 # Changelog
 
-## 3.0.5 — StartOS 0.4.0.2
-
-### Fixed
-
-- **`sdk.action.run` can run actions with input from init, dependency init handlers, and main**, as well as action handlers.
-
 ## 3.0.3 — StartOS 0.4.0.2
 
 ### Added
