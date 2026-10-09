@@ -53,6 +53,7 @@ Recursive types need a named definition; anonymous recursion returns an error.
 Supported shapes include:
 
 - Named, tuple, newtype and unit structs; transparent wrappers and flattening.
+- Internally tagged named structs. Input tags are optional: serde ignores them.
 - External, internal, adjacent and untagged enums; variant-level untagged forms.
 - Serde renames, split serialize/deserialize renames, `rename_all_fields`, input
   aliases, directional skips, field/container defaults and conditional output keys.
@@ -83,7 +84,7 @@ an explicit override.
 
 ## Overrides and unsupported shapes
 
-Custom serde hooks, identifier/remote derives, tagged structs, catch-all enum
+Custom serde hooks, identifier/remote derives, catch-all enum
 variants and conditional tuple layouts return a generation error rather than
 silently inventing a type. Required tuple fields following optional fields also
 need an override. Raw reflection retains skipped fields and variants. Add explicit

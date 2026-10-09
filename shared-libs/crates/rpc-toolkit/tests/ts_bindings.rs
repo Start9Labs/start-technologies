@@ -118,6 +118,13 @@ enum Untagged {
     Data { value: String },
 }
 reflect_ts!(Untagged);
+#[derive(Serialize, Deserialize, visit_rs::VisitFields)]
+#[serde(tag = "kind", rename = "Tagged", rename_all = "camelCase")]
+struct TaggedStruct {
+    some_value: u32,
+}
+reflect_ts!(TaggedStruct);
+
 #[derive(Serialize, Deserialize, visit_rs::VisitVariants)]
 enum Generic<T> {
     Data(T),
@@ -231,6 +238,25 @@ fn serde_struct_shapes_typecheck() {
     check_serialized(&[Unit], "[]");
     check_serialized(&[OneTuple("value".into())], "['value']");
     check_serialized(&[EmptyTuple()], "null");
+}
+
+#[test]
+fn tagged_structs_typecheck() {
+    check_serialized(
+        &[TaggedStruct { some_value: 1 }],
+        "{kind:'TaggedStruct',someValue:1}",
+    );
+    let inputs = [
+        json!({"kind":"Tagged","someValue":1}),
+        json!({"someValue":1}),
+    ];
+    let mut assertions = String::new();
+    for (i, input) in inputs.iter().enumerate() {
+        serde_json::from_value::<TaggedStruct>(input.clone()).unwrap();
+        assertions.push_str(&format!("const input{i}: TestType = {input};\n"));
+    }
+    assertions.push_str("// @ts-expect-error\nconst missing: TestType = {kind:'Tagged'};\n");
+    typecheck(&module::<TaggedStruct>(Direction::Input), &assertions);
 }
 
 #[test]

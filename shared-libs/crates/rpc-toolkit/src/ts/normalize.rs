@@ -70,6 +70,7 @@ pub(super) struct Plan {
     hints: Hints,
     target: Option<Target>,
     style: Option<Style>,
+    tag: Option<(String, String)>,
     fields: Vec<FieldPlan>,
     variants: Vec<VariantPlan>,
 }
@@ -510,6 +511,7 @@ pub(super) fn normalize(info: &DeclarationInfo, direction: Direction) -> Result<
         hints,
         target: None,
         style: None,
+        tag: None,
         fields: Vec::new(),
         variants: Vec::new(),
     };
@@ -544,11 +546,6 @@ pub(super) fn normalize(info: &DeclarationInfo, direction: Direction) -> Result<
             "Serde identifier and remote derives require an explicit shape override".into(),
         );
     }
-    if matches!(container.data, ast::Data::Struct(..))
-        && !matches!(container.attrs.tag(), attr::TagType::External)
-    {
-        return Err("Tagged structs require an explicit shape override".into());
-    }
     let conversion = if input {
         if container.attrs.type_from().is_some() {
             Some("from")
@@ -568,6 +565,14 @@ pub(super) fn normalize(info: &DeclarationInfo, direction: Direction) -> Result<
     }
     match &container.data {
         ast::Data::Struct(s, fs) => {
+            plan.tag = match container.attrs.tag() {
+                attr::TagType::External => None,
+                attr::TagType::Internal { tag } => Some((
+                    tag.clone(),
+                    container.attrs.name().serialize_name().value.clone(),
+                )),
+                _ => return Err("Unsupported struct tagging".into()),
+            };
             plan.style = Some(if container.attrs.transparent() {
                 Style::Newtype
             } else {
@@ -707,6 +712,7 @@ impl Plan {
             hints,
             target,
             style,
+            tag,
             fields,
             variants,
         } = self;
@@ -721,7 +727,7 @@ impl Plan {
                 callback(visitor);
             }
         } else if let Some(style) = style {
-            visitor.structure(style, |visitor| {
+            visitor.structure(style, tag, |visitor| {
                 for field in fields {
                     field.render(visitor, storage, targets);
                 }

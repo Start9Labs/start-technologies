@@ -420,8 +420,26 @@ impl TSVisitor {
     pub fn error(&mut self, reason: impl Into<String>) {
         self.errors.push(reason.into());
     }
-    pub(super) fn structure(&mut self, style: Style, fields: impl FnOnce(&mut Self)) {
+    pub(super) fn structure(
+        &mut self,
+        style: Style,
+        tag: Option<(String, String)>,
+        fields: impl FnOnce(&mut Self),
+    ) {
         let payload = self.payload(style, fields);
+        if let Some((tag, name)) = tag {
+            // Serde ignores a struct's tag when deserializing.
+            let optional = if self.direction == Direction::Input {
+                "?"
+            } else {
+                ""
+            };
+            self.ts.push_str(&format!(
+                "{{{}{optional}:({})}}&",
+                json_str(&tag),
+                json_str(&name)
+            ));
+        }
         self.ts.push_str(&payload);
     }
 
