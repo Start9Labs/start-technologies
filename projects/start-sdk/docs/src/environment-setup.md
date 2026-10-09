@@ -13,7 +13,7 @@ You must have a computer running StartOS to test your packages. Follow the [inst
 
 [Docker](https://docs.docker.com/get-docker/) is essential for building and managing container images that will be used for the final `.s9pk` build. It handles pulling base images and building custom container images from Dockerfiles.
 
-Follow the [official Docker installation guide](https://docs.docker.com/engine/install/) for your platform.
+Install Docker 28.1 or newer with Engine API 1.49 or newer; packaging uses platform-specific image inspection. Follow the [official Docker installation guide](https://docs.docker.com/engine/install/) for your platform.
 
 Docker must be **running** when you build a package, and your user must be able to use it:
 
@@ -295,7 +295,7 @@ host:
 ```
 
 > [!TIP]
-> Setting `host.default` lets you install with `make install` — the recommended way to work on a package, since it builds and pushes to your device in one repeatable command. It also requires logging in once with `start-cli auth login` (it prompts for your StartOS master password). If you'd rather not set up the CLI yet, you can sideload the `.s9pk` through the web interface instead — see [Quick Start](./quick-start.md#install-to-startos).
+> Setting `host.default` lets you upload an already-built package with `make install`. Build for your device first (`make x86`, `make arm`, or `make riscv`); `make install` does not build or refresh the artifact. It also requires logging in once with `start-cli auth login` (it prompts for your StartOS master password). If you'd rather not set up the CLI yet, you can sideload the `.s9pk` through the web interface instead — see [Quick Start](./quick-start.md#install-to-startos).
 
 Any `start-cli` command takes `-H`/`--host` and `-r`/`--registry`. Pass a **profile name** to use one of these entries, or a **URL** to target something directly:
 

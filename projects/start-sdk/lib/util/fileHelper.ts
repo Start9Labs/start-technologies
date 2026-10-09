@@ -95,11 +95,14 @@ function fileMerge(...args: any[]): any {
   return res
 }
 
+function isPlainObject(a: object) {
+  const proto = Object.getPrototypeOf(a)
+  return proto === Object.prototype || proto === null
+}
+
 function filterUndefined<A>(a: A): A {
-  if (a && typeof a === 'object') {
-    if (Array.isArray(a)) {
-      return a.map(filterUndefined) as A
-    }
+  if (Array.isArray(a)) return a.map(filterUndefined) as A
+  if (a && typeof a === 'object' && isPlainObject(a)) {
     return Object.entries(a).reduce<Record<string, any>>((acc, [k, v]) => {
       if (v !== undefined) {
         acc[k] = filterUndefined(v)

@@ -487,6 +487,12 @@ pub async fn cli_install(
             upload?;
         }
         CliInstallParams::Marketplace(QueryPackageParams { id, version }) => {
+            let registry = ctx
+                .registry_url
+                .as_ref()
+                .or_not_found("--registry")?
+                .get()?
+                .clone();
             let source_version: Option<VersionString> = from_value(
                 ctx.call_remote::<RpcContext>("package.installed-version", json!({ "id": &id }))
                     .await?,
@@ -494,37 +500,48 @@ pub async fn cli_install(
             let mut packages: GetPackageResponse = from_value(
                 ctx.call_remote::<RegistryContext>(
                     "package.get",
-                    json!({ "id": &id, "targetVersion": version, "sourceVersion": source_version, "otherVersions": "none" }),
+                    json!({ "id": &id, "targetVersion": &version, "sourceVersion": source_version, "otherVersions": "none" }),
                 )
                 .await?,
             )?;
-            let version = if packages.best.len() == 1 {
-                packages.best.pop_first().map(|(k, _)| k).unwrap()
-            } else {
-                let versions = packages.best.keys().collect::<Vec<_>>();
-                let version = choose(
-                    &format!(
-                        concat!(
-                            "Multiple flavors of {id} found. ",
-                            "Please select one of the following versions to install:"
+            let version = match packages.best.len() {
+                0 => {
+                    return Err(Error::new(
+                        eyre!(
+                            "{}",
+                            t!(
+                                "install.version-not-found-on-registry",
+                                id = id,
+                                version = version.unwrap_or(VersionRange::Any),
+                                registry = registry
+                            )
                         ),
-                        id = id
-                    ),
-                    &versions,
-                )
-                .await?;
-                (*version).clone()
+                        ErrorKind::NotFound,
+                    )
+                    .into());
+                }
+                1 => packages.best.pop_first().map(|(k, _)| k).unwrap(),
+                _ => {
+                    let versions = packages.best.keys().collect::<Vec<_>>();
+                    let version = choose(
+                        &format!(
+                            concat!(
+                                "Multiple flavors of {id} found. ",
+                                "Please select one of the following versions to install:"
+                            ),
+                            id = id
+                        ),
+                        &versions,
+                    )
+                    .await?;
+                    (*version).clone()
+                }
             };
             ctx.call_remote::<RpcContext>(
                 &method.join("."),
                 to_value(&InstallParams {
                     id,
-                    registry: ctx
-                        .registry_url
-                        .as_ref()
-                        .or_not_found("--registry")?
-                        .get()?
-                        .clone(),
+                    registry,
                     version,
                 })?,
             )

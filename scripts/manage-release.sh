@@ -37,8 +37,6 @@ S3_BUCKET="s3://startos-images"
 S3_CDN="https://startos-images.nyc3.cdn.digitaloceanspaces.com"
 START9_GPG_KEY="2D63C217"
 SDK_NPM_PACKAGE="@start9labs/start-sdk"
-# The changelog link sits inside the notes' Highlights section rather than at a
-# fixed position, so place_changelog_link finds it by this prefix.
 CHANGELOG_LINK_PREFIX="**[Full changelog"
 
 # The S3 origin, deliberately NOT the `*.cdn.*` host that apt/start9*.list point
@@ -88,10 +86,6 @@ OS_PLATFORMS="x86_64 x86_64-nonfree x86_64-nvidia aarch64 aarch64-nonfree aarch6
 CLI_TRIPLES="x86_64-unknown-linux-musl x86_64-apple-darwin aarch64-unknown-linux-musl aarch64-apple-darwin riscv64gc-unknown-linux-musl"
 DEB_ARCHES="x86_64 aarch64 riscv64"
 
-PROJECTS="start-os start-cli start-tunnel start-registry start-sdk start-wrt"
-
-# --- Project metadata ---
-
 project_kind() {
     case "$1" in
         start-os) echo os ;;
@@ -104,33 +98,14 @@ project_kind() {
 }
 
 derive_version() {
-    local project=$1 version
-    if [ "$(project_kind "$project")" = npm ]; then
-        jq -r .version "$REPO_ROOT/projects/$project/package.json"
-        return
-    fi
-    # StartOS versions carry a revision segment (0.4.0.1) that SemVer, and so Cargo, cannot
-    # express; root package.json holds it and projects/start-os/Cargo.toml carries only a
-    # `-rev.N` label (kept honest by cmd_pre_check). Mirrors build/env/version.sh.
-    if [ "$(project_kind "$project")" = os ]; then
-        jq -r .version "$REPO_ROOT/package.json"
-        return
-    fi
-    # start-wrt has no top-level crate; its canonical version lives in the ctrl
-    # crate manifest (mirrors the top CHANGELOG.md entry and start-wrt.yaml's
-    # "Determine version" step).
-    local toml="$REPO_ROOT/projects/$project/Cargo.toml"
-    if [ "$project" = start-wrt ]; then
-        toml="$REPO_ROOT/projects/start-wrt/backend/ctrl/Cargo.toml"
-    fi
-    version=$(grep -m1 'VERSION_BUMP' "$toml" 2>/dev/null | sed -E 's/.*version *= *"([^"]+)".*/\1/' || true)
-    if [ -z "$version" ]; then
-        version=$(sed -nE '/^\[package\]/,/^\[/{s/^version *= *"([^"]+)".*/\1/p}' "$toml" | head -1)
-    fi
-    echo "$version"
+    (cd "$REPO_ROOT" && node scripts/changelog.mjs version "projects/$1")
 }
 
-changelog_path() { echo "$REPO_ROOT/projects/$1/CHANGELOG.md"; }
+check_changelog_version() (
+    cd "$REPO_ROOT"
+    git fetch --tags origin
+    node scripts/changelog.mjs check-version "projects/$PROJECT" "$VERSION"
+)
 
 notes_path() { echo "$REPO_ROOT/projects/$1/release-notes/${VERSION}.md"; }
 
@@ -140,10 +115,15 @@ pre_update_notes_path() {
     echo "${notes%.md}.pre-update.md"
 }
 
-# CHANGELOG_REF is what the link resolves against — the tag for a release, and
-# the built commit for a CI registration, whose tag does not exist yet.
 changelog_link() {
-    echo "${CHANGELOG_LINK_PREFIX} for v${VERSION}](https://github.com/${REPO}/blob/${CHANGELOG_REF}/projects/${PROJECT}/CHANGELOG.md)** — every change in this release."
+    local ref="${CHANGELOG_REF:-master}"
+    if [ -n "${CHANGELOG_REF:-}" ] && (cd "$REPO_ROOT" && git cat-file -e "${ref}:projects/${PROJECT}/changelog" 2>/dev/null); then
+        echo "${CHANGELOG_LINK_PREFIX} fragments for v${VERSION}](https://github.com/${REPO}/tree/${ref}/projects/${PROJECT}/changelog)** — changes awaiting release."
+    else
+        local anchor="${VERSION//./}"
+        anchor="${anchor//+/}"
+        echo "${CHANGELOG_LINK_PREFIX} for v${VERSION}](https://github.com/${REPO}/blob/${ref}/projects/${PROJECT}/CHANGELOG.md#${anchor,,})** — every change in this release."
+    fi
 }
 
 curated_notes() {
@@ -242,8 +222,6 @@ os_image_exts() {
         *) echo "squashfs iso" ;;
     esac
 }
-
-# --- Helpers ---
 
 # Load a registry's OS index into $_INDEX_JSON, refetching only when asked for a
 # different registry than the one held — a release reads a dozen asset URLs off
@@ -414,8 +392,6 @@ require_kind() {
     >&2 echo "Subcommand '$SUBCOMMAND' does not apply to $PROJECT (kind: $KIND)."
     exit 2
 }
-
-# --- Deb helpers (shared by the deb and cli kinds) ---
 
 # Download this project's per-arch debs from a GitHub Actions run into the cwd.
 # Download this project's debs for the commit being tagged from the alpha suite.
@@ -599,20 +575,17 @@ resolve_alpha_commit() {
     echo "  To work from that tree: git checkout ${alpha_hash}"
 }
 
-# cmd_pre_check validates, and the release body is composed from, the *working
-# tree* — but an adopted commit can be behind it. Where the notes and changelog
-# are identical the distinction is immaterial, so the common case stays
-# frictionless; where it is not, the release would publish and link files the
-# tag does not point at, so stop and ask for the checkout.
+# Release metadata must match the commit that built the promoted artifacts.
 assert_metadata_matches_adopted() {
-    local adopted head file
+    local adopted file untracked
     adopted=$(tag_commit_sha)
-    head=$(cd "$REPO_ROOT" && git rev-parse --verify HEAD)
-    [ "$adopted" != "$head" ] || return 0
-    for file in "$(changelog_path "$PROJECT")" "$(notes_path "$PROJECT")" "$(pre_update_notes_path "$PROJECT")"; do
-        (cd "$REPO_ROOT" && git diff --quiet "$adopted" HEAD -- "$file") && continue
+    for file in "$REPO_ROOT/projects/$PROJECT/changelog" "$(notes_path "$PROJECT")" "$(pre_update_notes_path "$PROJECT")"; do
+        untracked=$(cd "$REPO_ROOT" && git ls-files --others --exclude-standard -- "$file")
+        if [ -z "$untracked" ] && (cd "$REPO_ROOT" && git diff --quiet "$adopted" -- "$file"); then
+            continue
+        fi
 
-        >&2 echo "  ✗ ${file#"$REPO_ROOT/"} differs between HEAD and the"
+        >&2 echo "  ✗ ${file#"$REPO_ROOT/"} differs between the working tree and the"
         >&2 echo "    commit being tagged (${adopted}). The release is composed from"
         >&2 echo "    the working tree, so it would not match the tag."
         >&2 echo
@@ -700,8 +673,6 @@ publish_debs() {
     done
 }
 
-# --- Subcommands ---
-
 # Report a failed "already released" guard. With FORCE=1 it's tolerated (returns
 # success) so an idempotent step can be re-run — S3 put -P, gh release --clobber,
 # registry re-index, apt re-publish all overwrite in place. Non-idempotent steps
@@ -719,25 +690,10 @@ cmd_pre_check() {
     local errors=0
     echo "Pre-checking ${PROJECT} v${VERSION} (tag ${TAG})..."
 
-    # 1. The TOP changelog heading must be this prospective version explicitly
-    #    (never `## [Unreleased]`) — see root AGENTS.md changelog rule. Testing the
-    #    first `## ` heading (not the whole file) rejects a stale `## [Unreleased]`
-    #    sitting above the version heading, which would also drop its entries from
-    #    the generated release notes (changelog_section reads from the heading down).
-    local changelog ver_re first_heading
-    changelog=$(changelog_path "$PROJECT")
-    ver_re=${VERSION//./\\.}
-    if [ ! -f "$changelog" ]; then
-        >&2 echo "  ✗ no CHANGELOG.md at $changelog"
-        errors=1
+    if check_changelog_version; then
+        echo "  ✓ changelog fragments and version agree"
     else
-        first_heading=$(grep -m1 -E '^## ' "$changelog")
-        if printf '%s\n' "$first_heading" | grep -qE "^##[[:space:]]+\[?${ver_re}(]| |\$)"; then
-            echo "  ✓ top changelog heading is ${VERSION}"
-        else
-            >&2 echo "  ✗ top CHANGELOG.md heading must be ${VERSION} (found: ${first_heading:-none}); a bare '## [Unreleased]' top heading is not allowed — see root AGENTS.md"
-            errors=1
-        fi
+        errors=1
     fi
 
     local notes
@@ -749,11 +705,7 @@ cmd_pre_check() {
         errors=1
     fi
 
-    # 1b. StartOS install/update docs pin the GitHub release link to the version
-    # being shipped — a repo-wide releases/latest resolves to whichever product
-    # released most recently (e.g. StartTunnel), not to StartOS. Enforce the bump
-    # like the changelog: fail if any doc still says releases/latest, links to no
-    # ${TAG} release, or pins a stale version. See root AGENTS.md "Coupled changes".
+    # releases/latest can resolve to another product's release.
     if [ "$KIND" = os ]; then
         local docs_src total good
         docs_src="$REPO_ROOT/projects/start-os/docs/src"
@@ -1187,6 +1139,8 @@ cmd_pull() {
 }
 
 cmd_tag() {
+    assert_metadata_matches_adopted
+    check_changelog_version
     local commit="${COMMIT:-HEAD}" tag_sha pulled_sha
     tag_sha=$(tag_commit_sha)
     # Refuse to tag a commit other than the one the pulled GHA assets were built from.
@@ -1206,7 +1160,7 @@ cmd_tag() {
     (cd "$REPO_ROOT" && git tag ${FORCE:+-f} "$TAG" "$commit" && git push origin ${FORCE:+-f} "refs/tags/${TAG}")
 }
 
-cmd_create_gh_release() {
+cmd_create_gh_release() (
     require_kind os cli deb npm wrt
     # os/cli/deb/wrt reference their pulled artifacts in the notes; npm (the SDK)
     # ships to npm and its notes are just the changelog link, so it needs no
@@ -1215,15 +1169,19 @@ cmd_create_gh_release() {
         enter_release_dir
         ensure_img_gz
     fi
-    local notes
+    local notes changelog_dir
     notes=$(release_body)
+    changelog_dir=$(mktemp -d)
+    trap 'rm -rf "$changelog_dir"' EXIT
+    (cd "$REPO_ROOT" && node scripts/changelog.mjs render "projects/$PROJECT" "$VERSION" --ref "$TAG") > "$changelog_dir/CHANGELOG.md"
     echo "Creating GitHub release ${TAG}..."
     if gh release view -R "$REPO" "$TAG" >/dev/null 2>&1; then
         gh release edit -R "$REPO" "$TAG" --title "$(project_display_name "$PROJECT") v${VERSION}" --notes "$notes"
     else
         gh release create -R "$REPO" "$TAG" --title "$(project_display_name "$PROJECT") v${VERSION}" --notes "$notes"
     fi
-}
+    gh release upload -R "$REPO" "$TAG" "$changelog_dir/CHANGELOG.md" --clobber
+)
 
 cmd_push() {
     case "$KIND" in
@@ -1642,8 +1600,8 @@ crate's — or package.json for start-sdk); the git tag / GitHub release is
 <project>/v<version>.
 
 Subcommands:
-  pre-check          Verify the changelog documents this version and that the
-                     version is not already tagged/released.
+  pre-check          Verify changelog fragments and their version severity,
+                     and that the version is not already tagged/released.
   alpha-commit       Print the commit alpha's current build of this project came
                      from. `git checkout "$(... alpha-commit <project>)"` puts a
                      tree on it. (cli/deb.)
@@ -1697,8 +1655,8 @@ Subcommands:
 
 Environment variables:
   VERSION                  Override the version (default: read from the manifest)
-  CHANGELOG_REF            Git ref the notes' changelog link resolves against
-                           (default: the release tag; CI passes the built commit)
+  CHANGELOG_REF            Link to change fragments at this ref (CI passes the
+                           built commit). Unset links to compiled history on master.
   RUN_ID                   GitHub Actions run id/url for pull-gha
   COMMIT                   Commit to tag (default: HEAD)
   FORCE                    Set to 1 to re-release an already-released version:
@@ -1722,8 +1680,6 @@ Registries are scoped per project (the OS and StartWRT promote source -> target)
 EOF
 }
 
-# --- Dispatch ---
-
 SUBCOMMAND="${1:-}"
 PROJECT="${2:-}"
 
@@ -1734,7 +1690,7 @@ fi
 
 if ! KIND=$(project_kind "$PROJECT"); then
     >&2 echo "Unknown or missing project: '${PROJECT}'"
-    >&2 echo "Projects: ${PROJECTS}"
+    >&2 echo "Projects: $(node "$SCRIPT_DIR/changelog.mjs" projects)"
     exit 2
 fi
 
@@ -1745,7 +1701,6 @@ if ! VERSION="${VERSION:-$(derive_version "$PROJECT")}" || [ -z "$VERSION" ]; th
     exit 1
 fi
 TAG="${PROJECT}/v${VERSION}"
-CHANGELOG_REF="${CHANGELOG_REF:-$TAG}"
 
 case "$SUBCOMMAND" in
     pre-check) cmd_pre_check ;;

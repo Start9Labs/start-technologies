@@ -781,6 +781,37 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn revision_three_migrates_and_rolls_back_without_changing_service_data() {
+        let previous = v0_4_0_2::Version;
+        let current = Current::default();
+        let registered = Version::from_exver_version(current.semver())
+            .as_version_t()
+            .unwrap();
+        assert_eq!(registered.previous().semver(), previous.semver());
+        let mut db = json!({ "public": { "serverInfo": {
+            "version": "0.4.0.2",
+            "packageVersionCompat": ">=0.3.0 <0.5.0",
+            "postInitMigrationTodos": {},
+        }, "packageData": { "service": { "setting": "preserved" } } } });
+        let packages = db["public"]["packageData"].clone();
+        let pre_ups = PreUps::load(&previous, &registered).await.unwrap();
+        migrate_from_unchecked(&previous, &registered, pre_ups, &mut db).unwrap();
+        assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.0.3"));
+        assert_eq!(
+            db["public"]["serverInfo"]["packageVersionCompat"],
+            to_value(current.compat()).unwrap()
+        );
+        assert_eq!(
+            db["public"]["serverInfo"]["postInitMigrationTodos"]["0.4.0.3"],
+            Value::Null
+        );
+        assert_eq!(db["public"]["packageData"], packages);
+        rollback_to_unchecked(&registered, &previous, &mut db).unwrap();
+        assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.0.2"));
+        assert_eq!(db["public"]["packageData"], packages);
+    }
+
     #[test]
     fn a_db_that_predates_revisions_reads_as_revision_zero() {
         let mut db = json!({ "public": { "serverInfo": {} } });

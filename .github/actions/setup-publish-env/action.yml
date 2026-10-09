@@ -15,24 +15,4 @@ runs:
   using: 'composite'
   steps:
     - name: Install start-cli
-      run: |
-        ARCH=$(uname -m)
-        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-        ASSET_NAME="start-cli_${ARCH}-${OS}"
-        DOWNLOAD_URL=$(curl -fsS \
-          -H "Authorization: token ${{ github.token }}" \
-          https://api.github.com/repos/Start9Labs/start-technologies/releases \
-          | jq -r '[.[].assets[] | select(.name=="'"$ASSET_NAME"'")] | first | .browser_download_url')
-        if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-          echo "Error: Could not find asset '$ASSET_NAME' in Start9Labs/start-technologies releases"
-          exit 1
-        fi
-        curl -fsSL \
-          -H "Authorization: token ${{ github.token }}" \
-          -H "Accept: application/octet-stream" \
-          "$DOWNLOAD_URL" -o /tmp/start-cli
-        sudo install -m 755 /tmp/start-cli /usr/local/bin/start-cli
-        rm /tmp/start-cli
-        echo ""
-        echo "start-cli: $(start-cli --version)"
-      shell: bash
+      uses: Start9Labs/start-technologies/.github/actions/install-start-cli@master

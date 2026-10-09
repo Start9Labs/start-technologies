@@ -22,7 +22,8 @@ providers: [tuiLinkOptionsProvider({ appearance: 'action-grayscale' })]
 **2. Hand-rolled card/heading/list CSS → layout primitives.** Custom `.card`/`.head` divs with
 60 lines of CSS become `<section tuiCardLarge="compact" appearance="secondary-grayscale">` +
 `<header tuiHeader><h3 tuiTitle>` + `<ul tuiList="s">`. A `role="table"` div grid with 60 lines
-of CSS becomes `tuiCell` rows + `| keyvalue`. If you're writing flexbox to lay out a
+of CSS becomes `tuiCell` rows + `| keyvalue`; label/value pairs are a `<dl tuiList>` of `dt`/`dd`
+(`compact` when dense), not `tuiSubtitle` stacks. If you're writing flexbox to lay out a
 title/subtitle/actions row, you missed a primitive.
 
 **3. Per-component loader + try/catch + error toast → `TaskService.run(task, 'Saving')`.**
@@ -57,7 +58,8 @@ gap: 2rem }`. Physical properties → logical (`inset-block-start`, `inline-size
 layout pokes die with the primitive that replaces them; custom appearance CSS
 (`[tuiCardLarge] { background: … }`) → `appearance="floating"`. When a global override _is_
 warranted: the doubled-selector trick (`.g-negative.g-negative { … }`,
-`tui-dropdown[data-appearance='start-os'][data-appearance='start-os']`), never `!important`.
+`tui-dropdown[data-appearance='start-os'][data-appearance='start-os']`); `!important` only in a
+`g-*` utility that must beat an appearance's state selectors (`g-active`).
 
 **9. Form ceremony → `NonNullableFormBuilder` shorthand** (see forms.md), with single-use private
 fields inlined into the group literal.

@@ -48,6 +48,7 @@ on:
       - '!**/*.md'
       # A release tags alpha's commit, which must contain its notes.
       - 'projects/start-cli/release-notes/**'
+      - 'projects/start-cli/changelog/**'
   pull_request:
     # The jobs below skip drafts, and `ready_for_review` is not a default
     # activity type, so without it a draft marked ready is never checked.

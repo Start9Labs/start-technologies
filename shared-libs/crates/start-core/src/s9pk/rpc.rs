@@ -177,6 +177,8 @@ async fn add_image(
     let tmp_dir = Arc::new(TmpDir::new().await?);
     s9pk.load_images(tmp_dir.clone()).await?;
     s9pk.validate_and_filter(None)?;
+    s9pk.as_archive_mut()
+        .set_signer(ctx.build_key()?, SIG_CONTEXT);
     let tmp_path = s9pk_path.with_extension("s9pk.tmp");
     let mut tmp_file = create_file(&tmp_path).await?;
     s9pk.serialize(&mut tmp_file, true).await?;
