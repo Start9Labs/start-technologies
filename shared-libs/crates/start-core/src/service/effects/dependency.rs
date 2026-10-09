@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use clap::builder::ValueParserFactory;
 use exver::VersionRange;
+use patch_db::ModelExt;
 use rust_i18n::t;
 
 use crate::db::model::package::{

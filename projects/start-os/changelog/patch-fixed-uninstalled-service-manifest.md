@@ -1,0 +1,1 @@
+- **Services that read an optional dependency's manifest can initialize when that dependency is not installed.**
