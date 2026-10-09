@@ -27,13 +27,32 @@ runs:
         toolchain: stable
 
     - name: Set up QEMU
+      id: qemu
+      continue-on-error: true
       uses: docker/setup-qemu-action@v4
+
+    - name: Set up QEMU (mirror.gcr.io)
+      if: steps.qemu.outcome == 'failure'
+      uses: docker/setup-qemu-action@v4
+      with:
+        image: mirror.gcr.io/tonistiigi/binfmt:latest
 
     - name: Set up Docker
       uses: docker/setup-docker-action@v5
 
     - name: Set up Docker Buildx
+      id: buildx
+      continue-on-error: true
       uses: docker/setup-buildx-action@v4
+
+    - name: Set up Docker Buildx (mirror.gcr.io)
+      if: steps.buildx.outcome == 'failure'
+      uses: docker/setup-buildx-action@v4
+      with:
+        driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
+        buildkitd-config-inline: |
+          [registry."docker.io"]
+            mirrors = ["mirror.gcr.io"]
 
     - name: Install start-cli
       uses: Start9Labs/start-technologies/.github/actions/install-start-cli@master

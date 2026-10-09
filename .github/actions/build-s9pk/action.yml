@@ -30,6 +30,7 @@ runs:
           echo "Daemon mirrors: $(docker info --format '{{.RegistryConfig.Mirrors}}')"
           printf '[registry."docker.io"]\n  mirrors = ["mirror.gcr.io"]\n' > "$RUNNER_TEMP/buildkitd.toml"
           docker buildx create --use --bootstrap --name mirror --driver docker-container \
+            --driver-opt image=mirror.gcr.io/moby/buildkit:buildx-stable-1 \
             --buildkitd-config "$RUNNER_TEMP/buildkitd.toml"
           make $TARGET
         fi
