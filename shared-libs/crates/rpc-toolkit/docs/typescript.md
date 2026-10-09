@@ -168,8 +168,8 @@ selected metadata callbacks.
 
 Nongeneric bridges use the Rust declaration name by default. Exceptional names
 use `#[visit(ts(rename = "PublicName", input_rename = "PublicInput"))]`.
-Lifetime-only types remain named; generic instances inline unless registered as
-concrete roots. `impl_ts_shape!` remains available for deliberate manual/inline
+Lifetime-only types remain named; generic instances inline unless the type opts
+into a generic family or is registered as a concrete root. `impl_ts_shape!` remains available for deliberate manual/inline
 bridges and explicit `{ define, input_define }` policy. `TSVisitor::with_direction`
 selects input or output. `TSWriter`, `type_writer` and `intersection_writer`
 supply writers; `TSVisitor::reserve`, `declare`, `intersection` and `declarations`
@@ -184,6 +184,15 @@ struct Payload<T> {
 }
 reflect_ts!(impl [T] for Payload<T> where [T: rpc_toolkit::ts::TS]);
 ```
+
+`reflect_ts!(generic Payload<T>)` instead declares one TypeScript generic,
+`Payload<T>` and `PayloadInput<T>`, and renders each instance as a reference such
+as `Payload<string>`. Parameters are plain type identifiers; add other bounds with
+`where [...]`. The family renders with `rpc_toolkit::ts::Param<N>` substituted for
+each parameter, so the declaration's own bounds must hold for `Param`. Fields of a
+parameter type stay required on input, and a parameter name may not shadow another
+declaration. Register a family without an instance through
+`rpc_toolkit::ts_export!(generic Payload<T>, namespaces = [""])`.
 
 Standalone roots register beside their declarations with
 `rpc_toolkit::ts_export!(Request, namespaces = ["events"])`. Concrete generic roots

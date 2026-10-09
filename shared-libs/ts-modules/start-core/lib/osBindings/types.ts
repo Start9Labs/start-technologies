@@ -2059,60 +2059,18 @@ export type OsVersionInfo = {
   releaseNotes: string
   sourceVersion: string
   authorized: Guid[]
-  iso: {
-    [key: string]: {
-      publishedAt: string
-      urls: string[]
-      commitment: Blake3Commitment
-      signatures: { [key: string]: AnySignature }
-    }
-  }
-  squashfs: {
-    [key: string]: {
-      publishedAt: string
-      urls: string[]
-      commitment: Blake3Commitment
-      signatures: { [key: string]: AnySignature }
-    }
-  }
-  img: {
-    [key: string]: {
-      publishedAt: string
-      urls: string[]
-      commitment: Blake3Commitment
-      signatures: { [key: string]: AnySignature }
-    }
-  }
+  iso: { [key: string]: RegistryAsset<Blake3Commitment> }
+  squashfs: { [key: string]: RegistryAsset<Blake3Commitment> }
+  img: { [key: string]: RegistryAsset<Blake3Commitment> }
 }
 export type OsVersionInfoInput = {
   headline: string
   releaseNotes: string
   sourceVersion: string
   authorized: GuidInput[]
-  iso: {
-    [key: string]: {
-      publishedAt: string
-      urls: string[]
-      commitment: Blake3CommitmentInput
-      signatures: { [key: string]: AnySignatureInput }
-    }
-  }
-  squashfs: {
-    [key: string]: {
-      publishedAt: string
-      urls: string[]
-      commitment: Blake3CommitmentInput
-      signatures: { [key: string]: AnySignatureInput }
-    }
-  }
-  img: {
-    [key: string]: {
-      publishedAt: string
-      urls: string[]
-      commitment: Blake3CommitmentInput
-      signatures: { [key: string]: AnySignatureInput }
-    }
-  }
+  iso: { [key: string]: RegistryAssetInput<Blake3CommitmentInput> }
+  squashfs: { [key: string]: RegistryAssetInput<Blake3CommitmentInput> }
+  img: { [key: string]: RegistryAssetInput<Blake3CommitmentInput> }
 }
 export type OsVersionInfoMap = { [key: string]: OsVersionInfo }
 export type OsVersionInfoMapInput = { [key: string]: OsVersionInfoInput }
@@ -2305,15 +2263,7 @@ export type PackageVersionInfo = {
   icon: DataUrl
   dependencyMetadata: { [key: string]: DependencyMetadata }
   sourceVersion: string | null
-  s9pks: [
-    HardwareRequirements,
-    {
-      publishedAt: string
-      urls: string[]
-      commitment: MerkleArchiveCommitment
-      signatures: { [key: string]: AnySignature }
-    },
-  ][]
+  s9pks: [HardwareRequirements, RegistryAsset<MerkleArchiveCommitment>][]
 } & PackageMetadata
 export type PackageVersionInfoInput = {
   icon: DataUrlInput
@@ -2321,12 +2271,7 @@ export type PackageVersionInfoInput = {
   sourceVersion?: string | null
   s9pks: [
     HardwareRequirementsInput,
-    {
-      publishedAt: string
-      urls: string[]
-      commitment: MerkleArchiveCommitmentInput
-      signatures: { [key: string]: AnySignatureInput }
-    },
+    RegistryAssetInput<MerkleArchiveCommitmentInput>,
   ][]
 } & PackageMetadataInput
 export type PartitionInfo = {
@@ -2637,30 +2582,46 @@ export type RangeServiceInterfaceInput = {
 }
 export type RebuildParams = { id: PackageId }
 export type RebuildParamsInput = { id: PackageIdInput }
-export type RecoverySourceWire =
+
+/**
+ * A migration or backup recovery source with a caller-selected backup password representation.
+ */
+export type RecoverySource<Password> =
   | ({ type: 'migrate' } & { guid: string })
   | ({ type: 'backup' } & {
       target: BackupTargetFS
-      password: string
+      password: Password
       serverId: string
     })
-export type RecoverySourceWireInput =
+
+/**
+ * A migration or backup recovery source with a caller-selected backup password representation.
+ */
+export type RecoverySourceInput<Password> =
   | ({ type: 'migrate' } & { guid: string })
   | ({ type: 'backup' } & {
       target: BackupTargetFSInput
-      password: string
+      password: Password
       serverId: string
     })
-export type RegistryAssetWire = {
+
+/**
+ * A registry asset with a caller-selected commitment representation.
+ */
+export type RegistryAsset<Commitment> = {
   publishedAt: string
   urls: string[]
-  commitment: string
+  commitment: Commitment
   signatures: { [key: string]: AnySignature }
 }
-export type RegistryAssetWireInput = {
+
+/**
+ * A registry asset with a caller-selected commitment representation.
+ */
+export type RegistryAssetInput<Commitment> = {
   publishedAt: string
   urls: string[]
-  commitment: string
+  commitment: Commitment
   signatures: { [key: string]: AnySignatureInput }
 }
 export type RegistryInfo = {
@@ -2978,32 +2939,14 @@ export type SetWifiEnabledParamsInput = { enabled: boolean }
 export type SetupExecuteParams = {
   guid: string
   password: EncryptedWire | null
-  recoverySource:
-    | (
-        | ({ type: 'migrate' } & { guid: string })
-        | ({ type: 'backup' } & {
-            target: BackupTargetFS
-            password: EncryptedWire
-            serverId: string
-          })
-      )
-    | null
+  recoverySource: RecoverySource<EncryptedWire> | null
   kiosk: boolean
   hostname: string | null
 }
 export type SetupExecuteParamsInput = {
   guid: string
   password?: EncryptedWireInput | null
-  recoverySource?:
-    | (
-        | ({ type: 'migrate' } & { guid: string })
-        | ({ type: 'backup' } & {
-            target: BackupTargetFSInput
-            password: EncryptedWireInput
-            serverId: string
-          })
-      )
-    | null
+  recoverySource?: RecoverySourceInput<EncryptedWireInput> | null
   kiosk: boolean
   hostname?: string | null
 }

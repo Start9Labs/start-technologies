@@ -47,7 +47,9 @@ use visit_rs::{
     VisitVariantFieldsStaticNamed, VisitVariantsStatic, Visitor,
 };
 
-pub use super::normalize::{declaration_name, default_name, documentation, input_name};
+pub use super::normalize::{
+    declaration_name, default_name, documentation, generic_name, input_name,
+};
 use super::normalize::{Field, Style, Tag, Variant};
 
 /// Appends the JSON expression for the visitor's selected direction.
@@ -101,12 +103,14 @@ pub struct TSVisitor {
     suppress_types: bool,
     pub(super) errors: Vec<String>,
     reserved: BTreeSet<String>,
+    generics: Vec<&'static [&'static str]>,
 }
 
 #[derive(Debug, Clone)]
 struct Definition {
     docs: Vec<String>,
     owner: (&'static str, Direction),
+    params: &'static [&'static str],
     expression: Option<String>,
 }
 
@@ -135,6 +139,7 @@ impl TSVisitor {
             suppress_types: false,
             errors: Vec::new(),
             reserved: BTreeSet::new(),
+            generics: Vec::new(),
         }
     }
 
@@ -159,7 +164,7 @@ impl TSVisitor {
         if let Some((name, _)) = self
             .definitions
             .iter()
-            .find(|(_, definition)| definition.owner == owner)
+            .find(|(_, definition)| definition.owner == owner && definition.params.is_empty())
         {
             self.ts.push_str(name);
         } else if let Some(define) = T::define_name() {
@@ -205,10 +210,79 @@ impl TSVisitor {
             Definition {
                 docs: T::documentation(),
                 owner,
+                params: &[],
                 expression: None,
             },
         );
         let expression = self.capture(T::visit_ts);
+        self.definitions.get_mut(&name).unwrap().expression = Some(expression);
+    }
+
+    /// Appends a generic instance, registering its family from `D`, which
+    /// substitutes `Param<N>` for each named parameter.
+    pub fn append_generic<D>(&mut self, params: &'static [&'static str], args: &[fn(&mut Self)])
+    where
+        D: TypeInfo + VisitTypeAttributes<MetadataCollector>,
+        D::Kind: ShapeKind<D>,
+    {
+        if self.suppress_types {
+            return;
+        }
+        let args: Vec<_> = args.iter().map(|arg| self.capture(arg)).collect();
+        if args.len() != params.len() {
+            self.error(format!(
+                "Generic {} expects {} arguments",
+                D::DECLARATION.name,
+                params.len()
+            ));
+        }
+        self.declare_generic::<D>(params);
+        self.ts.push('<');
+        self.ts.push_str(&args.join(","));
+        self.ts.push('>');
+    }
+
+    /// Registers a generic family by name, appending only that name.
+    pub fn declare_generic<D>(&mut self, params: &'static [&'static str])
+    where
+        D: TypeInfo + VisitTypeAttributes<MetadataCollector>,
+        D::Kind: ShapeKind<D>,
+    {
+        let base = generic_name(&D::DECLARATION);
+        let name = match self.direction {
+            Direction::Input => input_name(&D::DECLARATION)
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("{base}Input")),
+            Direction::Output => base.to_owned(),
+        };
+        let owner = (std::any::type_name::<D>(), self.direction);
+        if !valid_identifier(&name) || self.reserved.contains(&name) {
+            self.error(format!("Invalid TypeScript definition name: {name}"));
+            return;
+        }
+        if let Some(param) = params.iter().find(|param| !valid_parameter(param)) {
+            self.error(format!("Invalid TypeScript generic parameter: {param}"));
+            return;
+        }
+        self.ts.push_str(&name);
+        if let Some(existing) = self.definitions.get(&name) {
+            if existing.owner != owner {
+                self.error(format!("Conflicting TypeScript definition: {name}"));
+            }
+            return;
+        }
+        self.definitions.insert(
+            name.clone(),
+            Definition {
+                docs: documentation(&D::DECLARATION),
+                owner,
+                params,
+                expression: None,
+            },
+        );
+        self.generics.push(params);
+        let expression = self.capture(visit_shape::<D>);
+        self.generics.pop();
         self.definitions.get_mut(&name).unwrap().expression = Some(expression);
     }
 
@@ -340,7 +414,16 @@ impl TSVisitor {
     }
 
     /// Emits registered type declarations, rejecting accumulated generation errors.
-    pub fn into_declarations(self) -> Result<String, BindingError> {
+    pub fn into_declarations(mut self) -> Result<String, BindingError> {
+        for (name, definition) in &self.definitions {
+            for param in definition.params {
+                if self.definitions.contains_key(*param) || self.reserved.contains(*param) {
+                    self.errors.push(format!(
+                        "Generic parameter {param} of {name} shadows a declaration"
+                    ));
+                }
+            }
+        }
         if !self.errors.is_empty() {
             return Err(BindingError(self.errors.join("\n")));
         }
@@ -348,8 +431,13 @@ impl TSVisitor {
             .definitions
             .into_iter()
             .map(|(name, definition)| {
+                let params = if definition.params.is_empty() {
+                    String::new()
+                } else {
+                    format!("<{}>", definition.params.join(","))
+                };
                 format!(
-                    "{}export type {name} = {};\n",
+                    "{}export type {name}{params} = {};\n",
                     jsdoc(&definition.docs),
                     definition.expression.unwrap()
                 )
@@ -372,6 +460,7 @@ impl TSVisitor {
             Definition {
                 docs: Vec::new(),
                 owner: ("", self.direction),
+                params: &[],
                 expression: Some(std::mem::take(&mut self.ts)),
             },
         );
@@ -384,6 +473,12 @@ fn valid_identifier(name: &str) -> bool {
     matches!(bytes.next(), Some(b'A'..=b'Z'))
         && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
         && !matches!(name, "Partial" | "Exclude")
+}
+
+fn valid_parameter(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    matches!(bytes.next(), Some(b'A'..=b'Z' | b'a'..=b'z' | b'_'))
+        && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
 fn jsdoc(docs: &[String]) -> String {
@@ -668,6 +763,18 @@ impl Visit<TSVisitor> for LiteralTS {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Unknown;
+
+/// Stands in for a generic family's `N`th parameter while its declaration renders.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Param<const N: usize>;
+impl<const N: usize> TS for Param<N> {
+    fn visit_ts(visitor: &mut TSVisitor) {
+        match visitor.generics.last().and_then(|params| params.get(N)) {
+            Some(param) => visitor.ts.push_str(param),
+            None => visitor.error(format!("Generic parameter {N} outside its declaration")),
+        }
+    }
+}
 #[derive(Debug, Clone, Copy)]
 pub enum Never {}
 
@@ -755,8 +862,22 @@ where
 }
 
 /// Bridges reflected declaration identity, docs and wire shape to TypeScript.
+///
+/// `generic Name<A, B>` declares one TypeScript generic for every instance.
 #[macro_export]
 macro_rules! reflect_ts {
+    (generic $name:ident < $($param:ident),+ $(,)? > $(where [$($bounds:tt)*])?) => {
+        impl<$($param),+> $crate::ts::TS for $name<$($param),+>
+        where $($param: $crate::ts::TS,)+ $($($bounds)*)?
+        {
+            fn visit_ts(visitor: &mut $crate::ts::TSVisitor) {
+                visitor.append_generic::<$crate::__ts_generic_family!($name [] [] $($param)+)>(
+                    &[$(stringify!($param)),+],
+                    &[$($crate::ts::TSVisitor::append_type::<$param>),+],
+                );
+            }
+        }
+    };
     ($ty:ty) => { $crate::reflect_ts!(impl [] for $ty where []); };
     (impl [$($generic:tt)*] for $ty:ty $(where [$($bounds:tt)*])?) => {
         impl<$($generic)*> $crate::ts::TS for $ty where $($($bounds)*)? {
@@ -784,9 +905,33 @@ macro_rules! impl_ts_shape {
     };
 }
 
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ts_generic_family {
+    ($name:ident [$($done:ty),*] [$($index:tt)*]) => { $name<$($done),*> };
+    ($name:ident [$($done:ty),*] [$($index:tt)*] $param:ident $($rest:ident)*) => {
+        $crate::__ts_generic_family!(
+            $name [$($done,)* $crate::ts::Param<{ 0 $($index)* }>] [$($index)* + 1] $($rest)*
+        )
+    };
+}
+
 /// Registers a typed root beside its owner; unnamed registrations use `TS::DEFINE`.
 #[macro_export]
 macro_rules! ts_export {
+    (generic $name:ident < $($param:ident),+ $(,)? >, namespaces = [$($namespace:expr),* $(,)?]) => {
+        const _: () = {
+            type Family = $crate::__ts_generic_family!($name [] [] $($param)+);
+            const PARAMS: &[&str] = &[$(stringify!($param)),+];
+            $( $crate::ts::inventory::submit! {
+                $crate::ts::Export {
+                    module: module_path!(), namespace: $namespace,
+                    name: $crate::ts::generic_name(&<Family as $crate::ts::TypeInfo>::DECLARATION),
+                    register: |visitor| visitor.declare_generic::<Family>(PARAMS),
+                }
+            } )*
+        };
+    };
     ($ty:ty, namespaces = [$($namespace:expr),* $(,)?]) => {
         $( $crate::ts::inventory::submit! {
             $crate::ts::Export {

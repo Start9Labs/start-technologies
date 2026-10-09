@@ -23,6 +23,7 @@ use crate::util::future::NonDetachingJoinHandle;
 #[cfg(test)]
 use crate::util::io::TmpDir;
 
+/// A registry asset with a caller-selected commitment representation.
 #[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistryAsset<Commitment> {
@@ -36,12 +37,8 @@ pub struct RegistryAsset<Commitment> {
     pub signatures: HashMap<AnyVerifyingKey, AnySignature>,
 }
 
-rpc_toolkit::reflect_ts!(impl [Commitment] for RegistryAsset<Commitment> where [Commitment: rpc_toolkit::ts::TS]);
-rpc_toolkit::ts_export!(
-    RegistryAsset<String>,
-    name = "RegistryAssetWire",
-    namespaces = [""]
-);
+rpc_toolkit::reflect_ts!(generic RegistryAsset<Commitment>);
+rpc_toolkit::ts_export!(generic RegistryAsset<Commitment>, namespaces = [""]);
 impl<Commitment> RegistryAsset<Commitment> {
     pub fn all_signers(&self) -> AcceptSigners {
         AcceptSigners::All(

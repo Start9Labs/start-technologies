@@ -184,30 +184,15 @@ export type Api = {
               _CHILDREN: {
                 img: {
                   _PARAMS: GetOsAssetParamsInput
-                  _RETURN: {
-                    publishedAt: string
-                    urls: string[]
-                    commitment: Blake3Commitment
-                    signatures: { [key: string]: AnySignature }
-                  }
+                  _RETURN: RegistryAsset<Blake3Commitment>
                 }
                 iso: {
                   _PARAMS: GetOsAssetParamsInput
-                  _RETURN: {
-                    publishedAt: string
-                    urls: string[]
-                    commitment: Blake3Commitment
-                    signatures: { [key: string]: AnySignature }
-                  }
+                  _RETURN: RegistryAsset<Blake3Commitment>
                 }
                 squashfs: {
                   _PARAMS: GetOsAssetParamsInput
-                  _RETURN: {
-                    publishedAt: string
-                    urls: string[]
-                    commitment: Blake3Commitment
-                    signatures: { [key: string]: AnySignature }
-                  }
+                  _RETURN: RegistryAsset<Blake3Commitment>
                 }
               }
             }
@@ -467,30 +452,9 @@ export type OsVersionInfo = {
   releaseNotes: string
   sourceVersion: string
   authorized: Guid[]
-  iso: {
-    [key: string]: {
-      publishedAt: string
-      urls: string[]
-      commitment: Blake3Commitment
-      signatures: { [key: string]: AnySignature }
-    }
-  }
-  squashfs: {
-    [key: string]: {
-      publishedAt: string
-      urls: string[]
-      commitment: Blake3Commitment
-      signatures: { [key: string]: AnySignature }
-    }
-  }
-  img: {
-    [key: string]: {
-      publishedAt: string
-      urls: string[]
-      commitment: Blake3Commitment
-      signatures: { [key: string]: AnySignature }
-    }
-  }
+  iso: { [key: string]: RegistryAsset<Blake3Commitment> }
+  squashfs: { [key: string]: RegistryAsset<Blake3Commitment> }
+  img: { [key: string]: RegistryAsset<Blake3Commitment> }
 }
 export type OsVersionInfoMap = { [key: string]: OsVersionInfo }
 export type PackageDetailLevelInput = 'none' | 'short' | 'full'
@@ -543,15 +507,7 @@ export type PackageVersionInfo = {
   icon: DataUrl
   dependencyMetadata: { [key: string]: DependencyMetadata }
   sourceVersion: string | null
-  s9pks: [
-    HardwareRequirements,
-    {
-      publishedAt: string
-      urls: string[]
-      commitment: MerkleArchiveCommitment
-      signatures: { [key: string]: AnySignature }
-    },
-  ][]
+  s9pks: [HardwareRequirements, RegistryAsset<MerkleArchiveCommitment>][]
 } & PackageMetadata
 export type PluginId = 'url-v0'
 export type PreDownloadAlert = {
@@ -559,6 +515,16 @@ export type PreDownloadAlert = {
   when: PreDownloadAlertWhen
 }
 export type PreDownloadAlertWhen = { sourceVersion: string }
+
+/**
+ * A registry asset with a caller-selected commitment representation.
+ */
+export type RegistryAsset<Commitment> = {
+  publishedAt: string
+  urls: string[]
+  commitment: Commitment
+  signatures: { [key: string]: AnySignature }
+}
 export type RegistryInfo = {
   name: string | null
   icon: DataUrl | null

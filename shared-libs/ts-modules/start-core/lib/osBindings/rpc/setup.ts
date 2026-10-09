@@ -331,6 +331,17 @@ export type QueryDnsParamsInput = { fqdn: string }
  * IPv4 and an `AAAA` at the box's IPv6 GUA. Either may be absent.
  */
 export type QueryDnsRes = { ipv4: string | null; ipv6: string | null }
+
+/**
+ * A migration or backup recovery source with a caller-selected backup password representation.
+ */
+export type RecoverySourceInput<Password> =
+  | ({ type: 'migrate' } & { guid: string })
+  | ({ type: 'backup' } & {
+      target: BackupTargetFSInput
+      password: Password
+      serverId: string
+    })
 export type RequiresHostIdInput = { host: HostIdInput }
 export type RequiresPackageIdInput = { package: PackageIdInput }
 export type ServerHostname = string
@@ -338,16 +349,7 @@ export type SetLanguageParamsInput = { language: string }
 export type SetupExecuteParamsInput = {
   guid: string
   password?: EncryptedWireInput | null
-  recoverySource?:
-    | (
-        | ({ type: 'migrate' } & { guid: string })
-        | ({ type: 'backup' } & {
-            target: BackupTargetFSInput
-            password: EncryptedWireInput
-            serverId: string
-          })
-      )
-    | null
+  recoverySource?: RecoverySourceInput<EncryptedWireInput> | null
   kiosk: boolean
   hostname?: string | null
 }

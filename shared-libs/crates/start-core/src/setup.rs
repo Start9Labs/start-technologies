@@ -474,6 +474,7 @@ pub async fn verify_cifs(
     Ok(start_os)
 }
 
+/// A migration or backup recovery source with a caller-selected backup password representation.
 #[derive(Debug, Deserialize, Serialize, VisitVariants)]
 #[serde(tag = "type")]
 #[serde(rename_all = "camelCase")]
@@ -489,12 +490,8 @@ pub enum RecoverySource<Password> {
     },
 }
 
-rpc_toolkit::reflect_ts!(impl [Password] for RecoverySource<Password> where [Password: rpc_toolkit::ts::TS]);
-rpc_toolkit::ts_export!(
-    RecoverySource<String>,
-    name = "RecoverySourceWire",
-    namespaces = [""]
-);
+rpc_toolkit::reflect_ts!(generic RecoverySource<Password>);
+rpc_toolkit::ts_export!(generic RecoverySource<Password>, namespaces = [""]);
 
 pub async fn setup_data_drive(
     ctx: &SetupContext,

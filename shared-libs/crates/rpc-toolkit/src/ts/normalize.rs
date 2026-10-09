@@ -200,6 +200,12 @@ pub const fn default_name(info: &DeclarationInfo) -> Option<&'static str> {
         None => Some(legacy_name(info)),
     }
 }
+pub const fn generic_name(info: &DeclarationInfo) -> &'static str {
+    match setting(info.metadata, "rename") {
+        Some(name) => name,
+        None => legacy_name(info),
+    }
+}
 pub const fn input_name(info: &DeclarationInfo) -> Option<&'static str> {
     setting(info.metadata, "input_rename")
 }

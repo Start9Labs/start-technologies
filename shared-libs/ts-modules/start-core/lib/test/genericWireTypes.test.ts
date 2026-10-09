@@ -13,7 +13,7 @@ describe('public generic wire projections', () => {
 
   test('migration remains independent of the password type', () => {
     const source: T.RecoverySource<never> = { type: 'migrate', guid: 'guid' }
-    const wire: Extract<T.RecoverySourceWire, { type: 'migrate' }> = source
+    const wire: Extract<T.RecoverySource<string>, { type: 'migrate' }> = source
     expect(wire.guid).toBe('guid')
     // @ts-expect-error Migration has no password field.
     expect(source.password).toBeUndefined()
@@ -109,7 +109,7 @@ describe('public generic wire projections', () => {
       commitment: { digest: new Uint8Array([1]) },
       signatures: { signer: 'signature' },
     }
-    const signatures: T.RegistryAssetWire['signatures'] = asset.signatures
+    const signatures: T.RegistryAsset<string>['signatures'] = asset.signatures
     expect(asset.commitment.digest).toEqual(new Uint8Array([1]))
     expect(signatures.signer).toBe('signature')
     // @ts-expect-error Commitments use the supplied type.
