@@ -10,7 +10,7 @@ import { InitScript, setupOnInit } from '@start9labs/start-core/inits'
 import * as T from '@start9labs/start-core/types'
 import { getOwnHost } from '@start9labs/start-core/util/GetHostInfo'
 import { Watchable } from '@start9labs/start-core/util/Watchable'
-import { FilledHost } from '@start9labs/start-core/util/filledAddress'
+import { Filter, FilledHost } from '@start9labs/start-core/util/filledAddress'
 
 /** A reader in the shape `FileHelper.read()` returns. */
 export type Reader<A> = {
@@ -33,6 +33,16 @@ export type SetupPrimaryUrlParams<Id extends T.ActionId> = {
   get: Reader<string | null | undefined>
   /** Stores the URL the user chose. */
   set: (effects: T.Effects, url: string) => Promise<unknown>
+  /** Narrows the addresses offered, on top of dropping loopback, link-local and bridge ones. */
+  filter?: Filter
+  /** Offer only addresses served over TLS. */
+  ssl?: boolean
+  /**
+   * `false` when the service must run only on an address the user chose: the
+   * form and task start empty, and `bestUsable` is `null` while nothing is
+   * stored or the stored URL is gone. Defaults to `true`.
+   */
+  fallback?: boolean
 }
 
 export type PrimaryUrl<Id extends T.ActionId> = {
@@ -40,14 +50,16 @@ export type PrimaryUrl<Id extends T.ActionId> = {
   action: Action<Id, { url: string }>
   /**
    * Reader for the URL the service should use: the stored one, followed to its
-   * hostname's current port and scheme; else the `.local` address, else the
-   * first.
+   * hostname's current port and scheme; else the preferred address (see
+   * `setupTask`), unless `fallback` is `false`.
    */
   bestUsable: (effects: T.Effects) => Watchable<string | null>
   /**
-   * Keeps a task on `action` raised while the stored URL is unset or no longer
-   * one of the interface's addresses, pre-filled with the `.local` address.
-   * Register it with `sdk.setupInit()`, after the actions.
+   * Raises a task on `action` while the stored URL is unset or no longer one
+   * of the interface's addresses, and clears it otherwise. Unless `fallback`
+   * is `false`, the task pre-fills the preferred address: a public domain,
+   * HTTPS first; else the `.local` address; else the first. Register it
+   * with `sdk.setupInit()`, after the actions.
    */
   setupTask: (
     severity: T.TaskSeverity,
@@ -63,33 +75,42 @@ const parse = (url: string) => {
   }
 }
 
-const urlsOf =
-  (interfaceId: T.ServiceInterfaceId) =>
-  (host: FilledHost | null): string[] => {
+type Stored = string | null | undefined
+type Offered = { urls: string[]; preferred: string | undefined }
+
+const offeredBy =
+  (interfaceId: T.ServiceInterfaceId, filter: Filter, ssl: boolean) =>
+  (host: FilledHost | null): Offered => {
     const binding =
       host &&
       Object.values(host.bindings).find(b => interfaceId in b.interfaces)
-    return binding
-      ? binding.interfaces[interfaceId].addressInfo.nonLocal.format()
-      : []
+    if (!binding) return { urls: [], preferred: undefined }
+    const address = binding.interfaces[interfaceId].addressInfo.nonLocal
+    const hostnames = address
+      .filter(filter)
+      .format('hostname-info')
+      .filter(h => !ssl || h.ssl)
+    const rank = (h: T.HostnameInfo) =>
+      h.metadata.kind === 'public-domain'
+        ? Number(!h.ssl)
+        : h.hostname.endsWith('.local')
+          ? 2
+          : 3
+    const best = [...hostnames].sort((a, b) => rank(a) - rank(b))[0]
+    return {
+      urls: hostnames.map(address.toUrl),
+      preferred: best && address.toUrl(best),
+    }
   }
 
 /** The stored URL, or its hostname's address at another port or scheme. */
-function follow(stored: string | null | undefined, urls: string[]) {
-  if (!stored || urls.includes(stored)) return stored ?? undefined
+function follow(stored: Stored, urls: string[]) {
+  if (!stored) return undefined
+  if (urls.includes(stored)) return stored
   const was = parse(stored)
   const sameHost = urls.filter(u => parse(u)?.hostname === was?.hostname)
   return sameHost.find(u => parse(u)?.protocol === was?.protocol) ?? sameHost[0]
 }
-
-function fallback(urls: string[]) {
-  return urls.find(u => parse(u)?.hostname.endsWith('.local')) ?? urls[0]
-}
-
-type Stored = string | null | undefined
-
-const resolve = ([stored, urls]: [Stored, string[]]): string | null =>
-  follow(stored, urls) ?? fallback(urls) ?? stored ?? null
 
 export function setupPrimaryUrl<Id extends T.ActionId>(
   packageId: T.PackageId,
@@ -101,28 +122,45 @@ export function setupPrimaryUrl<Id extends T.ActionId>(
     field,
     get,
     set,
+    filter = {},
+    ssl = false,
+    fallback = true,
   }: SetupPrimaryUrlParams<Id>,
 ): PrimaryUrl<Id> {
-  const urls = (effects: T.Effects) =>
-    getOwnHost(effects, hostId, urlsOf(interfaceId))
+  const offered = (effects: T.Effects) =>
+    getOwnHost(effects, hostId, offeredBy(interfaceId, filter, ssl))
+  const sources = (effects: T.Effects) =>
+    [
+      {
+        once: () => get.once(),
+        watch: (abort?: AbortSignal) => get.watch(effects, abort),
+      },
+      offered(effects),
+    ] as const
+  const resolve = ([stored, { urls, preferred }]: [Stored, Offered]) =>
+    fallback
+      ? (follow(stored, urls) ?? preferred ?? (stored || null))
+      : (follow(stored, urls) ?? null)
 
   const action = Action.withInput(
     id,
     metadata,
     InputSpec.of({
       url: Value.dynamicSelect(async ({ effects }) => {
-        const offered = await urls(effects).once()
+        const { urls, preferred } = await offered(effects).once()
         return {
           ...field,
-          values: Object.fromEntries(offered.map(u => [u, u])),
-          default: fallback(offered) ?? null,
+          values: Object.fromEntries(urls.map(u => [u, u])),
+          default: (fallback && preferred) || null,
         }
       }),
     }),
     async ({ effects }) => {
       const stored = await get.once()
       return {
-        url: follow(stored, await urls(effects).once()) ?? stored ?? undefined,
+        url:
+          follow(stored, (await offered(effects).once()).urls) ??
+          (stored || undefined),
       }
     },
     async ({ effects, input }) => {
@@ -133,18 +171,17 @@ export function setupPrimaryUrl<Id extends T.ActionId>(
   return {
     action,
     bestUsable: effects =>
-      Watchable.combine(
-        effects,
-        [
-          { once: () => get.once(), watch: abort => get.watch(effects, abort) },
-          urls(effects),
-        ],
-        resolve,
-      ),
+      Watchable.combine(effects, sources(effects), resolve),
     setupTask: (severity, options) =>
       setupOnInit(async effects => {
-        const offered = await urls(effects).const()
-        if (!offered.length) return
+        const [stored, { urls, preferred }] = await Watchable.combine(
+          effects,
+          sources(effects),
+        ).const()
+        if (follow(stored, urls))
+          return effects.action.clearTasks({
+            only: [options?.replayId || `${packageId}:${id}`],
+          })
         await createTask<ActionInfo<T.ActionId, { url: string }>>({
           effects,
           packageId,
@@ -152,12 +189,10 @@ export function setupPrimaryUrl<Id extends T.ActionId>(
           severity,
           options: {
             ...options,
-            when: { condition: 'input-not-matches', once: false },
-            input: {
-              kind: 'partial',
-              accept: offered.map(url => ({ url })),
-              set: { url: fallback(offered) },
-            },
+            ...(fallback &&
+              preferred && {
+                input: { kind: 'partial', accept: [], set: { url: preferred } },
+              }),
           },
         })
       }),

@@ -47,9 +47,40 @@ jobs:
       - name: Check formatting
         run: npx --yes --package=prettier@$(node -p "require('./package.json').devDependencies.prettier") -- npm run format:check
 
+  changelog:
+    name: Changelog fragments & versions
+    if: github.event.pull_request.draft != true && github.base_ref != 'live-docs'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODEJS_VERSION }}
+      - name: Validate fragments and release severity
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --tags origin
+          if [ -n "$PR_BASE_SHA" ]; then
+            git fetch --no-tags origin "$PR_BASE_SHA"
+            products=$(node scripts/changelog.mjs changed "$PR_BASE_SHA")
+          else
+            products=$(node scripts/changelog.mjs projects)
+          fi
+          for product in $products; do
+            node scripts/changelog.mjs check-version "projects/${product#projects/}"
+          done
+      - name: Check changelog and release tooling
+        run: make release-notes-test
+
   # On pull requests, the expensive jobs below only run when a non-docs file
-  # changed. A docs-only PR is fully covered by the `prettier` job above, so it
-  # skips make test / the rustfmt container / the artifact regen here. Every
+  # changed. Markdown-only PRs run formatting and changelog validation, skipping
+  # make test / the rustfmt container / the artifact regen here. Every
   # live-docs PR is limited to the published books by its separate guard and
   # only needs the prettier gate. On push/dispatch this guard is bypassed and
   # the expensive jobs always run.

@@ -8,4 +8,5 @@ export type GetPackageParams = {
   targetVersion: string | null
   sourceVersion: Version | null
   otherVersions: PackageDetailLevel | null
+  allRevisions: boolean
 }

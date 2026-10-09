@@ -42,6 +42,7 @@ mod v0_3_6_alpha_18;
 mod v0_4_0;
 mod v0_4_0_1;
 mod v0_4_0_2;
+mod v0_4_0_3;
 mod v0_4_0_alpha_0;
 mod v0_4_0_alpha_1;
 mod v0_4_0_alpha_2;
@@ -79,7 +80,7 @@ mod v0_4_0_beta_7;
 mod v0_4_0_beta_8;
 mod v0_4_0_beta_9;
 
-pub type Current = v0_4_0_2::Version; // VERSION_BUMP
+pub type Current = v0_4_0_3::Version; // VERSION_BUMP
 
 impl Current {
     #[instrument(skip(self, db))]
@@ -237,7 +238,8 @@ enum Version {
     V0_4_0_beta_10(Wrapper<v0_4_0_beta_10::Version>),
     V0_4_0(Wrapper<v0_4_0::Version>),
     V0_4_0_1(Wrapper<v0_4_0_1::Version>),
-    V0_4_0_2(Wrapper<v0_4_0_2::Version>), // VERSION_BUMP
+    V0_4_0_2(Wrapper<v0_4_0_2::Version>),
+    V0_4_0_3(Wrapper<v0_4_0_3::Version>), // VERSION_BUMP
     Other(exver::Version),
 }
 
@@ -317,7 +319,8 @@ impl Version {
             Self::V0_4_0_beta_10(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_0(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_0_1(v) => DynVersion(Box::new(v.0)),
-            Self::V0_4_0_2(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP
+            Self::V0_4_0_2(v) => DynVersion(Box::new(v.0)),
+            Self::V0_4_0_3(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP
             Self::Other(v) => {
                 return Err(Error::new(
                     eyre!("unknown version {v}"),
@@ -389,7 +392,8 @@ impl Version {
             Version::V0_4_0_beta_10(Wrapper(x)) => x.semver(),
             Version::V0_4_0(Wrapper(x)) => x.semver(),
             Version::V0_4_0_1(Wrapper(x)) => x.semver(),
-            Version::V0_4_0_2(Wrapper(x)) => x.semver(), // VERSION_BUMP
+            Version::V0_4_0_2(Wrapper(x)) => x.semver(),
+            Version::V0_4_0_3(Wrapper(x)) => x.semver(), // VERSION_BUMP
             Version::Other(x) => x.clone(),
         }
     }
@@ -775,6 +779,37 @@ mod tests {
             Current::default().semver().to_string(),
             crate::bins::startos_version(),
         );
+    }
+
+    #[tokio::test]
+    async fn revision_three_migrates_and_rolls_back_without_changing_service_data() {
+        let previous = v0_4_0_2::Version;
+        let current = Current::default();
+        let registered = Version::from_exver_version(current.semver())
+            .as_version_t()
+            .unwrap();
+        assert_eq!(registered.previous().semver(), previous.semver());
+        let mut db = json!({ "public": { "serverInfo": {
+            "version": "0.4.0.2",
+            "packageVersionCompat": ">=0.3.0 <0.5.0",
+            "postInitMigrationTodos": {},
+        }, "packageData": { "service": { "setting": "preserved" } } } });
+        let packages = db["public"]["packageData"].clone();
+        let pre_ups = PreUps::load(&previous, &registered).await.unwrap();
+        migrate_from_unchecked(&previous, &registered, pre_ups, &mut db).unwrap();
+        assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.0.3"));
+        assert_eq!(
+            db["public"]["serverInfo"]["packageVersionCompat"],
+            to_value(current.compat()).unwrap()
+        );
+        assert_eq!(
+            db["public"]["serverInfo"]["postInitMigrationTodos"]["0.4.0.3"],
+            Value::Null
+        );
+        assert_eq!(db["public"]["packageData"], packages);
+        rollback_to_unchecked(&registered, &previous, &mut db).unwrap();
+        assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.0.2"));
+        assert_eq!(db["public"]["packageData"], packages);
     }
 
     #[test]

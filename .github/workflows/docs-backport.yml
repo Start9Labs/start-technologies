@@ -67,6 +67,10 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.17.0'
+
       - name: Warn about a stray skip marker
         if: ${{ contains(github.event.head_commit.message, '[skip-backport]') }}
         run: |
@@ -123,58 +127,6 @@ jobs:
               exit 0
             fi
 
-            # --no-renames on all three diffs below, and it is load-bearing.
-            # Rename detection is on by default, and a rename is one `R` row
-            # carrying two tab-separated paths: the additions filter would emit
-            # only the new path while the deletions filter emitted nothing, so
-            # the commit would add the moved page and leave the old one behind —
-            # and this awk would read the *old* path out of $2. Turning detection
-            # off renders a rename as a delete plus an add, which the API
-            # expresses exactly and which gives every row a single path.
-            #
-            # createCommitOnBranch can only express regular files: additions
-            # carry base64 content and land as mode 100644. A symlink (every
-            # book's docs/theme is one, mode 120000) would be read through to
-            # its target — and where that target is a directory, base64 fails,
-            # the command substitution swallows it, and the mutation happily
-            # writes contents:"" *over the symlink*. Divert anything that is not
-            # a plain 100644-to-100644 change to the git-based fallback, which
-            # represents modes natively.
-            UNSUPPORTED=$(git diff --cached --raw --no-renames "$BASE" | awk -F'\t' '{
-              split($1, m, " ");
-              old = substr(m[1], 2); new = m[2];
-              if ((old != "100644" && old != "000000") || (new != "100644" && new != "000000")) print $2;
-            }')
-            if [ -n "$UNSUPPORTED" ]; then
-              echo "::warning::Backport touches paths the commit API cannot represent (symlinks or mode changes) — opening a PR instead."
-              printf '  %s\n' $UNSUPPORTED
-              echo "fallback=unsupported-mode" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-
-            # createCommitOnBranch carries the whole content of every changed
-            # file, base64'd, in one mutation — fine for prose, but it would
-            # choke on a large binary asset. Docs fixes don't move those; if one
-            # ever does, this fails loudly and the PR fallback below takes it.
-            #
-            # Both lists go to disk and reach jq through --rawfile/--slurpfile
-            # rather than argv. A single argument is capped at MAX_ARG_STRLEN —
-            # 128 KiB on Linux, independent of the much larger ARG_MAX — and
-            # base64 inflates by a third, so passing the whole additions array
-            # (or one big file's contents) overflows once a change touches
-            # enough prose. jq is then never exec'd, `gh api graphql` reads
-            # empty stdin, and GitHub answers "A query attribute must be
-            # specified", which looks nothing like the actual cause. A nine-page
-            # docs change was 138 KB and hit exactly this.
-            : > /tmp/additions.json
-            git diff --cached --name-only --no-renames --diff-filter=d "$BASE" | while read -r f; do
-              base64 -w0 "$f" > /tmp/contents.b64
-              jq -n --arg path "$f" --rawfile contents /tmp/contents.b64 \
-                '{path: $path, contents: ($contents | rtrimstr("\n"))}' >> /tmp/additions.json
-            done
-            git diff --cached --name-only --no-renames --diff-filter=D "$BASE" \
-              | jq -R '{path: .}' > /tmp/deletions.json
-
             {
               echo "docs: backport live-docs $(git rev-parse --short "$AFTER") to master"
               echo
@@ -183,40 +135,16 @@ jobs:
               git log --reverse --format='- %h %s' "$RANGE"
             } > /tmp/backport-msg
 
-            # expectedHeadOid makes this a compare-and-swap: if master moved
-            # since the reset above, the mutation is rejected and we re-derive
-            # the patch against the new head rather than overwriting it.
-            # Assembled as its own step. A payload that cannot be built will
-            # not build on a retry either, so it takes the PR fallback straight
-            # away instead of spending the remaining attempts to report a cause
-            # it doesn't have.
-            if ! jq -n \
-              --arg repo "$GITHUB_REPOSITORY" \
-              --arg oid "$BASE" \
-              --arg headline "$(head -n1 /tmp/backport-msg)" \
-              --arg body "$(tail -n +3 /tmp/backport-msg)" \
-              --slurpfile additions /tmp/additions.json \
-              --slurpfile deletions /tmp/deletions.json \
-              '{
-                 query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
-                 variables: {
-                   input: {
-                     branch: { repositoryNameWithOwner: $repo, branchName: "master" },
-                     expectedHeadOid: $oid,
-                     message: { headline: $headline, body: $body },
-                     fileChanges: { additions: $additions, deletions: $deletions }
-                   }
-                 }
-               }' > /tmp/payload.json; then
-              echo "fallback=payload" >> "$GITHUB_OUTPUT"
-              echo "::warning::Could not assemble the commit payload — opening a PR instead."
+            if node scripts/commit-staged.mjs /tmp/backport-msg master "$BASE" > /tmp/commit-result; then
+              echo "Committed to master: $(cat /tmp/commit-result)"
               exit 0
-            fi
-
-            if gh api graphql --input /tmp/payload.json > /tmp/commit-result; then
-              echo "Committed to master:"
-              jq -r '.data.createCommitOnBranch.commit | "  \(.oid)\n  \(.url)"' /tmp/commit-result
-              exit 0
+            else
+              status=$?
+              if [ "$status" = 2 ]; then
+                echo "fallback=unsupported-mode" >> "$GITHUB_OUTPUT"
+                echo "::warning::Backport carries a file mode the signed commit API cannot represent — opening a PR instead."
+                exit 0
+              fi
             fi
 
             # Don't name a cause. A lost compare-and-swap is the common one, but
@@ -289,9 +217,6 @@ jobs:
                 ;;
               api-failure)
                 echo "The signed-commit API refused it three times running — usually master moving underneath it, but the run log has the actual response. The branch is a clean cherry-pick either way: **nothing is wrong with the content** — review and merge normally."
-                ;;
-              payload)
-                echo "The commit payload could not be assembled, most likely because the change is too large for a single signed-commit mutation, so it comes as a branch instead. **Nothing is wrong with it** — review and merge normally."
                 ;;
               conflict)
                 echo "It could not be applied to master unattended — **resolve the conflicts before merging**."
