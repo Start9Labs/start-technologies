@@ -102,9 +102,12 @@ describe('makeEffects event ID serialization', () => {
     requests = mockHostTransport(async () => null)
   })
 
-  test.each([null, 'caller-event'])(
+  test.each([
+    [null, 'request-event'],
+    ['caller-event', 'caller-event'],
+  ])(
     'pairs plain action requests while preserving caller event %s',
-    async eventId => {
+    async (eventId, expectedEventId) => {
       const callbacks = new CallbackHolder()
       const constRetry = jest.fn()
       const context = Object.freeze({ eventId, callbacks, constRetry })
@@ -131,12 +134,12 @@ describe('makeEffects event ID serialization', () => {
         {
           id: expect.any(Number),
           method: 'action.get-input',
-          params: { ...getInput, eventId: eventId ?? 'request-event' },
+          params: { ...getInput, eventId: expectedEventId },
         },
         {
           id: expect.any(Number),
           method: 'action.run',
-          params: { ...run, eventId: eventId ?? 'request-event' },
+          params: { ...run, eventId: expectedEventId },
         },
       ])
       expect(getInput.eventId).toBe('request-event')
@@ -149,13 +152,15 @@ describe('makeEffects event ID serialization', () => {
     },
   )
 
-  test('omits absent event IDs for plain action requests', async () => {
+  test('omits absent event IDs for action and non-action requests', async () => {
     const effects = makeEffects({ eventId: null })
     await effects.action.getInput({ actionId: 'attach' })
     await effects.action.run({ actionId: 'attach', input: {} })
+    await effects.getStatus({ packageId: 'target' })
     expect(requests.map(request => request.method)).toEqual([
       'action.get-input',
       'action.run',
+      'get-status',
     ])
     for (const request of requests) {
       expect(request.params).not.toHaveProperty('eventId')
@@ -163,23 +168,38 @@ describe('makeEffects event ID serialization', () => {
     expect(effects.eventId).toBeNull()
   })
 
-  test.each([null, 'caller-event'])(
-    'overwrites an unrelated effect request ID with caller event %s',
-    async eventId => {
+  test.each([
+    [null, 'request-event'],
+    ['caller-event', 'caller-event'],
+  ])(
+    'preserves supplied effect IDs while retaining caller event %s',
+    async (eventId, expectedEventId) => {
       const effects = makeEffects({ eventId })
       const options = Object.freeze({ except: [], eventId: 'request-event' })
+      const statusOptions = Object.freeze({
+        packageId: 'target',
+        eventId: 'request-event',
+      })
       await effects.action.clear(options)
+      await effects.getStatus(statusOptions)
       expect(requests).toEqual([
         {
           id: expect.any(Number),
           method: 'action.clear',
+          params: { ...options, eventId: expectedEventId },
+        },
+        {
+          id: expect.any(Number),
+          method: 'get-status',
           params: {
-            except: [],
-            ...(eventId === null ? {} : { eventId }),
+            ...statusOptions,
+            callback: null,
+            eventId: expectedEventId,
           },
         },
       ])
       expect(options.eventId).toBe('request-event')
+      expect(statusOptions.eventId).toBe('request-event')
       expect(effects.eventId).toBe(eventId)
     },
   )

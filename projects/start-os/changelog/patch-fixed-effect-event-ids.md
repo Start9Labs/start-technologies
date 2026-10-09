@@ -1,0 +1,1 @@
+- Fixed service effects losing supplied event IDs when called from main, including the ID shared by opening and submitting an action input form.
