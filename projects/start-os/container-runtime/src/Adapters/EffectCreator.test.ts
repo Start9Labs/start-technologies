@@ -47,6 +47,30 @@ type Request = {
   }
 }
 
+function mockHostTransport(dispatch: (request: Request) => Promise<unknown>) {
+  const requests: Request[] = []
+  jest.mocked(net.createConnection).mockImplementation((...args: unknown[]) => {
+    const onConnect = args[1] as () => void
+    const socket = Object.assign(new EventEmitter(), {
+      write: jest.fn((data: string) => {
+        expect(data.endsWith('\n')).toBe(true)
+        const request: Request = JSON.parse(data)
+        requests.push(request)
+        void dispatch(request).then(
+          result =>
+            socket.emit('data', Buffer.from(JSON.stringify({ result }) + '\n')),
+          error => socket.emit('error', error),
+        )
+        return true
+      }),
+      end: jest.fn(),
+    })
+    queueMicrotask(onConnect)
+    return socket as unknown as net.Socket
+  })
+  return requests
+}
+
 function attachAction(ran: jest.Mock) {
   return sdk.Action.withInput(
     'attach',
@@ -71,12 +95,101 @@ function attachAction(ran: jest.Mock) {
   )
 }
 
+describe('makeEffects event ID serialization', () => {
+  let requests: Request[]
+
+  beforeEach(() => {
+    requests = mockHostTransport(async () => null)
+  })
+
+  test.each([null, 'caller-event'])(
+    'pairs plain action requests while preserving caller event %s',
+    async eventId => {
+      const callbacks = new CallbackHolder()
+      const constRetry = jest.fn()
+      const context = Object.freeze({ eventId, callbacks, constRetry })
+      const effects = makeEffects(context)
+      const onLeave = jest.fn()
+      effects.onLeaveContext(onLeave)
+      const getInput = Object.freeze({
+        packageId: 'target',
+        actionId: 'attach',
+        eventId: 'request-event',
+        prefill: { hostId: 'peer' },
+      })
+      const run = Object.freeze({
+        packageId: 'target',
+        actionId: 'attach',
+        eventId: 'request-event',
+        input: { hostId: 'peer', address: 'peer-0' },
+      })
+
+      await effects.action.getInput(getInput)
+      await effects.action.run(run)
+
+      expect(requests).toEqual([
+        {
+          id: expect.any(Number),
+          method: 'action.get-input',
+          params: { ...getInput, eventId: eventId ?? 'request-event' },
+        },
+        {
+          id: expect.any(Number),
+          method: 'action.run',
+          params: { ...run, eventId: eventId ?? 'request-event' },
+        },
+      ])
+      expect(getInput.eventId).toBe('request-event')
+      expect(run.eventId).toBe('request-event')
+      expect(context).toEqual({ eventId, callbacks, constRetry })
+      expect(effects.eventId).toBe(eventId)
+      expect(effects.constRetry).toBe(constRetry)
+      expect(effects.isInContext).toBe(true)
+      expect(onLeave).not.toHaveBeenCalled()
+    },
+  )
+
+  test('omits absent event IDs for plain action requests', async () => {
+    const effects = makeEffects({ eventId: null })
+    await effects.action.getInput({ actionId: 'attach' })
+    await effects.action.run({ actionId: 'attach', input: {} })
+    expect(requests.map(request => request.method)).toEqual([
+      'action.get-input',
+      'action.run',
+    ])
+    for (const request of requests) {
+      expect(request.params).not.toHaveProperty('eventId')
+    }
+    expect(effects.eventId).toBeNull()
+  })
+
+  test.each([null, 'caller-event'])(
+    'overwrites an unrelated effect request ID with caller event %s',
+    async eventId => {
+      const effects = makeEffects({ eventId })
+      const options = Object.freeze({ except: [], eventId: 'request-event' })
+      await effects.action.clear(options)
+      expect(requests).toEqual([
+        {
+          id: expect.any(Number),
+          method: 'action.clear',
+          params: {
+            except: [],
+            ...(eventId === null ? {} : { eventId }),
+          },
+        },
+      ])
+      expect(options.eventId).toBe('request-event')
+      expect(effects.eventId).toBe(eventId)
+    },
+  )
+})
+
 describe('sdk.action.run through makeEffects', () => {
   let requests: Request[]
   let ran: jest.Mock
 
   beforeEach(() => {
-    requests = []
     ran = jest.fn()
     const attach = attachAction(ran)
     const reset = sdk.Action.withoutInput('reset', metadata, async () => {
@@ -111,30 +224,7 @@ describe('sdk.action.run through makeEffects', () => {
           throw new Error(`Unexpected RPC ${method}`)
       }
     }
-    jest
-      .mocked(net.createConnection)
-      .mockImplementation((...args: unknown[]) => {
-        const onConnect = args[1] as () => void
-        const socket = Object.assign(new EventEmitter(), {
-          write: jest.fn((data: string) => {
-            expect(data.endsWith('\n')).toBe(true)
-            const request: Request = JSON.parse(data)
-            requests.push(request)
-            void dispatch(request).then(
-              result =>
-                socket.emit(
-                  'data',
-                  Buffer.from(JSON.stringify({ result }) + '\n'),
-                ),
-              error => socket.emit('error', error),
-            )
-            return true
-          }),
-          end: jest.fn(),
-        })
-        queueMicrotask(onConnect)
-        return socket as unknown as net.Socket
-      })
+    requests = mockHostTransport(dispatch)
   })
 
   const run = (effects: ReturnType<typeof makeEffects>, hostId: string) =>

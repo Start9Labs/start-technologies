@@ -1,0 +1,1 @@
+- Fixed service action calls losing the event ID shared by opening and submitting an input form.
