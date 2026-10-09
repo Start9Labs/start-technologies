@@ -150,6 +150,36 @@ describe('LAN address overrides', () => {
     expect(hostnames(h)).toEqual(['relay.onion', 'relay.local'])
   })
 
+  test('plaintext mDNS stays on beside disabled visible IPs and hidden link-local', () => {
+    const linkLocal: HostnameInfo = {
+      ssl: false,
+      public: false,
+      hostname: 'fe80::10',
+      port: 5223,
+      metadata: { kind: 'ipv6', gateway: 'eth0', scopeId: 2 },
+    }
+    const { h, addresses } = lan(eth, gua, linkLocal)
+    addresses.available = addresses.available.map(a => ({ ...a, ssl: false }))
+    addresses.disabled = [[eth.hostname, 5223]]
+    const mdns = addresses.available.find(a => a.metadata.kind === 'mdns')!
+
+    expect(isAddressEnabled(addresses, mdns)).toBe(true)
+    expect(isAddressEnabled(addresses, eth)).toBe(false)
+    expect(isAddressEnabled(addresses, gua)).toBe(false)
+    expect(isAddressEnabled(addresses, linkLocal)).toBe(true)
+    expect(addressOf(h).nonLocal.hostnames.map(a => a.hostname)).toEqual([
+      'relay.onion',
+      'relay.local',
+    ])
+
+    addresses.disabled.push([linkLocal.hostname, 5223])
+    expect(isAddressEnabled(addresses, mdns)).toBe(true)
+    expect(addressOf(h).hostnames.map(a => a.hostname)).toEqual([
+      'relay.onion',
+      'relay.local',
+    ])
+  })
+
   test('a LAN IP without an override follows its mDNS address', () => {
     const { h, addresses } = lan(eth, wifi)
     addresses.disabled = [['relay.local', 5223]]

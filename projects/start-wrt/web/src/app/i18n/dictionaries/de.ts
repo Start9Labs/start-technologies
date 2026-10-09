@@ -535,4 +535,13 @@ export default {
   557: 'Nicht festgelegt',
   558: 'Öffnen Sie router.lan in Ihrem Browser, um die Verbindung zu Ihrem Router abzusichern.',
   559: 'router.lan öffnen',
+  560: 'DNS-Einträge veröffentlichen erlauben',
+  561: 'Erlaubt diesem Gerät, DNS-Namen für sich selbst im Router zu veröffentlichen, sodass jedes Gerät in Ihrem Netzwerk sie auflösen kann (von StartOS-Servern für private Domains genutzt). Standardmäßig aus; veröffentlichte Namen erscheinen unten.',
+  562: 'Veröffentlichen von DNS-Einträgen erlauben?',
+  563: 'Dieses Gerät kann dann DNS-Namen veröffentlichen, die in Ihrem gesamten Netzwerk aufgelöst werden. Gewähren Sie dies nur einem Gerät, dem Sie vertrauen, etwa Ihrem eigenen StartOS-Server.',
+  564: 'Erlauben',
+  565: 'Veröffentlichte DNS-Einträge',
+  566: 'Namen, die dieses Gerät im Router veröffentlicht hat. Sie laufen von selbst ab, wenn das Gerät sie nicht mehr veröffentlicht; wird die Berechtigung deaktiviert, werden sie sofort entfernt.',
+  567: 'Typ',
+  568: 'Verweist auf',
 } satisfies i18n

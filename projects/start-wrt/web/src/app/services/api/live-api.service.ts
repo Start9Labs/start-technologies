@@ -35,6 +35,7 @@ import {
   LogsResponse,
   DeviceFromApi,
   DeviceUpdateReq,
+  InjectedDnsRecordFromApi,
   DeviceDataUsageReq,
   DataUsagePointFromApi,
   LanIpv4Response,
@@ -273,6 +274,17 @@ export class LiveApiService extends ApiService {
     allow: boolean
   }): Promise<null> {
     return this.rpc.request({ method: 'devices.set-auto-forward', params })
+  }
+
+  async devicesSetDnsInjection(params: {
+    mac: string
+    allow: boolean
+  }): Promise<null> {
+    return this.rpc.request({ method: 'devices.set-dns-injection', params })
+  }
+
+  async dnsInjectedList(): Promise<InjectedDnsRecordFromApi[]> {
+    return this.rpc.request({ method: 'dns.injected-list', params: {} })
   }
 
   async devicesForget(params: { mac: string }): Promise<null> {

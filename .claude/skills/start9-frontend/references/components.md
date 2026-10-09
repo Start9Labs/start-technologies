@@ -96,7 +96,10 @@ export class Form {}
 ```
 
 One attribute = Taiga form + card + skeleton-on-loading, input forwarded. Twelve start-wrt
-dialogs attach contextual help the same way: `hostDirectives: [ModalHelp]`.
+dialogs attach contextual help the same way: `hostDirectives: [ModalHelp]`. A side effect that
+runs exactly while one component lives — support-server's paging sounds behind the staff rail —
+is a `@Directive()` in that component's `hostDirectives`, not a root service it injects only to
+start.
 
 ### `host: {}` carries all host concerns
 

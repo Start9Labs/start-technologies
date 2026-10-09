@@ -1814,6 +1814,43 @@ mod tests {
     }
 
     #[test]
+    fn mdns_tls_routes_accept_gateway_lan_ips_without_enabled_bare_ips() {
+        let eth = gw("eth0");
+        let ifaces = OrdMap::from_iter([(
+            eth,
+            NetworkInterfaceInfo {
+                ip_info: Some(Arc::new(IpInfo {
+                    subnets: ["192.0.2.10/24", "192.0.2.11/24"]
+                        .into_iter()
+                        .map(|s| s.parse::<IpNet>().unwrap())
+                        .collect(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        )]);
+        let name = mdns(true, 8443, ["eth0"]);
+        let bridge = lan_ip("10.0.3.1", true, 8443, "lxcbr0");
+        let enabled = BTreeSet::from([&name, &bridge]);
+        let mut vhosts = BTreeMap::new();
+        add_named_vhosts(&mut vhosts, &enabled, 8443, &ifaces, |_, _| {
+            proxy_target(&[])
+        });
+        let target = &vhosts[&(Some(name.hostname.clone()), 8443, false)];
+        assert_eq!(
+            target.private,
+            BTreeSet::from([ip("10.0.3.1"), ip("192.0.2.10"), ip("192.0.2.11")]),
+        );
+        assert!(target.public_v4.is_empty());
+        assert!(target.public_v6.is_empty());
+        assert!(target.public_v6_gateways.is_empty());
+        assert_eq!(
+            ssl_vhost_private_ips(enabled.iter().copied()),
+            BTreeSet::from([ip("10.0.3.1")]),
+        );
+    }
+
+    #[test]
     fn a_forwarded_port_admits_its_enabled_lan_ips_alone() {
         let eth = GatewayId::from(InternedString::intern("eth0"));
         let ifaces: OrdMap<GatewayId, NetworkInterfaceInfo> = [(
@@ -1922,6 +1959,142 @@ mod tests {
         );
     }
 
+    fn gw(name: &str) -> GatewayId {
+        GatewayId::from(InternedString::intern(name))
+    }
+
+    fn lan_ip(ip: &str, ssl: bool, port: u16, gateway: &str) -> HostnameInfo {
+        let metadata = if ip.parse::<IpAddr>().unwrap().is_ipv4() {
+            HostnameMetadata::Ipv4 {
+                gateway: gw(gateway),
+            }
+        } else {
+            HostnameMetadata::Ipv6 {
+                gateway: gw(gateway),
+                scope_id: 0,
+            }
+        };
+        HostnameInfo {
+            ssl,
+            public: false,
+            hostname: InternedString::intern(ip),
+            port: Some(port),
+            metadata,
+        }
+    }
+
+    fn mdns(
+        ssl: bool,
+        port: u16,
+        gateways: impl IntoIterator<Item = &'static str>,
+    ) -> HostnameInfo {
+        HostnameInfo {
+            ssl,
+            public: false,
+            hostname: InternedString::intern("start-9.local"),
+            port: Some(port),
+            metadata: HostnameMetadata::Mdns {
+                gateways: gateways.into_iter().map(gw).collect(),
+            },
+        }
+    }
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn a_name_contributes_no_address_to_the_ssl_vhost() {
+        let addrs = [
+            lan_ip("fe80::1", true, 443, "eth0"),
+            mdns(true, 443, ["eth0"]),
+            lan_ip("10.0.3.1", true, 443, "lxcbr0"),
+        ];
+
+        assert_eq!(
+            ssl_vhost_private_ips(addrs.iter()),
+            BTreeSet::from([ip("fe80::1"), ip("10.0.3.1")]),
+            "only the addresses still enabled are served"
+        );
+    }
+
+    #[test]
+    fn forwarded_lan_ips_match_the_selected_port_and_exclude_public_rows() {
+        let selected = lan_ip("192.168.1.5", false, 5000, "eth0");
+        let other_port = lan_ip("192.168.1.6", false, 5001, "eth0");
+        let ipv6 = lan_ip("fd00::5", false, 5000, "eth0");
+        let public = bare_v4(false, 5000, &gw("eth0"));
+
+        assert_eq!(
+            forwarded_lan_ips(
+                [&selected, &other_port, &ipv6, &public]
+                    .into_iter()
+                    .filter(|a| a.port == Some(5000)),
+                &OrdMap::new(),
+            ),
+            BTreeSet::from([ip("192.168.1.5"), ip("fd00::5")]),
+        );
+    }
+
+    #[test]
+    fn a_bare_ip_serves_itself_and_not_its_gateways_other_addresses() {
+        let addrs = [
+            lan_ip("192.168.1.5", true, 443, "eth0"),
+            lan_ip("10.13.13.5", true, 443, "eth0"),
+        ];
+
+        assert_eq!(
+            ssl_vhost_private_ips(addrs.iter()),
+            BTreeSet::from([ip("192.168.1.5"), ip("10.13.13.5")]),
+            "each enabled address is served"
+        );
+
+        assert_eq!(
+            ssl_vhost_private_ips(addrs[1..].iter()),
+            BTreeSet::from([ip("10.13.13.5")]),
+            "switching one off leaves the other served"
+        );
+    }
+
+    #[test]
+    fn a_plain_port_bare_ip_is_not_served_by_the_ssl_vhost() {
+        let addrs = [lan_ip("192.168.1.5", false, 80, "eth0")];
+
+        assert!(
+            ssl_vhost_private_ips(addrs.iter()).is_empty(),
+            "a plain-port bare IP is not an address the SSL vhost answers on"
+        );
+    }
+
+    #[test]
+    fn a_public_address_is_not_a_private_one() {
+        let addrs = [bare_v4(true, 443, &gw("eth0"))];
+
+        assert!(
+            ssl_vhost_private_ips(addrs.iter()).is_empty(),
+            "the WAN IPv4 belongs to the public set"
+        );
+    }
+
+    #[test]
+    fn the_container_bridges_own_addresses_are_internal() {
+        assert!(lan_ip("10.0.3.1", true, 443, "lxcbr0").is_internal());
+        assert!(lan_ip("fd00:3::1", true, 443, "lxcbr0").is_internal());
+        assert!(lan_ip("127.0.0.1", true, 443, "lo").is_internal());
+        assert!(lan_ip("::1", true, 443, "lo").is_internal());
+
+        assert!(!lan_ip("192.168.1.5", true, 443, "eth0").is_internal());
+        assert!(
+            !lan_ip("fd00:3::5", true, 443, "eth0").is_internal(),
+            "a router handing out the bridge's own prefix does not make its \
+             addresses internal, which would put them beyond the operator's reach"
+        );
+        assert!(
+            !lan_ip("fe80::1", true, 443, "lxcbr0").is_internal(),
+            "a link-local address is the kernel's, not one the bridge is given"
+        );
+    }
+
     fn host_id(s: &str) -> HostId {
         HostId::from(Id::try_from(s.to_owned()).unwrap())
     }
@@ -1932,6 +2105,24 @@ mod tests {
                 .map(|id| (host_id(id), Host::new()))
                 .collect(),
         )
+    }
+
+    fn proxy_target(private: &[&str]) -> ProxyTarget {
+        ProxyTarget {
+            public_v4: BTreeSet::new(),
+            public_v6: BTreeSet::new(),
+            public_v6_gateways: BTreeSet::new(),
+            private: private.iter().map(|ip| ip.parse().unwrap()).collect(),
+            acme: None,
+            addr: "10.0.3.2:80".parse().unwrap(),
+            addr_v6: None,
+            add_x_forwarded_headers: false,
+            auth: None,
+            connect_ssl: None,
+            alpn: Some(AlpnInfo(vec![MaybeUtf8String(b"h2".to_vec())])),
+            passthrough: false,
+            preserve_source_ip: false,
+        }
     }
 
     #[test]

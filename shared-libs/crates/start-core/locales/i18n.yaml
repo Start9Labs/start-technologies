@@ -1304,6 +1304,14 @@ disk.mount.binding:
   fr_FR: "Liaison de %{src} à %{dst}"
   pl_PL: "Wiązanie %{src} do %{dst}"
 
+# install/mod.rs
+install.version-not-found-on-registry:
+  en_US: "No version of %{id} that satisfies %{version} is available from %{registry}"
+  de_DE: "Keine Version von %{id}, die %{version} erfüllt, ist bei %{registry} verfügbar"
+  es_ES: "Ninguna versión de %{id} que satisfaga %{version} está disponible en %{registry}"
+  fr_FR: "Aucune version de %{id} satisfaisant %{version} n'est disponible sur %{registry}"
+  pl_PL: "Żadna wersja %{id} spełniająca %{version} nie jest dostępna w %{registry}"
+
 # os_install/mod.rs
 os-install.invalid-partuuid:
   en_US: "Unable to resolve a valid partition UUID for %{partition}"
@@ -2206,6 +2214,13 @@ net.dns.server-thread-exited:
   es_ES: "El hilo del servidor DNS ha terminado"
   fr_FR: "Le thread du serveur DNS s'est terminé"
   pl_PL: "Wątek serwera DNS zakończył się"
+
+net.dns.static-server-is-self:
+  en_US: "%{server} points back at this server and cannot be used as an upstream DNS server"
+  de_DE: "%{server} verweist auf diesen Server selbst und kann nicht als Upstream-DNS-Server verwendet werden"
+  es_ES: "%{server} apunta a este mismo servidor y no puede usarse como servidor DNS de origen"
+  fr_FR: "%{server} renvoie vers ce serveur lui-même et ne peut pas être utilisé comme serveur DNS amont"
+  pl_PL: "%{server} wskazuje na ten serwer i nie może być użyty jako nadrzędny serwer DNS"
 
 # lxc/mod.rs
 lxc.mod.rootfs-not-empty:
@@ -3490,6 +3505,13 @@ help.arg.gua-wan:
   fr_FR: "Exposer la GUA IPv6 au WAN (false = LAN uniquement)"
   pl_PL: "Udostępnij GUA IPv6 w sieci WAN (false = tylko LAN)"
 
+help.arg.all-revisions:
+  en_US: "Include superseded revisions of each upstream version"
+  de_DE: "Überholte Revisionen jeder Upstream-Version einschließen"
+  es_ES: "Incluir revisiones reemplazadas de cada versión upstream"
+  fr_FR: "Inclure les révisions remplacées de chaque version amont"
+  pl_PL: "Uwzględnij zastąpione rewizje każdej wersji upstream"
+
 help.arg.allow-model-mismatch:
   en_US: "Allow database model mismatch"
   de_DE: "Datenbankmodell-Abweichung erlauben"
@@ -4456,6 +4478,20 @@ help.arg.cifs-username:
   es_ES: "Nombre de usuario de autenticación CIFS"
   fr_FR: "Nom d'utilisateur d'authentification CIFS"
   pl_PL: "Nazwa użytkownika uwierzytelniania CIFS"
+
+help.arg.clear-registry-description:
+  en_US: "Remove the registry description"
+  de_DE: "Die Registry-Beschreibung entfernen"
+  es_ES: "Eliminar la descripción del registro"
+  fr_FR: "Supprimer la description du registre"
+  pl_PL: "Usuń opis rejestru"
+
+help.arg.clear-registry-icon:
+  en_US: "Remove the registry icon"
+  de_DE: "Das Registry-Symbol entfernen"
+  es_ES: "Eliminar el icono del registro"
+  fr_FR: "Supprimer l'icône du registre"
+  pl_PL: "Usuń ikonę rejestru"
 
 help.arg.database-path:
   en_US: "Path to the database file"

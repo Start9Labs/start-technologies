@@ -540,4 +540,13 @@ export const ENGLISH: Record<string, number> = {
   'Not set': 557,
   'Open router.lan in your browser to secure your connection to your router.': 558,
   'Open router.lan': 559,
+  'Allow DNS record publishing': 560,
+  'Lets this device publish DNS names for itself into the router, so every device on your network can resolve them (used by StartOS servers for private domains). Off by default; published names appear below.': 561,
+  'Allow DNS Record Publishing?': 562,
+  'This device will be able to publish DNS names that resolve on your whole network. Grant this only to a device you trust, such as your own StartOS server.': 563,
+  'Allow': 564,
+  'Published DNS records': 565,
+  'Names this device has published into the router. They expire on their own when the device stops publishing them; turning the permission off removes them immediately.': 566,
+  'Type': 567,
+  'Resolves to': 568,
 }
