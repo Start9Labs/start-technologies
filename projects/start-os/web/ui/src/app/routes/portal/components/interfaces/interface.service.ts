@@ -387,7 +387,6 @@ export class InterfaceService {
         pluginPkgInfo = {
           id: manifest.id,
           title: manifest.title,
-          icon: pluginPkg.icon,
           status: renderPkgStatus(pluginPkg).primary,
         }
       }
@@ -452,7 +451,6 @@ export type PluginAddress = {
 export type PluginPkgInfo = {
   id: string
   title: string
-  icon: string
   status: PrimaryStatus
 }
 

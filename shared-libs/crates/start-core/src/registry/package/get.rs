@@ -877,7 +877,7 @@ fn check_matching_info_short() {
             plugins: BTreeSet::new(),
             satisfies: BTreeSet::new(),
         },
-        icon: DataUrl::from_vec("image/png", vec![]),
+        icon: Some(DataUrl::from_vec("image/png", vec![])),
         dependency_metadata: BTreeMap::new(),
         source_version: None,
         s9pks: Vec::new(),

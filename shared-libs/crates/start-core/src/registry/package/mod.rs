@@ -7,6 +7,7 @@ use crate::util::serde::HandlerExtSerde;
 pub mod add;
 pub mod category;
 pub mod get;
+pub mod icon;
 pub mod index;
 pub mod promote;
 pub mod signer;

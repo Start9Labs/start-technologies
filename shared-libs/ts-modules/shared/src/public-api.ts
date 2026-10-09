@@ -22,7 +22,6 @@ export * from './i18n/localize.pipe'
 
 export * from './pipes/exver-compares.pipe'
 export * from './pipes/empty.pipe'
-export * from './pipes/trust.pipe'
 export * from './pipes/convert-bytes.pipe'
 export * from './pipes/markdown.pipe'
 export * from './pipes/leaf-progress.pipe'

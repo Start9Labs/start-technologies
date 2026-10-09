@@ -80,7 +80,7 @@ impl TS for DependencyMetadata {
         "DependencyMetadata".into()
     }
     fn inline() -> String {
-        "{ title: LocaleString | null, icon: DataUrl | null, description: LocaleString | null, optional: boolean, versionRange?: string | null, kind?: 'exists' | 'running' | null, healthChecks?: string[] }".into()
+        "{ title: LocaleString | null, icon?: DataUrl | null, description: LocaleString | null, optional: boolean, versionRange?: string | null, kind?: 'exists' | 'running' | null, healthChecks?: string[] }".into()
     }
     fn inline_flattened() -> String {
         Self::inline()
@@ -175,7 +175,10 @@ pub struct PackageMetadata {
 pub struct PackageVersionInfo {
     #[serde(flatten)]
     pub metadata: PackageMetadata,
-    pub icon: DataUrl<'static>,
+    /// Absent for clients that load icons from the registry's `/icons/` route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub icon: Option<DataUrl<'static>>,
     pub dependency_metadata: BTreeMap<PackageId, DependencyMetadata>,
     #[ts(type = "string | null")]
     pub source_version: Option<VersionRange>,
@@ -187,7 +190,7 @@ impl PackageVersionInfo {
         urls: Vec<Url>,
     ) -> Result<Self, Error> {
         let manifest = s9pk.as_manifest();
-        let icon = s9pk.icon_data_url().await?;
+        let icon = Some(s9pk.icon_data_url().await?);
         let mut dependency_metadata = BTreeMap::new();
         for (id, info) in &manifest.dependencies.0 {
             let dep_meta = s9pk.dependency_metadata(id).await?;

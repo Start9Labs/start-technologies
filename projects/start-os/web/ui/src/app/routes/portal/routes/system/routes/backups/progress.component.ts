@@ -1,3 +1,4 @@
+import { AsyncPipe } from '@angular/common'
 import { Component, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { i18nPipe, LeafProgressPipe } from '@start9labs/shared'
@@ -5,6 +6,7 @@ import { TuiIcon, TuiLoader, TuiTitle, TuiCell } from '@taiga-ui/core'
 import { TuiAvatar, TuiFade } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
 import { take } from 'rxjs'
+import { PkgIconPipe } from 'src/app/routes/portal/pipes/pkg-icon'
 import { ToManifestPipe } from 'src/app/routes/portal/pipes/to-manifest'
 import { InstallingProgressPipe } from 'src/app/routes/portal/routes/services/pipes/install-progress.pipe'
 import { DataModel } from 'src/app/services/patch-db/data-model'
@@ -29,7 +31,7 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
       <div tuiCell>
         <span tuiAvatar appearance="action-grayscale" [round]="false">
           @if (pkg) {
-            <img alt="" [src]="pkg.icon" />
+            <img alt="" [src]="pkg | pkgIcon | async" />
           } @else {
             <img alt="StartOS" src="assets/img/icon.png" />
           }
@@ -98,6 +100,8 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
     LeafProgressPipe,
     InstallingProgressPipe,
     i18nPipe,
+    AsyncPipe,
+    PkgIconPipe,
   ],
 })
 export class BackupProgressComponent {

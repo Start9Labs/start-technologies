@@ -15,6 +15,7 @@ import { TuiCardLarge, tuiCardOptionsProvider } from '@taiga-ui/layout'
 import { debounceTime } from 'rxjs'
 
 import { MarketplacePkg } from '../types'
+import { MarketplaceIconDirective } from './icon.directive'
 import { MarketplacePreviewComponent } from './preview.component'
 
 @Component({
@@ -22,10 +23,7 @@ import { MarketplacePreviewComponent } from './preview.component'
   template: `
     <span tuiCell>
       <span tuiAvatar [round]="false">
-        <img
-          alt=""
-          [src]="pkg().icon || 'assets/img/service-icons/fallback.png'"
-        />
+        <img [marketplaceIcon]="pkg()" />
       </span>
       <span tuiTitle>
         <b>{{ pkg().title }}</b>
@@ -84,6 +82,7 @@ import { MarketplacePreviewComponent } from './preview.component'
     TuiCell,
     TuiButtonX,
     i18nPipe,
+    MarketplaceIconDirective,
   ],
 })
 export class MarketplaceTileComponent {

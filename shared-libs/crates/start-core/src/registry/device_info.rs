@@ -127,6 +127,47 @@ impl DeviceInfo {
         }
     }
 
+    /// Strips package icons from a `package.get` response for clients that load them from `/icons/`.
+    pub fn omit_icons(&self, method: &str, params: &Value, res: &mut Value) -> Result<(), Error> {
+        if method != "package.get" || self.os.version < "0.4.0.3".parse::<Version>()? {
+            return Ok(());
+        }
+        let responses: Vec<&mut Value> = if params["id"].is_null() {
+            res.as_object_mut()
+                .into_iter()
+                .flat_map(|o| o.iter_mut().map(|(_, v)| v))
+                .collect()
+        } else {
+            vec![res]
+        };
+        for response in responses {
+            for key in ["best", "otherVersions"] {
+                for (_, info) in response
+                    .get_mut(key)
+                    .and_then(|v| v.as_object_mut())
+                    .into_iter()
+                    .flat_map(|o| o.iter_mut())
+                {
+                    let Some(info) = info.as_object_mut() else {
+                        continue;
+                    };
+                    info.remove("icon");
+                    for (_, dep) in info
+                        .get_mut("dependencyMetadata")
+                        .and_then(|d| d.as_object_mut())
+                        .into_iter()
+                        .flat_map(|d| d.iter_mut())
+                    {
+                        if let Some(dep) = dep.as_object_mut() {
+                            dep.remove("icon");
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn filter_package_versions(
         &self,
         versions: &mut Model<BTreeMap<VersionString, PackageVersionInfo>>,
@@ -267,11 +308,68 @@ impl Middleware<RegistryContext> for DeviceInfoMiddleware {
         if let (Some(req), Some(device_info), Ok(res)) =
             (&self.req, &self.device_info, &mut response.result)
         {
-            if let Err(e) =
-                device_info.filter_for_hardware(req.method.as_str(), req.params.clone(), res)
+            if let Err(e) = device_info
+                .filter_for_hardware(req.method.as_str(), req.params.clone(), res)
+                .and_then(|_| device_info.omit_icons(req.method.as_str(), &req.params, res))
             {
                 response.result = Err(e).map_err(From::from);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use imbl_value::json;
+
+    use super::*;
+
+    fn omitted_for(os_version: &str, params: Value, mut res: Value) -> Value {
+        DeviceInfo {
+            os: OsInfo {
+                version: os_version.parse().unwrap(),
+                compat: VersionRange::Any,
+                platform: "x86_64".into(),
+                language: None,
+            },
+            hardware: None,
+        }
+        .omit_icons("package.get", &params, &mut res)
+        .unwrap();
+        res
+    }
+
+    fn package() -> Value {
+        json!({
+            "best": { "1.0.0:0": {
+                "icon": "data:image/png;base64,aWNvbg==",
+                "dependencyMetadata": { "dep": { "icon": "data:image/png;base64,aWNvbg==" } },
+            } },
+            "otherVersions": { "0.9.0:0": { "icon": "data:image/png;base64,aWNvbg==" } },
+        })
+    }
+
+    #[test]
+    fn icons_are_omitted_from_0_4_0_3() {
+        let res = omitted_for("0.4.0.3", json!({ "id": "pkg" }), package());
+        let best = &res["best"]["1.0.0:0"];
+        assert!(best.get("icon").is_none());
+        assert!(best["dependencyMetadata"]["dep"].get("icon").is_none());
+        assert!(res["otherVersions"]["0.9.0:0"].get("icon").is_none());
+
+        let all = omitted_for(
+            "0.4.0.3",
+            json!({ "id": null }),
+            json!({ "pkg": package() }),
+        );
+        assert!(all["pkg"]["best"]["1.0.0:0"].get("icon").is_none());
+    }
+
+    #[test]
+    fn icons_are_kept_before_0_4_0_3() {
+        assert_eq!(
+            omitted_for("0.4.0.2", json!({ "id": "pkg" }), package()),
+            package()
+        );
     }
 }

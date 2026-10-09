@@ -39,6 +39,8 @@ export abstract class ApiService {
     params: Record<string, string | number>,
   ): Promise<string>
 
+  abstract getStaticObjectUrl(url: string): Promise<string>
+
   // websocket
 
   abstract openWebsocket$<T>(
