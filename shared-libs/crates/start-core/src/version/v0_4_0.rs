@@ -1,7 +1,7 @@
 use exver::VersionRange;
 
 use super::v0_3_5::V0_3_0_COMPAT;
-use super::{Current, VersionT, v0_4_0_alpha_0, v0_4_0_beta_10};
+use super::{VersionT, v0_4_0_alpha_0, v0_4_0_beta_10};
 use crate::context::RpcContext;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
@@ -26,6 +26,7 @@ impl VersionT for Version {
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
     }
+    /// Whether this run arrived from a 0.4.0 pre-release below beta.10.
     #[instrument(skip_all)]
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
         Ok(Value::Bool(
@@ -33,7 +34,7 @@ impl VersionT for Version {
         ))
     }
     async fn post_up(self, ctx: &RpcContext, input: Value) -> Result<(), Error> {
-        if should_welcome_to_release(self, Current::default(), input.as_bool().unwrap_or(false)) {
+        if input.as_bool().unwrap_or(false) {
             let highlights = include_str!("update_details/v0_4_0_highlights.md").to_string();
             ctx.db
                 .mutate(|db| {
@@ -79,18 +80,6 @@ fn migrated_through_beta_10(db: &Value) -> bool {
         .any(|v| v == beta_10)
 }
 
-fn should_welcome_to_release(
-    version: impl VersionT,
-    landing: impl VersionT,
-    from_0_4_0_beta: bool,
-) -> bool {
-    let landing = landing.semver();
-    let version = version.semver();
-    version.prerelease().is_empty()
-        && landing.number().starts_with(version.number())
-        && from_0_4_0_beta
-}
-
 #[cfg(test)]
 mod test {
     use imbl_value::json;
@@ -129,23 +118,5 @@ mod test {
             json!({ "0.3.5.2": null, "0.4.0-alpha.0": null, "0.4.0-beta.9": null, "0.4.0-beta.10": null }),
         );
         assert!(migrated_from_pre_0_4_0(&from_0_3_x));
-
-        assert!(should_welcome_to_release(Version, Version, true));
-        assert!(!should_welcome_to_release(Version, Version, false));
-        assert!(should_welcome_to_release(
-            Version,
-            super::super::v0_4_0_3::Version,
-            true,
-        ));
-        assert!(!should_welcome_to_release(
-            Version,
-            super::super::v0_4_1::Version,
-            true,
-        ));
-        assert!(!should_welcome_to_release(
-            v0_4_0_beta_10::Version,
-            Version,
-            true,
-        ));
     }
 }
