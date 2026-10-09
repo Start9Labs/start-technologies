@@ -7,7 +7,7 @@ use crate::rpc_continuations::Guid;
 pub(super) use crate::service::effects::context::EffectContext;
 
 // Identifies the procedure an effect call belongs to. The container runtime
-// sets it to the calling procedure's id; `action run --event-id` sets it to
+// defaults it to the calling procedure's id; `action run --event-id` sets it to
 // the id `get-input` returned.
 // A service treats a call carrying the id of a procedure it is running as part
 // of that procedure, exempt from its conflicts.

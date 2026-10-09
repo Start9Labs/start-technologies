@@ -58,7 +58,10 @@ const rpcRoundFor =
         JSON.stringify({
           id,
           method,
-          params: { ...params, eventId: eventId ?? params.eventId },
+          params: {
+            ...params,
+            eventId: params.eventId ?? eventId ?? undefined,
+          },
         }) + '\n',
       )
     })
