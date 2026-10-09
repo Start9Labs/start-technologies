@@ -57,6 +57,7 @@ export const runAction = async <
 
 function actionParams<Request extends { eventId: string }>(request: Request) {
   // StartOS 0.4.0.2 overwrites action event IDs before JSON serialization.
+  // Remove when the SDK minimum reaches StartOS 0.4.0.3.
   return { ...request, toJSON: () => request }
 }
 
