@@ -93,11 +93,11 @@ export type Effects = {
   mount(options: MountParams): Promise<string>
   /** Returns a list of the ids of all installed packages */
   getInstalledPackages(): Promise<string[]>
-  /** Returns the manifest of a service */
+  /** Returns the manifest of a service, or null if it is not installed */
   getServiceManifest(options: {
     packageId: PackageId
     callback?: () => void
-  }): Promise<Manifest>
+  }): Promise<Manifest | null>
 
   // backup
   /**

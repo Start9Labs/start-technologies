@@ -1,0 +1,1 @@
+- **`sdk.getServiceManifest` reads `null` for a package that is not installed**, instead of failing, and a `.const()` read re-runs once it is installed.
