@@ -19,8 +19,14 @@ export class GetServiceManifest<
     super(effects, options)
   }
 
-  protected fetchRaw(callback?: () => void) {
-    return this.effects.getServiceManifest({ ...this.opts, callback })
+  protected async fetchRaw(callback?: () => void) {
+    try {
+      return await this.effects.getServiceManifest({ ...this.opts, callback })
+    } catch (e) {
+      // StartOS 0.4.0.2 rejects for a package that is not installed, and subscribes nothing.
+      if (await this.effects.getStatus({ ...this.opts, callback })) throw e
+      return null
+    }
   }
 }
 
