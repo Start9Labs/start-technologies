@@ -12,8 +12,9 @@ export type RunActionInput<Input> = (form: {
 /**
  * Runs an action of this service, or of another one whose `access` admits it.
  * An action with input opens its form first, so the input is checked against
- * the form it answers. The target keys that form by the calling procedure's
- * event id, so one procedure runs one such action at a time.
+ * the form it answers. Calls reuse the caller's event ID when present and
+ * must run one input action at a time under that ID. Without a caller event
+ * ID, each call uses a fresh ID shared by opening and submitting its form.
  */
 export const runAction = async <
   Input extends Record<string, unknown>,
@@ -27,25 +28,39 @@ export const runAction = async <
 }) => {
   const { effects, packageId, actionId } = options
   if (!options.input) return effects.action.run({ packageId, actionId })
-  const form = await effects.action.getInput({
-    packageId,
-    actionId,
-    prefill: (options.prefill ?? null) as Record<string, unknown> | null,
-  })
+  const eventId = effects.eventId ?? crypto.randomUUID()
+  const form = await effects.action.getInput(
+    actionParams({
+      packageId,
+      actionId,
+      eventId,
+      prefill: (options.prefill ?? null) as Record<string, unknown> | null,
+    }),
+  )
   if (!form) {
     throw new Error(
       `Action ${actionId} of ${packageId ?? 'this service'} has no input form`,
     )
   }
-  return effects.action.run({
-    packageId,
-    actionId,
-    input: options.input({
-      spec: form.spec as IST.InputSpec,
-      value: form.value as T.DeepPartial<Input> | null,
+  return effects.action.run(
+    actionParams({
+      packageId,
+      actionId,
+      eventId,
+      input: options.input({
+        spec: form.spec as IST.InputSpec,
+        value: form.value as T.DeepPartial<Input> | null,
+      }),
     }),
-  })
+  )
 }
+
+function actionParams<Request extends { eventId: string }>(request: Request) {
+  // StartOS 0.4.0.2 overwrites action event IDs before JSON serialization.
+  // Remove when the SDK minimum reaches StartOS 0.4.0.3.
+  return { ...request, toJSON: () => request }
+}
+
 type GetActionInputType<A extends ActionInfo<T.ActionId, any>> =
   A extends ActionInfo<T.ActionId, infer I> ? I : never
 

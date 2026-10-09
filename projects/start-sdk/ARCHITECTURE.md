@@ -24,7 +24,7 @@ The Start SDK builds on a shared core library to form a layered architecture: **
 └─────────────────────────────────────────────────────────────┘
 ```
 
-The SDK follows [Semantic Versioning](https://semver.org/) and is versioned independently of StartOS. Each `CHANGELOG.md` heading records the SDK version and the StartOS release it targets.
+The SDK follows [Semantic Versioning](https://semver.org/) and is versioned independently of StartOS. `package.json` owns its version; `changelog/` holds pending fragments and `CHANGELOG.md` records generated release history.
 
 ## Place in the monorepo
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.0.4]
+
+### Fixed
+
+- **`sdk.action.run` can run actions with input from init, dependency init handlers, and main**, as well as action handlers.
+
+- **`sdk.getServiceManifest` reads `null` for a package that is not installed**, instead of failing, and a `.const()` read re-runs once it is installed.
+
 ## 3.0.3 — StartOS 0.4.0.2
 
 ### Added

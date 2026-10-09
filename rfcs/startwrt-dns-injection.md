@@ -952,10 +952,9 @@ Still open:
 Per the root `AGENTS.md`: user-visible behavior means
 `projects/start-wrt/docs/src/` (a section under `devices.md` or
 `security-profiles.md`, plus an `faq.md` entry for `.local` over inbound VPN)
-and a `projects/start-wrt/CHANGELOG.md` entry — in the same change, not a
-follow-up. That entry goes under the existing **unreleased `## [1.1.0]`** block
-(origin tags stop at `start-wrt/v1.0.1`), which already carries Phase 1's and the
-SNI dataplane's entries; do not cut a new heading. `API_CONTRACT.md` and both API
+and a fragment in `projects/start-wrt/changelog/` — in the same change, not a
+follow-up. Follow the root fragment rules and check live origin tags before
+choosing the prospective manifest version. `API_CONTRACT.md` and both API
 service implementations move with the handler.
 
 The workflow-`paths:` obligation is moot for this change:

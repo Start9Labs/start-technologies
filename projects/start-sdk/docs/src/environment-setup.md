@@ -13,7 +13,7 @@ You must have a computer running StartOS to test your packages. Follow the [inst
 
 [Docker](https://docs.docker.com/get-docker/) is essential for building and managing container images that will be used for the final `.s9pk` build. It handles pulling base images and building custom container images from Dockerfiles.
 
-Follow the [official Docker installation guide](https://docs.docker.com/engine/install/) for your platform.
+Install Docker 28.1 or newer with Engine API 1.49 or newer; packaging uses platform-specific image inspection. Follow the [official Docker installation guide](https://docs.docker.com/engine/install/) for your platform.
 
 Docker must be **running** when you build a package, and your user must be able to use it:
 

@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use clap::builder::ValueParserFactory;
 use exver::VersionRange;
+use patch_db::ModelExt;
 use rust_i18n::t;
 
 use crate::db::model::package::{
@@ -594,7 +595,7 @@ pub async fn get_service_manifest(
         package_id,
         callback,
     }: GetServiceManifestParams,
-) -> Result<Manifest, Error> {
+) -> Result<Option<Manifest>, Error> {
     use crate::db::model::package::PackageState;
 
     let context = context.deref()?;
@@ -604,10 +605,12 @@ pub async fn get_service_manifest(
         .expect("valid json pointer");
     let mut watch = context.seed.ctx.db.watch(ptr).await.typed::<PackageState>();
 
-    let manifest = watch
-        .peek_and_mark_seen()?
-        .as_manifest(ManifestPreference::Old)
-        .de()?;
+    let state = watch.peek_and_mark_seen()?;
+    let manifest = if state.as_value().is_null() {
+        None
+    } else {
+        Some(state.as_manifest(ManifestPreference::Old).de()?)
+    };
 
     if let Some(callback) = callback {
         let callback = callback.register(&context.seed.persistent_container);
