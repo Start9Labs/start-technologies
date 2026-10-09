@@ -89,6 +89,16 @@ impl UiContext for RpcContext {
     fn extend_router(self, router: Router) -> Router {
         router
             .nest("/s9pk", s9pk_router(self.clone()))
+            .route("/registry/icons/{url}", {
+                let ctx = self.clone();
+                get(|x::Path(url): x::Path<Url>, request: Request| async move {
+                    if_authorized(&ctx, request, |_| async {
+                        registry_icon_response(ctx.client.get(), url).await
+                    })
+                    .await
+                    .unwrap_or_else(server_error)
+                })
+            })
             .route("/static/local-root-ca.crt", {
                 let ctx = self.clone();
                 get(move || {
@@ -408,6 +418,17 @@ fn s9pk_router(ctx: RpcContext) -> Router {
                 },
             ),
         )
+}
+
+async fn registry_icon_response(client: reqwest::Client, url: Url) -> Result<Response, Error> {
+    let upstream = client.get(url).send().await.with_kind(ErrorKind::Network)?;
+    let mut response = Response::builder().status(upstream.status());
+    if let Some(content_type) = upstream.headers().get(CONTENT_TYPE) {
+        response = response.header(CONTENT_TYPE, content_type);
+    }
+    response
+        .body(Body::from_stream(upstream.bytes_stream()))
+        .with_kind(ErrorKind::Network)
 }
 
 async fn if_authorized<
@@ -1000,6 +1021,60 @@ mod tests {
 
     async fn body(response: Response) -> Bytes {
         to_bytes(response.into_body(), usize::MAX).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn registry_icon_proxy_preserves_status_type_and_bytes_without_upstream_headers() {
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpListener;
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        for (status, content_type, contents) in [
+            ("200 OK", "image/svg+xml", "<svg/>"),
+            ("404 Not Found", "text/plain", "missing icon"),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = Url::parse(&format!(
+                "http://{}/icons/test/1.0.0:0",
+                listener.local_addr().unwrap()
+            ))
+            .unwrap();
+            let upstream = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0; 1024];
+                while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                    let len = socket.read(&mut buffer).await.unwrap();
+                    assert_ne!(len, 0);
+                    request.extend_from_slice(&buffer[..len]);
+                }
+                assert!(request.starts_with(b"GET /icons/test/1.0.0:0 HTTP/1.1\r\n"));
+                socket
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\n\
+                             Content-Length: {}\r\nSet-Cookie: session=upstream\r\n\
+                             Location: https://example.com/\r\n\
+                             Content-Security-Policy: default-src *\r\n\
+                             Connection: close\r\n\r\n{contents}",
+                            contents.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            });
+            let response = registry_icon_response(client.clone(), url).await.unwrap();
+            assert_eq!(response.status().as_u16().to_string(), &status[..3]);
+            assert_eq!(header(&response, CONTENT_TYPE), content_type);
+            assert_eq!(response.headers().len(), 1);
+            assert_eq!(body(response).await, contents);
+            upstream.await.unwrap();
+        }
     }
 
     #[test]

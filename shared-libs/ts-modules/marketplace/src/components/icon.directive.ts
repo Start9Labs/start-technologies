@@ -1,30 +1,11 @@
 import { computed, Directive, inject, input, signal } from '@angular/core'
-import { toSignal } from '@angular/core/rxjs-interop'
-import { of } from 'rxjs'
+import { toObservable, toSignal } from '@angular/core/rxjs-interop'
+import { catchError, defer, of, startWith, switchMap } from 'rxjs'
 
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { MarketplacePkgBase } from '../types'
+import { FALLBACK_ICON, registryIconUrl } from '../util/icon'
 
-export const FALLBACK_ICON = 'assets/img/service-icons/fallback.png'
-
-export function registryIconUrl(
-  registry: string,
-  id: string,
-  version: string,
-  dependency?: string,
-): string {
-  const path = [
-    id,
-    version,
-    ...(dependency ? ['dependencies', dependency] : []),
-  ]
-    .map(encodeURIComponent)
-    .join('/')
-
-  return new URL(`icons/${path}`, registry).href
-}
-
-/** Registries omit inline icons only for StartOS 0.4.0.3 and later. */
 @Directive({
   selector: 'img[marketplaceIcon]',
   host: {
@@ -34,9 +15,11 @@ export function registryIconUrl(
   },
 })
 export class MarketplaceIconDirective {
+  private readonly marketplace = inject(AbstractMarketplaceService, {
+    optional: true,
+  })
   private readonly current = toSignal(
-    inject(AbstractMarketplaceService, { optional: true })
-      ?.currentRegistryUrl$ || of(null),
+    this.marketplace?.currentRegistryUrl$ || of(null),
   )
 
   readonly marketplaceIcon = input.required<MarketplacePkgBase>()
@@ -46,19 +29,36 @@ export class MarketplaceIconDirective {
   protected readonly fallback = FALLBACK_ICON
   protected readonly failed = signal<string | null>(null)
 
-  protected readonly src = computed(() => {
-    const pkg = this.marketplaceIcon()
-    const dependency = this.dependency()
-    const registry = this.registry() || this.current()
-    const inline = dependency
-      ? pkg.dependencyMetadata[dependency]?.icon
-      : pkg.icon
+  protected readonly src = toSignal(
+    toObservable(
+      computed(() => ({
+        pkg: this.marketplaceIcon(),
+        dependency: this.dependency(),
+        registry: this.registry() || this.current(),
+      })),
+    ).pipe(
+      switchMap(({ pkg, dependency, registry }) =>
+        defer(() => {
+          const inline = dependency
+            ? pkg.dependencyMetadata[dependency]?.icon
+            : pkg.icon
 
-    return (
-      inline ||
-      (registry
-        ? registryIconUrl(registry, pkg.id, pkg.version, dependency)
-        : FALLBACK_ICON)
-    )
-  })
+          if (inline || !registry) return of(inline || FALLBACK_ICON)
+
+          return this.marketplace
+            ? this.marketplace.fetchIcon$(
+                registry,
+                pkg.id,
+                pkg.version,
+                dependency,
+              )
+            : of(registryIconUrl(registry, pkg.id, pkg.version, dependency))
+        }).pipe(
+          catchError(() => of(FALLBACK_ICON)),
+          startWith(FALLBACK_ICON),
+        ),
+      ),
+    ),
+    { initialValue: FALLBACK_ICON },
+  )
 }

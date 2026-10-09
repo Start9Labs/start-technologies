@@ -9,7 +9,7 @@
 `InitializingComponent`/`LogsWindowComponent`, `CaWizard` (+`CA_TRUST_CHECK`),
 `DocsLinkDirective` (+`VERSION`, optional),
 `SafeLinksDirective`, pipes (`convertBytes`, `empty`, `compareExver`, `leafProgress`,
-`markdown`, `trustUrl`), `RELATIVE_URL` token, `HttpError`/`RpcError`, disk/RPC/http types,
+`markdown`), `RELATIVE_URL` token, `HttpError`/`RpcError`, disk/RPC/http types,
 utils (`convertAnsi`, `formatProgress`, `getPkgId`, `pauseFor`, `@debounce`, `sameUrl`,
 `isValidHttpUrl`, `registryUrl`, `hostnameValidator`, `hostnameValidationErrors`,
 `randomHostname`, keyboards/languages data,

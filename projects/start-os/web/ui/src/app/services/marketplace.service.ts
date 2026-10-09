@@ -37,6 +37,7 @@ import {
   tap,
 } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
+import { PackageIconService } from 'src/app/services/package-icon.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { StorageService } from 'src/app/services/storage.service'
 
@@ -47,6 +48,7 @@ const { start9, community } = defaultRegistries
 })
 export class MarketplaceService extends AbstractMarketplaceService {
   private readonly api = inject(ApiService)
+  private readonly icons = inject(PackageIconService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly exver = inject(Exver)
   private readonly storage = inject(StorageService)
@@ -154,6 +156,15 @@ export class MarketplaceService extends AbstractMarketplaceService {
         return pkg ? of(pkg) : this.fetchPackage$(url, id, version, flavor)
       }),
     )
+  }
+
+  override fetchIcon$(
+    registry: string,
+    id: string,
+    version: string,
+    dependency?: string,
+  ): Observable<string> {
+    return this.icons.getRegistry$(registry, id, version, dependency)
   }
 
   fetchInfo$(registry: string): Observable<T.RegistryInfo> {

@@ -804,9 +804,11 @@ export class LiveApiService extends ApiService {
   }
 
   private async httpResponse<T>(opts: HttpOptions) {
-    // Static package assets are authorized; continuation endpoints (uploads,
-    // websockets) authenticate by capability URL and need no signature.
-    if (opts.url.startsWith('/s9pk')) {
+    // Static asset routes require a signature.
+    if (
+      opts.url.startsWith('/s9pk') ||
+      opts.url.startsWith('/registry/icons/')
+    ) {
       opts = {
         ...opts,
         headers: {

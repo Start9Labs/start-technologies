@@ -4,7 +4,6 @@ use http::header::{CACHE_CONTROL, CONTENT_TYPE};
 
 use crate::PackageId;
 use crate::net::static_server::{bad_request, not_found, server_error};
-use crate::prelude::*;
 use crate::registry::context::RegistryContext;
 use crate::util::VersionString;
 

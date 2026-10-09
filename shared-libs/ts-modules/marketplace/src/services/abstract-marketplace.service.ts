@@ -1,6 +1,7 @@
-import { Observable } from 'rxjs'
+import { Observable, of } from 'rxjs'
 
 import { MarketplacePkg, StoreDataWithUrl, StoreIdentity } from '../types'
+import { registryIconUrl } from '../util/icon'
 
 /**
  * Contract the shared marketplace components (tile, preview, registry-select)
@@ -30,6 +31,16 @@ export abstract class AbstractMarketplaceService {
     flavor: string | null,
     registryUrl?: string,
   ): Observable<MarketplacePkg | null>
+
+  /** Loads a package or dependency icon through the app's transport. */
+  fetchIcon$(
+    registry: string,
+    id: string,
+    version: string,
+    dependency?: string,
+  ): Observable<string> {
+    return of(registryIconUrl(registry, id, version, dependency))
+  }
 
   /** Fetch a static asset (LICENSE.md / instructions.md) for a package. */
   abstract fetchStatic$(
