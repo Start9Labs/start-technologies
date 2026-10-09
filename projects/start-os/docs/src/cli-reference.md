@@ -853,7 +853,7 @@ List registry metadata and all packages.
 
 ### `start-cli registry info`
 
-Display the registry name and icon.
+Display the registry name, icon, and description.
 
 - `--format` — Output format
 
@@ -861,9 +861,21 @@ Display the registry name and icon.
 
 Set the registry's display name.
 
-### `start-cli registry info set-icon <ICON>`
+### `start-cli registry info set-icon [ICON] [--clear]`
 
-Set the registry's icon from a file path.
+Set the registry's icon from a file path, an http(s) URL, or a data URL. Supply either `ICON` or `--clear`, but not both.
+
+- `--clear` — Remove the registry's icon
+
+Over RPC, pass `null` in the setter's `icon` field to clear it; a value sets it.
+
+### `start-cli registry info set-description [DESCRIPTION] [--clear]`
+
+Set the registry's description (markdown), shown above its services in the marketplace. Supply either `DESCRIPTION` or `--clear`, but not both.
+
+- `--clear` — Remove the registry's description
+
+Over RPC, pass `null` in the setter's `description` field to clear it; a value sets it.
 
 ### Registry Admin Management
 

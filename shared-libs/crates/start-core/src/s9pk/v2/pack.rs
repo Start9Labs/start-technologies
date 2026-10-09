@@ -476,6 +476,81 @@ impl Default for ImageSource {
         ImageSource::Packed
     }
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct DockerImageConfig {
+    env: Option<Vec<String>>,
+    #[serde(default)]
+    working_dir: PathBuf,
+    #[serde(default)]
+    user: String,
+    entrypoint: Option<Vec<String>>,
+    cmd: Option<Vec<String>>,
+}
+
+impl DockerImageConfig {
+    fn into_parts(self) -> (ImageMetadata, Vec<String>) {
+        (
+            ImageMetadata {
+                workdir: if self.working_dir == Path::new("") {
+                    "/".into()
+                } else {
+                    self.working_dir
+                },
+                user: if self.user.is_empty() {
+                    "root".into()
+                } else {
+                    self.user.into()
+                },
+                entrypoint: self.entrypoint,
+                cmd: self.cmd,
+            },
+            self.env.unwrap_or_default(),
+        )
+    }
+}
+
+fn docker_platform(arch: &str) -> String {
+    let arch = match arch {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        arch => arch,
+    };
+    format!("--platform=linux/{arch}")
+}
+
+fn image_config_inspect_command(tool: &str, image: &str, platform: &str) -> Command {
+    let mut command = Command::new(tool);
+    command.arg("image").arg("inspect");
+    if tool == "docker" {
+        command.arg(platform);
+    }
+    command.arg("--format").arg("{{json .Config}}").arg(image);
+    command
+}
+
+async fn inspect_image_config(
+    tool: &str,
+    container: &str,
+    platform: &str,
+) -> Result<DockerImageConfig, Error> {
+    let image = Command::new(tool)
+        .arg("container")
+        .arg("inspect")
+        .arg("--format")
+        .arg("{{.Image}}")
+        .arg(container)
+        .invoke(ErrorKind::Docker)
+        .await?;
+    let image = String::from_utf8(image)?;
+    serde_json::from_slice(
+        &image_config_inspect_command(tool, image.trim(), platform)
+            .invoke(ErrorKind::Docker)
+            .await?,
+    )
+    .with_kind(ErrorKind::Deserialization)
+}
+
 impl ImageSource {
     pub fn ingredients(&self) -> Vec<PathBuf> {
         match self {
@@ -505,18 +580,8 @@ impl ImageSource {
         arch: &'a str,
         into: &'a mut DirectoryContents<S>,
     ) -> BoxFuture<'a, Result<(), Error>> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "PascalCase")]
-        struct DockerImageConfig {
-            env: Vec<String>,
-            #[serde(default)]
-            working_dir: PathBuf,
-            #[serde(default)]
-            user: String,
-            entrypoint: Option<Vec<String>>,
-            cmd: Option<Vec<String>>,
-        }
         async move {
+            let docker_platform = docker_platform(arch);
             match self {
                 ImageSource::Packed => Ok(()),
                 ImageSource::DockerBuild {
@@ -528,14 +593,6 @@ impl ImageSource {
                     let dockerfile = dockerfile
                         .clone()
                         .unwrap_or_else(|| workdir.join("Dockerfile"));
-                    let docker_platform = if arch == "x86_64" {
-                        "--platform=linux/amd64".to_owned()
-                    } else if arch == "aarch64" {
-                        "--platform=linux/arm64".to_owned()
-                    } else {
-                        format!("--platform=linux/{arch}")
-                    };
-                    // docker buildx build ${path} -o type=image,name=start9/${id}
                     let tag = format!("start9/{id}/{image_id}:{}", new_guid());
                     let mut command = Command::new(*CONTAINER_TOOL);
                     if *CONTAINER_TOOL == "docker" {
@@ -552,17 +609,14 @@ impl ImageSource {
                         .arg("--build-arg")
                         .arg(format!("ARCH={}", arch));
 
-                    // add build arguments
                     if let Some(build_args) = build_args {
                         for (key, value) in build_args {
                             let build_arg_value = match value {
                                 BuildArg::String(val) => val.to_string(),
-                                BuildArg::EnvVar { env } => {
-                                    match std::env::var(&env) {
-                                        Ok(val) => val,
-                                        Err(_) => continue, // skip if env var not set or invalid
-                                    }
-                                }
+                                BuildArg::EnvVar { env } => match std::env::var(&env) {
+                                    Ok(val) => val,
+                                    Err(_) => continue,
+                                },
                             };
 
                             command
@@ -592,45 +646,20 @@ impl ImageSource {
                     Ok(())
                 }
                 ImageSource::DockerTag(tag) => {
-                    let docker_platform = if arch == "x86_64" {
-                        "--platform=linux/amd64".to_owned()
-                    } else if arch == "aarch64" {
-                        "--platform=linux/arm64".to_owned()
-                    } else {
-                        format!("--platform=linux/{arch}")
-                    };
-                    let container = String::from_utf8(
-                        Command::new(*CONTAINER_TOOL)
-                            .arg("create")
-                            .arg(&docker_platform)
-                            .arg(&tag)
-                            .arg("/startos-pack-placeholder")
-                            .invoke(ErrorKind::Docker)
-                            .await?,
-                    )?;
+                    let container = Command::new(*CONTAINER_TOOL)
+                        .arg("create")
+                        .arg(&docker_platform)
+                        .arg(&tag)
+                        .arg("/startos-pack-placeholder")
+                        .invoke(ErrorKind::Docker)
+                        .await?;
+                    let container = String::from_utf8(container)?;
                     let container = container.trim();
                     let packed = async {
-                        let image = String::from_utf8(
-                            Command::new(*CONTAINER_TOOL)
-                                .arg("container")
-                                .arg("inspect")
-                                .arg("--format")
-                                .arg("{{.Image}}")
-                                .arg(container)
-                                .invoke(ErrorKind::Docker)
-                                .await?,
-                        )?;
-                        let config = serde_json::from_slice::<DockerImageConfig>(
-                            &Command::new(*CONTAINER_TOOL)
-                                .arg("image")
-                                .arg("inspect")
-                                .arg("--format")
-                                .arg("{{json .Config}}")
-                                .arg(image.trim())
-                                .invoke(ErrorKind::Docker)
-                                .await?,
-                        )
-                        .with_kind(ErrorKind::Deserialization)?;
+                        let config =
+                            inspect_image_config(*CONTAINER_TOOL, container, &docker_platform)
+                                .await?;
+                        let (metadata, env) = config.into_parts();
                         let base_path = Path::new("images").join(arch).join(image_id);
                         into.insert_path(
                             base_path.with_extension("json"),
@@ -638,22 +667,9 @@ impl ImageSource {
                                 TmpSource::new(
                                     tmp_dir.clone(),
                                     PackSource::Buffered(
-                                        serde_json::to_vec(&ImageMetadata {
-                                            workdir: if config.working_dir == Path::new("") {
-                                                "/".into()
-                                            } else {
-                                                config.working_dir
-                                            },
-                                            user: if config.user.is_empty() {
-                                                "root".into()
-                                            } else {
-                                                config.user.into()
-                                            },
-                                            entrypoint: config.entrypoint,
-                                            cmd: config.cmd,
-                                        })
-                                        .with_kind(ErrorKind::Serialization)?
-                                        .into(),
+                                        serde_json::to_vec(&metadata)
+                                            .with_kind(ErrorKind::Serialization)?
+                                            .into(),
                                     ),
                                 )
                                 .into(),
@@ -664,7 +680,7 @@ impl ImageSource {
                             Entry::file(
                                 TmpSource::new(
                                     tmp_dir.clone(),
-                                    PackSource::Buffered(config.env.join("\n").into_bytes().into()),
+                                    PackSource::Buffered(env.join("\n").into_bytes().into()),
                                 )
                                 .into(),
                             ),
@@ -1072,6 +1088,86 @@ pub async fn list_ingredients(_: CliContext, params: PackParams) -> Result<Vec<P
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn image_inspection_uses_the_requested_docker_platform() {
+        for (arch, platform) in [
+            ("x86_64", "--platform=linux/amd64"),
+            ("aarch64", "--platform=linux/arm64"),
+            ("riscv64", "--platform=linux/riscv64"),
+        ] {
+            let command =
+                image_config_inspect_command("docker", "sha256:index", &docker_platform(arch));
+            assert_eq!(command.as_std().get_program(), "docker");
+            assert_eq!(
+                command.as_std().get_args().collect::<Vec<_>>(),
+                [
+                    "image",
+                    "inspect",
+                    platform,
+                    "--format",
+                    "{{json .Config}}",
+                    "sha256:index"
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn podman_inspects_the_resolved_image_without_a_platform_flag() {
+        let command = image_config_inspect_command(
+            "podman",
+            "sha256:arm64-image",
+            &docker_platform("aarch64"),
+        );
+        assert_eq!(command.as_std().get_program(), "podman");
+        assert_eq!(
+            command.as_std().get_args().collect::<Vec<_>>(),
+            [
+                "image",
+                "inspect",
+                "--format",
+                "{{json .Config}}",
+                "sha256:arm64-image"
+            ]
+        );
+    }
+
+    #[test]
+    fn image_config_preserves_original_command_and_defaults() {
+        let config: DockerImageConfig = serde_json::from_str(
+            r#"{
+            "Cmd": ["serve", "--foreground"],
+            "Entrypoint": ["/app/entrypoint"],
+            "Env": ["MODE=production", "EMPTY="],
+            "WorkingDir": "/app",
+            "User": "1000:1000"
+        }"#,
+        )
+        .unwrap();
+        let (metadata, env) = config.into_parts();
+        assert_eq!(metadata.cmd.unwrap(), ["serve", "--foreground"]);
+        assert_eq!(metadata.entrypoint.unwrap(), ["/app/entrypoint"]);
+        assert_eq!(metadata.workdir, Path::new("/app"));
+        assert_eq!(&*metadata.user, "1000:1000");
+        assert_eq!(env, ["MODE=production", "EMPTY="]);
+    }
+
+    #[test]
+    fn image_config_accepts_missing_and_null_optional_fields() {
+        for json in [
+            "{}",
+            r#"{"Env":null,"Entrypoint":null,"Cmd":null,"WorkingDir":"","User":""}"#,
+        ] {
+            let config: DockerImageConfig = serde_json::from_str(json).unwrap();
+            let (metadata, env) = config.into_parts();
+            assert!(metadata.cmd.is_none());
+            assert!(metadata.entrypoint.is_none());
+            assert_eq!(metadata.workdir, Path::new("/"));
+            assert_eq!(&*metadata.user, "root");
+            assert!(env.is_empty());
+        }
+    }
 
     #[test]
     fn cli_enables_emulation_by_default() {

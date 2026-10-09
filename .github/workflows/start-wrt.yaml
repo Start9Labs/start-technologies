@@ -238,17 +238,17 @@ jobs:
           sparse-checkout: |
             projects/start-wrt/backend/ctrl/Cargo.toml
             projects/start-wrt/release-notes/*
-            scripts/manage-release.sh
+            scripts/
           sparse-checkout-cone-mode: false
 
-      # Canonical StartWRT version lives in the ctrl crate manifest (mirrors the
-      # top CHANGELOG.md entry). The web/package.json the standalone workflow
-      # read was removed when the UI folded into the root Angular workspace.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.17.0'
+
       - name: Determine version
         id: version
         run: |
-          VERSION=$(sed -n 's/^version = "\([^"]*\)".*/\1/p' \
-            projects/start-wrt/backend/ctrl/Cargo.toml | head -1)
+          VERSION=$(node scripts/changelog.mjs version projects/start-wrt)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION"
 
@@ -328,11 +328,11 @@ jobs:
           start-cli --registry="${{ env.REGISTRY }}" registry os version remove "$VERSION" \
             || echo "::notice::v${VERSION} was not indexed in ${{ env.REGISTRY }} yet."
 
-      # The compat range is the set of installed versions allowed to upgrade to
-      # this one; the floor matches manage-release.sh's STARTWRT_COMPAT_FLOOR.
+      # The compat floor matches manage-release.sh's STARTWRT_COMPAT_FLOOR.
       - name: Register StartWRT version in the target registry
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
           NOTES=$(CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh notes start-wrt) \
             || { echo "::warning::No release notes for v${VERSION}; registering without them."; NOTES=""; }
           start-cli --registry="${{ env.REGISTRY }}" registry os version add \

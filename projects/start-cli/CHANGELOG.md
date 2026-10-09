@@ -13,7 +13,21 @@ or the CLI's externally observable behavior.
 
 ### Added
 
-- **`server restart` and `server shutdown` wait for a running backup to finish by default.** Pass `--force` to interrupt the backup. `server cancel-deferred-power` cancels the pending action. These commands require StartOS 0.4.0.3 or later.
+- **`registry package get <ID> full --all-revisions` lists every revision of a package a registry
+  holds.** Without `--all-revisions`, a registry running start-registry 1.1.1 or later hides a
+  revision once a newer revision of the same upstream version runs on the same hardware.
+
+- **`registry info set-icon --clear` and `registry info set-description --clear` remove a
+  registry's icon and description.**
+
+### Fixed
+
+- **`s9pk pack` and `s9pk edit add-image` preserve the requested platform's image configuration**, including its default command, with Docker and Podman. Docker packaging requires Docker 28.1+ (API 1.49+).
+
+- **`s9pk edit add-image` signs the updated archive**, keeping the edited package readable and valid.
+
+- **`package install` reports a package missing from the registry it asked**, naming that
+  registry, instead of prompting to choose from an empty list of flavors.
 
 ## [2.2.0]
 

@@ -186,11 +186,23 @@ pub async fn set_static_dns(
                     &servers
                         .map(|s| {
                             s.into_iter()
-                                .map(|s| {
-                                    s.parse::<SocketAddr>()
-                                        .or_else(|_| s.parse::<IpAddr>().map(|a| (a, 53).into()))
+                                .map(|s| -> Result<SocketAddr, Error> {
+                                    let addr = s.parse::<SocketAddr>().or_else(|_| {
+                                        s.parse::<IpAddr>().map(|a| SocketAddr::from((a, 53)))
+                                    })?;
+                                    let ip = addr.ip().to_canonical();
+                                    if ip.is_unspecified() || ip.is_loopback() {
+                                        return Err(Error::new(
+                                            eyre!(
+                                                "{}",
+                                                t!("net.dns.static-server-is-self", server = s)
+                                            ),
+                                            ErrorKind::InvalidRequest,
+                                        ));
+                                    }
+                                    Ok(addr)
                                 })
-                                .collect()
+                                .collect::<Result<_, Error>>()
                         })
                         .transpose()?,
                 )

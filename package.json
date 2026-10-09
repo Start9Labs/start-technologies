@@ -1,6 +1,6 @@
 {
   "name": "startos-ui",
-  "version": "0.4.0.3",
+  "version": "0.4.1",
   "author": "Start9 Labs, Inc",
   "homepage": "https://start9.com/",
   "license": "MIT",
@@ -36,8 +36,8 @@
     "start:brochure": "ng serve --project brochure-marketplace --host 0.0.0.0",
     "start:ui:proxy": "npm run-script build-config && ng serve --project ui --host 0.0.0.0 --proxy-config proxy.conf.json",
     "build-config": "node shared-libs/ts-modules/build-config.js",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format": "prettier --config .prettierrc.json --write .",
+    "format:check": "prettier --config .prettierrc.json --check .",
     "format:toml": "git ls-files -zco --exclude-standard -- '*.toml' | xargs -0r taplo fmt",
     "format:toml:check": "git ls-files -zco --exclude-standard -- '*.toml' | xargs -0r taplo fmt --check",
     "prepare": "husky || true"

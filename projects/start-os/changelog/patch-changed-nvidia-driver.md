@@ -1,0 +1,1 @@
+- **NVIDIA images include driver 580.178.04**, with Linux 7.2 compatibility.

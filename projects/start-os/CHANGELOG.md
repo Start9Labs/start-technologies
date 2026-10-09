@@ -8,26 +8,6 @@ This file tracks notable changes since the move to the monorepo, and is what eac
 [GitHub release](https://github.com/Start9Labs/start-technologies/releases) links to
 for the detail behind its highlights.
 
-## [0.4.0.3]
-
-### Added
-
-- **Restarting or shutting down during a backup offers to wait for it to
-  finish.** The prompt defaults to waiting after a countdown. A bar shows the
-  pending action and lets you cancel it. Pressing the physical power button
-  during a backup also waits when StartOS can intercept the key. Over the CLI,
-  `start-cli server restart` and `server shutdown` wait by default; `--force`
-  interrupts the backup. The command
-  `start-cli server cancel-deferred-power` cancels the pending action. StartOS
-  refuses new backups once a restart or shutdown is committed. See
-  [Creating Backups](https://docs.start9.com/start-os/backup-create.html).
-
-### Fixed
-
-- **Restarting the StartOS daemon clears interrupted backup, update, restart,
-  and shutdown indicators**, including any pending power action. An interrupted
-  operation no longer appears to be running after the daemon starts again.
-
 ## [0.4.0.2]
 
 ### Security

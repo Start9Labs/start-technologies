@@ -7563,7 +7563,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "start-cli"
-version = "2.3.0"
+version = "2.4.0"
 dependencies = [
  "start-core",
  "tracing",
@@ -7571,7 +7571,7 @@ dependencies = [
 
 [[package]]
 name = "start-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aes",
  "astral-tokio-tar",
@@ -7718,7 +7718,7 @@ dependencies = [
 
 [[package]]
 name = "start-os"
-version = "0.4.0-rev.3"
+version = "0.4.1"
 dependencies = [
  "include_dir",
  "start-core",
@@ -7778,7 +7778,7 @@ dependencies = [
 
 [[package]]
 name = "startwrt-core"
-version = "1.2.2"
+version = "1.3.0"
 dependencies = [
  "arc-swap",
  "async_cell",
@@ -7800,6 +7800,7 @@ dependencies = [
  "form_urlencoded",
  "futures",
  "futures-util",
+ "hickory-server",
  "http",
  "imbl-value",
  "include_dir",
@@ -7836,6 +7837,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tower-http",
  "tracing",
  "tracing-subscriber",

@@ -2531,6 +2531,7 @@ config rule 'pp_a_v6'
             ipv6: ipv6.map(str::to_string),
             ipv4_static: false,
             allow_auto_port_forward: false,
+            allow_dns_injection: false,
             security_profile: None,
             speed: None,
             data_usage: None,

@@ -309,6 +309,7 @@ pub struct IOHook<'a, T> {
     pub io: T,
     pre_write: Option<Box<dyn FnMut(&[u8]) -> Result<(), std::io::Error> + Send + 'a>>,
     post_write: Option<Box<dyn FnMut(&[u8]) + Send + 'a>>,
+    post_flush: Option<Box<dyn FnMut() + Send + 'a>>,
     post_read: Option<Box<dyn FnMut(&[u8]) + Send + 'a>>,
 }
 impl<'a, T> IOHook<'a, T> {
@@ -317,6 +318,7 @@ impl<'a, T> IOHook<'a, T> {
             io,
             pre_write: None,
             post_write: None,
+            post_flush: None,
             post_read: None,
         }
     }
@@ -329,11 +331,43 @@ impl<'a, T> IOHook<'a, T> {
     pub fn post_write<F: FnMut(&[u8]) + Send + 'a>(&mut self, f: F) {
         self.post_write = Some(Box::new(f))
     }
+    /// Invokes the callback after each successful flush, excluding shutdown.
+    pub fn post_flush<F: FnMut() + Send + 'a>(&mut self, f: F) {
+        self.post_flush = Some(Box::new(f))
+    }
     pub fn post_read<F: FnMut(&[u8]) + Send + 'a>(&mut self, f: F) {
         self.post_read = Some(Box::new(f))
     }
 }
 impl<'a, T: AsyncWrite> AsyncWrite for IOHook<'a, T> {
+    fn is_write_vectored(&self) -> bool {
+        self.io.is_write_vectored()
+    }
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        bufs: &[std::io::IoSlice<'_>],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        let this = self.project();
+        if let Some(pre_write) = this.pre_write {
+            for buf in bufs {
+                pre_write(buf)?;
+            }
+        }
+        let written = futures::ready!(this.io.poll_write_vectored(cx, bufs)?);
+        if let Some(post_write) = this.post_write {
+            let mut remaining = written;
+            for buf in bufs {
+                if remaining == 0 {
+                    break;
+                }
+                let len = remaining.min(buf.len());
+                post_write(&buf[..len]);
+                remaining -= len;
+            }
+        }
+        Poll::Ready(Ok(written))
+    }
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -353,7 +387,12 @@ impl<'a, T: AsyncWrite> AsyncWrite for IOHook<'a, T> {
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
-        self.project().io.poll_flush(cx)
+        let this = self.project();
+        futures::ready!(this.io.poll_flush(cx)?);
+        if let Some(post_flush) = this.post_flush {
+            post_flush();
+        }
+        Poll::Ready(Ok(()))
     }
     fn poll_shutdown(
         self: Pin<&mut Self>,
@@ -1894,7 +1933,201 @@ impl Drop for AtomicFile {
 
 #[cfg(test)]
 mod test {
+    use std::io::{ErrorKind as IoErrorKind, IoSlice};
+    use std::sync::Mutex;
+    use std::task::Context;
+
     use super::*;
+
+    #[derive(Default)]
+    struct ScriptedWriter {
+        flushes: VecDeque<Poll<std::io::Result<()>>>,
+        writes: VecDeque<Poll<std::io::Result<usize>>>,
+        offered: Vec<Vec<Vec<u8>>>,
+        vectored: bool,
+        shutdowns: usize,
+    }
+
+    impl AsyncWrite for ScriptedWriter {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            _: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            panic!("vectored writes must reach poll_write_vectored")
+        }
+
+        fn is_write_vectored(&self) -> bool {
+            self.vectored
+        }
+
+        fn poll_write_vectored(
+            mut self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            bufs: &[IoSlice<'_>],
+        ) -> Poll<std::io::Result<usize>> {
+            self.offered
+                .push(bufs.iter().map(|buf| buf.to_vec()).collect());
+            self.writes.pop_front().unwrap()
+        }
+
+        fn poll_flush(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            self.flushes.pop_front().unwrap()
+        }
+
+        fn poll_shutdown(
+            mut self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            self.shutdowns += 1;
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    #[test]
+    fn io_hook_post_flush_fires_on_success_not_pending_error_or_shutdown() {
+        let calls = Mutex::new(0);
+        let mut hook = IOHook::new(ScriptedWriter {
+            flushes: VecDeque::from([
+                Poll::Pending,
+                Poll::Ready(Err(IoErrorKind::BrokenPipe.into())),
+                Poll::Ready(Ok(())),
+                Poll::Ready(Ok(())),
+            ]),
+            ..Default::default()
+        });
+        hook.post_flush(|| *calls.lock().unwrap() += 1);
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        assert!(Pin::new(&mut hook).poll_flush(&mut cx).is_pending());
+        assert_eq!(*calls.lock().unwrap(), 0);
+        assert!(matches!(
+            Pin::new(&mut hook).poll_flush(&mut cx),
+            Poll::Ready(Err(e)) if e.kind() == IoErrorKind::BrokenPipe
+        ));
+        assert_eq!(*calls.lock().unwrap(), 0);
+        for expected in [1, 2] {
+            assert!(matches!(
+                Pin::new(&mut hook).poll_flush(&mut cx),
+                Poll::Ready(Ok(()))
+            ));
+            assert_eq!(*calls.lock().unwrap(), expected);
+        }
+        assert!(matches!(
+            Pin::new(&mut hook).poll_shutdown(&mut cx),
+            Poll::Ready(Ok(()))
+        ));
+        assert_eq!(*calls.lock().unwrap(), 2);
+        assert_eq!(hook.io.shutdowns, 1);
+        assert!(hook.io.flushes.is_empty());
+    }
+
+    #[test]
+    fn io_hook_vectored_write_forwards_capability_and_accounts_written_prefix() {
+        let bufs = [
+            IoSlice::new(b"ab"),
+            IoSlice::new(b""),
+            IoSlice::new(b"cde"),
+            IoSlice::new(b"fgh"),
+        ];
+        let offered = vec![b"ab".to_vec(), vec![], b"cde".to_vec(), b"fgh".to_vec()];
+        let cases: &[(usize, &[&[u8]])] = &[
+            (0, &[]),
+            (1, &[b"a"]),
+            (2, &[b"ab"]),
+            (4, &[b"ab", b"", b"cd"]),
+            (5, &[b"ab", b"", b"cde"]),
+            (8, &[b"ab", b"", b"cde", b"fgh"]),
+        ];
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+        for &(written, expected) in cases {
+            let pre = Mutex::new(Vec::new());
+            let post = Mutex::new(Vec::new());
+            let mut hook = IOHook::new(ScriptedWriter {
+                writes: VecDeque::from([Poll::Ready(Ok(written))]),
+                vectored: true,
+                ..Default::default()
+            });
+            hook.pre_write(|buf| {
+                pre.lock().unwrap().push(buf.to_vec());
+                Ok(())
+            });
+            hook.post_write(|buf| post.lock().unwrap().push(buf.to_vec()));
+
+            assert!(hook.is_write_vectored());
+            assert!(matches!(
+                Pin::new(&mut hook).poll_write_vectored(&mut cx, &bufs),
+                Poll::Ready(Ok(n)) if n == written
+            ));
+            assert_eq!(*pre.lock().unwrap(), offered);
+            assert_eq!(*post.lock().unwrap(), expected);
+            assert_eq!(hook.io.offered, vec![offered.clone()]);
+        }
+        assert!(!IOHook::new(ScriptedWriter::default()).is_write_vectored());
+    }
+
+    #[test]
+    fn io_hook_vectored_write_pending_and_error_do_not_run_post_hook() {
+        let pre = Mutex::new(Vec::new());
+        let post = Mutex::new(Vec::new());
+        let mut hook = IOHook::new(ScriptedWriter {
+            writes: VecDeque::from([
+                Poll::Pending,
+                Poll::Ready(Err(IoErrorKind::BrokenPipe.into())),
+            ]),
+            ..Default::default()
+        });
+        hook.pre_write(|buf| {
+            pre.lock().unwrap().push(buf.to_vec());
+            Ok(())
+        });
+        hook.post_write(|buf| post.lock().unwrap().push(buf.to_vec()));
+        let bufs = [IoSlice::new(b"ab"), IoSlice::new(b"cd")];
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        assert!(
+            Pin::new(&mut hook)
+                .poll_write_vectored(&mut cx, &bufs)
+                .is_pending()
+        );
+        assert!(matches!(
+            Pin::new(&mut hook).poll_write_vectored(&mut cx, &bufs),
+            Poll::Ready(Err(e)) if e.kind() == IoErrorKind::BrokenPipe
+        ));
+        assert!(post.lock().unwrap().is_empty());
+        assert_eq!(*pre.lock().unwrap(), [b"ab", b"cd", b"ab", b"cd"]);
+        assert_eq!(hook.io.offered.len(), 2);
+    }
+
+    #[test]
+    fn io_hook_vectored_pre_write_error_prevents_transport_write() {
+        let pre = Mutex::new(Vec::new());
+        let post = Mutex::new(Vec::new());
+        let mut hook = IOHook::new(ScriptedWriter::default());
+        hook.pre_write(|buf| {
+            pre.lock().unwrap().push(buf.to_vec());
+            if buf == b"reject" {
+                Err(IoErrorKind::PermissionDenied.into())
+            } else {
+                Ok(())
+            }
+        });
+        hook.post_write(|buf| post.lock().unwrap().push(buf.to_vec()));
+        let bufs = [
+            IoSlice::new(b"ok"),
+            IoSlice::new(b"reject"),
+            IoSlice::new(b"unreached"),
+        ];
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        assert!(matches!(
+            Pin::new(&mut hook).poll_write_vectored(&mut cx, &bufs),
+            Poll::Ready(Err(e)) if e.kind() == IoErrorKind::PermissionDenied
+        ));
+        assert_eq!(*pre.lock().unwrap(), [b"ok".as_slice(), b"reject"]);
+        assert!(post.lock().unwrap().is_empty());
+        assert!(hook.io.offered.is_empty());
+    }
 
     #[tokio::test]
     async fn directory_helpers_exclude_source_path() {
