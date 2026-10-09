@@ -253,6 +253,60 @@ fn export_manpage_start_tunnel() {
         env!("CARGO_MANIFEST_DIR"),
         "/../../../projects/start-tunnel/man"
     );
-    std::fs::create_dir_all(dir).unwrap();
-    clap_mangen::generate_to(app().into_command(), dir).unwrap();
+    super::export_manpages(app().into_command(), dir);
+}
+
+#[test]
+fn tunnel_wan_endpoint_cli_native() {
+    for command in [
+        vec!["subnet", "10.59.0.1/24", "set-wan", "--wan-ip", "10.0.0.2"],
+        vec![
+            "device",
+            "set-wan",
+            "10.59.0.1/24",
+            "10.59.0.2",
+            "--wan-ip",
+            "10.0.0.2",
+        ],
+        vec!["device", "show-config", "10.59.0.1/24", "10.59.0.2"],
+        vec![
+            "device",
+            "show-config",
+            "10.59.0.1/24",
+            "10.59.0.2",
+            "--endpoint-ip",
+            "8.8.8.8",
+        ],
+        vec![
+            "device",
+            "show-config",
+            "10.59.0.1/24",
+            "10.59.0.2",
+            "--endpoint-ip",
+            "2606:4700:4700::1111",
+        ],
+        vec![
+            "device",
+            "show-config",
+            "10.59.0.1/24",
+            "10.59.0.2",
+            "--endpoint-ip",
+            "10.0.0.3",
+        ],
+    ] {
+        let args: Vec<_> = ["start-tunnel"].into_iter().chain(command).collect();
+        app().into_command().try_get_matches_from(args).unwrap();
+    }
+    let args: Vec<_> = ["start-tunnel"]
+        .into_iter()
+        .chain([
+            "device",
+            "show-config",
+            "10.59.0.1/24",
+            "10.59.0.2",
+            "--endpoint-ip",
+            "not-an-ip",
+        ])
+        .collect();
+    assert!(app().into_command().try_get_matches_from(args).is_err());
 }

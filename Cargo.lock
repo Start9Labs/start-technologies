@@ -7563,7 +7563,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "start-cli"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "start-core",
  "tracing",
@@ -7733,7 +7733,7 @@ dependencies = [
 
 [[package]]
 name = "start-tunnel"
-version = "1.3.1"
+version = "1.3.2"
 dependencies = [
  "include_dir",
  "start-core",

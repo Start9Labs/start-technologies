@@ -3330,6 +3330,13 @@ auth.passwords-do-not-match:
   fr_FR: "Les mots de passe ne correspondent pas"
   pl_PL: "Hasła nie pasują do siebie"
 
+tunnel.api.endpoint-ip-required:
+  en_US: 'WAN IP %{wan_ip} is not public; supply --endpoint-ip <IP> with the address the device uses to reach this tunnel server'
+  de_DE: 'Die WAN-IP %{wan_ip} ist nicht öffentlich; geben Sie mit --endpoint-ip <IP> die Adresse an, über die das Gerät diesen Tunnelserver erreicht'
+  es_ES: 'La IP WAN %{wan_ip} no es pública; indique con --endpoint-ip <IP> la dirección que usa el dispositivo para llegar a este servidor de túnel'
+  fr_FR: 'L’IP WAN %{wan_ip} n’est pas publique ; indiquez avec --endpoint-ip <IP> l’adresse utilisée par l’appareil pour joindre ce serveur de tunnel'
+  pl_PL: 'Adres IP WAN %{wan_ip} nie jest publiczny; podaj za pomocą --endpoint-ip <IP> adres, którego urządzenie używa do połączenia z tym serwerem tunelu'
+
 # util/tui.rs
 util.tui.terminal-must-be-interactive:
   en_US: "Terminal must be in interactive mode for this wizard"
@@ -3679,6 +3686,13 @@ help.arg.ed25519:
   es_ES: "Usar Ed25519 en lugar de NIST P-256"
   fr_FR: "Utiliser Ed25519 au lieu de NIST P-256"
   pl_PL: "Użyj Ed25519 zamiast NIST P-256"
+
+help.arg.endpoint-ip:
+  en_US: 'IPv4 or IPv6 endpoint address for this WireGuard config; required when the selected WAN IP is not public'
+  de_DE: 'IPv4- oder IPv6-Endpunktadresse für diese WireGuard-Konfiguration; erforderlich, wenn die gewählte WAN-IP nicht öffentlich ist'
+  es_ES: 'Dirección IPv4 o IPv6 del endpoint para esta configuración de WireGuard; obligatoria si la IP WAN seleccionada no es pública'
+  fr_FR: 'Adresse IPv4 ou IPv6 du point de terminaison pour cette configuration WireGuard ; requise si l’IP WAN sélectionnée n’est pas publique'
+  pl_PL: 'Adres IPv4 lub IPv6 punktu końcowego dla tej konfiguracji WireGuard; wymagany, gdy wybrany adres IP WAN nie jest publiczny'
 
 help.arg.env-file-path:
   en_US: "Path to environment file"

@@ -82,11 +82,14 @@ subnet is assigned a globally-routable `/128` out of it. See [IPv6](ipv6.md).
 
 ### `start-tunnel subnet <SUBNET> set-wan`
 
-Pin the public IPv4 the subnet's devices egress from, on a server that holds
-more than one. Devices published ports also take their external IP from it.
+Pin the IPv4 address used for the subnet's egress SNAT and published-port keys.
+Use an address assigned to the StartTunnel host: a public IPv4 on a directly
+connected VPS, or its private local IPv4 behind upstream NAT.
 Individual devices can override it with `device set-wan`.
 
 - `--wan-ip <IP>` — The address to pin. Omit to go back to the server default.
+
+For a host behind NAT, see [Devices › Hosting behind NAT](devices.md#hosting-behind-nat).
 
 ## Devices
 
@@ -108,9 +111,28 @@ List all devices in a subnet.
 
 Remove a device from a subnet.
 
-### `start-tunnel device show-config <SUBNET> <IP> [WAN_ADDR]`
+### `start-tunnel device set-wan <SUBNET> <IP>`
 
-Display the WireGuard configuration file for a device. Optionally override the WAN address in the generated config.
+Pin the device's IPv4 address for egress SNAT and published-port keys, overriding
+its subnet's setting.
+
+- `--wan-ip <IP>` — An IPv4 address assigned to the StartTunnel host. Omit to inherit the subnet's setting.
+
+### `start-tunnel device show-config <SUBNET> <IP>`
+
+Display the WireGuard configuration file for a device.
+
+- `--endpoint-ip <IP>` — An IPv4 or IPv6 address used only for the returned config's WireGuard `Endpoint`. This does not change the device's WAN assignment, SNAT, or published ports.
+
+Without `--endpoint-ip`, a public device or subnet WAN override supplies the
+endpoint. With neither override, StartTunnel uses a suitable address from the
+request, then the configured webserver listen address, then a detected public address. A non-public WAN override
+requires an explicit `--endpoint-ip` instead of generating a private endpoint.
+
+```bash
+start-tunnel device show-config 10.59.0.1/24 10.59.0.2 --endpoint-ip 203.0.113.10
+start-tunnel device show-config 10.59.0.1/24 10.59.0.2 --endpoint-ip 2001:db8::10
+```
 
 ## Port Forwarding
 

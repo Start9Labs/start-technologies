@@ -1141,21 +1141,41 @@ pub struct ShowConfigParams {
     subnet: Ipv4Net,
     #[ts(type = "string")]
     ip: Ipv4Addr,
+    /// Overrides the generated WireGuard endpoint without changing the WAN assignment.
+    #[serde(default)]
+    #[arg(long, value_name = "IP", help = "help.arg.endpoint-ip")]
+    #[ts(optional, type = "string")]
+    endpoint_ip: Option<IpAddr>,
     #[serde(rename = "__ConnectInfo_local_addr")]
     #[arg(skip)]
     #[ts(skip)]
     local_addr: Option<SocketAddr>,
 }
 
-pub async fn show_config(
-    ctx: TunnelContext,
+pub async fn show_config(ctx: TunnelContext, params: ShowConfigParams) -> Result<String, Error> {
+    let peek = ctx.db.peek().await;
+    render_device_config(&peek, params, || {
+        ctx.net_iface.peek(|i| {
+            i.iter().find_map(|(_, info)| {
+                info.ip_info
+                    .as_ref()
+                    .and_then(|ip_info| ip_info.wan_ip)
+                    .map(IpAddr::from)
+            })
+        })
+    })
+}
+
+fn render_device_config(
+    peek: &Model<super::db::TunnelDatabase>,
     ShowConfigParams {
         subnet,
         ip,
+        endpoint_ip,
         local_addr,
     }: ShowConfigParams,
+    interface_wan: impl FnOnce() -> Option<IpAddr>,
 ) -> Result<String, Error> {
-    let peek = ctx.db.peek().await;
     let wg = peek.as_wg();
     let subnet_model = wg.as_subnets().as_idx(&subnet).or_not_found(&subnet)?;
     let subnet_v6 = subnet_model.as_ipv6().de()?;
@@ -1164,10 +1184,19 @@ pub async fn show_config(
         .as_idx(&ip)
         .or_not_found(&ip)?
         .de()?;
-    let wan_ip = if let Some(ip) = client.wan_ip {
-        IpAddr::V4(ip)
-    } else if let Some(ip) = subnet_model.as_wan_ip().de()? {
-        IpAddr::V4(ip)
+    let wan_ip = if let Some(ip) = endpoint_ip {
+        ip
+    } else if let Some(wan_ip) = match client.wan_ip {
+        Some(ip) => Some(ip),
+        None => subnet_model.as_wan_ip().de()?,
+    } {
+        if !crate::net::port_map::upnp::is_wan_candidate(wan_ip) {
+            return Err(Error::new(
+                eyre!(t!("tunnel.api.endpoint-ip-required", wan_ip = wan_ip)),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        IpAddr::V4(wan_ip)
     } else if let Some(ip) = local_addr.map(|a| a.ip()).filter(|ip| {
         !ip.is_loopback()
             && !match ip {
@@ -1179,16 +1208,7 @@ pub async fn show_config(
     } else if let Some(webserver) = peek.as_webserver().as_listen().de()? {
         webserver.ip()
     } else {
-        ctx.net_iface
-            .peek(|i| {
-                i.iter().find_map(|(_, info)| {
-                    info.ip_info
-                        .as_ref()
-                        .and_then(|ip_info| ip_info.wan_ip)
-                        .map(IpAddr::from)
-                })
-            })
-            .or_not_found("a public IP address")?
+        interface_wan().or_not_found("a public IP address")?
     };
     Ok(client
         .client_config(
@@ -1811,6 +1831,193 @@ pub async fn list_http_redirects(ctx: TunnelContext) -> Result<Vec<HttpRedirectS
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn config_fixture(
+        device_wan: Option<&str>,
+        subnet_wan: Option<&str>,
+    ) -> super::super::db::TunnelDatabase {
+        let mut db = super::super::db::TunnelDatabase::default();
+        let mut subnet = WgSubnetConfig::default();
+        subnet.wan_ip = subnet_wan.map(|ip| ip.parse().unwrap());
+        subnet.ipv6 = Some("2001:db8:abcd::/64".parse().unwrap());
+        let mut client = WgConfig::generate("Device".into(), WgClientKind::Client);
+        client.wan_ip = device_wan.map(|ip| ip.parse().unwrap());
+        subnet
+            .clients
+            .0
+            .insert("10.59.0.2".parse().unwrap(), client);
+        db.wg
+            .subnets
+            .0
+            .insert("10.59.0.1/24".parse().unwrap(), subnet);
+        db.webserver.listen = Some("8.8.4.4:443".parse().unwrap());
+        db
+    }
+
+    fn config_params(endpoint: Option<&str>, local: Option<&str>) -> ShowConfigParams {
+        ShowConfigParams {
+            subnet: "10.59.0.1/24".parse().unwrap(),
+            ip: "10.59.0.2".parse().unwrap(),
+            endpoint_ip: endpoint.map(|ip| ip.parse().unwrap()),
+            local_addr: local.map(|addr| addr.parse().unwrap()),
+        }
+    }
+
+    #[test]
+    fn show_config_explicit_endpoint_is_render_only() {
+        for (device, subnet) in [
+            (Some("10.0.0.2"), Some("9.9.9.9")),
+            (None, Some("192.168.1.2")),
+            (Some("9.9.9.9"), None),
+            (None, None),
+        ] {
+            let snapshot = Model::new(&config_fixture(device, subnet)).unwrap();
+            let before = snapshot.de().unwrap();
+            let baseline =
+                render_device_config(&snapshot, config_params(Some("1.1.1.1"), None), || {
+                    panic!("unexpected discovery")
+                })
+                .unwrap();
+            for endpoint in ["8.8.8.8", "2606:4700:4700::1111", "10.0.0.3", "fd00::1"] {
+                let output = render_device_config(
+                    &snapshot,
+                    config_params(Some(endpoint), Some("9.9.9.9:80")),
+                    || panic!("unexpected discovery"),
+                )
+                .unwrap();
+                let socket = SocketAddr::new(endpoint.parse().unwrap(), 51820);
+                assert_eq!(
+                    output,
+                    baseline.replace("Endpoint = 1.1.1.1:51820", &format!("Endpoint = {socket}"))
+                );
+                assert!(output.contains(&format!("Endpoint = {socket}")));
+                assert!(output.contains("Address = 10.59.0.2/24, 2001:db8:abcd::a3b:2/64"));
+                assert!(output.contains("DNS = 10.59.0.1"));
+            }
+            assert_eq!(
+                serde_json::to_value(before).unwrap(),
+                serde_json::to_value(snapshot.de().unwrap()).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn show_config_nonpublic_wan_requires_endpoint_before_fallback() {
+        for wan in [
+            "10.0.0.2",
+            "192.168.1.2",
+            "127.0.0.1",
+            "169.254.1.2",
+            "0.0.0.0",
+            "192.0.2.1",
+            "255.255.255.255",
+        ] {
+            for (device, subnet) in [(Some(wan), Some("9.9.9.9")), (None, Some(wan))] {
+                let snapshot = Model::new(&config_fixture(device, subnet)).unwrap();
+                let error = render_device_config(
+                    &snapshot,
+                    config_params(None, Some("1.1.1.1:80")),
+                    || panic!("unexpected discovery"),
+                )
+                .unwrap_err();
+                assert_eq!(error.kind, ErrorKind::InvalidRequest);
+                assert!(error.to_string().contains("--endpoint-ip"));
+            }
+        }
+    }
+
+    #[test]
+    fn show_config_keeps_wan_and_fallback_precedence() {
+        for (device, subnet, local, web, expected) in [
+            (
+                Some("9.9.9.9"),
+                Some("8.8.8.8"),
+                Some("1.1.1.1:80"),
+                Some("8.8.4.4:443"),
+                "9.9.9.9:51820",
+            ),
+            (
+                Some("9.9.9.9"),
+                Some("10.0.0.2"),
+                None,
+                None,
+                "9.9.9.9:51820",
+            ),
+            (
+                None,
+                Some("8.8.8.8"),
+                Some("1.1.1.1:80"),
+                None,
+                "8.8.8.8:51820",
+            ),
+            (
+                None,
+                None,
+                Some("1.1.1.1:80"),
+                Some("8.8.4.4:443"),
+                "1.1.1.1:51820",
+            ),
+            (
+                None,
+                None,
+                Some("[2606:4700:4700::1111]:80"),
+                None,
+                "[2606:4700:4700::1111]:51820",
+            ),
+            (
+                None,
+                None,
+                Some("127.0.0.1:80"),
+                Some("8.8.4.4:443"),
+                "8.8.4.4:51820",
+            ),
+            (
+                None,
+                None,
+                Some("10.0.0.2:80"),
+                Some("192.168.1.2:443"),
+                "192.168.1.2:51820",
+            ),
+            (None, None, None, None, "8.8.8.8:51820"),
+        ] {
+            let mut db = config_fixture(device, subnet);
+            db.webserver.listen = web.map(|addr| addr.parse().unwrap());
+            let output = render_device_config(
+                &Model::new(&db).unwrap(),
+                config_params(None, local),
+                || {
+                    assert!(device.is_none() && subnet.is_none() && web.is_none());
+                    Some("8.8.8.8".parse().unwrap())
+                },
+            )
+            .unwrap();
+            assert!(output.contains(&format!("Endpoint = {expected}")));
+        }
+        let mut db = config_fixture(None, None);
+        db.webserver.listen = None;
+        let error =
+            render_device_config(&Model::new(&db).unwrap(), config_params(None, None), || {
+                None
+            })
+            .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn show_config_old_json_omits_endpoint() {
+        let params: ShowConfigParams = serde_json::from_value(serde_json::json!({
+            "subnet": "10.59.0.1/24", "ip": "10.59.0.2"
+        }))
+        .unwrap();
+        assert!(params.endpoint_ip.is_none());
+        assert!(params.local_addr.is_none());
+        let snapshot = Model::new(&config_fixture(Some("9.9.9.9"), None)).unwrap();
+        assert!(
+            render_device_config(&snapshot, params, || panic!("unexpected discovery"))
+                .unwrap()
+                .contains("Endpoint = 9.9.9.9:51820")
+        );
+    }
 
     #[test]
     fn parse_dns_server_defaults_to_port_53() {

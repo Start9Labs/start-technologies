@@ -1,13 +1,16 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH start-tunnel-device-show-config 1  "show-config " 
+.TH start-tunnel-device-show-config 1  "show-config "
 .SH NAME
 start\-tunnel\-device\-show\-config \- Show WireGuard configuration for device
 .SH SYNOPSIS
-\fBstart\-tunnel device show\-config\fR [\fB\-h\fR|\fB\-\-help\fR] <\fISUBNET\fR> <\fIIP\fR> 
+\fBstart\-tunnel device show\-config\fR [\fB\-\-endpoint\-ip\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISUBNET\fR> <\fIIP\fR>
 .SH DESCRIPTION
 Show WireGuard configuration for device
 .SH OPTIONS
+.TP
+\fB\-\-endpoint\-ip\fR \fI<IP>\fR
+IPv4 or IPv6 endpoint address for this WireGuard config; required when the selected WAN IP is not public
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help
