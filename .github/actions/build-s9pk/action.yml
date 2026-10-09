@@ -1,0 +1,39 @@
+name: 'Build s9pk'
+description: 'Runs make for one build target, retrying once through mirror.gcr.io when a Docker Hub pull fails'
+inputs:
+  target:
+    description: 'make target (empty for the default)'
+    required: false
+    default: ''
+runs:
+  using: 'composite'
+  steps:
+    - name: Build (make ${{ inputs.target || '(default)' }})
+      env:
+        TARGET: ${{ inputs.target }}
+        RUST_LOG: debug
+        RUST_BACKTRACE: '1'
+      run: |
+        log="$RUNNER_TEMP/build.log"
+        if ! make $TARGET 2>&1 | tee "$log"; then
+          grep -qE 'registry-1\.docker\.io|toomanyrequests' "$log" || exit 1
+          echo "::warning::A Docker Hub pull failed; retrying through mirror.gcr.io."
+          for pid in $(pgrep -x dockerd); do
+            conf=$(tr '\0' '\n' < "/proc/$pid/cmdline" | sed -n 's/^--config-file=//p; /^--config-file$/{n;p}' | tr -d '"')
+            conf=${conf:-/etc/docker/daemon.json}
+            sudo sh -c "[ -s '$conf' ] || echo '{}' > '$conf'"
+            sudo jq '."registry-mirrors" = ["https://mirror.gcr.io"]' "$conf" | sudo tee "$conf.new" > /dev/null
+            sudo mv "$conf.new" "$conf"
+            sudo kill -HUP "$pid"
+          done
+          sleep 2
+          echo "Daemon mirrors: $(docker info --format '{{.RegistryConfig.Mirrors}}')"
+          printf '[registry."docker.io"]\n  mirrors = ["mirror.gcr.io"]\n' > "$RUNNER_TEMP/buildkitd.toml"
+          docker buildx create --use --bootstrap --name mirror --driver docker-container \
+            --buildkitd-config "$RUNNER_TEMP/buildkitd.toml"
+          make $TARGET
+        fi
+        echo ""
+        echo "SHA256SUMs:"
+        sha256sum *.s9pk
+      shell: bash

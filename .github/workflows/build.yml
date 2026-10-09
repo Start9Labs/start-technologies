@@ -112,12 +112,9 @@ jobs:
         shell: bash
 
       - name: Build (make ${{ matrix.target || '(default)' }})
-        run: |
-          RUST_LOG=debug RUST_BACKTRACE=1 make ${{ matrix.target }}
-          echo ""
-          echo "SHA256SUMs:"
-          sha256sum *.s9pk
-        shell: bash
+        uses: Start9Labs/start-technologies/.github/actions/build-s9pk@master
+        with:
+          target: ${{ matrix.target }}
 
       - name: Upload each s9pk as its own artifact
         uses: Start9Labs/start-technologies/.github/actions/upload-each@master
