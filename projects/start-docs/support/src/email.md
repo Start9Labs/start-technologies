@@ -4,7 +4,7 @@ Start9 Support emails you about your chats in two ways, both on by default: a re
 
 ## Unread-Reply Reminders
 
-When a reply from Start9 has gone unread for a while, you are emailed a reminder, once for each run of unread replies. **Settings** says how long it waits. The reminder links to the chat; reply there, in Start9 Support.
+When a reply from Start9 has gone unread for a while, you are emailed a reminder. **Settings** says how long it waits. The reminder links to the chat; reply there, in Start9 Support.
 
 ## Chat Transcripts
 

@@ -14,8 +14,9 @@ Settings holds your profile, your password and email, your preferences, and how 
 
 ## Preferences
 
-- **Language** — English or Spanish: the language Dux replies in.
+- **Language** — English or Spanish: the language Dux replies in. A chat keeps the language it was started in.
 - **Appearance** — Light, Dark, or System to follow your device.
+- **Time format** — 12-hour, 24-hour, or Automatic to follow your browser's region.
 
 ## Notifications
 

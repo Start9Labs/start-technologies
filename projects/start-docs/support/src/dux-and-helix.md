@@ -14,7 +14,7 @@ Dux can also file a feature request with Start9 when you want a product or servi
 
 Choose **Request a human**, the person icon in the message field, or ask Dux for a person. Dux also brings one in when a case needs it.
 
-During support hours, someone from the team joins shortly. Outside them, the chat says when support hours resume; add anything that would help in the meantime — error messages, logs, what you have already tried — and it will be waiting for whoever picks it up. Dux keeps helping while you wait.
+During support hours, someone from the team joins shortly. When Dux hands a case over outside support hours, its reply says when they resume. Add anything that would help while you wait — error messages, logs, what you have already tried — and it will be waiting for whoever picks it up. Dux keeps helping while you wait.
 
 ## Helix
 

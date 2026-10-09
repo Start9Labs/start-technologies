@@ -68,9 +68,12 @@ The browser has no push service to deliver notifications through. On Android, br
 - **Use UnifiedPush.** Fennec and IronFox can deliver notifications through UnifiedPush instead:
   1. Install a UnifiedPush distributor app, such as ntfy.
   1. Turn on UnifiedPush in the browser's settings (in IronFox, **Use UnifiedPush**), and restart the browser.
+  1. In IronFox, enable website notification prompts under **Privacy and security → Site settings → Permissions → Notification → Ask to allow**.
   1. Allow notifications for support.start9.com in the browser's site settings, then open Start9 Support and choose **Turn on**.
 
 A distributor delivers only to apps and browsers that use UnifiedPush; installing one alone changes nothing.
+
+If IronFox receives notifications while open but not in the background on GrapheneOS, its [notification FAQ](https://ironfoxoss.org/docs/faq/#can-i-receive-push-notifications) says it may need **App info → Exploit protection → Dynamic code loading via storage → Allowed**. This relaxes an exploit protection for IronFox; consider that tradeoff before changing it.
 
 ### This Browser Can't Show Notifications
 

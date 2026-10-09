@@ -24,4 +24,4 @@ It runs in any modern browser and installs as an app on your phone or computer.
 
 - **[Email](email.md)** — Unread-reply reminders and chat transcripts, and how to turn them off.
 
-- **[Settings](settings.md)** — Your name, avatar, email, password, language and appearance.
+- **[Settings](settings.md)** — Your name, avatar, email, password, language, appearance and time format.
