@@ -24,4 +24,4 @@ This device's notifications and the **Push notifications** switch for every devi
 
 ## Email
 
-The **Unread reply reminders** and **Chat transcripts** switches. See [Email](email.md).
+The **Unread reply reminders** switch. See [Email](email.md).
