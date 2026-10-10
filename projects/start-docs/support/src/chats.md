@@ -49,4 +49,4 @@ To pick a closed chat back up, choose **Continue in a new chat** at the bottom o
 
 **Download as a zip**, under **Export** in **Chat info**, saves the whole chat: a `chat.md` file with every message in order and Dux's notes on the case, and an `attachments` folder with the files. If the chat continues an earlier one, that chat comes along too.
 
-Your private notes and attachments are in a separate `private` folder. Delete that folder before you pass the zip on to anyone.
+Your name, your email address and your private notes and attachments are in a separate `private` folder; everywhere else, you appear as Customer. Delete that folder before you pass the zip on to anyone. Anything you wrote in the chat itself stays in `chat.md`.
