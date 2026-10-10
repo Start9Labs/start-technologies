@@ -67,7 +67,7 @@ $(STARTWRT_BIN): $(STARTWRT_RUST_SRC) $(STARTWRT_SHARED_RUST_SRC) Cargo.toml Car
 	@touch $(STARTWRT_BIN)
 
 define STARTWRT_GENERATE_BINDINGS
-cargo run --profile bindings -p startwrt-core --example generate_rpc_bindings --locked -- $(STARTWRT_BINDINGS_DIR)/bindings.ts
+cargo run --profile bindings -p startwrt-core --example generate_rpc_bindings --features ts --locked -- $(STARTWRT_BINDINGS_DIR)/bindings.ts
 npm exec -- prettier -w $(STARTWRT_BINDINGS)
 endef
 

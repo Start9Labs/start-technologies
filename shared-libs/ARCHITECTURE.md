@@ -49,7 +49,8 @@ types from locally selected existing metadata literals.
 
 `rpc-toolkit/ts` owns direction-aware serde normalization, layout/default/hook
 policy, TypeScript rendering, scalar bridges, declaration identity and exports.
-Core and WRT enable that consumer for their production generators. Consumer
+Core and WRT enable that consumer only through their own `ts` features, for their
+binding generators and tests; product binaries build without it. Consumer
 `reflect_ts!` bridges and typed `ts_export!` registrations live beside declarations;
 actual handler traversal and namespace collection share the directional renderer.
 

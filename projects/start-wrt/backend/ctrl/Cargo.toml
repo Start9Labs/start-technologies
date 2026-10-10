@@ -12,6 +12,13 @@ path = "src/lib.rs"
 name = "startwrt"
 path = "src/bin/startwrt.rs"
 
+[features]
+ts = ["rpc-toolkit/ts", "startos/ts"]
+
+[[example]]
+name = "generate_rpc_bindings"
+required-features = ["ts"]
+
 [dependencies]
 arc-swap = "1.7"
 async_cell = "0.2.2"
@@ -71,9 +78,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 reqwest_cookie_store = "0.9"
 rpassword = "7.3.1"
-rpc-toolkit = { path = "../../../../shared-libs/crates/rpc-toolkit", default-features = false, features = [
-  "ts",
-] }
+rpc-toolkit = { path = "../../../../shared-libs/crates/rpc-toolkit", default-features = false }
 rusqlite = { version = "0.34", features = ["bundled"] }
 rustls = "0.23"
 rustls-pemfile = "2"

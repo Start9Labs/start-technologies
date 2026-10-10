@@ -90,7 +90,7 @@ payload bounds and inline by default. Read the
 [TypeScript guide](../../../shared-libs/crates/rpc-toolkit/docs/typescript.md)
 before adding custom wire hints or projections.
 
-`ctrl/examples/generate_rpc_bindings.rs` generates the `Api` tree from
+`ctrl/examples/generate_rpc_bindings.rs`, behind the crate's `ts` feature, generates the `Api` tree from
 `main_api::<ServerContext>()` into `web/src/app/services/api/bindings.ts` and
 near-owner `rpc_toolkit::ts_export!(Type, namespaces = ["events"])` streaming
 registrations collected by namespace into `events.ts`. Requests use input shapes; returns and streaming events use output

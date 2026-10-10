@@ -1097,6 +1097,7 @@ pub async fn list_ingredients(_: CliContext, params: PackParams) -> Result<Vec<P
 mod test {
     use super::*;
 
+    #[cfg(feature = "ts")]
     #[test]
     fn image_config_input_binding_matches_the_custom_decoder() {
         use rpc_toolkit::ts::{Direction, TSVisitor};

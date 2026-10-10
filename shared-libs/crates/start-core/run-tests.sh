@@ -40,5 +40,5 @@ fi
 
 echo "FEATURES=\"$FEATURES\""
 echo "RUSTFLAGS=\"$RUSTFLAGS\""
-rust-zig-builder cargo test --manifest-path=./Cargo.toml $BUILD_FLAGS --features=test,$FEATURES -p start-core --locked --lib -- --skip export_
+rust-zig-builder cargo test --manifest-path=./Cargo.toml $BUILD_FLAGS --features=test,ts,$FEATURES -p start-core --locked --lib -- --skip export_
 rust-zig-builder sh -c "chown -R $UID:$UID target && chown -R $UID:$UID /usr/local/cargo"

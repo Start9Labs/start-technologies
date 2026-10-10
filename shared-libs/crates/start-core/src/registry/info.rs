@@ -286,6 +286,7 @@ mod tests {
         assert!(SetNameParams::try_parse_from(["set-name", "--clear"]).is_err());
     }
 
+    #[cfg(feature = "ts")]
     #[test]
     fn rpc_setter_bindings_require_nullable_values() {
         use rpc_toolkit::ts::{Direction, TSVisitor};

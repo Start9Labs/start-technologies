@@ -51,6 +51,10 @@ TypeScript disabled. Changes to handler composition also need backend tests.
 
 This crate uses edition 2018. `cbor` is enabled by default; `ts` is opt-in.
 Enabling `ts` requires registered handlers to provide bindings or use `no_ts()`.
+Without it, the bridge macros expand to nothing, `TS` and `HandlerTSBindings` are
+blanket traits and the TS builder methods return the handler unchanged. Consumers
+gate the TS-only items they implement behind their own `ts` feature; any build that
+enables `rpc-toolkit/ts` must enable those consumer features too.
 The developer guide is [docs/typescript.md](docs/typescript.md).
 
 Handlers are immutable and registered through `Arc`. Mutable request state belongs

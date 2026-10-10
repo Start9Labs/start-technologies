@@ -759,7 +759,7 @@ pub async fn follow_logs<Context: AsRef<RpcContinuations>>(
     Ok(LogFollowResponse { start_cursor, guid })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "ts"))]
 mod tests {
     use rpc_toolkit::ts::{Direction, TSVisitor};
 

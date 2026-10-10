@@ -522,8 +522,11 @@ impl<T> rpc_toolkit::Adapter for DisplaySerializable<T> {
         &self.0
     }
 }
+#[cfg(feature = "ts")]
 impl<T> rpc_toolkit::ts::PassthroughReturnTS for DisplaySerializable<T> {}
+#[cfg(feature = "ts")]
 impl<T> rpc_toolkit::ts::PassthroughChildrenTS for DisplaySerializable<T> {}
+#[cfg(feature = "ts")]
 impl<T: rpc_toolkit::ts::ParamsTS> rpc_toolkit::ts::ParamsTS for DisplaySerializable<T> {
     fn params_ts(&self) -> Box<dyn Fn(&mut rpc_toolkit::ts::TSVisitor) + Send + Sync + '_> {
         rpc_toolkit::ts::intersection_writer(

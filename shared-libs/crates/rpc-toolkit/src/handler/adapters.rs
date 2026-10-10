@@ -74,6 +74,16 @@ pub trait HandlerExt<Context: crate::Context>: HandlerFor<Context> + Sized {
     fn override_return_ts_as<Params>(self) -> OverrideReturnTS<Self, Static<Params>>
     where
         Static<Params>: Visit<TSVisitor>;
+    #[cfg(not(feature = "ts"))]
+    fn no_ts(self) -> Self;
+    #[cfg(not(feature = "ts"))]
+    fn override_params_ts<Params>(self, params_ty: Params) -> Self;
+    #[cfg(not(feature = "ts"))]
+    fn override_return_ts<Return>(self, return_ty: Return) -> Self;
+    #[cfg(not(feature = "ts"))]
+    fn override_params_ts_as<Params>(self) -> Self;
+    #[cfg(not(feature = "ts"))]
+    fn override_return_ts_as<Return>(self) -> Self;
 }
 
 impl<Context: crate::Context, T: HandlerFor<Context> + Sized> HandlerExt<Context> for T {
@@ -141,6 +151,31 @@ impl<Context: crate::Context, T: HandlerFor<Context> + Sized> HandlerExt<Context
     #[cfg(feature = "ts")]
     fn no_ts(self) -> NoTS<Self> {
         NoTS(self)
+    }
+
+    #[cfg(not(feature = "ts"))]
+    fn no_ts(self) -> Self {
+        self
+    }
+
+    #[cfg(not(feature = "ts"))]
+    fn override_params_ts<Params>(self, _: Params) -> Self {
+        self
+    }
+
+    #[cfg(not(feature = "ts"))]
+    fn override_return_ts<Return>(self, _: Return) -> Self {
+        self
+    }
+
+    #[cfg(not(feature = "ts"))]
+    fn override_params_ts_as<Params>(self) -> Self {
+        self
+    }
+
+    #[cfg(not(feature = "ts"))]
+    fn override_return_ts_as<Return>(self) -> Self {
+        self
     }
 
     #[cfg(feature = "ts")]

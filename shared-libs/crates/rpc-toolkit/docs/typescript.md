@@ -1,6 +1,7 @@
 # TypeScript RPC bindings
 
-Enable the opt-in `ts` Cargo feature. Derive `visit_rs::VisitFields` for each RPC
+Enable the opt-in `ts` Cargo feature; without it the bridge macros expand to
+nothing, so product builds carry no generator code. Derive `visit_rs::VisitFields` for each RPC
 parameter/result struct or `visit_rs::VisitVariants` for each enum, then implement
 `rpc_toolkit::ts::TS` with `reflect_ts!`. Registered handlers need bindings or
 `.no_ts()`. RPC collects storage through static named field and variant visitors;
