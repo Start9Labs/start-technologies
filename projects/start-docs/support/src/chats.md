@@ -15,13 +15,13 @@ Keep chats on Start9's products and the technologies around them. The [Terms of 
 - **Attach files** with the paperclip in the message field — logs, screenshots, config files. Each file can be up to 25 MB.
 - **Share privately** with the lock in the message field, for something only Start9's staff should see. See [Privacy](privacy.md).
 - **Request a human** with the person icon in the message field. See [Dux and Helix](dux-and-helix.md#reaching-a-person).
-- **Close the chat** with the circled X in the message field (**Close chat**), once you have what you came for. See [Closing and Reopening](#closing-and-reopening).
+- **Close the chat** with the circled X in the message field (**Close chat**), once you have what you came for. See [Closing a Chat](#closing-a-chat).
 - **Reply to, react to or copy** a message from the toolbar that appears when you hover over it, or by long-pressing it on a phone.
 - **Search** the chat from the search icon in its header.
 
 While Dux works on a reply, or someone at Start9 is typing one, the chat says so. You can keep writing in the meantime; Dux answers everything you sent together.
 
-**Chat info**, from the info icon in the header, shows the chat's topic, its status, who is in it, and Dux's notes on the case.
+**Chat info**, from the info icon in the header, shows the chat's topic, its status, who is in it, and Dux's notes on the case. **Download as a zip**, under **Export**, saves the whole chat. See [Exporting a Chat](#exporting-a-chat).
 
 ## Your Chats
 
@@ -33,16 +33,20 @@ A chat's status is in **Chat info**:
 
 - **Open** — the chat is active.
 - **Paused until** a time — Start9 has set the chat aside until then, usually while waiting on something. You can still write in it.
-- **Closed** — the chat is over. You can't write in it until you reopen it.
+- **Closed** — the chat is over, and you can't write in it. Continue it in a new chat instead.
 
-## Closing and Reopening
+## Closing a Chat
 
 A chat closes when:
 
 - **You close it**, with **Close chat** in the message field.
 - **Start9 closes it**, usually once the problem is solved. Dux may close a chat it has handled alone, with a final reply.
-- **Nobody writes in it for a while.** An inactive chat closes on its own, but never while you are waiting on a person or Helix is investigating.
+- **Nobody writes in it for a while.** An inactive chat closes on its own, but never while you are waiting on a person or Helix is investigating. The chat says it closed due to inactivity.
 
-If [chat transcripts](email.md) are on, a copy of a closed chat is emailed to you.
+To pick a closed chat back up, choose **Continue in a new chat** at the bottom of it and write your first message. The new chat is linked to the old one, and Dux starts from its notes on the case. A chat can be continued once; after that, its link takes you to the newer chat.
 
-To pick a closed chat back up, choose **Reopen chat** at the bottom of it. A chat closed a long time ago continues in a new chat instead, linked to the old one.
+## Exporting a Chat
+
+**Download as a zip**, under **Export** in **Chat info**, saves the whole chat: a `chat.md` file with every message in order and Dux's notes on the case, and an `attachments` folder with the files. If the chat continues an earlier one, that chat comes along too.
+
+Your private notes and attachments are in a separate `private` folder. Delete that folder before you pass the zip on to anyone.
