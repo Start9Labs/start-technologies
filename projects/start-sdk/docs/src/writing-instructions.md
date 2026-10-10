@@ -77,6 +77,7 @@ One good link beats three that muddy the index.
 - **Platform plumbing the user can't act on.** "Registration is typically triggered automatically by the bridge service" tells the reader nothing they can do with the information. If they'd never act on a sentence, cut it.
 - **The full configuration reference.** Link to upstream for that.
 - **Version numbers and image tags.** They go stale every release; the manifest is the source of truth.
+- **What changed in an update.** "After updating from an older release…", "now uses…", "no longer…" — that is `releaseNotes`. The file describes the service as it is, for someone who has never seen an older version.
 - **Architectural detail about how the package is built.** That is the README's job.
 - **Reasons the package was structured a particular way.** Users do not care.
 - **Internal terminology from the StartOS codebase** ("ABI", "task", "manifest", "subcontainer"). Use the words a user sees in the UI.
