@@ -31,7 +31,7 @@ use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::s9pk::v2::pack::{CONTAINER_DATADIR, CONTAINER_TOOL};
 use crate::ssh::SSH_DIR;
 use crate::system::{get_mem_info, sync_kiosk};
-use crate::util::io::{IOHook, open_file};
+use crate::util::io::{IOHook, dir_copy, open_file};
 use crate::util::lshw::lshw;
 use crate::util::{Invoke, cpupower};
 use crate::{Error, MAIN_DATA, PACKAGE_DATA, ResultExt};
@@ -140,6 +140,18 @@ pub async fn run_script<P: AsRef<Path>>(path: P, mut progress: PhaseProgressTrac
     progress.complete();
 }
 
+async fn persist_pstore_archive(source: &Path, destination: &Path) -> Result<(), Error> {
+    let mut archive = match tokio::fs::read_dir(source).await {
+        Ok(archive) => archive,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.into()),
+    };
+    if archive.next_entry().await?.is_some() {
+        dir_copy(source, destination, None).await?;
+    }
+    Ok(())
+}
+
 #[instrument(skip_all)]
 pub async fn init(
     webserver: &WebServerAcceptorSetter<WildcardListener>,
@@ -163,6 +175,16 @@ pub async fn init(
         postinit,
     }: InitPhases,
 ) -> Result<InitResult, Error> {
+    if let Err(e) = persist_pstore_archive(
+        Path::new("/var/lib/systemd/pstore"),
+        &Path::new(MAIN_DATA).join("pstore"),
+    )
+    .await
+    {
+        tracing::warn!("could not persist systemd-pstore archive: {e}");
+        tracing::debug!("{e:?}");
+    }
+
     if let Some(progress) = preinit {
         run_script("/media/startos/config/preinit.sh", progress).await;
     }
@@ -581,4 +603,106 @@ pub async fn cli_init_progress(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::persist_pstore_archive;
+
+    #[tokio::test]
+    async fn pstore_archive_preserves_nested_and_flat_files() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("archive");
+        let destination = root.path().join("main/pstore");
+        let efi = "2026-06-01-120000/dmesg-efi-123456789";
+        let ramoops = "dmesg-ramoops-0";
+        let console = "console-ramoops-0";
+        tokio::fs::create_dir_all(source.join("2026-06-01-120000"))
+            .await
+            .unwrap();
+        tokio::fs::write(source.join(efi), b"EFI panic\0\xff")
+            .await
+            .unwrap();
+        tokio::fs::write(source.join(ramoops), b"ramoops panic")
+            .await
+            .unwrap();
+        tokio::fs::write(source.join(console), b"console output")
+            .await
+            .unwrap();
+
+        persist_pstore_archive(&source, &destination).await.unwrap();
+        persist_pstore_archive(&source, &destination).await.unwrap();
+        tokio::fs::remove_dir_all(&source).await.unwrap();
+        tokio::fs::create_dir(&source).await.unwrap();
+        persist_pstore_archive(&source, &destination).await.unwrap();
+        tokio::fs::remove_dir(&source).await.unwrap();
+        persist_pstore_archive(&source, &destination).await.unwrap();
+
+        assert_eq!(
+            tokio::fs::read(destination.join(efi)).await.unwrap(),
+            b"EFI panic\0\xff"
+        );
+        assert_eq!(
+            tokio::fs::read(destination.join(ramoops)).await.unwrap(),
+            b"ramoops panic"
+        );
+        assert_eq!(
+            tokio::fs::read(destination.join(console)).await.unwrap(),
+            b"console output"
+        );
+
+        tokio::fs::create_dir_all(&source).await.unwrap();
+        tokio::fs::write(source.join("dmesg-ramoops-1"), b"later panic")
+            .await
+            .unwrap();
+        persist_pstore_archive(&source, &destination).await.unwrap();
+        assert_eq!(
+            tokio::fs::read(destination.join("dmesg-ramoops-1"))
+                .await
+                .unwrap(),
+            b"later panic"
+        );
+        assert_eq!(
+            tokio::fs::read(destination.join(ramoops)).await.unwrap(),
+            b"ramoops panic"
+        );
+    }
+
+    #[tokio::test]
+    async fn pstore_archive_empty_or_absent_source_leaves_destination_untouched() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("archive");
+        let destination = root.path().join("main/pstore");
+        persist_pstore_archive(&source, &destination).await.unwrap();
+        assert!(!destination.exists());
+        tokio::fs::create_dir(&source).await.unwrap();
+        persist_pstore_archive(&source, &destination).await.unwrap();
+        assert!(!destination.exists());
+    }
+
+    #[tokio::test]
+    async fn pstore_archive_reports_copy_errors() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("archive");
+        let destination = root.path().join("pstore");
+        tokio::fs::create_dir(&source).await.unwrap();
+        tokio::fs::write(source.join("dmesg-ramoops-0"), b"panic")
+            .await
+            .unwrap();
+        tokio::fs::write(&destination, b"existing evidence")
+            .await
+            .unwrap();
+
+        assert!(persist_pstore_archive(&source, &destination).await.is_err());
+        assert_eq!(
+            tokio::fs::read(&destination).await.unwrap(),
+            b"existing evidence"
+        );
+        assert_eq!(
+            tokio::fs::read(source.join("dmesg-ramoops-0"))
+                .await
+                .unwrap(),
+            b"panic"
+        );
+    }
 }

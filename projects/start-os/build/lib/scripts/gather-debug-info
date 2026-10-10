@@ -15,16 +15,14 @@ echo "===================================================================" >> "$
 echo "Generated on: $(date)" >> "$OUTPUT_FILE"
 echo "" >> "$OUTPUT_FILE"
 
-# Function to check if a command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Function to run a command if it exists and append its output to the file with headers
 run_command() {
     local CMD="$1"
     local DESC="$2"
-    local CMD_NAME="${CMD%% *}"  # Extract the command name (first word)
+    local CMD_NAME="${CMD%% *}"
 
     if command_exists "$CMD_NAME"; then
         echo "===================================================================" >> "$OUTPUT_FILE"
@@ -32,7 +30,11 @@ run_command() {
         echo "DESCRIPTION: $DESC" >> "$OUTPUT_FILE"
         echo "===================================================================" >> "$OUTPUT_FILE"
         echo "" >> "$OUTPUT_FILE"
-        eval "$CMD" >> "$OUTPUT_FILE" 2>&1
+        local STATUS=0
+        timeout --kill-after=2s 15s bash -c "$CMD" >> "$OUTPUT_FILE" 2>&1 || STATUS=$?
+        if [ "$STATUS" -ne 0 ]; then
+            echo "Command exited with status $STATUS (124/137 indicates timeout)." >> "$OUTPUT_FILE"
+        fi
         echo "" >> "$OUTPUT_FILE"
     else
         echo "===================================================================" >> "$OUTPUT_FILE"
@@ -48,6 +50,25 @@ run_command() {
 run_command "start-cli --version; start-cli git-info" "StartOS CLI version and Git information"
 run_command "hostname" "Hostname of the system"
 run_command "uname -a" "Kernel version and system architecture"
+
+run_command "cat /proc/cmdline" "Kernel command line"
+run_command "journalctl --no-pager -k -b 0" "Current boot kernel log"
+run_command "journalctl --no-pager -k -b -1" "Previous boot kernel log"
+run_command "journalctl --no-pager -b -1 -n 5000" "Previous boot journal (last 5000 entries)"
+run_command "systemctl show --no-pager -p RuntimeWatchdogUSec -p WatchdogDevice" "Effective systemd manager watchdog configuration"
+run_command "ls -l /dev/watchdog* /sys/class/watchdog" "Watchdog availability"
+run_command "grep -H . /sys/class/watchdog/watchdog*/{identity,state,status,bootstatus,timeout,timeleft,nowayout}" "Watchdog device status"
+
+run_command "nvme list" "NVMe device availability"
+for controller in /dev/nvme[0-9]*; do
+    if [[ "${controller##*/}" =~ ^nvme[0-9]+$ ]] && test -c "$controller"; then
+        run_command "nvme get-feature '$controller' --feature-id=0x0c --data-len=256 --human-readable" "NVMe APST feature state for $controller"
+    fi
+done
+
+for directory in /sys/fs/pstore /var/lib/systemd/pstore /media/startos/data/main/pstore; do
+    run_command "find '$directory' -type f -exec sh -c 'for file do printf \"\\n=== %s ===\\n\" \"\$file\"; cat -- \"\$file\"; done' sh {} +" "Pstore records from $directory"
+done
 
 # Services Info
 run_command "start-cli lxc stats" "All Running Services"
