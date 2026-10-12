@@ -133,7 +133,7 @@ pub fn registry_router(ctx: RegistryContext) -> Router {
             any(
                 Server::new(move || ready(Ok(ctx.clone())), registry_api())
                     .middleware(Cors::new())
-                    .middleware(Auth::new().with_local_auth().with_signature_auth())
+                    .middleware(Auth::new().with_signature_auth().with_local_auth())
                     .middleware(DeviceInfoMiddleware::new()),
             )
         })
