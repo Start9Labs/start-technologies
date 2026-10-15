@@ -1,0 +1,1 @@
+- **Required tasks preserve a service's desired running status.** Services resume automatically when the last blocking task clears, unless explicitly stopped. CLI `package start` records running intent and warns while critical tasks block execution.

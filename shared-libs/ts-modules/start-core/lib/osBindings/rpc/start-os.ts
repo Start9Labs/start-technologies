@@ -703,7 +703,7 @@ export type Api = {
           _RETURN: null
         }
         sideload: { _PARAMS: SideloadParamsInput; _RETURN: SideloadResponse }
-        start: { _PARAMS: StartParamsInput; _RETURN: null }
+        start: { _PARAMS: ControlParamsInput; _RETURN: null }
         stats: {
           _PARAMS: ({ format?: IoFormatInput | null } & {}) & {}
           _RETURN: { [key: string]: ServiceStats | null }
@@ -2363,7 +2363,6 @@ export type StartOsRecoveryInfo = {
   version: string
   timestamp: string
 }
-export type StartParamsInput = { id: PackageIdInput; force?: boolean }
 export type SubnetParamsInput = { subnet: string }
 export type SubscribeParamsInput = { pointer?: string | null }
 export type SubscribeRes = { dump: Dump; guid: Guid }

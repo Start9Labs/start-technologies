@@ -1,0 +1,1 @@
+- **`package start` records running intent while critical tasks block execution and prints a warning.** The service starts when those tasks clear. The `--force` flag is removed; remove it from scripts.
