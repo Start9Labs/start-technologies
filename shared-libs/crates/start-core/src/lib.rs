@@ -456,6 +456,11 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
+            "registry-signing",
+            system::registry_signing::registry_signing_api::<C>()
+                .with_about("about.commands-registry-signing"),
+        )
+        .subcommand(
             "set-keyboard",
             from_fn_async(system::set_keyboard)
                 .no_display()

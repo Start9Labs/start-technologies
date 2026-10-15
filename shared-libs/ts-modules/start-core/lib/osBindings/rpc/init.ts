@@ -195,6 +195,7 @@ export type Api = {
           _PARAMS: { format?: IoFormatInput | null } & {}
           _CHILDREN: {}
         }
+        'registry-signing': { _PARAMS: {}; _CHILDREN: {} }
       }
     }
     setup: {

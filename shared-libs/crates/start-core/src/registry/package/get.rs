@@ -16,7 +16,7 @@ use crate::prelude::*;
 use crate::progress::{FullProgressTracker, ProgressUnits};
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfo;
-use crate::registry::package::index::{PackageIndex, PackageVersionInfo};
+use crate::registry::package::index::{PackageIndex, PackageVersionInfo, Reader, ReaderParams};
 use crate::s9pk::manifest::{HardwareRequirements, LocaleString};
 use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::v2::SIG_CONTEXT;
@@ -86,6 +86,9 @@ pub struct GetPackageParams {
     #[arg(long, help = "help.arg.all-revisions")]
     #[serde(default)]
     pub all_revisions: bool,
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub reader: ReaderParams,
 }
 
 rpc_toolkit::reflect_ts!(GetPackageParams);
@@ -183,6 +186,7 @@ rpc_toolkit::reflect_ts!(GetPackageResult);
 
 fn get_matching_models(
     db: &Model<PackageIndex>,
+    reader: Option<&Reader>,
     GetPackageParams {
         id,
         source_version,
@@ -192,13 +196,17 @@ fn get_matching_models(
     }: &GetPackageParams,
 ) -> Result<Vec<(PackageId, ExtendedVersion, Model<PackageVersionInfo>)>, Error> {
     if let Some(id) = id {
-        if let Some(pkg) = db.as_packages().as_idx(id) {
-            vec![(id.clone(), pkg)]
-        } else {
-            vec![]
-        }
+        db.visible_package(id, reader)?
+            .map(|pkg| (id.clone(), pkg))
+            .into_iter()
+            .collect()
     } else {
-        db.as_packages().as_entries()?
+        db.as_packages()
+            .as_entries()?
+            .into_iter()
+            .map(|(k, v)| Ok::<_, Error>(v.is_visible_to(reader)?.then_some((k, v))))
+            .flatten_ok()
+            .collect::<Result<Vec<_>, _>>()?
     }
     .iter()
     .map(|(k, v)| {
@@ -282,11 +290,14 @@ fn hide_superseded_revisions(
 
 pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Result<Value, Error> {
     let peek = ctx.db.peek().await;
+    let reader = params.reader.reader(&peek)?;
     let mut best: BTreeMap<PackageId, BTreeMap<VersionString, Model<PackageVersionInfo>>> =
         Default::default();
     let mut other: BTreeMap<PackageId, BTreeMap<VersionString, Model<PackageVersionInfo>>> =
         Default::default();
-    for (id, version, info) in get_matching_models(&peek.as_index().as_package(), &params)? {
+    for (id, version, info) in
+        get_matching_models(&peek.as_index().as_package(), reader.as_ref(), &params)?
+    {
         let package_best = best.entry(id.clone()).or_default();
         let package_other = other.entry(id.clone()).or_default();
         if package_best.keys().all(|k| !(**k > version)) {
@@ -333,8 +344,7 @@ pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Resu
         let categories = peek
             .as_index()
             .as_package()
-            .as_packages()
-            .as_idx(id)
+            .visible_package(id, reader.as_ref())?
             .map(|p| p.as_categories().de())
             .transpose()?
             .unwrap_or_default();
@@ -689,6 +699,113 @@ pub async fn cli_download(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rpc_continuations::Guid;
+
+    fn signer(signer: &Guid, admin: bool) -> Reader {
+        Reader {
+            signer: signer.clone(),
+            admin,
+        }
+    }
+
+    fn private_index(reader: &Guid, publisher: &Guid, versions: Value) -> Model<PackageIndex> {
+        json!({
+            "categories": {},
+            "packages": {
+                "public": {
+                    "authorized": {},
+                    "categories": [],
+                    "versions": versions.clone(),
+                    "private": false,
+                    "readers": [],
+                },
+                "secret": {
+                    "authorized": { publisher.as_ref(): "*" },
+                    "categories": ["hidden"],
+                    "versions": versions,
+                    "private": true,
+                    "readers": [reader],
+                },
+            },
+        })
+        .into()
+    }
+
+    fn matching_ids(
+        db: &Model<PackageIndex>,
+        reader: Option<&Reader>,
+        id: Option<&str>,
+    ) -> BTreeSet<String> {
+        let params = GetPackageParams {
+            id: id.map(|id| id.parse().unwrap()),
+            target_version: None,
+            source_version: None,
+            device_info: None,
+            other_versions: None,
+            all_revisions: false,
+            reader: ReaderParams::default(),
+        };
+        get_matching_models(db, reader, &params)
+            .unwrap()
+            .into_iter()
+            .map(|(id, _, _)| id.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn private_package_matches_only_readers_publishers_and_admins() {
+        let reader = Guid::new();
+        let publisher = Guid::new();
+        let db = private_index(&reader, &publisher, json!({ "1.0.0:0": {} }));
+        let all = BTreeSet::from(["public".to_owned(), "secret".to_owned()]);
+        let public = BTreeSet::from(["public".to_owned()]);
+        assert_eq!(matching_ids(&db, None, None), public);
+        assert_eq!(
+            matching_ids(&db, Some(&signer(&Guid::new(), false)), None),
+            public
+        );
+        assert_eq!(matching_ids(&db, Some(&signer(&reader, false)), None), all);
+        assert_eq!(
+            matching_ids(&db, Some(&signer(&publisher, false)), None),
+            all
+        );
+        assert_eq!(
+            matching_ids(&db, Some(&signer(&Guid::new(), true)), None),
+            all
+        );
+        assert!(matching_ids(&db, None, Some("secret")).is_empty());
+        assert_eq!(
+            matching_ids(&db, Some(&signer(&reader, false)), Some("secret")),
+            BTreeSet::from(["secret".to_owned()])
+        );
+    }
+
+    #[test]
+    fn private_package_is_absent_from_index_for_others() {
+        let reader = signer(&Guid::new(), false);
+        let db = private_index(&reader.signer, &Guid::new(), json!({}));
+        let id = "secret".parse().unwrap();
+        assert!(db.visible_package(&id, None).unwrap().is_none());
+        assert!(db.visible_package(&id, Some(&reader)).unwrap().is_some());
+        let ids = |reader: Option<&Reader>| {
+            db.de_visible_to(reader)
+                .unwrap()
+                .packages
+                .into_keys()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(Some(&signer(&Guid::new(), false))), ["public"]);
+        assert_eq!(ids(Some(&reader)), ["public", "secret"]);
+    }
+
+    #[test]
+    fn package_without_access_fields_is_public() {
+        let info: crate::registry::package::index::PackageInfo =
+            serde_json::from_str(r#"{"authorized":{},"versions":{},"categories":[]}"#).unwrap();
+        assert!(!info.private);
+        assert!(info.readers.is_empty());
+    }
 
     fn versions(entries: &[&str]) -> BTreeMap<VersionString, Model<PackageVersionInfo>> {
         entries.iter().map(|v| version(v, Vec::new())).collect()

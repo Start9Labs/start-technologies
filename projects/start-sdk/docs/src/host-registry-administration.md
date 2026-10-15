@@ -34,6 +34,17 @@ start-cli registry package signer add <PACKAGE_ID> <SIGNER_ID> \
 
 `--versions` is a version range — Alice can publish any version in the range you grant her. Admins can publish any package at any version without an explicit scope.
 
+### Private packages
+
+A private package is hidden from every request not signed by an admin, a signer authorized for the package, or one of its readers. Readers are registered signers:
+
+```sh
+start-cli registry package access set-private <PACKAGE_ID> true
+start-cli registry package access add-reader <PACKAGE_ID> <SIGNER_ID>
+```
+
+Mark a package private before publishing its first version to keep it hidden from the start. `start-cli` signs its requests with its identity key. A StartOS server signs only to registries added with `start-cli server registry-signing add <REGISTRY_URL>`; `start-cli server registry-signing key` prints the key to register as its signer.
+
 ### Publishing a package
 
 From the directory containing the `.s9pk`:

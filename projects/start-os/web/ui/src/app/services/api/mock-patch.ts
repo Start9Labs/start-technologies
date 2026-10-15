@@ -309,6 +309,7 @@ export const mockPatchData: DataModel = {
     ntpSynced: false,
     smtp: null,
     echoipUrls: ['https://ipconfig.me', 'https://ifconfig.co'],
+    signedRegistries: [],
     zram: false,
     governor: 'performance',
     epp: 'balance_power',

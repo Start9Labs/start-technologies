@@ -10,6 +10,7 @@ use crate::context::CliContext;
 use crate::prelude::*;
 use crate::registry::admin::display_package_signers;
 use crate::registry::context::RegistryContext;
+use crate::registry::package::index::ReaderParams;
 use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::Guid;
 use crate::util::serde::HandlerExtSerde;
@@ -36,6 +37,7 @@ pub fn signer_api<C: Context>() -> ParentHandler<C> {
             "list",
             from_fn_async(list_package_signers)
                 .with_metadata("authenticated", Value::Bool(false))
+                .with_metadata("get_signer", Value::Bool(true))
                 .with_display_serializable()
                 .with_custom_display_fn(|handle, result| {
                     display_package_signers(handle.params, result)
@@ -161,6 +163,9 @@ pub async fn remove_package_signer(
 pub struct ListPackageSignersParams {
     #[arg(help = "help.arg.package-id")]
     pub id: PackageId,
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub reader: ReaderParams,
 }
 
 rpc_toolkit::reflect_ts!(ListPackageSignersParams);
@@ -168,13 +173,13 @@ rpc_toolkit::ts_export!(ListPackageSignersParams, namespaces = [""]);
 
 pub async fn list_package_signers(
     ctx: RegistryContext,
-    ListPackageSignersParams { id }: ListPackageSignersParams,
+    ListPackageSignersParams { id, reader }: ListPackageSignersParams,
 ) -> Result<BTreeMap<Guid, (SignerInfo, VersionRange)>, Error> {
     let db = ctx.db.peek().await;
+    let reader = reader.reader(&db)?;
     db.as_index()
         .as_package()
-        .as_packages()
-        .as_idx(&id)
+        .visible_package(&id, reader.as_ref())?
         .or_not_found(&id)?
         .as_authorized()
         .de()?

@@ -1358,20 +1358,22 @@ export type GetOutboundGatewayParams = { callback: CallbackId | null }
 export type GetOutboundGatewayParamsInput = {
   callback?: CallbackIdInput | null
 }
+export type GetPackageAccessParams = { id: PackageId }
+export type GetPackageAccessParamsInput = { id: PackageIdInput }
 export type GetPackageParams = {
   id: PackageId | null
   targetVersion: string | null
   sourceVersion: Version | null
   otherVersions: PackageDetailLevel | null
   allRevisions: boolean
-}
+} & ReaderParams
 export type GetPackageParamsInput = {
   id?: PackageIdInput | null
   targetVersion?: string | null
   sourceVersion?: VersionInput | null
   otherVersions?: PackageDetailLevelInput | null
   allRevisions?: boolean
-}
+} & ReaderParamsInput
 export type GetPackageResponse = {
   categories: string[]
   best: { [key: string]: PackageVersionInfo }
@@ -1688,8 +1690,10 @@ export type ListNotificationParamsInput = {
   before?: number | null
   limit?: number | null
 }
-export type ListPackageSignersParams = { id: PackageId }
-export type ListPackageSignersParamsInput = { id: PackageIdInput }
+export type ListPackageSignersParams = { id: PackageId } & ReaderParams
+export type ListPackageSignersParamsInput = {
+  id: PackageIdInput
+} & ReaderParamsInput
 export type ListServiceInterfacesParams = {
   packageId: PackageId | null
   callback: CallbackId | null
@@ -2072,6 +2076,14 @@ export type OsVersionInfoInput = {
 }
 export type OsVersionInfoMap = { [key: string]: OsVersionInfo }
 export type OsVersionInfoMapInput = { [key: string]: OsVersionInfoInput }
+export type PackageAccess = {
+  private: boolean
+  readers: { [key: string]: SignerInfo }
+}
+export type PackageAccessInput = {
+  private: boolean
+  readers: { [key: string]: SignerInfoInput }
+}
 export type PackageBackupInfo = {
   title: string
   version: Version
@@ -2135,11 +2147,21 @@ export type PackageInfo = {
   authorized: { [key: string]: string }
   versions: { [key: string]: PackageVersionInfo }
   categories: string[]
+  /**
+   * Hides the package from every read request not signed by an admin, an authorized signer, or one of `readers`.
+   */
+  private: boolean
+  readers: Guid[]
 }
 export type PackageInfoInput = {
   authorized: { [key: string]: string }
   versions: { [key: string]: PackageVersionInfoInput }
   categories: string[]
+  /**
+   * Hides the package from every read request not signed by an admin, an authorized signer, or one of `readers`.
+   */
+  private?: boolean
+  readers?: GuidInput[]
 }
 export type PackageInfoShort = { releaseNotes: LocaleString }
 export type PackageInfoShortInput = { releaseNotes: LocaleStringInput }
@@ -2203,6 +2225,8 @@ export type PackageMetadataInput = {
 }
 export type PackagePlugin = { url: UrlPluginRegistration | null }
 export type PackagePluginInput = { url?: UrlPluginRegistrationInput | null }
+export type PackageReaderParams = { id: PackageId; signer: Guid }
+export type PackageReaderParamsInput = { id: PackageIdInput; signer: GuidInput }
 export type PackageState =
   | (
       | ({ state: 'installing' } & Exclude<InstallingState, null>)
@@ -2582,6 +2606,16 @@ export type RangeServiceInterfaceInput = {
   description: string
   scheme?: string | null
 }
+
+/**
+ * The verified signer of a read request.
+ */
+export type ReaderParams = {}
+
+/**
+ * The verified signer of a read request.
+ */
+export type ReaderParamsInput = {}
 export type RebuildParams = { id: PackageId }
 export type RebuildParamsInput = { id: PackageIdInput }
 
@@ -2770,6 +2804,10 @@ export type ServerInfo = {
   epp: Epp | null
   smtp: SmtpValue | null
   echoipUrls: string[]
+  /**
+   * Registries that receive requests signed with the server's developer key.
+   */
+  signedRegistries: string[]
   ram: number
   devices: LshwDevice[]
   kiosk: boolean | null
@@ -2795,6 +2833,10 @@ export type ServerInfoInput = {
   epp?: EppInput | null
   smtp?: SmtpValueInput | null
   echoipUrls?: string[]
+  /**
+   * Registries that receive requests signed with the server's developer key.
+   */
+  signedRegistries?: string[]
   ram: number
   devices: LshwDeviceInput[]
   kiosk?: boolean | null
@@ -2919,6 +2961,11 @@ export type SetOutboundGatewayParams = {
 export type SetOutboundGatewayParamsInput = {
   package: PackageIdInput
   gateway?: GatewayIdInput | null
+}
+export type SetPackagePrivateParams = { id: PackageId; private: boolean }
+export type SetPackagePrivateParamsInput = {
+  id: PackageIdInput
+  private: boolean
 }
 export type SetServerHostnameParams = {
   /**

@@ -2486,6 +2486,14 @@ registry.package.remove-not-exist:
   fr_FR: "%{id}%{version}%{sighash} n'existe pas, donc non supprimé"
   pl_PL: "%{id}%{version}%{sighash} nie istnieje, więc nie usunięto"
 
+# registry/package/access.rs
+registry.package.access.not-reader:
+  en_US: "Signer %{signer} is not a reader of %{id}"
+  de_DE: "Unterzeichner %{signer} ist kein Leser von %{id}"
+  es_ES: "El firmante %{signer} no es lector de %{id}"
+  fr_FR: "Le signataire %{signer} n'est pas un lecteur de %{id}"
+  pl_PL: "Sygnatariusz %{signer} nie jest czytelnikiem %{id}"
+
 # registry/package/add.rs
 registry.package.add.must-specify-url:
   en_US: "Must specify at least 1 URL"
@@ -4058,6 +4066,13 @@ help.arg.package-ids-to-backup:
   fr_FR: "IDs de paquets à inclure dans la sauvegarde"
   pl_PL: "Identyfikatory pakietów do uwzględnienia w kopii zapasowej"
 
+help.arg.package-private:
+  en_US: "Whether only admins, the package's signers, and its readers can see it"
+  de_DE: "Ob nur Administratoren, die Unterzeichner des Pakets und seine Leser es sehen können"
+  es_ES: "Si solo los administradores, los firmantes del paquete y sus lectores pueden verlo"
+  fr_FR: "Si seuls les administrateurs, les signataires du paquet et ses lecteurs peuvent le voir"
+  pl_PL: "Czy tylko administratorzy, sygnatariusze pakietu i jego czytelnicy mogą go widzieć"
+
 help.arg.package-url:
   en_US: "URL of the package"
   de_DE: "URL des Pakets"
@@ -5034,6 +5049,13 @@ about.add-package-category:
   fr_FR: "Ajouter un paquet à une catégorie"
   pl_PL: "Dodaj pakiet do kategorii"
 
+about.add-package-reader:
+  en_US: "Allow a signer to see a private package"
+  de_DE: "Einem Unterzeichner erlauben, ein privates Paket zu sehen"
+  es_ES: "Permitir que un firmante vea un paquete privado"
+  fr_FR: "Autoriser un signataire à voir un paquet privé"
+  pl_PL: "Zezwól sygnatariuszowi na widzenie prywatnego pakietu"
+
 about.add-package-registry:
   en_US: "Add package to registry index"
   de_DE: "Paket zum Registry-Index hinzufügen"
@@ -5103,6 +5125,13 @@ about.add-remove-update-backup-target:
   es_ES: "Agregar, eliminar o actualizar un destino de respaldo"
   fr_FR: "Ajouter, supprimer ou mettre à jour une cible de sauvegarde"
   pl_PL: "Dodaj, usuń lub zaktualizuj cel kopii zapasowej"
+
+about.add-signed-registry:
+  en_US: "Sign requests to a registry"
+  de_DE: "Anfragen an eine Registry signieren"
+  es_ES: "Firmar las solicitudes a un registro"
+  fr_FR: "Signer les requêtes vers un registre"
+  pl_PL: "Podpisuj żądania do rejestru"
 
 about.add-signer:
   en_US: "Add signer"
@@ -5455,6 +5484,13 @@ about.commands-os-assets-versions:
   fr_FR: "Commandes liées aux actifs et versions du système d'exploitation"
   pl_PL: "Polecenia związane z zasobami i wersjami systemu operacyjnego"
 
+about.commands-package-access:
+  en_US: "Commands to manage private package access"
+  de_DE: "Befehle zur Verwaltung des Zugriffs auf private Pakete"
+  es_ES: "Comandos para gestionar el acceso a paquetes privados"
+  fr_FR: "Commandes pour gérer l'accès aux paquets privés"
+  pl_PL: "Polecenia do zarządzania dostępem do prywatnych pakietów"
+
 about.commands-packages:
   en_US: "Commands related to packages"
   de_DE: "Befehle zu Paketen"
@@ -5475,6 +5511,20 @@ about.commands-http-redirect:
   es_ES: "Comandos para gestionar redirecciones HTTP→HTTPS"
   fr_FR: "Commandes pour gérer les redirections HTTP→HTTPS"
   pl_PL: "Polecenia do zarządzania przekierowaniami HTTP→HTTPS"
+
+about.commands-registry-signing:
+  en_US: "Commands to choose which registries receive signed requests"
+  de_DE: "Befehle zur Auswahl der Registries, die signierte Anfragen erhalten"
+  es_ES: "Comandos para elegir qué registros reciben solicitudes firmadas"
+  fr_FR: "Commandes pour choisir les registres qui reçoivent des requêtes signées"
+  pl_PL: "Polecenia do wyboru rejestrów otrzymujących podpisane żądania"
+
+about.get-package-access:
+  en_US: "Show whether a package is private and which signers can see it"
+  de_DE: "Anzeigen, ob ein Paket privat ist und welche Unterzeichner es sehen können"
+  es_ES: "Mostrar si un paquete es privado y qué firmantes pueden verlo"
+  fr_FR: "Indiquer si un paquet est privé et quels signataires peuvent le voir"
+  pl_PL: "Pokaż, czy pakiet jest prywatny i którzy sygnatariusze mogą go widzieć"
 
 about.list-http-redirects:
   en_US: "List the port-80 HTTP→HTTPS redirect status of every public IPv4"
@@ -5966,6 +6016,13 @@ about.get-id-pubkey:
   fr_FR: "Obtenir la clé publique d'identité"
   pl_PL: "Pobierz klucz publiczny tożsamości"
 
+about.list-signed-registries:
+  en_US: "List registries that receive signed requests"
+  de_DE: "Registries auflisten, die signierte Anfragen erhalten"
+  es_ES: "Listar los registros que reciben solicitudes firmadas"
+  fr_FR: "Lister les registres qui reçoivent des requêtes signées"
+  pl_PL: "Wyświetl rejestry otrzymujące podpisane żądania"
+
 about.print-shell-completions:
   en_US: "Print a shell completion script"
   de_DE: "Ein Shell-Vervollständigungsskript ausgeben"
@@ -6380,6 +6437,27 @@ about.publish-s9pk:
   fr_FR: "Publier s9pk dans le bucket S3 et indexer dans le registre"
   pl_PL: "Opublikuj s9pk do bucketu S3 i zindeksuj w rejestrze"
 
+about.registry-signing-key:
+  en_US: "Show the key that signs registry requests"
+  de_DE: "Den Schlüssel anzeigen, der Registry-Anfragen signiert"
+  es_ES: "Mostrar la clave que firma las solicitudes al registro"
+  fr_FR: "Afficher la clé qui signe les requêtes vers le registre"
+  pl_PL: "Pokaż klucz podpisujący żądania do rejestru"
+
+about.remove-package-reader:
+  en_US: "Revoke a signer's access to a private package"
+  de_DE: "Den Zugriff eines Unterzeichners auf ein privates Paket widerrufen"
+  es_ES: "Revocar el acceso de un firmante a un paquete privado"
+  fr_FR: "Révoquer l'accès d'un signataire à un paquet privé"
+  pl_PL: "Odbierz sygnatariuszowi dostęp do prywatnego pakietu"
+
+about.remove-signed-registry:
+  en_US: "Stop signing requests to a registry"
+  de_DE: "Anfragen an eine Registry nicht mehr signieren"
+  es_ES: "Dejar de firmar las solicitudes a un registro"
+  fr_FR: "Ne plus signer les requêtes vers un registre"
+  pl_PL: "Przestań podpisywać żądania do rejestru"
+
 about.select-s9pk-for-device:
   en_US: "Select the best compatible s9pk for a target device"
   de_DE: "Das beste kompatible s9pk für ein Zielgerät auswählen"
@@ -6638,6 +6716,13 @@ about.reset-user-interface-password:
   es_ES: "Restablecer contraseña de la interfaz de usuario"
   fr_FR: "Réinitialiser le mot de passe de l'interface utilisateur"
   pl_PL: "Zresetuj hasło interfejsu użytkownika"
+
+about.set-package-private:
+  en_US: "Set whether a package is private"
+  de_DE: "Festlegen, ob ein Paket privat ist"
+  es_ES: "Establecer si un paquete es privado"
+  fr_FR: "Définir si un paquet est privé"
+  pl_PL: "Ustaw, czy pakiet jest prywatny"
 
 about.uninitialize-webserver:
   en_US: "Uninitialize the webserver"

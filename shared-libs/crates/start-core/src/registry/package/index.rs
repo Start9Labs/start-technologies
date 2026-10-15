@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::u32;
 
 use chrono::Utc;
+use clap::Parser;
 use exver::{Version, VersionRange};
 use imbl_value::InternedString;
 use patch_db::ModelExt;
@@ -11,6 +12,7 @@ use url::Url;
 use crate::PackageId;
 use crate::db::model::package::CurrentDependencyKind;
 use crate::prelude::*;
+use crate::registry::RegistryDatabase;
 use crate::registry::asset::RegistryAsset;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfo;
@@ -46,10 +48,93 @@ pub struct PackageInfo {
     #[visit(ts(type = "string[]"), wire = "rpc_toolkit::ts::Unknown")]
     #[visit(opaque, type_attributes(visit::wire))]
     pub categories: BTreeSet<InternedString>,
+    /// Hides the package from every read request not signed by an admin, an authorized signer, or one of `readers`.
+    #[serde(default)]
+    pub private: bool,
+    #[serde(default)]
+    pub readers: BTreeSet<Guid>,
 }
 
 rpc_toolkit::reflect_ts!(PackageInfo);
 rpc_toolkit::ts_export!(PackageInfo, namespaces = [""]);
+
+/// The registered signer of a read request.
+#[derive(Clone, Debug)]
+pub struct Reader {
+    pub signer: Guid,
+    pub admin: bool,
+}
+
+impl Model<PackageInfo> {
+    pub fn is_visible_to(&self, reader: Option<&Reader>) -> Result<bool, Error> {
+        if !self.as_private().de()? {
+            return Ok(true);
+        }
+        let Some(reader) = reader else {
+            return Ok(false);
+        };
+        Ok(reader.admin
+            || self.as_authorized().contains_key(&reader.signer)?
+            || self.as_readers().de()?.contains(&reader.signer))
+    }
+}
+
+impl Model<PackageIndex> {
+    /// None when the package is absent or hidden from the reader.
+    pub fn visible_package(
+        &self,
+        id: &PackageId,
+        reader: Option<&Reader>,
+    ) -> Result<Option<&Model<PackageInfo>>, Error> {
+        match self.as_packages().as_idx(id) {
+            Some(info) if info.is_visible_to(reader)? => Ok(Some(info)),
+            _ => Ok(None),
+        }
+    }
+
+    /// Omits the packages hidden from the reader.
+    pub fn de_visible_to(&self, reader: Option<&Reader>) -> Result<PackageIndex, Error> {
+        let mut packages = BTreeMap::new();
+        for (id, info) in self.as_packages().as_entries()? {
+            if info.is_visible_to(reader)? {
+                packages.insert(id, info.de()?);
+            }
+        }
+        Ok(PackageIndex {
+            categories: self.as_categories().de()?,
+            packages,
+        })
+    }
+}
+
+/// The verified signer of a read request.
+#[derive(Debug, Default, Deserialize, Serialize, VisitFields, Parser)]
+#[group(skip)]
+pub struct ReaderParams {
+    #[arg(skip)]
+    #[visit(ts(skip), wire = "rpc_toolkit::ts::Unknown")]
+    #[serde(rename = "__Auth_signer")]
+    #[visit(opaque, type_attributes(visit::wire))]
+    pub signer: Option<AnyVerifyingKey>,
+}
+
+rpc_toolkit::reflect_ts!(ReaderParams);
+
+impl ReaderParams {
+    /// None for an unsigned request or an unregistered key.
+    pub fn reader(&self, db: &Model<RegistryDatabase>) -> Result<Option<Reader>, Error> {
+        let Some(key) = &self.signer else {
+            return Ok(None);
+        };
+        let Some(signer) = db.as_index().as_signers().find_signer(key)? else {
+            return Ok(None);
+        };
+        Ok(Some(Reader {
+            admin: db.as_admins().de()?.contains(&signer),
+            signer,
+        }))
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -348,8 +433,13 @@ impl Model<PackageVersionInfo> {
     }
 }
 
-pub async fn get_package_index(ctx: RegistryContext) -> Result<PackageIndex, Error> {
-    ctx.db.peek().await.into_index().into_package().de()
+pub async fn get_package_index(
+    ctx: RegistryContext,
+    params: ReaderParams,
+) -> Result<PackageIndex, Error> {
+    let peek = ctx.db.peek().await;
+    let reader = params.reader(&peek)?;
+    peek.as_index().as_package().de_visible_to(reader.as_ref())
 }
 
 #[cfg(test)]

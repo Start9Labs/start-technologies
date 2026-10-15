@@ -747,7 +747,7 @@ export type Api = {
           }
         }
         index: {
-          _PARAMS: ({ format?: IoFormatInput | null } & {}) & {}
+          _PARAMS: ({ format?: IoFormatInput | null } & {}) & ReaderParamsInput
           _RETURN: FullIndex
         }
         info: {
@@ -866,6 +866,28 @@ export type Api = {
         package: {
           _PARAMS: {}
           _CHILDREN: {
+            access: {
+              _PARAMS: {}
+              _CHILDREN: {
+                'add-reader': {
+                  _PARAMS: PackageReaderParamsInput
+                  _RETURN: null
+                }
+                get: {
+                  _PARAMS: ({ format?: IoFormatInput | null } & {}) &
+                    GetPackageAccessParamsInput
+                  _RETURN: PackageAccess
+                }
+                'remove-reader': {
+                  _PARAMS: PackageReaderParamsInput
+                  _RETURN: null
+                }
+                'set-private': {
+                  _PARAMS: SetPackagePrivateParamsInput
+                  _RETURN: null
+                }
+              }
+            }
             add: { _PARAMS: AddPackageParamsInput; _RETURN: null }
             'add-mirror': { _PARAMS: AddMirrorParamsInput; _RETURN: null }
             category: {
@@ -893,7 +915,8 @@ export type Api = {
               _RETURN: GetPackageResult
             }
             index: {
-              _PARAMS: ({ format?: IoFormatInput | null } & {}) & {}
+              _PARAMS: ({ format?: IoFormatInput | null } & {}) &
+                ReaderParamsInput
               _RETURN: PackageIndex
             }
             remove: { _PARAMS: RemovePackageParamsInput; _RETURN: boolean }
@@ -1036,6 +1059,21 @@ export type Api = {
           }
         }
         rebuild: { _PARAMS: {}; _RETURN: null }
+        'registry-signing': {
+          _PARAMS: {}
+          _CHILDREN: {
+            add: { _PARAMS: RegistryUrlParamsInput; _RETURN: null }
+            key: {
+              _PARAMS: ({ format?: IoFormatInput | null } & {}) & {}
+              _RETURN: AnyVerifyingKey
+            }
+            list: {
+              _PARAMS: ({ format?: IoFormatInput | null } & {}) & {}
+              _RETURN: string[]
+            }
+            remove: { _PARAMS: RegistryUrlParamsInput; _RETURN: null }
+          }
+        }
         restart: { _PARAMS: ShutdownParamsInput; _RETURN: null }
         'set-echoip-urls': { _PARAMS: SetEchoipUrlsParamsInput; _RETURN: null }
         'set-hostname': { _PARAMS: SetServerHostnameParamsInput; _RETURN: null }
@@ -1651,13 +1689,14 @@ export type GetOsVersionParamsInput = {
   serverId?: string | null
   platform?: string | null
 }
+export type GetPackageAccessParamsInput = { id: PackageIdInput }
 export type GetPackageParamsInput = {
   id?: PackageIdInput | null
   targetVersion?: string | null
   sourceVersion?: VersionInput | null
   otherVersions?: PackageDetailLevelInput | null
   allRevisions?: boolean
-}
+} & ReaderParamsInput
 export type GetPackageResponse = {
   categories: string[]
   best: { [key: string]: PackageVersionInfo }
@@ -1811,7 +1850,9 @@ export type ListNotificationParamsInput = {
   before?: number | null
   limit?: number | null
 }
-export type ListPackageSignersParamsInput = { id: PackageIdInput }
+export type ListPackageSignersParamsInput = {
+  id: PackageIdInput
+} & ReaderParamsInput
 export type ListParamsInput = {}
 export type ListVersionSignersParamsInput = { version: string }
 export type LocaleString = string | Record<string, string>
@@ -1969,6 +2010,10 @@ export type OsVersionInfo = {
   img: { [key: string]: RegistryAsset<Blake3Commitment> }
 }
 export type OsVersionInfoMap = { [key: string]: OsVersionInfo }
+export type PackageAccess = {
+  private: boolean
+  readers: { [key: string]: SignerInfo }
+}
 export type PackageBackupInfo = {
   title: string
   version: Version
@@ -1987,6 +2032,11 @@ export type PackageInfo = {
   authorized: { [key: string]: string }
   versions: { [key: string]: PackageVersionInfo }
   categories: string[]
+  /**
+   * Hides the package from every read request not signed by an admin, an authorized signer, or one of `readers`.
+   */
+  private: boolean
+  readers: Guid[]
 }
 export type PackageInfoShort = { releaseNotes: LocaleString }
 export type PackageMetadata = {
@@ -2018,6 +2068,7 @@ export type PackageMetadata = {
   plugins: PluginId[]
   satisfies: Version[]
 }
+export type PackageReaderParamsInput = { id: PackageIdInput; signer: GuidInput }
 export type PackageVersionCount = {
   pkgId: string
   version: string
@@ -2093,6 +2144,11 @@ export type QueryDnsParamsInput = { fqdn: string }
  * IPv4 and an `AAAA` at the box's IPv6 GUA. Either may be absent.
  */
 export type QueryDnsRes = { ipv4: string | null; ipv6: string | null }
+
+/**
+ * The verified signer of a read request.
+ */
+export type ReaderParamsInput = {}
 export type RebuildParamsInput = { id: PackageIdInput }
 
 /**
@@ -2252,6 +2308,10 @@ export type SetNameParamsInput = { name: string }
 export type SetOutboundGatewayParamsInput = {
   package: PackageIdInput
   gateway?: GatewayIdInput | null
+}
+export type SetPackagePrivateParamsInput = {
+  id: PackageIdInput
+  private: boolean
 }
 export type SetPasswordParamsInput = { password: string }
 export type SetPinholeEnabledParamsInput = {

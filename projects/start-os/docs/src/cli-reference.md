@@ -168,6 +168,26 @@ Set the keyboard layout.
 
 Set the Echo IP service URLs used for external IP detection.
 
+### `start-cli server registry-signing add <REGISTRY>`
+
+Sign requests to a registry with the server's key, so the registry can show the server private packages it may read.
+
+### `start-cli server registry-signing remove <REGISTRY>`
+
+Stop signing requests to a registry.
+
+### `start-cli server registry-signing list`
+
+List registries that receive signed requests.
+
+- `--format` — Output format
+
+### `start-cli server registry-signing key`
+
+Show the key the server signs registry requests with. A registry admin adds it as a signer and as a reader of private packages.
+
+- `--format` — Output format
+
 ### `start-cli server governor [SET]`
 
 View or set the CPU governor (e.g., `performance`, `powersave`).
@@ -1004,6 +1024,28 @@ Revoke a signer for a package.
 ### `start-cli registry package signer list <ID>`
 
 List authorized signers for a package.
+
+- `--format` — Output format
+
+### Registry Package Access
+
+Hide a package from everyone except the signers allowed to read it. A private package is left out of `package get`, `package index`, `index`, and `package signer list` unless the request is signed by an admin, a signer authorized for the package, or one of its readers.
+
+### `start-cli registry package access set-private <ID> <PRIVATE>`
+
+Set whether a package is private (`true` or `false`). Creates the package entry if it has no versions yet.
+
+### `start-cli registry package access add-reader <ID> <SIGNER>`
+
+Allow a signer to see a private package.
+
+### `start-cli registry package access remove-reader <ID> <SIGNER>`
+
+Revoke a signer's access to a private package.
+
+### `start-cli registry package access get <ID>`
+
+Show whether a package is private and which signers can see it.
 
 - `--format` — Output format
 

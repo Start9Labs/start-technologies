@@ -14,7 +14,7 @@ use crate::prelude::*;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfoMiddleware;
 use crate::registry::os::index::OsIndex;
-use crate::registry::package::index::PackageIndex;
+use crate::registry::package::index::{PackageIndex, ReaderParams};
 use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::manifest::LocaleString;
@@ -70,8 +70,21 @@ pub struct FullIndex {
 rpc_toolkit::reflect_ts!(FullIndex);
 rpc_toolkit::ts_export!(FullIndex, namespaces = [""]);
 
-pub async fn get_full_index(ctx: RegistryContext) -> Result<FullIndex, Error> {
-    ctx.db.peek().await.into_index().de()
+pub async fn get_full_index(
+    ctx: RegistryContext,
+    params: ReaderParams,
+) -> Result<FullIndex, Error> {
+    let peek = ctx.db.peek().await;
+    let reader = params.reader(&peek)?;
+    let index = peek.as_index();
+    Ok(FullIndex {
+        name: index.as_name().de()?,
+        icon: index.as_icon().de()?,
+        description: index.as_description().de()?,
+        package: index.as_package().de_visible_to(reader.as_ref())?,
+        os: index.as_os().de()?,
+        signers: index.as_signers().de()?,
+    })
 }
 
 pub fn registry_api<C: Context>() -> ParentHandler<C> {
@@ -79,6 +92,7 @@ pub fn registry_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "index",
             from_fn_async(get_full_index)
+                .with_metadata("get_signer", Value::Bool(true))
                 .with_display_serializable()
                 .with_about("about.list-registry-info-packages")
                 .with_call_remote::<CliContext>(),
@@ -119,7 +133,7 @@ pub fn registry_router(ctx: RegistryContext) -> Router {
             any(
                 Server::new(move || ready(Ok(ctx.clone())), registry_api())
                     .middleware(Cors::new())
-                    .middleware(Auth::new().with_local_auth().with_signature_auth())
+                    .middleware(Auth::new().with_signature_auth().with_local_auth())
                     .middleware(DeviceInfoMiddleware::new()),
             )
         })

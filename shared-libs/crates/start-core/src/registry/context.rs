@@ -34,6 +34,7 @@ use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
 use crate::sign::AnyVerifyingKey;
 use crate::util::io::append_file;
+use crate::util::serde::const_true;
 use crate::util::sync::SyncMutex;
 
 const DEFAULT_REGISTRY_LISTEN: SocketAddr =
@@ -279,6 +280,19 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
             device_info = Some(di);
         }
 
+        let sig_context = registry_sig_context(
+            &self
+                .db
+                .peek()
+                .await
+                .as_public()
+                .as_server_info()
+                .as_signed_registries()
+                .de()?,
+            &registry,
+        );
+        let is_onion = registry.host_str().map_or(false, |h| h.ends_with(".onion"));
+
         registry
             .path_segments_mut()
             .map_err(|_| Error::new(eyre!("cannot extend URL path"), ErrorKind::ParseUrl))?
@@ -286,8 +300,6 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
             .push("v0");
 
         method = method.strip_prefix("registry.").unwrap_or(method);
-        let sig_context = registry.host_str().map(InternedString::from);
-        let is_onion = registry.host_str().map_or(false, |h| h.ends_with(".onion"));
 
         let mut res = match crate::middleware::auth::signature::call_remote_with_client(
             self,
@@ -310,6 +322,18 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
         }
 
         Ok(res)
+    }
+}
+
+/// None for a registry that does not receive signed requests.
+fn registry_sig_context(
+    signed_registries: &BTreeSet<Url>,
+    registry: &Url,
+) -> Option<InternedString> {
+    if signed_registries.contains(registry) {
+        registry.host_str().map(InternedString::from)
+    } else {
+        None
     }
 }
 
@@ -338,6 +362,8 @@ async fn onion_tor_hint(ctx: &RpcContext, original: RpcError) -> RpcError {
 pub struct RegistryAuthMetadata {
     #[serde(default)]
     admin: bool,
+    #[serde(default = "const_true")]
+    authenticated: bool,
 }
 
 #[derive(Serialize, Deserialize, VisitFields)]
@@ -400,6 +426,9 @@ impl SignatureAuthContext for RegistryContext {
         pubkey: Option<&AnyVerifyingKey>,
         metadata: Self::AdditionalMetadata,
     ) -> Result<Self::CheckPubkeyRes, Error> {
+        if !metadata.authenticated {
+            return Ok(None);
+        }
         if let Some(pubkey) = pubkey {
             let (guid, admin) = db.as_index().as_signers().get_signer_info(pubkey)?;
             if !metadata.admin || db.as_admins().de()?.contains(&guid) {
@@ -434,5 +463,23 @@ impl SignatureAuthContext for RegistryContext {
             .await?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn signs_only_requests_to_signed_registries() {
+        let signed: Url = "https://private.example.com".parse().unwrap();
+        let other: Url = "https://registry.start9.com/".parse().unwrap();
+        let signed_registries = BTreeSet::from(["https://private.example.com/".parse().unwrap()]);
+        assert_eq!(
+            registry_sig_context(&signed_registries, &signed).as_deref(),
+            Some("private.example.com")
+        );
+        assert_eq!(registry_sig_context(&signed_registries, &other), None);
+        assert_eq!(registry_sig_context(&BTreeSet::new(), &signed), None);
     }
 }

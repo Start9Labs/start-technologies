@@ -144,6 +144,7 @@ impl Public {
                 epp: None,
                 smtp: None,
                 echoip_urls: default_echoip_urls(),
+                signed_registries: BTreeSet::new(),
                 ram: 0,
                 devices: Vec::new(),
                 kiosk: Some(kiosk).filter(|_| &*PLATFORM != "raspberrypi"),
@@ -203,6 +204,11 @@ pub struct ServerInfo {
     #[visit(ts(type = "string[]"), wire = "rpc_toolkit::ts::Unknown")]
     #[visit(opaque, type_attributes(visit::wire))]
     pub echoip_urls: Vec<Url>,
+    /// Registries that receive requests signed with the server's developer key.
+    #[serde(default)]
+    #[visit(ts(type = "string[]"), wire = "rpc_toolkit::ts::Unknown")]
+    #[visit(opaque, type_attributes(visit::wire))]
+    pub signed_registries: BTreeSet<Url>,
     #[visit(ts(type = "number"), wire = "rpc_toolkit::ts::Unknown")]
     #[visit(opaque, type_attributes(visit::wire))]
     pub ram: u64,

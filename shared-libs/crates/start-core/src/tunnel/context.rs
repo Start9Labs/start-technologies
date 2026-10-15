@@ -927,7 +927,7 @@ impl UiContext for TunnelContext {
     fn middleware(server: rpc_toolkit::Server<Self>) -> rpc_toolkit::HttpServer<Self> {
         server
             .middleware(Cors::new())
-            .middleware(Auth::new().with_local_auth().with_signature_auth())
+            .middleware(Auth::new().with_signature_auth().with_local_auth())
     }
 }
 

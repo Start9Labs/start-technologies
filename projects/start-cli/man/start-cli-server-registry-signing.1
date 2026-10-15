@@ -1,0 +1,26 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-server-registry-signing 1  "registry-signing "
+.SH NAME
+start\-cli\-server\-registry\-signing \- Commands to choose which registries receive signed requests
+.SH SYNOPSIS
+\fBstart\-cli server registry\-signing\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Commands to choose which registries receive signed requests
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+start\-cli\-server\-registry\-signing\-add(1)
+Sign requests to a registry
+.TP
+start\-cli\-server\-registry\-signing\-key(1)
+Show the key that signs registry requests
+.TP
+start\-cli\-server\-registry\-signing\-list(1)
+List registries that receive signed requests
+.TP
+start\-cli\-server\-registry\-signing\-remove(1)
+Stop signing requests to a registry

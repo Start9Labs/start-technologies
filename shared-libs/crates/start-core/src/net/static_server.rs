@@ -83,7 +83,7 @@ impl UiContext for RpcContext {
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
         server
             .middleware(Cors::new())
-            .middleware(Auth::new().with_local_auth().with_signature_auth())
+            .middleware(Auth::new().with_signature_auth().with_local_auth())
             .middleware(SyncDb::new())
     }
     fn extend_router(self, router: Router) -> Router {
