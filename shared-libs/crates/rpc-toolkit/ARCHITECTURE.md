@@ -13,7 +13,7 @@ emitting zod schemas and TypeScript types for clients.
 - **Consumers:** `start-core`. It is a first-party crate consumed via a direct path dependency —
   no `[patch]` redirect.
 - **Notable deps:** `imbl-value` (sibling crate, path dep) for the value model, `yajrc` for the
-  JSON-RPC wire types, `axum` for HTTP, `clap` for the CLI, `reqwest` for outbound remote calls,
+  JSON-RPC wire types, `axum` for HTTP, `rmcp` (optional) for MCP, `clap` for the CLI, `reqwest` for outbound remote calls,
   and `visit-rs` (optional) for generic raw type reflection.
 
 ## Handlers
@@ -53,6 +53,20 @@ Transports wrap a `Server`:
 - **HTTP** (`server/http.rs`): `HttpServer` on `axum`, with content-negotiated CBOR/JSON encoding
   and a `Middleware` pipeline (`process_http_request`, `process_rpc_request`, `process_rpc_response`,
   `process_http_response`, all defaulting to no-ops) erased through `DynMiddleware`.
+- **MCP** (`server/mcp.rs`, opt-in `mcp` feature): `McpServer` offers methods of an `HttpServer`'s
+  tree as [MCP](https://modelcontextprotocol.io) tools over streamable HTTP via `rmcp`, served
+  statelessly with JSON responses. The transport overrides session and response-mode
+  configuration; response middleware runs after tool dispatch and before HTTP headers are sent.
+  The tools are a catalog of `rmcp::model::Tool` descriptions — generated at build
+  time by the schema module's `toolCatalog` (`src/tool-catalog.ts`) — checked against the
+  tree at construction. A
+  `ToolPolicy` decides from each method's metadata whether it is offered and which
+  `ToolAnnotations` it carries. `McpService` runs the `HttpServer`'s middleware unchanged:
+  `process_http_request` once per HTTP request (shared with the JSON-RPC path through
+  `begin_http_request`), then `process_rpc_request`, dispatch and `process_rpc_response` per tool
+  call, then `process_http_response`. Handler results become text content, plus
+  `structuredContent` when the tool declares an `outputSchema`; RPC errors become `isError`
+  results carrying the serialized `RpcError`.
 - **Sockets** (`server/socket.rs`): `run_socket` over any `AsyncRead + AsyncWrite`, `run_unix`,
   and `run_tcp`, all line-delimited JSON. `ShutdownHandle` triggers graceful shutdown.
 

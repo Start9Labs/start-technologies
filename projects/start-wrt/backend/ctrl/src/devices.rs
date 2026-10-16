@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use rpc_toolkit::{from_fn_async, from_fn_async_local, HandlerExt as _, ParentHandler};
 use serde::{Deserialize, Serialize};
-use uciedit::openwrt::{DhcpHost, WifiDevice, WifiInterface};
+use uciedit::openwrt::DhcpHost;
 use uciedit::{dump_all, parse_all, Arena, Configs, Line, TypedSection};
 
 use crate::error::ErrorKind;
@@ -461,56 +461,18 @@ async fn get_wifi_clients() -> (HashMap<String, String>, std::collections::HashS
         .filter(|l| l.starts_with("hostapd."))
         .collect();
 
-    if hostapd_ifaces.is_empty() {
-        return (wifi_macs, wifi_ports);
-    }
-
-    // 2. Get wifi device → band mapping from UCI
-    // We'll do this by reading the wireless config
-    let mut iface_to_band: HashMap<String, String> = HashMap::new();
-
-    // Read UCI wireless config for device bands
-    let arena = Arena::new();
-    if let Ok(cfgs) = parse_all("/etc/config", &arena, &["wireless"]).await {
-        // Build radio → band map
-        let mut radio_band: HashMap<String, String> = HashMap::new();
-        cfgs["wireless"]
-            .each::<WifiDevice, Error>(|name, dev| {
-                if let Some(name) = name {
-                    let band_label = match dev.band.as_str() {
-                        "2g" => "Wi-Fi 2.4GHz",
-                        "5g" => "Wi-Fi 5GHz",
-                        "6g" => "Wi-Fi 6GHz",
-                        _ => "Wi-Fi",
-                    };
-                    radio_band.insert(name.to_string(), band_label.to_string());
-                }
-            })
-            .ok();
-
-        // Map wifi-iface section name → band via its device field
-        cfgs["wireless"]
-            .try_each(|name, iface: WifiInterface| {
-                if let Some(name) = name {
-                    if let Some(band) = radio_band.get(&iface.device) {
-                        // hostapd uses the section name as the interface name
-                        iface_to_band.insert(name.to_string(), band.clone());
-                    }
-                }
-                Ok::<_, Error>(())
-            })
-            .ok();
-    }
-
-    // 3. Query each hostapd interface for clients
+    // 2. Query each hostapd interface for its band and clients
     for hostapd in hostapd_ifaces {
-        // hostapd.wlan0 → wlan0
+        // hostapd.phy0-ap0 → phy0-ap0
         let wlan_name = hostapd.strip_prefix("hostapd.").unwrap_or(hostapd);
         wifi_ports.insert(wlan_name.to_string());
-        let band = iface_to_band
-            .get(wlan_name)
-            .cloned()
-            .unwrap_or_else(|| "Wi-Fi".to_string());
+        let status = run_cmd("ubus", &["call", hostapd, "get_status"]).await;
+        let band = wifi_band_label(
+            serde_json::from_str::<serde_json::Value>(&status)
+                .ok()
+                .and_then(|s| s.get("freq")?.as_u64()),
+        )
+        .to_string();
 
         let output = run_cmd("ubus", &["call", hostapd, "get_clients"]).await;
         if output.is_empty() {
@@ -528,6 +490,16 @@ async fn get_wifi_clients() -> (HashMap<String, String>, std::collections::HashS
     }
 
     (wifi_macs, wifi_ports)
+}
+
+/// Connection label for an access point's operating frequency in MHz.
+fn wifi_band_label(freq: Option<u64>) -> &'static str {
+    match freq.and_then(crate::wifi::frequency_band) {
+        Some("2g") => "Wi-Fi 2.4GHz",
+        Some("5g") => "Wi-Fi 5GHz",
+        Some("6g") => "Wi-Fi 6GHz",
+        _ => "Wi-Fi",
+    }
 }
 
 /// Parse `bridge fdb show br br-lan` to map each MAC to its bridge port.
@@ -2238,6 +2210,18 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wifi_band_label_follows_frequency() {
+        assert_eq!(wifi_band_label(Some(2412)), "Wi-Fi 2.4GHz");
+        assert_eq!(wifi_band_label(Some(2484)), "Wi-Fi 2.4GHz");
+        assert_eq!(wifi_band_label(Some(5180)), "Wi-Fi 5GHz");
+        assert_eq!(wifi_band_label(Some(5745)), "Wi-Fi 5GHz");
+        assert_eq!(wifi_band_label(Some(5885)), "Wi-Fi 5GHz");
+        assert_eq!(wifi_band_label(Some(5955)), "Wi-Fi 6GHz");
+        assert_eq!(wifi_band_label(Some(60480)), "Wi-Fi");
+        assert_eq!(wifi_band_label(None), "Wi-Fi");
+    }
 
     #[test]
     fn device_names_must_be_hostname_labels() {

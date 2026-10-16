@@ -273,12 +273,14 @@ impl ExecParams {
         }
         cmd.args(args);
 
-        if let Some(workdir) = workdir {
-            cmd.current_dir(workdir);
-        } else {
-            cmd.current_dir("/");
-        }
-        Err(cmd.exec().into())
+        let workdir = workdir.as_deref().unwrap_or(Path::new("/"));
+        cmd.current_dir(workdir);
+        Err(cmd.exec()).with_ctx(|_| {
+            (
+                ErrorKind::Filesystem,
+                lazy_format!("exec {command:?} in {workdir:?}"),
+            )
+        })
     }
 }
 

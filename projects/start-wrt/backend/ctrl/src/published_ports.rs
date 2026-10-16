@@ -888,13 +888,7 @@ pub async fn set<C: CtrlContext>(
 ) -> Result<PublishedPortsSetResult, Error> {
     validate_inputs(&req.ports)?;
 
-    // A LAN device can only have a Global Unicast Address (GUA) if the router
-    // itself has a globally-routable IPv6 prefix delegated. Resolve this once;
-    // it gates IPv6 publishing in the validation loop below. In configs-only
-    // mode we can't probe the WAN (and validation is skipped anyway), so this
-    // stays false. Failing closed here is the safe direction for a hardening
-    // guard: a transient WAN-probe miss yields a clear, retryable rejection
-    // rather than silently saving a forward that can never work.
+    // A missed WAN probe rejects every IPv6 port.
     let router_has_gua = ctx.effectful()
         && crate::system::has_global_ipv6(
             &crate::system::get_wan_ipv6s().await.unwrap_or_default(),
@@ -930,56 +924,13 @@ pub async fn set<C: CtrlContext>(
         };
         let now = chrono::Utc::now().timestamp();
 
-        // Validate that enabled ports have the required device addresses
-        if ctx.effectful() {
-            for port in &req.ports {
-                if !port.enabled || port.device_mac.is_empty() {
-                    continue;
-                }
-                let info = device_info.get(&port.device_mac.to_uppercase());
-                let (ipv4_addr, ipv6_addr) = info
-                    .map(|i| (i.ipv4.as_ref(), i.ipv6.as_ref()))
-                    .unwrap_or((None, None));
-                if port.ipv4 && ipv4_addr.is_none() {
-                    return Err(Error::new(
-                        eyre!(
-                            "missing IPv4 address for device {} (port forward '{}')",
-                            port.device_mac,
-                            port.label
-                        ),
-                        ErrorKind::MissingDeviceAddress,
-                    ));
-                }
-                // IPv6 publishing requires a Global Unicast Address: ULA and
-                // link-local are unreachable from the WAN, so a rule for them is
-                // a silent no-op. Reject the whole port (matching the IPv4 check
-                // above) rather than save a forward that can never work. Three
-                // confident signals trigger rejection:
-                //   * the router has no global IPv6 prefix at all, so no LAN
-                //     device can possibly have a GUA;
-                //   * the device resolved to a concrete non-GUA address (ULA); or
-                //   * the device is online but has only a link-local address
-                //     (excluded from resolution, surfaced via the flag below).
-                // Only a *genuinely offline* device (no IPv6 seen at all) on a
-                // GUA-capable router is left to the rule-creation GUA guard, so a
-                // briefly-offline device doesn't fail an otherwise-valid save.
-                if port.ipv6 {
-                    if !router_has_gua {
-                        return Err(Error::new(eyre!("IPv6 port forward '{}' requires a global IPv6 address, but this router has no global IPv6 prefix (only ULA/link-local, which are not reachable from the internet)", port.label), ErrorKind::MissingDeviceAddress));
-                    }
-                    if let Some(addr) = ipv6_addr {
-                        if !is_gua(addr) {
-                            return Err(Error::new(eyre!("IPv6 port forward '{}' requires a global IPv6 address for device {}, but it only has a local address ({}); ULA/link-local are not reachable from the internet", port.label, port.device_mac, addr), ErrorKind::MissingDeviceAddress));
-                        }
-                    } else if info.is_some_and(|i| i.ipv6_link_local_only) {
-                        return Err(Error::new(eyre!("IPv6 port forward '{}' requires a global IPv6 address for device {}, but it only has a link-local address; ULA/link-local are not reachable from the internet", port.label, port.device_mac), ErrorKind::MissingDeviceAddress));
-                    }
-                }
-            }
-        }
-
         let arena = Arena::new();
         let mut cfgs = parse_all(ctx.uci_root(), &arena, &["firewall", "dhcp", "network"]).await?;
+        let v6_dests = v6_rule_dests(&cfgs["firewall"]);
+
+        if ctx.effectful() {
+            validate_device_addresses(&req.ports, &device_info, router_has_gua, &v6_dests)?;
+        }
 
         // Effectful saves require explicit confirmation for occupied WAN ports.
         if ctx.effectful() {
@@ -1134,12 +1085,14 @@ pub async fn set<C: CtrlContext>(
                     None
                 }
             });
+            let kept_v6 = kept_v6_rule(&v6_dests, port);
             let resolved_zone = device_zone(
                 &cfgs,
                 &mac_upper,
                 ipv4_addr.as_deref().or(reserved_ipv4.as_deref()),
                 mac_zones.get(&mac_upper).map(String::as_str),
-            );
+            )
+            .or_else(|| kept_v6.and_then(|rule| rule.dest.clone()));
             let dest_zone = resolved_zone.clone().unwrap_or_else(|| "lan".into());
 
             // IPv4 redirect (DNAT)
@@ -1184,21 +1137,12 @@ pub async fn set<C: CtrlContext>(
                 cfgs["firewall"].append(&redirect, Some(&section_name))?;
             }
 
-            // IPv6 rule (ACCEPT) — only for globally routable addresses.
-            // Pin the tracker-elected stable GUA within a currently-assigned
-            // prefix when known, so a rule created mid-rotation doesn't latch
-            // the device's outgoing (old-prefix) address; else the validated
-            // address, even when it lies outside every current prefix — a
-            // deprecated prefix often stays routable for a while, and the
-            // tracker retargets the rule within seconds of the device
-            // acquiring an in-prefix address (a new-address sighting always
-            // schedules a reconcile). Deferring instead would leave a gap
-            // nothing closes: reconcile rewrites existing rules, it never
-            // creates missing ones. `reconcile` maintains it thereafter.
             let dest_v6 = if port.ipv6 {
-                crate::ipv6_tracker::elected_live_in_prefixes(&mac_upper, now, &prefixes)
-                    .map(|a| a.to_string())
-                    .or_else(|| ipv6_addr.clone().filter(|a| is_gua(a)))
+                v6_dest(
+                    crate::ipv6_tracker::elected_live_in_prefixes(&mac_upper, now, &prefixes),
+                    ipv6_addr.as_deref(),
+                    kept_v6.map(|rule| rule.dest_ip.as_str()),
+                )
             } else {
                 None
             };
@@ -1269,9 +1213,6 @@ pub async fn set<C: CtrlContext>(
                         reload_dnsmasq();
                     }
                 }
-                // Keep the tracker's relevance filter current (superset: also
-                // MACs whose v6 rule was deferred for lack of an in-prefix
-                // address).
                 note_v6_rule_macs(
                     req.ports
                         .iter()
@@ -1292,6 +1233,106 @@ pub async fn set<C: CtrlContext>(
             }
         }
     }
+}
+
+/// What a published port's WAN IPv6 rule holds for its device.
+struct KeptV6Rule {
+    mac: String,
+    dest_ip: String,
+    dest: Option<String>,
+}
+
+/// `_pp_id` → each published port's WAN IPv6 rule.
+fn v6_rule_dests(firewall: &uciedit::Config<'_>) -> HashMap<String, KeptV6Rule> {
+    firewall
+        .sections
+        .iter()
+        .filter_map(|section| {
+            let rule = section.get::<FirewallRule>().ok()?;
+            if !is_pp_v6_rule(&rule) || rule._pp_hairpin.is_some() {
+                return None;
+            }
+            Some((
+                rule._pp_id?,
+                KeptV6Rule {
+                    mac: rule._pp_mac?,
+                    dest_ip: rule.dest_ip?,
+                    dest: rule.dest,
+                },
+            ))
+        })
+        .collect()
+}
+
+/// The port's existing IPv6 rule for the same device.
+fn kept_v6_rule<'a>(
+    v6_dests: &'a HashMap<String, KeptV6Rule>,
+    port: &PublishedPortInput,
+) -> Option<&'a KeptV6Rule> {
+    v6_dests
+        .get(&port.id)
+        .filter(|rule| !rule.mac.is_empty() && rule.mac.eq_ignore_ascii_case(&port.device_mac))
+}
+
+/// A resolved GUA outside every current prefix still beats the kept address.
+fn v6_dest(
+    elected: Option<Ipv6Addr>,
+    resolved: Option<&str>,
+    kept: Option<&str>,
+) -> Option<String> {
+    elected
+        .map(|addr| addr.to_string())
+        .or_else(|| resolved.filter(|addr| is_gua(addr)).map(str::to_string))
+        .or_else(|| kept.map(str::to_string))
+}
+
+/// Rejects an enabled port whose device lacks an address the port publishes.
+fn validate_device_addresses(
+    ports: &[PublishedPortInput],
+    device_info: &HashMap<String, DeviceNetInfo>,
+    router_has_gua: bool,
+    v6_dests: &HashMap<String, KeptV6Rule>,
+) -> Result<(), Error> {
+    for port in ports {
+        if !port.enabled || port.device_mac.is_empty() {
+            continue;
+        }
+        let info = device_info.get(&port.device_mac.to_uppercase());
+        let (ipv4_addr, ipv6_addr) = info
+            .map(|i| (i.ipv4.as_ref(), i.ipv6.as_ref()))
+            .unwrap_or((None, None));
+        if port.ipv4 && ipv4_addr.is_none() {
+            return Err(Error::new(
+                eyre!(
+                    "missing IPv4 address for device {} (port forward '{}')",
+                    port.device_mac,
+                    port.label
+                ),
+                ErrorKind::MissingDeviceAddress,
+            ));
+        }
+        if !port.ipv6 {
+            continue;
+        }
+        if !router_has_gua {
+            return Err(Error::new(eyre!("IPv6 port forward '{}' requires a global IPv6 address, but this router has no global IPv6 prefix (only ULA/link-local, which are not reachable from the internet)", port.label), ErrorKind::MissingDeviceAddress));
+        }
+        match ipv6_addr {
+            Some(addr) if is_gua(addr) => {}
+            // A device without a GUA keeps the address its existing rule holds.
+            _ if kept_v6_rule(v6_dests, port).is_some() => {}
+            Some(addr) => {
+                return Err(Error::new(eyre!("IPv6 port forward '{}' requires a global IPv6 address for device {}, but it only has a local address ({}); ULA/link-local are not reachable from the internet", port.label, port.device_mac, addr), ErrorKind::MissingDeviceAddress));
+            }
+            None if info.is_some_and(|i| i.ipv6_link_local_only) => {
+                return Err(Error::new(eyre!("IPv6 port forward '{}' requires a global IPv6 address for device {}, but it only has a link-local address; ULA/link-local are not reachable from the internet", port.label, port.device_mac), ErrorKind::MissingDeviceAddress));
+            }
+            None => {
+                return Err(Error::new(eyre!("IPv6 port forward '{}' requires a global IPv6 address for device {}, but it has none; connect the device and try again", port.label, port.device_mac), ErrorKind::MissingDeviceAddress));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn active_ipv4_ranges(ports: &[PublishedPortInput]) -> Vec<(u16, u16)> {
@@ -1588,10 +1629,7 @@ struct DeviceNetInfo {
     /// has no GUA/ULA — either it's genuinely offline, or it's online but only
     /// link-local; `ipv6_link_local_only` disambiguates the two.
     ipv6: Option<String>,
-    /// The device is present on the network but its only IPv6 address(es) are
-    /// link-local (fe80::/10), which `pick_ipv6` excludes. Lets the caller
-    /// reject an IPv6 forward to a known-unreachable device instead of
-    /// deferring it like a briefly-offline one.
+    /// The device is present on the network with only link-local IPv6.
     ipv6_link_local_only: bool,
     /// ARP interface name (e.g. "br-lan.101") for zone resolution
     arp_interface: Option<String>,
@@ -3113,6 +3151,237 @@ config redirect 'pp_del1'
             !content.contains("src_ip"),
             "source 'any' should not produce src_ip"
         );
+    }
+
+    // ── IPv6 rules for offline devices ──
+
+    const KEPT_V6_FW: &str = "\
+config redirect 'pp_a'
+\toption name 'Port a'
+\toption src 'wan'
+\toption dest 'lan'
+\toption target 'DNAT'
+\tlist proto 'tcp'
+\toption src_dport '80'
+\toption dest_port '80'
+\toption _pp_id 'a'
+\toption _pp_mac 'AA:BB:CC:DD:EE:FF'
+
+config rule 'pp_a_v6'
+\toption name 'Port a'
+\toption src 'wan'
+\toption dest 'lan'
+\toption target 'ACCEPT'
+\tlist proto 'tcp'
+\toption dest_port '80'
+\toption dest_ip '2001:db8::50'
+\toption family 'ipv6'
+\toption enabled '1'
+\toption _pp_id 'a'
+\toption _pp_mac 'AA:BB:CC:DD:EE:FF'
+
+config rule 'pp_v6only_v6'
+\toption name 'Port v6only'
+\toption src 'wan'
+\toption dest 'lan'
+\toption target 'ACCEPT'
+\tlist proto 'tcp'
+\toption dest_port '80'
+\toption dest_ip '2001:db8::60'
+\toption family 'ipv6'
+\toption enabled '1'
+\toption _pp_id 'v6only'
+\toption _pp_mac 'aa:bb:cc:dd:ee:ff'
+";
+
+    async fn set_ports(dir: &std::path::Path, ports: Vec<PublishedPortInput>) -> Vec<RawPort> {
+        set(
+            TestContext(dir.to_path_buf()),
+            DeserializeStdin(PublishedPortsSetRequest { ports }),
+        )
+        .await
+        .unwrap();
+        let arena = Arena::new();
+        let mut ports = extract_ports(&arena, dir).await.unwrap();
+        ports.sort_by(|a, b| a.id.cmp(&b.id));
+        ports
+    }
+
+    #[tokio::test]
+    async fn set_keeps_v6_rule_of_offline_device() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall(dir.path(), KEPT_V6_FW);
+        let mut edited = make_port("a", true, true);
+        edited.ports = "8080".into();
+
+        let ports = set_ports(dir.path(), vec![edited, make_port("v6only", false, true)]).await;
+
+        assert_eq!(ports.len(), 2);
+        assert!(ports[0].ipv4 && ports[0].ipv6);
+        assert_eq!(ports[0].ports, "8080");
+        assert_eq!(ports[0].dest_ipv6.as_deref(), Some("2001:db8::50"));
+        assert_eq!(ports[1].id, "v6only");
+        assert!(ports[1].ipv6);
+        assert_eq!(ports[1].dest_ipv6.as_deref(), Some("2001:db8::60"));
+    }
+
+    #[tokio::test]
+    async fn set_keeps_v6_only_port_when_another_port_is_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall(dir.path(), KEPT_V6_FW);
+
+        let ports = set_ports(
+            dir.path(),
+            vec![
+                make_port("a", true, true),
+                make_port("v6only", false, true),
+                make_port("new", true, false),
+            ],
+        )
+        .await;
+
+        let v6only = ports.iter().find(|p| p.id == "v6only").unwrap();
+        assert!(!v6only.ipv4 && v6only.ipv6);
+        assert_eq!(v6only.dest_ipv6.as_deref(), Some("2001:db8::60"));
+    }
+
+    #[tokio::test]
+    async fn set_drops_kept_address_when_device_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall(dir.path(), KEPT_V6_FW);
+        let mut moved = make_port("v6only", false, true);
+        moved.device_mac = "11:22:33:44:55:66".into();
+
+        let ports = set_ports(dir.path(), vec![make_port("a", true, true), moved]).await;
+
+        assert!(ports.iter().all(|p| p.id != "v6only"));
+    }
+
+    #[tokio::test]
+    async fn set_keeps_v6_rule_zone_of_offline_device() {
+        let dir = tempfile::tempdir().unwrap();
+        let fw = KEPT_V6_FW.replacen(
+            "\toption dest 'lan'\n\toption target 'ACCEPT'\n\tlist proto 'tcp'\n\toption dest_port '80'\n\toption dest_ip '2001:db8::60'",
+            "\toption dest 'guest'\n\toption target 'ACCEPT'\n\tlist proto 'tcp'\n\toption dest_port '80'\n\toption dest_ip '2001:db8::60'",
+            1,
+        );
+        assert_ne!(fw, KEPT_V6_FW);
+        setup_firewall(dir.path(), &fw);
+
+        set_ports(
+            dir.path(),
+            vec![make_port("a", true, true), make_port("v6only", false, true)],
+        )
+        .await;
+
+        let content = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        let arena = Arena::new();
+        let cfg = uciedit::Config::parse_str(&arena, &content).unwrap();
+        let dest_of = |name: &str| {
+            cfg.sections
+                .iter()
+                .find(|s| s.name().as_deref() == Some(name))
+                .and_then(|s| s.get::<FirewallRule>().ok())
+                .and_then(|r| r.dest)
+        };
+        assert_eq!(dest_of("pp_v6only_v6").as_deref(), Some("guest"));
+        assert_eq!(dest_of("pp_a_v6").as_deref(), Some("lan"));
+    }
+
+    fn v6_dests_of(fw: &str) -> HashMap<String, KeptV6Rule> {
+        let arena = Arena::new();
+        let cfg = uciedit::Config::parse_str(&arena, fw).unwrap();
+        v6_rule_dests(&cfg)
+    }
+
+    fn offline_device() -> HashMap<String, DeviceNetInfo> {
+        HashMap::from([(
+            "AA:BB:CC:DD:EE:FF".to_string(),
+            DeviceNetInfo {
+                ipv4: Some("192.168.1.50".into()),
+                ipv6: None,
+                ipv6_link_local_only: false,
+                arp_interface: None,
+                has_static_ipv4: true,
+            },
+        )])
+    }
+
+    #[test]
+    fn validate_rejects_new_v6_port_for_device_without_gua() {
+        let err = validate_device_addresses(
+            &[make_port("new", true, true)],
+            &offline_device(),
+            true,
+            &v6_dests_of(KEPT_V6_FW),
+        )
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::MissingDeviceAddress);
+    }
+
+    #[test]
+    fn validate_rejects_v6_port_moved_to_device_without_gua() {
+        let mut moved = make_port("v6only", false, true);
+        moved.device_mac = "11:22:33:44:55:66".into();
+        let err =
+            validate_device_addresses(&[moved], &HashMap::new(), true, &v6_dests_of(KEPT_V6_FW))
+                .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::MissingDeviceAddress);
+    }
+
+    #[test]
+    fn validate_accepts_kept_v6_port_for_offline_device() {
+        validate_device_addresses(
+            &[make_port("a", true, true), make_port("v6only", false, true)],
+            &offline_device(),
+            true,
+            &v6_dests_of(KEPT_V6_FW),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn validate_accepts_kept_v6_port_for_device_with_stale_local_ipv6() {
+        let ula = HashMap::from([(
+            "AA:BB:CC:DD:EE:FF".to_string(),
+            DeviceNetInfo {
+                ipv6: Some("fd00::50".into()),
+                ..offline_device().remove("AA:BB:CC:DD:EE:FF").unwrap()
+            },
+        )]);
+        let link_local = HashMap::from([(
+            "AA:BB:CC:DD:EE:FF".to_string(),
+            DeviceNetInfo {
+                ipv6_link_local_only: true,
+                ..offline_device().remove("AA:BB:CC:DD:EE:FF").unwrap()
+            },
+        )]);
+        let kept = v6_dests_of(KEPT_V6_FW);
+        for devices in [&ula, &link_local] {
+            validate_device_addresses(&[make_port("a", true, true)], devices, true, &kept).unwrap();
+            let err =
+                validate_device_addresses(&[make_port("new", true, true)], devices, true, &kept)
+                    .unwrap_err();
+            assert_eq!(err.kind, ErrorKind::MissingDeviceAddress);
+        }
+    }
+
+    #[test]
+    fn v6_dest_prefers_live_address_over_kept() {
+        let elected: Ipv6Addr = "2001:db8:1::5".parse().unwrap();
+        assert_eq!(
+            v6_dest(Some(elected), Some("2001:db8:2::5"), Some("2001:db8::50")).as_deref(),
+            Some("2001:db8:1::5")
+        );
+        assert_eq!(
+            v6_dest(None, Some("2001:db8:2::5"), Some("2001:db8::50")).as_deref(),
+            Some("2001:db8:2::5")
+        );
+        assert_eq!(
+            v6_dest(None, Some("fd00::5"), Some("2001:db8::50")).as_deref(),
+            Some("2001:db8::50")
+        );
+        assert_eq!(v6_dest(None, Some("fd00::5"), None), None);
     }
 
     // ── NAT reflection scoping ──

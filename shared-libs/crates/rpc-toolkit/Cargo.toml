@@ -17,6 +17,7 @@ default = ["cbor"]
 exver = ["ts", "dep:exver"]
 ipnet = ["ts", "dep:ipnet"]
 josekit = ["ts", "dep:josekit"]
+mcp = ["dep:rmcp", "dep:tower-service"]
 patch-db = ["ts", "dep:patch-db"]
 ts = [
   "dep:visit-rs",
@@ -56,6 +57,10 @@ patch-db = { path = "../patch-db/core", optional = true, default-features = fals
 ] }
 pin-project = "1"
 reqwest = { version = "0.12" }
+rmcp = { version = "3.5.1", optional = true, default-features = false, features = [
+  "server",
+  "transport-streamable-http-server",
+] }
 serde = { version = "1.0", features = ["derive"] }
 serde_cbor = { version = "0.11", optional = true }
 serde_derive_internals = { version = "=0.30.0", optional = true }
@@ -67,6 +72,7 @@ syn = { version = "=3.0.6", features = [
 thiserror = "2.0"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["io-util", "net"] }
+tower-service = { version = "0.3", optional = true }
 url = "2"
 visit-rs = { path = "../visit-rs", optional = true, default-features = false, features = [
   "meta",

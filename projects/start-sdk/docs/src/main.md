@@ -660,7 +660,7 @@ const postgresSub = sdk.SubContainer.of(
       ])
       if (result.exitCode !== 0) {
         return {
-          result: 'loading',
+          result: 'starting',
           message: i18n('Waiting for PostgreSQL to be ready'),
         }
       }

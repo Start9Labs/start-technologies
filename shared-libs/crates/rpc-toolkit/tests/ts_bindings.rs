@@ -394,6 +394,19 @@ fn callable(_: Ctx, p: ParentParams) -> Result<String, RpcError> {
     Ok(p.token)
 }
 
+#[test]
+fn tool_catalog_follows_the_mcp_feature() {
+    let root = ParentHandler::<Ctx, Empty, Empty>::new().subcommand(
+        "leaf",
+        from_fn(|_: Ctx, _: Empty| Ok::<_, RpcError>(())).no_cli(),
+    );
+    let bindings = handler_bindings(&root, "Api", SCHEMAS).unwrap().unwrap();
+    assert_eq!(
+        bindings.schemas.contains("export function toolCatalog("),
+        cfg!(feature = "mcp")
+    );
+}
+
 #[tokio::test]
 async fn handler_tree_matches_dispatch_and_inference() {
     let parent = ParentHandler::<Ctx, ParentParams, Empty>::new()
@@ -407,7 +420,7 @@ async fn handler_tree_matches_dispatch_and_inference() {
         );
     let root = ParentHandler::<Ctx, Empty, Empty>::new().subcommand("jobs", parent.no_cli());
     let bindings = handler_bindings(&root, "Api", SCHEMAS).unwrap().unwrap();
-    assert!(bindings.schemas.contains("export const Api = { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: { \"jobs\": { _PARAMS: /* @__PURE__ */ ParentParams, _RETURN: /* @__PURE__ */ z.string(), _CHILDREN: { \"leaf\": { _PARAMS: /* @__PURE__ */ z.intersection(ParentParams, Params), _RETURN: /* @__PURE__ */ Node }, \"opaque\": { _PARAMS: /* @__PURE__ */ z.intersection(ParentParams, z.unknown()), _RETURN: /* @__PURE__ */ z.unknown() } } } } };"), "{}", bindings.schemas);
+    assert!(bindings.schemas.contains("export const Api = { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: { \"jobs\": { _PARAMS: /* @__PURE__ */ ParentParams, _RETURN: /* @__PURE__ */ z.string(), _CHILDREN: { \"leaf\": { _PARAMS: /* @__PURE__ */ z.intersection(ParentParams, Params), _RETURN: /* @__PURE__ */ Node }, \"opaque\": { _PARAMS: /* @__PURE__ */ z.intersection(ParentParams, z.unknown()), _RETURN: /* @__PURE__ */ z.unknown(), _OPAQUE: true as const } } } } };"), "{}", bindings.schemas);
     assert!(bindings
         .types
         .contains("export type Api = RpcSchemaTree<typeof schemas.Api>;"));

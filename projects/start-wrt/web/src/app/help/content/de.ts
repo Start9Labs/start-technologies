@@ -111,7 +111,7 @@ Die zugewiesene IP-Adresse im lokalen Netzwerk. Diese wurde beim Einrichten des 
 
 ### Routing
 
-Zeigt den Routing-Modus des Client-Datenverkehrs an. „Gesamter Datenverkehr“ leitet den gesamten Internetverkehr durch den VPN-Tunnel. „Nur LAN“ leitet nur den lokalen Netzwerkverkehr durch den Tunnel. Verwenden Sie das Aktionsmenü, um zwischen den Modi zu wechseln.`,
+Zeigt den Routing-Modus des Client-Datenverkehrs an. „Gesamter Datenverkehr“ leitet den gesamten Internetverkehr durch den VPN-Tunnel. „Nur LAN“ leitet nur den lokalen Netzwerkverkehr durch den Tunnel. Um ihn zu ändern, löschen Sie den Client und fügen Sie ihn mit dem gewünschten Routing erneut hinzu.`,
   '/inbound/client/dialog-add': `## Eingehende VPNs
 
 ### Bezeichnung

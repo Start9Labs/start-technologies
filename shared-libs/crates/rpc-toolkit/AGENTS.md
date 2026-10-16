@@ -11,10 +11,12 @@ root and `shared-libs/` guidance first. `CLAUDE.md` imports this file.
   share forwarding without changing caller-specific behavior.
 - `handler/from_fn.rs` owns sync, blocking, async and local-async factories.
 - `server/` owns dispatch and HTTP/socket transports; `cli.rs` owns clap and
-  remote calls.
+  remote calls. `server/mcp.rs` (`mcp` feature) owns the MCP tool surface and
+  reuses `HttpServer`'s middleware steps rather than reimplementing them.
 - `ts.rs` owns handler traversal, deferred parameter/result writers and binding
   composition. `type-helpers.ts` owns method-path parameter/return inference and
-  the `RpcSchemaTree` projection of a schema tree.
+  the `RpcSchemaTree` projection of a schema tree; `tool-catalog.ts` owns the
+  MCP tool catalog derived from a schema tree.
 - `rpc_toolkit::ts` owns the `TS` trait, the definition registry, module
   emission, scalar bridges and exports (`ts/types.rs`); `ts/normalize.rs` owns the
   serde policy, one plan per direction from `TypeInfo::DECLARATION.source` through
@@ -54,7 +56,7 @@ schema modules and RPC dispatch. Dispatch tests run even with TypeScript
 disabled. Changes to handler composition also need backend tests.
 
 This crate uses edition 2018, so `assert!` messages need explicit `"{}"`
-arguments. `cbor` is enabled by default; `ts` is opt-in.
+arguments. `cbor` is enabled by default; `ts` and `mcp` are opt-in.
 Enabling `ts` requires registered handlers to provide bindings or use `no_ts()`.
 Generated schema modules import `zod` 4 from the consuming package.
 Without it, the bridge macros expand to nothing, `TS` and `HandlerTSBindings` are

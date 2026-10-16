@@ -211,19 +211,18 @@ pub(super) fn validate_name(name: &OsStr) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Resolves against the archive root; `..` stops at the root.
 pub(super) fn normalize_path(path: &Path) -> std::io::Result<PathBuf> {
     let mut normalized = PathBuf::new();
     for component in path.components() {
         match component {
-            Component::CurDir => (),
+            Component::Prefix(_) | Component::RootDir | Component::CurDir => (),
+            Component::ParentDir => {
+                normalized.pop();
+            }
             Component::Normal(name) => {
                 validate_name(name)?;
                 normalized.push(name);
-            }
-            _ => {
-                return Err(invalid(
-                    "archive paths must be relative and cannot contain parent traversal",
-                ));
             }
         }
     }
@@ -430,7 +429,13 @@ mod tests {
             .unwrap();
         assert!(dir.get_path(&path).is_some());
         assert!(dir.get_path(Path::new("./parent")).is_some());
-        for bad in ["../escape", "a/../../escape", "/absolute", "name\0"] {
+        for path in ["../escape", "a/../../escape", "/escape"] {
+            dir.insert_path(path, Entry::file(Metadata::new(0o600), b"data"))
+                .unwrap();
+        }
+        assert!(dir.get_path("escape").is_some());
+        assert!(dir.get_path("a").is_none());
+        for bad in ["..", "/", "name\0"] {
             assert!(
                 dir.insert_path(bad, Entry::file(Metadata::new(0o600), b"bad"))
                     .is_err()

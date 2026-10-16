@@ -28,14 +28,14 @@ The `s9pk.mk` file contains all the common build logic shared across StartOS pac
 
 ### Variables
 
-| Variable       | Default                        | Description                                 |
-| -------------- | ------------------------------ | ------------------------------------------- |
-| `ARCHES`       | `x86 arm riscv`                | Architectures to build by default           |
-| `TARGETS`      | `$(ARCHES)`                    | Default build targets                       |
-| `VARIANT`      | (unset)                        | Optional variant suffix for package name    |
-| `TS_CHECK`     | `npx tsc --noEmit`             | Type-check step of the build gate           |
-| `FORMAT_CHECK` | `npx prettier --check startos` | Formatting step of the build gate           |
-| `JS_BUNDLE`    | `npx ncc build …`              | Bundle step producing `javascript/index.js` |
+| Variable    | Default                        | Description                                 |
+| ----------- | ------------------------------ | ------------------------------------------- |
+| `ARCHES`    | `x86 arm riscv`                | Architectures to build by default           |
+| `TARGETS`   | `$(ARCHES)`                    | Default build targets                       |
+| `VARIANT`   | (unset)                        | Optional variant suffix for package name    |
+| `TS_CHECK`  | `npx tsc --noEmit`             | Type-check step of the build gate           |
+| `FORMAT`    | `npx prettier --write startos` | Formatting step of the build                |
+| `JS_BUNDLE` | `npx ncc build …`              | Bundle step producing `javascript/index.js` |
 
 ## Makefile
 

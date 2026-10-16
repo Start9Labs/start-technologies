@@ -495,6 +495,7 @@ async fn inner_main() -> Result<(), Error> {
         .layer(Extension(proxy_client))
         .layer(Extension(app_state));
 
+    let app = crate::captive::redirect_to_router(app);
     // Must stay outermost.
     let app = crate::http_redirect::redirect_public_http(app);
 

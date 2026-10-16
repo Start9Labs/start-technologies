@@ -187,7 +187,7 @@ impl<Context> Clone for DynMiddleware<Context> {
 }
 
 pub struct HttpServer<Context: crate::Context> {
-    inner: Server<Context>,
+    pub(crate) inner: Server<Context>,
     middleware: Vector<DynMiddleware<Context>>,
 }
 impl<Context: crate::Context> Clone for HttpServer<Context> {
@@ -214,15 +214,40 @@ impl<Context: crate::Context> HttpServer<Context> {
         self.middleware.push_back(DynMiddleware::new(middleware));
         self
     }
-    async fn process_http_request(&self, mut req: Request) -> Response {
+    /// Builds the request's context and runs every middleware's
+    /// `process_http_request`; an `Err` is the response to send instead.
+    pub(crate) async fn begin_http_request(
+        &self,
+        req: &mut Request,
+    ) -> Result<(Context, Vector<DynMiddleware<Context>>), Response> {
+        let ctx = (self.inner.make_ctx)().await.map_err(|e| {
+            json_http_response(&RpcResponse {
+                id: None,
+                result: Err(e),
+            })
+        })?;
         let mut mid = self.middleware.clone();
+        for middleware in mid.iter_mut().rev() {
+            middleware.process_http_request(&ctx, req).await?;
+        }
+        Ok((ctx, mid))
+    }
+    pub(crate) async fn finish_http_response(
+        ctx: &Context,
+        mid: &mut Vector<DynMiddleware<Context>>,
+        res: &mut Response,
+    ) {
+        for middleware in mid.iter_mut() {
+            middleware.process_http_response(ctx, res).await;
+        }
+    }
+    async fn process_http_request(&self, mut req: Request) -> Response {
+        let (ctx, mut mid) = match self.begin_http_request(&mut req).await {
+            Ok(a) => a,
+            Err(res) => return res,
+        };
+        let mid = &mut mid;
         match async {
-            let ctx = (self.inner.make_ctx)().await?;
-            for middleware in mid.iter_mut().rev() {
-                if let Err(e) = middleware.process_http_request(&ctx, &mut req).await {
-                    return Ok::<_, RpcError>(e);
-                }
-            }
             let (_, body) = req.into_parts();
             match serde_json::from_slice::<SingleOrBatchRpcRequest>(
                 &*body.collect().await.map_err(internal_error)?.to_bytes(),
@@ -230,13 +255,10 @@ impl<Context: crate::Context> HttpServer<Context> {
             .map_err(parse_error)?
             {
                 SingleOrBatchRpcRequest::Single(rpc_req) => {
-                    let mut res = json_http_response(
-                        &self.process_rpc_request(&ctx, &mut mid, rpc_req).await,
-                    );
-                    for middleware in mid.iter_mut() {
-                        middleware.process_http_response(&ctx, &mut res).await;
-                    }
-                    Ok(res)
+                    let mut res =
+                        json_http_response(&self.process_rpc_request(&ctx, mid, rpc_req).await);
+                    Self::finish_http_response(&ctx, mid, &mut res).await;
+                    Ok::<_, RpcError>(res)
                 }
                 SingleOrBatchRpcRequest::Batch(rpc_reqs) => {
                     let (mids, rpc_res): (Vec<_>, Vec<_>) =
@@ -249,7 +271,7 @@ impl<Context: crate::Context> HttpServer<Context> {
                         .into_iter()
                         .unzip();
                     let mut res = json_http_response(&rpc_res);
-                    for mut mid in mids.into_iter().fold(
+                    for mut batch_mid in mids.into_iter().fold(
                         vec![Vec::with_capacity(rpc_res.len()); mid.len()],
                         |mut acc, x| {
                             for (idx, middleware) in x.into_iter().enumerate() {
@@ -258,7 +280,7 @@ impl<Context: crate::Context> HttpServer<Context> {
                             acc
                         },
                     ) {
-                        for middleware in mid.iter_mut() {
+                        for middleware in batch_mid.iter_mut() {
                             middleware.process_http_response(&ctx, &mut res).await;
                         }
                     }
@@ -275,7 +297,8 @@ impl<Context: crate::Context> HttpServer<Context> {
             }),
         }
     }
-    async fn process_rpc_request(
+    /// Runs one call through the RPC middleware and the handler tree.
+    pub(crate) async fn process_rpc_request(
         &self,
         ctx: &Context,
         mid: &mut Vector<DynMiddleware<Context>>,

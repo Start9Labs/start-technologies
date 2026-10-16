@@ -15,5 +15,6 @@ rpc-toolkit-test: node_modules/.package-lock.json
 	cargo test -p rpc-toolkit --no-default-features --locked
 	cargo test -p rpc-toolkit --features ts --locked
 	cargo test -p rpc-toolkit --no-default-features --features ts --locked
+	cargo test -p rpc-toolkit --no-default-features --features mcp --locked
 	cargo test -p rpc-toolkit --all-features --locked
 	cargo test -p rpc-toolkit --no-default-features --features ts,chrono,ipnet,josekit,url,yajrc,exver,patch-db --locked

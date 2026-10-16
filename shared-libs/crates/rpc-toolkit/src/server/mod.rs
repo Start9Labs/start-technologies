@@ -15,14 +15,17 @@ pub type RpcResponse = yajrc::RpcResponse<GenericRpcMethod>;
 pub type SingleOrBatchRpcRequest = yajrc::SingleOrBatchRpcRequest<GenericRpcMethod>;
 
 pub mod http;
+#[cfg(feature = "mcp")]
+pub mod mcp;
 pub mod socket;
 
 pub use http::*;
 pub use socket::*;
 
 pub struct Server<Context: crate::Context> {
-    make_ctx: Arc<dyn Fn() -> BoxFuture<'static, Result<Context, RpcError>> + Send + Sync>,
-    root_handler: Arc<AnyHandler<Context, Empty, ParentHandler<Context>>>,
+    pub(crate) make_ctx:
+        Arc<dyn Fn() -> BoxFuture<'static, Result<Context, RpcError>> + Send + Sync>,
+    pub(crate) root_handler: Arc<AnyHandler<Context, Empty, ParentHandler<Context>>>,
 }
 impl<Context: crate::Context> Clone for Server<Context> {
     fn clone(&self) -> Self {

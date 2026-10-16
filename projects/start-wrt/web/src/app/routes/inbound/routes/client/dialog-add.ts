@@ -27,11 +27,6 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 export interface ClientDialogData {
   serverAddress: string
   usedIps: string[]
-  defaults?: {
-    name?: string
-    ip?: string
-    route_all?: boolean
-  }
 }
 
 @Component({
@@ -94,12 +89,11 @@ class AddClient {
 
   private readonly serverAddress = this.context.data.serverAddress
   private readonly usedIps = this.context.data.usedIps
-  private readonly defaults = this.context.data.defaults
 
   protected readonly form = inject(NonNullableFormBuilder).group({
-    name: [this.defaults?.name ?? '', Validators.required],
+    name: ['', Validators.required],
     ip: [
-      this.defaults?.ip ?? this.nextAvailableIp(),
+      this.nextAvailableIp(),
       [
         Validators.required,
         CustomValidators.ipv4(),
@@ -108,7 +102,7 @@ class AddClient {
       ],
     ],
     public_key: [''],
-    route_all: [this.defaults?.route_all ?? false],
+    route_all: [false],
   })
 
   private nextAvailableIp(): string {

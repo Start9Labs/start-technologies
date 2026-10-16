@@ -61,6 +61,8 @@ pub fn typecheck(bindings: &Bindings, assertions: &str) {
         .args([
             "--strict",
             "--exactOptionalPropertyTypes",
+            "--noPropertyAccessFromIndexSignature",
+            "--noUncheckedIndexedAccess",
             "--noEmit",
             "--skipLibCheck",
             "--ignoreConfig",

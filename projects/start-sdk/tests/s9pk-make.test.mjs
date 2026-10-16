@@ -37,7 +37,7 @@ function fixture(t) {
   writeFileSync(
     join(root, 'Makefile'),
     `TS_CHECK := echo typecheck >> steps
-FORMAT_CHECK := echo format >> steps
+FORMAT := echo format >> steps
 JS_BUNDLE := mkdir -p javascript && cp startos/index.ts javascript/index.js && echo bundle >> steps
 include ${source}
 `,

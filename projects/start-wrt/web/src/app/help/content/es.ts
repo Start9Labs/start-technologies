@@ -111,7 +111,7 @@ La dirección IP asignada en la red de área local. Se configuró cuando se dio 
 
 ### Enrutamiento
 
-Muestra el modo de enrutamiento del tráfico del cliente. «Todo el tráfico» enruta todo el tráfico de internet a través del túnel VPN. «Solo LAN» enruta únicamente el tráfico de la red local a través del túnel. Usa el menú de acciones para cambiar entre modos.`,
+Muestra el modo de enrutamiento del tráfico del cliente. «Todo el tráfico» enruta todo el tráfico de internet a través del túnel VPN. «Solo LAN» enruta únicamente el tráfico de la red local a través del túnel. Para cambiarlo, elimina el cliente y vuelve a añadirlo con el enrutamiento que quieras.`,
   '/inbound/client/dialog-add': `## VPN entrantes
 
 ### Etiqueta

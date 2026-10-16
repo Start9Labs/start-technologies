@@ -27,7 +27,7 @@ SDK_DIR := node_modules/@start9labs/start-sdk
 PRETTIER_CONFIG := $(SDK_DIR)/prettier.config.json
 
 TS_CHECK ?= npx tsc --noEmit
-FORMAT_CHECK ?= npx prettier --config $(PRETTIER_CONFIG) --check startos
+FORMAT ?= npx prettier --config $(PRETTIER_CONFIG) --write startos
 JS_BUNDLE ?= rm -rf javascript && npx ncc build startos/index.ts -o javascript
 
 define SUMMARY
@@ -119,11 +119,11 @@ check-init:
 javascript/index.js: $(shell find startos -type f) tsconfig.json node_modules
 	$(TS_CHECK)
 	@if [ -f $(SDK_DIR)/lint.mjs ]; then node $(SDK_DIR)/lint.mjs; else echo "   ⚠ SDK lint runner not found; skipping (update @start9labs/start-sdk)"; fi
-	$(FORMAT_CHECK)
+	$(FORMAT)
 	$(JS_BUNDLE)
 
 format: | node_modules
-	npx prettier --config $(PRETTIER_CONFIG) --write startos
+	$(FORMAT)
 
 node_modules: package-lock.json package.json
 	npm ci

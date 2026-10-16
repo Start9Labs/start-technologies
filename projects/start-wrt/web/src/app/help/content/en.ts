@@ -111,7 +111,7 @@ The assigned IP address on the local area network. This was configured when the 
 
 ### Routing
 
-Shows the client's traffic routing mode. "All traffic" routes all internet traffic through the VPN tunnel. "LAN only" routes only local network traffic through the tunnel. Use the actions menu to switch between modes.`,
+Shows the client's traffic routing mode. "All traffic" routes all internet traffic through the VPN tunnel. "LAN only" routes only local network traffic through the tunnel. To change it, delete the client and add it again with the routing you want.`,
   '/inbound/client/dialog-add': `## Inbound VPNs
 
 ### Label

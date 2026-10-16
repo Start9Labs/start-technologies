@@ -14,7 +14,7 @@ import { TuiHeader } from '@taiga-ui/layout'
 import { filter } from 'rxjs'
 import { Placeholder } from 'src/app/components/placeholder'
 import { DevicesApiService } from 'src/app/routes/devices/service'
-import { InboundService, VpnServerPeer } from '../../service'
+import { InboundService, VpnServer, VpnServerPeer } from '../../service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 
 import { CLIENT_CONFIG } from './dialog-config'
@@ -94,18 +94,6 @@ import { RENAME_CLIENT } from './dialog-rename'
                     (click)="rename(item)"
                   >
                     {{ 'Rename' | i18n }}
-                  </button>
-                  <button
-                    tuiOption
-                    iconStart="@tui.repeat"
-                    (click)="changeRouting(item)"
-                  >
-                    {{
-                      (item.route_all
-                        ? 'Switch to LAN only'
-                        : 'Switch to all traffic'
-                      ) | i18n
-                    }}
                   </button>
                   <button
                     tuiOption
@@ -193,36 +181,15 @@ export default class InboundClients {
     const server = this.server()
     if (!server) return
 
-    const peerIps = server.peers.map(p => p.ip).filter(Boolean) as string[]
-    const usedIps = [
-      ...new Set([
-        server.server_address,
-        ...(this.deviceIps() ?? []),
-        ...peerIps,
-      ]),
-    ]
-
     this.dialogs
       .open<VpnServerPeer>(ADD_CLIENT, {
         label: this.i18n.transform('Add client device'),
         data: {
           serverAddress: server.server_address,
-          usedIps,
+          usedIps: this.usedIps(server),
         } satisfies ClientDialogData,
       })
-      .subscribe(async peer => {
-        const response = await this.service.addPeer(server.profile, peer)
-        if (response?.client_config) {
-          this.dialogs
-            .open(CLIENT_CONFIG, {
-              data: {
-                name: peer.name,
-                config: response.client_config,
-              },
-            })
-            .subscribe()
-        }
-      })
+      .subscribe(peer => this.addAndShowConfig(server.profile, peer))
   }
 
   rename(peer: VpnServerPeer) {
@@ -269,70 +236,6 @@ export default class InboundClients {
       .subscribe()
   }
 
-  changeRouting(peer: VpnServerPeer) {
-    const server = this.server()
-    if (!server || !peer.public_key) return
-
-    const newRouteAll = !peer.route_all
-
-    this.dialogs
-      .open(TUI_CONFIRM, {
-        label: this.i18n.transform('Change routing mode?'),
-        data: {
-          content: `${this.i18n.transform('This will delete the existing peer and create a new one with')} ${newRouteAll ? this.i18n.transform('all traffic') : this.i18n.transform('LAN only')} ${this.i18n.transform('routing. You will need to reconfigure your device with the new config.')}`,
-          yes: this.i18n.transform('Continue'),
-          no: this.i18n.transform('Cancel'),
-        },
-      })
-      .pipe(filter(Boolean))
-      .subscribe(async () => {
-        await this.service.deletePeer(server.profile, peer.public_key!)
-
-        // Refresh device IPs so the deleted peer's IP is no longer reserved
-        const devices = await this.devices.get()
-        this.deviceIps.set(devices.map(d => d.ipv4).filter(Boolean) as string[])
-
-        const peerIps = server.peers
-          .filter(p => p.public_key !== peer.public_key)
-          .map(p => p.ip)
-          .filter(Boolean) as string[]
-        const usedIps = [
-          ...new Set([
-            server.server_address,
-            ...(this.deviceIps() ?? []),
-            ...peerIps,
-          ]),
-        ]
-
-        this.dialogs
-          .open<VpnServerPeer>(ADD_CLIENT, {
-            label: this.i18n.transform('Reconfigure client device'),
-            data: {
-              serverAddress: server.server_address,
-              usedIps,
-              defaults: {
-                name: peer.name,
-                ip: peer.ip ?? undefined,
-                route_all: newRouteAll,
-              },
-            } satisfies ClientDialogData,
-          })
-          .subscribe(async newPeer => {
-            const response = await this.service.addPeer(server.profile, newPeer)
-            if (response?.client_config) {
-              this.dialogs
-                .open(CLIENT_CONFIG, {
-                  data: {
-                    name: newPeer.name,
-                    config: response.client_config,
-                  },
-                })
-                .subscribe()
-            }
-          })
-      })
-  }
-
   delete(peer: VpnServerPeer) {
     this.dialogs
       .open(TUI_CONFIRM, { label: this.i18n.transform('Are you sure?') })
@@ -343,5 +246,27 @@ export default class InboundClients {
           this.service.deletePeer(profile, peer.public_key)
         }
       })
+  }
+
+  private usedIps(server: VpnServer): string[] {
+    const peerIps = server.peers.map(p => p.ip).filter(Boolean) as string[]
+    return [
+      ...new Set([
+        server.server_address,
+        ...(this.deviceIps() ?? []),
+        ...peerIps,
+      ]),
+    ]
+  }
+
+  private async addAndShowConfig(profile: string, peer: VpnServerPeer) {
+    const response = await this.service.addPeer(profile, peer)
+    if (response?.client_config) {
+      this.dialogs
+        .open(CLIENT_CONFIG, {
+          data: { name: peer.name, config: response.client_config },
+        })
+        .subscribe()
+    }
   }
 }

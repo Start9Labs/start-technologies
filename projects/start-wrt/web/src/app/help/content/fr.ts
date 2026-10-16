@@ -111,7 +111,7 @@ L’adresse IP attribuée sur le réseau local. Elle a été configurée lors de
 
 ### Acheminement
 
-Affiche le mode d’acheminement du trafic du client. « Tout le trafic » achemine tout le trafic Internet par le tunnel VPN. « LAN uniquement » achemine seulement le trafic du réseau local par le tunnel. Utilisez le menu d’actions pour basculer entre les modes.`,
+Affiche le mode d’acheminement du trafic du client. « Tout le trafic » achemine tout le trafic Internet par le tunnel VPN. « LAN uniquement » achemine seulement le trafic du réseau local par le tunnel. Pour le modifier, supprimez le client et ajoutez-le de nouveau avec l’acheminement souhaité.`,
   '/inbound/client/dialog-add': `## VPN entrants
 
 ### Étiquette

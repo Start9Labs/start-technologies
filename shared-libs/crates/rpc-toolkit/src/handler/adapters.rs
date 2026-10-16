@@ -858,6 +858,9 @@ mod ts {
         }
     }
     impl<H> ReturnTS for NoTS<H> {
+        fn return_ts_enabled(&self) -> bool {
+            false
+        }
         fn return_ts(&self) -> Option<Box<dyn Fn(&mut TSVisitor) + Send + Sync>> {
             Some(Box::new(|v| v.leaf("z.unknown()", "z.ZodUnknown")))
         }

@@ -90,7 +90,7 @@ These files typically require minimal modification:
 - `.dockerignore` - Docker does not read `.gitignore`, so a package that builds from source needs this to keep `node_modules`, `.git`, and built `.s9pk`s out of the build context that `s9pk pack` uploads on every arch
 - `Makefile` - Includes the SDK's `s9pk.mk` from `node_modules` (see [Makefile](./makefile.md))
 - `package.json` / `package-lock.json` - the SDK is the only dependency; it supplies TypeScript, Prettier, ESLint and ncc
-- `.prettierrc` - one line naming the SDK's shared Prettier config, so editors format the way the build gate checks
+- `.prettierrc` - one line naming the SDK's shared Prettier config, so editors format the way the build does
 - `tsconfig.json`
 
 ### .github/workflows/

@@ -1,8 +1,7 @@
 #![cfg(feature = "meta")]
-#![cfg(feature = "meta")]
 
 use visit_rs::metadata::{AttributeMeta, MetaValue};
-use visit_rs::{EnumInfo, Visit, VisitVariants};
+use visit_rs::{EnumInfo, VisitVariants};
 
 #[derive(VisitVariants)]
 #[visit(tag = "type", content = "data")]

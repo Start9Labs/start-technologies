@@ -111,7 +111,7 @@ Przypisany adres IP w sieci lokalnej. Został on skonfigurowany podczas konfigur
 
 ### Routing
 
-Pokazuje tryb routingu ruchu klienta. „Cały ruch” kieruje cały ruch internetowy przez tunel VPN. „Tylko LAN” kieruje przez tunel jedynie ruch sieci lokalnej. Użyj menu akcji, aby przełączać się między trybami.`,
+Pokazuje tryb routingu ruchu klienta. „Cały ruch” kieruje cały ruch internetowy przez tunel VPN. „Tylko LAN” kieruje przez tunel jedynie ruch sieci lokalnej. Aby go zmienić, usuń klienta i dodaj go ponownie z wybranym trybem routingu.`,
   '/inbound/client/dialog-add': `## Przychodzące VPN
 
 ### Etykieta
