@@ -986,11 +986,14 @@ async fn reload_system_and_wifi_inner(restart_network: bool) -> Result<(), Error
     // drop the prefix. See deprecate_odhcpd_prefixes. A no-op on profile
     // create, beyond one extra RA.
     crate::deprecate_odhcpd_prefixes().await;
-    let network_action = if restart_network { "restart" } else { "reload" };
-    let _ = crate::run_quiet_async(
-        tokio::process::Command::new("/etc/init.d/network").arg(network_action),
-    )
-    .await;
+    if restart_network {
+        crate::wifi::restart_network().await;
+    } else {
+        let _ = crate::run_quiet_async(
+            tokio::process::Command::new("/etc/init.d/network").arg("reload"),
+        )
+        .await;
+    }
     if let Err(e) = crate::wifi::reload_wifi("/etc/config", crate::wifi::WifiReload::Restart).await
     {
         tracing::warn!("WiFi restart failed: {e}");

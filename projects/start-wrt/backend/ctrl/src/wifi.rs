@@ -633,10 +633,7 @@ fn generate_password<C: CtrlContext>(_ctx: C) -> Result<String, Error> {
     ))
 }
 
-fn find_relevant_with_radios(
-    cfgs: &Configs,
-    radios: &BTreeMap<String, WifiRadio>,
-) -> Result<Vec<(String, WifiInterface, WifiDevice, WifiRadio)>, Error> {
+fn wifi_devices(cfgs: &Configs) -> Result<HashMap<String, WifiDevice>, Error> {
     let mut devices = HashMap::new();
     cfgs["wireless"].try_each(|name, device: WifiDevice| {
         devices.insert(
@@ -651,6 +648,14 @@ fn find_relevant_with_radios(
         );
         Ok::<_, Error>(())
     })?;
+    Ok(devices)
+}
+
+fn find_relevant_with_radios(
+    cfgs: &Configs,
+    radios: &BTreeMap<String, WifiRadio>,
+) -> Result<Vec<(String, WifiInterface, WifiDevice, WifiRadio)>, Error> {
+    let devices = wifi_devices(cfgs)?;
     let mut relevant_interfaces = Vec::<(String, WifiInterface, WifiDevice, WifiRadio)>::new();
     cfgs["wireless"].try_each(|name, iface: WifiInterface| {
         if iface.mode != WifiMode::AP {
@@ -678,20 +683,7 @@ fn find_relevant_with_radios(
 }
 
 fn find_relevant(cfgs: &Configs) -> Result<Vec<(String, WifiInterface, WifiDevice)>, Error> {
-    let mut devices = HashMap::new();
-    cfgs["wireless"].try_each(|name, device: WifiDevice| {
-        devices.insert(
-            name.ok_or_else(|| {
-                Error::new(
-                    eyre!("unnamed wireless device"),
-                    ErrorKind::UnnamedWirelessDevice,
-                )
-            })?
-            .to_string(),
-            device,
-        );
-        Ok::<_, Error>(())
-    })?;
+    let devices = wifi_devices(cfgs)?;
     let mut relevant_interfaces = Vec::<(String, WifiInterface, WifiDevice)>::new();
     cfgs["wireless"].try_each(|name, iface: WifiInterface| {
         if iface.mode != WifiMode::AP {
@@ -1956,8 +1948,13 @@ pub(crate) async fn apply_blackout(uci_root: impl AsRef<Path>) -> Result<bool, E
 /// `wifi up` leaves a radio whose own config disables it down.
 async fn apply_blackout_locked(uci_root: &Path) -> Result<bool, Error> {
     let inside = inside_window(uci_root).await?;
+    let enabled = if inside {
+        BTreeSet::new()
+    } else {
+        read_enabled_radios(uci_root).await?
+    };
     let action = match settled_wireless_status().await {
-        Some(radios) => radio_action(&radios, inside),
+        Some(radios) => radio_action(&radios, inside, &enabled),
         None => inside.then_some("down"),
     };
     if let Some(action) = action {
@@ -1966,6 +1963,16 @@ async fn apply_blackout_locked(uci_root: &Path) -> Result<bool, Error> {
             .map_err(|e| Error::new(eyre!("wifi {action}: {e}"), ErrorKind::Network))?;
     }
     Ok(inside)
+}
+
+async fn read_enabled_radios(uci_root: &Path) -> Result<BTreeSet<String>, Error> {
+    let bytes = uciedit::read_all(uci_root, &["wireless"]).await?;
+    let arena = Arena::new();
+    let cfgs = bytes.parse(&arena)?;
+    Ok(wifi_devices(&cfgs)?
+        .into_iter()
+        .filter_map(|(name, device)| (!device.disabled).then_some(name))
+        .collect())
 }
 
 /// One radio of `ubus call network.wireless status`.
@@ -2022,19 +2029,21 @@ async fn settled_wireless_status() -> Option<BTreeMap<String, RadioStatus>> {
     wireless_status().await
 }
 
-/// The `wifi` command that brings the radios to the blackout state, if any.
-/// `wifi up` restarts radios that are already up, so it runs only for an
-/// enabled radio that is down and not mid setup.
-fn radio_action(radios: &BTreeMap<String, RadioStatus>, inside: bool) -> Option<&'static str> {
+/// Enablement comes from UCI; blackout saves can leave netifd's config stale.
+fn radio_action(
+    radios: &BTreeMap<String, RadioStatus>,
+    inside: bool,
+    enabled: &BTreeSet<String>,
+) -> Option<&'static str> {
     if inside {
         radios
             .values()
             .any(|r| r.up || r.pending || (r.autostart && r.enabled()))
             .then_some("down")
     } else {
-        radios
-            .values()
-            .any(|r| r.enabled() && !r.up && !r.pending)
+        enabled
+            .iter()
+            .any(|name| radios.get(name).map_or(true, |r| !r.up && !r.pending))
             .then_some("up")
     }
 }
@@ -2186,9 +2195,12 @@ mod tests {
         serde_json::from_str(&format!(r#"{{"radio0": {radio0}, "radio1": {radio1}}}"#)).unwrap()
     }
 
-    /// A radio disabled in its own config, as netifd reports it.
     fn user_disabled() -> String {
         radio(false, false, false, true)
+    }
+
+    fn enabled_radios(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|name| name.to_string()).collect()
     }
 
     #[test]
@@ -2197,8 +2209,9 @@ mod tests {
             radio(true, false, true, false),
             radio(true, false, true, false),
         );
-        assert_eq!(radio_action(&radios, true), Some("down"));
-        assert_eq!(radio_action(&radios, false), None);
+        let enabled = enabled_radios(&["radio0", "radio1"]);
+        assert_eq!(radio_action(&radios, true, &enabled), Some("down"));
+        assert_eq!(radio_action(&radios, false, &enabled), None);
     }
 
     #[test]
@@ -2207,8 +2220,9 @@ mod tests {
             radio(true, false, false, false),
             radio(true, false, false, false),
         );
-        assert_eq!(radio_action(&radios, true), Some("down"));
-        assert_eq!(radio_action(&radios, false), None);
+        let enabled = enabled_radios(&["radio0", "radio1"]);
+        assert_eq!(radio_action(&radios, true, &enabled), Some("down"));
+        assert_eq!(radio_action(&radios, false, &enabled), None);
     }
 
     #[test]
@@ -2217,8 +2231,9 @@ mod tests {
             radio(false, false, false, false),
             radio(false, false, false, false),
         );
-        assert_eq!(radio_action(&radios, true), None);
-        assert_eq!(radio_action(&radios, false), Some("up"));
+        let enabled = enabled_radios(&["radio0", "radio1"]);
+        assert_eq!(radio_action(&radios, true, &enabled), None);
+        assert_eq!(radio_action(&radios, false, &enabled), Some("up"));
     }
 
     #[test]
@@ -2227,8 +2242,9 @@ mod tests {
             radio(true, false, false, false),
             radio(false, false, false, false),
         );
-        assert_eq!(radio_action(&radios, true), Some("down"));
-        assert_eq!(radio_action(&radios, false), Some("up"));
+        let enabled = enabled_radios(&["radio0", "radio1"]);
+        assert_eq!(radio_action(&radios, true, &enabled), Some("down"));
+        assert_eq!(radio_action(&radios, false, &enabled), Some("up"));
     }
 
     #[test]
@@ -2237,8 +2253,9 @@ mod tests {
             radio(false, true, false, false),
             radio(true, false, false, false),
         );
-        assert_eq!(radio_action(&radios, true), Some("down"));
-        assert_eq!(radio_action(&radios, false), None);
+        let enabled = enabled_radios(&["radio0", "radio1"]);
+        assert_eq!(radio_action(&radios, true, &enabled), Some("down"));
+        assert_eq!(radio_action(&radios, false, &enabled), None);
     }
 
     #[test]
@@ -2247,21 +2264,57 @@ mod tests {
             radio(false, false, true, false),
             radio(false, false, true, false),
         );
-        assert_eq!(radio_action(&radios, true), Some("down"));
-        assert_eq!(radio_action(&radios, false), Some("up"));
+        let enabled = enabled_radios(&["radio0", "radio1"]);
+        assert_eq!(radio_action(&radios, true, &enabled), Some("down"));
+        assert_eq!(radio_action(&radios, false, &enabled), Some("up"));
     }
 
     #[test]
     fn test_radio_action_user_disabled_radio() {
+        let enabled = enabled_radios(&["radio0"]);
         let radios = status(radio(true, false, true, false), user_disabled());
-        assert_eq!(radio_action(&radios, false), None);
+        assert_eq!(radio_action(&radios, false, &enabled), None);
         let radios = status(radio(false, false, false, false), user_disabled());
-        assert_eq!(radio_action(&radios, true), None);
-        assert_eq!(radio_action(&radios, false), Some("up"));
+        assert_eq!(radio_action(&radios, true, &enabled), None);
+        assert_eq!(radio_action(&radios, false, &enabled), Some("up"));
         // `wifi up` marks a disabled radio for autostart without starting it.
         let disabled_autostart = radio(false, false, true, true);
         let radios = status(radio(false, false, false, false), disabled_autostart);
-        assert_eq!(radio_action(&radios, true), None);
+        assert_eq!(radio_action(&radios, true, &enabled), None);
+    }
+
+    #[tokio::test]
+    async fn test_radio_action_uses_saved_enablement() {
+        let dir = tempfile::tempdir().unwrap();
+        let wireless = dir.path().join("wireless");
+        tokio::fs::write(
+            &wireless,
+            "config wifi-device 'radio0'\n option type 'mac80211'\n option band '2g'\n option channel 'auto'\n option disabled '0'\n",
+        )
+        .await
+        .unwrap();
+        let enabled = read_enabled_radios(dir.path()).await.unwrap();
+        assert_eq!(enabled, enabled_radios(&["radio0"]));
+        let radios = status(user_disabled(), user_disabled());
+        assert_eq!(radio_action(&radios, true, &enabled), None);
+        assert_eq!(radio_action(&radios, false, &enabled), Some("up"));
+
+        tokio::fs::write(
+            &wireless,
+            "config wifi-device 'radio0'\n option type 'mac80211'\n option band '2g'\n option channel 'auto'\n option disabled '1'\n",
+        )
+        .await
+        .unwrap();
+        let enabled = read_enabled_radios(dir.path()).await.unwrap();
+        assert!(enabled.is_empty());
+        let radios = status(radio(false, false, false, false), user_disabled());
+        assert_eq!(radio_action(&radios, false, &enabled), None);
+    }
+
+    #[test]
+    fn test_radio_action_new_enabled_radio() {
+        let enabled = enabled_radios(&["radio0"]);
+        assert_eq!(radio_action(&BTreeMap::new(), false, &enabled), Some("up"));
     }
 
     #[tokio::test]
