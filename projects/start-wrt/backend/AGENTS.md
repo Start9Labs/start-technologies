@@ -21,7 +21,7 @@ crates are members of the **root** Cargo workspace (build with `cargo build -p s
 
 - New handler modules must export `pub fn <name><C: CtrlContext>() -> ParentHandler<C>` and be registered in `main_api()` in `ctrl/src/lib.rs`. Skipping the registration is silent — the endpoint won't exist.
 - After UCI writes, call `/etc/init.d/<service> reload` — but only when `ctx.effectful()` is true. Reloading unconditionally breaks `--configs-only` CLI mode.
-- Use `uciedit`'s retry mechanism for writes that may conflict with concurrent writes (profile creation already retries 4 times). Don't add ad-hoc retry loops.
+- `uciedit`'s `write_all`/`dump_all` fail with `uciedit::Error::Conflict` when a config changed after it was read. Re-read, re-apply, and re-write in a bounded loop on `Conflict` (profile creation retries 4 times).
 - The generic `uci.get` / `uci.set` / `uci.edit` / `file.*` / `exec` endpoints are vestigial — every feature has a purpose-built smart endpoint and no frontend code calls the generics. Don't reach for them when adding new functionality; add a typed handler instead. See `../API_CONTRACT.md` for the full contract.
 - For dev authentication, set `STARTWRT_DEV_PASSWORD` to bypass `/etc/shadow`. Don't try to populate `/etc/shadow` on a dev machine.
 
@@ -65,9 +65,11 @@ pub async fn my_handler<C: CtrlContext>(ctx: C, args: MyParams) -> Result<MyResp
 ```rust
 pub fn my_module<C: CtrlContext + Clone>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("my-method", from_fn_async(my_handler).with_display_serializable())
+        .subcommand("my-method", from_fn_async_local(my_handler::<C>).with_display_serializable())
 }
 ```
+
+A handler that holds a uciedit `Arena` across `.await` is `!Send`; register it with `from_fn_async_local`.
 
 4. **Register the module in `main_api()`** in `ctrl/src/lib.rs`:
 
@@ -128,6 +130,6 @@ let arena = Arena::new();
 let cfg = Config::parse(&arena, ctx.uci_root().join("myconfig")).await?;
 cfg.try_each(|section_name, section: MySection| {
     // process each section of this type
-    Ok(())
+    Ok::<_, Error>(())
 })?;
 ```

@@ -40,7 +40,7 @@ Optionally disable WiFi on a schedule — for example, 10pm to 7am — to preven
 
 ### Dynamic DNS
 
-Use Start9 Dynamic DNS for free with a single click. No account necessary. Optionally use another dynamic DNS provider.
+Keep a domain name pointed at your WAN address through a dynamic DNS provider: DynDNS, No-IP, Cloudflare, DuckDNS, or FreeDNS.
 
 ### Published Ports
 
@@ -48,7 +48,7 @@ Forward ports from the Internet to specific devices on the LAN, with per-rule co
 
 ### Help Mode
 
-Toggle Help Mode to get a detailed explanation of everything in the current view, including links to external resources. Toggle again to dismiss.
+Toggle **Help** in the header to get a detailed explanation of everything in the current view, including links to external resources. Toggle again to dismiss.
 
 ## Web Interface
 
@@ -62,13 +62,13 @@ The StartWRT web interface is a single-page application that communicates with t
 
 The interface is organized around the router's feature areas:
 
-| Section               | Routes                                       | Description                                           |
-| --------------------- | -------------------------------------------- | ----------------------------------------------------- |
-| **Internet**          | WAN Settings, Published Ports, Outbound VPNs | External connectivity, port forwarding, VPN clients   |
-| **Network**           | LAN Settings, Devices                        | Local network configuration and device management     |
-| **Security Profiles** | Profiles                                     | Create and manage access control profiles             |
-| **Points of Entry**   | Ethernet, Wi-Fi, Inbound VPNs                | How devices join the network and get profiled         |
-| **System**            | Settings                                     | General, advanced, password, SSH keys, logs, activity |
+| Section               | Routes                                       | Description                                                   |
+| --------------------- | -------------------------------------------- | ------------------------------------------------------------- |
+| **Internet**          | WAN Settings, Published Ports, Outbound VPNs | External connectivity, port forwarding, VPN clients           |
+| **Network**           | LAN Settings, Devices                        | Local network configuration and device management             |
+| **Security Profiles** | Profiles                                     | Create and manage access control profiles                     |
+| **Points of Entry**   | Ethernet, Wi-Fi, Inbound VPNs                | How devices join the network and get profiled                 |
+| **System**            | Settings                                     | General, password, SSH keys, activity, logs, backup, advanced |
 
 ## Documentation
 

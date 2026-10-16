@@ -32,6 +32,7 @@ Both `startwrt-ctrld` (daemon) and `startwrt-cli` (CLI) share the same handler c
 pub trait CtrlContext: Context + Clone {
     fn uci_root(&self) -> PathBuf;   // /etc/config/ on router, configurable for CLI
     fn effectful(&self) -> bool;      // CLI: --configs-only skips service reloads
+    fn wan_ipv4_addrs(&self) -> Vec<Ipv4Addr>; // provided; empty unless effectful
 }
 ```
 
@@ -82,7 +83,8 @@ ethernet
 wifi
   ├─ get / set / edit   # SSID, passwords, radio settings
   ├─ blackout-get / blackout-set
-  └─ generate-password
+  ├─ generate-password
+  └─ regulatory        # Countries + per-band channels
 
 vpn-server              # Inbound WireGuard VPN
   ├─ list / set / delete
@@ -99,6 +101,9 @@ system                  # System settings, remote access, restart, factory reset
                         # OTA update (newer-versions / update)
 
 devices                 # Device enumeration, rename, forget, data usage
+
+dns
+  └─ injected-list      # Records devices published via DNS UPDATE
 
 wan                     # WAN IPv4/IPv6, MAC, DNS, DDNS config
 
@@ -131,7 +136,7 @@ exec                    # Shell command execution
 
 ### profiles.rs — Security Profile CRUD
 
-The core module. Each profile creates a VLAN on the LAN bridge, a network interface, a firewall zone with forwarding rules, and a DHCP server. Orchestrates changes across five UCI configs: `startwrt`, `network`, `firewall`, `dhcp`, `wireless`. Uses retry loops (4 attempts) for conflict resolution.
+The core module. Each profile creates a VLAN on the LAN bridge, a network interface, a firewall zone with forwarding rules, and a DHCP server. Orchestrates changes across five UCI configs: `startwrt`, `network`, `firewall`, `dhcp`, `wireless`. Uses retry loops (4 retries) for conflict resolution.
 
 Key types:
 
@@ -143,7 +148,7 @@ Also handles WAN access schedules — time-of-day rules that enable/disable WAN 
 
 ### wifi.rs — WiFi Configuration
 
-Manages SSID, per-radio settings (band, channel, enabled, broadcast), and multi-password config. Each password maps to a profile via dynamic VLAN. The admin password uses `WifiDynamicVlan::ALLOWED`; all others use `REQUIRED`.
+Manages SSID, per-radio settings (band, channel, enabled, broadcast), and multi-password config. Each password maps to a profile via dynamic VLAN. `dynamic_vlan` is set per `wifi-iface`: `WifiDynamicVlan::ALLOWED`, with the first profile-less (admin) password as the interface `key`, when one exists; otherwise `REQUIRED` with no key.
 
 Manages WiFi blackout schedules via crontab (`/etc/crontabs/root`).
 
@@ -187,7 +192,7 @@ Low-level UCI, file, and shell access. These are vestigial — all features now 
 
 | Module                            | Purpose                                                                                                                                                                                                                                                      |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `system.rs`                       | System settings, remote access rules, schedules, restart, factory reset                                                                                                                                                                                      |
+| `system.rs`                       | System settings, timezone, remote access rules, logs, OTA entry points, restart, factory reset                                                                                                                                                               |
 | `devices.rs`                      | Device enumeration from ARP/DHCP, rename, forget (flush ARP + lease)                                                                                                                                                                                         |
 | `wan.rs` / `lan.rs`               | WAN/LAN interface configuration                                                                                                                                                                                                                              |
 | `published_ports.rs`              | Port forwarding rules (firewall redirects)                                                                                                                                                                                                                   |
@@ -196,6 +201,7 @@ Low-level UCI, file, and shell access. These are vestigial — all features now 
 | `ssh_keys.rs`                     | SSH public key CRUD (`/etc/dropbear/authorized_keys`)                                                                                                                                                                                                        |
 | `vpn_client.rs` / `vpn_server.rs` | WireGuard VPN management                                                                                                                                                                                                                                     |
 | `dns.rs`                          | DNS server configuration                                                                                                                                                                                                                                     |
+| `dns_inject.rs`                   | RFC 2136 DNS UPDATE ingress: per-device published records served through per-profile dnsmasq (`dns.injected-list`)                                                                                                                                           |
 | `activity.rs`                     | Activity logging via SQLite                                                                                                                                                                                                                                  |
 | `backup.rs` / `diagnostics.rs`    | Backup/restore and diagnostic bundles (via continuations)                                                                                                                                                                                                    |
 | `logs.rs`                         | WebSocket log streaming                                                                                                                                                                                                                                      |
@@ -279,14 +285,14 @@ Macro attributes:
 
 Shared, OpenWrt-native typed sections live in `uciedit/src/openwrt.rs`; feature-owned sections (`UciPreferences`, `UciWifiBlackout`, `UciProfile`, the VPN sections, …) are defined in `ctrl` beside their handlers. The sections in `openwrt.rs`:
 
-| Config       | Structs                                                                                 |
-| ------------ | --------------------------------------------------------------------------------------- |
-| **firewall** | `FirewallZone`, `FirewallRule`, `FirewallRedirect`, `FirewallForwarding`                |
-| **network**  | `NetworkInterface`, `NetworkDevice`, `NetworkBridgeVlan`, `NetworkRoute`, `NetworkRule` |
-| **wireless** | `WifiDevice`, `WifiInterface`, `WifiVlan`, `WifiStation`                                |
-| **dhcp**     | `Dhcp`, `DhcpHost`, `ProfileDnsmasq`                                                    |
-| **startwrt** | `UciSystemDns` (the `system_dns` section)                                               |
-| **ddns**     | `DdnsService`                                                                           |
+| Config       | Structs                                                                                                                                    |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **firewall** | `FirewallZone`, `FirewallRule`, `FirewallRedirect`, `FirewallForwarding`                                                                   |
+| **network**  | `NetworkInterface`, `NetworkDevice`, `NetworkBridgeVlan`, `NetworkRoute`, `NetworkRoute6`, `NetworkRule`, `NetworkRule6`, `NetworkGlobals` |
+| **wireless** | `WifiDevice`, `WifiInterface`, `WifiVlan`, `WifiStation`                                                                                   |
+| **dhcp**     | `Dhcp`, `DhcpHost`, `ProfileDnsmasq`                                                                                                       |
+| **startwrt** | `UciSystemDns` (the `system_dns` section)                                                                                                  |
+| **ddns**     | `DdnsService`                                                                                                                              |
 
 `NetworkVlanPort` (a plain struct) and `NetworkVlanPortTagging` (an enum) are not `TypedSection`s — they are used as fields within `NetworkBridgeVlan`.
 
@@ -298,15 +304,15 @@ Shared, OpenWrt-native typed sections live in `uciedit/src/openwrt.rs`; feature-
 - Profile errors: `MissingProfile`, `CorruptedProfile`, `LanOwnerExists`, `CannotDeleteLanOwner`
 - Infrastructure errors: `MissingLanBridge`, `MissingWanInterface`, `MissingLanInterface`, `MissingFirewallZone`
 - WiFi errors: `CorruptedWifi`, `UnnamedWirelessInterface`, `UnnamedWirelessDevice`
-- VPN errors: `VpnHasDependents`, `VpnChainCycle`, `VpnPeersWouldBreak`, `MissingDeviceAddress`
-- Validation: `InvalidValue`, `WanPortWithProfile`, `DhcpStaticHostsInSubnet`, `SubnetCollision`
-- UCI shell-out: `UciEdit` (failed `uci` CLI invocation)
+- VPN errors: `VpnHasDependents`, `VpnChainCycle`, `VpnPeersWouldBreak`, `VpnDisabled`
+- Validation: `InvalidValue`, `WanPortWithProfile`, `DhcpStaticHostsInSubnet`, `SubnetCollision`, `MissingDeviceAddress`, `PublishedPortsUseIpv6`
+- UCI errors: `UciEdit` (any `uciedit` parse, I/O, or write-conflict failure, and failed `uci` CLI calls)
 
-Auth-specific RPC error codes: 7 (incorrect password), 34 (authorization — triggers frontend logout), 40 (uninitialized).
+Auth-specific RPC error codes: 7 (incorrect password) and 34 (authorization — triggers frontend logout).
 
 ## Common Pitfalls
 
-- **UCI conflicts.** Concurrent writes to the same config file will fail. Use uciedit's retry mechanism. Profile creation already retries 4 times.
+- **UCI conflicts.** Concurrent writes to the same config file will fail with `uciedit::Error::Conflict`. Re-read, re-apply, and re-write in a bounded loop; profile creation retries 4 times.
 - **Service reloads.** After writing UCI configs, call `/etc/init.d/<service> reload`. The `effectful` flag on `CtrlContext` controls whether reloads happen.
 - **Arena lifetimes.** uciedit uses arena allocation — parsed values borrow from the arena. Don't try to outlive it.
 - **Bridge VLAN filtering.** StartWRT uses UCI `bridge-vlan` configuration for per-port VLAN assignment. OpenWrt maps this to DSA hardware switch tables when available (e.g., DeepComputing 4-port board) or to the kernel's software bridge filter when not (e.g., BPI-F3, which has two independent GMACs and no switch chip). The backend code is the same for both — it writes `NetworkBridgeVlan` / `NetworkVlanPort` sections regardless of the underlying hardware.

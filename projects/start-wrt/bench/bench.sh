@@ -496,7 +496,6 @@ uci commit firewall
 	esac
 }
 
-# Loopback bypasses daemon authentication.
 UI_REMOTE=$(
 	cat <<'EOF'
 read -r login

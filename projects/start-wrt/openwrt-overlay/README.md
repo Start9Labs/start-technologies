@@ -25,8 +25,8 @@ Sixteen files carry an explicit `SPDX-License-Identifier: GPL-2.0-only` header,
 most of them naming a copyright holder. The `.patch` files are diffs against
 GPL- or ISC-licensed sources, so each patched result carries its own source's
 terms. The remaining unheadered files are vendor BSP and OpenWrt copies, plus a few
-Start9-authored additions and the SpaceMiT opkg signing keys and root CA under
-`base-files/etc/` (key material, not licensed works — see the root NOTICE.md).
+Start9-authored additions and the SpaceMiT opkg signing keys under
+`base-files/etc/opkg/keys/` (key material, not licensed works — see the root NOTICE.md).
 Start9 contributes its own additions here under GPL-2.0-only so the overlay can
 be distributed as one tree.
 
