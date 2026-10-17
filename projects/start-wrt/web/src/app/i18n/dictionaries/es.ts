@@ -545,4 +545,5 @@ export default {
   573: 'Revocar publicación de registros DNS',
   574: 'Actualizando par VPN...',
   575: 'Par VPN actualizado',
+  576: 'Sustituya el marcador de posición de PrivateKey por la clave privada de este dispositivo antes de usar esta configuración.',
 } satisfies i18n

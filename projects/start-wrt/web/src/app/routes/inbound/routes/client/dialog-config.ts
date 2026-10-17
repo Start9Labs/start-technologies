@@ -3,6 +3,7 @@ import {
   TuiButton,
   TuiDialogContext,
   TuiIcon,
+  TuiNotification,
   TuiTextfield,
   TuiTitle,
 } from '@taiga-ui/core'
@@ -13,6 +14,12 @@ import { QrCodeComponent } from 'ng-qrcode'
 import { provideHelp } from 'src/app/help/help'
 import { ModalHelp } from 'src/app/help/modal-help'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+
+export interface ClientConfigData {
+  name: string
+  config: string
+  placeholderKey?: boolean
+}
 
 @Component({
   template: `
@@ -28,18 +35,28 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
         >
           {{ 'Toggle visibility' | i18n }}
         </button>
-        <tui-segmented [(activeItemIndex)]="index">
-          <button>
-            <tui-icon icon="@tui.file" />
-            {{ 'File' | i18n }}
-          </button>
-          <button>
-            <tui-icon icon="@tui.qr-code" />
-            {{ 'QR' | i18n }}
-          </button>
-        </tui-segmented>
+        @if (!context.data.placeholderKey) {
+          <tui-segmented [(activeItemIndex)]="index">
+            <button>
+              <tui-icon icon="@tui.file" />
+              {{ 'File' | i18n }}
+            </button>
+            <button>
+              <tui-icon icon="@tui.qr-code" />
+              {{ 'QR' | i18n }}
+            </button>
+          </tui-segmented>
+        }
       </aside>
     </header>
+    @if (context.data.placeholderKey) {
+      <div tuiNotification appearance="info">
+        {{
+          'Replace the PrivateKey placeholder with the private key of this device before using this configuration.'
+            | i18n
+        }}
+      </div>
+    }
     @if (index()) {
       <qr-code
         [value]="context.data.config"
@@ -69,6 +86,10 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
     }
   `,
   styles: `
+    [tuiNotification] {
+      margin-block-end: 1rem;
+    }
+
     .masked {
       filter: blur(8px);
       pointer-events: none;
@@ -84,6 +105,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
     TuiIcon,
     TuiTitle,
     TuiSegmented,
+    TuiNotification,
     TuiTextfield,
     TuiTextarea,
     TuiCopy,
@@ -94,7 +116,7 @@ export class ClientConfigDialog {
   protected readonly index = signal(0)
   protected readonly masked = signal(true)
   protected readonly context =
-    injectContext<TuiDialogContext<void, { name: string; config: string }>>()
+    injectContext<TuiDialogContext<void, ClientConfigData>>()
   protected readonly href = URL.createObjectURL(
     new Blob([this.context.data.config], { type: 'application/octet-stream' }),
   )

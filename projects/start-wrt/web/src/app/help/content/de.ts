@@ -139,7 +139,7 @@ Zeigt die Konfiguration als Text an. Verwenden Sie die Schaltfläche zum Kopiere
 
 ### QR
 
-Zeigt die Konfiguration als QR-Code an. Scannen Sie ihn mit der mobilen WireGuard-App, um das Client-Gerät ohne manuelle Eingabe zu konfigurieren.`,
+Zeigt die Konfiguration als QR-Code an, wenn der Router den privaten Schlüssel des Geräts erzeugt hat. Scannen Sie ihn mit der mobilen WireGuard-App, um das Client-Gerät ohne manuelle Eingabe zu konfigurieren.`,
   '/inbound/client/dialog-rename': `## Client umbenennen
 
 ### Name

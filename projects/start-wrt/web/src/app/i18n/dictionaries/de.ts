@@ -545,4 +545,5 @@ export default {
   573: 'DNS-Einträge veröffentlichen widerrufen',
   574: 'VPN-Peer wird aktualisiert...',
   575: 'VPN-Peer aktualisiert',
+  576: 'Ersetzen Sie den PrivateKey-Platzhalter durch den privaten Schlüssel dieses Geräts, bevor Sie diese Konfiguration verwenden.',
 } satisfies i18n

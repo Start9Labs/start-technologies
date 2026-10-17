@@ -19,7 +19,10 @@ import {
   ADD_CLIENT,
   ClientDialogData,
 } from 'src/app/routes/inbound/routes/client/dialog-add'
-import { CLIENT_CONFIG } from 'src/app/routes/inbound/routes/client/dialog-config'
+import {
+  CLIENT_CONFIG,
+  ClientConfigData,
+} from 'src/app/routes/inbound/routes/client/dialog-config'
 import { DevicesApiService } from 'src/app/routes/devices/service'
 import {
   ApiService,
@@ -270,13 +273,14 @@ export default class InboundTable {
           queryParams: { port: listenPort },
         })
 
-        if (response?.client_config) {
+        if (response) {
           this.dialogs
             .open(CLIENT_CONFIG, {
               data: {
                 name: peer.name,
                 config: response.client_config,
-              },
+                placeholderKey: !!peer.public_key,
+              } satisfies ClientConfigData,
             })
             .subscribe()
         }

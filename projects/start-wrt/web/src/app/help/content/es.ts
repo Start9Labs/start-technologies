@@ -139,7 +139,7 @@ Muestra la configuración como texto. Usa el botón de copiar para copiarla al p
 
 ### QR
 
-Muestra la configuración como un código QR. Escanéalo con la aplicación móvil de WireGuard para configurar el dispositivo cliente sin introducir los datos manualmente.`,
+Muestra la configuración como un código QR cuando el router ha generado la clave privada del dispositivo. Escanéalo con la aplicación móvil de WireGuard para configurar el dispositivo cliente sin introducir los datos manualmente.`,
   '/inbound/client/dialog-rename': `## Renombrar cliente
 
 ### Nombre

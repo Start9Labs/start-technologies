@@ -550,4 +550,5 @@ export const ENGLISH: Record<string, number> = {
   'Revoke DNS record publishing': 573,
   'Updating VPN peer...': 574,
   'VPN peer updated': 575,
+  'Replace the PrivateKey placeholder with the private key of this device before using this configuration.': 576,
 }

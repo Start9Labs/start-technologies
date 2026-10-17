@@ -139,7 +139,7 @@ Wyświetla konfigurację jako tekst. Użyj przycisku kopiowania, aby skopiować 
 
 ### QR
 
-Wyświetla konfigurację jako kod QR. Zeskanuj go aplikacją mobilną WireGuard, aby skonfigurować urządzenie klienckie bez ręcznego wprowadzania.`,
+Wyświetla konfigurację jako kod QR, gdy router wygenerował klucz prywatny urządzenia. Zeskanuj go aplikacją mobilną WireGuard, aby skonfigurować urządzenie klienckie bez ręcznego wprowadzania.`,
   '/inbound/client/dialog-rename': `## Zmień nazwę klienta
 
 ### Nazwa

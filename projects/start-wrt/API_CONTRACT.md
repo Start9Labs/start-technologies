@@ -1443,8 +1443,8 @@ struct VpnServerPeerInput {
 
 #[derive(Serialize)]
 struct VpnServerPeerAddResponse {
-    /// WireGuard client config (only when server generates the keypair)
-    client_config: Option<String>,
+    /// WireGuard client config; `PrivateKey = <PRIVATE_KEY>` when the request supplied `public_key`
+    client_config: String,
     public_key: String,
     ip: String,
 }

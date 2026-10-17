@@ -770,13 +770,13 @@ export const OutboundVpnUpdateRequest: z.ZodObject<{
 })
 
 /**
- * Response from adding a peer, contains client config if keys were generated
+ * Response from adding a peer
  */
 export const PeerAddResponse: z.ZodObject<{
   /**
-   * WireGuard client configuration (only present if keys were generated server-side)
+   * WireGuard client configuration. Its private key is a placeholder when the request supplied the public key.
    */
-  client_config: z.ZodOptional<z.ZodNullable<z.ZodString>>
+  client_config: z.ZodString
   /**
    * The public key of the peer
    */
@@ -787,11 +787,11 @@ export const PeerAddResponse: z.ZodObject<{
   ip: z.ZodString
 }> = /* @__PURE__ */ object({
   /**
-   * WireGuard client configuration (only present if keys were generated server-side)
+   * WireGuard client configuration. Its private key is a placeholder when the request supplied the public key.
    */
-  client_config: z.string().nullable().optional().meta({
+  client_config: z.string().meta({
     description:
-      'WireGuard client configuration (only present if keys were generated server-side)',
+      'WireGuard client configuration. Its private key is a placeholder when the request supplied the public key.',
   }),
   /**
    * The public key of the peer
@@ -807,8 +807,7 @@ export const PeerAddResponse: z.ZodObject<{
   }),
 }).meta({
   id: 'PeerAddResponse',
-  description:
-    'Response from adding a peer, contains client config if keys were generated',
+  description: 'Response from adding a peer',
 })
 export const PeerDeleteArgs: z.ZodObject<{
   /**
