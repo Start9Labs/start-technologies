@@ -81,21 +81,10 @@ fn no_shadowed_args_start_cli() {
 
 #[test]
 fn export_manpage_start_cli() {
-    // Pages live with the start-cli product; anchored to start-core's crate dir.
-    let dir = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../projects/start-cli/man"
-    );
-    std::fs::create_dir_all(dir).unwrap();
-    clap_mangen::generate_to(app().into_command(), dir).unwrap();
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
-        let page = std::fs::read_to_string(&path).unwrap();
-        let page = page
-            .lines()
-            .map(str::trim_end)
-            .collect::<Vec<_>>()
-            .join("\n");
-        std::fs::write(path, format!("{page}\n")).unwrap();
-    }
+    super::export_manpages(app().into_command(), "start-cli", super::cli_version());
+}
+
+#[test]
+fn cli_version_matches_manifest() {
+    assert_eq!(super::cli_version(), super::manifest_version("start-cli"));
 }

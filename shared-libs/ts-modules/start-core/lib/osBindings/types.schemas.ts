@@ -1055,6 +1055,122 @@ export const NotificationLevel: z.ZodEnum<{
 }> = /* @__PURE__ */ z.enum(['success', 'info', 'warning', 'error']).meta({
   id: 'NotificationLevel',
 })
+
+/**
+ * Directly connected UPS server settings or remote NUT client settings.
+ */
+export const NutSettings: z.ZodUnion<
+  readonly [
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * Serve and monitor a UPS connected directly to this StartOS host.
+         */
+        mode: z.ZodLiteral<'server'>
+      }>,
+      z.ZodObject<{
+        upsName: z.ZodString
+        driver: z.ZodString
+        port: z.ZodString
+        monitorUsername: z.ZodString
+        monitorPassword: z.ZodString
+        listenAll: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+        remoteUsername: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodString>>,
+          z.ZodNullable<z.ZodString>
+        >
+        remotePassword: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodString>>,
+          z.ZodNullable<z.ZodString>
+        >
+        shutdownDelay: z.ZodCodec<z.ZodOptional<z.ZodInt>, z.ZodInt>
+      }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * Monitor a UPS exposed by another NUT server.
+         */
+        mode: z.ZodLiteral<'client'>
+      }>,
+      z.ZodObject<{
+        upsName: z.ZodString
+        host: z.ZodString
+        port: z.ZodCodec<z.ZodOptional<z.ZodInt>, z.ZodInt>
+        monitorUsername: z.ZodString
+        monitorPassword: z.ZodString
+        shutdownDelay: z.ZodCodec<z.ZodOptional<z.ZodInt>, z.ZodInt>
+      }>
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.intersection(
+      object({
+        /**
+         * Serve and monitor a UPS connected directly to this StartOS host.
+         */
+        mode: z.literal('server').meta({
+          description:
+            'Serve and monitor a UPS connected directly to this StartOS host.',
+        }),
+      }),
+      object({
+        upsName: z.string(),
+        driver: z.string(),
+        port: z.string(),
+        monitorUsername: z.string(),
+        monitorPassword: z.string(),
+        listenAll: wire(z.boolean().optional(), z.boolean()),
+        remoteUsername: wire(
+          z.string().nullable().optional(),
+          z.string().nullable(),
+        ),
+        remotePassword: wire(
+          z.string().nullable().optional(),
+          z.string().nullable(),
+        ),
+        shutdownDelay: wire(z.int().optional(), z.int()),
+      }),
+    ),
+    z.intersection(
+      object({
+        /**
+         * Monitor a UPS exposed by another NUT server.
+         */
+        mode: z.literal('client').meta({
+          description: 'Monitor a UPS exposed by another NUT server.',
+        }),
+      }),
+      object({
+        upsName: z.string(),
+        host: z.string(),
+        port: wire(z.int().optional(), z.int()),
+        monitorUsername: z.string(),
+        monitorPassword: z.string(),
+        shutdownDelay: wire(z.int().optional(), z.int()),
+      }),
+    ),
+  ])
+  .meta({
+    id: 'NutSettings',
+    description:
+      'Directly connected UPS server settings or remote NUT client settings.',
+  })
+
+/**
+ * Current variables reported by the configured UPS.
+ */
+export const NutStatus: z.ZodObject<{
+  target: z.ZodString
+  variables: z.ZodRecord<z.ZodString, z.ZodString>
+}> = /* @__PURE__ */ object({
+  target: z.string(),
+  variables: z.record(z.string(), z.string()),
+}).meta({
+  id: 'NutStatus',
+  description: 'Current variables reported by the configured UPS.',
+})
 export const PackageBackupReport: z.ZodObject<{
   error: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -3152,6 +3268,43 @@ export const Notification: z.ZodObject<{
 }).meta({
   id: 'Notification',
 })
+
+/**
+ * Stored NUT configuration and its independent enabled state.
+ */
+export const NutConfig: z.ZodObject<{
+  /**
+   * Whether StartOS should run NUT monitoring.
+   */
+  enabled: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  /**
+   * Retained server or client settings, including while monitoring is disabled.
+   */
+  settings: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof NutSettings>>,
+    z.ZodNullable<typeof NutSettings>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Whether StartOS should run NUT monitoring.
+   */
+  enabled: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Whether StartOS should run NUT monitoring.',
+  }),
+  /**
+   * Retained server or client settings, including while monitoring is disabled.
+   */
+  settings: wire(
+    NutSettings.nullable().optional(),
+    NutSettings.nullable(),
+  ).meta({
+    description:
+      'Retained server or client settings, including while monitoring is disabled.',
+  }),
+}).meta({
+  id: 'NutConfig',
+  description: 'Stored NUT configuration and its independent enabled state.',
+})
 export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
   releaseNotes: z.ZodString
@@ -4484,6 +4637,15 @@ export const SetHealth: z.ZodIntersection<
   .meta({
     id: 'SetHealth',
   })
+
+/**
+ * Parameters for replacing the stored NUT configuration.
+ */
+export const SetNutParams: z.ZodObject<{ config: typeof NutConfig }> =
+  /* @__PURE__ */ object({ config: NutConfig }).meta({
+    id: 'SetNutParams',
+    description: 'Parameters for replacing the stored NUT configuration.',
+  })
 export const SetupProgress: z.ZodObject<{
   progress: typeof FullProgress
   guid: typeof Guid
@@ -5481,6 +5643,7 @@ export const ServerInfo: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof SmtpValue>>,
     z.ZodNullable<typeof SmtpValue>
   >
+  nut: z.ZodCodec<z.ZodOptional<typeof NutConfig>, typeof NutConfig>
   echoipUrls: z.ZodCodec<z.ZodOptional<typeof literal_5>, typeof literal_5>
   ram: typeof literal_3
   devices: z.ZodArray<typeof LshwDevice>
@@ -5514,6 +5677,7 @@ export const ServerInfo: z.ZodObject<{
   governor: wire(Governor.nullable().optional(), Governor.nullable()),
   epp: wire(Epp.nullable().optional(), Epp.nullable()),
   smtp: wire(SmtpValue.nullable().optional(), SmtpValue.nullable()),
+  nut: wire(NutConfig.optional(), NutConfig),
   echoipUrls: wire(literal_5.optional(), literal_5),
   ram: literal_3,
   devices: z.array(LshwDevice),
