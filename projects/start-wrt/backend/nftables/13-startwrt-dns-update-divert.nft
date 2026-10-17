@@ -5,8 +5,10 @@
 # `@th,81,4` is the DNS opcode (UDP header 64 bits, flags at bit 80); 5 is
 # UPDATE. A TCP SYN carries no opcode, so TCP is diverted whole. `fib daddr
 # type local` leaves transiting DNS alone.
-# `redirect` keeps the destination address. Priority -101 runs before fw4's
-# dstnat (-100), so the per-profile DNS-Override DNAT never sees these.
+# `redirect` delivers to the arriving interface's primary address: the
+# gateway on a profile, the server address on `wg_*`. Priority -101 runs
+# before fw4's dstnat (-100), so the per-profile DNS-Override DNAT never
+# sees these.
 # Inbound WireGuard arrivals take their own port.
 #
 # `redirect` needs kmod-nft-nat (build/openwrt.diffconfig); without it fw4

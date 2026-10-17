@@ -329,6 +329,19 @@ fn validate_private_key(key: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// The client config's `Address`. The IPv4 address carries the profile's /24,
+/// whose first host a StartOS client sends DNS updates to.
+fn client_address_line(peer_ip: Ipv4Addr, v6_groups: Option<[u16; 4]>) -> String {
+    match v6_groups {
+        Some(g) => format!(
+            "{}/24, {}/128",
+            peer_ip,
+            wg_peer_v6_addr(g, peer_ip.octets()[3])
+        ),
+        None => format!("{}/24", peer_ip),
+    }
+}
+
 /// Derive VPN server address from profile's gateway IP
 /// Gateway is typically .1, VPN server uses .254
 fn derive_server_address(gateway_ip: Ipv4Addr) -> Ipv4Addr {
@@ -1473,14 +1486,7 @@ pub async fn peer_add(
         // consumes cfgs. The peer gets a /128 in the server's dedicated WG /64
         // when the profile serves IPv6 (see wg_server_v6_groups).
         let v6_groups = wg_server_v6_groups(&cfgs, profile_interface);
-        let address_line = match v6_groups {
-            Some(g) => format!(
-                "{}/32, {}/128",
-                peer_ip,
-                wg_peer_v6_addr(g, peer_ip.octets()[3])
-            ),
-            None => format!("{}/32", peer_ip),
-        };
+        let address_line = client_address_line(peer_ip, v6_groups);
         // "All traffic" peers tunnel everything; "LAN only" peers tunnel exactly
         // the LAN subnets this profile's lan_access permits.
         let allowed_ips = if peer.route_all == Some(true) {
@@ -2600,6 +2606,19 @@ config dhcp 'guest'
     }
 
     // === Pure function tests ===
+
+    #[test]
+    fn client_address_carries_the_profile_prefix() {
+        let peer = Ipv4Addr::new(192, 168, 101, 200);
+        assert_eq!(client_address_line(peer, None), "192.168.101.200/24");
+        assert_eq!(
+            client_address_line(peer, Some([0xfdaa, 0xbbbb, 0xcccc, 0xf065])),
+            format!(
+                "192.168.101.200/24, {}/128",
+                wg_peer_v6_addr([0xfdaa, 0xbbbb, 0xcccc, 0xf065], 200)
+            ),
+        );
+    }
 
     #[test]
     fn test_derive_server_address() {

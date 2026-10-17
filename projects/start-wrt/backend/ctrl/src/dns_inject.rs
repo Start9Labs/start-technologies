@@ -13,8 +13,9 @@
 //! Both are refused a name under `lan.`. A name belongs to the first owner
 //! that claims it.
 //!
-//! Listeners bind each profile's gateway address and outlive the interface
-//! being recreated. Records, ownership and the directory live in memory;
+//! Listeners bind each profile's gateway address, and its WireGuard server
+//! address for inbound-VPN arrivals, and outlive the interface being
+//! recreated. Records, ownership and the directory live in memory;
 //! clients re-assert within 180 s of a restart.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -125,6 +126,9 @@ struct ProfileNet {
     zone: String,
     /// The inbound-VPN device (`wg_<interface>`), when one is configured.
     wg_device: Option<String>,
+    /// The inbound-VPN device's IPv4 address, where `redirect` delivers its
+    /// updates.
+    wg_address: Option<Ipv4Addr>,
 }
 
 /// State the injector's synchronous hooks read. A refresher task rebuilds it
@@ -427,16 +431,23 @@ fn read_snapshot(cfgs: &Configs) -> Result<NetSnapshot, Error> {
             .map(|(name, _)| name.clone())
             .unwrap_or_else(|| format!("vlan_{iface}"));
         let wg_name = format!("wg_{iface}");
-        let wg_device = cfgs["network"]
+        let wg_section = cfgs["network"]
             .sections
             .iter()
-            .any(|s| s.name().as_deref() == Some(wg_name.as_str()))
-            .then_some(wg_name.clone());
+            .find(|s| s.name().as_deref() == Some(wg_name.as_str()));
+        let wg_address = wg_section
+            .and_then(|s| s.get::<crate::vpn_server::WgInterface>().ok())
+            .and_then(|wg| {
+                wg.addresses
+                    .iter()
+                    .find_map(|a| a.split('/').next()?.parse::<Ipv4Addr>().ok())
+            });
         snapshot.profiles.push(ProfileNet {
             interface: iface,
             gateway,
             zone,
-            wg_device,
+            wg_device: wg_section.map(|_| wg_name.clone()),
+            wg_address,
         });
     })?;
 
@@ -655,9 +666,9 @@ fn bind_listener(injector: Arc<DnsInjector>, p: &ProfileNet) -> Result<Listener,
     let mut server = Server::new(InjectingHandler::new(injector.clone(), catalog));
     server.register_socket(bind_udp(p.gateway, DNS_UPDATE_PORT_LAN)?);
     let mut tcp = vec![bind_tcp(p.gateway, DNS_UPDATE_PORT_LAN)?];
-    if p.wg_device.is_some() {
-        server.register_socket(bind_udp(p.gateway, DNS_UPDATE_PORT_WG)?);
-        tcp.push(bind_tcp(p.gateway, DNS_UPDATE_PORT_WG)?);
+    if let Some(wg_address) = p.wg_address {
+        server.register_socket(bind_udp(wg_address, DNS_UPDATE_PORT_WG)?);
+        tcp.push(bind_tcp(wg_address, DNS_UPDATE_PORT_WG)?);
     }
     let shutdown = server.shutdown_token().clone();
     let tcp_shutdown = shutdown.clone();
@@ -1712,6 +1723,7 @@ mod tests {
             gateway: Ipv4Addr::new(192, 168, third_octet, 1),
             zone: zone.into(),
             wg_device: None,
+            wg_address: None,
         }
     }
 
@@ -1732,7 +1744,7 @@ mod tests {
             dir.path().join("network"),
             format!(
                 "config interface 'lan'\n\toption proto 'static'\n\toption ipaddr '192.168.1.1'\n\toption device 'br-lan.1'\n\n\
-                 config interface 'wg_lan'\n\toption proto 'wireguard'\n\n\
+                 config interface 'wg_lan'\n\toption proto 'wireguard'\n\toption private_key 'k'\n\tlist addresses '192.168.1.254/32'\n\tlist addresses 'fd00::1/128'\n\n\
                  config wireguard_wg_lan\n\toption public_key 'peer-pub'\n\toption preshared_key '{psk_b64}'\n\toption _allow_dns_inject '1'\n\tlist allowed_ips '10.59.0.2/32'\n\n\
                  config wireguard_wg_lan\n\toption public_key 'broken'\n\toption preshared_key 'not-base64!'\n\toption _allow_dns_inject '1'\n\tlist allowed_ips '10.59.0.3/32'\n"
             ),
@@ -1757,6 +1769,12 @@ mod tests {
             .find(|p| p.interface == "lan")
             .unwrap();
         assert_eq!(p.wg_device.as_deref(), Some("wg_lan"));
+        assert_eq!(
+            p.wg_address,
+            Some(Ipv4Addr::new(192, 168, 1, 254)),
+            "`redirect` delivers a peer's update to the WireGuard interface's \
+             own address, so the listener binds there, not the gateway"
+        );
 
         let (pubkey, key, profile) = snapshot
             .wg_peers
