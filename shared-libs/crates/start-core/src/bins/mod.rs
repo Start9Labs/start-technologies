@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 
 use rust_i18n::t;
 
+pub mod completions;
 pub mod container_cli;
 pub mod deprecated;
 pub mod registry;

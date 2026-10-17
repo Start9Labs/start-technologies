@@ -96,7 +96,7 @@ The full command tree comes from `start-core::main_api()`. Top-level groups incl
 - `echo`, `state`, `git-info` — diagnostics.
 - `completions` — a completion script for bash, zsh, fish, elvish or PowerShell.
 
-Run `start-cli <group> --help` for any group. Tab completion, in the shell's profile:
+Run `start-cli <group> --help` for any group. The Debian package and StartOS image enable Bash tab completion automatically in new shells. For other installations or shells, add completion to the shell's profile:
 
 ```sh
 eval "$(start-cli completions bash)"                          # bash

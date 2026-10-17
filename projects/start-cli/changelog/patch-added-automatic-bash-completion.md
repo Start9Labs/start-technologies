@@ -1,0 +1,1 @@
+- The Debian package enables Bash tab completion automatically in new shells.

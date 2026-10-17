@@ -18,6 +18,10 @@ These apply to all subcommands.
 - `-p, --proxy <URL>` — HTTP/SOCKS proxy
 - `--id-key-path <PATH>` — Identity signing key path (`--developer-key-path` is accepted as an alias)
 
+## Shell Completion
+
+The Debian package and StartOS image enable Bash tab completion automatically in new shells. For other installations, add `eval "$(start-cli completions bash)"` to `~/.bashrc`. `start-cli completions <shell>` also supports Zsh, fish, elvish, and PowerShell.
+
 ## Authentication
 
 Log in, log out, manage enrolled device keys, and reset the master password.

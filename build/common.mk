@@ -50,9 +50,13 @@ define cp
 endef
 endif
 
+define install-bash-completion
+	$(call mkdir,$(DESTDIR)/usr/share/bash-completion/completions)
+	$(call cp,build/bash-completion,$(DESTDIR)/usr/share/bash-completion/completions/$1)
+endef
+
 .DELETE_ON_ERROR:
 
-# --- vendored patch-db TS client (consumed by web) ---
 shared-libs/crates/patch-db/client/node_modules/.package-lock.json: shared-libs/crates/patch-db/client/package.json
 	npm --prefix shared-libs/crates/patch-db/client ci
 	touch shared-libs/crates/patch-db/client/node_modules/.package-lock.json

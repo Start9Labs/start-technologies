@@ -40,7 +40,7 @@ projects/start-os/build/lib/migration-images/.done: projects/start-os/build/save
 
 start-os-deb: results/$(BASENAME).deb
 
-results/$(BASENAME).deb: debian/build.sh $(call ls-files,projects/start-os/debian) $(STARTOS_TARGETS)
+results/$(BASENAME).deb: debian/build.sh build/common.mk build/bash-completion projects/start-os/build.mk $(call ls-files,projects/start-os/debian) $(STARTOS_TARGETS)
 	PLATFORM=$(PLATFORM) REQUIRES=debian ./build/os-compat/run-compat.sh ./debian/build.sh
 
 start-os-$(IMAGE_TYPE): results/$(BASENAME).$(IMAGE_TYPE)
@@ -65,13 +65,14 @@ results/$(BASENAME).migration.squashfs: results/$(BASENAME).squashfs projects/st
 		--pattern 'startos-*_$(PLATFORM).iso' --dir results/migration-base --clobber
 	docker run --rm -v "$(CURDIR)":/w -w /w -e OWNER_UID="$$(id -u)" -e OWNER_GID="$$(id -g)" start9/build-env bash -euc 'apt-get update -qq && apt-get install -yq --no-install-recommends xorriso && projects/start-os/build/assemble-migration-payload.sh --arch $(ARCH) --new-squashfs results/$(BASENAME).squashfs --old-image "$$(ls -1 results/migration-base/startos-*_$(PLATFORM).iso | head -n1)" --out $@'
 
-# For creating os images. DO NOT USE
-start-os-install: $(STARTOS_TARGETS)
+# The caller must set DESTDIR when staging an image.
+start-os-install: $(STARTOS_TARGETS) build/bash-completion
 	$(call mkdir,$(DESTDIR)/usr/bin)
 	$(call mkdir,$(DESTDIR)/usr/sbin)
 	$(call cp,target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox,$(DESTDIR)/usr/bin/startbox)
 	$(call ln,/usr/bin/startbox,$(DESTDIR)/usr/bin/startd)
 	$(call ln,/usr/bin/startbox,$(DESTDIR)/usr/bin/start-cli)
+	$(call install-bash-completion,start-cli)
 	if [ "$(PLATFORM)" = "raspberrypi" ]; then $(call cp,target/aarch64-unknown-linux-musl/release/pi-beep,$(DESTDIR)/usr/bin/pi-beep); fi
 	if /bin/bash -c '[[ "${ENVIRONMENT}" =~ (^|-)unstable($$|-) ]]'; then \
 		$(call cp,target/$(RUST_ARCH)-unknown-linux-musl/release/flamegraph,$(DESTDIR)/usr/bin/flamegraph); \

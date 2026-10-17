@@ -12,6 +12,10 @@ The `start-tunnel` CLI manages a StartTunnel server — a WireGuard-based gatewa
 - `-p, --proxy <URL>` — HTTP/SOCKS proxy
 - `--id-key-path <PATH>` — Identity signing key path (`--developer-key-path` is accepted as an alias)
 
+## Shell Completion
+
+The Debian package enables Bash tab completion automatically in new shells. `start-tunnel completions <shell>` prints a completion script for Bash, Zsh, fish, elvish, or PowerShell. For example, `eval "$(start-tunnel completions zsh)"` enables completion in Zsh.
+
 ## Authentication
 
 Manage passwords, enrolled device keys, and authorized SSH keys for remote access.

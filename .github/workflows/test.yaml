@@ -134,6 +134,9 @@ jobs:
           npm --prefix .github/actions/upload-each run build
           test -z "$(git status --porcelain --untracked-files=all -- .github/actions/upload-each/dist)"
 
+      - name: Install Bash completion test dependency
+        run: sudo apt-get install -y bash-completion
+
       - name: Build And Run Tests
         run: make test
 

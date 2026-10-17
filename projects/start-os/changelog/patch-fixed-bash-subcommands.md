@@ -1,0 +1,1 @@
+- Bash tab completion works for nested `start-cli` subcommands and their options.

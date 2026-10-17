@@ -121,6 +121,7 @@ make start-sdk-test          # SDK
 make backup-fs-test          # backup-fs library tests except the /dev/fuse suite
 make container-runtime-test  # container runtime
 make start-os-scripts-test   # StartOS shell scripts (projects/start-os/build/tests)
+make bash-completion-test    # completion staging and lazy loading (requires bash-completion)
 make start-wrt-test          # StartWRT Rust crates
 make release-notes-test      # changelog fragments, versions, release notes, signed commits
 make package-ci-test         # shared GitHub/Forgejo service-package CI (root npm dependencies)
