@@ -941,11 +941,14 @@ async fn reload_system_inner(restart_network: bool) -> Result<(), Error> {
     // left to withdraw. See deprecate_odhcpd_prefixes. A no-op when nothing
     // about IPv6 changed, beyond one extra RA.
     crate::deprecate_odhcpd_prefixes().await;
-    let network_action = if restart_network { "restart" } else { "reload" };
-    let _ = crate::run_quiet_async(
-        tokio::process::Command::new("/etc/init.d/network").arg(network_action),
-    )
-    .await;
+    if restart_network {
+        crate::wifi::restart_network().await;
+    } else {
+        let _ = crate::run_quiet_async(
+            tokio::process::Command::new("/etc/init.d/network").arg("reload"),
+        )
+        .await;
+    }
     // odhcpd holds RA/DHCPv6 config in memory; restart so dhcp.*.ra_default
     // (and other v6 advertisement changes) actually take effect.
     let _ =
@@ -986,12 +989,18 @@ async fn reload_system_and_wifi_inner(restart_network: bool) -> Result<(), Error
     // drop the prefix. See deprecate_odhcpd_prefixes. A no-op on profile
     // create, beyond one extra RA.
     crate::deprecate_odhcpd_prefixes().await;
-    let network_action = if restart_network { "restart" } else { "reload" };
-    let _ = crate::run_quiet_async(
-        tokio::process::Command::new("/etc/init.d/network").arg(network_action),
-    )
-    .await;
-    let _ = crate::run_quiet_async(&mut tokio::process::Command::new("wifi")).await;
+    if restart_network {
+        crate::wifi::restart_network().await;
+    } else {
+        let _ = crate::run_quiet_async(
+            tokio::process::Command::new("/etc/init.d/network").arg("reload"),
+        )
+        .await;
+    }
+    if let Err(e) = crate::wifi::reload_wifi("/etc/config", crate::wifi::WifiReload::Restart).await
+    {
+        tracing::warn!("WiFi restart failed: {e}");
+    }
     // odhcpd holds RA/DHCPv6 config in memory; restart so dhcp.*.ra_default
     // (and other v6 advertisement changes) actually take effect.
     let _ =

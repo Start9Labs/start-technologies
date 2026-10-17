@@ -1589,9 +1589,38 @@ full-week semantics apply to the profile `profiles.schedule-get` /
 
 ```rust
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct BlackoutSetRequest {
     windows: Vec<BlackoutWindow>,
+    /// Authorize turning Wi-Fi off now when a window covers the current time.
+    #[serde(default)]
+    confirm_immediate_blackout: bool,  // serialized as `confirmImmediateBlackout`
 }
+
+// Response:
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BlackoutSetResult {
+    /// True (and nothing applied) when a window covers the router's current
+    /// time and the caller hasn't confirmed. False once applied.
+    pending_immediate_blackout: bool,  // `pendingImmediateBlackout`
+}
+// Backend: without confirmation it validates, applies nothing, and reports
+// whether the windows cover the current time in the router's timezone; with
+// confirmation it saves them and applies the blackout state at once — Wi-Fi
+// down inside a window, up outside every window (a radio disabled in its own
+// settings stays down). Every Wi-Fi reload, boot, and timezone change applies
+// that state again, and cron runs `wifi.blackout-apply` at each window boundary.
+```
+
+### `wifi.blackout-apply`
+
+Internal endpoint, **not called from the frontend**. Applies the blackout state
+for the current time, exactly as `wifi.blackout-set` does after saving. The
+blackout crontab runs it at every window boundary.
+
+```rust
+// Request: {}
 // Response: null
 ```
 
@@ -2123,6 +2152,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `wifi.edit`                         | WiFi            | CLI editor                  |
 | `wifi.blackout-get`                 | WiFi            |                             |
 | `wifi.blackout-set`                 | WiFi            |                             |
+| `wifi.blackout-apply`               | WiFi            | Internal, blackout cron     |
 | `wifi.generate-password`            | WiFi            |                             |
 | `wifi.regulatory`                   | WiFi            |                             |
 | `profiles.list`                     | Profiles        |                             |
@@ -2144,7 +2174,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `diagnostics.create`                | Diagnostics     |                             |
 | `dns.injected-list`                 | DNS Injection   |                             |
 
-**Totals:** 82 RPC methods across 17 categories, plus the HTTP/WebSocket routes
+**Totals:** 83 RPC methods across 17 categories, plus the HTTP/WebSocket routes
 table above and the deprecated generic endpoints below.
 
 ---

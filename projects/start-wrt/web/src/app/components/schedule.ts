@@ -3,6 +3,7 @@ import {
   computed,
   inject,
   INJECTOR,
+  input,
   linkedSignal,
   model,
   WritableSignal,
@@ -183,6 +184,9 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 })
 export class ScheduleComponent {
   public readonly windows = model<ScheduleWindow[]>([])
+  /** Resolves false to discard an added or edited window. */
+  public readonly approve =
+    input<(windows: ScheduleWindow[]) => Promise<boolean>>(alwaysApprove)
 
   // Display order: Mon–Sun; data order: Sun(0)–Sat(6)
   protected readonly order = [1, 2, 3, 4, 5, 6, 0] as const
@@ -265,13 +269,7 @@ export class ScheduleComponent {
 
   // All other windows as ScheduleWindows, for the dialog's overlap check.
   private others(exclude?: number): ScheduleWindow[] {
-    return this.view()
-      .filter((_, i) => i !== exclude)
-      .map(({ range, days }) => ({
-        startTime: to(range[0]),
-        endTime: to(range[1]),
-        days,
-      }))
+    return toWindows(this.view().filter((_, i) => i !== exclude))
   }
 
   protected edit(index: number) {
@@ -289,9 +287,9 @@ export class ScheduleComponent {
           },
         },
       )
-      .subscribe(value => {
-        this.view.update(windows =>
-          windows
+      .subscribe(value =>
+        this.commit(
+          this.view()
             .map<any>((item, i) =>
               i === index
                 ? value && {
@@ -301,9 +299,8 @@ export class ScheduleComponent {
                 : item,
             )
             .filter(Boolean),
-        )
-        this.save()
-      })
+        ),
+      )
   }
 
   protected add(
@@ -330,23 +327,42 @@ export class ScheduleComponent {
           },
         },
       )
-      .subscribe(({ days, startTime, endTime }) => {
-        this.view.update(windows =>
-          windows.concat({ range: [from(startTime), from(endTime)], days }),
-        )
-        this.save()
-      })
+      .subscribe(({ days, startTime, endTime }) =>
+        this.commit(
+          this.view().concat({
+            range: [from(startTime), from(endTime)],
+            days,
+          }),
+        ),
+      )
+  }
+
+  private async commit(view: View) {
+    if (!(await this.approve()(toWindows(view)))) return
+    this.view.set(view)
+    this.save()
   }
 
   protected save() {
-    this.windows.set(
-      this.view().map(({ range, days }) => ({
-        startTime: to(range[0]),
-        endTime: to(range[1]),
-        days,
-      })),
-    )
+    this.windows.set(toWindows(this.view()))
   }
+}
+
+type View = {
+  range: readonly [number, number]
+  days: ScheduleWindow['days']
+}[]
+
+function toWindows(view: View): ScheduleWindow[] {
+  return view.map(({ range, days }) => ({
+    startTime: to(range[0]),
+    endTime: to(range[1]),
+    days,
+  }))
+}
+
+async function alwaysApprove(): Promise<boolean> {
+  return true
 }
 
 const to = quarterHourToTime

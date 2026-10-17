@@ -81,7 +81,7 @@ ethernet
 
 wifi
   ├─ get / set / edit   # SSID, passwords, radio settings
-  ├─ blackout-get / blackout-set
+  ├─ blackout-get / blackout-set / blackout-apply
   └─ generate-password
 
 vpn-server              # Inbound WireGuard VPN
@@ -145,7 +145,7 @@ Also handles WAN access schedules — time-of-day rules that enable/disable WAN 
 
 Manages SSID, per-radio settings (band, channel, enabled, broadcast), and multi-password config. Each password maps to a profile via dynamic VLAN. The admin password uses `WifiDynamicVlan::ALLOWED`; all others use `REQUIRED`.
 
-Manages WiFi blackout schedules via crontab (`/etc/crontabs/root`).
+Manages WiFi blackout schedules: every Wi-Fi reload re-applies the state for the current time, and crontab (`/etc/crontabs/root`) lines re-apply it at each window boundary.
 
 Creates `WifiStation` (password entries) and `WifiVlan` (VLAN mapping) sections in the `wireless` UCI config.
 

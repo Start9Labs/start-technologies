@@ -99,6 +99,7 @@ export type ApChannel = z.output<typeof schemas.ApChannel>
  * One automatic port use for the published-ports UI.
  */
 export type AutomaticPortUse = z.output<typeof schemas.AutomaticPortUse>
+export type BlackoutSetResult = z.output<typeof schemas.BlackoutSetResult>
 export type BlackoutWindow = z.output<typeof schemas.BlackoutWindow>
 export type BlackoutWindowInput = z.input<typeof schemas.BlackoutWindow>
 export type CheckInitializedRes = z.output<typeof schemas.CheckInitializedRes>
@@ -298,6 +299,15 @@ export type WanPortCollision = z.output<typeof schemas.WanPortCollision>
  */
 export type WifiSetRequestInput = z.input<typeof schemas.WifiSetRequest>
 export type WifiSetResult = z.output<typeof schemas.WifiSetResult>
+
+/**
+ * `wifi.blackout-set` request: the blackout windows plus a confirmation flag.
+ * A window covering the router's current time turns Wi-Fi off as soon as it is
+ * saved, for every device on it. When the flag is false, `blackout-set` applies
+ * nothing and reports that in `BlackoutSetResult` for a confirmation dialog;
+ * with the flag true it saves the windows and applies them at once.
+ */
+export type BlackoutSetRequestInput = z.input<typeof schemas.BlackoutSetRequest>
 export type PublishedPortsSetRequestInput = z.input<
   typeof schemas.PublishedPortsSetRequest
 >

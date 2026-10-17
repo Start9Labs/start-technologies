@@ -383,8 +383,14 @@ pub async fn set<C: CtrlContext>(
                             tokio::process::Command::new("/etc/init.d/firewall").arg("reload"),
                         )
                         .await;
-                        let _ =
-                            crate::run_quiet_async(&mut tokio::process::Command::new("wifi")).await;
+                        if let Err(e) = crate::wifi::reload_wifi(
+                            "/etc/config",
+                            crate::wifi::WifiReload::Restart,
+                        )
+                        .await
+                        {
+                            tracing::warn!("WiFi restart failed: {e}");
+                        }
                         if dhcp_changed {
                             crate::published_ports::reload_dnsmasq();
                             // odhcpd owns IPv6 leases/hostids; reload so a cleared

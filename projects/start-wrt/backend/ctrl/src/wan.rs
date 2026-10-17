@@ -321,12 +321,6 @@ async fn get_default_mac(dev_name: &str) -> String {
     "00:00:00:00:00:00".to_string()
 }
 
-async fn restart_network() {
-    let _ =
-        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/network").arg("restart"))
-            .await;
-}
-
 // ── IPv4 handlers ───────────────────────────────────────────
 
 #[instrument(skip_all)]
@@ -472,7 +466,7 @@ pub async fn ipv4_set<C: CtrlContext>(
                     None,
                 );
                 if ctx.effectful() {
-                    restart_network().await;
+                    crate::wifi::restart_network().await;
                 }
                 return Ok(());
             }
@@ -716,7 +710,7 @@ pub async fn ipv6_set<C: CtrlContext>(
                     // prefix the LAN was subnetting; withdraw it from clients
                     // while it still exists. See deprecate_odhcpd_prefixes.
                     crate::deprecate_odhcpd_prefixes().await;
-                    restart_network().await;
+                    crate::wifi::restart_network().await;
                     let _ = crate::run_quiet_async(
                         tokio::process::Command::new("/etc/init.d/odhcpd").arg("restart"),
                     )
@@ -860,7 +854,7 @@ pub async fn mac_set<C: CtrlContext>(
             Ok(()) => {
                 crate::activity::log("wan", "mac-updated", true, "Updated WAN MAC address", None);
                 if ctx.effectful() {
-                    restart_network().await;
+                    crate::wifi::restart_network().await;
                 }
                 return Ok(());
             }

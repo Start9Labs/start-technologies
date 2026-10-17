@@ -906,6 +906,7 @@ async fn set_timezone<C: CtrlContext>(
     crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/cron").arg("restart"))
         .await
         .map_err(|e| Error::new(eyre!("restarting cron: {e}"), ErrorKind::Filesystem))?;
+    crate::wifi::apply_blackout(ctx.uci_root()).await?;
 
     crate::activity::log(
         "system",

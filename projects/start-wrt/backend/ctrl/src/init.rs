@@ -71,7 +71,9 @@ pub async fn set_wifi_password(manual: bool) -> Result<(), Error> {
     println!("Configuring WiFi and reloading...");
     configure_wifi("/etc/config", &password, None).await?;
 
-    let _ = crate::run_quiet_async(tokio::process::Command::new("wifi").arg("reload")).await;
+    if let Err(e) = crate::wifi::reload_wifi("/etc/config", crate::wifi::WifiReload::Reload).await {
+        tracing::warn!("WiFi reload failed: {e}");
+    }
 
     println!("WiFi AP is now active.");
     Ok(())
@@ -169,7 +171,9 @@ pub async fn restore_wifi_if_needed() -> Result<bool, Error> {
     configure_wifi("/etc/config", &password, None).await?;
 
     // 4. Reload WiFi
-    let _ = crate::run_quiet_async(tokio::process::Command::new("wifi").arg("reload")).await;
+    if let Err(e) = crate::wifi::reload_wifi("/etc/config", crate::wifi::WifiReload::Reload).await {
+        tracing::warn!("WiFi reload failed: {e}");
+    }
 
     Ok(true)
 }

@@ -594,10 +594,7 @@ pub async fn ipv6_set<C: CtrlContext>(
                     // IPv6 leaves clients holding SLAAC addresses until they
                     // expire on their own.
                     crate::deprecate_odhcpd_prefixes().await;
-                    let _ = crate::run_quiet_async(
-                        tokio::process::Command::new("/etc/init.d/network").arg("restart"),
-                    )
-                    .await;
+                    crate::wifi::restart_network().await;
 
                     // Regenerate server cert to include/remove IPv6 SAN.
                     // When enabling IPv6, poll for the address to appear on
@@ -835,7 +832,10 @@ pub async fn restart_network_services(new_lan_ip: Ipv4Addr, interfaces: Vec<Stri
     // triggering fresh DHCP on the new subnet. Without this,
     // clients that stay connected keep stale leases from the
     // old network block.
-    let _ = crate::run_quiet_async(&mut tokio::process::Command::new("wifi")).await;
+    if let Err(e) = crate::wifi::reload_wifi("/etc/config", crate::wifi::WifiReload::Restart).await
+    {
+        tracing::warn!("WiFi restart failed: {e}");
+    }
 }
 
 #[cfg(test)]
