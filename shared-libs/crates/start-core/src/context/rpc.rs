@@ -21,7 +21,7 @@ use tracing::instrument;
 
 use super::setup::CURRENT_SECRET;
 use crate::account::AccountInfo;
-use crate::auth::AuthKeys;
+use crate::auth::{AuthKeys, revoke_tokens};
 use crate::context::config::ServerConfig;
 use crate::db::model::Database;
 use crate::db::model::package::PackageStateMatchModelRef;
@@ -171,19 +171,22 @@ fn reap_idle_sessions(
         return Ok(());
     }
     let now = Utc::now();
-    let expired = db
-        .as_private()
-        .as_session_pubkeys()
-        .as_entries()?
-        .into_iter()
-        .map(|(id, session)| Ok::<_, Error>((id, session.de()?.last_active)))
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .filter(|(_, last_active)| now - *last_active > TimeDelta::days(30))
-        .map(|(id, _)| id)
-        .collect::<Vec<_>>();
-    HasUnenrolledKeys::unenroll::<RpcContext>(continuations, Some(ephemeral), db, expired)?;
-    Ok(())
+    let idle = |sessions: &AuthKeys| {
+        sessions
+            .0
+            .iter()
+            .filter(|(_, session)| now - session.last_active > TimeDelta::days(30))
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>()
+    };
+    let sessions = db.as_private().as_sessions().de()?;
+    HasUnenrolledKeys::unenroll::<RpcContext>(
+        continuations,
+        Some(ephemeral),
+        db,
+        idle(&sessions.pubkeys),
+    )?;
+    revoke_tokens::<RpcContext>(continuations, db, idle(&sessions.tokens))
 }
 
 impl RpcContext {

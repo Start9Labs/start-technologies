@@ -189,9 +189,8 @@ export type ApplyWithPathParamsInput = z.input<
 >
 
 /**
- * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
- * key is a sign-in: it carries the same metadata a session used to (when it
- * was created, when it was last used, and the user agent that enrolled it).
+ * Sessions keyed by their credential: an enrolled key's PEM encoding, or a
+ * bearer token's hash.
  */
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
 export type LoginParamsInput = z.input<typeof schemas.LoginParams>
@@ -202,7 +201,12 @@ export type SetDeviceKindParamsInput = z.input<
 export type SetSubnetDnsParamsInput = z.input<typeof schemas.SetSubnetDnsParams>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
 export type WgConfig = z.output<typeof schemas.WgConfig>
-export type SessionList = z.output<typeof schemas.SessionList>
+
+/**
+ * The server's sessions, by credential type.
+ */
+export type Sessions = z.output<typeof schemas.Sessions>
 export type WgSubnetClients = z.output<typeof schemas.WgSubnetClients>
+export type SessionList = z.output<typeof schemas.SessionList>
 export type WgSubnetConfig = z.output<typeof schemas.WgSubnetConfig>
 export type Api = RpcSchemaTree<typeof schemas.Api>

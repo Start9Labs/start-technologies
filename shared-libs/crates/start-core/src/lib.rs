@@ -184,7 +184,12 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "auth",
-            auth::auth::<C, RpcContext>().with_about("about.commands-authentication"),
+            auth::auth::<C, RpcContext>()
+                .subcommand(
+                    "token",
+                    auth::token::<C, RpcContext>().with_about("about.commands-auth-tokens"),
+                )
+                .with_about("about.commands-authentication"),
         )
         .subcommand("db", db::db::<C>().with_about("about.commands-db"))
         .subcommand("ssh", ssh::ssh::<C>().with_about("about.commands-ssh-keys"))

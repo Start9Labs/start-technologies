@@ -8,7 +8,7 @@ This guide is for flashing StartOS to a USB drive, then installing it onto a des
 
 ## Download
 
-1.  Visit the [Github release page](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v0.4.0.3) to find the latest version of StartOS.
+1.  Visit the [Github release page](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v0.4.1) to find the latest version of StartOS.
 
 1.  Under "Image Downloads", select the image for your hardware. StartOS is available in x86_64 (AMD64), aarch64 (ARM64), and RISC-V (RVA23). For x86_64 and aarch64, two variants are available:
     - **Standard**: Includes proprietary firmware and drivers for broader hardware compatibility, including display and wireless. Recommended for most users.
@@ -25,7 +25,7 @@ You do not need to understand what any of this means. Follow the three steps and
 
 ### 1. Find your file on the release page
 
-On the [release page](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v0.4.0.3), scroll down to **OS Images Checksums**, then to the block under **SHA-256**. It holds one line per image: a long code, then the filename it belongs to.
+On the [release page](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v0.4.1), scroll down to **OS Images Checksums**, then to the block under **SHA-256**. It holds one line per image: a long code, then the filename it belongs to.
 
 ```text
 37b63c86197150866809d34b5824ae22c5fc705d4f8dc9e9750b8fa23485441a  startos-0.4.0.1-fdb27c7_x86_64-nonfree.iso
@@ -194,7 +194,7 @@ Anything else is a failure. **`BAD signature`** means the file is not what Start
 
 A Raspberry Pi does not use the USB installer above. Instead, you flash the StartOS image directly to the Pi's microSD card. This is also how a Raspberry Pi is updated to a new major version of StartOS — it cannot update over the air. If you are updating an existing 0.3.5.1 server, complete the [preparation steps in the update guide](update-040.md#prepare-your-server) before flashing.
 
-1. Visit the [Github release page](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v0.4.0.3) and, from the downloads list, download the **Raspberry Pi `.img.gz`** file.
+1. Visit the [Github release page](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v0.4.1) and, from the downloads list, download the **Raspberry Pi `.img.gz`** file.
 
 1. Check it against the release page, exactly as in [Verify your download](#verify-your-download). The release lists a checksum for the `.img` inside the archive as well — the line you want is the one ending in `.img.gz`, because that is the file you downloaded.
 

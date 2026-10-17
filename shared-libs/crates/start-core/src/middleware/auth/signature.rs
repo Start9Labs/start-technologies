@@ -5,7 +5,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::Request;
-use chrono::Utc;
 use http::header::USER_AGENT;
 use http::{HeaderMap, HeaderValue};
 use itertools::Itertools;
@@ -202,7 +201,7 @@ impl SignatureAuthContext for RpcContext {
         db: &mut Model<Self::Database>,
         keys: &BTreeSet<InternedString>,
     ) -> Result<(), Error> {
-        let auth_keys = db.as_private_mut().as_session_pubkeys_mut();
+        let auth_keys = db.as_private_mut().as_sessions_mut().as_pubkeys_mut();
         for key in keys {
             auth_keys.remove(key)?;
         }
@@ -248,35 +247,15 @@ impl SignatureAuthContext for RpcContext {
                 .peek(|keys| keys.0.contains_key(&**key))
                 || db
                     .as_private()
-                    .as_session_pubkeys()
-                    .de()?
-                    .0
-                    .contains_key(&**key))
+                    .as_sessions()
+                    .as_pubkeys()
+                    .as_idx(key)
+                    .is_some())
         })
     }
     async fn post_auth_hook(&self, key: Self::CheckPubkeyRes, _: &RpcRequest) -> Result<(), Error> {
         if let Some(key) = key {
-            let ephemeral = self.ephemeral_auth_keys.mutate(|keys| {
-                if let Some(entry) = keys.0.get_mut(&*key) {
-                    entry.last_active = Utc::now();
-                    true
-                } else {
-                    false
-                }
-            });
-            if !ephemeral {
-                self.db
-                    .mutate(|db| {
-                        db.as_private_mut().as_session_pubkeys_mut().mutate(|keys| {
-                            if let Some(entry) = keys.0.get_mut(&*key) {
-                                entry.last_active = Utc::now();
-                            }
-                            Ok(())
-                        })
-                    })
-                    .await
-                    .result?;
-            }
+            crate::auth::touch_session(self, &key).await?;
         }
         Ok(())
     }

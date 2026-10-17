@@ -350,10 +350,21 @@ export const IoFormat: z.ZodEnum<{
   .meta({
     id: 'IoFormat',
   })
-export const KillParams: z.ZodObject<{ ids: z.ZodArray<z.ZodString> }> =
-  /* @__PURE__ */ object({ ids: z.array(z.string()) }).meta({
-    id: 'KillParams',
-  })
+export const KillParams: z.ZodObject<{
+  pubkeys: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodString>>,
+    z.ZodArray<z.ZodString>
+  >
+  tokens: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodString>>,
+    z.ZodArray<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  pubkeys: wire(z.array(z.string()).optional(), z.array(z.string())),
+  tokens: wire(z.array(z.string()).optional(), z.array(z.string())),
+}).meta({
+  id: 'KillParams',
+})
 export const ListDevicesParams: z.ZodObject<{ subnet: typeof literal_0 }> =
   /* @__PURE__ */ object({ subnet: literal_0 }).meta({
     id: 'ListDevicesParams',
@@ -716,15 +727,14 @@ export const ApplyWithPathParams: z.ZodIntersection<
   })
 
 /**
- * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
- * key is a sign-in: it carries the same metadata a session used to (when it
- * was created, when it was last used, and the user agent that enrolled it).
+ * Sessions keyed by their credential: an enrolled key's PEM encoding, or a
+ * bearer token's hash.
  */
 export const AuthKeys: z.ZodRecord<z.ZodString, typeof Session> =
   /* @__PURE__ */ z.record(z.string(), Session).meta({
     id: 'AuthKeys',
     description:
-      "The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled\nkey is a sign-in: it carries the same metadata a session used to (when it\nwas created, when it was last used, and the user agent that enrolled it).",
+      "Sessions keyed by their credential: an enrolled key's PEM encoding, or a\nbearer token's hash.",
   })
 export const LoginParams: z.ZodObject<{
   password: z.ZodString
@@ -880,19 +890,30 @@ export const WgConfig: z.ZodObject<{
 }).meta({
   id: 'WgConfig',
 })
-export const SessionList: z.ZodObject<{
-  current: z.ZodCodec<z.ZodOptional<typeof literal_1>, typeof literal_1>
-  sessions: typeof AuthKeys
-}> = /* @__PURE__ */ object({
-  current: wire(literal_1.optional(), literal_1),
-  sessions: AuthKeys,
-}).meta({
-  id: 'SessionList',
+
+/**
+ * The server's sessions, by credential type.
+ */
+export const Sessions: z.ZodObject<{
+  pubkeys: typeof AuthKeys
+  tokens: typeof AuthKeys
+}> = /* @__PURE__ */ object({ pubkeys: AuthKeys, tokens: AuthKeys }).meta({
+  id: 'Sessions',
+  description: "The server's sessions, by credential type.",
 })
 export const WgSubnetClients: z.ZodRecord<z.ZodString, typeof WgConfig> =
   /* @__PURE__ */ z.record(z.string(), WgConfig).meta({
     id: 'WgSubnetClients',
   })
+export const SessionList: z.ZodObject<{
+  current: z.ZodCodec<z.ZodOptional<typeof literal_1>, typeof literal_1>
+  sessions: typeof Sessions
+}> = /* @__PURE__ */ object({
+  current: wire(literal_1.optional(), literal_1),
+  sessions: Sessions,
+}).meta({
+  id: 'SessionList',
+})
 export const WgSubnetConfig: z.ZodObject<{
   name: z.ZodString
   clients: typeof WgSubnetClients

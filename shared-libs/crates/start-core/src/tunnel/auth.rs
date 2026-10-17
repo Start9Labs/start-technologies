@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 
-use chrono::Utc;
 use clap::Parser;
 use imbl_value::InternedString;
 use itertools::Itertools;
@@ -115,17 +114,7 @@ impl SignatureAuthContext for TunnelContext {
         _: &rpc_toolkit::RpcRequest,
     ) -> Result<(), Error> {
         if let Some(key) = key {
-            self.db
-                .mutate(|db| {
-                    db.as_session_pubkeys_mut().mutate(|keys| {
-                        if let Some(info) = keys.0.get_mut(&*key) {
-                            info.last_active = Utc::now();
-                        }
-                        Ok(())
-                    })
-                })
-                .await
-                .result?;
+            crate::auth::touch_session(self, &key).await?;
         }
         Ok(())
     }

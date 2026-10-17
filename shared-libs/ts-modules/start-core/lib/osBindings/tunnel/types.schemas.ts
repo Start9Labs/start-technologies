@@ -786,15 +786,14 @@ export const AddKeyParams: z.ZodObject<{
 })
 
 /**
- * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
- * key is a sign-in: it carries the same metadata a session used to (when it
- * was created, when it was last used, and the user agent that enrolled it).
+ * Sessions keyed by their credential: an enrolled key's PEM encoding, or a
+ * bearer token's hash.
  */
 export const AuthKeys: z.ZodRecord<z.ZodString, typeof Session> =
   /* @__PURE__ */ z.record(z.string(), Session).meta({
     id: 'AuthKeys',
     description:
-      "The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled\nkey is a sign-in: it carries the same metadata a session used to (when it\nwas created, when it was last used, and the user agent that enrolled it).",
+      "Sessions keyed by their credential: an enrolled key's PEM encoding, or a\nbearer token's hash.",
   })
 export const DnsRecords: z.ZodArray<typeof DnsRecordEntry> = /* @__PURE__ */ z
   .array(DnsRecordEntry)

@@ -83,7 +83,12 @@ impl UiContext for RpcContext {
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
         server
             .middleware(Cors::new())
-            .middleware(Auth::new().with_local_auth().with_signature_auth())
+            .middleware(
+                Auth::new()
+                    .with_local_auth()
+                    .with_bearer_auth()
+                    .with_signature_auth(),
+            )
             .middleware(SyncDb::new())
     }
     fn extend_router(self, router: Router) -> Router {
@@ -451,10 +456,10 @@ async fn if_authorized<
                 .peek()
                 .await
                 .as_private()
-                .as_session_pubkeys()
-                .de()?
-                .0
-                .contains_key(&*key);
+                .as_sessions()
+                .as_pubkeys()
+                .as_idx(&key)
+                .is_some();
         if !enrolled {
             return Err(Error::new(
                 eyre!("{}", t!("middleware.auth.unauthorized")),

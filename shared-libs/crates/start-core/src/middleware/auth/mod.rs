@@ -3,13 +3,16 @@ use axum::response::Response;
 use rpc_toolkit::{Context, DynMiddleware, Middleware, RpcRequest, RpcResponse};
 use serde::Deserialize;
 
+use crate::auth::LoginContext;
 use crate::context::RpcContext;
 use crate::db::model::Database;
+use crate::middleware::auth::bearer::BearerAuth;
 use crate::middleware::auth::local::{LocalAuth, LocalAuthContext};
 use crate::middleware::auth::signature::{SignatureAuth, SignatureAuthContext};
 use crate::prelude::*;
 use crate::util::serde::const_true;
 
+pub mod bearer;
 pub mod local;
 pub mod signature;
 
@@ -50,6 +53,12 @@ impl<C: LocalAuthContext> Auth<C> {
 impl<C: SignatureAuthContext> Auth<C> {
     pub fn with_signature_auth(mut self) -> Self {
         self.0.push(DynMiddleware::new(SignatureAuth::new()));
+        self
+    }
+}
+impl<C: LoginContext> Auth<C> {
+    pub fn with_bearer_auth(mut self) -> Self {
+        self.0.push(DynMiddleware::new(BearerAuth::new()));
         self
     }
 }
