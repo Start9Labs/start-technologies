@@ -8,6 +8,7 @@ import {
   TuiCheckbox,
   TuiGroup,
   TuiLoader,
+  TuiNotification,
   TuiTitle,
 } from '@taiga-ui/core'
 import { TuiBlock } from '@taiga-ui/kit'
@@ -29,9 +30,26 @@ interface Package {
 
 @Component({
   template: `
+    <div tuiNotification appearance="warning">
+      {{
+        'For each selected service, this replaces its previous manual checkpoint. Automatic checkpoints are not changed.'
+          | i18n
+      }}
+    </div>
+    <label class="toggle-all">
+      <input
+        tuiCheckbox
+        type="checkbox"
+        [ngModel]="allEligibleSelected()"
+        (ngModelChange)="setAll($event)"
+      />
+      <span tuiTitle>
+        <b>{{ 'Toggle all' | i18n }}</b>
+      </span>
+    </label>
     <div tuiGroup orientation="vertical" [collapsed]="true">
       @if (pkgs(); as pkgs) {
-        @for (pkg of pkgs; track $index) {
+        @for (pkg of pkgs; track pkg.id) {
           <label tuiBlock="m">
             <img alt="" [src]="pkg.id | pkgIcon | async" />
             <span tuiTitle>{{ pkg.title }}</span>
@@ -51,9 +69,6 @@ interface Package {
       }
     </div>
     <footer class="g-buttons">
-      <button tuiButton appearance="flat-grayscale" (click)="toggleSelectAll()">
-        {{ 'Toggle all' | i18n }}
-      </button>
       <button tuiButton [disabled]="!hasSelection" (click)="done()">
         {{ 'Done' | i18n }}
       </button>
@@ -61,24 +76,39 @@ interface Package {
   `,
   styles: `
     [tuiGroup] {
-      width: 100%;
-      margin: 1.5rem 0 0;
+      inline-size: 100%;
+      margin: 0;
     }
 
     [tuiBlock] {
       align-items: center;
     }
 
+    [tuiTitle] {
+      min-inline-size: 0;
+      overflow-wrap: anywhere;
+    }
+
     img {
-      width: 2.5rem;
+      inline-size: 2.5rem;
+      flex-shrink: 0;
       border-radius: 100%;
     }
+
+    .toggle-all {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 1.5rem 1rem 0.75rem;
+    }
   `,
+  host: { class: 'g-wrap-content' },
   imports: [
     FormsModule,
     TuiButton,
     TuiGroup,
     TuiLoader,
+    TuiNotification,
     TuiBlock,
     TuiCheckbox,
     TuiTitle,
@@ -93,10 +123,10 @@ export class BackupsBackupComponent {
   private readonly api = inject(ApiService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
 
-  readonly context = injectContext<BackupContext>()
+  protected readonly context = injectContext<BackupContext>()
 
-  hasSelection = false
-  readonly pkgs = toSignal<readonly Package[] | null>(
+  protected hasSelection = false
+  protected readonly pkgs = toSignal<readonly Package[] | null>(
     this.patch.watch$('packageData').pipe(
       take(1),
       map(pkgs =>
@@ -118,34 +148,39 @@ export class BackupsBackupComponent {
     { initialValue: null },
   )
 
-  done() {
+  protected done() {
     this.dialog
       .openPrompt<string>({
         label: 'Master password needed',
         data: {
           message: 'Enter your master password to encrypt this backup.',
-          label: 'Master Password',
+          label: 'Password',
           placeholder: 'Enter master password',
           useMask: true,
-          buttonText: 'Create Backup',
+          buttonText: 'Create a manual backup',
         },
       })
       .pipe(
         filter(Boolean),
         switchMap(password => this.createBackup(password)),
-        filter(Boolean), // a password the server rejects leaves the prompt open to retry
+        filter(Boolean),
         take(1),
       )
       .subscribe()
   }
 
-  handleChange() {
+  protected handleChange() {
     this.hasSelection = !!this.pkgs()?.some(p => p.checked)
   }
 
-  toggleSelectAll() {
-    this.pkgs()?.forEach(p => (p.checked = !this.hasSelection && !p.disabled))
-    this.hasSelection = !this.hasSelection
+  protected allEligibleSelected(): boolean {
+    const eligible = this.pkgs()?.filter(pkg => !pkg.disabled) || []
+    return !!eligible.length && eligible.every(pkg => pkg.checked)
+  }
+
+  protected setAll(checked: boolean) {
+    this.pkgs()?.forEach(pkg => (pkg.checked = checked && !pkg.disabled))
+    this.handleChange()
   }
 
   private oldPassword(password: string) {

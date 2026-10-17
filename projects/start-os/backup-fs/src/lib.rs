@@ -632,24 +632,16 @@ impl Filesystem for BackupFS {
     fn fsyncdir(
         &self,
         _req: &Request,
-        _ino: INodeNo,
+        ino: INodeNo,
         _fh: FileHandle,
         _datasync: bool,
         reply: ReplyEmpty,
     ) {
-        // Callers like start-os need a way to force a whole-fs
-        // durability checkpoint before `umount -l`. FUSE_SYNCFS would
-        // be the natural hook, but the Linux kernel's `fc->sync_fs`
-        // defaults to 0 for non-bdev FUSE mounts and is never enabled
-        // via any INIT flag — so `syncfs(2)` / `sync -f` silently does
-        // a VFS-level sync and never dispatches to us. FUSE_FSYNCDIR,
-        // however, reaches the daemon reliably (`fsync(dirfd)` /
-        // `fsync .`). Route it to the same whole-fs flush so callers
-        // have a working checkpoint.
+        // Root fsync finishes compaction before the backing mount can detach.
         #[cfg(test)]
         FSYNCDIR_CALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut h = self.handler.lock().unwrap();
-        match h.flush_all_dirty() {
+        match h.sync_directory(Inode(ino.into())) {
             Ok(()) => reply.ok(),
             Err(e) => reply.error(errno(e.to_errno_log())),
         }

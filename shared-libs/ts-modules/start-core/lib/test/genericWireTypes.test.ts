@@ -7,6 +7,7 @@ describe('public generic wire projections', () => {
       target: { type: 'disk', logicalname: '/dev/sda' },
       password: { secret: new Uint8Array([1]) },
       serverId: 'server',
+      scheduled: false,
     }
     expect(source.password.secret).toEqual(new Uint8Array([1]))
   })
@@ -42,6 +43,7 @@ describe('public generic wire projections', () => {
         target: { type: 'disk', logicalname: '/dev/sda' },
         password: 42,
         serverId: 'server',
+        scheduled: false,
       }),
     ).toBe(42)
   })
@@ -58,6 +60,7 @@ describe('public generic wire projections', () => {
       },
       password: 42,
       serverId: 'server',
+      scheduled: false,
     }
     const target: T.BackupTargetFS = source.target
     expect(target.type).toBe('cifs')
@@ -88,6 +91,7 @@ describe('public generic wire projections', () => {
       type: 'backup',
       target: { type: 'disk', logicalname: '/dev/sda' },
       password: 42,
+      scheduled: false,
     }
     const migration: T.RecoverySource<number> = {
       type: 'migrate',
@@ -122,6 +126,7 @@ describe('public generic wire projections', () => {
       target: { type: 'disk', logicalname: '/dev/sda' },
       password: null,
       serverId: 'server',
+      scheduled: false,
     }
     const asset: T.RegistryAsset<number | null> = {
       publishedAt: '2026-01-01T00:00:00Z',

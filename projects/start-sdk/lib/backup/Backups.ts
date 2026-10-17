@@ -1,14 +1,15 @@
-import * as T from '@start9labs/start-core/types'
-import * as child_process from 'child_process'
-import * as fs from 'fs/promises'
-import { Affine, asError } from '../util'
 import { InitKind, InitScript } from '@start9labs/start-core/inits'
-import { CommandOptions, SubContainer, execFile } from '../util/SubContainer'
-import { Mounts } from '../mainFn/Mounts'
+import * as T from '@start9labs/start-core/types'
 import {
   FullProgressTracker,
   PhaseHandle,
 } from '@start9labs/start-core/util/FullProgressTracker'
+import * as child_process from 'child_process'
+import * as fs from 'fs/promises'
+
+import { Mounts } from '../mainFn/Mounts'
+import { Affine, asError } from '../util'
+import { CommandOptions, execFile, SubContainer } from '../util/SubContainer'
 
 const BACKUP_HOST_PATH = '/media/startos/backup'
 const BACKUP_CONTAINER_MOUNT = '/backup-target'
@@ -941,9 +942,6 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
    * @param effects - The effects context
    */
   async createBackup(effects: T.Effects) {
-    // Root tracker reports to the backup progress UI via setBackupProgress,
-    // with the effects context baked into the sink. Phase updates auto-sync in
-    // the background; we only flush at the end.
     const tracker = new FullProgressTracker(progress =>
       effects.setBackupProgress({ progress }),
     )
@@ -965,6 +963,8 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       preHook.complete()
     }
 
+    let changedBytes = 0
+    let changedBytesUnavailable = !!(this.preBackup || this.postBackup)
     for (let i = 0; i < this.backupSet.length; i++) {
       const item = this.backupSet[i]!
       const phase = syncs[i]!
@@ -982,14 +982,18 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
           ...item.backupOptions,
         },
       })
-      // Poll rsync's parsed percentage; setDone auto-syncs to the host. Cap at
-      // 99 until wait() resolves so the bar never claims "done" before exit.
+      // Progress stays below 100% until rsync exits.
       const interval = setInterval(async () => {
         const pct = await rsyncResults.progress()
         phase.setDone(Math.min(99, Math.floor(pct)))
       }, 500)
       try {
-        await rsyncResults.wait()
+        const transferred = await rsyncResults.wait()
+        if (transferred === null) {
+          changedBytesUnavailable = true
+        } else {
+          changedBytes += transferred
+        }
       } finally {
         clearInterval(interval)
       }
@@ -1005,11 +1009,14 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       await this.postBackup!(effects as BackupEffects, postHook)
       postHook.complete()
     }
-    // Don't mark the tracker complete: the OS backup harness holds this
-    // package's phase open until the s9pk image finishes writing, so it reports
-    // 100%, not "done".
+    // The OS completes this phase after writing the s9pk image.
     await tracker.sync()
-    return
+    return {
+      changedBytes:
+        changedBytesUnavailable || !Number.isSafeInteger(changedBytes)
+          ? null
+          : changedBytes,
+    }
   }
 
   async init(
@@ -1102,7 +1109,7 @@ async function runRsync(rsyncOptions: {
   options: T.SyncOptions
 }): Promise<{
   id: () => Promise<string>
-  wait: () => Promise<null>
+  wait: () => Promise<number | null>
   progress: () => Promise<number>
 }> {
   const { srcPath, dstPath, options } = rsyncOptions
@@ -1122,13 +1129,20 @@ async function runRsync(rsyncOptions: {
   args.push('--inplace')
   args.push('--timeout=300')
   args.push('--info=progress2')
+  args.push('--stats')
   // --no-inc-recursive's full pre-scan times out large backups.
   args.push(srcPath)
   args.push(dstPath)
-  const spawned = child_process.spawn(command, args, { detached: true })
+  const spawned = child_process.spawn(command, args, {
+    detached: true,
+    env: { ...process.env, LC_ALL: 'C' },
+  })
   let percentage = 0.0
+  let stdoutTail = ''
   spawned.stdout.on('data', (data: unknown) => {
-    const lines = String(data).replace(/\r/g, '\n').split('\n')
+    const output = String(data)
+    stdoutTail = `${stdoutTail}${output}`.slice(-64 * 1024)
+    const lines = output.replace(/\r/g, '\n').split('\n')
     for (const line of lines) {
       const parsed = /([0-9.]+)%/.exec(line)?.[1]
       if (!parsed) {
@@ -1155,10 +1169,11 @@ async function runRsync(rsyncOptions: {
     }
     return String(pid)
   }
-  const waitPromise = new Promise<null>((resolve, reject) => {
-    spawned.on('exit', (code: any) => {
+  const waitPromise = new Promise<number | null>((resolve, reject) => {
+    spawned.once('error', reject)
+    spawned.once('close', code => {
       if (code === 0) {
-        resolve(null)
+        resolve(parseRsyncTransferredBytes(stdoutTail))
       } else {
         reject(new Error(`rsync exited with code ${code}\n${stderr}`))
       }
@@ -1167,4 +1182,12 @@ async function runRsync(rsyncOptions: {
   const wait = () => waitPromise
   const progress = () => Promise.resolve(percentage)
   return { id, wait, progress }
+}
+
+export function parseRsyncTransferredBytes(output: string): number | null {
+  const transferred =
+    /^Total transferred file size:\s*([0-9,]+) bytes\s*$/m.exec(output)?.[1]
+  if (!transferred) return null
+  const value = Number.parseInt(transferred.replaceAll(',', ''), 10)
+  return Number.isSafeInteger(value) ? value : null
 }

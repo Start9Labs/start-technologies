@@ -154,6 +154,7 @@ export const RecoverySource = <Password extends z.ZodType>(
         target: BackupTargetFS,
         password: Password,
         serverId: z.string(),
+        scheduled: wire(z.boolean().optional(), z.boolean()),
       }),
     ),
   ])
@@ -345,10 +346,25 @@ export const StartOsRecoveryInfo: z.ZodObject<{
   hostname: typeof ServerHostname
   version: z.ZodString
   timestamp: typeof literal_1
+  scheduled: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  serverId: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  hasSystemBackup: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+    z.ZodNullable<z.ZodBoolean>
+  >
 }> = /* @__PURE__ */ object({
   hostname: ServerHostname,
   version: z.string(),
   timestamp: literal_1,
+  scheduled: wire(z.boolean().optional(), z.boolean()),
+  serverId: wire(z.string().nullable().optional(), z.string().nullable()),
+  hasSystemBackup: wire(
+    z.boolean().nullable().optional(),
+    z.boolean().nullable(),
+  ),
 }).meta({
   id: 'StartOsRecoveryInfo',
   description:
@@ -521,6 +537,11 @@ export const Api = {
     backup: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
+        activity: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+        history: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+        job: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+        policy: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+        review: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         target: {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {

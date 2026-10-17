@@ -57,6 +57,7 @@ import {
 import {
   tuiInputDateOptionsProvider,
   tuiInputDateTimeOptionsProvider,
+  tuiSwitchOptionsProvider,
 } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
 import { filter, identity, merge, pairwise } from 'rxjs'
@@ -113,6 +114,7 @@ export const APP_CONFIG: ApplicationConfig = {
     UntypedFormBuilder,
     tuiNumberFormatProvider({ decimalSeparator: '.', thousandSeparator: '' }),
     tuiButtonOptionsProvider({ size: 'm' }),
+    tuiSwitchOptionsProvider({ showIcons: false }),
     tuiDropdownOptionsProvider({ appearance: 'start-os' }),
     tuiNotificationOptionsProvider({
       autoClose: appearance => (appearance === 'negative' ? 0 : 3000),

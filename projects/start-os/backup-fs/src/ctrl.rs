@@ -240,12 +240,7 @@ impl Controller {
         Ok(())
     }
 
-    /// Reclaim dead space in the log by compacting heavily-dead sealed
-    /// segments (live frames relocated verbatim, then the segment deleted).
-    /// Gated on `BACKUPFS_COMPACT_RATIO` (default 0.6; ≥1.0 disables): only a
-    /// segment more than that fraction dead is rewritten, so mostly-live
-    /// segments aren't needlessly re-transferred by the next rsync/rclone.
-    /// "Speed over footprint" — run as a larger pass (on unmount), not inline.
+    /// Reclaims sealed segments above the configured dead-byte ratio.
     pub fn compact(&self) -> BkfsResult<usize> {
         if self.0.config.readonly {
             return Ok(0);

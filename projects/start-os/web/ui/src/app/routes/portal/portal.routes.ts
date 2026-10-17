@@ -1,4 +1,5 @@
 import { Routes } from '@angular/router'
+
 import { SYSTEM_UTILITIES } from 'src/app/utils/system-utilities'
 import { titleResolver } from 'src/app/utils/title-resolver'
 import { toRouterLink } from 'src/app/utils/to-router-link'
@@ -20,13 +21,16 @@ const ROUTES: Routes = [
         title: titleResolver,
         loadChildren: () => import('./routes/services/services.routes'),
       },
-      // @TODO 041
-      // {
-      //   title: titleResolver,
-      //   path: 'backups',
-      //   loadComponent: () => import('./routes/backups/backups.component'),
-      //   data: toNavigationItem('backups'),
-      // },
+      {
+        path: 'backups',
+        redirectTo: '/system/backups',
+        pathMatch: 'full',
+      },
+      {
+        path: 'backups/:section',
+        redirectTo: '/system/backups/:section',
+        pathMatch: 'full',
+      },
       {
         title: titleResolver,
         path: 'marketplace',

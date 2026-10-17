@@ -431,6 +431,61 @@ export const ApplyParams: z.ZodObject<{ expr: z.ZodString }> =
   /* @__PURE__ */ object({ expr: z.string() }).meta({
     id: 'ApplyParams',
   })
+export const BackupActivityKind: z.ZodEnum<{
+  manual: 'manual'
+  automatic: 'automatic'
+  restore: 'restore'
+}> = /* @__PURE__ */ z.enum(['manual', 'automatic', 'restore']).meta({
+  id: 'BackupActivityKind',
+})
+export const BackupJobPause: z.ZodUnion<
+  readonly [
+    z.ZodObject<{ reason: z.ZodLiteral<'user'> }>,
+    z.ZodIntersection<
+      z.ZodObject<{ reason: z.ZodLiteral<'targetUnavailable'> }>,
+      z.ZodObject<{ failures: z.ZodInt }>
+    >,
+    z.ZodObject<{ reason: z.ZodLiteral<'targetIdentityMismatch'> }>,
+    z.ZodObject<{ reason: z.ZodLiteral<'targetUnreadable'> }>,
+    z.ZodObject<{ reason: z.ZodLiteral<'reauthenticationRequired'> }>,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    object({ reason: z.literal('user') }),
+    z.intersection(
+      object({ reason: z.literal('targetUnavailable') }),
+      object({ failures: z.int() }),
+    ),
+    object({ reason: z.literal('targetIdentityMismatch') }),
+    object({ reason: z.literal('targetUnreadable') }),
+    object({ reason: z.literal('reauthenticationRequired') }),
+  ])
+  .meta({
+    id: 'BackupJobPause',
+  })
+export const BackupRunState: z.ZodEnum<{
+  running: 'running'
+  succeeded: 'succeeded'
+  partiallyFailed: 'partiallyFailed'
+  failed: 'failed'
+}> = /* @__PURE__ */ z
+  .enum(['running', 'succeeded', 'partiallyFailed', 'failed'])
+  .meta({
+    id: 'BackupRunState',
+  })
+export const BackupRunTrigger: z.ZodEnum<{
+  scheduled: 'scheduled'
+  catchUp: 'catchUp'
+  runNow: 'runNow'
+}> = /* @__PURE__ */ z.enum(['scheduled', 'catchUp', 'runNow']).meta({
+  id: 'BackupRunTrigger',
+})
+export const BackupSource: z.ZodEnum<{
+  manual: 'manual'
+  scheduled: 'scheduled'
+}> = /* @__PURE__ */ z.enum(['manual', 'scheduled']).meta({
+  id: 'BackupSource',
+})
 export const BackupTargetId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'BackupTargetId',
 })
@@ -1125,6 +1180,38 @@ export const NotificationLevel: z.ZodEnum<{
 }> = /* @__PURE__ */ z.enum(['success', 'info', 'warning', 'error']).meta({
   id: 'NotificationLevel',
 })
+export const PackageBackupReport: z.ZodObject<{
+  error: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  duration_ms: typeof literal_2
+  logical_size: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  physical_size: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  changed_bytes: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  measured_at: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  error: wire(z.string().nullable().optional(), z.string().nullable()),
+  duration_ms: literal_2,
+  logical_size: wire(z.int().nullable().optional(), z.int().nullable()),
+  physical_size: wire(z.int().nullable().optional(), z.int().nullable()),
+  changed_bytes: wire(z.int().nullable().optional(), z.int().nullable()),
+  measured_at: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'PackageBackupReport',
+})
 export const PackageDetailLevel: z.ZodEnum<{
   none: 'none'
   short: 'short'
@@ -1294,6 +1381,62 @@ export const ReplayId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 })
 export const RequiresReboot: z.ZodBoolean = /* @__PURE__ */ z.boolean().meta({
   id: 'RequiresReboot',
+})
+export const RetentionTier: z.ZodObject<{
+  /**
+   * Width of one local-time retention bucket.
+   */
+  intervalSeconds: z.ZodInt
+  /**
+   * How far back from the newest successful snapshot this tier covers.
+   */
+  coverageSeconds: z.ZodInt
+}> = /* @__PURE__ */ object({
+  /**
+   * Width of one local-time retention bucket.
+   */
+  intervalSeconds: z.int().meta({
+    description: 'Width of one local-time retention bucket.',
+  }),
+  /**
+   * How far back from the newest successful snapshot this tier covers.
+   */
+  coverageSeconds: z.int().meta({
+    description:
+      'How far back from the newest successful snapshot this tier covers.',
+  }),
+}).meta({
+  id: 'RetentionTier',
+})
+
+/**
+ * A validated five-field cron schedule tied to an IANA timezone.
+ */
+export const Schedule: z.ZodObject<{
+  /**
+   * Validated five-field cron expression.
+   */
+  cron: z.ZodString
+  /**
+   * Selected IANA timezone.
+   */
+  timezone: z.ZodString
+}> = /* @__PURE__ */ object({
+  /**
+   * Validated five-field cron expression.
+   */
+  cron: z.string().meta({
+    description: 'Validated five-field cron expression.',
+  }),
+  /**
+   * Selected IANA timezone.
+   */
+  timezone: z.string().meta({
+    description: 'Selected IANA timezone.',
+  }),
+}).meta({
+  id: 'Schedule',
+  description: 'A validated five-field cron schedule tied to an IANA timezone.',
 })
 export const Security: z.ZodObject<{ ssl: z.ZodBoolean }> =
   /* @__PURE__ */ object({ ssl: z.boolean() }).meta({
@@ -2117,6 +2260,15 @@ export const ApplyWithPathParams: z.ZodIntersection<
   .meta({
     id: 'ApplyWithPathParams',
   })
+export const ArchivedSnapshotSelection: z.ZodObject<{
+  packageId: typeof PackageId
+  snapshotIds: z.ZodArray<typeof Guid>
+}> = /* @__PURE__ */ object({
+  packageId: PackageId,
+  snapshotIds: z.array(Guid),
+}).meta({
+  id: 'ArchivedSnapshotSelection',
+})
 export const AttachParams: z.ZodObject<{
   id: typeof PackageId
   command: typeof literal_4
@@ -2154,6 +2306,213 @@ export const AuthKeys: z.ZodRecord<z.ZodString, typeof Session> =
     id: 'AuthKeys',
     description:
       "The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled\nkey is a sign-in: it carries the same metadata a session used to (when it\nwas created, when it was last used, and the user agent that enrolled it).",
+  })
+export const BackupActivity: z.ZodObject<{
+  id: typeof Guid
+  kind: typeof BackupActivityKind
+  state: typeof BackupRunState
+  targetId: typeof BackupTargetId
+  sourceServerId: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  jobId: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
+  jobName: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  trigger: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof BackupRunTrigger>>,
+    z.ZodNullable<typeof BackupRunTrigger>
+  >
+  startedAt: z.ZodString
+  completedAt: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  intendedServices: z.ZodArray<typeof PackageId>
+  services: z.ZodRecord<z.ZodString, typeof PackageBackupReport>
+  error: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  id: Guid,
+  kind: BackupActivityKind,
+  state: BackupRunState,
+  targetId: BackupTargetId,
+  sourceServerId: wire(z.string().nullable().optional(), z.string().nullable()),
+  jobId: wire(Guid.nullable().optional(), Guid.nullable()),
+  jobName: wire(z.string().nullable().optional(), z.string().nullable()),
+  trigger: wire(
+    BackupRunTrigger.nullable().optional(),
+    BackupRunTrigger.nullable(),
+  ),
+  startedAt: z.string(),
+  completedAt: wire(z.string().nullable().optional(), z.string().nullable()),
+  intendedServices: z.array(PackageId),
+  services: z.record(z.string(), PackageBackupReport),
+  error: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'BackupActivity',
+})
+export const BackupJobStatus: z.ZodObject<{
+  lastScheduledAt: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  lastAttemptedAt: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  lastSucceededAt: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  nextRunAt: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * A durable one-shot request consumed once the backup coordinator is free.
+   */
+  runRequested: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  consecutiveFailures: z.ZodInt
+  lastResult: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof BackupRunState>>,
+    z.ZodNullable<typeof BackupRunState>
+  >
+}> = /* @__PURE__ */ object({
+  lastScheduledAt: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ),
+  lastAttemptedAt: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ),
+  lastSucceededAt: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ),
+  nextRunAt: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * A durable one-shot request consumed once the backup coordinator is free.
+   */
+  runRequested: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'A durable one-shot request consumed once the backup coordinator is free.',
+  }),
+  consecutiveFailures: z.int(),
+  lastResult: wire(
+    BackupRunState.nullable().optional(),
+    BackupRunState.nullable(),
+  ),
+}).meta({
+  id: 'BackupJobStatus',
+})
+export const BackupRun: z.ZodObject<{
+  id: typeof Guid
+  jobId: typeof Guid
+  jobName: z.ZodString
+  targetId: typeof BackupTargetId
+  trigger: typeof BackupRunTrigger
+  state: typeof BackupRunState
+  startedAt: z.ZodString
+  completedAt: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  intendedServices: z.ZodArray<typeof PackageId>
+  services: z.ZodRecord<z.ZodString, typeof PackageBackupReport>
+  error: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  id: Guid,
+  jobId: Guid,
+  jobName: z.string(),
+  targetId: BackupTargetId,
+  trigger: BackupRunTrigger,
+  state: BackupRunState,
+  startedAt: z.string(),
+  completedAt: wire(z.string().nullable().optional(), z.string().nullable()),
+  intendedServices: z.array(PackageId),
+  services: z.record(z.string(), PackageBackupReport),
+  error: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'BackupRun',
+})
+export const BackupServiceCapacityEstimate: z.ZodObject<{
+  packageId: typeof PackageId
+  liveLogicalBytes: z.ZodInt
+  retainedSnapshotCount: z.ZodInt
+  maximumProjectedSnapshotCount: z.ZodInt
+  scheduledRetainedBytes: z.ZodInt
+  manualCheckpointBytes: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  archivedBytes: z.ZodInt
+  stagingHeadroomBytes: z.ZodInt
+  lastChangedBytes: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  conservativePeakExcludingManualBytes: z.ZodInt
+}> = /* @__PURE__ */ object({
+  packageId: PackageId,
+  liveLogicalBytes: z.int(),
+  retainedSnapshotCount: z.int(),
+  maximumProjectedSnapshotCount: z.int(),
+  scheduledRetainedBytes: z.int(),
+  manualCheckpointBytes: wire(
+    z.int().nullable().optional(),
+    z.int().nullable(),
+  ),
+  archivedBytes: z.int(),
+  stagingHeadroomBytes: z.int(),
+  lastChangedBytes: wire(z.int().nullable().optional(), z.int().nullable()),
+  conservativePeakExcludingManualBytes: z.int(),
+}).meta({
+  id: 'BackupServiceCapacityEstimate',
+})
+export const BackupServiceScope: z.ZodUnion<
+  readonly [
+    z.ZodObject<{ type: z.ZodLiteral<'all'> }>,
+    z.ZodIntersection<
+      z.ZodObject<{ type: z.ZodLiteral<'allExcept'> }>,
+      z.ZodObject<{ excludedPackageIds: z.ZodArray<typeof PackageId> }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ type: z.ZodLiteral<'selected'> }>,
+      z.ZodObject<{
+        packageIds: z.ZodArray<typeof PackageId>
+        includeSystem: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>
+      }>
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    object({ type: z.literal('all') }),
+    z.intersection(
+      object({ type: z.literal('allExcept') }),
+      object({ excludedPackageIds: z.array(PackageId) }),
+    ),
+    z.intersection(
+      object({ type: z.literal('selected') }),
+      object({
+        packageIds: z.array(PackageId),
+        includeSystem: z.boolean().nullable().optional(),
+      }),
+    ),
+  ])
+  .meta({
+    id: 'BackupServiceScope',
   })
 export const CancelInstallParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
@@ -2261,6 +2620,53 @@ export const CreateParams: z.ZodObject<{
 }).meta({
   id: 'CreateParams',
 })
+export const DeleteArchivedSnapshotsParams: z.ZodObject<{
+  targetId: typeof BackupTargetId
+  packageId: typeof PackageId
+  snapshotIds: z.ZodArray<typeof Guid>
+  password: z.ZodString
+  /**
+   * Password that encrypted the existing backup location.
+   */
+  oldPassword: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  targetId: BackupTargetId,
+  packageId: PackageId,
+  snapshotIds: z.array(Guid),
+  password: z.string(),
+  /**
+   * Password that encrypted the existing backup location.
+   */
+  oldPassword: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ).meta({
+    description: 'Password that encrypted the existing backup location.',
+  }),
+}).meta({
+  id: 'DeleteArchivedSnapshotsParams',
+})
+export const DeleteBackupJobParams: z.ZodObject<{ id: typeof Guid }> =
+  /* @__PURE__ */ object({ id: Guid }).meta({
+    id: 'DeleteBackupJobParams',
+  })
+export const DeleteBackupJobWithBackupsParams: z.ZodObject<{
+  id: typeof Guid
+  password: z.ZodString
+  oldPassword: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  id: Guid,
+  password: z.string(),
+  oldPassword: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'DeleteBackupJobWithBackupsParams',
+})
 export const DeleteLegacyParams: z.ZodObject<{
   targetId: typeof BackupTargetId
 }> = /* @__PURE__ */ object({ targetId: BackupTargetId }).meta({
@@ -2311,6 +2717,17 @@ export const Description: z.ZodObject<{
   long: typeof LocaleString
 }> = /* @__PURE__ */ object({ short: LocaleString, long: LocaleString }).meta({
   id: 'Description',
+})
+export const DiscoverScheduledBackupsParams: z.ZodObject<{
+  targetId: typeof BackupTargetId
+  serverId: z.ZodString
+  password: z.ZodString
+}> = /* @__PURE__ */ object({
+  targetId: BackupTargetId,
+  serverId: z.string(),
+  password: z.string(),
+}).meta({
+  id: 'DiscoverScheduledBackupsParams',
 })
 export const DownloadsResponse: z.ZodObject<{
   totalRequests: z.ZodInt
@@ -2804,6 +3221,17 @@ export const MountParams: z.ZodObject<{
 }).meta({
   id: 'MountParams',
 })
+export const NewServiceBackupReview: z.ZodObject<{
+  packageId: typeof PackageId
+  affectedJobs: z.ZodArray<typeof Guid>
+  createdAt: z.ZodString
+}> = /* @__PURE__ */ object({
+  packageId: PackageId,
+  affectedJobs: z.array(Guid),
+  createdAt: z.string(),
+}).meta({
+  id: 'NewServiceBackupReview',
+})
 export const Notification: z.ZodObject<{
   packageId: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof PackageId>>,
@@ -2984,6 +3412,11 @@ export const RebuildParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'RebuildParams',
   })
+export const RefreshScheduledBackupHistoriesParams: z.ZodObject<{
+  targetId: typeof BackupTargetId
+}> = /* @__PURE__ */ object({ targetId: BackupTargetId }).meta({
+  id: 'RefreshScheduledBackupHistoriesParams',
+})
 export const RemoveAcmeParams: z.ZodObject<{ provider: typeof AcmeProvider }> =
   /* @__PURE__ */ object({ provider: AcmeProvider }).meta({
     id: 'RemoveAcmeParams',
@@ -3060,6 +3493,28 @@ export const RequiresPackageId: z.ZodObject<{ package: typeof PackageId }> =
   /* @__PURE__ */ object({ package: PackageId }).meta({
     id: 'RequiresPackageId',
   })
+
+/**
+ * Complete inclusion decisions for one newly installed service.
+ */
+export const ResolveNewServiceBackupReviewParams: z.ZodObject<{
+  packageId: typeof PackageId
+  /**
+   * Every current job requires an inclusion decision.
+   */
+  decisions: z.ZodRecord<z.ZodString, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  packageId: PackageId,
+  /**
+   * Every current job requires an inclusion decision.
+   */
+  decisions: z.record(z.string(), z.boolean()).meta({
+    description: 'Every current job requires an inclusion decision.',
+  }),
+}).meta({
+  id: 'ResolveNewServiceBackupReviewParams',
+  description: 'Complete inclusion decisions for one newly installed service.',
+})
 export const RestorePackageParams: z.ZodObject<{
   targetId: typeof BackupTargetId
   password: z.ZodString
@@ -3075,6 +3530,70 @@ export const RestorePackageParams: z.ZodObject<{
   serverId: wire(z.string().nullable().optional(), z.string().nullable()),
 }).meta({
   id: 'RestorePackageParams',
+})
+export const RestoreScheduledPackagesParams: z.ZodObject<{
+  targetId: typeof BackupTargetId
+  snapshots: z.ZodRecord<z.ZodString, typeof Guid>
+  serverId: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  password: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  targetId: BackupTargetId,
+  snapshots: z.record(z.string(), Guid),
+  serverId: wire(z.string().nullable().optional(), z.string().nullable()),
+  password: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'RestoreScheduledPackagesParams',
+})
+export const RestoreSelectionParams: z.ZodObject<{
+  targetId: typeof BackupTargetId
+  manualIds: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof PackageId>>,
+    z.ZodArray<typeof PackageId>
+  >
+  snapshots: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof Guid>>,
+    z.ZodRecord<z.ZodString, typeof Guid>
+  >
+  serverId: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  password: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  targetId: BackupTargetId,
+  manualIds: wire(z.array(PackageId).optional(), z.array(PackageId)),
+  snapshots: wire(
+    z.record(z.string(), Guid).optional(),
+    z.record(z.string(), Guid),
+  ),
+  serverId: wire(z.string().nullable().optional(), z.string().nullable()),
+  password: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'RestoreSelectionParams',
+})
+export const RetentionPolicy: z.ZodObject<{
+  /**
+   * An empty tier list is the latest-only policy.
+   */
+  tiers: z.ZodArray<typeof RetentionTier>
+}> = /* @__PURE__ */ object({
+  /**
+   * An empty tier list is the latest-only policy.
+   */
+  tiers: z.array(RetentionTier).meta({
+    description: 'An empty tier list is the latest-only policy.',
+  }),
+}).meta({
+  id: 'RetentionPolicy',
 })
 export const RunActionParams: z.ZodObject<{
   packageId: typeof PackageId
@@ -3095,6 +3614,47 @@ export const RunActionParams: z.ZodObject<{
 }).meta({
   id: 'RunActionParams',
 })
+export const RunBackupJobNowParams: z.ZodObject<{ id: typeof Guid }> =
+  /* @__PURE__ */ object({ id: Guid }).meta({
+    id: 'RunBackupJobNowParams',
+  })
+export const ServiceSnapshot: z.ZodObject<{
+  id: typeof Guid
+  packageId: typeof PackageId
+  packageVersion: z.ZodString
+  source: typeof BackupSource
+  jobId: typeof Guid
+  jobName: z.ZodString
+  runId: typeof Guid
+  completedAt: z.ZodString
+  logicalSize: z.ZodInt
+  physicalSize: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  changedBytes: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  measuredAt: z.ZodString
+  archived: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  id: Guid,
+  packageId: PackageId,
+  packageVersion: z.string(),
+  source: BackupSource,
+  jobId: Guid,
+  jobName: z.string(),
+  runId: Guid,
+  completedAt: z.string(),
+  logicalSize: z.int(),
+  physicalSize: wire(z.int().nullable().optional(), z.int().nullable()),
+  changedBytes: wire(z.int().nullable().optional(), z.int().nullable()),
+  measuredAt: z.string(),
+  archived: z.boolean(),
+}).meta({
+  id: 'ServiceSnapshot',
+})
 export const ServiceStats: z.ZodObject<{
   container_id: typeof ContainerId
   memory_usage: typeof MiB
@@ -3105,6 +3665,18 @@ export const ServiceStats: z.ZodObject<{
   memory_limit: MiB,
 }).meta({
   id: 'ServiceStats',
+})
+export const SetBackupJobEnabledParams: z.ZodObject<{
+  id: typeof Guid
+  enabled: z.ZodBoolean
+}> = /* @__PURE__ */ object({ id: Guid, enabled: z.boolean() }).meta({
+  id: 'SetBackupJobEnabledParams',
+})
+export const SetBackupJobsEnabledParams: z.ZodObject<{
+  ids: z.ZodArray<typeof Guid>
+  enabled: z.ZodBoolean
+}> = /* @__PURE__ */ object({ ids: z.array(Guid), enabled: z.boolean() }).meta({
+  id: 'SetBackupJobsEnabledParams',
 })
 export const SetDefaultOutboundParams: z.ZodObject<{
   gateway: z.ZodCodec<
@@ -3294,10 +3866,25 @@ export const StartOsRecoveryInfo: z.ZodObject<{
   hostname: typeof ServerHostname
   version: z.ZodString
   timestamp: typeof literal_0
+  scheduled: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  serverId: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  hasSystemBackup: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+    z.ZodNullable<z.ZodBoolean>
+  >
 }> = /* @__PURE__ */ object({
   hostname: ServerHostname,
   version: z.string(),
   timestamp: literal_0,
+  scheduled: wire(z.boolean().optional(), z.boolean()),
+  serverId: wire(z.string().nullable().optional(), z.string().nullable()),
+  hasSystemBackup: wire(
+    z.boolean().nullable().optional(),
+    z.boolean().nullable(),
+  ),
 }).meta({
   id: 'StartOsRecoveryInfo',
   description:
@@ -3519,6 +4106,40 @@ export const BackupInfo: z.ZodObject<{
 }).meta({
   id: 'BackupInfo',
 })
+export const BackupJob: z.ZodObject<{
+  id: typeof Guid
+  name: z.ZodString
+  enabled: z.ZodBoolean
+  pause: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof BackupJobPause>>,
+    z.ZodNullable<typeof BackupJobPause>
+  >
+  targetId: typeof BackupTargetId
+  targetInstanceId: z.ZodString
+  services: typeof BackupServiceScope
+  schedule: typeof Schedule
+  defaultRetention: typeof RetentionPolicy
+  retentionOverrides: z.ZodRecord<z.ZodString, typeof RetentionPolicy>
+  status: typeof BackupJobStatus
+  createdAt: z.ZodString
+  updatedAt: z.ZodString
+}> = /* @__PURE__ */ object({
+  id: Guid,
+  name: z.string(),
+  enabled: z.boolean(),
+  pause: wire(BackupJobPause.nullable().optional(), BackupJobPause.nullable()),
+  targetId: BackupTargetId,
+  targetInstanceId: z.string(),
+  services: BackupServiceScope,
+  schedule: Schedule,
+  defaultRetention: RetentionPolicy,
+  retentionOverrides: z.record(z.string(), RetentionPolicy),
+  status: BackupJobStatus,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+}).meta({
+  id: 'BackupJob',
+})
 export const BackupParams: z.ZodObject<{
   targetId: typeof BackupTargetId
   oldPassword: z.ZodCodec<
@@ -3567,6 +4188,107 @@ export const CompatibleAlpnInfo: z.ZodUnion<
   readonly [z.ZodArray<typeof MaybeUtf8String>, typeof LegacyAlpnInfo]
 > = /* @__PURE__ */ z.union([z.array(MaybeUtf8String), LegacyAlpnInfo]).meta({
   id: 'CompatibleAlpnInfo',
+})
+export const CreateBackupJobParams: z.ZodObject<{
+  name: z.ZodString
+  targetId: typeof BackupTargetId
+  services: typeof BackupServiceScope
+  schedule: typeof Schedule
+  defaultRetention: typeof RetentionPolicy
+  retentionOverrides: z.ZodRecord<z.ZodString, typeof RetentionPolicy>
+  password: typeof PasswordType
+  /**
+   * Password that encrypted the existing backup location.
+   */
+  oldPassword: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof PasswordType>>,
+    z.ZodNullable<typeof PasswordType>
+  >
+  enabled: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  /**
+   * Queue the job's first run after creation.
+   */
+  runNow: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  targetId: BackupTargetId,
+  services: BackupServiceScope,
+  schedule: Schedule,
+  defaultRetention: RetentionPolicy,
+  retentionOverrides: z.record(z.string(), RetentionPolicy),
+  password: PasswordType,
+  /**
+   * Password that encrypted the existing backup location.
+   */
+  oldPassword: wire(
+    PasswordType.nullable().optional(),
+    PasswordType.nullable(),
+  ).meta({
+    description: 'Password that encrypted the existing backup location.',
+  }),
+  enabled: wire(z.boolean().optional(), z.boolean()),
+  /**
+   * Queue the job's first run after creation.
+   */
+  runNow: wire(z.boolean().optional(), z.boolean()).meta({
+    description: "Queue the job's first run after creation.",
+  }),
+}).meta({
+  id: 'CreateBackupJobParams',
+})
+export const DeleteArchivedSnapshotsBulkParams: z.ZodObject<{
+  targetId: typeof BackupTargetId
+  snapshots: z.ZodArray<typeof ArchivedSnapshotSelection>
+  password: z.ZodString
+  /**
+   * Password that encrypted the existing backup location.
+   */
+  oldPassword: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  targetId: BackupTargetId,
+  snapshots: z.array(ArchivedSnapshotSelection),
+  password: z.string(),
+  /**
+   * Password that encrypted the existing backup location.
+   */
+  oldPassword: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ).meta({
+    description: 'Password that encrypted the existing backup location.',
+  }),
+}).meta({
+  id: 'DeleteArchivedSnapshotsBulkParams',
+})
+export const EstimateBackupCapacityParams: z.ZodObject<{
+  targetId: typeof BackupTargetId
+  services: typeof BackupServiceScope
+  defaultRetention: typeof RetentionPolicy
+  retentionOverrides: z.ZodRecord<z.ZodString, typeof RetentionPolicy>
+  /**
+   * Preserves established history policies when estimating a new schedule.
+   */
+  preserveExistingPolicies: z.ZodCodec<
+    z.ZodOptional<z.ZodBoolean>,
+    z.ZodBoolean
+  >
+}> = /* @__PURE__ */ object({
+  targetId: BackupTargetId,
+  services: BackupServiceScope,
+  defaultRetention: RetentionPolicy,
+  retentionOverrides: z.record(z.string(), RetentionPolicy),
+  /**
+   * Preserves established history policies when estimating a new schedule.
+   */
+  preserveExistingPolicies: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Preserves established history policies when estimating a new schedule.',
+  }),
+}).meta({
+  id: 'EstimateBackupCapacityParams',
 })
 export const HardwareInfo: z.ZodObject<{
   arch: z.ZodString
@@ -3828,6 +4550,38 @@ export const PartitionInfo: z.ZodObject<{
 }).meta({
   id: 'PartitionInfo',
 })
+export const PreviewRetentionPolicyParams: z.ZodObject<{
+  targetId: typeof BackupTargetId
+  packageId: typeof PackageId
+  policy: typeof RetentionPolicy
+}> = /* @__PURE__ */ object({
+  targetId: BackupTargetId,
+  packageId: PackageId,
+  policy: RetentionPolicy,
+}).meta({
+  id: 'PreviewRetentionPolicyParams',
+})
+export const ReassignBackupTargetParams: z.ZodObject<{
+  id: typeof Guid
+  targetId: typeof BackupTargetId
+  password: typeof PasswordType
+  oldPassword: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof PasswordType>>,
+    z.ZodNullable<typeof PasswordType>
+  >
+  waitForSchedule: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  id: Guid,
+  targetId: BackupTargetId,
+  password: PasswordType,
+  oldPassword: wire(
+    PasswordType.nullable().optional(),
+    PasswordType.nullable(),
+  ),
+  waitForSchedule: wire(z.boolean().optional(), z.boolean()),
+}).meta({
+  id: 'ReassignBackupTargetParams',
+})
 export const RegistryInfo: z.ZodObject<{
   name: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -3874,6 +4628,34 @@ export const ResetPasswordParams: z.ZodObject<{
 }).meta({
   id: 'ResetPasswordParams',
 })
+export const RetentionPolicyChangePreview: z.ZodObject<{
+  removed: z.ZodArray<typeof ServiceSnapshot>
+  estimatedReclaimedBytes: z.ZodInt
+  affectedJobs: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({
+  removed: z.array(ServiceSnapshot),
+  estimatedReclaimedBytes: z.int(),
+  affectedJobs: z.array(z.string()),
+}).meta({
+  id: 'RetentionPolicyChangePreview',
+})
+export const RetryBackupTargetParams: z.ZodObject<{
+  targetId: typeof BackupTargetId
+  password: typeof PasswordType
+  oldPassword: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof PasswordType>>,
+    z.ZodNullable<typeof PasswordType>
+  >
+}> = /* @__PURE__ */ object({
+  targetId: BackupTargetId,
+  password: PasswordType,
+  oldPassword: wire(
+    PasswordType.nullable().optional(),
+    PasswordType.nullable(),
+  ),
+}).meta({
+  id: 'RetryBackupTargetParams',
+})
 export const ServiceInterface: z.ZodObject<{
   id: typeof ServiceInterfaceId
   name: z.ZodString
@@ -3907,6 +4689,27 @@ export const ServiceInterface: z.ZodObject<{
 }).meta({
   id: 'ServiceInterface',
 })
+export const ServiceTargetHistory: z.ZodObject<{
+  targetId: typeof BackupTargetId
+  targetInstanceId: z.ZodString
+  packageId: typeof PackageId
+  timezone: z.ZodString
+  policy: typeof RetentionPolicy
+  feedingJobs: z.ZodArray<typeof Guid>
+  snapshots: z.ZodArray<typeof ServiceSnapshot>
+  archived: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  targetId: BackupTargetId,
+  targetInstanceId: z.string(),
+  packageId: PackageId,
+  timezone: z.string(),
+  policy: RetentionPolicy,
+  feedingJobs: z.array(Guid),
+  snapshots: z.array(ServiceSnapshot),
+  archived: z.boolean(),
+}).meta({
+  id: 'ServiceTargetHistory',
+})
 export const SessionList: z.ZodObject<{
   current: z.ZodCodec<z.ZodOptional<typeof literal_1>, typeof literal_1>
   sessions: typeof AuthKeys
@@ -3915,6 +4718,62 @@ export const SessionList: z.ZodObject<{
   sessions: AuthKeys,
 }).meta({
   id: 'SessionList',
+})
+export const UpdateBackupJobParams: z.ZodObject<{
+  id: typeof Guid
+  name: z.ZodString
+  services: typeof BackupServiceScope
+  schedule: typeof Schedule
+  defaultRetention: typeof RetentionPolicy
+  retentionOverrides: z.ZodRecord<z.ZodString, typeof RetentionPolicy>
+}> = /* @__PURE__ */ object({
+  id: Guid,
+  name: z.string(),
+  services: BackupServiceScope,
+  schedule: Schedule,
+  defaultRetention: RetentionPolicy,
+  retentionOverrides: z.record(z.string(), RetentionPolicy),
+}).meta({
+  id: 'UpdateBackupJobParams',
+})
+export const UpdateRetentionPolicyParams: z.ZodObject<{
+  targetId: typeof BackupTargetId
+  packageId: typeof PackageId
+  policy: typeof RetentionPolicy
+  confirmedRemovals: z.ZodArray<typeof Guid>
+}> = /* @__PURE__ */ object({
+  targetId: BackupTargetId,
+  packageId: PackageId,
+  policy: RetentionPolicy,
+  confirmedRemovals: z.array(Guid),
+}).meta({
+  id: 'UpdateRetentionPolicyParams',
+})
+export const ValidateBackupJobParams: z.ZodObject<{
+  /**
+   * Existing job being replaced, or `None` for a new job.
+   */
+  id: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
+  services: typeof BackupServiceScope
+  schedule: typeof Schedule
+  defaultRetention: typeof RetentionPolicy
+  retentionOverrides: z.ZodRecord<z.ZodString, typeof RetentionPolicy>
+}> = /* @__PURE__ */ object({
+  /**
+   * Existing job being replaced, or `None` for a new job.
+   */
+  id: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description: 'Existing job being replaced, or `None` for a new job.',
+  }),
+  services: BackupServiceScope,
+  schedule: Schedule,
+  defaultRetention: RetentionPolicy,
+  retentionOverrides: z.record(z.string(), RetentionPolicy),
+}).meta({
+  id: 'ValidateBackupJobParams',
 })
 export const WgSubnetClients: z.ZodRecord<z.ZodString, typeof WgConfig> =
   /* @__PURE__ */ z.record(z.string(), WgConfig).meta({
@@ -4563,9 +5422,255 @@ export const Api = {
     backup: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
+        activity: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            list: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
+              _RETURN: /* @__PURE__ */ z.array(BackupActivity),
+            },
+          },
+        },
         create: {
           _PARAMS: /* @__PURE__ */ BackupParams,
           _RETURN: /* @__PURE__ */ z.null(),
+        },
+        'estimate-capacity': {
+          _PARAMS: /* @__PURE__ */ z.unknown(),
+          _RETURN: /* @__PURE__ */ z.unknown(),
+          _OPAQUE: true as const,
+        },
+        history: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            'delete-archived': {
+              _PARAMS: /* @__PURE__ */ z.unknown(),
+              _RETURN: /* @__PURE__ */ z.unknown(),
+              _OPAQUE: true as const,
+            },
+            'delete-archived-snapshots': {
+              _PARAMS: /* @__PURE__ */ DeleteArchivedSnapshotsParams,
+              _RETURN: /* @__PURE__ */ ServiceTargetHistory,
+            },
+            'delete-archived-snapshots-bulk': {
+              _PARAMS: /* @__PURE__ */ DeleteArchivedSnapshotsBulkParams,
+              _RETURN: /* @__PURE__ */ z.array(ServiceTargetHistory),
+            },
+            discover: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                DiscoverScheduledBackupsParams,
+              ),
+              _RETURN: /* @__PURE__ */ z.array(ServiceTargetHistory),
+            },
+            list: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
+              _RETURN: /* @__PURE__ */ z.array(ServiceTargetHistory),
+            },
+            refresh: {
+              _PARAMS: /* @__PURE__ */ RefreshScheduledBackupHistoriesParams,
+              _RETURN: /* @__PURE__ */ z.array(ServiceTargetHistory),
+            },
+          },
+        },
+        job: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            add: {
+              _PARAMS: /* @__PURE__ */ z.unknown(),
+              _RETURN: /* @__PURE__ */ z.unknown(),
+              _OPAQUE: true as const,
+            },
+            create: {
+              _PARAMS: /* @__PURE__ */ CreateBackupJobParams,
+              _RETURN: /* @__PURE__ */ BackupJob,
+            },
+            delete: {
+              _PARAMS: /* @__PURE__ */ DeleteBackupJobParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            'delete-with-backups': {
+              _PARAMS: /* @__PURE__ */ DeleteBackupJobWithBackupsParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            disable: {
+              _PARAMS: /* @__PURE__ */ z.unknown(),
+              _RETURN: /* @__PURE__ */ z.unknown(),
+              _OPAQUE: true as const,
+            },
+            edit: {
+              _PARAMS: /* @__PURE__ */ z.unknown(),
+              _RETURN: /* @__PURE__ */ z.unknown(),
+              _OPAQUE: true as const,
+            },
+            enable: {
+              _PARAMS: /* @__PURE__ */ z.unknown(),
+              _RETURN: /* @__PURE__ */ z.unknown(),
+              _OPAQUE: true as const,
+            },
+            list: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
+              _RETURN: /* @__PURE__ */ z.array(BackupJob),
+            },
+            'reassign-target': {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                ReassignBackupTargetParams,
+              ),
+              _RETURN: /* @__PURE__ */ BackupJob,
+            },
+            'retry-target': {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                RetryBackupTargetParams,
+              ),
+              _RETURN: /* @__PURE__ */ z.array(BackupJob),
+            },
+            'run-now': {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                RunBackupJobNowParams,
+              ),
+              _RETURN: /* @__PURE__ */ BackupRun,
+            },
+            'set-enabled': {
+              _PARAMS: /* @__PURE__ */ SetBackupJobEnabledParams,
+              _RETURN: /* @__PURE__ */ BackupJob,
+            },
+            'set-enabled-bulk': {
+              _PARAMS: /* @__PURE__ */ SetBackupJobsEnabledParams,
+              _RETURN: /* @__PURE__ */ z.array(BackupJob),
+            },
+            update: {
+              _PARAMS: /* @__PURE__ */ UpdateBackupJobParams,
+              _RETURN: /* @__PURE__ */ BackupJob,
+            },
+            validate: {
+              _PARAMS: /* @__PURE__ */ ValidateBackupJobParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+          },
+        },
+        policy: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            apply: {
+              _PARAMS: /* @__PURE__ */ z.unknown(),
+              _RETURN: /* @__PURE__ */ z.unknown(),
+              _OPAQUE: true as const,
+            },
+            estimate: {
+              _PARAMS: /* @__PURE__ */ EstimateBackupCapacityParams,
+              _RETURN: /* @__PURE__ */ z.array(BackupServiceCapacityEstimate),
+            },
+            preview: {
+              _PARAMS: /* @__PURE__ */ PreviewRetentionPolicyParams,
+              _RETURN: /* @__PURE__ */ RetentionPolicyChangePreview,
+            },
+            'preview-change': {
+              _PARAMS: /* @__PURE__ */ z.unknown(),
+              _RETURN: /* @__PURE__ */ z.unknown(),
+              _OPAQUE: true as const,
+            },
+            update: {
+              _PARAMS: /* @__PURE__ */ UpdateRetentionPolicyParams,
+              _RETURN: /* @__PURE__ */ ServiceTargetHistory,
+            },
+          },
+        },
+        review: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            decide: {
+              _PARAMS: /* @__PURE__ */ z.unknown(),
+              _RETURN: /* @__PURE__ */ z.unknown(),
+              _OPAQUE: true as const,
+            },
+            list: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
+              _RETURN: /* @__PURE__ */ z.array(NewServiceBackupReview),
+            },
+            resolve: {
+              _PARAMS: /* @__PURE__ */ ResolveNewServiceBackupReviewParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+          },
         },
         target: {
           _PARAMS: /* @__PURE__ */ empty,
@@ -4630,6 +5735,21 @@ export const Api = {
               _RETURN: /* @__PURE__ */ z.null(),
             },
           },
+        },
+        targets: {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            empty,
+          ),
+          _RETURN: /* @__PURE__ */ z.record(z.string(), BackupTarget),
         },
       },
     },
@@ -5095,6 +6215,24 @@ export const Api = {
           _CHILDREN: {
             restore: {
               _PARAMS: /* @__PURE__ */ RestorePackageParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            'restore-checkpoint': {
+              _PARAMS: /* @__PURE__ */ z.unknown(),
+              _RETURN: /* @__PURE__ */ z.unknown(),
+              _OPAQUE: true as const,
+            },
+            'restore-mixed': {
+              _PARAMS: /* @__PURE__ */ z.unknown(),
+              _RETURN: /* @__PURE__ */ z.unknown(),
+              _OPAQUE: true as const,
+            },
+            'restore-scheduled': {
+              _PARAMS: /* @__PURE__ */ RestoreScheduledPackagesParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            'restore-selection': {
+              _PARAMS: /* @__PURE__ */ RestoreSelectionParams,
               _RETURN: /* @__PURE__ */ z.null(),
             },
           },

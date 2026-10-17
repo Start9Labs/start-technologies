@@ -425,11 +425,6 @@ export class RpcListener {
     timeout: number | null | undefined,
     input: any,
   ) {
-    const ensureResultTypeShape = (
-      result: void | T.ActionInput | T.ActionResult | null,
-    ): { result: any } => {
-      return { result }
-    }
     const callbacks = this.callbacks?.child(procedure)
     const effects = makeEffects({
       eventId,
@@ -461,17 +456,20 @@ export class RpcListener {
               )
           }
       }
-    })().then(ensureResultTypeShape, error => {
-      const legacy = z.looseObject({ error: z.string() }).safeParse(error)
-      return {
-        error: {
-          ...errorKind.serviceRuntime,
-          data: {
-            details: legacy.success ? legacy.data.error : String(error),
-            debug: error?.stack,
+    })().then(
+      result => ({ result }),
+      error => {
+        const legacy = z.looseObject({ error: z.string() }).safeParse(error)
+        return {
+          error: {
+            ...errorKind.serviceRuntime,
+            data: {
+              details: legacy.success ? legacy.data.error : String(error),
+              debug: error?.stack,
+            },
           },
-        },
-      }
-    })
+        }
+      },
+    )
   }
 }

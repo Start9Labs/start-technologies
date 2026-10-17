@@ -1,0 +1,1 @@
+- **Backup reports include rsync transfer size when it can be measured.** Custom backup functions can omit the measurement.

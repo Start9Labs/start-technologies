@@ -1,0 +1,41 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-backup-job 1  "job "
+.SH NAME
+start\-cli\-backup\-job \- Commands to manage automatic backup jobs
+.SH SYNOPSIS
+\fBstart\-cli backup job\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Commands to manage automatic backup jobs
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+start\-cli\-backup\-job\-add(1)
+Add an automatic backup job
+.TP
+start\-cli\-backup\-job\-delete(1)
+Delete an automatic backup job
+.TP
+start\-cli\-backup\-job\-disable(1)
+Disable an automatic backup job without deleting its checkpoints
+.TP
+start\-cli\-backup\-job\-edit(1)
+Edit an automatic backup job
+.TP
+start\-cli\-backup\-job\-enable(1)
+Enable an automatic backup job
+.TP
+start\-cli\-backup\-job\-list(1)
+List automatic backup jobs
+.TP
+start\-cli\-backup\-job\-reassign\-target(1)
+Move an automatic backup job to another target
+.TP
+start\-cli\-backup\-job\-retry\-target(1)
+Reconnect an automatic backup target and resume its jobs
+.TP
+start\-cli\-backup\-job\-run\-now(1)
+Run an automatic backup job now

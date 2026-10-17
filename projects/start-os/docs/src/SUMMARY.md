@@ -61,6 +61,7 @@
 # Backups
 
 - [Creating Backups](backup-create.md)
+- [Automatic Backups](backup-automatic.md)
 - [Restoring Backups](backup-restore.md)
 
 ---
