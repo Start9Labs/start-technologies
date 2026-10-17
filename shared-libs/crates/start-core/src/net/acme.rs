@@ -77,7 +77,7 @@ const MAX_RETRY_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// `Some(retry_after)` (capped) for a 429, `None` otherwise.
 fn retry_after_from_order_error(err: &OrderError) -> Option<Duration> {
-    let OrderError::Acme(AcmeError::RateLimited { retry_after }) = err else {
+    let OrderError::Acme(AcmeError::RateLimited { retry_after, .. }) = err else {
         return None;
     };
     retry_after.map(|d| d.min(MAX_RETRY_AFTER))
@@ -119,15 +119,12 @@ where
                 .and_then(|c| should_use_cert(&c.0).log_err())
                 .unwrap_or(false)
             {
-                // Cached cert is healthy; drop any stale order/backoff state.
                 self.in_progress
                     .send_if_modified(|map| map.remove(san_info).is_some());
                 return certified_key(cert, &self.crypto_provider);
             }
         }
 
-        // A cert inside its renewal window is still publicly trusted, so it
-        // answers for anything below here that cannot produce a new one.
         let renewing = || {
             certified_key(
                 cached.as_ref().filter(|c| unexpired(c))?,
@@ -138,7 +135,6 @@ where
         let Some(contact) = <M as DbAccessByKey<AcmeSettings>>::access_by_key(&peek, &provider)
             .and_then(|settings| settings.as_contact().de().log_err())
         else {
-            // Provider removed from the server while a domain still names it.
             return renewing();
         };
         drop(peek);
@@ -157,8 +153,6 @@ where
             .map(|d| (d, Watch::new(None)))
             .collect::<BTreeMap<_, _>>();
 
-        // Reuse an in-flight order, honour an active backoff, or start a
-        // new order — all under the in_progress lock.
         enum Action {
             Await(Shared<BoxFuture<'static, Option<CertifiedKey>>>),
             Backoff,
@@ -166,8 +160,7 @@ where
         let action = self.in_progress.send_modify(|map| {
             let entry = map.entry(san_info.clone()).or_default();
 
-            // A resolved future's result is either in the DB (cached-cert
-            // path would have hit) or in `backoff_until` — don't await it.
+            // Resolved failures live in `backoff_until`, not `in_flight`.
             if let Some(fut) = &entry.in_flight {
                 if fut.peek().is_some() {
                     entry.in_flight = None;
@@ -249,8 +242,6 @@ where
                     }
                 };
 
-                // Success: leave the entry alone; the next cached-cert
-                // path call removes it. Failure: arm the cooldown.
                 if let Some((d, error)) = failure {
                     let report = in_progress.send_modify(|map| {
                         let Some(entry) = map.get_mut(&san_info_clone) else {
@@ -338,7 +329,6 @@ where
             .flatten()
             .any(|a| a == ACME_TLS_ALPN_NAME)
         {
-            // Only a name with an order in flight is answerable.
             let Some(cert) = self.acme_cache.peek(|c| c.get(domain).cloned()) else {
                 tracing::debug!("no ACME challenge in flight for {domain}");
                 return None;
@@ -716,8 +706,6 @@ rpc_toolkit::reflect_ts!(InitAcmeParams);
 rpc_toolkit::ts_export!(InitAcmeParams, namespaces = [""]);
 
 lazy_static::lazy_static! {
-    // Pragmatic email match: local@domain, no whitespace, dot in domain.
-    // RFC 5322 is far too permissive for what an ACME server actually accepts.
     static ref EMAIL_REGEX: Regex =
         Regex::new(r"^[^@\s]+@[^@\s]+\.[^@\s]+$").unwrap();
 }
@@ -729,10 +717,7 @@ fn invalid_contact_err(contact: &str) -> Error {
     )
 }
 
-// RFC 8555 §7.3 requires `contact` entries to be URLs, and Let's Encrypt
-// (the only provider start-os ships shorthand for) only supports `mailto:`.
-// Without this gate, a bare email here gets stored verbatim and eventually
-// fails the `newAccount` request with `unsupportedContact`.
+// RFC 8555 §7.3 requires contact URLs; Let's Encrypt accepts `mailto:`.
 fn validate_contact(contact: &str) -> Result<(), Error> {
     let url = contact
         .parse::<Url>()
@@ -746,9 +731,6 @@ fn validate_contact(contact: &str) -> Result<(), Error> {
     Ok(())
 }
 
-// Accept either a full `mailto:` URI or a bare email — for the latter,
-// prepend `mailto:` and re-validate so the stored value is always RFC 8555
-// compliant.
 fn normalize_contact(contact: String) -> Result<String, Error> {
     if validate_contact(&contact).is_ok() {
         return Ok(contact);
@@ -812,7 +794,7 @@ pub async fn remove(
 mod tests {
     use std::time::Duration;
 
-    use async_acme::acme::{AcmeError, Identifier};
+    use async_acme::acme::{AcmeError, Identifier, Problem};
     use async_acme::rustls_helper::OrderError;
 
     use super::{
@@ -823,6 +805,7 @@ mod tests {
     fn rate_limited_with_retry_after_passes_through() {
         let err = OrderError::Acme(AcmeError::RateLimited {
             retry_after: Some(Duration::from_secs(120)),
+            problem: None,
         });
         assert_eq!(
             retry_after_from_order_error(&err),
@@ -832,17 +815,48 @@ mod tests {
 
     #[test]
     fn rate_limited_retry_after_capped_at_max() {
-        // Pathological server: "please come back in a year".
         let err = OrderError::Acme(AcmeError::RateLimited {
             retry_after: Some(Duration::from_secs(365 * 24 * 60 * 60)),
+            problem: None,
         });
         assert_eq!(retry_after_from_order_error(&err), Some(MAX_RETRY_AFTER));
     }
 
     #[test]
     fn rate_limited_without_retry_after_returns_none() {
-        let err = OrderError::Acme(AcmeError::RateLimited { retry_after: None });
+        let err = OrderError::Acme(AcmeError::RateLimited {
+            retry_after: None,
+            problem: None,
+        });
         assert_eq!(retry_after_from_order_error(&err), None);
+    }
+
+    #[test]
+    fn rate_limited_problem_preserves_unpause_link_and_backoff() {
+        let link = "https://portal.letsencrypt.org/sfe/v1/unpause?jwt=test-token";
+        let err = OrderError::Acme(AcmeError::RateLimited {
+            retry_after: Some(Duration::from_secs(120)),
+            problem: Some(Problem {
+                typ: "urn:ietf:params:acme:error:rateLimited".into(),
+                detail: Some(format!(
+                    "Your account is temporarily prevented from requesting certificates for example.test. Please visit: {link}"
+                )),
+            }),
+        });
+        let error = err.to_string();
+        for locale in ["en_US", "de_DE", "es_ES", "fr_FR", "pl_PL"] {
+            let message = crate::prelude::t!(
+                "acme.order-failed-message",
+                locale = locale,
+                domain = "example.test",
+                error = error
+            );
+            assert!(message.contains(link), "{locale}: {message}");
+        }
+        assert_eq!(
+            retry_after_from_order_error(&err),
+            Some(Duration::from_secs(120))
+        );
     }
 
     #[test]
@@ -865,8 +879,6 @@ mod tests {
 
     #[test]
     fn validate_contact_rejects_bare_email() {
-        // The validator itself is strict; the fallback in `normalize_contact`
-        // is what auto-prefixes `mailto:`.
         assert!(validate_contact("admin@example.com").is_err());
     }
 

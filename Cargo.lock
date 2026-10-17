@@ -287,7 +287,7 @@ dependencies = [
 [[package]]
 name = "async-acme"
 version = "0.6.0"
-source = "git+https://github.com/Start9Labs/async-acme.git?rev=45c8a56379c5f8afb6b9dd6511e0c7e1ce70ccf5#45c8a56379c5f8afb6b9dd6511e0c7e1ce70ccf5"
+source = "git+https://github.com/Start9Labs/async-acme.git?rev=c6de111884efc7c6a3904daf58e8054f9c14230a#c6de111884efc7c6a3904daf58e8054f9c14230a"
 dependencies = [
  "async-trait",
  "base64 0.22.1",

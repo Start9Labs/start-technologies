@@ -1,0 +1,1 @@
+- Include Let's Encrypt's unpause link in certificate failure notifications for paused domains.
