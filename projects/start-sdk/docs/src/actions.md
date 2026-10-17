@@ -457,7 +457,7 @@ Benefits:
 
 ## SMTP Configuration
 
-The SDK provides a built-in SMTP input specification for managing email credentials. This supports three modes: disabled, system SMTP (from StartOS settings), or custom SMTP with provider presets (Gmail, Amazon SES, SendGrid, Mailgun, Proton Mail, or custom).
+The SDK provides a built-in SMTP input specification for managing email credentials. This supports three modes: disabled, system SMTP (from StartOS settings), or custom SMTP with provider presets (Amazon SES, Forward Email, Gmail, Mailgun, Proton Mail, SendGrid, or custom).
 
 ### 1. Add SMTP to store.json.ts
 

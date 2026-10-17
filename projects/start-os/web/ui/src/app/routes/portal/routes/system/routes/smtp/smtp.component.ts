@@ -29,10 +29,11 @@ import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
 function detectProviderKey(host: string | undefined): string {
   if (!host) return 'other'
   const providers: Record<string, string> = {
+    'smtp.forwardemail.net': 'forwardemail',
     'smtp.gmail.com': 'gmail',
-    'smtp.sendgrid.net': 'sendgrid',
     'smtp.mailgun.org': 'mailgun',
     'smtp.protonmail.ch': 'protonmail',
+    'smtp.sendgrid.net': 'sendgrid',
   }
   for (const [h, key] of Object.entries(providers)) {
     if (host === h) return key

@@ -1,0 +1,1 @@
+- Forward Email is a provider preset in the SMTP input spec, and the presets are listed alphabetically.

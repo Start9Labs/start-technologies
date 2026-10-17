@@ -85,14 +85,6 @@ export const customSmtp = smtpFields()
  * Each variant has SMTP fields pre-filled with the provider's recommended settings.
  */
 export const smtpProviderVariants = Variants.of({
-  gmail: {
-    name: 'Gmail',
-    spec: smtpFields({
-      host: 'smtp.gmail.com',
-      security: 'tls',
-      hostDisabled: true,
-    }),
-  },
   ses: {
     name: 'Amazon SES',
     spec: smtpFields({
@@ -100,10 +92,18 @@ export const smtpProviderVariants = Variants.of({
       security: 'tls',
     }),
   },
-  sendgrid: {
-    name: 'SendGrid',
+  forwardemail: {
+    name: 'Forward Email',
     spec: smtpFields({
-      host: 'smtp.sendgrid.net',
+      host: 'smtp.forwardemail.net',
+      security: 'tls',
+      hostDisabled: true,
+    }),
+  },
+  gmail: {
+    name: 'Gmail',
+    spec: smtpFields({
+      host: 'smtp.gmail.com',
       security: 'tls',
       hostDisabled: true,
     }),
@@ -121,6 +121,14 @@ export const smtpProviderVariants = Variants.of({
     spec: smtpFields({
       host: 'smtp.protonmail.ch',
       security: 'starttls',
+      hostDisabled: true,
+    }),
+  },
+  sendgrid: {
+    name: 'SendGrid',
+    spec: smtpFields({
+      host: 'smtp.sendgrid.net',
+      security: 'tls',
       hostDisabled: true,
     }),
   },

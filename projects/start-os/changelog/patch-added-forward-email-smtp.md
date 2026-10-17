@@ -1,0 +1,1 @@
+- Forward Email is a provider choice under **System > SMTP**, and the providers are listed alphabetically.
