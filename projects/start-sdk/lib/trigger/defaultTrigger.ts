@@ -1,6 +1,7 @@
 import { HealthStatus } from '@start9labs/start-core/types'
 import { Trigger } from '.'
 import { statusTrigger } from './statusTrigger'
+import { delay } from './delay'
 
 const SETTLED_MS = 30_000
 const PENDING: { [K in HealthStatus]?: number } = {
@@ -33,7 +34,7 @@ export const daemonReadyTrigger: Trigger = async function* (getInput) {
       ? loadingMs
       : (PENDING[lastResult ?? 'starting'] ?? SETTLED_MS)
     loadingMs = backoff ? Math.min(loadingMs * 2, SETTLED_MS) : 1_000
-    await new Promise(resolve => setTimeout(resolve, ms))
+    await delay(ms)
     yield
   }
 }

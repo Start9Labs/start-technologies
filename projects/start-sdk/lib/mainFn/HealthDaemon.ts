@@ -1,4 +1,5 @@
 import { HealthCheckResult } from '../health/checkFns'
+import { isInGracePeriod } from '../health/isInGracePeriod'
 import { daemonReadyTrigger, defaultTrigger } from '../trigger/defaultTrigger'
 import { Ready } from './Daemons'
 import { Daemon } from './Daemon'
@@ -228,8 +229,8 @@ export class HealthDaemon<Manifest extends SDKManifest> {
     let result = health.result
     if (
       result === 'failure' &&
-      this.started &&
-      performance.now() - this.started <= (this.ready.gracePeriod ?? 10_000)
+      this.started !== undefined &&
+      isInGracePeriod(this.started, this.ready.gracePeriod)
     )
       result = 'starting'
     if (result === 'failure') {

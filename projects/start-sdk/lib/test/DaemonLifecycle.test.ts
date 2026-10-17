@@ -1,6 +1,7 @@
 import { Daemon } from '../mainFn/Daemon'
 import { EXIT_SUCCESS, HealthDaemon } from '../mainFn/HealthDaemon'
 import { HealthCheckResult } from '../health/checkFns'
+import { onceTrigger } from '../trigger'
 import * as T from '@start9labs/start-core/types'
 
 type Manifest = {
@@ -411,6 +412,31 @@ describe('HealthDaemon ready polling', () => {
       await hd.term()
     },
   )
+
+  it('runs a check with onceTrigger once and reports its failure', async () => {
+    jest.advanceTimersByTime(1)
+    const setHealth = jest.fn(async () => null)
+    const fn = results('failure')
+    const hd = new HealthDaemon<Manifest>(
+      null,
+      [],
+      'signups',
+      { display: 'Signups', gracePeriod: 0, trigger: onceTrigger, fn },
+      { ...fakeEffects(), setHealth } as any,
+    )
+    await hd.updateStatus()
+
+    await expectPolls(fn, [
+      [0, 1],
+      [60_000, 1],
+    ])
+    expect(setHealth.mock.calls.map(([h]: any) => h.result)).toEqual([
+      'starting',
+      'failure',
+    ])
+
+    await hd.term()
+  })
 
   it.each(['loading', 'waiting'] as const)(
     'polls a standalone health check reporting %s every 30 seconds',

@@ -3,7 +3,8 @@ import { HealthCheckResult } from './checkFns/HealthCheckResult'
 import { Trigger } from '../trigger'
 import { TriggerInput } from '../trigger/TriggerInput'
 import { defaultTrigger } from '../trigger/defaultTrigger'
-import { once, asError, Drop } from '../util'
+import { Drop } from '@start9labs/start-core/util/Drop'
+import { isInGracePeriod } from './isInGracePeriod'
 
 /** Parameters for creating a health check */
 export type HealthCheckParams = {
@@ -22,6 +23,7 @@ export type HealthCheckParams = {
  * pauses when the daemon is stopped and resumes when restarted.
  */
 export class HealthCheck extends Drop {
+  private trigger: ReturnType<Trigger> | null = null
   private started: number | null = null
   private setStarted = (started: number | null) => {
     this.started = started
@@ -32,12 +34,12 @@ export class HealthCheck extends Drop {
   }
   private currentValue: TriggerInput = {}
   private promise: Promise<void>
-  private constructor(effects: Effects, o: HealthCheckParams) {
+  private constructor(
+    effects: Effects,
+    private readonly o: HealthCheckParams,
+  ) {
     super()
     this.promise = Promise.resolve().then(async () => {
-      const getCurrentValue = () => this.currentValue
-      const gracePeriod = o.gracePeriod ?? 10_000
-      const trigger = (o.trigger ?? defaultTrigger)(getCurrentValue)
       const checkStarted = () =>
         [
           this.started,
@@ -52,22 +54,23 @@ export class HealthCheck extends Drop {
             }
           }),
         ] as const
-      let triggered = false
+      let triggered: ReturnType<Trigger> | null = null
       while (!this.exited) {
         const [started, changed] = checkStarted()
+        const trigger = this.trigger
         let race:
           | [Promise<void>]
           | [Promise<void>, Promise<IteratorResult<unknown, unknown>>] = [
           changed,
         ]
-        if (started) {
+        if (started !== null && trigger) {
           race = [...race, trigger.next()]
-          if (triggered) {
+          if (triggered === trigger) {
             try {
               let { result, message } = await o.fn()
               if (
                 result === 'failure' &&
-                performance.now() - started <= gracePeriod
+                isInGracePeriod(started, o.gracePeriod)
               )
                 result = 'starting'
               await effects.setHealth({
@@ -81,20 +84,19 @@ export class HealthCheck extends Drop {
               await effects.setHealth({
                 name: o.name,
                 id: o.id,
-                result:
-                  performance.now() - started <= gracePeriod
-                    ? 'starting'
-                    : 'failure',
+                result: isInGracePeriod(started, o.gracePeriod)
+                  ? 'starting'
+                  : 'failure',
                 message: asMessage(e) || '',
               })
               this.currentValue.lastResult = 'failure'
             }
           }
-        } else triggered = false
+        } else triggered = null
         const raced = await Promise.race(race)
         if (raced) {
-          if (raced.done) break
-          triggered = true
+          if (raced.done) await changed
+          else triggered = trigger
         }
       }
     })
@@ -110,12 +112,13 @@ export class HealthCheck extends Drop {
   }
   /** Signal that the daemon is running, enabling health check polling */
   start() {
-    if (this.started) return
+    if (this.started !== null) return
+    this.trigger = (this.o.trigger ?? defaultTrigger)(() => this.currentValue)
     this.setStarted(performance.now())
   }
   /** Signal that the daemon has stopped, pausing health check polling */
   stop() {
-    if (!this.started) return
+    if (this.started === null) return
     this.setStarted(null)
   }
   onDrop(): void {

@@ -1,0 +1,1 @@
+- `cooldownTrigger` and `statusTrigger` wait out an interval longer than about 24.8 days instead of polling every millisecond, and an interval of `Infinity` stops polling.

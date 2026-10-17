@@ -220,7 +220,7 @@ The `.build()` method returns an object containing the entire SDK surface area, 
 | **Init/Uninit**  | `setupInit`, `setupUninit`, `setupOnInit`, `setupOnUninit`                                                                          | Lifecycle hooks                                   |
 | **Containers**   | `SubContainer.of`, `SubContainer.withTemp`, `Mounts.of`                                                                             | Container execution with mounts                   |
 | **Forms**        | `InputSpec.of`, `Value`, `Variants`, `List`                                                                                         | Form input builders                               |
-| **Triggers**     | `trigger.defaultTrigger`, `.cooldownTrigger`, `.statusTrigger`                                                                      | Health check polling strategies                   |
+| **Triggers**     | `trigger.defaultTrigger`, `.cooldownTrigger`, `.statusTrigger`, `.onceTrigger`                                                      | Health check polling strategies                   |
 | **Reactive**     | `getContainerIp`, `getStatus`, `getSystemSmtp`, `getOutboundGateway`, `getSslCertificate`, `getServiceManifest`                     | Subscription-based data access                    |
 | **Plugins**      | `plugin.url.register`, `plugin.url.exportUrl`                                                                                       | Plugin system (gated by manifest `plugins` field) |
 | **Effects**      | `restart`, `shutdown`, `setHealth`, `mount`, `clearBindings`, ...                                                                   | Direct effect wrappers                            |
@@ -320,6 +320,7 @@ Health checks are paired with **triggers** that control polling behavior:
 - `daemonReadyTrigger` — a daemon's `ready` check without its own trigger: `defaultTrigger`, except that `loading` or `waiting` before the first `success` backs off from 1 s, doubling to 30 s (selected in `HealthDaemon`, not exported on `sdk.trigger`)
 - `cooldownTrigger` — Fixed interval between checks
 - `statusTrigger` — Per-status polling intervals with a default fallback
+- `onceTrigger` — One check at start
 
 ### Primary URL (`lib/primaryUrl/`)
 
@@ -433,6 +434,7 @@ Polling strategy functions that determine when health checks run:
 sdk.trigger.defaultTrigger
 sdk.trigger.cooldownTrigger(30_000)
 sdk.trigger.statusTrigger(30_000, { starting: 5_000, failure: 5_000 })
+sdk.trigger.onceTrigger
 ```
 
 ## Build Pipeline
