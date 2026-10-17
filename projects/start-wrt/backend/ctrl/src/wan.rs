@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
     DdnsService, InterfaceProto, NetworkDevice, NetworkInterface, UciSystemDns,
 };
-use uciedit::{dump_all, parse_all, Arena};
+use uciedit::{dump_all, parse_all, Arena, TypedSection};
 
 use crate::dns::{self, DnsServer};
 use crate::invoke::Invoke;
@@ -23,6 +23,14 @@ fn serde_name(v: &impl Serialize) -> String {
 pub const WAN_INTERFACE: &str = "wan";
 pub const WAN6_INTERFACE: &str = "wan6";
 const DDNS_SECTION: &str = "wan";
+
+/// The `auto` option of a network interface, written without touching its other options.
+#[derive(Debug, TypedSection, Default)]
+#[uci(ty = "interface")]
+struct InterfaceAutostart {
+    #[uci(default)]
+    auto: Option<bool>,
+}
 
 // ── IPv4 types ──────────────────────────────────────────────
 
@@ -482,22 +490,36 @@ pub async fn ipv4_set<C: CtrlContext>(
 
 // ── IPv6 handlers ───────────────────────────────────────────
 
+fn default_wan6() -> NetworkInterface {
+    NetworkInterface {
+        device: "@wan".to_string(),
+        proto: InterfaceProto::DHCPV6,
+        reqaddress: Some("try".to_string()),
+        reqprefix: Some("auto".to_string()),
+        ..Default::default()
+    }
+}
+
 #[instrument(skip_all)]
 pub async fn ipv6_get<C: CtrlContext>(ctx: C) -> Result<WanIpv6Response, Error> {
     let arena = Arena::new();
     let cfgs = parse_all(ctx.uci_root(), &arena, &["network"]).await?;
 
-    let mut wan6: Option<NetworkInterface> = None;
+    let mut wan6: Option<(NetworkInterface, bool)> = None;
     for section in &cfgs["network"].sections {
         if section.name().as_deref() == Some(WAN6_INTERFACE) {
             if let Some(iface) = section.get_typed::<NetworkInterface>()? {
-                wan6 = Some(iface);
+                let autostart = section
+                    .get_typed::<InterfaceAutostart>()?
+                    .and_then(|a| a.auto)
+                    .unwrap_or(true);
+                wan6 = Some((iface, autostart));
                 break;
             }
         }
     }
 
-    let Some(iface) = wan6 else {
+    let Some((iface, autostart)) = wan6 else {
         return Ok(WanIpv6Response {
             mode: WanIpv6Mode::Disabled,
             address: None,
@@ -512,7 +534,8 @@ pub async fn ipv6_get<C: CtrlContext>(ctx: C) -> Result<WanIpv6Response, Error> 
         });
     };
 
-    let mode = match iface.proto {
+    // Settings of a disabled wan6 are still reported.
+    let configured = match iface.proto {
         InterfaceProto::NONE => WanIpv6Mode::Disabled,
         InterfaceProto::DHCPV6 => {
             if iface.reqaddress.as_deref() == Some("force") {
@@ -526,7 +549,7 @@ pub async fn ipv6_get<C: CtrlContext>(ctx: C) -> Result<WanIpv6Response, Error> 
         _ => WanIpv6Mode::Disabled,
     };
 
-    let (address, prefix) = match mode {
+    let (address, prefix) = match configured {
         WanIpv6Mode::Slaac | WanIpv6Mode::Dhcpv6 => {
             let prefix = iface
                 .reqprefix
@@ -569,19 +592,23 @@ pub async fn ipv6_get<C: CtrlContext>(ctx: C) -> Result<WanIpv6Response, Error> 
 
     // For Static mode, ip6prefix is the LAN delegation prefix.
     // For 6RD, ip6prefix is the tunnel parameter.
-    let lan_prefix = if mode == WanIpv6Mode::Static {
+    let lan_prefix = if configured == WanIpv6Mode::Static {
         iface.ip6prefix.clone()
     } else {
         None
     };
-    let sixrd_ip6prefix = if mode == WanIpv6Mode::SixRd {
+    let sixrd_ip6prefix = if configured == WanIpv6Mode::SixRd {
         iface.ip6prefix
     } else {
         None
     };
 
     Ok(WanIpv6Response {
-        mode,
+        mode: if autostart {
+            configured
+        } else {
+            WanIpv6Mode::Disabled
+        },
         address,
         prefix,
         gateway: iface.ip6gw,
@@ -610,9 +637,14 @@ pub async fn ipv6_set<C: CtrlContext>(
             .position(|s| s.name().as_deref() == Some(WAN6_INTERFACE));
 
         if req.mode == WanIpv6Mode::Disabled {
-            if let Some(idx) = wan6_idx {
-                cfgs["network"].sections.remove(idx);
-            }
+            let idx = match wan6_idx {
+                Some(idx) => idx,
+                None => {
+                    cfgs["network"].append(&default_wan6(), Some(WAN6_INTERFACE))?;
+                    cfgs["network"].sections.len() - 1
+                }
+            };
+            cfgs["network"].sections[idx].set(&InterfaceAutostart { auto: Some(false) })?;
         } else {
             let reqprefix = req
                 .prefix
@@ -622,11 +654,8 @@ pub async fn ipv6_set<C: CtrlContext>(
 
             let new_iface = match &req.mode {
                 WanIpv6Mode::Slaac => NetworkInterface {
-                    device: "@wan".to_string(),
-                    proto: InterfaceProto::DHCPV6,
-                    reqaddress: Some("try".to_string()),
                     reqprefix: Some(reqprefix.unwrap_or_else(|| "auto".to_string())),
-                    ..Default::default()
+                    ..default_wan6()
                 },
                 WanIpv6Mode::Dhcpv6 => NetworkInterface {
                     device: "@wan".to_string(),
@@ -681,6 +710,7 @@ pub async fn ipv6_set<C: CtrlContext>(
                     updated.ip6assign = existing.ip6assign;
                 }
                 section.set(&updated)?;
+                section.set(&InterfaceAutostart { auto: None })?;
             } else {
                 cfgs["network"].append(&new_iface, Some(WAN6_INTERFACE))?;
             }
@@ -1208,6 +1238,21 @@ mod tests {
         }
     }
 
+    /// The wan6 proto and `auto` option as written to disk.
+    async fn wan6_on_disk(dir: &std::path::Path) -> Option<(InterfaceProto, Option<bool>)> {
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.to_path_buf(), &arena, &["network"])
+            .await
+            .unwrap();
+        let section = cfgs["network"]
+            .sections
+            .iter()
+            .find(|s| s.name().as_deref() == Some(WAN6_INTERFACE))?;
+        let iface = section.get_typed::<NetworkInterface>().unwrap()?;
+        let auto = section.get_typed::<InterfaceAutostart>().unwrap()?.auto;
+        Some((iface.proto, auto))
+    }
+
     fn setup_network(dir: &std::path::Path) {
         std::fs::write(
             dir.join("network"),
@@ -1371,6 +1416,85 @@ config interface 'wan6'
 
         let res = ipv6_get(ctx).await.unwrap();
         assert_eq!(res.mode, WanIpv6Mode::Disabled);
+
+        assert_eq!(
+            wan6_on_disk(dir.path()).await,
+            Some((InterfaceProto::DHCPV6, Some(false)))
+        );
+    }
+
+    #[tokio::test]
+    async fn ipv6_set_disabled_without_wan6() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("network"),
+            "\
+config interface 'wan'
+\toption device 'eth1'
+\toption proto 'dhcp'
+",
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        ipv6_set(
+            ctx.clone(),
+            DeserializeStdin(WanIpv6SetRequest {
+                mode: WanIpv6Mode::Disabled,
+                address: None,
+                prefix: None,
+                gateway: None,
+                ip6prefix: None,
+                ip6prefixlen: None,
+                ip4prefixlen: None,
+                border_relay: None,
+                lan_prefix: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let res = ipv6_get(ctx).await.unwrap();
+        assert_eq!(res.mode, WanIpv6Mode::Disabled);
+
+        assert_eq!(
+            wan6_on_disk(dir.path()).await,
+            Some((InterfaceProto::DHCPV6, Some(false)))
+        );
+    }
+
+    #[tokio::test]
+    async fn ipv6_reenable_clears_autostart() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_network(dir.path());
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        for mode in [WanIpv6Mode::Disabled, WanIpv6Mode::Dhcpv6] {
+            ipv6_set(
+                ctx.clone(),
+                DeserializeStdin(WanIpv6SetRequest {
+                    mode,
+                    address: None,
+                    prefix: None,
+                    gateway: None,
+                    ip6prefix: None,
+                    ip6prefixlen: None,
+                    ip4prefixlen: None,
+                    border_relay: None,
+                    lan_prefix: None,
+                }),
+            )
+            .await
+            .unwrap();
+        }
+
+        let res = ipv6_get(ctx).await.unwrap();
+        assert_eq!(res.mode, WanIpv6Mode::Dhcpv6);
+
+        assert_eq!(
+            wan6_on_disk(dir.path()).await,
+            Some((InterfaceProto::DHCPV6, None))
+        );
     }
 
     // ── MAC ──
@@ -2172,7 +2296,7 @@ config service 'wan'
     }
 
     #[tokio::test]
-    async fn ipv6_6rd_to_disabled_clears_fields() {
+    async fn ipv6_6rd_to_disabled_keeps_fields() {
         let dir = tempfile::tempdir().unwrap();
         setup_network(dir.path());
         let ctx = TestContext(dir.path().to_path_buf());
@@ -2213,8 +2337,10 @@ config service 'wan'
 
         let res = ipv6_get(ctx).await.unwrap();
         assert_eq!(res.mode, WanIpv6Mode::Disabled);
-        assert!(res.border_relay.is_none(), "border relay should be cleared");
-        assert!(res.ip6prefix.is_none(), "ip6prefix should be cleared");
+        assert_eq!(res.ip6prefix.as_deref(), Some("2001:db8::"));
+        assert_eq!(res.ip6prefixlen.as_deref(), Some("/32"));
+        assert_eq!(res.ip4prefixlen.as_deref(), Some("/0"));
+        assert_eq!(res.border_relay.as_deref(), Some("203.0.113.1"));
     }
 
     // ── MAC revert ──

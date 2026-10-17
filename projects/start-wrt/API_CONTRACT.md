@@ -426,6 +426,7 @@ enum WanIpv6Mode {
 struct WanIpv6Response {
     /// A wan6 proto startwrt doesn't manage (e.g. a hand-configured `6in4`)
     /// is reported as Disabled, not an error; the config is left untouched.
+    /// A disabled wan6 still reports the settings it keeps.
     mode: WanIpv6Mode,
     /// Static mode
     address: Option<String>,
@@ -464,7 +465,8 @@ struct WanIpv6SetRequest {
     border_relay: Option<String>,
 }
 // Response: null
-// Backend: updates UCI network.wan6, restarts network, then restarts odhcpd
+// Backend: updates UCI network.wan6, restarts network, then restarts odhcpd.
+// Disabled sets `auto 0` on wan6, keeping its other options; any other mode clears it.
 ```
 
 ### `wan.mac-get`

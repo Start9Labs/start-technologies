@@ -1341,6 +1341,7 @@ export class MockApiService extends ApiService {
   }
 
   async wanIpv6Set(params: WanIpv6SetRequest): Promise<null> {
+    const previous = this.mockWanIpv6
     await pauseFor(250)
     const requested = params.prefix?.replace(/^\//, '') ?? ''
     this.mockWanIpv6 = {
@@ -1364,6 +1365,9 @@ export class MockApiService extends ApiService {
           : params.mode === 'static'
             ? (params.address ?? null)
             : (this.mockWanIpv6.assigned_ipv6 ?? '2001:db8::1'),
+    }
+    if (params.mode === 'disabled') {
+      this.mockWanIpv6 = { ...previous, mode: 'disabled', assigned_ipv6: null }
     }
     this.logActivity(
       'wan',

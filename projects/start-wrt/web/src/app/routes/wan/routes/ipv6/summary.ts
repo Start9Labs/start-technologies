@@ -61,7 +61,7 @@ export class WanIpv6Summary {
 
   readonly items = computed(() => {
     const ip = this.service.data()?.ip
-    if (!ip) return []
+    if (!ip || ip.mode === 'disabled') return []
 
     return SUMMARY_FIELDS.map(key => ({
       label: IPV6_LABELS[key],
