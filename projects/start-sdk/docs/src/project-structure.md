@@ -285,6 +285,28 @@ The shared release workflow retains its 2 GiB per-asset ceiling; configure S3 fo
 larger files and ensure the Forgejo instance's upload limit permits the remaining
 assets.
 
+### Gitea Actions
+
+The package workflows support GitHub and Forgejo, not Gitea Actions. Verification
+against Gitea 28.1.0 with Gitea Runner 5.1.1 found that default workflow discovery
+prefers `.gitea/workflows/`, falls back to `.github/workflows/`, and ignores
+`.forgejo/workflows/`. An unchanged template therefore selects the GitHub callers,
+whose unqualified reusable-workflow imports resolve on the Gitea instance rather
+than GitHub.
+
+Copying the Forgejo callers into `.gitea/workflows/` is insufficient: Gitea
+[restricts reusable-workflow URLs to the same instance](https://github.com/go-gitea/gitea/blob/v28.1.0/services/actions/reusable_workflow.go#L443-L464)
+and rejects their `https://github.com/...` imports before scheduling jobs. Build,
+release, registry publishing, and `syncNext` are blocked at that boundary.
+
+Isolated jobs passed the Forgejo v4 artifact upload/download round-trip and used
+the automatic token for checkout, tag pushes, and release creation/update with
+asset replacement (with `contents: write` permission). These successful primitive
+checks do not establish compatibility of the package workflows.
+
+Run the template's CI on GitHub or Forgejo. Keep Actions disabled on a Gitea mirror
+of a scaffolded package; renaming workflow directories alone does not enable it.
+
 ### AGENTS.md and CLAUDE.md
 
 `AGENTS.md` is the package's agent-context file. Generic packaging knowledge — SDK patterns, the disciplines on the [Development Workflow](./workflow.md) page, the rules throughout this guide — lives in one canonical place: the packaging guide, **not** copied into each package repo where duplicates would drift out of sync. `AGENTS.md` carries only what's specific to _this_ repo.
