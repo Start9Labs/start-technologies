@@ -44,21 +44,21 @@ One SSID, multiple passwords. One router, multiple isolated networks. The profil
 1. On the **WAN / Internet** tab, configure Internet access:
    - **Outbound Routing** — Choose how traffic from this profile reaches the Internet. Select **Direct** for direct Internet access, or **VPN** to route all traffic through an outbound VPN. The VPN option cannot be selected if you have no enabled [Outbound VPN](outbound-vpn.md) clients; choosing VPN reveals a picker listing your enabled VPNs (a disabled VPN's tunnel is down, so routing a profile through it would cut that profile off).
 
-   - **WAN Access** — Controls Internet access for devices on this profile:
+   - **Access** — Controls Internet access for devices on this profile:
      - **All** — Unrestricted Internet access.
      - **None** — No Internet access. Devices can only reach LAN resources permitted by the LAN access setting.
      - **Whitelist** — Allow connections only to specific destination IPs or CIDR ranges (e.g. `1.1.1.1, 8.8.8.0/24`). Include the router's public address to let the profile reach [published ports](published-ports.md#reaching-a-published-port-from-your-own-network) on other profiles.
      - **Blacklist** — Block connections to specific destination IPs or CIDR ranges, allow everything else. Blocking the router's public address keeps the profile away from published ports on other profiles.
 
-   - **Blackout Schedule** — A button that opens a schedule dialog for time-of-day Internet restrictions (see [WAN Blackout](#wan-blackout) below). It is disabled when WAN Access is None; any existing windows are retained.
+   - **Blackout Schedule** — A button that opens a schedule dialog for time-of-day Internet restrictions (see [WAN Blackout](#wan-blackout) below). It is disabled when Access is None; any existing windows are retained.
 
-1. On the **DNS** tab, choose **Inherit from system** or **Custom**. Custom lets you specify up to three DNS servers, each with an optional **DoH** (DNS-over-HTTPS) toggle. When inheriting, the profile uses the outbound VPN's DNS (if routing through a VPN) or the system DNS from [WAN Settings](wan.md).
+1. On the **DNS** tab, choose **Inherit from system** or **Custom**. Custom lets you specify up to three DNS servers, each with an optional **Secure (DoH)** toggle for DNS-over-HTTPS. When inheriting, the profile uses the outbound VPN's DNS (if routing through a VPN) or the system DNS from [WAN Settings](wan.md).
 
 1. Click "Save".
 
 ## Editing a Profile
 
-1. Navigate to `Security Profiles` and select the profile.
+1. Navigate to `Security Profiles` and select "Edit" from the profile's actions menu.
 
 1. Modify any settings and click "Save".
 
@@ -67,9 +67,9 @@ One SSID, multiple passwords. One router, multiple isolated networks. The profil
 
 ## Deleting a Profile
 
-1. Navigate to `Security Profiles` and select the profile.
+1. Navigate to `Security Profiles` and select "Delete" from the profile's actions menu.
 
-1. Click "Delete".
+1. Confirm the deletion.
 
 > [!WARNING]
 > Deleting a profile disconnects all devices assigned to it. Associated points of entry (Wi-Fi passwords, Ethernet port assignments, VPN servers) are automatically removed.

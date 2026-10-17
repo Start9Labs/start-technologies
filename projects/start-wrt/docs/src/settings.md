@@ -12,7 +12,7 @@ When a firmware update is available, a "vX.Y.Z released!" panel appears at the t
 
 - **Theme** — System, Dark, or Light. System follows your browser or OS preference.
 - **Language** — A dropdown for the web interface language. Available languages are English, Spanish, German, French, and Polish (English is the fallback). The choice is saved per-router (server-side) — there is no automatic browser-language detection.
-- **Timezone** — A searchable combo box populated from the device, listing hundreds of IANA time zones (e.g. labelled like "(GMT-6) America/Denver"). It's auto-detected from your browser during [initial setup](initial-setup.md) (falling back to UTC if detection fails). Changing the timezone restarts the schedule engine so that [WAN Blackout](security-profiles.md#wan-blackout) and [Wi-Fi Blackout](wifi-schedules.md) windows fire at the correct local time. It also affects activity timestamps and log timestamps.
+- **Timezone** — A searchable combo box populated from the device, listing hundreds of IANA time zones (e.g. labelled like "(GMT-6) America/Denver"). It's auto-detected from your browser during [initial setup](initial-setup.md) (falling back to UTC if detection fails). Changing the timezone restarts the schedule engine so that [WAN Blackout](security-profiles.md#wan-blackout) and [Wi-Fi Blackout](wifi-schedules.md) windows fire at the correct local time. It also sets the time zone of log timestamps. Activity timestamps are shown in your browser's time zone.
 
 Theme and Language changes are previewed immediately when you select them, and saved when you click "Save". If you leave the page without saving, the preview reverts to your saved settings.
 
@@ -32,10 +32,10 @@ The options control direct WAN-side access only:
 > Selecting "Always" exposes your router's admin interface to the public Internet. Only use this if you understand the security implications and have a strong admin password.
 
 > [!NOTE]
-> The ports Remote Access uses are protected from [Published Ports](published-ports.md): publishing 80, 443, or 22 to a device asks for confirmation first, and a device's [automatic port forwarding](published-ports.md#automatic-port-forwarding) request for them is refused. [Hostname routes](published-ports.md#hostname-routes-shared-ports) are the exception — they share port 443 with Remote Access, each connection going to the device whose hostname it names and everything else to the router.
+> While Remote Access accepts WAN connections — "Always", or "When behind NAT" while the router's WAN address is private — the ports it uses are protected from [Published Ports](published-ports.md): publishing 80, 443, or 22 to a device asks for confirmation first, and a device's [automatic port forwarding](published-ports.md#automatic-port-forwarding) request for them is refused. [Hostname routes](published-ports.md#hostname-routes-shared-ports) are the exception — they share port 443 with Remote Access, each connection going to the device whose hostname it names and everything else to the router.
 
 > [!NOTE]
-> While port 443 is published to a device — by a [Published Port](published-ports.md) or a device's [hostname routes](published-ports.md#hostname-routes-shared-ports) — plain `http://` to the router's WAN address is answered with a redirect to `https://` instead of the web interface, under every option above, "Never" included. See [Reaching a Published Port from Your Own Network](published-ports.md#reaching-a-published-port-from-your-own-network).
+> While port 443 is published to a device — by a [Published Port](published-ports.md) or a device's [hostname routes](published-ports.md#hostname-routes-shared-ports) — and port 80 is not, plain `http://` to the router's WAN address is answered with a redirect to `https://` instead of the web interface, under every option above, "Never" included. See [Reaching a Published Port from Your Own Network](published-ports.md#reaching-a-published-port-from-your-own-network).
 
 ### Security
 

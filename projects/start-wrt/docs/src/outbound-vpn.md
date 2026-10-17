@@ -7,7 +7,7 @@ Route your network's Internet traffic through one or more WireGuard VPN provider
 1. Navigate to `Internet > Outbound VPNs` and click "Add".
 
 1. Configure the VPN:
-   - **Label** — A descriptive name (e.g. "Mullvad Sweden", "Proton US").
+   - **Label** — A descriptive name of up to 12 characters (e.g. "Mullvad SE", "Proton US").
    - **Config File** — Upload a WireGuard `.conf` file from your VPN provider — drop it into the dialog or click to browse. Most providers (Mullvad, ProtonVPN, IVPN, etc.) offer WireGuard config file downloads from their account dashboard.
    - **Target** — How this VPN reaches its own server. The dropdown lists **Internet** along with your existing VPNs. Select **Internet** to connect over your WAN, or select another VPN to carry this one's tunnel, so traffic passes through that VPN first for additional privacy.
 
@@ -63,7 +63,7 @@ A kill switch protects every VPN-routed profile: both IPv4 and IPv6 fail closed.
 
 Click a VPN label in the table to open its detail page, which shows:
 
-- **Status** — Whether the VPN is connected or disabled.
+- **Status** — **Connected** while the VPN is enabled, **Disabled** otherwise.
 - **Connection Path** — This VPN's chain outward to your WAN, each hop carrying the one before it (e.g. "Mullvad → Proton → Internet" means Mullvad's tunnel runs through Proton, and Proton connects over the WAN). Traffic routed here exits at the first VPN listed.
 - **Used by** — Which [Security Profiles](security-profiles.md) currently route their traffic through this VPN. Check this before making changes to understand the impact.
 - **Label** — Edit the display name.
@@ -77,7 +77,7 @@ To delete a VPN, click "Delete" on its detail page. If any Security Profiles rou
 
 ## Enabling and Disabling
 
-Each VPN has an enable/disable toggle in the table view. When a VPN is disabled, profiles that route through it will fall back to the WAN (direct Internet). A disabled VPN is not offered when choosing a [Security Profile's](security-profiles.md) outbound routing, nor as another VPN's **Connects to** target — re-enable it first.
+Each VPN has an enable/disable toggle in the table view. Disabling a VPN switches every profile that routes through it to the WAN (direct Internet), after you confirm. Those profiles stay on the WAN until you select the VPN again under their **Outbound Routing**. A disabled VPN is not offered when choosing a [Security Profile's](security-profiles.md) outbound routing, nor as another VPN's **Connects to** target — re-enable it first.
 
 > [!NOTE]
 > You cannot disable a VPN if other VPNs use it as a target. Change their target first.
@@ -86,7 +86,7 @@ Each VPN has an enable/disable toggle in the table view. When a VPN is disabled,
 
 By default, all [Security Profiles](security-profiles.md) use the router's default gateway (your ISP) for Internet traffic. You can override this per profile:
 
-1. Navigate to `Security Profiles` and select a profile.
+1. Navigate to `Security Profiles` and select "Edit" from the profile's actions menu.
 
 1. Under **Outbound Routing**, select a VPN client.
 
