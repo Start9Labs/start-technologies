@@ -765,6 +765,12 @@ export class MockApiService extends ApiService {
     return profile
   }
 
+  private grantsAccessToNewProfiles(params: ProfileCreateInput): boolean {
+    if (params.lan_access === 'ALL') return true
+    if (params.lan_access === 'SAME_PROFILE') return false
+    return params.access_to_new_profiles
+  }
+
   private resolveLanAccess(
     access: ProfileCreateInput['lan_access'],
   ): SecurityProfile['lan_access'] {
@@ -811,7 +817,7 @@ export class MockApiService extends ApiService {
       outbound: params.outbound,
       lan_access: this.resolveLanAccess(params.lan_access),
       wan_access: params.wan_access,
-      access_to_new_profiles: params.access_to_new_profiles,
+      access_to_new_profiles: this.grantsAccessToNewProfiles(params),
       owns_lan: params.owns_lan,
       dns_override: params.dns_override ?? [],
       dns_source: params.dns_override?.length
@@ -852,7 +858,7 @@ export class MockApiService extends ApiService {
             outbound: params.outbound,
             lan_access: this.resolveLanAccess(params.lan_access),
             wan_access: params.wan_access,
-            access_to_new_profiles: params.access_to_new_profiles,
+            access_to_new_profiles: this.grantsAccessToNewProfiles(params),
             owns_lan: params.owns_lan,
             dns_override: params.dns_override ?? [],
             dns_source: params.dns_override?.length

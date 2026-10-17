@@ -1726,6 +1726,12 @@ struct SecurityProfile {
 // Response: SecurityProfile
 ```
 
+`lan_access` reflects current firewall forwardings together with the stored
+`access_to_new_profiles` flag. `ALL` requires access to every other profile and
+the flag. No access to another existing profile returns `SAME_PROFILE` with the
+flag false; a sole profile returns `ALL` when the flag is set. Other
+combinations return `other_profiles` with the stored flag.
+
 ### `profiles.create`
 
 ```rust
@@ -1756,6 +1762,9 @@ struct ProfileCreateRequest {
 //   A disabled VPN's tunnel never comes up, so routing a profile through it
 //   would blackhole that profile.
 ```
+
+On create and set, `lan_access: "ALL"` stores `access_to_new_profiles: true`,
+`"SAME_PROFILE"` stores `false`, and `other_profiles` preserves the supplied flag.
 
 ### `profiles.set`
 

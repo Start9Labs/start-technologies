@@ -770,7 +770,9 @@ class AddProfile {
         outbound: val.outboundType === 'vpn' ? val.outboundVpn : 'wan',
         lan_access,
         wan_access,
-        access_to_new_profiles: val.accessToNewProfiles,
+        access_to_new_profiles:
+          lan_access === 'ALL' ||
+          (typeof lan_access !== 'string' && val.accessToNewProfiles),
         owns_lan: this.existing?.owns_lan || false,
         dns_override: dns_override?.length ? dns_override : undefined,
         schedule_windows: this.scheduleWindows(),
