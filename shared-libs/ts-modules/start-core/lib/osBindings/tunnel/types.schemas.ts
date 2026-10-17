@@ -624,7 +624,24 @@ export const SetSubnetWanParams: z.ZodObject<{
 export const ShowConfigParams: z.ZodObject<{
   subnet: typeof literal_0
   ip: z.ZodString
-}> = /* @__PURE__ */ object({ subnet: literal_0, ip: z.string() }).meta({
+  /**
+   * Overrides the generated WireGuard endpoint without changing the WAN assignment.
+   */
+  endpoint: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  subnet: literal_0,
+  ip: z.string(),
+  /**
+   * Overrides the generated WireGuard endpoint without changing the WAN assignment.
+   */
+  endpoint: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'Overrides the generated WireGuard endpoint without changing the WAN assignment.',
+  }),
+}).meta({
   id: 'ShowConfigParams',
 })
 
