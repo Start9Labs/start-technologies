@@ -1,6 +1,6 @@
 # Start9 Accessory Onboarding
 
-Status: draft for review. Owner: unassigned. Target: unscheduled.
+Status: draft for review. Owner: unassigned. Target: StartOS 0.4.1 (SDK 3.1.0).
 
 StartOS adopts Start9's own IoT products: it brings one onto the LAN, pairs
 with it, and grants it to the services the user chooses. The Start9 Camera (a
@@ -269,6 +269,14 @@ model and the setup secret. The class selects the routes the UI offers. Accessor
 because DPP bootstrapping keys are NIST-curve keys, and P-256 is the one every
 DPP implementation supports.
 
+Encodings: `K:` is standard base64 with padding, as DPP has it, of the same
+SubjectPublicKeyInfo bytes the accessory presents in TLS (an uncompressed
+point); StartOS hashes the decoded bytes as given and never re-encodes the
+key. The setup secret is RFC 4648 base32, uppercase and unpadded (26
+characters). Parsers accept the fields in any order and ignore unknown ones
+(`M:`, `C:`, `H:`). The reCamera's class is `camera` and its model
+`recamera`.
+
 Possession of the QR code is the authority to onboard the accessory while it
 is unpaired. Once paired, the accessory ignores its setup secret until it is
 released or factory reset.
@@ -277,7 +285,13 @@ An accessory's **identity** is its factory key. Its **fingerprint** is the
 SHA-256 of the DER SubjectPublicKeyInfo, encoded and displayed exactly as AGCP
 §Fingerprints specifies, so a fingerprint on the accessory's own display, on
 the StartOS accessory page and on a router page compare character for
-character.
+character. Every protocol field named `fingerprint` or `server` below carries
+the AGCP wire form (unpadded base64url of the digest).
+
+Its **accessory ID** is the lowercase, unpadded base32 of the first 10 octets
+of the fingerprint digest (16 characters). It is derived from the factory
+key, so StartOS computes it from the QR code before it has spoken to the
+accessory.
 
 ### Server identity
 
@@ -303,22 +317,31 @@ accessory.onboard.begin { uri, route, wifi?: { ssid, psk } }
   → { session, bundle }
 ```
 
-startd parses the URI, opens an onboarding session in memory (15-minute
-expiry), and seals a **bundle** with HPKE (RFC 9180; the `hpke` crate):
+startd parses the URI, opens an onboarding session in memory (one-hour
+expiry, so the user can scan the sticker and then unbox, mount and power the
+accessory), and seals a **bundle** with HPKE (RFC 9180; the `hpke` crate):
 
 - Mode `mode_psk`, KEM `DHKEM(P-256, HKDF-SHA256)`, KDF `HKDF-SHA256`, AEAD
   `AES-128-GCM`.
-- Recipient key: the factory public key from the QR. PSK: the setup secret,
-  `psk_id = "start9-onboard-v1"`.
-- `info = "start9 onboard v1"`, `aad` = the session ID.
+- Recipient key: the factory public key from the QR. PSK:
+  `HKDF-SHA256(ikm = setup secret, salt = "", info = "start9-onboard-v1 psk", L = 32)`,
+  `psk_id = "start9-onboard-v1"`. RFC 9180 requires a PSK of at least 32
+  bytes; the 128-bit setup secret is stretched to that length, and its
+  entropy is unchanged.
+- `info = "start9 onboard v1"`, `aad` = the UTF-8 bytes of the session ID.
+- `session` and `token` are each 16 random bytes, base64url.
 - Plaintext, JSON:
-  `{ "v": 1, "session", "token": <base64url 128-bit>, "server": <server
-fingerprint>, "serverId", "wifi"?: { "ssid", "psk", "security" },
-"expires" }`.
+  `{ "v": 1, "session", "token", "server": <server fingerprint>, "serverId",
+"wifi"?: { "ssid", "psk", "security" }, "expires": <Unix seconds> }`, with
+  `security` one of `wpa2-psk`, `wpa3-sae` or `open` (`psk` empty).
 
-The bundle on the wire is the HPKE encapsulated key followed by the
-ciphertext, base64url wherever it travels as text. Without Wi-Fi it is about
-250 bytes; with Wi-Fi, under 400, inside one GATT long write.
+The bundle's text form, wherever it travels, is
+`<session>.<base64url(enc || ciphertext)>`: the accessory needs the session ID
+as AAD before it can open the bundle, so it travels in clear in front. The
+session ID is not secret, and the AEAD rejects a bundle whose prefix was
+changed; the accessory also checks it against the `session` inside. Without
+Wi-Fi the text form is about 400 characters; with Wi-Fi, about 500, and up to
+about 730 with a 32-byte SSID and a 63-character passphrase.
 
 `mode_psk` is the point: a sender must hold both the accessory's public key
 and the setup secret. The public key is visible to anyone the accessory talks
@@ -332,15 +355,25 @@ depends on the accessory class and on the browser.
 
 **Web Bluetooth.** Offered when `'bluetooth' in navigator` and
 `navigator.bluetooth.getAvailability()` resolves true. The accessory
-advertises a **Start9 onboarding GATT service** (128-bit UUID to be assigned)
-while unpaired and without a working network, beside Improv where it has
-Improv:
+advertises the **Start9 onboarding GATT service**
+`faa69064-50ae-4ce3-bbad-6e284048ad5b` while unpaired and without a working
+network, beside Improv where it has Improv:
 
-| Characteristic | Properties   | Value                                       |
-| -------------- | ------------ | ------------------------------------------- |
-| `info`         | read         | JSON `{ v, id, class, model, fingerprint }` |
-| `bundle`       | write (long) | the sealed bundle                           |
-| `status`       | read, notify | JSON `{ state, error?, ipv4?, ipv6? }`      |
+| Characteristic | UUID                                   | Properties   | Value                                       |
+| -------------- | -------------------------------------- | ------------ | ------------------------------------------- |
+| `info`         | `9edb1604-db34-4de1-9c62-c445b44b5893` | read         | JSON `{ v, id, class, model, fingerprint }` |
+| `bundle`       | `9592ec0b-f1d6-4c16-be7c-a444069a6999` | write (long) | the bundle's text form, UTF-8, in chunks    |
+| `status`       | `55cb7a10-cdc5-44c7-8376-061abbc0192d` | read, notify | JSON `{ state, error?, ipv4?, ipv6? }`      |
+
+A GATT attribute value is at most 512 bytes, and a bundle with Wi-Fi can be
+longer, so the UI writes it in chunks of at most 512 bytes, each at offset 0.
+The first chunk starts with the session and its dot; the later chunks contain
+no dot and continue the bundle. A write that starts with a session and a dot
+starts a new bundle. The framing needs no integrity of its own: the AEAD
+rejects any bundle that was spliced or cut.
+
+`status.state` is one of `idle`, `received`, `joining`, `connected` and
+`error`, and `error` is `BUNDLE_REJECTED`, `ALREADY_PAIRED` or `WIFI_FAILED`.
 
 The UI filters `requestDevice` by the service UUID, checks that
 `info.fingerprint` matches the scanned key, writes `bundle`, and follows
@@ -348,9 +381,11 @@ The UI filters `requestDevice` by the service UUID, checks that
 Web Bluetooth browser such as Bluefy; Safari and iOS home-screen apps have no
 Web Bluetooth.
 
-**Shown QR code.** For accessories with a camera. The UI renders the bundle as
-a QR code and the accessory reads it (the reCamera's `feat/wifi-qr`
-pipeline). Anyone photographing the screen gets ciphertext.
+**Shown QR code.** For accessories with a camera. The UI renders `S9B1:`
+followed by the bundle's text form as a QR code (byte mode), and the
+accessory reads it (the reCamera's `feat/wifi-qr` pipeline). The prefix lets
+the same reader tell a bundle from a plain Wi-Fi QR code. Anyone
+photographing the screen gets ciphertext.
 
 **LAN.** For accessories already on the LAN (Ethernet, or Wi-Fi set up some
 other way). startd finds the accessory by mDNS (see Discovery), opens TLS,
@@ -372,12 +407,15 @@ StartWRT relay; Thread joining.
 5. Advertise on mDNS (see Discovery) with `state=pending`.
 
 An accessory that is not paired within the bundle's expiry discards the
-pending pairing. Wi-Fi it joined stays configured.
+pending pairing. Wi-Fi it joined stays configured. An accessory without a
+real-time clock that has not yet set its time cannot check `expires`; it
+accepts the bundle and discards the pending pairing an hour after receipt.
 
 ### Discovery
 
 Accessories advertise `_start9._tcp` with a subtype per class
-(`_camera._sub._start9._tcp`) on their HTTPS port, with TXT:
+(`_camera._sub._start9._tcp`) on their contract port (8443 by default; the
+SRV record is authoritative), with TXT:
 
 - `v=1`, the contract version;
 - `id`, the accessory ID;
@@ -431,8 +469,11 @@ stored by StartOS:
 password = base64url( HKDF-SHA256(
     ikm  = accessory_secret,
     salt = "start9-accessory-credentials-v1",
-    info = accessory_id || 0x00 || purpose || 0x00 || generation ) )[..32]
+    info = accessory_id || 0x00 || purpose || 0x00 || generation,
+    L    = 32 ) )[..32]
 ```
+
+`generation` is its decimal ASCII form.
 
 `accessory_secret` is 32 random bytes in `private.key_store`, generated the
 first time a login is derived and carried in the OS backup from then on. It is
@@ -451,10 +492,17 @@ hash, the RTSP server's plaintext. Because StartOS can recompute any login at
 any time, it can hand logins to services, and show the user theirs, without
 storing them, and while the accessory is offline.
 
-Accessories declare whether they support **per-grant logins** for a kind. The
-reCamera's stream has one RTSP user, so its `rtsp` kind is **shared**: every
-grantee gets the same login. Revoking a grant then rotates the shared login
-and redelivers it to the remaining grantees. A push to an offline accessory is
+Accessories declare each login kind in `accessory.info` `credentialKinds`,
+with a **scope**: `owner` (shown to the user), `shared` (one login every
+grantee receives) or `per-grant` (one login per service), and optionally the
+fixed username their mechanism requires (the reCamera's system account is
+`recamera`). Without one, startd uses the kind's name for owner and shared
+logins and the package ID for per-grant ones. Scopes and usernames are what
+startd needs to derive and label logins while the accessory is offline, so
+startd keeps them on the registry entry (see Persisted state). The reCamera's
+stream has one RTSP user, so its `rtsp` kind is **shared**: every grantee
+gets the same login. Revoking a grant then rotates the shared login and
+redelivers it to the remaining grantees. A push to an offline accessory is
 retried when discovery next sees it; until it lands, the registry's generation
 is ahead of the accessory's and the entry says so.
 
@@ -490,12 +538,17 @@ calling package, only accessories granted to it:
 
 ```ts
 {
-  id, name, model, online,
+  id, name, class, model, online,
   capabilities: {
     'start9.video.rtsp': { url: 'rtsp://192.168.1.40:8554/live', username, password },
   },
 }
 ```
+
+startd builds each `url` from the capability's scheme, port and path in
+`accessory.info` and the accessory's IPv4 address, else its bracketed IPv6
+address. An offline accessory is still listed, with `online: false` and the
+URL from its last known address, or `""` when startd knows none since boot.
 
 The handler watches two patch-db pointers through one callback: the package's
 own `accessories` map, and `server_info.accessories`, where address, online
@@ -511,8 +564,7 @@ package writes its `cameras:` section through a file model. Home Assistant's
 integration creates entities from the list instead of discovering and pairing.
 
 **Actions** remain the place for application-specific configuration of a
-granted accessory: Frigate's zones and retention per camera, HA's area
-assignment. They take a `dynamicSelect` over `sdk.accessories.getAll`, as
+granted accessory: Frigate's zones and retention per camera. They take a `dynamicSelect` over `sdk.accessories.getAll`, as
 `pairedCameraSelect` does on the prototype branch (`startos/cameras.ts`).
 
 **Uninstall** drops the package's entry, which rotates any shared logins.
@@ -552,7 +604,9 @@ server_info.accessories: {
     fingerprint,
     state: 'paired' | 'releasing',
     credentials: { <purpose>: generation },
-    capabilities: [<capability>, ...],
+    appliedCredentials: { <purpose>: generation },
+    credentialKinds: { <kind>: { scope, username? } },
+    capabilities: [{ id, scheme, port, path, credentialKind? }, ...],
     address: { ipv4?, ipv6? } | null,
     online: bool,
   }
@@ -560,8 +614,12 @@ server_info.accessories: {
 ```
 
 Two kinds of field share the entry. `name`, `class`, `model`, `fingerprint`,
-`state` and `credentials` are **persisted intent**: written by the user or by
-pairing, carried in the backup. `capabilities`, `address` and `online` are
+`state`, `credentials`, `appliedCredentials` and `credentialKinds` are
+**persisted intent**: written by the user or by pairing, carried in the
+backup. `appliedCredentials` holds the generation the accessory last
+confirmed for each purpose, so an entry whose generation is ahead says a push
+is still due. `credentialKinds` is copied from `accessory.info` at pairing and
+refreshed on each later `accessory.info`. `capabilities`, `address` and `online` are
 **observed**: written by discovery and by `accessory.info`, reset to empty,
 null and false on boot and on restore, never carried in the backup. They live
 in patch-db because the UI and the effect react to them; nothing else holds
@@ -594,7 +652,8 @@ login.
 
 ### Accessory contract v1
 
-The accessory serves JSON-RPC 2.0 over HTTPS at `POST /start9/v1`, under the
+The accessory serves JSON-RPC 2.0 over HTTPS at `POST /start9/v1`, on port
+8443 by default (the mDNS SRV record is authoritative), under the
 AGCP transport rules: TLS 1.3 only, the server requests a client certificate,
 certificate contents are ignored and identity is the SubjectPublicKeyInfo,
 every request carries an `id`, parameters are named, member names are
@@ -603,7 +662,7 @@ lowerCamelCase and enumerated values lowercase with hyphens, and errors carry
 
 | Method               | Callable by                            | Purpose                                                                                                                            |
 | -------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `accessory.info`     | anyone                                 | `{ v, id, class, model, name, swVersion, state, fingerprint, capabilities, credentialKinds: { <kind>: "per-grant" \| "shared" } }` |
+| `accessory.info`     | anyone                                 | `{ v, id, class, model, name, swVersion, state, fingerprint, capabilities, credentialKinds }`, below                               |
 | `onboard.deliver`    | anyone, while unpaired                 | `{ bundle }`; the LAN route                                                                                                        |
 | `pair.adopt`         | the server named in the pending bundle | `{ session, token }`                                                                                                               |
 | `credential.set`     | the pinned server                      | `{ kind, username, password }`                                                                                                     |
@@ -618,6 +677,37 @@ lowerCamelCase and enumerated values lowercase with hyphens, and errors carry
 | 1003 | NOT_PENDING     | No pending pairing, or the session or token does not match it.         |
 | 1004 | BUNDLE_REJECTED | The bundle did not open, has expired, or is malformed.                 |
 | 1005 | UNSUPPORTED     | The credential kind or Wi-Fi security is not one the accessory offers. |
+
+Malformed parameters are JSON-RPC's own -32602, and a mechanism that fails
+while applying a request is -32603; neither carries `data.kind`.
+
+`accessory.info` for the reCamera:
+
+```json
+{
+  "v": 1, "id": "<accessory ID>", "class": "camera", "model": "recamera",
+  "name": "reCamera", "swVersion": "…", "state": "paired",
+  "fingerprint": "<wire fingerprint>",
+  "capabilities": [
+    { "id": "start9.video.rtsp", "scheme": "rtsp", "port": 8554, "path": "/live", "credentialKind": "rtsp" },
+    { "id": "start9.detections.http", "scheme": "http", "port": 8555, "path": "/start9-camera/state" }
+  ],
+  "credentialKinds": {
+    "system":   { "scope": "owner", "username": "recamera" },
+    "node-red": { "scope": "owner", "username": "admin" },
+    "rtsp":     { "scope": "shared" }
+  }
+}
+```
+
+Each capability names the scheme, port and path startd needs to build the URL
+it hands to services, and the login kind that goes with it, if any. Neither
+the capabilities nor the usernames are secret; an unpaired accessory exposed
+the same ports to the LAN already.
+
+`credential.set` answers once the login is applied, which on the reCamera
+includes a Node-RED restart of up to about a minute, so startd allows each
+call 150 seconds and retries one that times out.
 
 Repeating a request with the same values is harmless, so startd retries freely.
 
@@ -709,9 +799,9 @@ here:
 ## Assumptions to validate
 
 - Chrome on Android and Bluefy on iOS can `requestDevice` by a 128-bit service
-  UUID and write a 400-byte value to the reCamera's BlueZ 5.58 GATT server
-  (long write).
-- The reCamera's `qr` pipeline decodes a QR code of about 550 characters from
+  UUID and write a bundle of up to about 730 bytes, in chunks of up to 512
+  (long writes), to the reCamera's BlueZ 5.58 GATT server.
+- The reCamera's `qr` pipeline decodes a QR code of about 740 characters from
   a phone screen at a usable distance.
 - HPKE `mode_psk` with P-256 can be implemented on the camera's Node 22.8
   `crypto` (ECDH, HKDF, AES-GCM), or a small pure-JS HPKE library runs
@@ -754,12 +844,43 @@ here:
    the prototype on `feat/camera-zeroconf-discovery` before it merges.
 5. A Frigate package that consumes grants.
 
+## Action items
+
+1. **A persistent location for the factory identity.** Find or create a
+   place on the reCamera that keeps the factory key and setup secret across
+   a flash, a factory reset and an OTA upgrade. The firmware currently keeps
+   them in a hidden directory on the eMMC's `RESERVED` partition
+   (`/dev/mmcblk0p5`), Seeed's OTA download area: no flash or factory reset
+   writes it, and Seeed's `upgrade.sh` empties it with a glob that skips
+   hidden directories, so the identity survives only by that accident. A
+   future upgrade script that wipes it differently, or a reflash of the
+   whole eMMC or its partition table, makes the accessory generate a new
+   identity, and its QR sticker stops matching. Start9 controls the
+   firmware's partition layout and upgrade path, so the candidate is a small
+   dedicated `FACTORY` partition, carved from `RESERVED`, written at Start9's
+   flashing station and touched by no flash, reset or upgrade path. The
+   eMMC's hardware boot partitions are unsuitable, since bootloader updates
+   write there. The reCamera has no secure element.
+2. **WPA3-only networks.** The reCamera joins WPA2 and WPA2/WPA3 transition
+   networks. It cannot yet join a network that allows only SAE: its
+   wpa_supplicant 2.9 is built without SAE, and the CYW43012 firmware it
+   ships is Infineon's external-SAE build, which needs the host to run SAE
+   through external authentication. The mainline brcmfmac in its 5.10 kernel
+   offers only firmware-offloaded SAE. Supporting SAE-only networks needs
+   Infineon's brcmfmac (or a backport of its external-authentication
+   support), a wpa_supplicant with SAE and external authentication enabled,
+   and a test on hardware. Enabling SAE in wpa_supplicant alone is not
+   enough, and would make the firmware pick SAE where it cannot complete it.
+   Until then a `wpa3-sae` network is joined as WPA-PSK with optional PMF,
+   which works on transition networks, and the accessory reports
+   `WIFI_FAILED` on an SAE-only one.
+
 ## Open questions
 
 1. **Factory identity for reCameras Start9 flashes itself.** Who generates the
-   key and setup secret, where they are stored, and how the user gets the QR
-   code (a sticker from Start9's flashing station, or a page on the
-   accessory's own access point).
+   key and setup secret, and how the user gets the QR code (a sticker from
+   Start9's flashing station, or a page on the accessory's own access point).
+   Where they are stored is action item 1.
 2. **Manual entry.** The URI is about 150 characters. A short typed code needs
    a PAKE (as Matter's SPAKE2+) to be safe; v1 accepts only a scanned or
    pasted URI.
