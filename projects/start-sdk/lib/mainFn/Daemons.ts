@@ -98,6 +98,8 @@ export type Ready = {
    *
    * Use one of the built-in triggers from `sdk.trigger`:
    * - `cooldownTrigger(ms)` — fixed interval between checks
+   * - `onceTrigger` — one check at start, for a result fixed until `main`
+   *   restarts; pair with `gracePeriod: 0`
    * - `statusTrigger(defaultMs, { success, loading, failure, ... })` —
    *   per-status polling intervals
    *

@@ -417,6 +417,7 @@ Available triggers on `sdk.trigger`:
 
 - **`cooldownTrigger(ms)`** — fixed interval between checks, regardless of status.
 - **`statusTrigger(defaultMs, { success?, loading?, disabled?, starting?, waiting?, failure? })`** — per-status polling intervals in milliseconds. The first argument is the default interval for any status not explicitly listed.
+- **`onceTrigger`** — one check, as soon as the health check starts. Use it for a result that cannot change until `main` restarts, such as one computed from configuration read with `.const()`: re-polling it only repeats the same result, and a failure writes a line to the service log on every poll. Pair it with `gracePeriod: 0`, or the single result is reported as `starting`.
 
 Use a slower trigger for expensive checks (RPC calls during heavy processing) to reduce load on the service:
 

@@ -51,7 +51,7 @@ import { checkPortListening } from './health/checkFns/checkPortListening'
 import { setupMain } from './mainFn'
 import { Daemon, Daemons } from './mainFn/Daemons'
 import { Mounts } from './mainFn/Mounts'
-import { cooldownTrigger, statusTrigger } from './trigger'
+import { cooldownTrigger, onceTrigger, statusTrigger } from './trigger'
 import { defaultTrigger } from './trigger/defaultTrigger'
 import {
   GetOutboundGateway,
@@ -860,6 +860,11 @@ export class StartSdk<Manifest extends T.SDKManifest> {
         defaultTrigger,
         /** Fixed interval between checks. Use for a simple, constant polling rate. */
         cooldownTrigger,
+        /**
+         * One check at start. Pair with `gracePeriod: 0`, or the single
+         * result is reported as `starting`.
+         */
+        onceTrigger,
         /**
          * Per-status polling intervals. Map each health status (`success`,
          * `loading`, `starting`, `failure`, etc.) to a cooldown in
