@@ -11,6 +11,7 @@ import {
 } from 'src/app/services/api/api.service'
 import { FormService } from 'src/app/services/form.service'
 import { isNetworkError } from 'src/app/services/connection.service'
+import { isVpnPeersWouldBreak } from 'src/app/services/vpn-peers'
 import { pauseFor } from '@start9labs/shared'
 
 const RESTART_TIMEOUT_MS = 60_000
@@ -64,7 +65,7 @@ export class ProfilesService extends FormService<SecurityProfile[]> {
 
   /**
    * @returns true if the admin IP changed (caller handles redirect/reconnect)
-   * @throws error with 'VPN client' in message when IP change would break VPN peers
+   * @throws when the change would delete inbound VPN peers; see isVpnPeersWouldBreak
    */
   async updateProfile(
     params: ProfileUpdateInput,
@@ -124,6 +125,7 @@ export class ProfilesService extends FormService<SecurityProfile[]> {
         loading: this.i18n.transform('Applying profile settings...'),
         success: this.i18n.transform('Profile updated'),
         restart: true,
+        rethrow: isVpnPeersWouldBreak,
       },
     )
 

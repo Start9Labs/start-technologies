@@ -632,6 +632,8 @@ struct LanIpv4SetRequest {
 }
 // Response: null
 // Backend: updates UCI network.lan ipaddr (netmask /24), restarts network.
+// Inbound VPN peers the new block would break fail the call with
+//   ErrorKind::VpnPeersWouldBreak unless force is set.
 // Validation: address must fall inside an RFC 1918 block at one of the
 //   selectable /16 boundaries, else ErrorKind::InvalidRequest:
 //     10.0.0.0/8     — second octet 0..=255
@@ -1773,6 +1775,8 @@ struct ProfileSetRequest {
 }
 // Response: ProfileId
 // Validation: same gateway_ip and outbound checks as profiles.create.
+// Inbound VPN peers the new subnet would break fail the call with
+//   ErrorKind::VpnPeersWouldBreak unless force is set.
 ```
 
 ### `profiles.delete`

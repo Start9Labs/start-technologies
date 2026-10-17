@@ -517,6 +517,103 @@ test('WRT mock mutations resolve nullable partial profile queries into full LAN 
   )
 })
 
+test('WRT recognises VPN peer rejections through shared RPC errors', () => {
+  const { load } = harness()
+  const { RpcError } = load(
+    'shared-libs/ts-modules/shared/src/classes/rpc-error.ts',
+  )
+  const { isVpnPeersWouldBreak } = load(
+    'projects/start-wrt/web/src/app/services/vpn-peers.ts',
+  )
+  const details = 'VPN Peers Would Break: VPN peers would break: 1 peer(s)'
+  for (const data of [details, { details }]) {
+    assert.equal(
+      isVpnPeersWouldBreak(
+        new RpcError({ code: -1, message: 'General error', data }),
+      ),
+      true,
+    )
+  }
+  assert.equal(isVpnPeersWouldBreak({ code: 1019 }), true)
+  for (const error of [
+    null,
+    'VPN Peers Would Break',
+    { code: 0 },
+    new Error('VPN client failed'),
+  ]) {
+    assert.equal(isVpnPeersWouldBreak(error), false)
+  }
+})
+
+for (const method of ['lanIpv4Set', 'profileUpdate']) {
+  test(`WRT ${method} guards VPN peers across profiles on a Network Block change`, async () => {
+    const { load } = harness(
+      new Map([
+        ['src/app/utils/workspace-config', { GIT_HASH: 'fixture' }],
+        ['src/app/routes/lan/routes/ipv6/uci/mocks', {}],
+        ['src/app/routes/outbound/utils', {}],
+        ['src/app/routes/devices/uci/mocks', { mockDhcpHosts: [] }],
+      ]),
+    )
+    const { MockApiService } = load(
+      'projects/start-wrt/web/src/app/services/api/mock-api.service.ts',
+    )
+    const { isVpnPeersWouldBreak } = load(
+      'projects/start-wrt/web/src/app/services/vpn-peers.ts',
+    )
+    const client = Object.create(MockApiService.prototype)
+    const admin = {
+      fullname: 'Admin',
+      interface: 'lan',
+      vlan_tag: 1,
+      owns_lan: true,
+      gateway_ip: '192.168.1.1',
+      lan_access: 'ALL',
+      wan_access: 'ALL',
+      outbound: 'wan',
+      access_to_new_profiles: true,
+    }
+    const guest = {
+      ...admin,
+      fullname: 'Guest',
+      interface: 'guest',
+      vlan_tag: 100,
+      owns_lan: false,
+      gateway_ip: '192.168.2.1',
+    }
+    client.mockProfiles = [admin, guest]
+    client.mockLanIpv4 = { address: admin.gateway_ip }
+    client.mockVpnServers = [
+      { profile: 'guest', peers: [{ name: 'phone' }] },
+      { profile: 'lan', peers: [] },
+    ]
+    client.logActivity = () => {}
+    let persisted = 0
+    client.persistVpnServers = () => persisted++
+    const save = (address, force) =>
+      client[method](
+        method === 'lanIpv4Set'
+          ? { address, force }
+          : { ...admin, gateway_ip: address, force },
+      )
+
+    await save(admin.gateway_ip)
+    await save('192.168.4.1')
+    assert.equal(client.mockVpnServers.length, 2)
+    await assert.rejects(save('10.10.4.1'), isVpnPeersWouldBreak)
+    assert.equal(client.mockLanIpv4.address, '192.168.4.1')
+    assert.equal(client.mockVpnServers.length, 2)
+    assert.equal(persisted, 0)
+    await save('10.10.4.1', true)
+    assert.equal(client.mockLanIpv4.address, '10.10.4.1')
+    assert.deepEqual(
+      Array.from(client.mockVpnServers, s => s.profile),
+      ['lan'],
+    )
+    assert.equal(persisted, 1)
+  })
+}
+
 test('WRT timeout unsubscribes from HTTP and retains code-zero reconnect errors', async () => {
   const { dependencies, tokens, load } = harness()
   let aborted = 0
