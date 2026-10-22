@@ -4,7 +4,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { fill } from 'src/app/i18n/validation-errors'
 
 const CORE = 6
-const WALL = 10
+const WALL = 4
 const STEP = 28
 const CARD = 140
 const GAP = 200
