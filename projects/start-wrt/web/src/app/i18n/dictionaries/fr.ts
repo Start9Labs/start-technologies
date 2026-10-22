@@ -484,7 +484,6 @@ export default {
   505: 'La valeur maximale est {max}',
   506: 'Votre FAI a délégué un préfixe /{delegatedPrefix}. Saisissez une valeur de {delegatedPrefix} à 64.',
   507: 'Saisissez une valeur entre {min} et {max}',
-  508: 'Client',
   509: 'La nouvelle adresse IP prendra effet lorsque cet appareil en demandera une au routeur ; le routeur ne peut pas l’imposer à un appareil connecté. Le moyen le plus rapide de l’appliquer est de déconnecter puis de reconnecter l’appareil (Wi-Fi ou Ethernet) ou de le redémarrer ; cela fonctionne généralement, mais une prise d’effet immédiate n’est pas garantie. Sinon, l’appareil adoptera la nouvelle adresse de lui-même sous 12 heures au maximum.',
   510: 'Compris',
   511: 'Tentative de connexion au routeur',
@@ -580,4 +579,6 @@ export default {
   616: 'En dehors du sous-réseau du profil de cet appareil',
   617: "Pas une adresse d'hôte utilisable",
   618: 'Cet appareil tente de publier des enregistrements DNS. Autorisez la publication d’enregistrements DNS pour qu’ils soient résolus sur votre réseau.',
+  619: 'Tunnel {vpn}',
+  620: 'Votre trafic',
 } satisfies i18n

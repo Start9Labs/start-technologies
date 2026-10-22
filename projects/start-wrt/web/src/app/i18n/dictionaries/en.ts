@@ -489,7 +489,6 @@ export const ENGLISH: Record<string, number> = {
   'Maximum value is {max}': 505,
   'Your ISP delegated a /{delegatedPrefix} prefix. Enter a value from {delegatedPrefix} to 64.': 506,
   'Enter a value between {min} and {max}': 507,
-  'Client': 508,
   'The new IP address takes effect the next time this device requests one from the router — the router cannot push it to a connected device. The fastest way to apply it is to disconnect and reconnect the device (Wi-Fi or Ethernet) or reboot it; this usually works but is not guaranteed to take effect immediately. Otherwise the device will pick up the new address on its own within up to 12 hours.': 509,
   'Got it': 510,
   'Trying to reach the router': 511,
@@ -585,4 +584,6 @@ export const ENGLISH: Record<string, number> = {
   "Outside the subnet of this device's profile": 616,
   'Not a usable host address': 617,
   'This device is trying to publish DNS records. Allow DNS record publishing for them to resolve on your network.': 618,
+  '{vpn} tunnel': 619,
+  'Your traffic': 620,
 }

@@ -484,7 +484,6 @@ export default {
   505: 'El valor máximo es {max}',
   506: 'Tu proveedor delegó un prefijo /{delegatedPrefix}. Introduce un valor entre {delegatedPrefix} y 64.',
   507: 'Introduce un valor entre {min} y {max}',
-  508: 'Cliente',
   509: 'La nueva dirección IP se aplicará la próxima vez que este dispositivo solicite una al router; el router no puede enviársela a un dispositivo conectado. La forma más rápida de aplicarla es desconectar y volver a conectar el dispositivo (Wi-Fi o Ethernet) o reiniciarlo; esto suele funcionar, pero no se garantiza que surta efecto de inmediato. De lo contrario, el dispositivo adoptará la nueva dirección por sí solo en un plazo de hasta 12 horas.',
   510: 'Entendido',
   511: 'Intentando contactar con el router',
@@ -580,4 +579,6 @@ export default {
   616: 'Fuera de la subred del perfil de este dispositivo',
   617: 'No es una dirección de host utilizable',
   618: 'Este dispositivo intenta publicar registros DNS. Permita la publicación de registros DNS para que se resuelvan en su red.',
+  619: 'Túnel de {vpn}',
+  620: 'Tu tráfico',
 } satisfies i18n

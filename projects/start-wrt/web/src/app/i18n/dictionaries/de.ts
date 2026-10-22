@@ -484,7 +484,6 @@ export default {
   505: 'Höchstwert ist {max}',
   506: 'Ihr Anbieter hat ein /{delegatedPrefix}-Präfix delegiert. Geben Sie einen Wert von {delegatedPrefix} bis 64 ein.',
   507: 'Geben Sie einen Wert zwischen {min} und {max} ein',
-  508: 'Client',
   509: 'Die neue IP-Adresse wird wirksam, sobald dieses Gerät das nächste Mal eine Adresse vom Router anfordert – der Router kann sie einem verbundenen Gerät nicht aufzwingen. Am schnellsten wird sie übernommen, wenn Sie das Gerät (WLAN oder Ethernet) trennen und neu verbinden oder neu starten; das funktioniert meist, eine sofortige Übernahme ist jedoch nicht garantiert. Andernfalls übernimmt das Gerät die neue Adresse von selbst innerhalb von bis zu 12 Stunden.',
   510: 'Verstanden',
   511: 'Router wird kontaktiert',
@@ -580,4 +579,6 @@ export default {
   616: 'Außerhalb des Subnetzes des Profils dieses Geräts',
   617: 'Keine nutzbare Host-Adresse',
   618: 'Dieses Gerät versucht, DNS-Einträge zu veröffentlichen. Erlauben Sie das Veröffentlichen von DNS-Einträgen, damit sie in Ihrem Netzwerk aufgelöst werden.',
+  619: '{vpn}-Tunnel',
+  620: 'Ihr Datenverkehr',
 } satisfies i18n
