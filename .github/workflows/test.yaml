@@ -170,6 +170,10 @@ jobs:
           npm --prefix projects/start-sdk ci
       - name: Validate web lockfile
         run: npm ci
+      - name: Build PatchDB client
+        run: npm run build:patch-db
+      - name: Check UI logic
+        run: npm run test:ui
       - name: Validate package CI variants and forge operations
         run: make package-ci-test
       - name: Verify action entrypoints on Node 20

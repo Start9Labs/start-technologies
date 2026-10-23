@@ -839,4 +839,7 @@ export const ENGLISH: Record<string, number> = {
   'OS update blocked': 953,
   'No trusted signer is listed for this OS update. Installing it from the UI is blocked. A malicious OS update could take full control of your server, steal private keys and passwords, or permanently destroy your data.': 954,
   'Use system gateway': 955,
+  'Force stop': 956,
+  'Force stopping': 957,
+  'Force stopping may cause data loss or leave the service in a bad state. Are you sure you want to force stop?': 958,
 }

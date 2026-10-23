@@ -634,6 +634,8 @@ export type ExportRangeServiceInterfaceParams = z.output<
 export type ExportRangeServiceInterfaceParamsInput = z.input<
   typeof schemas.ExportRangeServiceInterfaceParams
 >
+export type ForceStopParams = z.output<typeof schemas.ForceStopParams>
+export type ForceStopParamsInput = z.input<typeof schemas.ForceStopParams>
 export type ForgetGatewayParams = z.output<typeof schemas.ForgetGatewayParams>
 export type ForgetGatewayParamsInput = z.input<
   typeof schemas.ForgetGatewayParams

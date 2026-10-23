@@ -838,4 +838,7 @@ export default {
   953: 'Actualización del sistema operativo bloqueada',
   954: 'Esta actualización del sistema operativo no incluye ningún firmante de confianza. Su instalación desde la interfaz está bloqueada. Una actualización maliciosa podría tomar el control total de tu servidor, robar claves privadas y contraseñas o destruir tus datos permanentemente.',
   955: 'Usar la puerta de enlace del sistema',
+  956: 'Forzar detención',
+  957: 'Forzando detención',
+  958: 'Forzar la detención puede provocar pérdida de datos o dejar el servicio en mal estado. ¿Seguro que deseas forzar la detención?',
 } satisfies i18n

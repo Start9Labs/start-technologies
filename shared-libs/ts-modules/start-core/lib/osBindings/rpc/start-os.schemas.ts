@@ -1878,6 +1878,12 @@ export const EppParams: z.ZodObject<{
 }).meta({
   id: 'EppParams',
 })
+export const ForceStopParams: z.ZodObject<{
+  id: typeof PackageId
+  forceStopAt: z.ZodString
+}> = /* @__PURE__ */ object({ id: PackageId, forceStopAt: z.string() }).meta({
+  id: 'ForceStopParams',
+})
 export const ForgetGatewayParams: z.ZodObject<{ gateway: typeof GatewayId }> =
   /* @__PURE__ */ object({ gateway: GatewayId }).meta({
     id: 'ForgetGatewayParams',
@@ -4749,6 +4755,10 @@ export const Api = {
         },
         'cancel-install': {
           _PARAMS: /* @__PURE__ */ CancelInstallParams,
+          _RETURN: /* @__PURE__ */ z.null(),
+        },
+        'force-stop': {
+          _PARAMS: /* @__PURE__ */ ForceStopParams,
           _RETURN: /* @__PURE__ */ z.null(),
         },
         host: {

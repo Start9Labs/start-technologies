@@ -1,0 +1,1 @@
+- **Force stop services that are stuck stopping.** A confirmation warns about data loss and an inconsistent service state. The button appears after 30 seconds by default, configurable with `force-stop-delay-seconds` in `config.yaml`.

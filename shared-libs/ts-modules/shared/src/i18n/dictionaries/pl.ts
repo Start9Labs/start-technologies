@@ -838,4 +838,7 @@ export default {
   953: 'Aktualizacja systemu zablokowana',
   954: 'Ta aktualizacja systemu nie wymienia żadnego zaufanego sygnatariusza. Instalacja z poziomu interfejsu jest zablokowana. Złośliwa aktualizacja mogłaby przejąć pełną kontrolę nad Twoim serwerem, wykraść klucze prywatne i hasła lub trwale zniszczyć Twoje dane.',
   955: 'Użyj bramy systemowej',
+  956: 'Wymuś zatrzymanie',
+  957: 'Wymuszanie zatrzymania',
+  958: 'Wymuszenie zatrzymania może spowodować utratę danych lub pozostawić serwis w nieprawidłowym stanie. Czy na pewno chcesz wymusić zatrzymanie?',
 } satisfies i18n

@@ -838,4 +838,7 @@ export default {
   953: 'Mise à jour du système bloquée',
   954: 'Cette mise à jour du système ne mentionne aucun signataire de confiance. Son installation depuis l’interface est bloquée. Une mise à jour malveillante pourrait prendre le contrôle total de votre serveur, voler vos clés privées et vos mots de passe ou détruire définitivement vos données.',
   955: 'Utiliser la passerelle du système',
+  956: 'Forcer l’arrêt',
+  957: 'Arrêt forcé en cours',
+  958: 'Forcer l’arrêt peut entraîner une perte de données ou laisser le service dans un état défectueux. Voulez-vous vraiment forcer l’arrêt ?',
 } satisfies i18n

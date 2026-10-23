@@ -838,4 +838,7 @@ export default {
   953: 'Betriebssystem-Update gesperrt',
   954: 'Für dieses Betriebssystem-Update ist kein vertrauenswürdiger Unterzeichner aufgeführt. Die Installation über die Benutzeroberfläche ist gesperrt. Ein bösartiges Update könnte die vollständige Kontrolle über Ihren Server übernehmen, private Schlüssel und Passwörter stehlen oder Ihre Daten dauerhaft zerstören.',
   955: 'Systemgateway verwenden',
+  956: 'Stopp erzwingen',
+  957: 'Stopp wird erzwungen',
+  958: 'Ein erzwungener Stopp kann zu Datenverlust führen oder den Dienst in einem fehlerhaften Zustand hinterlassen. Möchten Sie den Stopp wirklich erzwingen?',
 } satisfies i18n
