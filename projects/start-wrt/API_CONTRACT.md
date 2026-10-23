@@ -96,19 +96,31 @@ unsigned local-token request is rejected as unnecessary.
 struct SessionList {
     /// The key that signed this request
     current: Option<String>,
+    sessions: Sessions,
+}
+
+struct Sessions {
     /// Enrolled keys by PEM: { name, loggedIn, lastActive, userAgent }.
     /// `lastActive` is persisted at most hourly.
-    sessions: BTreeMap<String, Session>,
+    pubkeys: BTreeMap<String, Session>,
+    /// Empty on StartWRT.
+    tokens: BTreeMap<String, Session>,
 }
 ```
 
 ### `auth.session.kill`
 
+StartWRT revokes enrolled keys through `pubkeys`. The shared request also accepts
+`tokens`, but StartWRT has no bearer-token sessions.
+
 ```rust
 #[derive(Deserialize)]
 struct KillParams {
     /// PEM-encoded keys to revoke
-    ids: Vec<String>,
+    #[serde(default)]
+    pubkeys: Vec<String>,
+    #[serde(default)]
+    tokens: Vec<String>,
 }
 // Response: null
 ```

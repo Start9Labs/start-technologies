@@ -246,9 +246,8 @@ export type WifiRadioInput = z.input<typeof schemas.WifiRadio>
 export type ActivityListResponse = z.output<typeof schemas.ActivityListResponse>
 
 /**
- * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
- * key is a sign-in: it carries the same metadata a session used to (when it
- * was created, when it was last used, and the user agent that enrolled it).
+ * Sessions keyed by their credential: an enrolled key's PEM encoding, or a
+ * bearer token's hash.
  */
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
 export type BackupCreateRes = z.output<typeof schemas.BackupCreateRes>
@@ -336,11 +335,16 @@ export type PublishedPortsSetRequestInput = z.input<
 export type PublishedPortsSetResult = z.output<
   typeof schemas.PublishedPortsSetResult
 >
-export type SessionList = z.output<typeof schemas.SessionList>
+
+/**
+ * The server's sessions, by credential type.
+ */
+export type Sessions = z.output<typeof schemas.Sessions>
 
 /**
  * Response containing all VPN servers
  */
 export type VpnServers = z.output<typeof schemas.VpnServers>
 export type WifiRegulatory = z.output<typeof schemas.WifiRegulatory>
+export type SessionList = z.output<typeof schemas.SessionList>
 export type Api = RpcSchemaTree<typeof schemas.Api>

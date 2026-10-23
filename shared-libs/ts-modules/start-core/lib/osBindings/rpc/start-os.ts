@@ -109,6 +109,8 @@ export type ContactInfo = z.output<typeof schemas.ContactInfo>
 export type ContactInfoInput = z.input<typeof schemas.ContactInfo>
 export type ContainerId = z.output<typeof schemas.ContainerId>
 export type CountEntry = z.output<typeof schemas.CountEntry>
+export type CreateTokenParamsInput = z.input<typeof schemas.CreateTokenParams>
+export type CreatedToken = z.output<typeof schemas.CreatedToken>
 export type DataUrl = z.output<typeof schemas.DataUrl>
 export type DataUrlInput = z.input<typeof schemas.DataUrl>
 export type DeviceFilter = z.output<typeof schemas.DeviceFilter>
@@ -335,9 +337,8 @@ export type ApplyWithPathParamsInput = z.input<
 export type AttachParamsInput = z.input<typeof schemas.AttachParams>
 
 /**
- * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
- * key is a sign-in: it carries the same metadata a session used to (when it
- * was created, when it was last used, and the user agent that enrolled it).
+ * Sessions keyed by their credential: an enrolled key's PEM encoding, or a
+ * bearer token's hash.
  */
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
 export type CancelInstallParamsInput = z.input<
@@ -545,7 +546,11 @@ export type ResetPasswordParamsInput = z.input<
   typeof schemas.ResetPasswordParams
 >
 export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
-export type SessionList = z.output<typeof schemas.SessionList>
+
+/**
+ * The server's sessions, by credential type.
+ */
+export type Sessions = z.output<typeof schemas.Sessions>
 export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type WifiListInfo = z.output<typeof schemas.WifiListInfo>
 export type AddSslOptions = z.output<typeof schemas.AddSslOptions>
@@ -565,6 +570,7 @@ export type MetricsFollowResponse = z.output<
 export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 export type OsIndex = z.output<typeof schemas.OsIndex>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
+export type SessionList = z.output<typeof schemas.SessionList>
 export type BindOptions = z.output<typeof schemas.BindOptions>
 
 /**

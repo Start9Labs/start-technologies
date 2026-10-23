@@ -1264,24 +1264,34 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
   export const Sessions: T.SessionList = {
     current: 'b7b1a9cef4284f00af9e9dda6e676177',
     sessions: {
-      '9513226517c54ddd8107d6d7b9d8aed7': {
-        name: null,
-        loggedIn: '2021-07-14T20:49:17.774Z',
-        lastActive: '2021-07-14T20:49:17.774Z',
-        userAgent: 'AppleWebKit/{WebKit Rev} (KHTML, like Gecko)',
+      pubkeys: {
+        '9513226517c54ddd8107d6d7b9d8aed7': {
+          name: null,
+          loggedIn: '2021-07-14T20:49:17.774Z',
+          lastActive: '2021-07-14T20:49:17.774Z',
+          userAgent: 'AppleWebKit/{WebKit Rev} (KHTML, like Gecko)',
+        },
+        klndsfjhbwsajkdnaksj: {
+          name: null,
+          loggedIn: '2021-07-14T20:49:17.774Z',
+          lastActive: '2019-07-14T20:49:17.774Z',
+          userAgent: 'AppleWebKit/{WebKit Rev} (KHTML, like Gecko)',
+        },
+        b7b1a9cef4284f00af9e9dda6e676177: {
+          name: null,
+          loggedIn: '2021-07-14T20:49:17.774Z',
+          lastActive: '2021-06-14T20:49:17.774Z',
+          userAgent:
+            'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:47.0) Gecko/20100101 Firefox/47.0',
+        },
       },
-      klndsfjhbwsajkdnaksj: {
-        name: null,
-        loggedIn: '2021-07-14T20:49:17.774Z',
-        lastActive: '2019-07-14T20:49:17.774Z',
-        userAgent: 'AppleWebKit/{WebKit Rev} (KHTML, like Gecko)',
-      },
-      b7b1a9cef4284f00af9e9dda6e676177: {
-        name: null,
-        loggedIn: '2021-07-14T20:49:17.774Z',
-        lastActive: '2021-06-14T20:49:17.774Z',
-        userAgent:
-          'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:47.0) Gecko/20100101 Firefox/47.0',
+      tokens: {
+        Qm3xV1yZ8kH2pL0sT4wN6rB9cD5fG7jAeU2iO8qW4tY: {
+          name: 'Claude Desktop MCP',
+          loggedIn: '2021-07-14T20:49:17.774Z',
+          lastActive: '2021-07-13T20:49:17.774Z',
+          userAgent: null,
+        },
       },
     },
   }

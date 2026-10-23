@@ -28,9 +28,8 @@ use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 use crate::util::sync::SyncMutex;
 use crate::{Error, ResultExt, ensure_code};
 
-/// The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
-/// key is a sign-in: it carries the same metadata a session used to (when it
-/// was created, when it was last used, and the user agent that enrolled it).
+/// Sessions keyed by their credential: an enrolled key's PEM encoding, or a
+/// bearer token's hash.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, VisitFields)]
 pub struct AuthKeys(pub BTreeMap<InternedString, Session>);
 
@@ -51,6 +50,18 @@ impl Map for AuthKeys {
     }
 }
 
+/// The server's sessions, by credential type.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, HasModel, VisitFields)]
+#[serde(rename_all = "camelCase")]
+#[model = "Model<Self>"]
+pub struct Sessions {
+    pub pubkeys: AuthKeys,
+    pub tokens: AuthKeys,
+}
+
+rpc_toolkit::reflect_ts!(Sessions);
+rpc_toolkit::ts_export!(Sessions, namespaces = [""]);
+
 /// Contexts where a password can enroll an auth key (login), plus access to
 /// the enrolled-key store that login writes and the session list reads.
 pub trait LoginContext: SignatureAuthContext {
@@ -59,6 +70,12 @@ pub trait LoginContext: SignatureAuthContext {
     /// [`SignatureAuthContext::unenroll`] so a revoked key's open
     /// continuations die with it.
     fn access_auth_keys(db: &mut Model<Self::Database>) -> &mut Model<AuthKeys>;
+    /// The bearer-token store, keyed by token hash. `None` where tokens are unsupported.
+    /// Never remove a token directly; [`revoke_tokens`] kills its continuations.
+    #[allow(unused_variables)]
+    fn access_tokens(db: &mut Model<Self::Database>) -> Option<&mut Model<AuthKeys>> {
+        None
+    }
     fn check_password(db: &Model<Self::Database>, password: &str) -> Result<(), Error>;
     /// Whether a sign-in has ended, judged by a trusted clock. Defaults to
     /// [`MAX_IDLE`] without use.
@@ -70,9 +87,29 @@ pub trait LoginContext: SignatureAuthContext {
         async { Ok(()) }
     }
 }
+/// Removes bearer tokens and kills the continuations they opened. For call sites
+/// already inside a db transaction.
+pub fn revoke_tokens<C: LoginContext>(
+    continuations: &OpenAuthedContinuations<Option<InternedString>>,
+    db: &mut Model<C::Database>,
+    tokens: impl IntoIterator<Item = InternedString>,
+) -> Result<(), Error> {
+    let Some(store) = C::access_tokens(db) else {
+        return Ok(());
+    };
+    for token in tokens {
+        continuations.kill(&Some(token.clone()));
+        store.remove(&token)?;
+    }
+    Ok(())
+}
+
 impl LoginContext for RpcContext {
     fn access_auth_keys(db: &mut Model<Self::Database>) -> &mut Model<AuthKeys> {
-        db.as_private_mut().as_session_pubkeys_mut()
+        db.as_private_mut().as_sessions_mut().as_pubkeys_mut()
+    }
+    fn access_tokens(db: &mut Model<Self::Database>) -> Option<&mut Model<AuthKeys>> {
+        Some(db.as_private_mut().as_sessions_mut().as_tokens_mut())
     }
     fn check_password(db: &Model<Self::Database>, password: &str) -> Result<(), Error> {
         check_password(&db.as_private().as_password().de()?, password)
@@ -215,7 +252,81 @@ pub fn auth<C: Context, AC: LoginContext, CC: IdKeyContext + CallRemote<AC>>() -
         )
 }
 
-/// Keys unused this long are unenrolled by default.
+/// Bearer-token commands; a token is a named session, listed and revoked with `auth.session`.
+pub fn token<C: Context, AC: LoginContext>() -> ParentHandler<C>
+where
+    CliContext: CallRemote<AC>,
+{
+    ParentHandler::new().subcommand(
+        "create",
+        from_fn_async(create_token::<AC>)
+            .with_display_serializable()
+            .with_custom_display_fn(|handle, result| {
+                if let Some(format) = handle.params.format {
+                    return display_serializable(format, result);
+                }
+                println!("{}", result.token);
+                Ok(())
+            })
+            .with_about("about.create-auth-token")
+            .with_call_remote::<CliContext>(),
+    )
+}
+
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
+pub struct CreateTokenParams {
+    #[arg(long, help = "help.arg.token-name")]
+    pub name: InternedString,
+}
+
+rpc_toolkit::reflect_ts!(CreateTokenParams);
+rpc_toolkit::ts_export!(CreateTokenParams, namespaces = [""]);
+
+#[derive(Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedToken {
+    /// The session id the token authenticates as, for `auth.session.kill`.
+    pub id: InternedString,
+    /// The bearer secret. It is not stored and cannot be retrieved again.
+    pub token: String,
+}
+
+rpc_toolkit::reflect_ts!(CreatedToken);
+rpc_toolkit::ts_export!(CreatedToken, namespaces = [""]);
+
+#[instrument(skip_all)]
+pub async fn create_token<C: LoginContext>(
+    ctx: C,
+    CreateTokenParams { name }: CreateTokenParams,
+) -> Result<CreatedToken, Error> {
+    let (token, id) = crate::middleware::auth::bearer::new_token();
+    let now = Utc::now();
+    let record = Session {
+        name: Some(name),
+        logged_in: now,
+        last_active: now,
+        user_agent: None,
+    };
+    ctx.db()
+        .mutate(|db| {
+            C::access_tokens(db)
+                .ok_or_else(|| {
+                    Error::new(
+                        eyre!("{}", t!("auth.tokens-unsupported")),
+                        ErrorKind::InvalidRequest,
+                    )
+                })?
+                .insert(&id, &record)
+        })
+        .await
+        .result?;
+    Ok(CreatedToken { id, token })
+}
+
+/// Keys and tokens unused this long expire by default.
 pub const MAX_IDLE: TimeDelta = TimeDelta::days(30);
 
 fn expired_keys<C: LoginContext>(keys: &AuthKeys, now: DateTime<Utc>) -> Vec<InternedString> {
@@ -226,20 +337,25 @@ fn expired_keys<C: LoginContext>(keys: &AuthKeys, now: DateTime<Utc>) -> Vec<Int
         .collect()
 }
 
-/// Unenrolls keys whose sign-in has expired inside an open db transaction.
-/// The caller has established that the clock is trustworthy.
+/// Unenrolls keys and revokes tokens whose sign-in has expired inside an open
+/// db transaction. The caller has established that the clock is trustworthy.
 pub fn reap_idle_keys_in<C: LoginContext>(
     continuations: &OpenAuthedContinuations<Option<InternedString>>,
     ephemeral: Option<&SyncMutex<AuthKeys>>,
     db: &mut Model<C::Database>,
 ) -> Result<(), Error> {
-    let expired = expired_keys::<C>(&C::access_auth_keys(db).de()?, Utc::now());
+    let now = Utc::now();
+    let expired = expired_keys::<C>(&C::access_auth_keys(db).de()?, now);
     HasUnenrolledKeys::unenroll::<C>(continuations, ephemeral, db, expired)?;
-    Ok(())
+    let expired = C::access_tokens(db)
+        .map(|tokens| tokens.de())
+        .transpose()?
+        .map_or_else(Vec::new, |tokens| expired_keys::<C>(&tokens, now));
+    revoke_tokens::<C>(continuations, db, expired)
 }
 
-/// Unenrolls keys whose sign-in has expired. Waits for a trusted clock, so a
-/// wrong boot-time clock cannot reap live sign-ins.
+/// Unenrolls keys and revokes tokens whose sign-in has expired. Waits for a
+/// trusted clock, so a wrong boot-time clock cannot reap live sign-ins.
 pub async fn reap_idle_keys<C: LoginContext>(ctx: &C) -> Result<(), Error> {
     if !ctx.clock_synced().await {
         return Ok(());
@@ -270,20 +386,48 @@ pub async fn touch_last_active<C: LoginContext>(
             return Ok(());
         }
     }
+    persist_last_active(ctx, pubkey_store::<C>, key, now).await
+}
+
+/// Records a request by a bearer token, persisting the time at most once per
+/// [`SignatureAuthContext::LAST_ACTIVE_RESOLUTION`].
+pub async fn touch_token<C: LoginContext>(ctx: &C, token: &InternedString) -> Result<(), Error> {
+    persist_last_active(ctx, C::access_tokens, token, Utc::now()).await
+}
+
+fn pubkey_store<C: LoginContext>(db: &mut Model<C::Database>) -> Option<&mut Model<AuthKeys>> {
+    Some(C::access_auth_keys(db))
+}
+
+async fn persist_last_active<C: LoginContext>(
+    ctx: &C,
+    store: fn(&mut Model<C::Database>) -> Option<&mut Model<AuthKeys>>,
+    key: &InternedString,
+    now: DateTime<Utc>,
+) -> Result<(), Error> {
     if !C::LAST_ACTIVE_RESOLUTION.is_zero() {
-        let fresh = C::access_auth_keys(&mut ctx.db().peek().await)
-            .de()?
-            .0
-            .get(key)
-            .is_some_and(|session| now - session.last_active < C::LAST_ACTIVE_RESOLUTION);
+        let mut peek = ctx.db().peek().await;
+        let fresh = store(&mut peek)
+            .map(|sessions| sessions.de())
+            .transpose()?
+            .and_then(|sessions| {
+                sessions
+                    .0
+                    .get(key)
+                    .map(|session| now - session.last_active < C::LAST_ACTIVE_RESOLUTION)
+            })
+            .unwrap_or(false);
         if fresh {
             return Ok(());
         }
     }
     ctx.db()
         .mutate(|db| {
-            C::access_auth_keys(db).mutate(|keys| {
-                if let Some(session) = keys.0.get_mut(key) {
+            let Some(sessions) = store(db) else {
+                return Ok(());
+            };
+            sessions.mutate(|sessions| {
+                if let Some(session) = sessions.0.get_mut(key) {
                     session.last_active = now;
                 }
                 Ok(())
@@ -469,7 +613,7 @@ pub struct LogoutParams {
 
 rpc_toolkit::reflect_ts!(LogoutParams);
 
-pub async fn logout<C: SignatureAuthContext>(
+pub async fn logout<C: LoginContext>(
     ctx: C,
     LogoutParams { signer }: LogoutParams,
 ) -> Result<Option<HasUnenrolledKeys>, Error> {
@@ -479,7 +623,13 @@ pub async fn logout<C: SignatureAuthContext>(
             ErrorKind::InvalidRequest,
         ));
     };
-    Ok(Some(ctx.unenroll([signer]).await?))
+    let unenrolled = ctx.unenroll([signer.clone()]).await?;
+    let continuations = ctx.open_authed_continuations();
+    ctx.db()
+        .mutate(|db| revoke_tokens::<C>(continuations, db, [signer]))
+        .await
+        .result?;
+    Ok(Some(unenrolled))
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, VisitFields)]
@@ -504,7 +654,7 @@ rpc_toolkit::ts_export!(Session, namespaces = [""]);
 #[serde(rename_all = "camelCase")]
 pub struct SessionList {
     current: Option<InternedString>,
-    sessions: AuthKeys,
+    sessions: Sessions,
 }
 
 rpc_toolkit::reflect_ts!(SessionList);
@@ -539,14 +689,20 @@ fn display_sessions(params: WithIoFormat<ListParams>, arg: SessionList) -> Resul
 
     let mut table = Table::new();
     table.add_row(row![bc =>
+        "TYPE",
         "ID",
+        "NAME",
         "LOGGED IN",
         "LAST ACTIVE",
         "USER AGENT",
     ]);
-    for (id, session) in arg.sessions.0 {
+    let pubkeys = arg.sessions.pubkeys.0.into_iter().map(|s| ("pubkey", s));
+    let tokens = arg.sessions.tokens.0.into_iter().map(|s| ("token", s));
+    for (kind, (id, session)) in pubkeys.chain(tokens) {
         let mut row = row![
+            kind,
             &id,
+            session.name.as_deref().unwrap_or("N/A"),
             &format!("{}", session.logged_in),
             &format!("{}", session.last_active),
             session.user_agent.as_deref().unwrap_or("N/A"),
@@ -580,17 +736,22 @@ pub async fn list<C: LoginContext>(
     ctx: C,
     ListParams { signer }: ListParams,
 ) -> Result<SessionList, Error> {
-    let mut sessions = C::access_auth_keys(&mut ctx.db().peek().await).de()?;
+    let mut db = ctx.db().peek().await;
+    let mut pubkeys = C::access_auth_keys(&mut db).de()?;
     if let Some(ephemeral) = ctx.ephemeral_auth_keys() {
         ephemeral.peek(|e| {
-            sessions
+            pubkeys
                 .0
                 .extend(e.0.iter().map(|(k, v)| (k.clone(), v.clone())))
         });
     }
+    let tokens = C::access_tokens(&mut db)
+        .map(|tokens| tokens.de())
+        .transpose()?
+        .unwrap_or_default();
     Ok(SessionList {
         current: signer,
-        sessions,
+        sessions: Sessions { pubkeys, tokens },
     })
 }
 
@@ -599,21 +760,28 @@ pub async fn list<C: LoginContext>(
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct KillParams {
-    #[arg(help = "help.arg.session-ids")]
-    ids: Vec<String>,
+    #[arg(long = "pubkey", help = "help.arg.session-pubkeys")]
+    #[serde(default)]
+    pubkeys: Vec<InternedString>,
+    #[arg(long = "token", help = "help.arg.session-tokens")]
+    #[serde(default)]
+    tokens: Vec<InternedString>,
 }
 
 rpc_toolkit::reflect_ts!(KillParams);
 rpc_toolkit::ts_export!(KillParams, namespaces = [""]);
 
 #[instrument(skip_all)]
-pub async fn kill<C: SignatureAuthContext>(
+pub async fn kill<C: LoginContext>(
     ctx: C,
-    KillParams { ids }: KillParams,
+    KillParams { pubkeys, tokens }: KillParams,
 ) -> Result<(), Error> {
-    ctx.unenroll(ids.into_iter().map(InternedString::from))
-        .await?;
-    Ok(())
+    ctx.unenroll(pubkeys).await?;
+    let continuations = ctx.open_authed_continuations();
+    ctx.db()
+        .mutate(|db| revoke_tokens::<C>(continuations, db, tokens))
+        .await
+        .result
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]

@@ -216,16 +216,14 @@ export type AddKeyParams = z.output<typeof schemas.AddKeyParams>
 export type AddKeyParamsInput = z.input<typeof schemas.AddKeyParams>
 
 /**
- * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
- * key is a sign-in: it carries the same metadata a session used to (when it
- * was created, when it was last used, and the user agent that enrolled it).
+ * Sessions keyed by their credential: an enrolled key's PEM encoding, or a
+ * bearer token's hash.
  */
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
 
 /**
- * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
- * key is a sign-in: it carries the same metadata a session used to (when it
- * was created, when it was last used, and the user agent that enrolled it).
+ * Sessions keyed by their credential: an enrolled key's PEM encoding, or a
+ * bearer token's hash.
  */
 export type AuthKeysInput = z.input<typeof schemas.AuthKeys>
 export type DnsRecords = z.output<typeof schemas.DnsRecords>
