@@ -1995,9 +1995,15 @@ fn is_container_tool_bridge(iface: &GatewayId) -> bool {
 }
 
 fn forget_container_tool_bridges(m: &mut OrdMap<GatewayId, NetworkInterfaceInfo>) -> bool {
-    let before = m.len();
-    m.retain(|iface, _| !is_container_tool_bridge(iface));
-    m.len() != before
+    let bridges: Vec<_> = m
+        .keys()
+        .filter(|iface| is_container_tool_bridge(iface))
+        .cloned()
+        .collect();
+    for iface in &bridges {
+        m.remove(iface);
+    }
+    !bridges.is_empty()
 }
 
 /// An interface absent from the table stays absent.
@@ -2992,6 +2998,7 @@ impl NetworkInterfaceController {
             .wait_for(|synced| {
                 connected
                     .iter()
+                    .filter(|iface| !is_container_tool_bridge(iface))
                     .all(|iface| synced.get(iface).is_some_and(|i| i.ip_info.is_some()))
             })
             .await;
@@ -4322,7 +4329,12 @@ mod container_tool_bridge_tests {
         let mut m: OrdMap<GatewayId, NetworkInterfaceInfo> =
             ["eno0", "lxcbr0", "wg0", "podman0", "docker0", "cni-podman0"]
                 .into_iter()
-                .map(|id| (id.parse().unwrap(), NetworkInterfaceInfo::default()))
+                .map(|id| {
+                    (
+                        id.parse::<GatewayId>().unwrap(),
+                        NetworkInterfaceInfo::default(),
+                    )
+                })
                 .collect();
         assert!(forget_container_tool_bridges(&mut m));
         assert_eq!(
