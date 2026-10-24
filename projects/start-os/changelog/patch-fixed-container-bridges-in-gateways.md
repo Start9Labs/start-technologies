@@ -1,0 +1,1 @@
+- Podman and Docker container bridges are left out of the Gateways list.
