@@ -405,16 +405,13 @@ export default class Devices {
   }
 
   async onConfig({ subnet, ip }: MappedDevice) {
-    this.tasks.run(async () => {
-      const data = await this.api.rpc.device.showConfig({
-        subnet: subnet.range,
-        ip,
+    this.dialogs
+      .open(DEVICES_CONFIG, {
+        data: { subnet: subnet.range, ip },
+        closable: false,
+        size: 'm',
       })
-
-      this.dialogs
-        .open(DEVICES_CONFIG, { data, closable: false, size: 'm' })
-        .subscribe()
-    })
+      .subscribe()
   }
 
   protected onDelete({ subnet, ip }: MappedDevice): void {
