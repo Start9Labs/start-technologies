@@ -1515,9 +1515,6 @@ async fn watcher(
                                 continue;
                             }
                             let iface: GatewayId = iface.into();
-                            if is_container_tool_bridge(&iface) {
-                                continue;
-                            }
                             // Only policy-route managed, connected gateways —
                             // mirrors the gating in `watch_ip` and excludes
                             // unmanaged plumbing like container veth pairs.
@@ -1550,7 +1547,7 @@ async fn watcher(
                         }
 
                         watch_ip_info.send_if_modified(|m| {
-                            let mut changed = forget_container_tool_bridges(m);
+                            let mut changed = false;
                             for (iface, info) in OrdMapIterMut::from(m) {
                                 if !ifaces.contains(iface) {
                                     info.ip_info = None;
@@ -1985,25 +1982,6 @@ async fn reconcile_local_outbound_mark(selected: bool) -> Result<(), Error> {
         .invoke(ErrorKind::Network)
         .await?;
     Ok(())
-}
-
-/// Matches the bridges podman, Docker, and CNI create for their own containers.
-fn is_container_tool_bridge(iface: &GatewayId) -> bool {
-    ["podman", "docker", "cni"]
-        .iter()
-        .any(|prefix| iface.as_str().starts_with(prefix))
-}
-
-fn forget_container_tool_bridges(m: &mut OrdMap<GatewayId, NetworkInterfaceInfo>) -> bool {
-    let bridges: Vec<_> = m
-        .keys()
-        .filter(|iface| is_container_tool_bridge(iface))
-        .cloned()
-        .collect();
-    for iface in &bridges {
-        m.remove(iface);
-    }
-    !bridges.is_empty()
 }
 
 /// An interface absent from the table stays absent.
@@ -2998,7 +2976,6 @@ impl NetworkInterfaceController {
             .wait_for(|synced| {
                 connected
                     .iter()
-                    .filter(|iface| !is_container_tool_bridge(iface))
                     .all(|iface| synced.get(iface).is_some_and(|i| i.ip_info.is_some()))
             })
             .await;
@@ -4317,30 +4294,5 @@ mod wg_config_tests {
         assert!(!parsed.to_nm_settings("wg0", None).unwrap()["connection"].contains_key("uuid"));
         let updated = parsed.to_nm_settings("wg0", Some("uuid-x")).unwrap();
         assert_eq!(as_str(&updated["connection"]["uuid"]), "uuid-x");
-    }
-}
-
-#[cfg(test)]
-mod container_tool_bridge_tests {
-    use super::*;
-
-    #[test]
-    fn container_tool_bridges_are_forgotten() {
-        let mut m: OrdMap<GatewayId, NetworkInterfaceInfo> =
-            ["eno0", "lxcbr0", "wg0", "podman0", "docker0", "cni-podman0"]
-                .into_iter()
-                .map(|id| {
-                    (
-                        id.parse::<GatewayId>().unwrap(),
-                        NetworkInterfaceInfo::default(),
-                    )
-                })
-                .collect();
-        assert!(forget_container_tool_bridges(&mut m));
-        assert_eq!(
-            m.keys().map(|id| id.as_str()).collect::<Vec<_>>(),
-            ["eno0", "lxcbr0", "wg0"]
-        );
-        assert!(!forget_container_tool_bridges(&mut m));
     }
 }
