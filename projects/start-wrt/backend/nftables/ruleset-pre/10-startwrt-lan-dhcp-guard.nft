@@ -1,15 +1,19 @@
-# Drops DHCP and DHCPv6 server replies and router advertisements switched
-# between bridge ports. The router's own leave through the output hook.
+# Drops DHCP and DHCPv6 server replies, and router advertisements from a
+# device outside @ra_allow, switched between bridge ports. The router's own
+# leave through the output hook. startwrt fills @ra_allow from
+# 11-startwrt-lan-ra-allow.nft.
 #
-# Raw payloads: bridge-family `meta` and protocol matches need kmod-nft-bridge,
-# which the image lacks, and a failed include leaves fw4 with no ruleset.
+# Needs kmod-nft-bridge: without it this include fails and fw4 loads no ruleset.
 table bridge startwrt_lan_guard
 delete table bridge startwrt_lan_guard
 table bridge startwrt_lan_guard {
+	set ra_allow {
+		type ether_addr
+	}
 	chain forward {
 		type filter hook forward priority filter; policy accept;
-		ether type ip @nh,72,8 17 @th,0,16 67 @th,16,16 68 counter drop
-		ether type ip6 @nh,48,8 17 @th,0,16 547 @th,16,16 546 counter drop
-		ether type ip6 @nh,48,8 58 @th,0,8 134 counter drop
+		ether type ip meta l4proto udp udp sport 67 udp dport 68 counter drop
+		ether type ip6 meta l4proto udp udp sport 547 udp dport 546 counter drop
+		ether type ip6 meta l4proto ipv6-icmp icmpv6 type nd-router-advert ether saddr != @ra_allow counter drop
 	}
 }

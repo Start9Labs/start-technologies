@@ -25,6 +25,7 @@ pub mod http_redirect;
 pub mod init;
 pub mod ipv6_tracker;
 pub mod lan;
+pub mod lan_guard;
 pub mod logs;
 pub mod luci_proxy;
 pub mod migrate;

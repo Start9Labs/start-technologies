@@ -531,6 +531,10 @@ pub struct DhcpHost {
     /// denied.
     #[uci(default)]
     pub _allow_dns_inject: Option<String>,
+    /// "1" when the LAN guard forwards this device's IPv6 router
+    /// advertisements between bridge ports. Absent = dropped.
+    #[uci(default)]
+    pub _allow_ra: Option<String>,
 }
 
 #[derive(Debug, TypedSection, Default)]

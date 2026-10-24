@@ -564,4 +564,8 @@ export default {
   592: "Désactivé. Les profils ne peuvent pas l'utiliser tant qu'il n'est pas réactivé.",
   593: 'Jamais',
   594: 'Modifier le mot de passe déconnecte tous les autres navigateurs et toutes les sessions startwrt-cli. Ce navigateur reste connecté.',
+  595: 'Autoriser les annonces de routeur IPv6',
+  596: 'Permet à cet appareil d’annoncer des routes IPv6 à vos autres appareils (nécessaire pour les routeurs de bordure Thread comme une Apple TV, un HomePod ou Home Assistant). Désactivé par défaut.',
+  597: 'Autoriser les annonces de routeur IPv6 ?',
+  598: 'Cet appareil pourra attribuer à vos autres appareils des adresses IPv6, des routes, des serveurs DNS et une passerelle par défaut, et pourrait faire passer leur trafic IPv6 en dehors du routeur. N’accordez cela qu’à un appareil de confiance, comme un routeur de bordure Thread.',
 } satisfies i18n

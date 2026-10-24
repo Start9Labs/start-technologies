@@ -564,4 +564,8 @@ export default {
   592: 'Ausgeschaltet. Profile können es erst wieder nutzen, wenn es aktiviert ist.',
   593: 'Nie',
   594: 'Das Ändern des Passworts meldet alle anderen Browser und startwrt-cli-Anmeldungen ab. Dieser Browser bleibt angemeldet.',
+  595: 'IPv6-Router-Advertisements erlauben',
+  596: 'Erlaubt diesem Gerät, Ihren anderen Geräten IPv6-Routen anzukündigen (erforderlich für Thread-Border-Router wie Apple TV, HomePod oder Home Assistant). Standardmäßig aus.',
+  597: 'IPv6-Router-Advertisements erlauben?',
+  598: 'Dieses Gerät kann dann Ihren anderen Geräten IPv6-Adressen, Routen, DNS-Server und ein Standard-Gateway zuweisen und ihren IPv6-Verkehr am Router vorbeileiten. Gewähren Sie dies nur einem Gerät, dem Sie vertrauen, etwa einem Thread-Border-Router.',
 } satisfies i18n

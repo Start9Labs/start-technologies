@@ -564,4 +564,8 @@ export default {
   592: 'Apagada. Los perfiles no pueden usarla hasta que se vuelva a activar.',
   593: 'Nunca',
   594: 'Cambiar la contraseña cierra la sesión en todos los demás navegadores y en startwrt-cli. Este navegador mantiene la sesión iniciada.',
+  595: 'Permitir anuncios de router IPv6',
+  596: 'Permite que este dispositivo anuncie rutas IPv6 a tus otros dispositivos (necesario para routers de borde Thread como un Apple TV, HomePod o Home Assistant). Desactivado de forma predeterminada.',
+  597: '¿Permitir anuncios de router IPv6?',
+  598: 'Este dispositivo podrá asignar a tus otros dispositivos direcciones IPv6, rutas, servidores DNS y una puerta de enlace predeterminada, y podría desviar su tráfico IPv6 fuera del router. Concede esto solo a un dispositivo de confianza, como un router de borde Thread.',
 } satisfies i18n

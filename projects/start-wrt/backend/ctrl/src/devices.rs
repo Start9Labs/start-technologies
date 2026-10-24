@@ -32,6 +32,10 @@ pub fn devices<C: CtrlContext>() -> ParentHandler<C> {
             "set-dns-injection",
             from_fn_async_local(crate::dns_inject::set_dns_injection::<C>).no_display(),
         )
+        .subcommand(
+            "set-router-advertisements",
+            from_fn_async_local(crate::lan_guard::set_router_advertisements::<C>).no_display(),
+        )
         .subcommand("forget", from_fn_async_local(forget::<C>).no_display())
         .subcommand(
             "data-usage",
@@ -74,6 +78,10 @@ pub struct Device {
     /// (`devices set-dns-injection`; `vpn-server peer-set-dns-injection` for a
     /// VPN peer).
     pub allow_dns_injection: bool,
+    /// Whether the router forwards this device's IPv6 router advertisements
+    /// to the rest of the LAN (`devices set-router-advertisements`). Always
+    /// false for a VPN peer.
+    pub allow_router_advertisements: bool,
     pub security_profile: Option<String>,
     pub speed: Option<SpeedData>,
     pub data_usage: Option<f64>,
@@ -1545,6 +1553,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             ipv4_static: host.map(|h| h.ip.is_some()).unwrap_or(false),
             allow_auto_port_forward: host.is_some_and(|h| h._allow_pcp.as_deref() == Some("1")),
             allow_dns_injection: host.is_some_and(|h| h._allow_dns_inject.as_deref() == Some("1")),
+            allow_router_advertisements: host.is_some_and(|h| h._allow_ra.as_deref() == Some("1")),
             security_profile,
             speed,
             data_usage,
@@ -1652,6 +1661,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 // No MAC to authorize, so a VPN peer can never be auto-forward capable.
                 allow_auto_port_forward: false,
                 allow_dns_injection: peer_cfg.allow_dns_injection,
+                allow_router_advertisements: false,
                 security_profile: Some(server.profile_fullname.clone()),
                 speed,
                 data_usage,
@@ -1945,13 +1955,6 @@ pub async fn forget<C: CtrlContext>(
                 return Err(err.into());
             }
             Ok(()) => {
-                crate::activity::log(
-                    "device",
-                    "forgotten",
-                    true,
-                    &format!("Forgot device {}", mac_upper),
-                    None,
-                );
                 crate::device_names::forget(&mac_upper).await;
                 crate::port_control::close_device_forwards(&mac_upper, &removed_static_ips).await;
                 // The sweep drops the device's published DNS records now.
@@ -1967,8 +1970,29 @@ pub async fn forget<C: CtrlContext>(
                     }
                 }
                 if ctx.effectful() {
+                    // Revokes routing authority before the potentially slow dnsmasq restart.
+                    let ra_result = crate::lan_guard::apply_ra_allow(ctx.uci_root()).await;
                     flush_device_from_network(&mac_upper).await;
+                    if let Err(err) = ra_result {
+                        crate::activity::log(
+                            "device",
+                            "forgotten",
+                            false,
+                            &format!(
+                                "Forgot device {mac_upper}, but could not revoke its IPv6 router advertisements"
+                            ),
+                            Some(&err.to_string()),
+                        );
+                        return Err(err);
+                    }
                 }
+                crate::activity::log(
+                    "device",
+                    "forgotten",
+                    true,
+                    &format!("Forgot device {}", mac_upper),
+                    None,
+                );
                 return Ok(());
             }
         }
