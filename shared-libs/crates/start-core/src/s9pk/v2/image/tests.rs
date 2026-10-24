@@ -138,6 +138,55 @@ async fn image_files_and_metadata_survive_without_docker_initialization() {
 }
 
 #[tokio::test]
+async fn symlinked_resolver_becomes_a_regular_file() {
+    let mut layer = Vec::new();
+    append(&mut layer, b"etc", b'5', b"", None);
+    append(
+        &mut layer,
+        b"etc/resolv.conf",
+        b'2',
+        b"",
+        Some(b"/nix/store/image-root/etc/resolv.conf"),
+    );
+    append(
+        &mut layer,
+        b"etc/hosts",
+        b'2',
+        b"",
+        Some(b"/nix/store/image-root/etc/hosts"),
+    );
+    layer.extend_from_slice(&[0; 1024]);
+    let (archive, _) = save_archive(&[layer], "amd64");
+    let (image, _) = from_image_archive(archive.as_slice(), "--platform=linux/amd64")
+        .await
+        .unwrap();
+    let node = image
+        .contents()
+        .get_path("etc/resolv.conf")
+        .unwrap()
+        .as_node()
+        .unwrap();
+    let crate::util::squashfs::NodeContents::File(source) = &node.contents else {
+        panic!("not a file")
+    };
+    assert!(source.to_vec(None).await.unwrap().is_empty());
+    assert_eq!(
+        (node.metadata.mode, node.metadata.uid, node.metadata.gid),
+        (0o644, 0, 0)
+    );
+    assert!(matches!(
+        &image
+            .contents()
+            .get_path("etc/hosts")
+            .unwrap()
+            .as_node()
+            .unwrap()
+            .contents,
+        crate::util::squashfs::NodeContents::Symlink(_)
+    ));
+}
+
+#[tokio::test]
 async fn compressed_layers_have_identical_filesystem_bytes_and_validate_uncompressed_digests() {
     let layer = image_layer();
     let config = serde_json::json!({"architecture": "amd64", "os": "linux", "rootfs": {
