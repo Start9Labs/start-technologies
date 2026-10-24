@@ -1,1 +1,1 @@
-- Podman and Docker container bridges are left out of the Gateways list.
+- Restore the Gateways list to connected gateways, hiding stale bridge entries.
