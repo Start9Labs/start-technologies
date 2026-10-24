@@ -1,7 +1,6 @@
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use async_compression::tokio::bufread::{GzipDecoder, ZstdDecoder};
@@ -12,9 +11,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, BufReader, ReadBuf};
 use super::pack::DockerImageConfig;
 use crate::prelude::*;
 use crate::s9pk::merkle_archive::source::{DynFileSource, FileSource};
-use crate::util::squashfs::{
-    Entry, LayerFilesystem, Metadata, Node, NodeContents, Squashfs, resolve_hardlink,
-};
+use crate::util::squashfs::{Entry, LayerFilesystem, Squashfs, resolve_hardlink};
 
 mod oci;
 
@@ -277,27 +274,12 @@ async fn from_layers(
             None => apply_layer(&mut filesystem, reader, &diff_id).await?,
         }
     }
-    let mut image = filesystem.into_squashfs()?;
-    if matches!(
-        image
-            .contents()
-            .get_path("etc/resolv.conf")
-            .and_then(Entry::as_node),
-        Some(Node {
-            contents: NodeContents::Symlink(_),
-            ..
-        })
-    ) {
-        // StartOS copies the resolver onto this path from outside the image's root.
-        image.contents_mut().insert_path(
-            "etc/resolv.conf",
-            Entry::file(
-                Metadata::new(0o644),
-                DynFileSource::new(Arc::<[u8]>::from([])),
-            ),
-        )?;
-    }
-    Ok((image, config.config.unwrap_or_default()))
+    // StartOS copies the resolver onto this path from outside the image's root.
+    filesystem.replace_symlink_with_empty_file(Path::new("etc/resolv.conf"));
+    Ok((
+        filesystem.into_squashfs()?,
+        config.config.unwrap_or_default(),
+    ))
 }
 
 #[cfg(test)]
