@@ -222,6 +222,7 @@ termion = "4.0.5"
 textwrap = "0.16.1"
 thiserror = "2.0.12"
 tokio = { version = "1.38.1", features = ["full"] }
+tokio-native-tls = "0.3.1"
 tokio-rustls = "0.26.4"
 tokio-stream = { version = "0.1.14", features = ["io-util", "net", "sync"] }
 tokio-tar = { package = "astral-tokio-tar", version = "0.6" }

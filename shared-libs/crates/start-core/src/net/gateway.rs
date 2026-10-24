@@ -1597,22 +1597,78 @@ async fn get_wan_ipv4(
     base_url: &Url,
     local_ipv4: Ipv4Addr,
 ) -> Result<Option<Ipv4Addr>, Error> {
-    let client = reqwest::Client::builder();
-    #[cfg(target_os = "linux")]
-    let client = client
-        .interface(iface)
-        .local_address(IpAddr::V4(local_ipv4));
     let url = base_url.join("/ip").with_kind(ErrorKind::ParseUrl)?;
-    let text = client
-        .build()?
-        .get(url)
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await?
-        .error_for_status()?
-        .text()
-        .await?;
+    let text = tokio::time::timeout(
+        Duration::from_secs(5),
+        get_via_gateway(iface, &url, local_ipv4),
+    )
+    .await
+    .map_err(|_| Error::new(eyre!("request to {url} timed out"), ErrorKind::Network))??;
     parse_echoip(&text)
+}
+
+/// Leaves through the gateway whatever the outbound selection.
+async fn get_via_gateway(iface: &str, url: &Url, local_ipv4: Ipv4Addr) -> Result<String, Error> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| Error::new(eyre!("{url} has no host"), ErrorKind::ParseUrl))?;
+    let addr = tokio::net::lookup_host((host, url.port_or_known_default().unwrap_or(443)))
+        .await?
+        .find(SocketAddr::is_ipv4)
+        .ok_or_else(|| Error::new(eyre!("{host} has no IPv4 address"), ErrorKind::Network))?;
+    let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
+    #[cfg(target_os = "linux")]
+    {
+        let index = if_nametoindex(iface).with_kind(ErrorKind::Network)?;
+        socket.bind_device_by_index_v4(std::num::NonZeroU32::new(index))?;
+        socket.set_mark(gateway_table_id(index))?;
+    }
+    socket.bind(&SocketAddr::from((local_ipv4, 0)).into())?;
+    socket.set_nonblocking(true)?;
+    let stream = tokio::net::TcpSocket::from_std_stream(socket.into())
+        .connect(addr)
+        .await?;
+    let req = hyper::Request::get(url.path())
+        .header(
+            hyper::header::HOST,
+            &url[url::Position::BeforeHost..url::Position::AfterPort],
+        )
+        .body(http_body_util::Empty::<bytes::Bytes>::new())
+        .with_kind(ErrorKind::Network)?;
+    if url.scheme() == "https" {
+        let tls = tokio_native_tls::TlsConnector::from(
+            native_tls::TlsConnector::new().with_kind(ErrorKind::Network)?,
+        )
+        .connect(host, stream)
+        .await
+        .with_kind(ErrorKind::Network)?;
+        send_http1(hyper_util::rt::TokioIo::new(tls), req).await
+    } else {
+        send_http1(hyper_util::rt::TokioIo::new(stream), req).await
+    }
+}
+
+async fn send_http1<T>(
+    io: T,
+    req: hyper::Request<http_body_util::Empty<bytes::Bytes>>,
+) -> Result<String, Error>
+where
+    T: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
+{
+    use http_body_util::BodyExt;
+
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
+    let _conn = NonDetachingJoinHandle::from(tokio::spawn(conn));
+    let res = sender.send_request(req).await?;
+    if !res.status().is_success() {
+        return Err(Error::new(
+            eyre!("echoip responded {}", res.status()),
+            ErrorKind::Network,
+        ));
+    }
+    Ok(String::from_utf8(
+        res.into_body().collect().await?.to_bytes().to_vec(),
+    )?)
 }
 
 /// A routable WAN address from an echoip response.
