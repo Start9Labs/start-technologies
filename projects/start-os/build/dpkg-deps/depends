@@ -43,6 +43,8 @@ net-tools
 network-manager
 nfs-common
 nftables
+nut-client
+nut-server
 nvme-cli
 nyx
 openssh-server

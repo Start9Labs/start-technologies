@@ -212,6 +212,26 @@ export type NotificationLevel = z.output<typeof schemas.NotificationLevel>
 export type NotificationLevelInput = z.input<typeof schemas.NotificationLevel>
 
 /**
+ * Directly connected UPS server settings or remote NUT client settings.
+ */
+export type NutSettings = z.output<typeof schemas.NutSettings>
+
+/**
+ * Directly connected UPS server settings or remote NUT client settings.
+ */
+export type NutSettingsInput = z.input<typeof schemas.NutSettings>
+
+/**
+ * Current variables reported by the configured UPS.
+ */
+export type NutStatus = z.output<typeof schemas.NutStatus>
+
+/**
+ * Current variables reported by the configured UPS.
+ */
+export type NutStatusInput = z.input<typeof schemas.NutStatus>
+
+/**
  * An absent update preserves DNS intent; null servers select gateway DNS.
  */
 export type OutboundDnsUpdate = z.output<typeof schemas.OutboundDnsUpdate>
@@ -780,6 +800,16 @@ export type NamedHealthCheckResultInput = z.input<
 >
 export type Notification = z.output<typeof schemas.Notification>
 export type NotificationInput = z.input<typeof schemas.Notification>
+
+/**
+ * Stored NUT configuration and its independent enabled state.
+ */
+export type NutConfig = z.output<typeof schemas.NutConfig>
+
+/**
+ * Stored NUT configuration and its independent enabled state.
+ */
+export type NutConfigInput = z.input<typeof schemas.NutConfig>
 export type OsUpdateSignerKeyParams = z.output<
   typeof schemas.OsUpdateSignerKeyParams
 >
@@ -1108,6 +1138,16 @@ export type SetDependenciesParamsInput = z.input<
 >
 export type SetHealth = z.output<typeof schemas.SetHealth>
 export type SetHealthInput = z.input<typeof schemas.SetHealth>
+
+/**
+ * Parameters for replacing the stored NUT configuration.
+ */
+export type SetNutParams = z.output<typeof schemas.SetNutParams>
+
+/**
+ * Parameters for replacing the stored NUT configuration.
+ */
+export type SetNutParamsInput = z.input<typeof schemas.SetNutParams>
 export type SetupProgress = z.output<typeof schemas.SetupProgress>
 export type SetupProgressInput = z.input<typeof schemas.SetupProgress>
 export type StatusInfo = z.output<typeof schemas.StatusInfo>

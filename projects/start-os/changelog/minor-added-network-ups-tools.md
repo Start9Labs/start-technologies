@@ -1,0 +1,1 @@
+- **Network UPS Tools support monitors a directly connected UPS or a network NUT server**, with retained configuration, independent monitoring controls, and UPS status under System.

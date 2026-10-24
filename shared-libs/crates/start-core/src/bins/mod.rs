@@ -297,3 +297,36 @@ pub(crate) fn assert_no_shadowed_args(root: clap::Command) {
         found.join("\n  ")
     );
 }
+
+#[cfg(test)]
+fn manifest_version(product: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .join("projects")
+        .join(product)
+        .join("Cargo.toml");
+    let manifest: serde_toml::Table =
+        serde_toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    manifest["package"]["version"].as_str().unwrap().to_owned()
+}
+
+#[cfg(test)]
+fn export_manpages(command: clap::Command, product: &str, version: &str) {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .join("projects")
+        .join(product)
+        .join("man");
+    std::fs::create_dir_all(&dir).unwrap();
+    clap_mangen::generate_to(command.version(version.to_owned()), &dir).unwrap();
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        let page = std::fs::read_to_string(&path).unwrap();
+        let page = page
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(path, format!("{page}\n")).unwrap();
+    }
+}
