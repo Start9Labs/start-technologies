@@ -1,0 +1,65 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-backup-job-edit 1  "edit "
+.SH NAME
+start\-cli\-backup\-job\-edit \- Edit an automatic backup job
+.SH SYNOPSIS
+\fBstart\-cli backup job edit\fR [\fB\-\-name\fR] [\fB\-\-cron\fR] [\fB\-\-timezone\fR] [\fB\-\-all\-services\fR] [\fB\-\-package\-ids\fR] [\fB\-\-exclude\-package\-ids\fR] [\fB\-\-system\-data\fR] [\fB\-\-keep\-rule\fR] [\fB\-\-latest\-only\fR] [\fB\-\-service\-keep\-rule\fR] [\fB\-\-service\-latest\-only\fR] [\fB\-\-use\-default\-retention\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIID\fR>
+.SH DESCRIPTION
+Edit an automatic backup job
+.SH OPTIONS
+.TP
+\fB\-\-name\fR \fI<NAME>\fR
+Human\-readable automatic backup job name
+.TP
+\fB\-\-cron\fR \fI<CRON>\fR
+Five\-field cron schedule (minute, hour, day of month, month, weekday)
+.TP
+\fB\-\-timezone\fR \fI<TIMEZONE>\fR
+IANA timezone for the automatic backup schedule
+.TP
+\fB\-\-all\-services\fR
+Back up every current and future service
+.TP
+\fB\-\-package\-ids\fR \fI<PACKAGE_IDS>\fR
+Package IDs to include in the automatic backup
+.TP
+\fB\-\-exclude\-package\-ids\fR \fI<EXCLUDE_PACKAGE_IDS>\fR
+Package IDs to exclude from current and future services
+.TP
+\fB\-\-system\-data\fR \fI<SYSTEM_DATA>\fR
+Include or exclude StartOS System data
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+include
+.IP \(bu 2
+exclude
+.RE
+.TP
+\fB\-\-keep\-rule\fR \fI<INTERVAL:COVERAGE>\fR
+Version\-history rule INTERVAL:COVERAGE; accepts s, m, h, d, or w and may repeat
+.TP
+\fB\-\-latest\-only\fR
+Keep only the latest automatic checkpoint
+.TP
+\fB\-\-service\-keep\-rule\fR \fI<PACKAGE_ID=INTERVAL:COVERAGE>\fR
+Version\-history rule PACKAGE_ID=INTERVAL:COVERAGE; use x_system for System data; may repeat
+.TP
+\fB\-\-service\-latest\-only\fR \fI<PACKAGE_ID>\fR
+Service IDs, or x_system for System data, that should keep only their latest checkpoint
+.TP
+\fB\-\-use\-default\-retention\fR \fI<PACKAGE_ID>\fR
+Service IDs, or x_system for System data, that should use the job\*(Aqs default retention
+.TP
+\fB\-\-format\fR
+
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIID\fR>
+Automatic backup job identifier

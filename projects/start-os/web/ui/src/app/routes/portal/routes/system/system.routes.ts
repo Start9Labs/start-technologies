@@ -6,6 +6,7 @@ import {
   RouterStateSnapshot,
   Routes,
 } from '@angular/router'
+
 import { titleResolver } from 'src/app/utils/title-resolver'
 import { SystemComponent } from './system.component'
 
@@ -31,16 +32,20 @@ export default [
         loadComponent: () => import('./routes/smtp/smtp.component'),
       },
       {
-        path: 'backup',
+        path: 'backups',
         title: titleResolver,
-        loadComponent: () => import('./routes/backups/backups.component'),
-        data: { type: 'create' },
+        loadChildren: () => import('../backups/backups.routes'),
+        data: { title: 'Backups' },
+      },
+      {
+        path: 'backup',
+        redirectTo: 'backups/manual',
+        pathMatch: 'full',
       },
       {
         path: 'restore',
-        title: titleResolver,
-        loadComponent: () => import('./routes/backups/backups.component'),
-        data: { type: 'restore' },
+        redirectTo: 'backups/restore',
+        pathMatch: 'full',
       },
       {
         path: 'interfaces',

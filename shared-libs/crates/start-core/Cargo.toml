@@ -16,7 +16,7 @@ license = "MIT"
 name = "start-core"
 readme = "README.md"
 repository = "https://github.com/Start9Labs/start-technologies"
-version = "0.4.0" # VERSION_BUMP
+version = "0.4.1" # VERSION_BUMP
 
 [lib]
 name = "start_core"
@@ -59,6 +59,7 @@ base64ct = "1.6.0"
 blake3 = { version = "1.5.0", features = ["mmap", "rayon"] }
 bytes = "1"
 chrono = { version = "0.4.31", features = ["serde"] }
+chrono-tz = { version = "0.10.4", features = ["serde"] }
 clap = { version = "4.4.12", features = ["string"] }
 clap_complete = "4.6"
 color-eyre = "0.6.2"

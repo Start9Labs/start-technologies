@@ -1,0 +1,25 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-package-backup-restore-checkpoint 1  "restore-checkpoint "
+.SH NAME
+start\-cli\-package\-backup\-restore\-checkpoint \- Restore services from selected automatic backup checkpoints
+.SH SYNOPSIS
+\fBstart\-cli package backup restore\-checkpoint\fR [\fB\-\-server\-id\fR] [\fB\-\-password\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET_ID\fR> <\fICHECKPOINTS\fR>
+.SH DESCRIPTION
+Restore services from selected automatic backup checkpoints
+.SH OPTIONS
+.TP
+\fB\-\-server\-id\fR \fI<SERVER_ID>\fR
+Unique server identifier
+.TP
+\fB\-\-password\fR \fI<PASSWORD>\fR
+Password for backup encryption
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fITARGET_ID\fR>
+Backup target identifier
+.TP
+<\fICHECKPOINTS\fR>
+Checkpoint as PACKAGE_ID=SNAPSHOT_ID; repeat for multiple services

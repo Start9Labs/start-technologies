@@ -24,26 +24,27 @@ import { TuiIcon } from '@taiga-ui/core'
   `,
   styles: `
     :host {
-      height: 2rem;
       display: flex;
       align-items: center;
       gap: 0.25rem;
+      min-block-size: 2rem;
+      block-size: auto;
+      padding-block: 0.25rem;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+      white-space: normal;
     }
 
     tui-icon {
       font-size: 1rem;
-      min-width: 1.25rem;
+      min-inline-size: 1.25rem;
       text-align: center;
-    }
-
-    :host-context(tui-root._mobile) {
-      height: auto;
     }
   `,
   imports: [TuiIcon, i18nPipe],
 })
 export class BackupStatusComponent {
-  readonly type = inject(ActivatedRoute).snapshot.data['type']
+  protected readonly type = inject(ActivatedRoute).snapshot.data['type']
   readonly backupStatus = input(false)
   readonly physical = input(false)
 }

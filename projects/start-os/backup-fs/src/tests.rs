@@ -1,5 +1,7 @@
+use std::ffi::{CStr, CString};
 use std::future::Future;
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
@@ -135,6 +137,21 @@ fn tree(path: impl AsRef<Path>, dirs: bool) -> Result<Vec<String>, io::Error> {
     }
     children.sort_unstable();
     Ok(children)
+}
+
+unsafe fn next_named_dir_entry(dir: *mut libc::DIR) -> Option<String> {
+    loop {
+        let entry = unsafe { libc::readdir(dir) };
+        if entry.is_null() {
+            return None;
+        }
+        let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) }
+            .to_string_lossy()
+            .into_owned();
+        if name != "." && name != ".." {
+            return Some(name);
+        }
+    }
 }
 
 /// Count content block files, tolerating an absent `contents/` dir — a
@@ -1376,8 +1393,6 @@ fn rename_over_existing_across_remount() {
 
 // ── Redesign coverage: block store, ECC, device nodes ──────────────
 
-use std::ffi::CString;
-use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileTypeExt;
 
 use crate::ctrl::Controller;
@@ -1998,6 +2013,42 @@ fn large_directory_spills_and_stays_consistent() {
     assert!(
         leftover.is_empty(),
         "leftover dir bucket files after rm -rf: {leftover:?}"
+    );
+}
+
+#[test_log::test]
+fn directory_offsets_survive_seekdir_retries() {
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
+
+    with_backupfs(
+        data.path(),
+        "ohea".to_owned(),
+        |mnt| {
+            let dir = mnt.join("seekable");
+            fs::create_dir(&dir).unwrap();
+            for i in 0..256 {
+                fs::write(dir.join(format!("f{i:05}")), b"data").unwrap();
+            }
+
+            let path = CString::new(dir.as_os_str().as_bytes()).unwrap();
+            let stream = unsafe { libc::opendir(path.as_ptr()) };
+            assert!(!stream.is_null());
+
+            for _ in 0..21 {
+                unsafe { next_named_dir_entry(stream) }.unwrap();
+            }
+            let cookie = unsafe { libc::telldir(stream) };
+            let expected = unsafe { next_named_dir_entry(stream) }.unwrap();
+
+            unsafe { libc::seekdir(stream, cookie) };
+            assert_eq!(unsafe { next_named_dir_entry(stream) }.unwrap(), expected);
+
+            unsafe { libc::seekdir(stream, cookie) };
+            assert_eq!(unsafe { next_named_dir_entry(stream) }.unwrap(), expected);
+
+            assert_eq!(unsafe { libc::closedir(stream) }, 0);
+        },
+        None,
     );
 }
 

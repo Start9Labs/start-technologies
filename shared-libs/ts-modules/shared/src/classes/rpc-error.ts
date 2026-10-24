@@ -1,9 +1,12 @@
-import { RPCErrorDetails } from '../types/rpc.types'
+import type { RPCErrorDetails } from '../types/rpc.types'
 import { getRpcErrorMessage } from '../util/rpc.util'
 
-export class RpcError {
-  constructor(private readonly error: RPCErrorDetails) {}
+export class RpcError extends Error {
+  readonly code: number
 
-  readonly code = this.error.code
-  readonly message = `RPC ERROR: ${getRpcErrorMessage(this.error)}`
+  constructor(error: RPCErrorDetails) {
+    super(`RPC ERROR: ${getRpcErrorMessage(error)}`)
+    this.name = 'RpcError'
+    this.code = error.code
+  }
 }

@@ -41,6 +41,38 @@ function mockService(
 }
 
 export const mockPatchData: DataModel = {
+  scheduledBackups: {
+    jobs: {
+      'automatic-backup': {
+        id: 'automatic-backup',
+        name: 'Default',
+        enabled: false,
+        pause: { reason: 'user' },
+        targetId: 'cifs-1',
+        targetInstanceId: 'mock-target-instance',
+        services: { type: 'allExcept', excludedPackageIds: [] },
+        schedule: { cron: '0 3 * * *', timezone: 'Etc/UTC' },
+        defaultRetention: { tiers: [] },
+        retentionOverrides: {},
+        status: {
+          lastScheduledAt: null,
+          lastAttemptedAt: null,
+          lastSucceededAt: null,
+          nextRunAt: '2026-07-17T03:00:00Z',
+          runRequested: false,
+          consecutiveFailures: 0,
+          lastResult: null,
+        },
+        createdAt: '2026-07-16T00:00:00Z',
+        updatedAt: '2026-07-16T00:00:00Z',
+      },
+    },
+    histories: {},
+    runs: {},
+    activities: {},
+    targetFailures: {},
+    pendingServiceReviews: {},
+  },
   ui: {
     registries: {
       'https://registry.start9.com/': 'Start9 Registry',

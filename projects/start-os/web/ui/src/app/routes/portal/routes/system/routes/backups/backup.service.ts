@@ -1,6 +1,14 @@
-import { inject, Injectable, signal } from '@angular/core'
-import { ErrorService, getErrorMessage } from '@start9labs/shared'
+import { computed, inject, Injectable, signal } from '@angular/core'
+import {
+  DialogService,
+  convertBytes,
+  ErrorService,
+  getErrorMessage,
+  i18nPipe,
+  RpcError,
+} from '@start9labs/shared'
 import { T, Version } from '@start9labs/start-core'
+import { TuiNotificationService } from '@taiga-ui/core'
 import { PatchDB } from 'patch-db-client'
 import { firstValueFrom } from 'rxjs'
 import {
@@ -17,19 +25,66 @@ export interface MappedBackupTarget<T> {
   entry: T
 }
 
+export function formatCifsLocation(target: CifsBackupTarget): string {
+  const share = target.path.replace(/^\/+/, '')
+  return share ? `${target.hostname}/${share}` : target.hostname
+}
+
 @Injectable({
   providedIn: 'root',
 })
 export class BackupService {
   private readonly api = inject(ApiService)
   private readonly errorService = inject(ErrorService)
+  private readonly i18n = inject(i18nPipe)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
+  private readonly alerts = inject(TuiNotificationService)
+  private readonly dialogs = inject(DialogService)
 
   private serverId = ''
 
   readonly cifs = signal<MappedBackupTarget<CifsBackupTarget>[]>([])
   readonly drives = signal<MappedBackupTarget<DiskBackupTarget>[]>([])
   readonly loading = signal(true)
+  readonly locations = computed(() => [
+    ...this.cifs().map(location => ({
+      id: location.id,
+      location,
+      name: location.entry.path.split('/').pop() || location.entry.path,
+      detail: formatCifsLocation(location.entry),
+      icon: '@tui.network',
+      available: location.entry.mountable,
+      capacity: null as number | null,
+      used: null as number | null,
+    })),
+    ...this.drives().map(location => ({
+      id: location.id,
+      location,
+      name:
+        [location.entry.vendor, location.entry.model]
+          .filter(Boolean)
+          .join(' ') || location.entry.logicalname,
+      detail: `${location.entry.logicalname} · ${convertBytes(location.entry.capacity)}`,
+      icon: '@tui.hard-drive',
+      available: location.entry.capacity > 0,
+      capacity: location.entry.capacity,
+      used: location.entry.used,
+    })),
+  ])
+
+  readonly targets = computed(() =>
+    this.locations().map(location => ({
+      id: location.id,
+      name:
+        location.location.entry.type === 'cifs'
+          ? location.detail
+          : location.name,
+    })),
+  )
+
+  targetName(id: string): string {
+    return this.targets().find(target => target.id === id)?.name || id
+  }
 
   async getBackupTargets(): Promise<void> {
     this.loading.set(true)
@@ -67,7 +122,7 @@ export class BackupService {
             }
           }),
       )
-    } catch (e: any) {
+    } catch (e) {
       this.errorService.handleError(getErrorMessage(e))
     } finally {
       this.loading.set(false)
@@ -89,14 +144,10 @@ export class BackupService {
     )
   }
 
-  // Whether *this* server has a current (V2) backup on the target — the signal
-  // that decides if deleting the legacy backup needs an extra confirmation.
   hasCurrentBackup(target: T.BackupTarget): boolean {
     return this.hasThisBackup(target, this.serverId)
   }
 
-  // Drop the now-deleted legacy (V1) backup from the cached target so the
-  // warning + delete button disappear without re-listing every drive.
   clearLegacy(id: string): void {
     this.drives.update(drives =>
       drives.map(t =>
@@ -108,5 +159,49 @@ export class BackupService {
         t.id === id ? { ...t, entry: { ...t.entry, legacyBackup: false } } : t,
       ),
     )
+  }
+
+  showQueuedNotification(job: T.BackupJob): void {
+    if (!job.status.runRequested) return
+
+    this.alerts
+      .open(
+        this.i18n.transform(
+          'The first backup is queued and will start automatically when no backup or restore is in progress.',
+        ),
+        {
+          appearance: 'info',
+          label: this.i18n.transform('Automatic backup'),
+        },
+      )
+      .subscribe()
+  }
+
+  async withOriginalPassword<Result>(
+    action: (oldPassword?: string) => Promise<Result>,
+  ): Promise<Result | null> {
+    let oldPassword: string | undefined
+    for (;;) {
+      try {
+        return await action(oldPassword)
+      } catch (error) {
+        if (!(error instanceof RpcError) || error.code !== 81) throw error
+      }
+      oldPassword = await firstValueFrom(
+        this.dialogs.openPrompt<string>({
+          label: 'Original password needed',
+          data: {
+            message:
+              'This backup was created with a different password. Enter the original password that was used to encrypt this backup.',
+            label: 'Password',
+            placeholder: 'Enter original password',
+            useMask: true,
+            buttonText: 'Retry',
+          },
+        }),
+        { defaultValue: '' },
+      )
+      if (!oldPassword) return null
+    }
   }
 }

@@ -37,7 +37,11 @@ impl VersionT for Version {
     }
     async fn post_up(self, ctx: &RpcContext, input: Value) -> Result<(), Error> {
         // `input` is `up`'s came-from-a-0.4.0-beta flag.
-        if should_welcome_to_release(self, input.as_bool().unwrap_or(false)) {
+        if should_welcome_to_release(
+            self,
+            &Current::default().semver(),
+            input.as_bool().unwrap_or(false),
+        ) {
             let highlights = include_str!("update_details/v0_4_0_highlights.md").to_string();
             ctx.db
                 .mutate(|db| {
@@ -87,18 +91,12 @@ fn migrated_through_beta_10(db: &Value) -> bool {
         .any(|v| v == beta_10)
 }
 
-/// 0.4.0's welcome fires only when 0.4.0 is the release being landed on (so an intermediate
-/// hop in a multi-version jump stays silent) and the server came from a 0.4.0 pre-release
-/// below beta.10: pre-0.4.0 arrivals get `v0_4_0_alpha_0`'s welcome
-/// (`update_details/v0_4_0.md`) instead, and a beta.10 server already has everything
-/// `update_details/v0_4_0_highlights.md` describes. `from_0_4_0_beta` is the flag threaded
-/// through `up`'s output.
-///
-/// A revision release still counts as landing on 0.4.0 — once 0.4.0.1 is `Current`, 0.4.0 is
-/// necessarily an intermediate hop, and these highlights are new to every beta arrival either
-/// way. A prerelease never counts: its digits alias the release it precedes.
-fn should_welcome_to_release(version: impl VersionT, from_0_4_0_beta: bool) -> bool {
-    let landing = Current::default().semver();
+/// Beta.10 arrivals have already seen the stable release's highlights.
+fn should_welcome_to_release(
+    version: impl VersionT,
+    landing: &exver::Version,
+    from_0_4_0_beta: bool,
+) -> bool {
     let version = version.semver();
     version.prerelease().is_empty()
         && landing.number().starts_with(version.number())
@@ -147,10 +145,27 @@ mod test {
         );
         assert!(migrated_from_pre_0_4_0(&from_0_3_x));
 
-        // 0.4.0 is the landing release: welcome only for 0.4.0-beta arrivals.
-        assert!(should_welcome_to_release(Version, true));
-        assert!(!should_welcome_to_release(Version, false));
+        assert!(should_welcome_to_release(Version, &Version.semver(), true));
+        assert!(should_welcome_to_release(
+            Version,
+            &exver::Version::new([0, 4, 0, 3], []),
+            true,
+        ));
+        assert!(!should_welcome_to_release(
+            Version,
+            &exver::Version::new([0, 4, 1], []),
+            true,
+        ));
+        assert!(!should_welcome_to_release(
+            Version,
+            &Version.semver(),
+            false
+        ));
         // an intermediate (non-landing) release stays silent, even from the 0.4.0 line
-        assert!(!should_welcome_to_release(v0_4_0_beta_10::Version, true));
+        assert!(!should_welcome_to_release(
+            v0_4_0_beta_10::Version,
+            &Version.semver(),
+            true
+        ));
     }
 }
