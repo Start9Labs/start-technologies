@@ -1,1 +1,0 @@
-- On the StartTunnel host itself, `start-tunnel auth login` and `auth logout` explain that no login is needed there.
