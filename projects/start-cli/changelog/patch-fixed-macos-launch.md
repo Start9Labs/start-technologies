@@ -1,1 +1,0 @@
-- Fixed macOS binaries aborting at launch on newer macOS versions.
