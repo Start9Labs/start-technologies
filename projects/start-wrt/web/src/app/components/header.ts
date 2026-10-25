@@ -60,6 +60,7 @@ import { I18N } from 'src/app/i18n/i18n.providers'
       class="start9-menu"
       tuiIconButton
       tuiDropdown
+      tuiDropdownAlign="end"
       tuiDropdownAuto
       tuiDropdownSheet
     >
