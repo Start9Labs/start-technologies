@@ -609,6 +609,20 @@ struct WanDdnsResponse {
     /// Cloudflare only: the zone's root domain (null for configs saved
     /// before the zone was stored)
     zone: Option<String>,
+    /// The hostname is served with a certificate from Let's Encrypt
+    acme: bool,
+    /// Null while `acme` or `enabled` is off, and when the handler runs
+    /// outside the daemon
+    certificate: Option<AcmeCertificateStatus>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+enum AcmeCertificateStatus {
+    Pending,
+    Issued { expires: DateTime<Utc> },
+    /// The last order failed; it is retried
+    Failed { reason: String },
 }
 ```
 
@@ -630,10 +644,19 @@ struct WanDdnsSetRequest {
     password: Option<String>,
     token: Option<String>,
     zone: Option<String>,
+    /// Defaults to false
+    acme: bool,
 }
 // Response: null
 // Backend: updates UCI ddns config, restarts/stops ddns service
 ```
+
+`acme` is stored as `_acme '1'` on the service section, and only while
+`enabled`. With it on, the daemon obtains and renews a Let's Encrypt
+certificate for `hostname` over TLS-ALPN-01 on port 443, which needs Remote
+Access at `always`. Failed orders are recorded in the activity log. Until a
+certificate is issued, the hostname is served with one from the router's
+local CA.
 
 For Cloudflare, `zone` is required and must be the domain registered with
 Cloudflare (e.g. `example.com`), and `hostname` must be that zone itself
@@ -677,8 +700,7 @@ struct LanIpv4SetRequest {
 // Backend: updates UCI network.lan ipaddr (netmask /24) — and every profile's
 // addresses on a /16 block change — then clears DHCP leases, cycles only the LAN
 // interface (plus every profile interface on a block change) with ifdown/ifup,
-// reloads the firewall and dnsmasq, restarts Wi-Fi, and regenerates the HTTPS
-// certificate.
+// reloads the firewall and dnsmasq, and restarts Wi-Fi.
 // Inbound VPN peers the change would break fail the call with
 //   ErrorKind::VpnPeersWouldBreak unless force is set.
 // Validation: address must fall inside an RFC 1918 block at one of the
@@ -732,8 +754,7 @@ struct LanIpv6SetRequest {
 // With SLAAC enabled, `prefix` outside 48..=64, or shorter than the live
 // delegated prefix, is rejected (`InvalidRequest`), matching the UI validator.
 // Backend: updates UCI dhcp + network for the LAN and every profile, reloads
-// odhcpd to withdraw the old prefix, restarts network, and regenerates the HTTPS
-// certificate.
+// odhcpd to withdraw the old prefix, and restarts network.
 // Disabling SLAAC while any *enabled* IPv6 published-port rule exists is
 // rejected (`PublishedPortsUseIpv6`): it would strand every pp_*_v6 pinhole on
 // an address no device will hold. The UI locks the toggle for the same reason;

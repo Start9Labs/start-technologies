@@ -1,8 +1,10 @@
+import { DatePipe } from '@angular/common'
 import { Component, computed } from '@angular/core'
 import { TuiBadge, TuiStatus } from '@taiga-ui/kit'
 import { Summary } from 'src/app/components/summary'
 import { injectFormService } from 'src/app/services/form.service'
-import { DdnsForm, DDNS_PROVIDERS } from './utils'
+import { DdnsData } from './service'
+import { DDNS_PROVIDERS } from './utils'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 
 @Component({
@@ -28,13 +30,39 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
         @if (hostname(); as hostname) {
           <div [appSummary]="hostname">{{ 'Hostname' | i18n }}</div>
         }
+        @if (service.data()?.certificate; as certificate) {
+          <div appSummary>
+            {{ 'Certificate' | i18n }}
+            <span tuiSubtitle>
+              @switch (certificate.state) {
+                @case ('issued') {
+                  <span tuiBadge tuiStatus appearance="positive">
+                    {{ 'Valid until' | i18n }}
+                    {{ certificate.expires | date: 'mediumDate' }}
+                  </span>
+                }
+                @case ('failed') {
+                  <span tuiBadge tuiStatus appearance="negative">
+                    {{ 'Failed' | i18n }}
+                  </span>
+                  {{ certificate.reason }}
+                }
+                @default {
+                  <span tuiBadge tuiStatus appearance="neutral">
+                    {{ 'Pending' | i18n }}
+                  </span>
+                }
+              }
+            </span>
+          </div>
+        }
       }
     </section>
   `,
-  imports: [TuiBadge, TuiStatus, Summary, i18nPipe],
+  imports: [DatePipe, TuiBadge, TuiStatus, Summary, i18nPipe],
 })
 export class DdnsSummary {
-  protected readonly service = injectFormService<DdnsForm>()
+  protected readonly service = injectFormService<DdnsData>()
 
   readonly enabled = computed(() => this.service.data()?.enabled ?? false)
 

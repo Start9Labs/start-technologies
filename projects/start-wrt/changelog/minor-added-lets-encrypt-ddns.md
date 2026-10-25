@@ -1,0 +1,1 @@
+- **Let's Encrypt certificate for your DDNS hostname.** Turn on "Use a Let's Encrypt certificate" on the Dynamic DNS tab, with Remote Access set to "Always", and any browser trusts the web interface at that hostname without installing your Root CA. The router renews the certificate itself, and the Dynamic DNS summary shows its expiry or why the last attempt failed.

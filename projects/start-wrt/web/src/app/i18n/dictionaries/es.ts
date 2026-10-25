@@ -568,4 +568,10 @@ export default {
   596: 'Permite que este dispositivo anuncie rutas IPv6 a tus otros dispositivos (necesario para routers de borde Thread como un Apple TV, HomePod o Home Assistant). Desactivado de forma predeterminada.',
   597: '¿Permitir anuncios de router IPv6?',
   598: 'Este dispositivo podrá asignar a tus otros dispositivos direcciones IPv6, rutas, servidores DNS y una puerta de enlace predeterminada, y podría desviar su tráfico IPv6 fuera del router. Concede esto solo a un dispositivo de confianza, como un router de borde Thread.',
+  599: "Usar un certificado de Let's Encrypt",
+  600: "Permite que los navegadores confíen en este nombre de host sin instalar su CA raíz. Requiere el acceso remoto en «Siempre». Let's Encrypt publica en registros públicos cada certificado que emite.",
+  601: 'Certificado',
+  602: 'Válido hasta',
+  603: 'Pendiente',
+  604: 'Fallido',
 } satisfies i18n

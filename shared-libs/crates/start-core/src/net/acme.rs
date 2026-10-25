@@ -61,8 +61,8 @@ pub struct OrderEntry {
     /// [`DEFAULT_FAILURE_BACKOFF`]. Inside this window `get_cert`
     /// returns `None` instead of starting a new order.
     backoff_until: Option<Instant>,
-    /// Set once reported, so retries stay silent; dropped with the entry.
-    reported: bool,
+    /// Reported when it changes; dropped with the entry.
+    last_error: Option<String>,
 }
 
 /// Told the SANs of a failed order and why, to surface to the operator.
@@ -112,6 +112,12 @@ where
         + 'static,
     S: GetAcmeProvider + Clone + Send + Sync,
 {
+    /// Why the last order for these names failed, until one succeeds.
+    pub fn last_failure(&self, san_info: &BTreeSet<InternedString>) -> Option<String> {
+        self.in_progress
+            .peek(|map| map.get(san_info)?.last_error.clone())
+    }
+
     pub async fn get_cert(&self, san_info: &BTreeSet<InternedString>) -> Option<CertifiedKey> {
         let provider = self.get_provider.get_provider(san_info).await?;
         let provider = provider.as_ref();
@@ -250,16 +256,16 @@ where
                 };
 
                 if let Some((d, error)) = failure {
-                    let report = in_progress.send_modify(|map| {
+                    let changed = in_progress.send_modify(|map| {
                         let Some(entry) = map.get_mut(&san_info_clone) else {
                             return false;
                         };
                         entry.in_flight = None;
                         entry.backoff_until = Some(Instant::now() + d);
                         tracing::info!("ACME order for {san_info_clone:?} backing off for {d:?}");
-                        std::mem::replace(&mut entry.reported, true) == false
+                        entry.last_error.replace(error.clone()).as_ref() != Some(&error)
                     });
-                    if report {
+                    if changed {
                         if let Some(report) = &report_failure {
                             report(san_info_clone.clone(), error).await;
                         }

@@ -568,4 +568,10 @@ export default {
   596: 'Pozwala temu urządzeniu ogłaszać trasy IPv6 innym Twoim urządzeniom (wymagane przez routery brzegowe Thread, takie jak Apple TV, HomePod lub Home Assistant). Domyślnie wyłączone.',
   597: 'Zezwolić na ogłoszenia routera IPv6?',
   598: 'To urządzenie będzie mogło przydzielać innym Twoim urządzeniom adresy IPv6, trasy, serwery DNS i bramę domyślną, a także kierować ich ruch IPv6 z pominięciem routera. Przyznaj to tylko zaufanemu urządzeniu, takiemu jak router brzegowy Thread.',
+  599: "Użyj certyfikatu Let's Encrypt",
+  600: "Przeglądarki ufają tej nazwie hosta bez instalowania Twojego Root CA. Wymaga dostępu zdalnego ustawionego na „Zawsze”. Let's Encrypt publikuje w publicznych dziennikach każdy wystawiony certyfikat.",
+  601: 'Certyfikat',
+  602: 'Ważny do',
+  603: 'Oczekuje',
+  604: 'Niepowodzenie',
 } satisfies i18n

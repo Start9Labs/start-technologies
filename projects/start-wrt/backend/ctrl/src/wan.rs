@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use rpc_toolkit::{from_fn_async_local, ParentHandler};
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
@@ -189,6 +190,10 @@ pub struct WanDdnsResponse {
     pub password: Option<String>,
     pub token: Option<String>,
     pub zone: Option<String>,
+    /// The hostname is served with a certificate from Let's Encrypt.
+    pub acme: bool,
+    /// Absent while ACME is off, and outside the daemon.
+    pub certificate: Option<AcmeCertificateStatus>,
 }
 rpc_toolkit::reflect_ts!(WanDdnsResponse);
 
@@ -201,8 +206,25 @@ pub struct WanDdnsSetRequest {
     pub password: Option<String>,
     pub token: Option<String>,
     pub zone: Option<String>,
+    #[serde(default)]
+    pub acme: bool,
 }
 rpc_toolkit::reflect_ts!(WanDdnsSetRequest);
+
+/// The Let's Encrypt certificate for the DDNS hostname.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, visit_rs::VisitVariants)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum AcmeCertificateStatus {
+    Pending,
+    Issued {
+        expires: DateTime<Utc>,
+    },
+    /// The last order failed; it is retried.
+    Failed {
+        reason: String,
+    },
+}
+rpc_toolkit::reflect_ts!(AcmeCertificateStatus);
 
 // ── Provider mapping ────────────────────────────────────────
 
@@ -1023,7 +1045,14 @@ pub async fn dns_set<C: CtrlContext>(
 
 #[instrument(skip_all)]
 pub async fn ddns_get<C: CtrlContext>(ctx: C) -> Result<WanDdnsResponse, Error> {
-    let bytes = read_all(ctx.uci_root(), &["ddns"]).await?;
+    let mut res = parse_ddns(read_all(ctx.uci_root(), &["ddns"]).await?)?;
+    if let (Some(hostname), true) = (&res.hostname, res.enabled && res.acme) {
+        res.certificate = crate::tls::acme_status(hostname).await;
+    }
+    Ok(res)
+}
+
+fn parse_ddns(bytes: uciedit::ConfigBytes) -> Result<WanDdnsResponse, Error> {
     let arena = Arena::new();
     let cfgs = bytes.parse(&arena)?;
 
@@ -1070,6 +1099,8 @@ pub async fn ddns_get<C: CtrlContext>(ctx: C) -> Result<WanDdnsResponse, Error> 
                     password,
                     token,
                     zone,
+                    acme: svc._acme.as_deref() == Some("1"),
+                    certificate: None,
                 });
             }
         }
@@ -1083,6 +1114,8 @@ pub async fn ddns_get<C: CtrlContext>(ctx: C) -> Result<WanDdnsResponse, Error> 
         password: None,
         token: None,
         zone: None,
+        acme: false,
+        certificate: None,
     })
 }
 
@@ -1157,6 +1190,7 @@ pub async fn ddns_set<C: CtrlContext>(
             } else {
                 None
             },
+            _acme: (req.enabled && req.acme).then(|| "1".to_string()),
         };
 
         if let Some(idx) = ddns_idx {
@@ -1191,6 +1225,7 @@ pub async fn ddns_set<C: CtrlContext>(
                     None,
                 );
                 if ctx.effectful() {
+                    crate::tls::request_acme_certificate();
                     let _ = crate::run_quiet_async(
                         tokio::process::Command::new("/etc/init.d/ddns").arg(if req.enabled {
                             "restart"
@@ -1753,6 +1788,7 @@ config service 'wan'
         ddns_set(
             ctx.clone(),
             DeserializeStdin(WanDdnsSetRequest {
+                acme: false,
                 enabled: true,
                 provider: DdnsProvider::Cloudflare,
                 hostname: Some("mysite.example.com".to_string()),
@@ -1792,6 +1828,7 @@ config service 'wan'
         ddns_set(
             ctx.clone(),
             DeserializeStdin(WanDdnsSetRequest {
+                acme: false,
                 enabled: true,
                 provider: DdnsProvider::Cloudflare,
                 hostname: Some("example.com".to_string()),
@@ -1821,6 +1858,7 @@ config service 'wan'
         let err = ddns_set(
             ctx,
             DeserializeStdin(WanDdnsSetRequest {
+                acme: false,
                 enabled: true,
                 provider: DdnsProvider::Cloudflare,
                 hostname: Some("mysite.example.com".to_string()),
@@ -1845,6 +1883,7 @@ config service 'wan'
             let err = ddns_set(
                 ctx.clone(),
                 DeserializeStdin(WanDdnsSetRequest {
+                    acme: false,
                     enabled: true,
                     provider: DdnsProvider::Cloudflare,
                     hostname: Some(hostname.to_string()),
@@ -1895,6 +1934,7 @@ config service 'wan'
         ddns_set(
             ctx.clone(),
             DeserializeStdin(WanDdnsSetRequest {
+                acme: false,
                 enabled: true,
                 provider: DdnsProvider::Freedns,
                 hostname: Some("myhost.mooo.com".to_string()),
@@ -1918,6 +1958,42 @@ config service 'wan'
         assert_eq!(res.provider, DdnsProvider::Freedns);
         assert_eq!(res.token.as_deref(), Some("freedns-update-key"));
         assert_eq!(res.hostname.as_deref(), Some("myhost.mooo.com"));
+    }
+
+    #[tokio::test]
+    async fn ddns_acme_follows_enabled() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("ddns"), "").unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        let request = |enabled| WanDdnsSetRequest {
+            acme: true,
+            enabled,
+            provider: DdnsProvider::Duckdns,
+            hostname: Some("myhost.duckdns.org".to_string()),
+            username: None,
+            password: None,
+            token: Some("token".to_string()),
+            zone: None,
+        };
+
+        ddns_set(ctx.clone(), DeserializeStdin(request(true)))
+            .await
+            .unwrap();
+        let raw = std::fs::read_to_string(dir.path().join("ddns")).unwrap();
+        assert!(raw.contains("option _acme '1'"));
+        let res = ddns_get(ctx.clone()).await.unwrap();
+        assert!(res.acme);
+        assert_eq!(
+            res.certificate, None,
+            "no certificate store outside the daemon"
+        );
+
+        ddns_set(ctx.clone(), DeserializeStdin(request(false)))
+            .await
+            .unwrap();
+        let raw = std::fs::read_to_string(dir.path().join("ddns")).unwrap();
+        assert!(!raw.contains("_acme"));
+        assert!(!ddns_get(ctx).await.unwrap().acme);
     }
 
     #[tokio::test]
@@ -2576,6 +2652,7 @@ config service 'wan'
         ddns_set(
             ctx.clone(),
             DeserializeStdin(WanDdnsSetRequest {
+                acme: false,
                 enabled: true,
                 provider: DdnsProvider::Duckdns,
                 hostname: Some("myhost".to_string()),
@@ -2591,6 +2668,7 @@ config service 'wan'
         ddns_set(
             ctx.clone(),
             DeserializeStdin(WanDdnsSetRequest {
+                acme: false,
                 enabled: false,
                 provider: DdnsProvider::Duckdns,
                 hostname: None,
@@ -2617,6 +2695,7 @@ config service 'wan'
         ddns_set(
             ctx.clone(),
             DeserializeStdin(WanDdnsSetRequest {
+                acme: false,
                 enabled: true,
                 provider: DdnsProvider::Duckdns,
                 hostname: Some("myhost.duckdns.org".to_string()),
@@ -2648,6 +2727,7 @@ config service 'wan'
         ddns_set(
             ctx.clone(),
             DeserializeStdin(WanDdnsSetRequest {
+                acme: false,
                 enabled: true,
                 provider: DdnsProvider::Cloudflare,
                 hostname: Some("mysite.example.com".to_string()),
@@ -2663,6 +2743,7 @@ config service 'wan'
         ddns_set(
             ctx.clone(),
             DeserializeStdin(WanDdnsSetRequest {
+                acme: false,
                 enabled: true,
                 provider: DdnsProvider::Duckdns,
                 hostname: Some("myhost.duckdns.org".to_string()),

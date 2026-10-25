@@ -568,4 +568,10 @@ export default {
   596: 'Erlaubt diesem Gerät, Ihren anderen Geräten IPv6-Routen anzukündigen (erforderlich für Thread-Border-Router wie Apple TV, HomePod oder Home Assistant). Standardmäßig aus.',
   597: 'IPv6-Router-Advertisements erlauben?',
   598: 'Dieses Gerät kann dann Ihren anderen Geräten IPv6-Adressen, Routen, DNS-Server und ein Standard-Gateway zuweisen und ihren IPv6-Verkehr am Router vorbeileiten. Gewähren Sie dies nur einem Gerät, dem Sie vertrauen, etwa einem Thread-Border-Router.',
+  599: "Ein Let's-Encrypt-Zertifikat verwenden",
+  600: "Browser vertrauen diesem Hostnamen, ohne dass Sie Ihre Root-CA installieren. Erfordert Fernzugriff auf „Immer“. Let's Encrypt veröffentlicht jedes ausgestellte Zertifikat in öffentlichen Protokollen.",
+  601: 'Zertifikat',
+  602: 'Gültig bis',
+  603: 'Ausstehend',
+  604: 'Fehlgeschlagen',
 } satisfies i18n

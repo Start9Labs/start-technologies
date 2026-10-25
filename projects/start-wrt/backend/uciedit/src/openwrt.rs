@@ -486,6 +486,8 @@ pub struct ProfileDnsmasq {
     #[uci(default)]
     pub nonwildcard: Option<String>,
     #[uci(default)]
+    pub localise_queries: Option<String>,
+    #[uci(default)]
     pub listen_address: Vec<String>,
     #[uci(default)]
     pub notinterface: Vec<String>,
@@ -574,4 +576,7 @@ pub struct DdnsService {
     pub domain: Option<String>,
     #[uci(default)]
     pub lookup_host: Option<String>,
+    /// StartWRT's own: `1` serves the hostname with an ACME certificate.
+    #[uci(default)]
+    pub _acme: Option<String>,
 }

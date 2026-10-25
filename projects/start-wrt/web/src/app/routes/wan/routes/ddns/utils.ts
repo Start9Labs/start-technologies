@@ -45,6 +45,7 @@ export function getDdnsForm(builder: NonNullableFormBuilder) {
   return builder.group({
     enabled: builder.control(false),
     provider: builder.control<DdnsProvider>('dyndns'),
+    acme: builder.control(false),
     fields: builder.group({
       username: builder.control(''),
       password: builder.control(''),
