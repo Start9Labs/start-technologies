@@ -14,6 +14,7 @@ import { Authority, AuthorityService } from './authority.service'
         <button
           tuiIconButton
           tuiDropdown
+          tuiDropdownAlign="end"
           size="s"
           appearance="flat-grayscale"
           iconStart="@tui.ellipsis-vertical"

@@ -58,6 +58,7 @@ import { PORT_FORWARDS_MODAL } from './port-forwards.component'
         <button
           tuiIconButton
           tuiDropdown
+          tuiDropdownAlign="end"
           tuiDropdownAuto
           size="s"
           appearance="flat-grayscale"

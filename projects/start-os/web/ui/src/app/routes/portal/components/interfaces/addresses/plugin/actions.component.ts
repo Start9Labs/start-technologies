@@ -65,6 +65,7 @@ import {
             <button
               tuiIconButton
               tuiDropdown
+              tuiDropdownAlign="end"
               appearance="flat-grayscale"
               iconStart="@tui.ellipsis-vertical"
               [tuiAppearanceState]="overflowOpen() ? 'hover' : null"
@@ -94,6 +95,7 @@ import {
       <div class="mobile">
         <button
           tuiDropdown
+          tuiDropdownAlign="end"
           tuiIconButton
           appearance="flat-grayscale"
           iconStart="@tui.ellipsis-vertical"

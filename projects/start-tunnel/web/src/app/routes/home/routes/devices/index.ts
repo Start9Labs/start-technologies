@@ -35,12 +35,17 @@ type DeviceRow = { name: string; subnet: { name: string }; ip: string }
         <tui-icon icon="@tui.server" />
         <h3 tuiTitle>{{ 'Servers' | i18n }}</h3>
         <aside tuiAccessories>
-          <button tuiButton iconStart="@tui.plus" (click)="onAdd('server')">
+          <button
+            tuiButton
+            iconStart="@tui.plus"
+            [disabled]="loading()"
+            (click)="onAdd('server')"
+          >
             {{ 'Add' | i18n }}
           </button>
         </aside>
       </header>
-      <table tuiTable class="g-table" [tuiSkeleton]="!servers()">
+      <table tuiTable class="g-table" [tuiSkeleton]="loading()">
         <thead>
           <tr>
             <th tuiTh [sorter]="byName">{{ 'Name' | i18n }}</th>
@@ -108,6 +113,7 @@ type DeviceRow = { name: string; subnet: { name: string }; ip: string }
                   tuiIconButton
                   size="xs"
                   tuiDropdown
+                  tuiDropdownAlign="end"
                   tuiDropdownAuto
                   appearance="flat-grayscale"
                   iconStart="@tui.ellipsis-vertical"
@@ -168,12 +174,17 @@ type DeviceRow = { name: string; subnet: { name: string }; ip: string }
         <tui-icon icon="@tui.laptop" />
         <h3 tuiTitle>{{ 'Clients' | i18n }}</h3>
         <aside tuiAccessories>
-          <button tuiButton iconStart="@tui.plus" (click)="onAdd('client')">
+          <button
+            tuiButton
+            iconStart="@tui.plus"
+            [disabled]="loading()"
+            (click)="onAdd('client')"
+          >
             {{ 'Add' | i18n }}
           </button>
         </aside>
       </header>
-      <table tuiTable class="g-table" [tuiSkeleton]="!clients()">
+      <table tuiTable class="g-table" [tuiSkeleton]="loading()">
         <thead>
           <tr>
             <th tuiTh [sorter]="byName">{{ 'Name' | i18n }}</th>
@@ -205,6 +216,7 @@ type DeviceRow = { name: string; subnet: { name: string }; ip: string }
                   tuiIconButton
                   size="xs"
                   tuiDropdown
+                  tuiDropdownAlign="end"
                   tuiDropdownAuto
                   appearance="flat-grayscale"
                   iconStart="@tui.ellipsis-vertical"
@@ -321,6 +333,8 @@ export default class Devices {
     ),
     { initialValue: null },
   )
+
+  protected readonly loading = computed(() => this.subnets() === null)
 
   protected readonly devices = computed(() => {
     const defaultWan = this.defaultWan()
