@@ -608,6 +608,10 @@ assert_metadata_matches_adopted() {
         if [ -z "$untracked" ] && (cd "$REPO_ROOT" && git diff --quiet "$adopted" -- "$file"); then
             continue
         fi
+        if [ -n "${UNCOMMITTED_NOTES:-}" ] && [ "$file" != "$REPO_ROOT/projects/$PROJECT/changelog" ]; then
+            >&2 echo "  ! ${file#"$REPO_ROOT/"} differs from ${adopted}; releasing it anyway (UNCOMMITTED_NOTES)"
+            continue
+        fi
 
         >&2 echo "  ✗ ${file#"$REPO_ROOT/"} differs between the working tree and the"
         >&2 echo "    commit being tagged (${adopted}). The release is composed from"
@@ -1772,6 +1776,8 @@ Environment variables:
                            and downgrade pre-check's "already released" failure to
                            a warning (idempotent steps only; npm republish always
                            fails)
+  UNCOMMITTED_NOTES        Set to 1 to release curated notes that differ from the
+                           tagged commit; commit them to master afterwards
   CLEAN                    Set to 1 to wipe and recreate the release directory
   GH_USER                  Override GitHub username (default: autodetected via gh)
   OTP                      npm one-time password for start-sdk publish

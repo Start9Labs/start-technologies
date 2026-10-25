@@ -123,7 +123,7 @@ fn display_summary<T>(params: WithIoFormat<T>, summary: MetricsSummary) -> Resul
         for entry in &summary.by_arch {
             table.add_row(row![&entry.label, entry.count]);
         }
-        table.print_tty(false)?;
+        print_table(&table)?;
     }
 
     if !summary.by_os_version.is_empty() {
@@ -133,7 +133,7 @@ fn display_summary<T>(params: WithIoFormat<T>, summary: MetricsSummary) -> Resul
         for entry in &summary.by_os_version {
             table.add_row(row![&entry.label, entry.count]);
         }
-        table.print_tty(false)?;
+        print_table(&table)?;
     }
 
     Ok(())
@@ -337,7 +337,7 @@ fn display_downloads(
         for entry in &response.by_package {
             table.add_row(row![&entry.label, entry.count]);
         }
-        table.print_tty(false)?;
+        print_table(&table)?;
     }
 
     if !response.by_package_version.is_empty() {
@@ -347,7 +347,7 @@ fn display_downloads(
         for entry in &response.by_package_version {
             table.add_row(row![&entry.pkg_id, &entry.version, entry.count]);
         }
-        table.print_tty(false)?;
+        print_table(&table)?;
     }
 
     Ok(())

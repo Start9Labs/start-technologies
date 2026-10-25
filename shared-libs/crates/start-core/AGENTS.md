@@ -49,6 +49,8 @@ See [rpc-toolkit.md](rpc-toolkit.md) for handler patterns.
 
 ## Gotchas
 
+- **Console output uses `rpc_toolkit::output`.** `lib.rs` imports `rpc_toolkit`'s macros with `#[macro_use]`, whose four print macros shadow `std`'s crate-wide. A glob re-export cannot shadow them (E0659). Use `rpc_toolkit::output`'s stdout/stderr writers for serializers and generators, and the prelude's `print_table` for tables. Broken output pipes exit with status 141; network and filesystem errors retain their normal handling.
+
 - **Process invocation: use `.invoke(ErrorKind::...)`, not `.status()`.** When running CLI commands via `tokio::process::Command`, the `Invoke` trait (from `crate::util::Invoke`) captures stdout/stderr and checks exit codes. `.status()` leaks stderr directly to system logs and creates noise in production. For check-then-act patterns (e.g. `iptables -C`), use `.invoke(...).await.is_ok()` / `.is_err()` instead of `.status().await.map_or(false, |s| s.success())`.
 - **File I/O: prefer `crate::util::io` over `tokio::fs`** when an equivalent helper exists. These helpers add error context and mount-aware behavior that `tokio::fs` doesn't.
 - **i18n is mandatory for any user-facing string** — including CLI subcommand descriptions (`about.<name>`), CLI arg help (`help.arg.<name>`), error messages, notifications, and setup messages. All 5 locales (`en_US`, `de_DE`, `es_ES`, `fr_FR`, `pl_PL`) must be filled in `locales/i18n.yaml` (i.e. `shared-libs/crates/start-core/locales/i18n.yaml`), alphabetically ordered within their section. Use `t!()`, match the key namespace to the module path, and use kebab-case for multi-word segments. See `i18n-patterns.md`. Compile-time validation catches missing keys.

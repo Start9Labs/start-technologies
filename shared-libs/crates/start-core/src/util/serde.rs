@@ -14,6 +14,7 @@ use openssl::pkey::{PKey, Private};
 use openssl::x509::X509;
 use rpc_toolkit::{
     CliBindings, Context, HandlerArgs, HandlerArgsFor, HandlerFor, HandlerTypes, PrintCliResult,
+    output,
 };
 use serde::de::DeserializeOwned;
 use serde::ser::{SerializeMap, SerializeSeq};
@@ -450,10 +451,13 @@ mod yaml_tests {
 }
 
 pub fn display_serializable<T: Serialize>(format: IoFormat, result: T) -> Result<(), Error> {
-    format.to_writer(std::io::stdout(), &result)?;
+    use std::io::Write as _;
+    let mut stdout = output::stdout();
+    format.to_writer(&mut stdout, &result)?;
     if format == IoFormat::JsonPretty {
-        println!()
+        writeln!(stdout)?;
     }
+    stdout.flush()?;
     Ok(())
 }
 

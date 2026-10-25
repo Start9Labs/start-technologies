@@ -1,6 +1,7 @@
 use std::ffi::OsString;
+use std::io::Write;
 
-use rpc_toolkit::CliApp;
+use rpc_toolkit::{CliApp, output};
 use serde_json::Value;
 
 use super::completions::CompletionsParams;
@@ -8,6 +9,9 @@ use crate::context::CliContext;
 use crate::context::config::ClientConfig;
 use crate::prelude::Error;
 use crate::util::logger::LOGGER;
+
+#[cfg(test)]
+mod tests;
 
 fn app() -> CliApp<CliContext, ClientConfig> {
     CliApp::new(
@@ -19,26 +23,28 @@ fn app() -> CliApp<CliContext, ClientConfig> {
 }
 
 pub fn completions(_: CliContext, params: CompletionsParams) -> Result<(), Error> {
-    params.generate(app().into_command(), &mut std::io::stdout())
+    params.generate(app().into_command(), &mut output::stdout())
 }
 
 pub fn main(args: impl IntoIterator<Item = OsString>) {
     LOGGER.enable();
 
     if let Err(e) = app().run(args) {
-        match e.data {
-            Some(Value::String(s)) => eprintln!("{}: {}", e.message, s),
-            Some(Value::Object(o)) => {
-                if let Some(Value::String(s)) = o.get("details") {
-                    eprintln!("{}: {}", e.message, s);
+        let mut stderr = output::stderr();
+        let _ = match e.data {
+            Some(Value::String(s)) => writeln!(stderr, "{}: {}", e.message, s),
+            Some(Value::Object(o)) => match o.get("details") {
+                Some(Value::String(s)) => {
                     if let Some(Value::String(s)) = o.get("debug") {
                         tracing::debug!("{}", s)
                     }
+                    writeln!(stderr, "{}: {}", e.message, s)
                 }
-            }
-            Some(a) => eprintln!("{}: {}", e.message, a),
-            None => eprintln!("{}", e.message),
-        }
+                _ => Ok(()),
+            },
+            Some(a) => writeln!(stderr, "{}: {}", e.message, a),
+            None => writeln!(stderr, "{}", e.message),
+        };
 
         std::process::exit(e.code);
     }

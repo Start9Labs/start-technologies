@@ -60,6 +60,11 @@ pub trait LoginContext: SignatureAuthContext {
     /// continuations die with it.
     fn access_auth_keys(db: &mut Model<Self::Database>) -> &mut Model<AuthKeys>;
     fn check_password(db: &Model<Self::Database>, password: &str) -> Result<(), Error>;
+    /// Whether a sign-in has ended, judged by a trusted clock. Defaults to
+    /// [`MAX_IDLE`] without use.
+    fn sign_in_expired(session: &Session, now: DateTime<Utc>) -> bool {
+        now - session.last_active > MAX_IDLE
+    }
     #[allow(unused_variables)]
     fn post_login_hook(&self, password: &str) -> impl Future<Output = Result<(), Error>> + Send {
         async { Ok(()) }
@@ -210,30 +215,30 @@ pub fn auth<C: Context, AC: LoginContext, CC: IdKeyContext + CallRemote<AC>>() -
         )
 }
 
-/// Keys unused this long are unenrolled by [`reap_idle_keys`].
+/// Keys unused this long are unenrolled by default.
 pub const MAX_IDLE: TimeDelta = TimeDelta::days(30);
 
-fn idle_keys(keys: &AuthKeys, now: DateTime<Utc>) -> Vec<InternedString> {
+fn expired_keys<C: LoginContext>(keys: &AuthKeys, now: DateTime<Utc>) -> Vec<InternedString> {
     keys.0
         .iter()
-        .filter(|(_, session)| now - session.last_active > MAX_IDLE)
+        .filter(|(_, session)| C::sign_in_expired(session, now))
         .map(|(key, _)| key.clone())
         .collect()
 }
 
-/// Unenrolls keys idle past [`MAX_IDLE`] inside an open db transaction. The
-/// caller has established that the clock is trustworthy.
+/// Unenrolls keys whose sign-in has expired inside an open db transaction.
+/// The caller has established that the clock is trustworthy.
 pub fn reap_idle_keys_in<C: LoginContext>(
     continuations: &OpenAuthedContinuations<Option<InternedString>>,
     ephemeral: Option<&SyncMutex<AuthKeys>>,
     db: &mut Model<C::Database>,
 ) -> Result<(), Error> {
-    let expired = idle_keys(&C::access_auth_keys(db).de()?, Utc::now());
+    let expired = expired_keys::<C>(&C::access_auth_keys(db).de()?, Utc::now());
     HasUnenrolledKeys::unenroll::<C>(continuations, ephemeral, db, expired)?;
     Ok(())
 }
 
-/// Unenrolls keys idle past [`MAX_IDLE`]. Waits for a trusted clock, so a
+/// Unenrolls keys whose sign-in has expired. Waits for a trusted clock, so a
 /// wrong boot-time clock cannot reap live sign-ins.
 pub async fn reap_idle_keys<C: LoginContext>(ctx: &C) -> Result<(), Error> {
     if !ctx.clock_synced().await {
@@ -553,7 +558,7 @@ fn display_sessions(params: WithIoFormat<ListParams>, arg: SessionList) -> Resul
         }
         table.add_row(row);
     }
-    table.print_tty(false)?;
+    print_table(&table)?;
     Ok(())
 }
 

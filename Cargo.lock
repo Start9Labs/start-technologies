@@ -7652,7 +7652,7 @@ dependencies = [
 
 [[package]]
 name = "start-cli"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "start-core",
  "tracing",
@@ -7810,7 +7810,7 @@ dependencies = [
 
 [[package]]
 name = "start-os"
-version = "0.4.0-rev.3"
+version = "0.4.0-rev.4"
 dependencies = [
  "include_dir",
  "start-core",
