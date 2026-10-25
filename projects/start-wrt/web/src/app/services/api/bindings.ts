@@ -207,6 +207,9 @@ export type SetInitialPasswordParamsInput = z.input<
   typeof schemas.SetInitialPasswordParams
 >
 export type SetPreferencesReqInput = z.input<typeof schemas.SetPreferencesReq>
+export type SetRouterAdvertisementsReqInput = z.input<
+  typeof schemas.SetRouterAdvertisementsReq
+>
 export type SetTimezoneParamsInput = z.input<typeof schemas.SetTimezoneParams>
 export type SniPortUse = z.output<typeof schemas.SniPortUse>
 export type SpeedData = z.output<typeof schemas.SpeedData>

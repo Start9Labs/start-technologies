@@ -564,4 +564,8 @@ export default {
   592: 'Wyłączony. Profile nie mogą z niego korzystać, dopóki nie zostanie ponownie włączony.',
   593: 'Nigdy',
   594: 'Zmiana hasła wyloguje wszystkie inne przeglądarki i sesje startwrt-cli. Ta przeglądarka pozostanie zalogowana.',
+  595: 'Zezwalaj na ogłoszenia routera IPv6',
+  596: 'Pozwala temu urządzeniu ogłaszać trasy IPv6 innym Twoim urządzeniom (wymagane przez routery brzegowe Thread, takie jak Apple TV, HomePod lub Home Assistant). Domyślnie wyłączone.',
+  597: 'Zezwolić na ogłoszenia routera IPv6?',
+  598: 'To urządzenie będzie mogło przydzielać innym Twoim urządzeniom adresy IPv6, trasy, serwery DNS i bramę domyślną, a także kierować ich ruch IPv6 z pominięciem routera. Przyznaj to tylko zaufanemu urządzeniu, takiemu jak router brzegowy Thread.',
 } satisfies i18n

@@ -33,6 +33,8 @@ Click a device name to open its detail page:
 
   Names ending in `.lan` cannot be published; that zone is the router's own. Enable this toggle **before** adding the private domain on the server: while publishing is refused, other devices may cache a "no such domain" answer for a while. See [Private Domains](/start-os/private-domains.html) in the StartOS book for choosing a domain and clearing a cached miss.
 
+- **Allow IPv6 router advertisements** — Off by default. The router drops IPv6 router advertisements that another device sends between its ports and Wi-Fi networks, so a modem or router plugged into a LAN port cannot take over the IPv6 of devices on the router's Wi-Fi. Toggle on for a device that needs to send them, such as a Thread border router (an Apple TV, HomePod, Nest Hub, or Home Assistant), so your phone or controller can reach Thread accessories. An allowed device can give your other devices IPv6 addresses, routes, DNS servers, and a default gateway, so enabling asks for confirmation; grant it only to a device you trust. The router recognizes the device by its MAC address, which another device on your network could copy.
+
 - **Forget** — Remove an offline device from the list. Custom name, reserved IP settings, granted permissions, and the device's cached name are lost; any automatic port forwards it holds are closed and any DNS records it published are removed. If the device reconnects, it will appear as a new entry.
 
 > [!TIP]

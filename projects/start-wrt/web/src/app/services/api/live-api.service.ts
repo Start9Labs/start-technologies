@@ -304,6 +304,15 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'devices.set-dns-injection', params })
   }
 
+  async devicesSetRouterAdvertisements(
+    params: RpcParamType<Api, 'devices.set-router-advertisements'>,
+  ): Promise<RpcReturnType<Api, 'devices.set-router-advertisements'>> {
+    return this.rpc.request({
+      method: 'devices.set-router-advertisements',
+      params,
+    })
+  }
+
   async dnsInjectedList(): Promise<InjectedDnsRecordFromApi[]> {
     return this.rpc.request({ method: 'dns.injected-list', params: {} })
   }

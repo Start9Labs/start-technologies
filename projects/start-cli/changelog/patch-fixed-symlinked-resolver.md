@@ -1,0 +1,1 @@
+- Fixed services packed from an image whose `/etc/resolv.conf` is a symlink, such as a Nix-built image, failing to start on StartOS. Repack affected services with this version.

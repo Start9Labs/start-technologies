@@ -1,6 +1,10 @@
 import { Component, computed, effect, inject } from '@angular/core'
 import { toObservable, toSignal } from '@angular/core/rxjs-interop'
-import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms'
+import {
+  FormControl,
+  NonNullableFormBuilder,
+  ReactiveFormsModule,
+} from '@angular/forms'
 import { ActivatedRoute, Router, RouterLink } from '@angular/router'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import {
@@ -20,6 +24,7 @@ import { Form } from 'src/app/components/form'
 import { DevicesService } from 'src/app/routes/devices/service'
 import {
   DEVICE_VALIDATION_ERRORS,
+  DevicePermissionChanges,
   getDeviceForm,
   updateDeviceValidators,
 } from 'src/app/routes/devices/utils'
@@ -30,6 +35,7 @@ import {
 import { DeviceSummary } from './summary'
 import { InjectedRecordsTable } from './records'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { i18nKey } from 'src/app/i18n/i18n.providers'
 
 @Component({
   template: `
@@ -148,6 +154,23 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
             }}
           </div>
         </section>
+        <section>
+          <label tuiLabel>
+            <input
+              tuiSwitch
+              type="checkbox"
+              formControlName="allowRouterAdvertisements"
+              (click)="onRouterAdvertisementsToggle($event)"
+            />
+            {{ 'Allow IPv6 router advertisements' | i18n }}
+          </label>
+          <div class="g-secondary">
+            {{
+              'Lets this device announce IPv6 routes to your other devices (needed by Thread border routers such as an Apple TV, HomePod, or Home Assistant). Off by default.'
+                | i18n
+            }}
+          </div>
+        </section>
       </fieldset>
       @if (data()) {
         <footer appFooter></footer>
@@ -254,6 +277,7 @@ export default class DeviceDetail {
           name: data.customName ?? '',
           allowAutoPortForward: data.allowAutoPortForward,
           allowDnsInjection: data.allowDnsInjection,
+          allowRouterAdvertisements: data.allowRouterAdvertisements,
           ip: {
             ipv4Static: data.ipv4Static,
             ipv4: data.ipv4 ?? '',
@@ -269,18 +293,38 @@ export default class DeviceDetail {
     })
   }
 
-  // Enabling asks first; the control flips only on confirmation.
   protected onDnsInjectionToggle(event: Event) {
-    const control = this.form.controls.allowDnsInjection
+    this.confirmEnable(
+      event,
+      this.form.controls.allowDnsInjection,
+      'Allow DNS Record Publishing?',
+      'This device will be able to publish DNS names that resolve on your whole network. Grant this only to a device you trust, such as your own StartOS server.',
+    )
+  }
+
+  protected onRouterAdvertisementsToggle(event: Event) {
+    this.confirmEnable(
+      event,
+      this.form.controls.allowRouterAdvertisements,
+      'Allow IPv6 Router Advertisements?',
+      'This device will be able to give your other devices IPv6 addresses, routes, DNS servers, and a default gateway, and could route their IPv6 traffic around the router. Grant this only to a device you trust, such as a Thread border router.',
+    )
+  }
+
+  // Enabling asks first; the control flips only on confirmation.
+  private confirmEnable(
+    event: Event,
+    control: FormControl<boolean>,
+    label: i18nKey,
+    content: i18nKey,
+  ) {
     if (control.value) return
     event.preventDefault()
     this.dialogs
       .open<boolean>(TUI_CONFIRM, {
-        label: this.i18n.transform('Allow DNS Record Publishing?'),
+        label: this.i18n.transform(label),
         data: {
-          content: this.i18n.transform(
-            'This device will be able to publish DNS names that resolve on your whole network. Grant this only to a device you trust, such as your own StartOS server.',
-          ),
+          content: this.i18n.transform(content),
           yes: this.i18n.transform('Allow'),
           no: this.i18n.transform('Cancel'),
         },
@@ -317,14 +361,8 @@ export default class DeviceDetail {
 
     // A permission is sent only when it changed; revoking one tears down what
     // the device created with it.
-    const allowAutoForward =
-      formValue.allowAutoPortForward !== this.data()?.allowAutoPortForward
-        ? formValue.allowAutoPortForward
-        : undefined
-    const allowDnsInjection =
-      formValue.allowDnsInjection !== this.data()?.allowDnsInjection
-        ? formValue.allowDnsInjection
-        : undefined
+    const changed = (key: keyof DevicePermissionChanges) =>
+      formValue[key] !== this.data()?.[key] ? formValue[key] : undefined
 
     const success = await this.service.update(
       this.mac,
@@ -333,8 +371,11 @@ export default class DeviceDetail {
         ipv4Static: formValue.ip.ipv4Static,
         ipv4: formValue.ip.ipv4,
       },
-      allowAutoForward,
-      allowDnsInjection,
+      {
+        allowAutoPortForward: changed('allowAutoPortForward'),
+        allowDnsInjection: changed('allowDnsInjection'),
+        allowRouterAdvertisements: changed('allowRouterAdvertisements'),
+      },
     )
 
     if (success) {
@@ -364,6 +405,7 @@ export default class DeviceDetail {
         name: data.name,
         allowAutoPortForward: data.allowAutoPortForward,
         allowDnsInjection: data.allowDnsInjection,
+        allowRouterAdvertisements: data.allowRouterAdvertisements,
         ip: {
           ipv4Static: data.ipv4Static,
           ipv4: data.ipv4 ?? '',

@@ -12,7 +12,7 @@ use crate::prelude::*;
 use crate::s9pk::merkle_archive::source::{DynFileSource, FileSource};
 use crate::util::squashfs::blocks::invalid;
 use crate::util::squashfs::tree::resolve_hardlink;
-use crate::util::squashfs::{Entry, Node, NodeContents, Squashfs};
+use crate::util::squashfs::{Entry, Metadata, Node, NodeContents, Squashfs};
 
 pub(crate) struct LayerFilesystem {
     nodes: BTreeMap<PathBuf, Arc<Node<DynFileSource>>>,
@@ -152,6 +152,22 @@ impl LayerFilesystem {
             self.ensure_directory(&path)?;
         }
         Ok(())
+    }
+
+    pub(crate) fn replace_symlink_with_empty_file(&mut self, path: &Path) {
+        if self
+            .nodes
+            .get(path)
+            .is_some_and(|node| matches!(node.contents, NodeContents::Symlink(_)))
+        {
+            self.nodes.insert(
+                path.to_owned(),
+                Arc::new(Node {
+                    metadata: Metadata::new(0o644),
+                    contents: NodeContents::File(DynFileSource::new(Arc::<[u8]>::from([]))),
+                }),
+            );
+        }
     }
 
     pub(crate) fn into_squashfs(self) -> Result<Squashfs<DynFileSource>, Error> {

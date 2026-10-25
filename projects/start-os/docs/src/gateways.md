@@ -42,7 +42,7 @@ To re-import a gateway's WireGuard config — for example, a StartTunnel config 
 
 ## DNS Settings
 
-The **DNS** column shows each gateway's effective resolver addresses, marked **(Auto)** for gateway-provided DNS or **(Fallback)** for public fallback. Choose **Edit** from the gateway's `⋮` menu to change its name and [DNS settings](dns.md) together. Disconnected gateways remain listed so their settings can still be edited.
+The **DNS** column shows each gateway's effective resolver addresses, marked **(Auto)** for gateway-provided DNS or **(Fallback)** for public fallback. Choose **Edit** from the gateway's `⋮` menu to change its name and [DNS settings](dns.md) together.
 
 ## Outbound Traffic
 

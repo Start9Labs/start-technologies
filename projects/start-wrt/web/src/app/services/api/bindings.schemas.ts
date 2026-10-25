@@ -1121,6 +1121,12 @@ export const SetPreferencesReq: z.ZodObject<{
 }).meta({
   id: 'SetPreferencesReq',
 })
+export const SetRouterAdvertisementsReq: z.ZodObject<{
+  mac: z.ZodString
+  allow: z.ZodBoolean
+}> = /* @__PURE__ */ object({ mac: z.string(), allow: z.boolean() }).meta({
+  id: 'SetRouterAdvertisementsReq',
+})
 export const SetTimezoneParams: z.ZodObject<{
   /**
    * IANA timezone name, e.g. "America/New_York"
@@ -1546,6 +1552,12 @@ export const Device: z.ZodObject<{
    * VPN peer).
    */
   allow_dns_injection: z.ZodBoolean
+  /**
+   * Whether the router forwards this device's IPv6 router advertisements
+   * to the rest of the LAN (`devices set-router-advertisements`). Always
+   * false for a VPN peer.
+   */
+  allow_router_advertisements: z.ZodBoolean
   security_profile: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
@@ -1608,6 +1620,15 @@ export const Device: z.ZodObject<{
   allow_dns_injection: z.boolean().meta({
     description:
       "Whether this device may publish DNS records into the router's resolver\n(`devices set-dns-injection`; `vpn-server peer-set-dns-injection` for a\nVPN peer).",
+  }),
+  /**
+   * Whether the router forwards this device's IPv6 router advertisements
+   * to the rest of the LAN (`devices set-router-advertisements`). Always
+   * false for a VPN peer.
+   */
+  allow_router_advertisements: z.boolean().meta({
+    description:
+      "Whether the router forwards this device's IPv6 router advertisements\nto the rest of the LAN (`devices set-router-advertisements`). Always\nfalse for a VPN peer.",
   }),
   security_profile: wire(
     z.string().nullable().optional(),
@@ -2893,6 +2914,13 @@ export const Api = {
         },
         'set-dns-injection': {
           _PARAMS: /* @__PURE__ */ SetDnsInjectionReq.meta({
+            description:
+              'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
+          }),
+          _RETURN: /* @__PURE__ */ z.null(),
+        },
+        'set-router-advertisements': {
+          _PARAMS: /* @__PURE__ */ SetRouterAdvertisementsReq.meta({
             description:
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
