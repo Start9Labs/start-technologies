@@ -62,6 +62,7 @@ import { wifiSpec } from './wifi.const'
         <button
           tuiIconButton
           tuiDropdown
+          tuiDropdownAlign="end"
           tuiDropdownAuto
           size="s"
           appearance="flat-grayscale"

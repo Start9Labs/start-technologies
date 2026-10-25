@@ -108,6 +108,7 @@ type DeviceRow = { name: string; subnet: { name: string }; ip: string }
                   tuiIconButton
                   size="xs"
                   tuiDropdown
+                  tuiDropdownAlign="end"
                   tuiDropdownAuto
                   appearance="flat-grayscale"
                   iconStart="@tui.ellipsis-vertical"
@@ -205,6 +206,7 @@ type DeviceRow = { name: string; subnet: { name: string }; ip: string }
                   tuiIconButton
                   size="xs"
                   tuiDropdown
+                  tuiDropdownAlign="end"
                   tuiDropdownAuto
                   appearance="flat-grayscale"
                   iconStart="@tui.ellipsis-vertical"
