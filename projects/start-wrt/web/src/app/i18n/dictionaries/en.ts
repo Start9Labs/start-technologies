@@ -569,4 +569,8 @@ export const ENGLISH: Record<string, number> = {
   'Turned off. Profiles can\'t use it until it\'s enabled again.': 592,
   'Never': 593,
   'Changing the password signs out every other browser and startwrt-cli login. This browser stays signed in.': 594,
+  'Allow IPv6 router advertisements': 595,
+  'Lets this device announce IPv6 routes to your other devices (needed by Thread border routers such as an Apple TV, HomePod, or Home Assistant). Off by default.': 596,
+  'Allow IPv6 Router Advertisements?': 597,
+  'This device will be able to give your other devices IPv6 addresses, routes, DNS servers, and a default gateway, and could route their IPv6 traffic around the router. Grant this only to a device you trust, such as a Thread border router.': 598,
 }

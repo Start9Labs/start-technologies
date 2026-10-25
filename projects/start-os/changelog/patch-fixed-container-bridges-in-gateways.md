@@ -1,0 +1,1 @@
+- Restore the Gateways list to connected gateways, hiding stale bridge entries.

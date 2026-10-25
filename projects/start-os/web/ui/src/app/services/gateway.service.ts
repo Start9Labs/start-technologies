@@ -5,8 +5,15 @@ import { PatchDB } from 'patch-db-client'
 
 import { DataModel } from './patch-db/data-model'
 
-function isGatewayInterface(gateway: T.NetworkInterfaceInfo): boolean {
-  return !['bridge', 'loopback'].includes(gateway.ipInfo?.deviceType ?? '')
+type ConnectedGateway = T.NetworkInterfaceInfo & { ipInfo: T.IpInfo }
+
+export function isConnectedGateway(
+  gateway: T.NetworkInterfaceInfo | undefined,
+): gateway is ConnectedGateway {
+  return (
+    !!gateway?.ipInfo &&
+    !['bridge', 'loopback'].includes(gateway.ipInfo.deviceType ?? '')
+  )
 }
 
 export function outboundGatewayOptions(
@@ -14,10 +21,7 @@ export function outboundGatewayOptions(
   selected: string | null,
 ): Record<string, string> {
   const ids = Object.entries(gateways)
-    .filter(
-      ([id, gateway]) =>
-        id === selected || (gateway.ipInfo && isGatewayInterface(gateway)),
-    )
+    .filter(([id, gateway]) => id === selected || isConnectedGateway(gateway))
     .map(([id]) => id)
   if (selected && !ids.includes(selected)) ids.push(selected)
   return Object.fromEntries(
@@ -25,15 +29,13 @@ export function outboundGatewayOptions(
   )
 }
 
-export type GatewayDetails = T.NetworkInterfaceInfo & {
+export type GatewayPlus = ConnectedGateway & {
   id: string
   name: string
   subnets: utils.IpNet[]
   lanIpv4: string[]
   wanIp?: utils.IpAddress
 }
-
-export type GatewayPlus = GatewayDetails & { ipInfo: T.IpInfo }
 
 export function gatewayName(
   id: string,
@@ -59,30 +61,26 @@ export class GatewayService {
     return { id, name: gatewayName(id, network.gateways[id]) }
   })
 
-  readonly configuredGateways = computed(() => {
+  readonly gateways = computed(() => {
     const network = this.network()
     if (!network) return
-    return Object.entries(network.gateways)
-      .filter(([, gateway]) => isGatewayInterface(gateway))
-      .map(([id, gateway]): GatewayDetails => {
-        const subnets =
-          gateway.ipInfo?.subnets.map(s => utils.IpNet.parse(s)) ?? []
-        return {
-          ...gateway,
-          id,
-          name: gatewayName(id, gateway),
-          subnets,
-          lanIpv4: subnets.filter(s => s.isIpv4()).map(s => s.address),
-          wanIp: gateway.ipInfo?.wanIp
-            ? utils.IpAddress.parse(gateway.ipInfo.wanIp)
-            : undefined,
-        }
-      })
+    return Object.entries(network.gateways).flatMap(
+      ([id, gateway]): GatewayPlus[] => {
+        if (!isConnectedGateway(gateway)) return []
+        const subnets = gateway.ipInfo.subnets.map(s => utils.IpNet.parse(s))
+        return [
+          {
+            ...gateway,
+            id,
+            name: gatewayName(id, gateway),
+            subnets,
+            lanIpv4: subnets.filter(s => s.isIpv4()).map(s => s.address),
+            wanIp: gateway.ipInfo.wanIp
+              ? utils.IpAddress.parse(gateway.ipInfo.wanIp)
+              : undefined,
+          },
+        ]
+      },
+    )
   })
-
-  readonly gateways = computed(() =>
-    this.configuredGateways()?.filter(
-      (gateway): gateway is GatewayPlus => !!gateway.ipInfo,
-    ),
-  )
 }

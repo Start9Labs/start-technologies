@@ -99,7 +99,7 @@ cd start-technologies
 
 `make start-core-ts-bindings` regenerates the TypeScript bindings from the Rust types, and `make clean` removes all compiled artifacts (ask before running it). Cross-layer changes (Rust → bindings → SDK → web/runtime) are described in [ARCHITECTURE.md](ARCHITECTURE.md#build-pipeline).
 
-The shared Rust builder image is defined in `build/rust-builder/`. `make rust-builder` builds it locally and `make rust-builder-check` verifies the resulting image. `.github/workflows/rust-builder.yaml` verifies native amd64 and arm64 builds before publishing their combined manifest to GHCR on master. See [`build/rust-builder/README.md`](build/rust-builder/README.md) for image inputs and update conventions.
+The shared Rust builder image is defined in `build/rust-builder/`. `make rust-builder` builds it locally and `make rust-builder-check` verifies the resulting image. `.github/workflows/rust-builder.yaml` verifies native amd64 and arm64 builds before publishing their combined manifest to GHCR on master. `build/rust-builder/image.sh` selects the pinned published image or a `RUST_BUILDER_IMAGE` override for compiler, formatter, and K1 callers; core tests retain their prebuilt-test-image override. `make rust-builder-selection-test` checks those selection paths without Docker. See [`build/rust-builder/README.md`](build/rust-builder/README.md) for image inputs and update conventions.
 
 ### Build configuration
 
@@ -151,8 +151,8 @@ make format-check    # read-only check (what CI runs)
 
 rustfmt uses options that are still nightly-only, so to keep output identical for
 everyone it runs in a pinned-nightly container — `build/fmt/fmtenv.Dockerfile`, which
-adds the pinned nightly to `start9/cargo-zigbuild` (the same image the Rust build
-uses) and is built on first use. prettier and taplo are pinned via npm
+adds the pinned nightly to the shared GHCR builder selected by `build/rust-builder/image.sh`.
+Docker's build cache refreshes it when its base or Dockerfile changes. prettier and taplo are pinned via npm
 devDependencies and run natively. To bump a version, edit the Dockerfile's
 `RUSTFMT_TOOLCHAIN` (rustfmt) or `package.json` (prettier / `@taplo/cli`).
 

@@ -85,6 +85,7 @@ const ERROR =
               <button
                 tuiIconButton
                 tuiDropdown
+                tuiDropdownAlign="end"
                 size="s"
                 appearance="flat-grayscale"
                 iconStart="@tui.ellipsis-vertical"

@@ -10,6 +10,14 @@ The image does not include the legacy GNU cross-compiler tree or its CMake overr
 
 The final image contains the replacement executable and its verification script, not the downloaded source or intermediate Rust build artifacts.
 
+## Consumers
+
+`image.sh` resolves the published image from `repository` and `reference`, or returns a `RUST_BUILDER_IMAGE` override. Shared compiler commands, StartWRT's compiler/test/disassembly commands, and the formatter use that selection. Rust binary Make prerequisites track the selection files, so a pin change invalidates existing binaries.
+
+The formatter and core-test Dockerfiles receive the base as a build argument. Docker's build cache refreshes derived images when their base or recipe changes. Core tests keep their separate `RUST_BUILDER_IMAGE` contract: a custom value selects a prebuilt test image; the default test image is built over the pinned builder with Node and SquashFS tools.
+
+Run `make rust-builder-selection-test` for Docker-mocked checks of image selection, overrides, derived-image build arguments, and the K1 disassembler's native override.
+
 ## Local build
 
 From the monorepo root:

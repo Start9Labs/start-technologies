@@ -795,7 +795,6 @@ test('StartOS gateway editor keeps its target and unsaved name/DNS edits across 
 
 test('StartOS gateway editor saves name and DNS together and closes only after success', async () => {
   const fixture = gatewayDnsHarness()
-  fixture.network.value.gateways.wg0.ipInfo = null
   const dialog = fixture.create('wg0')
   await new Promise(setImmediate)
   const form = dialog.data().form
@@ -829,7 +828,7 @@ test('StartOS gateway editor saves name and DNS together and closes only after s
   })
 })
 
-test('StartOS DNS-only gateway edits preserve automatic names after a disconnect', async () => {
+test('StartOS gateway editor stops editing on disconnect and resumes after reconnect', async () => {
   const fixture = gatewayDnsHarness()
   const gateway = {
     ...fixture.gateway,
@@ -851,11 +850,35 @@ test('StartOS DNS-only gateway edits preserve automatic names after a disconnect
   await new Promise(setImmediate)
   assert.equal(dialog.data().form, form)
   assert.equal(dialog.data().name, 'eth0')
+  assert.equal(dialog.data().gateway, undefined)
+  await dialog.save(form)
+  assert.equal(fixture.requests.length, 0)
+  assert.equal(fixture.closed.length, 0)
+  fixture.network.next({
+    ...fixture.network.value,
+    gateways: { eth0: gateway },
+  })
+  await new Promise(setImmediate)
+  assert.equal(dialog.data().form, form)
+  assert.equal(dialog.data().gateway.ipInfo.name, 'Automatic LAN')
   await dialog.save(form)
   assert.equal(fixture.requests[0].name, null)
 })
 
-test('StartOS gateway settings include disconnected gateways without changing active interface candidates', () => {
+test('StartOS gateway editor rejects disconnected and bridge targets', async () => {
+  for (const ipInfo of [null, { deviceType: 'bridge', lanIp: [] }]) {
+    const fixture = gatewayDnsHarness()
+    fixture.network.value.gateways.eth0.ipInfo = ipInfo
+    const dialog = fixture.create('eth0')
+    await new Promise(setImmediate)
+    assert.equal(dialog.data().gateway, undefined)
+    await dialog.save(dialog.data().form)
+    assert.equal(fixture.requests.length, 0)
+    assert.equal(fixture.closed.length, 0)
+  }
+})
+
+test('StartOS gateway list excludes disconnected interfaces, bridges and loopback without changing saved selections', () => {
   const { PatchDB } = require('patch-db-client')
   const overrides = new Map([
     [
@@ -890,6 +913,15 @@ test('StartOS gateway settings include disconnected gateways without changing ac
         },
       },
       wg0: { name: 'VPN', ipInfo: null },
+      podman0: { name: null, ipInfo: null },
+      'custom-bridge': {
+        name: null,
+        ipInfo: { deviceType: 'bridge', subnets: [] },
+      },
+      lo: {
+        name: null,
+        ipInfo: { deviceType: 'loopback', subnets: [] },
+      },
       lxcbr0: {
         name: null,
         ipInfo: {
@@ -906,13 +938,6 @@ test('StartOS gateway settings include disconnected gateways without changing ac
     'projects/start-os/web/ui/src/app/services/gateway.service.ts',
   )
   const service = new gatewayModule.GatewayService()
-  assert.equal(
-    service
-      .configuredGateways()
-      .map(g => g.id)
-      .join(','),
-    'eth0,wg0',
-  )
   assert.equal(
     service
       .gateways()
@@ -936,10 +961,27 @@ test('StartOS gateway settings include disconnected gateways without changing ac
     gateways: { ...network.value.gateways, eth0: { name: null, ipInfo: null } },
   })
   assert.equal(service.gateways().length, 0)
+  assert.equal(service.defaultOutbound(), 'wg0')
+  assert.equal(service.defaultOutboundGateway().name, 'VPN')
+  network.next({
+    ...network.value,
+    gateways: {
+      ...network.value.gateways,
+      wg0: {
+        name: 'VPN',
+        dns: { staticServers: ['192.0.2.53:53'] },
+        ipInfo: { deviceType: 'wireguard', subnets: [] },
+      },
+    },
+  })
   assert.equal(
-    service.configuredGateways().find(g => g.id === 'eth0').name,
-    'eth0',
+    service
+      .gateways()
+      .map(g => g.id)
+      .join(','),
+    'wg0',
   )
+  assert.equal(service.gateways()[0].dns.staticServers[0], '192.0.2.53:53')
 })
 
 test('StartOS host outbound form ignores observed link changes and saves gateway/DNS together', async () => {
@@ -1277,16 +1319,14 @@ test('WRT timeout unsubscribes from HTTP and retains code-zero reconnect errors'
   const { dependencies, tokens, load } = harness()
   let aborted = 0
   let url
-  let credentials
   dependencies.set(tokens.StaleUiService, {
     checkHash() {
       assert.fail('Timed-out request must not check firmware hash')
     },
   })
   dependencies.set(tokens.HttpClient, {
-    post: (target, body, options) => {
+    post: target => {
       url = target
-      credentials = options.withCredentials
       return new Observable(() => () => aborted++)
     },
   })
@@ -1299,7 +1339,6 @@ test('WRT timeout unsubscribes from HTTP and retains code-zero reconnect errors'
   )
   assert.equal(aborted, 1)
   assert.equal(url, 'https://router.test/rpc/v1')
-  assert.equal(credentials, true)
 })
 
 test('WRT checks firmware hashes and preserves HTTP error details', async () => {
@@ -1336,6 +1375,7 @@ test('WRT lazily invalidates authentication and preserves host errors and nullab
   let invalidated = 0
   let lookups = 0
   let response = { result: null }
+  dependencies.set(tokens.AuthKeyService, { signRpcHeaders: async () => ({}) })
   dependencies.set(tokens.HttpService, {
     request: async () => ({ body: response }),
   })

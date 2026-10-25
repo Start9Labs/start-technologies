@@ -1,0 +1,1 @@
+- Deleting a profile, or returning one to the ISP's DNS, no longer leaves the router's name resolving to that profile's old address until the next restart.

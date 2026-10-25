@@ -99,9 +99,6 @@ jobs:
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
 
-      # build/verify-isa.sh disassembles the binary to reject instructions the
-      # SpaceMiT K1 can't run; it runs llvm-objdump inside the same
-      # start9/cargo-zigbuild container as the build — no host riscv binutils.
       - name: Make start-wrt
         run: make start-wrt
         env:

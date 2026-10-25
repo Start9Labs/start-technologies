@@ -1,6 +1,7 @@
+ARG RUST_BUILDER_IMAGE
 FROM node:24-bookworm-slim AS node
 
-FROM start9/cargo-zigbuild
+FROM ${RUST_BUILDER_IMAGE}
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends gpg squashfs-tools && \
