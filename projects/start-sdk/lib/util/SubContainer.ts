@@ -502,6 +502,13 @@ export class SubContainerEager<
       name,
     })
 
+    try {
+      await fs.mkdir(`${rootfs}/proc`, { recursive: true })
+    } catch (e) {
+      await effects.subcontainer.destroyFs({ guid })
+      throw e
+    }
+
     const res = new SubContainerEager<Manifest, Effects>(
       effects,
       imageId,
@@ -522,6 +529,7 @@ export class SubContainerEager<
       }
 
       await fs.mkdir(`${rootfs}/etc`, { recursive: true })
+      await fs.rm(`${rootfs}/etc/resolv.conf`, { force: true })
       await fs.copyFile('/etc/resolv.conf', `${rootfs}/etc/resolv.conf`)
 
       for (const dirPart of shared) {
