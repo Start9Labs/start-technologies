@@ -71,7 +71,7 @@ Browsers don't recognize `.lan` as a web address, so a bare `router.lan` typed i
 
 ### Why can't my device find `router.lan` when the router's IP address works?
 
-Names ending in `.lan` — `router.lan` and your devices' hostnames — are answered only by the router. A device that sends its DNS lookups anywhere else gets "server not found" (`DNS_PROBE_FINISHED_NXDOMAIN` in Chrome, "Hmm. We're having trouble finding that site." in Firefox) for these names while their IP addresses keep working.
+Names ending in `.lan` — `router.lan` and your devices' names — are answered only by the router. A device that sends its DNS lookups anywhere else gets "server not found" (`DNS_PROBE_FINISHED_NXDOMAIN` in Chrome, "Hmm. We're having trouble finding that site." in Firefox) for these names while their IP addresses keep working.
 
 On a computer, you can confirm this by running `nslookup router.lan` in a terminal. The `Server:` line shows where the device sends its lookups. If it is not the router's address on your network (the address ending in `.1`, such as `192.168.0.1`), something on the device has replaced the router's DNS.
 
@@ -79,8 +79,8 @@ Check the device for the following. Menu locations vary between versions.
 
 - **A VPN app** (Mullvad, Proton VPN, Tailscale, NordVPN, etc.) — most send all DNS lookups to the VPN provider while connected. Disconnect it to confirm, then see [the next question](#why-cant-i-reach-the-router-or-devices-on-other-profiles-while-a-vpn-app-is-on).
 - **A WireGuard tunnel left on at home**, such as a StartTunnel configuration with a `DNS =` line. On an iPhone or Mac, edit the tunnel in the WireGuard app, enable **On-Demand**, and exclude your home Wi-Fi network, so the tunnel turns off when you are home. On other devices, turn the tunnel off while at home.
-- **Android Private DNS** set to a provider hostname. Set `Settings > Network & internet > Private DNS` to **Automatic** — it then uses encrypted DNS only when the network supports it.
-- **Chrome secure DNS set to a specific provider.** In `Settings > Privacy and security > Security > Use secure DNS`, select **With your current service provider**, or turn the setting off. Edge and Brave have the same setting in their privacy or security settings.
+- **Android or GrapheneOS Private DNS** set to a provider hostname. Set `Settings > Network & internet > Private DNS` to **Automatic** — it then uses encrypted DNS only when the network supports it. On GrapheneOS, Private DNS also takes precedence over a VPN's DNS servers.
+- **Chrome secure DNS set to a specific provider.** In `Settings > Privacy and security > Security > Use secure DNS`, select **With your current service provider**, or turn the setting off. Edge, Brave, and Vanadium (GrapheneOS) have the same setting in their privacy or security settings.
 - **Firefox Max Protection.** In `Settings > Privacy & Security > DNS over HTTPS`, **Max Protection** never falls back to the router. Choose **Default Protection** or **Increased Protection**, or click **Manage Exceptions** and add `lan`. Firefox's default setting falls back to the router for `.lan` names and needs no change.
 - **An encrypted DNS profile** on an iPhone, iPad, or Mac (NextDNS, AdGuard, Cloudflare 1.1.1.1). Remove it under `Settings > General > VPN & Device Management` (Mac: `System Settings > General > Device Management`), or turn it off in the provider's app.
 - **DNS servers entered manually** in the device's network settings. Remove them so the device uses the DNS servers the router provides:
@@ -104,6 +104,8 @@ Most apps have a setting that exempts the local network. Settings and defaults d
 - **Tailscale** (when using an exit node) — **Allow Local Network Access** in the exit node menu. Off by default.
 - **Other apps** — look for a setting named "LAN access", "local network", or "split tunneling", often next to the app's kill switch.
 
+On Android and GrapheneOS, an always-on VPN with **Block connections without VPN** turned on (`Settings > Network & internet > VPN`, then the gear next to the VPN) blocks the local network even when the app allows it. Turn that setting off to reach your local devices.
+
 Allowing the local network lets the device reach its own network, but most VPN apps still send DNS to the VPN provider, so `.lan` names can keep failing; use IP addresses or check the app's DNS settings.
 
 Some apps treat only the subnet the device is on as local. If the router's address works but devices on your other [Security Profiles](security-profiles.md) still time out, the app is sending those profiles' traffic into the tunnel, and the only fixes are to disconnect it or use an app that lets you add your network range (such as `192.168.0.0/16`) to its local or excluded routes.
@@ -124,17 +126,18 @@ Check these in order:
 
 ### Why don't AirPlay, Chromecast, or printers show up from another profile?
 
-Automatic discovery — AirPlay, Chromecast, network printers, and `.local` names — only works between devices on the same Security Profile. Put devices that need to discover each other on the same profile, or connect to the other device by its IP address or `.lan` hostname.
+Automatic discovery — AirPlay, Chromecast, network printers, and `.local` names — only works between devices on the same Security Profile. Put devices that need to discover each other on the same profile, or connect to the other device by its IP address, or by name once you have given it a custom name and reserved its address on its [device page](devices.md#device-detail-page).
 
 ### Why does my phone keep showing up as a new device?
 
 Phones, tablets, and laptops can hide their hardware (MAC) address behind a private, randomly generated one. StartWRT recognizes a device by that address, so when it changes, the device appears on the [Devices](devices.md) page as a new entry and loses its custom name, reserved address, and permissions such as **Allow automatic port forwarding**. A [Published Ports](published-ports.md) rule pointing at its old address no longer reaches it.
 
-The address changes when **Rotating** is selected on an iPhone or iPad, and after resetting a device's network settings. For devices you want the router to remember, keep one address for your network. Menu locations vary between versions and phone makers.
+The address changes when **Rotating** is selected on an iPhone or iPad, and after resetting a device's network settings. GrapheneOS picks a new address every time it connects, by default. For devices you want the router to remember, keep one address for your network. Menu locations vary between versions and phone makers.
 
 - **iPhone and iPad** — `Settings > Wi-Fi > ⓘ` next to your network `> Private Wi-Fi Address`, then choose **Fixed** or **Off**.
 - **Mac** — `System Settings > Wi-Fi > Details` next to your network `> Private Wi-Fi address`, then choose **Fixed** or **Off**.
 - **Android** — `Settings > Network & internet > Internet`, tap the gear next to your network, then `Privacy > Use device MAC`.
+- **GrapheneOS** — the same menu, then choose **Use per-network randomized MAC**. This keeps one address on your network and a different one on every other network. **Use device MAC** also works.
 - **Windows** — `Settings > Network & internet > Wi-Fi > <your network> properties > Random hardware addresses`, then turn it **Off**.
 
 Afterward, [Forget](devices.md#device-detail-page) the stale offline entry and set the name, reservation, and permissions again on the device's current entry.
