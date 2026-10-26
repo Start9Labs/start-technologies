@@ -1,1 +1,0 @@
-- **Update the Linux kernel to 6.18.57** with upstream stable security and bug fixes.

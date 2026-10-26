@@ -1,1 +1,0 @@
-- Editing an inbound VPN server no longer lets you change its Security Profile, which created a second, empty server and left the original running. To move a VPN to another profile, delete it and add a new one.
