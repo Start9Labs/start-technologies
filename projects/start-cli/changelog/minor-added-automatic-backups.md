@@ -1,0 +1,1 @@
+- **Automatic-backup administration** manages jobs, targets, activity, capacity estimates, checkpoint history, retention previews, and checkpoint restoration, including System data.

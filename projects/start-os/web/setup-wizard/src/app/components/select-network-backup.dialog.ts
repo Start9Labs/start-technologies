@@ -41,13 +41,11 @@ interface Data {
 
     <ng-template #serverContent let-server>
       <span tuiTitle>
-        {{ server.id }}
-        <!-- @TODO eos-version? -->
-        @if (server['eos-version']) {
-          <span tuiSubtitle>
-            {{ server['eos-version'] }}
-          </span>
-        }
+        {{ server.hostname }}
+        <span tuiSubtitle>
+          {{ (server.scheduled ? 'Automatic backup' : 'Manual backup') | i18n }}
+          · {{ server.version }}
+        </span>
       </span>
     </ng-template>
   `,
@@ -76,7 +74,7 @@ export class SelectNetworkBackupDialog {
   }
 
   readonly stringify = (server: StartOSDiskInfoWithId | null) =>
-    server ? server.id : ''
+    server ? server.hostname : ''
 }
 
 export const SELECT_NETWORK_BACKUP = new PolymorpheusComponent(

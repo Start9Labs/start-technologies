@@ -2,7 +2,8 @@
 
 Operating rules for AI developers working in `start-os/`. `CLAUDE.md` is a
 one-line `@AGENTS.md` import. See the root [AGENTS.md](../../AGENTS.md) for
-monorepo-wide rules and [ARCHITECTURE.md](ARCHITECTURE.md) for how this product is wired.
+monorepo-wide rules and [ARCHITECTURE.md](ARCHITECTURE.md) for how this product
+is wired and built.
 
 ## Layout
 
@@ -32,7 +33,7 @@ monorepo-wide rules and [ARCHITECTURE.md](ARCHITECTURE.md) for how this product 
   `make start-core-ts-bindings`. Then rebuild start-core (`cd shared-libs/ts-modules/start-core && make dist`)
   and the SDK (`cd projects/start-sdk && make bundle`) before web/runtime type-checks —
   editing `shared-libs/ts-modules/start-core/lib/osBindings/*.ts` alone is not enough.
-- Type-check web apps: `npm run check:ui && npm run check:setup`.
+- Check web apps: `npm run check:ui && npm run check:setup` (type-checks and UI schedule regression tests).
 - Type-check the runtime: `cd projects/start-os/container-runtime && npm run check`.
 - Build the UI: `make start-os-ui` (or `make start-os-uis` for ui + setup-wizard).
 - Tests: `make test` (Rust + SDK + container-runtime + shell), `make start-core-test`, `make backup-fs-test` for all backup-fs library tests except the mount-based `/dev/fuse` suite, or `make start-os-scripts-test` for the shell suite under `build/tests/`.

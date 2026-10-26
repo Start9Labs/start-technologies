@@ -1,0 +1,28 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-backup-policy-preview-change 1  "preview-change "
+.SH NAME
+start\-cli\-backup\-policy\-preview\-change \- Preview an automatic backup retention policy change
+.SH SYNOPSIS
+\fBstart\-cli backup policy preview\-change\fR [\fB\-\-keep\-rule\fR] [\fB\-\-latest\-only\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET_ID\fR> <\fIPACKAGE_ID\fR>
+.SH DESCRIPTION
+Preview an automatic backup retention policy change
+.SH OPTIONS
+.TP
+\fB\-\-keep\-rule\fR \fI<INTERVAL:COVERAGE>\fR
+Version\-history rule INTERVAL:COVERAGE; accepts s, m, h, d, or w and may repeat
+.TP
+\fB\-\-latest\-only\fR
+Keep only the latest automatic checkpoint
+.TP
+\fB\-\-format\fR
+
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fITARGET_ID\fR>
+Backup target identifier
+.TP
+<\fIPACKAGE_ID\fR>
+Service identifier, or x_system for System data

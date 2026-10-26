@@ -2,19 +2,40 @@
 .el .ds Aq '
 .TH start-cli-backup 1  "backup "
 .SH NAME
-start\-cli\-backup \- Commands related to backup creation and backup targets
+start\-cli\-backup \- Commands to create, schedule, inspect, and restore backups
 .SH SYNOPSIS
 \fBstart\-cli backup\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
 .SH DESCRIPTION
-Commands related to backup creation and backup targets
+Commands to create, schedule, inspect, and restore backups
 .SH OPTIONS
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help
 .SH SUBCOMMANDS
 .TP
+start\-cli\-backup\-activity(1)
+Commands to inspect backup and restore activity
+.TP
 start\-cli\-backup\-create(1)
 Create a backup for all packages
 .TP
+start\-cli\-backup\-estimate\-capacity(1)
+Estimate automatic backup storage requirements
+.TP
+start\-cli\-backup\-history(1)
+Commands to inspect automatic backup checkpoint history
+.TP
+start\-cli\-backup\-job(1)
+Commands to manage automatic backup jobs
+.TP
+start\-cli\-backup\-policy(1)
+Commands to preview and apply automatic backup retention policies
+.TP
+start\-cli\-backup\-review(1)
+Commands to resolve automatic backup decisions for new services
+.TP
 start\-cli\-backup\-target(1)
 Commands related to a backup target
+.TP
+start\-cli\-backup\-targets(1)
+List existing backup targets

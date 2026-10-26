@@ -28,7 +28,8 @@ boundary(
     'MarkdownPipe',
     'SafeLinksDirective',
   ],
-  'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => [];',
+  `export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => [];
+export { leafProgress } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/format-progress.ts', import.meta.url).href)};`,
 )
 boundary(
   '@taiga-ui/core',
@@ -332,6 +333,20 @@ function fixture(t, cachedVersion) {
           id: ++revision,
           patch: [
             { op: 'replace', path: '/serverInfo/version', value: version },
+          ],
+        },
+      ])
+    },
+    status(statusInfo) {
+      source.next([
+        {
+          id: ++revision,
+          patch: [
+            {
+              op: 'replace',
+              path: '/serverInfo/statusInfo',
+              value: statusInfo,
+            },
           ],
         },
       ])
@@ -650,4 +665,27 @@ test('a candidate disappearing during the asynchronous UI registry lookup preven
   assert.deepEqual(await Promise.all(f.tasks), [true])
   assert.deepEqual(f.submissions, [])
   assert.equal(f.completed, 0)
+})
+
+test('backup activity remains independent of changing OS update candidates', async t => {
+  const f = fixture(t, '0.4.0.2')
+  let busy
+  const sub = f.os.updatingOrBackingUp$.subscribe(value => {
+    busy = value
+  })
+  t.after(() => sub.unsubscribe())
+  await f.load()
+  assert.equal(busy, false)
+  f.status({
+    backupProgress: {
+      overall: { overall: { done: 1, total: 2, units: null }, phases: [] },
+      phases: [],
+    },
+  })
+  assert.equal(busy, true)
+  f.version('0.4.0.4')
+  assert.deepEqual(f.os.updateCandidates(), [])
+  assert.equal(busy, true)
+  f.status({ backupProgress: { overall: true, phases: [] } })
+  assert.equal(busy, false)
 })

@@ -1370,14 +1370,24 @@ test('WRT checks firmware hashes and preserves HTTP error details', async () => 
   )
 })
 
-test('WRT lazily invalidates authentication and preserves host errors and nullable results', async () => {
+test('WRT signs calls, lazily invalidates authentication and preserves host errors and nullable results', async () => {
   const { dependencies, tokens, load } = harness()
   let invalidated = 0
   let lookups = 0
   let response = { result: null }
-  dependencies.set(tokens.AuthKeyService, { signRpcHeaders: async () => ({}) })
+  const signed = []
+  const requests = []
+  dependencies.set(tokens.AuthKeyService, {
+    signRpcHeaders: async options => {
+      signed.push(options)
+      return { signature: 'signed' }
+    },
+  })
   dependencies.set(tokens.HttpService, {
-    request: async () => ({ body: response }),
+    request: async options => {
+      requests.push(options)
+      return { body: response }
+    },
   })
   dependencies.set(tokens.Injector, {
     get: token => {
@@ -1390,9 +1400,18 @@ test('WRT lazily invalidates authentication and preserves host errors and nullab
     'projects/start-wrt/web/src/app/services/rpc.service.ts',
   ).RpcService)()
   assert.equal(
-    await client.request({ method: 'auth.logout', params: {} }),
+    await client.request({
+      method: 'auth.logout',
+      params: {},
+      headers: { existing: 'preserved' },
+    }),
     null,
   )
+  assert.deepEqual(JSON.parse(JSON.stringify(signed)), [
+    { method: 'auth.logout', params: {} },
+  ])
+  assert.equal(requests[0].headers.existing, 'preserved')
+  assert.equal(requests[0].headers.signature, 'signed')
   assert.equal(lookups, 0)
   response = { error: { code: 34, message: 'unauthorized', data: 'expired' } }
   await assert.rejects(
