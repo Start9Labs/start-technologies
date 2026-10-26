@@ -122,17 +122,17 @@ async fn image_files_and_metadata_survive_without_docker_initialization() {
         matches!(&image.contents().get_path("etc/mtab").unwrap().as_node().unwrap().contents,
         crate::util::squashfs::NodeContents::Symlink(target) if target == Path::new("/proc/mounts"))
     );
-    for path in ["dev", "proc", "sys"] {
-        assert!(
-            image
-                .contents()
-                .get(path)
-                .unwrap()
-                .as_node()
-                .unwrap()
-                .contents
-                .as_directory()
-                .is_some()
+    for path in ["dev", "etc", "proc", "sys"] {
+        let node = image.contents().get(path).unwrap().as_node().unwrap();
+        assert!(node.contents.as_directory().is_some(), "{path}");
+        assert_eq!(
+            (
+                node.metadata.mode,
+                node.metadata.uid,
+                node.metadata.gid,
+                node.metadata.modification_time
+            ),
+            (0o640, 17, 23, 42)
         );
     }
 }
@@ -450,7 +450,20 @@ async fn scratch_images_do_not_require_a_container_command_or_any_layers() {
     let (image, config) = from_image_archive(archive.as_slice(), "--platform=linux/amd64")
         .await
         .unwrap();
-    assert!(image.contents().is_empty());
+    assert_eq!(image.contents().len(), 4);
+    for path in ["dev", "etc", "proc", "sys"] {
+        let node = image.contents().get(path).unwrap().as_node().unwrap();
+        assert!(node.contents.as_directory().is_some(), "{path}");
+        assert_eq!(
+            (
+                node.metadata.mode,
+                node.metadata.uid,
+                node.metadata.gid,
+                node.metadata.modification_time
+            ),
+            (0o755, 0, 0, 0)
+        );
+    }
     let (metadata, env) = config.into_parts();
     assert!(metadata.cmd.is_none());
     assert!(metadata.entrypoint.is_none());
