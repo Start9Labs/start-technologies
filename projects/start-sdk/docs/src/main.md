@@ -317,7 +317,7 @@ Pass environment variables to a daemon or oneshot via the `env` option on `exec`
 })
 ```
 
-The process also receives the image's environment variables and the server's language as `LANG`; these `env` values override both. Set a variable to `undefined` to remove it, e.g. `env: { LANG: undefined }`.
+The process also receives the image's environment variables and, unless the image sets one, the server's language as `LANG` when the image includes that locale; these `env` values override both. Set a variable to `undefined` to remove it, e.g. `env: { LANG: undefined }`.
 
 ## Health Checks
 
