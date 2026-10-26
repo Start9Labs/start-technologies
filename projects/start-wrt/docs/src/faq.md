@@ -73,7 +73,7 @@ Browsers don't recognize `.lan` as a web address, so a bare `router.lan` typed i
 
 Names ending in `.lan` — `router.lan` and your devices' names — are answered only by the router. A device that sends its DNS lookups anywhere else gets "server not found" (`DNS_PROBE_FINISHED_NXDOMAIN` in Chrome, "Hmm. We're having trouble finding that site." in Firefox) for these names while their IP addresses keep working.
 
-On a computer, you can confirm this by running `nslookup router.lan` in a terminal. The `Server:` line shows where the device sends its lookups. If it is not the router's address on your network (the address ending in `.1`, such as `192.168.0.1`), something on the device has replaced the router's DNS.
+On a computer, run `nslookup router.lan` to test the system's DNS, then compare it with a query sent directly to the router: `nslookup router.lan <router-IP>` (for example, `nslookup router.lan 192.168.0.1`). If only the direct query succeeds, check the system's DNS settings below. The `Server:` line can show a normal local resolver such as `127.0.0.53`; on Linux with systemd-resolved, [resolvectl status](https://www.freedesktop.org/software/systemd/man/latest/resolvectl.html) shows its upstream servers. If both queries succeed but the browser still fails, check the browser's secure DNS setting below — `nslookup` does not test that DNS path.
 
 Check the device for the following. Menu locations vary between versions.
 
@@ -99,7 +99,7 @@ A VPN app that sends all traffic through its tunnel also sends traffic for your 
 
 Most apps have a setting that exempts the local network. Settings and defaults differ by app and platform:
 
-- **Mullvad** — `Settings > VPN settings > Local network sharing`. Off by default. The iOS app always allows the local network.
+- **Mullvad** — `Settings > VPN settings > Local network sharing`. Off by default. On iOS, local network connections are allowed by default with **Force all apps** disabled; with it enabled, turn on **Local network sharing** (see [Mullvad's iOS guide](https://mullvad.net/en/help/using-mullvad-app-on-ios)).
 - **Proton VPN** — `Settings > Advanced > Allow LAN connections`. On Windows, `.lan` names also need **Access devices by name**.
 - **Tailscale** (when using an exit node) — **Allow Local Network Access** in the exit node menu. Off by default.
 - **Other apps** — look for a setting named "LAN access", "local network", or "split tunneling", often next to the app's kill switch.
