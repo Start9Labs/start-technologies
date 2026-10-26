@@ -1597,22 +1597,88 @@ async fn get_wan_ipv4(
     base_url: &Url,
     local_ipv4: Ipv4Addr,
 ) -> Result<Option<Ipv4Addr>, Error> {
-    let client = reqwest::Client::builder();
-    #[cfg(target_os = "linux")]
-    let client = client
-        .interface(iface)
-        .local_address(IpAddr::V4(local_ipv4));
     let url = base_url.join("/ip").with_kind(ErrorKind::ParseUrl)?;
-    let text = client
-        .build()?
-        .get(url)
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await?
-        .error_for_status()?
-        .text()
-        .await?;
+    let text = tokio::time::timeout(
+        Duration::from_secs(5),
+        get_via_gateway(iface, &url, local_ipv4),
+    )
+    .await
+    .map_err(|_| Error::new(eyre!("request to {url} timed out"), ErrorKind::Network))??;
     parse_echoip(&text)
+}
+
+async fn get_via_gateway(iface: &str, url: &Url, local_ipv4: Ipv4Addr) -> Result<String, Error> {
+    let mut connector = hyper_util::client::legacy::connect::HttpConnector::new();
+    connector.enforce_http(false);
+    connector.set_local_address(Some(local_ipv4.into()));
+    #[cfg(target_os = "linux")]
+    {
+        let index = if_nametoindex(iface).with_kind(ErrorKind::Network)?;
+        connector.set_interface(iface);
+        connector.set_mark(Some(gateway_table_id(index)));
+    }
+    let tls = native_tls::TlsConnector::new().with_kind(ErrorKind::Network)?;
+    let connector = hyper_tls::HttpsConnector::from((connector, tls.into()));
+    let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+        .build(connector);
+    get_echoip_response(&client, url).await
+}
+
+async fn get_echoip_response<C>(
+    client: &hyper_util::client::legacy::Client<C, http_body_util::Empty<bytes::Bytes>>,
+    url: &Url,
+) -> Result<String, Error>
+where
+    C: hyper_util::client::legacy::connect::Connect + Clone + Send + Sync + 'static,
+{
+    use http_body_util::BodyExt;
+    use hyper::StatusCode;
+
+    let mut url = url.clone();
+    for redirects in 0..=10 {
+        ensure_code!(
+            matches!(url.scheme(), "http" | "https"),
+            ErrorKind::ParseUrl,
+            "unsupported echoip URL {url}"
+        );
+        let res = client
+            .get(
+                url.as_str()
+                    .parse::<hyper::Uri>()
+                    .with_kind(ErrorKind::ParseUrl)?,
+            )
+            .await
+            .with_kind(ErrorKind::Network)?;
+        if matches!(
+            res.status(),
+            StatusCode::MOVED_PERMANENTLY
+                | StatusCode::FOUND
+                | StatusCode::SEE_OTHER
+                | StatusCode::TEMPORARY_REDIRECT
+                | StatusCode::PERMANENT_REDIRECT
+        ) && let Some(location) = res.headers().get(hyper::header::LOCATION)
+        {
+            ensure_code!(
+                redirects < 10,
+                ErrorKind::Network,
+                "too many echoip redirects"
+            );
+            url = url
+                .join(location.to_str().with_kind(ErrorKind::ParseUrl)?)
+                .with_kind(ErrorKind::ParseUrl)?;
+            continue;
+        }
+        ensure_code!(
+            !res.status().is_client_error() && !res.status().is_server_error(),
+            ErrorKind::Network,
+            "echoip responded {}",
+            res.status()
+        );
+        return Ok(String::from_utf8(
+            res.into_body().collect().await?.to_bytes().to_vec(),
+        )?);
+    }
+    unreachable!()
 }
 
 /// A routable WAN address from an echoip response.
@@ -3671,6 +3737,134 @@ mod lookup_tests {
         let ip_info = gateway_holding("192.168.1.5/24");
         let compatible: SocketAddr = "[::192.168.1.5]:80".parse().unwrap();
         assert!(lookup_info_by_addr(&ip_info, compatible).is_none());
+    }
+}
+
+#[cfg(test)]
+mod echoip_http_tests {
+    use std::future::{Ready, ready};
+    use std::task::{Context, Poll};
+
+    use hyper_util::client::legacy::Client;
+    use hyper_util::client::legacy::connect::HttpConnector;
+    use hyper_util::client::legacy::connect::dns::Name;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tower_service::Service;
+
+    use super::*;
+
+    async fn echoip_server(responses: Vec<(String, String)>) -> (Url, NonDetachingJoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let url = Url::parse(&format!("http://{}/ip", listener.local_addr().unwrap())).unwrap();
+        let server = tokio::spawn(async move {
+            for (path, response) in responses {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    request.push(stream.read_u8().await.unwrap());
+                }
+                assert!(
+                    String::from_utf8(request)
+                        .unwrap()
+                        .starts_with(&format!("GET {path} HTTP/1.1\r\n"))
+                );
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        (url, server.into())
+    }
+
+    #[tokio::test]
+    async fn follows_echoip_redirects() {
+        let mut responses = Vec::new();
+        let mut path = "/ip".to_owned();
+        for status in [301, 302, 303, 307, 308] {
+            let next = format!("/redirected?status={status}");
+            responses.push((
+                path,
+                format!("HTTP/1.1 {status} Redirect\r\nLocation: {next}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+            ));
+            path = next;
+        }
+        responses.push((
+            path,
+            "HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\n8.8.8.8\n".into(),
+        ));
+        let (url, server) = echoip_server(responses).await;
+        let client = Client::builder(hyper_util::rt::TokioExecutor::new()).build_http();
+        let text = tokio::time::timeout(Duration::from_secs(5), get_echoip_response(&client, &url))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(text, "8.8.8.8\n");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn bounds_echoip_redirects_and_rejects_http_errors() {
+        let (url, server) = echoip_server(vec![(
+            "/ip".into(),
+            "HTTP/1.1 302 Found\r\nLocation: /ip\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into(),
+        ); 11]).await;
+        let client = Client::builder(hyper_util::rt::TokioExecutor::new()).build_http();
+        let error =
+            tokio::time::timeout(Duration::from_secs(5), get_echoip_response(&client, &url))
+                .await
+                .unwrap()
+                .unwrap_err();
+        assert!(error.to_string().contains("too many echoip redirects"));
+        server.await.unwrap();
+
+        let (url, server) = echoip_server(vec![(
+            "/ip".into(),
+            "HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into(),
+        )])
+        .await;
+        let error = get_echoip_response(&client, &url).await.unwrap_err();
+        assert!(error.to_string().contains("503"));
+        server.await.unwrap();
+    }
+
+    #[derive(Clone)]
+    struct MultipleAddresses;
+
+    impl Service<Name> for MultipleAddresses {
+        type Response = std::vec::IntoIter<SocketAddr>;
+        type Error = std::io::Error;
+        type Future = Ready<Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _: Name) -> Self::Future {
+            ready(Ok(vec![
+                "127.0.0.2:0".parse().unwrap(),
+                "127.0.0.1:0".parse().unwrap(),
+            ]
+            .into_iter()))
+        }
+    }
+
+    #[tokio::test]
+    async fn retries_echoip_dns_addresses() {
+        let (mut url, server) = echoip_server(vec![(
+            "/ip".into(),
+            "HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\n8.8.8.8\n".into(),
+        )])
+        .await;
+        url.set_host(Some("echoip.test")).unwrap();
+        let mut connector = HttpConnector::new_with_resolver(MultipleAddresses);
+        connector.set_local_address(Some(Ipv4Addr::LOCALHOST.into()));
+        let client = Client::builder(hyper_util::rt::TokioExecutor::new()).build(connector);
+        let text = tokio::time::timeout(Duration::from_secs(5), get_echoip_response(&client, &url))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(text, "8.8.8.8\n");
+        server.await.unwrap();
     }
 }
 

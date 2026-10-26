@@ -1,0 +1,1 @@
+- After the router restarts or updates, devices get an address as soon as the router is back, instead of up to two minutes later on routers with several profiles.
