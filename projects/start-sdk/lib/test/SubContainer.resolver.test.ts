@@ -1,5 +1,6 @@
 import * as cp from 'child_process'
 import { EventEmitter } from 'events'
+import { statSync } from 'fs'
 import * as fs from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -19,6 +20,7 @@ let target: string
 let effects: T.Effects
 
 beforeEach(async () => {
+  jest.clearAllMocks()
   dir = await fs.mkdtemp(join(tmpdir(), 'subcontainer-resolver-'))
   rootfs = join(dir, 'rootfs')
   resolver = join(rootfs, 'etc/resolv.conf')
@@ -36,6 +38,7 @@ beforeEach(async () => {
     stderr: '',
   })
   jest.spyOn(cp, 'spawn').mockImplementation(() => {
+    expect(statSync(join(rootfs, 'proc')).isDirectory()).toBe(true)
     const leader = new EventEmitter()
     return Object.assign(leader, {
       kill: jest.fn(() => {
@@ -111,16 +114,30 @@ it('destroys the filesystem when resolver installation fails', async () => {
   expect(subcontainers.execFile).not.toHaveBeenCalled()
 })
 
-it('creates the proc mount point for an image without one', async () => {
-  const sub = await SubContainer.eager(
-    effects,
-    { imageId: 'main' },
-    null,
-    'test',
-  )
-  try {
-    expect((await fs.stat(join(rootfs, 'proc'))).isDirectory()).toBe(true)
-  } finally {
-    await sub.destroy()
-  }
+it.each(['missing', 'existing'])(
+  'prepares the %s proc mount point before launching the image',
+  async kind => {
+    if (kind === 'existing') await fs.mkdir(join(rootfs, 'proc'))
+    const sub = await SubContainer.eager(
+      effects,
+      { imageId: 'main' },
+      null,
+      'test',
+    )
+    try {
+      expect(cp.spawn).toHaveBeenCalledTimes(1)
+    } finally {
+      await sub.destroy()
+    }
+  },
+)
+
+it('destroys the filesystem without launching when proc preparation fails', async () => {
+  await fs.writeFile(join(rootfs, 'proc'), '')
+  await expect(
+    SubContainer.eager(effects, { imageId: 'main' }, null, 'test'),
+  ).rejects.toMatchObject({ code: 'EEXIST' })
+  expect(effects.subcontainer.destroyFs).toHaveBeenCalledWith({ guid: 'guid' })
+  expect(effects.subcontainer.destroyFs).toHaveBeenCalledTimes(1)
+  expect(cp.spawn).not.toHaveBeenCalled()
 })
