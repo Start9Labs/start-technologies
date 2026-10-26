@@ -1,4 +1,4 @@
-import { inject, Injectable, signal } from '@angular/core'
+import { computed, inject, Injectable, signal } from '@angular/core'
 import { TuiNotificationService } from '@taiga-ui/core'
 import {
   ApiService,
@@ -31,7 +31,8 @@ export class SystemService {
 
   readonly info = signal<SystemInfoRes | null>(null)
   readonly newerVersions = signal<VersionInfo[]>([])
-  readonly updateAvailable = signal(false)
+  readonly updateCheckFailed = signal(false)
+  readonly updateAvailable = computed(() => this.newerVersions().length > 0)
   readonly updating = signal(false)
   readonly rebooting = signal(false)
 
@@ -73,17 +74,22 @@ export class SystemService {
         .subscribe()
     }
 
-    try {
-      const [info, newerVersions] = await Promise.all([
-        this.api.systemInfo(),
-        this.api.systemNewerVersions(),
-      ])
+    await Promise.all([
+      this.refresh().catch(e =>
+        console.error('Failed to fetch system info:', e),
+      ),
+      this.checkForUpdates(),
+    ])
+  }
 
-      this.setInfo(info)
-      this.newerVersions.set(newerVersions)
-      this.updateAvailable.set(newerVersions.length > 0)
+  private async checkForUpdates(): Promise<void> {
+    try {
+      this.newerVersions.set(await this.api.systemNewerVersions())
+      this.updateCheckFailed.set(false)
     } catch (e) {
-      console.error('Failed to fetch system info:', e)
+      console.error('Failed to check for updates:', e)
+      this.newerVersions.set([])
+      this.updateCheckFailed.set(true)
     }
   }
 

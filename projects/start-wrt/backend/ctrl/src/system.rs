@@ -113,13 +113,9 @@ async fn newer_versions(_ctx: ServerContext) -> Result<Vec<VersionInfo>, Error> 
     // Read registry URL from UCI config (fallback to default)
     let registry_url = read_registry_url().unwrap_or_else(|| DEFAULT_REGISTRY_URL.to_string());
 
-    let versions = match crate::update::fetch_newer_versions(&registry_url).await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("Failed to check for updates: {e}");
-            return Ok(Vec::new());
-        }
-    };
+    let versions = crate::update::fetch_newer_versions(&registry_url)
+        .await
+        .inspect_err(|e| tracing::warn!("Failed to check for updates: {e}"))?;
 
     let platform = crate::registry::device_info::DeviceInfo::load()
         .map(|d| d.os.platform)

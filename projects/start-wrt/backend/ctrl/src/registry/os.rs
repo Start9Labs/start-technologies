@@ -1,13 +1,10 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+pub use startos::registry::os::SIG_CONTEXT;
+use startos::sign::commitment::blake3::Blake3Commitment;
 
 use super::asset::RegistryAsset;
-use crate::sign::commitment::Blake3Commitment;
-
-/// Signature context for Start9 registry assets.
-/// Same as start-os: all asset signatures use this domain separator.
-pub const SIG_CONTEXT: &str = "startos";
 
 /// Information about a single OS version from the registry.
 /// Wire-compatible with start-os's `OsVersionInfo`.

@@ -4,11 +4,13 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use startos::sign::commitment::blake3::Blake3Commitment;
 use tokio::process::Command;
 
 use crate::continuations::{Guid, RpcContinuation};
 use crate::error::Error;
 use crate::progress::{FullProgressTracker, ProgressUnits};
+use crate::registry::asset::RegistryAsset;
 use crate::registry::device_info::DeviceInfo;
 use crate::registry::os::{OsVersionInfo, SIG_CONTEXT};
 use crate::registry::{self};
@@ -270,7 +272,7 @@ pub fn check_pending_update_marker() {
 /// Execute the actual update: download, verify, sysupgrade.
 async fn do_update(
     client: &reqwest::Client,
-    asset: crate::registry::asset::RegistryAsset<crate::sign::commitment::Blake3Commitment>,
+    asset: RegistryAsset<Blake3Commitment>,
     target_ver: &str,
     download_phase: &mut crate::progress::PhaseProgressTrackerHandle,
     verify_phase: &mut crate::progress::PhaseProgressTrackerHandle,
@@ -288,7 +290,7 @@ async fn do_update(
 
     // Phase 2: Verify (re-read and check blake3)
     verify_phase.start();
-    asset.commitment.verify_file(firmware_path).await?;
+    asset.verify_file(firmware_path).await?;
     verify_phase.complete();
 
     // Phase 3: Apply via sysupgrade

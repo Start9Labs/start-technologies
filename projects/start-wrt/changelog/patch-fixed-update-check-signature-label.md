@@ -1,0 +1,2 @@
+- The router finds updates from registries running start-registry 1.2.0 or later.
+- When the router cannot check for updates, **System > Settings > General** says **Failed to check for updates** instead of showing no update.

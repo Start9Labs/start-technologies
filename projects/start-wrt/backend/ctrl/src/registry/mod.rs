@@ -1,7 +1,6 @@
 pub mod asset;
 pub mod device_info;
 pub mod os;
-pub mod signer;
 
 use http::HeaderValue;
 use reqwest::Client;
