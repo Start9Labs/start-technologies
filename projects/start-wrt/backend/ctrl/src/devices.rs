@@ -1179,26 +1179,38 @@ fn choose_ipv4_entry<'a>(
         .min_by_key(|e| rank(e, live_ipv4s))
 }
 
-/// The VLAN of the profile a device is on: its neighbour entry's bridge, else
-/// the bridge FDB's VLAN, else the profile subnet holding its displayed IPv4.
-/// Unset when none of these places it.
+struct ProfileNetwork {
+    vlan: u16,
+    device: String,
+    subnet: Option<Ipv4Net>,
+}
+
 fn device_vlan(
     chosen_arp: Option<&ArpEntry>,
     arp_list: &[&ArpEntry],
-    fdb_vlan: Option<u16>,
+    fdb: Option<&FdbEntry>,
     ipv4: Option<&str>,
-    profile_subnets: &[(u16, Ipv4Net)],
+    profile_networks: &[ProfileNetwork],
 ) -> Option<u16> {
+    let bridge_vlan = |device: &str| {
+        profile_networks
+            .iter()
+            .find(|p| p.device == device)
+            .map(|p| p.vlan)
+    };
     chosen_arp
         .or_else(|| arp_list.first().copied())
-        .and_then(|e| e.interface.split('.').nth(1)?.parse::<u16>().ok())
-        .or(fdb_vlan)
+        .and_then(|e| bridge_vlan(&e.interface))
+        .or_else(|| {
+            let entry = fdb?;
+            entry.vlan.or_else(|| bridge_vlan("br-lan"))
+        })
         .or_else(|| {
             let ip = ipv4?.parse::<Ipv4Addr>().ok()?;
-            profile_subnets
+            profile_networks
                 .iter()
-                .find(|(_, net)| net.contains(&ip))
-                .map(|(vlan, _)| *vlan)
+                .find(|p| p.subnet.is_some_and(|net| net.contains(&ip)))
+                .map(|p| p.vlan)
         })
 }
 
@@ -1356,7 +1368,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 .iter()
                 .map(|p| (p.vlan_tag, p.fullname.clone()))
                 .collect();
-            let subnets: Vec<(u16, Ipv4Net)> = lookup
+            let profile_networks: Vec<ProfileNetwork> = lookup
                 .list()
                 .iter()
                 .filter_map(|p| {
@@ -1366,11 +1378,18 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                         .find(|s| s.name().as_deref() == Some(p.interface.as_str()))?
                         .get::<NetworkInterface>()
                         .ok()?;
-                    if iface.proto != InterfaceProto::STATIC {
-                        return None;
-                    }
-                    let net = Ipv4Net::with_netmask(iface.ipaddr?, iface.netmask?).ok()?;
-                    Some((p.vlan_tag, net.trunc()))
+                    let subnet = if iface.proto == InterfaceProto::STATIC {
+                        iface.ipaddr.zip(iface.netmask).and_then(|(ip, mask)| {
+                            Ipv4Net::with_netmask(ip, mask).ok().map(|net| net.trunc())
+                        })
+                    } else {
+                        None
+                    };
+                    Some(ProfileNetwork {
+                        vlan: p.vlan_tag,
+                        device: iface.device,
+                        subnet,
+                    })
                 })
                 .collect();
 
@@ -1384,7 +1403,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 })
                 .collect();
 
-            Ok::<_, Error>((hosts_by_mac, profiles, subnets, vpn_peer_configs))
+            Ok::<_, Error>((hosts_by_mac, profiles, profile_networks, vpn_peer_configs))
         },
         get_bridge_fdb(),
     );
@@ -1505,7 +1524,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     }
 
     // Unpack UCI results
-    let (hosts_by_mac, profile_by_vlan, profile_subnets, vpn_peer_configs) = uci_result?;
+    let (hosts_by_mac, profile_by_vlan, profile_networks, vpn_peer_configs) = uci_result?;
 
     // Build ARP index
     let mut arp_by_mac: HashMap<String, Vec<&ArpEntry>> = HashMap::new();
@@ -1663,9 +1682,9 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
         let security_profile = device_vlan(
             chosen_arp,
             &arp_list,
-            fdb_by_mac.get(mac).and_then(|e| e.vlan),
+            fdb_by_mac.get(mac),
             ipv4.as_deref(),
-            &profile_subnets,
+            &profile_networks,
         )
         .and_then(|vlan| profile_by_vlan.get(&vlan).cloned());
 
@@ -3015,11 +3034,26 @@ config wireguard_wg_lan 'wg_lan_0'
         assert_eq!(chosen.ip, "192.168.0.187");
     }
 
-    fn subnets() -> Vec<(u16, Ipv4Net)> {
+    fn profile_networks() -> Vec<ProfileNetwork> {
         vec![
-            (1, "192.168.1.0/24".parse().unwrap()),
-            (20, "192.168.20.0/24".parse().unwrap()),
+            ProfileNetwork {
+                vlan: 1,
+                device: "br-lan.1".into(),
+                subnet: Some("192.168.1.0/24".parse().unwrap()),
+            },
+            ProfileNetwork {
+                vlan: 20,
+                device: "br-lan.20".into(),
+                subnet: Some("192.168.20.0/24".parse().unwrap()),
+            },
         ]
+    }
+
+    fn fdb_entry(vlan: Option<u16>) -> FdbEntry {
+        FdbEntry {
+            port: "eth0".into(),
+            vlan,
+        }
     }
 
     #[test]
@@ -3027,13 +3061,19 @@ config wireguard_wg_lan 'wg_lan_0'
         let e = arp("192.168.20.5", "br-lan.20", "STALE");
         let list = vec![&e];
         assert_eq!(
-            device_vlan(Some(&e), &list, Some(1), Some("192.168.1.9"), &subnets()),
+            device_vlan(
+                Some(&e),
+                &list,
+                Some(&fdb_entry(Some(1))),
+                Some("192.168.1.9"),
+                &profile_networks(),
+            ),
             Some(20)
         );
         let v6 = arp("fe80::1", "br-lan.20", "STALE");
         let list = vec![&v6];
         assert_eq!(
-            device_vlan(None, &list, None, Some("192.168.1.9"), &subnets()),
+            device_vlan(None, &list, None, Some("192.168.1.9"), &profile_networks()),
             Some(20)
         );
     }
@@ -3041,20 +3081,55 @@ config wireguard_wg_lan 'wg_lan_0'
     #[test]
     fn device_vlan_without_neighbour_uses_fdb_then_subnet() {
         assert_eq!(
-            device_vlan(None, &[], Some(20), Some("192.168.1.9"), &subnets()),
+            device_vlan(
+                None,
+                &[],
+                Some(&fdb_entry(Some(20))),
+                Some("192.168.1.9"),
+                &profile_networks(),
+            ),
             Some(20)
         );
         assert_eq!(
-            device_vlan(None, &[], None, Some("192.168.20.175"), &subnets()),
+            device_vlan(None, &[], None, Some("192.168.20.175"), &profile_networks()),
             Some(20)
         );
     }
 
     #[test]
-    fn device_vlan_unplaced_is_none_not_admin() {
-        assert_eq!(device_vlan(None, &[], None, None, &subnets()), None);
+    fn device_vlan_preserves_untagged_lan_neighbour() {
+        let mut networks = profile_networks();
+        networks.truncate(1);
+        networks[0].device = "br-lan".into();
+        let e = arp("fe80::1", "br-lan", "REACHABLE");
+        assert_eq!(device_vlan(None, &[&e], None, None, &networks), Some(1));
+    }
+
+    #[test]
+    fn device_vlan_untagged_fdb_requires_configured_bridge_owner() {
+        let mut networks = profile_networks();
+        networks.truncate(1);
+        networks[0].device = "br-lan".into();
+        let entry = fdb_entry(None);
         assert_eq!(
-            device_vlan(None, &[], None, Some("10.0.0.4"), &subnets()),
+            device_vlan(None, &[], Some(&entry), None, &networks),
+            Some(1)
+        );
+        assert_eq!(device_vlan(None, &[], None, None, &networks), None);
+        assert_eq!(
+            device_vlan(None, &[], Some(&entry), None, &profile_networks()),
+            None
+        );
+    }
+
+    #[test]
+    fn device_vlan_unplaced_is_none_not_admin() {
+        assert_eq!(
+            device_vlan(None, &[], None, None, &profile_networks()),
+            None
+        );
+        assert_eq!(
+            device_vlan(None, &[], None, Some("10.0.0.4"), &profile_networks()),
             None
         );
     }
