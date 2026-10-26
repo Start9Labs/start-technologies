@@ -502,6 +502,13 @@ export class SubContainerEager<
       name,
     })
 
+    try {
+      await fs.mkdir(`${rootfs}/proc`, { recursive: true })
+    } catch (e) {
+      await effects.subcontainer.destroyFs({ guid })
+      throw e
+    }
+
     const res = new SubContainerEager<Manifest, Effects>(
       effects,
       imageId,
