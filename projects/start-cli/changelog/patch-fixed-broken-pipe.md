@@ -1,1 +1,0 @@
-- Piping output into a command that stops reading early, such as `head`, no longer crashes the CLI.

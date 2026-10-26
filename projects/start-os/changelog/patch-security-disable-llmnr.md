@@ -1,0 +1,1 @@
+- Link-Local Multicast Name Resolution (LLMNR, port 5355) is disabled.

@@ -9,6 +9,16 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [2.5.1]
+
+### Fixed
+
+- Piping output into a command that stops reading early, such as `head`, no longer crashes the CLI.
+
+- Fixed macOS binaries aborting at launch on newer macOS versions.
+
+- Fixed services packed from an image whose `/etc/resolv.conf` is a symlink, such as a Nix-built image, failing to start on StartOS. Repack affected services with this version.
+
 ## [2.5.0]
 
 ### Added

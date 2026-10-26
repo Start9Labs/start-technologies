@@ -161,6 +161,20 @@ pub async fn create_subcontainer_fs(
             .arg(&mountpoint)
             .invoke(ErrorKind::Filesystem)
             .await?;
+        let etc = mountpoint.join("etc");
+        match tokio::fs::create_dir(&etc).await {
+            Ok(()) => {
+                Command::new("chown")
+                    .arg("100000:100000")
+                    .arg(&etc)
+                    .invoke(ErrorKind::Filesystem)
+                    .await?;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
+            Err(e) => {
+                return Err(e).with_ctx(|_| (ErrorKind::Filesystem, format!("mkdir {etc:?}")));
+            }
+        }
         write_file_owned_atomic(
             mountpoint.join("etc/hostname"),
             format!("{container_guid}\n"),

@@ -467,6 +467,9 @@ pub struct Dhcp {
     /// route when the router itself has no upstream IPv6 PD.
     #[uci(default)]
     pub ra_default: Option<String>,
+    /// Skips dnsmasq's probe for another DHCP server before serving the pool.
+    #[uci(default)]
+    pub force: Option<bool>,
 }
 
 #[derive(Debug, TypedSection, Default)]

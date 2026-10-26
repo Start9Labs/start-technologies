@@ -98,7 +98,9 @@ hmac = "0.13.0"
 http = "1.0.0"
 http-body-util = "0.1"
 hyper = { version = "1.5", features = ["http1", "http2", "server"] }
-hyper-util = { version = "0.1.10", features = [
+hyper-tls = "0.6.0"
+hyper-util = { version = "0.1.21", features = [
+  "client-legacy",
   "http1",
   "http2",
   "server",

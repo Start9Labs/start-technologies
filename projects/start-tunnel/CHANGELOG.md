@@ -5,6 +5,20 @@ All notable changes to StartTunnel are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1]
+
+### Removed
+
+- `start-tunnel auth get-pubkey` is removed; the tunnel server never answered it.
+
+### Fixed
+
+- Action menus near the right edge of the screen size to fit their items.
+
+- Revoking a sign-in immediately closes its idle streams.
+
+- On the StartTunnel host itself, `start-tunnel auth login` and `auth logout` explain that no login is needed there.
+
 ## [1.4.0]
 
 ### Added
