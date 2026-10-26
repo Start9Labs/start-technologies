@@ -1,0 +1,1 @@
+- `s9pk pack` keeps an image's `/etc/resolv.conf` as the image provides it. A service whose image's resolver is a symlink, such as a Nix-built image, needs start-sdk 3.1.1 or later.
