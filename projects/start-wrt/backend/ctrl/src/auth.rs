@@ -263,7 +263,6 @@ pub async fn reap_idle_keys(ctx: ServerContext) {
     }
 }
 
-/// Every name and address a browser may sign for.
 /// Lowercased; `None` while DDNS is disabled.
 fn enabled_ddns_hostname(ddns: crate::wan::WanDdnsResponse) -> Option<InternedString> {
     ddns.enabled
@@ -272,6 +271,7 @@ fn enabled_ddns_hostname(ddns: crate::wan::WanDdnsResponse) -> Option<InternedSt
         .map(|hostname| InternedString::intern(hostname.to_ascii_lowercase()))
 }
 
+/// Every name and address a browser may sign for.
 fn signing_identities(
     addresses: impl IntoIterator<Item = IpAddr>,
     ddns: Option<InternedString>,
