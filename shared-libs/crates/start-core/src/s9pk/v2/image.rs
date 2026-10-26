@@ -20,6 +20,9 @@ pub(crate) use oci::tests::{legacy_docker_save_fixture, simple_archive as oci_te
 
 const ARCHITECTURES: &[(&str, &str)] = &[("x86_64", "amd64"), ("aarch64", "arm64")];
 
+/// Root directories StartOS mounts or writes into without creating them.
+const RUNTIME_MOUNT_POINTS: [&str; 4] = ["dev", "etc", "proc", "sys"];
+
 pub(super) fn oci_architecture(arch: &str) -> &str {
     ARCHITECTURES
         .iter()
@@ -276,8 +279,7 @@ async fn from_layers(
     }
     // StartOS copies the resolver onto this path from outside the image's root.
     filesystem.replace_symlink_with_empty_file(Path::new("etc/resolv.conf"));
-    // StartOS mounts or writes into these without creating them.
-    for path in ["dev", "etc", "proc", "sys"] {
+    for path in RUNTIME_MOUNT_POINTS {
         filesystem.add_missing_directory(Path::new(path));
     }
     Ok((

@@ -18,6 +18,23 @@ pub(crate) fn save_archive(layers: &[Vec<u8>], architecture: &str) -> (Vec<u8>, 
     )
 }
 
+fn assert_runtime_mount_points(image: &Squashfs<DynFileSource>, expected: (u16, u32, u32, u32)) {
+    for path in RUNTIME_MOUNT_POINTS {
+        let node = image.contents().get(path).unwrap().as_node().unwrap();
+        assert!(node.contents.as_directory().is_some(), "{path}");
+        assert_eq!(
+            (
+                node.metadata.mode,
+                node.metadata.uid,
+                node.metadata.gid,
+                node.metadata.modification_time
+            ),
+            expected,
+            "{path}"
+        );
+    }
+}
+
 fn archive_with_config(layers: &[Vec<u8>], config: &serde_json::Value) -> (Vec<u8>, String) {
     let config = serde_json::to_vec(config).unwrap();
     let id = format!("sha256:{}", hex::encode(Sha256::digest(&config)));
@@ -122,19 +139,7 @@ async fn image_files_and_metadata_survive_without_docker_initialization() {
         matches!(&image.contents().get_path("etc/mtab").unwrap().as_node().unwrap().contents,
         crate::util::squashfs::NodeContents::Symlink(target) if target == Path::new("/proc/mounts"))
     );
-    for path in ["dev", "etc", "proc", "sys"] {
-        let node = image.contents().get(path).unwrap().as_node().unwrap();
-        assert!(node.contents.as_directory().is_some(), "{path}");
-        assert_eq!(
-            (
-                node.metadata.mode,
-                node.metadata.uid,
-                node.metadata.gid,
-                node.metadata.modification_time
-            ),
-            (0o640, 17, 23, 42)
-        );
-    }
+    assert_runtime_mount_points(&image, (0o640, 17, 23, 42));
 }
 
 #[tokio::test]
@@ -195,14 +200,7 @@ async fn scratch_image_gains_runtime_mount_points() {
     let (image, _) = from_image_archive(archive.as_slice(), "--platform=linux/amd64")
         .await
         .unwrap();
-    for path in ["dev", "etc", "proc", "sys"] {
-        let node = image.contents().get(path).unwrap().as_node().unwrap();
-        assert!(node.contents.as_directory().is_some(), "{path}");
-        assert_eq!(
-            (node.metadata.mode, node.metadata.uid, node.metadata.gid),
-            (0o755, 0, 0)
-        );
-    }
+    assert_runtime_mount_points(&image, (0o755, 0, 0, 0));
     assert!(image.contents().get("server").is_some());
 }
 
@@ -451,19 +449,7 @@ async fn scratch_images_do_not_require_a_container_command_or_any_layers() {
         .await
         .unwrap();
     assert_eq!(image.contents().len(), 4);
-    for path in ["dev", "etc", "proc", "sys"] {
-        let node = image.contents().get(path).unwrap().as_node().unwrap();
-        assert!(node.contents.as_directory().is_some(), "{path}");
-        assert_eq!(
-            (
-                node.metadata.mode,
-                node.metadata.uid,
-                node.metadata.gid,
-                node.metadata.modification_time
-            ),
-            (0o755, 0, 0, 0)
-        );
-    }
+    assert_runtime_mount_points(&image, (0o755, 0, 0, 0));
     let (metadata, env) = config.into_parts();
     assert!(metadata.cmd.is_none());
     assert!(metadata.entrypoint.is_none());
