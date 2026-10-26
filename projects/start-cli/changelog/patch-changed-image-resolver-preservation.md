@@ -1,1 +1,1 @@
-- Preserved image-provided `/etc/resolv.conf` symlinks and hardlinks when packing. Packages with symlinked resolvers need SDK 3.1.1 or later.
+- Preserved image-provided `/etc/resolv.conf` symlinks and hardlinks when packing. Packages with symlinked resolvers need SDK 3.2.0 or later.
