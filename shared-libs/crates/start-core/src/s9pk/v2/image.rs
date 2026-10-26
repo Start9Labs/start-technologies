@@ -276,6 +276,10 @@ async fn from_layers(
     }
     // StartOS copies the resolver onto this path from outside the image's root.
     filesystem.replace_symlink_with_empty_file(Path::new("etc/resolv.conf"));
+    // StartOS mounts or writes into these without creating them.
+    for path in ["dev", "etc", "proc", "sys"] {
+        filesystem.add_missing_directory(Path::new(path));
+    }
     Ok((
         filesystem.into_squashfs()?,
         config.config.unwrap_or_default(),

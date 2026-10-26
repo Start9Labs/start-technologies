@@ -187,6 +187,26 @@ async fn symlinked_resolver_becomes_a_regular_file() {
 }
 
 #[tokio::test]
+async fn scratch_image_gains_runtime_mount_points() {
+    let mut layer = Vec::new();
+    append(&mut layer, b"server", b'0', b"binary", None);
+    layer.extend_from_slice(&[0; 1024]);
+    let (archive, _) = save_archive(&[layer], "amd64");
+    let (image, _) = from_image_archive(archive.as_slice(), "--platform=linux/amd64")
+        .await
+        .unwrap();
+    for path in ["dev", "etc", "proc", "sys"] {
+        let node = image.contents().get(path).unwrap().as_node().unwrap();
+        assert!(node.contents.as_directory().is_some(), "{path}");
+        assert_eq!(
+            (node.metadata.mode, node.metadata.uid, node.metadata.gid),
+            (0o755, 0, 0)
+        );
+    }
+    assert!(image.contents().get("server").is_some());
+}
+
+#[tokio::test]
 async fn symlinked_resolver_replacement_preserves_other_hardlink_paths() {
     for alias in [b"etc/zzz".as_slice(), b"etc/aaa".as_slice()] {
         let mut layer = Vec::new();

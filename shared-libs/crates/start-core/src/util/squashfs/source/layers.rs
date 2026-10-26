@@ -170,6 +170,12 @@ impl LayerFilesystem {
         }
     }
 
+    pub(crate) fn add_missing_directory(&mut self, path: &Path) {
+        self.nodes
+            .entry(path.to_owned())
+            .or_insert_with(|| Arc::new(Node::implicit_directory()));
+    }
+
     pub(crate) fn into_squashfs(self) -> Result<Squashfs<DynFileSource>, Error> {
         let mut owners: BTreeMap<usize, PathBuf> = BTreeMap::new();
         let mut image = Squashfs::default();

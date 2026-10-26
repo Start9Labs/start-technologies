@@ -1,0 +1,1 @@
+- Fixed services packed from an image with no `/proc` or `/etc`, such as one built `FROM scratch`, failing to start on StartOS. Repack affected services with this version.
