@@ -89,12 +89,11 @@ const ERROR =
                 size="s"
                 appearance="flat-grayscale"
                 iconStart="@tui.ellipsis-vertical"
-                [tuiDropdownOpen]="!!opens[$index]"
-                (tuiDropdownOpenChange)="opens[$index] = $event"
+                tuiDropdownAuto
                 (click)="$event.stopPropagation()"
               >
                 {{ 'More' | i18n }}
-                <tui-data-list *tuiDropdown>
+                <tui-data-list *tuiDropdown="let close" (click)="close()">
                   <button tuiOption (click)="edit(target)">
                     {{ 'Edit' | i18n }}
                   </button>
@@ -219,8 +218,6 @@ export class BackupNetworkComponent {
 
   readonly service = inject(BackupService)
   readonly networkFolders = output<MappedBackupTarget<CifsBackupTarget>>()
-
-  opens: Record<number, boolean> = {}
 
   select(target: MappedBackupTarget<CifsBackupTarget>) {
     if (!target.entry.mountable) {
