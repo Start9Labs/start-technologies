@@ -47,7 +47,7 @@ Select "Edit" from a password's actions menu to change its label or move it to a
 
 Configure the Wi-Fi radio hardware under `Points of Entry > Wi-Fi > Settings`:
 
-- **Country** — The country whose Wi-Fi regulations the router follows. It determines which channels each band may use and the maximum transmit power. Select the country the router is physically located in; if you move, change it. Until a country is selected the router runs on a conservative worldwide subset — 2.4 GHz channels 1–11 and 5 GHz channels 36–48, at 20 dBm — so setting it is the first thing to do after setup. Changing the country resets both channel selections to Auto.
+- **Country** — The country whose Wi-Fi regulations the router follows. It determines which channels each band may use and the maximum transmit power. Select the country the router is physically located in; if you move, change it. Until a country is selected the router runs on a conservative worldwide subset — 2.4 GHz channels 1–11 and 5 GHz channels 36–48, at 20 dBm — so setting it is the first thing to do after setup. Changing the country resets both channel selections to Auto and narrows a channel width above 80 MHz to 80 MHz.
 
 - **Enable Wi-Fi** — Global toggle to turn the wireless radio on or off. When disabled, no devices can connect via Wi-Fi.
 
@@ -60,6 +60,8 @@ Configure the Wi-Fi radio hardware under `Points of Entry > Wi-Fi > Settings`:
 - **Broadcast Separately** — Shown only when Band is "Both". When enabled, the 5 GHz band gets a separate SSID with a `-5G` suffix (e.g. `StartWRT` and `StartWRT-5G`). Useful if you want to control which band a device connects to.
 
 - **Channel** — Separate dropdowns for each band. **Auto** (recommended) lets the router select a channel automatically. You can also select a specific channel; the dropdowns list the channels the selected country permits. **Auto** skips radar-detection (DFS) channels. You can pick one by hand, but the 5 GHz network then takes a minute or more to appear each time the router starts while it listens for radar.
+
+- **Channel Width** — Separate dropdowns for each band setting how much of the band the network occupies: 20 or 40 MHz on 2.4 GHz, and up to 160 MHz on 5 GHz where the radio supports it. Each lists only the widths the selected channel can use in the selected country; picking a channel that cannot carry the current width switches to the widest one it can. Wider channels are faster but overlap more neighboring networks. On 2.4 GHz, a 40 MHz network starts at 20 MHz instead when a neighboring network overlaps it.
 
 > [!WARNING]
 > Changing the SSID disconnects all Wi-Fi clients. You will be prompted to confirm before the change is applied.

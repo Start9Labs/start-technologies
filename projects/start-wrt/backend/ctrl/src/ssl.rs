@@ -24,6 +24,7 @@ use startos::net::web_server::Accept;
 use uciedit::openwrt::NetworkInterface;
 use uciedit::{parse_all, Arena};
 
+use crate::captive;
 use crate::invoke::Invoke;
 use crate::prelude::*;
 
@@ -39,7 +40,7 @@ const SERVER_CERT_FILENAME: &str = "startwrt-server.pem";
 const SERVER_KEY_FILENAME: &str = "startwrt-server.key";
 
 /// Default SAN hostname for the router.
-const ROUTER_HOSTNAME: &str = "router.lan";
+pub(crate) const ROUTER_HOSTNAME: &str = "router.lan";
 
 /// The IPv4 and optional IPv6 addresses to include in the server certificate SAN.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -644,9 +645,12 @@ where
 {
     async fn get_config(
         &'a mut self,
-        _hello: &'a ClientHello<'a>,
+        hello: &'a ClientHello<'a>,
         _metadata: &'a A::Metadata,
     ) -> Option<TlsHandlerAction> {
+        if captive::is_active() && !hello.server_name().is_none_or(captive::serves) {
+            return None;
+        }
         let materials = self.materials.load_full();
         let mut cfg = ServerConfig::builder_with_provider(self.crypto_provider.clone())
             .with_safe_default_protocol_versions()
@@ -693,9 +697,8 @@ mod tests {
             .unwrap();
         assert!(
             cn.data()
-                .as_utf8()
-                .unwrap()
                 .to_string()
+                .unwrap()
                 .starts_with("StartWRT Local Root CA "),
             "Root CA CN missing base label"
         );
@@ -714,9 +717,8 @@ mod tests {
                 .next()
                 .unwrap()
                 .data()
-                .as_utf8()
-                .unwrap()
                 .to_string()
+                .unwrap()
         };
         let (a, _) = generate_root_ca().unwrap();
         let (b, _) = generate_root_ca().unwrap();
@@ -739,7 +741,7 @@ mod tests {
             .next()
             .unwrap();
         assert_eq!(
-            cn.data().as_utf8().unwrap().to_string(),
+            cn.data().to_string().unwrap(),
             "StartWRT Local Intermediate CA"
         );
 
@@ -752,17 +754,15 @@ mod tests {
                 .next()
                 .unwrap()
                 .data()
-                .as_utf8()
-                .unwrap()
-                .to_string(),
+                .to_string()
+                .unwrap(),
             ca.subject_name()
                 .entries()
                 .next()
                 .unwrap()
                 .data()
-                .as_utf8()
-                .unwrap()
-                .to_string(),
+                .to_string()
+                .unwrap(),
         );
 
         // Verify it has AKI and SKI

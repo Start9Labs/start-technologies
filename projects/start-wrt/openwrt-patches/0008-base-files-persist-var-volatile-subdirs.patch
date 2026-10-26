@@ -1,0 +1,33 @@
+Subject: base-files: keep uci state and generated configuration in RAM when /var persists
+
+CONFIG_TARGET_ROOTFS_PERSIST_VAR makes /var a directory on the overlay
+and links only /var/run into /tmp. OpenWrt's scripts expect /var/state
+and /var/etc to start empty on every boot as well: uci keeps interface
+state under /var/state, services write their generated configuration
+under /var/etc, and nothing clears either. Link both into /tmp too, and
+create /tmp/etc at boot; procd creates /tmp/state.
+
+Start9 downstream patch (start-technologies projects/start-wrt).
+Applies to: openwrt v25.12.6
+
+--- a/package/base-files/Makefile
++++ b/package/base-files/Makefile
+@@ -225,6 +225,8 @@
+ else
+ 	mkdir -p $(1)/var
+ 	$(LN) /tmp/run $(1)/var/run
++	$(LN) /tmp/state $(1)/var/state
++	$(LN) /tmp/etc $(1)/var/etc
+ endif
+ 	$(LN) /tmp/resolv.conf /tmp/TZ /tmp/localtime $(1)/etc/
+ 
+--- a/package/base-files/files/etc/init.d/boot
++++ b/package/base-files/files/etc/init.d/boot
+@@ -30,6 +30,7 @@
+ 	ln -s /var/run /run
+ 	ln -s /var/lock /run/lock
+ 	mkdir -p /var/state
++	mkdir -p /tmp/etc
+ 	mkdir -p /var/tmp
+ 	mkdir -p /tmp/.uci
+ 	chmod 0700 /tmp/.uci

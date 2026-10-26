@@ -1,4 +1,5 @@
 import { Component, computed, effect, inject, signal } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
 import {
   NonNullableFormBuilder,
   ReactiveFormsModule,
@@ -12,6 +13,7 @@ import {
   TuiHint,
   TuiInput,
   TuiLink,
+  TuiNotification,
   TuiTextfield,
   tuiTextfieldOptionsProvider,
   TuiTitle,
@@ -109,6 +111,29 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
           </small>
         </div>
       </section>
+      <section>
+        <div>
+          <tui-textfield>
+            <label tuiLabel>{{ 'DNS servers' | i18n }}</label>
+            <input tuiInput formControlName="dns" />
+          </tui-textfield>
+          <tui-error formControlName="dns" />
+          <small class="g-secondary">
+            {{
+              'Resolvers reached through the tunnel by profiles using this VPN that have no DNS of their own. Separate with commas.'
+                | i18n
+            }}
+          </small>
+          @if (data() && !dns().trim()) {
+            <div tuiNotification appearance="warning">
+              {{
+                'No DNS servers: profiles using this VPN resolve through your ISP, outside the tunnel, unless system DNS uses custom servers.'
+                  | i18n
+              }}
+            </div>
+          }
+        </div>
+      </section>
       @if (data()) {
         <footer appFooter>
           <button
@@ -164,6 +189,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
     TuiHint,
     TuiInput,
     TuiInputNumber,
+    TuiNotification,
     Footer,
     Form,
     VPNSummary,
@@ -187,6 +213,9 @@ export default class OutboundVPN {
   readonly data = computed(
     () => this.service.data()?.find(v => v.id === this.vpnId) ?? null,
   )
+  protected readonly dns = toSignal(this.form.controls.dns.valueChanges, {
+    initialValue: '',
+  })
 
   readonly dependentVpns = computed(() => {
     const allVpns = this.service.data() ?? []
@@ -215,7 +244,7 @@ export default class OutboundVPN {
           CustomValidators.duplicateName(otherLabels),
           CustomValidators.interfaceNameLength('wg_', 15),
         ])
-        this.form.reset({ ...data })
+        this.form.reset({ ...data, dns: data.dns.join(', ') })
       }
     })
   }
@@ -239,7 +268,7 @@ export default class OutboundVPN {
   onCancel() {
     const data = this.data()
     if (data) {
-      this.form.reset({ ...data })
+      this.form.reset({ ...data, dns: data.dns.join(', ') })
     }
   }
 

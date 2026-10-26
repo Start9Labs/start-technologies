@@ -92,7 +92,7 @@ The IP address or domain name where the VPN server can be reached by clients con
 
 ### Security Profile
 
-The initial set of access rights and restrictions assigned to clients when they connect to the VPN server. Select a previously created profile or schedule, or create a new one.
+The initial set of access rights and restrictions assigned to clients when they connect to the VPN server. Select a previously created profile or schedule, or create a new one. The profile is fixed once the server is created; to move a VPN to another profile, delete it and add a new one.
 
 ### Port
 
@@ -111,7 +111,7 @@ The assigned IP address on the local area network. This was configured when the 
 
 ### Routing
 
-Shows the client's traffic routing mode. "All traffic" routes all internet traffic through the VPN tunnel. "LAN only" routes only local network traffic through the tunnel. Use the actions menu to switch between modes.`,
+Shows the client's traffic routing mode. "All traffic" routes all internet traffic through the VPN tunnel. "LAN only" routes only local network traffic through the tunnel. To change it, delete the client and add it again with the routing you want.`,
   '/inbound/client/dialog-add': `## Inbound VPNs
 
 ### Label
@@ -139,7 +139,7 @@ Displays the configuration as text. Use the copy button to copy it to your clipb
 
 ### QR
 
-Displays the configuration as a QR code. Scan it with the WireGuard mobile app to configure the client device without manual entry.`,
+Displays the configuration as a QR code when the router generated the device's private key. Scan it with the WireGuard mobile app to configure the client device without manual entry.`,
   '/inbound/client/dialog-rename': `## Rename Client
 
 ### Name
@@ -164,9 +164,9 @@ IPv6 allows your devices to be directly reachable from the internet without NAT,
 
 ### Prefix Length
 
-The prefix length determines the size of your LAN's IPv6 address space. It must be **larger** (a higher number) than your WAN prefix to create a valid subnet.
+The prefix length determines the size of your LAN's IPv6 address space. Choose a value from /48 to /64, no shorter than the prefix your ISP delegated. The summary shows that size as **Delegated Prefix** (**None** without a delegation).
 
-For example, if your ISP assigns you a /48 prefix, you can use /56, /60, or /64 for your LAN. A /64 prefix is recommended for most home networks.`,
+For example, on a /56 delegation, you can use /56, /60, or /64 for your LAN; on a /64 delegation, use /64. A /64 prefix is recommended for most home networks.`,
   '/outbound': `## Outbound VPNs
 
 Outbound VPNs route your internet traffic through encrypted tunnels to remote servers, enhancing privacy and security.
@@ -187,7 +187,7 @@ Route one VPN through another for additional privacy. Your traffic exits through
 Upload a WireGuard configuration file from your VPN provider (Mullvad, ProtonVPN, IVPN, etc.) to create a new VPN client.`,
   '/outbound/vpn': `## Outbound VPNs
 
-<details><summary>Label</summary> A friendly name to identify this VPN connection. Use something descriptive like "Mullvad Sweden" or "Work VPN". </details> <details><summary>Connects to</summary> Where traffic from this VPN should be routed:<ul><li><b>Internet:</b> Traffic exits directly to the internet through this VPN.</li><li><b>Another VPN:</b> Chain through another VPN first for extra privacy. Your traffic will be encrypted multiple times and exit through multiple servers.</li></ul><b>Note:</b> Chaining VPNs increases latency and may reduce speeds. </details> <details><summary>Connection Path</summary> Shows the full route your traffic takes from this VPN to the internet. For example: Mullvad → Proton → Internet means traffic is encrypted by Mullvad, sent through Proton, then exits to the internet.</details>`,
+<details><summary>Label</summary> A friendly name to identify this VPN connection. Use something descriptive like "Mullvad Sweden" or "Work VPN". </details> <details><summary>Connects to</summary> Where traffic from this VPN should be routed:<ul><li><b>Internet:</b> Traffic exits directly to the internet through this VPN.</li><li><b>Another VPN:</b> Chain through another VPN first for extra privacy. Your traffic will be encrypted multiple times and exit through multiple servers.</li></ul><b>Note:</b> Chaining VPNs increases latency and may reduce speeds. </details> <details><summary>DNS Servers</summary> Resolvers reached through the tunnel by profiles routed through this VPN that have no DNS servers of their own. Leave blank to use the system's custom DNS servers through the tunnel — or, when the system uses your ISP's DNS, your ISP's servers outside it. </details> <details><summary>Connection Path</summary> Shows the full route your traffic takes from this VPN to the internet. For example: Mullvad → Proton → Internet means traffic is encrypted by Mullvad, sent through Proton, then exits to the internet.</details>`,
   '/outbound/dialog': `## Outbound VPNs
 
 VPN clients create an outbound connection to a VPN server, allowing devices to send and receive data as if they were directly connected to the private network. Masks your IP address, bypasses geographic restrictions, and protects sensitive data on public Wi-Fi networks.
@@ -202,7 +202,11 @@ Upload a WireGuard **.conf** file from your VPN provider. This file contains the
 
 ### Target
 
-The next hop in the path of a layered VPN connection.`,
+The next hop in the path of a layered VPN connection.
+
+### DNS Servers
+
+Optional. Replaces the DNS servers in the config file. Profiles routed through this VPN resolve through the tunnel with these servers unless they set their own. With none here, in the config, or in the system's custom DNS, those profiles resolve through your ISP outside the tunnel.`,
   '/profiles': `## Profiles
 
 Security profiles define network segments with isolated permissions. Each profile controls internet access and communication with other profiles on your local network.
@@ -213,7 +217,7 @@ A descriptive name for the security profile, such as "Guest" or "IoT Devices".
 
 ### DNS
 
-Which DNS servers devices in this profile use — the system's ("System"), the profile's own custom servers ("Custom"), or, when routing through a VPN, the VPN's ("VPN").
+Which DNS servers devices in this profile use — the system's ("System"), the profile's own custom servers ("Custom"), or, when routing through a VPN, the VPN's ("VPN"). "System (outside VPN)" means a VPN-routed profile has no DNS servers to use through the tunnel and resolves through your ISP outside it.
 
 ### Outbound
 
@@ -471,7 +475,7 @@ Controls what the connected device can access on the network. Assign a security 
 
 ### Country
 
-The country whose Wi-Fi regulations the router follows. It decides which channels each band may use and how much transmit power is allowed. Until a country is selected, the router runs on a conservative worldwide subset: 2.4 GHz channels 1–11 and 5 GHz channels 36–48 at reduced power. Changing the country resets the channel selections to Auto. Choose the country the router is physically located in.
+The country whose Wi-Fi regulations the router follows. It decides which channels each band may use and how much transmit power is allowed. Until a country is selected, the router runs on a conservative worldwide subset: 2.4 GHz channels 1–11 and 5 GHz channels 36–48 at reduced power. Changing the country resets the channel selections to Auto and narrows a channel width above 80 MHz to 80 MHz. Choose the country the router is physically located in.
 
 ### Enable Wi-Fi
 
@@ -495,7 +499,11 @@ When using both frequency bands, this option creates separate SSIDs for 2.4 GHz 
 
 ### Channels
 
-Specific channels within each frequency band. Select "Auto" for the router to choose the best channel, or pick a specific channel to avoid interference from neighboring networks. "Auto" skips radar-detection (DFS) channels. You can pick one by hand, but the 5 GHz network then takes a minute or more to appear each time the router starts while it listens for radar.`,
+Specific channels within each frequency band. Select "Auto" for the router to choose the best channel, or pick a specific channel to avoid interference from neighboring networks. "Auto" skips radar-detection (DFS) channels. You can pick one by hand, but the 5 GHz network then takes a minute or more to appear each time the router starts while it listens for radar.
+
+### Channel Width
+
+How much of the band each network occupies. Wider channels are faster but overlap more neighboring networks and reach slightly less far. Each dropdown lists the widths the selected channel can use in the selected country. On 2.4 GHz, a 40 MHz network starts at 20 MHz instead when a neighboring network overlaps it.`,
 }
 
 export default HELP_EN

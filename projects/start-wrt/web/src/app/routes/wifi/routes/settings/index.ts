@@ -43,6 +43,9 @@ import { ReconnectDialog } from './reconnect-dialog'
 // The kernel's world regulatory domain; null on the wire.
 const WORLD = '00'
 
+// Widest width a save that changes the country may carry.
+const COUNTRY_CHANGE_MAX_WIDTH = 80
+
 @Component({
   template: `
     <form
@@ -115,7 +118,11 @@ const WORLD = '00'
         <legend>{{ 'Frequency Range' | i18n }}</legend>
         <tui-textfield tuiChevron [stringify]="stringifyChannel">
           <label tuiLabel>{{ '2.4 GHz Channel' | i18n }}</label>
-          <input tuiSelect formControlName="channel24" />
+          <input
+            tuiSelect
+            formControlName="channel24"
+            (tuiValueChanges)="onChannel('2g', $event)"
+          />
           <tui-data-list *tuiDropdown>
             @for (ch of channels24(); track ch) {
               <button tuiOption [value]="ch">{{ ch | i18n }}</button>
@@ -124,10 +131,35 @@ const WORLD = '00'
         </tui-textfield>
         <tui-textfield tuiChevron [stringify]="stringifyChannel">
           <label tuiLabel>{{ '5 GHz Channel' | i18n }}</label>
-          <input tuiSelect formControlName="channel5" />
+          <input
+            tuiSelect
+            formControlName="channel5"
+            (tuiValueChanges)="onChannel('5g', $event)"
+          />
           <tui-data-list *tuiDropdown>
             @for (ch of channels5(); track ch) {
               <button tuiOption [value]="ch">{{ ch | i18n }}</button>
+            }
+          </tui-data-list>
+        </tui-textfield>
+      </fieldset>
+      <fieldset>
+        <legend>{{ 'Channel Width' | i18n }}</legend>
+        <tui-textfield tuiChevron [stringify]="stringifyWidth">
+          <label tuiLabel>{{ '2.4 GHz Width' | i18n }}</label>
+          <input tuiSelect formControlName="width24" />
+          <tui-data-list *tuiDropdown>
+            @for (w of widths24(); track w) {
+              <button tuiOption [value]="w">{{ stringifyWidth(w) }}</button>
+            }
+          </tui-data-list>
+        </tui-textfield>
+        <tui-textfield tuiChevron [stringify]="stringifyWidth">
+          <label tuiLabel>{{ '5 GHz Width' | i18n }}</label>
+          <input tuiSelect formControlName="width5" />
+          <tui-data-list *tuiDropdown>
+            @for (w of widths5(); track w) {
+              <button tuiOption [value]="w">{{ stringifyWidth(w) }}</button>
             }
           </tui-data-list>
         </tui-textfield>
@@ -190,7 +222,23 @@ export default class WifiSettings {
     broadcastSeparately: [false],
     channel24: ['Auto'],
     channel5: ['Auto'],
+    width24: [null as number | null],
+    width5: [null as number | null],
   })
+
+  private readonly channel24 = toSignal(
+    this.form.controls.channel24.valueChanges.pipe(
+      startWith(this.form.controls.channel24.value),
+    ),
+    { requireSync: true },
+  )
+
+  private readonly channel5 = toSignal(
+    this.form.controls.channel5.valueChanges.pipe(
+      startWith(this.form.controls.channel5.value),
+    ),
+    { requireSync: true },
+  )
 
   protected readonly band = toSignal(
     this.form.controls.band.valueChanges.pipe(
@@ -229,6 +277,15 @@ export default class WifiSettings {
   protected readonly channels24 = computed(() => this.channelOptions('2g'))
   protected readonly channels5 = computed(() => this.channelOptions('5g'))
 
+  protected readonly stringifyWidth = (w: number): string => `${w} MHz`
+
+  protected readonly widths24 = computed(() =>
+    this.widthOptions('2g', this.channel24()),
+  )
+  protected readonly widths5 = computed(() =>
+    this.widthOptions('5g', this.channel5()),
+  )
+
   constructor() {
     this.loadRegulatory()
     effect(() => {
@@ -239,10 +296,28 @@ export default class WifiSettings {
     })
   }
 
-  // A channel permitted under the old country may not be under the new one.
+  // A channel or width permitted under the old country may not be under the new one.
   protected onCountry(country: string | null): void {
     if ((country || WORLD) !== (this.service.data()?.country ?? WORLD)) {
-      this.form.patchValue({ channel24: 'Auto', channel5: 'Auto' })
+      const narrow = (w: number | null) =>
+        w && Math.min(w, COUNTRY_CHANGE_MAX_WIDTH)
+      const { width24, width5 } = this.form.getRawValue()
+      this.form.patchValue({
+        channel24: 'Auto',
+        channel5: 'Auto',
+        width24: narrow(width24),
+        width5: narrow(width5),
+      })
+    }
+  }
+
+  // A width the new channel cannot carry falls back to the widest it can.
+  protected onChannel(band: string, channel: string): void {
+    const control =
+      band === '2g' ? this.form.controls.width24 : this.form.controls.width5
+    const widths = this.widthOptions(band, channel)
+    if (control.value && widths.length && !widths.includes(control.value)) {
+      control.setValue(Math.max(...widths))
     }
   }
 
@@ -307,7 +382,16 @@ export default class WifiSettings {
   }
 
   private channelOptions(band: string): string[] {
-    return ['Auto', ...(this.regulatory()?.channels[band] ?? []).map(String)]
+    const channels = this.regulatory()?.bands[band]?.channels ?? []
+    return ['Auto', ...channels.map(c => String(c.channel))]
+  }
+
+  private widthOptions(band: string, channel: string): number[] {
+    const options = this.regulatory()?.bands[band]
+    return channel === 'Auto'
+      ? (options?.autoWidths ?? [])
+      : (options?.channels.find(c => String(c.channel) === channel)?.widths ??
+          [])
   }
 
   private toFormValue(config: WifiConfig) {
@@ -327,6 +411,8 @@ export default class WifiSettings {
       broadcastSeparately: config.broadcastSeparately,
       channel24: radio2g ? channelToOption(radio2g[1].channel) : 'Auto',
       channel5: radio5g ? channelToOption(radio5g[1].channel) : 'Auto',
+      width24: radio2g?.[1].width ?? null,
+      width5: radio5g?.[1].width ?? null,
     }
   }
 
@@ -353,6 +439,7 @@ export default class WifiSettings {
           : is5g
             ? optionToChannel(form.channel5)
             : radio.channel,
+        width: is2g ? form.width24 : is5g ? form.width5 : radio.width,
         enabled: form.enabled && enabledByBand,
         broadcast: form.broadcast && form.enabled && enabledByBand,
       }

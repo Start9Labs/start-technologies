@@ -21,7 +21,7 @@ StartWRT has three components:
 - **Rust backend** — A single binary (`startwrt`) that runs as the RPC server and CLI. It manages all configuration, service reloads, TLS certificates, authentication, and system operations.
 - **Angular frontend** — A single-page application embedded in the backend binary. Communicates with the backend over JSON-RPC 2.0.
 
-All persistent configuration lives in UCI files under `/etc/config/` — the same configuration system used by stock OpenWrt, with no separate configuration database. The backend reads and writes these files atomically, so the CLI, LuCI, and the StartWRT web interface all share a single source of truth. (The activity log and login sessions are stored separately under `/etc/startwrt/`, outside the UCI config system.)
+All persistent configuration lives in UCI files under `/etc/config/` — the same configuration system used by stock OpenWrt, with no separate configuration database. The backend reads and writes these files atomically, so the CLI, LuCI, and the StartWRT web interface all share a single source of truth. (The activity log is stored separately under `/var/lib/startwrt/` and enrolled sign-in keys under `/etc/startwrt/`, outside the UCI config system.)
 
 ## Security Profile Internals
 
@@ -53,7 +53,7 @@ StartWRT's multi-password Wi-Fi uses WPA2's identity PSK feature with dynamic VL
 
 - **Admin password** — Stored as a SHA-512 hash in `/etc/shadow`
 - **Wi-Fi password** — Printed on the sticker and stored in the router's EEPROM
-- **Sessions** — Random token with 1-day expiry; HTTP-only SameSite=Strict cookie
+- **Sign-in** — Logging in creates a key your browser holds but cannot export, and the browser signs every request with it. A sign-in lasts 24 hours from when you log in, or until you log out or the admin password is changed from another device.
 - **Rate limiting** — 3 login attempts per 20 seconds
 - **SSH** — Public key authentication or password auth (Admin password)
 - **TLS** — rustls with a Root CA certificate chain

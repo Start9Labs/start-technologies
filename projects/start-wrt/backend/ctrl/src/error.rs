@@ -64,6 +64,14 @@ pub enum ErrorKind {
     VpnDisabled = 1026,
 }
 
+impl From<Error> for startos::Error {
+    fn from(e: Error) -> Self {
+        let mut res = startos::Error::new(e.source, e.kind.into());
+        res.info = e.info;
+        res
+    }
+}
+
 impl From<ErrorKind> for startos::ErrorKind {
     fn from(k: ErrorKind) -> Self {
         // Matching numeric code where possible (generic variants have the same
@@ -151,8 +159,6 @@ impl Debug for Error {
         write!(f, "{}: {:?}", self.kind.as_str(), self.source)
     }
 }
-
-impl std::error::Error for Error {}
 
 impl Error {
     pub fn new<E: Into<color_eyre::eyre::Error> + std::fmt::Debug + 'static>(
@@ -271,12 +277,13 @@ impl From<rusqlite::Error> for Error {
 
 // --- RPC conversion ---
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, visit_rs::VisitFields)]
 pub struct ErrorData {
     pub details: String,
     #[serde(default)]
     pub info: Value,
 }
+rpc_toolkit::reflect_ts!(ErrorData);
 
 impl Display for ErrorData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -295,6 +302,23 @@ impl From<Error> for ErrorData {
         Self {
             details: format!("{:#}", value.source),
             info: value.info,
+        }
+    }
+}
+
+impl From<Error> for RpcError {
+    fn from(e: Error) -> Self {
+        let kind = e.kind;
+        RpcError {
+            code: kind as i32,
+            message: kind.as_str().into(),
+            data: Some(match serde_json::to_value(&ErrorData::from(e)) {
+                Ok(a) => a,
+                Err(e) => {
+                    tracing::warn!("Error serializing ErrorData object: {}", e);
+                    serde_json::Value::Null
+                }
+            }),
         }
     }
 }
@@ -471,4 +495,34 @@ macro_rules! ensure_code {
             ));
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rpc_error_carries_kind() {
+        let rpc = RpcError::from(
+            Error::new(eyre!("2 peer(s)"), ErrorKind::VpnPeersWouldBreak)
+                .with_info(imbl_value::json!({ "profiles": ["guest"] })),
+        );
+        assert_eq!(rpc.code, 1019);
+        assert_eq!(rpc.message, "VPN Peers Would Break");
+        assert_eq!(
+            rpc.data,
+            Some(serde_json::json!({
+                "details": "2 peer(s)",
+                "info": { "profiles": ["guest"] },
+            }))
+        );
+    }
+
+    #[test]
+    fn rpc_error_round_trips_kind() {
+        let rpc = RpcError::from(Error::new(eyre!("taken"), ErrorKind::DuplicateFullname));
+        let e = Error::from(rpc);
+        assert_eq!(e.kind, ErrorKind::DuplicateFullname);
+        assert_eq!(e.source.to_string(), "taken");
+    }
 }

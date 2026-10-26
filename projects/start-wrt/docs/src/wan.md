@@ -28,7 +28,7 @@ Configure IPv6 if your ISP supports it.
 - **6RD** — Tunnels IPv6 over an IPv4 connection. Required by some ISPs that do not provide native IPv6. Configuration fields: IPv6 Prefix, IPv6 Prefix Length, IPv4 Prefix Length, and Border Relay IP (the IPv4 address of the ISP's relay server).
 - **Disabled** — No IPv6 on the WAN interface.
 
-For SLAAC and DHCPv6, an optional **IPv6 Prefix** field lets you request a specific prefix length from your ISP for prefix delegation (e.g. `/48`, `/56`, `/64`). Leave empty to let your ISP decide automatically.
+For SLAAC and DHCPv6, an optional **IPv6 Prefix** field lets you request a specific prefix length from your ISP for prefix delegation (e.g. `/48`, `/56`, `/64`). Leave empty to let your ISP decide automatically. The request is a hint the ISP may ignore; the size it actually delegated appears as **Delegated Prefix** on the [LAN IPv6](lan.md#ipv6) page.
 
 > [!NOTE]
 > IPv6 cannot be set to Disabled while any enabled [Published Ports](published-ports.md) rules use IPv6 — the option is grayed out with a hint. Remove or disable those rules first.

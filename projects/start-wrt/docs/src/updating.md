@@ -10,7 +10,7 @@ StartWRT never updates automatically — updating always requires explicit actio
 
 1. Click "Update now" and confirm.
 
-1. A progress dialog stays open while the router downloads and applies the update. When it finishes, the router reboots. Once it is back online, the page reloads to the new interface automatically and takes you to the login page — updating signs everyone out, so simply log back in with your admin password. After you log in, an "Updated to vX.Y.Z" confirmation appears.
+1. A progress dialog stays open while the router downloads and applies the update. When it finishes, the router reboots. Once it is back online, the page reloads to the new interface automatically and takes you to the login page, so log back in with your admin password. After you log in, an "Updated to vX.Y.Z" confirmation appears.
 
    > [!WARNING]
    > Do not unplug your router during the update or reboot. The update can take several minutes to apply. All network traffic — Wi-Fi, Ethernet, VPN connections, and port forwarding — will be interrupted until the router finishes restarting.

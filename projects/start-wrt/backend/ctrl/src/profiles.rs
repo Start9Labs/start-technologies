@@ -7,7 +7,7 @@ use clap::Parser;
 use rpc_toolkit::{from_fn_async_local, HandlerExt as _, ParentHandler};
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
-    DeviceType, Dhcp, FirewallForwarding, FirewallRedirect, FirewallRule, FirewallTarget,
+    DeviceType, Dhcp, DhcpHost, FirewallForwarding, FirewallRedirect, FirewallRule, FirewallTarget,
     FirewallZone, InterfaceProto, NetworkBridgeVlan, NetworkDevice, NetworkInterface, NetworkRoute,
     NetworkRoute6, NetworkRule, NetworkRule6, NetworkVlanPort, NetworkVlanPortTagging,
     ProfileDnsmasq, WifiStation, WifiVlan,
@@ -32,7 +32,7 @@ pub const DEFAULT_WAN_ZONE: &str = "wan";
 /// Do NOT raise this without re-checking every interface-derived netdev name.
 pub const INTERFACE_NAME_LIMIT: usize = 5;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitVariants)]
 pub enum LanAccess<Id: Ord> {
     #[serde(rename = "ALL")]
     All,
@@ -41,8 +41,9 @@ pub enum LanAccess<Id: Ord> {
     #[serde(rename = "other_profiles")]
     OtherProfiles(BTreeSet<Id>),
 }
+rpc_toolkit::reflect_ts!(impl [Id: Ord] for LanAccess<Id> where [BTreeSet<Id>: rpc_toolkit::ts::TS]);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitVariants)]
 pub enum WanAccess {
     #[serde(rename = "ALL")]
     All,
@@ -53,22 +54,25 @@ pub enum WanAccess {
     #[serde(rename = "blacklist")]
     Blacklist(Vec<String>), // List of blocked destination IPs/CIDRs
 }
+rpc_toolkit::reflect_ts!(WanAccess);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduleWindow {
     pub start_time: String,
     pub end_time: String,
     pub days: [bool; 7],
 }
+rpc_toolkit::reflect_ts!(ScheduleWindow);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitFields)]
 pub struct ScheduleWindows {
     pub interface: String,
     pub windows: Vec<ScheduleWindow>,
 }
+rpc_toolkit::reflect_ts!(ScheduleWindows);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct Profile<Id: Ord = ProfileId> {
     #[serde(flatten)]
     pub id: Id,
@@ -83,14 +87,16 @@ pub struct Profile<Id: Ord = ProfileId> {
     pub access_to_new_profiles: bool,
     pub owns_lan: bool,
 }
+rpc_toolkit::reflect_ts!(impl [Id: Ord] for Profile<Id> where [Id: rpc_toolkit::ts::TS, LanAccess<Id>: rpc_toolkit::ts::TS]);
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, visit_rs::VisitFields)]
 pub struct ProfileSetRequest {
     #[serde(flatten)]
     pub profile: Profile<ProfileIdOpt>,
     #[serde(default)]
     pub force: bool,
 }
+rpc_toolkit::reflect_ts!(ProfileSetRequest);
 
 pub fn profiles<C: CtrlContext>() -> ParentHandler<C> {
     ParentHandler::new()
@@ -125,14 +131,38 @@ pub fn profiles<C: CtrlContext>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug,
+    Deserialize,
+    Serialize,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    visit_rs::VisitFields,
+)]
 pub struct ProfileId {
     pub fullname: String,
     pub interface: String,
     pub vlan_tag: u16,
 }
+rpc_toolkit::reflect_ts!(ProfileId);
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Parser)]
+#[derive(
+    Debug,
+    Deserialize,
+    Serialize,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Parser,
+    visit_rs::VisitFields,
+)]
 pub struct ProfileIdOpt {
     #[clap(short, long)]
     pub fullname: Option<String>,
@@ -141,6 +171,7 @@ pub struct ProfileIdOpt {
     #[clap(short, long)]
     pub vlan_tag: Option<u16>,
 }
+rpc_toolkit::reflect_ts!(ProfileIdOpt);
 
 impl From<ProfileId> for ProfileIdOpt {
     fn from(id: ProfileId) -> Self {
@@ -179,6 +210,12 @@ pub(crate) struct UciProfile {
     pub outbound: Option<String>,
     #[uci(default_value = "false")]
     pub access_to_new_profiles: bool,
+    /// Unset on a profile last saved before the mode was stored.
+    #[uci(default)]
+    pub lan_access: Option<LanAccessMode>,
+    /// Interfaces of the whitelisted profiles.
+    #[uci(default)]
+    pub lan_access_list: Vec<String>,
     #[uci(default)]
     pub wan_access: Option<String>,
     #[uci(default)]
@@ -209,6 +246,147 @@ impl UciProfile {
     }
 }
 
+fn grants_access_to_new_profiles<Id: Ord>(profile: &Profile<Id>) -> bool {
+    match profile.lan_access {
+        LanAccess::All => true,
+        LanAccess::SameProfile => false,
+        LanAccess::OtherProfiles(_) => profile.access_to_new_profiles,
+    }
+}
+
+/// The stored `lan_access` option of a profile section.
+#[derive(Debug, Clone, PartialEq, Eq, strum::EnumString, strum::Display)]
+#[strum(serialize_all = "snake_case")]
+pub(crate) enum LanAccessMode {
+    All,
+    SameProfile,
+    Whitelist,
+    /// A value StartWRT did not write, preserved verbatim and read as unset.
+    #[strum(default)]
+    Unknown(String),
+}
+
+fn store_lan_access(uci: &mut UciProfile, access: &LanAccess<ProfileId>, grants_new: bool) {
+    let (mode, list) = match access {
+        LanAccess::All => (LanAccessMode::All, Vec::new()),
+        LanAccess::SameProfile => (LanAccessMode::SameProfile, Vec::new()),
+        LanAccess::OtherProfiles(ids) => (
+            LanAccessMode::Whitelist,
+            ids.iter().map(|id| id.interface.clone()).collect(),
+        ),
+    };
+    uci.lan_access = Some(mode);
+    uci.lan_access_list = list;
+    uci.access_to_new_profiles = grants_new;
+    collapse_empty_whitelist(uci);
+}
+
+/// An empty whitelist without future access is stored as Same profile.
+fn collapse_empty_whitelist(uci: &mut UciProfile) {
+    if uci.lan_access == Some(LanAccessMode::Whitelist)
+        && uci.lan_access_list.is_empty()
+        && !uci.access_to_new_profiles
+    {
+        uci.lan_access = Some(LanAccessMode::SameProfile);
+    }
+}
+
+fn persist_lan_access(
+    cfgs: &mut Configs,
+    id: &ProfileId,
+    access: &LanAccess<ProfileId>,
+    grants_new: bool,
+) -> Result<(), Error> {
+    for section in &mut cfgs["startwrt"].sections {
+        if let Some(mut uci) = section.get_typed::<UciProfile>()? {
+            if &uci.id() == id {
+                store_lan_access(&mut uci, access, grants_new);
+                section.set(&uci)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Returns `None` for an unset or unrecognized mode.
+fn stored_lan_access(uci: &UciProfile, lookup: &Lookup) -> Option<(LanAccess<ProfileId>, bool)> {
+    match uci.lan_access.as_ref()? {
+        LanAccessMode::All => Some((LanAccess::All, true)),
+        LanAccessMode::SameProfile => Some((LanAccess::SameProfile, false)),
+        LanAccessMode::Whitelist => Some((
+            LanAccess::OtherProfiles(
+                uci.lan_access_list
+                    .iter()
+                    .filter(|iface| **iface != uci.interface)
+                    .filter_map(|iface| lookup.from_interface(iface).cloned())
+                    .collect(),
+            ),
+            uci.access_to_new_profiles,
+        )),
+        LanAccessMode::Unknown(_) => None,
+    }
+}
+
+/// Reconstructs the mode of a profile saved before it was stored, from its
+/// forwardings and future-access flag.
+fn infer_lan_access(
+    cfgs: &Configs,
+    lookup: &Lookup,
+    id: &ProfileId,
+    stored_flag: bool,
+) -> Result<(LanAccess<ProfileId>, bool), Error> {
+    let mut this_zone_name = format!("vlan_{}", id.interface);
+    cfgs["firewall"].each::<FirewallZone, Error>(|_, zone| {
+        for zone_interface in zone.network {
+            if id.interface == zone_interface {
+                this_zone_name = zone.name.clone();
+            }
+        }
+    })?;
+    let mut forwarding = BTreeSet::new();
+    cfgs["firewall"].each::<FirewallForwarding, Error>(|_, FirewallForwarding { src, dest }| {
+        if src == this_zone_name && src != dest {
+            forwarding.insert(dest);
+        }
+    })?;
+    let mut other_profiles = BTreeSet::new();
+    cfgs["firewall"].each::<FirewallZone, Error>(|_, FirewallZone { name, network, .. }| {
+        if forwarding.contains(&name) {
+            for other_interface in network {
+                if let Some(other) = lookup.from_interface(&other_interface) {
+                    other_profiles.insert(other.clone());
+                }
+            }
+        }
+    })?;
+    Ok(
+        if other_profiles.is_empty() && (lookup.list().len() > 1 || !stored_flag) {
+            (LanAccess::SameProfile, false)
+        } else if (other_profiles.len() + 1) >= lookup.list().len() && stored_flag {
+            (LanAccess::All, true)
+        } else {
+            (LanAccess::OtherProfiles(other_profiles), stored_flag)
+        },
+    )
+}
+
+fn read_lan_access(
+    cfgs: &Configs,
+    lookup: &Lookup,
+    id: &ProfileId,
+    uci: Option<&UciProfile>,
+) -> Result<(LanAccess<ProfileId>, bool), Error> {
+    if let Some(stored) = uci.and_then(|uci| stored_lan_access(uci, lookup)) {
+        return Ok(stored);
+    }
+    infer_lan_access(
+        cfgs,
+        lookup,
+        id,
+        uci.map_or(false, |uci| uci.access_to_new_profiles),
+    )
+}
+
 fn wan_access_type_str(wa: &WanAccess) -> String {
     match wa {
         WanAccess::All => "all".into(),
@@ -225,31 +403,21 @@ fn wan_access_destinations(wa: &WanAccess) -> Vec<String> {
     }
 }
 
-fn get_vpn_dns(cfgs: &Configs, vpn_interface: &str) -> Vec<String> {
-    for section in &cfgs["network"].sections {
-        if let Ok(iface) = section.get::<NetworkInterface>() {
-            if section.name().as_deref() == Some(vpn_interface) && !iface.dns.is_empty() {
-                return iface.dns.iter().map(|s| s.to_string()).collect();
-            }
-        }
-    }
-    Vec::new()
+fn profile_dns(cfgs: &Configs, profile: &Profile) -> dns::ProfileDns {
+    dns::profile_dns(cfgs, &profile.outbound, &profile.dns_override)
 }
 
-fn compute_dns_source(cfgs: &Configs, profile: &Profile) -> String {
-    if !profile.dns_override.is_empty() {
-        "custom".into()
-    } else if profile.outbound != "wan" && !get_vpn_dns(cfgs, &profile.outbound).is_empty() {
-        "vpn".into()
-    } else {
-        "system".into()
-    }
-}
-
-/// Returns true if the profile has non-system DNS (custom override or VPN DNS).
-fn has_effective_dns(cfgs: &Configs, profile: &Profile) -> bool {
-    !profile.dns_override.is_empty()
-        || (profile.outbound != "wan" && !get_vpn_dns(cfgs, &profile.outbound).is_empty())
+/// Whether any device or inbound-VPN peer may inject DNS records. Box-wide: a
+/// device's profile is a runtime fact. Separate from `ProfileDns::redirects`,
+/// which gates the `DNS-Override` redirect.
+fn has_dns_injection(cfgs: &Configs) -> bool {
+    cfgs["dhcp"].sections.iter().any(|s| {
+        s.get::<DhcpHost>()
+            .is_ok_and(|h| h._allow_dns_inject.as_deref() == Some("1"))
+    }) || cfgs["network"]
+        .sections
+        .iter()
+        .any(|s| s.ty().starts_with("wireguard_") && crate::dns_inject::peer_allows_dns_inject(s))
 }
 
 /// Rewrite DNS forwarding (dnsmasq sections) for ALL profiles.
@@ -297,6 +465,57 @@ pub(crate) fn rewrite_all_dns_forwarding(cfgs: &mut Configs) -> Result<(), Error
     Ok(())
 }
 
+pub async fn heal_dns_forwarding<C: CtrlContext>(ctx: C) -> Result<(), Error> {
+    let mut retries = 4;
+    loop {
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "dhcp", "firewall"],
+        )
+        .await?;
+        let before = dns_forwarding_snapshot(&cfgs);
+        rewrite_all_dns_forwarding(&mut cfgs)?;
+        if dns_forwarding_snapshot(&cfgs) == before {
+            return Ok(());
+        }
+        match dump_all(ctx.uci_root(), cfgs).await {
+            Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
+                retries -= 1;
+            }
+            Err(err) => return Err(err.into()),
+            Ok(()) => {
+                if ctx.effectful() {
+                    crate::published_ports::reload_firewall_wait().await?;
+                    crate::devices::reload_dnsmasq();
+                }
+                return Ok(());
+            }
+        }
+    }
+}
+
+/// Ignores section order.
+fn dns_forwarding_snapshot(cfgs: &Configs) -> [Vec<String>; 2] {
+    ["dhcp", "firewall"].map(|name| {
+        let mut sections: Vec<String> = cfgs[name]
+            .sections
+            .iter()
+            .map(|section| {
+                section
+                    .lines
+                    .iter()
+                    .filter(|line| !matches!(line, Line::Empty))
+                    .map(|line| format!("{line}\n"))
+                    .collect()
+            })
+            .collect();
+        sections.sort();
+        sections
+    })
+}
+
 /// Rewrite the DNS-Override DNAT redirect rule for a single profile.
 /// Adds or removes the redirect based on whether the profile needs DNS hijacking.
 fn rewrite_dns_redirect(cfgs: &mut Configs, profile: &Profile) -> Result<(), Error> {
@@ -323,7 +542,7 @@ fn rewrite_dns_redirect(cfgs: &mut Configs, profile: &Profile) -> Result<(), Err
     });
 
     // Add redirect if this profile needs DNS hijacking
-    if has_effective_dns(cfgs, profile) || !dns::get_system_dns_servers(cfgs).is_empty() {
+    if profile_dns(cfgs, profile).redirects() {
         cfgs["firewall"].append(
             &FirewallRedirect {
                 name: format!("DNS-Override-{}", profile.id.fullname.replace(" ", "-"),),
@@ -366,42 +585,34 @@ pub(crate) fn rewrite_dns_forwarding(cfgs: &mut Configs, profile: &Profile) -> R
         }
     }
 
-    // Determine the dnsmasq server list based on DNS source:
-    // 1. Custom DNS → SmartDNS profile group
-    // 2. VPN DNS → dnsmasq server IP@interface directly (SmartDNS can't bind to VPN iface)
-    // 3. System DNS (custom) → SmartDNS system group
-    // 4. System DNS (ISP) → no per-profile dnsmasq (uses default resolvfile)
-    let servers: Vec<String> = if !profile.dns_override.is_empty() {
-        // Custom DNS: route through SmartDNS profile group
-        let port = dns::smartdns_port_for_vlan(profile.id.vlan_tag);
-        vec![format!("127.0.0.1#{}", port)]
-    } else if profile.outbound != "wan" {
-        // VPN DNS: use dnsmasq server IP@interface directly
-        let vpn_dns = get_vpn_dns(cfgs, &profile.outbound);
-        if vpn_dns.is_empty() {
-            vec![]
-        } else {
-            vpn_dns
-                .into_iter()
-                .map(|ip| format!("{}@{}", ip, profile.outbound))
-                .collect()
-        }
-    } else {
-        // System DNS: route through SmartDNS system group if configured
-        let system_dns = dns::get_system_dns_servers(cfgs);
-        if !system_dns.is_empty() {
-            vec![format!("127.0.0.1#{}", dns::SMARTDNS_SYSTEM_PORT)]
-        } else {
-            vec![] // ISP mode — no per-profile dnsmasq needed
-        }
+    let servers: Vec<String> = match profile_dns(cfgs, profile) {
+        dns::ProfileDns::Group { .. } => vec![format!(
+            "127.0.0.1#{}",
+            dns::smartdns_port_for_vlan(profile.id.vlan_tag)
+        )],
+        dns::ProfileDns::Vpn { servers, via } => servers
+            .into_iter()
+            .map(|ip| format!("{ip}@{via}"))
+            .collect(),
+        dns::ProfileDns::System => vec![format!("127.0.0.1#{}", dns::SMARTDNS_SYSTEM_PORT)],
+        dns::ProfileDns::Isp | dns::ProfileDns::IspOutsideVpn => vec![],
     };
 
-    if !servers.is_empty() {
+    // Injection needs an instance even in ISP mode; with no `server` list and
+    // `noresolv` unset it forwards to resolv.conf.auto like the main one.
+    let inject = has_dns_injection(cfgs);
+    if !servers.is_empty() || inject {
+        let noresolv = (!servers.is_empty()).then(|| "1".to_string());
+        let mut server = servers;
+        // Firefox's DoH canary: an NXDOMAIN here turns off its default-enabled
+        // DNS-over-HTTPS on this network.
+        server.push("/use-application-dns.net/".to_string());
         cfgs["dhcp"].append(
             &ProfileDnsmasq {
-                server: servers,
-                noresolv: Some("1".to_string()),
-                interface: vec![],
+                noresolv,
+                server,
+                // An unscoped instance serves every profile's DHCP pool.
+                interface: vec![profile.id.interface.clone()],
                 localservice: Some("1".to_string()),
                 nonwildcard: Some("1".to_string()),
                 listen_address: vec![profile.gateway_ip.to_string()],
@@ -415,6 +626,11 @@ pub(crate) fn rewrite_dns_forwarding(cfgs: &mut Configs, profile: &Profile) -> R
                 boguspriv: Some("0".to_string()),
                 local: Some("/lan/".to_string()),
                 dhcpscript: Some(crate::device_ident::FINGERPRINT_SCRIPT_PATH.to_string()),
+                addnhosts: if inject {
+                    vec![crate::dns_inject::inject_hosts_path(&profile.id.interface)]
+                } else {
+                    vec![]
+                },
             },
             Some(&section_name),
         )?;
@@ -476,10 +692,7 @@ pub(crate) fn get_config(
             .map(|p| dns::parse_dns_server_list(&p.dns_override))
             .unwrap_or_default(),
         dns_source: String::new(),
-        access_to_new_profiles: match &uciprofile {
-            Some(p) => p.access_to_new_profiles,
-            None => false,
-        },
+        access_to_new_profiles: false,
     };
     let mut found = false;
     for section in &cfgs["network"].sections {
@@ -511,14 +724,6 @@ pub(crate) fn get_config(
             ErrorKind::CorruptedProfile,
         ));
     }
-    let mut this_zone_name = format!("vlan_{}", id.interface);
-    cfgs["firewall"].each::<FirewallZone, Error>(|_, zone| {
-        for zone_interface in zone.network {
-            if id.interface == zone_interface {
-                this_zone_name = zone.name.clone();
-            }
-        }
-    })?;
     wip_profile.wan_access = match uciprofile.as_ref().and_then(|p| p.wan_access.as_deref()) {
         Some("whitelist") => WanAccess::Whitelist(
             uciprofile
@@ -535,30 +740,9 @@ pub(crate) fn get_config(
         Some("none") => WanAccess::None,
         _ => WanAccess::All,
     };
-    let mut forwarding = BTreeSet::new();
-    cfgs["firewall"].each::<FirewallForwarding, Error>(|_, FirewallForwarding { src, dest }| {
-        if src == this_zone_name && src != dest {
-            forwarding.insert(dest);
-        }
-    })?;
-    let mut other_profiles = BTreeSet::new();
-    cfgs["firewall"].each::<FirewallZone, Error>(|_, FirewallZone { name, network, .. }| {
-        if forwarding.contains(&name) {
-            for other_interface in network {
-                if let Some(other) = lookup.from_interface(&other_interface) {
-                    other_profiles.insert(other.clone());
-                }
-            }
-        }
-    })?;
-    if other_profiles.is_empty() {
-        wip_profile.lan_access = LanAccess::SameProfile;
-    } else if (other_profiles.len() + 1) >= lookup.list().len() {
-        wip_profile.lan_access = LanAccess::All;
-    } else {
-        wip_profile.lan_access = LanAccess::OtherProfiles(other_profiles);
-    }
-    wip_profile.dns_source = compute_dns_source(cfgs, &wip_profile);
+    (wip_profile.lan_access, wip_profile.access_to_new_profiles) =
+        read_lan_access(cfgs, &lookup, id, uciprofile.as_ref())?;
+    wip_profile.dns_source = profile_dns(cfgs, &wip_profile).source().into();
     Ok(wip_profile)
 }
 
@@ -616,11 +800,7 @@ pub async fn delete<C: CtrlContext>(ctx: C, id: ProfileIdOpt) -> Result<(), Erro
                 if ctx.effectful() {
                     // Regenerate SmartDNS config after UCI dump so the deleted
                     // profile's group is removed.
-                    let smartdns_groups = {
-                        let arena2 = Arena::new();
-                        let cfgs2 = parse_all(ctx.uci_root(), &arena2, &["startwrt"]).await?;
-                        dns::collect_smartdns_groups(&cfgs2)
-                    };
+                    let smartdns_groups = dns::load_smartdns_groups(ctx.uci_root()).await?;
                     dns::apply_smartdns_groups(smartdns_groups).await?;
 
                     // Bring down the WireGuard interface before reloading services.
@@ -692,6 +872,17 @@ fn delete_config(
         }
         true
     });
+
+    for section in &mut cfgs["startwrt"].sections {
+        if let Some(mut uci) = section.get_typed::<UciProfile>()? {
+            if !uci.lan_access_list.contains(&id.interface) {
+                continue;
+            }
+            uci.lan_access_list.retain(|iface| iface != &id.interface);
+            collapse_empty_whitelist(&mut uci);
+            section.set(&uci)?;
+        }
+    }
 
     // Remove network interface, bridge-vlan, and WireGuard interface + peers
     let wg_peer_type = format!("wireguard_{}", wg_interface_name);
@@ -883,11 +1074,14 @@ async fn reload_system_inner(restart_network: bool) -> Result<(), Error> {
     // left to withdraw. See deprecate_odhcpd_prefixes. A no-op when nothing
     // about IPv6 changed, beyond one extra RA.
     crate::deprecate_odhcpd_prefixes().await;
-    let network_action = if restart_network { "restart" } else { "reload" };
-    let _ = crate::run_quiet_async(
-        tokio::process::Command::new("/etc/init.d/network").arg(network_action),
-    )
-    .await;
+    if restart_network {
+        crate::wifi::restart_network().await;
+    } else {
+        let _ = crate::run_quiet_async(
+            tokio::process::Command::new("/etc/init.d/network").arg("reload"),
+        )
+        .await;
+    }
     // odhcpd holds RA/DHCPv6 config in memory; restart so dhcp.*.ra_default
     // (and other v6 advertisement changes) actually take effect.
     let _ =
@@ -899,9 +1093,7 @@ async fn reload_system_inner(restart_network: bool) -> Result<(), Error> {
     let _ =
         crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("restart"))
             .await;
-    let _ =
-        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("restart"))
-            .await;
+    crate::devices::reload_dnsmasq_now().await;
     // Re-apply WAN schedules — firewall restart rebuilds the nftables ruleset
     reapply_schedules_after_reload().await;
     Ok(())
@@ -928,12 +1120,18 @@ async fn reload_system_and_wifi_inner(restart_network: bool) -> Result<(), Error
     // drop the prefix. See deprecate_odhcpd_prefixes. A no-op on profile
     // create, beyond one extra RA.
     crate::deprecate_odhcpd_prefixes().await;
-    let network_action = if restart_network { "restart" } else { "reload" };
-    let _ = crate::run_quiet_async(
-        tokio::process::Command::new("/etc/init.d/network").arg(network_action),
-    )
-    .await;
-    let _ = crate::run_quiet_async(&mut tokio::process::Command::new("wifi")).await;
+    if restart_network {
+        crate::wifi::restart_network().await;
+    } else {
+        let _ = crate::run_quiet_async(
+            tokio::process::Command::new("/etc/init.d/network").arg("reload"),
+        )
+        .await;
+    }
+    if let Err(e) = crate::wifi::reload_wifi("/etc/config", crate::wifi::WifiReload::Restart).await
+    {
+        tracing::warn!("WiFi restart failed: {e}");
+    }
     // odhcpd holds RA/DHCPv6 config in memory; restart so dhcp.*.ra_default
     // (and other v6 advertisement changes) actually take effect.
     let _ =
@@ -945,9 +1143,7 @@ async fn reload_system_and_wifi_inner(restart_network: bool) -> Result<(), Error
     let _ =
         crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("restart"))
             .await;
-    let _ =
-        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("restart"))
-            .await;
+    crate::devices::reload_dnsmasq_now().await;
     // Re-apply WAN schedules — firewall restart rebuilds the nftables ruleset
     reapply_schedules_after_reload().await;
     Ok(())
@@ -1149,11 +1345,7 @@ pub async fn set<C: CtrlContext>(
                 if ctx.effectful() {
                     // Regenerate SmartDNS config after UCI dump so it reflects
                     // any dns_override changes on this profile.
-                    let smartdns_groups = {
-                        let arena2 = Arena::new();
-                        let cfgs2 = parse_all(ctx.uci_root(), &arena2, &["startwrt"]).await?;
-                        dns::collect_smartdns_groups(&cfgs2)
-                    };
+                    let smartdns_groups = dns::load_smartdns_groups(ctx.uci_root()).await?;
                     dns::apply_smartdns_groups(smartdns_groups).await?;
 
                     if admin_ip_changed {
@@ -1192,10 +1384,10 @@ pub async fn set<C: CtrlContext>(
                     if old.wan_access.as_deref() != Some(&new_wan) {
                         changes.push(format!("WAN access: {}", new_wan));
                     }
-                    if old.access_to_new_profiles != profile.access_to_new_profiles {
+                    if old.access_to_new_profiles != grants_access_to_new_profiles(&profile) {
                         changes.push(format!(
                             "access to new profiles: {}",
-                            profile.access_to_new_profiles
+                            grants_access_to_new_profiles(&profile)
                         ));
                     }
                     if old.gateway_ip.is_some() && old.gateway_ip != Some(profile.gateway_ip) {
@@ -1364,7 +1556,7 @@ fn set_config<C: CtrlContext>(
                     dns_override: existing_profile.dns_override.clone(),
                     gateway_ip: None, // filled from network config below
                 });
-                existing_profile.access_to_new_profiles = profile.access_to_new_profiles;
+                existing_profile.access_to_new_profiles = grants_access_to_new_profiles(profile);
                 existing_profile.outbound = Some(profile.outbound.clone());
                 existing_profile.wan_access = Some(wan_access_type_str(&profile.wan_access));
                 existing_profile.wan_access_list = wan_access_destinations(&profile.wan_access);
@@ -1392,9 +1584,15 @@ fn set_config<C: CtrlContext>(
         wan_access: profile.wan_access.clone(),
         dns_override: profile.dns_override.clone(),
         dns_source: String::new(),
-        access_to_new_profiles: profile.access_to_new_profiles,
+        access_to_new_profiles: grants_access_to_new_profiles(profile),
         owns_lan: profile.owns_lan,
     };
+    persist_lan_access(
+        cfgs,
+        &profile.id,
+        &profile.lan_access,
+        profile.access_to_new_profiles,
+    )?;
     // Reject a /24 that collides with a sibling (or the admin LAN). Runs on the
     // resolved interface, before the network config is mutated below, so the
     // profile's own current subnet is correctly skipped.
@@ -1579,13 +1777,10 @@ pub async fn create<C: CtrlContext>(
                 if ctx.effectful() {
                     // Regenerate SmartDNS config after UCI dump so it reflects
                     // any dns_override on the new profile.
-                    let smartdns_groups = {
-                        let arena2 = Arena::new();
-                        let cfgs2 = parse_all(ctx.uci_root(), &arena2, &["startwrt"]).await?;
-                        dns::collect_smartdns_groups(&cfgs2)
-                    };
+                    let smartdns_groups = dns::load_smartdns_groups(ctx.uci_root()).await?;
                     dns::apply_smartdns_groups(smartdns_groups).await?;
 
+                    crate::dns_inject::ensure_hosts_file(&out.interface).await;
                     // Full network restart (not reload) so netifd re-runs IPv6
                     // prefix distribution and the new profile's VLAN gets its /64.
                     reload_system_and_wifi_full().await?;
@@ -1769,11 +1964,12 @@ fn create_config(
             )?;
         }
     }
-    let mut wants_access = Vec::new();
+    let mut granting = Vec::new();
     for section in &cfgs["startwrt"].sections {
         if let Some(other_profile) = section.get_typed::<UciProfile>()? {
-            if other_profile.access_to_new_profiles {
-                wants_access.push(other_profile.id());
+            let other = get_config(ctx.clone(), cfgs, other_profile.id().into())?;
+            if grants_access_to_new_profiles(&other) {
+                granting.push(other);
             }
         }
     }
@@ -1783,7 +1979,9 @@ fn create_config(
             interface: interface.clone(),
             vlan_tag,
             outbound: Some(profile.outbound.clone()),
-            access_to_new_profiles: profile.access_to_new_profiles,
+            access_to_new_profiles: grants_access_to_new_profiles(profile),
+            lan_access: None,
+            lan_access_list: Vec::new(),
             wan_access: Some(wan_access_type_str(&profile.wan_access)),
             wan_access_list: wan_access_destinations(&profile.wan_access),
             dns_override: dns::serialize_dns_server_list(&profile.dns_override),
@@ -1812,9 +2010,23 @@ fn create_config(
         wan_access: profile.wan_access.clone(),
         dns_override: profile.dns_override.clone(),
         dns_source: String::new(),
-        access_to_new_profiles: profile.access_to_new_profiles,
+        access_to_new_profiles: grants_access_to_new_profiles(profile),
         owns_lan: profile.owns_lan,
     };
+    persist_lan_access(
+        cfgs,
+        &profile.id,
+        &profile.lan_access,
+        profile.access_to_new_profiles,
+    )?;
+    let mut wants_access = Vec::new();
+    for mut other in granting {
+        if let LanAccess::OtherProfiles(ids) = &mut other.lan_access {
+            ids.insert(profile.id.clone());
+        }
+        persist_lan_access(cfgs, &other.id, &other.lan_access, true)?;
+        wants_access.push(other.id);
+    }
     rewrite_firewall(&ctx, cfgs, &profile, &all_interfaces, &wants_access, true)?;
     rewrite_dhcp(&ctx, cfgs, &profile)?;
     rewrite_dns_forwarding(cfgs, &profile)?;
@@ -1931,7 +2143,7 @@ fn rewrite_firewall(
     // DNS hijacking: redirect all port 53 traffic to the profile's gateway,
     // where per-profile dnsmasq handles .lan locally and forwards the rest
     // via SmartDNS (for custom/system DNS) or directly (for VPN DNS).
-    if has_effective_dns(cfgs, profile) || !dns::get_system_dns_servers(cfgs).is_empty() {
+    if profile_dns(cfgs, profile).redirects() {
         cfgs["firewall"].append(
             &FirewallRedirect {
                 name: format!("DNS-Override-{}", profile.id.fullname.replace(" ", "-"),),
@@ -2205,6 +2417,10 @@ pub fn rewrite_dhcp(
                 dhcp.limit = 198;
                 changed = true;
             }
+            if dhcp.force != Some(true) {
+                dhcp.force = Some(true);
+                changed = true;
+            }
             if changed {
                 section.set(&dhcp)?;
             }
@@ -2222,6 +2438,7 @@ pub fn rewrite_dhcp(
                 dhcpv6: Some(dhcpv6_value),
                 ra_management: None,
                 ra_default: ra_default_value,
+                force: Some(true),
             },
             Some(&profile.id.interface),
         )?;
@@ -2690,12 +2907,8 @@ pub(crate) fn ensure_vpn_outbound_zone(cfgs: &mut Configs, wg_name: &str) -> Res
     Ok(zone_name)
 }
 
-/// After routing changes, remove `vpn_<X>` zones (and any forwardings or rules
-/// that reference them) when no profile uses `wg_X` as outbound. Also strips
-/// stray `wg_X` entries from the wan zone (pre-migration leftovers from when
-/// VPN outbounds lived directly in the wan zone).
-pub(crate) fn cleanup_orphaned_vpn_zones(cfgs: &mut Configs) {
-    // Collect all VPN interface names referenced by any profile's outbound
+/// VPN interfaces that some profile routes its outbound traffic through.
+fn profile_vpn_outbounds(cfgs: &Configs) -> std::collections::HashSet<String> {
     let mut referenced_vpns = std::collections::HashSet::new();
     for section in &cfgs["startwrt"].sections {
         if section.ty() != "profile" {
@@ -2708,6 +2921,34 @@ pub(crate) fn cleanup_orphaned_vpn_zones(cfgs: &mut Configs) {
             }
         }
     }
+    referenced_vpns
+}
+
+/// Removes `wg_X` entries no profile routes through from the wan zone.
+/// Returns whether the firewall config changed.
+pub(crate) fn strip_unreferenced_wan_zone_vpns(cfgs: &mut Configs) -> Result<bool, Error> {
+    let referenced_vpns = profile_vpn_outbounds(cfgs);
+    for section in &mut cfgs["firewall"].sections {
+        if let Ok(mut zone) = section.get::<FirewallZone>() {
+            if zone.name == DEFAULT_WAN_ZONE {
+                let before_len = zone.network.len();
+                zone.network
+                    .retain(|n| !n.starts_with("wg_") || referenced_vpns.contains(n));
+                if zone.network.len() == before_len {
+                    return Ok(false);
+                }
+                section.set(&zone)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// After routing changes, remove `vpn_<X>` zones (and any forwardings or rules
+/// that reference them) when no profile uses `wg_X` as outbound.
+pub(crate) fn cleanup_orphaned_vpn_zones(cfgs: &mut Configs) {
+    let referenced_vpns = profile_vpn_outbounds(cfgs);
     let referenced_zone_names: std::collections::HashSet<String> = referenced_vpns
         .iter()
         .map(|wg| resolve_outbound_zone(wg))
@@ -2753,22 +2994,7 @@ pub(crate) fn cleanup_orphaned_vpn_zones(cfgs: &mut Configs) {
         true
     });
 
-    // 3. Defense in depth: strip any stray wg_X entries still in the wan zone.
-    for section in &mut cfgs["firewall"].sections {
-        if let Ok(mut zone) = section.get::<FirewallZone>() {
-            if zone.name == DEFAULT_WAN_ZONE {
-                let before_len = zone.network.len();
-                zone.network
-                    .retain(|n| !n.starts_with("wg_") || referenced_vpns.contains(n));
-                if zone.network.len() != before_len {
-                    let _ = section.set(&zone);
-                }
-                break;
-            }
-        }
-    }
-
-    // 4. The global DNAT-return ip rules exist only to keep port-forward replies
+    // 3. The global DNAT-return ip rules exist only to keep port-forward replies
     //    on the main table for VPN-routed profiles. With no VPN-routed profile
     //    left they have no consumer — tear them down so they exist iff at least
     //    one VPN-routed profile does, mirroring the zone lifecycle above.
@@ -2972,6 +3198,8 @@ pub async fn bootstrap_admin_profile(uci_root: &str) -> Result<(), Error> {
             vlan_tag: 1,
             outbound: Some("wan".into()),
             access_to_new_profiles: true,
+            lan_access: Some(LanAccessMode::All),
+            lan_access_list: Vec::new(),
             wan_access: Some("all".into()),
             wan_access_list: Vec::new(),
             dns_override: Vec::new(),
@@ -2992,6 +3220,30 @@ pub async fn bootstrap_admin_profile(uci_root: &str) -> Result<(), Error> {
 
     dump_all(uci_root, cfgs).await?;
     Ok(())
+}
+
+/// Stores the LAN Access mode of every profile saved before the mode was
+/// stored, inferred from its forwardings. Leaves the firewall unchanged.
+pub(crate) fn migrate_lan_access_mode(
+    ctx: impl CtrlContext,
+    cfgs: &mut Configs,
+) -> Result<bool, Error> {
+    let lookup = Lookup::parse(ctx, cfgs)?;
+    let mut migrated = Vec::new();
+    for section in &cfgs["startwrt"].sections {
+        if let Some(uci) = section.get_typed::<UciProfile>()? {
+            if stored_lan_access(&uci, &lookup).is_none() {
+                let id = uci.id();
+                let (access, grants_new) =
+                    infer_lan_access(cfgs, &lookup, &id, uci.access_to_new_profiles)?;
+                migrated.push((id, access, grants_new));
+            }
+        }
+    }
+    for (id, access, grants_new) in &migrated {
+        persist_lan_access(cfgs, id, access, *grants_new)?;
+    }
+    Ok(!migrated.is_empty())
 }
 
 /// Repair IPv6 state that a pre-1.0.2 router could be left in, where the LAN
@@ -3124,13 +3376,14 @@ fn heal_ipv6_state_in_cfgs(cfgs: &mut Configs) -> Result<Vec<String>, Error> {
     Ok(repaired)
 }
 
-#[derive(Debug, Parser, Serialize, Deserialize)]
+#[derive(Debug, Parser, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct EditArgs {
     #[clap(flatten)]
     pub get: ProfileIdOpt,
     #[clap(long)]
     pub create: bool,
 }
+rpc_toolkit::reflect_ts!(EditArgs);
 
 #[instrument(skip_all)]
 pub async fn edit<C: CtrlContext>(ctx: C, args: EditArgs) -> Result<ProfileId, Error> {
@@ -3261,10 +3514,11 @@ fn parse_schedule_windows(raw: &[String]) -> Vec<ScheduleWindow> {
         .collect()
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, visit_rs::VisitFields)]
 pub struct ScheduleGetParams {
     interface: String,
 }
+rpc_toolkit::reflect_ts!(ScheduleGetParams);
 
 /// Read schedule data for a single profile from UCI.
 #[instrument(skip_all)]
@@ -6600,6 +6854,209 @@ config zone
             .any(|s| s.name().as_deref() == Some("dns_guest"));
         assert!(dns_lan, "Admin profile should get per-profile dnsmasq");
         assert!(dns_guest, "Guest profile should get per-profile dnsmasq");
+
+        // The instance serves exactly its own bridge: an unscoped instance
+        // picks up every profile's `config dhcp` pool.
+        let section = cfgs["dhcp"]
+            .sections
+            .iter()
+            .find(|s| s.name().as_deref() == Some("dns_lan"))
+            .unwrap()
+            .get::<ProfileDnsmasq>()
+            .unwrap();
+        assert_eq!(section.interface, vec!["lan".to_string()]);
+        assert_eq!(section.noresolv.as_deref(), Some("1"));
+        assert!(section.addnhosts.is_empty(), "no injection, no hosts file");
+    }
+
+    /// Write the ISP-mode base fixture (no system DNS, no overrides), with a
+    /// DHCP host section carrying `_allow_dns_inject` when asked — the case
+    /// where DNS injection alone must create the per-profile instances.
+    fn setup_isp_mode_configs(dir: &std::path::Path, inject: bool) {
+        std::fs::write(
+            dir.join("startwrt"),
+            "\
+config profile lan
+\toption fullname 'Admin'
+\toption interface 'lan'
+\toption vlan_tag '1'
+
+config profile guest
+\toption fullname 'Guest'
+\toption interface 'guest'
+\toption vlan_tag '101'
+",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("network"),
+            "\
+config interface 'lan'
+\toption proto 'static'
+\toption ipaddr '192.168.1.1'
+\toption device 'br-lan.1'
+
+config interface 'guest'
+\toption proto 'static'
+\toption ipaddr '192.168.101.1'
+\toption device 'br-lan.101'
+",
+        )
+        .unwrap();
+        let host = if inject {
+            "\n\
+config host host_001a2b3c4d5e
+\toption mac '00:1A:2B:3C:4D:5E'
+\toption dns '1'
+\toption _allow_dns_inject '1'
+"
+        } else {
+            ""
+        };
+        std::fs::write(
+            dir.join("dhcp"),
+            format!("config dnsmasq\n\toption domainneeded '1'\n{host}"),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("firewall"),
+            "\
+config zone
+\toption name 'lan'
+\tlist network 'lan'
+
+config zone
+\toption name 'vlan_guest'
+\tlist network 'guest'
+",
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn dns_injection_creates_isp_mode_instances() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_isp_mode_configs(dir.path(), true);
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            dir.path(),
+            &arena,
+            &["startwrt", "network", "dhcp", "firewall"],
+        )
+        .await
+        .unwrap();
+        rewrite_all_dns_forwarding(&mut cfgs).unwrap();
+
+        for (name, iface) in [("dns_lan", "lan"), ("dns_guest", "guest")] {
+            let section = cfgs["dhcp"]
+                .sections
+                .iter()
+                .find(|s| s.name().as_deref() == Some(name))
+                .unwrap_or_else(|| panic!("{name} instance created by injection alone"))
+                .get::<ProfileDnsmasq>()
+                .unwrap();
+            assert_eq!(
+                section.addnhosts,
+                vec![crate::dns_inject::inject_hosts_path(iface)]
+            );
+            assert_eq!(section.interface, vec![iface.to_string()]);
+            assert_eq!(
+                section.server,
+                vec!["/use-application-dns.net/".to_string()],
+                "ISP mode: no upstream override, only the Firefox DoH canary"
+            );
+            assert_eq!(
+                section.noresolv, None,
+                "falls back to resolv.conf.auto like the main instance"
+            );
+        }
+        // The main instance stays off the profile bridges.
+        let main = cfgs["dhcp"]
+            .sections
+            .iter()
+            .find(|s| s.ty() == "dnsmasq" && s.name().is_none())
+            .unwrap();
+        let notinterface: Vec<_> = main
+            .lines
+            .iter()
+            .filter_map(|line| match line {
+                Line::List { list, item, .. } if list.as_str() == "notinterface" => {
+                    Some(item.as_str().to_string())
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(notinterface.contains(&"lan".to_string()));
+        assert!(notinterface.contains(&"guest".to_string()));
+
+        // Injection alone must not start hijacking port-53 traffic.
+        assert!(
+            !cfgs["firewall"].sections.iter().any(|s| s
+                .get::<FirewallRedirect>()
+                .is_ok_and(|r| r.name.contains("DNS-Override"))),
+            "no DNS-Override redirect from the inject flag"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_injection_means_no_isp_mode_instances() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_isp_mode_configs(dir.path(), false);
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            dir.path(),
+            &arena,
+            &["startwrt", "network", "dhcp", "firewall"],
+        )
+        .await
+        .unwrap();
+        rewrite_all_dns_forwarding(&mut cfgs).unwrap();
+        assert!(
+            !cfgs["dhcp"]
+                .sections
+                .iter()
+                .any(|s| s.name().is_some_and(|n| n.starts_with("dns_"))),
+            "ISP mode without injection keeps the single main instance"
+        );
+    }
+
+    #[tokio::test]
+    async fn permitted_vpn_peer_alone_serves_injected_records() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_isp_mode_configs(dir.path(), false);
+        let mut network = std::fs::read_to_string(dir.path().join("network")).unwrap();
+        network.push_str(
+            "
+config interface 'wg_lan'
+\toption proto 'wireguard'
+
+config wireguard_wg_lan 'wg_lan_0'
+\toption public_key 'peer-pub'
+\toption _allow_dns_inject '1'
+\tlist allowed_ips '192.168.1.200/32'
+",
+        );
+        std::fs::write(dir.path().join("network"), network).unwrap();
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            dir.path(),
+            &arena,
+            &["startwrt", "network", "dhcp", "firewall"],
+        )
+        .await
+        .unwrap();
+        rewrite_all_dns_forwarding(&mut cfgs).unwrap();
+        let section = cfgs["dhcp"]
+            .sections
+            .iter()
+            .find(|s| s.name().as_deref() == Some("dns_lan"))
+            .expect("a permitted peer needs the profile instance with no LAN device toggled")
+            .get::<ProfileDnsmasq>()
+            .unwrap();
+        assert_eq!(
+            section.addnhosts,
+            vec![crate::dns_inject::inject_hosts_path("lan")]
+        );
     }
 
     // === IPv6 routing tests ===
@@ -7360,7 +7817,9 @@ config dhcp 'guest'
         assert_eq!(lan.dhcpv6.as_deref(), Some("server"));
         // The rest of rewrite_dhcp still applies to the admin LAN.
         assert_eq!((lan.start, lan.limit), (2, 198));
+        assert_eq!(lan.force, Some(true));
         let guest = dhcp_of("guest");
+        assert_eq!(guest.force, Some(true));
         assert_eq!(
             guest.ra.as_deref(),
             Some("disabled"),
@@ -7369,7 +7828,478 @@ config dhcp 'guest'
         assert_eq!(guest.dhcpv6.as_deref(), Some("disabled"));
     }
 
+    #[tokio::test]
+    async fn lan_access_all_keeps_access_to_new_profiles() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp", "wireless"],
+        )
+        .await
+        .unwrap();
+
+        let guest_all = Profile {
+            id: ProfileIdOpt {
+                fullname: Some("Guest".into()),
+                interface: Some("guest".into()),
+                vlan_tag: Some(101),
+            },
+            gateway_ip: Ipv4Addr::new(192, 168, 101, 1),
+            outbound: "wan".into(),
+            lan_access: LanAccess::All,
+            wan_access: WanAccess::All,
+            dns_override: Vec::new(),
+            dns_source: String::new(),
+            access_to_new_profiles: false,
+            owns_lan: false,
+        };
+        set_config(ctx.clone(), &mut cfgs, &guest_all).unwrap();
+
+        let third = Profile {
+            id: ProfileIdOpt {
+                fullname: Some("Third".into()),
+                interface: None,
+                vlan_tag: None,
+            },
+            gateway_ip: Ipv4Addr::new(192, 168, 102, 1),
+            outbound: "wan".into(),
+            lan_access: LanAccess::SameProfile,
+            wan_access: WanAccess::All,
+            dns_override: Vec::new(),
+            dns_source: String::new(),
+            access_to_new_profiles: false,
+            owns_lan: false,
+        };
+        let third_id = create_config(ctx.clone(), &mut cfgs, &third, Some("third".into())).unwrap();
+
+        let got = get_config(
+            ctx.clone(),
+            &cfgs,
+            ProfileIdOpt {
+                fullname: None,
+                interface: Some("guest".into()),
+                vlan_tag: None,
+            },
+        )
+        .unwrap();
+        assert!(got.access_to_new_profiles);
+        assert!(
+            matches!(got.lan_access, LanAccess::All),
+            "an All profile must still read as All after another profile is created"
+        );
+
+        let third_zone = find_zone_for_interface(&cfgs, &third_id.interface);
+        let mut guest_reaches_third = false;
+        cfgs["firewall"]
+            .each::<FirewallForwarding, Error>(|_, FirewallForwarding { src, dest }| {
+                if src == "vlan_guest" && dest == third_zone {
+                    guest_reaches_third = true;
+                }
+            })
+            .unwrap();
+        assert!(guest_reaches_third);
+    }
+
+    #[tokio::test]
+    async fn same_profile_ignores_stale_access_to_new_profiles() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp", "wireless"],
+        )
+        .await
+        .unwrap();
+
+        let guest_isolated = Profile {
+            id: ProfileIdOpt {
+                fullname: Some("Guest".into()),
+                interface: Some("guest".into()),
+                vlan_tag: Some(101),
+            },
+            gateway_ip: Ipv4Addr::new(192, 168, 101, 1),
+            outbound: "wan".into(),
+            lan_access: LanAccess::SameProfile,
+            wan_access: WanAccess::All,
+            dns_override: Vec::new(),
+            dns_source: String::new(),
+            access_to_new_profiles: false,
+            owns_lan: false,
+        };
+        set_config(ctx.clone(), &mut cfgs, &guest_isolated).unwrap();
+        for section in &mut cfgs["startwrt"].sections {
+            if let Some(mut stored) = section.get_typed::<UciProfile>().unwrap() {
+                if stored.interface == "guest" {
+                    stored.access_to_new_profiles = true;
+                    section.set(&stored).unwrap();
+                }
+            }
+        }
+
+        let third = Profile {
+            id: ProfileIdOpt {
+                fullname: Some("Third".into()),
+                interface: None,
+                vlan_tag: None,
+            },
+            gateway_ip: Ipv4Addr::new(192, 168, 102, 1),
+            outbound: "wan".into(),
+            lan_access: LanAccess::SameProfile,
+            wan_access: WanAccess::All,
+            dns_override: Vec::new(),
+            dns_source: String::new(),
+            access_to_new_profiles: false,
+            owns_lan: false,
+        };
+        let third_id = create_config(ctx.clone(), &mut cfgs, &third, Some("third".into())).unwrap();
+
+        let got = get_config(
+            ctx.clone(),
+            &cfgs,
+            ProfileIdOpt {
+                fullname: None,
+                interface: Some("guest".into()),
+                vlan_tag: None,
+            },
+        )
+        .unwrap();
+        assert!(!got.access_to_new_profiles);
+        assert!(
+            matches!(got.lan_access, LanAccess::SameProfile),
+            "a Same profile stays isolated after another profile is created"
+        );
+
+        let third_zone = find_zone_for_interface(&cfgs, &third_id.interface);
+        cfgs["firewall"]
+            .each::<FirewallForwarding, Error>(|_, FirewallForwarding { src, dest }| {
+                assert!(
+                    !(src == "vlan_guest" && dest == third_zone),
+                    "isolated profile must not reach the new profile"
+                );
+            })
+            .unwrap();
+    }
+
+    fn stored_profile(cfgs: &Configs, interface: &str) -> UciProfile {
+        let mut found = None;
+        cfgs["startwrt"]
+            .each::<UciProfile, Error>(|_, profile| {
+                if profile.interface == interface {
+                    found = Some(profile);
+                }
+            })
+            .unwrap();
+        found.unwrap()
+    }
+
+    fn forwardings(cfgs: &Configs) -> Vec<(String, String)> {
+        let mut found = Vec::new();
+        cfgs["firewall"]
+            .each::<FirewallForwarding, Error>(|_, FirewallForwarding { src, dest }| {
+                found.push((src, dest));
+            })
+            .unwrap();
+        found
+    }
+
+    fn third_profile() -> Profile<ProfileIdOpt> {
+        Profile {
+            id: ProfileIdOpt {
+                fullname: Some("Third".into()),
+                interface: None,
+                vlan_tag: None,
+            },
+            gateway_ip: Ipv4Addr::new(192, 168, 102, 1),
+            ..guest_profile(LanAccess::SameProfile)
+        }
+    }
+
+    #[tokio::test]
+    async fn full_whitelist_with_new_profiles_reads_back_as_whitelist() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp", "wireless"],
+        )
+        .await
+        .unwrap();
+
+        let mut guest = guest_profile(LanAccess::OtherProfiles(BTreeSet::from([ProfileIdOpt {
+            fullname: None,
+            interface: Some("lan".into()),
+            vlan_tag: None,
+        }])));
+        guest.access_to_new_profiles = true;
+        set_config(ctx.clone(), &mut cfgs, &guest).unwrap();
+
+        let stored = stored_profile(&cfgs, "guest");
+        assert_eq!(stored.lan_access, Some(LanAccessMode::Whitelist));
+        assert_eq!(stored.lan_access_list, vec!["lan".to_string()]);
+        let got = get_config(ctx.clone(), &cfgs, guest.id.clone()).unwrap();
+        assert!(matches!(got.lan_access, LanAccess::OtherProfiles(_)));
+        assert!(got.access_to_new_profiles);
+    }
+
+    #[tokio::test]
+    async fn empty_whitelist_with_new_profiles_gains_the_next_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp", "wireless"],
+        )
+        .await
+        .unwrap();
+
+        let mut guest = guest_profile(LanAccess::OtherProfiles(BTreeSet::new()));
+        guest.access_to_new_profiles = true;
+        set_config(ctx.clone(), &mut cfgs, &guest).unwrap();
+        let got = get_config(ctx.clone(), &cfgs, guest.id.clone()).unwrap();
+        assert!(matches!(&got.lan_access, LanAccess::OtherProfiles(ids) if ids.is_empty()));
+        assert!(got.access_to_new_profiles);
+
+        let third_id = create_config(
+            ctx.clone(),
+            &mut cfgs,
+            &third_profile(),
+            Some("third".into()),
+        )
+        .unwrap();
+
+        let got = get_config(ctx.clone(), &cfgs, guest.id.clone()).unwrap();
+        assert!(
+            matches!(&got.lan_access, LanAccess::OtherProfiles(ids) if ids.len() == 1 && ids.contains(&third_id))
+        );
+        let third_zone = find_zone_for_interface(&cfgs, &third_id.interface);
+        assert!(forwardings(&cfgs).contains(&("vlan_guest".to_string(), third_zone)));
+    }
+
+    #[tokio::test]
+    async fn deleting_a_whitelisted_profile_prunes_the_whitelist() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp", "wireless"],
+        )
+        .await
+        .unwrap();
+
+        let third_id = create_config(
+            ctx.clone(),
+            &mut cfgs,
+            &third_profile(),
+            Some("third".into()),
+        )
+        .unwrap();
+        let third = ProfileIdOpt::from(third_id);
+        let guest = guest_profile(LanAccess::OtherProfiles(BTreeSet::from([third.clone()])));
+        set_config(ctx.clone(), &mut cfgs, &guest).unwrap();
+        delete_config(ctx.clone(), &mut cfgs, &third).unwrap();
+
+        let stored = stored_profile(&cfgs, "guest");
+        assert!(stored.lan_access_list.is_empty());
+        assert_eq!(stored.lan_access, Some(LanAccessMode::SameProfile));
+        let got = get_config(ctx.clone(), &cfgs, guest.id.clone()).unwrap();
+        assert!(matches!(got.lan_access, LanAccess::SameProfile));
+    }
+
+    #[tokio::test]
+    async fn deleting_a_whitelisted_profile_keeps_an_empty_whitelist_with_new_profiles() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp", "wireless"],
+        )
+        .await
+        .unwrap();
+
+        let third_id = create_config(
+            ctx.clone(),
+            &mut cfgs,
+            &third_profile(),
+            Some("third".into()),
+        )
+        .unwrap();
+        let third = ProfileIdOpt::from(third_id);
+        let mut guest = guest_profile(LanAccess::OtherProfiles(BTreeSet::from([third.clone()])));
+        guest.access_to_new_profiles = true;
+        set_config(ctx.clone(), &mut cfgs, &guest).unwrap();
+        delete_config(ctx.clone(), &mut cfgs, &third).unwrap();
+
+        let got = get_config(ctx.clone(), &cfgs, guest.id.clone()).unwrap();
+        assert!(matches!(&got.lan_access, LanAccess::OtherProfiles(ids) if ids.is_empty()));
+        assert!(got.access_to_new_profiles);
+    }
+
+    #[tokio::test]
+    async fn migration_stores_the_inferred_mode_without_touching_the_firewall() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let arena = Arena::new();
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["startwrt", "firewall"])
+            .await
+            .unwrap();
+        cfgs["firewall"]
+            .append(
+                &FirewallForwarding {
+                    src: "lan".into(),
+                    dest: "vlan_guest".into(),
+                },
+                None,
+            )
+            .unwrap();
+        let before = forwardings(&cfgs);
+
+        assert!(migrate_lan_access_mode(ctx.clone(), &mut cfgs).unwrap());
+
+        assert_eq!(forwardings(&cfgs), before);
+        let admin = stored_profile(&cfgs, "lan");
+        assert_eq!(admin.lan_access, Some(LanAccessMode::All));
+        assert!(admin.access_to_new_profiles);
+        let guest = stored_profile(&cfgs, "guest");
+        assert_eq!(guest.lan_access, Some(LanAccessMode::SameProfile));
+        assert!(!guest.access_to_new_profiles);
+        assert!(!migrate_lan_access_mode(ctx.clone(), &mut cfgs).unwrap());
+    }
+
+    #[test]
+    fn lan_access_mode_round_trips_its_stored_strings() {
+        for (mode, stored) in [
+            (LanAccessMode::All, "all"),
+            (LanAccessMode::SameProfile, "same_profile"),
+            (LanAccessMode::Whitelist, "whitelist"),
+        ] {
+            assert_eq!(mode.to_string(), stored);
+            assert_eq!(stored.parse::<LanAccessMode>().unwrap(), mode);
+        }
+        let unknown = "bogus".parse::<LanAccessMode>().unwrap();
+        assert_eq!(unknown, LanAccessMode::Unknown("bogus".into()));
+        assert_eq!(unknown.to_string(), "bogus");
+    }
+
     // === Interface id allocation ===
+
+    #[tokio::test]
+    async fn whitelist_of_every_profile_keeps_new_profiles_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp", "wireless"],
+        )
+        .await
+        .unwrap();
+
+        let mut guest = guest_profile(LanAccess::OtherProfiles(BTreeSet::from([ProfileIdOpt {
+            fullname: None,
+            interface: Some("lan".into()),
+            vlan_tag: None,
+        }])));
+        guest.access_to_new_profiles = false;
+        set_config(ctx.clone(), &mut cfgs, &guest).unwrap();
+        let got = get_config(ctx.clone(), &cfgs, guest.id.clone()).unwrap();
+        assert!(matches!(got.lan_access, LanAccess::OtherProfiles(_)));
+        assert!(!got.access_to_new_profiles);
+
+        let third = Profile {
+            id: ProfileIdOpt {
+                fullname: Some("Third".into()),
+                interface: None,
+                vlan_tag: None,
+            },
+            gateway_ip: Ipv4Addr::new(192, 168, 102, 1),
+            ..guest_profile(LanAccess::SameProfile)
+        };
+        let third_id = create_config(ctx.clone(), &mut cfgs, &third, Some("third".into())).unwrap();
+        let third_zone = find_zone_for_interface(&cfgs, &third_id.interface);
+        cfgs["firewall"]
+            .each::<FirewallForwarding, Error>(|_, FirewallForwarding { src, dest }| {
+                assert!(!(src == "vlan_guest" && dest == third_zone));
+            })
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn sole_profile_with_access_to_new_profiles_reaches_the_next_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp", "wireless"],
+        )
+        .await
+        .unwrap();
+        delete_config(
+            ctx.clone(),
+            &mut cfgs,
+            &ProfileIdOpt {
+                fullname: None,
+                interface: Some("guest".into()),
+                vlan_tag: None,
+            },
+        )
+        .unwrap();
+        let admin = ProfileIdOpt {
+            fullname: None,
+            interface: Some("lan".into()),
+            vlan_tag: None,
+        };
+        let got = get_config(ctx.clone(), &cfgs, admin.clone()).unwrap();
+        assert!(matches!(got.lan_access, LanAccess::All));
+        assert!(got.access_to_new_profiles);
+
+        let second = Profile {
+            id: ProfileIdOpt {
+                fullname: Some("Second".into()),
+                interface: None,
+                vlan_tag: None,
+            },
+            gateway_ip: Ipv4Addr::new(192, 168, 102, 1),
+            ..guest_profile(LanAccess::SameProfile)
+        };
+        let second_id =
+            create_config(ctx.clone(), &mut cfgs, &second, Some("second".into())).unwrap();
+        let second_zone = find_zone_for_interface(&cfgs, &second_id.interface);
+        let admin_zone = find_zone_for_interface(&cfgs, "lan");
+        let mut admin_reaches_second = false;
+        cfgs["firewall"]
+            .each::<FirewallForwarding, Error>(|_, FirewallForwarding { src, dest }| {
+                if src == admin_zone && dest == second_zone {
+                    admin_reaches_second = true;
+                }
+            })
+            .unwrap();
+        assert!(admin_reaches_second);
+    }
 
     #[tokio::test]
     async fn test_allocate_is_random_and_well_formed() {
@@ -7404,5 +8334,300 @@ config dhcp 'guest'
         // From network interface sections and startwrt profiles.
         assert!(reserved.contains("lan"));
         assert!(reserved.contains("guest"));
+    }
+
+    fn guest_via(outbound: &str, dns_override: Vec<dns::DnsServer>) -> Profile<ProfileIdOpt> {
+        Profile {
+            id: ProfileIdOpt {
+                fullname: Some("Guest".into()),
+                interface: Some("guest".into()),
+                vlan_tag: Some(101),
+            },
+            gateway_ip: Ipv4Addr::new(192, 168, 101, 1),
+            outbound: outbound.into(),
+            lan_access: LanAccess::SameProfile,
+            wan_access: WanAccess::All,
+            dns_override,
+            dns_source: String::new(),
+            access_to_new_profiles: false,
+            owns_lan: false,
+        }
+    }
+
+    fn append(dir: &std::path::Path, config: &str, text: &str) {
+        let mut contents = std::fs::read_to_string(dir.join(config)).unwrap();
+        contents.push_str(text);
+        std::fs::write(dir.join(config), contents).unwrap();
+    }
+
+    fn plain(address: &str) -> dns::DnsServer {
+        dns::DnsServer {
+            address: address.into(),
+            ssl: false,
+        }
+    }
+
+    fn guest_dnsmasq_servers(cfgs: &Configs) -> Option<Vec<String>> {
+        cfgs["dhcp"]
+            .sections
+            .iter()
+            .find(|s| s.name().as_deref() == Some("dns_guest"))
+            .map(|s| s.get::<ProfileDnsmasq>().unwrap().server)
+    }
+
+    fn guest_redirected(cfgs: &Configs) -> bool {
+        cfgs["firewall"].sections.iter().any(|s| {
+            s.get::<FirewallRedirect>()
+                .is_ok_and(|r| r.name == "DNS-Override-Guest")
+        })
+    }
+
+    fn guest_group(cfgs: &Configs) -> Option<dns::SmartDnsGroup> {
+        dns::collect_smartdns_groups(cfgs)
+            .into_iter()
+            .find(|g| g.name == "profile_guest")
+    }
+
+    #[tokio::test]
+    async fn test_vpn_profile_without_any_dns_reports_outside_vpn() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs_with_ipv6_vpn(dir.path());
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+        set_config(ctx.clone(), &mut cfgs, &guest_via("wg_v4", Vec::new())).unwrap();
+
+        assert_eq!(guest_dnsmasq_servers(&cfgs), None);
+        assert!(!guest_redirected(&cfgs));
+        let guest = get_config(ctx, &cfgs, guest_via("wg_v4", Vec::new()).id).unwrap();
+        assert_eq!(guest.dns_source, "system-outside-vpn");
+    }
+
+    #[tokio::test]
+    async fn test_vpn_profile_uses_vpn_dns_through_interface() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs_with_ipv6_vpn(dir.path());
+        let network = std::fs::read_to_string(dir.path().join("network")).unwrap();
+        std::fs::write(
+            dir.path().join("network"),
+            network.replace(
+                "\tlist addresses '10.3.0.2/32'\n",
+                "\tlist addresses '10.3.0.2/32'\n\tlist dns '10.3.0.1'\n",
+            ),
+        )
+        .unwrap();
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+        set_config(ctx.clone(), &mut cfgs, &guest_via("wg_v4", Vec::new())).unwrap();
+
+        let servers = guest_dnsmasq_servers(&cfgs).expect("per-profile dnsmasq");
+        assert!(servers.contains(&"10.3.0.1@wg_v4".to_string()));
+        assert!(guest_redirected(&cfgs));
+        assert!(guest_group(&cfgs).is_none());
+        let guest = get_config(ctx, &cfgs, guest_via("wg_v4", Vec::new()).id).unwrap();
+        assert_eq!(guest.dns_source, "vpn");
+    }
+
+    #[tokio::test]
+    async fn test_vpn_profile_custom_dns_resolves_through_tunnel() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs_with_ipv6_vpn(dir.path());
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+        let profile = guest_via("wg_v4", vec![plain("1.1.1.1")]);
+        set_config(ctx.clone(), &mut cfgs, &profile).unwrap();
+
+        let servers = guest_dnsmasq_servers(&cfgs).expect("per-profile dnsmasq");
+        assert!(servers.contains(&format!("127.0.0.1#{}", dns::smartdns_port_for_vlan(101))));
+        let group = guest_group(&cfgs).expect("profile SmartDNS group");
+        assert_eq!(group.interface.as_deref(), Some("wg_v4"));
+        assert_eq!(group.servers, vec![plain("1.1.1.1")]);
+    }
+
+    #[tokio::test]
+    async fn test_wan_profile_custom_dns_is_not_bound() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs_with_ipv6_vpn(dir.path());
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+        set_config(ctx, &mut cfgs, &guest_via("wan", vec![plain("1.1.1.1")])).unwrap();
+
+        assert_eq!(guest_group(&cfgs).expect("profile group").interface, None);
+    }
+
+    #[tokio::test]
+    async fn test_heal_dns_forwarding_repairs_saved_vpn_system_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs_with_ipv6_vpn(dir.path());
+        append(
+            dir.path(),
+            "startwrt",
+            "\nconfig system_dns system_dns\n\tlist servers '{\"address\":\"9.9.9.9\",\"ssl\":true}'\n",
+        );
+
+        {
+            let arena = Arena::new();
+            let mut cfgs = parse_all(
+                ctx.uci_root(),
+                &arena,
+                &["startwrt", "network", "firewall", "dhcp"],
+            )
+            .await
+            .unwrap();
+            set_config(ctx.clone(), &mut cfgs, &guest_via("wg_v4", Vec::new())).unwrap();
+            cfgs["dhcp"]
+                .sections
+                .retain(|s| s.name().as_deref() != Some("dns_guest"));
+            for section in &mut cfgs["dhcp"].sections {
+                section.lines.retain(|line| {
+                    !matches!(line, Line::List { list, item, .. }
+                        if list.as_str() == "notinterface" && item.as_str() == "guest")
+                });
+            }
+            assert!(guest_redirected(&cfgs));
+            assert!(guest_dnsmasq_servers(&cfgs).is_none());
+            dump_all(ctx.uci_root(), cfgs).await.unwrap();
+        }
+
+        heal_dns_forwarding(ctx.clone()).await.unwrap();
+        let arena = Arena::new();
+        let cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+        assert!(guest_redirected(&cfgs));
+        assert!(guest_dnsmasq_servers(&cfgs)
+            .expect("startup installs the tunnel-bound system fallback")
+            .contains(&"127.0.0.1#5401".to_string()));
+        assert_eq!(
+            guest_group(&cfgs).unwrap().interface.as_deref(),
+            Some("wg_v4")
+        );
+
+        let modified = ["dhcp", "firewall", "network", "startwrt"].map(|name| {
+            std::fs::metadata(dir.path().join(name))
+                .unwrap()
+                .modified()
+                .unwrap()
+        });
+        heal_dns_forwarding(ctx).await.unwrap();
+        assert_eq!(
+            modified,
+            ["dhcp", "firewall", "network", "startwrt"].map(|name| {
+                std::fs::metadata(dir.path().join(name))
+                    .unwrap()
+                    .modified()
+                    .unwrap()
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn test_heal_dns_forwarding_ignores_reordered_sections() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs_with_ipv6_vpn(dir.path());
+        append(
+            dir.path(),
+            "startwrt",
+            "\nconfig system_dns system_dns\n\tlist servers '{\"address\":\"9.9.9.9\",\"ssl\":true}'\n",
+        );
+        {
+            let arena = Arena::new();
+            let mut cfgs = parse_all(
+                ctx.uci_root(),
+                &arena,
+                &["startwrt", "network", "firewall", "dhcp"],
+            )
+            .await
+            .unwrap();
+            set_config(ctx.clone(), &mut cfgs, &guest_via("wg_v4", Vec::new())).unwrap();
+            dump_all(ctx.uci_root(), cfgs).await.unwrap();
+        }
+        heal_dns_forwarding(ctx.clone()).await.unwrap();
+        append(
+            dir.path(),
+            "firewall",
+            "\nconfig rule 'startwrt_remote_443_ipv4_10'\n\toption src 'wan'\n\toption dest_port '443'\n\toption target 'ACCEPT'\n",
+        );
+
+        let snapshot = |name: &str| std::fs::read_to_string(dir.path().join(name)).unwrap();
+        let before = ["dhcp", "firewall"].map(snapshot);
+        heal_dns_forwarding(ctx).await.unwrap();
+        assert_eq!(before, ["dhcp", "firewall"].map(snapshot));
+    }
+
+    #[tokio::test]
+    async fn test_vpn_profile_without_vpn_dns_uses_system_dns_through_tunnel() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs_with_ipv6_vpn(dir.path());
+        append(
+            dir.path(),
+            "startwrt",
+            "\nconfig system_dns system_dns\n\tlist servers '{\"address\":\"9.9.9.9\",\"ssl\":true}'\n",
+        );
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+        set_config(ctx.clone(), &mut cfgs, &guest_via("wg_v4", Vec::new())).unwrap();
+
+        // The redirect is installed, so the instance must have an upstream.
+        assert!(guest_redirected(&cfgs));
+        let servers = guest_dnsmasq_servers(&cfgs).expect("per-profile dnsmasq");
+        assert!(servers.contains(&format!("127.0.0.1#{}", dns::smartdns_port_for_vlan(101))));
+        assert!(!servers.contains(&format!("127.0.0.1#{}", dns::SMARTDNS_SYSTEM_PORT)));
+        let group = guest_group(&cfgs).expect("profile SmartDNS group");
+        assert_eq!(group.interface.as_deref(), Some("wg_v4"));
+        assert_eq!(
+            group.servers,
+            vec![dns::DnsServer {
+                address: "9.9.9.9".into(),
+                ssl: true
+            }]
+        );
+        let guest = get_config(ctx, &cfgs, guest_via("wg_v4", Vec::new()).id).unwrap();
+        assert_eq!(guest.dns_source, "system");
     }
 }

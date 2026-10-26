@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use rpc_toolkit::{from_fn_async, from_fn_async_local, HandlerExt as _, ParentHandler};
 use serde::{Deserialize, Serialize};
-use uciedit::openwrt::{DhcpHost, WifiDevice, WifiInterface};
+use uciedit::openwrt::DhcpHost;
 use uciedit::{dump_all, parse_all, Arena, Configs, Line, TypedSection};
 
 use crate::error::ErrorKind;
@@ -12,6 +12,7 @@ use crate::invoke::Invoke;
 use crate::prelude::*;
 use crate::profiles::Lookup;
 use crate::utils::{DeserializeStdin, HandlerExtSerde};
+use crate::wg::{self, WgPeerStats};
 use crate::{CliContext, CtrlContext, Error, ServerContext};
 
 pub fn devices<C: CtrlContext>() -> ParentHandler<C> {
@@ -27,6 +28,14 @@ pub fn devices<C: CtrlContext>() -> ParentHandler<C> {
             "set-auto-forward",
             from_fn_async_local(crate::port_control::set_auto_forward::<C>).no_display(),
         )
+        .subcommand(
+            "set-dns-injection",
+            from_fn_async_local(crate::dns_inject::set_dns_injection::<C>).no_display(),
+        )
+        .subcommand(
+            "set-router-advertisements",
+            from_fn_async_local(crate::lan_guard::set_router_advertisements::<C>).no_display(),
+        )
         .subcommand("forget", from_fn_async_local(forget::<C>).no_display())
         .subcommand(
             "data-usage",
@@ -38,14 +47,15 @@ pub fn devices<C: CtrlContext>() -> ParentHandler<C> {
 
 // --- Types ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitVariants)]
 #[serde(rename_all = "lowercase")]
 pub enum DeviceStatus {
     Online,
     Offline,
 }
+rpc_toolkit::reflect_ts!(DeviceStatus);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitFields)]
 pub struct Device {
     pub mac: Option<String>,
     /// Fully-resolved display name: UCI static name → live DHCP hostname →
@@ -64,18 +74,28 @@ pub struct Device {
     /// Whether this device may auto-create port forwards via PCP/UPnP
     /// (default off; set via `devices set-auto-forward`).
     pub allow_auto_port_forward: bool,
+    /// Whether this device may publish DNS records into the router's resolver
+    /// (`devices set-dns-injection`; `vpn-server peer-set-dns-injection` for a
+    /// VPN peer).
+    pub allow_dns_injection: bool,
+    /// Whether the router forwards this device's IPv6 router advertisements
+    /// to the rest of the LAN (`devices set-router-advertisements`). Always
+    /// false for a VPN peer.
+    pub allow_router_advertisements: bool,
     pub security_profile: Option<String>,
     pub speed: Option<SpeedData>,
     pub data_usage: Option<f64>,
 }
+rpc_toolkit::reflect_ts!(Device);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitFields)]
 pub struct SpeedData {
     pub up: f64,
     pub down: f64,
 }
+rpc_toolkit::reflect_ts!(SpeedData);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct DeviceUpdateReq {
     pub mac: String,
     /// Absent leaves the assigned name untouched; empty clears it. Otherwise
@@ -85,13 +105,15 @@ pub struct DeviceUpdateReq {
     pub ipv4_static: bool,
     pub ipv4: String,
 }
+rpc_toolkit::reflect_ts!(DeviceUpdateReq);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct DeviceMacReq {
     pub mac: String,
 }
+rpc_toolkit::reflect_ts!(DeviceMacReq);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitVariants)]
 #[serde(rename_all = "lowercase")]
 pub enum DataUsagePeriod {
     Week,
@@ -99,19 +121,22 @@ pub enum DataUsagePeriod {
     #[serde(rename = "3months")]
     ThreeMonths,
 }
+rpc_toolkit::reflect_ts!(DataUsagePeriod);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct DataUsageReq {
     pub mac: String,
     pub period: DataUsagePeriod,
 }
+rpc_toolkit::reflect_ts!(DataUsageReq);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct DataUsagePoint {
     pub timestamp: u64,
     pub upload: u64,
     pub download: u64,
 }
+rpc_toolkit::reflect_ts!(DataUsagePoint);
 
 // --- Traffic cache for speed computation ---
 
@@ -310,6 +335,153 @@ pub(crate) async fn dhcp_lease_files() -> Vec<std::path::PathBuf> {
     files
 }
 
+const DNSMASQ_GENERATED_DIR: &str = "/var/etc";
+const DNSMASQ_RUN_DIR: &str = "/var/run/dnsmasq";
+
+/// Each running dnsmasq instance's value for `option`, read from the config
+/// OpenWrt generates for it. A removed instance leaves its config behind but
+/// not its pid file. Instances without the option are omitted.
+pub(crate) fn dnsmasq_instance_option(option: &str) -> Vec<(String, String)> {
+    dnsmasq_instance_option_in(
+        std::path::Path::new(DNSMASQ_GENERATED_DIR),
+        std::path::Path::new(DNSMASQ_RUN_DIR),
+        option,
+    )
+}
+
+fn dnsmasq_instance_option_in(
+    dir: &std::path::Path,
+    run_dir: &std::path::Path,
+    option: &str,
+) -> Vec<(String, String)> {
+    generated_dnsmasq_configs_in(dir)
+        .into_iter()
+        .filter(|(instance, _)| run_dir.join(format!("dnsmasq.{instance}.pid")).exists())
+        .filter_map(|(instance, contents)| {
+            Some((
+                instance,
+                dnsmasq_option_value(&contents, option)?.to_string(),
+            ))
+        })
+        .collect()
+}
+
+/// Each generated `dnsmasq.conf.<instance>` in `dir` with its contents.
+fn generated_dnsmasq_configs_in(dir: &std::path::Path) -> Vec<(String, String)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(instance) = name
+            .to_str()
+            .and_then(|name| name.strip_prefix("dnsmasq.conf."))
+            .filter(|instance| !instance.is_empty() && !instance.contains('.'))
+        else {
+            continue;
+        };
+        if let Ok(contents) = std::fs::read_to_string(entry.path()) {
+            found.push((instance.to_string(), contents));
+        }
+    }
+    found
+}
+
+fn dnsmasq_option_value<'a>(contents: &'a str, option: &str) -> Option<&'a str> {
+    let prefix = format!("{option}=");
+    contents.lines().find_map(|line| line.strip_prefix(&prefix))
+}
+
+const DNSMASQ_HOSTS_DIR: &str = "/tmp/hosts";
+const DNSMASQ_STAMP_DIR: &str = "/var/run";
+
+/// Purges what the init script generated for `dns_*` instances whose UCI
+/// section is gone, then reloads dnsmasq. The init script never removes them,
+/// and every instance reads the shared hosts directory, so a removed profile's
+/// gateway kept answering for the router's name.
+pub(crate) async fn reload_dnsmasq_now() {
+    purge_removed_dnsmasq_instances().await;
+    if let Err(e) =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("reload"))
+            .await
+    {
+        tracing::error!("failed to reload dnsmasq: {e}");
+    }
+}
+
+async fn purge_removed_dnsmasq_instances() {
+    let configured = crate::port_control::uci_task(|| async {
+        let arena = Arena::new();
+        let cfgs = parse_all(std::path::Path::new("/etc/config"), &arena, &["dhcp"]).await?;
+        Ok(cfgs["dhcp"]
+            .sections
+            .iter()
+            .filter(|s| s.ty() == "dnsmasq")
+            .filter_map(|s| s.name().map(|n| n.to_string()))
+            .collect::<std::collections::BTreeSet<String>>())
+    })
+    .await;
+    match configured {
+        Ok(configured) => purge_removed_dnsmasq_instances_in(
+            std::path::Path::new(DNSMASQ_GENERATED_DIR),
+            std::path::Path::new(DNSMASQ_HOSTS_DIR),
+            std::path::Path::new(DNSMASQ_STAMP_DIR),
+            &configured,
+        ),
+        Err(e) => tracing::warn!("dnsmasq sections unreadable, stale instances kept: {e}"),
+    }
+}
+
+/// Only `dns_*` instances are StartWRT's to remove; OpenWrt's unnamed section
+/// has a generated name.
+fn purge_removed_dnsmasq_instances_in(
+    dir: &std::path::Path,
+    hosts_dir: &std::path::Path,
+    stamp_dir: &std::path::Path,
+    configured: &std::collections::BTreeSet<String>,
+) {
+    for (instance, contents) in generated_dnsmasq_configs_in(dir) {
+        if !instance.starts_with("dns_") || configured.contains(&instance) {
+            continue;
+        }
+        if let Some(lease_file) = dnsmasq_option_value(&contents, "dhcp-leasefile") {
+            let _ = std::fs::remove_file(lease_file);
+        }
+        if let Some(conf_dir) = dnsmasq_option_value(&contents, "conf-dir") {
+            let _ = std::fs::remove_dir_all(conf_dir);
+        }
+        let _ = std::fs::remove_file(hosts_dir.join(format!("dhcp.{instance}")));
+        let stamp_prefix = format!("dnsmasq.{instance}.");
+        if let Ok(entries) = std::fs::read_dir(stamp_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name.starts_with(&stamp_prefix) && name.ends_with(".dhcp") {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+        let _ = std::fs::remove_file(dir.join(format!("dnsmasq.conf.{instance}")));
+    }
+}
+
+fn lease_file_without(content: &str, mac: &str) -> String {
+    let kept: Vec<&str> = content
+        .lines()
+        .filter(|line| {
+            line.split_whitespace()
+                .nth(1)
+                .map_or(true, |m| !m.eq_ignore_ascii_case(mac))
+        })
+        .collect();
+    let mut filtered = kept.join("\n");
+    if content.ends_with('\n') && !filtered.is_empty() {
+        filtered.push('\n');
+    }
+    filtered
+}
+
 /// Read and concatenate the contents of every dnsmasq lease file. Unreadable
 /// files are skipped. The result feeds straight into `parse_dhcp_leases`.
 pub(crate) async fn read_all_dhcp_leases() -> String {
@@ -446,56 +618,18 @@ async fn get_wifi_clients() -> (HashMap<String, String>, std::collections::HashS
         .filter(|l| l.starts_with("hostapd."))
         .collect();
 
-    if hostapd_ifaces.is_empty() {
-        return (wifi_macs, wifi_ports);
-    }
-
-    // 2. Get wifi device → band mapping from UCI
-    // We'll do this by reading the wireless config
-    let mut iface_to_band: HashMap<String, String> = HashMap::new();
-
-    // Read UCI wireless config for device bands
-    let arena = Arena::new();
-    if let Ok(cfgs) = parse_all("/etc/config", &arena, &["wireless"]).await {
-        // Build radio → band map
-        let mut radio_band: HashMap<String, String> = HashMap::new();
-        cfgs["wireless"]
-            .each::<WifiDevice, Error>(|name, dev| {
-                if let Some(name) = name {
-                    let band_label = match dev.band.as_str() {
-                        "2g" => "Wi-Fi 2.4GHz",
-                        "5g" => "Wi-Fi 5GHz",
-                        "6g" => "Wi-Fi 6GHz",
-                        _ => "Wi-Fi",
-                    };
-                    radio_band.insert(name.to_string(), band_label.to_string());
-                }
-            })
-            .ok();
-
-        // Map wifi-iface section name → band via its device field
-        cfgs["wireless"]
-            .try_each(|name, iface: WifiInterface| {
-                if let Some(name) = name {
-                    if let Some(band) = radio_band.get(&iface.device) {
-                        // hostapd uses the section name as the interface name
-                        iface_to_band.insert(name.to_string(), band.clone());
-                    }
-                }
-                Ok::<_, Error>(())
-            })
-            .ok();
-    }
-
-    // 3. Query each hostapd interface for clients
+    // 2. Query each hostapd interface for its band and clients
     for hostapd in hostapd_ifaces {
-        // hostapd.wlan0 → wlan0
+        // hostapd.phy0-ap0 → phy0-ap0
         let wlan_name = hostapd.strip_prefix("hostapd.").unwrap_or(hostapd);
         wifi_ports.insert(wlan_name.to_string());
-        let band = iface_to_band
-            .get(wlan_name)
-            .cloned()
-            .unwrap_or_else(|| "Wi-Fi".to_string());
+        let status = run_cmd("ubus", &["call", hostapd, "get_status"]).await;
+        let band = wifi_band_label(
+            serde_json::from_str::<serde_json::Value>(&status)
+                .ok()
+                .and_then(|s| s.get("freq")?.as_u64()),
+        )
+        .to_string();
 
         let output = run_cmd("ubus", &["call", hostapd, "get_clients"]).await;
         if output.is_empty() {
@@ -513,6 +647,16 @@ async fn get_wifi_clients() -> (HashMap<String, String>, std::collections::HashS
     }
 
     (wifi_macs, wifi_ports)
+}
+
+/// Connection label for an access point's operating frequency in MHz.
+fn wifi_band_label(freq: Option<u64>) -> &'static str {
+    match freq.and_then(crate::wifi::frequency_band) {
+        Some("2g") => "Wi-Fi 2.4GHz",
+        Some("5g") => "Wi-Fi 5GHz",
+        Some("6g") => "Wi-Fi 6GHz",
+        _ => "Wi-Fi",
+    }
 }
 
 /// Parse `bridge fdb show br br-lan` to map each MAC to its bridge port.
@@ -565,14 +709,7 @@ struct VpnPeerConfig {
     public_key: String,
     name: String,
     ip: Option<String>,
-}
-
-/// An active VPN peer from `wg show`
-struct WgActivePeer {
-    public_key: String,
-    latest_handshake: u64,
-    rx_bytes: u64,
-    tx_bytes: u64,
+    allow_dns_injection: bool,
 }
 
 /// Collect VPN server info from already-parsed UCI configs
@@ -636,51 +773,26 @@ fn get_vpn_peer_configs(cfgs: &Configs, wg_interface: &str) -> Vec<VpnPeerConfig
                 public_key,
                 name: description.unwrap_or_else(|| section.name().unwrap_or_default().to_string()),
                 ip,
-            })
-        })
-        .collect()
-}
-
-/// Parse `wg show <interface> dump` output into active peer entries.
-/// First line is the interface itself; subsequent lines are peers.
-fn parse_wg_show_dump(output: &str) -> Vec<WgActivePeer> {
-    output
-        .lines()
-        .skip(1) // skip interface line
-        .filter_map(|line| {
-            let fields: Vec<&str> = line.split('\t').collect();
-            if fields.len() < 7 {
-                return None;
-            }
-            Some(WgActivePeer {
-                public_key: fields[0].to_string(),
-                latest_handshake: fields[4].parse().unwrap_or(0),
-                rx_bytes: fields[5].parse().unwrap_or(0),
-                tx_bytes: fields[6].parse().unwrap_or(0),
+                allow_dns_injection: crate::dns_inject::peer_allows_dns_inject(section),
             })
         })
         .collect()
 }
 
 /// Query all WireGuard interfaces and return active peer data.
-/// Returns Vec<(wg_interface_name, Vec<WgActivePeer>)>.
-async fn query_wg_active_peers(wg_interfaces: &[String]) -> Vec<(String, Vec<WgActivePeer>)> {
+/// Returns Vec<(wg_interface_name, Vec<WgPeerStats>)>.
+async fn query_wg_active_peers(wg_interfaces: &[String]) -> Vec<(String, Vec<WgPeerStats>)> {
     let mut results = Vec::new();
     for iface in wg_interfaces {
         let output = run_cmd("wg", &["show", iface, "dump"]).await;
-        let peers = parse_wg_show_dump(&output);
+        let peers = wg::parse_dump(&output);
         results.push((iface.clone(), peers));
     }
     results
 }
 
 pub(crate) fn reload_dnsmasq() {
-    tokio::spawn(async {
-        let _ = crate::run_quiet_async(
-            tokio::process::Command::new("/etc/init.d/dnsmasq").arg("reload"),
-        )
-        .await;
-    });
+    tokio::spawn(reload_dnsmasq_now());
 }
 
 #[allow(dead_code)]
@@ -698,12 +810,12 @@ fn reload_firewall_and_dnsmasq() {
 }
 
 /// Remove a device's ARP entries and DHCP lease so it disappears from
-/// `devices.list`. Also restarts dnsmasq to pick up UCI host removal and
-/// the edited lease file. If the device is still connected, it will
-/// reappear after its next network activity.
+/// `devices.list`, then reloads dnsmasq to apply the UCI host removal. If the
+/// device is still connected, it will reappear after its next network
+/// activity.
 ///
-/// Dnsmasq owns `/tmp/dhcp.leases` and dumps in-memory state on exit, so
-/// we must stop it *first*, edit the file while it's down, then start it.
+/// A running instance rewrites its lease file from memory, so each instance
+/// holding the lease is stopped before its file is edited.
 async fn flush_device_from_network(mac: &str) {
     let mac = mac.to_uppercase();
 
@@ -718,35 +830,32 @@ async fn flush_device_from_network(mac: &str) {
         }
     }
 
-    // Stop dnsmasq so it flushes in-memory leases to disk and exits.
-    let _ = crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("stop"))
-        .await;
-
-    // Remove the device's lease line from every (now-stable) lease file — the
-    // base file and any per-profile `/tmp/dhcp.leases.dns_*`.
-    for path in dhcp_lease_files().await {
-        if let Ok(content) = tokio::fs::read_to_string(&path).await {
-            let filtered: String = content
-                .lines()
-                .filter(|line| {
-                    line.split_whitespace()
-                        .nth(1)
-                        .map_or(true, |m| m.to_uppercase() != mac)
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            let filtered = if content.ends_with('\n') && !filtered.is_empty() {
-                filtered + "\n"
-            } else {
-                filtered
-            };
-            let _ = tokio::fs::write(&path, filtered).await;
+    // A full `stop` unregisters dnsmasq's interface triggers; stopping an
+    // instance by name leaves them in place.
+    for (instance, path) in dnsmasq_instance_option("dhcp-leasefile") {
+        let Ok(content) = tokio::fs::read_to_string(&path).await else {
+            continue;
+        };
+        if lease_file_without(&content, &mac) != content {
+            let _ = crate::run_quiet_async(
+                tokio::process::Command::new("/etc/init.d/dnsmasq").args(["stop", &instance]),
+            )
+            .await;
         }
     }
 
-    // Start dnsmasq — picks up both the UCI host removal and edited leases.
+    for path in dhcp_lease_files().await {
+        if let Ok(content) = tokio::fs::read_to_string(&path).await {
+            let filtered = lease_file_without(&content, &mac);
+            if filtered != content {
+                let _ = tokio::fs::write(&path, filtered).await;
+            }
+        }
+    }
+
+    // Starts the stopped instances and restarts the rest for the host removal.
     let _ =
-        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("start"))
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("reload"))
             .await;
 }
 
@@ -1582,6 +1691,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             ipv6,
             ipv4_static: host.map(|h| h.ip.is_some()).unwrap_or(false),
             allow_auto_port_forward: host.is_some_and(|h| h._allow_pcp.as_deref() == Some("1")),
+            allow_dns_injection: host.is_some_and(|h| h._allow_dns_inject.as_deref() == Some("1")),
+            allow_router_advertisements: host.is_some_and(|h| h._allow_ra.as_deref() == Some("1")),
             security_profile,
             speed,
             data_usage,
@@ -1604,12 +1715,11 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let handshake_timeout = 180; // 3 minutes
 
-    // Build active peer index: public_key → WgActivePeer, keyed per interface
-    let mut wg_active_by_iface: HashMap<String, HashMap<String, &WgActivePeer>> = HashMap::new();
+    // Build active peer index: public_key → WgPeerStats, keyed per interface
+    let mut wg_active_by_iface: HashMap<String, HashMap<String, &WgPeerStats>> = HashMap::new();
     for (iface, peers) in &wg_active_peers {
-        let peer_map: HashMap<String, &WgActivePeer> =
+        let peer_map: HashMap<String, &WgPeerStats> =
             peers.iter().map(|p| (p.public_key.clone(), p)).collect();
         wg_active_by_iface.insert(iface.clone(), peer_map);
     }
@@ -1624,7 +1734,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             let is_online = active
                 .map(|a| {
                     a.latest_handshake > 0
-                        && now_unix.saturating_sub(a.latest_handshake) < handshake_timeout
+                        && now_unix.saturating_sub(a.latest_handshake) < wg::REJECT_AFTER_SECS
                 })
                 .unwrap_or(false);
 
@@ -1689,6 +1799,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 ipv4_static: true,
                 // No MAC to authorize, so a VPN peer can never be auto-forward capable.
                 allow_auto_port_forward: false,
+                allow_dns_injection: peer_cfg.allow_dns_injection,
+                allow_router_advertisements: false,
                 security_profile: Some(server.profile_fullname.clone()),
                 speed,
                 data_usage,
@@ -1865,6 +1977,11 @@ pub async fn update<C: CtrlContext>(
             if ctx.effectful() {
                 reload_dnsmasq();
             }
+            // A refused UPDATE from the new address costs the client a
+            // five-minute back-off.
+            if let Some(di) = crate::dns_inject::DNS_INJECT.get() {
+                di.invalidate();
+            }
             Ok(())
         }
     }
@@ -1977,15 +2094,12 @@ pub async fn forget<C: CtrlContext>(
                 return Err(err.into());
             }
             Ok(()) => {
-                crate::activity::log(
-                    "device",
-                    "forgotten",
-                    true,
-                    &format!("Forgot device {}", mac_upper),
-                    None,
-                );
                 crate::device_names::forget(&mac_upper).await;
                 crate::port_control::close_device_forwards(&mac_upper, &removed_static_ips).await;
+                // The sweep drops the device's published DNS records now.
+                if let Some(di) = crate::dns_inject::DNS_INJECT.get() {
+                    di.invalidate();
+                }
                 // Drop the mDNS attempt history too: a forgotten device that
                 // reconnects "appears as a new entry" (per the user docs), so
                 // it starts a fresh retry schedule.
@@ -1995,8 +2109,29 @@ pub async fn forget<C: CtrlContext>(
                     }
                 }
                 if ctx.effectful() {
+                    // Revokes routing authority before the potentially slow dnsmasq reload.
+                    let ra_result = crate::lan_guard::apply_ra_allow(ctx.uci_root()).await;
                     flush_device_from_network(&mac_upper).await;
+                    if let Err(err) = ra_result {
+                        crate::activity::log(
+                            "device",
+                            "forgotten",
+                            false,
+                            &format!(
+                                "Forgot device {mac_upper}, but could not revoke its IPv6 router advertisements"
+                            ),
+                            Some(&err.to_string()),
+                        );
+                        return Err(err);
+                    }
                 }
+                crate::activity::log(
+                    "device",
+                    "forgotten",
+                    true,
+                    &format!("Forgot device {}", mac_upper),
+                    None,
+                );
                 return Ok(());
             }
         }
@@ -2211,6 +2346,163 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn instance_options_come_from_each_running_generated_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = tempfile::tempdir().unwrap();
+        let write = |name: &str, body: &str| std::fs::write(dir.path().join(name), body).unwrap();
+        let running = |instance: &str| {
+            std::fs::write(run.path().join(format!("dnsmasq.{instance}.pid")), "1\n").unwrap()
+        };
+        write(
+            "dnsmasq.conf.cfg01411c",
+            "conf-dir=/tmp/dnsmasq.cfg01411c.d\ndhcp-leasefile=/tmp/dhcp.leases\n",
+        );
+        write(
+            "dnsmasq.conf.dns_guest",
+            "dhcp-leasefile=/tmp/dhcp.leases.dns_guest\n",
+        );
+        write(
+            "dnsmasq.conf.dns_deleted",
+            "conf-dir=/tmp/dnsmasq.dns_deleted.d\ndhcp-leasefile=/tmp/dhcp.leases.dns_deleted\n",
+        );
+        write("dnsmasq.conf.dns_guest.tmp", "dhcp-leasefile=/tmp/stale\n");
+        write("resolv.conf", "dhcp-leasefile=/tmp/unrelated\n");
+        running("cfg01411c");
+        running("dns_guest");
+
+        let mut leases = dnsmasq_instance_option_in(dir.path(), run.path(), "dhcp-leasefile");
+        leases.sort();
+        assert_eq!(
+            leases,
+            [
+                ("cfg01411c".into(), "/tmp/dhcp.leases".into()),
+                ("dns_guest".into(), "/tmp/dhcp.leases.dns_guest".into()),
+            ]
+        );
+        assert_eq!(
+            dnsmasq_instance_option_in(dir.path(), run.path(), "conf-dir"),
+            [(
+                "cfg01411c".to_string(),
+                "/tmp/dnsmasq.cfg01411c.d".to_string()
+            )]
+        );
+        assert!(
+            dnsmasq_instance_option_in(&dir.path().join("missing"), run.path(), "conf-dir")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn removed_profile_instances_leave_no_generated_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let hosts = tempfile::tempdir().unwrap();
+        let stamps = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let instance = |name: &str| {
+            let lease = tmp.path().join(format!("dhcp.leases.{name}"));
+            let conf_dir = tmp.path().join(format!("dnsmasq.{name}.d"));
+            std::fs::write(&lease, "lease\n").unwrap();
+            std::fs::create_dir(&conf_dir).unwrap();
+            std::fs::write(conf_dir.join("drop-in.conf"), "").unwrap();
+            std::fs::write(
+                dir.path().join(format!("dnsmasq.conf.{name}")),
+                format!(
+                    "dhcp-leasefile={}\nconf-dir={}\n",
+                    lease.display(),
+                    conf_dir.display()
+                ),
+            )
+            .unwrap();
+            std::fs::write(
+                hosts.path().join(format!("dhcp.{name}")),
+                "192.168.9.1 router\n",
+            )
+            .unwrap();
+            for ifname in ["br-lan.1", "br-lan.90"] {
+                std::fs::write(
+                    stamps.path().join(format!("dnsmasq.{name}.{ifname}.dhcp")),
+                    "0\n",
+                )
+                .unwrap();
+            }
+        };
+        instance("cfg01411c");
+        instance("dns_lan");
+        instance("dns_gone");
+        std::fs::write(
+            stamps.path().join("dnsmasq.dns_gone_other.br-lan.1.dhcp"),
+            "0\n",
+        )
+        .unwrap();
+
+        let configured = ["dns_lan".to_string()].into_iter().collect();
+        purge_removed_dnsmasq_instances_in(dir.path(), hosts.path(), stamps.path(), &configured);
+
+        let names = |d: &std::path::Path| {
+            let mut v: Vec<String> = std::fs::read_dir(d)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            v.sort();
+            v
+        };
+        assert_eq!(
+            names(dir.path()),
+            ["dnsmasq.conf.cfg01411c", "dnsmasq.conf.dns_lan"]
+        );
+        assert_eq!(names(hosts.path()), ["dhcp.cfg01411c", "dhcp.dns_lan"]);
+        assert_eq!(
+            names(tmp.path()),
+            [
+                "dhcp.leases.cfg01411c",
+                "dhcp.leases.dns_lan",
+                "dnsmasq.cfg01411c.d",
+                "dnsmasq.dns_lan.d",
+            ]
+        );
+        assert_eq!(
+            names(stamps.path()),
+            [
+                "dnsmasq.cfg01411c.br-lan.1.dhcp",
+                "dnsmasq.cfg01411c.br-lan.90.dhcp",
+                "dnsmasq.dns_gone_other.br-lan.1.dhcp",
+                "dnsmasq.dns_lan.br-lan.1.dhcp",
+                "dnsmasq.dns_lan.br-lan.90.dhcp",
+            ]
+        );
+    }
+
+    #[test]
+    fn lease_removal_matches_the_mac_in_any_case() {
+        let leases = "1700000000 aa:bb:cc:dd:ee:ff 192.168.1.10 phone *\n\
+                      1700000001 11:22:33:44:55:66 192.168.1.11 laptop *\n";
+        assert_eq!(
+            lease_file_without(leases, "AA:BB:CC:DD:EE:FF"),
+            "1700000001 11:22:33:44:55:66 192.168.1.11 laptop *\n"
+        );
+        assert_eq!(lease_file_without(leases, "00:00:00:00:00:00"), leases);
+        assert_eq!(
+            lease_file_without(
+                "1700000000 aa:bb:cc:dd:ee:ff 192.168.1.10 phone *\n",
+                "aa:bb:cc:dd:ee:ff"
+            ),
+            ""
+        );
+    }
+
+    #[test]
+    fn wifi_band_label_follows_frequency() {
+        assert_eq!(wifi_band_label(Some(2412)), "Wi-Fi 2.4GHz");
+        assert_eq!(wifi_band_label(Some(2484)), "Wi-Fi 2.4GHz");
+        assert_eq!(wifi_band_label(Some(5180)), "Wi-Fi 5GHz");
+        assert_eq!(wifi_band_label(Some(5745)), "Wi-Fi 5GHz");
+        assert_eq!(wifi_band_label(Some(5885)), "Wi-Fi 5GHz");
+        assert_eq!(wifi_band_label(Some(5955)), "Wi-Fi 6GHz");
+        assert_eq!(wifi_band_label(Some(60480)), "Wi-Fi");
+        assert_eq!(wifi_band_label(None), "Wi-Fi");
+    }
 
     #[test]
     fn device_names_must_be_hostname_labels() {

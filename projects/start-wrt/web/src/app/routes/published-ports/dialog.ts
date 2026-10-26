@@ -332,10 +332,6 @@ export class PublishPortDialog implements OnInit {
     this.deviceMap().get(this.selectedDeviceMac()),
   )
 
-  // The specific, actionable reason the current IP-version selection can't be
-  // published for the selected device — or null when it's fine. Shared by the
-  // inline <tui-error> (display) and validateIpVersion (drives form.invalid /
-  // Save-disable) so both always agree.
   private ipVersionErrorKey(
     ipVersion: 'ipv4' | 'ipv6' | 'both',
     device: Device | undefined,
@@ -347,11 +343,21 @@ export class PublishPortDialog implements OnInit {
     if (needsIpv6) {
       if (!this.context.data.ipv6Available)
         return 'IPv6 options require WAN IPv6 and LAN IPv6 to be enabled'
+      if (this.keepsIpv6(device)) return null
       if (!device.ipv6) return 'Device has no global IPv6 (GUA) address'
       if (!isGua(device.ipv6))
         return "This device's IPv6 address is local-only (ULA/link-local), so IPv6 port forwarding is disabled. It requires a global (GUA) address from ISP prefix delegation."
     }
     return null
+  }
+
+  // An offline device keeps the IPv6 address its published rule already holds.
+  private keepsIpv6(device: Device): boolean {
+    const existing = this.context.data.existing
+    return (
+      !!existing?.ipv6 &&
+      existing.deviceMac.toUpperCase() === device.mac?.toUpperCase()
+    )
   }
 
   // Translated inline error for the current selection (shown proactively).
@@ -508,7 +514,7 @@ export class PublishPortDialog implements OnInit {
 
   private validateIpVersion(control: AbstractControl): ValidationErrors | null {
     const value = control.value as 'ipv4' | 'ipv6' | 'both'
-    const device = this.deviceMap().get(this.form?.value.deviceMac ?? '')
+    const device = this.deviceMap().get(this.form.controls.deviceMac.value)
     const message = this.ipVersionErrorKey(value, device)
     return message ? { missingDeviceAddress: { message } } : null
   }

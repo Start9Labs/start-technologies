@@ -1,5 +1,6 @@
 import { Component, computed, inject } from '@angular/core'
-import { TuiFormatNumberPipe, TuiIcon, TuiLink } from '@taiga-ui/core'
+import { TuiIcon, TuiLink } from '@taiga-ui/core'
+import { TuiFormatNumberPipe } from '@taiga-ui/kit'
 import { Summary } from 'src/app/components/summary'
 
 import DeviceDetail from '.'

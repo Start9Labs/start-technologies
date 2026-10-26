@@ -35,6 +35,16 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
           <span tuiSubtitle>{{ p }}</span>
         </div>
       }
+      <div appSummary>
+        {{ 'Delegated Prefix' | i18n }}
+        <span tuiSubtitle>
+          @if (delegatedPrefix(); as p) {
+            /{{ p }}
+          } @else {
+            {{ 'None' | i18n }}
+          }
+        </span>
+      </div>
     </section>
   `,
   imports: [TuiBadge, TuiStatus, Summary, i18nPipe],
@@ -52,4 +62,7 @@ export class LanIpv6Summary {
       : null,
   )
   readonly ip6addr = computed(() => this.service.data()?.ip6addr || '')
+  readonly delegatedPrefix = computed(
+    () => this.service.data()?.delegatedPrefix ?? null,
+  )
 }

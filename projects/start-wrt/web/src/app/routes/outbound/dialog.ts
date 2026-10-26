@@ -1,4 +1,4 @@
-import { Component, effect, inject, signal } from '@angular/core'
+import { Component, computed, effect, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms'
 import {
@@ -6,6 +6,7 @@ import {
   TuiDialogContext,
   TuiError,
   TuiInput,
+  TuiNotification,
   TuiTextfield,
   tuiTextfieldOptionsProvider,
 } from '@taiga-ui/core'
@@ -25,6 +26,7 @@ import { ModalHelp } from 'src/app/help/modal-help'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import {
   AddClientDialogData,
+  configDnsServers,
   getAddOutboundVpnForm,
   hasHostnameEndpoint,
   OUTBOUND_VALIDATION_ERRORS,
@@ -71,6 +73,23 @@ import {
         <input tuiSelect formControlName="target" />
         <tui-data-list-wrapper *tuiDropdown [items]="targets()" />
       </tui-textfield>
+      <tui-textfield>
+        <label tuiLabel>{{ 'DNS servers' | i18n }}</label>
+        <input
+          tuiInput
+          [placeholder]="configDns().join(', ')"
+          formControlName="dns"
+        />
+      </tui-textfield>
+      <tui-error formControlName="dns" />
+      @if (dnsMissing()) {
+        <div tuiNotification appearance="warning">
+          {{
+            'No DNS servers: profiles using this VPN resolve through your ISP, outside the tunnel, unless system DNS uses custom servers.'
+              | i18n
+          }}
+        </div>
+      }
       <footer>
         <button
           tuiButton
@@ -102,6 +121,7 @@ import {
     TuiChevron,
     TuiButton,
     TuiInput,
+    TuiNotification,
     i18nPipe,
   ],
 })
@@ -114,16 +134,27 @@ class AddClient {
     this.context.data.existingLabels,
   )
 
-  protected readonly targets = toSignal(
+  private readonly config = toSignal(
     this.form.controls.config.valueChanges.pipe(
-      switchMap(async file => {
-        const config = await file?.text().catch(() => '')
-        return config && hasHostnameEndpoint(config)
-          ? ['Internet']
-          : this.context.data.targets
-      }),
+      switchMap(async file => (await file?.text().catch(() => '')) ?? ''),
     ),
-    { initialValue: this.context.data.targets },
+    { initialValue: '' },
+  )
+
+  protected readonly targets = computed(() =>
+    hasHostnameEndpoint(this.config())
+      ? ['Internet']
+      : this.context.data.targets,
+  )
+
+  protected readonly configDns = computed(() => configDnsServers(this.config()))
+
+  private readonly dns = toSignal(this.form.controls.dns.valueChanges, {
+    initialValue: '',
+  })
+
+  protected readonly dnsMissing = computed(
+    () => !!this.config() && !this.configDns().length && !this.dns().trim(),
   )
 
   // Translates the 'Internet' option; user VPN labels pass through unchanged.

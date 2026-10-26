@@ -70,7 +70,7 @@ pub struct UciVpnServer {
 // === Public API Types ===
 
 /// Peer configuration for VPN server
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct VpnServerPeer {
     /// Human-readable name for the peer
     pub name: String,
@@ -86,10 +86,14 @@ pub struct VpnServerPeer {
     /// Route all traffic (LAN + WAN) through the tunnel. Default (false/absent) = split tunnel (LAN only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub route_all: Option<bool>,
+    /// May publish DNS records into the router's resolver. Default (false/absent) = denied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_dns_injection: Option<bool>,
 }
+rpc_toolkit::reflect_ts!(VpnServerPeer);
 
 /// VPN server configuration returned by list (excludes sensitive data)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct VpnServer {
     /// Profile interface name this VPN server is associated with (e.g., "lan", "guest")
     pub profile: String,
@@ -108,9 +112,10 @@ pub struct VpnServer {
     /// Connected peers
     pub peers: Vec<VpnServerPeer>,
 }
+rpc_toolkit::reflect_ts!(VpnServer);
 
 /// VPN server configuration for set/create requests
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct VpnServerConfig {
     /// Human-readable label for the VPN server
     pub label: String,
@@ -124,37 +129,42 @@ pub struct VpnServerConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub private_key: Option<String>,
 }
+rpc_toolkit::reflect_ts!(VpnServerConfig);
 
 /// Response containing all VPN servers
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct VpnServers {
     pub servers: Vec<VpnServer>,
 }
+rpc_toolkit::reflect_ts!(VpnServers);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct SetArgs {
     /// Profile interface name (e.g., "lan", "guest")
     pub profile: String,
     /// VPN server configuration
     pub config: VpnServerConfig,
 }
+rpc_toolkit::reflect_ts!(SetArgs);
 
-#[derive(Debug, Clone, Serialize, Deserialize, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, Parser, visit_rs::VisitFields)]
 pub struct DeleteArgs {
     /// Profile interface name
     #[clap(short, long)]
     pub profile: String,
 }
+rpc_toolkit::reflect_ts!(DeleteArgs);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct PeerAddArgs {
     /// Profile interface name (e.g., "lan", "guest")
     pub profile: String,
     /// Peer configuration
     pub peer: VpnServerPeer,
 }
+rpc_toolkit::reflect_ts!(PeerAddArgs);
 
-#[derive(Debug, Clone, Serialize, Deserialize, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, Parser, visit_rs::VisitFields)]
 pub struct PeerDeleteArgs {
     /// Profile interface name
     #[clap(short, long)]
@@ -163,22 +173,97 @@ pub struct PeerDeleteArgs {
     #[clap(long)]
     pub public_key: String,
 }
+rpc_toolkit::reflect_ts!(PeerDeleteArgs);
 
-/// Response from adding a peer, contains client config if keys were generated
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Parser, visit_rs::VisitFields)]
+pub struct PeerRenameArgs {
+    /// Profile interface name
+    #[clap(short, long)]
+    pub profile: String,
+    /// Public key of the peer to rename
+    #[clap(long)]
+    pub public_key: String,
+    /// New human-readable name for the peer
+    #[clap(long)]
+    pub name: String,
+}
+rpc_toolkit::reflect_ts!(PeerRenameArgs);
+
+#[derive(Debug, Clone, Serialize, Deserialize, Parser, visit_rs::VisitFields)]
+pub struct PeerSetDnsInjectionArgs {
+    /// Profile interface name
+    #[clap(short, long)]
+    pub profile: String,
+    /// Public key of the peer
+    #[clap(long)]
+    pub public_key: String,
+    /// Grant rather than revoke the permission
+    #[clap(long)]
+    pub allow: bool,
+}
+rpc_toolkit::reflect_ts!(PeerSetDnsInjectionArgs);
+
+/// Response from adding a peer
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct PeerAddResponse {
-    /// WireGuard client configuration (only present if keys were generated server-side)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub client_config: Option<String>,
+    /// WireGuard client configuration. Its private key is a placeholder when the request supplied the public key.
+    pub client_config: String,
     /// The public key of the peer
     pub public_key: String,
     /// The assigned IP address
     pub ip: Ipv4Addr,
 }
+rpc_toolkit::reflect_ts!(PeerAddResponse);
+
+/// Rejected by `wg` as a key.
+const CLIENT_PRIVATE_KEY_PLACEHOLDER: &str = "<PRIVATE_KEY>";
+
+struct ClientConfig<'a> {
+    name: &'a str,
+    /// `None` renders the placeholder.
+    private_key: Option<&'a str>,
+    address: &'a str,
+    dns: Ipv4Addr,
+    server_public_key: &'a str,
+    preshared_key: &'a str,
+    endpoint: &'a str,
+    port: u16,
+    allowed_ips: &'a str,
+}
+
+impl ClientConfig<'_> {
+    fn render(&self) -> String {
+        format!(
+            "# WireGuard client configuration for {name}\n\
+             # Generated by StartWRT\n\
+             \n\
+             [Interface]\n\
+             PrivateKey = {privkey}\n\
+             Address = {address}\n\
+             DNS = {dns}\n\
+             \n\
+             [Peer]\n\
+             PublicKey = {server_pubkey}\n\
+             PresharedKey = {psk}\n\
+             Endpoint = {endpoint}:{port}\n\
+             AllowedIPs = {allowed_ips}\n\
+             PersistentKeepalive = 25\n",
+            name = self.name,
+            privkey = self.private_key.unwrap_or(CLIENT_PRIVATE_KEY_PLACEHOLDER),
+            address = self.address,
+            dns = self.dns,
+            server_pubkey = self.server_public_key,
+            psk = self.preshared_key,
+            endpoint = self.endpoint,
+            port = self.port,
+            allowed_ips = self.allowed_ips,
+        )
+    }
+}
 
 // === API Handler ===
 
-pub fn vpn_server<C: rpc_toolkit::Context>() -> ParentHandler<C> {
+pub fn vpn_server<C: CtrlContext>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand(
             "list",
@@ -209,6 +294,16 @@ pub fn vpn_server<C: rpc_toolkit::Context>() -> ParentHandler<C> {
             from_fn_async_local(peer_delete)
                 .with_display_serializable()
                 .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "peer-rename",
+            from_fn_async_local(peer_rename)
+                .with_display_serializable()
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "peer-set-dns-injection",
+            from_fn_async_local(peer_set_dns_injection::<C>).no_display(),
         )
 }
 
@@ -257,8 +352,9 @@ fn validate_endpoint(endpoint: &str) -> Result<(), Error> {
 }
 
 /// Validate that a peer name is safe for use in UCI config and WireGuard client configs.
+/// A blank name is written as a valueless option that the config parser rejects.
 fn validate_peer_name(name: &str) -> Result<(), Error> {
-    if name.contains('\n') || name.contains('\r') {
+    if name.trim().is_empty() || name.contains('\n') || name.contains('\r') {
         return Err(Error::new(
             eyre!("invalid name: {name}"),
             ErrorKind::InvalidValue,
@@ -276,6 +372,19 @@ fn validate_private_key(key: &str) -> Result<(), Error> {
         )
     })?;
     Ok(())
+}
+
+/// The client config's `Address`. The IPv4 address carries the profile's /24,
+/// whose first host a StartOS client sends DNS updates to.
+fn client_address_line(peer_ip: Ipv4Addr, v6_groups: Option<[u16; 4]>) -> String {
+    match v6_groups {
+        Some(g) => format!(
+            "{}/24, {}/128",
+            peer_ip,
+            wg_peer_v6_addr(g, peer_ip.octets()[3])
+        ),
+        None => format!("{}/24", peer_ip),
+    }
 }
 
 /// Derive VPN server address from profile's gateway IP
@@ -1152,7 +1261,7 @@ pub async fn set(
 
 /// Delete VPN server configuration for a profile
 #[instrument(skip_all)]
-pub async fn delete(_ctx: ServerContext, args: DeleteArgs) -> Result<(), Error> {
+pub async fn delete(ctx: ServerContext, args: DeleteArgs) -> Result<(), Error> {
     let profile_interface = &args.profile;
     let wg_interface_name = format!("wg_{}", profile_interface);
 
@@ -1189,6 +1298,9 @@ pub async fn delete(_ctx: ServerContext, args: DeleteArgs) -> Result<(), Error> 
 
         // Remove peers (sections of type wireguard_<interface_name>)
         let peer_type = format!("wireguard_{}", wg_interface_name);
+        let had_dns_injection = cfgs["network"].sections.iter().any(|section| {
+            section.ty() == peer_type && crate::dns_inject::peer_allows_dns_inject(section)
+        });
         cfgs["network"]
             .sections
             .retain(|section| section.ty() != peer_type);
@@ -1246,6 +1358,9 @@ pub async fn delete(_ctx: ServerContext, args: DeleteArgs) -> Result<(), Error> 
             }
             Ok(()) => {
                 reload_system().await?;
+                if had_dns_injection {
+                    crate::dns_inject::apply_permission_change(&ctx).await?;
+                }
                 // Clear proxy_arp sysctl — netifd ignores the UCI option
                 if let Some(tag) = vlan_tag {
                     apply_proxy_arp_sysctl(tag, false).await;
@@ -1266,7 +1381,7 @@ pub async fn delete(_ctx: ServerContext, args: DeleteArgs) -> Result<(), Error> 
 /// Add a peer to a VPN server
 #[instrument(skip_all)]
 pub async fn peer_add(
-    _ctx: ServerContext,
+    ctx: ServerContext,
     DeserializeStdin(PeerAddArgs { profile, mut peer }): DeserializeStdin<PeerAddArgs>,
 ) -> Result<PeerAddResponse, Error> {
     // Validate peer name before any other processing
@@ -1285,10 +1400,10 @@ pub async fn peer_add(
         }
     };
 
-    // Always generate PSK for better security if not provided
-    if peer.preshared_key.is_none() {
-        peer.preshared_key = Some(Base64::new(generate_psk()).to_base64());
-    }
+    let preshared_key = peer
+        .preshared_key
+        .get_or_insert_with(|| Base64::new(generate_psk()).to_base64())
+        .clone();
 
     // Update peer with the public key (in case it was generated)
     peer.public_key = Some(peer_public_key.clone());
@@ -1416,14 +1531,7 @@ pub async fn peer_add(
         // consumes cfgs. The peer gets a /128 in the server's dedicated WG /64
         // when the profile serves IPv6 (see wg_server_v6_groups).
         let v6_groups = wg_server_v6_groups(&cfgs, profile_interface);
-        let address_line = match v6_groups {
-            Some(g) => format!(
-                "{}/32, {}/128",
-                peer_ip,
-                wg_peer_v6_addr(g, peer_ip.octets()[3])
-            ),
-            None => format!("{}/32", peer_ip),
-        };
+        let address_line = client_address_line(peer_ip, v6_groups);
         // "All traffic" peers tunnel everything; "LAN only" peers tunnel exactly
         // the LAN subnets this profile's lan_access permits.
         let allowed_ips = if peer.route_all == Some(true) {
@@ -1471,37 +1579,35 @@ pub async fn peer_add(
             Ok(()) => {
                 // Restart the WireGuard interface to apply peer changes immediately
                 restart_wireguard_interface(&wg_interface_name).await?;
+                // A failed rewrite must not discard the one-time client config.
+                if peer.allow_dns_injection == Some(true) {
+                    if let Err(err) = crate::dns_inject::apply_permission_change(&ctx).await {
+                        crate::activity::log(
+                            "vpn-server",
+                            "peer-dns-injection",
+                            false,
+                            &format!(
+                                "Failed to enable DNS injection for inbound VPN peer '{}'",
+                                peer.name
+                            ),
+                            Some(&err.to_string()),
+                        );
+                    }
+                }
 
-                // Generate client config if we generated the keys.
-                // `allowed_ips` was computed above, before dump_all consumed cfgs.
-                let client_config = client_private_key.map(|private_key| {
-                    let psk = peer.preshared_key.as_deref().unwrap_or("");
-
-                    format!(
-                        "# WireGuard client configuration for {name}\n\
-                         # Generated by StartWRT\n\
-                         \n\
-                         [Interface]\n\
-                         PrivateKey = {privkey}\n\
-                         Address = {address}\n\
-                         DNS = {gateway}\n\
-                         \n\
-                         [Peer]\n\
-                         PublicKey = {server_pubkey}\n\
-                         PresharedKey = {psk}\n\
-                         Endpoint = {endpoint}:{port}\n\
-                         AllowedIPs = {allowed_ips}\n\
-                         PersistentKeepalive = 25\n",
-                        name = peer.name,
-                        privkey = private_key.to_base64(),
-                        address = address_line,
-                        server_pubkey = server_public_key,
-                        psk = psk,
-                        endpoint = server_endpoint,
-                        port = server_port,
-                        gateway = gateway_ip,
-                    )
-                });
+                let private_key = client_private_key.map(|k| k.to_base64());
+                let client_config = ClientConfig {
+                    name: &peer.name,
+                    private_key: private_key.as_deref(),
+                    address: &address_line,
+                    dns: gateway_ip,
+                    server_public_key: &server_public_key,
+                    preshared_key: &preshared_key,
+                    endpoint: &server_endpoint,
+                    port: server_port,
+                    allowed_ips: &allowed_ips,
+                }
+                .render();
 
                 crate::activity::log(
                     "vpn-server",
@@ -1525,7 +1631,7 @@ pub async fn peer_add(
 
 /// Delete a peer from a VPN server
 #[instrument(skip_all)]
-pub async fn peer_delete(_ctx: ServerContext, args: PeerDeleteArgs) -> Result<(), Error> {
+pub async fn peer_delete(ctx: ServerContext, args: PeerDeleteArgs) -> Result<(), Error> {
     let profile_interface = &args.profile;
     let wg_interface_name = format!("wg_{}", profile_interface);
     let public_key = &args.public_key;
@@ -1561,16 +1667,19 @@ pub async fn peer_delete(_ctx: ServerContext, args: PeerDeleteArgs) -> Result<()
         // Find and remove the peer with matching public key
         let peer_type = format!("wireguard_{}", wg_interface_name);
         let original_len = cfgs["network"].sections.len();
+        let mut had_dns_injection = false;
 
         cfgs["network"].sections.retain(|section| {
             if section.ty() != peer_type {
                 return true;
             }
             // Keep the section if it doesn't have the matching public key
-            !section.lines.iter().any(|line| {
+            let matched = section.lines.iter().any(|line| {
                 matches!(line, Line::Option { option, value, .. }
                     if option.as_str() == "public_key" && value.as_str() == public_key.as_str())
-            })
+            });
+            had_dns_injection |= matched && crate::dns_inject::peer_allows_dns_inject(section);
+            !matched
         });
 
         if cfgs["network"].sections.len() == original_len {
@@ -1606,6 +1715,9 @@ pub async fn peer_delete(_ctx: ServerContext, args: PeerDeleteArgs) -> Result<()
             Ok(()) => {
                 // Restart the WireGuard interface to apply peer changes immediately
                 restart_wireguard_interface(&wg_interface_name).await?;
+                if had_dns_injection {
+                    crate::dns_inject::apply_permission_change(&ctx).await?;
+                }
                 crate::activity::log(
                     "vpn-server",
                     "peer-deleted",
@@ -1622,7 +1734,204 @@ pub async fn peer_delete(_ctx: ServerContext, args: PeerDeleteArgs) -> Result<()
     }
 }
 
+/// Rename a peer of a VPN server
+#[instrument(skip_all)]
+pub async fn peer_rename(_ctx: ServerContext, args: PeerRenameArgs) -> Result<(), Error> {
+    validate_peer_name(&args.name)?;
+
+    let profile_interface = &args.profile;
+    let wg_interface_name = format!("wg_{}", profile_interface);
+
+    let mut retries = 4;
+    loop {
+        let arena = Arena::new();
+        let mut cfgs = parse_all("/etc/config", &arena, &["network", "startwrt"]).await?;
+
+        let profile_name = {
+            let profile_lookup = profiles::Lookup::parse(ServerContext::default(), &cfgs)?;
+            profile_lookup
+                .from_interface(profile_interface)
+                .map(|p| p.fullname.clone())
+                .unwrap_or_else(|| profile_interface.clone())
+        };
+
+        let vpn_exists = cfgs["startwrt"]
+            .sections
+            .iter()
+            .filter_map(|s| s.get::<UciVpnServer>().ok())
+            .any(|meta| meta.interface == wg_interface_name);
+
+        if !vpn_exists {
+            return Err(Error::new(
+                eyre!("VPN server not found for profile: {}", profile_interface),
+                ErrorKind::NotFound,
+            ));
+        }
+
+        rename_peer_section(
+            &mut cfgs,
+            &arena,
+            &wg_interface_name,
+            &args.public_key,
+            &args.name,
+        )?;
+
+        match dump_all("/etc/config", cfgs).await {
+            Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
+                retries -= 1;
+                continue;
+            }
+            Err(err) => {
+                crate::activity::log(
+                    "vpn-server",
+                    "updated",
+                    false,
+                    &format!(
+                        "Failed to rename peer of inbound VPN for profile '{}'",
+                        profile_name
+                    ),
+                    Some(&err.to_string()),
+                );
+                return Err(err.into());
+            }
+            Ok(()) => {
+                crate::activity::log(
+                    "vpn-server",
+                    "updated",
+                    true,
+                    &format!(
+                        "Renamed peer to '{}' on inbound VPN for profile '{}'",
+                        args.name, profile_name
+                    ),
+                    None,
+                );
+                return Ok(());
+            }
+        }
+    }
+}
+
+/// Sets an inbound peer's DNS-injection permission on its WireGuard peer
+/// section. Revoking it drops the records the peer has published.
+#[instrument(skip_all)]
+pub async fn peer_set_dns_injection<C: CtrlContext>(
+    ctx: C,
+    args: PeerSetDnsInjectionArgs,
+) -> Result<(), Error> {
+    let peer_type = format!("wireguard_wg_{}", args.profile);
+    let log_failure = |err: &Error| {
+        crate::activity::log(
+            "vpn-server",
+            "peer-dns-injection",
+            false,
+            "Failed to update DNS injection for inbound VPN peer",
+            Some(&err.to_string()),
+        );
+    };
+    let mut retries = 4;
+    let peer_name = loop {
+        let arena = Arena::new();
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network"]).await?;
+        let section = cfgs["network"]
+            .sections
+            .iter_mut()
+            .find(|section| {
+                section.ty() == peer_type
+                    && section.lines.iter().any(|line| {
+                        matches!(line, Line::Option { option, value, .. }
+                            if option.as_str() == "public_key"
+                                && value.as_str() == args.public_key.as_str())
+                    })
+            })
+            .ok_or_else(|| {
+                Error::new(
+                    eyre!("Peer with public key {} not found", args.public_key),
+                    ErrorKind::NotFound,
+                )
+            })?;
+        if crate::dns_inject::peer_allows_dns_inject(section) == args.allow {
+            return Ok(());
+        }
+        crate::dns_inject::set_peer_dns_inject(section, args.allow);
+        let name = section
+            .lines
+            .iter()
+            .find_map(|line| match line {
+                Line::Option { option, value, .. } if option.as_str() == "description" => {
+                    Some(value.as_str().to_string())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| section.name().unwrap_or_default().to_string());
+        match dump_all(ctx.uci_root(), cfgs).await {
+            Err(uciedit::Error::Conflict { .. }) if retries > 0 => retries -= 1,
+            Err(err) => {
+                let err = err.into();
+                log_failure(&err);
+                return Err(err);
+            }
+            Ok(()) => break name,
+        }
+    };
+    crate::dns_inject::apply_permission_change(&ctx)
+        .await
+        .inspect_err(log_failure)?;
+    crate::activity::log(
+        "vpn-server",
+        "peer-dns-injection",
+        true,
+        &format!(
+            "{} DNS injection for inbound VPN peer '{peer_name}'",
+            if args.allow { "Enabled" } else { "Disabled" }
+        ),
+        None,
+    );
+    Ok(())
+}
+
 // === Helper Functions ===
+
+/// Sets the `description` of the peer with the given public key.
+fn rename_peer_section<'a>(
+    cfgs: &mut Configs<'a>,
+    arena: &'a Arena,
+    interface_name: &str,
+    public_key: &str,
+    name: &str,
+) -> Result<(), Error> {
+    let peer_type = format!("wireguard_{}", interface_name);
+    let section = cfgs["network"]
+        .sections
+        .iter_mut()
+        .filter(|s| s.ty() == peer_type)
+        .find(|s| {
+            s.lines.iter().any(|line| {
+                matches!(line, Line::Option { option, value, .. }
+                    if option.as_str() == "public_key" && value.as_str() == public_key)
+            })
+        })
+        .ok_or_else(|| {
+            Error::new(
+                eyre!("Peer with public key {} not found", public_key),
+                ErrorKind::NotFound,
+            )
+        })?;
+
+    let name_str: &'a str = arena.alloc(name.to_string());
+    let existing = section.lines.iter_mut().find_map(|line| match line {
+        Line::Option { option, value, .. } if option.as_str() == "description" => Some(value),
+        _ => None,
+    });
+    match existing {
+        Some(value) => *value = Token::from_str(name_str, arena),
+        None => section.lines.push(Line::Option {
+            option: Token::from_str("description", arena),
+            value: Token::from_str(name_str, arena),
+            comment: LineComment::None,
+        }),
+    }
+    Ok(())
+}
 
 fn add_single_peer<'a>(
     cfgs: &mut Configs<'a>,
@@ -1733,7 +2042,8 @@ fn add_single_peer<'a>(
         });
     }
 
-    let section = Section { arena, lines };
+    let mut section = Section { arena, lines };
+    crate::dns_inject::set_peer_dns_inject(&mut section, peer.allow_dns_injection == Some(true));
     cfgs["network"].sections.push(section);
 
     Ok(())
@@ -1787,6 +2097,8 @@ fn get_peers_for_interface(cfgs: &Configs, interface_name: &str) -> Vec<VpnServe
                 // Never expose PSK in list responses — it's only needed at peer creation time
                 preshared_key: None,
                 route_all: if route_all { Some(true) } else { None },
+                allow_dns_injection: crate::dns_inject::peer_allows_dns_inject(section)
+                    .then_some(true),
             })
         })
         .collect()
@@ -2324,6 +2636,19 @@ config dhcp 'guest'
     // === Pure function tests ===
 
     #[test]
+    fn client_address_carries_the_profile_prefix() {
+        let peer = Ipv4Addr::new(192, 168, 101, 200);
+        assert_eq!(client_address_line(peer, None), "192.168.101.200/24");
+        assert_eq!(
+            client_address_line(peer, Some([0xfdaa, 0xbbbb, 0xcccc, 0xf065])),
+            format!(
+                "192.168.101.200/24, {}/128",
+                wg_peer_v6_addr([0xfdaa, 0xbbbb, 0xcccc, 0xf065], 200)
+            ),
+        );
+    }
+
+    #[test]
     fn test_derive_server_address() {
         let gateway = Ipv4Addr::new(192, 168, 101, 1);
         let server = derive_server_address(gateway);
@@ -2351,6 +2676,8 @@ config dhcp 'guest'
     #[test]
     fn test_validate_peer_name_invalid() {
         assert!(validate_peer_name("has\nnewline").is_err());
+        assert!(validate_peer_name("").is_err());
+        assert!(validate_peer_name("   ").is_err());
     }
 
     #[test]
@@ -2869,6 +3196,7 @@ config dhcp 'guest'
             public_key: Some(peer_key.clone()),
             preshared_key: Some(psk.clone()),
             route_all: None,
+            allow_dns_injection: None,
         };
 
         add_single_peer(&mut cfgs, "wg_guest", &peer, &arena).unwrap();
@@ -2924,6 +3252,101 @@ config dhcp 'guest'
             if list.as_str() == "allowed_ips" && item.as_str() == "192.168.101.202/32")
         });
         assert!(has_ip, "should have allowed_ips with correct IP/32");
+        assert!(
+            !crate::dns_inject::peer_allows_dns_inject(new_peer),
+            "a peer is added without the DNS-injection permission by default"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_add_single_peer_with_dns_injection() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_with_vpn_server(dir.path());
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            dir.path(),
+            &arena,
+            &["network", "startwrt", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+        let peer_key = gen_key();
+        let peer = VpnServerPeer {
+            name: "Server".into(),
+            ip: Some(Ipv4Addr::new(192, 168, 101, 202)),
+            public_key: Some(peer_key.clone()),
+            preshared_key: Some(Base64::new(generate_psk()).to_base64()),
+            route_all: None,
+            allow_dns_injection: Some(true),
+        };
+        add_single_peer(&mut cfgs, "wg_guest", &peer, &arena).unwrap();
+        let listed = get_peers_for_interface(&cfgs, "wg_guest");
+        let listed = listed
+            .iter()
+            .find(|p| p.public_key.as_deref() == Some(peer_key.as_str()))
+            .unwrap();
+        assert_eq!(listed.allow_dns_injection, Some(true));
+    }
+
+    /// Granting and revoking a peer's permission edits its section and the
+    /// per-profile dnsmasq instances together.
+    #[tokio::test]
+    async fn test_peer_set_dns_injection() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, peer0_key, _) = setup_with_vpn_server(dir.path());
+        let ctx = TestContext(dir.path().to_path_buf());
+        let set = |allow: bool| {
+            peer_set_dns_injection(
+                ctx.clone(),
+                PeerSetDnsInjectionArgs {
+                    profile: "guest".into(),
+                    public_key: peer0_key.clone(),
+                    allow,
+                },
+            )
+        };
+        let read = || async {
+            let arena = Arena::new();
+            let cfgs = parse_all(dir.path(), &arena, &["network", "dhcp"])
+                .await
+                .unwrap();
+            let peers = get_peers_for_interface(&cfgs, "wg_guest");
+            let allowed = peers
+                .iter()
+                .find(|p| p.public_key.as_deref() == Some(peer0_key.as_str()))
+                .unwrap()
+                .allow_dns_injection;
+            let addnhosts = cfgs["dhcp"]
+                .sections
+                .iter()
+                .find(|s| s.name().as_deref() == Some("dns_guest"))
+                .and_then(|s| s.get::<uciedit::openwrt::ProfileDnsmasq>().ok())
+                .map(|d| d.addnhosts)
+                .unwrap_or_default();
+            (allowed, addnhosts)
+        };
+
+        set(true).await.unwrap();
+        assert_eq!(
+            read().await,
+            (
+                Some(true),
+                vec![crate::dns_inject::inject_hosts_path("guest")]
+            )
+        );
+        set(false).await.unwrap();
+        assert_eq!(read().await, (None, vec![]));
+
+        let missing = peer_set_dns_injection(
+            ctx.clone(),
+            PeerSetDnsInjectionArgs {
+                profile: "guest".into(),
+                public_key: "absent".into(),
+                allow: true,
+            },
+        )
+        .await;
+        assert!(missing.is_err(), "an unknown peer is an error");
     }
 
     #[tokio::test]
@@ -2952,6 +3375,7 @@ config dhcp 'guest'
             public_key: Some(gen_key()),
             preshared_key: None,
             route_all: None,
+            allow_dns_injection: None,
         };
         add_single_peer(&mut cfgs, "wg_guest", &peer, &arena).unwrap();
 
@@ -2976,6 +3400,34 @@ config dhcp 'guest'
             .iter()
             .any(|s| s.name().as_deref() == Some("wg_guest_1"));
         assert!(has_1, "wg_guest_1 should still exist");
+    }
+
+    #[tokio::test]
+    async fn test_rename_peer_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, peer0_key, _) = setup_with_vpn_server(dir.path());
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            dir.path(),
+            &arena,
+            &["network", "startwrt", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+        let before = get_peers_for_interface(&cfgs, "wg_guest");
+
+        rename_peer_section(&mut cfgs, &arena, "wg_guest", &peer0_key, "Work Phone").unwrap();
+
+        let after = get_peers_for_interface(&cfgs, "wg_guest");
+        assert_eq!(after.len(), 2);
+        assert_eq!(after[0].name, "Work Phone");
+        assert_eq!(after[0].public_key, before[0].public_key);
+        assert_eq!(after[0].ip, before[0].ip);
+        assert_eq!(after[1].name, before[1].name);
+
+        let missing = rename_peer_section(&mut cfgs, &arena, "wg_guest", &gen_key(), "Ghost");
+        assert!(missing.is_err());
     }
 
     #[tokio::test]
@@ -3040,6 +3492,7 @@ config dhcp 'guest'
             public_key: Some(peer_key.clone()),
             preshared_key: None,
             route_all: Some(true),
+            allow_dns_injection: None,
         };
         add_single_peer(&mut cfgs, "wg_guest", &peer, &arena).unwrap();
 
@@ -3088,6 +3541,7 @@ config dhcp 'guest'
             public_key: Some(peer_key.clone()),
             preshared_key: None,
             route_all: None,
+            allow_dns_injection: None,
         };
         add_single_peer(&mut cfgs, "wg_guest", &peer, &arena).unwrap();
 
@@ -3134,6 +3588,7 @@ config dhcp 'guest'
             public_key: Some(gen_key()),
             preshared_key: None,
             route_all: Some(true),
+            allow_dns_injection: None,
         };
         add_single_peer(&mut cfgs, "wg_guest", &peer, &arena).unwrap();
 
@@ -3261,6 +3716,7 @@ config dhcp 'guest'
             public_key: Some(gen_key()),
             preshared_key: Some(Base64::new(generate_psk()).to_base64()),
             route_all: None,
+            allow_dns_injection: None,
         };
         let peer2 = VpnServerPeer {
             name: "Laptop".into(),
@@ -3268,6 +3724,7 @@ config dhcp 'guest'
             public_key: Some(gen_key()),
             preshared_key: Some(Base64::new(generate_psk()).to_base64()),
             route_all: None,
+            allow_dns_injection: None,
         };
         add_single_peer(&mut cfgs, "wg_guest", &peer1, &arena).unwrap();
         add_single_peer(&mut cfgs, "wg_guest", &peer2, &arena).unwrap();
@@ -3665,6 +4122,7 @@ config zone
             public_key: Some(key.clone()),
             preshared_key: None,
             route_all: None,
+            allow_dns_injection: None,
         };
         add_single_peer(&mut cfgs, "wg_guest", &peer, &arena).unwrap();
 
@@ -3705,6 +4163,7 @@ config zone
             public_key: Some(key.clone()),
             preshared_key: None,
             route_all: None,
+            allow_dns_injection: None,
         };
         add_single_peer(&mut cfgs, "wg_guest", &peer, &arena).unwrap();
 
@@ -3829,5 +4288,48 @@ config zone
                 .any(|a| a == "fdaa:bbbb:cccc:f065::1/128"),
             "should add the server v6 /128 when the profile serves v6"
         );
+    }
+
+    fn client_config(private_key: Option<&str>) -> String {
+        ClientConfig {
+            name: "Laptop",
+            private_key,
+            address: "192.168.0.200/32",
+            dns: Ipv4Addr::new(192, 168, 0, 1),
+            server_public_key: "c2VydmVy",
+            preshared_key: "cHNr",
+            endpoint: "router.example.com",
+            port: 51820,
+            allowed_ips: "192.168.0.0/24",
+        }
+        .render()
+    }
+
+    #[test]
+    fn client_config_with_supplied_public_key_has_placeholder_and_psk() {
+        let config = client_config(None);
+        let lines: Vec<&str> = config.lines().collect();
+        for expected in [
+            "PrivateKey = <PRIVATE_KEY>",
+            "Address = 192.168.0.200/32",
+            "DNS = 192.168.0.1",
+            "PublicKey = c2VydmVy",
+            "PresharedKey = cHNr",
+            "Endpoint = router.example.com:51820",
+            "AllowedIPs = 192.168.0.0/24",
+        ] {
+            assert!(
+                lines.contains(&expected),
+                "missing {expected:?} in {config}"
+            );
+        }
+    }
+
+    #[test]
+    fn client_config_with_generated_key_carries_it() {
+        let key = gen_key();
+        let config = client_config(Some(key.as_str()));
+        assert!(config.lines().any(|l| l == format!("PrivateKey = {key}")));
+        assert!(!config.contains(CLIENT_PRIVATE_KEY_PLACEHOLDER));
     }
 }

@@ -177,6 +177,9 @@ pub struct NetworkInterface {
     pub username: Option<String>,
     #[uci(default)]
     pub password: Option<String>,
+    /// Unset is `auto`: pppd then runs its own DHCPv6 client beside `wan6`.
+    #[uci(default)]
+    pub ipv6: Option<String>,
     // MAC override
     #[uci(default)]
     pub macaddr: Option<String>,
@@ -318,6 +321,8 @@ pub struct WifiDevice {
     pub band: String,
     #[uci(inpt)]
     pub channel: WifiChannel,
+    /// PHY mode and channel width, e.g. `HE80` or `HT40+`.
+    pub htmode: Option<String>,
     pub country: Option<String>,
     /// Keeps automatic channel selection off radar-detection channels.
     pub acs_exclude_dfs: Option<bool>,
@@ -462,6 +467,9 @@ pub struct Dhcp {
     /// route when the router itself has no upstream IPv6 PD.
     #[uci(default)]
     pub ra_default: Option<String>,
+    /// Skips dnsmasq's probe for another DHCP server before serving the pool.
+    #[uci(default)]
+    pub force: Option<bool>,
 }
 
 #[derive(Debug, TypedSection, Default)]
@@ -499,6 +507,9 @@ pub struct ProfileDnsmasq {
     pub local: Option<String>,
     #[uci(default)]
     pub dhcpscript: Option<String>,
+    /// Extra hosts files; dnsmasq re-reads them on SIGHUP.
+    #[uci(default)]
+    pub addnhosts: Vec<String>,
 }
 
 #[derive(Debug, TypedSection, Default)]
@@ -518,6 +529,15 @@ pub struct DhcpHost {
     /// (startwrt metadata; dnsmasq ignores unknown options). Absent = denied.
     #[uci(default)]
     pub _allow_pcp: Option<String>,
+    /// "1" when this device may publish DNS records into the router's
+    /// resolver (startwrt metadata; dnsmasq ignores unknown options). Absent =
+    /// denied.
+    #[uci(default)]
+    pub _allow_dns_inject: Option<String>,
+    /// "1" when the LAN guard forwards this device's IPv6 router
+    /// advertisements between bridge ports. Absent = dropped.
+    #[uci(default)]
+    pub _allow_ra: Option<String>,
 }
 
 #[derive(Debug, TypedSection, Default)]

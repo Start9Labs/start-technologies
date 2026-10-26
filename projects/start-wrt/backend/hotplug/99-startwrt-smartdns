@@ -1,0 +1,6 @@
+#!/bin/sh
+# Restart SmartDNS when a device its upstreams bind to comes up.
+[ "$ACTION" = "ifup" ] && [ -n "$DEVICE" ] || exit 0
+grep -qE -- "-interface $DEVICE( |\$)" /etc/smartdns/smartdns.conf 2>/dev/null && {
+    /etc/init.d/smartdns restart 2>/dev/null &
+}

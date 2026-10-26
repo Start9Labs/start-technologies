@@ -25,6 +25,7 @@ import {
 import { ConnectionService } from 'src/app/services/connection.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { confirmVpnExposedPort } from 'src/app/services/vpn-exposed-port'
+import { isVpnPeersWouldBreak } from 'src/app/services/vpn-peers'
 import { ADD_PROFILE, ProfileDialogResult } from './dialog'
 import { ProfilesService } from './service'
 
@@ -193,6 +194,8 @@ class Profiles {
         return 'VPN'
       case 'custom':
         return 'Custom'
+      case 'system-outside-vpn':
+        return 'System (outside VPN)'
       default:
         return 'System'
     }
@@ -350,7 +353,7 @@ class Profiles {
               schedule_windows,
             )
           } catch (e: any) {
-            if (!e?.message?.includes('VPN client')) {
+            if (!isVpnPeersWouldBreak(e)) {
               this.alerts
                 .open(e?.message || this.i18n.transform('Failed to save'), {
                   appearance: 'negative',

@@ -13,6 +13,8 @@ use axum::routing::{any, get, post};
 use axum::{Extension, Json, Router};
 use rpc_toolkit::Server;
 use serde::Deserialize;
+use startos::middleware::auth::local::LocalAuthContext;
+use startos::middleware::auth::Auth;
 use startos::net::tls::TlsListener;
 use startos::net::web_server::{Accept, Acceptor, DynAccept, MetadataVisitor, WebServer};
 use tokio::signal::unix::SignalKind;
@@ -25,7 +27,6 @@ use visit_rs::Visit;
 use crate::continuations::{self, RpcContinuations};
 use crate::embedded_web::serve_embedded;
 use crate::luci_proxy::{self, ProxyClient};
-use crate::middleware::SessionAuth;
 use crate::prelude::*;
 use crate::setup::{self, FlashMode, SetupEvent};
 use crate::{init_logging, main_api, ssl, ServerContext};
@@ -37,7 +38,7 @@ struct AppState {
     flash_in_progress: Arc<AtomicBool>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 struct FlashParams {
     mode: FlashMode,
@@ -48,6 +49,8 @@ struct FlashParams {
     #[serde(default)]
     timezone: Option<String>,
 }
+rpc_toolkit::reflect_ts!(FlashParams);
+rpc_toolkit::ts_export!(FlashParams, namespaces = ["events"]);
 
 fn ndjson_error(message: &str) -> Response<Body> {
     let event = SetupEvent::Error {
@@ -63,18 +66,17 @@ fn ndjson_error(message: &str) -> Response<Body> {
 /// GET /ws/rpc/{guid} — WebSocket continuation handler (e.g., update progress).
 async fn ws_continuation_handler(
     axum::extract::Path(guid): axum::extract::Path<String>,
-    headers: axum::http::HeaderMap,
     ws: axum::extract::ws::WebSocketUpgrade,
-    Extension(continuations): Extension<RpcContinuations>,
+    Extension(continuations): Extension<Arc<RpcContinuations>>,
 ) -> axum::response::Response {
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
 
-    if !crate::middleware::validate_session_from_headers(&headers).await {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-    let guid = crate::continuations::Guid::from_str(&guid);
-    match continuations.get_ws_handler(&guid).await {
+    let handler = match continuations::Guid::from(&guid) {
+        Some(guid) => continuations.get_ws_handler(&guid).await,
+        None => None,
+    };
+    match handler {
         Some(handler) => ws.on_upgrade(handler),
         None => StatusCode::NOT_FOUND.into_response(),
     }
@@ -202,13 +204,15 @@ impl<V: MetadataVisitor> Visit<V> for WebserverListener {
 
 #[instrument(skip_all)]
 async fn inner_main() -> Result<(), Error> {
-    // Generate local auth cookie so CLI commands over SSH bypass session auth
-    crate::auth::init_local_auth_cookie().await?;
+    <ServerContext as LocalAuthContext>::init_auth_cookie().await?;
 
     let setup_mode = setup::is_setup_mode().await;
 
-    let continuations = RpcContinuations::new();
-    let open_authed = crate::continuations::OpenAuthedContinuations::new();
+    let continuations = Arc::new(RpcContinuations::new());
+    let ctx = ServerContext {
+        continuations: continuations.clone(),
+        auth: Arc::new(crate::auth::AuthState::open().await?),
+    };
     let app_state;
 
     if setup_mode {
@@ -236,8 +240,11 @@ async fn inner_main() -> Result<(), Error> {
             {
                 tracing::error!("WiFi AP setup failed: {e}");
             }
-            let _ =
-                crate::run_quiet_async(tokio::process::Command::new("wifi").arg("reload")).await;
+            if let Err(e) =
+                crate::wifi::reload_wifi("/etc/config", crate::wifi::WifiReload::Reload).await
+            {
+                tracing::error!("WiFi reload failed: {e}");
+            }
 
             // Enable captive portal only when WiFi AP can start
             if let Err(e) = crate::captive::enable_captive_portal().await {
@@ -258,19 +265,21 @@ async fn inner_main() -> Result<(), Error> {
         if let Err(e) = crate::init::restore_wifi_if_needed().await {
             tracing::error!("WiFi auto-restore failed: {e}");
         }
+        if let Err(e) = crate::wifi::heal_channel_widths("/etc/config").await {
+            tracing::error!("WiFi channel width repair failed: {e}");
+        }
 
-        // Reassert WiFi blackout if we rebooted inside an active window. Runs
-        // *after* restore_wifi_if_needed (whose job is to restore missing AP
-        // config, applying it via `wifi reload`) so our `wifi down` is the final
-        // word and the radio ends down. Nothing after this point brings the radio
-        // back up — bootstrap_admin_profile, apply_remote_access, the WAN-schedule
-        // and captive-portal steps touch firewall/dnsmasq, not the wifi radios —
-        // so the radio stays down until cron's window-end `wifi up`, by which time
-        // restore has ensured the AP config is valid. (Note: netifd already
-        // brought radios up earlier in boot — this closes the steady-state gap,
-        // not the boot-window one; see reconcile_blackout_at_boot.)
-        if let Err(e) = crate::wifi::reconcile_blackout_at_boot(&ServerContext::default()).await {
-            tracing::error!("Failed to reconcile WiFi blackout at boot: {e}");
+        // netifd raises the radios at boot whatever the blackout schedule says.
+        match crate::wifi::apply_blackout("/etc/config").await {
+            Ok(true) => crate::activity::log(
+                "wifi",
+                "blackout-reasserted",
+                true,
+                "Reasserted WiFi blackout after reboot (inside active window)",
+                None,
+            ),
+            Ok(false) => {}
+            Err(e) => tracing::error!("Failed to apply WiFi blackout at boot: {e}"),
         }
         if let Err(e) = crate::profiles::bootstrap_admin_profile("/etc/config").await {
             tracing::error!("Admin profile bootstrap failed: {e}");
@@ -280,20 +289,26 @@ async fn inner_main() -> Result<(), Error> {
         if let Err(e) = crate::profiles::heal_ipv6_state("/etc/config").await {
             tracing::error!("IPv6 state repair failed: {e}");
         }
-        // Installs the hairpin accept and re-derives every hairpin projection
-        // (fw4 drops a redirect whose list names a deleted zone). Reloads the
-        // firewall only when something changed.
-        if let Err(e) = crate::published_ports::heal_hairpin("/etc/config").await {
-            tracing::error!("Hairpin repair failed: {e}");
+        // Installs the hairpin accept and the IPv6 MAC binding, and re-derives
+        // every hairpin projection (fw4 drops a redirect whose list names a
+        // deleted zone). Reloads the firewall only when something changed.
+        if let Err(e) = crate::published_ports::heal_published_ports("/etc/config").await {
+            tracing::error!("Published-port firewall repair failed: {e}");
+        }
+        if let Err(e) = crate::lan_guard::heal_ra_allow("/etc/config").await {
+            tracing::error!("LAN guard repair failed: {e}");
         }
         if let Err(e) = crate::vpn_client::heal_vpn_clients("/etc/config").await {
             tracing::error!("Outbound VPN repair failed: {e}");
         }
-        if let Err(e) = crate::system::apply_remote_access(ServerContext::default()).await {
+        if let Err(e) = crate::system::apply_remote_access(ctx.clone()).await {
             tracing::error!("Remote access rule apply failed: {e}");
         }
         if let Err(e) = crate::dns::heal_smartdns_conf("/etc/config").await {
             tracing::error!("SmartDNS config repair failed: {e}");
+        }
+        if let Err(e) = crate::profiles::heal_dns_forwarding(ctx.clone()).await {
+            tracing::error!("DNS forwarding repair failed: {e}");
         }
         // Repairs a reservation name from a release that let one through, which
         // dnsmasq refuses to start on. Must precede the fingerprint hook: both
@@ -308,9 +323,7 @@ async fn inner_main() -> Result<(), Error> {
             tracing::error!("DHCP fingerprint hook setup failed: {e}");
         }
         // Apply WAN schedule enforcement (UCI firewall rules)
-        if let Err(e) =
-            crate::profiles::evaluate_and_apply_schedules(&ServerContext::default()).await
-        {
+        if let Err(e) = crate::profiles::evaluate_and_apply_schedules(&ctx).await {
             tracing::error!("Failed to evaluate WAN schedules at boot: {e}");
         }
 
@@ -322,11 +335,10 @@ async fn inner_main() -> Result<(), Error> {
         // stop firing after an upgrade. No-op when there are no windows; also
         // self-heals crontab drift on any boot. Both regenerators strip only their
         // own tagged lines, so running them in sequence over the shared file is safe.
-        let schedule_ctx = ServerContext::default();
-        if let Err(e) = crate::profiles::regenerate_schedule_crontab(&schedule_ctx).await {
+        if let Err(e) = crate::profiles::regenerate_schedule_crontab(&ctx).await {
             tracing::error!("Failed to regenerate WAN schedule crontab at boot: {e}");
         }
-        if let Err(e) = crate::wifi::regenerate_blackout_crontab(&schedule_ctx).await {
+        if let Err(e) = crate::wifi::regenerate_blackout_crontab(&ctx).await {
             tracing::error!("Failed to regenerate WiFi blackout crontab at boot: {e}");
         }
         if let Err(e) =
@@ -387,14 +399,17 @@ async fn inner_main() -> Result<(), Error> {
         if crate::port_control::PORT_CONTROL.set(pc.clone()).is_ok() {
             tokio::spawn(crate::port_control::run(pc));
         }
+        let di = crate::dns_inject::DnsInject::new("/etc/config".into());
+        if crate::dns_inject::DNS_INJECT.set(di.clone()).is_ok() {
+            tokio::spawn(crate::dns_inject::run(di));
+        }
     }
 
-    let ctx = ServerContext {
-        continuations: continuations.clone(),
-        open_authed_continuations: open_authed,
-    };
-    let handler =
-        Server::new(move || ready(Ok(ctx.clone())), main_api()).middleware(SessionAuth::new());
+    if !setup_mode {
+        tokio::spawn(crate::auth::reap_idle_keys(ctx.clone()));
+    }
+    let handler = Server::new(move || ready(Ok(ctx.clone())), main_api())
+        .middleware(Auth::new().with_local_auth().with_signature_auth());
 
     let proxy_client = ProxyClient(
         reqwest::Client::builder()
@@ -433,20 +448,16 @@ async fn inner_main() -> Result<(), Error> {
         // RPC continuation endpoint (binary I/O for backup/restore/diagnostics)
         .route(
             "/rest/rpc/{guid}",
-            any(continuations::continuation_handler).layer(DefaultBodyLimit::max(10 * 1024 * 1024)),
+            any(continuations::continuation_handler)
+                .layer(DefaultBodyLimit::max(continuations::MAX_UPLOAD_BYTES)),
         )
-        // WebSocket continuation endpoint (progress streaming for updates).
+        // WebSocket continuation endpoint (update progress, live logs).
         // Registered with `any` (not `get`) so HTTP/2 CONNECT requests (RFC
         // 8441 extended CONNECT, used for WebSocket-over-h2) reach the
-        // upgrade extractor — same reasoning as /api/logs below.
+        // upgrade extractor instead of being rejected with 405.
         .route("/ws/rpc/{guid}", any(ws_continuation_handler))
         // Streaming flash endpoint for setup wizard
         .route("/api/setup/flash", post(setup_flash_handler))
-        // WebSocket endpoint for live log streaming. Registered with `any`
-        // (not `get`) so HTTP/2 CONNECT requests (RFC 8441 extended CONNECT,
-        // used for WebSocket-over-h2) reach the upgrade extractor instead of
-        // being rejected with 405 by the method router.
-        .route("/api/logs", any(crate::logs::logs_ws_handler))
         // Root CA download (no auth required)
         .route(
             "/static/local-root-ca.crt",
@@ -486,6 +497,7 @@ async fn inner_main() -> Result<(), Error> {
         .layer(Extension(proxy_client))
         .layer(Extension(app_state));
 
+    let app = crate::captive::redirect_to_router(app);
     // Must stay outermost.
     let app = crate::http_redirect::redirect_public_http(app);
 

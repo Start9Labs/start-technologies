@@ -8,7 +8,7 @@ set -eo pipefail
 # the sha256-pinned upstream release tarball (build/openwrt-version) plus the
 # Start9 delta: openwrt-patches/ (modified upstream files) and openwrt-overlay/
 # (added files). Never keep work inside openwrt/ — every run rebuilds it; see
-# CONTRIBUTING.md "OpenWrt tree" for the workflow. Generated content the
+# AGENTS.md "OpenWrt tree" for the workflow. Generated content the
 # tarball doesn't provide (dl/, build_dir/, staging_dir/, bin/, feeds/, files/,
 # .config, signing keys, …) is preserved across rebuilds.
 #

@@ -10,6 +10,7 @@ Route your network's Internet traffic through one or more WireGuard VPN provider
    - **Label** — A descriptive name of up to 12 characters (e.g. "Mullvad SE", "Proton US").
    - **Config File** — Upload a WireGuard `.conf` file from your VPN provider — drop it into the dialog or click to browse. Most providers (Mullvad, ProtonVPN, IVPN, etc.) offer WireGuard config file downloads from their account dashboard.
    - **Target** — How this VPN reaches its own server. The dropdown lists **Internet** along with your existing VPNs. Select **Internet** to connect over your WAN, or select another VPN to carry this one's tunnel, so traffic passes through that VPN first for additional privacy.
+   - **DNS Servers** — Optional. Replaces the DNS servers in the config file's `DNS =` line. If the config has no DNS servers and you leave this blank, the dialog warns you — see [DNS](#dns).
 
 1. Click "Add VPN".
 
@@ -59,11 +60,28 @@ A kill switch protects every VPN-routed profile: both IPv4 and IPv6 fail closed.
 > [!NOTE]
 > Routing IPv6 through a VPN requires the VPN's tunnel config to include an IPv6 address on the tunnel interface. Without one, the VPN carries IPv4 only and IPv6 is blocked for routed profiles.
 
+## DNS
+
+A profile routed through a VPN sends its DNS queries through the tunnel, using the first of these that is set:
+
+1. The profile's own custom DNS servers, including DNS-over-HTTPS servers.
+1. The VPN's **DNS Servers** — from the config file's `DNS =` line, or set on the VPN's detail page.
+1. The custom servers in [WAN Settings](wan.md#dns).
+
+Like the rest of the profile's traffic, these queries fail closed: if the tunnel goes down, DNS stops rather than falling back to your WAN.
+
+If none of the three is set, the profile's DNS goes to your ISP's DNS servers outside the tunnel, and your ISP can see the names your devices look up. The profile's DNS column then shows **System (outside VPN)**. To fix this, enter DNS servers on the VPN's detail page — your provider's own servers, or a public resolver.
+
 ## VPN Detail Page
 
 Click a VPN label in the table to open its detail page, which shows:
 
-- **Status** — **Connected** while the VPN is enabled, **Disabled** otherwise.
+- **Status** — The tunnel's live state, with a note explaining it:
+  - **Connected** — The tunnel completed a handshake within the last three minutes.
+  - **Idle** — Enabled, but nothing has sent traffic through the tunnel recently, so it has no active session. It connects when a profile using it sends traffic.
+  - **Not responding** — The router is sending to the VPN server and getting no reply. Profiles using this VPN have no internet until it responds. Check with your provider that the server is online and that the configuration is still valid.
+  - **Disabled** — The VPN is turned off.
+- **Last handshake** — How long ago the tunnel last completed a handshake with the VPN server, or **Never**. Shown while the VPN is enabled.
 - **Connection Path** — This VPN's chain outward to your WAN, each hop carrying the one before it (e.g. "Mullvad → Proton → Internet" means Mullvad's tunnel runs through Proton, and Proton connects over the WAN). Traffic routed here exits at the first VPN listed.
 - **Used by** — Which [Security Profiles](security-profiles.md) currently route their traffic through this VPN. Check this before making changes to understand the impact.
 - **Label** — Edit the display name.

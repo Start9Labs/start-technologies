@@ -52,7 +52,7 @@ One SSID, multiple passwords. One router, multiple isolated networks. The profil
 
    - **Blackout Schedule** — A button that opens a schedule dialog for time-of-day Internet restrictions (see [WAN Blackout](#wan-blackout) below). It is disabled when Access is None; any existing windows are retained.
 
-1. On the **DNS** tab, choose **Inherit from system** or **Custom**. Custom lets you specify up to three DNS servers, each with an optional **DoH** (DNS-over-HTTPS) toggle. When inheriting, the profile uses the outbound VPN's DNS (if routing through a VPN) or the system DNS from [WAN Settings](wan.md).
+1. On the **DNS** tab, choose **Inherit from system** or **Custom**. Custom lets you specify up to three DNS servers, each with an optional **Secure (DoH)** toggle for DNS-over-HTTPS. When inheriting, the profile uses the system DNS from [WAN Settings](wan.md). A profile routed through a VPN resolves through the tunnel instead, using the VPN's DNS servers if it has any — see [Outbound VPNs](outbound-vpn.md#dns). Custom servers on such a profile are also reached through the tunnel.
 
 1. Click "Save".
 

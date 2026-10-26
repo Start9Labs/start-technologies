@@ -12,7 +12,7 @@ use crate::Error;
 
 /// A downloadable, signed asset from the registry.
 /// Wire-compatible with start-os's `RegistryAsset<Commitment>`.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistryAsset<Commitment> {
     pub published_at: DateTime<Utc>,
@@ -20,6 +20,7 @@ pub struct RegistryAsset<Commitment> {
     pub commitment: Commitment,
     pub signatures: HashMap<AnyVerifyingKey, AnySignature>,
 }
+rpc_toolkit::reflect_ts!(impl [Commitment] for RegistryAsset<Commitment> where [Commitment: rpc_toolkit::ts::TS]);
 
 impl<C> RegistryAsset<C> {
     /// Build an `AcceptSigners::All` requiring every signer on this asset.

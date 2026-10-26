@@ -176,8 +176,12 @@ class AddServer {
       ],
     ],
     profile: [
-      this.profiles.find(p => p.interface === this.server?.profile)?.fullname ??
-        '',
+      {
+        value:
+          this.profiles.find(p => p.interface === this.server?.profile)
+            ?.fullname ?? '',
+        disabled: !!this.server,
+      },
       Validators.required,
     ],
   })

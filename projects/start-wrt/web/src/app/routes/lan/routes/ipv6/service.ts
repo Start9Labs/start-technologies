@@ -6,7 +6,8 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 
 export type LanIpv6Data = LanIpv6Form & {
   ip6addr?: string // For summary display
-  wanPrefix?: number // WAN prefix for validation (read-only)
+  delegatedPrefix?: number | null
+  prefixEdited?: boolean
 }
 
 @Injectable()
@@ -26,16 +27,20 @@ export class LanIpv6Service extends FormService<LanIpv6Data> {
         prefix: numberToPrefix(res.prefix),
       },
       ip6addr: res.ip6addr || '',
-      wanPrefix: res.wan_prefix,
+      delegatedPrefix: res.delegated_prefix ?? null,
     }
   }
 
   async store(data: LanIpv6Data): Promise<void> {
+    // An unedited prefix is the effective length, not the configured one.
     await this.api.lanIpv6Set({
       slaac: data.strategy.slaac,
       // DHCPv6 requires SLAAC (RA) to function
       dhcpv6: data.strategy.slaac && data.strategy.dhcpv6,
-      prefix: prefixToNumber(data.subnet.prefix),
+      prefix:
+        data.strategy.slaac && data.prefixEdited
+          ? prefixToNumber(data.subnet.prefix)
+          : undefined,
     })
   }
 

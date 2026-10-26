@@ -2,7 +2,7 @@ import { inject, Injectable, signal } from '@angular/core'
 import { FormService } from 'src/app/services/form.service'
 import { ApiService } from 'src/app/services/api/api.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
-import { WanIpv6Form } from './utils'
+import { IPV6_CONTROLS, WanIpv6Form } from './utils'
 
 @Injectable()
 export class WanIpv6Service extends FormService<WanIpv6Form> {
@@ -33,7 +33,10 @@ export class WanIpv6Service extends FormService<WanIpv6Form> {
     await this.api.wanIpv6Set({
       mode: ip.mode,
       address: ip.mode === 'static' ? ip.wan : undefined,
-      prefix: ip.mode === 'static' ? ip.prefix : undefined,
+      prefix:
+        IPV6_CONTROLS[ip.mode].includes('prefix') && ip.prefix
+          ? ip.prefix
+          : undefined,
       gateway: ip.mode === 'static' ? ip.gateway : undefined,
       lan_prefix:
         ip.mode === 'static' && ip.lan_prefix ? ip.lan_prefix : undefined,

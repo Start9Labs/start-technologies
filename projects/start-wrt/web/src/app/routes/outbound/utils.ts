@@ -18,6 +18,31 @@ export const OUTBOUND_VALIDATION_ERRORS = {
   max: 'MTU must be at most 1500',
   notWireguard: 'This doesn’t look like a WireGuard .conf file',
   looksLikeOpenvpn: 'OpenVPN configs aren’t supported — only WireGuard',
+  dnsList: 'Enter IP addresses separated by commas',
+}
+
+/** Splits a comma-separated DNS server field. */
+export function parseDnsList(value: string): string[] {
+  return value
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+}
+
+function dnsListValidator(control: AbstractControl): ValidationErrors | null {
+  const invalid = parseDnsList(control.value || '').some(
+    ip =>
+      CustomValidators.ipv4OrIpv6()({ value: ip } as AbstractControl) !== null,
+  )
+  return invalid ? { dnsList: true } : null
+}
+
+/** The address entries of a WireGuard .conf's `DNS =` line. */
+export function configDnsServers(config: string): string[] {
+  const line = /^[ \t]*DNS[ \t]*=(.*)$/im.exec(config)?.[1] ?? ''
+  return parseDnsList(line).filter(
+    entry => isValidIpv4(entry) || entry.includes(':'),
+  )
 }
 
 function fileExtensionValidator(
@@ -94,6 +119,7 @@ export function getOutboundVpnForm(
       Validators.min(1280),
       Validators.max(1500),
     ]),
+    dns: builder.control('', [dnsListValidator]),
   })
 }
 
@@ -108,6 +134,7 @@ export function getAddOutboundVpnForm(
       asyncValidators: [wireguardConfigValidator()],
     }),
     target: builder.control('Internet', [Validators.required]),
+    dns: builder.control('', [dnsListValidator]),
   })
 }
 
