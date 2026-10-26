@@ -36,8 +36,7 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
 
 type Disk = Result<'disk.list'>[number]
 
-/** ext4 stores the volume label in 16 bytes. */
-const MAX_LABEL_BYTES = 16
+const MAX_LABEL_BYTES = 255
 
 function labelValidator(control: AbstractControl): ValidationErrors | null {
   const label: string = control.value || ''
@@ -58,7 +57,7 @@ function labelValidator(control: AbstractControl): ValidationErrors | null {
         <h2 [id]="context.id">{{ 'Format a drive' | i18n }}</h2>
         <p>
           {{
-            'Erases a drive and prepares it as a single ext4 partition for backups.'
+            'Erases a drive and prepares it as a single Btrfs partition for backups.'
               | i18n
           }}
         </p>
@@ -117,7 +116,7 @@ function labelValidator(control: AbstractControl): ValidationErrors | null {
         }
         <tui-textfield>
           <label tuiLabel>{{ 'Label' | i18n }}</label>
-          <input tuiInput formControlName="label" maxlength="16" />
+          <input tuiInput formControlName="label" maxlength="255" />
         </tui-textfield>
         <tui-error formControlName="label" />
         <label tuiCell>
@@ -174,7 +173,7 @@ function labelValidator(control: AbstractControl): ValidationErrors | null {
         return {
           required: i18n.transform('Required'),
           labelMaxBytes: i18n.transform(
-            'Must be 16 bytes or less (accented letters and symbols take more than one)',
+            'Must be 255 bytes or less (accented letters and symbols take more than one)',
           ),
           labelControlCharacters: i18n.transform(
             'Must not contain control characters',

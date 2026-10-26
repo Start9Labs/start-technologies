@@ -708,9 +708,9 @@ Repair filesystem issues on the data partition.
 
 ### `start-cli disk format <DISK>`
 
-Erase a whole drive and leave it with a single ext4 partition ready for backups, then print the new partition. The drive holding StartOS or its data, the live boot medium, and anything mounted are refused.
+Erase a whole drive and leave it with a single Btrfs partition ready for backups, then print the new partition. The drive holding StartOS or its data, the live boot medium, and anything mounted are refused.
 
-- `--label <LABEL>` — Volume label, at most 16 bytes (default `StartOS Backups`)
+- `--label <LABEL>` — Volume label, at most 255 bytes (default `StartOS Backups`)
 
 ## Diagnostics
 

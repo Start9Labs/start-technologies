@@ -3957,11 +3957,11 @@ help.arg.format-disk:
   pl_PL: "Dysk do wymazania, np. /dev/sdb"
 
 help.arg.format-label:
-  en_US: "Filesystem label of at most 16 bytes (default: StartOS Backups)"
-  de_DE: "Dateisystembezeichnung mit höchstens 16 Bytes (Standard: StartOS Backups)"
-  es_ES: "Etiqueta del sistema de archivos de como máximo 16 bytes (predeterminado: StartOS Backups)"
-  fr_FR: "Étiquette du système de fichiers de 16 octets au plus (par défaut : StartOS Backups)"
-  pl_PL: "Etykieta systemu plików o długości najwyżej 16 bajtów (domyślnie: StartOS Backups)"
+  en_US: "Filesystem label of at most 255 bytes (default: StartOS Backups)"
+  de_DE: "Dateisystembezeichnung mit höchstens 255 Bytes (Standard: StartOS Backups)"
+  es_ES: "Etiqueta del sistema de archivos de como máximo 255 bytes (predeterminado: StartOS Backups)"
+  fr_FR: "Étiquette du système de fichiers de 255 octets au plus (par défaut : StartOS Backups)"
+  pl_PL: "Etykieta systemu plików o długości najwyżej 255 bajtów (domyślnie: StartOS Backups)"
 
 help.arg.from-registry-url:
   en_US: "Source registry URL to promote from"
@@ -6117,11 +6117,11 @@ about.forget-disconnected-gateway:
   pl_PL: "Zapomnij odłączoną bramę"
 
 about.format-disk:
-  en_US: "Erase a drive and format it as one ext4 partition"
-  de_DE: "Ein Laufwerk löschen und als eine ext4-Partition formatieren"
-  es_ES: "Borrar una unidad y formatearla como una única partición ext4"
-  fr_FR: "Effacer un disque et le formater en une seule partition ext4"
-  pl_PL: "Wymaż dysk i sformatuj go jako jedną partycję ext4"
+  en_US: "Erase a drive and format it as one Btrfs partition"
+  de_DE: "Ein Laufwerk löschen und als eine Btrfs-Partition formatieren"
+  es_ES: "Borrar una unidad y formatearla como una única partición Btrfs"
+  fr_FR: "Effacer un disque et le formater en une seule partition Btrfs"
+  pl_PL: "Wymaż dysk i sformatuj go jako jedną partycję Btrfs"
 
 about.generate-certificate-for-webserver:
   en_US: "Generate a certificate for the webserver"

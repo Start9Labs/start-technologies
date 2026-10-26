@@ -2,15 +2,15 @@
 .el .ds Aq '
 .TH start-cli-disk-format 1  "format "
 .SH NAME
-start\-cli\-disk\-format \- Erase a drive and format it as one ext4 partition
+start\-cli\-disk\-format \- Erase a drive and format it as one Btrfs partition
 .SH SYNOPSIS
 \fBstart\-cli disk format\fR [\fB\-\-label\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIDISK\fR>
 .SH DESCRIPTION
-Erase a drive and format it as one ext4 partition
+Erase a drive and format it as one Btrfs partition
 .SH OPTIONS
 .TP
 \fB\-\-label\fR \fI<LABEL>\fR
-Filesystem label of at most 16 bytes (default: StartOS Backups)
+Filesystem label of at most 255 bytes (default: StartOS Backups)
 .TP
 \fB\-\-format\fR
 

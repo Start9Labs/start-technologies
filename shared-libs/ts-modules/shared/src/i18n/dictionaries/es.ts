@@ -839,7 +839,7 @@ export default {
   954: 'Esta actualización del sistema operativo no incluye ningún firmante de confianza. Su instalación desde la interfaz está bloqueada. Una actualización maliciosa podría tomar el control total de tu servidor, robar claves privadas y contraseñas o destruir tus datos permanentemente.',
   955: 'Usar la puerta de enlace del sistema',
   956: 'Formatear una unidad',
-  957: 'Borra una unidad y la prepara como una única partición ext4 para copias de seguridad.',
+  957: 'Borra una unidad y la prepara como una única partición Btrfs para copias de seguridad.',
   958: 'Unidad',
   959: 'Todo el contenido de esta unidad se borrará de forma permanente.',
   960: 'contiene copias de seguridad de StartOS',
@@ -849,6 +849,6 @@ export default {
   964: 'Formatear',
   965: 'Formateando la unidad',
   966: 'Unidad formateada. Aparece en «Unidades físicas».',
-  967: 'Debe tener 16 bytes o menos (las letras acentuadas y los símbolos ocupan más de uno)',
+  967: 'Debe tener 255 bytes o menos (las letras acentuadas y los símbolos ocupan más de uno)',
   968: 'No debe contener caracteres de control',
 } satisfies i18n

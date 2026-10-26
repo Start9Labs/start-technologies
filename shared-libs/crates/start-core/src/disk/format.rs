@@ -23,8 +23,8 @@ use crate::util::io::read_file_to_string;
 use crate::util::serde::{WithIoFormat, display_serializable};
 
 pub const DEFAULT_LABEL: &str = "StartOS Backups";
-/// ext4 stores the volume label in 16 bytes.
-const MAX_LABEL_BYTES: usize = 16;
+/// Btrfs labels reserve the final byte for NUL.
+const MAX_LABEL_BYTES: usize = 255;
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
@@ -39,7 +39,7 @@ pub struct FormatDiskParams {
 
 rpc_toolkit::reflect_ts!(FormatDiskParams);
 
-/// Erases a whole drive into one ext4 partition and returns that partition's node.
+/// Erases a whole drive into one Btrfs partition and returns that partition's node.
 pub async fn format(
     ctx: RpcContext,
     FormatDiskParams { disk, label }: FormatDiskParams,
@@ -95,19 +95,24 @@ async fn erase_and_partition(
         .arg(&partition)
         .invoke(ErrorKind::DiskManagement)
         .await?;
-    Command::new("mkfs.ext4")
-        .arg("-q")
-        .arg("-F")
-        .arg("-L")
-        .arg(&label)
-        .arg(&partition)
-        .invoke(ErrorKind::DiskManagement)
-        .await?;
+    create_backup_filesystem(&partition, &label).await?;
     Command::new("udevadm")
         .arg("settle")
         .invoke(ErrorKind::DiskManagement)
         .await?;
     Ok(partition)
+}
+
+async fn create_backup_filesystem(partition: &Path, label: &str) -> Result<(), Error> {
+    Command::new("mkfs.btrfs")
+        .arg("-q")
+        .arg("-f")
+        .arg("-L")
+        .arg(label)
+        .arg(partition)
+        .invoke(ErrorKind::DiskManagement)
+        .await?;
+    Ok(())
 }
 
 pub fn display_formatted(
@@ -266,14 +271,16 @@ mod tests {
             "1234567890123456",
             "éééééééé",
             "Mum’s Backups!",
+            "Family’s Backups",
+            &"a".repeat(255),
+            &format!("{}a", "é".repeat(127)),
         ] {
             assert!(validate_label(label).is_ok(), "{label:?}");
         }
         for label in [
             "",
-            "12345678901234567",
-            "ééééééééé",
-            "Family’s Backups",
+            &"a".repeat(256),
+            &"é".repeat(128),
             "bad\0label",
             "bad\nlabel",
             "bad\tlabel",
@@ -282,6 +289,33 @@ mod tests {
         ] {
             assert!(validate_label(label).is_err(), "{label:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn backup_filesystem_is_btrfs_with_the_requested_label() {
+        let image = tempfile::NamedTempFile::new().unwrap();
+        image.as_file().set_len(256 * 1024 * 1024).unwrap();
+        let label = format!("{}a", "é".repeat(127));
+        validate_label(&label).unwrap();
+        create_backup_filesystem(image.path(), &label)
+            .await
+            .unwrap();
+
+        Command::new("btrfs")
+            .arg("check")
+            .arg("--readonly")
+            .arg(image.path())
+            .invoke(ErrorKind::DiskManagement)
+            .await
+            .unwrap();
+        let actual_label = Command::new("btrfs")
+            .arg("filesystem")
+            .arg("label")
+            .arg(image.path())
+            .invoke(ErrorKind::DiskManagement)
+            .await
+            .unwrap();
+        assert_eq!(String::from_utf8(actual_label).unwrap().trim(), label);
     }
 
     #[test]

@@ -839,7 +839,7 @@ export default {
   954: 'Ta aktualizacja systemu nie wymienia żadnego zaufanego sygnatariusza. Instalacja z poziomu interfejsu jest zablokowana. Złośliwa aktualizacja mogłaby przejąć pełną kontrolę nad Twoim serwerem, wykraść klucze prywatne i hasła lub trwale zniszczyć Twoje dane.',
   955: 'Użyj bramy systemowej',
   956: 'Sformatuj dysk',
-  957: 'Wymazuje dysk i przygotowuje go jako jedną partycję ext4 na kopie zapasowe.',
+  957: 'Wymazuje dysk i przygotowuje go jako jedną partycję Btrfs na kopie zapasowe.',
   958: 'Dysk',
   959: 'Cała zawartość tego dysku zostanie trwale usunięta.',
   960: 'zawiera kopie zapasowe StartOS',
@@ -849,6 +849,6 @@ export default {
   964: 'Formatuj',
   965: 'Formatowanie dysku',
   966: 'Dysk sformatowany. Znajduje się na liście „Dyski fizyczne”.',
-  967: 'Może mieć maksymalnie 16 bajtów (litery ze znakami diakrytycznymi i symbole zajmują więcej niż jeden)',
+  967: 'Może mieć maksymalnie 255 bajtów (litery ze znakami diakrytycznymi i symbole zajmują więcej niż jeden)',
   968: 'Nie może zawierać znaków sterujących',
 } satisfies i18n
