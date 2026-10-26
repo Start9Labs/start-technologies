@@ -131,11 +131,9 @@ fn no_shadowed_args_start_registry() {
 
 #[test]
 fn export_manpage_start_registry() {
-    // Pages live with the start-registry product; anchored to start-core's crate dir.
-    let dir = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../projects/start-registry/man"
+    super::export_manpages(
+        app().into_command(),
+        "start-registry",
+        &super::manifest_version("start-registry"),
     );
-    std::fs::create_dir_all(dir).unwrap();
-    clap_mangen::generate_to(app().into_command(), dir).unwrap();
 }

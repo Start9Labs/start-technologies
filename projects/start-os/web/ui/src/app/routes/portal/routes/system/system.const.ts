@@ -34,6 +34,11 @@ export const SYSTEM_MENU = [
       item: 'WiFi',
       link: 'wifi',
     },
+    {
+      icon: '@tui.zap',
+      item: 'Network UPS Tools',
+      link: 'nut',
+    },
   ],
   [
     {

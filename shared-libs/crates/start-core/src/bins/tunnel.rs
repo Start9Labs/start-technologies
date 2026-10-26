@@ -272,10 +272,9 @@ fn no_shadowed_args_start_tunnel() {
 
 #[test]
 fn export_manpage_start_tunnel() {
-    let dir = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../projects/start-tunnel/man"
+    super::export_manpages(
+        app().into_command(),
+        "start-tunnel",
+        &super::manifest_version("start-tunnel"),
     );
-    std::fs::create_dir_all(dir).unwrap();
-    clap_mangen::generate_to(app().into_command(), dir).unwrap();
 }

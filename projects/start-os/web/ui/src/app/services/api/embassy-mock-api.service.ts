@@ -131,6 +131,9 @@ export class MockApiService extends ApiService {
   private readonly revertTime = 1800
   sequence = 1
   private readonly handlers: RpcHandlers<Api> = {
+    'server.set-nut': params => this.setNut(params),
+    'server.nut-status': params => this.getNutStatus(params),
+
     state: async () => {
       await pauseFor(1000)
 
@@ -2339,5 +2342,65 @@ export class MockApiService extends ApiService {
   private async getRegistryPackages(params: GetRegistryPackagesReq) {
     await pauseFor(2000)
     return Mock.RegistryPackages
+  }
+
+  private async setNut(params: Params<'server.set-nut'>): Promise<null> {
+    await pauseFor(2000)
+    const settings = params.config.settings ?? null
+    const config: T.NutConfig = {
+      enabled: params.config.enabled ?? false,
+      settings: !settings
+        ? null
+        : settings.mode === 'client'
+          ? {
+              ...settings,
+              port: settings.port ?? 3493,
+              shutdownDelay: settings.shutdownDelay ?? 5,
+            }
+          : {
+              ...settings,
+              listenAll: settings.listenAll ?? false,
+              remoteUsername: settings.remoteUsername ?? null,
+              remotePassword: settings.remotePassword ?? null,
+              shutdownDelay: settings.shutdownDelay ?? 5,
+            },
+    }
+    mockPatchData.serverInfo.nut = config
+    this.mockRevision([
+      {
+        op: PatchOp.REPLACE,
+        path: '/serverInfo/nut',
+        value: config,
+      },
+    ])
+    return null
+  }
+
+  private async getNutStatus(params: {}): Promise<T.NutStatus> {
+    await pauseFor(1000)
+    const settings: T.NutSettings | null = this.mockData(
+      '/serverInfo/nut/settings',
+    )
+    const host = settings?.mode === 'client' ? settings.host : 'localhost'
+    const port = settings?.mode === 'client' ? settings.port : 3493
+    return {
+      target: `${settings?.upsName ?? 'ups'}@${host.includes(':') && !host.startsWith('[') ? `[${host}]` : host}:${port}`,
+      variables: {
+        'battery.charge': '96',
+        'battery.runtime': '4280',
+        'battery.type': 'PbAc',
+        'device.mfr': 'Start9 Mock UPS',
+        'device.model': 'NUT Simulator',
+        'device.serial': 'MOCK-UPS-001',
+        'driver.name': 'usbhid-ups',
+        'driver.version': '2.8.1',
+        'input.voltage': '120.1',
+        'output.voltage': '120.0',
+        'ups.load': '18',
+        'ups.mfr': 'Start9 Mock UPS',
+        'ups.model': 'NUT Simulator',
+        'ups.status': 'OL',
+      },
+    }
   }
 }
