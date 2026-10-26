@@ -118,17 +118,23 @@ where
             .peek(|map| map.get(san_info)?.last_error.clone())
     }
 
+    /// An unexpired certificate already stored for these names; never starts an order.
+    pub async fn get_cached_cert(
+        &self,
+        san_info: &BTreeSet<InternedString>,
+    ) -> Option<CertifiedKey> {
+        let provider = self.get_provider.get_provider(san_info).await?;
+        let peek = self.db.peek().await;
+        let cert = stored_cert::<M>(&peek, provider.as_ref(), san_info).filter(unexpired)?;
+        certified_key(&cert, &self.crypto_provider).log_err()
+    }
+
     pub async fn get_cert(&self, san_info: &BTreeSet<InternedString>) -> Option<CertifiedKey> {
         let provider = self.get_provider.get_provider(san_info).await?;
         let provider = provider.as_ref();
 
         let peek = self.db.peek().await;
-        let store = <M as DbAccess<AcmeCertStore>>::access(&peek);
-        let cached = store
-            .as_certs()
-            .as_idx(&provider.0)
-            .and_then(|p| p.as_idx(JsonKey::new_ref(san_info)))
-            .and_then(|cert| cert.de().log_err());
+        let cached = stored_cert::<M>(&peek, provider, san_info);
         if let Some(cert) = &cached {
             if cert
                 .fullchain
@@ -287,6 +293,18 @@ where
         }
         .or_else(renewing)
     }
+}
+
+fn stored_cert<M: DbAccess<AcmeCertStore>>(
+    db: &Model<M>,
+    provider: &AcmeProvider,
+    san_info: &BTreeSet<InternedString>,
+) -> Option<AcmeCert> {
+    <M as DbAccess<AcmeCertStore>>::access(db)
+        .as_certs()
+        .as_idx(&provider.0)
+        .and_then(|p| p.as_idx(JsonKey::new_ref(san_info)))
+        .and_then(|cert| cert.de().log_err())
 }
 
 fn unexpired(cert: &AcmeCert) -> bool {

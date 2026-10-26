@@ -459,6 +459,7 @@ async fn cached_certificates_keep_working_after_provider_configuration_is_remove
             in_progress: Watch::new([(sans(), OrderEntry::default())].into_iter().collect()),
             report_failure: None,
         };
+        assert_eq!(handler.get_cached_cert(&sans()).await.is_some(), days > 0);
         assert_eq!(handler.get_cert(&sans()).await.is_some(), days > 0);
         if days == 90 {
             assert!(handler.in_progress.peek(|entries| entries.is_empty()));

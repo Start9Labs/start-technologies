@@ -21,14 +21,16 @@ use patch_db::ModelExt;
 use rustls::crypto::CryptoProvider;
 use rustls::server::ClientHello;
 use rustls::sign::CertifiedKey;
+use rustls::ServerConfig;
 use serde::{Deserialize, Serialize};
 use startos::db::model::public::AcmeSettings;
 use startos::db::{DbAccess, DbAccessByKey, DbAccessMut};
 use startos::net::acme::{
     AcmeCertStore, AcmeProvider, AcmeTlsHandler, GetAcmeProvider, ReportOrderFailure,
+    ACME_TLS_ALPN_NAME,
 };
 use startos::net::ssl::{cert_is_unexpired, root_ca_config, CertStore};
-use startos::net::tls::{TlsHandler, TlsHandlerAction};
+use startos::net::tls::{SingleCertResolver, TlsHandler, TlsHandlerAction};
 use startos::net::web_server::{extract, Accept, ExtractVisitor, TcpMetadata};
 use startos::prelude::{HasModel, JsonKey, Model, PatchDb, TypedPatchDb};
 use startos::util::serde::Pem;
@@ -200,6 +202,22 @@ where
     S: GetAcmeProvider + Clone + Send + Sync,
 {
     acme.get_cert(sans)
+}
+
+fn cached_acme_cert<'x, M, S>(
+    acme: &'x Arc<AcmeTlsHandler<M, S>>,
+    sans: &'x BTreeSet<InternedString>,
+) -> impl Future<Output = Option<CertifiedKey>> + Send + 'x
+where
+    for<'m> M: DbAccessByKey<AcmeSettings, Key<'m> = &'m AcmeProvider>
+        + DbAccessMut<AcmeCertStore>
+        + HasModel<Model = Model<M>>
+        + Send
+        + Sync
+        + 'static,
+    S: GetAcmeProvider + Clone + Send + Sync,
+{
+    acme.get_cached_cert(sans)
 }
 
 fn acme_config<'a, A, M, S>(
@@ -456,15 +474,25 @@ where
         let dialed = extract::<TcpMetadata, _>(metadata).map(|tcp| tcp.local_addr.ip());
         match served(hello.server_name(), ddns.as_ref(), dialed) {
             Served::Ddns(name) => {
-                match acme_config::<A, _, _>(&mut self.acme, hello, metadata).await {
-                    Some(TlsHandlerAction::Tls(mut cfg)) => {
-                        if cfg.alpn_protocols.is_empty() {
-                            cfg.alpn_protocols = http_alpn();
-                        }
-                        Some(TlsHandlerAction::Tls(cfg))
-                    }
-                    Some(action) => Some(action),
-                    None => local_config(&self.db, &self.crypto_provider, hello, name).await,
+                if hello
+                    .alpn()
+                    .into_iter()
+                    .flatten()
+                    .any(|a| a == ACME_TLS_ALPN_NAME)
+                {
+                    return acme_config::<A, _, _>(&mut self.acme, hello, metadata).await;
+                }
+                let sans = [name.clone()].into();
+                if let Some(cert) = cached_acme_cert(&self.acme, &sans).await {
+                    let mut cfg = ServerConfig::builder_with_provider(self.crypto_provider.clone())
+                        .with_safe_default_protocol_versions()
+                        .ok()?
+                        .with_no_client_auth()
+                        .with_cert_resolver(Arc::new(SingleCertResolver(Arc::new(cert))));
+                    cfg.alpn_protocols = http_alpn();
+                    Some(TlsHandlerAction::Tls(cfg))
+                } else {
+                    local_config(&self.db, &self.crypto_provider, hello, name).await
                 }
             }
             Served::Local(name) => local_config(&self.db, &self.crypto_provider, hello, name).await,
@@ -501,6 +529,7 @@ fn served(
 #[cfg(test)]
 mod tests {
     use openssl::pkey::PKey;
+    use openssl::x509::X509;
     use startos::net::ssl::{gen_nistp256, make_int_cert, make_root_cert};
 
     use super::*;
@@ -571,6 +600,191 @@ mod tests {
         <CertDatabase as DbAccess<CertStore>>::access(&db.peek().await)
             .de()
             .unwrap()
+    }
+
+    async fn router_with_acme(provider: AcmeProvider) -> RouterTlsHandler {
+        let ctx = ServerContext {
+            auth: Arc::new(crate::auth::AuthState::with_ddns_name(
+                crate::auth::DdnsName {
+                    hostname: Some(InternedString::intern("home.example.com")),
+                    acme: true,
+                },
+            )),
+            ..ServerContext::default()
+        };
+        let db = db_with(store()).await;
+        db.mutate(|db| {
+            acme_settings_mut(db).insert(
+                &provider,
+                &AcmeSettings {
+                    contact: Vec::new(),
+                },
+            )
+        })
+        .await
+        .result
+        .unwrap();
+        let crypto_provider = Arc::new(rustls::crypto::ring::default_provider());
+        let acme = Arc::new(AcmeTlsHandler {
+            db: db.clone(),
+            acme_cache: Arc::new(SyncMutex::new(BTreeMap::new())),
+            crypto_provider: crypto_provider.clone(),
+            get_provider: DdnsAcmeProvider {
+                ctx: ctx.clone(),
+                provider,
+            },
+            in_progress: Watch::new(BTreeMap::new()),
+            report_failure: None,
+        });
+        RouterTlsHandler {
+            db,
+            acme,
+            ctx,
+            crypto_provider,
+        }
+    }
+
+    async fn resolved_certificate(router: &mut RouterTlsHandler, name: &str) -> X509 {
+        use rustls::pki_types::ServerName;
+        use rustls::server::Acceptor;
+        use rustls::{ClientConfig, ClientConnection, RootCertStore};
+        let client_config = ClientConfig::builder_with_provider(router.crypto_provider.clone())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(RootCertStore::empty())
+            .with_no_client_auth();
+        let wire_name = if name.ends_with('.') {
+            format!("{}x", name.trim_end_matches('.'))
+        } else {
+            name.to_string()
+        };
+        let mut client = ClientConnection::new(
+            Arc::new(client_config),
+            ServerName::try_from(wire_name.clone()).unwrap(),
+        )
+        .unwrap();
+        let mut bytes = Vec::new();
+        client.write_tls(&mut bytes).unwrap();
+        // rustls clients omit trailing dots from SNI.
+        if name.ends_with('.') {
+            let offset = bytes
+                .windows(wire_name.len())
+                .position(|part| part == wire_name.as_bytes())
+                .unwrap();
+            bytes[offset + wire_name.len() - 1] = b'.';
+        }
+        let mut acceptor = Acceptor::default();
+        acceptor.read_tls(&mut std::io::Cursor::new(bytes)).unwrap();
+        let accepted = acceptor.accept().unwrap().unwrap();
+        let hello = accepted.client_hello();
+        assert_eq!(hello.server_name(), Some(name));
+        let metadata = TcpMetadata {
+            local_addr: "192.168.20.1:443".parse().unwrap(),
+            peer_addr: "192.168.20.2:12345".parse().unwrap(),
+        };
+        let action = tokio::time::timeout(
+            Duration::from_millis(250),
+            <RouterTlsHandler as TlsHandler<'_, tokio::net::TcpListener>>::get_config(
+                router, &hello, &metadata,
+            ),
+        )
+        .await
+        .expect("HTTPS must not wait for an ACME order")
+        .unwrap();
+        let TlsHandlerAction::Tls(config) = action else {
+            panic!("expected TLS");
+        };
+        assert_eq!(config.alpn_protocols, http_alpn());
+        let cert = config.cert_resolver.resolve(hello).unwrap();
+        X509::from_der(cert.cert[0].as_ref()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn ddns_handshake_uses_local_ca_while_acme_is_pending() {
+        let stalled_directory = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let provider: AcmeProvider = format!(
+            "http://{}/directory",
+            stalled_directory.local_addr().unwrap()
+        )
+        .parse()
+        .unwrap();
+        let mut router = router_with_acme(provider).await;
+        let cert = resolved_certificate(&mut router, "home.example.com").await;
+        assert_eq!(
+            cert.subject_alt_names().unwrap()[0].dnsname(),
+            Some("home.example.com")
+        );
+        assert!(
+            router.acme.in_progress.peek(|orders| orders.is_empty()),
+            "only the maintenance task starts orders"
+        );
+    }
+
+    #[tokio::test]
+    async fn ddns_handshake_serves_cached_certificate_during_renewal_and_with_trailing_dot() {
+        use openssl::hash::MessageDigest;
+        use openssl::x509::extension::SubjectAlternativeName;
+        use openssl::x509::X509NameBuilder;
+        use startos::net::acme::AcmeCert;
+        let stalled_directory = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let provider: AcmeProvider = format!(
+            "http://{}/directory",
+            stalled_directory.local_addr().unwrap()
+        )
+        .parse()
+        .unwrap();
+        let mut router = router_with_acme(provider.clone()).await;
+        let key = gen_nistp256().unwrap();
+        let mut subject = X509NameBuilder::new().unwrap();
+        subject
+            .append_entry_by_text("CN", "cached ACME certificate")
+            .unwrap();
+        let subject = subject.build();
+        let mut cert = X509::builder().unwrap();
+        cert.set_version(2).unwrap();
+        cert.set_subject_name(&subject).unwrap();
+        cert.set_issuer_name(&subject).unwrap();
+        cert.set_pubkey(&key).unwrap();
+        cert.set_not_before(&Asn1Time::from_unix(Utc::now().timestamp() - 60).unwrap())
+            .unwrap();
+        cert.set_not_after(&Asn1Time::days_from_now(5).unwrap())
+            .unwrap();
+        let san = SubjectAlternativeName::new()
+            .dns("home.example.com")
+            .build(&cert.x509v3_context(None, None))
+            .unwrap();
+        cert.append_extension(san).unwrap();
+        cert.sign(&key, MessageDigest::sha256()).unwrap();
+        let cert = cert.build();
+        let sans: BTreeSet<InternedString> = [InternedString::intern("home.example.com")].into();
+        router
+            .db
+            .mutate(|db| {
+                <CertDatabase as DbAccessMut<AcmeCertStore>>::access_mut(db)
+                    .as_certs_mut()
+                    .upsert(&provider.0, || Ok(BTreeMap::new()))?
+                    .insert(
+                        JsonKey::new_ref(&sans),
+                        &AcmeCert {
+                            key: Pem(key),
+                            fullchain: vec![Pem(cert.clone())],
+                        },
+                    )
+            })
+            .await
+            .result
+            .unwrap();
+        for name in ["home.example.com.", "home.example.com"] {
+            assert!(
+                resolved_certificate(&mut router, name)
+                    .await
+                    .to_der()
+                    .unwrap()
+                    == cert.to_der().unwrap(),
+                "must serve the cached ACME certificate for {name}"
+            );
+        }
+        assert!(router.acme.in_progress.peek(|orders| orders.is_empty()));
     }
 
     #[test]

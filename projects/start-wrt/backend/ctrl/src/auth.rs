@@ -124,6 +124,18 @@ impl AuthState {
         ))
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_ddns_name(name: DdnsName) -> Self {
+        let state = Self::in_memory();
+        state.ddns.mutate(|cache| {
+            cache.modified = std::fs::metadata("/etc/config/ddns")
+                .and_then(|m| m.modified())
+                .ok();
+            cache.name = name;
+        });
+        state
+    }
+
     fn new(db: TypedPatchDb<AuthDatabase>) -> Self {
         Self {
             db,
