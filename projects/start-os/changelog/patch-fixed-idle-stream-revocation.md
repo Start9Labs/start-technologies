@@ -1,0 +1,1 @@
+- Revoking a sign-in immediately closes its idle streams.

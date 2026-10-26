@@ -161,6 +161,10 @@ function nonEmptyList(control: AbstractControl): ValidationErrors | null {
                 tuiAnimated
                 tuiChevron
                 [stringify]="'fullname' | tuiStringify"
+                [invalid]="
+                  form.controls.lanAccessProfiles.touched &&
+                  form.controls.lanAccessProfiles.invalid
+                "
               >
                 @if (!context.data.otherProfiles.length) {
                   <label tuiLabel>{{ 'No other profiles' | i18n }}</label>
@@ -169,10 +173,6 @@ function nonEmptyList(control: AbstractControl): ValidationErrors | null {
                   tuiInputChip
                   tuiSelectLike
                   [disabled]="!context.data.otherProfiles.length"
-                  [invalid]="
-                    form.controls.lanAccessProfiles.touched &&
-                    form.controls.lanAccessProfiles.invalid
-                  "
                   [placeholder]="
                     multi().length ? '' : ('Allowed profiles' | i18n)
                   "
@@ -456,6 +456,11 @@ class AddProfile {
     { initialValue: this.form.controls.lanAccessType.value },
   )
 
+  private readonly accessToNewProfiles = toSignal(
+    this.form.controls.accessToNewProfiles.valueChanges,
+    { initialValue: this.form.controls.accessToNewProfiles.value },
+  )
+
   protected readonly wanAccessType = toSignal(
     this.form.controls.wanAccessType.valueChanges,
     { initialValue: this.form.controls.wanAccessType.value },
@@ -503,6 +508,7 @@ class AddProfile {
     effect(() => {
       const needsSelection =
         this.lanAccessType() === 'whitelist' &&
+        !this.accessToNewProfiles() &&
         this.context.data.otherProfiles.length > 0
       const group = this.form.controls.lanAccessProfiles
       group.setValidators(needsSelection ? [atLeastOneSelected] : [])

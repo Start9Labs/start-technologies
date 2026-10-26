@@ -1,1 +1,0 @@
-- Fixed service effects losing supplied event IDs, including the ID shared by opening and submitting an action input form. Supplied IDs take precedence over the caller's event ID.

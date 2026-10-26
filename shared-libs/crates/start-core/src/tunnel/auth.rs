@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 
-use chrono::Utc;
 use clap::Parser;
 use imbl_value::InternedString;
 use itertools::Itertools;
@@ -58,6 +57,7 @@ impl SignatureAuthContext for TunnelContext {
     }
     async fn sig_context(
         &self,
+        _extensions: &http::Extensions,
     ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send {
         let peek = self.db().peek().await;
         peek.as_webserver()
@@ -115,17 +115,7 @@ impl SignatureAuthContext for TunnelContext {
         _: &rpc_toolkit::RpcRequest,
     ) -> Result<(), Error> {
         if let Some(key) = key {
-            self.db
-                .mutate(|db| {
-                    db.as_session_pubkeys_mut().mutate(|keys| {
-                        if let Some(info) = keys.0.get_mut(&*key) {
-                            info.last_active = Utc::now();
-                        }
-                        Ok(())
-                    })
-                })
-                .await
-                .result?;
+            crate::auth::touch_last_active(self, &key).await?;
         }
         Ok(())
     }
@@ -154,7 +144,7 @@ pub struct SignerInfo {
 rpc_toolkit::reflect_ts!(SignerInfo);
 
 pub fn auth_api<C: Context>() -> ParentHandler<C> {
-    crate::auth::auth::<C, TunnelContext>()
+    crate::auth::auth::<C, TunnelContext, CliContext>()
         .subcommand("set-password", from_fn_async(set_password_rpc).no_cli())
         .subcommand(
             "set-password",
@@ -202,7 +192,7 @@ pub fn auth_api<C: Context>() -> ParentHandler<C> {
                             for (key, info) in res.0 {
                                 table.add_row(row![info.name.as_deref().unwrap_or("-"), key]);
                             }
-                            table.print_tty(false)?;
+                            print_table(&table)?;
                             Ok(())
                         })
                         .with_about("about.list-authorized-keys")

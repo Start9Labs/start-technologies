@@ -28,6 +28,14 @@ pub fn main(args: VecDeque<OsString>) {
             }
             return;
         }
+        Some("migrate") => {
+            let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+            if let Err(e) = rt.block_on(crate::migrate::run(std::path::Path::new("/"))) {
+                eprintln!("migrate failed: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
         Some("verify") => {
             let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
             if let Err(e) = rt.block_on(crate::verify::run_verify()) {
@@ -48,6 +56,7 @@ pub fn main(args: VecDeque<OsString>) {
         |args: CliArgs| CliContext::init(args).map_err(|e| e.into()),
         main_api(),
     )
+    .mutate_command(startos::bins::translate_cli)
     .run(full_args)
     {
         match e.data {

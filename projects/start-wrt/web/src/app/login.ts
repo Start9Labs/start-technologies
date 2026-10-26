@@ -8,7 +8,7 @@ import {
 } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { Router } from '@angular/router'
-import { CaWizard } from '@start9labs/shared'
+import { AuthKeyService, CaWizard } from '@start9labs/shared'
 import { TuiButton, TuiError, TuiInput, TuiTextfield } from '@taiga-ui/core'
 import { TuiButtonLoading } from '@taiga-ui/kit'
 import { ApiService } from 'src/app/services/api/api.service'
@@ -90,6 +90,7 @@ export default class Login {
   private readonly auth = inject(AuthService)
   private readonly router = inject(Router)
   private readonly api = inject(ApiService)
+  private readonly authKeys = inject(AuthKeyService)
   private readonly document = inject(DOCUMENT)
 
   private readonly isLanHttp = computed(() => {
@@ -108,7 +109,16 @@ export default class Login {
   protected async login() {
     this.loading.set(true)
     try {
-      await this.api.login({ password: this.password() })
+      const key = await this.authKeys.create()
+      try {
+        await this.api.login({
+          password: this.password(),
+          pubkey: key.pubkeyPem,
+        })
+      } catch (e) {
+        await this.authKeys.rollback()
+        throw e
+      }
       this.auth.authenticated.set(true)
       this.router.navigate(['.'])
     } catch (e) {

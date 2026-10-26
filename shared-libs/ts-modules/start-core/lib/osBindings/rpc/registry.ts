@@ -164,6 +164,11 @@ export type ListPackageSignersParamsInput = z.input<
 >
 export type MetricsSummary = z.output<typeof schemas.MetricsSummary>
 export type OsVersionInfo = z.output<typeof schemas.OsVersionInfo>
+
+/**
+ * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
+ */
+export type PackageIcon = z.output<typeof schemas.PackageIcon>
 export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PreDownloadAlert = z.output<typeof schemas.PreDownloadAlert>
 export type RemoveAdminParamsInput = z.input<typeof schemas.RemoveAdminParams>

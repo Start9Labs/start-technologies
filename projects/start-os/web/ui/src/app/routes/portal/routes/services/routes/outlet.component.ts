@@ -17,9 +17,7 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
 import { TitleDirective } from 'src/app/services/title.service'
 import { getManifest } from 'src/app/utils/get-package-data'
 
-// `exact` gates routerLinkActive: the dashboard ('./') must match exactly or it
-// would light up on every sub-route; `interfaces` is inexact so it stays active
-// on its detail sub-pages (interfaces/:id). Leaf routes are exact.
+// Dashboard matching is exact; interfaces includes its detail routes.
 type NavItem = { title: i18nKey; icon: string; link: string; exact: boolean }
 
 @Component({
@@ -61,6 +59,7 @@ type NavItem = { title: i18nKey; icon: string; link: string; exact: boolean }
               tuiAppearance="action-grayscale"
               routerLinkActive="active"
               [routerLinkActiveOptions]="{ exact: item.exact }"
+              [attr.aria-label]="item.title | i18n"
               [routerLink]="item.link"
             >
               <tui-icon [icon]="item.icon" />
@@ -218,6 +217,12 @@ export class ServiceOutletComponent {
     { title: 'logs', icon: '@tui.scroll-text', link: 'logs', exact: true },
     { title: 'about', icon: '@tui.info', link: 'about', exact: true },
     {
+      title: 'Outbound Traffic',
+      icon: '@tui.globe',
+      link: 'outbound-traffic',
+      exact: true,
+    },
+    {
       title: 'actions & config',
       icon: '@tui.cog',
       link: 'actions',
@@ -233,7 +238,6 @@ export class ServiceOutletComponent {
       distinctUntilChanged(),
       switchMap(id => this.patch.watch$('packageData', id)),
       tap(pkg => {
-        // if package disappears, navigate to list page
         if (!pkg) {
           this.router.navigate(['services'])
         }

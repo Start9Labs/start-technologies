@@ -10,6 +10,12 @@ export const AUTH_KEY_STORAGE_KEY = new InjectionToken<string>(
   { factory: () => '_startos/authKey' },
 )
 
+/** The server identity requests are signed for. */
+export const AUTH_SIGNING_HOST = new InjectionToken<string>(
+  'AUTH_SIGNING_HOST',
+  { factory: () => inject(WA_WINDOW).location.hostname },
+)
+
 const DB_NAME = 'startos-auth'
 const STORE = 'keys'
 
@@ -24,6 +30,7 @@ const STORE = 'keys'
 export class AuthKeyService {
   private readonly win = inject(WA_WINDOW)
   private readonly storageKey = inject(AUTH_KEY_STORAGE_KEY)
+  private readonly host = inject(AUTH_SIGNING_HOST)
   private cached: auth.AuthKey | null | undefined
   /** Record displaced by this tab's `create()`, restored by `rollback()` so a
    *  failed login here can't wipe the key another tab is signing with. */
@@ -74,11 +81,7 @@ export class AuthKeyService {
     const bytes =
       typeof body === 'string' ? new TextEncoder().encode(body) : body
     return {
-      [auth.AUTH_SIG_HEADER]: await auth.signRequest(
-        key,
-        this.win.location.hostname,
-        bytes,
-      ),
+      [auth.AUTH_SIG_HEADER]: await auth.signRequest(key, this.host, bytes),
     }
   }
 

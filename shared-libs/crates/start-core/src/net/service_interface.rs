@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 
 use imbl_value::InternedString;
 use serde::{Deserialize, Serialize};
@@ -65,13 +65,9 @@ impl HostnameInfo {
 
     /// True for loopback and the bridge's own addresses.
     pub fn is_internal(&self) -> bool {
-        match self.hostname.parse::<IpAddr>() {
-            Ok(IpAddr::V4(v4)) => v4.is_loopback() || v4 == Ipv4Addr::from(crate::HOST_IP),
-            Ok(IpAddr::V6(v6)) => {
-                v6.is_loopback() || v6 == crate::net::forward::START9_BRIDGE_V6_ADDR
-            }
-            Err(_) => false,
-        }
+        self.hostname
+            .parse::<IpAddr>()
+            .is_ok_and(crate::net::utils::is_internal_ip)
     }
 
     /// If this address is an IPv6 **global unicast** address (a GUA — not

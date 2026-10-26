@@ -1,0 +1,1 @@
+- Moving an Ethernet port to another Security Profile gives a connected Linux client an address on the new profile's subnet without reconnecting it by hand.

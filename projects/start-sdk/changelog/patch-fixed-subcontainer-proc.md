@@ -1,0 +1,1 @@
+- Fixed subcontainer startup from an image with no `/proc`, such as one built `FROM scratch`. Rebuild packages with this SDK version to receive the fix.

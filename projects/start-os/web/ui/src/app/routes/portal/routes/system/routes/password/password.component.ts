@@ -42,11 +42,6 @@ import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
   styles: `
     :host {
       max-inline-size: 40rem;
-
-      ::ng-deep footer {
-        background: transparent !important;
-        margin: 0;
-      }
     }
 
     section {

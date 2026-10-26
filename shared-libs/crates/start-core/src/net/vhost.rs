@@ -9,7 +9,6 @@ use std::sync::{Arc, LazyLock, Weak};
 use std::task::{Poll, ready};
 use std::time::{Duration, Instant};
 
-use async_acme::acme::ACME_TLS_ALPN_NAME;
 use clap::Parser;
 use color_eyre::eyre::eyre;
 use futures::FutureExt;
@@ -35,8 +34,8 @@ use crate::db::model::Database;
 use crate::db::model::public::{AcmeSettings, NetworkInterfaceInfo};
 use crate::db::{DbAccessByKey, DbAccessMut};
 use crate::net::acme::{
-    AcmeCertStore, AcmeProvider, AcmeTlsAlpnCache, AcmeTlsHandler, GetAcmeProvider,
-    ReportOrderFailure,
+    ACME_TLS_ALPN_NAME, AcmeCertStore, AcmeProvider, AcmeTlsAlpnCache, AcmeTlsHandler,
+    GetAcmeProvider, ReportOrderFailure,
 };
 use crate::net::forward::START9_BRIDGE_V6_SUBNET;
 use crate::net::gateway::{
@@ -46,7 +45,7 @@ use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::ssl::{CertBranding, CertStore, RootCaTlsHandler};
 use crate::net::tls::{TlsHandler, TlsHandlerAction, TlsListener, TlsMetadata};
 use crate::net::utils::{
-    bind_mio_listener, gua_ips, ipv6_is_link_local, ipv6_is_local, is_private_ip,
+    bind_mio_listener, gua_ips, ipv6_is_link_local, ipv6_is_local, is_private_client,
 };
 use crate::net::web_server::{Accept, AcceptStream, ExtractVisitor, TcpMetadata, extract};
 use crate::notifications::NotificationLevel;
@@ -140,7 +139,7 @@ pub fn vhost_api<C: Context>() -> ParentHandler<C> {
                         }
                     }
 
-                    table.print_tty(false)?;
+                    print_table(&table)?;
 
                     Ok(())
                 })
@@ -1171,8 +1170,7 @@ impl ProxyTarget {
     /// A dial of one of our own private addresses from that address's network.
     /// On IPv4 the source is all that separates it from a forwarded one.
     fn accepts_as_private(&self, subnets: &OrdSet<IpNet>, src: IpAddr, dst: IpAddr) -> bool {
-        self.private.contains(&dst)
-            && (subnets.iter().any(|s| s.contains(&src)) || is_private_ip(src))
+        self.private.contains(&dst) && is_private_client(src, Some(subnets))
     }
 
     /// Whether the box gateways `client`, which source preservation requires:
@@ -1241,7 +1239,7 @@ where
         + Send
         + Sync,
 {
-    type PreprocessRes = AcceptStream;
+    type PreprocessRes = (AcceptStream, Option<crate::util::GeneralBoxedGuard>);
     fn filter(&self, metadata: &<A as Accept>::Metadata) -> bool {
         let Some(at) = arrival::<A>(metadata) else {
             return false;
@@ -1331,6 +1329,18 @@ where
             tracing::error!("Failed to set tcp keepalive: {e}");
             tracing::debug!("{e:?}");
         }
+        let origin_registration = if self.passthrough {
+            None
+        } else {
+            let tcp = extract::<TcpMetadata, _>(metadata);
+            let gateway = extract::<GatewayInfo, _>(metadata);
+            let mut origin = crate::net::request_origin::RequestOrigin::from_connection(
+                tcp.as_ref(),
+                gateway.as_ref(),
+            );
+            origin.public = !VHostTarget::<A>::filter_private(self, metadata);
+            Some(origin.register_proxy(tcp_stream.local_addr().ok()?, tcp_stream.peer_addr().ok()?))
+        };
         let client_alpn: Vec<Vec<u8>> = hello
             .alpn()
             .into_iter()
@@ -1356,7 +1366,7 @@ where
             && dialled.is_empty()
         {
             prev.alpn_protocols = offered;
-            return Some((prev, Box::pin(tcp_stream)));
+            return Some((prev, (Box::pin(tcp_stream), origin_registration)));
         }
         let (stream, negotiated): (AcceptStream, _) = match &self.connect_ssl {
             Some(client_cfg) => {
@@ -1389,13 +1399,13 @@ where
             Some(_) => negotiated.into_iter().collect(),
             None => offered,
         };
-        Some((prev, stream))
+        Some((prev, (stream, origin_registration)))
     }
     fn handle_stream(
         &self,
         stream: AcceptStream,
         metadata: TlsMetadata<<A as Accept>::Metadata>,
-        mut prev: Self::PreprocessRes,
+        (mut prev, origin_registration): Self::PreprocessRes,
         ctx: ProxyContext,
     ) {
         let add_x_forwarded_headers = self.add_x_forwarded_headers;
@@ -1429,6 +1439,7 @@ where
             // Force capture by the outer `async move`; without a reference
             // here the registry entry would deregister immediately.
             let _registration = registration;
+            let _origin_registration = origin_registration;
             let work = async move {
                 if http_aware {
                     crate::net::http::run_http_proxy(
@@ -2261,6 +2272,8 @@ mod port_map_tests {
         info.insert(
             GatewayId::from(InternedString::intern(GATEWAY)),
             NetworkInterfaceInfo {
+                wireguard_endpoint_domains: Default::default(),
+                dns: Default::default(),
                 name: None,
                 secure: None,
                 ip_info: Some(Arc::new(IpInfo {
@@ -2275,6 +2288,8 @@ mod port_map_tests {
                     wan_ip: None,
                     ntp_servers: Default::default(),
                     dns_servers: Default::default(),
+                    default_route_v4: None,
+                    default_route_v6: None,
                 })),
                 gateway_type: GatewayType::InboundOutbound,
                 port_map: Default::default(),
@@ -2855,23 +2870,31 @@ mod upstream_alpn_tests {
         /// Written to the stream `preprocess` hands back.
         probe: &'static [u8],
     }
-    impl<'a> TlsHandler<'a, TcpListener> for Preprocessing {
+    impl<'a, A> TlsHandler<'a, A> for Preprocessing
+    where
+        A: Accept + 'static,
+        A::Metadata: Visit<ExtractVisitor<GatewayInfo>>
+            + Visit<ExtractVisitor<TcpMetadata>>
+            + Clone
+            + Send
+            + Sync,
+    {
         async fn get_config(
             &'a mut self,
             hello: &'a ClientHello<'a>,
-            metadata: &'a TcpMetadata,
+            metadata: &'a A::Metadata,
         ) -> Option<TlsHandlerAction> {
             let base_alpn: Vec<&str> = self.base_alpn.iter().map(|a| a.as_str()).collect();
             let base = config_advertising(&base_alpn);
             let (cfg, upstream) =
-                VHostTarget::<TcpListener>::preprocess(&self.target, base, hello, metadata).await?;
+                VHostTarget::<A>::preprocess(&self.target, base, hello, metadata).await?;
             if self.probe.is_empty() {
                 // The client handshakes off `cfg` alone.
                 drop(upstream);
             } else {
                 let probe = self.probe;
                 tokio::spawn(async move {
-                    let mut upstream = upstream;
+                    let (mut upstream, _origin_registration) = upstream;
                     let _ = upstream.write_all(probe).await;
                     let _ = upstream.flush().await;
                     // The stream stays open until the backend has the probe.
@@ -2992,6 +3015,85 @@ mod upstream_alpn_tests {
             .expect("the listener's accept task runs to completion")
             .expect("the listener accepts the connection");
         Ok(alpn.map(|a| String::from_utf8(a.0).unwrap()))
+    }
+
+    #[tokio::test]
+    async fn terminating_proxy_preserves_ingress_gateway_and_access() {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            for private in [false, true] {
+                let backend = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+                let frontend = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+                let frontend_addr = frontend.local_addr().unwrap();
+                let gateway_id: GatewayId = "eth0".parse().unwrap();
+                let info = NetworkInterfaceInfo {
+                    ip_info: Some(Arc::new(crate::db::model::public::IpInfo {
+                        subnets: ["127.0.0.1/8".parse::<IpNet>().unwrap()]
+                            .into_iter()
+                            .collect(),
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                };
+                let listener = VHostBindListener {
+                    ip_info: Watch::new([(gateway_id.clone(), info.clone())].into_iter().collect()),
+                    port: frontend_addr.port(),
+                    bind_reqs: Watch::new(VHostBindRequirements {
+                        private_ips: [frontend_addr.ip()].into_iter().collect(),
+                        ..Default::default()
+                    }),
+                    listeners: [(
+                        frontend_addr,
+                        (
+                            frontend,
+                            GatewayInfo {
+                                id: gateway_id.clone(),
+                                info,
+                            },
+                        ),
+                    )]
+                    .into_iter()
+                    .collect(),
+                    retry: None,
+                };
+                let mut target = target(backend.local_addr().unwrap(), None, None);
+                if private {
+                    target.private.insert(frontend_addr.ip());
+                }
+                let mut tls = TlsListener::new(
+                    listener,
+                    Preprocessing {
+                        target,
+                        base_alpn: Vec::new(),
+                        probe: b"x",
+                    },
+                );
+                let client =
+                    TlsConnector::from(Arc::new(client_config_no_verify(provider()).unwrap()));
+                let tcp = TcpStream::connect(frontend_addr).await.unwrap();
+                let (accepted, connected) = tokio::join!(
+                    futures::future::poll_fn(|cx| tls.poll_accept(cx)),
+                    client.connect(ServerName::IpAddress(Ipv4Addr::LOCALHOST.into()), tcp),
+                );
+                let _accepted = accepted.unwrap();
+                let _connected = connected.unwrap();
+                let (mut upstream, _) = backend.accept().await.unwrap();
+                let mut probe = [0];
+                upstream.read_exact(&mut probe).await.unwrap();
+                let mut extensions = http::Extensions::new();
+                extensions.insert(TcpMetadata {
+                    peer_addr: upstream.peer_addr().unwrap(),
+                    local_addr: upstream.local_addr().unwrap(),
+                });
+                let origin =
+                    crate::net::request_origin::RequestOrigin::from_extensions(&extensions);
+                assert_eq!(origin.peer_ip, Some(Ipv4Addr::LOCALHOST.into()));
+                assert_eq!(origin.gateway, Some(gateway_id));
+                assert_eq!(origin.local_ip, Some(frontend_addr.ip()));
+                assert_eq!(origin.public, !private);
+            }
+        })
+        .await
+        .unwrap();
     }
 
     #[tokio::test]

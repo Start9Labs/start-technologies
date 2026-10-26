@@ -33,13 +33,8 @@ export abstract class AbstractMarketplaceService {
   ): Observable<MarketplacePkg | null>
 
   /** Loads a package or dependency icon through the app's transport. */
-  fetchIcon$(
-    registry: string,
-    id: string,
-    version: string,
-    dependency?: string,
-  ): Observable<string> {
-    return of(registryIconUrl(registry, id, version, dependency))
+  fetchIcon$(registry: string, icon: string): Observable<string> {
+    return of(registryIconUrl(registry, icon))
   }
 
   /** Fetch a static asset (LICENSE.md / instructions.md) for a package. */

@@ -25,8 +25,7 @@
 //! atomic rename swaps inodes rather than mutating in place, so the external
 //! `tar`/`fs::read` that copies it always sees one complete document — a live
 //! SQLite file copied the same way could be torn mid-write. The in-memory map is
-//! authoritative (mirrors the `sessions.json` pattern in `auth.rs`); disk is
-//! rewritten only when the map actually changes.
+//! authoritative; disk is rewritten only when the map actually changes.
 
 use std::collections::HashMap;
 use std::path::Path;

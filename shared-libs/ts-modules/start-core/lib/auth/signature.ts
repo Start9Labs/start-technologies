@@ -7,11 +7,12 @@ import { concatBytes, hexToBytes } from '@noble/hashes/utils'
  * A request is authorized by signing, with an enrolled Ed25519 key, a
  * message of:
  *
- *   "Start-Auth-Sig v1\0" || timestamp || nonce || size || blake3(body) || context
+ *   "Start-Auth-Sig v2\0" || len(context) || context || 3 || timestamp || nonce || size || blake3(body)
  *
- * — a fixed protocol tag (cross-protocol separation), the request commitment,
- * and the server identity (hostname/IP/domain) the signature is bound to. The
- * header value is the query-encoded commitment plus the signer's public key
+ * — a fixed protocol tag (cross-protocol separation), the server identity
+ * (hostname/IP/domain) the signature is bound to, prefixed with its length as
+ * one byte, the request commitment's type, and the commitment. The
+ * header value is the query-encoded commitment, tagged with its type, plus the signer's public key
  * and the signature, each as bare base64 DER (no PEM armor).
  *
  * Keys are WebCrypto and non-extractable: a compromised page can sign while
@@ -19,7 +20,10 @@ import { concatBytes, hexToBytes } from '@noble/hashes/utils'
  * secure context and Ed25519 WebCrypto support (all evergreen browsers).
  */
 
-const REQUEST_AUTH_TAG = new TextEncoder().encode('Start-Auth-Sig v1\0')
+const REQUEST_AUTH_TAG = new TextEncoder().encode('Start-Auth-Sig v2\0')
+
+// The server's `SignedCommitment::TYPE_ID` for `RequestCommitment`.
+const REQUEST_COMMITMENT_TYPE = 3
 
 export const AUTH_SIG_HEADER = 'X-Start-Auth-Sig'
 
@@ -53,23 +57,29 @@ export async function signRequest(
   const size = BigInt(body.length)
   const hash = blake3(body)
   const contextBytes = new TextEncoder().encode(context)
+  if (contextBytes.length > 255) {
+    throw new Error('Signing context is longer than 255 bytes')
+  }
 
-  const message = new Uint8Array(
-    REQUEST_AUTH_TAG.length + 56 + contextBytes.length,
-  )
+  const typeAt = REQUEST_AUTH_TAG.length + 1 + contextBytes.length
+  const commitmentStart = typeAt + 1
+  const message = new Uint8Array(commitmentStart + 56)
   message.set(REQUEST_AUTH_TAG, 0)
-  const view = new DataView(message.buffer, REQUEST_AUTH_TAG.length, 24)
+  message[REQUEST_AUTH_TAG.length] = contextBytes.length
+  message.set(contextBytes, REQUEST_AUTH_TAG.length + 1)
+  message[typeAt] = REQUEST_COMMITMENT_TYPE
+  const view = new DataView(message.buffer, commitmentStart, 24)
   view.setBigInt64(0, timestamp, false)
   view.setBigUint64(8, nonce, false)
   view.setBigUint64(16, size, false)
-  message.set(hash, REQUEST_AUTH_TAG.length + 24)
-  message.set(contextBytes, REQUEST_AUTH_TAG.length + 56)
+  message.set(hash, commitmentStart + 24)
 
   const signature = new Uint8Array(
     await crypto.subtle.sign('Ed25519', key.privateKey, message),
   )
 
   const params = new URLSearchParams()
+  params.set('commitment', 'request')
   params.set('timestamp', timestamp.toString())
   params.set('nonce', nonce.toString())
   params.set('size', size.toString())

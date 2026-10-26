@@ -1,4 +1,4 @@
-import { WA_IS_MOBILE } from '@ng-web-apis/platform'
+import { TUI_BREAKPOINT } from '@taiga-ui/core'
 import { inject } from '@angular/core'
 import {
   ActivatedRouteSnapshot,
@@ -13,10 +13,11 @@ export default [
   {
     path: '',
     component: SystemComponent,
+    runGuardsAndResolvers: 'always',
     canActivate: [
       ({ firstChild }: ActivatedRouteSnapshot, state: RouterStateSnapshot) =>
         !!firstChild ||
-        inject(WA_IS_MOBILE) ||
+        inject(TUI_BREAKPOINT)() === 'mobile' ||
         inject(Router).parseUrl(`${state.url}/general`),
     ],
     children: [
@@ -71,16 +72,15 @@ export default [
         path: 'gateways',
         loadComponent: () => import('./routes/gateways/gateways.component'),
       },
-      // {
-      //   path: 'authorities',
-      //   title: titleResolver,
-      //   loadComponent: () =>
-      //     import('./routes/authorities/authorities.component'),
-      // },
+      {
+        path: 'outbound-traffic',
+        title: titleResolver,
+        data: { title: 'Outbound Traffic' },
+        loadComponent: () => import('./routes/outbound-traffic'),
+      },
       {
         path: 'dns',
-        title: titleResolver,
-        loadComponent: () => import('./routes/dns/dns.component'),
+        redirectTo: 'gateways',
       },
       {
         path: 'os-logs',

@@ -19,11 +19,10 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tokio::sync::broadcast::Sender;
 use tracing::instrument;
-use url::Url;
 
 use crate::GatewayId;
+use crate::context::CliContext;
 use crate::context::config::ContextConfig;
-use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::{NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::middleware::auth::Auth;
 use crate::middleware::auth::local::{LocalAuthContext, dial_addr, local_auth_header};
@@ -871,41 +870,6 @@ impl CallRemote<TunnelContext> for CliContext {
             self,
             url,
             headers,
-            sig_ctx.as_deref(),
-            method,
-            params,
-        )
-        .await
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize, VisitFields, Parser)]
-#[group(skip)]
-pub struct TunnelUrlParams {
-    #[arg(help = "help.arg.tunnel-url")]
-    pub tunnel: Url,
-}
-
-rpc_toolkit::reflect_ts!(TunnelUrlParams);
-
-impl CallRemote<TunnelContext, TunnelUrlParams> for RpcContext {
-    async fn call_remote(
-        &self,
-        mut method: &str,
-        _: OrdMap<&'static str, Value>,
-        params: Value,
-        TunnelUrlParams { tunnel }: TunnelUrlParams,
-    ) -> Result<Value, RpcError> {
-        let url = tunnel.join("rpc/v0")?;
-        method = method.strip_prefix("tunnel.").unwrap_or(method);
-
-        let sig_ctx = url.host_str().map(InternedString::from_display);
-
-        crate::middleware::auth::signature::call_remote_with_client(
-            self,
-            self.client.get(),
-            url,
-            HeaderMap::new(),
             sig_ctx.as_deref(),
             method,
             params,

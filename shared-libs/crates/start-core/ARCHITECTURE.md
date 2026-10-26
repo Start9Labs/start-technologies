@@ -28,6 +28,7 @@ how `startbox` dispatches to `startd`, `start-cli`, etc. The per-entrypoint logi
 ## Key Modules
 
 - `src/bins/` — Per-binary entrypoints + `MultiExecutable` dispatch
+- `src/util/output.rs` — Table output under `rpc_toolkit::output`'s broken-pipe policy; the prelude re-exports it.
 - `src/context/` — Context types (RpcContext, CliContext, InitContext, DiagnosticContext)
 - `src/service/` — Service lifecycle management with actor pattern (`service_actor.rs`)
 - `src/db/model/` — Patch-DB models (`public.rs` synced to frontend, `private.rs` backend-only)
@@ -41,6 +42,10 @@ how `startbox` dispatches to `startd`, `start-cli`, etc. The per-entrypoint logi
 - `src/os_install/`, `src/init.rs`, `src/setup.rs` — OS install, init, and first-run setup
 - `src/util/` — Shared utilities (process invocation, IO, guards — see `core-rust-patterns.md`)
 - `src/version/` — Migrations and version logic (see `VERSION_BUMP.md`, `exver.md`)
+
+## DNS lifecycle
+
+`startd` creates one shared `DnsController` before selecting setup, initialization, or diagnostic UI. Those contexts and the runtime `NetController` share its handle and listener-reconciliation task. Attaching the persisted `NetworkInterfaceController` transfers DNS authority and keeps that controller alive independently of later RPC initialization success. See [DNS forwarding](policy-routing.md#dns-forwarding) for bootstrap policy, watcher handoff, and requester-based routing.
 
 ## RPC Pattern
 

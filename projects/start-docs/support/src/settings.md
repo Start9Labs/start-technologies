@@ -1,6 +1,6 @@
 # Settings
 
-Settings holds your profile, your password and email, your preferences, and how Start9 Support reaches you. Open it from the account menu, under your name at the bottom of the chat list.
+Settings holds your profile, your password and email, your preferences, how Start9 Support reaches you, and the way to delete your account. Open it from the account menu, under your name at the bottom of the chat list.
 
 ## Profile
 
@@ -11,6 +11,7 @@ Settings holds your profile, your password and email, your preferences, and how 
 
 - **Change email** — the new address takes effect once you open the link sent to it.
 - **Change password** — signs you out everywhere else.
+- **Delete account** — closes your account and deletes it for good 30 days later. See [Deleting Your Account](account.md#deleting-your-account).
 
 ## Preferences
 
@@ -21,7 +22,3 @@ Settings holds your profile, your password and email, your preferences, and how 
 ## Notifications
 
 This device's notifications and the **Push notifications** switch for every device. See [Notifications](notifications.md).
-
-## Email
-
-The **Unread reply reminders** switch. See [Email](email.md).

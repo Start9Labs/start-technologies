@@ -134,19 +134,21 @@ cat << EOF > /etc/issue.net
 StartOS v${VERSION}
 EOF
 
-# change timezone
 ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime
 
-rm /etc/resolv.conf
-echo "nameserver 127.0.0.1" > /etc/resolv.conf
-echo "nameserver 1.1.1.1" >> /etc/resolv.conf # Cloudflare DNS Fallback
+resolv_conf=/etc/resolv.conf
+# live-build restores the saved resolver after chroot customization.
+if [ "$(cat /etc/debian_chroot 2>/dev/null)" = live ]; then
+	resolv_conf=/etc/resolv.conf.orig
+fi
+rm -f "$resolv_conf"
+echo "nameserver 127.0.0.1" > "$resolv_conf"
 
-# switch to network-manager
 echo "#" > /etc/network/interfaces
 cat << EOF > /etc/NetworkManager/NetworkManager.conf
 [main]
 plugins=ifupdown,keyfile
-dns=systemd-resolved
+dns=none
 
 [ifupdown]
 managed=true
@@ -175,6 +177,9 @@ $SYSTEMCTL mask suspend.target
 $SYSTEMCTL mask hibernate.target
 $SYSTEMCTL mask hybrid-sleep.target
 
+$SYSTEMCTL mask rpcbind.service
+$SYSTEMCTL mask rpcbind.socket
+
 if which gsettings > /dev/null; then
 	gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-timeout '0'
 	gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-timeout '0'
@@ -190,8 +195,7 @@ set_config /etc/systemd/journald.conf ForwardToSyslog no
 set_config /etc/lvm/lvm.conf issue_discards 1
 set_config /etc/containers/registries.conf unqualified-search-registries '["docker.io"]'
 sed -i 's/\(#\|\^\)\s*\([^=]\+\)=\(suspend\|hibernate\)\s*$/\2=ignore/g' /etc/systemd/logind.conf
-set_config /etc/systemd/resolved.conf MulticastDNS no
-set_config /etc/systemd/resolved.conf DNSStubListener no
+cp /usr/lib/startos/resolved.conf /etc/systemd/resolved.conf
 set_config /etc/default/lxc-net LXC_DHCP_CONFILE /etc/dnsmasq.conf
 # Dual-stack lxcbr0: a ULA (fd00:3::/64) + SLAAC RA, so containers get a v6.
 set_config /etc/default/lxc-net LXC_IPV6_ADDR '"fd00:3::1"'
@@ -242,6 +246,19 @@ cat > /etc/systemd/oomd.conf.d/10-startos.conf << 'EOF'
 DefaultMemoryPressureDurationSec=20s
 EOF
 
+mkdir -p /etc/systemd/system.conf.d
+cat > /etc/systemd/system.conf.d/10-startos-watchdog.conf << 'EOF'
+[Manager]
+RuntimeWatchdogSec=60s
+EOF
+
+# Start the serial console login prompt only on ports that have a UART.
+mkdir -p /etc/systemd/system/serial-getty@.service.d
+cat > /etc/systemd/system/serial-getty@.service.d/10-startos.conf << 'EOF'
+[Service]
+ExecCondition=/bin/sh -c '[ "$$(cat /sys/class/tty/%I/type 2>/dev/null)" != 0 ]'
+EOF
+
 mkdir -p /etc/nginx/ssl
 
 rm -rf /var/lib/tor/*
@@ -256,6 +273,8 @@ fs.inotify.max_user_watches=1048576
 # Headroom for nested user namespaces (rootless OCI engines inside service LXCs).
 user.max_user_namespaces=28633
 kernel.unprivileged_userns_clone=1
+# Outbound source ports stay below the service ports StartOS allocates.
+net.ipv4.ip_local_port_range=32768 49151
 EOF
 
 # Ensure /dev/fuse and /dev/net/tun are available on the host so service LXCs

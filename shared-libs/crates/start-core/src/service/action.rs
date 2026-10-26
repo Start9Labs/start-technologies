@@ -5,7 +5,7 @@ use imbl_value::json;
 
 use crate::action::{ActionInput, ActionResult};
 use crate::db::model::package::{
-    ActionVisibility, AllowedStatuses, TaskCondition, TaskEntry, TaskInput, TaskSeverity,
+    ActionVisibility, AllowedStatuses, TaskCondition, TaskEntry, TaskInput,
 };
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
@@ -111,8 +111,7 @@ pub fn update_tasks(
     action_id: &ActionId,
     input: &Value,
     was_run: bool,
-) -> bool {
-    let mut critical_activated = false;
+) {
     tasks.retain(|_, v| {
         if &v.task.package_id != package_id || &v.task.action_id != action_id {
             return true;
@@ -129,9 +128,6 @@ pub fn update_tasks(
                             }
                         } else if accept.iter().all(|a| conflicts(a, input)) {
                             v.active = true;
-                            if v.task.severity == TaskSeverity::Critical {
-                                critical_activated = true;
-                            }
                         }
                     }
                     None => {
@@ -150,7 +146,6 @@ pub fn update_tasks(
             !was_run
         }
     });
-    critical_activated
 }
 
 pub(super) struct RunAction {
@@ -233,16 +228,11 @@ impl Handler<RunAction> for ServiceActor {
             .ctx
             .db
             .mutate(|db| {
-                for (id, pde) in db.as_public_mut().as_package_data_mut().as_entries_mut()? {
-                    if pde.as_tasks_mut().mutate(|tasks| {
-                        Ok(update_tasks(tasks, &package_id, action_id, &input, true))
-                    })? && pde
-                        .as_current_dependencies()
-                        .de()?
-                        .is_task_target(&id, &package_id)
-                    {
-                        pde.as_status_info_mut().stop()?;
-                    }
+                for (_, pde) in db.as_public_mut().as_package_data_mut().as_entries_mut()? {
+                    pde.as_tasks_mut().mutate(|tasks| {
+                        update_tasks(tasks, &package_id, action_id, &input, true);
+                        Ok(())
+                    })?;
                 }
                 Ok(())
             })

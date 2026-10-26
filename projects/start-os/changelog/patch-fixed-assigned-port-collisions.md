@@ -1,0 +1,1 @@
+- Service interfaces on automatically assigned ports no longer occasionally fail to accept connections because StartOS was using the port for an outbound connection.

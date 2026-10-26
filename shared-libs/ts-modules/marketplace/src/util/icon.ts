@@ -1,18 +1,6 @@
-export const FALLBACK_ICON = 'assets/img/service-icons/fallback.png'
+export { FALLBACK_ICON } from '@start9labs/shared'
 
-export function registryIconUrl(
-  registry: string,
-  id: string,
-  version: string,
-  dependency?: string,
-): string {
-  const path = [
-    id,
-    version,
-    ...(dependency ? ['dependencies', dependency] : []),
-  ]
-    .map(encodeURIComponent)
-    .join('/')
-
+/** Resolves a stored icon's path against the registry's `/icons/` route. */
+export function registryIconUrl(registry: string, path: string): string {
   return new URL(`icons/${path}`, registry).href
 }

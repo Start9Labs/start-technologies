@@ -21,7 +21,7 @@ start-wrt was migrated from its own repo into this monorepo. Key consequences:
 
 - Don't run `make start-wrt-image` (full OpenWrt build) unsolicited — it fetches the OpenWrt tree and takes hours. For backend work use `cargo build -p startwrt-core --bin startwrt`; for frontend work use `npm run start:wrt`. Use `make start-wrt-update STARTWRT_REMOTE=…` only when explicitly asked to deploy — a request to test on the [live bench](#live-bench) is that request, for the bench router alone.
 - Read the component-level `AGENTS.md` before operating on that component — they document footguns specific to each tree.
-- Cross-frontend/backend changes: update `API_CONTRACT.md`, the Rust handler, `web/src/app/services/api/api.service.ts`, and **both** `live-api.service.ts` and `mock-api.service.ts` together. Skipping any breaks the contract.
+- Cross-frontend/backend changes: update `API_CONTRACT.md`, the Rust handler, the committed bindings (`make start-wrt-rpc-bindings`), `web/src/app/services/api/api.service.ts`, and **both** `live-api.service.ts` and `mock-api.service.ts` together. Skipping any breaks the contract.
 
 ## Live bench
 
@@ -50,15 +50,16 @@ have tested and stop.
 - **Serial console** — `/dev/wrt-console` on this machine: boot output, panics, and hangs, and
   a root shell once `bench.sh console login` answers its `login` prompt. It is the recovery
   path whenever SSH is gone.
-- **Web UI and RPC** — `bench.sh ui rpc <method>` calls through the daemon's login and session
-  layer exactly as the web UI does, against the router's LAN address (loopback bypasses
-  auth). `bench.sh ui tunnel` puts the UI at `https://127.0.0.1:8443/` for a headless browser.
-  Both work whatever Remote Access is set to.
+- **Web UI and RPC** — `bench.sh ui rpc <method>` signs each call with a key it enrolled through
+  the daemon's login, exactly as the web UI does, against the router's LAN address. `bench.sh ui tunnel`
+  puts the UI at `https://127.0.0.1:8443/` for a headless browser. Both work whatever Remote
+  Access is set to.
 
 [`bench/bench.sh`](bench/bench.sh) drives all of it; `bench.sh --help` lists the commands.
 Run `bash projects/start-wrt/bench/bench.test.sh` from the repo root for the harness's
-host-mocked regression tests; they need Bash and Node.js, not a physical bench.
-Its state — the console log and config snapshots — lives in
+host-mocked regression tests; they need Bash, Node.js, and the root npm dependencies, not a
+physical bench, and `bench.sh ui` needs the same dependencies.
+Its state — the console log, config snapshots, and the UI signing key — lives in
 `~/.local/state/startwrt-bench/`, outside the repo. A snapshot is a `sysupgrade` backup:
 it holds the router's password hash and private keys, so it never leaves that directory.
 The router's root password — the UI and console login — lives in
@@ -105,9 +106,11 @@ as what its upstream router offers.
 5. **Drive the scenario** a user would meet, from the side they would meet it: inbound from
    this machine, outbound and LAN-side from `os-bench` or a synthetic client, the UI from a
    headless browser through `bench.sh ui tunnel`. Drive an RPC handler through
-   `bench.sh ui rpc` as well as `startwrt-cli`: the CLI runs the handler in its own
-   short-lived process, the UI in the daemon. Reproduce a bug on the old binary first when
-   you can; a fix that passes a test which never failed has proven nothing.
+   `bench.sh ui rpc` as well as `startwrt-cli`: the CLI runs a handler in its own
+   short-lived process unless it is registered with `.with_call_remote::<CliContext>()`,
+   which sends it to the daemon; the UI always runs it in the daemon. Reproduce a bug on the
+   old binary first when you can; a fix that passes a test which never failed has proven
+   nothing.
 6. **Test for regressions.** Drive each item from step 1, then `bench.sh smoke` — the standing
    checks every deploy must pass whatever it changed. Run `smoke` again after a reboot when
    the change touches boot, init, or anything written at startup.
@@ -148,7 +151,7 @@ as what its upstream router offers.
 
 1. **Key.** `ssh-keygen -t ed25519 -N '' -C startwrt-bench -f ~/.ssh/id_ed25519_wrtbench`.
    Add the public half to the router in the StartWRT UI's SSH keys, and to StartOS under
-   `System > SSH`. Give the router's WAN a DHCP reservation on the upstream router so the
+   `System > SSH Keys`. Give the router's WAN a DHCP reservation on the upstream router so the
    address holds.
 2. **SSH aliases** in `~/.ssh/config`:
 
@@ -243,8 +246,9 @@ make start-wrt-test                                              # same tests, c
 vendored `rpc-toolkit` and `imbl-value`. For dev authentication set `STARTWRT_DEV_PASSWORD` to
 bypass `/etc/shadow`.
 
-> The host build embeds the web UI via `include_dir!`, so it needs `projects/start-wrt/web/dist/`
-> to exist — run the web build first (below), or build the full binary with `make start-wrt`.
+> The host build embeds the web UI via `include_dir!`. Without a prior web build (below),
+> `build.rs` creates an empty `projects/start-wrt/web/dist/startwrt/browser/` and the binary
+> embeds no UI — run the web build first, or build the full binary with `make start-wrt`.
 
 ## Frontend (Angular, in the root workspace)
 
@@ -254,7 +258,8 @@ The web app is the `start-wrt` project in the root Angular workspace — it shar
 ```bash
 npm ci                  # install the whole workspace
 npm run build:deps      # build the file: deps (@start9labs/start-core, patch-db client) — once after install
-npm run start:wrt       # dev server (mock API, no backend needed) — stamps config.json first
+cp projects/start-wrt/web/config-sample.json projects/start-wrt/web/config.json  # once; config.json is gitignored
+npm run start:wrt       # dev server (mock API while config.json has useMocks: true) — stamps config.json first
 npm run build:wrt       # production build → projects/start-wrt/web/dist/startwrt/browser/
 npm run check:wrt       # type-check
 npm run check:i18n:wrt  # i18n dictionary check
@@ -296,14 +301,14 @@ Releases stage through a beta registry before promotion to production, mirroring
 2. Run the **start-wrt** workflow with `deploy: release`. It builds the OpenWrt image, uploads
    the images to `s3://startwrt-images`, and registers + indexes the version into the **beta
    registry** (signing with the `DEV_KEY` repo secret). Beta routers — any router whose UCI
-   `startwrt.system.registry` points at the beta registry (`uci set
-startwrt.system.registry=<beta url>; uci commit startwrt`) — now soak the version as a
+   `startwrt.system.registry` points at the beta registry (`uci set startwrt.system=system;
+uci set startwrt.system.registry=<beta url>; uci commit startwrt`) — now soak the version as a
    normal OTA update. (If the register step failed or must be redone, the manual fallback is
    `RUN_ID=<the deploy run> ./scripts/manage-release.sh pull-gha start-wrt` followed by
    `./scripts/manage-release.sh register start-wrt` — needs `gh`, `start-cli`, and
-   `~/.startos/developer.key.pem`.)
+   `~/.startos/id.key.pem`.)
 3. Once the version has soaked, cut the release from the repo root (needs `gh`, `gpg` with the
-   Start9 org key, `start-cli`, and `~/.startos/developer.key.pem`):
+   Start9 org key, `b3sum`, `start-cli`, and `~/.startos/id.key.pem`):
 
    ```
    ./scripts/manage-release.sh release start-wrt
@@ -357,6 +362,11 @@ diff -u /tmp/pristine openwrt/<path> \
 (Keep the explanatory header block above the diff — patch tooling ignores everything before
 the first `---`/`diff` line.)
 
+A patch to a package's own directory (its `Makefile` or `files/`) does not invalidate that
+package's build stamp in the carried-over `build_dir/`, so an incremental image reinstalls the
+stale package. Run `make -C projects/start-wrt/openwrt package/<path>/{clean,compile}` before
+re-imaging; CI builds from a clean workspace and is unaffected.
+
 **Bumping the upstream release.** Update both values in `build/openwrt-version` (the new
 version and the sha256 of its tag tarball — download it once and `sha256sum` it), set each
 feed in [`build/feeds.conf`](build/feeds.conf) to the `^<commit>` the tag's own
@@ -367,3 +377,29 @@ each patch's `Applies to:` header line to the new version. The overlay needs
 attention only if upstream grew a conflicting path (the spacemit target dir is ours alone, so
 this is rare). Commit the pin bump + feed pins + refreshed patches + a changelog fragment as one
 ordinary PR.
+
+**Bumping the kernel.** The K1 kernel is a mainline stable release plus the SpaceMiT vendor
+delta, the way every OpenWrt target pins its kernel. The delta comes from
+[jmontleon/kernel-ark](https://gitlab.com/jmontleon/kernel-ark), whose
+`fedora-6.18.<n>-riscv-k1.*` branches carry the K1 work rebased onto each 6.18 stable release.
+[`openwrt-overlay/target/linux/generic/kernel-6.18`](openwrt-overlay/target/linux/generic/kernel-6.18)
+names the release (`LINUX_VERSION-6.18`) and the sha256 of its kernel.org tarball
+(`LINUX_KERNEL_HASH-6.18.<n>`).
+[`build/gen-kernel-patch.sh`](build/gen-kernel-patch.sh) pins the vendor tree by commit
+(`VENDOR_URL`, `VENDOR_REF`) and generates
+`openwrt-overlay/target/linux/spacemit/patches-6.18/0000-spacemit-k1-vendor-kernel.patch`
+from it. It reverts the Fedora packaging and patches in its `FEDORA` list to mainline and leaves
+out the vendor drivers in its `EXCLUDE` list. Never edit that patch by hand.
+To move the kernel:
+
+1. Set `VENDOR_REF` to the new vendor commit, never a branch name: its branches are republished.
+   Set `LINUX_VERSION-6.18` to the `SUBLEVEL` in that commit's top-level `Makefile`, and rename
+   the hash line to match.
+2. Take the tarball's sha256 from kernel.org's signed `sha256sums.asc`
+   (`https://cdn.kernel.org/pub/linux/kernel/v6.x/`), check its signature, and record it.
+3. Run `projects/start-wrt/build/gen-kernel-patch.sh`. It fails if the vendor tree is a
+   different sublevel, still references an excluded driver, or adds Red Hat lines outside
+   `FEDORA`. It lists every path new to the patch; add any that carries only Fedora changes to
+   `FEDORA` and rerun.
+4. Rebuild the image and bench it. Commit the version, hash, regenerated patch, and a changelog
+   fragment together.

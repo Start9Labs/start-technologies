@@ -12,6 +12,7 @@ jest.mock('fs/promises', () => ({
   stat: jest.fn(),
   mkdir: jest.fn(),
   copyFile: jest.fn(),
+  rm: jest.fn(),
 }))
 
 jest.mock('child_process', () => ({
@@ -70,6 +71,7 @@ beforeEach(() => {
   jest.spyOn(fs, 'stat').mockRejectedValue(new Error('ENOENT'))
   jest.spyOn(fs, 'mkdir').mockResolvedValue(undefined)
   jest.spyOn(fs, 'copyFile').mockResolvedValue(undefined)
+  jest.spyOn(fs, 'rm').mockResolvedValue(undefined)
   jest.spyOn(subcontainers, 'execFile').mockResolvedValue({
     stdout: '',
     stderr: '',

@@ -123,6 +123,12 @@ export const mockTunnelData: TunnelData = {
   ],
   gateways: {
     eth0: {
+      wireguardEndpointDomains: [],
+      dns: {
+        staticServers: null,
+        servers: ['1.1.1.1:53', '[2606:4700:4700::1111]:53'],
+        source: 'public-fallback',
+      },
       name: null,
       secure: null,
       type: 'inbound-outbound',
@@ -142,6 +148,8 @@ export const mockTunnelData: TunnelData = {
         ntpServers: [],
         lanIp: ['10.59.0.1'],
         dnsServers: [],
+        defaultRouteV4: 100,
+        defaultRouteV6: null,
       },
     },
   },

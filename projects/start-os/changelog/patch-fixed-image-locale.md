@@ -1,1 +1,0 @@
-- Services start on servers set to a language other than English, including those running PostgreSQL.

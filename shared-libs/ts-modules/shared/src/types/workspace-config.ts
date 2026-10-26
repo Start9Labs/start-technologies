@@ -15,6 +15,7 @@ export type WorkspaceConfig = {
     api: {
       url: string
       version: string
+      signAs?: string
     }
     mocks: {
       maskAs: AccessType

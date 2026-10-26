@@ -22,6 +22,4 @@ It runs in any modern browser and installs as an app on your phone or computer.
 
 - **[Notifications](notifications.md)** — Getting notified when Start9 replies, and what to do when notifications don't arrive.
 
-- **[Email](email.md)** — Unread-reply reminders and how to turn them off.
-
 - **[Settings](settings.md)** — Your name, avatar, email, password, language, appearance and time format.

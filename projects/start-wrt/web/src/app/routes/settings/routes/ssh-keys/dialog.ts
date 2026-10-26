@@ -49,7 +49,7 @@ function publicKeyValidator(control: AbstractControl): ValidationErrors | null {
           tuiTextarea
           placeholder="ssh-ed25519 AAAA... user@host"
           formControlName="key"
-          [min]="3"
+          [minRows]="3"
         ></textarea>
       </tui-textfield>
       <tui-error formControlName="key" />

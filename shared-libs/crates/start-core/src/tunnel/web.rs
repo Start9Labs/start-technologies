@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 
 use clap::Parser;
@@ -23,9 +23,11 @@ use crate::net::web_server::Accept;
 use crate::prelude::*;
 use crate::tunnel::auth::SetPasswordParams;
 use crate::tunnel::context::TunnelContext;
-use crate::tunnel::db::TunnelDatabase;
+use crate::tunnel::db::{PortForward, PortForwards, TunnelDatabase};
 use crate::util::serde::{HandlerExtSerde, Pem, display_serializable};
 use crate::util::tui::{choose, parse_as, prompt, prompt_multiline};
+
+pub(crate) mod listener;
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +36,224 @@ pub struct WebserverInfo {
     pub enabled: bool,
     pub listen: Option<SocketAddr>,
     pub certificate: Option<TunnelCertData>,
+}
+
+impl WebserverInfo {
+    pub(crate) fn reserves_plain_forward(&self, source: SocketAddrV4, count: u16) -> bool {
+        self.enabled
+            && self
+                .listen
+                .and_then(ipv4_listener_addr)
+                .is_some_and(|listen| {
+                    (listen.ip().is_unspecified() || listen.ip() == source.ip())
+                        && source.port() <= listen.port()
+                        && listen.port() <= source.port().saturating_add(count.saturating_sub(1))
+                })
+    }
+
+    pub(crate) fn check_plain_forward(
+        &self,
+        source: SocketAddrV4,
+        count: u16,
+    ) -> Result<(), Error> {
+        if self.reserves_plain_forward(source, count) {
+            return Err(Error::new(
+                eyre!(t!("tunnel.web.ui-port-reserved")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        Ok(())
+    }
+
+    fn check_forward_conflicts(&self, forwards: &PortForwards) -> Result<(), Error> {
+        for (source, forward) in &forwards.0 {
+            let enabled = match forward {
+                PortForward::Dnat { enabled, .. } => *enabled,
+                PortForward::Sni { fallback, .. } => fallback.as_ref().is_some_and(|f| f.enabled),
+            };
+            if enabled && self.reserves_plain_forward(*source, forward.port_span()) {
+                return Err(Error::new(
+                    eyre!(t!("tunnel.web.listen-port-forwarded")),
+                    ErrorKind::InvalidRequest,
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn ipv4_listener_addr(listen: SocketAddr) -> Option<SocketAddrV4> {
+    match listen {
+        SocketAddr::V4(addr) => Some(addr),
+        SocketAddr::V6(addr) => {
+            let ip = if addr.ip().is_unspecified() {
+                Ipv4Addr::UNSPECIFIED
+            } else {
+                addr.ip().to_ipv4_mapped()?
+            };
+            Some(SocketAddrV4::new(ip, addr.port()))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn listen_changes_reject_plain_ranges_without_changing_the_address() {
+        use std::collections::BTreeMap;
+
+        use crate::tunnel::db::SniRoute;
+
+        let source = "203.0.113.4:442".parse().unwrap();
+        let target = "10.0.0.2:442".parse().unwrap();
+        let original = "0.0.0.0:8443".parse().unwrap();
+        let mut db = Model::new(&TunnelDatabase::default()).unwrap();
+        db.as_webserver_mut().as_enabled_mut().ser(&true).unwrap();
+        for enabled in [false, true] {
+            for auto in [false, true] {
+                db.as_port_forwards_mut()
+                    .ser(&PortForwards(BTreeMap::from([(
+                        source,
+                        PortForward::Dnat {
+                            target,
+                            label: None,
+                            enabled,
+                            count: 2,
+                            auto,
+                        },
+                    )])))
+                    .unwrap();
+                update_listen_address(&mut db, original).unwrap();
+                for listen in ["0.0.0.0:443", "203.0.113.4:443", "[::]:443"] {
+                    if enabled {
+                        let error =
+                            update_listen_address(&mut db, listen.parse().unwrap()).unwrap_err();
+                        assert_eq!(error.kind, ErrorKind::InvalidRequest);
+                        assert_eq!(db.as_webserver().as_listen().de().unwrap(), Some(original));
+                    } else {
+                        update_listen_address(&mut db, listen.parse().unwrap()).unwrap();
+                    }
+                }
+                for listen in ["203.0.113.5:443", "0.0.0.0:444", "[::1]:443"] {
+                    update_listen_address(&mut db, listen.parse().unwrap()).unwrap();
+                }
+            }
+        }
+        db.as_port_forwards_mut()
+            .ser(&PortForwards(BTreeMap::from([(
+                "203.0.113.4:443".parse().unwrap(),
+                PortForward::Sni {
+                    routes: BTreeMap::from([(
+                        "service.example.com".to_owned(),
+                        SniRoute {
+                            target,
+                            label: None,
+                            enabled: true,
+                            auto: false,
+                        },
+                    )]),
+                    fallback: None,
+                },
+            )])))
+            .unwrap();
+        update_listen_address(&mut db, "0.0.0.0:443".parse().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn disabled_ui_allows_configuration_but_checks_conflicts_on_enable() {
+        use std::collections::BTreeMap;
+
+        use crate::tunnel::db::SniRoute;
+
+        let source = "203.0.113.4:443".parse().unwrap();
+        let target = "10.0.0.2:443".parse().unwrap();
+        for enabled in [false, true] {
+            for forward in [
+                PortForward::Dnat {
+                    target,
+                    label: None,
+                    enabled,
+                    count: 1,
+                    auto: true,
+                },
+                PortForward::Sni {
+                    routes: BTreeMap::from([(
+                        "service.example.com".to_owned(),
+                        SniRoute {
+                            target,
+                            label: None,
+                            enabled: true,
+                            auto: true,
+                        },
+                    )]),
+                    fallback: Some(SniRoute {
+                        target,
+                        label: None,
+                        enabled,
+                        auto: true,
+                    }),
+                },
+            ] {
+                let mut db = Model::new(&TunnelDatabase::default()).unwrap();
+                db.as_port_forwards_mut()
+                    .ser(&PortForwards(BTreeMap::from([(source, forward)])))
+                    .unwrap();
+                update_listen_address(&mut db, "0.0.0.0:443".parse().unwrap()).unwrap();
+                assert!(!db.as_webserver().as_enabled().de().unwrap());
+                let result = activate_webserver(&mut db);
+                if enabled {
+                    assert_eq!(result.unwrap_err().kind, ErrorKind::InvalidRequest);
+                    assert!(!db.as_webserver().as_enabled().de().unwrap());
+                } else {
+                    result.unwrap();
+                    assert!(db.as_webserver().as_enabled().de().unwrap());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn plain_forwards_respect_enabled_ui_address_and_ranges() {
+        let source = "203.0.113.4:443".parse().unwrap();
+        let mut web = WebserverInfo {
+            enabled: true,
+            ..Default::default()
+        };
+        assert!(!web.reserves_plain_forward(source, 1));
+        for listen in [
+            "0.0.0.0:443",
+            "203.0.113.4:443",
+            "[::]:443",
+            "[::ffff:203.0.113.4]:443",
+        ] {
+            web.listen = Some(listen.parse().unwrap());
+            web.enabled = false;
+            assert!(!web.reserves_plain_forward(source, 1));
+            assert!(web.check_plain_forward(source, 1).is_ok());
+            web.enabled = true;
+            assert!(web.reserves_plain_forward(source, 1));
+            assert_eq!(
+                web.check_plain_forward(source, 1).unwrap_err().kind,
+                ErrorKind::InvalidRequest
+            );
+            assert!(web.reserves_plain_forward("203.0.113.4:442".parse().unwrap(), 2));
+            assert!(!web.reserves_plain_forward("203.0.113.4:442".parse().unwrap(), 1));
+            assert!(!web.reserves_plain_forward("203.0.113.4:444".parse().unwrap(), 1));
+        }
+        for listen in [
+            "203.0.113.5:443",
+            "127.0.0.1:443",
+            "[::1]:443",
+            "0.0.0.0:8443",
+        ] {
+            web.listen = Some(listen.parse().unwrap());
+            assert!(!web.reserves_plain_forward(source, 1));
+        }
+        web.listen = Some("0.0.0.0:65535".parse().unwrap());
+        assert!(web.reserves_plain_forward("203.0.113.4:65534".parse().unwrap(), 2));
+    }
 }
 
 rpc_toolkit::reflect_ts!(WebserverInfo);
@@ -352,25 +572,32 @@ pub async fn set_listen(
     ctx: TunnelContext,
     SetListenParams { listen }: SetListenParams,
 ) -> Result<(), Error> {
-    // Validate that the address is available to bind
-    tokio::net::TcpListener::bind(listen)
-        .await
-        .with_kind(ErrorKind::Network)
-        .with_ctx(|_| {
-            (
-                ErrorKind::Network,
-                format!("{} is not available to bind to", listen),
-            )
-        })?;
+    let _guard = ctx.forward_write_lock.lock().await;
+    listener::UiListener::check_available(listen).with_ctx(|_| {
+        (
+            ErrorKind::Network,
+            format!("{} is not available to bind to", listen),
+        )
+    })?;
 
     ctx.db
-        .mutate(|db| {
-            db.as_webserver_mut().as_listen_mut().ser(&Some(listen))?;
-
-            Ok(())
-        })
+        .mutate(|db| update_listen_address(db, listen))
         .await
         .result
+}
+
+fn update_listen_address(db: &mut Model<TunnelDatabase>, listen: SocketAddr) -> Result<(), Error> {
+    let mut web = db.as_webserver().de()?;
+    web.listen = Some(listen);
+    web.check_forward_conflicts(&db.as_port_forwards().de()?)?;
+    db.as_webserver_mut().as_listen_mut().ser(&Some(listen))
+}
+
+fn activate_webserver(db: &mut Model<TunnelDatabase>) -> Result<(), Error> {
+    let mut web = db.as_webserver().de()?;
+    web.enabled = true;
+    web.check_forward_conflicts(&db.as_port_forwards().de()?)?;
+    db.as_webserver_mut().as_enabled_mut().ser(&true)
 }
 
 pub async fn get_listen(ctx: TunnelContext) -> Result<Option<SocketAddr>, Error> {
@@ -393,6 +620,7 @@ pub async fn get_available_ips(ctx: TunnelContext) -> Result<Vec<IpAddr>, Error>
 }
 
 pub async fn enable_web(ctx: TunnelContext) -> Result<(), Error> {
+    let _guard = ctx.forward_write_lock.lock().await;
     ctx.db
         .mutate(|db| {
             if db.as_webserver().as_listen().transpose_ref().is_none() {
@@ -413,7 +641,7 @@ pub async fn enable_web(ctx: TunnelContext) -> Result<(), Error> {
                     ErrorKind::Authorization,
                 ));
             };
-            db.as_webserver_mut().as_enabled_mut().ser(&true)
+            activate_webserver(db)
         })
         .await
         .result

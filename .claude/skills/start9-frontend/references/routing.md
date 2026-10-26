@@ -24,3 +24,10 @@
   path (`/staff/chat`) and the level's `**` redirects there.
 - Navigation: `routerLink` in templates (with `[queryParams]`, `[state]`), `Router.navigate` in
   TS; shareable UI state lives in **query params**, synced bidirectionally (see components.md, templates).
+- **Route and query params are inputs.** `provideRouter(routes, withComponentInputBinding())`,
+  then the routed component declares `id = input('')` for `:id` and `tab = input('')` for
+  `?tab`. A child outside the outlet takes the value from that routed component
+  (`<aside [appQueue]="tab()">`) rather than injecting `ActivatedRoute` itself.
+  `inject(ActivatedRoute).snapshot` is left for a value needed while the class is constructed,
+  such as a form group's seed. An absent param sets the input to `undefined`, not its default,
+  so supply the fallback where the value is read.

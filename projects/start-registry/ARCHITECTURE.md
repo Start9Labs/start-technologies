@@ -38,7 +38,7 @@ Defined in `shared-libs/crates/start-core/src/registry/mod.rs`:
 - `POST /rpc/{*path}` — JSON-RPC, wrapped in `Cors`, `Auth` (local + signature auth), and `DeviceInfoMiddleware`.
 - `GET /ws/rpc/{*path}` — WebSocket RPC continuations, keyed by a `Guid`.
 - `/rest/rpc/{*path}` — REST continuation channel (e.g. large asset streams), keyed by a `Guid`.
-- `GET /icons/{id}/{version}` and `GET /icons/{id}/{version}/dependencies/{dependency}` — a package version's icon, or its icon for a dependency, unauthenticated. `package.get` omits icons for StartOS 0.4.0.3 and later, which load them here.
+- `GET /icons/{*path}` — a package or dependency icon from the content-addressed store, unauthenticated and immutable. Package versions refer to an icon by this path, `blake3/<hash>.<ext>`; `DeviceInfoMiddleware` inlines it as a data URL for StartOS before 0.4.0.3.
 
 ## RPC API surface (`registry_api`)
 
@@ -76,6 +76,7 @@ Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hol
 `RegistryContext::init` resolves `datadir` (default `/var/lib/startos`) and:
 
 - Opens `<datadir>/registry.db` as a `TypedPatchDb<RegistryDatabase>`; initializes it on first run and runs pending migrations.
+- Stores package and dependency icons once each under `<datadir>/icons/blake3/`, named by the blake3 of their bytes, and deletes those the index no longer refers to.
 - Opens a SQLite connection for metrics.
 - Hosts asset files under the data directory.
 

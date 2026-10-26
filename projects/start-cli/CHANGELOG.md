@@ -9,6 +9,44 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [2.5.1]
+
+### Fixed
+
+- Piping output into a command that stops reading early, such as `head`, no longer crashes the CLI.
+
+- Fixed macOS binaries aborting at launch on newer macOS versions.
+
+- Fixed services packed from an image whose `/etc/resolv.conf` is a symlink, such as a Nix-built image, failing to start on StartOS. Repack affected services with this version.
+
+## [2.5.0]
+
+### Added
+
+- **The identity key can live in gpg-agent.** Set `id-key-gpg: <key>` in the config (or pass `--id-key-gpg`) to a fingerprint, key ID, or user ID to sign with an Ed25519 key held by gpg-agent instead of `id.key.pem`. Requires GnuPG 2.3 or later. Servers running StartOS 0.4.0.3 or earlier cannot verify registry assets signed only by such a key.
+
+- The Debian package enables Bash tab completion automatically in new shells.
+
+- Add `server update-signers` commands to add, get, list, relabel, and remove trusted OS update signing keys.
+
+### Changed
+
+- **Registry signatures carry their actual scheme.** Signatures made with `id.key.pem` are Ed25519ph labeled with their own algorithm identifier. Publishing requires start-registry 1.2.0 or later; reading from older registries still works.
+
+- **Requests are signed with a new layout.** Managing a server or publishing to a registry requires StartOS 0.4.0.3, StartTunnel 1.4.0, or start-registry 1.2.0 or later.
+
+- Set DNS overrides per gateway with `net dns set-static <GATEWAY> [SERVERS]...`; omit servers to restore automatic gateway DNS.
+
+### Fixed
+
+- Bash tab completion works for nested subcommands and their options.
+
+- **`package start` records running intent while critical tasks block execution and prints a warning.** The service starts when those tasks clear. The `--force` flag is removed; remove it from scripts.
+
+### Security
+
+- **Update dependencies with security fixes**, including TLS certificate verification and handshake handling, HTTP/2 flow control, and XML parsing.
+
 ## [2.4.2]
 
 ### Fixed

@@ -1,5 +1,6 @@
 use std::cmp::max;
 use std::ffi::OsString;
+use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
@@ -12,18 +13,21 @@ use tracing::instrument;
 use crate::context::config::ServerConfig;
 use crate::context::rpc::InitRpcContextPhases;
 use crate::context::{DiagnosticContext, InitContext, RpcContext};
+use crate::net::dns::DnsController;
 use crate::net::gateway::WildcardListener;
 use crate::net::static_server::refresher;
 use crate::net::web_server::{Acceptor, WebServer};
 use crate::prelude::*;
 use crate::shutdown::Shutdown;
 use crate::system::launch_metrics_task;
+use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::append_file;
 use crate::util::logger::LOGGER;
 
 #[instrument(skip_all)]
 async fn inner_main(
     server: &mut WebServer<WildcardListener>,
+    dns: &Arc<DnsController>,
     config: &ServerConfig,
 ) -> Result<Option<Shutdown>, Error> {
     let rpc_ctx = if !tokio::fs::metadata("/run/startos/initialized")
@@ -33,7 +37,7 @@ async fn inner_main(
         LOGGER.set_logfile(Some(
             append_file("/run/startos/init.log").await?.into_std().await,
         ));
-        let (ctx, handle) = match super::start_init::main(server, &config).await? {
+        let (ctx, handle) = match super::start_init::main(server, dns.clone(), &config).await? {
             Err(s) => return Ok(Some(s)),
             Ok(ctx) => ctx,
         };
@@ -45,16 +49,17 @@ async fn inner_main(
 
         ctx
     } else {
-        let init_ctx = InitContext::init(config).await?;
+        let init_ctx = InitContext::init(config, dns.clone()).await?;
         let handle = init_ctx.progress.clone();
         let rpc_ctx_phases = InitRpcContextPhases::new(&handle);
         server.serve_ui_for(init_ctx);
 
         let ctx = RpcContext::init(
             &server.acceptor_setter(),
+            dns.clone(),
             config,
             InternedString::intern(
-                tokio::fs::read_to_string("/media/startos/config/disk.guid") // unique identifier for volume group - keeps track of the disk that goes with your embassy
+                tokio::fs::read_to_string("/media/startos/config/disk.guid")
                     .await?
                     .trim(),
             ),
@@ -74,8 +79,8 @@ async fn inner_main(
 
         let mut shutdown_recv = rpc_ctx.shutdown.subscribe();
 
-        let sig_handler_ctx = rpc_ctx.clone();
-        let sig_handler = tokio::spawn(async move {
+        let shutdown_send = rpc_ctx.shutdown.clone();
+        let sig_handler = NonDetachingJoinHandle::from(tokio::spawn(async move {
             use tokio::signal::unix::SignalKind;
             futures::future::select_all(
                 [
@@ -95,12 +100,11 @@ async fn inner_main(
                 }),
             )
             .await;
-            sig_handler_ctx
-                .shutdown
+            shutdown_send
                 .send(None)
                 .map_err(|_| ())
                 .expect("send shutdown signal");
-        });
+        }));
 
         let metrics_ctx = rpc_ctx.clone();
         let metrics_task = tokio::spawn(async move {
@@ -125,7 +129,7 @@ async fn inner_main(
             .await
             .with_kind(crate::ErrorKind::Unknown)?;
 
-        sig_handler.abort();
+        drop(sig_handler);
 
         Ok::<_, Error>((rpc_ctx, shutdown))
     }
@@ -158,8 +162,10 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
                 }
             });
 
-            let mut server = WebServer::new(Acceptor::new(WildcardListener::new(80)?), refresher());
-            match inner_main(&mut server, &config).await {
+            let listener = WildcardListener::new(80)?;
+            let dns = Arc::new(DnsController::new(listener.subscribe()));
+            let mut server = WebServer::new(Acceptor::new(listener), refresher());
+            match inner_main(&mut server, &dns, &config).await {
                 Ok(a) => {
                     server.shutdown().await;
                     Ok(a)
@@ -175,7 +181,7 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
                                 .is_ok()
                             {
                                 Some(InternedString::intern(
-                                    tokio::fs::read_to_string("/media/startos/config/disk.guid") // unique identifier for volume group - keeps track of the disk that goes with your embassy
+                                    tokio::fs::read_to_string("/media/startos/config/disk.guid")
                                         .await?
                                         .trim(),
                                 ))
@@ -183,6 +189,7 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
                                 None
                             },
                             e,
+                            dns.clone(),
                         )?;
 
                         server.serve_ui_for(ctx.clone());

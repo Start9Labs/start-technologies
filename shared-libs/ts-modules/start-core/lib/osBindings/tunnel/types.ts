@@ -54,6 +54,8 @@ export type DnsRecordEntry = z.output<typeof schemas.DnsRecordEntry>
  * `value` is the rdata as text: an IP for A/AAAA, a name for CNAME, etc.
  */
 export type DnsRecordEntryInput = z.input<typeof schemas.DnsRecordEntry>
+export type DnsSource = z.output<typeof schemas.DnsSource>
+export type DnsSourceInput = z.input<typeof schemas.DnsSource>
 export type GatewayId = z.output<typeof schemas.GatewayId>
 export type GatewayIdInput = z.input<typeof schemas.GatewayId>
 export type GatewayType = z.output<typeof schemas.GatewayType>
@@ -228,6 +230,20 @@ export type AuthKeys = z.output<typeof schemas.AuthKeys>
 export type AuthKeysInput = z.input<typeof schemas.AuthKeys>
 export type DnsRecords = z.output<typeof schemas.DnsRecords>
 export type DnsRecordsInput = z.input<typeof schemas.DnsRecords>
+
+/**
+ * Per-gateway DNS intent and effective upstreams. `static_servers` is the persisted
+ * override; `servers` and `source` are derived from it and the link configuration.
+ * Without an override or gateway-provided resolvers, the public fallback is used.
+ */
+export type DnsSettings = z.output<typeof schemas.DnsSettings>
+
+/**
+ * Per-gateway DNS intent and effective upstreams. `static_servers` is the persisted
+ * override; `servers` and `source` are derived from it and the link configuration.
+ * Without an override or gateway-provided resolvers, the public fallback is used.
+ */
+export type DnsSettingsInput = z.input<typeof schemas.DnsSettings>
 
 /**
  * Whether the gateway reachable via this interface speaks each port-mapping

@@ -13,6 +13,7 @@ use crate::shutdown::Shutdown;
 use crate::util::sync::SyncMutex;
 
 pub struct DiagnosticContextSeed {
+    pub(crate) dns: Arc<crate::net::dns::DnsController>,
     pub shutdown: Sender<Shutdown>,
     pub error: Arc<RpcError>,
     pub disk_guid: Option<InternedString>,
@@ -29,6 +30,7 @@ impl DiagnosticContext {
         _config: &ServerConfig,
         disk_guid: Option<InternedString>,
         error: Error,
+        dns: Arc<crate::net::dns::DnsController>,
     ) -> Result<Self, Error> {
         tracing::error!(
             "{}",
@@ -39,6 +41,7 @@ impl DiagnosticContext {
         let (shutdown, _) = tokio::sync::broadcast::channel(1);
 
         Ok(Self(Arc::new(DiagnosticContextSeed {
+            dns,
             shutdown,
             disk_guid,
             error: Arc::new(error.into()),

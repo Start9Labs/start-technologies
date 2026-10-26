@@ -697,9 +697,8 @@ mod tests {
             .unwrap();
         assert!(
             cn.data()
-                .as_utf8()
-                .unwrap()
                 .to_string()
+                .unwrap()
                 .starts_with("StartWRT Local Root CA "),
             "Root CA CN missing base label"
         );
@@ -718,9 +717,8 @@ mod tests {
                 .next()
                 .unwrap()
                 .data()
-                .as_utf8()
-                .unwrap()
                 .to_string()
+                .unwrap()
         };
         let (a, _) = generate_root_ca().unwrap();
         let (b, _) = generate_root_ca().unwrap();
@@ -743,7 +741,7 @@ mod tests {
             .next()
             .unwrap();
         assert_eq!(
-            cn.data().as_utf8().unwrap().to_string(),
+            cn.data().to_string().unwrap(),
             "StartWRT Local Intermediate CA"
         );
 
@@ -756,17 +754,15 @@ mod tests {
                 .next()
                 .unwrap()
                 .data()
-                .as_utf8()
-                .unwrap()
-                .to_string(),
+                .to_string()
+                .unwrap(),
             ca.subject_name()
                 .entries()
                 .next()
                 .unwrap()
                 .data()
-                .as_utf8()
-                .unwrap()
-                .to_string(),
+                .to_string()
+                .unwrap(),
         );
 
         // Verify it has AKI and SKI

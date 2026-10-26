@@ -50,7 +50,7 @@ The StartWRT web interface is organized into five sections:
 - **System** — [General settings](settings.md), [SSH keys](ssh.md), [backups](backups.md), [logs](settings.md#logs)
 
 > [!TIP]
-> Toggle **Help Mode** from the header to get a plain-language explanation of everything on the current page, including links to external resources.
+> Toggle **Help** in the header to get a plain-language explanation of everything on the current page, including links to external resources.
 
 ## Next Steps
 

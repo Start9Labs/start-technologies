@@ -205,7 +205,7 @@ pub fn address_api<C: Context, Kind: HostApiKind>()
                         ]);
                     }
 
-                    table.print_tty(false)?;
+                    print_table(&table)?;
 
                     Ok(())
                 })

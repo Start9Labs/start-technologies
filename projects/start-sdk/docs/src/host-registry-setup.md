@@ -29,6 +29,8 @@ start-cli pubkey
 
 Treat the private key like an SSH key: it authenticates every admin and publish action you take against the registry. Back it up.
 
+To keep the key in gpg-agent instead, skip `init-key` and point `start-cli` at an Ed25519 signing key in your GnuPG keyring (GnuPG 2.3 or later). Set `id-key-gpg: <key>` in `~/.startos/config.yaml` or pass `--id-key-gpg <key>`, where `<key>` is anything `gpg` accepts: a fingerprint, key ID, or user ID. If several signing keys match, append `!` to a fingerprint to choose one. `pubkey` then prints that key. Servers running StartOS 0.4.0.3 or earlier cannot verify an asset signed only by a gpg-agent key.
+
 ## 4. Point `start-cli` at the registry
 
 All registry operations go through `start-cli registry` (or `start-cli s9pk publish` for uploading packages). Pass the registry's URL with `--registry`:

@@ -1,0 +1,1 @@
+- On the server itself, `start-cli auth login` and `auth logout` explain that no login is needed there, instead of failing with an unclear error.

@@ -3,6 +3,7 @@ import { T } from '@start9labs/start-core'
 import { BTC_ICON, LND_ICON, PROXY_ICON, REGISTRY_ICON } from './api-icons'
 
 const mockMerkleArchiveCommitment: T.MerkleArchiveCommitment = {
+  type: 'merkle-archive',
   rootSighash: 'fakehash',
   rootMaxsize: 0,
 }

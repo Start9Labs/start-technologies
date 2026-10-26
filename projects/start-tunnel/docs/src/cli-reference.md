@@ -11,6 +11,7 @@ The `start-tunnel` CLI manages a StartTunnel server — a WireGuard-based gatewa
 - `-t, --tunnel <URL>` — Tunnel server address
 - `-p, --proxy <URL>` — HTTP/SOCKS proxy
 - `--id-key-path <PATH>` — Identity signing key path (`--developer-key-path` is accepted as an alias)
+- `--id-key-gpg <KEY>` — Sign through gpg-agent with this GnuPG key (fingerprint, key ID, or user ID) instead of the identity key file
 
 ## Shell Completion
 

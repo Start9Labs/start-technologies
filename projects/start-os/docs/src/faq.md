@@ -184,6 +184,18 @@ Yes, but it is not officially supported. StartOS identifies a service by its pac
 
 The fork is a separate service with its own settings, addresses, data and [backups](backup-create.md), and starts empty.
 
+## My server restarted on its own
+
+On servers with a supported hardware watchdog, StartOS keeps a watchdog timer armed with a requested timeout of one minute. If a system hang prevents the operating system from refreshing that timer, the hardware resets the server. The effective timeout depends on the device. This is an abrupt reset: in-flight writes can be lost.
+
+An unexpected restart can also follow a power interruption or a kernel crash. To inspect the previous boot, [connect via SSH](ssh.md) and run:
+
+```sh
+sudo journalctl -b -1 -n 200 --no-pager
+```
+
+Where the kernel and firmware provide persistent crash records, StartOS preserves the systemd-pstore archive under `/media/startos/data/main/pstore/`. A watchdog reset may leave no crash record. `sudo gather-debug-info` collects available records, kernel logs, the previous boot's journal, watchdog status and NVMe power-state information for [support](https://start9.com/contact).
+
 ## Issue with a particular service
 
 If a service is misbehaving or crashing, check the [logs](logs.md) for that service — open the service and select its **Logs** tab. Look for any errors that might explain the problem. Often, the solution is to restart the service by clicking "Restart". If the issue persist, [contact support](https://start9.com/contact).

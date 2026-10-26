@@ -6,7 +6,7 @@ use rust_i18n::t;
 use crate::action::{ActionInput, ActionResult, display_action_result};
 use crate::db::model::DatabaseModel;
 use crate::db::model::package::{
-    ActionAccess, ActionMetadata, Task, TaskCondition, TaskEntry, TaskSeverity, TaskTrigger,
+    ActionAccess, ActionMetadata, Task, TaskCondition, TaskEntry, TaskTrigger,
 };
 use crate::service::cli::ContainerCliContext;
 use crate::service::effects::prelude::*;
@@ -386,15 +386,6 @@ async fn create_task(
                     None => true,
                 },
             };
-            if active
-                && task.severity == TaskSeverity::Critical
-                && pde
-                    .as_current_dependencies()
-                    .de()?
-                    .is_task_target(src_id, &task.package_id)
-            {
-                pde.as_status_info_mut().stop()?;
-            }
             pde.as_tasks_mut()
                 .insert(&replay_id, &TaskEntry { active, task })
         })

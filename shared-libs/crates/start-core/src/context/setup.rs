@@ -52,6 +52,7 @@ rpc_toolkit::reflect_ts!(SetupResult);
 rpc_toolkit::ts_export!(SetupResult, namespaces = [""]);
 
 pub struct SetupContextSeed {
+    pub(crate) dns: Arc<crate::net::dns::DnsController>,
     pub webserver: WebServerAcceptorSetter<WildcardListener>,
     pub config: SyncMutex<ServerConfig>,
     pub disable_encryption: bool,
@@ -75,11 +76,13 @@ impl SetupContext {
     pub fn init(
         webserver: &WebServer<WildcardListener>,
         config: ServerConfig,
+        dns: Arc<crate::net::dns::DnsController>,
     ) -> Result<Self, Error> {
         let (shutdown, _) = tokio::sync::broadcast::channel(1);
         let mut progress = FullProgressTracker::new();
         progress.enable_logging(true);
         Ok(Self(Arc::new(SetupContextSeed {
+            dns,
             webserver: webserver.acceptor_setter(),
             disable_encryption: config.disable_encryption.unwrap_or(false),
             config: SyncMutex::new(config),

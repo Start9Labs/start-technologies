@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::ops::Deref;
+use std::path::Path;
 
 use axum::extract::Request;
 use axum::response::Response;
@@ -16,9 +17,11 @@ use crate::context::RpcContext;
 use crate::prelude::*;
 use crate::registry::context::RegistryContext;
 use crate::registry::os::index::OsVersionInfoMap;
+use crate::registry::os::version::GetOsVersionParams;
 use crate::registry::package::get::{
     GetPackageParams, GetPackageResponse, GetPackageResponseFull, PackageDetailLevel,
 };
+use crate::registry::package::icon::{icons_dir, load_icon};
 use crate::registry::package::index::PackageVersionInfo;
 use crate::util::VersionString;
 use crate::util::lshw::LshwDevice;
@@ -128,47 +131,6 @@ impl DeviceInfo {
         }
     }
 
-    /// Strips package icons from a `package.get` response for clients that load them from `/icons/`.
-    pub fn omit_icons(&self, method: &str, params: &Value, res: &mut Value) -> Result<(), Error> {
-        if method != "package.get" || self.os.version < "0.4.0.3".parse::<Version>()? {
-            return Ok(());
-        }
-        let responses: Vec<&mut Value> = if params["id"].is_null() {
-            res.as_object_mut()
-                .into_iter()
-                .flat_map(|o| o.iter_mut().map(|(_, v)| v))
-                .collect()
-        } else {
-            vec![res]
-        };
-        for response in responses {
-            for key in ["best", "otherVersions"] {
-                for (_, info) in response
-                    .get_mut(key)
-                    .and_then(|v| v.as_object_mut())
-                    .into_iter()
-                    .flat_map(|o| o.iter_mut())
-                {
-                    let Some(info) = info.as_object_mut() else {
-                        continue;
-                    };
-                    info.remove("icon");
-                    for (_, dep) in info
-                        .get_mut("dependencyMetadata")
-                        .and_then(|d| d.as_object_mut())
-                        .into_iter()
-                        .flat_map(|d| d.iter_mut())
-                    {
-                        if let Some(dep) = dep.as_object_mut() {
-                            dep.remove("icon");
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
     fn filter_package_versions(
         &self,
         versions: &mut Model<BTreeMap<VersionString, PackageVersionInfo>>,
@@ -261,6 +223,8 @@ pub struct DeviceInfoMiddleware {
     device_info_header: Option<HeaderValue>,
     device_info: Option<DeviceInfo>,
     req: Option<RpcRequest>,
+    legacy_signatures: bool,
+    inline_icons_for: Option<RpcRequest>,
 }
 impl DeviceInfoMiddleware {
     pub fn new() -> Self {
@@ -268,8 +232,131 @@ impl DeviceInfoMiddleware {
             device_info_header: None,
             device_info: None,
             req: None,
+            legacy_signatures: false,
+            inline_icons_for: None,
         }
     }
+
+    fn prepare_request(
+        &mut self,
+        startwrt: bool,
+        metadata: Metadata,
+        request: &mut RpcRequest,
+    ) -> Result<(), Error> {
+        self.legacy_signatures = startwrt;
+        if let Some(header) = &self.device_info_header {
+            let device_info = if metadata.get_device_info {
+                Some(DeviceInfo::from_header_value(header)?)
+            } else {
+                DeviceInfo::from_header_value(header).ok()
+            };
+            if let Some(device_info) = device_info {
+                self.legacy_signatures |= reads_legacy_signatures(&device_info.os.version)?;
+                if reads_inline_icons(&device_info.os.version)? {
+                    self.inline_icons_for = Some(request.clone());
+                }
+                if metadata.get_device_info {
+                    request.params["__DeviceInfo_device_info"] = to_value(&device_info)?;
+                    self.device_info = Some(device_info);
+                    self.req = Some(request.clone());
+                }
+            }
+        } else if request.method.as_str() == "os.version.get" {
+            let params: GetOsVersionParams = from_value(request.params.clone())?;
+            if let Some(version) = params.source_version {
+                self.legacy_signatures |= reads_legacy_signatures(&version)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn reads_legacy_signatures(version: &Version) -> Result<bool, Error> {
+    Ok(version <= &"0.4.0.3".parse::<Version>()?)
+}
+
+/// Whether a StartOS version needs icons inline as data URLs.
+fn reads_inline_icons(version: &Version) -> Result<bool, Error> {
+    Ok(version < &"0.4.0.3".parse::<Version>()?)
+}
+
+/// Replaces stored icon names with their data URLs in a response carrying package versions.
+pub async fn inline_icons(
+    dir: &Path,
+    method: &str,
+    params: &Value,
+    res: &mut Value,
+) -> Result<(), Error> {
+    let infos: Vec<&mut Value> = match method {
+        "package.get" => {
+            let responses: Vec<&mut Value> = if params["id"].is_null() {
+                res.as_object_mut()
+                    .into_iter()
+                    .flat_map(|o| o.iter_mut().map(|(_, v)| v))
+                    .collect()
+            } else {
+                vec![res]
+            };
+            responses
+                .into_iter()
+                .filter_map(|r| r.as_object_mut())
+                .flat_map(|r| {
+                    r.iter_mut()
+                        .filter(|(k, _)| matches!(&**k, "best" | "otherVersions"))
+                        .map(|(_, v)| v)
+                })
+                .filter_map(|v| v.as_object_mut())
+                .flat_map(|v| v.iter_mut().map(|(_, info)| info))
+                .collect()
+        }
+        "package.index" => package_index_versions(res),
+        "index" => package_index_versions(&mut res["package"]),
+        _ => return Ok(()),
+    };
+    let mut slots: Vec<&mut Value> = Vec::new();
+    for info in infos.into_iter().filter_map(|i| i.as_object_mut()) {
+        for (k, v) in info.iter_mut() {
+            match &**k {
+                "icon" => slots.push(v),
+                "dependencyMetadata" => slots.extend(
+                    v.as_object_mut()
+                        .into_iter()
+                        .flat_map(|d| d.iter_mut())
+                        .filter_map(|(_, dep)| dep.as_object_mut())
+                        .flat_map(|dep| dep.iter_mut().filter(|(k, _)| &**k == "icon"))
+                        .map(|(_, icon)| icon),
+                ),
+                _ => (),
+            }
+        }
+    }
+    let mut loaded: BTreeMap<InternedString, Value> = BTreeMap::new();
+    for slot in slots {
+        let Some(path) = slot.as_str().filter(|s| !s.starts_with("data:")) else {
+            continue;
+        };
+        let path = InternedString::intern(path);
+        let data_url = match loaded.get(&path) {
+            Some(data_url) => data_url.clone(),
+            None => {
+                let data_url = Value::String(load_icon(dir, &path).await?.into());
+                loaded.insert(path, data_url.clone());
+                data_url
+            }
+        };
+        *slot = data_url;
+    }
+    Ok(())
+}
+
+fn package_index_versions(index: &mut Value) -> Vec<&mut Value> {
+    index["packages"]
+        .as_object_mut()
+        .into_iter()
+        .flat_map(|p| p.iter_mut())
+        .filter_map(|(_, package)| package["versions"].as_object_mut())
+        .flat_map(|v| v.iter_mut().map(|(_, info)| info))
+        .collect()
 }
 
 impl Middleware<RegistryContext> for DeviceInfoMiddleware {
@@ -284,39 +371,41 @@ impl Middleware<RegistryContext> for DeviceInfoMiddleware {
     }
     async fn process_rpc_request(
         &mut self,
-        _: &RegistryContext,
+        ctx: &RegistryContext,
         metadata: Self::Metadata,
         request: &mut RpcRequest,
     ) -> Result<(), RpcResponse> {
-        async move {
-            if metadata.get_device_info {
-                if let Some(device_info) = &self.device_info_header {
-                    let device_info = DeviceInfo::from_header_value(device_info)?;
-                    request.params["__DeviceInfo_device_info"] = to_value(&device_info)?;
-                    self.device_info = Some(device_info);
-                    self.req = Some(request.clone());
-                }
-            }
-
-            Ok::<_, Error>(())
-        }
-        .await
-        .map_err(|e| RpcResponse::from_result(Err(e)))
+        self.prepare_request(ctx.startwrt, metadata, request)
+            .map_err(|e| RpcResponse::from_result(Err(e)))
     }
     async fn process_rpc_response(
         &mut self,
-        _: &RegistryContext,
+        ctx: &RegistryContext,
         response: &mut RpcResponse,
     ) -> () {
         if let (Some(req), Some(device_info), Ok(res)) =
             (&self.req, &self.device_info, &mut response.result)
         {
-            if let Err(e) = device_info
-                .filter_for_hardware(req.method.as_str(), req.params.clone(), res)
-                .and_then(|_| device_info.omit_icons(req.method.as_str(), &req.params, res))
+            if let Err(e) =
+                device_info.filter_for_hardware(req.method.as_str(), req.params.clone(), res)
             {
                 response.result = Err(e).map_err(From::from);
             }
+        }
+        if let (Some(req), Ok(res)) = (&self.inline_icons_for, &mut response.result) {
+            if let Err(e) = inline_icons(
+                &icons_dir(&ctx.datadir),
+                req.method.as_str(),
+                &req.params,
+                res,
+            )
+            .await
+            {
+                response.result = Err(e).map_err(From::from);
+            }
+        }
+        if let (true, Ok(res)) = (self.legacy_signatures, &mut response.result) {
+            crate::sign::compat::downgrade_signatures(res);
         }
     }
 }
@@ -327,52 +416,153 @@ mod tests {
 
     use super::*;
 
-    fn omitted_for(os_version: &str, params: Value, mut res: Value) -> Value {
-        DeviceInfo {
-            os: OsInfo {
-                version: os_version.parse().unwrap(),
-                compat: VersionRange::Any,
-                platform: "x86_64".into(),
-                language: None,
-            },
-            hardware: None,
-        }
-        .omit_icons("package.get", &params, &mut res)
-        .unwrap();
-        res
+    fn request(method: &str, params: Value) -> RpcRequest {
+        from_value(json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }))
+            .unwrap()
     }
 
-    fn package() -> Value {
+    #[test]
+    fn diagnostic_update_signatures_follow_source_version_without_device_info() {
+        for (version, legacy) in [("0.4.0.2", true), ("0.4.0.3", true), ("0.4.0.4", false)] {
+            let mut middleware = DeviceInfoMiddleware::new();
+            middleware
+                .prepare_request(
+                    false,
+                    Metadata {
+                        get_device_info: true,
+                    },
+                    &mut request("os.version.get", json!({ "sourceVersion": version })),
+                )
+                .unwrap();
+            assert_eq!(middleware.legacy_signatures, legacy, "{version}");
+        }
+    }
+
+    #[test]
+    fn headerless_registry_queries_keep_modern_labels_unless_startwrt() {
+        for startwrt in [false, true] {
+            for (method, params) in [
+                ("os.version.get", json!({})),
+                ("package.get", json!({ "sourceVersion": "0.4.0.2" })),
+            ] {
+                let mut middleware = DeviceInfoMiddleware::new();
+                middleware
+                    .prepare_request(
+                        startwrt,
+                        Metadata {
+                            get_device_info: true,
+                        },
+                        &mut request(method, params),
+                    )
+                    .unwrap();
+                assert_eq!(middleware.legacy_signatures, startwrt);
+            }
+        }
+    }
+
+    #[test]
+    fn device_info_version_takes_precedence_over_update_source() {
+        let mut middleware = DeviceInfoMiddleware::new();
+        middleware.device_info_header = Some(HeaderValue::from_static(
+            "os.version=0.4.0.4&os.compat=*&os.platform=x86_64",
+        ));
+        middleware
+            .prepare_request(
+                false,
+                Metadata {
+                    get_device_info: true,
+                },
+                &mut request("os.version.get", json!({ "sourceVersion": "0.4.0.2" })),
+            )
+            .unwrap();
+        assert!(!middleware.legacy_signatures);
+        assert!(middleware.device_info.is_some());
+    }
+
+    fn stored(dir: &Path) -> (Value, Value) {
+        let icon = crate::util::DataUrl::from_vec("image/png", b"icon".to_vec());
+        let stored = crate::registry::package::icon::store_icon(dir, &icon).unwrap();
+        (to_value(&stored).unwrap(), to_value(&icon).unwrap())
+    }
+
+    fn versions(name: &Value) -> Value {
         json!({
-            "best": { "1.0.0:0": {
-                "icon": "data:image/png;base64,aWNvbg==",
-                "dependencyMetadata": { "dep": { "icon": "data:image/png;base64,aWNvbg==" } },
-            } },
-            "otherVersions": { "0.9.0:0": { "icon": "data:image/png;base64,aWNvbg==" } },
+            "1.0.0:0": {
+                "icon": name,
+                "dependencyMetadata": { "dep": { "icon": name }, "bare": { "title": null } },
+            },
         })
     }
 
-    #[test]
-    fn icons_are_omitted_from_0_4_0_3() {
-        let res = omitted_for("0.4.0.3", json!({ "id": "pkg" }), package());
-        let best = &res["best"]["1.0.0:0"];
-        assert!(best.get("icon").is_none());
-        assert!(best["dependencyMetadata"]["dep"].get("icon").is_none());
-        assert!(res["otherVersions"]["0.9.0:0"].get("icon").is_none());
+    #[tokio::test]
+    async fn inlines_icons_for_every_method_carrying_package_versions() {
+        let dir = tempfile::tempdir().unwrap();
+        let (name, data_url) = stored(dir.path());
+        let inlined = |info: &Value| {
+            assert_eq!(info["icon"], data_url);
+            assert_eq!(info["dependencyMetadata"]["dep"]["icon"], data_url);
+            assert!(info["dependencyMetadata"]["bare"].get("icon").is_none());
+        };
 
-        let all = omitted_for(
-            "0.4.0.3",
-            json!({ "id": null }),
-            json!({ "pkg": package() }),
-        );
-        assert!(all["pkg"]["best"]["1.0.0:0"].get("icon").is_none());
+        let mut one = json!({ "best": versions(&name), "otherVersions": versions(&name) });
+        inline_icons(dir.path(), "package.get", &json!({ "id": "pkg" }), &mut one)
+            .await
+            .unwrap();
+        inlined(&one["best"]["1.0.0:0"]);
+        inlined(&one["otherVersions"]["1.0.0:0"]);
+
+        let mut all = json!({ "pkg": { "best": versions(&name) } });
+        inline_icons(dir.path(), "package.get", &json!({ "id": null }), &mut all)
+            .await
+            .unwrap();
+        inlined(&all["pkg"]["best"]["1.0.0:0"]);
+
+        let index = json!({ "packages": { "pkg": { "versions": versions(&name) } } });
+        let mut package_index = index.clone();
+        inline_icons(dir.path(), "package.index", &json!({}), &mut package_index)
+            .await
+            .unwrap();
+        inlined(&package_index["packages"]["pkg"]["versions"]["1.0.0:0"]);
+
+        let mut full = json!({ "package": index });
+        inline_icons(dir.path(), "index", &json!({}), &mut full)
+            .await
+            .unwrap();
+        inlined(&full["package"]["packages"]["pkg"]["versions"]["1.0.0:0"]);
+    }
+
+    #[tokio::test]
+    async fn other_methods_are_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let (name, _) = stored(dir.path());
+        let mut res = json!({ "icon": name });
+        let before = res.clone();
+        inline_icons(dir.path(), "os.version.get", &json!({}), &mut res)
+            .await
+            .unwrap();
+        assert_eq!(res, before);
     }
 
     #[test]
-    fn icons_are_kept_before_0_4_0_3() {
-        assert_eq!(
-            omitted_for("0.4.0.2", json!({ "id": "pkg" }), package()),
-            package()
-        );
+    fn only_startos_before_0_4_0_3_needs_inline_icons() {
+        let prepared = |header: Option<&'static str>, method: &str| {
+            let mut middleware = DeviceInfoMiddleware::new();
+            middleware.device_info_header = header.map(HeaderValue::from_static);
+            middleware
+                .prepare_request(
+                    false,
+                    Metadata {
+                        get_device_info: false,
+                    },
+                    &mut request(method, json!({})),
+                )
+                .unwrap();
+            middleware.inline_icons_for.is_some()
+        };
+        const LEGACY: &str = "os.version=0.4.0.2&os.compat=*&os.platform=x86_64";
+        const CURRENT: &str = "os.version=0.4.0.3&os.compat=*&os.platform=x86_64";
+        assert!(prepared(Some(LEGACY), "package.index"));
+        assert!(!prepared(Some(CURRENT), "package.index"));
+        assert!(!prepared(None, "package.index"));
     }
 }

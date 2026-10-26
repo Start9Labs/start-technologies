@@ -184,7 +184,7 @@ pub fn display_signers<T>(
             &info.keys.into_iter().join("\n"),
         ]);
     }
-    table.print_tty(false)?;
+    print_table(&table)?;
     Ok(())
 }
 
@@ -215,7 +215,7 @@ pub fn display_package_signers<T>(
             &versions.to_string()
         ]);
     }
-    table.print_tty(false)?;
+    print_table(&table)?;
     Ok(())
 }
 

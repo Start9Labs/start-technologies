@@ -1,1 +1,1 @@
-- **Update the web interface and shared dependencies with security fixes**, including Angular and DOMPurify, and replace the unmaintained YAML parser.
+- **Update the web interface and shared dependencies with security fixes**, including Angular, DOMPurify, TLS certificate verification and handshake handling, and HTTP/2 flow control, and replace the unmaintained YAML parser.

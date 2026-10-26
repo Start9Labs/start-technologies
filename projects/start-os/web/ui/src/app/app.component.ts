@@ -2,7 +2,7 @@ import { Component, inject } from '@angular/core'
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop'
 import { Meta } from '@angular/platform-browser'
 import { RouterOutlet } from '@angular/router'
-import { i18nService } from '@start9labs/shared'
+import { i18nService, StartupDnsStatus } from '@start9labs/shared'
 import { TuiRoot } from '@taiga-ui/core'
 import { PatchDB } from 'patch-db-client'
 import { merge } from 'rxjs'
@@ -10,12 +10,16 @@ import { ToastContainerComponent } from 'src/app/components/toast-container.comp
 import { PatchDataService } from './services/patch-data.service'
 import { DataModel } from './services/patch-db/data-model'
 import { PatchMonitorService } from './services/patch-monitor.service'
+import { StateService } from './services/state.service'
 
 @Component({
   selector: 'app-root',
-  imports: [TuiRoot, RouterOutlet, ToastContainerComponent],
+  imports: [TuiRoot, RouterOutlet, StartupDnsStatus, ToastContainerComponent],
   template: `
     <tui-root>
+      @if (state.dnsStatus(); as status) {
+        <startup-dns-status [status]="status" />
+      }
       <router-outlet />
       <toast-container />
     </tui-root>
@@ -24,6 +28,11 @@ import { PatchMonitorService } from './services/patch-monitor.service'
     :host {
       display: block;
       height: 100%;
+    }
+
+    startup-dns-status:not(:empty) {
+      display: block;
+      margin: 1rem;
     }
 
     tui-root {
@@ -35,6 +44,7 @@ import { PatchMonitorService } from './services/patch-monitor.service'
 export class AppComponent {
   private readonly i18n = inject(i18nService)
   private readonly meta = inject(Meta)
+  protected readonly state = inject(StateService)
 
   readonly subscription = merge(
     inject(PatchDataService),

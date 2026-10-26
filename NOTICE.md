@@ -68,6 +68,6 @@ rights are granted by the MIT license.
 
 ## Key material
 
-`projects/start-wrt/openwrt-overlay/` carries SpaceMiT's opkg signing keys and a
-vendor root CA certificate, shipped unmodified from the vendor BSP. They are key
-material rather than code, and are listed here for provenance.
+`projects/start-wrt/openwrt-overlay/` carries SpaceMiT's opkg signing keys,
+shipped unmodified from the vendor BSP. They are key material rather than code,
+and are listed here for provenance.

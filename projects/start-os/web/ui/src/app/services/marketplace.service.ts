@@ -160,13 +160,8 @@ export class MarketplaceService extends AbstractMarketplaceService {
     )
   }
 
-  override fetchIcon$(
-    registry: string,
-    id: string,
-    version: string,
-    dependency?: string,
-  ): Observable<string> {
-    return this.icons.getRegistry$(registry, id, version, dependency)
+  override fetchIcon$(registry: string, icon: string): Observable<string> {
+    return this.icons.getRegistry$(registry, icon)
   }
 
   fetchInfo$(registry: string): Observable<T.RegistryInfo> {

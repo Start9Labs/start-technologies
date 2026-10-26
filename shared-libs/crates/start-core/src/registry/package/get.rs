@@ -471,12 +471,12 @@ pub fn display_package_info(
     if let Some(_) = params.rest.id {
         if params.rest.other_versions.unwrap_or_default() == PackageDetailLevel::Full {
             for table in from_value::<GetPackageResponseFull>(info)?.tables() {
-                table.print_tty(false)?;
+                print_table(&table)?;
                 println!();
             }
         } else {
             for table in from_value::<GetPackageResponse>(info)?.tables() {
-                table.print_tty(false)?;
+                print_table(&table)?;
                 println!();
             }
         }
@@ -484,14 +484,14 @@ pub fn display_package_info(
         if params.rest.other_versions.unwrap_or_default() == PackageDetailLevel::Full {
             for (_, package) in from_value::<GetPackagesResponseFull>(info)? {
                 for table in package.tables() {
-                    table.print_tty(false)?;
+                    print_table(&table)?;
                     println!();
                 }
             }
         } else {
             for (_, package) in from_value::<GetPackagesResponse>(info)? {
                 for table in package.tables() {
-                    table.print_tty(false)?;
+                    print_table(&table)?;
                     println!();
                 }
             }
@@ -873,7 +873,6 @@ mod tests {
 fn check_matching_info_short() {
     use crate::registry::package::index::PackageMetadata;
     use crate::s9pk::manifest::Description;
-    use crate::util::DataUrl;
 
     let lang_map =
         |s: &str| LocaleString::LanguageMap([("en".into(), s.into())].into_iter().collect());
@@ -902,7 +901,9 @@ fn check_matching_info_short() {
             plugins: BTreeSet::new(),
             satisfies: BTreeSet::new(),
         },
-        icon: Some(DataUrl::from_vec("image/png", vec![])),
+        icon: Some(crate::registry::package::icon::PackageIcon::Stored(
+            "blake3/icon.png".into(),
+        )),
         dependency_metadata: BTreeMap::new(),
         source_version: None,
         s9pks: Vec::new(),

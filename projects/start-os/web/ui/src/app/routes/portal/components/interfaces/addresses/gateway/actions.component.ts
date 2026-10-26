@@ -103,6 +103,7 @@ import { DomainHealthService } from './domain-health.service'
     <div class="mobile">
       <button
         tuiDropdown
+        tuiDropdownAlign="end"
         tuiIconButton
         appearance="flat-grayscale"
         iconStart="@tui.ellipsis-vertical"

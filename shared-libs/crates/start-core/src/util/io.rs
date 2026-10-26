@@ -15,6 +15,7 @@ use bytes::{Buf, BytesMut};
 use clap::builder::ValueParserFactory;
 use futures::future::{BoxFuture, Fuse};
 use futures::{FutureExt, Stream, TryStreamExt};
+#[cfg(target_os = "linux")]
 use inotify::{EventMask, EventStream, Inotify, WatchMask};
 use nix::unistd::{Gid, Uid, fchown};
 use serde::{Deserialize, Serialize};
@@ -1697,6 +1698,7 @@ impl ValueParserFactory for TermSize {
 pub trait ReadWriter: AsyncRead + AsyncWrite {}
 impl<T: AsyncRead + AsyncWrite> ReadWriter for T {}
 
+#[cfg(target_os = "linux")]
 #[instrument(skip_all)]
 fn wait_for_created<'a>(
     stream: &'a mut EventStream<[u8; 1024]>,
@@ -1730,6 +1732,7 @@ fn wait_for_created<'a>(
     .boxed()
 }
 
+#[cfg(target_os = "linux")]
 #[instrument(skip_all)]
 pub fn file_string_stream(
     path: impl Into<PathBuf>,

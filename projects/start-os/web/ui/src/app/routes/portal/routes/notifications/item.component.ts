@@ -7,7 +7,7 @@ import { TuiIcon, TuiLink } from '@taiga-ui/core'
 import { TuiAvatar, TuiLineClamp } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
 import { EMPTY, first, switchMap } from 'rxjs'
-import { PkgIconPipe } from 'src/app/routes/portal/pipes/pkg-icon'
+import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
 import { ServerNotification } from 'src/app/services/api/api.types'
 import { NotificationService } from 'src/app/services/notification.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
@@ -33,7 +33,7 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
               [routerLink]="'/services/' + manifest.id"
               [title]="manifest.title"
             >
-              <img [src]="pkg | pkgIcon | async" [alt]="manifest.title" />
+              <img [pkgIcon]="pkg" [alt]="manifest.title" />
             </a>
           } @else {
             {{ item.packageId || '-' }}
@@ -165,7 +165,7 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
     TuiIcon,
     i18nPipe,
     TuiAvatar,
-    PkgIconPipe,
+    PkgIconDirective,
   ],
 })
 export class NotificationItemComponent {

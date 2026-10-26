@@ -322,14 +322,36 @@ fn caret() {
         .map_err(|e| eprintln!("{e}"))
         .unwrap();
     println!("{}", thing);
-    // match parse_atom(b"<0.0.0") {
-    // Ok(a) => println!("{:#?}", a),
-    // Err(e) => println!("{}", e),
-    // }
-    // use nom::bytes::complete::tag;
-    // use nom::multi::separated_list;
-    // println!("{:?}", parse_range(b"=0.0.0"));
-    // println!("{:?}", decimal(b"1234"));
+}
+
+#[test]
+fn range_parse_on_small_stack() {
+    std::thread::Builder::new()
+        .stack_size(32 * 1024)
+        .spawn(|| {
+            let range: VersionRange = "<=0.4.9.14:1".parse().unwrap();
+            assert_eq!(
+                range,
+                VersionRange::anchor(LTE, "0.4.9.14:1".parse().unwrap())
+            );
+            assert!("0.4.9.14:1"
+                .parse::<ExtendedVersion>()
+                .unwrap()
+                .satisfies(&range));
+            assert!(!"0.4.9.14:2"
+                .parse::<ExtendedVersion>()
+                .unwrap()
+                .satisfies(&range));
+            assert!("<=".parse::<VersionRange>().is_err());
+            #[cfg(feature = "serde")]
+            assert_eq!(
+                serde_yaml::from_str::<VersionRange>("'<=0.4.9.14:1'").unwrap(),
+                range
+            );
+        })
+        .unwrap()
+        .join()
+        .unwrap();
 }
 
 #[cfg(feature = "serde")]

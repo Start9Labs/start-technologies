@@ -6,8 +6,6 @@ Start9 Support notifies you on each device you turn it on for, whenever Start9 r
 
 You are notified of every reply in your own chats, from Dux or from a person, as soon as it is posted — unless you have that chat open in front of you at the time. A notification says who replied, not what they wrote; tap it to open the chat.
 
-If notifications can't reach you, [unread-reply reminders](email.md) by email can.
-
 ## Turning Them On
 
 When you open Start9 Support on a device that isn't notified yet, it offers to turn notifications on; choose **Turn on** and allow them when your browser asks. To do it later, open **Settings** from the account menu, under your name at the bottom of the chat list. Its **Notifications** section shows whether this device is notified, and offers **Turn on** when it isn't.

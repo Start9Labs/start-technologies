@@ -82,8 +82,8 @@ export type DataUrl = z.output<typeof schemas.DataUrl>
 export type DataUrlInput = z.input<typeof schemas.DataUrl>
 export type DeviceFilter = z.output<typeof schemas.DeviceFilter>
 export type DeviceFilterInput = z.input<typeof schemas.DeviceFilter>
-export type DnsSettings = z.output<typeof schemas.DnsSettings>
-export type DnsSettingsInput = z.input<typeof schemas.DnsSettings>
+export type DnsSource = z.output<typeof schemas.DnsSource>
+export type DnsSourceInput = z.input<typeof schemas.DnsSource>
 export type Duration = z.output<typeof schemas.Duration>
 export type DurationInput = z.input<typeof schemas.Duration>
 export type EchoParams = z.output<typeof schemas.EchoParams>
@@ -210,6 +210,16 @@ export type NetworkInterfaceTypeInput = z.input<
 >
 export type NotificationLevel = z.output<typeof schemas.NotificationLevel>
 export type NotificationLevelInput = z.input<typeof schemas.NotificationLevel>
+
+/**
+ * An absent update preserves DNS intent; null servers select gateway DNS.
+ */
+export type OutboundDnsUpdate = z.output<typeof schemas.OutboundDnsUpdate>
+
+/**
+ * An absent update preserves DNS intent; null servers select gateway DNS.
+ */
+export type OutboundDnsUpdateInput = z.input<typeof schemas.OutboundDnsUpdate>
 export type PackageBackupReport = z.output<typeof schemas.PackageBackupReport>
 export type PackageBackupReportInput = z.input<
   typeof schemas.PackageBackupReport
@@ -334,8 +344,6 @@ export type SetServerHostnameParams = z.output<
 export type SetServerHostnameParamsInput = z.input<
   typeof schemas.SetServerHostnameParams
 >
-export type SetStaticDnsParams = z.output<typeof schemas.SetStaticDnsParams>
-export type SetStaticDnsParamsInput = z.input<typeof schemas.SetStaticDnsParams>
 export type SetWifiEnabledParams = z.output<typeof schemas.SetWifiEnabledParams>
 export type SetWifiEnabledParamsInput = z.input<
   typeof schemas.SetWifiEnabledParams
@@ -384,8 +392,12 @@ export type TaskSeverity = z.output<typeof schemas.TaskSeverity>
 export type TaskSeverityInput = z.input<typeof schemas.TaskSeverity>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TimeInfoInput = z.input<typeof schemas.TimeInfo>
-export type UpdateSystemParams = z.output<typeof schemas.UpdateSystemParams>
-export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
+export type TrustedOsUpdateSigner = z.output<
+  typeof schemas.TrustedOsUpdateSigner
+>
+export type TrustedOsUpdateSignerInput = z.input<
+  typeof schemas.TrustedOsUpdateSigner
+>
 
 /**
  * How the OS reverse proxy validates the container's TLS certificate when it
@@ -588,10 +600,26 @@ export type DestroySubcontainerFsParams = z.output<
 export type DestroySubcontainerFsParamsInput = z.input<
   typeof schemas.DestroySubcontainerFsParams
 >
+
+/**
+ * Per-gateway DNS intent and effective upstreams. `static_servers` is the persisted
+ * override; `servers` and `source` are derived from it and the link configuration.
+ * Without an override or gateway-provided resolvers, the public fallback is used.
+ */
+export type DnsSettings = z.output<typeof schemas.DnsSettings>
+
+/**
+ * Per-gateway DNS intent and effective upstreams. `static_servers` is the persisted
+ * override; `servers` and `source` are derived from it and the link configuration.
+ * Without an override or gateway-provided resolvers, the public fallback is used.
+ */
+export type DnsSettingsInput = z.input<typeof schemas.DnsSettings>
 export type DomainSettings = z.output<typeof schemas.DomainSettings>
 export type DomainSettingsInput = z.input<typeof schemas.DomainSettings>
 export type DownloadsResponse = z.output<typeof schemas.DownloadsResponse>
 export type DownloadsResponseInput = z.input<typeof schemas.DownloadsResponse>
+export type EditGatewayParams = z.output<typeof schemas.EditGatewayParams>
+export type EditGatewayParamsInput = z.input<typeof schemas.EditGatewayParams>
 export type EditSignerParams = z.output<typeof schemas.EditSignerParams>
 export type EditSignerParamsInput = z.input<typeof schemas.EditSignerParams>
 export type EffectsRunActionParams = z.output<
@@ -752,10 +780,26 @@ export type NamedHealthCheckResultInput = z.input<
 >
 export type Notification = z.output<typeof schemas.Notification>
 export type NotificationInput = z.input<typeof schemas.Notification>
+export type OsUpdateSignerKeyParams = z.output<
+  typeof schemas.OsUpdateSignerKeyParams
+>
+export type OsUpdateSignerKeyParamsInput = z.input<
+  typeof schemas.OsUpdateSignerKeyParams
+>
 export type OsVersionInfo = z.output<typeof schemas.OsVersionInfo>
 export type OsVersionInfoInput = z.input<typeof schemas.OsVersionInfo>
 export type PackageBackupInfo = z.output<typeof schemas.PackageBackupInfo>
 export type PackageBackupInfoInput = z.input<typeof schemas.PackageBackupInfo>
+
+/**
+ * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
+ */
+export type PackageIcon = z.output<typeof schemas.PackageIcon>
+
+/**
+ * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
+ */
+export type PackageIconInput = z.input<typeof schemas.PackageIcon>
 export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PackageInfoShortInput = z.input<typeof schemas.PackageInfoShort>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
@@ -900,12 +944,20 @@ export type SetIconParams = z.output<typeof schemas.SetIconParams>
 export type SetIconParamsInput = z.input<typeof schemas.SetIconParams>
 export type SetMainStatus = z.output<typeof schemas.SetMainStatus>
 export type SetMainStatusInput = z.input<typeof schemas.SetMainStatus>
+export type SetOsUpdateSignerParams = z.output<
+  typeof schemas.SetOsUpdateSignerParams
+>
+export type SetOsUpdateSignerParamsInput = z.input<
+  typeof schemas.SetOsUpdateSignerParams
+>
 export type SetOutboundGatewayParams = z.output<
   typeof schemas.SetOutboundGatewayParams
 >
 export type SetOutboundGatewayParamsInput = z.input<
   typeof schemas.SetOutboundGatewayParams
 >
+export type SetStaticDnsParams = z.output<typeof schemas.SetStaticDnsParams>
+export type SetStaticDnsParamsInput = z.input<typeof schemas.SetStaticDnsParams>
 export type SetupExecuteParams = z.output<typeof schemas.SetupExecuteParams>
 export type SetupExecuteParamsInput = z.input<typeof schemas.SetupExecuteParams>
 export type SetupResult = z.output<typeof schemas.SetupResult>
@@ -1062,6 +1114,8 @@ export type StatusInfo = z.output<typeof schemas.StatusInfo>
 export type StatusInfoInput = z.input<typeof schemas.StatusInfo>
 export type Task = z.output<typeof schemas.Task>
 export type TaskParams = z.input<typeof schemas.Task>
+export type UpdateSystemParams = z.output<typeof schemas.UpdateSystemParams>
+export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type UrlPluginClearUrlsParams = z.output<
   typeof schemas.UrlPluginClearUrlsParams
 >
@@ -1110,6 +1164,8 @@ export type MetricsFollowResponse = z.output<
 export type MetricsFollowResponseInput = z.input<
   typeof schemas.MetricsFollowResponse
 >
+export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
+export type NetworkGatewayInfoInput = z.input<typeof schemas.NetworkGatewayInfo>
 export type OsIndex = z.output<typeof schemas.OsIndex>
 export type OsIndexInput = z.input<typeof schemas.OsIndex>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
@@ -1132,6 +1188,16 @@ export type CheckDependenciesResultInput = z.input<
 >
 export type Dependencies = z.output<typeof schemas.Dependencies>
 export type DependenciesInput = z.input<typeof schemas.Dependencies>
+
+/**
+ * Active DNS authority and its bootstrap gateway.
+ */
+export type DnsStatus = z.output<typeof schemas.DnsStatus>
+
+/**
+ * Active DNS authority and its bootstrap gateway.
+ */
+export type DnsStatusInput = z.input<typeof schemas.DnsStatus>
 export type GetPackageResponse = z.output<typeof schemas.GetPackageResponse>
 export type GetPackageResponseInput = z.input<typeof schemas.GetPackageResponse>
 export type GetPackageResponseFull = z.output<

@@ -35,7 +35,7 @@ Usage: bench.sh <command> [args]
   console wait <regex> [timeout]    wait for new console output matching a regex (default 180s)
 
   ui rpc <method> [params-json]     call an RPC method through the daemon's login, as the web UI does
-  ui login                          start a fresh UI session
+  ui login                          revoke the UI key and enroll a fresh one
   ui tunnel [port]|stop             forward a local port to the router UI for a browser (default 8443)
 
   snapshot save [label]             copy a sysupgrade config backup of the router to local state
@@ -496,39 +496,93 @@ uci commit firewall
 	esac
 }
 
-# Loopback bypasses daemon authentication.
+UI_KEY=$BENCH_STATE_DIR/ui-key.pem
+
 UI_REMOTE=$(
 	cat <<'EOF'
+read -r ip
 read -r login
+read -r login_sig
 read -r req
-ip=$(uci -q get network.lan.ipaddr)
-jar=/tmp/bench/ui-cookies
-mkdir -p /tmp/bench
-umask 077
+read -r req_sig
+read -r retry_sig
 call() {
-	curl -sk -m 60 -b "$jar" -c "$jar" "https://${ip%/*}/rpc/v1" \
-		-H 'Content-Type: application/json' --data-binary "$1"
+	curl -sk -m 60 "https://$ip/rpc/v1" -H 'Content-Type: application/json' \
+		-H "X-Start-Auth-Sig: $2" --data-binary "$1"
 }
-out=$(call "$req")
+out=$(call "$req" "$req_sig")
 case $out in *'"code":34'*)
-	call "$login" >/dev/null
-	out=$(call "$req")
+	call "$login" "$login_sig" >/dev/null
+	out=$(call "$req" "$retry_sig")
 	;;
 esac
 echo "$out"
 EOF
 )
 
+# Signs as the web UI does: start-core's X-Start-Auth-Sig over the exact request body.
+UI_SIGN=$(
+	cat <<'EOF'
+const crypto = require('node:crypto')
+const fs = require('node:fs')
+const [repoRoot, keyFile, ip, method, params] = process.argv.slice(1)
+const { blake3 } = require(require.resolve('@noble/hashes/blake3', { paths: [repoRoot] }))
+const password = fs.readFileSync(0, 'utf8').replace(/\n$/, '')
+
+let key
+try {
+	key = crypto.createPrivateKey(fs.readFileSync(keyFile))
+} catch {
+	key = crypto.generateKeyPairSync('ed25519').privateKey
+	fs.writeFileSync(keyFile, key.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 })
+}
+const spki = crypto.createPublicKey(key).export({ type: 'spki', format: 'der' })
+const pem = `-----BEGIN PUBLIC KEY-----\n${spki.toString('base64').match(/.{1,64}/g).join('\n')}\n-----END PUBLIC KEY-----\n`
+const b64url = bytes => Buffer.from(bytes).toString('base64url')
+
+function sign(body) {
+	const bytes = Buffer.from(body)
+	const timestamp = BigInt(Math.floor(Date.now() / 1000))
+	const nonce = crypto.randomBytes(8).readBigUInt64BE()
+	const hash = blake3(bytes)
+	const context = Buffer.from(ip)
+	const commitment = Buffer.alloc(24)
+	commitment.writeBigInt64BE(timestamp, 0)
+	commitment.writeBigUInt64BE(nonce, 8)
+	commitment.writeBigUInt64BE(BigInt(bytes.length), 16)
+	const message = Buffer.concat([
+		Buffer.from('Start-Auth-Sig v2\0'),
+		Buffer.from([context.length]),
+		context,
+		Buffer.from([3]),
+		commitment,
+		hash,
+	])
+	const signature = crypto.sign(null, message, key)
+	return new URLSearchParams({
+		commitment: 'request',
+		timestamp: timestamp.toString(),
+		nonce: nonce.toString(),
+		size: bytes.length.toString(),
+		blake3: b64url(hash),
+		signer: b64url(spki),
+		signature: b64url(Buffer.concat([Buffer.from('3049300506032b65700440', 'hex'), signature])),
+	}).toString()
+}
+
+const login = JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'auth.login', params: { password, pubkey: pem } })
+const req = JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: JSON.parse(params) })
+console.log([ip, login, sign(login), req, sign(req), sign(req)].join('\n'))
+EOF
+)
+
 ui_rpc() {
-	local method=$1 params=${2:-'{}'} login req
-	login=$(router_password | node -e '
-const fs = require("node:fs")
-const password = fs.readFileSync(0, "utf8").replace(/\n$/, "")
-console.log(JSON.stringify({jsonrpc: "2.0", id: 0, method: "auth.login", params: {password}}))')
-	req=$(node -e '
-console.log(JSON.stringify({jsonrpc: "2.0", id: 1, method: process.argv[1], params: JSON.parse(process.argv[2])}))' \
-		"$method" "$params") || die "params must be JSON"
-	printf '%s\n%s\n' "$login" "$req" | wrt "sh -c $(sq "$UI_REMOTE")"
+	local method=$1 params=${2:-'{}'} ip
+	node -e 'JSON.parse(process.argv[1])' "$params" 2>/dev/null || die "params must be JSON"
+	state_dir
+	ip=$(wrt 'uci -q get network.lan.ipaddr')
+	router_password | node -e "$UI_SIGN" "$REPO_ROOT" "$UI_KEY" "${ip%/*}" "$method" "$params" |
+		wrt "sh -c $(sq "$UI_REMOTE")"
 }
 
 cmd_ui() {
@@ -537,7 +591,8 @@ cmd_ui() {
 		ui_rpc "${2:?method required}" "${3:-}"
 		;;
 	login)
-		wrt 'rm -f /tmp/bench/ui-cookies'
+		[ -f "$UI_KEY" ] && ui_rpc auth.logout >/dev/null 2>&1 || true
+		rm -f "$UI_KEY"
 		ui_rpc wan.ipv4-get | grep -q '"result"' && echo "UI session started" || die "UI login failed"
 		;;
 	tunnel)

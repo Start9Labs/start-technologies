@@ -13,7 +13,7 @@ export interface HttpOptions {
   params?: {
     [param: string]: ParamPrimitive | ParamPrimitive[]
   }
-  responseType?: 'json' | 'text' | 'arrayBuffer'
+  responseType?: 'json' | 'text' | 'arraybuffer'
   body?: any
   timeout?: number
 }
@@ -28,7 +28,7 @@ export interface HttpAngularOptions {
   params?: {
     [param: string]: ParamPrimitive | ParamPrimitive[]
   }
-  responseType?: 'json' | 'text' | 'arrayBuffer'
+  responseType?: 'json' | 'text' | 'arraybuffer'
 }
 
 export interface LocalHttpResponse<T> extends HttpResponse<T> {

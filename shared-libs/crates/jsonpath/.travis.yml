@@ -26,7 +26,7 @@ matrix:
       script:
         - ./clippy.sh
       after_success: |
-        cargo tarpaulin --exclude-files wasm parser/mod.rs --out Xml
+        cargo tarpaulin --exclude-files parser/mod.rs --out Xml
         bash <(curl -s https://codecov.io/bash)
     - rust: stable
       os: osx
@@ -35,35 +35,3 @@ matrix:
         - cargo clean
         - cargo build --verbose --all
         - cargo test --verbose --all
-    - language: node_js
-      os: linux
-      node_js:
-        - '11'
-        - '10'
-        - '9'
-        - '8'
-      before_install:
-        - curl https://sh.rustup.rs -sSf > /tmp/rustup.sh
-        - sh /tmp/rustup.sh -y
-        - export PATH="$HOME/.cargo/bin:$PATH"
-        - source "$HOME/.cargo/env"
-      before_script:
-        - curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh -s -- -f
-      script:
-        - bash ./build-wasm.sh
-    - language: node_js
-      os: osx
-      node_js:
-        - '11'
-        - '10'
-        - '9'
-        - '8'
-      before_install:
-        - curl https://sh.rustup.rs -sSf > /tmp/rustup.sh
-        - sh /tmp/rustup.sh -y
-        - export PATH="$HOME/.cargo/bin:$PATH"
-        - source "$HOME/.cargo/env"
-      before_script:
-        - curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh -s -- -f
-      script:
-        - bash ./build-wasm.sh

@@ -1,1 +1,0 @@
-- Bash tab completion for `start-cli` is enabled automatically in new shells.

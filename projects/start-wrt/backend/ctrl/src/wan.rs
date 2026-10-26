@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
     DdnsService, InterfaceProto, NetworkDevice, NetworkInterface, UciSystemDns,
 };
-use uciedit::{dump_all, parse_all, Arena, TypedSection};
+use uciedit::{dump_all, parse_all, read_all, Arena, TypedSection};
 
 use crate::dns::{self, DnsServer};
 use crate::invoke::Invoke;
@@ -408,6 +408,7 @@ pub async fn ipv4_set<C: CtrlContext>(
                             iface.gateway = None;
                             iface.username = None;
                             iface.password = None;
+                            iface.ipv6 = None;
                         }
                         WanIpv4Mode::Static => {
                             iface.proto = InterfaceProto::STATIC;
@@ -416,6 +417,7 @@ pub async fn ipv4_set<C: CtrlContext>(
                             iface.gateway = req.gateway.clone();
                             iface.username = None;
                             iface.password = None;
+                            iface.ipv6 = None;
                             // If no custom DNS is configured, use the gateway as DNS
                             // so dnsmasq has an upstream to forward to
                             if iface.peerdns.as_deref() != Some("0") {
@@ -435,6 +437,7 @@ pub async fn ipv4_set<C: CtrlContext>(
                             iface.ipaddr = None;
                             iface.netmask = None;
                             iface.gateway = None;
+                            iface.ipv6 = Some("1".to_string());
                         }
                     }
                     section.set(&iface)?;
@@ -1020,8 +1023,9 @@ pub async fn dns_set<C: CtrlContext>(
 
 #[instrument(skip_all)]
 pub async fn ddns_get<C: CtrlContext>(ctx: C) -> Result<WanDdnsResponse, Error> {
+    let bytes = read_all(ctx.uci_root(), &["ddns"]).await?;
     let arena = Arena::new();
-    let cfgs = parse_all(ctx.uci_root(), &arena, &["ddns"]).await?;
+    let cfgs = bytes.parse(&arena)?;
 
     for section in &cfgs["ddns"].sections {
         if section.name().as_deref() == Some(DDNS_SECTION) {
@@ -1344,6 +1348,50 @@ config service 'wan'
         let res = ipv4_get(ctx).await.unwrap();
         assert_eq!(res.mode, WanIpv4Mode::Pppoe);
         assert_eq!(res.username.as_deref(), Some("user@isp"));
+        let raw = std::fs::read_to_string(dir.path().join("network")).unwrap();
+        assert!(raw.contains("option ipv6 '1'"));
+    }
+
+    #[tokio::test]
+    async fn ipv4_set_dhcp_clears_pppoe_ipv6() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_network(dir.path());
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        ipv4_set(
+            ctx.clone(),
+            DeserializeStdin(WanIpv4SetRequest {
+                mode: WanIpv4Mode::Pppoe,
+                address: None,
+                netmask: None,
+                gateway: None,
+                username: Some("user@isp".to_string()),
+                password: Some("secret".to_string()),
+                device: None,
+            }),
+        )
+        .await
+        .unwrap();
+        ipv4_set(
+            ctx.clone(),
+            DeserializeStdin(WanIpv4SetRequest {
+                mode: WanIpv4Mode::Dhcp,
+                address: None,
+                netmask: None,
+                gateway: None,
+                username: None,
+                password: None,
+                device: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let res = ipv4_get(ctx).await.unwrap();
+        assert_eq!(res.mode, WanIpv4Mode::Dhcp);
+        let raw = std::fs::read_to_string(dir.path().join("network")).unwrap();
+        assert!(!raw.contains("option ipv6"));
+        assert!(!raw.contains("option username"));
     }
 
     // ── IPv6 ──

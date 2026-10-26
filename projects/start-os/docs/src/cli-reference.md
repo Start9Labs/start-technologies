@@ -17,10 +17,20 @@ These apply to all subcommands.
 - `-t, --tunnel <URL>` — Tunnel server address
 - `-p, --proxy <URL>` — HTTP/SOCKS proxy
 - `--id-key-path <PATH>` — Identity signing key path (`--developer-key-path` is accepted as an alias)
+- `--id-key-gpg <KEY>` — Sign through gpg-agent with this GnuPG key (fingerprint, key ID, or user ID) instead of the identity key file
 
 ## Shell Completion
 
 The Debian package and StartOS image enable Bash tab completion automatically in new shells. For other installations, add `eval "$(start-cli completions bash)"` to `~/.bashrc`. `start-cli completions <shell>` also supports Zsh, fish, elvish, and PowerShell.
+
+## From the Browser Console
+
+The same API is reachable from the StartOS web interface. While logged in, open your browser's developer console and call a command through `rpcClient.rpc`, writing its path in camelCase and passing its arguments as an object:
+
+```js
+await rpcClient.rpc.server.setHostname({ hostname: 'my-server' })
+await rpcClient.rpc.package.start({ id: 'bitcoind' })
+```
 
 ## Authentication
 
@@ -250,9 +260,7 @@ Install a package from the registry or sideload a local `.s9pk` file.
 
 ### `start-cli package start <ID>`
 
-Start a service. Blocked if the service has an unresolved critical task, unless `--force` is passed.
-
-- `--force` — Start even if the service has an unresolved critical task
+Request that a service run. If active critical tasks block execution, the CLI warns and records running intent. The service starts automatically when its blocking tasks clear.
 
 ### `start-cli package stop <ID>`
 
