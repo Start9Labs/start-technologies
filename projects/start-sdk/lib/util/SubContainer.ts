@@ -522,6 +522,7 @@ export class SubContainerEager<
       }
 
       await fs.mkdir(`${rootfs}/etc`, { recursive: true })
+      await fs.mkdir(`${rootfs}/proc`, { recursive: true })
       await fs.rm(`${rootfs}/etc/resolv.conf`, { force: true })
       await fs.copyFile('/etc/resolv.conf', `${rootfs}/etc/resolv.conf`)
 

@@ -110,3 +110,17 @@ it('destroys the filesystem when resolver installation fails', async () => {
   expect(effects.subcontainer.destroyFs).toHaveBeenCalledTimes(1)
   expect(subcontainers.execFile).not.toHaveBeenCalled()
 })
+
+it('creates the proc mount point for an image without one', async () => {
+  const sub = await SubContainer.eager(
+    effects,
+    { imageId: 'main' },
+    null,
+    'test',
+  )
+  try {
+    expect((await fs.stat(join(rootfs, 'proc'))).isDirectory()).toBe(true)
+  } finally {
+    await sub.destroy()
+  }
+})
