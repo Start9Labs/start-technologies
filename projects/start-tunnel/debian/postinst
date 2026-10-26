@@ -6,5 +6,7 @@ if [ -n "$DPKG_MAINTSCRIPT_PACKAGE" ]; then
 	  SYSTEMCTL=deb-systemd-helper
 fi
 
+sysctl -q -p /usr/lib/sysctl.d/60-start-tunnel.conf
+
 $SYSTEMCTL enable start-tunneld.service
 $SYSTEMCTL restart start-tunneld.service
