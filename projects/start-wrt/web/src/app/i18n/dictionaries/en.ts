@@ -573,10 +573,4 @@ export const ENGLISH: Record<string, number> = {
   'Lets this device announce IPv6 routes to your other devices (needed by Thread border routers such as an Apple TV, HomePod, or Home Assistant). Off by default.': 596,
   'Allow IPv6 Router Advertisements?': 597,
   'This device will be able to give your other devices IPv6 addresses, routes, DNS servers, and a default gateway, and could route their IPv6 traffic around the router. Grant this only to a device you trust, such as a Thread border router.': 598,
-  'Use a Let\'s Encrypt certificate': 599,
-  'Lets browsers trust this hostname without installing your Root CA. Requires Remote Access set to Always. Let\'s Encrypt publishes every certificate it issues in public logs.': 600,
-  'Certificate': 601,
-  'Valid until': 602,
-  'Pending': 603,
-  'Failed': 604,
 }

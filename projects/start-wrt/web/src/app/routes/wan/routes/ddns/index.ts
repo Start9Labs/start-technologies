@@ -2,7 +2,7 @@ import { Component, computed, effect, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms'
 import { TuiAnimated, tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
-import { TuiHint, TuiLabel, TuiTextfield, TuiTitle } from '@taiga-ui/core'
+import { TuiTextfield, TuiTitle } from '@taiga-ui/core'
 import {
   TuiChevron,
   TuiDataListWrapper,
@@ -18,18 +18,18 @@ import {
   provideFormService,
 } from 'src/app/services/form.service'
 import { DdnsFields } from './form/fields'
-import { DdnsData, DdnsService } from './service'
+import { DdnsService } from './service'
 import { DdnsSummary } from './summary'
 import {
   DDNS_PROVIDER_LIST,
   DDNS_PROVIDERS,
+  DdnsForm,
   DdnsProvider,
   getDdnsForm,
   getProviderFields,
   updateDdnsValidators,
 } from './utils'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
-import { i18nKey } from 'src/app/i18n/i18n.providers'
 
 @Component({
   template: `
@@ -77,15 +77,6 @@ import { i18nKey } from 'src/app/i18n/i18n.providers'
           />
         }
       </tui-elastic-container>
-      <tui-elastic-container>
-        @if (enabled()) {
-          <label tuiLabel tuiAnimated>
-            <input type="checkbox" tuiSwitch formControlName="acme" />
-            {{ acme.label | i18n }}
-            <i [tuiHint]="acme.hint | i18n"></i>
-          </label>
-        }
-      </tui-elastic-container>
       @if (service.data()) {
         <footer appFooter></footer>
       }
@@ -97,8 +88,6 @@ import { i18nKey } from 'src/app/i18n/i18n.providers'
     TuiHeader,
     TuiTitle,
     TuiTextfield,
-    TuiLabel,
-    TuiHint,
     TuiSwitch,
     TuiChevron,
     TuiSelect,
@@ -115,14 +104,9 @@ import { i18nKey } from 'src/app/i18n/i18n.providers'
 })
 export default class Ddns {
   protected readonly builder = inject(NonNullableFormBuilder)
-  protected readonly service = injectFormService<DdnsData>()
+  protected readonly service = injectFormService<DdnsForm>()
 
   readonly form = getDdnsForm(this.builder)
-
-  protected readonly acme: Record<'label' | 'hint', i18nKey> = {
-    label: "Use a Let's Encrypt certificate",
-    hint: "Lets browsers trust this hostname without installing your Root CA. Requires Remote Access set to Always. Let's Encrypt publishes every certificate it issues in public logs.",
-  }
 
   protected readonly providerList = DDNS_PROVIDER_LIST
 

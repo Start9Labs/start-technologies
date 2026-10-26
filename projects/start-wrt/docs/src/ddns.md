@@ -32,19 +32,3 @@ To set up DDNS:
 ## Checking Your DDNS Status
 
 The Dynamic DNS tab on the WAN Settings page shows the current status of your dynamic DNS configuration: whether it is enabled, the provider, and the hostname. The router updates the record whenever the WAN connection comes up — after a modem reboot or a PPPoE reconnect — and on a periodic check in between, so a changed address is registered within minutes.
-
-## Using a Trusted Certificate
-
-Browsers trust the router's own certificate only on devices that have [trusted your Root CA](trust-ca.md). To open the web interface at your DDNS hostname from any browser without a warning, the router can get a certificate for the hostname from Let's Encrypt:
-
-1. Set [Remote Access](settings.md#remote-access) to "Always". Let's Encrypt confirms you control the hostname by connecting to your router on port 443 from the Internet. If your router sits behind another router, forward port 443 on that router to it; behind [CGNAT](cgnat.md), Let's Encrypt cannot reach it.
-
-1. On the Dynamic DNS tab, toggle **Use a Let's Encrypt certificate** on and click "Save".
-
-The Dynamic DNS summary shows the certificate's expiry date once it is issued, or why the last attempt failed; failures also appear in the [Activity](settings.md#activity) log. The router retries a failed attempt and renews the certificate before it expires. Until a certificate is issued, the hostname is served with one from your Root CA.
-
-> [!NOTE]
-> A proxied (orange-cloud) Cloudflare record cannot get a Let's Encrypt certificate this way: Cloudflare answers on port 443 in place of your router.
-
-> [!NOTE]
-> Let's Encrypt publishes every certificate it issues in public Certificate Transparency logs, so your hostname is listed there.

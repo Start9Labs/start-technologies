@@ -334,7 +334,7 @@ impl VHostController {
         })
     }
 
-    /// Once per reason until a certificate lands: the address refuses
+    /// Once per name until a certificate lands: the address refuses
     /// connections meanwhile, and nothing else would say why.
     fn report_acme_failure(&self) -> ReportOrderFailure {
         let db = self.db.clone();

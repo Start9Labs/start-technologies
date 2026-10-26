@@ -77,13 +77,6 @@ export type RpcSchemaTree<Schema> = {
         ? { [Name in keyof Schema[Key]]: RpcSchemaTree<Schema[Key][Name]> }
         : never
 }
-
-/**
- * The Let's Encrypt certificate for the DDNS hostname.
- */
-export type AcmeCertificateStatus = z.output<
-  typeof schemas.AcmeCertificateStatus
->
 export type ActivityDeleteParamsInput = z.input<
   typeof schemas.ActivityDeleteParams
 >

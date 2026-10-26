@@ -199,7 +199,6 @@ cat > "${FILES_DIR}/lib/upgrade/keep.d/startwrt" << 'KEEPEOF'
 /etc/ssl/certs/startwrt-int.pem
 /etc/ssl/private/startwrt-ca.key
 /etc/ssl/private/startwrt-int.key
-# Issued certificates and the ACME account.
 /etc/startwrt/certs/
 /etc/nlbwmon/data/
 /etc/startwrt/pending-update

@@ -81,19 +81,12 @@ impl AuthDatabaseModel for Model<AuthDatabase> {
 }
 const SESSION_PUBKEYS: &str = "sessionPubkeys";
 
-/// The enabled DDNS hostname, lowercased, and whether it takes an ACME
-/// certificate.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct DdnsName {
-    pub hostname: Option<InternedString>,
-    pub acme: bool,
-}
-
-/// The DDNS name as of the ddns config's modification time.
+/// The enabled DDNS hostname, lowercased, as of the ddns config's
+/// modification time.
 #[derive(Default)]
 struct DdnsIdentity {
     modified: Option<SystemTime>,
-    name: DdnsName,
+    hostname: Option<InternedString>,
 }
 
 pub struct AuthState {
@@ -124,18 +117,6 @@ impl AuthState {
         ))
     }
 
-    #[cfg(test)]
-    pub(crate) fn with_ddns_name(name: DdnsName) -> Self {
-        let state = Self::in_memory();
-        state.ddns.mutate(|cache| {
-            cache.modified = std::fs::metadata("/etc/config/ddns")
-                .and_then(|m| m.modified())
-                .ok();
-            cache.name = name;
-        });
-        state
-    }
-
     fn new(db: TypedPatchDb<AuthDatabase>) -> Self {
         Self {
             db,
@@ -148,7 +129,7 @@ impl AuthState {
 
 impl ServerContext {
     /// Re-reads the ddns config only when its modification time changes.
-    pub(crate) async fn ddns_name(&self) -> DdnsName {
+    pub(crate) async fn ddns_identity(&self) -> Option<InternedString> {
         let path = self.uci_root().join("ddns");
         let modified = tokio::fs::metadata(&path)
             .await
@@ -157,37 +138,23 @@ impl ServerContext {
         let cached = self
             .auth
             .ddns
-            .peek(|cache| (cache.modified == modified).then(|| cache.name.clone()));
-        if let Some(name) = cached {
-            return name;
+            .peek(|cache| (cache.modified == modified).then(|| cache.hostname.clone()));
+        if let Some(hostname) = cached {
+            return hostname;
         }
-        let name = crate::wan::ddns_get(self.clone())
+        let hostname = crate::wan::ddns_get(self.clone())
             .await
             .ok()
             .filter(|ddns| ddns.enabled)
-            .and_then(|ddns| {
-                Some(DdnsName {
-                    hostname: Some(InternedString::intern(ddns.hostname?.to_ascii_lowercase())),
-                    acme: ddns.acme,
-                })
-            })
-            .unwrap_or_default();
+            .and_then(|ddns| ddns.hostname)
+            .map(|hostname| InternedString::intern(hostname.to_ascii_lowercase()));
         self.auth.ddns.mutate(|cache| {
             *cache = DdnsIdentity {
                 modified,
-                name: name.clone(),
+                hostname: hostname.clone(),
             }
         });
-        name
-    }
-
-    /// The DDNS name as of the last [`Self::ddns_name`].
-    pub(crate) fn cached_ddns_name(&self) -> DdnsName {
-        self.auth.ddns.peek(|cache| cache.name.clone())
-    }
-
-    async fn ddns_identity(&self) -> Option<InternedString> {
-        self.ddns_name().await.hostname
+        hostname
     }
 }
 

@@ -609,20 +609,6 @@ struct WanDdnsResponse {
     /// Cloudflare only: the zone's root domain (null for configs saved
     /// before the zone was stored)
     zone: Option<String>,
-    /// The hostname is served with a certificate from Let's Encrypt
-    acme: bool,
-    /// Null while `acme` or `enabled` is off, and when the handler runs
-    /// outside the daemon
-    certificate: Option<AcmeCertificateStatus>,
-}
-
-#[derive(Serialize)]
-#[serde(tag = "state", rename_all = "camelCase")]
-enum AcmeCertificateStatus {
-    Pending,
-    Issued { expires: DateTime<Utc> },
-    /// The last order failed; it is retried
-    Failed { reason: String },
 }
 ```
 
@@ -644,19 +630,10 @@ struct WanDdnsSetRequest {
     password: Option<String>,
     token: Option<String>,
     zone: Option<String>,
-    /// Defaults to false
-    acme: bool,
 }
 // Response: null
 // Backend: updates UCI ddns config, restarts/stops ddns service
 ```
-
-`acme` is stored as `_acme '1'` on the service section, and only while
-`enabled`. With it on, the daemon obtains and renews a Let's Encrypt
-certificate for `hostname` over TLS-ALPN-01 on port 443, which needs Remote
-Access at `always`. Failed orders are recorded in the activity log. Until a
-certificate is issued, the hostname is served with one from the router's
-local CA.
 
 For Cloudflare, `zone` is required and must be the domain registered with
 Cloudflare (e.g. `example.com`), and `hostname` must be that zone itself

@@ -5,50 +5,6 @@ const object = <Shape extends z.core.$ZodLooseShape>(shape: Shape) =>
   z.object(shape).meta({ additionalProperties: true })
 const empty: z.ZodType<{}, {}> = /* @__PURE__ */ object({})
 const literal_0 = /* @__PURE__ */ z.string()
-
-/**
- * The Let's Encrypt certificate for the DDNS hostname.
- */
-export const AcmeCertificateStatus: z.ZodUnion<
-  readonly [
-    z.ZodObject<{ state: z.ZodLiteral<'pending'> }>,
-    z.ZodIntersection<
-      z.ZodObject<{ state: z.ZodLiteral<'issued'> }>,
-      z.ZodObject<{ expires: z.ZodString }>
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{
-        /**
-         * The last order failed; it is retried.
-         */
-        state: z.ZodLiteral<'failed'>
-      }>,
-      z.ZodObject<{ reason: z.ZodString }>
-    >,
-  ]
-> = /* @__PURE__ */ z
-  .union([
-    object({ state: z.literal('pending') }),
-    z.intersection(
-      object({ state: z.literal('issued') }),
-      object({ expires: z.string() }),
-    ),
-    z.intersection(
-      object({
-        /**
-         * The last order failed; it is retried.
-         */
-        state: z.literal('failed').meta({
-          description: 'The last order failed; it is retried.',
-        }),
-      }),
-      object({ reason: z.string() }),
-    ),
-  ])
-  .meta({
-    id: 'AcmeCertificateStatus',
-    description: "The Let's Encrypt certificate for the DDNS hostname.",
-  })
 export const ActivityDeleteParams: z.ZodObject<{ id: z.ZodInt }> =
   /* @__PURE__ */ object({ id: z.int() }).meta({
     id: 'ActivityDeleteParams',
@@ -2299,17 +2255,6 @@ export const WanDdnsResponse: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
-  /**
-   * The hostname is served with a certificate from Let's Encrypt.
-   */
-  acme: z.ZodBoolean
-  /**
-   * Absent while ACME is off, and outside the daemon.
-   */
-  certificate: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof AcmeCertificateStatus>>,
-    z.ZodNullable<typeof AcmeCertificateStatus>
-  >
 }> = /* @__PURE__ */ object({
   enabled: z.boolean(),
   provider: DdnsProvider,
@@ -2318,22 +2263,6 @@ export const WanDdnsResponse: z.ZodObject<{
   password: wire(z.string().nullable().optional(), z.string().nullable()),
   token: wire(z.string().nullable().optional(), z.string().nullable()),
   zone: wire(z.string().nullable().optional(), z.string().nullable()),
-  /**
-   * The hostname is served with a certificate from Let's Encrypt.
-   */
-  acme: z.boolean().meta({
-    description:
-      "The hostname is served with a certificate from Let's Encrypt.",
-  }),
-  /**
-   * Absent while ACME is off, and outside the daemon.
-   */
-  certificate: wire(
-    AcmeCertificateStatus.nullable().optional(),
-    AcmeCertificateStatus.nullable(),
-  ).meta({
-    description: 'Absent while ACME is off, and outside the daemon.',
-  }),
 }).meta({
   id: 'WanDdnsResponse',
 })
@@ -2360,7 +2289,6 @@ export const WanDdnsSetRequest: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
-  acme: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   enabled: z.boolean(),
   provider: DdnsProvider,
@@ -2369,7 +2297,6 @@ export const WanDdnsSetRequest: z.ZodObject<{
   password: wire(z.string().nullable().optional(), z.string().nullable()),
   token: wire(z.string().nullable().optional(), z.string().nullable()),
   zone: wire(z.string().nullable().optional(), z.string().nullable()),
-  acme: wire(z.boolean().optional(), z.boolean()),
 }).meta({
   id: 'WanDdnsSetRequest',
 })

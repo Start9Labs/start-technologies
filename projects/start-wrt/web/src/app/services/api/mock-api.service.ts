@@ -1545,8 +1545,6 @@ export class MockApiService extends ApiService {
     password: 'mypass',
     token: null,
     zone: null,
-    acme: false,
-    certificate: null,
   }
 
   async wanDdnsGet(): Promise<WanDdnsResponse> {
@@ -1573,14 +1571,6 @@ export class MockApiService extends ApiService {
       password: fields.includes('password') ? (params.password ?? null) : null,
       token: fields.includes('token') ? (params.token ?? null) : null,
       zone: fields.includes('zone') ? (params.zone ?? null) : null,
-      acme: params.enabled && !!params.acme,
-      certificate:
-        params.enabled && params.acme
-          ? {
-              state: 'issued',
-              expires: new Date(Date.now() + 90 * 86400_000).toISOString(),
-            }
-          : null,
     }
     this.logActivity(
       'wan',
