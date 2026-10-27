@@ -391,7 +391,7 @@ Le DNS (Domain Name System) traduit les noms de domaine en adresses IP.
 
 Activez le DNS over HTTPS (DoH) pour des requêtes DNS chiffrées. Cela améliore la confidentialité en empêchant l’écoute de votre trafic DNS.
 
-**Remarque :** Tous les serveurs DNS ne prennent pas en charge le DoH. Parmi les serveurs courants qui le font figurent Cloudflare (1.1.1.1), Google (8.8.8.8) et Quad9 (9.9.9.9).`,
+**Remarque :** Tous les serveurs DNS ne prennent pas en charge le DoH. Parmi les serveurs courants qui le font figurent Cloudflare (1.1.1.1) et Google (8.8.8.8).`,
   '/wan/dynamic-dns': `## WAN – DNS dynamique
 
 ### DNS dynamique

@@ -391,7 +391,7 @@ DNS (Domain Name System) traduce los nombres de dominio a direcciones IP.
 
 Habilita DNS over HTTPS (DoH) para consultas DNS cifradas. Esto mejora la privacidad evitando la interceptación de tu tráfico DNS.
 
-**Nota:** No todos los servidores DNS admiten DoH. Algunos servidores habituales que sí lo hacen son Cloudflare (1.1.1.1), Google (8.8.8.8) y Quad9 (9.9.9.9).`,
+**Nota:** No todos los servidores DNS admiten DoH. Algunos servidores habituales que sí lo hacen son Cloudflare (1.1.1.1) y Google (8.8.8.8).`,
   '/wan/dynamic-dns': `## WAN – DNS dinámico
 
 ### DNS dinámico
