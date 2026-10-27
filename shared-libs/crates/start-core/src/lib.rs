@@ -411,6 +411,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
             "update-signers",
             update::signers::api::<C>().with_about("about.commands-os-update-signers"),
         )
+        .subcommand("trusted-keys", update::trusted_keys::api::<C>().no_cli())
         .subcommand(
             "update-firmware",
             from_fn_async(|_: RpcContext| async {

@@ -8,6 +8,8 @@ import {
   StoreIdentity,
   packageResponse,
   packagesResponse,
+  matchingTrustedKeys,
+  packageSigners,
 } from '@start9labs/marketplace'
 import {
   defaultRegistries,
@@ -288,17 +290,30 @@ export class MarketplaceService extends AbstractMarketplaceService {
   }
 
   async installPackage(
-    id: string,
-    version: string,
+    pkg: Pick<MarketplacePkg, 'id' | 'version' | 's9pks' | 'signers'>,
     url: string,
   ): Promise<void> {
-    const params: T.InstallParams = {
-      id,
-      version,
-      registry: url,
+    const groups = await firstValueFrom(
+      this.patch.watch$('serverInfo', 'trustedKeys'),
+    )
+    const keys = matchingTrustedKeys(
+      packageSigners(pkg),
+      groups,
+      'marketplace',
+    ).flatMap(group => group.publicKeys)
+    if (!keys.length) {
+      throw new Error(
+        this.i18n.transform(
+          "this service package isn't signed by anyone you trust",
+        ),
+      )
     }
-
-    await this.api.rpc.package.install(params)
+    await this.api.rpc.package.install({
+      id: pkg.id,
+      version: pkg.version,
+      registry: url,
+      acceptSigners: { any: keys.map(signer => ({ signer })) },
+    })
   }
 
   async connect(url: string): Promise<void> {
@@ -314,7 +329,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
       throw new Error(this.i18n.transform('Registry already added'))
     }
 
-    // validates the registry is reachable and provides a display name
     const info = await firstValueFrom(this.fetchInfo$(url))
     await this.api.rpc.db.put.ui({
       pointer: pathFromArray(['registries', url]),
@@ -334,8 +348,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
       value: filtered,
     })
 
-    // If the deleted registry was the persisted selection, clear it so the next
-    // load falls back to the default rather than the deleted one.
     const selected = this.storage.get<string>('selectedRegistry')
     if (selected && sameUrl(selected, url)) {
       this.storage.set('selectedRegistry', null)

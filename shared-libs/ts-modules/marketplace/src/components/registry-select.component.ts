@@ -26,6 +26,7 @@ import {
 
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreIconDirective } from './store-icon.directive'
+import { MarketplaceTrust } from '../trust'
 
 @Component({
   selector: 'marketplace-registry-select',
@@ -49,6 +50,16 @@ import { StoreIconDirective } from './store-icon.directive'
         <tui-data-list *tuiDropdown size="m">
           <div class="g-title">
             <small>{{ 'Saved Registries' | i18n }}</small>
+            @if (trust; as trust) {
+              <button
+                tuiButton
+                size="xs"
+                appearance="flat-grayscale"
+                (click)="open = false; trust.manage()"
+              >
+                🗝️ {{ 'Manage trusted keys' | i18n }}
+              </button>
+            }
             <button
               tuiButton
               size="xs"
@@ -131,6 +142,8 @@ import { StoreIconDirective } from './store-icon.directive'
 
     .g-title {
       justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.5rem;
       margin: 0.5rem 0.5rem 0.25rem;
     }
   `,
@@ -152,14 +165,12 @@ export class MarketplaceRegistrySelectComponent {
   private readonly marketplace = inject(AbstractMarketplaceService)
   private readonly router = inject(Router)
 
+  protected readonly trust = inject(MarketplaceTrust, { optional: true })
   protected open = false
   protected readonly breakpoint = inject(TUI_BREAKPOINT)
 
-  // The resolved current registry — used to label an arbitrary (deep-linked)
-  // registry that isn't in the saved list yet.
   protected readonly fetched = toSignal(this.marketplace.currentRegistry$)
 
-  // 0 and 1 are the standard registries (start9, community); 2+ are custom.
   protected readonly data = toSignal(
     combineLatest([
       this.marketplace.registries$,
@@ -177,7 +188,6 @@ export class MarketplaceRegistrySelectComponent {
           current,
           standard: withSelected.slice(0, 2),
           custom: withSelected.slice(2),
-          // an arbitrary (deep-linked) registry not in the saved list
           unsaved: current ? null : currentUrl,
         }
       }),
@@ -187,7 +197,6 @@ export class MarketplaceRegistrySelectComponent {
   async connect(url: string): Promise<void> {
     this.open = false
 
-    // Already on this registry: just close the dropdown
     if (sameUrl(url, this.data()?.current?.url)) return
 
     this.tasks.run(async () => {

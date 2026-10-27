@@ -1469,7 +1469,11 @@ export const ShutdownParams: z.ZodObject<{
 }).meta({
   id: 'ShutdownParams',
 })
-export const SideloadParams: typeof empty = /* @__PURE__ */ empty.meta({
+export const SideloadParams: z.ZodObject<{
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  trust: wire(z.boolean().optional(), z.boolean()),
+}).meta({
   id: 'SideloadParams',
 })
 
@@ -2919,17 +2923,6 @@ export const InitAcmeParams: z.ZodObject<{
 }).meta({
   id: 'InitAcmeParams',
 })
-export const InstallParams: z.ZodObject<{
-  registry: z.ZodString
-  id: typeof PackageId
-  version: typeof Version
-}> = /* @__PURE__ */ object({
-  registry: z.string(),
-  id: PackageId,
-  version: Version,
-}).meta({
-  id: 'InstallParams',
-})
 export const InstalledVersionParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'InstalledVersionParams',
@@ -3953,6 +3946,21 @@ export const TestSmtpParams: z.ZodObject<{
 }).meta({
   id: 'TestSmtpParams',
 })
+export const TrustedKey: z.ZodObject<{
+  name: z.ZodString
+  publicKeys: z.ZodArray<typeof AnyVerifyingKey>
+  removable: z.ZodBoolean
+  marketplace: z.ZodBoolean
+  os: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  publicKeys: z.array(AnyVerifyingKey),
+  removable: z.boolean(),
+  marketplace: z.boolean(),
+  os: z.boolean(),
+}).meta({
+  id: 'TrustedKey',
+})
 export const UmountParams: z.ZodObject<{
   targetId: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof BackupTargetId>>,
@@ -4345,6 +4353,27 @@ export const InitProgressRes: z.ZodObject<{
   guid: typeof Guid
 }> = /* @__PURE__ */ object({ progress: FullProgress, guid: Guid }).meta({
   id: 'InitProgressRes',
+})
+export const InstallParams: z.ZodObject<{
+  registry: z.ZodString
+  id: typeof PackageId
+  version: typeof Version
+  acceptSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
+    z.ZodNullable<typeof AcceptSigners>
+  >
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  registry: z.string(),
+  id: PackageId,
+  version: Version,
+  acceptSigners: wire(
+    AcceptSigners.nullable().optional(),
+    AcceptSigners.nullable(),
+  ),
+  trust: wire(z.boolean().optional(), z.boolean()),
+}).meta({
+  id: 'InstallParams',
 })
 export const MetadataSrc: z.ZodUnion<
   readonly [
@@ -4853,6 +4882,7 @@ export const UpdateSystemParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
     z.ZodNullable<typeof AcceptSigners>
   >
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   targetVersion: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
@@ -4870,6 +4900,7 @@ export const UpdateSystemParams: z.ZodObject<{
     description:
       'Additional signer requirements checked before starting the update.',
   }),
+  trust: wire(z.boolean().optional(), z.boolean()),
   targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
   progress: wire(z.boolean().optional(), z.boolean()),
 }).meta({
@@ -5887,9 +5918,9 @@ export const ServerInfo: z.ZodObject<{
     typeof ServerStatus
   >
   unreadNotificationCount: z.ZodInt
-  trustedOsUpdateSigners: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof TrustedOsUpdateSigner>>,
-    z.ZodRecord<z.ZodString, typeof TrustedOsUpdateSigner>
+  trustedKeys: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof TrustedKey>>,
+    z.ZodRecord<z.ZodString, typeof TrustedKey>
   >
   pubkey: z.ZodString
   caFingerprint: z.ZodString
@@ -5936,9 +5967,9 @@ export const ServerInfo: z.ZodObject<{
   network: NetworkInfo,
   statusInfo: wire(ServerStatus.optional(), ServerStatus),
   unreadNotificationCount: z.int(),
-  trustedOsUpdateSigners: wire(
-    z.record(z.string(), TrustedOsUpdateSigner).optional(),
-    z.record(z.string(), TrustedOsUpdateSigner),
+  trustedKeys: wire(
+    z.record(z.string(), TrustedKey).optional(),
+    z.record(z.string(), TrustedKey),
   ),
   pubkey: z.string(),
   caFingerprint: z.string(),

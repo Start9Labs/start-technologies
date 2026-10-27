@@ -24,6 +24,8 @@ import {
   TuiButton,
   TuiCell,
   tuiCellOptionsProvider,
+  TuiDataList,
+  TuiDropdown,
   TuiIcon,
   TuiInput,
   TuiTitle,
@@ -44,6 +46,7 @@ import { ConfigService } from 'src/app/services/config.service'
 import { OSService } from 'src/app/services/os.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { TitleDirective } from 'src/app/services/title.service'
+import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
 import { KeyboardSelectComponent } from './keyboard-select.component'
 import { ServerNameDialog } from './server-name.dialog'
 import { SnakeDirective } from './snake.directive'
@@ -94,6 +97,21 @@ import { UPDATE } from './update.component'
           } @else {
             {{ 'Check for updates' | i18n }}
           }
+        </button>
+        <button
+          tuiIconButton
+          tuiDropdown
+          tuiDropdownAuto
+          tuiDropdownAlign="end"
+          appearance="icon"
+          iconStart="@tui.ellipsis"
+        >
+          {{ 'More' | i18n }}
+          <tui-data-list *tuiDropdown="let close">
+            <button tuiOption (click)="close(); trust.manage('os')">
+              🗝️ {{ 'Manage trusted keys' | i18n }}
+            </button>
+          </tui-data-list>
         </button>
       </div>
       <div tuiCell tuiAppearance="outline-grayscale">
@@ -259,6 +277,8 @@ import { UPDATE } from './update.component'
     TuiButtonLoading,
     TuiButtonSelect,
     TuiDataListWrapper,
+    TuiDataList,
+    TuiDropdown,
     TuiInput,
     FormsModule,
     SnakeDirective,
@@ -276,6 +296,8 @@ export default class SystemGeneralComponent {
   private readonly injector = inject(INJECTOR)
   private readonly win = inject(WA_WINDOW)
   private readonly config = inject(ConfigService)
+
+  protected readonly trust = inject(TrustedKeysService)
 
   count = 0
 

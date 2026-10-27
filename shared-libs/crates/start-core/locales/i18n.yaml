@@ -4439,6 +4439,13 @@ help.arg.tor-proxy-url:
   fr_FR: "URL du proxy SOCKS Tor"
   pl_PL: "URL proxy SOCKS Tor"
 
+help.arg.trust:
+  en_US: "Install without requiring a trusted signer; signature and integrity checks remain mandatory"
+  de_DE: "Ohne vertrauenswürdigen Unterzeichner installieren; Signatur- und Integritätsprüfungen bleiben erforderlich"
+  es_ES: "Instalar sin exigir un firmante de confianza; las comprobaciones de firma e integridad siguen siendo obligatorias"
+  fr_FR: "Installer sans exiger un signataire de confiance ; les contrôles de signature et d'intégrité restent obligatoires"
+  pl_PL: "Instaluj bez wymogu zaufanego sygnatariusza; kontrole podpisu i integralności pozostają obowiązkowe"
+
 help.arg.tunnel-address:
   en_US: "Tunnel server address"
   de_DE: "Tunnel-Server-Adresse"
@@ -7285,6 +7292,27 @@ update.signers.not-found:
   es_ES: "No se encontró el firmante de confianza de actualizaciones del sistema"
   fr_FR: "Signataire de confiance des mises à jour du système introuvable"
   pl_PL: "Nie znaleziono zaufanego sygnatariusza aktualizacji systemu"
+
+update.trusted-keys.invalid:
+  en_US: "Enter a name and at least one Ed25519 public key"
+  de_DE: "Geben Sie einen Namen und mindestens einen öffentlichen Ed25519-Schlüssel ein"
+  es_ES: "Introduzca un nombre y al menos una clave pública Ed25519"
+  fr_FR: "Saisissez un nom et au moins une clé publique Ed25519"
+  pl_PL: "Podaj nazwę i co najmniej jeden klucz publiczny Ed25519"
+
+update.trusted-keys.not-found:
+  en_US: "Trusted key not found"
+  de_DE: "Vertrauenswürdiger Schlüssel nicht gefunden"
+  es_ES: "No se encontró la clave de confianza"
+  fr_FR: "Clé de confiance introuvable"
+  pl_PL: "Nie znaleziono zaufanego klucza"
+
+update.trusted-keys.protected:
+  en_US: "Start9 cannot be deleted; disable its trust toggle instead"
+  de_DE: "Start9 kann nicht gelöscht werden; deaktivieren Sie stattdessen den Vertrauensschalter"
+  es_ES: "Start9 no se puede eliminar; desactive su interruptor de confianza"
+  fr_FR: "Start9 ne peut pas être supprimé ; désactivez plutôt son interrupteur de confiance"
+  pl_PL: "Nie można usunąć Start9; zamiast tego wyłącz zaufanie przełącznikiem"
 
 # volume.rs
 volume.restore-conflict:

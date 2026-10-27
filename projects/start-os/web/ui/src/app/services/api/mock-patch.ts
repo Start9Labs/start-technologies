@@ -53,7 +53,28 @@ export const mockPatchData: DataModel = {
   },
   serverInfo: {
     id: 'abcdefgh',
-    trustedOsUpdateSigners: {},
+    trustedKeys: {
+      start9: {
+        name: 'Start9',
+        publicKeys: [
+          '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=\n-----END PUBLIC KEY-----\n',
+          '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=\n-----END PUBLIC KEY-----\n',
+          '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=\n-----END PUBLIC KEY-----\n',
+        ],
+        removable: false,
+        marketplace: true,
+        os: true,
+      },
+      'start9-alpha': {
+        name: 'Start9 Alpha',
+        publicKeys: [
+          '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PUBLIC KEY-----\n',
+        ],
+        removable: true,
+        marketplace: false,
+        os: false,
+      },
+    },
     version,
     lastBackup: new Date(new Date().valueOf() - 604800001).toISOString(),
     network: {

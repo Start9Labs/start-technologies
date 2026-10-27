@@ -1000,6 +1000,10 @@ export const RemovePassthroughParams: z.ZodObject<{
 }).meta({
   id: 'RemovePassthroughParams',
 })
+export const RemoveTrustedKeyParams: z.ZodObject<{ id: z.ZodString }> =
+  /* @__PURE__ */ object({ id: z.string() }).meta({
+    id: 'RemoveTrustedKeyParams',
+  })
 export const RemoveVersionParams: z.ZodObject<{ version: z.ZodString }> =
   /* @__PURE__ */ object({ version: z.string() }).meta({
     id: 'RemoveVersionParams',
@@ -1119,7 +1123,11 @@ export const ShutdownParams: z.ZodObject<{
 }).meta({
   id: 'ShutdownParams',
 })
-export const SideloadParams: typeof empty = /* @__PURE__ */ empty.meta({
+export const SideloadParams: z.ZodObject<{
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  trust: wire(z.boolean().optional(), z.boolean()),
+}).meta({
   id: 'SideloadParams',
 })
 
@@ -1197,6 +1205,10 @@ export const TimeInfo: z.ZodObject<{ now: z.ZodString; uptime: z.ZodInt }> =
 export const TrustCaParams: z.ZodObject<{ cert: typeof literal_0 }> =
   /* @__PURE__ */ object({ cert: literal_0 }).meta({
     id: 'TrustCaParams',
+  })
+export const TrustContext: z.ZodEnum<{ marketplace: 'marketplace'; os: 'os' }> =
+  /* @__PURE__ */ z.enum(['marketplace', 'os']).meta({
+    id: 'TrustContext',
   })
 export const TrustedCa: z.ZodObject<{
   subject: z.ZodString
@@ -1512,6 +1524,17 @@ export const AddPublicDomainParams: z.ZodObject<{
   internalPort: z.int(),
 }).meta({
   id: 'AddPublicDomainParams',
+})
+export const AddTrustedKeyParams: z.ZodObject<{
+  name: z.ZodString
+  publicKeys: z.ZodArray<typeof AnyVerifyingKey>
+  context: typeof TrustContext
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  publicKeys: z.array(AnyVerifyingKey),
+  context: TrustContext,
+}).meta({
+  id: 'AddTrustedKeyParams',
 })
 export const AddTunnelParams: z.ZodObject<{
   name: z.ZodString
@@ -2095,17 +2118,6 @@ export const InitAcmeParams: z.ZodObject<{
   contact: z.array(z.string()),
 }).meta({
   id: 'InitAcmeParams',
-})
-export const InstallParams: z.ZodObject<{
-  registry: z.ZodString
-  id: typeof PackageId
-  version: typeof Version
-}> = /* @__PURE__ */ object({
-  registry: z.string(),
-  id: PackageId,
-  version: Version,
-}).meta({
-  id: 'InstallParams',
 })
 export const InstalledVersionParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
@@ -2912,6 +2924,17 @@ export const TestSmtpParams: z.ZodObject<{
 }).meta({
   id: 'TestSmtpParams',
 })
+export const ToggleTrustedKeyParams: z.ZodObject<{
+  id: z.ZodString
+  context: typeof TrustContext
+  enabled: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  id: z.string(),
+  context: TrustContext,
+  enabled: z.boolean(),
+}).meta({
+  id: 'ToggleTrustedKeyParams',
+})
 export const UmountParams: z.ZodObject<{
   targetId: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof BackupTargetId>>,
@@ -3192,6 +3215,27 @@ export const HostnameInfo: z.ZodObject<{
   metadata: HostnameMetadata,
 }).meta({
   id: 'HostnameInfo',
+})
+export const InstallParams: z.ZodObject<{
+  registry: z.ZodString
+  id: typeof PackageId
+  version: typeof Version
+  acceptSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
+    z.ZodNullable<typeof AcceptSigners>
+  >
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  registry: z.string(),
+  id: PackageId,
+  version: Version,
+  acceptSigners: wire(
+    AcceptSigners.nullable().optional(),
+    AcceptSigners.nullable(),
+  ),
+  trust: wire(z.boolean().optional(), z.boolean()),
+}).meta({
+  id: 'InstallParams',
 })
 export const Metrics: z.ZodObject<{
   general: typeof MetricsGeneral
@@ -3533,6 +3577,7 @@ export const UpdateSystemParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
     z.ZodNullable<typeof AcceptSigners>
   >
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   targetVersion: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
@@ -3550,6 +3595,7 @@ export const UpdateSystemParams: z.ZodObject<{
     description:
       'Additional signer requirements checked before starting the update.',
   }),
+  trust: wire(z.boolean().optional(), z.boolean()),
   targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
   progress: wire(z.boolean().optional(), z.boolean()),
 }).meta({
@@ -5966,6 +6012,23 @@ export const Api = {
             TrustCaParams,
           ),
           _RETURN: /* @__PURE__ */ TrustedCa,
+        },
+        'trusted-keys': {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            add: {
+              _PARAMS: /* @__PURE__ */ AddTrustedKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            remove: {
+              _PARAMS: /* @__PURE__ */ RemoveTrustedKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            toggle: {
+              _PARAMS: /* @__PURE__ */ ToggleTrustedKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+          },
         },
         update: {
           _PARAMS: /* @__PURE__ */ UpdateSystemParams,

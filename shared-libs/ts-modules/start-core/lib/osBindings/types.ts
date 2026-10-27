@@ -726,8 +726,6 @@ export type InfoParams = z.output<typeof schemas.InfoParams>
 export type InfoParamsInput = z.input<typeof schemas.InfoParams>
 export type InitAcmeParams = z.output<typeof schemas.InitAcmeParams>
 export type InitAcmeParamsInput = z.input<typeof schemas.InitAcmeParams>
-export type InstallParams = z.output<typeof schemas.InstallParams>
-export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type InstalledVersionParams = z.output<
   typeof schemas.InstalledVersionParams
 >
@@ -992,6 +990,8 @@ export type TaskTrigger = z.output<typeof schemas.TaskTrigger>
 export type TaskTriggerInput = z.input<typeof schemas.TaskTrigger>
 export type TestSmtpParams = z.output<typeof schemas.TestSmtpParams>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
+export type TrustedKey = z.output<typeof schemas.TrustedKey>
+export type TrustedKeyInput = z.input<typeof schemas.TrustedKey>
 export type UmountParams = z.output<typeof schemas.UmountParams>
 export type UmountParamsInput = z.input<typeof schemas.UmountParams>
 export type UninstallParams = z.output<typeof schemas.UninstallParams>
@@ -1066,6 +1066,8 @@ export type ImageConfigRepr = z.output<typeof schemas.ImageConfigRepr>
 export type ImageConfigReprInput = z.input<typeof schemas.ImageConfigRepr>
 export type InitProgressRes = z.output<typeof schemas.InitProgressRes>
 export type InitProgressResInput = z.input<typeof schemas.InitProgressRes>
+export type InstallParams = z.output<typeof schemas.InstallParams>
+export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type MetadataSrc = z.output<typeof schemas.MetadataSrc>
 export type MetadataSrcInput = z.input<typeof schemas.MetadataSrc>
 export type Metrics = z.output<typeof schemas.Metrics>

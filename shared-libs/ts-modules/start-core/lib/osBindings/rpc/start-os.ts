@@ -235,6 +235,9 @@ export type RemoveDomainParamsInput = z.input<typeof schemas.RemoveDomainParams>
 export type RemovePassthroughParamsInput = z.input<
   typeof schemas.RemovePassthroughParams
 >
+export type RemoveTrustedKeyParamsInput = z.input<
+  typeof schemas.RemoveTrustedKeyParams
+>
 export type RemoveVersionParamsInput = z.input<
   typeof schemas.RemoveVersionParams
 >
@@ -277,6 +280,7 @@ export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type TermSizeInput = z.input<typeof schemas.TermSize>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TrustCaParamsInput = z.input<typeof schemas.TrustCaParams>
+export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedCa = z.output<typeof schemas.TrustedCa>
 export type TrustedOsUpdateSigner = z.output<
   typeof schemas.TrustedOsUpdateSigner
@@ -321,6 +325,9 @@ export type AddPrivateDomainParamsInput = z.input<
 >
 export type AddPublicDomainParamsInput = z.input<
   typeof schemas.AddPublicDomainParams
+>
+export type AddTrustedKeyParamsInput = z.input<
+  typeof schemas.AddTrustedKeyParams
 >
 export type AddTunnelParamsInput = z.input<typeof schemas.AddTunnelParams>
 export type AddressInfo = z.output<typeof schemas.AddressInfo>
@@ -403,7 +410,6 @@ export type HostnameMetadata = z.output<typeof schemas.HostnameMetadata>
 export type HostnameMetadataInput = z.input<typeof schemas.HostnameMetadata>
 export type InfoParamsInput = z.input<typeof schemas.InfoParams>
 export type InitAcmeParamsInput = z.input<typeof schemas.InitAcmeParams>
-export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type InstalledVersionParamsInput = z.input<
   typeof schemas.InstalledVersionParams
 >
@@ -512,6 +518,9 @@ export type SshAddParamsInput = z.input<typeof schemas.SshAddParams>
 export type StartOsRecoveryInfo = z.output<typeof schemas.StartOsRecoveryInfo>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
+export type ToggleTrustedKeyParamsInput = z.input<
+  typeof schemas.ToggleTrustedKeyParams
+>
 export type UmountParamsInput = z.input<typeof schemas.UmountParams>
 export type UninstallParamsInput = z.input<typeof schemas.UninstallParams>
 export type UnsetGatewaySecureParamsInput = z.input<
@@ -534,6 +543,7 @@ export type HardwareInfo = z.output<typeof schemas.HardwareInfo>
 export type HostAddress = z.output<typeof schemas.HostAddress>
 export type HostnameInfo = z.output<typeof schemas.HostnameInfo>
 export type HostnameInfoInput = z.input<typeof schemas.HostnameInfo>
+export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type Metrics = z.output<typeof schemas.Metrics>
 export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
 export type NotificationWithId = z.output<typeof schemas.NotificationWithId>

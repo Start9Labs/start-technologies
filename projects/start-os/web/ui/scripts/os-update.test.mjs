@@ -8,7 +8,8 @@ import test from 'node:test'
 import ts from 'typescript'
 import '@angular/compiler'
 import { createEnvironmentInjector, runInInjectionContext } from '@angular/core'
-import { BehaviorSubject, EMPTY, Subject } from 'rxjs'
+import { BehaviorSubject, EMPTY, of, Subject } from 'rxjs'
+import { FormControl } from '@angular/forms'
 
 // Presentation substitutes keep browser-only dependencies out of class-method tests.
 const boundaries = new Map()
@@ -27,8 +28,11 @@ boundary(
     'i18nService',
     'MarkdownPipe',
     'SafeLinksDirective',
+    'ErrorService',
+    'Exver',
+    'ExverComparesPipe',
   ],
-  'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => [];',
+  'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => []; export const FALLBACK_ICON = "fallback.png"; export const defaultRegistries = { start9: "https://registry.test", community: "https://community.test" }; export const sameUrl = (a, b) => a === b; export const registryUrl = value => value;',
 )
 boundary(
   '@taiga-ui/core',
@@ -37,11 +41,16 @@ boundary(
     'TuiScrollbar',
     'TuiAppearance',
     'TuiCell',
+    'TuiDataList',
+    'TuiDropdown',
+    'TuiNotification',
+    'TuiLoader',
+    'TuiError',
     'TuiIcon',
     'TuiInput',
     'TuiTitle',
   ],
-  'export const tuiCellOptionsProvider = () => [];',
+  'export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => [];',
 )
 boundary('@taiga-ui/kit', [
   'TuiBadge',
@@ -49,8 +58,15 @@ boundary('@taiga-ui/kit', [
   'TuiButtonLoading',
   'TuiButtonSelect',
   'TuiDataListWrapper',
+  'TuiSwitch',
+  'TuiTextarea',
 ])
-boundary('@taiga-ui/cdk', ['TuiAnimated'])
+boundary(
+  '@taiga-ui/cdk',
+  ['TuiAnimated'],
+  'export const tuiMarkControlAsTouchedAndValidate = () => {};',
+)
+boundary('@taiga-ui/layout', ['TuiHeader', 'TuiForm'])
 boundary('@taiga-ui/dompurify', ['NgDompurifyPipe'])
 boundary(
   '@ng-web-apis/common',
@@ -69,6 +85,11 @@ export class PolymorpheusComponent { constructor(component) { this.component = c
 )
 boundary('src/app/services/api/embassy-api.service', ['ApiService'])
 boundary('src/app/services/config.service', ['ConfigService'])
+boundary('src/app/services/trusted-keys.service', ['TrustedKeysService'])
+boundary('src/app/services/package-icon.service', ['PackageIconService'])
+boundary('src/app/services/storage.service', ['StorageService'])
+boundary('src/app/routes/portal/pipes/to-manifest', ['ToManifestPipe'])
+boundary('../services/alerts.service', ['MarketplaceAlertsService'])
 boundary('src/app/services/title.service', ['TitleDirective'])
 boundary(
   'src/app/routes/portal/components/header/about.component',
@@ -84,6 +105,15 @@ for (const [file, name] of [
 }
 const root = fileURLToPath(new URL('../../../../../', import.meta.url))
 const ui = resolve(root, 'projects/start-os/web/ui')
+boundaries.set(
+  '@start9labs/marketplace',
+  ['trust.ts', 'types.ts', 'services/abstract-marketplace.service.ts']
+    .map(
+      file =>
+        `export * from ${JSON.stringify(pathToFileURL(resolve(root, 'shared-libs/ts-modules/marketplace/src', file)).href)};`,
+    )
+    .join('\n'),
+)
 const options = ts.readConfigFile(
   resolve(root, 'tsconfig.json'),
   ts.sys.readFile,
@@ -137,6 +167,8 @@ const { TaskService, DialogService, i18nPipe, i18nService } =
 const { CONTEXT } = await import('@taiga-ui/polymorpheus')
 const { WA_WINDOW } = await import('@ng-web-apis/common')
 const { ConfigService } = await import('src/app/services/config.service')
+const { TrustedKeysService } =
+  await import('src/app/services/trusted-keys.service')
 const { trustedOsUpdateSigners } =
   await import('src/app/utils/os-update-signers')
 const { default: General } =
@@ -160,7 +192,16 @@ const makeSigner = () =>
 const OS_UPDATE_SIGNERS = Array.from({ length: 3 }, makeSigner)
 const untrustedSigner = makeSigner()
 const trustedSigners = Object.fromEntries(
-  OS_UPDATE_SIGNERS.map((key, i) => [key, { label: `Signer ${i}` }]),
+  OS_UPDATE_SIGNERS.map((key, i) => [
+    key,
+    {
+      name: `Signer ${i}`,
+      publicKeys: [key],
+      removable: true,
+      marketplace: true,
+      os: true,
+    },
+  ]),
 )
 const squashfs = {
   x86_64: { signatures: { [OS_UPDATE_SIGNERS[0]]: 'signature' } },
@@ -180,7 +221,7 @@ const state = version => ({
     id: 'server-id',
     version,
     statusInfo: {},
-    trustedOsUpdateSigners: trustedSigners,
+    trustedKeys: trustedSigners,
   },
   ui: { startosRegistry: 'https://registry.test', snakeHighScore: 0 },
 })
@@ -268,6 +309,7 @@ function fixture(t, cachedVersion) {
     { provide: i18nService, useValue: {} },
     { provide: WA_WINDOW, useValue: {} },
     { provide: ConfigService, useValue: {} },
+    { provide: TrustedKeysService, useValue: {} },
     {
       provide: CONTEXT,
       useValue: {
@@ -319,7 +361,7 @@ function fixture(t, cachedVersion) {
           patch: [
             {
               op: 'replace',
-              path: '/serverInfo/trustedOsUpdateSigners',
+              path: '/serverInfo/trustedKeys',
               value: signers,
             },
           ],
@@ -532,7 +574,15 @@ test('live trust-list changes remove default trust and allow a custom signer', a
   assert.deepEqual(f.submissions, [])
   await Promise.all(f.tasks)
 
-  f.trust({ [untrustedSigner]: { label: 'My custom release signer' } })
+  f.trust({
+    custom: {
+      name: 'My custom release signer',
+      publicKeys: [untrustedSigner],
+      removable: true,
+      marketplace: false,
+      os: true,
+    },
+  })
   await f.load({
     '0.4.0.4': {
       releaseNotes: '',
@@ -550,7 +600,9 @@ test('live trust-list changes remove default trust and allow a custom signer', a
 
 test('trusted signer matching ignores PEM whitespace but rejects unrelated keys and unsigned metadata', () => {
   const key = OS_UPDATE_SIGNERS[0].replace(/\n/g, '\r\n')
-  assert.deepEqual(trustedOsUpdateSigners([key], trustedSigners), [key])
+  assert.deepEqual(trustedOsUpdateSigners([key], trustedSigners), [
+    OS_UPDATE_SIGNERS[0],
+  ])
   assert.deepEqual(
     trustedOsUpdateSigners(['unrelated key'], trustedSigners),
     [],
@@ -650,4 +702,285 @@ test('a candidate disappearing during the asynchronous UI registry lookup preven
   assert.deepEqual(await Promise.all(f.tasks), [true])
   assert.deepEqual(f.submissions, [])
   assert.equal(f.completed, 0)
+})
+
+const { matchingTrustedKeys, packageSigners } =
+  await import('@start9labs/marketplace')
+const { parsePublicKeys, publicKeyPem } =
+  await import('src/app/utils/public-keys')
+const { MarketplaceControlsComponent: Controls } =
+  await import('src/app/routes/portal/routes/marketplace/components/controls.component')
+const { MarketplaceService } =
+  await import('src/app/services/marketplace.service')
+
+const pkg = {
+  id: 'hello-world',
+  version: '1.0.0:0',
+  flavor: null,
+  s9pks: [['x86_64', { signatures: { [OS_UPDATE_SIGNERS[0]]: 'signature' } }]],
+}
+
+test('PEM form parsing canonicalizes multiple keys and rejects empty, private, non-Ed25519, and mixed input', () => {
+  const first = OS_UPDATE_SIGNERS[0]
+  const second = OS_UPDATE_SIGNERS[1]
+  assert.deepEqual(
+    parsePublicKeys(` ${first.replace(/\n/g, ' ')}\n${second}\n${first}`),
+    [first, second],
+  )
+  const { privateKey } = generateKeyPairSync('ed25519')
+  const rsa = generateKeyPairSync('rsa', {
+    modulusLength: 1024,
+  }).publicKey.export({ type: 'spki', format: 'pem' })
+  for (const invalid of [
+    '',
+    'garbage',
+    first + 'trailing junk',
+    first.slice(0, -15),
+    rsa,
+    privateKey.export({ type: 'pkcs8', format: 'pem' }),
+  ]) {
+    assert.throws(() => parsePublicKeys(invalid))
+  }
+  const raw = generateKeyPairSync('ed25519')
+    .publicKey.export({ type: 'spki', format: 'der' })
+    .subarray(-32)
+  assert.deepEqual(parsePublicKeys(publicKeyPem(raw)), [publicKeyPem(raw)])
+})
+
+test('package signers select the install asset or the verified sideload signer, not other assets', () => {
+  assert.deepEqual(
+    packageSigners({
+      ...pkg,
+      s9pks: [
+        ...pkg.s9pks,
+        ['aarch64', { signatures: { [untrustedSigner]: '' } }],
+      ],
+    }),
+    [OS_UPDATE_SIGNERS[0]],
+  )
+  assert.deepEqual(packageSigners({ s9pks: [], signers: [untrustedSigner] }), [
+    untrustedSigner,
+  ])
+  assert.deepEqual(packageSigners({ s9pks: [] }), [])
+})
+
+test('named multi-key signer matching follows the selected trust context and deduplicates each identity', () => {
+  const groups = {
+    publisher: {
+      name: 'Publisher',
+      publicKeys: OS_UPDATE_SIGNERS,
+      os: false,
+      marketplace: true,
+    },
+  }
+  assert.deepEqual(
+    matchingTrustedKeys(
+      [OS_UPDATE_SIGNERS[0], OS_UPDATE_SIGNERS[1]],
+      groups,
+      'marketplace',
+    ),
+    [
+      {
+        id: 'publisher',
+        name: 'Publisher',
+        publicKeys: OS_UPDATE_SIGNERS.slice(0, 2),
+      },
+    ],
+  )
+  assert.deepEqual(matchingTrustedKeys(OS_UPDATE_SIGNERS, groups, 'os'), [])
+  groups.publisher.os = true
+  groups.publisher.marketplace = false
+  assert.deepEqual(
+    matchingTrustedKeys(OS_UPDATE_SIGNERS, groups, 'marketplace'),
+    [],
+  )
+  assert.equal(matchingTrustedKeys(OS_UPDATE_SIGNERS, groups, 'os').length, 1)
+})
+
+function controlsFixture({
+  sideload = false,
+  trusted = false,
+  confirmation = EMPTY,
+} = {}) {
+  const calls = [],
+    prompts = []
+  const instance = {
+    file: () => (sideload ? new File(['data'], 'test.s9pk') : undefined),
+    trusted: () => (trusted ? [{ name: 'Publisher' }] : []),
+    blocked: () => !sideload && !trusted,
+    dialogs: {
+      openConfirm(options) {
+        prompts.push(options)
+        return confirmation
+      },
+    },
+    localPkg: () => undefined,
+    pkg: () => pkg,
+    alerts: { alertPreDownload: async () => true },
+    marketplace: { currentRegistryUrl$: of('https://registry.test') },
+    installOrUpload: async (...params) => {
+      calls.push(params)
+    },
+  }
+  return {
+    instance,
+    calls,
+    prompts,
+    run: () => Controls.prototype.tryInstall.call(instance),
+  }
+}
+
+test('untrusted marketplace installs cannot enter the install flow or ask for an override', async () => {
+  const f = controlsFixture()
+  await f.run()
+  assert.deepEqual(f.calls, [])
+  assert.deepEqual(f.prompts, [])
+})
+
+for (const confirmation of [EMPTY, of(false)]) {
+  test('dismissing or cancelling an untrusted sideload never starts an upload', async () => {
+    const f = controlsFixture({ sideload: true, confirmation })
+    await f.run()
+    assert.equal(f.prompts.length, 1)
+    assert.deepEqual(f.calls, [])
+  })
+}
+
+test('only a confirmed untrusted sideload receives the trust override', async () => {
+  const untrusted = controlsFixture({ sideload: true, confirmation: of(true) })
+  await untrusted.run()
+  assert.deepEqual(untrusted.calls, [[null, true]])
+  const trusted = controlsFixture({ sideload: true, trusted: true })
+  await trusted.run()
+  assert.deepEqual(trusted.calls, [[null, false]])
+  assert.deepEqual(trusted.prompts, [])
+  const marketplace = controlsFixture({ trusted: true })
+  await marketplace.run()
+  assert.deepEqual(marketplace.calls, [['https://registry.test', false]])
+})
+
+test('the upload RPC receives the confirmed override and failed setup does not navigate', async () => {
+  const calls = []
+  const file = new File(['data'], 'test.s9pk')
+  const instance = {
+    file: () => file,
+    tasks: {
+      run: async work => {
+        await work()
+        return true
+      },
+    },
+    api: {
+      rpc: {
+        package: {
+          sideload: async params => {
+            calls.push(params)
+            return { upload: 'upload-guid' }
+          },
+        },
+      },
+      uploadFile: async (guid, uploaded) => {
+        assert.equal(guid, 'upload-guid')
+        assert.equal(uploaded, file)
+      },
+    },
+  }
+  assert.equal(await Controls.prototype.upload.call(instance, true), true)
+  assert.deepEqual(calls, [{ trust: true }])
+  let navigated = false
+  await Controls.prototype.installOrUpload.call(
+    {
+      file: () => file,
+      upload: async () => false,
+      router: {
+        navigate() {
+          navigated = true
+        },
+      },
+    },
+    null,
+    true,
+  )
+  assert.equal(navigated, false)
+})
+
+test('marketplace dispatch rereads live trust and pins the actual trusted signer', async t => {
+  const f = fixture(t, '0.4.0.2')
+  const submissions = []
+  const instance = {
+    patch: f.patch,
+    api: {
+      rpc: {
+        package: {
+          install: async params => {
+            submissions.push(params)
+          },
+        },
+      },
+    },
+    i18n: { transform: key => key },
+  }
+  await MarketplaceService.prototype.installPackage.call(
+    instance,
+    pkg,
+    'https://registry.test',
+  )
+  assert.deepEqual(submissions[0].acceptSigners, {
+    any: [{ signer: OS_UPDATE_SIGNERS[0] }],
+  })
+  assert.notEqual(submissions[0].trust, true)
+  f.trust({})
+  await assert.rejects(
+    () =>
+      MarketplaceService.prototype.installPackage.call(
+        instance,
+        pkg,
+        'https://registry.test',
+      ),
+    /isn't signed by anyone you trust/,
+  )
+  assert.equal(submissions.length, 1)
+})
+
+const { TrustedKeysDialog } =
+  await import('src/app/components/trusted-keys/dialog')
+test('a rejected trust toggle restores the persisted value without emitting another mutation', async () => {
+  const control = new FormControl(true)
+  const viewWrites = []
+  control.registerOnChange((value, emitModelEvent) =>
+    viewWrites.push({ value, emitModelEvent }),
+  )
+  const saving = []
+  const instance = {
+    context: { data: 'marketplace' },
+    saving: { set: value => saving.push(value) },
+    trust: { keys: () => ({ publisher: { marketplace: false } }) },
+    api: {
+      rpc: {
+        server: {
+          trustedKeys: {
+            toggle: async () => {
+              throw new Error('offline')
+            },
+          },
+        },
+      },
+    },
+    tasks: {
+      run: async work => {
+        try {
+          await work()
+          return true
+        } catch {
+          return false
+        }
+      },
+    },
+  }
+  await TrustedKeysDialog.prototype.toggle.call(instance, 'publisher', true, {
+    control,
+  })
+  assert.equal(control.value, false)
+  assert.deepEqual(viewWrites, [{ value: false, emitModelEvent: false }])
+  assert.deepEqual(saving, [true, false])
 })

@@ -51,6 +51,7 @@ import {
 } from 'src/app/services/patch-db/data-model'
 import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { toAuthorityUrl } from 'src/app/utils/acme'
+import { parsePublicKeys } from 'src/app/utils/public-keys'
 import { Mock } from './api.fixures'
 import { BTC_ICON, LND_ICON, PROXY_ICON } from './api-icons'
 import {
@@ -282,6 +283,48 @@ export class MockApiService extends ApiService {
       },
       hardware: null,
     }),
+    'server.trusted-keys.add': async ({ name, publicKeys, context }) => {
+      const id = crypto.randomUUID()
+      const value: T.TrustedKey = {
+        name,
+        publicKeys: parsePublicKeys(publicKeys.join('\n')),
+        removable: true,
+        marketplace: true,
+        os: context === 'os',
+      }
+      mockPatchData.serverInfo.trustedKeys[id] = value
+      await this.mockRevision([
+        {
+          op: PatchOp.ADD,
+          path: pathFromArray(['serverInfo', 'trustedKeys', id]),
+          value,
+        },
+      ])
+      return null
+    },
+    'server.trusted-keys.toggle': async ({ id, context, enabled }) => {
+      mockPatchData.serverInfo.trustedKeys[id]![context] = enabled
+      await this.mockRevision([
+        {
+          op: PatchOp.REPLACE,
+          path: pathFromArray(['serverInfo', 'trustedKeys', id, context]),
+          value: enabled,
+        },
+      ])
+      return null
+    },
+    'server.trusted-keys.remove': async ({ id }) => {
+      if (!mockPatchData.serverInfo.trustedKeys[id]?.removable)
+        throw new Error('Protected key')
+      delete mockPatchData.serverInfo.trustedKeys[id]
+      await this.mockRevision([
+        {
+          op: PatchOp.REMOVE,
+          path: pathFromArray(['serverInfo', 'trustedKeys', id]),
+        },
+      ])
+      return null
+    },
     'server.update': async params => {
       await pauseFor(2000)
       const initialProgress = {
