@@ -494,6 +494,18 @@ pub struct ProfileDnsmasq {
     #[uci(default)]
     pub rebind_protection: Option<String>,
     #[uci(default)]
+    pub rebind_localhost: Option<String>,
+    #[uci(default)]
+    pub authoritative: Option<String>,
+    #[uci(default)]
+    pub domainneeded: Option<String>,
+    #[uci(default)]
+    pub localise_queries: Option<String>,
+    #[uci(default)]
+    pub cachesize: Option<String>,
+    #[uci(default)]
+    pub ednspacket_max: Option<String>,
+    #[uci(default)]
     pub localuse: Option<String>,
     #[uci(default)]
     pub leasefile: Option<String>,

@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use tokio::io::AsyncWriteExt;
-use uciedit::openwrt::{Dhcp, InterfaceProto, NetworkInterface};
+use uciedit::openwrt::{Dhcp, DhcpHost, InterfaceProto, NetworkInterface};
 use uciedit::{dump_all, parse_all, Arena, TypedSection};
 
 use crate::prelude::*;
@@ -31,6 +31,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::StoreLogsUnderVar,
     Migration::RemoveSessionsJson,
     Migration::ForceDhcpPools,
+    Migration::ScopeReservedNames,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -53,6 +54,8 @@ enum Migration {
     RemoveSessionsJson,
     /// Earlier releases probed for another DHCP server before serving a pool.
     ForceDhcpPools,
+    /// Earlier releases served a reserved device's name to every profile.
+    ScopeReservedNames,
 }
 
 impl Migration {
@@ -66,6 +69,7 @@ impl Migration {
             Migration::StoreLogsUnderVar => store_logs_under_var(root).await,
             Migration::RemoveSessionsJson => remove_sessions_json(root).await,
             Migration::ForceDhcpPools => force_dhcp_pools(root).await,
+            Migration::ScopeReservedNames => scope_reserved_names(root).await,
         }
     }
 }
@@ -183,6 +187,25 @@ async fn force_dhcp_pools(root: &Path) -> Result<(), Error> {
         if dhcp.force != Some(true) {
             dhcp.force = Some(true);
             section.set(&dhcp)?;
+            changed = true;
+        }
+    }
+    if changed {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+async fn scope_reserved_names(root: &Path) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["dhcp"]).await?;
+    let mut changed = false;
+    for section in &mut cfgs["dhcp"].sections {
+        let Ok(mut host) = section.get::<DhcpHost>() else {
+            continue;
+        };
+        if host.dns.take().is_some() {
+            section.set(&host)?;
             changed = true;
         }
     }
@@ -381,6 +404,12 @@ config dhcp 'guest'
 \toption limit '198'
 \toption leasetime '12h'
 \toption force '0'
+
+config host 'host_aabbccddeeff'
+\toption mac 'AA:BB:CC:DD:EE:FF'
+\toption name 'nas'
+\toption ip '192.168.1.50'
+\toption dns '1'
 ";
 
     fn router(record: Option<&str>, has_run: bool) -> tempfile::TempDir {
@@ -695,6 +724,22 @@ config forwarding
         assert!(!section("guest").contains("option force '0'"));
         assert!(!section("wan").contains("force"));
         assert!(!dhcp.split("\n\n").next().unwrap().contains("force"));
+    }
+
+    #[tokio::test]
+    async fn reserved_names_leave_the_shared_hosts_file() {
+        let dir = router(Some("8\n"), true);
+        write(&dir, "etc/config/dhcp", LEGACY_DHCP);
+        run(dir.path()).await.unwrap();
+        assert_eq!(record(&dir), current());
+        let dhcp = read(&dir, "etc/config/dhcp");
+        let host = dhcp
+            .split("\n\n")
+            .find(|s| s.contains("config host"))
+            .unwrap();
+        assert!(!host.contains("option dns"));
+        assert!(host.contains("option name 'nas'"));
+        assert!(host.contains("option ip '192.168.1.50'"));
     }
 
     #[tokio::test]

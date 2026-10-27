@@ -201,13 +201,14 @@ pub(crate) struct ArpEntry {
     pub(crate) state: String,
 }
 
-struct DhcpLease {
-    mac: String,
-    ip: String,
-    hostname: String,
+pub(crate) struct DhcpLease {
+    pub(crate) mac: String,
+    pub(crate) ip: String,
+    /// `*` when the device sent none.
+    pub(crate) hostname: String,
     /// Unix expiry from the lease file; dnsmasq writes `0` for a lease that
     /// never expires.
-    expires: u64,
+    pub(crate) expires: u64,
 }
 
 /// Placeholder name for a device no source could name at all — not even a
@@ -292,6 +293,18 @@ fn parse_dhcp_leases(output: &str) -> Vec<DhcpLease> {
 /// the difference. Used by port-control to bind a forward to the address
 /// assignment behind it.
 pub(crate) async fn current_lease_ips() -> Option<HashMap<String, String>> {
+    Some(
+        current_leases()
+            .await?
+            .into_iter()
+            .map(|l| (l.mac, l.ip))
+            .collect(),
+    )
+}
+
+/// Every unexpired lease across every lease file; `None` as for
+/// [`current_lease_ips`].
+pub(crate) async fn current_leases() -> Option<Vec<DhcpLease>> {
     if dhcp_lease_files().await.is_empty() {
         return None;
     }
@@ -302,7 +315,6 @@ pub(crate) async fn current_lease_ips() -> Option<HashMap<String, String>> {
         parse_dhcp_leases(&read_all_dhcp_leases().await)
             .into_iter()
             .filter(|l| l.expires == 0 || l.expires > now)
-            .map(|l| (l.mac, l.ip))
             .collect(),
     )
 }
@@ -1813,9 +1825,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
 
 /// Find-or-create the DHCP host section for `mac` and apply `mutate` to it,
 /// with the standard UCI conflict retries. `mutate(host, existed)` may return
-/// `false` to abort without writing (nothing to do); a created host starts
-/// from the crate's host-section defaults (`dns '1'`, `host_<mac>` section
-/// name). Returns whether a write happened. The single upsert for DHCP host
+/// `false` to abort without writing (nothing to do); a created host is named
+/// `host_<mac>`. Returns whether a write happened. The single upsert for DHCP host
 /// entries — device updates and the auto-forward toggle both go through it so
 /// the section-name and default-field conventions can't drift apart.
 pub(crate) async fn upsert_dhcp_host<F>(
@@ -1849,7 +1860,6 @@ where
         if !found {
             let mut host = DhcpHost {
                 mac: mac.to_string(),
-                dns: Some("1".to_string()),
                 ..Default::default()
             };
             if !mutate(&mut host, false) {
