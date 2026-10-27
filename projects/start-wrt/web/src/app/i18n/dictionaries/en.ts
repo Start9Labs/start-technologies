@@ -573,5 +573,5 @@ export const ENGLISH: Record<string, number> = {
   'Lets this device announce IPv6 routes to your other devices (needed by Thread border routers such as an Apple TV, HomePod, or Home Assistant). Off by default.': 596,
   'Allow IPv6 Router Advertisements?': 597,
   'This device will be able to give your other devices IPv6 addresses, routes, DNS servers, and a default gateway, and could route their IPv6 traffic around the router. Grant this only to a device you trust, such as a Thread border router.': 598,
-  "Couldn't check for updates": 599,
+  'Failed to check for updates': 599,
 }

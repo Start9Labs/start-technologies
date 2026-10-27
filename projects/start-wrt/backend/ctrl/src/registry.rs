@@ -2,8 +2,8 @@ use startos::registry::device_info::{DeviceInfo, OsInfo};
 
 use crate::Error;
 
-/// Device info of the running router.
-pub fn load() -> Result<DeviceInfo, Error> {
+/// Device info of the running router, sent to the registry.
+pub fn device_info() -> Result<DeviceInfo, Error> {
     let version = env!("CARGO_PKG_VERSION");
     Ok(DeviceInfo {
         os: OsInfo {
@@ -43,7 +43,7 @@ mod tests {
 
     #[test]
     fn loads_this_build() {
-        let info = load().unwrap();
+        let info = device_info().unwrap();
         assert_eq!(info.os.version.to_string(), env!("CARGO_PKG_VERSION"));
         assert!(info.os.version.satisfies(&info.os.compat));
     }

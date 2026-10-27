@@ -117,7 +117,7 @@ async fn newer_versions(_ctx: ServerContext) -> Result<Vec<VersionInfo>, Error> 
         .await
         .inspect_err(|e| tracing::warn!("Failed to check for updates: {e}"))?;
 
-    let platform = crate::registry::device_info::platform();
+    let platform = crate::registry::platform();
 
     let current: &str = env!("CARGO_PKG_VERSION");
 

@@ -568,5 +568,5 @@ export default {
   596: 'Permet à cet appareil d’annoncer des routes IPv6 à vos autres appareils (nécessaire pour les routeurs de bordure Thread comme une Apple TV, un HomePod ou Home Assistant). Désactivé par défaut.',
   597: 'Autoriser les annonces de routeur IPv6 ?',
   598: 'Cet appareil pourra attribuer à vos autres appareils des adresses IPv6, des routes, des serveurs DNS et une passerelle par défaut, et pourrait faire passer leur trafic IPv6 en dehors du routeur. N’accordez cela qu’à un appareil de confiance, comme un routeur de bordure Thread.',
-  599: 'Impossible de rechercher des mises à jour',
+  599: 'Échec de la recherche de mises à jour',
 } satisfies i18n

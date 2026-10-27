@@ -29,7 +29,7 @@ use crate::middleware::auth::signature::{NonceCache, SignatureAuthContext, Signa
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::client::{Product, RegistryClient};
-use crate::registry::device_info::{DEVICE_INFO_HEADER, DeviceInfo};
+use crate::registry::device_info::DeviceInfo;
 use crate::registry::migrations::run_migrations;
 use crate::registry::package::icon::{icons_dir, referenced_icons, sweep_icons};
 use crate::registry::signer::SignerInfo;
@@ -296,35 +296,26 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
         mut method: &str,
         metadata: OrdMap<&'static str, Value>,
         params: Value,
-        RegistryUrlParams { mut registry }: RegistryUrlParams,
+        RegistryUrlParams { registry }: RegistryUrlParams,
     ) -> Result<Value, RpcError> {
-        let mut headers = HeaderMap::new();
-        RegistryClient::current(Some(Product::StartOs)).insert_into(&mut headers);
-        let mut device_info = None;
-        if metadata
+        let device_info = if metadata
             .get("get_device_info")
             .and_then(|m| m.as_bool())
             .unwrap_or(false)
         {
-            let di = DeviceInfo::load(self).await?;
-            headers.insert(DEVICE_INFO_HEADER, di.to_header_value());
-            device_info = Some(di);
-        }
-
-        registry
-            .path_segments_mut()
-            .map_err(|_| Error::new(eyre!("cannot extend URL path"), ErrorKind::ParseUrl))?
-            .push("rpc")
-            .push("v0");
+            Some(DeviceInfo::load(self).await?)
+        } else {
+            None
+        };
 
         method = method.strip_prefix("registry.").unwrap_or(method);
         let is_onion = registry.host_str().map_or(false, |h| h.ends_with(".onion"));
 
-        let mut res = match crate::middleware::auth::signature::call_remote_with_client(
-            None,
+        let mut res = match crate::registry::client::call(
             self.client.get(),
             registry,
-            headers,
+            Product::StartOs,
+            device_info.as_ref(),
             method,
             params.clone(),
         )

@@ -2,9 +2,14 @@ use std::fmt;
 use std::str::FromStr;
 
 use http::{HeaderMap, HeaderValue};
+use reqwest::Client;
+use rpc_toolkit::yajrc::RpcError;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
+use crate::middleware::auth::signature::call_remote_with_client;
 use crate::prelude::*;
+use crate::registry::device_info::{DEVICE_INFO_HEADER, DeviceInfo};
 
 pub const REGISTRY_CLIENT_HEADER: &str = "X-Start9-Registry-Client";
 
@@ -97,6 +102,28 @@ impl RegistryClient {
     pub fn insert_into(&self, headers: &mut HeaderMap) {
         headers.insert(REGISTRY_CLIENT_HEADER, self.to_header_value());
     }
+}
+
+/// Calls a registry method unsigned, as an OS asking for its own releases.
+pub async fn call(
+    client: Client,
+    mut registry: Url,
+    product: Product,
+    device_info: Option<&DeviceInfo>,
+    method: &str,
+    params: Value,
+) -> Result<Value, RpcError> {
+    registry
+        .path_segments_mut()
+        .map_err(|_| Error::new(eyre!("cannot extend URL path"), ErrorKind::ParseUrl))?
+        .push("rpc")
+        .push("v0");
+    let mut headers = HeaderMap::new();
+    RegistryClient::current(Some(product)).insert_into(&mut headers);
+    if let Some(device_info) = device_info {
+        headers.insert(DEVICE_INFO_HEADER, device_info.to_header_value());
+    }
+    call_remote_with_client(None, client, registry, headers, method, params).await
 }
 
 #[cfg(test)]
