@@ -31,19 +31,22 @@ impl VersionT for Version {
         Ok(Value::Null)
     }
     async fn post_up(self, _ctx: &RpcContext, _input: Value) -> Result<(), Error> {
-        start_initial_balance(Command::new("systemctl")).await
+        start_initial_balance(Command::new("systemctl")).await;
+        Ok(())
     }
     fn down(self, _db: &mut Value) -> Result<(), Error> {
         Ok(())
     }
 }
 
-async fn start_initial_balance(mut systemctl: Command) -> Result<(), Error> {
-    systemctl
+async fn start_initial_balance(mut systemctl: Command) {
+    if let Err(error) = systemctl
         .args(["start", "--no-block", "btrfs-balance.service"])
         .invoke(ErrorKind::DiskManagement)
-        .await?;
-    Ok(())
+        .await
+    {
+        tracing::warn!(?error, "{}", t!("migration.initial-balance-failed"));
+    }
 }
 
 #[cfg(test)]
@@ -53,7 +56,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn initial_balance_queues_the_existing_service_and_propagates_queue_failures()
+    async fn initial_balance_queues_the_existing_service_without_failing_startup()
     -> Result<(), Error> {
         let temp = tempfile::tempdir()?;
         let systemctl = temp.path().join("systemctl");
@@ -68,16 +71,11 @@ mod tests {
             command
                 .env("CALL_LOG", &calls)
                 .env("EXIT_STATUS", status.to_string());
-            let result = start_initial_balance(command).await;
+            let () = start_initial_balance(command).await;
             assert_eq!(
                 std::fs::read_to_string(&calls)?,
                 "start\n--no-block\nbtrfs-balance.service\n"
             );
-            if status == 0 {
-                result?;
-            } else {
-                assert_eq!(result.unwrap_err().kind, ErrorKind::DiskManagement);
-            }
         }
         Ok(())
     }

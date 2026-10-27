@@ -2378,6 +2378,14 @@ migration.services-failed-message:
   fr_FR: "Échec de la migration des services suivants depuis 0.3.5.1 : %{services}\nVOS DONNÉES SONT EN SÉCURITÉ. Réinstallez simplement ces services depuis le marketplace."
   pl_PL: "Nie udało się zmigrować następujących usług z 0.3.5.1: %{services}\nTWOJE DANE SĄ BEZPIECZNE. Po prostu zainstaluj ponownie te usługi z marketplace."
 
+# version/v0_4_0_5.rs
+migration.initial-balance-failed:
+  en_US: "Could not start the initial Btrfs balance; continuing startup"
+  de_DE: "Der erste Btrfs-Ausgleich konnte nicht gestartet werden; der Systemstart wird fortgesetzt"
+  es_ES: "No se pudo iniciar el balanceo inicial de Btrfs; el arranque continúa"
+  fr_FR: "Impossible de lancer l’équilibrage Btrfs initial ; le démarrage continue"
+  pl_PL: "Nie udało się uruchomić początkowego równoważenia Btrfs; uruchamianie systemu jest kontynuowane"
+
 # registry/admin.rs
 registry.admin.unknown-signer:
   en_US: "Unknown signer"
