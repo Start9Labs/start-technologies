@@ -22,7 +22,7 @@ import {
   withPreloading,
   withRouterConfig,
 } from '@angular/router'
-import { provideServiceWorker } from '@angular/service-worker'
+import { provideServiceWorker, SwUpdate } from '@angular/service-worker'
 import { WA_WINDOW } from '@ng-web-apis/common'
 import {
   AbstractMarketplaceService,
@@ -107,6 +107,10 @@ export const APP_CONFIG: ApplicationConfig = {
       // Register the ServiceWorker as soon as the application is stable
       // or after 30 seconds (whichever comes first).
       registrationStrategy: 'registerWhenStable:30000',
+    }),
+    provideAppInitializer(() => {
+      const win = inject(WA_WINDOW)
+      inject(SwUpdate).unrecoverable.subscribe(() => win.location.reload())
     }),
     I18N_PROVIDERS,
     FilterPackagesPipe,
