@@ -1169,11 +1169,11 @@ disk.main.running-e2fsck:
   pl_PL: "Uruchamianie e2fsck przed konwersją %{name} z ext4 na btrfs"
 
 disk.mount.filesystem.cifs.hostname-unresolved:
-  en_US: "Failed to resolve hostname %{hostname}. DNS: %{dns}; NetBIOS: %{netbios}"
-  de_DE: "Hostname %{hostname} konnte nicht aufgelöst werden. DNS: %{dns}; NetBIOS: %{netbios}"
-  es_ES: "No se pudo resolver el nombre de host %{hostname}. DNS: %{dns}; NetBIOS: %{netbios}"
-  fr_FR: "Impossible de résoudre le nom d'hôte %{hostname}. DNS : %{dns} ; NetBIOS : %{netbios}"
-  pl_PL: "Nie udało się rozwiązać nazwy hosta %{hostname}. DNS: %{dns}; NetBIOS: %{netbios}"
+  en_US: "Failed to resolve hostname %{hostname} using %{resolver}: %{error}"
+  de_DE: "Hostname %{hostname} konnte über %{resolver} nicht aufgelöst werden: %{error}"
+  es_ES: "No se pudo resolver el nombre de host %{hostname} mediante %{resolver}: %{error}"
+  fr_FR: "Impossible de résoudre le nom d'hôte %{hostname} via %{resolver} : %{error}"
+  pl_PL: "Nie udało się rozwiązać nazwy hosta %{hostname} przy użyciu %{resolver}: %{error}"
 
 disk.mount.filesystem.cifs.no-dns-addresses:
   en_US: "DNS returned no addresses"

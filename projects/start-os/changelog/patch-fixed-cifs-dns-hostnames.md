@@ -1,1 +1,1 @@
-- Network-folder backups and recovery accept DNS hostnames, retaining NetBIOS fallback and reporting both lookup failures when a name cannot be resolved.
+- Network-folder backups and recovery accept dotted DNS hostnames. Bare computer names remain NetBIOS-only, and lookup errors identify the resolver used.

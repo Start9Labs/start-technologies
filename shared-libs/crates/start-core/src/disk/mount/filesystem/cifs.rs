@@ -61,20 +61,22 @@ async fn resolve_dns_or_netbios(
     dns: impl Future<Output = Result<IpAddr, Error>>,
     netbios: impl Future<Output = Result<IpAddr, Error>>,
 ) -> Result<IpAddr, Error> {
-    match dns.await {
-        Ok(addr) => Ok(addr),
-        Err(dns_error) => netbios.await.map_err(|netbios_error| {
-            Error::new(
-                eyre!(t!(
-                    "disk.mount.filesystem.cifs.hostname-unresolved",
-                    hostname = hostname,
-                    dns = dns_error.display_src(),
-                    netbios = netbios_error.display_src()
-                )),
-                crate::ErrorKind::Network,
-            )
-        }),
-    }
+    let (resolver, result) = if hostname.contains('.') {
+        ("DNS", dns.await)
+    } else {
+        ("NetBIOS", netbios.await)
+    };
+    result.map_err(|error| {
+        Error::new(
+            eyre!(t!(
+                "disk.mount.filesystem.cifs.hostname-unresolved",
+                hostname = hostname,
+                resolver = resolver,
+                error = error.display_src()
+            )),
+            crate::ErrorKind::Network,
+        )
+    })
 }
 
 #[instrument(skip_all)]
@@ -125,49 +127,67 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn system_hostname_resolves_without_netbios() {
-        assert!(resolve_hostname("localhost").await.unwrap().is_loopback());
+    async fn dotted_system_hostname_resolves_without_netbios() {
+        assert!(resolve_hostname("localhost.").await.unwrap().is_loopback());
     }
 
     #[tokio::test]
-    async fn dns_success_skips_netbios() {
+    async fn dotted_names_use_dns_only() {
         let addr = "2001:db8::10".parse().unwrap();
-        assert_eq!(
-            resolve_dns_or_netbios("nas.home.arpa", ready(Ok(addr)), async {
-                panic!("NetBIOS must not run after DNS succeeds")
-            })
-            .await
-            .unwrap(),
-            addr
-        );
+        for hostname in ["nas.lan", "nas.home.arpa", "nas.example.com", "nas."] {
+            assert_eq!(
+                resolve_dns_or_netbios(hostname, ready(Ok(addr)), async {
+                    panic!("Dotted names must not use NetBIOS")
+                })
+                .await
+                .unwrap(),
+                addr
+            );
+        }
     }
 
     #[tokio::test]
-    async fn dns_failure_falls_back_to_netbios() {
+    async fn bare_names_use_netbios_without_leaking_to_dns() {
         let addr = "192.0.2.10".parse().unwrap();
-        assert_eq!(
-            resolve_dns_or_netbios(
-                "NAS",
-                ready(Err(Error::new(
-                    eyre!("DNS unavailable"),
-                    crate::ErrorKind::Network
-                ))),
-                ready(Ok(addr)),
-            )
-            .await
-            .unwrap(),
-            addr
-        );
+        for hostname in ["NAS", "fileserver", "backup-server"] {
+            assert_eq!(
+                resolve_dns_or_netbios(
+                    hostname,
+                    async { panic!("Bare names must not reach DNS") },
+                    ready(Ok(addr)),
+                )
+                .await
+                .unwrap(),
+                addr
+            );
+        }
     }
 
     #[tokio::test]
-    async fn lookup_failure_reports_hostname_and_both_resolvers() {
+    async fn dns_failure_does_not_fall_back_to_netbios() {
         let error = resolve_dns_or_netbios(
             "nas.home.arpa",
             ready(Err(Error::new(
                 eyre!("DNS unavailable"),
                 crate::ErrorKind::Network,
             ))),
+            async { panic!("Dotted names must not fall back to NetBIOS") },
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error.kind, crate::ErrorKind::Network));
+        let message = error.to_string();
+        for expected in ["nas.home.arpa", "DNS", "DNS unavailable"] {
+            assert!(message.contains(expected), "{message}");
+        }
+        assert!(!message.contains("NetBIOS"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn netbios_failure_does_not_fall_back_to_dns() {
+        let error = resolve_dns_or_netbios(
+            "NAS",
+            async { panic!("Bare names must not fall back to DNS") },
             ready(Err(Error::new(
                 eyre!("NetBIOS unavailable"),
                 crate::ErrorKind::Network,
@@ -177,9 +197,10 @@ mod tests {
         .unwrap_err();
         assert!(matches!(error.kind, crate::ErrorKind::Network));
         let message = error.to_string();
-        for expected in ["nas.home.arpa", "DNS unavailable", "NetBIOS unavailable"] {
+        for expected in ["NAS", "NetBIOS", "NetBIOS unavailable"] {
             assert!(message.contains(expected), "{message}");
         }
+        assert!(!message.contains("DNS"), "{message}");
     }
 }
 
