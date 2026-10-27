@@ -1,7 +1,7 @@
 use exver::VersionRange;
 
 use super::v0_3_5::V0_3_0_COMPAT;
-use super::{VersionT, v0_4_0_4};
+use super::{VersionT, v0_4_0_5};
 use crate::prelude::*;
 use crate::update::trusted_keys::{migrate_signers, os_signers};
 
@@ -9,7 +9,7 @@ use crate::update::trusted_keys::{migrate_signers, os_signers};
 pub struct Version;
 
 impl VersionT for Version {
-    type Previous = v0_4_0_4::Version;
+    type Previous = v0_4_0_5::Version;
     type PreUpRes = ();
 
     async fn pre_up(self) -> Result<Self::PreUpRes, Error> {

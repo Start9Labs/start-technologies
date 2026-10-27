@@ -44,6 +44,7 @@ mod v0_4_0_1;
 mod v0_4_0_2;
 mod v0_4_0_3;
 mod v0_4_0_4;
+mod v0_4_0_5;
 mod v0_4_0_alpha_0;
 mod v0_4_0_alpha_1;
 mod v0_4_0_alpha_2;
@@ -243,6 +244,7 @@ enum Version {
     V0_4_0_2(Wrapper<v0_4_0_2::Version>),
     V0_4_0_3(Wrapper<v0_4_0_3::Version>),
     V0_4_0_4(Wrapper<v0_4_0_4::Version>),
+    V0_4_0_5(Wrapper<v0_4_0_5::Version>),
     V0_4_1(Wrapper<v0_4_1::Version>), // VERSION_BUMP
     Other(exver::Version),
 }
@@ -326,6 +328,7 @@ impl Version {
             Self::V0_4_0_2(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_0_3(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_0_4(v) => DynVersion(Box::new(v.0)),
+            Self::V0_4_0_5(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_1(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP
             Self::Other(v) => {
                 return Err(Error::new(
@@ -401,6 +404,7 @@ impl Version {
             Version::V0_4_0_2(Wrapper(x)) => x.semver(),
             Version::V0_4_0_3(Wrapper(x)) => x.semver(),
             Version::V0_4_0_4(Wrapper(x)) => x.semver(),
+            Version::V0_4_0_5(Wrapper(x)) => x.semver(),
             Version::V0_4_1(Wrapper(x)) => x.semver(), // VERSION_BUMP
             Version::Other(x) => x.clone(),
         }
@@ -778,9 +782,6 @@ mod tests {
 
     use super::*;
 
-    /// Root `package.json` is the OS version's source of truth and `Current` is what actually
-    /// migrates the db; nothing else forces them to agree, and a mismatch is silent — the
-    /// release would tag and publish under a version the running server never reports.
     #[test]
     fn current_matches_manifest() {
         assert_eq!(
@@ -821,36 +822,95 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revision_four_migrates_and_rolls_back_without_changing_service_data() {
-        let previous = v0_4_0_3::Version;
-        let current = v0_4_0_4::Version;
-        let registered = Version::from_exver_version(current.semver())
+    async fn maintenance_revisions_migrate_and_roll_back_without_changing_service_data() {
+        for (from, to) in [("0.4.0.3", "0.4.0.4"), ("0.4.0.4", "0.4.0.5")] {
+            let previous = from_value::<Version>(json!(from))
+                .unwrap()
+                .as_version_t()
+                .unwrap();
+            let current = from_value::<Version>(json!(to))
+                .unwrap()
+                .as_version_t()
+                .unwrap();
+            assert_eq!(current.previous().semver(), previous.semver());
+            let mut db = json!({ "public": { "serverInfo": {
+                "version": from,
+                "packageVersionCompat": ">=0.3.0 <0.5.0",
+                "postInitMigrationTodos": {},
+                "latestMigrationRevision": 0,
+            }, "packageData": { "service": { "setting": "preserved", "outboundDns": null } } } });
+            let packages = db["public"]["packageData"].clone();
+            let pre_ups = PreUps::load(&previous, &current).await.unwrap();
+            migrate_from_unchecked(&previous, &current, pre_ups, &mut db).unwrap();
+            assert_eq!(db["public"]["serverInfo"]["version"], json!(to));
+            assert_eq!(
+                db["public"]["serverInfo"]["packageVersionCompat"],
+                to_value(current.compat()).unwrap()
+            );
+            assert_eq!(
+                db["public"]["serverInfo"]["postInitMigrationTodos"][to],
+                Value::Null
+            );
+            assert_eq!(
+                db["public"]["serverInfo"]["postInitMigrationTodos"]
+                    .as_object()
+                    .unwrap()
+                    .len(),
+                1
+            );
+            assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
+            assert_eq!(db["public"]["packageData"], packages);
+            rollback_to_unchecked(&current, &previous, &mut db).unwrap();
+            assert_eq!(db["public"]["serverInfo"]["version"], json!(from));
+            assert_eq!(db["public"]["packageData"], packages);
+        }
+    }
+
+    #[tokio::test]
+    async fn maintenance_revisions_upgrade_to_keyrings_and_roll_back() {
+        use crate::update::signers::{TrustedOsUpdateSigners, initial_signers};
+        use crate::update::trusted_keys::{TrustedKeys, os_signers};
+
+        let current = Version::from_exver_version(v0_4_1::Version.semver())
             .as_version_t()
             .unwrap();
-        assert_eq!(registered.previous().semver(), previous.semver());
-        let mut db = json!({ "public": { "serverInfo": {
-            "version": "0.4.0.3",
-            "packageVersionCompat": ">=0.3.0 <0.5.0",
-            "postInitMigrationTodos": {},
-            "latestMigrationRevision": 0,
-        }, "packageData": { "service": { "setting": "preserved", "outboundDns": null } } } });
-        let packages = db["public"]["packageData"].clone();
-        let pre_ups = PreUps::load(&previous, &registered).await.unwrap();
-        migrate_from_unchecked(&previous, &registered, pre_ups, &mut db).unwrap();
-        assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.0.4"));
-        assert_eq!(
-            db["public"]["serverInfo"]["packageVersionCompat"],
-            to_value(current.compat()).unwrap()
-        );
-        assert_eq!(
-            db["public"]["serverInfo"]["postInitMigrationTodos"],
-            json!({ "0.4.0.4": null })
-        );
-        assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
-        assert_eq!(db["public"]["packageData"], packages);
-        rollback_to_unchecked(&registered, &previous, &mut db).unwrap();
-        assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.0.3"));
-        assert_eq!(db["public"]["packageData"], packages);
+        assert_eq!(current.previous().semver(), v0_4_0_5::Version.semver());
+        let legacy = initial_signers();
+        let expected = legacy.keys().cloned().collect::<Vec<_>>();
+        for from in ["0.4.0.4", "0.4.0.5"] {
+            let previous = from_value::<Version>(json!(from))
+                .unwrap()
+                .as_version_t()
+                .unwrap();
+            let mut db = json!({ "public": { "serverInfo": {
+                "version": from,
+                "packageVersionCompat": ">=0.3.0 <0.5.0",
+                "postInitMigrationTodos": {},
+                "latestMigrationRevision": 0,
+                "trustedOsUpdateSigners": legacy,
+            }, "packageData": { "service": { "setting": "preserved", "outboundDns": null } } } });
+            let packages = db["public"]["packageData"].clone();
+            let pre_ups = PreUps::load(&previous, &current).await.unwrap();
+            migrate_from_unchecked(&previous, &current, pre_ups, &mut db).unwrap();
+            assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.1"));
+            let keys: TrustedKeys =
+                from_value(db["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
+            assert_eq!(os_signers(&keys).into_keys().collect::<Vec<_>>(), expected);
+            assert!(
+                db["public"]["serverInfo"]
+                    .get("trustedOsUpdateSigners")
+                    .is_none()
+            );
+            assert_eq!(db["public"]["packageData"], packages);
+
+            rollback_to_unchecked(&current, &previous, &mut db).unwrap();
+            assert_eq!(db["public"]["serverInfo"]["version"], json!(from));
+            let restored: TrustedOsUpdateSigners =
+                from_value(db["public"]["serverInfo"]["trustedOsUpdateSigners"].clone()).unwrap();
+            assert_eq!(restored.into_keys().collect::<Vec<_>>(), expected);
+            assert!(db["public"]["serverInfo"].get("trustedKeys").is_none());
+            assert_eq!(db["public"]["packageData"], packages);
+        }
     }
 
     #[test]
