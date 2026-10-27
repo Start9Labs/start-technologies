@@ -486,6 +486,8 @@ pub struct ProfileDnsmasq {
     #[uci(default)]
     pub nonwildcard: Option<String>,
     #[uci(default)]
+    pub localise_queries: Option<String>,
+    #[uci(default)]
     pub listen_address: Vec<String>,
     #[uci(default)]
     pub notinterface: Vec<String>,
