@@ -272,7 +272,7 @@ impl DeviceInfoMiddleware {
 }
 
 fn reads_legacy_signatures(version: &Version) -> Result<bool, Error> {
-    Ok(version <= &"0.4.0.3".parse::<Version>()?)
+    Ok(version < &"0.4.0.3".parse::<Version>()?)
 }
 
 /// Whether a StartOS version needs icons inline as data URLs.
@@ -423,7 +423,7 @@ mod tests {
 
     #[test]
     fn diagnostic_update_signatures_follow_source_version_without_device_info() {
-        for (version, legacy) in [("0.4.0.2", true), ("0.4.0.3", true), ("0.4.0.4", false)] {
+        for (version, legacy) in [("0.4.0.2", true), ("0.4.0.3", false), ("0.4.0.4", false)] {
             let mut middleware = DeviceInfoMiddleware::new();
             middleware
                 .prepare_request(

@@ -1,0 +1,1 @@
+- StartOS 0.4.0.3 servers now receive pure Ed25519 signatures on OS and package assets. They were previously stripped, which blocked updating to an OS release signed with a gpg-held key.
