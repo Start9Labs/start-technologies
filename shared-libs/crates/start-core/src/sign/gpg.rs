@@ -1,5 +1,6 @@
 use ed25519_dalek::VerifyingKey;
 use pgp::composed::{Deserializable, SignedPublicKey};
+use pgp::packet::SignatureType;
 use pgp::types::{EddsaLegacyPublicParams, KeyDetails, PublicParams};
 
 use crate::prelude::*;
@@ -44,6 +45,9 @@ fn parse_gpg_keys(value: &str) -> Result<Vec<AnyVerifyingKey>, Error> {
     let mut keys = Vec::new();
     for certificate in certificates {
         let certificate = certificate.with_kind(ErrorKind::Deserialization)?;
+        if primary_revoked(&certificate)? {
+            continue;
+        }
         if let Some(key) = ed25519_public_key(certificate.primary_key.public_params())? {
             keys.push(key);
         }
@@ -59,7 +63,13 @@ fn parse_gpg_keys(value: &str) -> Result<Vec<AnyVerifyingKey>, Error> {
                 subkey
                     .verify_bindings(&certificate.primary_key)
                     .with_kind(ErrorKind::InvalidSignature)?;
-                keys.push(key);
+                if !subkey
+                    .signatures
+                    .iter()
+                    .any(|signature| signature.typ() == Some(SignatureType::SubkeyRevocation))
+                {
+                    keys.push(key);
+                }
             }
         }
     }
@@ -67,6 +77,16 @@ fn parse_gpg_keys(value: &str) -> Result<Vec<AnyVerifyingKey>, Error> {
         return Err(invalid_key());
     }
     Ok(keys)
+}
+
+/// Errors on a revocation signature the primary key did not make.
+fn primary_revoked(certificate: &SignedPublicKey) -> Result<bool, Error> {
+    for signature in &certificate.details.revocation_signatures {
+        signature
+            .verify_key(&certificate.primary_key)
+            .with_kind(ErrorKind::InvalidSignature)?;
+    }
+    Ok(!certificate.details.revocation_signatures.is_empty())
 }
 
 #[cfg(test)]
@@ -134,6 +154,67 @@ mod tests {
         subkey.key = pgp::packet::PublicSubkey::from_inner(inner).unwrap();
         let armored = certificate.to_armored_string(Default::default()).unwrap();
         assert!(parse_public_keys(&[armored]).is_err());
+    }
+
+    #[test]
+    fn skips_revoked_signing_keys() {
+        let keys =
+            parse_public_keys(&[include_str!("fixtures/revoked-subkey.asc").into()]).unwrap();
+        assert_eq!(keys.len(), 2);
+        let (certificate, _) = SignedPublicKey::from_armor_single(
+            include_str!("fixtures/revoked-subkey.asc").as_bytes(),
+        )
+        .unwrap();
+        let revoked = &certificate.public_subkeys[0];
+        assert!(
+            revoked
+                .signatures
+                .iter()
+                .any(|signature| signature.typ() == Some(SignatureType::SubkeyRevocation))
+        );
+        let revoked = ed25519_public_key(revoked.public_params())
+            .unwrap()
+            .unwrap();
+        assert!(!keys.contains(&revoked));
+        assert!(parse_public_keys(&[include_str!("fixtures/revoked-primary.asc").into()]).is_err());
+    }
+
+    #[test]
+    fn rejects_forged_revocations_on_primary_keys() {
+        let (mut certificate, _) = SignedPublicKey::from_armor_single(
+            include_str!("fixtures/ed25519-signers.asc").as_bytes(),
+        )
+        .unwrap();
+        let (revoked, _) = SignedPublicKey::from_armor_single(
+            include_str!("fixtures/revoked-primary.asc").as_bytes(),
+        )
+        .unwrap();
+        certificate.details.revocation_signatures = revoked.details.revocation_signatures;
+        let armored = certificate.to_armored_string(Default::default()).unwrap();
+        assert_eq!(
+            parse_public_keys(&[armored]).unwrap_err().kind,
+            ErrorKind::InvalidSignature
+        );
+    }
+
+    #[test]
+    fn rejects_forged_revocations_on_subkeys() {
+        let (mut certificate, _) = SignedPublicKey::from_armor_single(
+            include_str!("fixtures/revoked-subkey.asc").as_bytes(),
+        )
+        .unwrap();
+        let revocation = certificate.public_subkeys[0]
+            .signatures
+            .iter()
+            .find(|signature| signature.typ() == Some(SignatureType::SubkeyRevocation))
+            .unwrap()
+            .clone();
+        certificate.public_subkeys[1].signatures.push(revocation);
+        let armored = certificate.to_armored_string(Default::default()).unwrap();
+        assert_eq!(
+            parse_public_keys(&[armored]).unwrap_err().kind,
+            ErrorKind::InvalidSignature
+        );
     }
 
     #[test]

@@ -13,7 +13,7 @@ Each named keyring contains one or more public keys. Keyrings are shared between
 
 New installations include **Start9**, containing the drbonez, matthill, and Start9 signing keys, enabled in both contexts. **Start9 Alpha** contains the Alpha and community-registry build keys and starts disabled in both contexts. Start9 cannot be deleted; switch it off in either context to stop trusting it there. Other keyrings can be deleted, which removes them from both contexts. Deleted keyrings are not automatically restored.
 
-To add a keyring, click **Add**, enter a **Name**, and paste one or more Ed25519 public keys into **Public keys**. The form accepts PEM public keys and armored GPG public-key exports, including a mixture of both formats. GPG imports store Ed25519 primary keys and Ed25519 signing subkeys as PEM public keys; encryption keys are ignored. Keyring switches govern imported keys independently of GPG certificate lifetimes. Exports without a supported signing key are rejected.
+To add a keyring, click **Add**, enter a **Name**, and paste one or more Ed25519 public keys into **Public keys**. The form accepts PEM public keys and armored GPG public-key exports, including a mixture of both formats. GPG imports store Ed25519 primary keys and Ed25519 signing subkeys as PEM public keys; encryption keys and keys revoked in the pasted export are ignored. Revocation signatures are verified during import. Keyring switches govern imported keys independently of GPG certificate lifetimes. Exports without a supported signing key are rejected.
 
 A keyring added from the Marketplace starts enabled there and disabled for OS updates. A keyring added from Software Update starts enabled in both contexts. Enabling a keyring trusts any of its keys in that context.
 
