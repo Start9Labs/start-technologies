@@ -1,1 +1,0 @@
-- An IPv6 published port now delivers traffic only to the device it was published for. Previously, another device on the same Security Profile could spoof IPv6 neighbor discovery to have the router send that port's Internet traffic to it.

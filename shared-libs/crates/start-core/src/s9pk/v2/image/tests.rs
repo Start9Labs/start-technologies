@@ -138,57 +138,8 @@ async fn image_files_and_metadata_survive_without_docker_initialization() {
 }
 
 #[tokio::test]
-async fn symlinked_resolver_becomes_a_regular_file() {
-    let mut layer = Vec::new();
-    append(&mut layer, b"etc", b'5', b"", None);
-    append(
-        &mut layer,
-        b"etc/resolv.conf",
-        b'2',
-        b"",
-        Some(b"/nix/store/image-root/etc/resolv.conf"),
-    );
-    append(
-        &mut layer,
-        b"etc/hosts",
-        b'2',
-        b"",
-        Some(b"/nix/store/image-root/etc/hosts"),
-    );
-    layer.extend_from_slice(&[0; 1024]);
-    let (archive, _) = save_archive(&[layer], "amd64");
-    let (image, _) = from_image_archive(archive.as_slice(), "--platform=linux/amd64")
-        .await
-        .unwrap();
-    let node = image
-        .contents()
-        .get_path("etc/resolv.conf")
-        .unwrap()
-        .as_node()
-        .unwrap();
-    let crate::util::squashfs::NodeContents::File(source) = &node.contents else {
-        panic!("not a file")
-    };
-    assert!(source.to_vec(None).await.unwrap().is_empty());
-    assert_eq!(
-        (node.metadata.mode, node.metadata.uid, node.metadata.gid),
-        (0o644, 0, 0)
-    );
-    assert!(matches!(
-        &image
-            .contents()
-            .get_path("etc/hosts")
-            .unwrap()
-            .as_node()
-            .unwrap()
-            .contents,
-        crate::util::squashfs::NodeContents::Symlink(_)
-    ));
-}
-
-#[tokio::test]
-async fn symlinked_resolver_replacement_preserves_other_hardlink_paths() {
-    for alias in [b"etc/zzz".as_slice(), b"etc/aaa".as_slice()] {
+async fn symlinked_resolver_and_hardlink_identity_survive_packing() {
+    for alias in [None, Some("etc/zzz"), Some("etc/aaa")] {
         let mut layer = Vec::new();
         append(&mut layer, b"etc", b'5', b"", None);
         append(
@@ -198,39 +149,47 @@ async fn symlinked_resolver_replacement_preserves_other_hardlink_paths() {
             b"",
             Some(b"/nix/store/image-root/etc/resolv.conf"),
         );
-        append(&mut layer, alias, b'1', b"", Some(b"etc/resolv.conf"));
+        if let Some(alias) = alias {
+            append(
+                &mut layer,
+                alias.as_bytes(),
+                b'1',
+                b"",
+                Some(b"etc/resolv.conf"),
+            );
+        }
         layer.extend_from_slice(&[0; 1024]);
         let (archive, _) = save_archive(&[layer], "amd64");
         let (image, _) = from_image_archive(archive.as_slice(), "--platform=linux/amd64")
             .await
             .unwrap();
-        let node = image
-            .contents()
-            .get_path("etc/resolv.conf")
-            .unwrap()
-            .as_node()
-            .expect("resolver must have its own inode");
-        let crate::util::squashfs::NodeContents::File(source) = &node.contents else {
-            panic!("resolver is not a file")
-        };
-        assert!(source.to_vec(None).await.unwrap().is_empty());
-        let alias = std::str::from_utf8(alias).unwrap();
-        let node = resolve_hardlink(Path::new(alias), |target| {
-            image.contents().get_path(target).map(|entry| match entry {
-                Entry::Node(node) => Ok(node),
-                Entry::Hardlink(target) => Err(target.clone()),
+        let resolve = |path: &str| {
+            resolve_hardlink(Path::new(path), |target| {
+                image.contents().get_path(target).map(|entry| match entry {
+                    Entry::Node(node) => Ok(node),
+                    Entry::Hardlink(target) => Err(target.clone()),
+                })
             })
-        })
-        .unwrap();
+            .unwrap()
+        };
+        let node = resolve("etc/resolv.conf");
         assert!(matches!(
             &node.contents,
             crate::util::squashfs::NodeContents::Symlink(target)
                 if target == Path::new("/nix/store/image-root/etc/resolv.conf")
         ));
         assert_eq!(
-            (node.metadata.mode, node.metadata.uid, node.metadata.gid),
-            (0o640, 17, 23)
+            (
+                node.metadata.mode,
+                node.metadata.uid,
+                node.metadata.gid,
+                node.metadata.modification_time,
+            ),
+            (0o640, 17, 23, 42)
         );
+        if let Some(alias) = alias {
+            assert!(std::ptr::eq(node, resolve(alias)));
+        }
     }
 }
 

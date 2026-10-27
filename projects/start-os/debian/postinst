@@ -273,6 +273,8 @@ fs.inotify.max_user_watches=1048576
 # Headroom for nested user namespaces (rootless OCI engines inside service LXCs).
 user.max_user_namespaces=28633
 kernel.unprivileged_userns_clone=1
+# Outbound source ports stay below the service ports StartOS allocates.
+net.ipv4.ip_local_port_range=32768 49151
 EOF
 
 # Ensure /dev/fuse and /dev/net/tun are available on the host so service LXCs
