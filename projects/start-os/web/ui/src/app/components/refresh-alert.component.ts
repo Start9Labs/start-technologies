@@ -1,22 +1,12 @@
 import { Component, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
-import { SwUpdate } from '@angular/service-worker'
 import { WA_WINDOW } from '@ng-web-apis/common'
-import { i18nPipe, TaskService } from '@start9labs/shared'
+import { i18nPipe } from '@start9labs/shared'
 import { Version } from '@start9labs/start-core'
 import { TuiResponsiveDialog } from '@taiga-ui/addon-mobile'
 import { TuiButton } from '@taiga-ui/core'
 import { PatchDB } from 'patch-db-client'
-import {
-  distinctUntilChanged,
-  firstValueFrom,
-  from,
-  map,
-  merge,
-  Subject,
-  switchMap,
-  timeout,
-} from 'rxjs'
+import { distinctUntilChanged, map, merge, Subject } from 'rxjs'
 import { ConfigService } from 'src/app/services/config.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 
@@ -61,8 +51,6 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
 })
 export class RefreshAlertComponent {
   private readonly win = inject(WA_WINDOW)
-  private readonly updates = inject(SwUpdate)
-  private readonly tasks = inject(TaskService)
   private readonly version = Version.parse(inject(ConfigService).version)
 
   readonly i18n = inject(i18nPipe)
@@ -85,25 +73,7 @@ export class RefreshAlertComponent {
     },
   )
 
-  protected async reload(): Promise<void> {
-    try {
-      if (
-        this.updates.isEnabled &&
-        this.win.navigator.serviceWorker.controller !== null
-      ) {
-        await this.tasks.run(
-          () =>
-            firstValueFrom(
-              from(this.updates.checkForUpdate()).pipe(
-                switchMap(() => this.updates.activateUpdate()),
-                timeout(30_000),
-              ),
-            ),
-          'Loading',
-        )
-      }
-    } finally {
-      this.win.location.reload()
-    }
+  protected reload(): void {
+    this.win.location.reload()
   }
 }

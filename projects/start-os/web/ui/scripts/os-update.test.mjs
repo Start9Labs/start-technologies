@@ -350,102 +350,31 @@ function fixture(t, cachedVersion, providers = []) {
   }
 }
 
-function refreshFixture(t, { enabled = true, controlled = true } = {}) {
-  const check = deferred()
-  const activation = deferred()
-  const calls = []
-  const f = fixture(t, '0.4.0.5', [
-    {
-      provide: SwUpdate,
-      useValue: {
-        isEnabled: enabled,
-        checkForUpdate() {
-          calls.push('check')
-          return check.promise
-        },
-        activateUpdate() {
-          calls.push('activate')
-          return activation.promise
+for (const standalone of [false, true]) {
+  test(`refresh reloads immediately without worker operations or a loading task (${standalone ? 'PWA' : 'browser'})`, t => {
+    let reloads = 0
+    const f = fixture(t, '0.4.0.5', [
+      {
+        provide: SwUpdate,
+        useValue: {
+          isEnabled: true,
+          checkForUpdate() {
+            throw new Error('Refresh must not wait for the worker')
+          },
         },
       },
-    },
-    { provide: ConfigService, useValue: { version: '0.4.0.4' } },
-    {
-      provide: WA_WINDOW,
-      useValue: {
-        matchMedia: () => ({ matches: false }),
-        navigator: { serviceWorker: { controller: controlled ? {} : null } },
-        location: { reload: () => calls.push('reload') },
+      { provide: ConfigService, useValue: { version: '0.4.0.4' } },
+      {
+        provide: WA_WINDOW,
+        useValue: {
+          matchMedia: () => ({ matches: standalone }),
+          navigator: { serviceWorker: { controller: {} } },
+          location: { reload: () => reloads++ },
+        },
       },
-    },
-  ])
-  return {
-    ...f,
-    component: f.make(RefreshAlertComponent),
-    check,
-    activation,
-    calls,
-  }
-}
-
-test('refresh checks, activates, and reloads after a successful worker response', async t => {
-  const f = refreshFixture(t)
-  const reloading = f.component.reload()
-  assert.deepEqual(f.calls, ['check'])
-  f.check.resolve(true)
-  await tick()
-  assert.deepEqual(f.calls, ['check', 'activate'])
-  f.activation.resolve(true)
-  await reloading
-  assert.deepEqual(f.calls, ['check', 'activate', 'reload'])
-  assert.deepEqual(await Promise.all(f.tasks), [true])
-})
-
-for (const phase of ['check', 'activation']) {
-  test(`refresh reloads after a failed ${phase}`, async t => {
-    const f = refreshFixture(t)
-    const reloading = f.component.reload()
-    if (phase === 'activation') {
-      f.check.resolve(true)
-      await tick()
-    }
-    f[phase].reject(new Error('worker unavailable'))
-    await reloading
-    assert.equal(f.calls.at(-1), 'reload')
-    assert.deepEqual(await Promise.all(f.tasks), [false])
-  })
-
-  test(`refresh reloads when the worker never acknowledges ${phase}`, async t => {
-    t.mock.timers.enable({ apis: ['setInterval'] })
-    const f = refreshFixture(t)
-    const reloading = f.component.reload()
-    if (phase === 'activation') {
-      t.mock.timers.tick(20_000)
-      f.check.resolve(true)
-      await tick()
-      t.mock.timers.tick(9_999)
-    } else {
-      t.mock.timers.tick(29_999)
-    }
-    await tick()
-    assert.notEqual(f.calls.at(-1), 'reload')
-    t.mock.timers.tick(1)
-    await tick()
-    assert.equal(f.calls.at(-1), 'reload')
-    await reloading
-    assert.deepEqual(await Promise.all(f.tasks), [false])
-    const calls = [...f.calls]
-    f[phase].resolve(true)
-    await tick()
-    assert.deepEqual(f.calls, calls)
-  })
-}
-
-for (const options of [{ enabled: false }, { controlled: false }]) {
-  test(`refresh without an active worker reloads immediately: ${JSON.stringify(options)}`, async t => {
-    const f = refreshFixture(t, options)
-    await f.component.reload()
-    assert.deepEqual(f.calls, ['reload'])
+    ])
+    f.make(RefreshAlertComponent).reload()
+    assert.equal(reloads, 1)
     assert.deepEqual(f.tasks, [])
   })
 }
