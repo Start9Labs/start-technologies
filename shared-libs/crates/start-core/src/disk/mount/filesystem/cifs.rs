@@ -1,8 +1,11 @@
+use std::future::Future;
 use std::net::IpAddr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
+use color_eyre::eyre::eyre;
 use digest::Digest;
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use tokio::process::Command;
@@ -20,17 +23,58 @@ async fn resolve_hostname(hostname: &str) -> Result<IpAddr, Error> {
     if hostname.ends_with(".local") {
         return Ok(IpAddr::V4(crate::net::mdns::resolve_mdns(hostname).await?));
     }
-    Ok(String::from_utf8(
-        Command::new("nmblookup")
-            .arg(hostname)
-            .invoke(crate::ErrorKind::Network)
-            .await?,
-    )?
-    .split(" ")
-    .next()
-    .unwrap()
-    .trim()
-    .parse()?)
+    resolve_dns_or_netbios(
+        hostname,
+        async {
+            tokio::net::lookup_host((hostname, 445))
+                .await
+                .map_err(|error| Error::new(error, crate::ErrorKind::Network))?
+                .next()
+                .map(|addr| addr.ip())
+                .ok_or_else(|| {
+                    Error::new(
+                        eyre!(t!("disk.mount.filesystem.cifs.no-dns-addresses")),
+                        crate::ErrorKind::Network,
+                    )
+                })
+        },
+        async {
+            Ok(String::from_utf8(
+                Command::new("nmblookup")
+                    .kill_on_drop(true)
+                    .arg(hostname)
+                    .invoke(crate::ErrorKind::Network)
+                    .await?,
+            )?
+            .split(" ")
+            .next()
+            .unwrap()
+            .trim()
+            .parse()?)
+        },
+    )
+    .await
+}
+
+async fn resolve_dns_or_netbios(
+    hostname: &str,
+    dns: impl Future<Output = Result<IpAddr, Error>>,
+    netbios: impl Future<Output = Result<IpAddr, Error>>,
+) -> Result<IpAddr, Error> {
+    match dns.await {
+        Ok(addr) => Ok(addr),
+        Err(dns_error) => netbios.await.map_err(|netbios_error| {
+            Error::new(
+                eyre!(t!(
+                    "disk.mount.filesystem.cifs.hostname-unresolved",
+                    hostname = hostname,
+                    dns = dns_error.display_src(),
+                    netbios = netbios_error.display_src()
+                )),
+                crate::ErrorKind::Network,
+            )
+        }),
+    }
 }
 
 #[instrument(skip_all)]
@@ -62,6 +106,81 @@ pub async fn mount_cifs(
     cmd.arg("-o").arg(opts);
     cmd.invoke(crate::ErrorKind::Filesystem).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::ready;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn ip_literals_bypass_name_lookup() {
+        for hostname in ["192.0.2.10", "2001:db8::10"] {
+            assert_eq!(
+                resolve_hostname(hostname).await.unwrap(),
+                hostname.parse::<IpAddr>().unwrap()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn system_hostname_resolves_without_netbios() {
+        assert!(resolve_hostname("localhost").await.unwrap().is_loopback());
+    }
+
+    #[tokio::test]
+    async fn dns_success_skips_netbios() {
+        let addr = "2001:db8::10".parse().unwrap();
+        assert_eq!(
+            resolve_dns_or_netbios("nas.home.arpa", ready(Ok(addr)), async {
+                panic!("NetBIOS must not run after DNS succeeds")
+            })
+            .await
+            .unwrap(),
+            addr
+        );
+    }
+
+    #[tokio::test]
+    async fn dns_failure_falls_back_to_netbios() {
+        let addr = "192.0.2.10".parse().unwrap();
+        assert_eq!(
+            resolve_dns_or_netbios(
+                "NAS",
+                ready(Err(Error::new(
+                    eyre!("DNS unavailable"),
+                    crate::ErrorKind::Network
+                ))),
+                ready(Ok(addr)),
+            )
+            .await
+            .unwrap(),
+            addr
+        );
+    }
+
+    #[tokio::test]
+    async fn lookup_failure_reports_hostname_and_both_resolvers() {
+        let error = resolve_dns_or_netbios(
+            "nas.home.arpa",
+            ready(Err(Error::new(
+                eyre!("DNS unavailable"),
+                crate::ErrorKind::Network,
+            ))),
+            ready(Err(Error::new(
+                eyre!("NetBIOS unavailable"),
+                crate::ErrorKind::Network,
+            ))),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error.kind, crate::ErrorKind::Network));
+        let message = error.to_string();
+        for expected in ["nas.home.arpa", "DNS unavailable", "NetBIOS unavailable"] {
+            assert!(message.contains(expected), "{message}");
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, visit_rs::VisitFields)]

@@ -1168,7 +1168,20 @@ disk.main.running-e2fsck:
   fr_FR: "Exécution de e2fsck avant la conversion de %{name} d'ext4 vers btrfs"
   pl_PL: "Uruchamianie e2fsck przed konwersją %{name} z ext4 na btrfs"
 
-# disk/util.rs
+disk.mount.filesystem.cifs.hostname-unresolved:
+  en_US: "Failed to resolve hostname %{hostname}. DNS: %{dns}; NetBIOS: %{netbios}"
+  de_DE: "Hostname %{hostname} konnte nicht aufgelöst werden. DNS: %{dns}; NetBIOS: %{netbios}"
+  es_ES: "No se pudo resolver el nombre de host %{hostname}. DNS: %{dns}; NetBIOS: %{netbios}"
+  fr_FR: "Impossible de résoudre le nom d'hôte %{hostname}. DNS : %{dns} ; NetBIOS : %{netbios}"
+  pl_PL: "Nie udało się rozwiązać nazwy hosta %{hostname}. DNS: %{dns}; NetBIOS: %{netbios}"
+
+disk.mount.filesystem.cifs.no-dns-addresses:
+  en_US: "DNS returned no addresses"
+  de_DE: "DNS hat keine Adressen zurückgegeben"
+  es_ES: "DNS no devolvió ninguna dirección"
+  fr_FR: "DNS n'a renvoyé aucune adresse"
+  pl_PL: "DNS nie zwrócił żadnych adresów"
+
 disk.util.not-canonical-block-device:
   en_US: "not a canonical block device"
   de_DE: "kein kanonisches Blockgerät"
