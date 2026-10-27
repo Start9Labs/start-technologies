@@ -51,6 +51,7 @@ boundary('@taiga-ui/kit', [
   'TuiDataListWrapper',
 ])
 boundary('@taiga-ui/cdk', ['TuiAnimated'])
+boundary('@taiga-ui/addon-mobile', ['TuiResponsiveDialog'])
 boundary('@taiga-ui/dompurify', ['NgDompurifyPipe'])
 boundary(
   '@ng-web-apis/common',
@@ -129,6 +130,9 @@ registerHooks({
     return next(url, context)
   },
 })
+const { SwUpdate } = await import('@angular/service-worker')
+const { RefreshAlertComponent } =
+  await import('src/app/components/refresh-alert.component')
 const { PatchDB } = await import('patch-db-client')
 const { OSService } = await import('src/app/services/os.service')
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
@@ -185,7 +189,7 @@ const state = version => ({
   ui: { startosRegistry: 'https://registry.test', snakeHighScore: 0 },
 })
 const tick = () => new Promise(resolve => setImmediate(resolve))
-function fixture(t, cachedVersion) {
+function fixture(t, cachedVersion, providers = []) {
   const source = new Subject()
   const cache = new BehaviorSubject(
     cachedVersion
@@ -279,6 +283,7 @@ function fixture(t, cachedVersion) {
       },
     },
     { provide: OSService, useFactory: () => new OSService() },
+    ...providers,
   ])
   const os = injector.get(OSService)
   const availability = [],
@@ -343,6 +348,106 @@ function fixture(t, cachedVersion) {
       await loading
     },
   }
+}
+
+function refreshFixture(t, { enabled = true, controlled = true } = {}) {
+  const check = deferred()
+  const activation = deferred()
+  const calls = []
+  const f = fixture(t, '0.4.0.5', [
+    {
+      provide: SwUpdate,
+      useValue: {
+        isEnabled: enabled,
+        checkForUpdate() {
+          calls.push('check')
+          return check.promise
+        },
+        activateUpdate() {
+          calls.push('activate')
+          return activation.promise
+        },
+      },
+    },
+    { provide: ConfigService, useValue: { version: '0.4.0.4' } },
+    {
+      provide: WA_WINDOW,
+      useValue: {
+        matchMedia: () => ({ matches: false }),
+        navigator: { serviceWorker: { controller: controlled ? {} : null } },
+        location: { reload: () => calls.push('reload') },
+      },
+    },
+  ])
+  return {
+    ...f,
+    component: f.make(RefreshAlertComponent),
+    check,
+    activation,
+    calls,
+  }
+}
+
+test('refresh checks, activates, and reloads after a successful worker response', async t => {
+  const f = refreshFixture(t)
+  const reloading = f.component.reload()
+  assert.deepEqual(f.calls, ['check'])
+  f.check.resolve(true)
+  await tick()
+  assert.deepEqual(f.calls, ['check', 'activate'])
+  f.activation.resolve(true)
+  await reloading
+  assert.deepEqual(f.calls, ['check', 'activate', 'reload'])
+  assert.deepEqual(await Promise.all(f.tasks), [true])
+})
+
+for (const phase of ['check', 'activation']) {
+  test(`refresh reloads after a failed ${phase}`, async t => {
+    const f = refreshFixture(t)
+    const reloading = f.component.reload()
+    if (phase === 'activation') {
+      f.check.resolve(true)
+      await tick()
+    }
+    f[phase].reject(new Error('worker unavailable'))
+    await reloading
+    assert.equal(f.calls.at(-1), 'reload')
+    assert.deepEqual(await Promise.all(f.tasks), [false])
+  })
+
+  test(`refresh reloads when the worker never acknowledges ${phase}`, async t => {
+    t.mock.timers.enable({ apis: ['setInterval'] })
+    const f = refreshFixture(t)
+    const reloading = f.component.reload()
+    if (phase === 'activation') {
+      t.mock.timers.tick(20_000)
+      f.check.resolve(true)
+      await tick()
+      t.mock.timers.tick(9_999)
+    } else {
+      t.mock.timers.tick(29_999)
+    }
+    await tick()
+    assert.notEqual(f.calls.at(-1), 'reload')
+    t.mock.timers.tick(1)
+    await tick()
+    assert.equal(f.calls.at(-1), 'reload')
+    await reloading
+    assert.deepEqual(await Promise.all(f.tasks), [false])
+    const calls = [...f.calls]
+    f[phase].resolve(true)
+    await tick()
+    assert.deepEqual(f.calls, calls)
+  })
+}
+
+for (const options of [{ enabled: false }, { controlled: false }]) {
+  test(`refresh without an active worker reloads immediately: ${JSON.stringify(options)}`, async t => {
+    const f = refreshFixture(t, options)
+    await f.component.reload()
+    assert.deepEqual(f.calls, ['reload'])
+    assert.deepEqual(f.tasks, [])
+  })
 }
 
 for (const liveBeforeResponse of [true, false]) {

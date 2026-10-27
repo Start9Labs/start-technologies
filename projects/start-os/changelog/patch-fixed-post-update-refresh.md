@@ -1,0 +1,1 @@
+- Fixed the Refresh button hanging indefinitely after a StartOS update.

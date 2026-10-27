@@ -7,7 +7,16 @@ import { Version } from '@start9labs/start-core'
 import { TuiResponsiveDialog } from '@taiga-ui/addon-mobile'
 import { TuiButton } from '@taiga-ui/core'
 import { PatchDB } from 'patch-db-client'
-import { distinctUntilChanged, map, merge, Subject } from 'rxjs'
+import {
+  distinctUntilChanged,
+  firstValueFrom,
+  from,
+  map,
+  merge,
+  Subject,
+  switchMap,
+  timeout,
+} from 'rxjs'
 import { ConfigService } from 'src/app/services/config.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 
@@ -82,10 +91,16 @@ export class RefreshAlertComponent {
         this.updates.isEnabled &&
         this.win.navigator.serviceWorker.controller !== null
       ) {
-        await this.tasks.run(async () => {
-          await this.updates.checkForUpdate()
-          await this.updates.activateUpdate()
-        }, 'Loading')
+        await this.tasks.run(
+          () =>
+            firstValueFrom(
+              from(this.updates.checkForUpdate()).pipe(
+                switchMap(() => this.updates.activateUpdate()),
+                timeout(30_000),
+              ),
+            ),
+          'Loading',
+        )
       }
     } finally {
       this.win.location.reload()
