@@ -51,7 +51,7 @@ import {
 } from 'src/app/services/patch-db/data-model'
 import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { toAuthorityUrl } from 'src/app/utils/acme'
-import { parsePublicKeys } from 'src/app/utils/public-keys'
+import { parsePemPublicKey, parsePublicKeys } from 'src/app/utils/public-keys'
 import { Mock } from './api.fixures'
 import { BTC_ICON, LND_ICON, PROXY_ICON } from './api-icons'
 import {
@@ -287,7 +287,9 @@ export class MockApiService extends ApiService {
       const id = crypto.randomUUID()
       const value: T.TrustedKey = {
         name,
-        publicKeys: parsePublicKeys(publicKeys.join('\n')),
+        publicKeys: parsePublicKeys(publicKeys.join('\n')).map(
+          parsePemPublicKey,
+        ),
         removable: true,
         marketplace: true,
         os: context === 'os',

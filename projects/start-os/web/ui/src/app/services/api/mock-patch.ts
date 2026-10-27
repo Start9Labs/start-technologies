@@ -69,6 +69,7 @@ export const mockPatchData: DataModel = {
         name: 'Start9 Alpha',
         publicKeys: [
           '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PUBLIC KEY-----\n',
+          '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=\n-----END PUBLIC KEY-----\n',
         ],
         removable: true,
         marketplace: false,

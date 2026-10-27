@@ -55,9 +55,10 @@ import { MarketplaceTrust } from '../trust'
                 tuiButton
                 size="xs"
                 appearance="flat-grayscale"
+                iconStart="@tui.key"
                 (click)="open = false; trust.manage()"
               >
-                🗝️ {{ 'Manage trusted keys' | i18n }}
+                {{ 'Manage trusted keyrings' | i18n }}
               </button>
             }
             <button

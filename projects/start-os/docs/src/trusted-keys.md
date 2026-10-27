@@ -1,25 +1,27 @@
-# Trusted Keys
+# Trusted Keyrings
 
-Trusted keys identify the publishers whose signatures your server accepts for service packages and OS updates. Trust is independent of the registry hosting the software.
+Trusted keyrings group the public keys whose signatures your server accepts for service packages and OS updates. Trust is independent of the registry hosting the software.
 
-## Manage Trusted Keys
+## Manage Trusted Keyrings
 
-Open **🗝️ Manage trusted keys** from either location:
+Open **Manage trusted keyrings** from either location:
 
-- **Marketplace**: open the registry selector and use the button next to **Add**.
+- **Marketplace**: open the registry selector and use the key-icon button next to **Add**.
 - **System → General Settings**: open the **Software Update** card's overflow menu.
 
-Each named entry contains one or more public keys. The entries are shared between both locations, but their switches are independent: enabling an entry in the Marketplace does not enable it for OS updates.
+Each named keyring contains one or more public keys. Keyrings are shared between both locations, but their switches are independent: enabling a keyring in the Marketplace does not enable it for OS updates.
 
-New installations include **Start9**, containing the drbonez, matthill, and Start9 signing keys, enabled in both lists. **Start9 Alpha** is included but disabled in both lists. Start9 cannot be deleted; switch it off in either list to stop trusting it there. Other entries can be deleted, which removes them from both lists. Deleted entries are not automatically restored.
+New installations include **Start9**, containing the drbonez, matthill, and Start9 signing keys, enabled in both contexts. **Start9 Alpha** contains the Alpha and community-registry build keys and starts disabled in both contexts. Start9 cannot be deleted; switch it off in either context to stop trusting it there. Other keyrings can be deleted, which removes them from both contexts. Deleted keyrings are not automatically restored.
 
-To add an entry, click **Add**, enter a **Name**, and paste one or more PEM-encoded Ed25519 public keys into **Public keys**. An entry added from the Marketplace starts enabled there and disabled for OS updates. An entry added from Software Update starts enabled in both lists.
+To add a keyring, click **Add**, enter a **Name**, and paste one or more Ed25519 public keys into **Public keys**. The form accepts PEM public keys and armored GPG public-key exports, including a mixture of both formats. GPG imports store Ed25519 primary keys and Ed25519 signing subkeys as PEM public keys; encryption keys are ignored. Keyring switches govern imported keys independently of GPG certificate lifetimes. Exports without a supported signing key are rejected.
 
-Confirm public keys through a source you already trust. A name is only a label; an entry trusts the actual keys it contains.
+A keyring added from the Marketplace starts enabled there and disabled for OS updates. A keyring added from Software Update starts enabled in both contexts. Enabling a keyring trusts any of its keys in that context.
+
+Confirm public keys through a source you already trust. A name is only a label; a keyring trusts the actual keys it contains.
 
 ## Installing Software
 
-Package details show a **Signed by** row listing enabled Marketplace entries whose keys sign the selected package. Marketplace installation is blocked when none match. [Sideloading](sideloading.md) allows an untrusted package after an explicit risk confirmation. OS updates from the UI require a signature from an enabled OS-update entry.
+Package details show a **Signed by** row listing enabled Marketplace keyrings whose keys sign the selected package. Marketplace installation is blocked when none match. [Sideloading](sideloading.md) allows an untrusted package after an explicit risk confirmation. OS updates from the UI require a signature from an enabled OS-update keyring.
 
 > [!IMPORTANT]
 > Packages signed only by Start9 Alpha or other untrusted keys are blocked under the defaults. Production Marketplace packages must be re-signed with an enabled Start9 key before rollout.
@@ -39,9 +41,9 @@ Diagnostic mode cannot access the saved trust list. Diagnostic updates require a
 
 ## Existing OS-Update Trust
 
-Upgrades preserve the keys previously trusted for OS updates, including an intentionally empty list. When individual Start9 keys were removed, the remaining trusted keys become separate entries and the complete Start9 entry stays disabled for OS updates.
+Upgrades preserve the keys previously trusted for OS updates, including an intentionally empty list. When individual Start9 keys were removed, the remaining trusted keys become separate keyrings and the complete Start9 keyring stays disabled for OS updates.
 
-The existing CLI commands manage the OS-enabled keys in the shared list:
+The existing CLI commands manage the OS-enabled keys in the shared keyrings:
 
 ```sh
 start-cli server update-signers list
@@ -51,4 +53,4 @@ start-cli server update-signers update "$(cat signer.pem)" --label "Renamed sign
 start-cli server update-signers remove "$(cat signer.pem)"
 ```
 
-`add` creates a single-key entry enabled in both lists. If the key already belongs to an OS-disabled entry, it enables that entry for OS updates without changing its name or Marketplace switch; adding an already OS-trusted key is an error. `update` renames every OS-enabled entry containing that key, including any other keys in those entries. `remove` removes the key from every removable OS-enabled entry containing it, deleting entries whose last key is removed. For protected Start9, `remove` disables the entire entry for OS updates without changing its keys or Marketplace switch; `add` re-enables it. Use the management dialog to change either trust switch.
+`add` creates a single-key keyring enabled in both contexts. If the key already belongs to an OS-disabled keyring, it enables that keyring for OS updates without changing its name or Marketplace switch; adding an already OS-trusted key is an error. `update` renames every OS-enabled keyring containing that key, including any other keys in those keyrings. `remove` removes the key from every removable OS-enabled keyring containing it, deleting keyrings whose last key is removed. For protected Start9, `remove` disables the entire keyring for OS updates without changing its keys or Marketplace switch; `add` re-enables it. Use the management dialog to change either trust switch.

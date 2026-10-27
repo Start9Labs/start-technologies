@@ -17,6 +17,7 @@ use crate::util::serde::{deserialize_from_str, serialize_display};
 pub mod commitment;
 pub mod compat;
 pub mod ed25519;
+pub(crate) mod gpg;
 pub mod gpg_agent;
 
 /// Protocol tag prefixed to pure-Ed25519 commitment signing messages.

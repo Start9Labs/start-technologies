@@ -1537,9 +1537,9 @@ export const AddPublicDomainParams: z.ZodObject<{
 export const AddTrustedKeyParams: z.ZodObject<{
   name: z.ZodString
   /**
-   * At least one PEM-encoded Ed25519 public key.
+   * Ed25519 public keys in PEM or armored GPG format.
    */
-  publicKeys: z.ZodArray<typeof AnyVerifyingKey>
+  publicKeys: z.ZodArray<z.ZodString>
   /**
    * New entries are enabled in this context and in the Marketplace.
    */
@@ -1547,10 +1547,10 @@ export const AddTrustedKeyParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   name: z.string(),
   /**
-   * At least one PEM-encoded Ed25519 public key.
+   * Ed25519 public keys in PEM or armored GPG format.
    */
-  publicKeys: z.array(AnyVerifyingKey).meta({
-    description: 'At least one PEM-encoded Ed25519 public key.',
+  publicKeys: z.array(z.string()).meta({
+    description: 'Ed25519 public keys in PEM or armored GPG format.',
   }),
   /**
    * New entries are enabled in this context and in the Marketplace.

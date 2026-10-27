@@ -177,6 +177,7 @@ openssl-sys = "0.9.116"
 p256 = { version = "0.14.0-rc.15", features = ["pem"] }
 patch-db = { path = "../patch-db/core", features = ["trace"] }
 pbkdf2 = "0.13.0"
+pgp = { version = "0.21.0", default-features = false }
 pin-project = "1.1.3"
 pkcs8 = { version = "0.11.0", features = ["pem", "std"] }
 prettytable-rs = "0.10.0"

@@ -747,6 +747,25 @@ test('PEM form parsing canonicalizes multiple keys and rejects empty, private, n
   assert.deepEqual(parsePublicKeys(publicKeyPem(raw)), [publicKeyPem(raw)])
 })
 
+test('GPG form input preserves armored exports for backend validation alongside PEM keys', () => {
+  const armored = readFileSync(
+    resolve(
+      root,
+      'shared-libs/crates/start-core/src/sign/fixtures/ed25519-signers.asc',
+    ),
+    'utf8',
+  ).trim()
+  assert.deepEqual(
+    parsePublicKeys(`${OS_UPDATE_SIGNERS[0]}\n${armored}\n${armored}`),
+    [OS_UPDATE_SIGNERS[0], armored],
+  )
+  assert.throws(() =>
+    parsePublicKeys(
+      armored.replaceAll('PGP PUBLIC KEY BLOCK', 'PGP PRIVATE KEY BLOCK'),
+    ),
+  )
+})
+
 test('package signers select the install asset or the verified sideload signer, not other assets', () => {
   assert.deepEqual(
     packageSigners({

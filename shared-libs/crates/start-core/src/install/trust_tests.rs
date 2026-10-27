@@ -57,27 +57,44 @@ fn package_commitment_requires_an_enabled_marketplace_signer() {
 }
 
 #[test]
-fn production_package_requires_explicit_alpha_opt_in() {
-    let asset: RegistryAsset<MerkleArchiveCommitment> =
-        serde_json::from_str(include_str!("fixtures/production-bitcoind-31.1-26.json")).unwrap();
-    asset.validate_all(SIG_CONTEXT, None).unwrap();
-    let mut keys = trusted_keys::initial_trusted_keys();
-    assert!(
+fn production_and_community_build_signers_require_explicit_alpha_opt_in() {
+    for (fixture, signer) in [
+        (
+            include_str!("fixtures/production-bitcoind-31.1-26.json"),
+            "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PUBLIC KEY-----\n",
+        ),
+        (
+            include_str!("fixtures/community-bitcoind-knotsprerdts-29.3-31.json"),
+            "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=\n-----END PUBLIC KEY-----\n",
+        ),
+    ] {
+        let mut asset: RegistryAsset<MerkleArchiveCommitment> =
+            serde_json::from_str(fixture).unwrap();
+        asset.validate_all(SIG_CONTEXT, None).unwrap();
+        let signer: AnyVerifyingKey = signer.parse().unwrap();
+        asset.signatures.retain(|key, _| key == &signer);
+        assert_eq!(asset.signatures.len(), 1);
+        let mut keys = trusted_keys::initial_trusted_keys();
+        assert!(
+            asset
+                .validate_all(
+                    SIG_CONTEXT,
+                    trusted_keys::signer_policy(Some(enabled_keys(
+                        &keys,
+                        TrustContext::Marketplace
+                    )))
+                )
+                .is_err()
+        );
+        keys.get_mut("start9-alpha").unwrap().marketplace = true;
         asset
             .validate_all(
                 SIG_CONTEXT,
-                trusted_keys::signer_policy(Some(enabled_keys(&keys, TrustContext::Marketplace)))
+                trusted_keys::signer_policy(Some(enabled_keys(&keys, TrustContext::Marketplace))),
             )
-            .is_err()
-    );
-    keys.get_mut("start9-alpha").unwrap().marketplace = true;
-    asset
-        .validate_all(
-            SIG_CONTEXT,
-            trusted_keys::signer_policy(Some(enabled_keys(&keys, TrustContext::Marketplace))),
-        )
-        .unwrap();
-    assert!(!keys["start9-alpha"].os);
+            .unwrap();
+        assert!(!keys["start9-alpha"].os);
+    }
 }
 
 #[test]

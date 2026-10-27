@@ -26,7 +26,7 @@ import { parsePublicKeys } from 'src/app/utils/public-keys'
   template: `
     <form tuiForm="m" [formGroup]="form" (submit.prevent)="save()">
       <header tuiHeader>
-        <h2 tuiTitle [id]="context.id">{{ 'Add trusted key' | i18n }}</h2>
+        <h2 tuiTitle [id]="context.id">{{ 'Add trusted keyring' | i18n }}</h2>
       </header>
       <tui-textfield>
         <label tuiLabel>{{ 'Name' | i18n }}</label>
@@ -45,7 +45,11 @@ import { parsePublicKeys } from 'src/app/utils/public-keys'
         ></textarea>
       </tui-textfield>
       <tui-error formControlName="publicKeys" />
-      <p>{{ 'Enter one or more PEM-encoded Ed25519 public keys.' | i18n }}</p>
+      <p>
+        {{
+          'Enter one or more Ed25519 public keys in PEM or GPG format.' | i18n
+        }}
+      </p>
       <footer>
         <button
           tuiButton
@@ -78,7 +82,7 @@ import { parsePublicKeys } from 'src/app/utils/public-keys'
         required: i18n.transform('Required'),
         pattern: i18n.transform('Required'),
         publicKeys: i18n.transform(
-          'Enter one or more PEM-encoded Ed25519 public keys.',
+          'Enter one or more Ed25519 public keys in PEM or GPG format.',
         ),
       }
     }),

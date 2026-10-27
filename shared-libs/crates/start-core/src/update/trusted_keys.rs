@@ -7,12 +7,13 @@ use crate::context::RpcContext;
 use crate::prelude::*;
 use crate::registry::signer::AcceptSigners;
 use crate::sign::AnyVerifyingKey;
+use crate::sign::gpg::parse_public_keys;
 use crate::update::signers::{TrustedOsUpdateSigner, TrustedOsUpdateSigners, initial_signers};
 
 pub type TrustedKeys = BTreeMap<InternedString, TrustedKey>;
 pub const START9: &str = "start9";
 
-/// A named publisher with independent service-package and OS-update trust.
+/// A named keyring with independent service-package and OS-update trust.
 #[derive(Clone, Debug, Deserialize, Serialize, HasModel, VisitFields, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
@@ -20,7 +21,7 @@ pub struct TrustedKey {
     pub name: String,
     /// PEM-encoded Ed25519 public keys.
     pub public_keys: Vec<AnyVerifyingKey>,
-    /// False for the protected Start9 entry.
+    /// False for the protected Start9 keyring.
     pub removable: bool,
     pub marketplace: bool,
     pub os: bool,
@@ -96,7 +97,10 @@ pub fn initial_trusted_keys() -> TrustedKeys {
         ("start9-alpha".into(), TrustedKey {
             name: "Start9 Alpha".into(),
             removable: true,
-            public_keys: vec!["-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PUBLIC KEY-----\n".parse().unwrap()],
+            public_keys: vec![
+                "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
+                "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
+            ],
             marketplace: false,
             os: false,
         }),
@@ -175,8 +179,8 @@ pub fn api<C: Context>() -> ParentHandler<C> {
 #[serde(rename_all = "camelCase")]
 pub struct AddTrustedKeyParams {
     pub name: String,
-    /// At least one PEM-encoded Ed25519 public key.
-    pub public_keys: Vec<AnyVerifyingKey>,
+    /// Ed25519 public keys in PEM or armored GPG format.
+    pub public_keys: Vec<String>,
     /// New entries are enabled in this context and in the Marketplace.
     pub context: TrustContext,
 }
@@ -226,26 +230,28 @@ fn group_name(name: String) -> Result<String, Error> {
 pub fn add_group(
     keys: &mut TrustedKeys,
     id: InternedString,
-    params: AddTrustedKeyParams,
+    name: String,
+    public_keys: Vec<AnyVerifyingKey>,
+    context: TrustContext,
 ) -> Result<(), Error> {
-    let name = group_name(params.name)?;
-    if params.public_keys.is_empty() {
+    let name = group_name(name)?;
+    if public_keys.is_empty() {
         return Err(invalid_group());
     }
-    let mut public_keys = Vec::new();
-    for key in params.public_keys {
-        if !public_keys.contains(&key) {
-            public_keys.push(key);
+    let mut normalized = Vec::new();
+    for key in public_keys {
+        if !normalized.contains(&key) {
+            normalized.push(key);
         }
     }
     keys.insert(
         id,
         TrustedKey {
             name,
-            public_keys,
+            public_keys: normalized,
             removable: true,
             marketplace: true,
-            os: matches!(params.context, TrustContext::Os),
+            os: matches!(context, TrustContext::Os),
         },
     );
     Ok(())
@@ -272,12 +278,21 @@ pub fn remove_group(keys: &mut TrustedKeys, id: &str) -> Result<(), Error> {
 }
 
 async fn add(ctx: RpcContext, params: AddTrustedKeyParams) -> Result<(), Error> {
+    let public_keys = parse_public_keys(&params.public_keys)?;
     ctx.db
         .mutate(|db| {
             db.as_public_mut()
                 .as_server_info_mut()
                 .as_trusted_keys_mut()
-                .mutate(|keys| add_group(keys, uuid::Uuid::new_v4().to_string().into(), params))
+                .mutate(|keys| {
+                    add_group(
+                        keys,
+                        uuid::Uuid::new_v4().to_string().into(),
+                        params.name,
+                        public_keys,
+                        params.context,
+                    )
+                })
         })
         .await
         .result
@@ -331,15 +346,7 @@ pub fn legacy_add(
         group.os = true;
         return Ok(());
     }
-    add_group(
-        keys,
-        key.interned_pem(),
-        AddTrustedKeyParams {
-            name: label,
-            public_keys: vec![key],
-            context: TrustContext::Os,
-        },
-    )
+    add_group(keys, key.interned_pem(), label, vec![key], TrustContext::Os)
 }
 
 pub fn legacy_update(
@@ -395,6 +402,7 @@ mod tests {
     fn defaults_and_context_independence() {
         let mut keys = initial_trusted_keys();
         assert_eq!(keys[START9].public_keys.len(), 3);
+        assert_eq!(keys["start9-alpha"].public_keys.len(), 2);
         assert!(keys[START9].marketplace && keys[START9].os);
         assert!(!keys["start9-alpha"].marketplace && !keys["start9-alpha"].os);
         assert!(remove_group(&mut keys, START9).is_err());
@@ -426,11 +434,9 @@ mod tests {
             add_group(
                 &mut keys,
                 "invalid".into(),
-                AddTrustedKeyParams {
-                    name: " ".into(),
-                    public_keys: vec![public_key.clone()],
-                    context: TrustContext::Os
-                }
+                " ".into(),
+                vec![public_key.clone()],
+                TrustContext::Os
             )
             .is_err()
         );
@@ -438,11 +444,9 @@ mod tests {
             add_group(
                 &mut keys,
                 "invalid".into(),
-                AddTrustedKeyParams {
-                    name: "empty".into(),
-                    public_keys: vec![],
-                    context: TrustContext::Os
-                }
+                "empty".into(),
+                vec![],
+                TrustContext::Os
             )
             .is_err()
         );
@@ -454,11 +458,9 @@ mod tests {
             add_group(
                 &mut keys,
                 id.into(),
-                AddTrustedKeyParams {
-                    name: " custom ".into(),
-                    public_keys: vec![public_key.clone(), public_key.clone()],
-                    context,
-                },
+                " custom ".into(),
+                vec![public_key.clone(), public_key.clone()],
+                context,
             )
             .unwrap();
             assert_eq!(keys[id].name, "custom");
@@ -466,12 +468,6 @@ mod tests {
             assert!(keys[id].marketplace);
             assert_eq!(keys[id].os, os);
         }
-        assert!(
-            serde_json::from_value::<AddTrustedKeyParams>(
-                serde_json::json!({"name":"bad", "publicKeys":["not pem"], "context":"os"})
-            )
-            .is_err()
-        );
     }
 
     #[test]
@@ -501,6 +497,9 @@ mod tests {
         assert_eq!(keys["start9-alpha"].name, alpha.name);
         assert_eq!(keys.len(), 2);
         legacy_remove(&mut keys, &key).unwrap();
+        assert_eq!(keys["start9-alpha"].public_keys, alpha.public_keys[1..]);
+        let remaining = keys["start9-alpha"].public_keys[0].clone();
+        legacy_remove(&mut keys, &remaining).unwrap();
         assert!(!keys.contains_key("start9-alpha"));
     }
 
@@ -511,11 +510,9 @@ mod tests {
         add_group(
             &mut keys,
             "zz-overlap".into(),
-            AddTrustedKeyParams {
-                name: "Overlapping publisher".into(),
-                public_keys: vec![key.clone()],
-                context: TrustContext::Os,
-            },
+            "Overlapping publisher".into(),
+            vec![key.clone()],
+            TrustContext::Os,
         )
         .unwrap();
         let saved = keys.clone();
@@ -530,11 +527,9 @@ mod tests {
         add_group(
             &mut keys,
             "overlap".into(),
-            AddTrustedKeyParams {
-                name: "Overlapping publisher".into(),
-                public_keys: vec![key.clone()],
-                context: TrustContext::Os,
-            },
+            "Overlapping publisher".into(),
+            vec![key.clone()],
+            TrustContext::Os,
         )
         .unwrap();
         legacy_update(&mut keys, &key, "renamed".into()).unwrap();

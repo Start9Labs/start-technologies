@@ -2688,7 +2688,13 @@ sign.gpg-agent.no-signing-key:
   fr_FR: "Aucune clé de signature Ed25519 avec sa partie secrète dans le trousseau GnuPG ne correspond à %{key}"
   pl_PL: "Żaden klucz podpisujący Ed25519 z częścią tajną w bazie kluczy GnuPG nie pasuje do %{key}"
 
-# service/mod.rs
+sign.gpg.invalid-public-key:
+  en_US: "Use an Ed25519 public signing key in PEM or GPG format"
+  de_DE: "Verwenden Sie einen öffentlichen Ed25519-Signaturschlüssel im PEM- oder GPG-Format"
+  es_ES: "Use una clave pública de firma Ed25519 en formato PEM o GPG"
+  fr_FR: "Utilisez une clé publique de signature Ed25519 au format PEM ou GPG"
+  pl_PL: "Użyj publicznego klucza podpisującego Ed25519 w formacie PEM lub GPG"
+
 service.mod.service-actor-held-after-shutdown:
   en_US: "ServiceActor held somewhere after actor shutdown"
   de_DE: "ServiceActor wird nach dem Herunterfahren des Actors noch irgendwo gehalten"
@@ -7301,11 +7307,11 @@ update.trusted-keys.invalid:
   pl_PL: "Podaj nazwę i co najmniej jeden klucz publiczny Ed25519"
 
 update.trusted-keys.not-found:
-  en_US: "Trusted key not found"
-  de_DE: "Vertrauenswürdiger Schlüssel nicht gefunden"
-  es_ES: "No se encontró la clave de confianza"
-  fr_FR: "Clé de confiance introuvable"
-  pl_PL: "Nie znaleziono zaufanego klucza"
+  en_US: "Trusted keyring not found"
+  de_DE: "Vertrauenswürdiger Schlüsselbund nicht gefunden"
+  es_ES: "No se encontró el llavero de confianza"
+  fr_FR: "Trousseau de confiance introuvable"
+  pl_PL: "Nie znaleziono zaufanego pęku kluczy"
 
 update.trusted-keys.protected:
   en_US: "Start9 cannot be deleted; disable its trust toggle instead"

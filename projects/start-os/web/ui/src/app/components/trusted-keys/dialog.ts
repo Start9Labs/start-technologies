@@ -7,6 +7,7 @@ import {
   TuiButton,
   TuiCell,
   TuiDialogContext,
+  TuiIcon,
   TuiLoader,
   TuiTitle,
 } from '@taiga-ui/core'
@@ -21,7 +22,8 @@ import { ADD_TRUSTED_KEY } from './form'
 @Component({
   template: `
     <header tuiHeader>
-      <h2 tuiTitle [id]="context.id">🗝️ {{ 'Manage trusted keys' | i18n }}</h2>
+      <tui-icon icon="@tui.key" />
+      <h2 tuiTitle [id]="context.id">{{ 'Manage trusted keyrings' | i18n }}</h2>
       <aside tuiAccessories>
         <button
           tuiButton
@@ -36,8 +38,8 @@ import { ADD_TRUSTED_KEY } from './form'
     <p>
       {{
         (context.data === 'marketplace'
-          ? 'Trust these keys for service packages.'
-          : 'Trust these keys for OS updates.'
+          ? 'Trust these keyrings for service packages.'
+          : 'Trust these keyrings for OS updates.'
         ) | i18n
       }}
     </p>
@@ -77,6 +79,7 @@ import { ADD_TRUSTED_KEY } from './form'
     TuiButton,
     TuiCell,
     TuiHeader,
+    TuiIcon,
     TuiLoader,
     TuiTitle,
     TuiSwitch,
@@ -123,10 +126,10 @@ export class TrustedKeysDialog {
     const confirmed = await firstValueFrom(
       this.dialogs
         .openConfirm({
-          label: 'Delete trusted key?',
+          label: 'Delete trusted keyring?',
           data: {
             content:
-              'Deleting this key removes it from both service-package and OS-update trust lists.',
+              'Deleting this keyring removes it from both service-package and OS-update trust lists.',
             yes: 'Delete',
             no: 'Cancel',
           },

@@ -3979,7 +3979,7 @@ export const TestSmtpParams: z.ZodObject<{
 })
 
 /**
- * A named publisher with independent service-package and OS-update trust.
+ * A named keyring with independent service-package and OS-update trust.
  */
 export const TrustedKey: z.ZodObject<{
   name: z.ZodString
@@ -3988,7 +3988,7 @@ export const TrustedKey: z.ZodObject<{
    */
   publicKeys: z.ZodArray<typeof AnyVerifyingKey>
   /**
-   * False for the protected Start9 entry.
+   * False for the protected Start9 keyring.
    */
   removable: z.ZodBoolean
   marketplace: z.ZodBoolean
@@ -4002,17 +4002,17 @@ export const TrustedKey: z.ZodObject<{
     description: 'PEM-encoded Ed25519 public keys.',
   }),
   /**
-   * False for the protected Start9 entry.
+   * False for the protected Start9 keyring.
    */
   removable: z.boolean().meta({
-    description: 'False for the protected Start9 entry.',
+    description: 'False for the protected Start9 keyring.',
   }),
   marketplace: z.boolean(),
   os: z.boolean(),
 }).meta({
   id: 'TrustedKey',
   description:
-    'A named publisher with independent service-package and OS-update trust.',
+    'A named keyring with independent service-package and OS-update trust.',
 })
 export const UmountParams: z.ZodObject<{
   targetId: z.ZodCodec<
