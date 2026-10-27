@@ -101,11 +101,15 @@ A pre-release version instead takes prerelease segments: `exver::Version::new([0
 
 **`projects/start-os/release-notes/X.Y.Z.N.md`** — this release's curated notes: a lede, `## Highlights`, an optional `## Important`. Put pre-update instructions in an optional sibling **`X.Y.Z.N.pre-update.md`**, headed `## ⚠️ Before You Update`. `manage-release.sh` prefixes the companion to the main notes for the GitHub release and registry entry. The post-update notification uses the main notes alone. **The image packages the main file by name** (`projects/start-os/build.mk`), so the StartOS image does not build until it exists.
 
-### 6. Release-gated docs
+### 6. Generated man pages
+
+Run `make manpages` and commit the generated changes. `projects/start-os/man/start-container.1` embeds the OS version; the Generated Artifacts CI job rejects a stale page.
+
+### 7. Release-gated docs
 
 `projects/start-os/docs/src/installing-startos.md` (and `update-040.md`) pin the GitHub release link to the shipping version. `manage-release.sh pre-check start-os` fails on a stale or `releases/latest` link.
 
-### 7. SDK TypeScript version (only on breaking SDK changes)
+### 8. SDK TypeScript version (only on breaking SDK changes)
 
 **`projects/start-sdk/lib/StartSdk.ts`** — update `OSVersion` **only** when the bump includes breaking changes the SDK relies on. `OSVersion` tracks compatibility for service developers, not the OS release cadence; routine bumps skip it.
 
@@ -124,6 +128,7 @@ cargo test -p start-core --features test version::   # incl. current_matches_man
 - [ ] Update `shared-libs/crates/start-core/src/version/mod.rs` in 5 locations
 - [ ] Add the StartOS changelog fragments
 - [ ] Write `projects/start-os/release-notes/X.Y.Z.N.md` (the image won't build without it), plus `X.Y.Z.N.pre-update.md` for any pre-update instructions
+- [ ] Regenerate and commit man pages with `make manpages`
 - [ ] Bump the release link in `projects/start-os/docs/src/`
 - [ ] Update `projects/start-sdk/lib/StartSdk.ts` `OSVersion` — **only** on breaking SDK changes
 - [ ] `cargo test` + `pre-check` pass
