@@ -151,3 +151,7 @@ With **HTTPS-Only Mode** on, Firefox tries `https://router.lan` first and shows 
 If the network you are visiting uses the same addresses as your home network, your device sends traffic for those addresses to the network it is on rather than through the tunnel. The WireGuard app shows the tunnel connected with a recent handshake, but your home addresses time out or open the visited network's own router page.
 
 StartWRT's default addresses (`192.168.0.x` for the Admin profile, then `192.168.1.x` for the next profile) are among the most common on home, hotel, and office networks. To avoid the overlap, choose a less common **Network Block** in [LAN Settings](lan.md#ipv4), such as `10.47`. Changing the Network Block removes your existing [Inbound VPN](inbound-vpn.md) servers, so do it before setting up remote access, or recreate the servers and re-import their client configurations afterward.
+
+### Why doesn't the router get an Internet address after I replaced my old router?
+
+Some ISPs only give an address to the device they already know, which they identify by its MAC address. In [WAN Settings](wan.md#mac-address), set **MAC Address** to **Custom** and enter the MAC address of your old router's Internet port. Take it from the old router's admin page, not its label, which usually shows a different port's address. Then disconnect the old router.
