@@ -113,17 +113,11 @@ async fn newer_versions(_ctx: ServerContext) -> Result<Vec<VersionInfo>, Error> 
     // Read registry URL from UCI config (fallback to default)
     let registry_url = read_registry_url().unwrap_or_else(|| DEFAULT_REGISTRY_URL.to_string());
 
-    let versions = match crate::update::fetch_newer_versions(&registry_url).await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("Failed to check for updates: {e}");
-            return Ok(Vec::new());
-        }
-    };
+    let versions = crate::update::fetch_newer_versions(&registry_url)
+        .await
+        .inspect_err(|e| tracing::warn!("Failed to check for updates: {e}"))?;
 
-    let platform = crate::registry::device_info::DeviceInfo::load()
-        .map(|d| d.os.platform)
-        .unwrap_or_else(|_| "unknown".to_string());
+    let platform = crate::registry::device_info::platform();
 
     let current: &str = env!("CARGO_PKG_VERSION");
 
@@ -132,7 +126,8 @@ async fn newer_versions(_ctx: ServerContext) -> Result<Vec<VersionInfo>, Error> 
         .filter(|(ver, info)| {
             // Only include versions that have an asset for our platform
             // and are newer than the current version (semver comparison)
-            info.asset_for_platform(&platform).is_some() && is_newer_version(ver, current)
+            crate::update::asset_for_platform(&info, &platform).is_some()
+                && is_newer_version(ver, current)
         })
         .map(|(ver, info)| VersionInfo {
             version: ver,

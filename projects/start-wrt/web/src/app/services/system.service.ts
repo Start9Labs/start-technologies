@@ -32,6 +32,7 @@ export class SystemService {
   readonly info = signal<SystemInfoRes | null>(null)
   readonly newerVersions = signal<VersionInfo[]>([])
   readonly updateAvailable = signal(false)
+  readonly updateCheckFailed = signal(false)
   readonly updating = signal(false)
   readonly rebooting = signal(false)
 
@@ -73,17 +74,23 @@ export class SystemService {
         .subscribe()
     }
 
-    try {
-      const [info, newerVersions] = await Promise.all([
-        this.api.systemInfo(),
-        this.api.systemNewerVersions(),
-      ])
+    const [info, newerVersions] = await Promise.allSettled([
+      this.api.systemInfo(),
+      this.api.systemNewerVersions(),
+    ])
 
-      this.setInfo(info)
-      this.newerVersions.set(newerVersions)
-      this.updateAvailable.set(newerVersions.length > 0)
-    } catch (e) {
-      console.error('Failed to fetch system info:', e)
+    if (info.status === 'fulfilled') {
+      this.setInfo(info.value)
+    } else {
+      console.error('Failed to fetch system info:', info.reason)
+    }
+
+    if (newerVersions.status === 'fulfilled') {
+      this.newerVersions.set(newerVersions.value)
+      this.updateAvailable.set(newerVersions.value.length > 0)
+      this.updateCheckFailed.set(false)
+    } else if (!isNetworkError(newerVersions.reason)) {
+      this.updateCheckFailed.set(true)
     }
   }
 

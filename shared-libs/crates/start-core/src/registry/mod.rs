@@ -23,6 +23,7 @@ use crate::util::serde::HandlerExtSerde;
 
 pub mod admin;
 pub mod asset;
+pub mod client;
 pub mod context;
 pub mod db;
 pub mod device_info;

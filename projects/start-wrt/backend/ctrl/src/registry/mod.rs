@@ -1,11 +1,9 @@
-pub mod asset;
 pub mod device_info;
-pub mod os;
-pub mod signer;
 
-use http::HeaderValue;
 use reqwest::Client;
 use serde_json::Value;
+use startos::registry::client::{Product, RegistryClient, REGISTRY_CLIENT_HEADER};
+use startos::registry::device_info::{DeviceInfo, DEVICE_INFO_HEADER};
 use url::Url;
 
 use crate::Error;
@@ -20,7 +18,7 @@ pub async fn call_registry_rpc(
     registry_url: &str,
     method: &str,
     params: Value,
-    device_info_header: Option<HeaderValue>,
+    device_info: Option<&DeviceInfo>,
 ) -> Result<Value, Error> {
     // Build JSON-RPC request
     let rpc_req = serde_json::json!({
@@ -46,11 +44,14 @@ pub async fn call_registry_rpc(
         .post(url.clone())
         .header(http::header::CONTENT_TYPE, "application/json")
         .header(http::header::ACCEPT, "application/json")
-        .header(http::header::CONTENT_LENGTH, body.len());
+        .header(http::header::CONTENT_LENGTH, body.len())
+        .header(
+            REGISTRY_CLIENT_HEADER,
+            RegistryClient::current(Some(Product::StartWrt)).to_header_value(),
+        );
 
-    // Add device info header
-    if let Some(di) = device_info_header {
-        req = req.header(device_info::DEVICE_INFO_HEADER, di);
+    if let Some(device_info) = device_info {
+        req = req.header(DEVICE_INFO_HEADER, device_info.to_header_value());
     }
 
     let res = req

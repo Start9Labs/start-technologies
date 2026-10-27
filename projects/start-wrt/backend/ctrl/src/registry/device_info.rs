@@ -1,66 +1,28 @@
-use http::HeaderValue;
-use serde::{Deserialize, Serialize};
+use startos::registry::device_info::{DeviceInfo, OsInfo};
 
 use crate::Error;
 
-pub const DEVICE_INFO_HEADER: &str = "X-StartOS-Device-Info";
-
-/// Device information sent to the registry in the X-StartOS-Device-Info header.
-/// Wire-compatible with start-os's `DeviceInfo`.
-#[derive(Clone, Debug, Serialize, Deserialize, visit_rs::VisitFields)]
-#[serde(rename_all = "camelCase")]
-pub struct DeviceInfo {
-    pub os: OsInfo,
-    pub hardware: Option<HardwareInfo>,
+/// Device info of the running router.
+pub fn load() -> Result<DeviceInfo, Error> {
+    let version = env!("CARGO_PKG_VERSION");
+    Ok(DeviceInfo {
+        os: OsInfo {
+            version: version.parse().map_err(Error::other)?,
+            compat: compute_compat_range(version)
+                .parse()
+                .map_err(Error::other)?,
+            platform: platform().into(),
+            language: None,
+        },
+        hardware: None,
+    })
 }
-rpc_toolkit::reflect_ts!(DeviceInfo);
 
-#[derive(Clone, Debug, Serialize, Deserialize, visit_rs::VisitFields)]
-#[serde(rename_all = "camelCase")]
-pub struct OsInfo {
-    pub version: String,
-    /// Semver range this OS is compatible with (e.g. `^0.1.0`).
-    pub compat: String,
-    pub platform: String,
-}
-rpc_toolkit::reflect_ts!(OsInfo);
-
-#[derive(Clone, Debug, Serialize, Deserialize, visit_rs::VisitFields)]
-#[serde(rename_all = "camelCase")]
-pub struct HardwareInfo {
-    pub arch: String,
-    pub ram: u64,
-}
-rpc_toolkit::reflect_ts!(HardwareInfo);
-
-impl DeviceInfo {
-    /// Load device info from the running system.
-    pub fn load() -> Result<Self, Error> {
-        let version = env!("CARGO_PKG_VERSION").to_string();
-        let compat = compute_compat_range(&version);
-        Ok(Self {
-            os: OsInfo {
-                version,
-                compat,
-                platform: detect_platform(),
-            },
-            hardware: Some(HardwareInfo {
-                arch: detect_arch(),
-                ram: detect_ram(),
-            }),
-        })
-    }
-
-    /// Encode as a URL-query-encoded header value for the registry.
-    /// Matches start-os: only `os.*` fields are sent.
-    pub fn to_header_value(&self) -> Result<HeaderValue, Error> {
-        let mut ser = form_urlencoded::Serializer::new(String::new());
-        ser.append_pair("os.version", &self.os.version);
-        ser.append_pair("os.compat", &self.os.compat);
-        ser.append_pair("os.platform", &self.os.platform);
-        let s = ser.finish();
-        HeaderValue::from_str(&s).map_err(|e| Error::other(format!("invalid header value: {e}")))
-    }
+/// The OpenWrt board name.
+pub fn platform() -> String {
+    std::fs::read_to_string("/tmp/sysinfo/board_name")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "unknown".to_string())
 }
 
 /// Derive a caret-range compatibility string from a version string.
@@ -75,31 +37,14 @@ fn compute_compat_range(version: &str) -> String {
     }
 }
 
-/// Detect the platform from the OpenWrt board name.
-fn detect_platform() -> String {
-    std::fs::read_to_string("/tmp/sysinfo/board_name")
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|_| "unknown".to_string())
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Detect CPU architecture.
-fn detect_arch() -> String {
-    std::env::consts::ARCH.to_string()
-}
-
-/// Detect total RAM in bytes.
-fn detect_ram() -> u64 {
-    if let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") {
-        for line in meminfo.lines() {
-            if let Some(rest) = line.strip_prefix("MemTotal:") {
-                let rest = rest.trim();
-                if let Some(kb_str) = rest.strip_suffix("kB").or_else(|| rest.strip_suffix("KB")) {
-                    if let Ok(kb) = kb_str.trim().parse::<u64>() {
-                        return kb * 1024;
-                    }
-                }
-            }
-        }
+    #[test]
+    fn loads_this_build() {
+        let info = load().unwrap();
+        assert_eq!(info.os.version.to_string(), env!("CARGO_PKG_VERSION"));
+        assert!(info.os.version.satisfies(&info.os.compat));
     }
-    0
 }

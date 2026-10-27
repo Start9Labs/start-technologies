@@ -21,6 +21,7 @@ use crate::middleware::auth::signature;
 use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker, PhasedProgressBar, ProgressUnits};
 use crate::registry::asset::RegistryAsset;
+use crate::registry::client::{Product, RegistryClient};
 use crate::registry::os::index::OsVersionInfo;
 use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::sign::commitment::blake3::Blake3Commitment;
@@ -233,11 +234,13 @@ async fn get_versions(
         .map_err(|_| Error::new(eyre!("cannot extend URL path"), ErrorKind::ParseUrl))?
         .push("rpc")
         .push("v0");
+    let mut headers = HeaderMap::new();
+    RegistryClient::current(Some(Product::StartOs)).insert_into(&mut headers);
     let res = signature::call_remote_with_client(
         None,
         client.clone(),
         registry,
-        HeaderMap::new(),
+        headers,
         "os.version.get",
         json!({
             "sourceVersion": source,

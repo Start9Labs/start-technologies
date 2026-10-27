@@ -1,0 +1,2 @@
+- Routers read every signature format the registry serves, so updates no longer depend on the registry being configured for StartWRT.
+- Settings shows "Couldn't check for updates" when the update check fails, instead of reporting the router up to date.

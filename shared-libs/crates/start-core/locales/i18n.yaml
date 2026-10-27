@@ -2388,7 +2388,29 @@ registry.asset.failed-to-load-http-url:
   fr_FR: "Échec du chargement de toute URL HTTP"
   pl_PL: "Nie udało się załadować żadnego adresu HTTP"
 
+# registry/client.rs
+registry.client.unknown-product:
+  en_US: "Unknown product: %{product}"
+  de_DE: "Unbekanntes Produkt: %{product}"
+  es_ES: "Producto desconocido: %{product}"
+  fr_FR: "Produit inconnu : %{product}"
+  pl_PL: "Nieznany produkt: %{product}"
+
+registry.client.wrong-product:
+  en_US: "This registry serves %{registry}, not %{client}"
+  de_DE: "Dieses Registry stellt %{registry} bereit, nicht %{client}"
+  es_ES: "Este registro sirve %{registry}, no %{client}"
+  fr_FR: "Ce registre sert %{registry}, pas %{client}"
+  pl_PL: "Ten rejestr obsługuje %{registry}, a nie %{client}"
+
 # registry/context.rs
+registry.context.conflicting-product:
+  en_US: "Conflicting configuration: `startwrt` is set but `product` is startos"
+  de_DE: "Widersprüchliche Konfiguration: `startwrt` ist gesetzt, aber `product` ist startos"
+  es_ES: "Configuración contradictoria: `startwrt` está activado pero `product` es startos"
+  fr_FR: "Configuration contradictoire : `startwrt` est défini mais `product` vaut startos"
+  pl_PL: "Sprzeczna konfiguracja: ustawiono `startwrt`, ale `product` to startos"
+
 registry.context.missing-hostname:
   en_US: "Missing required configuration: registry-hostname"
   de_DE: "Fehlende erforderliche Konfiguration: registry-hostname"
@@ -4229,12 +4251,12 @@ help.arg.registry-name:
   fr_FR: "Nom du registre"
   pl_PL: "Nazwa rejestru"
 
-help.arg.registry-startwrt:
-  en_US: "Serve StartWRT clients"
-  de_DE: "StartWRT-Clients bedienen"
-  es_ES: "Atender a clientes de StartWRT"
-  fr_FR: "Servir les clients StartWRT"
-  pl_PL: "Obsługuj klientów StartWRT"
+help.arg.registry-product:
+  en_US: "Operating system whose releases the registry serves"
+  de_DE: "Betriebssystem, dessen Releases das Registry bereitstellt"
+  es_ES: "Sistema operativo cuyas versiones sirve el registro"
+  fr_FR: "Système d'exploitation dont le registre sert les versions"
+  pl_PL: "System operacyjny, którego wydania udostępnia rejestr"
 
 help.arg.registry-url:
   en_US: "URL of the registry"

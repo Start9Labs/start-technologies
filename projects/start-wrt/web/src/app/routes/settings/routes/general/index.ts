@@ -85,6 +85,10 @@ const getTheme = (theme: string): Theme =>
           </div>
         </tui-expand>
       </tui-accordion>
+    } @else if (system.updateCheckFailed()) {
+      <div tuiNotification appearance="warning">
+        {{ "Couldn't check for updates" | i18n }}
+      </div>
     }
     <form
       [formGroup]="form"
