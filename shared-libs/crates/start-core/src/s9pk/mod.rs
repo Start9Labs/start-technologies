@@ -87,16 +87,4 @@ fn validate_signer(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sideload_signer_policy_distinguishes_override_from_empty_trust() {
-        let signer = ed25519_dalek::SigningKey::from_bytes(&[7; 32]).verifying_key();
-        let other = ed25519_dalek::SigningKey::from_bytes(&[8; 32]).verifying_key();
-        assert!(validate_signer(signer, None).is_ok());
-        assert!(validate_signer(signer, Some(&[])).is_err());
-        assert!(validate_signer(signer, Some(&[AnyVerifyingKey::Ed25519(other)])).is_err());
-        assert!(validate_signer(signer, Some(&[AnyVerifyingKey::Ed25519(signer)])).is_ok());
-    }
-}
+mod trust_tests;
