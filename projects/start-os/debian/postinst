@@ -177,6 +177,9 @@ $SYSTEMCTL mask suspend.target
 $SYSTEMCTL mask hibernate.target
 $SYSTEMCTL mask hybrid-sleep.target
 
+$SYSTEMCTL mask rpcbind.service
+$SYSTEMCTL mask rpcbind.socket
+
 if which gsettings > /dev/null; then
 	gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-timeout '0'
 	gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-timeout '0'
@@ -249,6 +252,13 @@ cat > /etc/systemd/system.conf.d/10-startos-watchdog.conf << 'EOF'
 RuntimeWatchdogSec=60s
 EOF
 
+# Start the serial console login prompt only on ports that have a UART.
+mkdir -p /etc/systemd/system/serial-getty@.service.d
+cat > /etc/systemd/system/serial-getty@.service.d/10-startos.conf << 'EOF'
+[Service]
+ExecCondition=/bin/sh -c '[ "$$(cat /sys/class/tty/%I/type 2>/dev/null)" != 0 ]'
+EOF
+
 mkdir -p /etc/nginx/ssl
 
 rm -rf /var/lib/tor/*
@@ -263,6 +273,8 @@ fs.inotify.max_user_watches=1048576
 # Headroom for nested user namespaces (rootless OCI engines inside service LXCs).
 user.max_user_namespaces=28633
 kernel.unprivileged_userns_clone=1
+# Outbound source ports stay below the service ports StartOS allocates.
+net.ipv4.ip_local_port_range=32768 49151
 EOF
 
 # Ensure /dev/fuse and /dev/net/tun are available on the host so service LXCs

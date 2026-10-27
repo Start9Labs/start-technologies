@@ -6,7 +6,7 @@ import { filter } from 'rxjs'
 import { FormComponent } from 'src/app/routes/portal/components/form.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { FormDialogService } from 'src/app/services/form-dialog.service'
-import { GatewayDetails } from 'src/app/services/gateway.service'
+import { GatewayPlus } from 'src/app/services/gateway.service'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
 
 import EditGateway from './edit'
@@ -17,7 +17,7 @@ import { PORT_FORWARDS_MODAL } from './port-forwards.component'
   template: `
     @if (gateway(); as gateway) {
       <td>
-        @switch (gateway.ipInfo?.deviceType) {
+        @switch (gateway.ipInfo.deviceType) {
           @case ('ethernet') {
             <tui-icon icon="@tui.ethernet-port" />
           }
@@ -41,14 +41,10 @@ import { PORT_FORWARDS_MODAL } from './port-forwards.component'
       <td
         class="wan"
         [style.color]="
-          gateway.ipInfo?.wanIp ? undefined : 'var(--tui-text-warning)'
+          gateway.ipInfo.wanIp ? undefined : 'var(--tui-text-warning)'
         "
       >
-        {{
-          gateway.ipInfo
-            ? gateway.ipInfo.wanIp || ('Error' | i18n)
-            : ('Disconnected' | i18n)
-        }}
+        {{ gateway.ipInfo.wanIp || ('Error' | i18n) }}
       </td>
       <td [attr.data-label]="'DNS' | i18n">
         {{ gateway.dns.servers.join(', ') }}
@@ -62,6 +58,7 @@ import { PORT_FORWARDS_MODAL } from './port-forwards.component'
         <button
           tuiIconButton
           tuiDropdown
+          tuiDropdownAlign="end"
           tuiDropdownAuto
           size="s"
           appearance="flat-grayscale"
@@ -72,12 +69,12 @@ import { PORT_FORWARDS_MODAL } from './port-forwards.component'
             <button tuiOption (click)="edit()">
               {{ 'Edit' | i18n }}
             </button>
-            @if (gateway.ipInfo && gateway.type !== 'outbound-only') {
+            @if (gateway.type !== 'outbound-only') {
               <button tuiOption (click)="viewPortForwards()">
                 {{ 'View port forwards' | i18n }}
               </button>
             }
-            @if (gateway.ipInfo?.deviceType === 'wireguard') {
+            @if (gateway.ipInfo.deviceType === 'wireguard') {
               <button tuiOption (click)="updateConfig()">
                 {{ 'Update config' | i18n }}
               </button>
@@ -156,7 +153,7 @@ export class GatewaysItemComponent {
   private readonly formDialog = inject(FormDialogService)
   private readonly i18n = inject(i18nPipe)
 
-  public readonly gateway = input.required<GatewayDetails>()
+  public readonly gateway = input.required<GatewayPlus>()
 
   edit() {
     this.formDialog.open(EditGateway, { size: 'm', data: this.gateway().id })
