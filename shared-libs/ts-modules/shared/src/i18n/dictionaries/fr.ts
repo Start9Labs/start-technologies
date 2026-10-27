@@ -838,4 +838,11 @@ export default {
   953: 'Mise à jour du système bloquée',
   954: 'Cette mise à jour du système ne mentionne aucun signataire de confiance. Son installation depuis l’interface est bloquée. Une mise à jour malveillante pourrait prendre le contrôle total de votre serveur, voler vos clés privées et vos mots de passe ou détruire définitivement vos données.',
   955: 'Utiliser la passerelle du système',
+  956: 'Mise à jour de l’interface',
+  957: 'L’interface mise à jour est prête. Rechargez la page pour l’utiliser.',
+  958: 'Mise à jour de l’interface...',
+  960: 'La mise à jour de l’interface a échoué. Réessayez ou réinitialisez le cache de l’interface.',
+  961: 'Réinitialisation du cache de l’interface...',
+  962: 'Réinitialiser le cache de l’interface',
+  963: 'Réinitialiser l’interface en cache et recharger la page ? Votre connexion et vos paramètres seront conservés.',
 } satisfies i18n

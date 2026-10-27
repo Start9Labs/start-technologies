@@ -22,7 +22,7 @@ import {
   withPreloading,
   withRouterConfig,
 } from '@angular/router'
-import { provideServiceWorker, SwUpdate } from '@angular/service-worker'
+import { provideServiceWorker } from '@angular/service-worker'
 import { WA_WINDOW } from '@ng-web-apis/common'
 import {
   AbstractMarketplaceService,
@@ -76,6 +76,7 @@ import {
 import { PluginsService } from 'src/app/services/plugins.service'
 import { StateService } from 'src/app/services/state.service'
 import { StorageService } from 'src/app/services/storage.service'
+import { UiUpdateService } from 'src/app/services/ui-update.service'
 import {
   DatetimeTransformer,
   DateTransformer,
@@ -104,13 +105,10 @@ export const APP_CONFIG: ApplicationConfig = {
     ),
     provideServiceWorker('ngsw-worker.js', {
       enabled: environment.useServiceWorker,
-      // Register the ServiceWorker as soon as the application is stable
-      // or after 30 seconds (whichever comes first).
       registrationStrategy: 'registerWhenStable:30000',
     }),
     provideAppInitializer(() => {
-      const win = inject(WA_WINDOW)
-      inject(SwUpdate).unrecoverable.subscribe(() => win.location.reload())
+      inject(UiUpdateService)
     }),
     I18N_PROVIDERS,
     FilterPackagesPipe,

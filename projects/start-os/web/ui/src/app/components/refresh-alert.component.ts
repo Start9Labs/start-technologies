@@ -1,79 +1,111 @@
-import { Component, inject } from '@angular/core'
-import { toSignal } from '@angular/core/rxjs-interop'
-import { WA_WINDOW } from '@ng-web-apis/common'
-import { i18nPipe } from '@start9labs/shared'
-import { Version } from '@start9labs/start-core'
-import { TuiResponsiveDialog } from '@taiga-ui/addon-mobile'
-import { TuiButton } from '@taiga-ui/core'
-import { PatchDB } from 'patch-db-client'
-import { distinctUntilChanged, map, merge, Subject } from 'rxjs'
-import { ConfigService } from 'src/app/services/config.service'
-import { DataModel } from 'src/app/services/patch-db/data-model'
+import {
+  Component,
+  computed,
+  inject,
+  linkedSignal,
+  TemplateRef,
+} from '@angular/core'
+import { DialogService, i18nPipe } from '@start9labs/shared'
+import { TuiButton, TuiNotification } from '@taiga-ui/core'
+
+import { UiUpdateService } from 'src/app/services/ui-update.service'
 
 @Component({
   selector: 'refresh-alert',
   template: `
     <ng-template
-      [tuiResponsiveDialog]="show()"
-      [tuiResponsiveDialogOptions]="{
-        label: i18n.transform('Refresh Needed'),
-        size: 's',
+      [tuiNotification]="show()"
+      [tuiNotificationOptions]="{
+        label: i18n.transform('Interface update'),
+        autoClose: 0,
       }"
-      (tuiResponsiveDialogChange)="dismiss$.next()"
+      (tuiNotificationChange)="dismissed.set(!$event)"
     >
-      @if (isPwa) {
-        <p>
-          {{
-            'Your user interface is cached and out of date. Attempt to reload the PWA using the button below. If you continue to see this message, uninstall and reinstall the PWA.'
-              | i18n
-          }}
-        </p>
-      } @else {
-        <p>
-          {{
-            'StartOS has been updated, but this page is still running the previous interface. Refresh the page to get the latest version.'
-              | i18n
-          }}
-        </p>
+      @let state = ui.state();
+      <p role="status" aria-live="polite">
+        @switch (state.status) {
+          @case ('ready') {
+            {{ 'The updated interface is ready. Refresh to use it.' | i18n }}
+          }
+          @case ('updating') {
+            {{ 'Updating interface...' | i18n }}
+          }
+          @case ('error') {
+            {{
+              'The interface update failed. Retry or reset the UI cache.' | i18n
+            }}
+          }
+          @case ('resetting') {
+            {{ 'Resetting UI cache...' | i18n }}
+          }
+          @default {
+            {{ 'Checking for updates' | i18n }}
+          }
+        }
+      </p>
+      @if (state.status === 'ready') {
+        <button tuiButton size="s" (click)="ui.reload()">
+          {{ 'Refresh' | i18n }}
+        </button>
+      } @else if (state.status !== 'resetting') {
+        @if (state.status === 'error') {
+          <button tuiButton size="s" (click)="ui.check()">
+            {{ 'Retry' | i18n }}
+          </button>
+        }
+        <button tuiButton size="s" appearance="flat" (click)="resetCache()">
+          {{ 'Reset UI cache' | i18n }}
+        </button>
+        @if (state.status === 'error' && state.error) {
+          <ng-template #details>
+            <p>{{ state.error }}</p>
+          </ng-template>
+          <button
+            tuiButton
+            size="s"
+            appearance="flat"
+            (click)="openDetails(details)"
+          >
+            {{ 'Details' | i18n }}
+          </button>
+        }
       }
-      <button
-        tuiButton
-        appearance="secondary"
-        style="float: right"
-        [tuiAppearanceFocus]="false"
-        (click)="reload()"
-      >
-        {{ 'Refresh' | i18n }}
-      </button>
     </ng-template>
   `,
-  imports: [TuiResponsiveDialog, TuiButton, i18nPipe],
+  imports: [TuiNotification, TuiButton, i18nPipe],
 })
 export class RefreshAlertComponent {
-  private readonly win = inject(WA_WINDOW)
-  private readonly version = Version.parse(inject(ConfigService).version)
+  private readonly dialogs = inject(DialogService)
 
-  readonly i18n = inject(i18nPipe)
-
-  readonly dismiss$ = new Subject<void>()
-  readonly isPwa = this.win.matchMedia('(display-mode: standalone)').matches
-
-  readonly show = toSignal(
-    merge(
-      this.dismiss$.pipe(map(() => false)),
-      inject<PatchDB<DataModel>>(PatchDB)
-        .watch$('serverInfo', 'version')
-        .pipe(
-          distinctUntilChanged(),
-          map(v => this.version.compare(Version.parse(v)) !== 'equal'),
-        ),
-    ),
-    {
-      initialValue: false,
-    },
+  protected readonly ui = inject(UiUpdateService)
+  protected readonly i18n = inject(i18nPipe)
+  protected readonly dismissed = linkedSignal({
+    source: () => this.ui.state().status,
+    computation: () => false,
+  })
+  protected readonly show = computed(
+    () =>
+      !this.dismissed() &&
+      (this.ui.outdated() || this.ui.state().status !== 'idle'),
   )
 
-  protected reload(): void {
-    this.win.location.reload()
+  protected openDetails(content: TemplateRef<unknown>): void {
+    this.dialogs.openComponent(content, { label: 'Error' }).subscribe()
+  }
+
+  protected resetCache(): void {
+    this.dialogs
+      .openConfirm({
+        label: 'Reset UI cache',
+        data: {
+          content:
+            'Reset the cached interface and reload? Your login and settings will be kept.',
+          yes: 'Reset UI cache',
+          no: 'Cancel',
+        },
+      })
+      .subscribe(confirmed => {
+        if (confirmed) void this.ui.resetCache()
+      })
   }
 }

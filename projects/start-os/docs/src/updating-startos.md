@@ -23,7 +23,7 @@
 
 1. When your server comes back, a notification welcomes you to the new version. Open it from **Notifications** — the bell in the menu — to read that release's notes again at any time.
 
-A browser page left open during the update displays **Refresh Needed** when the server returns. Select **Refresh** to open the updated interface. If an installed StartOS app still shows the previous interface afterwards, remove and reinstall the app.
+A browser page left open during the update shows an **Interface update** notice while the updated interface downloads. You can keep using the page; select **Refresh** when the interface is ready. An installation failure or broken cached interface triggers a recovery reload. If the problem persists, the notice offers **Retry**, **Details**, and **Reset UI cache**. Confirming a cache reset reloads the interface while preserving your login and settings.
 
 ## Trusted update signers
 

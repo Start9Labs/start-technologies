@@ -838,4 +838,11 @@ export default {
   953: 'Betriebssystem-Update gesperrt',
   954: 'Für dieses Betriebssystem-Update ist kein vertrauenswürdiger Unterzeichner aufgeführt. Die Installation über die Benutzeroberfläche ist gesperrt. Ein bösartiges Update könnte die vollständige Kontrolle über Ihren Server übernehmen, private Schlüssel und Passwörter stehlen oder Ihre Daten dauerhaft zerstören.',
   955: 'Systemgateway verwenden',
+  956: 'Aktualisierung der Benutzeroberfläche',
+  957: 'Die aktualisierte Benutzeroberfläche ist bereit. Lade die Seite neu, um sie zu verwenden.',
+  958: 'Benutzeroberfläche wird aktualisiert...',
+  960: 'Die Aktualisierung der Benutzeroberfläche ist fehlgeschlagen. Versuche es erneut oder setze den Cache der Benutzeroberfläche zurück.',
+  961: 'Cache der Benutzeroberfläche wird zurückgesetzt...',
+  962: 'Cache der Benutzeroberfläche zurücksetzen',
+  963: 'Die zwischengespeicherte Benutzeroberfläche zurücksetzen und die Seite neu laden? Deine Anmeldung und Einstellungen bleiben erhalten.',
 } satisfies i18n

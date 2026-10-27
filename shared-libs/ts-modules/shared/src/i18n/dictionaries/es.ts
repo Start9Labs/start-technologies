@@ -838,4 +838,11 @@ export default {
   953: 'Actualización del sistema operativo bloqueada',
   954: 'Esta actualización del sistema operativo no incluye ningún firmante de confianza. Su instalación desde la interfaz está bloqueada. Una actualización maliciosa podría tomar el control total de tu servidor, robar claves privadas y contraseñas o destruir tus datos permanentemente.',
   955: 'Usar la puerta de enlace del sistema',
+  956: 'Actualización de la interfaz',
+  957: 'La interfaz actualizada está lista. Recarga la página para usarla.',
+  958: 'Actualizando la interfaz...',
+  960: 'La actualización de la interfaz ha fallado. Reinténtalo o restablece la caché de la interfaz.',
+  961: 'Restableciendo la caché de la interfaz...',
+  962: 'Restablecer la caché de la interfaz',
+  963: '¿Restablecer la interfaz almacenada en caché y recargar la página? Se conservarán tu sesión y tus ajustes.',
 } satisfies i18n

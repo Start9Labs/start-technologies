@@ -1,1 +1,1 @@
-- Fixed the Refresh button hanging indefinitely after a StartOS update.
+- Fixed interface updates getting stuck after a StartOS update. Update status stays visible without blocking the page, with automatic recovery reloads and retry or cache-reset actions for persistent failures.

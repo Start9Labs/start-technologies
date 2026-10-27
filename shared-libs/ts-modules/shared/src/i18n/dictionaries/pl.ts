@@ -838,4 +838,11 @@ export default {
   953: 'Aktualizacja systemu zablokowana',
   954: 'Ta aktualizacja systemu nie wymienia żadnego zaufanego sygnatariusza. Instalacja z poziomu interfejsu jest zablokowana. Złośliwa aktualizacja mogłaby przejąć pełną kontrolę nad Twoim serwerem, wykraść klucze prywatne i hasła lub trwale zniszczyć Twoje dane.',
   955: 'Użyj bramy systemowej',
+  956: 'Aktualizacja interfejsu',
+  957: 'Zaktualizowany interfejs jest gotowy. Odśwież stronę, aby go użyć.',
+  958: 'Aktualizowanie interfejsu...',
+  960: 'Aktualizacja interfejsu nie powiodła się. Spróbuj ponownie lub zresetuj pamięć podręczną interfejsu.',
+  961: 'Resetowanie pamięci podręcznej interfejsu...',
+  962: 'Zresetuj pamięć podręczną interfejsu',
+  963: 'Zresetować interfejs w pamięci podręcznej i odświeżyć stronę? Dane logowania i ustawienia zostaną zachowane.',
 } satisfies i18n
