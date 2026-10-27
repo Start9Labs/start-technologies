@@ -277,7 +277,7 @@ test('source links survive fragment consumption', t => {
   excludes(output, '/tree/')
 })
 
-test('GitHub and registry share composition with an expandable changelog', t => {
+test('GitHub body carries the notes and changelog without the link', t => {
   const { root, write, script, git, commit } = releaseFixture(t)
   git('init', '-q')
   git('remote', 'add', 'origin', root)
@@ -289,7 +289,9 @@ test('GitHub and registry share composition with an expandable changelog', t => 
   commit()
   const notes = script().stdout
   const body = script('body').stdout
-  contains(body, '\n' + notes + '\n')
+  contains(notes, '**[Full changelog')
+  excludes(body, '**[Full changelog')
+  contains(body, `\n${PRE_UPDATE}\n\n${MAIN}\n<details>`)
   contains(body, '<details>\n<summary>Full changelog</summary>\n\n## [1.2.3]')
   contains(body, '- Fixed feature.\n\n</details>')
   excludes(body, '<details open')
@@ -460,7 +462,7 @@ if (args.includes('--draft=false') && process.env.FAIL_PUBLISH) process.exit(1)
   assert.ok(recorded[1].includes('--verify-tag'))
   assert.ok(recorded[3].includes('--draft=false'))
   const body = text(bodyFile)
-  contains(body, '/releases/tag/start-sdk/v1.2.3')
+  excludes(body, '**[Full changelog')
   contains(body, '<details>\n<summary>Full changelog</summary>\n\n## [1.2.3]')
   contains(body, 'Fixed the released feature.\n\n</details>')
   excludes(body, 'Old change.')
