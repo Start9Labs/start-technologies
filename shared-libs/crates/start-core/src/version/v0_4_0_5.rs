@@ -20,7 +20,7 @@ impl VersionT for Version {
     type Previous = v0_4_0_4::Version;
     type PreUpRes = ();
 
-    async fn pre_up(self) -> Result<(), Error> {
+    async fn pre_up(self) -> Result<Self::PreUpRes, Error> {
         Ok(())
     }
     fn semver(self) -> exver::Version {
@@ -28,6 +28,9 @@ impl VersionT for Version {
     }
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
+    }
+    fn migration_revision(self) -> usize {
+        1
     }
     fn up(self, db: &mut Value, _: ()) -> Result<Value, Error> {
         if let Some(keys) = field(db, &["private", "sessionPubkeys"]) {
@@ -123,6 +126,45 @@ mod tests {
 
     use super::*;
     use crate::auth::Session;
+
+    #[tokio::test]
+    async fn revision_zero_servers_convert_existing_signer_indexes() {
+        use patch_db::json_ptr::ROOT;
+        let key = AnyVerifyingKey::Ed25519(
+            ed25519_dalek::SigningKey::from_bytes(&[43; 32]).verifying_key(),
+        );
+        let account =
+            crate::account::AccountInfo::new("password", std::time::SystemTime::now(), None)
+                .unwrap();
+        let mut fixture =
+            to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
+                .unwrap();
+        fixture["public"]["serverInfo"]["latestMigrationRevision"] = json!(0);
+        fixture["public"]["serverInfo"]["trustedOsUpdateSigners"] =
+            json!({ key.to_string(): { "label": "retained signer" } });
+        fixture["private"]["sessionPubkeys"] = json!({ key.to_string(): Session::default() });
+        let db = PatchDb::in_memory();
+        db.put(&ROOT, &fixture).await.unwrap();
+        Version.pre_init(&db).await.unwrap();
+        let migrated = db.dump(&ROOT).await.value;
+        assert_eq!(
+            migrated["public"]["serverInfo"]["latestMigrationRevision"],
+            json!(1)
+        );
+        let canonical = key.interned_der64();
+        assert!(
+            migrated["private"]["sessionPubkeys"]
+                .as_object()
+                .unwrap()
+                .contains_key(&canonical)
+        );
+        assert_eq!(
+            migrated["public"]["serverInfo"]["trustedOsUpdateSigners"][&*canonical]["label"],
+            json!("retained signer")
+        );
+        Version.pre_init(&db).await.unwrap();
+        assert_eq!(db.dump(&ROOT).await.value, migrated);
+    }
 
     #[test]
     fn downgrade_restores_tls_and_acme_private_keys() {
