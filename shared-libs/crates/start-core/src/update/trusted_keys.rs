@@ -26,6 +26,12 @@ pub struct TrustedKey {
     pub os: bool,
 }
 
+impl TrustedKey {
+    fn trusts_os_key(&self, key: &AnyVerifyingKey) -> bool {
+        self.os && self.public_keys.contains(key)
+    }
+}
+
 rpc_toolkit::reflect_ts!(TrustedKey);
 rpc_toolkit::ts_export!(TrustedKey, namespaces = [""]);
 
@@ -113,7 +119,7 @@ pub fn os_signers(keys: &TrustedKeys) -> TrustedOsUpdateSigners {
         .collect()
 }
 
-pub fn migrate_signers(legacy: TrustedOsUpdateSigners) -> TrustedKeys {
+pub fn migrate_signers(legacy: TrustedOsUpdateSigners) -> Result<TrustedKeys, Error> {
     let mut keys = initial_trusted_keys();
     let start9 = keys.get_mut(START9).unwrap();
     start9.os = start9
@@ -126,7 +132,7 @@ pub fn migrate_signers(legacy: TrustedOsUpdateSigners) -> TrustedKeys {
         Vec::new()
     };
     for (key, signer) in legacy {
-        let public_key: AnyVerifyingKey = key.parse().unwrap();
+        let public_key: AnyVerifyingKey = key.parse()?;
         if !grouped.contains(&public_key) {
             keys.insert(
                 key,
@@ -140,7 +146,7 @@ pub fn migrate_signers(legacy: TrustedOsUpdateSigners) -> TrustedKeys {
             );
         }
     }
-    keys
+    Ok(keys)
 }
 
 pub fn api<C: Context>() -> ParentHandler<C> {
@@ -306,11 +312,24 @@ pub fn legacy_add(
     key: AnyVerifyingKey,
     label: String,
 ) -> Result<(), Error> {
-    if keys.values().any(|group| group.public_keys.contains(&key)) {
-        return Err(Error::new(
-            eyre!("{}", t!("update.signers.already-exists")),
-            ErrorKind::InvalidRequest,
-        ));
+    let mut disabled = None;
+    for group in keys
+        .values_mut()
+        .filter(|group| group.public_keys.contains(&key))
+    {
+        if group.os {
+            return Err(Error::new(
+                eyre!("{}", t!("update.signers.already-exists")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        if disabled.is_none() {
+            disabled = Some(group);
+        }
+    }
+    if let Some(group) = disabled {
+        group.os = true;
+        return Ok(());
     }
     add_group(
         keys,
@@ -328,29 +347,33 @@ pub fn legacy_update(
     key: &AnyVerifyingKey,
     label: String,
 ) -> Result<(), Error> {
-    let group = keys
+    let mut groups = keys
         .values_mut()
-        .find(|group| group.os && group.public_keys.contains(key))
-        .ok_or_else(not_found)?;
-    group.name = group_name(label)?;
+        .filter(|group| group.trusts_os_key(key))
+        .peekable();
+    groups.peek().ok_or_else(not_found)?;
+    let label = group_name(label)?;
+    for group in groups {
+        group.name = label.clone();
+    }
     Ok(())
 }
 
 pub fn legacy_remove(keys: &mut TrustedKeys, key: &AnyVerifyingKey) -> Result<(), Error> {
-    let id = keys
-        .iter()
-        .find(|(_, group)| group.os && group.public_keys.contains(key))
-        .map(|(id, _)| id.clone())
-        .ok_or_else(not_found)?;
-    if !keys[&id].removable {
-        return remove_group(keys, &id);
-    }
-    let group = keys.get_mut(&id).unwrap();
-    group.public_keys.retain(|k| k != key);
-    if group.public_keys.is_empty() {
-        remove_group(keys, &id)?;
-    }
-    Ok(())
+    let mut found = false;
+    keys.retain(|_, group| {
+        if !group.trusts_os_key(key) {
+            return true;
+        }
+        found = true;
+        if !group.removable {
+            group.os = false;
+            return true;
+        }
+        group.public_keys.retain(|candidate| candidate != key);
+        !group.public_keys.is_empty()
+    });
+    found.then_some(()).ok_or_else(not_found)
 }
 
 #[cfg(test)]
@@ -452,9 +475,84 @@ mod tests {
     }
 
     #[test]
+    fn legacy_commands_disable_and_reenable_protected_os_trust() {
+        let mut keys = initial_trusted_keys();
+        let start9 = keys[START9].clone();
+        let key = start9.public_keys[0].clone();
+        legacy_remove(&mut keys, &key).unwrap();
+        assert!(!keys[START9].os);
+        assert!(keys[START9].marketplace);
+        assert_eq!(keys[START9].public_keys, start9.public_keys);
+        assert!(!keys[START9].removable);
+        legacy_add(&mut keys, key.clone(), "ignored label".into()).unwrap();
+        assert_eq!(keys[START9], start9);
+        assert_eq!(keys.len(), 2);
+        assert!(legacy_add(&mut keys, key, "duplicate".into()).is_err());
+    }
+
+    #[test]
+    fn legacy_add_enables_existing_os_disabled_entry_without_changing_marketplace_trust() {
+        let mut keys = initial_trusted_keys();
+        let alpha = keys["start9-alpha"].clone();
+        let key = alpha.public_keys[0].clone();
+        legacy_add(&mut keys, key.clone(), "ignored label".into()).unwrap();
+        assert!(keys["start9-alpha"].os);
+        assert!(!keys["start9-alpha"].marketplace);
+        assert_eq!(keys["start9-alpha"].name, alpha.name);
+        assert_eq!(keys.len(), 2);
+        legacy_remove(&mut keys, &key).unwrap();
+        assert!(!keys.contains_key("start9-alpha"));
+    }
+
+    #[test]
+    fn legacy_add_does_not_mutate_an_overlapping_disabled_entry_when_key_is_already_os_trusted() {
+        let mut keys = initial_trusted_keys();
+        let key = keys["start9-alpha"].public_keys[0].clone();
+        add_group(
+            &mut keys,
+            "zz-overlap".into(),
+            AddTrustedKeyParams {
+                name: "Overlapping publisher".into(),
+                public_keys: vec![key.clone()],
+                context: TrustContext::Os,
+            },
+        )
+        .unwrap();
+        let saved = keys.clone();
+        assert!(legacy_add(&mut keys, key, "duplicate".into()).is_err());
+        assert_eq!(keys, saved);
+    }
+
+    #[test]
+    fn legacy_key_commands_update_every_os_enabled_entry_containing_the_key() {
+        let mut keys = initial_trusted_keys();
+        let key = keys[START9].public_keys[0].clone();
+        add_group(
+            &mut keys,
+            "overlap".into(),
+            AddTrustedKeyParams {
+                name: "Overlapping publisher".into(),
+                public_keys: vec![key.clone()],
+                context: TrustContext::Os,
+            },
+        )
+        .unwrap();
+        legacy_update(&mut keys, &key, "renamed".into()).unwrap();
+        assert_eq!(keys[START9].name, "renamed");
+        assert_eq!(keys["overlap"].name, "renamed");
+        legacy_remove(&mut keys, &key).unwrap();
+        assert!(!keys[START9].os);
+        assert!(keys[START9].marketplace);
+        assert!(keys[START9].public_keys.contains(&key));
+        assert!(!keys.contains_key("overlap"));
+        assert!(!os_signers(&keys).contains_key(&key.interned_pem()));
+        assert!(legacy_remove(&mut keys, &key).is_err());
+    }
+
+    #[test]
     fn migration_preserves_custom_and_removed_os_trust() {
         let legacy = initial_signers();
-        let keys = migrate_signers(legacy.clone());
+        let keys = migrate_signers(legacy.clone()).unwrap();
         assert_eq!(keys.len(), 2);
         assert_eq!(
             os_signers(&keys).into_keys().collect::<Vec<_>>(),
@@ -462,10 +560,10 @@ mod tests {
         );
         let mut legacy = initial_signers();
         let removed = legacy.pop_first().unwrap().0;
-        let keys = migrate_signers(legacy.clone());
+        let keys = migrate_signers(legacy.clone()).unwrap();
         assert!(!keys[START9].os);
         assert!(!os_signers(&keys).contains_key(&removed));
         assert_eq!(os_signers(&keys), legacy);
-        assert!(os_signers(&migrate_signers(TrustedOsUpdateSigners::new())).is_empty());
+        assert!(os_signers(&migrate_signers(TrustedOsUpdateSigners::new()).unwrap()).is_empty());
     }
 }

@@ -410,6 +410,7 @@ export type HostnameMetadata = z.output<typeof schemas.HostnameMetadata>
 export type HostnameMetadataInput = z.input<typeof schemas.HostnameMetadata>
 export type InfoParamsInput = z.input<typeof schemas.InfoParams>
 export type InitAcmeParamsInput = z.input<typeof schemas.InitAcmeParams>
+export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type InstalledVersionParamsInput = z.input<
   typeof schemas.InstalledVersionParams
 >
@@ -543,7 +544,6 @@ export type HardwareInfo = z.output<typeof schemas.HardwareInfo>
 export type HostAddress = z.output<typeof schemas.HostAddress>
 export type HostnameInfo = z.output<typeof schemas.HostnameInfo>
 export type HostnameInfoInput = z.input<typeof schemas.HostnameInfo>
-export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type Metrics = z.output<typeof schemas.Metrics>
 export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
 export type NotificationWithId = z.output<typeof schemas.NotificationWithId>

@@ -2145,6 +2145,28 @@ export const InitAcmeParams: z.ZodObject<{
 }).meta({
   id: 'InitAcmeParams',
 })
+export const InstallParams: z.ZodObject<{
+  registry: z.ZodString
+  id: typeof PackageId
+  version: typeof Version
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  registry: z.string(),
+  id: PackageId,
+  version: Version,
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
+}).meta({
+  id: 'InstallParams',
+})
 export const InstalledVersionParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'InstalledVersionParams',
@@ -3241,45 +3263,6 @@ export const HostnameInfo: z.ZodObject<{
   metadata: HostnameMetadata,
 }).meta({
   id: 'HostnameInfo',
-})
-export const InstallParams: z.ZodObject<{
-  registry: z.ZodString
-  id: typeof PackageId
-  version: typeof Version
-  /**
-   * Additional signer requirements checked before starting installation.
-   */
-  acceptSigners: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
-    z.ZodNullable<typeof AcceptSigners>
-  >
-  /**
-   * Accepts an untrusted signer without skipping signature or integrity verification.
-   */
-  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-}> = /* @__PURE__ */ object({
-  registry: z.string(),
-  id: PackageId,
-  version: Version,
-  /**
-   * Additional signer requirements checked before starting installation.
-   */
-  acceptSigners: wire(
-    AcceptSigners.nullable().optional(),
-    AcceptSigners.nullable(),
-  ).meta({
-    description:
-      'Additional signer requirements checked before starting installation.',
-  }),
-  /**
-   * Accepts an untrusted signer without skipping signature or integrity verification.
-   */
-  trust: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Accepts an untrusted signer without skipping signature or integrity verification.',
-  }),
-}).meta({
-  id: 'InstallParams',
 })
 export const Metrics: z.ZodObject<{
   general: typeof MetricsGeneral

@@ -29,14 +29,14 @@ impl VersionT for Version {
             .or_not_found("serverInfo")?;
         if !server.contains_key("trustedKeys") {
             let legacy = server
-                .remove("trustedOsUpdateSigners")
+                .get("trustedOsUpdateSigners")
+                .cloned()
                 .map(from_value)
                 .transpose()?
                 .unwrap_or_default();
-            server.insert("trustedKeys".into(), to_value(&migrate_signers(legacy))?);
-        } else {
-            server.remove("trustedOsUpdateSigners");
+            server.insert("trustedKeys".into(), to_value(&migrate_signers(legacy)?)?);
         }
+        server.remove("trustedOsUpdateSigners");
         Ok(Value::Null)
     }
     fn down(self, db: &mut Value) -> Result<(), Error> {
@@ -59,6 +59,14 @@ impl VersionT for Version {
 mod tests {
     use super::*;
     use crate::update::signers::initial_signers;
+
+    #[test]
+    fn malformed_legacy_keys_fail_without_changing_saved_trust() {
+        let mut db = imbl_value::json!({"public": {"serverInfo": {"trustedOsUpdateSigners": {"not a public key": {"label": "custom"}}}}});
+        let saved = db.clone();
+        assert!(Version.up(&mut db, ()).is_err());
+        assert_eq!(db, saved);
+    }
 
     #[test]
     fn migration_is_idempotent_and_downgrade_preserves_os_policy() {

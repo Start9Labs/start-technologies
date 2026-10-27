@@ -8,8 +8,6 @@ import {
   StoreIdentity,
   packageResponse,
   packagesResponse,
-  matchingTrustedKeys,
-  packageSigners,
 } from '@start9labs/marketplace'
 import {
   defaultRegistries,
@@ -290,29 +288,13 @@ export class MarketplaceService extends AbstractMarketplaceService {
   }
 
   async installPackage(
-    pkg: Pick<MarketplacePkg, 'id' | 'version' | 's9pks' | 'signers'>,
+    pkg: Pick<MarketplacePkg, 'id' | 'version'>,
     url: string,
   ): Promise<void> {
-    const groups = await firstValueFrom(
-      this.patch.watch$('serverInfo', 'trustedKeys'),
-    )
-    const keys = matchingTrustedKeys(
-      packageSigners(pkg),
-      groups,
-      'marketplace',
-    ).flatMap(group => group.publicKeys)
-    if (!keys.length) {
-      throw new Error(
-        this.i18n.transform(
-          "this service package isn't signed by anyone you trust",
-        ),
-      )
-    }
     await this.api.rpc.package.install({
       id: pkg.id,
       version: pkg.version,
       registry: url,
-      acceptSigners: { any: keys.map(signer => ({ signer })) },
     })
   }
 

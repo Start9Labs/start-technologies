@@ -25,7 +25,6 @@ use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker, PhasedProgressBar};
 use crate::registry::context::{RegistryContext, RegistryUrlParams};
 use crate::registry::package::get::GetPackageResponse;
-use crate::registry::signer::AcceptSigners;
 use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::s9pk::manifest::PackageId;
 use crate::s9pk::v2::SIG_CONTEXT;
@@ -121,8 +120,6 @@ pub struct InstallParams {
     registry: Url,
     id: PackageId,
     version: VersionString,
-    /// Additional signer requirements checked before starting installation.
-    pub accept_signers: Option<AcceptSigners>,
     /// Accepts an untrusted signer without skipping signature or integrity verification.
     #[serde(default)]
     pub trust: bool,
@@ -138,7 +135,6 @@ pub async fn install(
         registry,
         id,
         version,
-        accept_signers,
         trust,
     }: InstallParams,
 ) -> Result<(), Error> {
@@ -175,9 +171,6 @@ pub async fn install(
         trusted_keys::required(&ctx, TrustContext::Marketplace, trust).await?,
     );
     asset.validate_all(SIG_CONTEXT, policy)?;
-    if let Some(policy) = accept_signers {
-        asset.validate(SIG_CONTEXT, policy)?;
-    }
 
     let progress_tracker = FullProgressTracker::new();
     let download_progress = progress_tracker.add_phase("Downloading".into(), Some(100));
@@ -601,7 +594,6 @@ pub async fn cli_install(
                     id,
                     registry,
                     version,
-                    accept_signers: None,
                     trust,
                 })?,
             )

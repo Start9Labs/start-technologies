@@ -57,6 +57,30 @@ fn package_commitment_requires_an_enabled_marketplace_signer() {
 }
 
 #[test]
+fn production_package_requires_explicit_alpha_opt_in() {
+    let asset: RegistryAsset<MerkleArchiveCommitment> =
+        serde_json::from_str(include_str!("fixtures/production-bitcoind-31.1-26.json")).unwrap();
+    asset.validate_all(SIG_CONTEXT, None).unwrap();
+    let mut keys = trusted_keys::initial_trusted_keys();
+    assert!(
+        asset
+            .validate_all(
+                SIG_CONTEXT,
+                trusted_keys::signer_policy(Some(enabled_keys(&keys, TrustContext::Marketplace)))
+            )
+            .is_err()
+    );
+    keys.get_mut("start9-alpha").unwrap().marketplace = true;
+    asset
+        .validate_all(
+            SIG_CONTEXT,
+            trusted_keys::signer_policy(Some(enabled_keys(&keys, TrustContext::Marketplace))),
+        )
+        .unwrap();
+    assert!(!keys["start9-alpha"].os);
+}
+
+#[test]
 fn cli_override_is_explicit_for_registry_and_sideload() {
     for (arguments, expected) in [
         (vec!["install", "hello-world"], false),

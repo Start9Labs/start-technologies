@@ -726,6 +726,8 @@ export type InfoParams = z.output<typeof schemas.InfoParams>
 export type InfoParamsInput = z.input<typeof schemas.InfoParams>
 export type InitAcmeParams = z.output<typeof schemas.InitAcmeParams>
 export type InitAcmeParamsInput = z.input<typeof schemas.InitAcmeParams>
+export type InstallParams = z.output<typeof schemas.InstallParams>
+export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type InstalledVersionParams = z.output<
   typeof schemas.InstalledVersionParams
 >
@@ -1074,8 +1076,6 @@ export type ImageConfigRepr = z.output<typeof schemas.ImageConfigRepr>
 export type ImageConfigReprInput = z.input<typeof schemas.ImageConfigRepr>
 export type InitProgressRes = z.output<typeof schemas.InitProgressRes>
 export type InitProgressResInput = z.input<typeof schemas.InitProgressRes>
-export type InstallParams = z.output<typeof schemas.InstallParams>
-export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type MetadataSrc = z.output<typeof schemas.MetadataSrc>
 export type MetadataSrcInput = z.input<typeof schemas.MetadataSrc>
 export type Metrics = z.output<typeof schemas.Metrics>

@@ -21,6 +21,9 @@ Confirm public keys through a source you already trust. A name is only a label; 
 
 Package details show a **Signed by** row listing enabled Marketplace entries whose keys sign the selected package. Marketplace installation is blocked when none match. [Sideloading](sideloading.md) allows an untrusted package after an explicit risk confirmation. OS updates from the UI require a signature from an enabled OS-update entry.
 
+> [!IMPORTANT]
+> Packages signed only by Start9 Alpha or other untrusted keys are blocked under the defaults. Production Marketplace packages must be re-signed with an enabled Start9 key before rollout.
+
 CLI package installs and OS updates also require trusted signers by default. To deliberately accept an untrusted signer, use `--trust`:
 
 ```sh
@@ -48,4 +51,4 @@ start-cli server update-signers update "$(cat signer.pem)" --label "Renamed sign
 start-cli server update-signers remove "$(cat signer.pem)"
 ```
 
-`add` creates a single-key entry enabled in both lists. `update` renames the entry containing that key, including any other keys in the same entry. `remove` removes the key from its entry, deleting the entry when its last key is removed; it cannot remove keys from the protected Start9 entry. Use the management dialog to change either trust switch.
+`add` creates a single-key entry enabled in both lists. If the key already belongs to an OS-disabled entry, it enables that entry for OS updates without changing its name or Marketplace switch; adding an already OS-trusted key is an error. `update` renames every OS-enabled entry containing that key, including any other keys in those entries. `remove` removes the key from every removable OS-enabled entry containing it, deleting entries whose last key is removed. For protected Start9, `remove` disables the entire entry for OS updates without changing its keys or Marketplace switch; `add` re-enables it. Use the management dialog to change either trust switch.

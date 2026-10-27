@@ -904,11 +904,9 @@ test('the upload RPC receives the confirmed override and failed setup does not n
   assert.equal(navigated, false)
 })
 
-test('marketplace dispatch rereads live trust and pins the actual trusted signer', async t => {
-  const f = fixture(t, '0.4.0.2')
+test('marketplace dispatch delegates trust enforcement to the server without an override', async () => {
   const submissions = []
   const instance = {
-    patch: f.patch,
     api: {
       rpc: {
         package: {
@@ -918,28 +916,15 @@ test('marketplace dispatch rereads live trust and pins the actual trusted signer
         },
       },
     },
-    i18n: { transform: key => key },
   }
   await MarketplaceService.prototype.installPackage.call(
     instance,
     pkg,
     'https://registry.test',
   )
-  assert.deepEqual(submissions[0].acceptSigners, {
-    any: [{ signer: OS_UPDATE_SIGNERS[0] }],
-  })
-  assert.notEqual(submissions[0].trust, true)
-  f.trust({})
-  await assert.rejects(
-    () =>
-      MarketplaceService.prototype.installPackage.call(
-        instance,
-        pkg,
-        'https://registry.test',
-      ),
-    /isn't signed by anyone you trust/,
-  )
-  assert.equal(submissions.length, 1)
+  assert.deepEqual(submissions, [
+    { id: pkg.id, version: pkg.version, registry: 'https://registry.test' },
+  ])
 })
 
 const { TrustedKeysDialog } =
