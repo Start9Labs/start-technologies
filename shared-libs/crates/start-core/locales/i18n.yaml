@@ -7286,6 +7286,13 @@ update.signers.not-found:
   fr_FR: "Signataire de confiance des mises à jour du système introuvable"
   pl_PL: "Nie znaleziono zaufanego sygnatariusza aktualizacji systemu"
 
+version.http-auth-downgrade-requires-tls:
+  en_US: "Cannot downgrade: an HTTP authentication policy has no TLS wrapper. Add TLS to this binding before downgrading."
+  de_DE: "Downgrade nicht möglich: Eine HTTP-Authentifizierungsrichtlinie hat keine TLS-Ummantelung. Aktivieren Sie vor dem Downgrade TLS für diese Bindung."
+  es_ES: "No se puede volver a una versión anterior: una política de autenticación HTTP no tiene una envoltura TLS. Añada TLS a este enlace antes de continuar."
+  fr_FR: "Rétrogradation impossible : une politique d'authentification HTTP ne dispose pas d'enveloppe TLS. Ajoutez TLS à cette liaison avant de rétrograder."
+  pl_PL: "Nie można obniżyć wersji: zasada uwierzytelniania HTTP nie ma osłony TLS. Dodaj TLS do tego powiązania przed obniżeniem wersji."
+
 # volume.rs
 volume.restore-conflict:
   en_US: "Cannot roll back %{id}: both the backup and the live data contain files, so it is not clear which is current. Resolve this manually before retrying."

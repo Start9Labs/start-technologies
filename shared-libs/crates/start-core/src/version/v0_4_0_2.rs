@@ -68,7 +68,7 @@ impl VersionT for Version {
     }
 }
 
-fn for_each_host(db: &mut Value, mut visit: impl FnMut(&mut Value)) {
+pub(super) fn for_each_host(db: &mut Value, mut visit: impl FnMut(&mut Value)) {
     if let Some(host) = db
         .get_mut("public")
         .and_then(|p| p.get_mut("serverInfo"))
