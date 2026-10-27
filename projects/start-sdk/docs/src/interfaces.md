@@ -227,6 +227,8 @@ The handler then re-runs when the new value lands, updating the interface in pla
 
 HTTP proxying and TLS termination are separate: `proxy` describes HTTP handling, while `addSsl` adds a TLS wrapper to any TCP protocol. HTTP-family bindings remain HTTP-aware even with `proxy: { addXForwardedHeaders: false, auth: null }`. For `http`/`ws`, setting `addSsl: null` retains plaintext HTTP proxying without adding a TLS leg. HTTP proxying for `https`/`wss` requires TLS termination through `addSsl`.
 
+Both HTTP legs connect to the container from StartOS, rather than preserving the client's TCP source address. With forwarded-header generation enabled, applications identify the client through `X-Forwarded-For`.
+
 The HTTP proxy strips client-supplied `X-Forwarded-*` values even when header generation is disabled. TLS legs generate `X-Forwarded-Proto: https`; plaintext legs strip that header and generate no replacement. Treat a missing header as plaintext rather than trusting a client-provided scheme.
 
 An `addSsl` binding on any port can carry a Let's Encrypt certificate — issuance is per name, not per port. The user's side of that is one extra requirement: Let's Encrypt validates on port `443` whatever port you bind, so StartOS asks their gateway to route `443` for the domain as well. On a gateway that cannot do it automatically they forward `443` by hand. Worth a line in your instructions for an interface on a non-standard port that users will reach from software validating against public roots — an Electrum client, say.

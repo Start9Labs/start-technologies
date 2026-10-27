@@ -3,7 +3,7 @@ use http::{HeaderMap, Request, Response, StatusCode};
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
@@ -31,7 +31,7 @@ async fn backend() -> (
                     local_addr: stream.local_addr().unwrap(),
                 });
                 let origin = RequestOrigin::from_extensions(&extensions);
-                hyper::server::conn::http1::Builder::new()
+                hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
                     .serve_connection(
                         TokioIo::new(stream),
                         service_fn(move |req: Request<Incoming>| {
@@ -172,6 +172,76 @@ async fn plaintext_listener_enforces_auth_and_preserves_origin_in_both_families(
                 assert!(!origin.public);
                 let response = client.send_request(request(None)).await.unwrap();
                 assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+                assert!(requests.try_recv().is_err());
+            }
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn prior_knowledge_h2c_enforces_policy_on_each_stream_in_both_families() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        for ip in ["127.0.0.1", "::1"] {
+            for headers in [false, true] {
+                let (upstream, mut requests, _backend) = backend().await;
+                let (addr, _proxy) = proxy(
+                    ip.parse().unwrap(),
+                    upstream,
+                    ProxyOptions::Http {
+                        add_x_forwarded_headers: headers,
+                        auth: Some(ProxyAuth::Basic {
+                            credentials: vec![crate::net::host::binding::BasicCredential {
+                                username: "user".into(),
+                                password: "secret".into(),
+                            }],
+                            realm: None,
+                        }),
+                    },
+                    4,
+                )
+                .await;
+                let stream = TcpStream::connect(addr).await.unwrap();
+                let (mut client, connection) = hyper::client::conn::http2::handshake(
+                    TokioExecutor::new(),
+                    TokioIo::new(stream),
+                )
+                .await
+                .unwrap();
+                let _connection: NonDetachingJoinHandle<()> = tokio::spawn(async {
+                    connection.await.ok();
+                })
+                .into();
+                let h2_request = |auth| {
+                    let mut request = request(auth);
+                    *request.uri_mut() = "http://service.test/".parse().unwrap();
+                    request
+                };
+                for auth in [None, Some("Basic invalid")] {
+                    let response = client.send_request(h2_request(auth)).await.unwrap();
+                    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+                    response.into_body().collect().await.unwrap();
+                    assert!(requests.try_recv().is_err());
+                }
+                let response = client
+                    .send_request(h2_request(Some("Basic dXNlcjpzZWNyZXQ=")))
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+                response.into_body().collect().await.unwrap();
+                let (received, origin) = requests.recv().await.unwrap();
+                assert_eq!(
+                    received.get("X-Forwarded-For").map(|v| v.to_str().unwrap()),
+                    headers.then_some(ip)
+                );
+                assert_eq!(received.get("X-Forwarded-User").unwrap(), "user");
+                assert!(!received.contains_key("X-Forwarded-Proto"));
+                assert!(!received.contains_key("X-Forwarded-Host"));
+                assert_eq!(origin.peer_ip, Some(addr.ip()));
+                let response = client.send_request(h2_request(None)).await.unwrap();
+                assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+                response.into_body().collect().await.unwrap();
                 assert!(requests.try_recv().is_err());
             }
         }

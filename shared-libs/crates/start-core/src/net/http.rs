@@ -15,12 +15,13 @@ use hyper::body::{Body as HyperBody, Incoming};
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
+use tokio::io::AsyncReadExt;
 use tokio::sync::{Mutex, Notify, oneshot};
 use tokio_util::io::InspectReader;
 
 use crate::net::host::binding::ProxyAuth;
 use crate::prelude::*;
-use crate::util::io::{IOHook, ReadWriter};
+use crate::util::io::{BackTrackingIO, IOHook, ReadWriter};
 use crate::util::serde::MaybeUtf8String;
 
 /// Body type returned by the proxy service: either an upstream response body
@@ -314,6 +315,41 @@ pub async fn handle_http_on_https(stream: impl ReadWriter + Unpin + 'static) -> 
         .map_err(|e| Error::new(color_eyre::eyre::Report::msg(e), ErrorKind::Network))
 }
 
+const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+const HTTP_HEADER_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Proxies HTTP/1 or prior-knowledge HTTP/2 using the client's framing.
+pub async fn run_plain_http_proxy<F, T>(
+    from: F,
+    to: T,
+    src_ip: Option<IpAddr>,
+    forwarded_headers: ForwardedHeaders,
+    gate: Option<AuthGate>,
+) -> Result<(), Error>
+where
+    F: ReadWriter + Unpin + Send + 'static,
+    T: ReadWriter + Unpin + Send + 'static,
+{
+    let mut from = BackTrackingIO::new(from);
+    let http2 = tokio::time::timeout(HTTP_HEADER_TIMEOUT, async {
+        for expected in H2_PREFACE {
+            if from.read_u8().await? != *expected {
+                return Ok::<_, std::io::Error>(false);
+            }
+        }
+        Ok(true)
+    })
+    .await
+    .with_kind(ErrorKind::Network)?
+    .with_kind(ErrorKind::Network)?;
+    let _ = from.rewind();
+    if http2 {
+        run_http2_proxy(from, to, src_ip, forwarded_headers, gate).await
+    } else {
+        run_http1_proxy(from, to, src_ip, forwarded_headers, gate).await
+    }
+}
+
 pub async fn run_http_proxy<F, T>(
     from: F,
     to: T,
@@ -586,7 +622,7 @@ where
     // Hyper disarms `header_read_timeout` during a body or upgrade.
     let from = hyper::server::conn::http1::Builder::new()
         .timer(TokioTimer::new())
-        .header_read_timeout(Duration::from_secs(60))
+        .header_read_timeout(HTTP_HEADER_TIMEOUT)
         .serve_connection(
             TokioIo::new(from),
             service_fn(move |mut req| {
@@ -1289,7 +1325,6 @@ mod tests {
     }
 
     use super::{ENABLE_CONNECT_PROTOCOL, H2_SETTINGS_FRAME as SETTINGS_FRAME};
-    const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
     const GOAWAY_FRAME: u8 = 0x7;
 
     async fn write_frame(s: &mut DuplexStream, kind: u8, payload: &[u8]) {
@@ -1795,41 +1830,124 @@ mod tests {
                 ForwardedHeaders::Ssl,
             ] {
                 for upgrade in ["HTTP/2.0", "h2c", "H2C"] {
-                let (mut client, client_facing) = tokio::io::duplex(4096);
-                let (backend_facing, mut backend) = tokio::io::duplex(4096);
-                let proxy = tokio::spawn(run_http1_proxy(
-                    client_facing,
-                    backend_facing,
-                    Some(CLIENT_IP.parse().unwrap()),
-                    forwarded_headers,
-                    Some(basic_gate()),
-                ));
-                let backend = tokio::spawn(async move {
-                    let head = read_head(&mut backend).await;
-                    assert_policy_headers(&parse_request_headers(&head), forwarded_headers, Some("alice"));
-                    backend.write_all(
-                        format!("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: {upgrade}\r\n\r\n").as_bytes(),
-                    ).await.unwrap();
-                    hyper::server::conn::http2::Builder::new(TokioExecutor::new())
-                        .serve_connection(TokioIo::new(backend), service_fn(echo_request_headers))
+                    let (mut client, client_facing) = tokio::io::duplex(4096);
+                    let (backend_facing, mut backend) = tokio::io::duplex(4096);
+                    let proxy = tokio::spawn(run_http1_proxy(
+                        client_facing,
+                        backend_facing,
+                        Some(CLIENT_IP.parse().unwrap()),
+                        forwarded_headers,
+                        Some(basic_gate()),
+                    ));
+                    let backend = tokio::spawn(async move {
+                        let head = read_head(&mut backend).await;
+                        assert_policy_headers(
+                            &parse_request_headers(&head),
+                            forwarded_headers,
+                            Some("alice"),
+                        );
+                        let response = format!(
+                            "HTTP/1.1 101 Switching Protocols\r\n\
+                         Connection: Upgrade\r\nUpgrade: {upgrade}\r\n\r\n"
+                        );
+                        backend.write_all(response.as_bytes()).await.unwrap();
+                        hyper::server::conn::http2::Builder::new(TokioExecutor::new())
+                            .serve_connection(
+                                TokioIo::new(backend),
+                                service_fn(echo_request_headers),
+                            )
+                            .await
+                            .unwrap();
+                    });
+                    client
+                        .write_all(http1_spoofed_request(Some(upgrade)).as_bytes())
                         .await
                         .unwrap();
-                });
-                client.write_all(
-                    http1_spoofed_request(Some(upgrade)).as_bytes(),
-                ).await.unwrap();
-                assert!(read_head(&mut client).await.starts_with("http/1.1 101"));
-                let (sender, connection) = hyper::client::conn::http2::handshake(
-                    TokioExecutor::new(), TokioIo::new(client),
-                ).await.unwrap();
-                let connection = tokio::spawn(connection);
-                PolicyClient::Http2(sender).check_auth_and_headers(forwarded_headers).await;
-                connection.abort();
-                proxy.abort();
-                backend.abort();
+                    assert!(read_head(&mut client).await.starts_with("http/1.1 101"));
+                    let (sender, connection) = hyper::client::conn::http2::handshake(
+                        TokioExecutor::new(),
+                        TokioIo::new(client),
+                    )
+                    .await
+                    .unwrap();
+                    let connection = tokio::spawn(connection);
+                    PolicyClient::Http2(sender)
+                        .check_auth_and_headers(forwarded_headers)
+                        .await;
+                    connection.abort();
+                    proxy.abort();
+                    backend.abort();
                 }
             }
-        }).await.expect("HTTP/2 upgrade policy exchange stalled");
+        })
+        .await
+        .expect("HTTP/2 upgrade policy exchange stalled");
+    }
+
+    #[tokio::test]
+    async fn plaintext_detection_accepts_a_short_http1_request() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (mut client, from) = tokio::io::duplex(4096);
+            let (to, mut backend) = tokio::io::duplex(4096);
+            let proxy = tokio::spawn(run_plain_http_proxy(
+                from,
+                to,
+                None,
+                ForwardedHeaders::Disabled,
+                None,
+            ));
+            client.write_all(b"GET / HTTP/1.0\r\n\r\n").await.unwrap();
+            assert!(read_head(&mut backend).await.starts_with("get / http/1.0"));
+            backend
+                .write_all(b"HTTP/1.0 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            drop(backend);
+            assert!(read_head(&mut client).await.starts_with("http/1.0 200"));
+            proxy.await.unwrap().unwrap();
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn plaintext_detection_replays_a_fragmented_http2_preface() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (mut client, from) = tokio::io::duplex(4096);
+            let (to, mut backend) = tokio::io::duplex(4096);
+            let proxy = tokio::spawn(run_plain_http_proxy(
+                from,
+                to,
+                None,
+                ForwardedHeaders::Plaintext,
+                None,
+            ));
+            for byte in H2_PREFACE {
+                client.write_all(&[*byte]).await.unwrap();
+                tokio::task::yield_now().await;
+            }
+            let mut preface = vec![0; H2_PREFACE.len()];
+            backend.read_exact(&mut preface).await.unwrap();
+            assert_eq!(preface, H2_PREFACE);
+            proxy.abort();
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn plaintext_detection_times_out_idle_and_incomplete_prefaces() {
+        for prefix in [b"".as_slice(), b"PRI *"] {
+            let (mut client, from) = tokio::io::duplex(4096);
+            let (to, _backend) = tokio::io::duplex(4096);
+            client.write_all(prefix).await.unwrap();
+            let start = tokio::time::Instant::now();
+            let error = run_plain_http_proxy(from, to, None, ForwardedHeaders::Plaintext, None)
+                .await
+                .unwrap_err();
+            assert_eq!(error.kind, ErrorKind::Network);
+            assert_eq!(start.elapsed(), HTTP_HEADER_TIMEOUT);
+        }
     }
 
     fn req_with_auth(auth: Option<&str>) -> Request<()> {

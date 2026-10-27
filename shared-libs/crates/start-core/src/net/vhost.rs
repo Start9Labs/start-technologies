@@ -1269,9 +1269,18 @@ impl ProxyTarget {
                     (true, false) => ForwardedHeaders::Plaintext,
                     (true, true) => ForwardedHeaders::Ssl,
                 };
-                crate::net::http::run_http_proxy(stream, backend, alpn, source_ip, headers, gate)
+                let result = if ssl {
+                    crate::net::http::run_http_proxy(
+                        stream, backend, alpn, source_ip, headers, gate,
+                    )
                     .await
-                    .log_err();
+                } else {
+                    crate::net::http::run_plain_http_proxy(
+                        stream, backend, source_ip, headers, gate,
+                    )
+                    .await
+                };
+                result.log_err();
             }
             None => {
                 tokio::io::copy_bidirectional(&mut stream, &mut backend)
