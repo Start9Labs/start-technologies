@@ -31,6 +31,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::StoreLogsUnderVar,
     Migration::RemoveSessionsJson,
     Migration::ForceDhcpPools,
+    Migration::RemoveServerCert,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -53,6 +54,8 @@ enum Migration {
     RemoveSessionsJson,
     /// Earlier releases probed for another DHCP server before serving a pool.
     ForceDhcpPools,
+    /// Earlier images served one certificate from `/etc/ssl`.
+    RemoveServerCert,
 }
 
 impl Migration {
@@ -66,6 +69,7 @@ impl Migration {
             Migration::StoreLogsUnderVar => store_logs_under_var(root).await,
             Migration::RemoveSessionsJson => remove_sessions_json(root).await,
             Migration::ForceDhcpPools => force_dhcp_pools(root).await,
+            Migration::RemoveServerCert => remove_server_cert(root).await,
         }
     }
 }
@@ -188,6 +192,19 @@ async fn force_dhcp_pools(root: &Path) -> Result<(), Error> {
     }
     if changed {
         dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+async fn remove_server_cert(root: &Path) -> Result<(), Error> {
+    for path in [
+        "etc/ssl/certs/startwrt-server.pem",
+        "etc/ssl/private/startwrt-server.key",
+    ] {
+        match tokio::fs::remove_file(root.join(path)).await {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            _ => {}
+        }
     }
     Ok(())
 }

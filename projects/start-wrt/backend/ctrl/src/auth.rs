@@ -128,7 +128,7 @@ impl AuthState {
 
 impl ServerContext {
     /// Re-reads the ddns config only when its modification time changes.
-    async fn ddns_identity(&self) -> Option<InternedString> {
+    pub(crate) async fn ddns_identity(&self) -> Option<InternedString> {
         let path = self.uci_root().join("ddns");
         let modified = tokio::fs::metadata(&path)
             .await
@@ -144,9 +144,7 @@ impl ServerContext {
         let hostname = crate::wan::ddns_get(self.clone())
             .await
             .ok()
-            .filter(|ddns| ddns.enabled)
-            .and_then(|ddns| ddns.hostname)
-            .map(InternedString::from);
+            .and_then(enabled_ddns_hostname);
         self.auth.ddns.mutate(|cache| {
             *cache = DdnsIdentity {
                 modified,
@@ -265,6 +263,14 @@ pub async fn reap_idle_keys(ctx: ServerContext) {
     }
 }
 
+/// Lowercased; `None` while DDNS is disabled.
+fn enabled_ddns_hostname(ddns: crate::wan::WanDdnsResponse) -> Option<InternedString> {
+    ddns.enabled
+        .then_some(ddns.hostname)
+        .flatten()
+        .map(|hostname| InternedString::intern(hostname.to_ascii_lowercase()))
+}
+
 /// Every name and address a browser may sign for.
 fn signing_identities(
     addresses: impl IntoIterator<Item = IpAddr>,
@@ -272,7 +278,7 @@ fn signing_identities(
 ) -> BTreeSet<InternedString> {
     std::iter::once(InternedString::intern(crate::ssl::ROUTER_HOSTNAME))
         .chain(addresses.into_iter().map(url_host_str))
-        .chain(ddns.map(|hostname| InternedString::intern(hostname.to_ascii_lowercase())))
+        .chain(ddns)
         .collect()
 }
 
@@ -716,9 +722,21 @@ mod tests {
     }
 
     #[test]
-    fn ddns_signing_identity_matches_browser_hostname_case() {
-        let identities = signing_identities([], Some("Home.Example.COM".into()));
-        assert!(identities.contains("home.example.com"));
+    fn enabled_ddns_hostname_is_lowercased() {
+        let ddns = |enabled| crate::wan::WanDdnsResponse {
+            enabled,
+            provider: crate::wan::DdnsProvider::Cloudflare,
+            hostname: Some("Home.Example.COM".into()),
+            username: None,
+            password: None,
+            token: None,
+            zone: None,
+        };
+        assert_eq!(
+            enabled_ddns_hostname(ddns(true)).as_deref(),
+            Some("home.example.com")
+        );
+        assert_eq!(enabled_ddns_hostname(ddns(false)), None);
     }
 
     #[tokio::test]
