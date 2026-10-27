@@ -21,7 +21,9 @@ fn notification_body(notes: &str, version: &exver::Version, locale: &str) -> Str
         "release-notes.full-changelog",
         locale = locale,
         version = version.to_string(),
-        url = "https://github.com/Start9Labs/start-technologies/blob/master/projects/start-os/CHANGELOG.md"
+        url = format!(
+            "https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v{version}"
+        )
     );
     format!("{notes}\n\n{footer}")
 }
@@ -109,8 +111,14 @@ mod tests {
             assert!(body.starts_with("Highlights\n\n**["));
             assert!(body.contains(label), "{locale}: {body}");
             assert!(body.contains(
-                "](https://github.com/Start9Labs/start-technologies/blob/master/projects/start-os/CHANGELOG.md)**"
+                "](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v0.4.0.5)**"
             ));
         }
+        let next_version = exver::Version::new([0, 4, 1], []);
+        assert!(
+            notification_body("Highlights", &next_version, "en_US").contains(
+                "](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v0.4.1)**"
+            )
+        );
     }
 }

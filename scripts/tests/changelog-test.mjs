@@ -272,6 +272,28 @@ test('rejected bodies', async t => {
     })
 })
 
+test('section extracts exactly one compiled version', t => {
+  const { run } = compilerFixture(t)
+  const history = Buffer.from(
+    '# Changelog\n\n## [1.2.30]\n\n- Newer.\n\n' +
+      '## [1.2.3]\n\n### Fixed\n\n- This release.\n\n' +
+      '## [1.2.2]\n\n- Older.\n',
+  )
+  const section = version => {
+    const result = run(process.execPath, [SCRIPT, 'section', version], {
+      input: history,
+    })
+    assert.equal(result.status, 0, result.stderr.toString())
+    return result.stdout
+  }
+  assert.equal(
+    section('1.2.3').toString(),
+    '## [1.2.3]\n\n### Fixed\n\n- This release.\n\n',
+  )
+  assert.equal(section('1.2.2').toString(), '## [1.2.2]\n\n- Older.\n')
+  assert.equal(section('1.2.4').length, 0)
+})
+
 test('empty directory is valid', t => {
   const { cli, render } = compilerFixture(t)
   cli(['validate', PRODUCT])
