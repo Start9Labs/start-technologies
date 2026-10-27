@@ -331,8 +331,6 @@ shape.parse({})
 
 The `.catch()` callback delegates back to the child schema, so defaults are defined in exactly one place. Extracting child schemas into variables keeps the code DRY — the shape and its defaults are the same thing.
 
-Pass an object fallback as a function, never as a fixed object: `.catch(value)` hands that one object to every key and every parse that falls back to it, so anything that changes it changes them all.
-
 > [!NOTE]
 > This pattern only works when **all** inner fields have `.catch()` defaults. If a nested object has required fields without defaults (e.g., a password that must be generated at init time), seed the file with complete data using `write()` instead of relying on `merge(effects, {})`.
 
@@ -345,23 +343,27 @@ import { FileHelper, z } from '@start9labs/start-sdk'
 import { sdk } from '../sdk'
 
 // Level 2: nested object
-const dbSchema = z.looseObject({
-  path: z.literal('/data/app.db').catch('/data/app.db'),
-  journal_mode: z.string().catch('wal'),
-})
-const dbShape = dbSchema.catch(() => dbSchema.parse({}))
+const dbDefault = { path: '/data/app.db', journal_mode: 'wal' }
+const dbShape = z
+  .looseObject({
+    path: z.literal('/data/app.db').catch(dbDefault.path),
+    journal_mode: z.string().catch(dbDefault.journal_mode),
+  })
+  .catch(dbDefault)
 
 // Level 2: array item
-const endpointSchema = z.looseObject({
-  port: z.number().catch(8080),
-  tls: z.boolean().catch(false),
-})
-const endpointShape = endpointSchema.catch(() => endpointSchema.parse({}))
+const endpointDefault = { port: 8080, tls: false }
+const endpointShape = z
+  .looseObject({
+    port: z.number().catch(endpointDefault.port),
+    tls: z.boolean().catch(endpointDefault.tls),
+  })
+  .catch(endpointDefault)
 
 // Top level
 const shape = z.looseObject({
   database: dbShape,
-  endpoints: z.array(endpointShape).catch(() => [endpointSchema.parse({})]),
+  endpoints: z.array(endpointShape).catch([endpointDefault]),
   log_level: z.string().catch('info'),
   max_upload_size: z.string().catch('50M'),
 })
@@ -369,7 +371,7 @@ const shape = z.looseObject({
 export const configYaml = FileHelper.yaml({ base: sdk.volumes.main, subpath: 'config.yaml' }, shape)
 ```
 
-The key technique: define each nested level's shape separately, then compose them. Every level has its own `.catch()` so missing or malformed data at any depth resolves to sane defaults.
+The key technique: define each nested level's default and shape separately, then compose them. Every level has its own `.catch()` so missing or malformed data at any depth resolves to sane defaults.
 
 ### Hardcoded Literal Values
 
@@ -464,7 +466,7 @@ await configToml.merge(effects, { legacy_key: undefined })
 ```
 
 > [!WARNING]
-> This removes a stale key your schema doesn't model. It cannot surgically delete one entry of a _typed_ collection that has a `.catch()` default. `merge({ users: { bob: undefined } })` against `users: z.record(...).catch(() => ({}))` makes the whole `users` value fail validation, so the fallback replaces the **entire** record with `{}` — every entry is wiped, not just `bob`. To drop one entry while keeping the rest, rebuild the complete value inside `update()`.
+> This removes a stale key your schema doesn't model. It cannot surgically delete one entry of a _typed_ collection that has a `.catch()` default. `merge({ users: { bob: undefined } })` against `users: z.record(...).catch({})` makes the whole `users` value fail validation, so the `.catch({})` replaces the **entire** record with `{}` — every entry is wiped, not just `bob`. To drop one entry while keeping the rest, rebuild the complete value inside `update()`.
 
 ### Arrays Are Replaced, Not Merged
 
