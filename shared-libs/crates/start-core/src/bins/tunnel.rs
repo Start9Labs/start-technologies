@@ -277,5 +277,9 @@ fn export_manpage_start_tunnel() {
         "/../../../projects/start-tunnel/man"
     );
     std::fs::create_dir_all(dir).unwrap();
-    clap_mangen::generate_to(app().into_command(), dir).unwrap();
+    let command = super::with_manifest_version(
+        app().into_command(),
+        std::path::Path::new(dir).parent().unwrap(),
+    );
+    clap_mangen::generate_to(command, dir).unwrap();
 }

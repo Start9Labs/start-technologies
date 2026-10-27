@@ -5318,11 +5318,11 @@ about.check-port-v6-reachability:
   pl_PL: "Sprawdź, czy port jest osiągalny przez IPv6 (zapora GUA)"
 
 about.check-update-startos:
-  en_US: "Check a given registry for StartOS updates and update if available"
-  de_DE: "Ein bestimmtes Registry auf StartOS-Updates prüfen und bei Verfügbarkeit aktualisieren"
-  es_ES: "Verificar un registro dado para actualizaciones de StartOS y actualizar si está disponible"
-  fr_FR: "Vérifier un registre donné pour les mises à jour StartOS et mettre à jour si disponible"
-  pl_PL: "Sprawdź dany rejestr pod kątem aktualizacji StartOS i zaktualizuj, jeśli dostępne"
+  en_US: "Check for StartOS updates and update if available"
+  de_DE: "Nach StartOS-Updates suchen und bei Verfügbarkeit aktualisieren"
+  es_ES: "Buscar actualizaciones de StartOS y actualizar si están disponibles"
+  fr_FR: "Rechercher les mises à jour StartOS et mettre à jour si disponible"
+  pl_PL: "Sprawdź dostępność aktualizacji StartOS i zaktualizuj, jeśli są dostępne"
 
 about.clear-service-task:
   en_US: "Clear a service task"

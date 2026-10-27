@@ -75,6 +75,22 @@ fn no_shadowed_args_start_cli() {
 }
 
 #[test]
+fn diagnostic_update_accepts_trust_without_an_ignored_registry_argument() {
+    let matches = app()
+        .into_command()
+        .try_get_matches_from(["start-cli", "diagnostic", "update", "--trust"])
+        .unwrap();
+    assert!(
+        matches
+            .subcommand_matches("diagnostic")
+            .unwrap()
+            .subcommand_matches("update")
+            .unwrap()
+            .get_flag("trust")
+    );
+}
+
+#[test]
 fn export_manpage_start_cli() {
     let dir = concat!(
         env!("CARGO_MANIFEST_DIR"),

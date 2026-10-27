@@ -24,7 +24,7 @@ use crate::registry::asset::RegistryAsset;
 use crate::registry::os::index::OsVersionInfo;
 use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::sign::commitment::blake3::Blake3Commitment;
-use crate::update::{UpdateProgressHandles, UpdateSystemParams, UpdateSystemRes, do_update};
+use crate::update::{UpdateProgressHandles, UpdateSystemRes, do_update};
 use crate::version::{Current, VersionT};
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
@@ -32,6 +32,7 @@ use crate::version::{Current, VersionT};
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct DiagnosticUpdateSystemParams {
+    /// Accepts an untrusted signer without skipping signature or integrity verification.
     #[arg(long, help = "help.arg.trust")]
     #[serde(default)]
     trust: bool,
@@ -265,7 +266,7 @@ pub async fn cli_update_system(
         method,
         raw_params,
         ..
-    }: HandlerArgs<CliContext, UpdateSystemParams>,
+    }: HandlerArgs<CliContext, DiagnosticUpdateSystemParams>,
 ) -> Result<(), Error> {
     let res = from_value::<UpdateSystemRes>(
         context
