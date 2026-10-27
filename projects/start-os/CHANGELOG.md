@@ -8,6 +8,38 @@ This file tracks notable changes since the move to the monorepo, and is what eac
 [GitHub release](https://github.com/Start9Labs/start-technologies/releases) links to
 for the detail behind its highlights.
 
+## [0.4.0.4]
+
+### Fixed
+
+- Action menus near the right edge of the screen size to fit their items.
+
+- Service interfaces on automatically assigned ports no longer occasionally fail to accept connections because StartOS was using the port for an outbound connection.
+
+- On the server itself, `start-cli auth login` and `auth logout` explain that no login is needed there, instead of failing with an unclear error.
+
+- Restore the Gateways list to connected gateways, hiding stale bridge entries.
+
+- Menus and dropdowns open when the browser or OS has reduced motion turned on.
+
+- Revoking a sign-in immediately closes its idle streams.
+
+- The Start menu and the More menus in Backups and Certificate Authorities close after you choose an item.
+
+- The serial console login prompt starts only on servers that have a serial port.
+
+- Fixed services whose container image has no `/etc`, such as one built `FROM scratch`, failing to start.
+
+- Opening System Settings from the Start menu or the System tab while already in System shows General Settings.
+
+- A gateway's WAN IP is shown while another gateway is selected for outbound traffic.
+
+### Security
+
+- Link-Local Multicast Name Resolution (LLMNR, port 5355) is disabled.
+
+- The RPC port mapper (port 111) is disabled. NFS shares mount over NFSv4, or over NFSv3 with `-o nolock`.
+
 ## [0.4.0.3]
 
 ### Added

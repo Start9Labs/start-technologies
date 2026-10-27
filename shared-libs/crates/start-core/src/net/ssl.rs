@@ -26,7 +26,7 @@ use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::rustls::crypto::CryptoProvider;
-use tokio_rustls::rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
+use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio_rustls::rustls::server::ClientHello;
 use tracing::instrument;
 use visit_rs::Visit;
@@ -107,7 +107,7 @@ impl CertBranding {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel)]
+#[derive(Debug, Clone, Deserialize, Serialize, HasModel)]
 #[model = "Model<Self>"]
 #[serde(rename_all = "camelCase")]
 pub struct CertStore {
@@ -805,54 +805,58 @@ where
         )?]
         .into_iter()
         .collect();
-        let branding = self.branding.clone();
-        let cert = self
-            .db
-            .mutate(move |db| M::access_mut(db).cert_for(&hostnames, &branding))
-            .await
-            .result
-            .log_err()?;
-        let cfg = ServerConfig::builder_with_provider(self.crypto_provider.clone())
-            .with_safe_default_protocol_versions()
-            .log_err()?
-            .with_no_client_auth();
-        if hello
-            .signature_schemes()
-            .contains(&tokio_rustls::rustls::SignatureScheme::ED25519)
-        {
-            cfg.with_single_cert(
-                cert.fullchain_ed25519()
-                    .into_iter()
-                    .map(|c| {
-                        Ok(tokio_rustls::rustls::pki_types::CertificateDer::from(
-                            c.to_der()?,
-                        ))
-                    })
-                    .collect::<Result<_, Error>>()
-                    .log_err()?,
-                PrivateKeyDer::from(PrivatePkcs8KeyDer::from(
-                    cert.leaf.keys.ed25519.private_key_to_pkcs8().log_err()?,
-                )),
-            )
-        } else {
-            cfg.with_single_cert(
-                cert.fullchain_nistp256()
-                    .into_iter()
-                    .map(|c| {
-                        Ok(tokio_rustls::rustls::pki_types::CertificateDer::from(
-                            c.to_der()?,
-                        ))
-                    })
-                    .collect::<Result<_, Error>>()
-                    .log_err()?,
-                PrivateKeyDer::from(PrivatePkcs8KeyDer::from(
-                    cert.leaf.keys.nistp256.private_key_to_pkcs8().log_err()?,
-                )),
-            )
-        }
-        .log_err()
+        root_ca_config(
+            &self.db,
+            &self.crypto_provider,
+            &self.branding,
+            hello,
+            hostnames,
+        )
+        .await
         .map(TlsHandlerAction::Tls)
     }
+}
+
+/// The local CA's certificate for these names, signed with the key type the
+/// client accepts.
+pub async fn root_ca_config<M>(
+    db: &TypedPatchDb<M>,
+    crypto_provider: &Arc<CryptoProvider>,
+    branding: &CertBranding,
+    hello: &ClientHello<'_>,
+    hostnames: BTreeSet<InternedString>,
+) -> Option<ServerConfig>
+where
+    M: HasModel<Model = Model<M>> + DbAccessMut<CertStore> + Send + Sync,
+{
+    let branding = branding.clone();
+    let cert = db
+        .mutate(move |db| M::access_mut(db).cert_for(&hostnames, &branding))
+        .await
+        .result
+        .log_err()?;
+    let (chain, key) = if hello
+        .signature_schemes()
+        .contains(&tokio_rustls::rustls::SignatureScheme::ED25519)
+    {
+        (cert.fullchain_ed25519(), &cert.leaf.keys.ed25519)
+    } else {
+        (cert.fullchain_nistp256(), &cert.leaf.keys.nistp256)
+    };
+    let chain = chain
+        .into_iter()
+        .map(|c| Ok(CertificateDer::from(c.to_der()?)))
+        .collect::<Result<Vec<_>, Error>>()
+        .log_err()?;
+    let key = PrivateKeyDer::from(PrivatePkcs8KeyDer::from(
+        key.private_key_to_pkcs8().log_err()?,
+    ));
+    ServerConfig::builder_with_provider(crypto_provider.clone())
+        .with_safe_default_protocol_versions()
+        .log_err()?
+        .with_no_client_auth()
+        .with_single_cert(chain, key)
+        .log_err()
 }
 
 #[cfg(test)]

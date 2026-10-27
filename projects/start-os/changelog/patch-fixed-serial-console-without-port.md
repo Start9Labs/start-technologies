@@ -1,1 +1,0 @@
-- The serial console login prompt starts only on servers that have a serial port.

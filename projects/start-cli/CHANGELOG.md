@@ -9,6 +9,12 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [2.5.2]
+
+### Changed
+
+- Preserved image-provided `/etc/resolv.conf` symlinks and hardlinks when packing. Packages with symlinked resolvers need SDK 3.1.1 or later.
+
 ## [2.5.1]
 
 ### Fixed

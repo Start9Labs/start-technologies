@@ -1,1 +1,0 @@
-- The RPC port mapper (port 111) is disabled. NFS shares mount over NFSv4, or over NFSv3 with `-o nolock`.
