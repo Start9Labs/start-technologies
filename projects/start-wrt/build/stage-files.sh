@@ -197,10 +197,9 @@ mkdir -p "${FILES_DIR}/lib/upgrade/keep.d"
 cat > "${FILES_DIR}/lib/upgrade/keep.d/startwrt" << 'KEEPEOF'
 /etc/ssl/certs/startwrt-ca.pem
 /etc/ssl/certs/startwrt-int.pem
-/etc/ssl/certs/startwrt-server.pem
 /etc/ssl/private/startwrt-ca.key
 /etc/ssl/private/startwrt-int.key
-/etc/ssl/private/startwrt-server.key
+/etc/startwrt/certs/
 /etc/nlbwmon/data/
 /etc/startwrt/pending-update
 /etc/startwrt/migrations

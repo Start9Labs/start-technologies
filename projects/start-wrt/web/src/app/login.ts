@@ -14,6 +14,8 @@ import { TuiButtonLoading } from '@taiga-ui/kit'
 import { ApiService } from 'src/app/services/api/api.service'
 import { AuthService } from 'src/app/services/auth.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { i18nKey } from 'src/app/i18n/i18n.providers'
+import { RpcError } from 'src/app/services/rpc.service'
 
 @Component({
   template: `
@@ -41,7 +43,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
             {{ 'Login' | i18n }}
           </button>
         </tui-textfield>
-        <tui-error [error]="error() ? ('Password is invalid' | i18n) : null" />
+        <tui-error [error]="(error() | i18n) || null" />
       </form>
     }
   `,
@@ -102,9 +104,10 @@ export default class Login {
 
   protected readonly password = signal('')
   protected readonly loading = signal(false)
-  protected readonly error = linkedSignal<boolean>(
-    () => !!this.password() && false,
-  )
+  protected readonly error = linkedSignal<string, i18nKey | null>({
+    source: () => this.password(),
+    computation: () => null,
+  })
 
   protected async login() {
     this.loading.set(true)
@@ -122,7 +125,11 @@ export default class Login {
       this.auth.authenticated.set(true)
       this.router.navigate(['.'])
     } catch (e) {
-      this.error.set(true)
+      this.error.set(
+        e instanceof RpcError && e.code === 7
+          ? 'Password is invalid'
+          : (((e as { message?: string }).message || String(e)) as i18nKey),
+      )
     } finally {
       this.loading.set(false)
     }
