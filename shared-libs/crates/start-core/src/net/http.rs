@@ -331,7 +331,7 @@ where
     T: ReadWriter + Unpin + Send + 'static,
 {
     let mut from = BackTrackingIO::new(from);
-    let http2 = tokio::time::timeout(HTTP_HEADER_TIMEOUT, async {
+    let http2 = match tokio::time::timeout(HTTP_HEADER_TIMEOUT, async {
         for expected in H2_PREFACE {
             if from.read_u8().await? != *expected {
                 return Ok::<_, std::io::Error>(false);
@@ -341,7 +341,16 @@ where
     })
     .await
     .with_kind(ErrorKind::Network)?
-    .with_kind(ErrorKind::Network)?;
+    {
+        Ok(http2) => http2,
+        Err(error)
+            if error.kind() == std::io::ErrorKind::UnexpectedEof
+                && from.read_buffer().is_empty() =>
+        {
+            return Ok(());
+        }
+        Err(error) => return Err(Error::new(error, ErrorKind::Network)),
+    };
     let _ = from.rewind();
     if http2 {
         run_http2_proxy(from, to, src_ip, forwarded_headers, gate).await
@@ -1930,6 +1939,27 @@ mod tests {
             backend.read_exact(&mut preface).await.unwrap();
             assert_eq!(preface, H2_PREFACE);
             proxy.abort();
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn plaintext_close_is_clean_before_any_bytes_but_rejects_partial_prefaces() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            for prefix in [b"".as_slice(), b"P", b"PRI *"] {
+                let (mut client, from) = tokio::io::duplex(4096);
+                let (to, _backend) = tokio::io::duplex(4096);
+                client.write_all(prefix).await.unwrap();
+                client.shutdown().await.unwrap();
+                let result =
+                    run_plain_http_proxy(from, to, None, ForwardedHeaders::Plaintext, None).await;
+                if prefix.is_empty() {
+                    result.unwrap();
+                } else {
+                    assert_eq!(result.unwrap_err().kind, ErrorKind::Network);
+                }
+            }
         })
         .await
         .unwrap();
