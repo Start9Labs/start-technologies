@@ -172,7 +172,7 @@ Support for multiple drives is planned for StartOS 0.4.1. There is no release da
 
 ## What does “Data drive metadata space is low” mean?
 
-Btrfs needs unallocated space for metadata even when the disk metrics show free space inside existing data chunks. StartOS runs a weekly filtered balance on both data filesystems to reclaim unused chunks and raises this notification when unallocated space falls below 5% of a filesystem's size, capped at 10 GiB. The notification names the affected filesystem. If the warning persists, free space or [move to a larger data drive](#can-i-add-a-second-drive-to-give-a-service-more-storage).
+Btrfs needs unallocated space for metadata even when the disk metrics show free space inside existing data chunks. The upgrade migration to StartOS 0.4.0.5 starts a filtered balance on both data filesystems in the background after they are mounted; weekly maintenance reclaims unused chunks thereafter. StartOS raises this notification when unallocated space falls below 5% of a filesystem's size, capped at 10 GiB. The notification names the affected filesystem. If the warning persists, free space or [move to a larger data drive](#can-i-add-a-second-drive-to-give-a-service-more-storage).
 
 ## Can I run two copies of the same service?
 

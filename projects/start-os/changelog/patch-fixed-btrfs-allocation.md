@@ -1,1 +1,1 @@
-- Reclaim unused data-drive chunks with weekly Btrfs maintenance and warn when metadata allocation space runs low, before services encounter write failures despite reported free space.
+- Reclaim unused data-drive chunks with an initial background Btrfs balance after upgrading and weekly maintenance thereafter. Warn when metadata allocation space runs low, before services encounter write failures despite reported free space.
