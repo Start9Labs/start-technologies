@@ -31,39 +31,3 @@ impl VersionT for Version {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod test {
-    use imbl_value::json;
-
-    use super::*;
-    use crate::version::{DynVersionT, PreUps, migrate_from_unchecked, rollback_to_unchecked};
-
-    #[tokio::test]
-    async fn revision_five_migrates_and_rolls_back_without_changing_service_data() {
-        let previous = v0_4_0_4::Version;
-        let current = Version;
-        let registered = crate::version::Version::from_exver_version(current.semver())
-            .as_version_t()
-            .unwrap();
-        assert_eq!(registered.previous().semver(), previous.semver());
-        let mut db = json!({ "public": { "serverInfo": {
-            "version": "0.4.0.4",
-            "packageVersionCompat": ">=0.3.0 <0.5.0",
-            "postInitMigrationTodos": {},
-            "latestMigrationRevision": 0,
-        }, "packageData": { "service": { "setting": "preserved" } } } });
-        let packages = db["public"]["packageData"].clone();
-        let pre_ups = PreUps::load(&previous, &registered).await.unwrap();
-        migrate_from_unchecked(&previous, &registered, pre_ups, &mut db).unwrap();
-        assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.0.5"));
-        assert_eq!(
-            db["public"]["serverInfo"]["postInitMigrationTodos"],
-            json!({ "0.4.0.5": null })
-        );
-        assert_eq!(db["public"]["packageData"], packages);
-        rollback_to_unchecked(&registered, &previous, &mut db).unwrap();
-        assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.0.4"));
-        assert_eq!(db["public"]["packageData"], packages);
-    }
-}

@@ -281,9 +281,7 @@ function markdownFormatter() {
   }
 }
 
-function prependSection(history, version, fragments, format) {
-  if (!fragments.length) return history
-  const section = releaseSection(version, fragments)
+function compiledSection(history, version) {
   const text = decodeUtf8(history)
   const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const heading = new RegExp(
@@ -295,13 +293,24 @@ function prependSection(history, version, fragments, format) {
     const afterHeading = start + heading[0].length
     const next = /^## /m.exec(text.slice(afterHeading))
     const end = next ? afterHeading + next.index : text.length
-    if (!format(Buffer.from(text.slice(start, end))).equals(format(section))) {
+    return Buffer.from(text.slice(start, end))
+  }
+  return Buffer.alloc(0)
+}
+
+function prependSection(history, version, fragments, format) {
+  if (!fragments.length) return history
+  const section = releaseSection(version, fragments)
+  const existing = compiledSection(history, version)
+  if (existing.length) {
+    if (!format(existing).equals(format(section))) {
       throw new Error(
         `release ${version} already has a different compiled changelog; do not move released tags`,
       )
     }
     return history
   }
+  const text = decodeUtf8(history)
   const first = /^## /m.exec(text)
   const position = first
     ? Buffer.byteLength(text.slice(0, first.index))
@@ -439,7 +448,7 @@ function sync() {
 }
 
 const USAGE =
-  'usage: changelog.mjs projects | changed BASE | validate PRODUCT | version PRODUCT | check-version PRODUCT [VERSION] | render PRODUCT VERSION [--ref REF] | sync'
+  'usage: changelog.mjs projects | changed BASE | validate PRODUCT | version PRODUCT | check-version PRODUCT [VERSION] | render PRODUCT VERSION [--ref REF] | section VERSION | sync'
 
 try {
   const { values, positionals } = parseArgs({
@@ -457,6 +466,7 @@ try {
     version: [1],
     'check-version': [1, 2],
     render: [2],
+    section: [1],
     sync: [0],
   }
   if (
@@ -477,6 +487,8 @@ try {
     checkManifestVersion(productPath(args[0]), args[1])
   else if (command === 'render')
     process.stdout.write(render(productPath(args[0]), args[1], values.ref))
+  else if (command === 'section')
+    process.stdout.write(compiledSection(readFileSync(0), args[0]))
   else sync()
 } catch (error) {
   process.stderr.write(`changelog: ${error.message}\n`)

@@ -15,13 +15,12 @@ use futures::stream::FusedStream;
 use futures::{FutureExt, SinkExt, StreamExt, TryStreamExt};
 use imbl_value::{InternedString, json};
 use itertools::Itertools;
-use nix::sys::signal::Signal;
 use persistent_container::PersistentContainer;
 use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
 use service_actor::ServiceActor;
 use termion::raw::IntoRawMode;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use url::Url;
@@ -56,6 +55,7 @@ use crate::volume::{PKG_VOLUME_DIR, data_dir};
 use crate::{ActionId, CAP_1_KiB, DATA_DIR, ImageId, PackageId};
 
 pub mod action;
+mod attach_input;
 pub mod cli;
 pub mod effects;
 pub mod persistent_container;
@@ -1196,40 +1196,7 @@ pub async fn attach(
                 }
                 msg = ws.try_next() => {
                     if let Some(msg) = msg.with_kind(ErrorKind::Network)? {
-                        match msg {
-                            Message::Text(in_ty) => {
-                                current_in = in_ty;
-                            }
-                            Message::Binary(data) => {
-                                match &*current_in {
-                                    "stdin" => {
-                                        if let Some(stdin) = &mut stdin {
-                                            stdin.write_all(&data).await?;
-                                        }
-                                    }
-                                    "close-stdin" => {
-                                        stdin.take();
-                                    }
-                                    "signal" => {
-                                        if data.len() != 4 {
-                                            return Err(Error::new(
-                                                eyre!("{}", t!("service.mod.invalid-byte-length-for-signal", length = data.len())),
-                                                ErrorKind::InvalidRequest
-                                            ));
-                                        }
-                                        let mut sig_buf = [0u8; 4];
-                                        sig_buf.clone_from_slice(&data);
-                                        nix::sys::signal::kill(
-                                            pid,
-                                            Signal::try_from(i32::from_be_bytes(sig_buf))
-                                                .with_kind(ErrorKind::InvalidRequest)?
-                                        ).with_kind(ErrorKind::Filesystem)?;
-                                    }
-                                    _ => (),
-                                }
-                            }
-                            _ => ()
-                        }
+                        attach_input::handle(msg, &mut current_in, &mut stdin, pid).await?;
                     } else {
                         return Ok(())
                     }
@@ -1241,9 +1208,7 @@ pub async fn attach(
         }
 
         let exit = child.wait().await?;
-        // Send the exit code, not `into_raw()`'s wait status: the client hands this
-        // straight to `std::process::exit`, which keeps only the low byte, and a
-        // normal exit encodes as `code << 8` — so every code would arrive as 0.
+        // The client expects an exit code, not an encoded wait status.
         let code = exit
             .code()
             .unwrap_or_else(|| 128 + exit.signal().unwrap_or_default());
