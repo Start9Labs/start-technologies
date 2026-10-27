@@ -713,6 +713,14 @@ impl Default for SniDemux {
 mod tests {
     use super::*;
 
+    fn free_port() -> u16 {
+        std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
     /// A rustls-generated ClientHello carrying SNI.
     fn real_client_hello(sni: &str) -> Vec<u8> {
         use tokio_rustls::rustls::pki_types::ServerName;
@@ -863,7 +871,7 @@ mod tests {
     async fn fallback_register_ownership_and_coexistence() {
         let demux = SniDemux::new();
         let ip: Ipv4Addr = Ipv4Addr::LOCALHOST;
-        let port = 44300u16;
+        let port = free_port();
         let fb = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 9), 443);
         let host_target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
 
@@ -915,7 +923,7 @@ mod tests {
     async fn local_fallback_source_policy() {
         let demux = SniDemux::new();
         let ip = Ipv4Addr::LOCALHOST;
-        let port = 44320u16;
+        let port = free_port();
         let ui = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 443);
         let host_target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
         demux
@@ -1130,7 +1138,7 @@ mod tests {
     async fn a_device_repoints_its_own_bindings() {
         let demux = SniDemux::new();
         let ip = Ipv4Addr::LOCALHOST;
-        let port = 44301u16;
+        let port = free_port();
         let hostname = ["a.example.com".to_string()];
         let mine = |port| SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), port);
         let theirs = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 2), 9443);

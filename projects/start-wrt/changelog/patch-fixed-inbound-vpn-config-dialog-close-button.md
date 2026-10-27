@@ -1,1 +1,0 @@
-- The inbound VPN client config dialog's visibility toggle and File/QR selector no longer sit under its close button with a long client name or in a narrow window.
