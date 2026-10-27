@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   unlinkSync,
 } from 'node:fs'
 import { join } from 'node:path'
@@ -467,6 +468,13 @@ test('StartOS registry and packaged welcome', t => {
       `projects/start-os/release-notes/${name}`,
       readFileSync(join(source, name)),
     )
+  const main = join(root, `projects/start-os/release-notes/${version}.md`)
+  write(
+    `projects/start-os/release-notes/${version}.pl_PL.md`,
+    'Polskie nowości\n',
+  )
+  write(`projects/start-os/release-notes/${version}.de_DE.md`, 'Neuigkeiten\n')
+  write('projects/start-os/release-notes/0.4.0.1.pl_PL.md', 'Starsze wydanie\n')
   env.VERSION = version
   const combined = script('notes', 'start-os').stdout
   contains(combined, '## ⚠️ Before You Update')
@@ -477,13 +485,26 @@ test('StartOS registry and packaged welcome', t => {
   const versionFile = write('VERSION.txt', version)
   const harness = write(
     'install.mk',
-    `mkdir = true
+    `mkdir = $(if $(filter %/release-notes,$(1)),mkdir -p "$(1)",true)
 rm = true
 ln = true
-cp = $(if $(filter %/release-notes.md,$(2)),cp "$(1)" "$(2)",true)
+cp = $(if $(filter %/release-notes.md,$(2))$(findstring /release-notes/,$(2)),cp "$(1)" "$(2)",true)
 include ${REPO}/projects/start-os/build.mk
+notes-inputs:
+\t@printf '%s\\n' $(filter $(STARTOS_RELEASE_NOTES) $(STARTOS_LOCALIZED_RELEASE_NOTES),$(STARTOS_TARGETS))
 `,
   )
+  const inputs = run(
+    'make',
+    ['-f', harness, 'notes-inputs', `STARTOS_RELEASE_NOTES=${main}`],
+    { cwd: REPO, encoding: 'utf8' },
+  )
+  assert.equal(inputs.status, 0, inputs.stderr)
+  contains(inputs.stdout, `${version}.md`)
+  contains(inputs.stdout, `${version}.pl_PL.md`)
+  contains(inputs.stdout, `${version}.de_DE.md`)
+  excludes(inputs.stdout, 'pre-update')
+  excludes(inputs.stdout, '0.4.0.1')
   const result = run(
     'make',
     [
@@ -493,6 +514,7 @@ include ${REPO}/projects/start-os/build.mk
       'STARTOS_TARGETS=',
       'PLATFORM=x86_64',
       `VERSION_FILE=${versionFile}`,
+      `STARTOS_RELEASE_NOTES=${main}`,
       `DESTDIR=${root}/image`,
       'ENVIRONMENT=',
     ],
@@ -504,4 +526,10 @@ include ${REPO}/projects/start-os/build.mk
   excludes(packaged, 'Before You Update')
   excludes(packaged, 'only way to update')
   contains(packaged, '## Highlights')
+  assert.equal(text(join(stage, 'release-notes/pl_PL.md')), 'Polskie nowości\n')
+  assert.equal(text(join(stage, 'release-notes/de_DE.md')), 'Neuigkeiten\n')
+  assert.deepEqual(readdirSync(join(stage, 'release-notes')).sort(), [
+    'de_DE.md',
+    'pl_PL.md',
+  ])
 })

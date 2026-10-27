@@ -2313,7 +2313,13 @@ lxc.mod.cleaned-up-containers:
   fr_FR: "Conteneurs LXC orphelins nettoyés avec succès"
   pl_PL: "Pomyślnie wyczyszczono wiszące kontenery LXC"
 
-# version/release_notes.rs
+release-notes.full-changelog:
+  en_US: "**[Full changelog for v%{version}](%{url})** — every change in this release."
+  de_DE: "**[Vollständiges Änderungsprotokoll für v%{version}](%{url})** — alle Änderungen in dieser Version."
+  es_ES: "**[Registro completo de cambios de v%{version}](%{url})** — todos los cambios de esta versión."
+  fr_FR: "**[Journal complet des modifications de la v%{version}](%{url})** — toutes les modifications de cette version."
+  pl_PL: "**[Pełna lista zmian w wersji %{version}](%{url})** — wszystkie zmiany w tym wydaniu."
+
 release-notes.welcome-message:
   en_US: "Click \"View details\" for what's new in this release."
   de_DE: "Klicken Sie auf \"Details anzeigen\", um zu sehen, was in dieser Version neu ist."
