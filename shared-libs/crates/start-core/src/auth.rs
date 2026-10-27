@@ -28,11 +28,17 @@ use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 use crate::util::sync::SyncMutex;
 use crate::{Error, ResultExt, ensure_code};
 
-/// The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
-/// key is a sign-in: it carries the same metadata a session used to (when it
-/// was created, when it was last used, and the user agent that enrolled it).
-#[derive(Debug, Clone, Default, Deserialize, Serialize, VisitFields)]
+/// Enrolled sign-ins indexed by canonical DER64 SPKI.
+#[derive(Debug, Clone, Default, Serialize, VisitFields)]
 pub struct AuthKeys(pub BTreeMap<InternedString, Session>);
+
+impl<'de> Deserialize<'de> for AuthKeys {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::sign::canonicalize_verifying_keys(BTreeMap::deserialize(deserializer)?)
+            .map(Self)
+            .map_err(serde::de::Error::custom)
+    }
+}
 
 rpc_toolkit::reflect_ts!(AuthKeys);
 impl AuthKeys {
@@ -422,7 +428,7 @@ pub async fn login_impl<C: LoginContext>(
     }
 
     let now = Utc::now();
-    let pubkey = pubkey.to_string();
+    let pubkey = pubkey.interned_der64();
     let record = Session {
         name: None,
         logged_in: now,
@@ -438,13 +444,13 @@ pub async fn login_impl<C: LoginContext>(
         };
         C::check_password(&ctx.db().peek().await, &password)?;
         ephemeral_keys.mutate(|keys| {
-            keys.0.insert(InternedString::intern(&pubkey), record);
+            keys.0.insert(pubkey.clone(), record);
         });
     } else {
         ctx.db()
             .mutate(|db| {
                 C::check_password(db, &password)?;
-                C::access_auth_keys(db).insert(&InternedString::intern(&pubkey), &record)?;
+                C::access_auth_keys(db).insert(&pubkey, &record)?;
                 Ok(())
             })
             .await
@@ -600,7 +606,7 @@ pub async fn list<C: LoginContext>(
 #[command(rename_all = "kebab-case")]
 pub struct KillParams {
     #[arg(help = "help.arg.session-ids")]
-    ids: Vec<String>,
+    ids: Vec<AnyVerifyingKey>,
 }
 
 rpc_toolkit::reflect_ts!(KillParams);
@@ -611,7 +617,7 @@ pub async fn kill<C: SignatureAuthContext>(
     ctx: C,
     KillParams { ids }: KillParams,
 ) -> Result<(), Error> {
-    ctx.unenroll(ids.into_iter().map(InternedString::from))
+    ctx.unenroll(ids.into_iter().map(|key| key.interned_der64()))
         .await?;
     Ok(())
 }

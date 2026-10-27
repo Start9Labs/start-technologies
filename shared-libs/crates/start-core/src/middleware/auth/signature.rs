@@ -27,7 +27,7 @@ use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::commitment::Commitment;
 use crate::sign::commitment::request::RequestCommitment;
 use crate::sign::{AnySignature, AnyVerifyingKey, Signer};
-use crate::util::serde::Base64;
+use crate::util::serde::{Base64, Der64};
 use crate::util::sync::SyncMutex;
 
 pub const AUTH_SIG_HEADER: &str = "X-Start-Auth-Sig";
@@ -74,7 +74,7 @@ pub fn check_enrolled(
     if login {
         return Ok(None);
     }
-    let key = pubkey.interned_pem();
+    let key = pubkey.interned_der64();
     if is_enrolled(&key)? {
         Ok(Some(key))
     } else {
@@ -513,24 +513,26 @@ impl SignatureHeader {
     pub fn to_header(&self) -> HeaderValue {
         let mut url: Url = "http://localhost".parse().unwrap();
         self.commitment.append_query(&mut url);
-        url.query_pairs_mut().append_pair(
-            "signer",
-            &self.signer.to_base64_der().expect("encode verifying key"),
-        );
-        url.query_pairs_mut().append_pair(
-            "signature",
-            &self.signature.to_base64_der().expect("encode signature"),
-        );
+        url.query_pairs_mut()
+            .append_pair("signer", &Der64::new_ref(&self.signer).to_string());
+        url.query_pairs_mut()
+            .append_pair("signature", &Der64::new_ref(&self.signature).to_string());
         HeaderValue::from_str(url.query().unwrap_or_default()).unwrap()
     }
     pub fn from_header(header: &HeaderValue) -> Result<Self, Error> {
         let query: BTreeMap<_, _> = form_urlencoded::parse(header.as_bytes()).collect();
         Ok(Self {
             commitment: RequestCommitment::from_query(&header)?,
-            signer: AnyVerifyingKey::from_base64_der(query.get("signer").or_not_found("signer")?)?,
-            signature: AnySignature::from_base64_der(
-                query.get("signature").or_not_found("signature")?,
-            )?,
+            signer: query
+                .get("signer")
+                .or_not_found("signer")?
+                .parse::<Der64<_>>()?
+                .0,
+            signature: query
+                .get("signature")
+                .or_not_found("signature")?
+                .parse::<Der64<_>>()?
+                .0,
         })
     }
     pub async fn sign(signer: &Signer, body: &[u8], context: &str) -> Result<Self, Error> {

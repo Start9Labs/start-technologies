@@ -84,7 +84,7 @@ export async function signRequest(
   params.set('nonce', nonce.toString())
   params.set('size', size.toString())
   params.set('blake3', base64UrlEncode(hash))
-  params.set('signer', base64UrlEncode(pemToDer(key.pubkeyPem)))
+  params.set('signer', normalizeDer64(key.pubkeyPem))
   params.set(
     'signature',
     base64UrlEncode(concatBytes(SIGNATURE_PREFIX, signature)),
@@ -101,16 +101,17 @@ function derToPem(label: string, der: Uint8Array): string {
   return `-----BEGIN ${label}-----\n${lines.join('\n')}\n-----END ${label}-----\n`
 }
 
-function pemToDer(pem: string): Uint8Array {
-  return base64ToBytes(pem.replace(/-----[^-]*-----|\s/g, ''))
-}
-
-/** Unpadded base64url: survives a form-urlencoded container unescaped. */
-function base64UrlEncode(bytes: Uint8Array): string {
-  return bytesToBase64(bytes)
+/** Canonicalizes PEM or base64-encoded DER to unpadded base64url. */
+export function normalizeDer64(value: string): string {
+  return value
+    .replace(/-----[^-]*-----|\s/g, '')
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '')
+}
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  return normalizeDer64(bytesToBase64(bytes))
 }
 
 export function bytesToBase64(bytes: Uint8Array): string {
