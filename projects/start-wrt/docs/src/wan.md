@@ -46,7 +46,7 @@ Configure which DNS servers the router uses to resolve domain names.
 - **Custom** — Specify your own DNS servers. Up to three servers are supported (Primary required, Secondary and Tertiary optional). Each server has a **Secure (DoH)** toggle to enable DNS-over-HTTPS encryption for that server.
 
 > [!NOTE]
-> Not all DNS servers support DoH. Common servers that do include Cloudflare (`1.1.1.1`), Google (`8.8.8.8`), and Quad9 (`9.9.9.9`).
+> Not all DNS servers support DoH. Common servers that do include Cloudflare (`1.1.1.1`) and Google (`8.8.8.8`).
 
 > [!TIP]
 > Using privacy-focused DNS providers can improve both privacy and performance compared to your ISP's default DNS servers. Individual [Security Profiles](security-profiles.md) can override these DNS settings with their own Custom DNS configuration.
