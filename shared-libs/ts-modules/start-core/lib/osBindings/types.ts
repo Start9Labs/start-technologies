@@ -990,7 +990,15 @@ export type TaskTrigger = z.output<typeof schemas.TaskTrigger>
 export type TaskTriggerInput = z.input<typeof schemas.TaskTrigger>
 export type TestSmtpParams = z.output<typeof schemas.TestSmtpParams>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
+
+/**
+ * A named publisher with independent service-package and OS-update trust.
+ */
 export type TrustedKey = z.output<typeof schemas.TrustedKey>
+
+/**
+ * A named publisher with independent service-package and OS-update trust.
+ */
 export type TrustedKeyInput = z.input<typeof schemas.TrustedKey>
 export type UmountParams = z.output<typeof schemas.UmountParams>
 export type UmountParamsInput = z.input<typeof schemas.UmountParams>

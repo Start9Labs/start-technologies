@@ -1124,9 +1124,18 @@ export const ShutdownParams: z.ZodObject<{
   id: 'ShutdownParams',
 })
 export const SideloadParams: z.ZodObject<{
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
   trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
-  trust: wire(z.boolean().optional(), z.boolean()),
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
 }).meta({
   id: 'SideloadParams',
 })
@@ -1527,12 +1536,29 @@ export const AddPublicDomainParams: z.ZodObject<{
 })
 export const AddTrustedKeyParams: z.ZodObject<{
   name: z.ZodString
+  /**
+   * At least one PEM-encoded Ed25519 public key.
+   */
   publicKeys: z.ZodArray<typeof AnyVerifyingKey>
+  /**
+   * New entries are enabled in this context and in the Marketplace.
+   */
   context: typeof TrustContext
 }> = /* @__PURE__ */ object({
   name: z.string(),
-  publicKeys: z.array(AnyVerifyingKey),
-  context: TrustContext,
+  /**
+   * At least one PEM-encoded Ed25519 public key.
+   */
+  publicKeys: z.array(AnyVerifyingKey).meta({
+    description: 'At least one PEM-encoded Ed25519 public key.',
+  }),
+  /**
+   * New entries are enabled in this context and in the Marketplace.
+   */
+  context: TrustContext.meta({
+    description:
+      'New entries are enabled in this context and in the Marketplace.',
+  }),
 }).meta({
   id: 'AddTrustedKeyParams',
 })
@@ -3220,20 +3246,38 @@ export const InstallParams: z.ZodObject<{
   registry: z.ZodString
   id: typeof PackageId
   version: typeof Version
+  /**
+   * Additional signer requirements checked before starting installation.
+   */
   acceptSigners: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
     z.ZodNullable<typeof AcceptSigners>
   >
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
   trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   registry: z.string(),
   id: PackageId,
   version: Version,
+  /**
+   * Additional signer requirements checked before starting installation.
+   */
   acceptSigners: wire(
     AcceptSigners.nullable().optional(),
     AcceptSigners.nullable(),
-  ),
-  trust: wire(z.boolean().optional(), z.boolean()),
+  ).meta({
+    description:
+      'Additional signer requirements checked before starting installation.',
+  }),
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
 }).meta({
   id: 'InstallParams',
 })
@@ -3577,6 +3621,9 @@ export const UpdateSystemParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
     z.ZodNullable<typeof AcceptSigners>
   >
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
   trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   targetVersion: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -3595,7 +3642,13 @@ export const UpdateSystemParams: z.ZodObject<{
     description:
       'Additional signer requirements checked before starting the update.',
   }),
-  trust: wire(z.boolean().optional(), z.boolean()),
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
   targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
   progress: wire(z.boolean().optional(), z.boolean()),
 }).meta({

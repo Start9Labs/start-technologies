@@ -12,12 +12,15 @@ use crate::update::signers::{TrustedOsUpdateSigner, TrustedOsUpdateSigners, init
 pub type TrustedKeys = BTreeMap<InternedString, TrustedKey>;
 pub const START9: &str = "start9";
 
+/// A named publisher with independent service-package and OS-update trust.
 #[derive(Clone, Debug, Deserialize, Serialize, HasModel, VisitFields, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct TrustedKey {
     pub name: String,
+    /// PEM-encoded Ed25519 public keys.
     pub public_keys: Vec<AnyVerifyingKey>,
+    /// False for the protected Start9 entry.
     pub removable: bool,
     pub marketplace: bool,
     pub os: bool,
@@ -166,7 +169,9 @@ pub fn api<C: Context>() -> ParentHandler<C> {
 #[serde(rename_all = "camelCase")]
 pub struct AddTrustedKeyParams {
     pub name: String,
+    /// At least one PEM-encoded Ed25519 public key.
     pub public_keys: Vec<AnyVerifyingKey>,
+    /// New entries are enabled in this context and in the Marketplace.
     pub context: TrustContext,
 }
 

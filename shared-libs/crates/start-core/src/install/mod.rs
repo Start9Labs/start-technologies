@@ -121,7 +121,9 @@ pub struct InstallParams {
     registry: Url,
     id: PackageId,
     version: VersionString,
+    /// Additional signer requirements checked before starting installation.
     pub accept_signers: Option<AcceptSigners>,
+    /// Accepts an untrusted signer without skipping signature or integrity verification.
     #[serde(default)]
     pub trust: bool,
 }
@@ -197,6 +199,7 @@ pub async fn install(
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct SideloadParams {
+    /// Accepts an untrusted signer without skipping signature or integrity verification.
     #[serde(default)]
     trust: bool,
     #[visit(ts(skip))]

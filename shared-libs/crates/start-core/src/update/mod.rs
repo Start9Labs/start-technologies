@@ -58,6 +58,7 @@ pub struct UpdateSystemParams {
     /// Additional signer requirements checked before starting the update.
     #[arg(skip)]
     pub accept_signers: Option<AcceptSigners>,
+    /// Accepts an untrusted signer without skipping signature or integrity verification.
     #[arg(long, help = "help.arg.trust")]
     #[serde(default)]
     pub trust: bool,

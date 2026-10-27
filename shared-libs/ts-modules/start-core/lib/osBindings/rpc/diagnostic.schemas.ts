@@ -39,6 +39,9 @@ export const CapabilityVerdict: z.ZodObject<{
   id: 'CapabilityVerdict',
 })
 export const DiagnosticUpdateSystemParams: z.ZodObject<{
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
   trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   targetVersion: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -46,7 +49,13 @@ export const DiagnosticUpdateSystemParams: z.ZodObject<{
   >
   progress: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
-  trust: wire(z.boolean().optional(), z.boolean()),
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
   targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
   progress: wire(z.boolean().optional(), z.boolean()),
 }).meta({

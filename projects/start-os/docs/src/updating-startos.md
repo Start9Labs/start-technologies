@@ -25,23 +25,11 @@
 
 A browser page left open during the update displays **Refresh Needed** when the server returns. Select **Refresh** to open the updated interface. If an installed StartOS app still shows the previous interface afterwards, remove and reinstall the app.
 
-## Trusted update signers
+## Trusted Update Signers
 
-Trusted OS update signers are stored on your server as public keys with labels. New installations and the migration initially trust drbonez, matthill, and Start9. Changes persist across restarts; removing a key, including all keys, does not restore the defaults.
+Open **🗝️ Manage trusted keys** from the **Software Update** card's overflow menu to choose which publishers can sign OS updates. These entries are shared with the Marketplace, but the OS-update switches are independent. See [Trusted Keys](trusted-keys.md) for defaults, adding keys, migration behavior, and CLI management.
 
-Manage them using the CLI:
-
-```sh
-start-cli server update-signers list
-start-cli server update-signers add "$(cat signer.pem)" --label "My release signer"
-start-cli server update-signers get "$(cat signer.pem)"
-start-cli server update-signers update "$(cat signer.pem)" --label "Renamed signer"
-start-cli server update-signers remove "$(cat signer.pem)"
-```
-
-Keys use PEM format and identify entries; `update` changes the label. To replace a key, add its replacement and remove the old key. Labels do not grant trust to a different key. The UI uses this list before starting an update, and the downloader requires a valid signature from the accepted keys. Normal CLI updates and browser-console calls that omit signer requirements still verify signatures but do not enforce the saved trust list.
-
-Diagnostic updates always require a valid signature from one of the built-in drbonez, matthill, or Start9 keys. Diagnostic mode cannot access the saved trust list.
+CLI OS updates enforce the saved OS-update trust policy unless explicitly overridden with `--trust`. Signature and integrity verification remain mandatory.
 
 ## Update by Re-flashing
 

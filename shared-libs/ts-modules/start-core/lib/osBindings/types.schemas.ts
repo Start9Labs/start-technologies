@@ -1470,9 +1470,18 @@ export const ShutdownParams: z.ZodObject<{
   id: 'ShutdownParams',
 })
 export const SideloadParams: z.ZodObject<{
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
   trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
-  trust: wire(z.boolean().optional(), z.boolean()),
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
 }).meta({
   id: 'SideloadParams',
 })
@@ -3946,20 +3955,42 @@ export const TestSmtpParams: z.ZodObject<{
 }).meta({
   id: 'TestSmtpParams',
 })
+
+/**
+ * A named publisher with independent service-package and OS-update trust.
+ */
 export const TrustedKey: z.ZodObject<{
   name: z.ZodString
+  /**
+   * PEM-encoded Ed25519 public keys.
+   */
   publicKeys: z.ZodArray<typeof AnyVerifyingKey>
+  /**
+   * False for the protected Start9 entry.
+   */
   removable: z.ZodBoolean
   marketplace: z.ZodBoolean
   os: z.ZodBoolean
 }> = /* @__PURE__ */ object({
   name: z.string(),
-  publicKeys: z.array(AnyVerifyingKey),
-  removable: z.boolean(),
+  /**
+   * PEM-encoded Ed25519 public keys.
+   */
+  publicKeys: z.array(AnyVerifyingKey).meta({
+    description: 'PEM-encoded Ed25519 public keys.',
+  }),
+  /**
+   * False for the protected Start9 entry.
+   */
+  removable: z.boolean().meta({
+    description: 'False for the protected Start9 entry.',
+  }),
   marketplace: z.boolean(),
   os: z.boolean(),
 }).meta({
   id: 'TrustedKey',
+  description:
+    'A named publisher with independent service-package and OS-update trust.',
 })
 export const UmountParams: z.ZodObject<{
   targetId: z.ZodCodec<
@@ -4358,20 +4389,38 @@ export const InstallParams: z.ZodObject<{
   registry: z.ZodString
   id: typeof PackageId
   version: typeof Version
+  /**
+   * Additional signer requirements checked before starting installation.
+   */
   acceptSigners: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
     z.ZodNullable<typeof AcceptSigners>
   >
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
   trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   registry: z.string(),
   id: PackageId,
   version: Version,
+  /**
+   * Additional signer requirements checked before starting installation.
+   */
   acceptSigners: wire(
     AcceptSigners.nullable().optional(),
     AcceptSigners.nullable(),
-  ),
-  trust: wire(z.boolean().optional(), z.boolean()),
+  ).meta({
+    description:
+      'Additional signer requirements checked before starting installation.',
+  }),
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
 }).meta({
   id: 'InstallParams',
 })
@@ -4882,6 +4931,9 @@ export const UpdateSystemParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
     z.ZodNullable<typeof AcceptSigners>
   >
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
   trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   targetVersion: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -4900,7 +4952,13 @@ export const UpdateSystemParams: z.ZodObject<{
     description:
       'Additional signer requirements checked before starting the update.',
   }),
-  trust: wire(z.boolean().optional(), z.boolean()),
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
   targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
   progress: wire(z.boolean().optional(), z.boolean()),
 }).meta({
