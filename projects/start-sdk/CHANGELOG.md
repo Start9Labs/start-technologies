@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.1.1]
+
+### Fixed
+
+- Fixed subcontainer startup from an image with no `/proc`, such as one built `FROM scratch`. Rebuild packages with this SDK version to receive the fix.
+
+- Fixed subcontainer startup with a symlinked `/etc/resolv.conf` and preserved other files linked to an image's resolver. Rebuild packages with this SDK version to receive the fix.
+
 ## [3.1.0]
 
 ### Added

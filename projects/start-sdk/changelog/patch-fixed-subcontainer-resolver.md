@@ -1,1 +1,0 @@
-- Fixed subcontainer startup with a symlinked `/etc/resolv.conf` and preserved other files linked to an image's resolver. Rebuild packages with this SDK version to receive the fix.

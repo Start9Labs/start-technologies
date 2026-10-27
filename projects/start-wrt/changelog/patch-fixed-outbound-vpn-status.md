@@ -1,1 +1,0 @@
-- An outbound VPN's detail page shows its tunnel's real state — **Connected**, **Idle**, **Not responding**, or **Disabled** — with the time of its last handshake, instead of reading **Connected** whenever the VPN is enabled. **Not responding** explains that profiles using the VPN have no internet until its server answers, and how to get them back online.

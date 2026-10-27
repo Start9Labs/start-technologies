@@ -1,2 +1,0 @@
-- The LAN IPv6 page shows the prefix size your ISP actually delegated, and checks the LAN prefix length against it rather than assuming a `/48`. A `/64` LAN prefix is now accepted on a `/64` delegation, and a LAN prefix too short for the delegation is shown at the length the router actually uses.
-- LAN IPv6 prefix lengths outside `/48` to `/64`, or shorter than the delegated prefix, are now rejected from the CLI as well as the web interface.
