@@ -47,7 +47,6 @@ import { ADD_TRUSTED_KEY } from './form'
     @if (trust.keys(); as keys) {
       @for (entry of keys | keyvalue: compareKeyrings; track entry.key) {
         <div tuiCell>
-          <span tuiTitle>{{ entry.value.name }}</span>
           <input
             #toggleControl="ngModel"
             tuiSwitch
@@ -57,6 +56,7 @@ import { ADD_TRUSTED_KEY } from './form'
             [disabled]="saving()"
             (ngModelChange)="toggle(entry.key, $event, toggleControl)"
           />
+          <span tuiTitle>{{ entry.value.name }}</span>
           @if (entry.value.removable) {
             <button
               tuiIconButton
