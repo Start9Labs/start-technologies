@@ -113,8 +113,8 @@ pub async fn add_version(
                 .as_versions_mut()
                 .upsert(&version, || Ok(OsVersionInfo::default()))?
                 .mutate(|i| {
-                    i.release_notes = release_notes;
                     i.headline = headline;
+                    i.release_notes = release_notes;
                     i.source_version = source_version;
                     i.authorized.extend(signer);
                     Ok(())

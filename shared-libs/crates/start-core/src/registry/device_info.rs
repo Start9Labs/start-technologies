@@ -261,9 +261,9 @@ impl DeviceInfoMiddleware {
             };
             if let Some(device_info) = device_info {
                 self.legacy_signatures |= reads_legacy_signatures(&device_info.os.version)?;
-                self.legacy_pem = startwrt || reads_pem(&device_info.os.version)?;
+                self.legacy_pem = startwrt || predates_0_4_0_5(&device_info.os.version)?;
+                self.legacy_os_notes = self.legacy_pem;
                 self.inline_icons = reads_inline_icons(&device_info.os.version)?;
-                self.legacy_os_notes |= startwrt || reads_legacy_os_notes(&device_info.os.version)?;
                 if metadata.get_device_info {
                     request.params["__DeviceInfo_device_info"] = to_value(&device_info)?;
                     self.device_info = Some(device_info);
@@ -273,8 +273,8 @@ impl DeviceInfoMiddleware {
             let params: GetOsVersionParams = from_value(request.params.clone())?;
             if let Some(version) = params.source_version {
                 self.legacy_signatures |= reads_legacy_signatures(&version)?;
-                self.legacy_pem = startwrt || reads_pem(&version)?;
-                self.legacy_os_notes |= startwrt || reads_legacy_os_notes(&version)?;
+                self.legacy_pem = startwrt || predates_0_4_0_5(&version)?;
+                self.legacy_os_notes = self.legacy_pem;
             }
         }
         if request.method.as_str().starts_with("db.") {
@@ -288,11 +288,7 @@ impl DeviceInfoMiddleware {
     }
 }
 
-fn reads_pem(version: &Version) -> Result<bool, Error> {
-    Ok(version < &"0.4.0.5".parse::<Version>()?)
-}
-
-fn reads_legacy_os_notes(version: &Version) -> Result<bool, Error> {
+fn predates_0_4_0_5(version: &Version) -> Result<bool, Error> {
     Ok(version < &"0.4.0.5".parse::<Version>()?)
 }
 

@@ -235,7 +235,9 @@ function sourceFragments(product, ref) {
 }
 
 function originTags() {
-  return releaseTags(git('ls-remote', '--tags', 'origin'))
+  return memo('origin tags', () =>
+    releaseTags(git('ls-remote', '--tags', 'origin')),
+  )
 }
 
 function localTags() {
@@ -268,17 +270,31 @@ function compareText(a, b) {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
+const memos = new Map()
+
+function memo(key, compute) {
+  if (!memos.has(key)) memos.set(key, compute())
+  return memos.get(key)
+}
+
 function originReleases(ref, product = null, tags = originTags()) {
-  const ordered = decodeUtf8(git('rev-list', '--topo-order', '--reverse', ref))
-    .trim()
-    .split('\n')
-  const positions = new Map(ordered.map((commit, index) => [commit, index]))
+  const head = decodeUtf8(
+    git('rev-parse', '--verify', `${ref}^{commit}`),
+  ).trim()
+  const positions = memo(`rev-list ${head}`, () => {
+    const ordered = decodeUtf8(
+      git('rev-list', '--topo-order', '--reverse', head),
+    )
+      .trim()
+      .split('\n')
+    return new Map(ordered.map((commit, index) => [commit, index]))
+  })
   const releases = []
   for (const [tag, sha] of tags) {
     if (product && !tag.startsWith(`${basename(product)}/v`)) continue
-    const commit = decodeUtf8(
-      git('rev-parse', '--verify', `${sha}^{commit}`),
-    ).trim()
+    const commit = memo(`commit ${sha}`, () =>
+      decodeUtf8(git('rev-parse', '--verify', `${sha}^{commit}`)).trim(),
+    )
     if (!positions.has(commit)) continue
     const [name, version] = tag.split('/v')
     const path = `projects/${name}`
@@ -286,7 +302,9 @@ function originReleases(ref, product = null, tags = originTags()) {
       product: path,
       version,
       commit,
-      fragments: taggedFragments(path, commit),
+      fragments: memo(`fragments ${path} ${commit}`, () =>
+        taggedFragments(path, commit),
+      ),
     })
   }
   return releases.sort(
@@ -679,6 +697,10 @@ function releaseNotes(product, version, ref) {
 }
 
 function releaseNoteLabels(ref) {
+  return memo(`labels ${ref ?? ''}`, () => loadReleaseNoteLabels(ref))
+}
+
+function loadReleaseNoteLabels(ref) {
   const path = 'shared-libs/crates/start-core/locales/release-notes.json'
   const tagged = ref ? decodeUtf8(sourceFile(path, ref)) : ''
   const packaged = new URL(`../${path}`, import.meta.url)
@@ -715,12 +737,9 @@ function changelogLink(product, version, ref, locale, labels) {
   return label.replaceAll('%{version}', version).replaceAll('%{url}', url)
 }
 
-function placeChangelogLink(notes, link, heading) {
+function placeChangelogLink(notes, link) {
   const lines = notes.split('\n')
-  if (lines.at(-1) === '') lines.pop()
   const output = []
-  let inHighlights = false
-  let placed = false
   let dropped = false
   for (const line of lines) {
     if (line.startsWith('**[Full changelog')) {
@@ -731,43 +750,10 @@ function placeChangelogLink(notes, link, heading) {
       dropped = false
       if (!line) continue
     }
-    if (line.startsWith('## ')) {
-      if (inHighlights) {
-        output.push(link, '')
-        placed = true
-        inHighlights = false
-      }
-      if (line.replace(/\r$/, '') === heading?.replace(/\r$/, ''))
-        inHighlights = true
-    }
     output.push(line)
   }
-  if (!placed) output.push(...(lines.length ? [''] : []), link)
-  return `${output.join('\n')}\n`
-}
-
-function highlightsHeading(framing) {
-  const marker = framing.indexOf(HIGHLIGHTS_MARKER)
-  return marker < 0
-    ? null
-    : [...framing.slice(0, marker).matchAll(/^## [^\r\n]+/gm)].at(-1)?.[0]
-}
-
-function registryHighlightsHeading(product, version, ref, locale, notes) {
-  if (locale === ENGLISH) return /^## highlights[^\r\n]*/im.exec(notes)?.[0]
-  const path = notesPath(product, version, locale)
-  const authored = highlightsHeading(decodeUtf8(sourceFile(path, ref)))
-  if (authored) return authored
-  const tagged = spawnSync(
-    'git',
-    ['show', `refs/tags/${basename(product)}/v${version}:${path}`],
-    { maxBuffer: Infinity },
-  )
-  const archived =
-    tagged.status === 0 ? highlightsHeading(decodeUtf8(tagged.stdout)) : null
-  return (
-    archived ?? HIGHLIGHTS.exec(notes)?.[0] ?? /^## [^\r\n]+/m.exec(notes)?.[0]
-  )
+  const body = output.join('\n').trimEnd()
+  return `${body}${body ? '\n\n' : ''}${link}\n`
 }
 
 function registryNotes(product, version, ref, changelogRef) {
@@ -786,13 +772,6 @@ function registryNotes(product, version, ref, changelogRef) {
   }
   const composed = Object.fromEntries(
     Object.entries(bundle).map(([locale, notes]) => {
-      const heading = registryHighlightsHeading(
-        product,
-        version,
-        ref,
-        locale,
-        notes,
-      )
       return [
         locale,
         placeChangelogLink(
@@ -801,7 +780,6 @@ function registryNotes(product, version, ref, changelogRef) {
             preUpdateNotes(product, version, ref, locale),
           ),
           changelogLink(product, version, changelogRef, locale, labels),
-          heading,
         ),
       ]
     }),

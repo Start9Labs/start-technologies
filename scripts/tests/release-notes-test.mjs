@@ -95,6 +95,9 @@ const excludes = (value, unexpected) =>
     `Unexpected ${JSON.stringify(unexpected)} in ${JSON.stringify(value)}`,
   )
 
+const linkLast = notes =>
+  assert.match(notes.trimEnd().split('\n').at(-1), /^\*\*\[.+\]\(.+\)\*\*/)
+
 test('optional companion', t => {
   const { script, write } = releaseFixture(t)
   const without = script().stdout
@@ -103,9 +106,7 @@ test('optional companion', t => {
   write(`projects/start-sdk/release-notes/${VERSION}.pre-update.md`, PRE_UPDATE)
   const combined = script().stdout
   assert.equal(combined, PRE_UPDATE + '\n\n' + without)
-  assert.ok(
-    combined.indexOf('Full changelog') < combined.indexOf('## Important'),
-  )
+  linkLast(combined)
   assert.equal(combined.match(/Full changelog/g).length, 1)
   contains(combined, '/blob/fixture-ref/projects/start-sdk/CHANGELOG.md#123')
 })
@@ -1014,7 +1015,7 @@ test('registry payload composes localized notes, warnings, fallbacks and links',
   contains(english, 'Lede.')
   contains(english, 'Follow up.')
   contains(english, '/releases/tag/start-sdk/v1.2.3')
-  assert.ok(english.indexOf('Full changelog') < english.indexOf('## Important'))
+  linkLast(english)
   contains(translations.pl_PL, 'Wstęp.')
   contains(translations.pl_PL, 'Ważna uwaga.')
   contains(translations.pl_PL, '- Funkcja.')
@@ -1022,18 +1023,12 @@ test('registry payload composes localized notes, warnings, fallbacks and links',
   contains(translations.pl_PL, 'Polskie ostrzeżenie.')
   contains(translations.pl_PL, 'Pełna lista zmian')
   excludes(translations.pl_PL, 'Prepare first.')
-  assert.ok(
-    translations.pl_PL.indexOf('Pełna lista zmian') <
-      translations.pl_PL.indexOf('## Ważne'),
-  )
+  linkLast(translations.pl_PL)
   contains(translations.de_DE, PRE_UPDATE)
   contains(translations.de_DE, '- Feature.')
   contains(translations.de_DE, '- Another fix.')
   contains(translations.de_DE, 'Vollständiges Änderungsprotokoll')
-  assert.ok(
-    translations.de_DE.indexOf('Vollständiges') <
-      translations.de_DE.indexOf('## Wichtig'),
-  )
+  linkLast(translations.de_DE)
   contains(translations.es_ES, PRE_UPDATE)
   contains(translations.es_ES, 'Registro completo de cambios')
   contains(translations.fr_FR, 'Attention.')
@@ -1141,10 +1136,7 @@ test('registry and GitHub notes include localized Security without summary files
     contains(notes[locale], `## ${security}\n\n- ${body}`)
     contains(notes[locale], PRE_UPDATE)
     excludes(notes[locale], 'Internal security detail.')
-    assert.ok(
-      notes[locale].indexOf('](https://github.com/') <
-        notes[locale].indexOf(`## ${security}`),
-    )
+    linkLast(notes[locale])
   }
   assert.ok(
     !existsSync(join(root, `projects/start-sdk/release-notes/${VERSION}.md`)),
@@ -1391,7 +1383,7 @@ assert_metadata_matches_adopted
   contains(mismatch.stderr, 'release-note bundle')
 })
 
-test('archived localized Highlights retain their link position and source URL', t => {
+test('archived localized notes keep the changelog link last and its source URL', t => {
   const { root, env, write, script, run, git, commit } = releaseFixture(t)
   git('init', '-q')
   git('remote', 'add', 'origin', root)
@@ -1416,8 +1408,7 @@ test('archived localized Highlights retain their link position and source URL', 
   const archived = JSON.parse(script('registry-notes').stdout)
   const polish = archived.releaseNotes.pl_PL
   contains(polish, '/blob/HEAD/projects/start-sdk/CHANGELOG.md#123')
-  assert.ok(polish.indexOf('- Feature.') < polish.indexOf('Pełna lista zmian'))
-  assert.ok(polish.indexOf('Pełna lista zmian') < polish.indexOf('## Ważne'))
+  linkLast(polish)
   const pendingPolish = pending.releaseNotes.pl_PL
   contains(pendingPolish, 'Fragmenty pełnej listy zmian w wersji 1.2.3')
   contains(pendingPolish, '/tree/HEAD/projects/start-sdk/changelog')
@@ -1509,7 +1500,7 @@ enter_release_dir() { touch "${marker}"; }
     ])
 })
 
-test('historical CRLF English notes retain changelog link placement', t => {
+test('historical CRLF English notes keep the changelog link last', t => {
   const { write, script } = releaseFixture(t)
   write(
     `projects/start-sdk/release-notes/${VERSION}.md`,
@@ -1517,5 +1508,5 @@ test('historical CRLF English notes retain changelog link placement', t => {
   )
   const notes = script().stdout
   contains(notes, 'Lede.\r\n')
-  assert.ok(notes.indexOf('Full changelog') < notes.indexOf('## Important'))
+  linkLast(notes)
 })
