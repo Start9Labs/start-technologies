@@ -23,7 +23,7 @@ pub mod push;
 
 pub fn notification<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("push", push::push::<C>())
+        .subcommand("push", push::push::<C>().no_cli())
         .subcommand(
             "list",
             from_fn_async(list)

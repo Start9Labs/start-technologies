@@ -263,6 +263,15 @@ fn validates_real_keys_and_permits_private_endpoints() {
 }
 
 #[test]
+fn push_rpc_group_is_absent_from_cli() {
+    use rpc_toolkit::CliBindings;
+
+    let command = crate::notifications::notification::<crate::context::CliContext>().cli_command();
+    assert!(command.find_subcommand("push").is_none());
+    assert!(command.find_subcommand("list").is_some());
+}
+
+#[test]
 fn empty_titles_remain_visible_and_canonical_endpoints_share_one_identity() {
     let payload: serde_json::Value = serde_json::from_str(&payload("", "body").unwrap()).unwrap();
     assert_eq!(payload["notification"]["title"], "StartOS");
