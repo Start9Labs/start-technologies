@@ -485,6 +485,18 @@ export const Epp: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   description:
     'Selects how aggressively an EPP-capable CPU pursues performance.',
 })
+export const FormatDiskParams: z.ZodObject<{
+  disk: z.ZodString
+  label: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  disk: z.string(),
+  label: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'FormatDiskParams',
+})
 export const ForwardTarget: z.ZodObject<{
   target: z.ZodString
   target_prefix: z.ZodInt
@@ -4331,6 +4343,21 @@ export const Api = {
     disk: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
+        format: {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            FormatDiskParams,
+          ),
+          _RETURN: /* @__PURE__ */ z.string(),
+        },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
