@@ -1,0 +1,1 @@
+- Pakiety systemowe kontenerów usług zawierają dostępne poprawki bezpieczeństwa Debiana, w tym poprawkę dekodera Brotli.

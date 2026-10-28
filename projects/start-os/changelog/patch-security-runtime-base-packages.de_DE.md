@@ -1,0 +1,1 @@
+- Die Systempakete der Dienstcontainer enthalten die verfügbaren Debian-Sicherheitskorrekturen, einschließlich der Korrektur für den Brotli-Decoder.
