@@ -727,6 +727,49 @@ export const GitHash: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 export const Governor: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Governor',
 })
+
+/**
+ * An original public-key export and its self-certified identity claims.
+ */
+export const GpgPublicKeyExport: z.ZodObject<{
+  /**
+   * Original armor, preserving all certificate packets and headers.
+   */
+  armored: z.ZodString
+  /**
+   * Primary-key fingerprints of the certificates in this export.
+   */
+  fingerprints: z.ZodArray<z.ZodString>
+  /**
+   * Self-certified user IDs containing names, comments, and email addresses.
+   */
+  userIds: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({
+  /**
+   * Original armor, preserving all certificate packets and headers.
+   */
+  armored: z.string().meta({
+    description:
+      'Original armor, preserving all certificate packets and headers.',
+  }),
+  /**
+   * Primary-key fingerprints of the certificates in this export.
+   */
+  fingerprints: z.array(z.string()).meta({
+    description: 'Primary-key fingerprints of the certificates in this export.',
+  }),
+  /**
+   * Self-certified user IDs containing names, comments, and email addresses.
+   */
+  userIds: z.array(z.string()).meta({
+    description:
+      'Self-certified user IDs containing names, comments, and email addresses.',
+  }),
+}).meta({
+  id: 'GpgPublicKeyExport',
+  description:
+    'An original public-key export and its self-certified identity claims.',
+})
 export const Guid: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Guid',
 })
@@ -3986,6 +4029,13 @@ export const TrustedKey: z.ZodObject<{
    */
   publicKeys: z.ZodArray<typeof AnyVerifyingKey>
   /**
+   * Original GPG exports; signing trust is determined by `public_keys`.
+   */
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
+  /**
    * False for built-in keyrings.
    */
   removable: z.ZodBoolean
@@ -3999,6 +4049,16 @@ export const TrustedKey: z.ZodObject<{
   publicKeys: z.array(AnyVerifyingKey).meta({
     description:
       'Ed25519 public keys encoded as padded standard Base64 DER in canonical order.',
+  }),
+  /**
+   * Original GPG exports; signing trust is determined by `public_keys`.
+   */
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ).meta({
+    description:
+      'Original GPG exports; signing trust is determined by `public_keys`.',
   }),
   /**
    * False for built-in keyrings.

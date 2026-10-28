@@ -1,14 +1,14 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 use crate::context::RpcContext;
 use crate::prelude::*;
 use crate::registry::signer::AcceptSigners;
-use crate::sign::gpg::parse_public_keys;
+use crate::sign::gpg::{GpgPublicKeyExport, ImportedPublicKeys, parse_public_keys};
 use crate::sign::{AnyVerifyingKey, canonicalize_verifying_keys};
-use crate::update::signers::{TrustedOsUpdateSigner, TrustedOsUpdateSigners, initial_signers};
+use crate::update::signers::{TrustedOsUpdateSigner, TrustedOsUpdateSigners};
 use crate::util::new_guid;
 
 pub type TrustedKeys = BTreeMap<InternedString, TrustedKey>;
@@ -21,12 +21,10 @@ pub const START9: &str = "start9";
 pub struct TrustedKey {
     pub name: String,
     /// Ed25519 public keys encoded as padded standard Base64 DER in canonical order.
-    #[serde(serialize_with = "serialize_public_keys")]
-    #[visit(
-        output_wire = "Vec<AnyVerifyingKey>",
-        type_attributes(visit::output_wire)
-    )]
-    pub public_keys: HashSet<AnyVerifyingKey>,
+    pub public_keys: BTreeSet<AnyVerifyingKey>,
+    /// Original GPG exports; signing trust is determined by `public_keys`.
+    #[serde(default)]
+    pub gpg_exports: BTreeSet<GpgPublicKeyExport>,
     /// False for built-in keyrings.
     pub removable: bool,
     pub marketplace: bool,
@@ -37,15 +35,6 @@ impl TrustedKey {
     fn trusts_os_key(&self, key: &AnyVerifyingKey) -> bool {
         self.os && self.public_keys.contains(key)
     }
-}
-
-fn serialize_public_keys<S: Serializer>(
-    keys: &HashSet<AnyVerifyingKey>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    let mut keys = keys.iter().collect::<Vec<_>>();
-    keys.sort_unstable_by_key(|key| key.interned_der64());
-    keys.serialize(serializer)
 }
 
 rpc_toolkit::reflect_ts!(TrustedKey);
@@ -100,22 +89,57 @@ pub async fn required(
     ))
 }
 
+fn initial_signer_certificates() -> impl Iterator<Item = (&'static str, ImportedPublicKeys)> {
+    [
+        ("drbonez", include_str!("trusted_keys/initial/aiden.asc")),
+        (
+            "matthill",
+            include_str!("trusted_keys/initial/matthill.asc"),
+        ),
+        ("Start9", include_str!("trusted_keys/initial/dev.asc")),
+    ]
+    .into_iter()
+    .map(|(label, armored)| (label, parse_public_keys(&[armored.into()]).unwrap()))
+}
+
+pub fn initial_signers() -> TrustedOsUpdateSigners {
+    initial_signer_certificates()
+        .flat_map(|(label, imported)| {
+            imported.keys.into_iter().map(move |key| {
+                (
+                    key.interned_der64(),
+                    TrustedOsUpdateSigner {
+                        label: label.to_owned(),
+                    },
+                )
+            })
+        })
+        .collect()
+}
+
 pub fn initial_trusted_keys() -> TrustedKeys {
+    let mut start9 = ImportedPublicKeys::default();
+    for (_, imported) in initial_signer_certificates() {
+        start9.keys.extend(imported.keys);
+        start9.gpg_exports.extend(imported.gpg_exports);
+    }
     BTreeMap::from([
         (START9.into(), TrustedKey {
             name: "Start9".into(),
             removable: false,
-            public_keys: initial_signers().into_keys().map(|key| key.parse().unwrap()).collect(),
+            public_keys: start9.keys,
+            gpg_exports: start9.gpg_exports,
             marketplace: true,
             os: true,
         }),
         ("start9-alpha".into(), TrustedKey {
             name: "Start9 Alpha".into(),
             removable: false,
-            public_keys: HashSet::from([
+            public_keys: BTreeSet::from([
                 "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
                 "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
             ]),
+            gpg_exports: BTreeSet::new(),
             marketplace: false,
             os: false,
         }),
@@ -149,7 +173,7 @@ pub fn migrate_signers(legacy: TrustedOsUpdateSigners) -> Result<TrustedKeys, Er
     let grouped = if start9.os {
         start9.public_keys.clone()
     } else {
-        HashSet::new()
+        BTreeSet::new()
     };
     for (key, signer) in legacy {
         let public_key: AnyVerifyingKey = key.parse()?;
@@ -158,7 +182,8 @@ pub fn migrate_signers(legacy: TrustedOsUpdateSigners) -> Result<TrustedKeys, Er
                 key,
                 TrustedKey {
                     name: signer.label,
-                    public_keys: HashSet::from([public_key]),
+                    public_keys: BTreeSet::from([public_key]),
+                    gpg_exports: BTreeSet::new(),
                     removable: true,
                     marketplace: true,
                     os: true,
@@ -247,18 +272,20 @@ pub fn add_group(
     keys: &mut TrustedKeys,
     id: InternedString,
     name: String,
-    public_keys: Vec<AnyVerifyingKey>,
+    public_keys: impl Into<ImportedPublicKeys>,
     context: TrustContext,
 ) -> Result<(), Error> {
     let name = group_name(name)?;
-    if public_keys.is_empty() {
+    let imported = public_keys.into();
+    if imported.keys.is_empty() {
         return Err(invalid_group());
     }
     keys.insert(
         id,
         TrustedKey {
             name,
-            public_keys: public_keys.into_iter().collect(),
+            public_keys: imported.keys,
+            gpg_exports: imported.gpg_exports,
             removable: true,
             marketplace: true,
             os: matches!(context, TrustContext::Os),
@@ -435,6 +462,44 @@ mod tests {
     }
 
     #[test]
+    fn seed_certificates_preserve_the_three_approved_signers_and_all_identities() {
+        let keys = initial_trusted_keys();
+        let start9 = &keys[START9];
+        let expected: BTreeSet<AnyVerifyingKey> = [
+            "MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=",
+            "MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=",
+            "MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=",
+        ]
+        .into_iter()
+        .map(|key| key.parse().unwrap())
+        .collect();
+        assert_eq!(start9.public_keys, expected);
+        assert_eq!(start9.gpg_exports.len(), 3);
+        let identities: BTreeSet<_> = start9
+            .gpg_exports
+            .iter()
+            .flat_map(|export| export.user_ids.iter().map(String::as_str))
+            .collect();
+        assert_eq!(
+            identities,
+            BTreeSet::from([
+                "Matt Hill <matthill@start9.com>",
+                "Aiden McClelland <me@drbonez.dev>",
+                "Aiden McClelland <aiden@mcclelland.family>",
+                "Aiden McClelland <aiden@start9.com>",
+                "Aiden McClelland <aiden@tenletters.net>",
+                "Start9 <security@start9.com>",
+                "Start9 <dev@start9.com>",
+            ])
+        );
+        assert!(keys["start9-alpha"].gpg_exports.is_empty());
+        assert_eq!(
+            from_value::<TrustedKeys>(to_value(&keys).unwrap()).unwrap(),
+            keys
+        );
+    }
+
+    #[test]
     fn stored_arrays_deserialize_as_unique_key_sets() {
         let key = "MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=";
         let group: TrustedKey = from_value(imbl_value::json!({
@@ -442,7 +507,8 @@ mod tests {
             "removable": true, "marketplace": true, "os": false,
         }))
         .unwrap();
-        assert_eq!(group.public_keys, HashSet::from([key.parse().unwrap()]));
+        assert!(group.gpg_exports.is_empty());
+        assert_eq!(group.public_keys, BTreeSet::from([key.parse().unwrap()]));
         assert_eq!(
             to_value(&group).unwrap()["publicKeys"],
             imbl_value::json!([key])
@@ -451,8 +517,8 @@ mod tests {
 
     #[test]
     fn public_key_set_serialization_is_canonical_across_reads() {
-        let first = "MCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=";
-        let second = "MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=";
+        let first = "MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=";
+        let second = "MCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=";
         let group: TrustedKey = from_value(imbl_value::json!({
             "name": "Publisher", "publicKeys": [second, first, second],
             "removable": true, "marketplace": true, "os": false,
@@ -491,9 +557,43 @@ mod tests {
         .unwrap();
         let saved = to_value(&keys).unwrap();
         assert_eq!(saved["imported"]["publicKeys"], imbl_value::json!([key]));
+        assert_eq!(keys["imported"].gpg_exports.len(), 1);
+        assert!(
+            !keys["imported"]
+                .gpg_exports
+                .first()
+                .unwrap()
+                .user_ids
+                .is_empty()
+        );
         assert_eq!(from_value::<TrustedKeys>(saved).unwrap(), keys);
         assert!(keys["imported"].marketplace);
         assert!(!keys["imported"].os);
+    }
+
+    #[test]
+    fn retaining_a_certificate_does_not_reenable_removed_signing_keys() {
+        let source = include_str!("sign/fixtures/ed25519-signers.asc");
+        let imported = parse_public_keys(&[source.into()]).unwrap();
+        let removed = imported.keys.first().unwrap().clone();
+        let mut keys = TrustedKeys::new();
+        add_group(
+            &mut keys,
+            "imported".into(),
+            "Publisher".into(),
+            imported,
+            TrustContext::Os,
+        )
+        .unwrap();
+        legacy_remove(&mut keys, &removed).unwrap();
+        let restored: TrustedKeys = from_value(to_value(&keys).unwrap()).unwrap();
+        let group = &restored["imported"];
+        assert_eq!(group.public_keys.len(), 1);
+        assert!(!group.public_keys.contains(&removed));
+        for context in [TrustContext::Marketplace, TrustContext::Os] {
+            assert!(!enabled_keys(&restored, context).contains(&removed));
+        }
+        assert_eq!(group.gpg_exports.first().unwrap().armored, source);
     }
 
     #[test]
@@ -556,7 +656,7 @@ mod tests {
             )
             .unwrap();
             assert_eq!(keys[id].name, "custom");
-            assert_eq!(keys[id].public_keys, HashSet::from([public_key.clone()]));
+            assert_eq!(keys[id].public_keys, BTreeSet::from([public_key.clone()]));
             assert!(keys[id].marketplace);
             assert_eq!(keys[id].os, os);
         }

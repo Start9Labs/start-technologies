@@ -132,6 +132,16 @@ export type GitHash = z.output<typeof schemas.GitHash>
 export type GitHashInput = z.input<typeof schemas.GitHash>
 export type Governor = z.output<typeof schemas.Governor>
 export type GovernorInput = z.input<typeof schemas.Governor>
+
+/**
+ * An original public-key export and its self-certified identity claims.
+ */
+export type GpgPublicKeyExport = z.output<typeof schemas.GpgPublicKeyExport>
+
+/**
+ * An original public-key export and its self-certified identity claims.
+ */
+export type GpgPublicKeyExportInput = z.input<typeof schemas.GpgPublicKeyExport>
 export type Guid = z.output<typeof schemas.Guid>
 export type GuidInput = z.input<typeof schemas.Guid>
 export type HealthCheckId = z.output<typeof schemas.HealthCheckId>

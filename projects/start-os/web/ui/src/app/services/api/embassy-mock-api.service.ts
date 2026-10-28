@@ -288,6 +288,7 @@ export class MockApiService extends ApiService {
       const id = crypto.randomUUID()
       const value: T.TrustedKey = {
         name,
+        gpgExports: [],
         publicKeys: parsePublicKeys(publicKeys.join('\n')).map(key =>
           auth.normalizeDer64(parsePemPublicKey(key)),
         ),

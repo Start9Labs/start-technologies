@@ -56,6 +56,7 @@ export const mockPatchData: DataModel = {
     trustedKeys: {
       start9: {
         name: 'Start9',
+        gpgExports: [],
         publicKeys: [
           'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=',
           'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
@@ -67,6 +68,7 @@ export const mockPatchData: DataModel = {
       },
       'start9-alpha': {
         name: 'Start9 Alpha',
+        gpgExports: [],
         publicKeys: [
           'MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=',
           'MCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=',

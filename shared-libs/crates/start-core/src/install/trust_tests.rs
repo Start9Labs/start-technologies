@@ -32,7 +32,8 @@ fn package_commitment_requires_an_enabled_marketplace_signer() {
         TrustedKey {
             name: "custom".into(),
             removable: true,
-            public_keys: std::collections::HashSet::from([public]),
+            public_keys: std::collections::BTreeSet::from([public]),
+            gpg_exports: Default::default(),
             marketplace: false,
             os: true,
         },

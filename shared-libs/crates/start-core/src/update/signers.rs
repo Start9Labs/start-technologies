@@ -8,6 +8,7 @@ use crate::context::{CliContext, RpcContext};
 use crate::prelude::*;
 use crate::registry::signer::AcceptSigners;
 use crate::sign::AnyVerifyingKey;
+pub use crate::trusted_keys::initial_signers;
 use crate::trusted_keys::{legacy_add, legacy_remove, legacy_update, os_signers};
 use crate::util::serde::HandlerExtSerde;
 
@@ -22,23 +23,6 @@ pub struct TrustedOsUpdateSigner {
 
 rpc_toolkit::reflect_ts!(TrustedOsUpdateSigner);
 rpc_toolkit::ts_export!(TrustedOsUpdateSigner, namespaces = [""]);
-
-pub fn initial_signers() -> TrustedOsUpdateSigners {
-    [
-        ("drbonez", "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=\n-----END PUBLIC KEY-----\n"),
-        ("matthill", "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=\n-----END PUBLIC KEY-----\n"),
-        // Ed25519 primary key from apt/start9.gpg.
-        ("Start9", "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=\n-----END PUBLIC KEY-----\n"),
-    ]
-    .into_iter()
-    .map(|(label, key)| {
-        (
-            key.parse::<AnyVerifyingKey>().unwrap().interned_der64(),
-            TrustedOsUpdateSigner { label: label.to_owned() },
-        )
-    })
-    .collect()
-}
 
 pub fn initial_signer_policy() -> AcceptSigners {
     AcceptSigners::Any(

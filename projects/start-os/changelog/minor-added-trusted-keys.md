@@ -2,6 +2,6 @@
 user-facing: true
 ---
 
-- Manage named trusted keyrings from the Marketplace sidebar and Software Update menu, with shared entries and independent service-package and OS-update trust switches. Import Ed25519 public keys in PEM or armored GPG format, honoring revocations present in GPG exports. Built-in keyrings stay first and can be disabled but not deleted.
+- Manage named trusted keyrings from the Marketplace sidebar and Software Update menu, with shared entries and independent service-package and OS-update trust switches. Import Ed25519 public keys in PEM or armored GPG format, honoring revocations present in GPG exports and retaining full certificates with names and email addresses. Built-in keyrings stay first and can be disabled but not deleted.
 - Show trusted package signers, block untrusted Marketplace installs, and require explicit confirmation before sideloading untrusted software.
 - Require trusted signers for CLI package installs and OS updates by default; `--trust` explicitly overrides signer trust while preserving signature and integrity checks.
