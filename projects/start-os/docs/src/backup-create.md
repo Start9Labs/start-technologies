@@ -50,7 +50,9 @@ Even with proper backups the risk of data corruption is always non-zero. Therefo
 
 ## Physical Drive
 
-`EXT4` is the recommended format of your backup drive. `fat32` and `exFAT` are _not_ recommended and may not work.
+`Btrfs` is the recommended format of your backup drive. Existing `EXT4` backup drives remain supported. `fat32` and `exFAT` are _not_ recommended and may not work.
+
+A new drive, or one formatted for another system, can be prepared from StartOS: in `System > Create Backup`, click "Format a drive", choose the drive, and confirm. This erases everything on the drive and leaves a single `Btrfs` partition. The drive must be at least 1 GiB.
 
 > [!WARNING]
 > Backing up to USB thumb drives or SD card media is not recommended unless you are using high-endurance, high-quality storage. Low-quality flash memory is prone to corruption and failure over time.

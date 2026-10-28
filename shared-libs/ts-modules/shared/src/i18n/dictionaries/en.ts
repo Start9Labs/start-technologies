@@ -839,4 +839,17 @@ export const ENGLISH: Record<string, number> = {
   'OS update blocked': 953,
   'No trusted signer is listed for this OS update. Installing it from the UI is blocked. A malicious OS update could take full control of your server, steal private keys and passwords, or permanently destroy your data.': 954,
   'Use system gateway': 955,
+  'Format a drive': 956,
+  'Erases a drive and prepares it as a single Btrfs partition for backups.': 957,
+  'Drive': 958,
+  'Everything on this drive will be permanently erased.': 959,
+  'contains StartOS backups': 960,
+  'No readable partitions': 961,
+  'Label': 962,
+  'I understand this drive will be erased': 963,
+  'Format': 964, // verb
+  'Formatting drive': 965,
+  'Drive formatted. It is listed under Physical Drives.': 966,
+  'Must be 255 bytes or less (accented letters and symbols take more than one)': 967,
+  'Must not contain control characters': 968,
 }
