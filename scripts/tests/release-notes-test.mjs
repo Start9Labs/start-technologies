@@ -15,6 +15,7 @@ const VERSION = '1.2.3'
 const MAIN =
   'Lede.\n\n## Highlights\n\n- Feature.\n\n## Important\n\nFollow up.\n'
 const PRE_UPDATE = '## ⚠️ Before You Update\n\n> Prepare first.'
+const METADATA = '---\nuser-facing: true\n---\n\n'
 
 function releaseFixture(t) {
   const f = fixture(t)
@@ -147,8 +148,13 @@ test('sparse deploy canonical versions and notes', t => {
     releaseFixture(t)
   delete env.VERSION
   const marker = blockPython()
-  unlinkSync(join(root, '.prettierrc.json'))
-  write('package.json', '{"version":"0.4.0.3"}')
+  write(
+    'package.json',
+    JSON.stringify({
+      ...JSON.parse(text(join(REPO, 'package.json'))),
+      version: '0.4.0.3',
+    }),
+  )
   write(
     'projects/start-wrt/backend/ctrl/Cargo.toml',
     '[package]\nname = "ctrl"\nversion = "1.2.3"\n',
@@ -159,6 +165,10 @@ test('sparse deploy canonical versions and notes', t => {
   ]
   for (const [project, , version] of cases) {
     write(`projects/${project}/release-notes/${version}.md`, MAIN)
+    write(
+      `projects/${project}/changelog/patch-fixed-feature.md`,
+      METADATA + '- Generated feature.\n',
+    )
     write(
       `projects/${project}/release-notes/${version}.pre-update.md`,
       PRE_UPDATE,
@@ -195,10 +205,9 @@ test('sparse deploy canonical versions and notes', t => {
     )
     assert.equal(set.status, 0, set.stderr)
     git('-C', checkout, 'checkout', '-q')
-    assert.equal(existsSync(join(checkout, '.prettierrc.json')), false)
+    assert.equal(existsSync(join(checkout, '.prettierrc.json')), true)
     assert.equal(existsSync(join(checkout, 'node_modules')), false)
-    if (project === 'start-wrt')
-      assert.equal(existsSync(join(checkout, 'package.json')), false)
+    assert.equal(existsSync(join(checkout, 'package.json')), true)
     const determine = deploy.match(
       /      - name: Determine version\n        id: version\n        run: \|\n((?:          .+\n)+)/,
     )
@@ -213,17 +222,10 @@ test('sparse deploy canonical versions and notes', t => {
     assert.equal(text(outputFile), `version=${version}\n`)
     const derived = script('notes', project, true, checkout).stdout
     contains(derived, PRE_UPDATE)
-    contains(derived, '- Feature.')
-    contains(derived, `/blob/${ref}/projects/${project}/CHANGELOG.md#${anchor}`)
+    contains(derived, '- Generated feature.')
+    excludes(derived, '- Feature.')
+    contains(derived, `/tree/${ref}/projects/${project}/changelog`)
     env.VERSION = version
-    unlinkSync(
-      join(
-        checkout,
-        project === 'start-os'
-          ? 'package.json'
-          : 'projects/start-wrt/backend/ctrl/Cargo.toml',
-      ),
-    )
     assert.equal(script('notes', project, true, checkout).stdout, derived)
     delete env.VERSION
   }
@@ -257,7 +259,7 @@ test('source links survive fragment consumption', t => {
   git('init', '-q')
   write(
     'projects/start-sdk/changelog/patch-fixed-example.md',
-    '- Fixed feature.\n',
+    METADATA + '- Fixed feature.\n',
   )
   write(
     'projects/start-sdk/CHANGELOG.md',
@@ -284,14 +286,17 @@ test('GitHub body carries the notes and changelog without the link', t => {
   write(`projects/start-sdk/release-notes/${VERSION}.pre-update.md`, PRE_UPDATE)
   write(
     'projects/start-sdk/changelog/patch-fixed-example.md',
-    '- Fixed feature.\n',
+    METADATA + '- Fixed feature.\n',
   )
   commit()
   const notes = script().stdout
   const body = script('body').stdout
   contains(notes, '**[Full changelog')
   excludes(body, '**[Full changelog')
-  contains(body, `\n${PRE_UPDATE}\n\n${MAIN}\n<details>`)
+  contains(
+    body,
+    `\n${PRE_UPDATE}\n\n${MAIN.replace('Feature.', 'Fixed feature.')}\n<details>`,
+  )
   contains(body, '<details>\n<summary>Full changelog</summary>\n\n## [1.2.3]')
   contains(body, '- Fixed feature.\n\n</details>')
   excludes(body, '<details open')
@@ -299,15 +304,15 @@ test('GitHub body carries the notes and changelog without the link', t => {
   assert.equal(body.split(PRE_UPDATE).length - 1, 1)
 })
 
-test('missing main fails even with companion', t => {
+test('main framing is optional', t => {
   const { root, main, write, script, git, commit } = releaseFixture(t)
   git('init', '-q')
   git('remote', 'add', 'origin', root)
   commit()
   write(`projects/start-sdk/release-notes/${VERSION}.pre-update.md`, PRE_UPDATE)
   unlinkSync(main)
-  contains(script('notes', 'start-sdk', false).stderr, 'No release notes')
-  contains(script('body', 'start-sdk', false).stderr, 'No release notes')
+  contains(script('notes').stdout, PRE_UPDATE)
+  contains(script('body').stdout, '## Highlights')
 })
 
 test('existing changelog link is replaced', t => {
@@ -325,6 +330,7 @@ test('existing changelog link is replaced', t => {
 test('companion changes block adopted release', t => {
   const { root, preUpdate, write, run, git, commit } = releaseFixture(t)
   git('init', '-q')
+  git('remote', 'add', 'origin', root)
   commit()
   let adopted = git('rev-parse', 'HEAD').trim()
   const command = `source <(awk '/^SUBCOMMAND=/{exit} {print}' "$1")
@@ -372,7 +378,7 @@ assert_metadata_matches_adopted`
   commit()
   blocked()
   adopted = git('rev-parse', 'HEAD').trim()
-  write('projects/start-sdk/CHANGELOG.md', '# Generated history\n')
+  write('projects/start-sdk/CHANGELOG.md', '')
   commit()
   const result = check()
   assert.equal(result.status, 0, result.stderr)
@@ -382,6 +388,35 @@ assert_metadata_matches_adopted`
   )
   commit()
   blocked('changelog')
+})
+
+test('adopted release accepts compiled metadata after fragments are consumed', t => {
+  const { root, write, run, git, commit } = releaseFixture(t)
+  git('init', '-q')
+  git('remote', 'add', 'origin', root)
+  write(`projects/start-sdk/release-notes/${VERSION}.md`, 'Lede.\n')
+  const path = write(
+    'projects/start-sdk/changelog/patch-fixed-public.md',
+    METADATA + '- Released fix.\n',
+  )
+  commit()
+  const adopted = git('rev-parse', 'HEAD').trim()
+  git('-c', 'tag.gpgsign=false', 'tag', 'start-sdk/v1.2.3')
+  const synced = run(process.execPath, ['scripts/changelog.mjs', 'sync'])
+  assert.equal(synced.status, 0, synced.stderr.toString())
+  assert.equal(existsSync(path), false)
+  commit()
+  const command = `source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
+REPO_ROOT="$PWD"; PROJECT=start-sdk; VERSION=1.2.3; COMMIT="${adopted}"
+assert_metadata_matches_adopted`
+  const check = () => run('bash', ['-c', command], { encoding: 'utf8' })
+  const result = check()
+  assert.equal(result.status, 0, result.stderr)
+  write(
+    'projects/start-sdk/changelog/patch-fixed-other.md',
+    METADATA + '- New change.\n',
+  )
+  assert.notEqual(check().status, 0)
 })
 
 test('release uploads changelog from tag before publication', t => {
@@ -395,7 +430,7 @@ test('release uploads changelog from tag before publication', t => {
   )
   write(
     'projects/start-sdk/changelog/patch-fixed-example.md',
-    '- Fixed the released feature.\n',
+    METADATA + '- Fixed the released feature.\n',
   )
   commit()
   git('-c', 'tag.gpgsign=false', 'tag', 'start-sdk/v1.2.3')
@@ -405,7 +440,7 @@ test('release uploads changelog from tag before publication', t => {
   git('push', '-q', 'origin', 'HEAD:master', '--tags')
   write(
     'projects/start-sdk/changelog/minor-added-later.md',
-    '- Later change.\n',
+    METADATA + '- Later change.\n',
   )
   git('add', 'projects')
   git(
@@ -418,6 +453,11 @@ test('release uploads changelog from tag before publication', t => {
     'commit',
     '-qm',
     'later',
+  )
+  write(`projects/start-sdk/release-notes/${VERSION}.md`, 'Later lede.\n')
+  write(
+    `projects/start-sdk/release-notes/${VERSION}.pre-update.md`,
+    PRE_UPDATE + '\nLater warning.\n',
   )
   const captured = join(root, 'uploaded.md')
   const bodyFile = join(root, 'release-body.md')
@@ -467,6 +507,9 @@ if (args.includes('--draft=false') && process.env.FAIL_PUBLISH) process.exit(1)
   contains(body, 'Fixed the released feature.\n\n</details>')
   excludes(body, 'Old change.')
   excludes(body, 'Later change.')
+  excludes(body, 'Later lede.')
+  excludes(body, 'Later warning.')
+  contains(body, 'Lede.')
   excludes(body, '<details open')
   const uploaded = text(captured)
   contains(uploaded, '## [1.2.3]')
@@ -617,8 +660,11 @@ test('release without fragments still has an expandable changelog', t => {
 })
 
 test('StartOS registry and packaged welcome', t => {
-  const { root, env, write, script, run } = releaseFixture(t)
+  const { root, env, write, script, run, git, commit } = releaseFixture(t)
   const version = '0.4.0.2'
+  write('projects/start-os/build/lib/firmware.json', '[]')
+  write('projects/start-os/build/dpkg-deps/fixture', '')
+  write('build/bash-completion', '')
   const source = join(REPO, 'projects/start-os/release-notes')
   for (const name of [`${version}.md`, `${version}.pre-update.md`])
     write(
@@ -642,24 +688,53 @@ cp = $(if $(filter %/release-notes.md,$(2)),cp "$(1)" "$(2)",true)
 include ${REPO}/projects/start-os/build.mk
 `,
   )
-  const result = run(
-    'make',
-    [
-      '-f',
-      harness,
-      'start-os-install',
-      'STARTOS_TARGETS=',
-      'PLATFORM=x86_64',
-      `VERSION_FILE=${versionFile}`,
-      `DESTDIR=${root}/image`,
-      'ENVIRONMENT=',
-    ],
-    { cwd: REPO, encoding: 'utf8' },
-  )
+  const install = () =>
+    run(
+      'make',
+      [
+        '-f',
+        harness,
+        'start-os-install',
+        'STARTOS_TARGETS=',
+        'PLATFORM=x86_64',
+        `VERSION_FILE=${versionFile}`,
+        `DESTDIR=${root}/image`,
+        'ENVIRONMENT=',
+      ],
+      { cwd: root, encoding: 'utf8' },
+    )
+  const result = install()
   assert.equal(result.status, 0, result.stderr)
   const packaged = text(join(stage, 'release-notes.md'))
   assert.equal(packaged, text(join(source, `${version}.md`)))
   excludes(packaged, 'Before You Update')
   excludes(packaged, 'only way to update')
   contains(packaged, '## Highlights')
+
+  git('init', '-q')
+  write(
+    `projects/start-os/release-notes/${version}.md`,
+    'Lede.\n\n## Important\n\nKeep this notice.\n',
+  )
+  write(
+    'projects/start-os/changelog/patch-fixed-public.md',
+    METADATA + '- Generated highlight.\n',
+  )
+  write(
+    'projects/start-os/changelog/patch-changed-internal.md',
+    '---\nuser-facing: false\n---\n\n- Internal detail.\n',
+  )
+  commit()
+  const generated = install()
+  assert.equal(generated.status, 0, generated.stderr)
+  const welcome = text(join(stage, 'release-notes.md'))
+  assert.equal(
+    welcome,
+    'Lede.\n\n## Highlights\n\n- Generated highlight.\n\n## Important\n\nKeep this notice.\n',
+  )
+  const registry = script('notes', 'start-os').stdout
+  contains(registry, 'Generated highlight.')
+  contains(registry, PRE_UPDATE.split('\n')[0])
+  excludes(welcome, 'Before You Update')
+  excludes(registry, 'Internal detail.')
 })

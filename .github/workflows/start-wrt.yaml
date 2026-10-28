@@ -48,8 +48,11 @@ on:
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-wrt/docs/**) shouldn't trigger a build.
       - '!**/*.md'
-      # Alpha's registry entry reads the notes from this commit.
       - 'projects/start-wrt/release-notes/**'
+      - 'projects/start-wrt/changelog/**'
+      - 'scripts/changelog*.mjs'
+      - 'scripts/manage-release.sh'
+      - '.prettierrc.json'
   pull_request:
     # The jobs below skip drafts, and `ready_for_review` is not a default
     # activity type, so without it a draft marked ready is never checked.
@@ -235,9 +238,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           sparse-checkout: |
+            /package.json
+            /.prettierrc.json
             projects/start-wrt/backend/ctrl/Cargo.toml
             projects/start-wrt/release-notes/*
+            projects/start-wrt/changelog/*
             scripts/
           sparse-checkout-cone-mode: false
 
