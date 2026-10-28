@@ -1,2 +1,0 @@
-- Block UI-initiated OS updates unless their registry metadata lists a trusted signer. The trust list is stored on the server, initially includes drbonez, matthill, and Start9, and supports labeled CLI management.
-- Require a valid signature from a built-in trusted signer for diagnostic OS updates.

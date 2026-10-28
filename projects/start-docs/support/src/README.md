@@ -14,14 +14,12 @@ It runs in any modern browser and installs as an app on your phone or computer.
 
 - **[Installing the App](installing-the-app.md)** — Adding Start9 Support to your Home Screen or app list.
 
-- **[Chats](chats.md)** — Starting a chat, attaching files, replying and searching, and what happens when a chat closes.
+- **[Chats](chats.md)** — Starting a chat, attaching files, replying and searching, reading other customers' chats, and what happens when a chat closes.
 
 - **[Dux and Helix](dux-and-helix.md)** — Who answers your chat, how to reach a person, and what you can see of the work on your case.
 
 - **[Privacy](privacy.md)** — What Start9 and Dux can see, and how to share something privately.
 
 - **[Notifications](notifications.md)** — Getting notified when Start9 replies, and what to do when notifications don't arrive.
-
-- **[Email](email.md)** — Unread-reply reminders and how to turn them off.
 
 - **[Settings](settings.md)** — Your name, avatar, email, password, language, appearance and time format.

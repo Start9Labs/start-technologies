@@ -1,1 +1,0 @@
-- Reject remote requests using unconfigured loopback signing addresses.

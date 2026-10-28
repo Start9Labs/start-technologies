@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use imbl_value::json;
 
 use super::RegistryMigration;
@@ -5,7 +7,7 @@ use crate::prelude::*;
 
 pub struct PackageSignerScopeMigration;
 impl RegistryMigration for PackageSignerScopeMigration {
-    fn action(&self, db: &mut Value) -> Result<(), Error> {
+    fn action(&self, db: &mut Value, _: &Path) -> Result<(), Error> {
         for (_, info) in db["index"]["package"]["packages"]
             .as_object_mut()
             .unwrap()

@@ -10,8 +10,8 @@ laid out and how a query flows through it. For usage and the full API surface, s
 - **Path:** `shared-libs/crates/jsonpath`
 - **Package name:** `jsonpath_lib` (the Cargo package name differs from the directory name
   `jsonpath`; always use `cargo … -p jsonpath_lib`). Library name is also `jsonpath_lib`.
-- **Crate type:** `["cdylib", "rlib"]` — an rlib for Rust consumers plus a cdylib that backs the
-  `wasm/` JavaScript/WebAssembly bindings.
+- **Crate type:** `["cdylib", "rlib"]` — an rlib for Rust consumers plus a cdylib exporting the
+  deprecated C FFI.
 - **Consumers:** `start-core` (`shared-libs/crates/start-core`) uses `jsonpath_lib::Compiled` in
   `src/config/hook.rs` for configuration-hook processing.
 - **First-party.** A direct path dependency (`jsonpath_lib = { path = "../jsonpath" }` in
@@ -56,8 +56,7 @@ type:
 The crate also re-exports an older stack, kept for compatibility: `compile()` and the `Compiled`
 struct (backed by `parser` + `select`), plus `Parser`, `Selector`, `SelectorMut`. `start-core`
 currently depends on `Compiled`. New code should prefer `PathCompiled` and the `paths`/`selector`
-modules; the `parser`, `select`, and `ffi` modules are deprecated (the `ffi` C bindings moved to
-`wasm/` upstream).
+modules; the `parser`, `select`, and `ffi` modules are deprecated.
 
 ## Supported path syntax
 
@@ -68,6 +67,6 @@ examples.
 
 ## Further reading
 
-- [README.md](README.md) — usage and API examples (Rust, plus the JS/WASM bindings inherited from the original project).
+- [README.md](README.md) — usage and API examples.
 - [AGENTS.md](AGENTS.md) — toolchain, build/test/format, conventions.
 - Sibling: [`imbl-value`](../imbl-value) — the value types this engine queries.

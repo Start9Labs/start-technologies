@@ -1,2 +1,0 @@
-- Certificate acquisition trusts custom certificate authorities installed in the host trust store.
-- Certificate failure notifications include the authority's explanation, including Let's Encrypt's unpause link for paused domains.

@@ -11,7 +11,7 @@ import { GatewayService } from 'src/app/services/gateway.service'
     <table
       [appTable]="['Name', 'Type', $any('LAN IP'), $any('WAN IP'), 'DNS', null]"
     >
-      @for (gateway of gatewayService.configuredGateways(); track gateway.id) {
+      @for (gateway of gatewayService.gateways(); track gateway.id) {
         <tr [gateway]="gateway"></tr>
       } @empty {
         <tr>

@@ -15,6 +15,9 @@ File Models support automatic parsing and serialization for:
 
 Custom parser/serializer support is available for non-standard formats via `FileHelper.raw()`.
 
+> [!WARNING]
+> `FileHelper.ini` writes through the npm `ini` package, which JSON-quotes any value containing `=` or starting with `[`, and backslash-escapes `;` and `#`. If the daemon reads values without unquoting them, use `FileHelper.raw()` with a writer that emits them verbatim, as [monerod](https://github.com/Start9-Community/monerod-startos) does in `startos/fileModels/monero.conf.ts`, and migrate the file a released version already wrote ([Parser / Separator Transitions Can Wipe Data](#parser--separator-transitions-can-wipe-data)).
+
 ## Core Principle: Lean on File Models
 
 File models are not just type definitions — they are your **primary tool for enforcing runtime correctness**. The zod schema is both the shape definition _and_ the source of truth for default values. Every key should have a `.catch()` so that:
@@ -395,8 +398,8 @@ When a `FileHelper.ini` uses an `InputSpec`'s `partialValidator` as its validato
 
 ```typescript
 export const shape = z.looseObject({
-  'rpc-bind-ip': z.literal('0.0.0.0').catch('0.0.0.0'),
-  'rpc-bind-port': z.literal(18081).catch(18081),
+  'bind-ip': z.literal('0.0.0.0').catch('0.0.0.0'),
+  'bind-port': z.literal(8080).catch(8080),
   // ...more enforced + configurable keys
 })
 

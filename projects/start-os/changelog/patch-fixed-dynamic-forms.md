@@ -1,2 +1,0 @@
-- Keep expanded form fields correctly spaced after focusing inputs.
-- Respect configured form-list limits when adding entries.

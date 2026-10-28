@@ -1741,6 +1741,12 @@ backup.restore.package-error:
   es_ES: "Error al restaurar el paquete %{id}: %{error}"
   fr_FR: "Erreur lors de la restauration du paquet %{id} : %{error}"
   pl_PL: "Błąd przywracania pakietu %{id}: %{error}"
+backup.restore.package-installed:
+  en_US: "Cannot restore %{id}: it is already installed. Uninstall it first."
+  de_DE: "%{id} kann nicht wiederhergestellt werden: Es ist bereits installiert. Deinstalliere es zuerst."
+  es_ES: "No se puede restaurar %{id}: ya está instalado. Desinstálalo primero."
+  fr_FR: "Impossible de restaurer %{id} : il est déjà installé. Désinstallez-le d’abord."
+  pl_PL: "Nie można przywrócić %{id}: jest już zainstalowany. Najpierw go odinstaluj."
 
 # backup/target/cifs.rs
 backup.target.cifs.target-not-found:
@@ -2579,6 +2585,13 @@ registry.package.remove-mirror.unauthorized:
   pl_PL: "Brak autoryzacji"
 
 # registry/package/index.rs
+registry.package.icon.invalid-name:
+  en_US: "invalid package icon name: %{name}"
+  de_DE: "Ungültiger Paketsymbolname: %{name}"
+  es_ES: "nombre de icono de paquete no válido: %{name}"
+  fr_FR: "nom d'icône de paquet invalide : %{name}"
+  pl_PL: "nieprawidłowa nazwa ikony pakietu: %{name}"
+
 registry.package.index.metadata-mismatch:
   en_US: "package metadata mismatch: remove the existing version first, then re-add"
   de_DE: "Paketmetadaten stimmen nicht überein: vorhandene Version zuerst entfernen, dann erneut hinzufügen"
@@ -3184,6 +3197,13 @@ middleware.auth.enrolled-key-mismatch:
   fr_FR: "La clé enregistrée doit correspondre à la clé avec laquelle la demande de connexion a été signée."
   pl_PL: "Zarejestrowany klucz musi być zgodny z kluczem, którym podpisano żądanie logowania."
 
+middleware.auth.local-login-unnecessary:
+  en_US: "Login is unnecessary when using the local auth cookie."
+  de_DE: "Bei Verwendung des lokalen Authentifizierungs-Cookies ist keine Anmeldung erforderlich."
+  es_ES: "No es necesario iniciar sesión al usar la cookie de autenticación local."
+  fr_FR: "La connexion est inutile lorsque le cookie d'authentification local est utilisé."
+  pl_PL: "Logowanie nie jest potrzebne podczas korzystania z lokalnego pliku cookie uwierzytelniania."
+
 # middleware/auth/signature.rs
 middleware.auth.key-not-authorized:
   en_US: "Key is not authorized"
@@ -3421,6 +3441,13 @@ auth.passwords-do-not-match:
   es_ES: "Las contraseñas no coinciden"
   fr_FR: "Les mots de passe ne correspondent pas"
   pl_PL: "Hasła nie pasują do siebie"
+
+auth.local-logout-unnecessary:
+  en_US: "Logout is unnecessary when using the local auth cookie."
+  de_DE: "Bei Verwendung des lokalen Authentifizierungs-Cookies ist keine Abmeldung erforderlich."
+  es_ES: "No es necesario cerrar sesión al usar la cookie de autenticación local."
+  fr_FR: "La déconnexion est inutile lorsque le cookie d'authentification local est utilisé."
+  pl_PL: "Wylogowanie nie jest potrzebne podczas korzystania z lokalnego pliku cookie uwierzytelniania."
 
 # util/tui.rs
 util.tui.terminal-must-be-interactive:

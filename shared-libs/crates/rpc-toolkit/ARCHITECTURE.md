@@ -78,6 +78,12 @@ Transports wrap a `Server`:
 constructs the context, dispatches synchronously, then renders the result with `PrintCliResult`.
 `mutate_command` / `into_command` expose the underlying `clap::Command`.
 
+`output.rs` owns stdout/stderr writers, formatted printing, and the exported `print!`,
+`println!`, `eprint!` and `eprintln!` macros. A broken output pipe exits with status 141
+without changing signal dispositions. Default handler displays and clap diagnostics use
+that policy; consumers import the macros with `#[macro_use]` to shadow `std`'s and use the same writers for
+custom formatters and serialization.
+
 For talking to a _remote_ server, `CallRemote` + `CallRemoteHandler` forward a local invocation
 over the wire using `call_remote_http` (CBOR or JSON over `reqwest`) or `call_remote_socket`
 (line-delimited JSON over a duplex connection).

@@ -792,6 +792,16 @@ export type OsVersionInfo = z.output<typeof schemas.OsVersionInfo>
 export type OsVersionInfoInput = z.input<typeof schemas.OsVersionInfo>
 export type PackageBackupInfo = z.output<typeof schemas.PackageBackupInfo>
 export type PackageBackupInfoInput = z.input<typeof schemas.PackageBackupInfo>
+
+/**
+ * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
+ */
+export type PackageIcon = z.output<typeof schemas.PackageIcon>
+
+/**
+ * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
+ */
+export type PackageIconInput = z.input<typeof schemas.PackageIcon>
 export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PackageInfoShortInput = z.input<typeof schemas.PackageInfoShort>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>

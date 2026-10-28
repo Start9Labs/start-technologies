@@ -21,6 +21,7 @@ src/app/
 │   ├── nav.ts                # Left sidebar navigation
 │   ├── placeholder.ts        # Empty-state placeholder with icon
 │   ├── schedule.ts           # app-schedule — 7-day schedule-window grid
+│   ├── stale-ui-alert.ts     # "Refresh Needed" dialog after a firmware update
 │   ├── summary.ts            # Read-only display with copy button
 │   └── window.ts             # AddWindow dialog — schedule-window form
 │
@@ -48,18 +49,23 @@ src/app/
 │   ├── network.service.ts    # Browser online/offline as an observable
 │   ├── published-port-deletion.ts # Confirm dialog: change would delete published ports
 │   ├── rpc.service.ts        # JSON-RPC 2.0 over HTTP (auto-logout on code 34)
+│   ├── stale-ui.service.ts   # Detects a UI bundle older than the firmware build
 │   ├── system.service.ts     # System info, version, update check
 │   ├── vpn-exposed-port.ts   # Confirm dialog: published port bypasses VPN routing
 │   └── api/
-│       ├── api.service.ts    # Abstract API contract (all RPC methods)
+│       ├── api.service.ts    # Abstract API facade (the methods the UI calls) + aliases over generated types
+│       ├── bindings.ts       # Generated `Api` RPC tree types — do not edit
+│       ├── bindings.schemas.ts # Generated zod schemas for bindings.ts — do not edit
+│       ├── events.ts         # Generated streaming types — do not edit
+│       ├── events.schemas.ts # Generated zod schemas for events.ts — do not edit
 │       ├── live-api.service.ts
 │       ├── mock-api.service.ts
-│       └── types.ts          # UCI section types + API response types
+│       └── types.ts          # UCI section types for the mock API
 │
 ├── utils/
 │   ├── validators.ts         # Custom validators: ipv4, ipv6, prefix, mac, hostname, etc.
 │   ├── languages.ts          # Supported locales
-│   ├── timezones.ts          # Timezone list
+│   ├── timezones.ts          # Browser timezone detection + offset labels
 │   ├── schedule.ts           # Schedule window utilities
 │   ├── masks.ts              # Input masks for forms
 │   └── workspace-config.ts   # Type for config.json
@@ -106,7 +112,7 @@ Each route folder typically contains:
 | `dialog.ts`  | Dialog component for add/edit flows          |
 | `types.ts`   | Local types and interfaces                   |
 
-Multi-level routes (wan, wifi, outbound, inbound, lan, devices, profiles, settings) use `loadChildren` with child-route folders:
+Multi-level routes (wan, wifi, outbound, inbound, lan, devices, settings) use `loadChildren` with child-route folders:
 
 ```typescript
 export default [
@@ -141,8 +147,8 @@ skill. `routes/published-ports/` is the project-local example of a table/dialog 
 ## API Layer
 
 - **Transport:** JSON-RPC 2.0 over a single HTTP POST endpoint (`/rpc/v1`)
-- **Contract:** `ApiService` (abstract) defines all methods. `LiveApiService` calls `RpcService`; `MockApiService` returns static data for dev.
-- **Auth:** RPC error code 34 triggers auto-logout. Session cookie with `withCredentials: true`.
+- **Contract:** the generated `bindings.ts` types every RPC method; `ApiService` (abstract) defines the methods the UI calls. `LiveApiService` calls `RpcService`; `MockApiService` returns static data for dev.
+- **Auth:** login enrolls a non-extractable WebCrypto key (`AuthKeyService` from `@start9labs/shared`) and `RpcService` signs every request with it. RPC error code 34 clears the key and logs out.
 - **Mocks:** Toggle via `config.json` → `useMocks`. Dev server runs without a real router.
 
 ## i18n

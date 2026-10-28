@@ -2,9 +2,8 @@ name: 'Setup Publish Environment'
 description: |
   Minimal environment for the Publish job: installs start-cli only.
 
-  The Publish job doesn't build s9pks, so it doesn't need Node, Rust,
-  Docker, Buildx, QEMU, or the squashfs toolchain that setup-build-env
-  installs. It needs:
+  The Publish job doesn't build s9pks, so it doesn't need the Node,
+  Docker, Buildx, or QEMU that setup-build-env installs. It needs:
     - start-cli (statically linked; we install it here)
     - jq (pre-installed on ubuntu-latest)
     - curl (pre-installed on ubuntu-latest)

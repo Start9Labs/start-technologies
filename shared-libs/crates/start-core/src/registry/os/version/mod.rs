@@ -253,6 +253,6 @@ pub fn display_version_info<T>(
             &info.squashfs.keys().into_iter().join(", "),
         ]);
     }
-    table.print_tty(false)?;
+    print_table(&table)?;
     Ok(())
 }

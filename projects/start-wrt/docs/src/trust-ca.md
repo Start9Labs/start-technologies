@@ -83,7 +83,7 @@ Select your platform:
 
 1. Head to _Settings > General > VPN & Device Management_.
 
-1. Under "DOWNLOADED PROFILE", tap your `StartWRT Root CA` profile.
+1. Under "DOWNLOADED PROFILE", tap your `StartWRT Root CA (router.lan)` profile.
 
 1. Tap "Install" in the top-right corner and enter your passcode if prompted.
 

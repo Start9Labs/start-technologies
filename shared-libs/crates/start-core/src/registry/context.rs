@@ -30,6 +30,7 @@ use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::device_info::{DEVICE_INFO_HEADER, DeviceInfo};
 use crate::registry::migrations::run_migrations;
+use crate::registry::package::icon::{icons_dir, referenced_icons, sweep_icons};
 use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
 use crate::sign::AnyVerifyingKey;
@@ -117,7 +118,12 @@ impl RegistryContext {
         if db.dump(&ROOT).await.value.is_null() {
             db.put(&ROOT, &RegistryDatabase::init()).await?;
         }
-        db.mutate(|db| run_migrations(db)).await.result?;
+        db.mutate(|db| run_migrations(db, &datadir)).await.result?;
+        sweep_icons(
+            &icons_dir(&datadir),
+            &referenced_icons(&db.peek().await.into_index().into_package().de()?),
+        )
+        .await?;
 
         Self::init_auth_cookie().await?;
 

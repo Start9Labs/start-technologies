@@ -691,7 +691,7 @@ pub async fn fetch_logs(
             },
         )
         .await?;
-    let mut entries = Reversible::new(entries);
+    let mut entries = Reversible::<LogEntry>::new(entries);
     // reverse again so output is always in increasing chronological order
     if cursor.is_some() && before {
         entries.reverse();

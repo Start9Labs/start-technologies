@@ -164,9 +164,9 @@ IPv6 ermöglicht es, dass Ihre Geräte ohne NAT direkt aus dem Internet erreichb
 
 ### Präfixlänge
 
-Die Präfixlänge bestimmt die Größe des IPv6-Adressraums Ihres LAN. Sie muss **größer** (eine höhere Zahl) als Ihr WAN-Präfix sein, um ein gültiges Subnetz zu bilden.
+Die Präfixlänge bestimmt die Größe des IPv6-Adressraums Ihres LAN. Wählen Sie einen Wert von /48 bis /64, der nicht kürzer als das von Ihrem Anbieter delegierte Präfix ist. Die Zusammenfassung zeigt diese Größe als **Delegiertes Präfix** (**Keine**, wenn kein Präfix delegiert wurde).
 
-Weist Ihnen Ihr ISP beispielsweise ein /48-Präfix zu, können Sie /56, /60 oder /64 für Ihr LAN verwenden. Für die meisten Heimnetzwerke wird ein /64-Präfix empfohlen.`,
+Bei einer /56-Delegation können Sie beispielsweise /56, /60 oder /64 für Ihr LAN verwenden; bei einer /64-Delegation verwenden Sie /64. Für die meisten Heimnetzwerke wird ein /64-Präfix empfohlen.`,
   '/outbound': `## Ausgehende VPNs
 
 Ausgehende VPNs leiten Ihren Internetverkehr durch verschlüsselte Tunnel zu entfernten Servern und verbessern so Privatsphäre und Sicherheit.

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use super::RegistryMigration;
 use crate::prelude::*;
 use crate::sign::commitment::SignedCommitment;
@@ -6,7 +8,7 @@ use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 
 pub struct CommitmentTypeTags;
 impl RegistryMigration for CommitmentTypeTags {
-    fn action(&self, db: &mut Value) -> Result<(), Error> {
+    fn action(&self, db: &mut Value, _: &Path) -> Result<(), Error> {
         tag_commitments(&mut db["index"]);
         Ok(())
     }
@@ -55,7 +57,7 @@ mod tests {
                 "commitment": { "rootSighash": "r", "rootMaxsize": 1 },
             }]] } } } } },
         } });
-        CommitmentTypeTags.action(&mut db).unwrap();
+        CommitmentTypeTags.action(&mut db, Path::new("")).unwrap();
         assert_eq!(
             db["index"]["os"]["versions"]["0.4.0.2"]["squashfs"]["x86_64"]["commitment"]["type"],
             json!("blake3")

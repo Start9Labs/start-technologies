@@ -296,7 +296,10 @@ mod tests {
 
     #[test]
     fn initial_start9_key_matches_repository_openpgp_primary_key() {
+        let home = tempfile::tempdir().unwrap();
         let output = std::process::Command::new("gpg")
+            .arg("--homedir")
+            .arg(home.path())
             .args([
                 "--batch",
                 "--no-options",
@@ -307,7 +310,11 @@ mod tests {
             ])
             .output()
             .unwrap();
-        assert!(output.status.success());
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let records = String::from_utf8(output.stdout).unwrap();
         let primary = records
             .lines()

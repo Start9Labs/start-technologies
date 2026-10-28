@@ -144,33 +144,35 @@ pub async fn update_system(
     let guid_str = guid.to_string();
     let tracker_for_ws = tracker.clone();
 
-    ctx.continuations.add(
-        guid.clone(),
-        RpcContinuation::ws(
-            move |mut ws| async move {
-                let stream = tracker_for_ws.stream(Some(Duration::from_millis(300)));
-                tokio::pin!(stream);
-                while let Some(progress) = stream.next().await {
-                    let json = match serde_json::to_string(&progress) {
-                        Ok(j) => j,
-                        Err(_) => break,
-                    };
-                    if ws
-                        .send(axum::extract::ws::Message::Text(json.into()))
-                        .await
-                        .is_err()
-                    {
-                        break;
+    ctx.continuations
+        .add(
+            guid.clone(),
+            RpcContinuation::ws(
+                move |mut ws| async move {
+                    let stream = tracker_for_ws.stream(Some(Duration::from_millis(300)));
+                    tokio::pin!(stream);
+                    while let Some(progress) = stream.next().await {
+                        let json = match serde_json::to_string(&progress) {
+                            Ok(j) => j,
+                            Err(_) => break,
+                        };
+                        if ws
+                            .send(axum::extract::ws::Message::Text(json.into()))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                        if progress.overall.is_complete() {
+                            break;
+                        }
                     }
-                    if progress.overall.is_complete() {
-                        break;
-                    }
-                }
-                let _ = ws.send(axum::extract::ws::Message::Close(None)).await;
-            },
-            Duration::from_secs(600),
-        ),
-    );
+                    let _ = ws.send(axum::extract::ws::Message::Close(None)).await;
+                },
+                Duration::from_secs(600),
+            ),
+        )
+        .await;
 
     // 7. Spawn background update task (owns tracker + phase handles)
     let client = reqwest::Client::new();

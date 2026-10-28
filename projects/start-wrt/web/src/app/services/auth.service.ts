@@ -1,26 +1,17 @@
-import { effect, inject, Injectable, signal } from '@angular/core'
+import { inject, Injectable, signal } from '@angular/core'
 import { Router } from '@angular/router'
-import { WA_LOCAL_STORAGE } from '@ng-web-apis/common'
+import { AuthKeyService } from '@start9labs/shared'
 import { ApiService } from './api/api.service'
-
-const KEY = '_startWrt/loggedIn'
 
 @Injectable({
   providedIn: 'root',
 })
 export class AuthService {
-  private readonly storage = inject(WA_LOCAL_STORAGE)
   private readonly api = inject(ApiService)
+  private readonly authKeys = inject(AuthKeyService)
   private readonly router = inject(Router)
-  private readonly effect = effect(() => {
-    if (this.authenticated()) {
-      this.storage?.setItem(KEY, JSON.stringify(true))
-    } else {
-      this.storage?.removeItem(KEY)
-    }
-  })
 
-  readonly authenticated = signal(Boolean(this.storage?.getItem(KEY)))
+  readonly authenticated = signal(false)
 
   /** Whether the device has been initialized (admin password set).
    *  Defaults to true to avoid flash-of-setup on already-initialized devices. */
@@ -39,6 +30,7 @@ export class AuthService {
 
   constructor() {
     this.ready = Promise.all([
+      this.authKeys.get().then(key => this.authenticated.set(Boolean(key))),
       this.api
         .checkInitialized()
         .then(res => this.initialized.set(res.initialized))
@@ -59,6 +51,7 @@ export class AuthService {
   }
 
   setUnverified(): void {
+    this.authKeys.clear()
     this.authenticated.set(false)
     this.router.navigate(['.'])
   }

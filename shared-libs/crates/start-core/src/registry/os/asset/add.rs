@@ -109,7 +109,8 @@ async fn add_asset(
     + UnwindSafe
     + Send,
 ) -> Result<(), Error> {
-    signer.verify_commitment(&commitment, SIG_CONTEXT, &signature)?;
+    let signature =
+        crate::sign::compat::verify_commitment(&signer, &commitment, SIG_CONTEXT, &signature)?;
     ctx.db
         .mutate(|db| {
             let signer_guid = db.as_index().as_signers().get_signer(&signer)?;

@@ -1,1 +1,0 @@
-- **Registry signatures carry their actual scheme.** Signatures made with `id.key.pem` are Ed25519ph labeled with their own algorithm identifier. Publishing requires start-registry 1.2.0 or later; reading from older registries still works.

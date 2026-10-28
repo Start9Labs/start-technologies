@@ -1,8 +1,7 @@
-import { AsyncPipe } from '@angular/common'
 import { Component, computed, input } from '@angular/core'
 import { RouterLink } from '@angular/router'
-import { TuiAvatar } from '@taiga-ui/kit'
-import { PkgIconPipe } from 'src/app/routes/portal/pipes/pkg-icon'
+import { TuiAvatar, TuiSkeleton } from '@taiga-ui/kit'
+import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
 import { ServiceUptimeComponent } from 'src/app/routes/portal/routes/services/components/uptime.component'
 import { PkgDependencyErrors } from 'src/app/services/dep-error.service'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
@@ -13,8 +12,8 @@ import { StatusComponent } from './status.component'
   selector: 'tr[appService]',
   template: `
     <td [style.width.rem]="3">
-      <i tuiAvatar size="s" [round]="false">
-        <img alt="logo" [src]="pkg() | pkgIcon | async" />
+      <i tuiAvatar size="s" [round]="false" [tuiSkeleton]="icon.loading()">
+        <img #icon="pkgIcon" [pkgIcon]="pkg()" />
       </i>
     </td>
     <td class="title">
@@ -74,8 +73,8 @@ import { StatusComponent } from './status.component'
     ServiceUptimeComponent,
     StatusComponent,
     TuiAvatar,
-    AsyncPipe,
-    PkgIconPipe,
+    TuiSkeleton,
+    PkgIconDirective,
   ],
 })
 export class ServiceComponent {

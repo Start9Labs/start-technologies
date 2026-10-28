@@ -14,7 +14,9 @@ import { REPO, fixture } from './fixtures.mjs'
 const VERSION = '1.2.3'
 const MAIN =
   'Lede.\n\n## Highlights\n\n- Feature.\n\n## Important\n\nFollow up.\n'
+const FRAMING = 'Lede.\n\n## Important\n\nFollow up.\n'
 const PRE_UPDATE = '## ⚠️ Before You Update\n\n> Prepare first.'
+const METADATA = '---\nuser-facing: true\n---\n\n'
 
 function releaseFixture(t) {
   const f = fixture(t)
@@ -147,8 +149,13 @@ test('sparse deploy canonical versions and notes', t => {
     releaseFixture(t)
   delete env.VERSION
   const marker = blockPython()
-  unlinkSync(join(root, '.prettierrc.json'))
-  write('package.json', '{"version":"0.4.0.3"}')
+  write(
+    'package.json',
+    JSON.stringify({
+      ...JSON.parse(text(join(REPO, 'package.json'))),
+      version: '0.4.0.3',
+    }),
+  )
   write(
     'projects/start-wrt/backend/ctrl/Cargo.toml',
     '[package]\nname = "ctrl"\nversion = "1.2.3"\n',
@@ -158,7 +165,11 @@ test('sparse deploy canonical versions and notes', t => {
     ['start-wrt', 'start-wrt.yaml', VERSION, '123'],
   ]
   for (const [project, , version] of cases) {
-    write(`projects/${project}/release-notes/${version}.md`, MAIN)
+    write(`projects/${project}/release-notes/${version}.md`, FRAMING)
+    write(
+      `projects/${project}/changelog/patch-fixed-feature.md`,
+      METADATA + '- Generated feature.\n',
+    )
     write(
       `projects/${project}/release-notes/${version}.pre-update.md`,
       PRE_UPDATE,
@@ -195,10 +206,9 @@ test('sparse deploy canonical versions and notes', t => {
     )
     assert.equal(set.status, 0, set.stderr)
     git('-C', checkout, 'checkout', '-q')
-    assert.equal(existsSync(join(checkout, '.prettierrc.json')), false)
+    assert.equal(existsSync(join(checkout, '.prettierrc.json')), true)
     assert.equal(existsSync(join(checkout, 'node_modules')), false)
-    if (project === 'start-wrt')
-      assert.equal(existsSync(join(checkout, 'package.json')), false)
+    assert.equal(existsSync(join(checkout, 'package.json')), true)
     const determine = deploy.match(
       /      - name: Determine version\n        id: version\n        run: \|\n((?:          .+\n)+)/,
     )
@@ -213,17 +223,41 @@ test('sparse deploy canonical versions and notes', t => {
     assert.equal(text(outputFile), `version=${version}\n`)
     const derived = script('notes', project, true, checkout).stdout
     contains(derived, PRE_UPDATE)
-    contains(derived, '- Feature.')
-    contains(derived, `/blob/${ref}/projects/${project}/CHANGELOG.md#${anchor}`)
-    env.VERSION = version
-    unlinkSync(
-      join(
-        checkout,
-        project === 'start-os'
-          ? 'package.json'
-          : 'projects/start-wrt/backend/ctrl/Cargo.toml',
-      ),
+    contains(derived, '- Generated feature.')
+    contains(derived, 'Follow up.')
+    contains(derived, `/tree/${ref}/projects/${project}/changelog`)
+    const compose = deploy
+      .split('      - name: Compile release notes\n')[1]
+      ?.split('        run: |\n')[1]
+      ?.split('\n      - ')[0]
+    assert.ok(compose)
+    assert.ok(
+      deploy.indexOf('Compile release notes') <
+        deploy.indexOf('Drop the previous alpha build'),
     )
+    const composeShell = compose
+      .split('\n')
+      .map(line => line.slice(10))
+      .join('\n')
+      .replaceAll('${{ github.sha }}', ref)
+    const runnerTemp = join(root, `notes-${project}`)
+    mkdirSync(runnerTemp)
+    const compile = () =>
+      run('bash', ['-e', '-c', composeShell], {
+        cwd: checkout,
+        env: { ...env, VERSION: version, RUNNER_TEMP: runnerTemp },
+        encoding: 'utf8',
+      })
+    const compiled = compile()
+    assert.equal(compiled.status, 0, compiled.stderr)
+    assert.equal(text(join(runnerTemp, 'release-notes.md')), derived)
+    const fragmentPath = `checkout-${project}/projects/${project}/changelog/patch-fixed-feature.md`
+    write(fragmentPath, '---\nuser-facing: invalid\n---\n\n- Invalid.\n')
+    const invalid = compile()
+    assert.notEqual(invalid.status, 0)
+    contains(invalid.stderr, 'user-facing: true or false')
+    write(fragmentPath, METADATA + '- Generated feature.\n')
+    env.VERSION = version
     assert.equal(script('notes', project, true, checkout).stdout, derived)
     delete env.VERSION
   }
@@ -234,19 +268,20 @@ test('sparse deploy canonical versions and notes', t => {
   )
 })
 
-test('release links rendered changelog', t => {
+test('release links GitHub release without depending on tag CI', t => {
   const { env, write, script } = releaseFixture(t)
   delete env.CHANGELOG_REF
-  for (const [project, version, anchor] of [
-    ['start-sdk', '1.2.3', '123'],
-    ['start-os', '0.4.0.3', '0403'],
-    ['start-os', '0.4.1', '041'],
-    ['start-sdk', '1.2.3-RC.1+Build.2', '123-rc1build2'],
+  for (const [project, version] of [
+    ['start-sdk', '1.2.3'],
+    ['start-os', '0.4.0.3'],
+    ['start-os', '0.4.1'],
+    ['start-sdk', '1.2.3-RC.1+Build.2'],
   ]) {
     env.VERSION = version
     write(`projects/${project}/release-notes/${version}.md`, MAIN)
     const output = script('notes', project).stdout
-    contains(output, `/blob/master/projects/${project}/CHANGELOG.md#${anchor}`)
+    contains(output, `/releases/tag/${project}/v${version}`)
+    excludes(output, '/blob/')
     excludes(output, '/releases/download/')
   }
 })
@@ -254,9 +289,10 @@ test('release links rendered changelog', t => {
 test('source links survive fragment consumption', t => {
   const { env, write, script, git, commit } = releaseFixture(t)
   git('init', '-q')
+  write(`projects/start-sdk/release-notes/${VERSION}.md`, FRAMING)
   write(
     'projects/start-sdk/changelog/patch-fixed-example.md',
-    '- Fixed feature.\n',
+    METADATA + '- Fixed feature.\n',
   )
   write(
     'projects/start-sdk/CHANGELOG.md',
@@ -276,21 +312,73 @@ test('source links survive fragment consumption', t => {
   excludes(output, '/tree/')
 })
 
-test('GitHub and registry share composition', t => {
-  const { write, script } = releaseFixture(t)
+test('GitHub body carries the notes and changelog without the link', t => {
+  const { root, write, script, git, commit } = releaseFixture(t)
+  git('init', '-q')
+  write(`projects/start-sdk/release-notes/${VERSION}.md`, FRAMING)
+  git('remote', 'add', 'origin', root)
   write(`projects/start-sdk/release-notes/${VERSION}.pre-update.md`, PRE_UPDATE)
+  write(
+    'projects/start-sdk/changelog/patch-fixed-example.md',
+    METADATA + '- Fixed feature.\n',
+  )
+  commit()
   const notes = script().stdout
   const body = script('body').stdout
-  assert.ok(body.endsWith('\n' + notes + '\n'))
+  contains(notes, '**[Full changelog')
+  excludes(body, '**[Full changelog')
+  contains(
+    body,
+    `\n${PRE_UPDATE}\n\n${MAIN.replace('Feature.', 'Fixed feature.')}\n<details>`,
+  )
+  contains(body, '<details>\n<summary>Full changelog</summary>\n\n## [1.2.3]')
+  contains(body, '- Fixed feature.\n\n</details>')
+  excludes(body, '<details open')
+  excludes(notes, '<details>')
   assert.equal(body.split(PRE_UPDATE).length - 1, 1)
 })
 
-test('missing main fails even with companion', t => {
-  const { main, write, script } = releaseFixture(t)
+test('registry commands reject invalid highlights before writes', t => {
+  const { root, write, run } = releaseFixture(t)
+  write(
+    'projects/start-wrt/changelog/patch-fixed-invalid.md',
+    '---\nuser-facing: invalid\n---\n\n- Invalid.\n',
+  )
+  const marker = join(root, 'registry-write')
+  for (const command of [
+    'refresh_registry_notes fixture-registry',
+    'cmd_register',
+  ]) {
+    const result = run(
+      'bash',
+      [
+        '-c',
+        `
+source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
+REPO_ROOT="$PWD"; PROJECT=start-wrt; KIND=wrt; VERSION=1.2.3
+load_registry_index() { _INDEX_JSON='{"versions":{"1.2.3":{"sourceVersion":">=0.1.0"}}}'; }
+enter_release_dir() { :; }
+start-cli() { touch "${marker}"; }
+${command}
+`,
+      ],
+      { encoding: 'utf8' },
+    )
+    assert.notEqual(result.status, 0)
+    contains(result.stderr, 'user-facing: true or false')
+    assert.equal(existsSync(marker), false)
+  }
+})
+
+test('main framing is optional', t => {
+  const { root, main, write, script, git, commit } = releaseFixture(t)
+  git('init', '-q')
+  git('remote', 'add', 'origin', root)
+  commit()
   write(`projects/start-sdk/release-notes/${VERSION}.pre-update.md`, PRE_UPDATE)
   unlinkSync(main)
-  contains(script('notes', 'start-sdk', false).stderr, 'No release notes')
-  contains(script('body', 'start-sdk', false).stderr, 'No release notes')
+  contains(script('notes').stdout, PRE_UPDATE)
+  contains(script('body').stdout, '## Highlights')
 })
 
 test('existing changelog link is replaced', t => {
@@ -308,6 +396,7 @@ test('existing changelog link is replaced', t => {
 test('companion changes block adopted release', t => {
   const { root, preUpdate, write, run, git, commit } = releaseFixture(t)
   git('init', '-q')
+  git('remote', 'add', 'origin', root)
   commit()
   let adopted = git('rev-parse', 'HEAD').trim()
   const command = `source <(awk '/^SUBCOMMAND=/{exit} {print}' "$1")
@@ -355,7 +444,7 @@ assert_metadata_matches_adopted`
   commit()
   blocked()
   adopted = git('rev-parse', 'HEAD').trim()
-  write('projects/start-sdk/CHANGELOG.md', '# Generated history\n')
+  write('projects/start-sdk/CHANGELOG.md', '')
   commit()
   const result = check()
   assert.equal(result.status, 0, result.stderr)
@@ -367,17 +456,48 @@ assert_metadata_matches_adopted`
   blocked('changelog')
 })
 
-test('release uploads changelog from tag before publication', t => {
-  const { root, env, write, script, git, commit, nodeExecutable } =
-    releaseFixture(t)
+test('adopted release accepts compiled metadata after fragments are consumed', t => {
+  const { root, write, run, git, commit } = releaseFixture(t)
   git('init', '-q')
+  git('remote', 'add', 'origin', root)
+  write(`projects/start-sdk/release-notes/${VERSION}.md`, 'Lede.\n')
+  const path = write(
+    'projects/start-sdk/changelog/patch-fixed-public.md',
+    METADATA + '- Released fix.\n',
+  )
+  commit()
+  const adopted = git('rev-parse', 'HEAD').trim()
+  git('-c', 'tag.gpgsign=false', 'tag', 'start-sdk/v1.2.3')
+  const synced = run(process.execPath, ['scripts/changelog.mjs', 'sync'])
+  assert.equal(synced.status, 0, synced.stderr.toString())
+  assert.equal(existsSync(path), false)
+  commit()
+  const command = `source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
+REPO_ROOT="$PWD"; PROJECT=start-sdk; VERSION=1.2.3; COMMIT="${adopted}"
+assert_metadata_matches_adopted`
+  const check = () => run('bash', ['-c', command], { encoding: 'utf8' })
+  const result = check()
+  assert.equal(result.status, 0, result.stderr)
+  write(
+    'projects/start-sdk/changelog/patch-fixed-other.md',
+    METADATA + '- New change.\n',
+  )
+  assert.notEqual(check().status, 0)
+})
+
+test('release uploads changelog from tag before publication', t => {
+  const { root, env, write, script, git, commit, nodeExecutable, run } =
+    releaseFixture(t)
+  delete env.CHANGELOG_REF
+  git('init', '-q')
+  write(`projects/start-sdk/release-notes/${VERSION}.md`, FRAMING)
   write(
     'projects/start-sdk/CHANGELOG.md',
     '# Changelog\n\n## [1.2.2]\n\n- Old change.\n',
   )
   write(
     'projects/start-sdk/changelog/patch-fixed-example.md',
-    '- Fixed the released feature.\n',
+    METADATA + '- Fixed the released feature.\n',
   )
   commit()
   git('-c', 'tag.gpgsign=false', 'tag', 'start-sdk/v1.2.3')
@@ -387,7 +507,7 @@ test('release uploads changelog from tag before publication', t => {
   git('push', '-q', 'origin', 'HEAD:master', '--tags')
   write(
     'projects/start-sdk/changelog/minor-added-later.md',
-    '- Later change.\n',
+    METADATA + '- Later change.\n',
   )
   git('add', 'projects')
   git(
@@ -401,35 +521,118 @@ test('release uploads changelog from tag before publication', t => {
     '-qm',
     'later',
   )
+  write(`projects/start-sdk/release-notes/${VERSION}.md`, 'Later lede.\n')
+  write(
+    `projects/start-sdk/release-notes/${VERSION}.pre-update.md`,
+    PRE_UPDATE + '\nLater warning.\n',
+  )
   const captured = join(root, 'uploaded.md')
+  const bodyFile = join(root, 'release-body.md')
   const calls = join(root, 'gh-calls')
   nodeExecutable(
     'bin/gh',
     `import { appendFileSync, copyFileSync } from 'node:fs'
 const args = process.argv.slice(2)
-appendFileSync(process.env.CALLS, args.join(' ') + '\\n')
-if (args[0] === 'release' && args[1] === 'view')
-  process.exit(process.env.EXISTING_RELEASE ? 0 : 1)
-if (args[0] === 'release' && args[1] === 'upload')
+appendFileSync(process.env.CALLS, JSON.stringify(args) + '\\n')
+if (args[1] === 'view') {
+  if (!process.env.EXISTING_RELEASE) process.exit(1)
+  console.log(process.env.RELEASE_DRAFT || 'false')
+}
+if (args.includes('--notes-file'))
+  copyFileSync(args[args.indexOf('--notes-file') + 1], process.env.BODY)
+if (args[1] === 'upload') {
+  if (process.env.FAIL_UPLOAD) process.exit(1)
   copyFileSync(args.find(arg => arg.endsWith('/CHANGELOG.md')), process.env.CAPTURE)
+}
+if (args.includes('--draft=false') && process.env.FAIL_PUBLISH) process.exit(1)
 `,
   )
   Object.assign(env, {
     PATH: `${join(root, 'bin')}:${env.PATH}`,
     CAPTURE: captured,
+    BODY: bodyFile,
     CALLS: calls,
   })
+  const ghCalls = () =>
+    text(calls)
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line))
+  const taggedCommit = git('rev-parse', 'start-sdk/v1.2.3')
   script('create-gh-release')
-  contains(text(calls), 'release create')
-  unlinkSync(calls)
-  env.EXISTING_RELEASE = '1'
-  script('create-gh-release')
-  contains(text(calls), 'release edit')
+  let recorded = ghCalls()
+  assert.deepEqual(
+    recorded.map(args => args[1]),
+    ['view', 'create', 'upload', 'edit'],
+  )
+  assert.ok(recorded[1].includes('--draft'))
+  assert.ok(recorded[1].includes('--verify-tag'))
+  assert.ok(recorded[3].includes('--draft=false'))
+  const body = text(bodyFile)
+  excludes(body, '**[Full changelog')
+  contains(body, '<details>\n<summary>Full changelog</summary>\n\n## [1.2.3]')
+  contains(body, 'Fixed the released feature.\n\n</details>')
+  excludes(body, 'Old change.')
+  excludes(body, 'Later change.')
+  excludes(body, 'Later lede.')
+  excludes(body, 'Later warning.')
+  contains(body, 'Lede.')
+  excludes(body, '<details open')
   const uploaded = text(captured)
   contains(uploaded, '## [1.2.3]')
   contains(uploaded, 'Fixed the released feature.')
   contains(uploaded, 'Old change.')
   excludes(uploaded, 'Later change.')
+  assert.equal(git('rev-parse', 'start-sdk/v1.2.3'), taggedCommit)
+
+  env.EXISTING_RELEASE = '1'
+  for (const draft of ['true', 'false']) {
+    env.RELEASE_DRAFT = draft
+    unlinkSync(calls)
+    script('create-gh-release')
+    recorded = ghCalls()
+    assert.deepEqual(
+      recorded.map(args => args[1]),
+      draft === 'true'
+        ? ['view', 'edit', 'upload', 'edit']
+        : ['view', 'edit', 'upload'],
+    )
+    assert.equal(text(bodyFile), body)
+    assert.equal(text(captured), uploaded)
+    assert.ok(!recorded[1].includes('--draft'))
+  }
+
+  env.FAIL_UPLOAD = '1'
+  env.EXISTING_RELEASE = ''
+  unlinkSync(calls)
+  const published = join(root, 'published')
+  const failed = run(
+    'bash',
+    [
+      '-c',
+      `
+source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
+REPO_ROOT="$PWD"
+PROJECT=start-sdk; KIND=npm; VERSION=1.2.3; TAG=start-sdk/v1.2.3
+cmd_pre_check() { :; }
+cmd_tag() { :; }
+cmd_push() { touch "${published}"; }
+cmd_release
+`,
+    ],
+    { encoding: 'utf8' },
+  )
+  assert.notEqual(failed.status, 0)
+  assert.equal(existsSync(published), false)
+  assert.ok(!ghCalls().some(args => args.includes('--draft=false')))
+  delete env.FAIL_UPLOAD
+
+  env.EXISTING_RELEASE = '1'
+  env.RELEASE_DRAFT = 'true'
+  env.FAIL_PUBLISH = '1'
+  script('create-gh-release', 'start-sdk', false)
+  delete env.FAIL_PUBLISH
+  script('create-gh-release')
   write(
     'projects/start-sdk/changelog/patch-fixed-example.md',
     'invalid fragment\n',
@@ -458,9 +661,77 @@ if (args[0] === 'release' && args[1] === 'upload')
   }
 })
 
+test('resume requires a published release with inline changelog and attachment', t => {
+  const { root, env, run, git, commit, nodeExecutable } = releaseFixture(t)
+  git('init', '-q')
+  git('remote', 'add', 'origin', root)
+  commit()
+  nodeExecutable(
+    'bin/gh',
+    `
+if (!process.env.RELEASE_METADATA) process.exit(1)
+console.log(process.env.RELEASE_METADATA)
+`,
+  )
+  env.PATH = `${join(root, 'bin')}:${env.PATH}`
+  const command = `
+source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
+REPO_ROOT="$PWD"
+PROJECT=start-wrt; KIND=wrt; VERSION=1.2.3; TAG=start-wrt/v1.2.3
+missing_registry_assets() { echo missing; }
+detect_progress
+printf '%s' "\${DONE[create-gh-release]:-incomplete}"
+`
+  for (const [metadata, complete] of [
+    [null, false],
+    [{ isDraft: false, assets: [], body: '' }, false],
+    [{ isDraft: false, assets: [{ name: 'CHANGELOG.md' }], body: MAIN }, false],
+    [
+      { isDraft: false, assets: [], body: '<summary>Full changelog</summary>' },
+      false,
+    ],
+    [
+      {
+        isDraft: true,
+        assets: [{ name: 'CHANGELOG.md' }],
+        body: '<summary>Full changelog</summary>',
+      },
+      false,
+    ],
+    [
+      {
+        isDraft: false,
+        assets: [{ name: 'CHANGELOG.md' }],
+        body: '<summary>Full changelog</summary>',
+      },
+      true,
+    ],
+  ]) {
+    env.RELEASE_METADATA = metadata ? JSON.stringify(metadata) : ''
+    const result = run('bash', ['-c', command], { encoding: 'utf8' })
+    assert.equal(result.status, 0, result.stderr)
+    assert.equal(result.stdout, complete ? '1' : 'incomplete')
+  }
+})
+
+test('release without fragments still has an expandable changelog', t => {
+  const { root, script, git, commit } = releaseFixture(t)
+  git('init', '-q')
+  git('remote', 'add', 'origin', root)
+  commit()
+  const body = script('body').stdout
+  contains(
+    body,
+    '<summary>Full changelog</summary>\n\nNo changelog entries.\n\n</details>',
+  )
+})
+
 test('StartOS registry and packaged welcome', t => {
-  const { root, env, write, script, run } = releaseFixture(t)
+  const { root, env, write, script, run, git, commit } = releaseFixture(t)
   const version = '0.4.0.2'
+  write('projects/start-os/build/lib/firmware.json', '[]')
+  write('projects/start-os/build/dpkg-deps/fixture', '')
+  write('build/bash-completion', '')
   const source = join(REPO, 'projects/start-os/release-notes')
   for (const name of [`${version}.md`, `${version}.pre-update.md`])
     write(
@@ -484,24 +755,53 @@ cp = $(if $(filter %/release-notes.md,$(2)),cp "$(1)" "$(2)",true)
 include ${REPO}/projects/start-os/build.mk
 `,
   )
-  const result = run(
-    'make',
-    [
-      '-f',
-      harness,
-      'start-os-install',
-      'STARTOS_TARGETS=',
-      'PLATFORM=x86_64',
-      `VERSION_FILE=${versionFile}`,
-      `DESTDIR=${root}/image`,
-      'ENVIRONMENT=',
-    ],
-    { cwd: REPO, encoding: 'utf8' },
-  )
+  const install = () =>
+    run(
+      'make',
+      [
+        '-f',
+        harness,
+        'start-os-install',
+        'STARTOS_TARGETS=',
+        'PLATFORM=x86_64',
+        `VERSION_FILE=${versionFile}`,
+        `DESTDIR=${root}/image`,
+        'ENVIRONMENT=',
+      ],
+      { cwd: root, encoding: 'utf8' },
+    )
+  const result = install()
   assert.equal(result.status, 0, result.stderr)
   const packaged = text(join(stage, 'release-notes.md'))
   assert.equal(packaged, text(join(source, `${version}.md`)))
   excludes(packaged, 'Before You Update')
   excludes(packaged, 'only way to update')
   contains(packaged, '## Highlights')
+
+  git('init', '-q')
+  write(
+    `projects/start-os/release-notes/${version}.md`,
+    'Lede.\n\n## Important\n\nKeep this notice.\n',
+  )
+  write(
+    'projects/start-os/changelog/patch-fixed-public.md',
+    METADATA + '- Generated highlight.\n',
+  )
+  write(
+    'projects/start-os/changelog/patch-changed-internal.md',
+    '---\nuser-facing: false\n---\n\n- Internal detail.\n',
+  )
+  commit()
+  const generated = install()
+  assert.equal(generated.status, 0, generated.stderr)
+  const welcome = text(join(stage, 'release-notes.md'))
+  assert.equal(
+    welcome,
+    'Lede.\n\n## Highlights\n\n- Generated highlight.\n\n## Important\n\nKeep this notice.\n',
+  )
+  const registry = script('notes', 'start-os').stdout
+  contains(registry, 'Generated highlight.')
+  contains(registry, PRE_UPDATE.split('\n')[0])
+  excludes(welcome, 'Before You Update')
+  excludes(registry, 'Internal detail.')
 })

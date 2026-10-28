@@ -138,6 +138,62 @@ async fn image_files_and_metadata_survive_without_docker_initialization() {
 }
 
 #[tokio::test]
+async fn symlinked_resolver_and_hardlink_identity_survive_packing() {
+    for alias in [None, Some("etc/zzz"), Some("etc/aaa")] {
+        let mut layer = Vec::new();
+        append(&mut layer, b"etc", b'5', b"", None);
+        append(
+            &mut layer,
+            b"etc/resolv.conf",
+            b'2',
+            b"",
+            Some(b"/nix/store/image-root/etc/resolv.conf"),
+        );
+        if let Some(alias) = alias {
+            append(
+                &mut layer,
+                alias.as_bytes(),
+                b'1',
+                b"",
+                Some(b"etc/resolv.conf"),
+            );
+        }
+        layer.extend_from_slice(&[0; 1024]);
+        let (archive, _) = save_archive(&[layer], "amd64");
+        let (image, _) = from_image_archive(archive.as_slice(), "--platform=linux/amd64")
+            .await
+            .unwrap();
+        let resolve = |path: &str| {
+            resolve_hardlink(Path::new(path), |target| {
+                image.contents().get_path(target).map(|entry| match entry {
+                    Entry::Node(node) => Ok(node),
+                    Entry::Hardlink(target) => Err(target.clone()),
+                })
+            })
+            .unwrap()
+        };
+        let node = resolve("etc/resolv.conf");
+        assert!(matches!(
+            &node.contents,
+            crate::util::squashfs::NodeContents::Symlink(target)
+                if target == Path::new("/nix/store/image-root/etc/resolv.conf")
+        ));
+        assert_eq!(
+            (
+                node.metadata.mode,
+                node.metadata.uid,
+                node.metadata.gid,
+                node.metadata.modification_time,
+            ),
+            (0o640, 17, 23, 42)
+        );
+        if let Some(alias) = alias {
+            assert!(std::ptr::eq(node, resolve(alias)));
+        }
+    }
+}
+
+#[tokio::test]
 async fn compressed_layers_have_identical_filesystem_bytes_and_validate_uncompressed_digests() {
     let layer = image_layer();
     let config = serde_json::json!({"architecture": "amd64", "os": "linux", "rootfs": {

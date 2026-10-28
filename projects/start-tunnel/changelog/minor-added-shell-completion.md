@@ -1,1 +1,0 @@
-- The Debian package enables Bash tab completion automatically in new shells. `start-tunnel completions <shell>` generates completion scripts for Bash, Zsh, fish, elvish, and PowerShell.

@@ -430,6 +430,11 @@ export type OsUpdateSignerKeyParamsInput = z.input<
 >
 export type OsVersionInfo = z.output<typeof schemas.OsVersionInfo>
 export type PackageBackupInfo = z.output<typeof schemas.PackageBackupInfo>
+
+/**
+ * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
+ */
+export type PackageIcon = z.output<typeof schemas.PackageIcon>
 export type PackageIdParamsInput = z.input<typeof schemas.PackageIdParams>
 export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>

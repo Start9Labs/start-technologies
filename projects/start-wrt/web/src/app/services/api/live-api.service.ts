@@ -101,7 +101,7 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'system.get-timezones', params: {} })
   }
 
-  async logout(): Promise<null> {
+  async logout(): Promise<RpcReturnType<Api, 'auth.logout'>> {
     return this.rpc.request({ method: 'auth.logout', params: {} })
   }
 
@@ -279,6 +279,10 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'system.logs', params: {} })
   }
 
+  async followLogs(): Promise<RpcReturnType<Api, 'system.logs-follow'>> {
+    return this.rpc.request({ method: 'system.logs-follow', params: {} })
+  }
+
   async devicesList(): Promise<DeviceFromApi[]> {
     return this.rpc.request({ method: 'devices.list', params: {} })
   }
@@ -298,6 +302,15 @@ export class LiveApiService extends ApiService {
     params: RpcParamType<Api, 'devices.set-dns-injection'>,
   ): Promise<RpcReturnType<Api, 'devices.set-dns-injection'>> {
     return this.rpc.request({ method: 'devices.set-dns-injection', params })
+  }
+
+  async devicesSetRouterAdvertisements(
+    params: RpcParamType<Api, 'devices.set-router-advertisements'>,
+  ): Promise<RpcReturnType<Api, 'devices.set-router-advertisements'>> {
+    return this.rpc.request({
+      method: 'devices.set-router-advertisements',
+      params,
+    })
   }
 
   async dnsInjectedList(): Promise<InjectedDnsRecordFromApi[]> {

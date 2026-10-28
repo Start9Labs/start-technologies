@@ -188,10 +188,8 @@ fn get_config(ctx: impl CtrlContext, cfgs: &Configs) -> Result<Ethernet, Error> 
     })
 }
 
-/// IEEE 802.3 Clause 28 `break_link_timer` requires 1200–1500 ms of link pulse
-/// suppression for the link partner to reliably detect carrier loss.  We use 2 s
-/// to provide margin above the 1.5 s maximum.
-const PORT_BOUNCE_DOWN_SECS: u64 = 2;
+/// Outlasts NetworkManager's carrier-loss debounce: 6 s, or 10 s after it changes the MTU.
+const PORT_BOUNCE_DOWN_SECS: u64 = 10;
 
 #[instrument(skip_all)]
 pub async fn set<C: CtrlContext>(
@@ -230,7 +228,7 @@ pub async fn set<C: CtrlContext>(
         let macs = crate::devices::get_bridge_fdb()
             .await
             .into_iter()
-            .filter(|(_, port)| changed_ports.contains(port))
+            .filter(|(_, entry)| changed_ports.contains(&entry.port))
             .map(|(mac, _)| mac)
             .collect();
         (macs, changed_ports)

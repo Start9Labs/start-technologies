@@ -414,7 +414,7 @@ impl CallRemote<RpcContext> for CliContext {
                             .unwrap_or_default()
                     )
                 );
-                crate::auth::login::<RpcContext>(self, "auth.login").await?;
+                crate::auth::login::<RpcContext, _>(self, "auth.login").await?;
                 call().await
             }
             res => res,

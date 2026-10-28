@@ -25,8 +25,6 @@ rpc_toolkit::ts_export!(SignerInfo, namespaces = [""]);
 
 #[derive(Clone, Debug, Deserialize, Serialize, VisitVariants, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-
-// TODO: better types
 pub enum ContactInfo {
     Email(String),
     Matrix(String),
@@ -116,7 +114,8 @@ impl AcceptSigners {
                 if &s == signer {
                     res = crate::sign::compat::verify_commitment(
                         signer, commitment, context, signature,
-                    );
+                    )
+                    .map(|_| ());
                     Self::Accepted
                 } else {
                     Self::Signer(s)

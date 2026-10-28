@@ -5,17 +5,19 @@ use crate::sign::commitment::SignedCommitment;
 use crate::sign::ed25519::Ed25519ph;
 use crate::sign::{AnySignature, AnyVerifyingKey, SignatureScheme};
 
-/// Accepts an `id-Ed25519` signature as Ed25519ph when it fails as pure Ed25519.
+/// Returns a verified signature with its canonical algorithm tag.
 pub fn verify_commitment<C: SignedCommitment>(
     key: &AnyVerifyingKey,
     commitment: &C,
     context: &str,
     signature: &AnySignature,
-) -> Result<(), Error> {
+) -> Result<AnySignature, Error> {
     key.verify_commitment(commitment, context, signature)
+        .map(|()| signature.clone())
         .or_else(|e| match (key, signature) {
             (AnyVerifyingKey::Ed25519(k), AnySignature::Ed25519(s)) => Ed25519ph
                 .verify_commitment(k, commitment, context, s)
+                .map(|()| AnySignature::Ed25519ph(*s))
                 .map_err(|_| e),
             _ => Err(e),
         })
@@ -42,7 +44,6 @@ pub fn downgrade_signatures(value: &mut Value) {
     });
 }
 
-/// Applies `f` to each entry of every `signatures` map; `None` removes the entry.
 fn map_signatures(value: &mut Value, f: &mut impl FnMut(&Value) -> Option<Value>) {
     match value {
         Value::Object(obj) => {
@@ -119,18 +120,98 @@ mod tests {
         );
     }
 
+    fn assert_signature_normalization<C: SignedCommitment>(
+        commitment: &C,
+        changed: &C,
+        context: &str,
+    ) {
+        use ed25519_dalek::Signer as _;
+
+        use crate::sign::{COMMITMENT_SIG_TAG, signing_message};
+
+        let signing_key = key();
+        let key = AnyVerifyingKey::Ed25519(signing_key.verifying_key());
+        let wrong_key = AnyVerifyingKey::Ed25519(
+            ed25519_dalek::SigningKey::from_bytes(&[9; 32]).verifying_key(),
+        );
+        let ph = Ed25519ph
+            .sign_commitment(&signing_key, commitment, context)
+            .unwrap();
+        let pure =
+            signing_key.sign(&signing_message(COMMITMENT_SIG_TAG, commitment, context).unwrap());
+        let legacy = AnySignature::Ed25519(ph);
+        assert!(key.verify_commitment(commitment, context, &legacy).is_err());
+
+        for (input, expected) in [
+            (legacy, AnySignature::Ed25519ph(ph)),
+            (AnySignature::Ed25519ph(ph), AnySignature::Ed25519ph(ph)),
+            (AnySignature::Ed25519(pure), AnySignature::Ed25519(pure)),
+        ] {
+            let normalized = verify_commitment(&key, commitment, context, &input).unwrap();
+            assert_eq!(normalized, expected);
+            let stored: AnySignature = from_value(to_value(&normalized).unwrap()).unwrap();
+            assert_eq!(stored, expected);
+            key.verify_commitment(commitment, context, &stored).unwrap();
+            assert!(verify_commitment(&key, changed, context, &input).is_err());
+            assert!(verify_commitment(&key, commitment, "wrong-context", &input).is_err());
+            assert!(verify_commitment(&wrong_key, commitment, context, &input).is_err());
+        }
+        assert!(
+            verify_commitment(&key, commitment, context, &AnySignature::Ed25519ph(pure)).is_err()
+        );
+    }
+
     #[test]
-    fn legacy_labelled_ed25519ph_verifies() {
-        let commitment = crate::sign::commitment::blake3::Blake3Commitment {
-            hash: crate::util::serde::Base64([1; 32]),
+    fn os_signatures_normalize_verified_algorithm_tags() {
+        use crate::sign::commitment::blake3::Blake3Commitment;
+        use crate::util::serde::Base64;
+
+        let commitment = Blake3Commitment {
+            hash: Base64([1; 32]),
             size: 7,
         };
-        let key = AnyVerifyingKey::Ed25519(key().verifying_key());
-        let legacy = AnySignature::Ed25519(ph_signature());
-        assert!(
-            key.verify_commitment(&commitment, "startos", &legacy)
-                .is_err()
+        assert_signature_normalization(
+            &commitment,
+            &Blake3Commitment {
+                size: 8,
+                ..commitment
+            },
+            crate::registry::os::SIG_CONTEXT,
         );
-        verify_commitment(&key, &commitment, "startos", &legacy).unwrap();
+        assert_signature_normalization(
+            &commitment,
+            &Blake3Commitment {
+                hash: Base64([2; 32]),
+                ..commitment
+            },
+            crate::registry::os::SIG_CONTEXT,
+        );
+    }
+
+    #[test]
+    fn package_signatures_normalize_verified_algorithm_tags() {
+        use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
+        use crate::util::serde::Base64;
+
+        let commitment = MerkleArchiveCommitment {
+            root_sighash: Base64([1; 32]),
+            root_maxsize: 7,
+        };
+        assert_signature_normalization(
+            &commitment,
+            &MerkleArchiveCommitment {
+                root_maxsize: 8,
+                ..commitment
+            },
+            crate::s9pk::v2::SIG_CONTEXT,
+        );
+        assert_signature_normalization(
+            &commitment,
+            &MerkleArchiveCommitment {
+                root_sighash: Base64([2; 32]),
+                ..commitment
+            },
+            crate::s9pk::v2::SIG_CONTEXT,
+        );
     }
 }

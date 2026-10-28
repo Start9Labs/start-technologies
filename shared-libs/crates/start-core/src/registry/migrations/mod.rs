@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use patch_db::ModelExt;
 
 use crate::prelude::*;
@@ -7,13 +9,14 @@ mod m_00_package_signer_scope;
 mod m_01_registry_asset_array;
 mod m_02_ed25519ph_signature_label;
 mod m_03_commitment_type_tags;
+mod m_04_icon_store;
 
 pub trait RegistryMigration {
     fn name(&self) -> &'static str {
         let val = std::any::type_name_of_val(self);
         val.rsplit_once("::").map_or(val, |v| v.1)
     }
-    fn action(&self, db: &mut Value) -> Result<(), Error>;
+    fn action(&self, db: &mut Value, datadir: &Path) -> Result<(), Error>;
 }
 
 pub const MIGRATIONS: &[&dyn RegistryMigration] = &[
@@ -21,15 +24,16 @@ pub const MIGRATIONS: &[&dyn RegistryMigration] = &[
     &m_01_registry_asset_array::RegistryAssetArray,
     &m_02_ed25519ph_signature_label::Ed25519phSignatureLabel,
     &m_03_commitment_type_tags::CommitmentTypeTags,
+    &m_04_icon_store::IconStore,
 ];
 
 #[instrument(skip_all)]
-pub fn run_migrations(db: &mut Model<RegistryDatabase>) -> Result<(), Error> {
+pub fn run_migrations(db: &mut Model<RegistryDatabase>, datadir: &Path) -> Result<(), Error> {
     let mut migrations = db.as_migrations().de().unwrap_or_default();
     for migration in MIGRATIONS {
         let name = migration.name();
         if !migrations.contains(name) {
-            migration.action(ModelExt::as_value_mut(db))?;
+            migration.action(ModelExt::as_value_mut(db), datadir)?;
             migrations.insert(name.into());
         }
     }

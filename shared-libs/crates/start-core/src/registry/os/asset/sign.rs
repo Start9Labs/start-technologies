@@ -105,7 +105,12 @@ async fn sign_asset(
             .as_idx_mut(&platform)
             .or_not_found(&platform)?
             .mutate(|s| {
-                signer.verify_commitment(&s.commitment, SIG_CONTEXT, &signature)?;
+                let signature = crate::sign::compat::verify_commitment(
+                    &signer,
+                    &s.commitment,
+                    SIG_CONTEXT,
+                    &signature,
+                )?;
                 s.signatures.insert(signer, signature);
                 Ok(())
             })?;

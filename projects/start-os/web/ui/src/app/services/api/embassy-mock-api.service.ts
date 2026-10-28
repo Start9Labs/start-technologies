@@ -1585,7 +1585,7 @@ export class MockApiService extends ApiService {
 
   async getStaticObjectUrl(url: string): Promise<string> {
     await pauseFor(500)
-    const id = url.match(/([^/]+?)(\.s9pk)?\/icon$/)?.[1] || ''
+    const id = url.match(/([^/]+?)(\.s9pk)?\/icon(\?|$)/)?.[1] || ''
     const icons: Record<string, string> = {
       bitcoind: BTC_ICON,
       lnd: LND_ICON,

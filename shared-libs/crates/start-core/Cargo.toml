@@ -98,7 +98,9 @@ hmac = "0.13.0"
 http = "1.0.0"
 http-body-util = "0.1"
 hyper = { version = "1.5", features = ["http1", "http2", "server"] }
-hyper-util = { version = "0.1.10", features = [
+hyper-tls = "0.6.0"
+hyper-util = { version = "0.1.21", features = [
+  "client-legacy",
   "http1",
   "http2",
   "server",
@@ -115,12 +117,11 @@ iddqd = "0.3.14"
 igd-next = { version = "0.17.1", default-features = false, features = [
   "aio_tokio",
 ] }
-imbl = { version = "6", features = ["serde", "small-chunks"] }
+imbl = { version = "7", features = ["serde", "small-chunks"] }
 imbl-value = { path = "../imbl-value" }
 include_dir = { version = "0.7.3", features = ["metadata"] }
 indexmap = { version = "2.0.2", features = ["serde"] }
 indicatif = { version = "0.18.3", features = ["tokio"] }
-inotify = "0.11.0"
 instant-acme = { git = "https://github.com/Start9Labs/instant-acme.git", rev = "f5fea9642366ba3b495ee9be2cf653b9812368d7", default-features = false, features = [
   "ring",
 ] }
@@ -258,5 +259,6 @@ tempfile = "3.14.0"
 tokio = { version = "1.38.1", features = ["test-util"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+inotify = "0.11.0"
 procfs = "0.18.0"
 pty-process = "0.5.1"

@@ -47,8 +47,25 @@ pub struct OutboundVpn {
     /// Resolvers reached through the tunnel. Empty leaves profiles routed through
     /// this VPN on the system DNS servers, or on the ISP's outside the tunnel.
     pub dns: Vec<IpAddr>,
+    pub status: OutboundVpnStatus,
+    /// Seconds since the tunnel's latest handshake, measured on the router.
+    /// `None` when it has never completed one.
+    pub last_handshake_secs: Option<u64>,
 }
 rpc_toolkit::reflect_ts!(OutboundVpn);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, visit_rs::VisitVariants)]
+#[serde(rename_all = "kebab-case")]
+pub enum OutboundVpnStatus {
+    Disabled,
+    /// A handshake completed within the session lifetime.
+    Connected,
+    /// Nothing has sent through the tunnel since its session lapsed.
+    Idle,
+    /// The router is sending through the tunnel and the server is not answering.
+    NotResponding,
+}
+rpc_toolkit::reflect_ts!(OutboundVpnStatus);
 
 #[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct OutboundVpnCreateRequest {
@@ -741,7 +758,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<OutboundVpn>, Error> {
 
     let server_interfaces = get_vpn_server_interfaces(&cfgs);
 
-    let clients: Vec<OutboundVpn> = cfgs["startwrt"]
+    let mut clients: Vec<OutboundVpn> = cfgs["startwrt"]
         .sections
         .iter()
         .filter_map(|section| section.get::<UciVpnClient>().ok())
@@ -780,11 +797,119 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<OutboundVpn>, Error> {
                 mtu,
                 hostname_endpoint,
                 dns,
+                status: OutboundVpnStatus::Disabled,
+                last_handshake_secs: None,
             })
         })
         .collect();
 
+    fill_tunnel_status(&mut clients).await;
+
     Ok(clients)
+}
+
+/// How long a send seen after the session lapsed counts as an unanswered handshake.
+const ATTEMPT_WINDOW_SECS: u64 = 120;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TxSample {
+    tx_bytes: u64,
+    at: u64,
+    attempt_at: Option<u64>,
+}
+
+static TX_SAMPLES: std::sync::Mutex<std::collections::BTreeMap<String, TxSample>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TunnelStats {
+    latest_handshake: u64,
+    rx_bytes: u64,
+    tx_bytes: u64,
+}
+
+impl TunnelStats {
+    /// `None` when no peer has an endpoint to send to.
+    fn from_peers(peers: &[crate::wg::WgPeerStats]) -> Option<Self> {
+        let mut peers = peers.iter().filter(|p| p.endpoint.is_some()).peekable();
+        peers.peek()?;
+        Some(peers.fold(
+            TunnelStats {
+                latest_handshake: 0,
+                rx_bytes: 0,
+                tx_bytes: 0,
+            },
+            |acc, p| TunnelStats {
+                latest_handshake: acc.latest_handshake.max(p.latest_handshake),
+                rx_bytes: acc.rx_bytes + p.rx_bytes,
+                tx_bytes: acc.tx_bytes + p.tx_bytes,
+            },
+        ))
+    }
+}
+
+fn tunnel_status(
+    stats: Option<&TunnelStats>,
+    prev: Option<TxSample>,
+    now: u64,
+) -> (OutboundVpnStatus, Option<TxSample>) {
+    let Some(stats) = stats else {
+        return (OutboundVpnStatus::NotResponding, None);
+    };
+    let lapsed_at = stats.latest_handshake + crate::wg::REJECT_AFTER_SECS;
+    let attempt_at = match prev {
+        Some(p) if stats.tx_bytes > p.tx_bytes && p.at >= lapsed_at => Some(now),
+        Some(p) if stats.tx_bytes >= p.tx_bytes => p.attempt_at.filter(|t| *t >= lapsed_at),
+        _ => None,
+    };
+    let status = if now < lapsed_at {
+        OutboundVpnStatus::Connected
+    } else if stats.rx_bytes == 0 && stats.tx_bytes > crate::wg::HANDSHAKE_INITIATION_BYTES {
+        OutboundVpnStatus::NotResponding
+    } else if attempt_at.is_some_and(|t| now.saturating_sub(t) < ATTEMPT_WINDOW_SECS) {
+        OutboundVpnStatus::NotResponding
+    } else {
+        OutboundVpnStatus::Idle
+    };
+    let sample = TxSample {
+        tx_bytes: stats.tx_bytes,
+        at: now,
+        attempt_at,
+    };
+    (status, Some(sample))
+}
+
+async fn fill_tunnel_status(clients: &mut [OutboundVpn]) {
+    let dumps = futures::future::join_all(clients.iter().map(|c| async move {
+        if c.enabled {
+            crate::wg::show_dump(&c.id).await
+        } else {
+            None
+        }
+    }))
+    .await;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+
+    let mut samples = TX_SAMPLES.lock().unwrap();
+    for (client, peers) in clients.iter_mut().zip(dumps) {
+        if !client.enabled {
+            samples.remove(&client.id);
+            continue;
+        }
+        let stats = peers.as_deref().and_then(TunnelStats::from_peers);
+        let (status, sample) = tunnel_status(stats.as_ref(), samples.get(&client.id).copied(), now);
+        client.status = status;
+        client.last_handshake_secs = stats
+            .filter(|s| s.latest_handshake > 0)
+            .map(|s| now.saturating_sub(s.latest_handshake));
+        match sample {
+            Some(sample) => samples.insert(client.id.clone(), sample),
+            None => samples.remove(&client.id),
+        };
+    }
+    samples.retain(|id, _| clients.iter().any(|c| c.id == *id));
 }
 
 /// Create a new outbound VPN client from a WireGuard .conf file
@@ -2167,8 +2292,150 @@ mod tests {
     use tokio::runtime::Runtime;
 
     use super::*;
-    use crate::wg::{Base64, WgKey};
+    use crate::wg::{Base64, WgKey, WgPeerStats};
     use crate::CtrlContext;
+
+    const NOW: u64 = 1_800_000_000;
+
+    fn stats(latest_handshake: u64, rx_bytes: u64, tx_bytes: u64) -> TunnelStats {
+        TunnelStats {
+            latest_handshake,
+            rx_bytes,
+            tx_bytes,
+        }
+    }
+
+    fn sample(tx_bytes: u64, at: u64) -> TxSample {
+        TxSample {
+            tx_bytes,
+            at,
+            attempt_at: None,
+        }
+    }
+
+    #[test]
+    fn recent_handshake_is_connected() {
+        let (status, _) = tunnel_status(Some(&stats(NOW - 10, 92, 1480)), None, NOW);
+        assert_eq!(status, OutboundVpnStatus::Connected);
+    }
+
+    #[test]
+    fn unanswered_tunnel_is_not_responding() {
+        let (status, _) = tunnel_status(Some(&stats(0, 0, 1480)), None, NOW);
+        assert_eq!(status, OutboundVpnStatus::NotResponding);
+    }
+
+    #[test]
+    fn a_single_unanswered_initiation_is_still_idle() {
+        let one = crate::wg::HANDSHAKE_INITIATION_BYTES;
+        let (status, _) = tunnel_status(Some(&stats(0, 0, one)), None, NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+        let (status, _) = tunnel_status(Some(&stats(0, 0, 2 * one)), None, NOW);
+        assert_eq!(status, OutboundVpnStatus::NotResponding);
+    }
+
+    #[test]
+    fn unused_tunnel_is_idle() {
+        let (status, _) = tunnel_status(Some(&stats(0, 0, 0)), None, NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+    }
+
+    #[test]
+    fn missing_peer_is_not_responding() {
+        assert_eq!(
+            tunnel_status(None, None, NOW),
+            (OutboundVpnStatus::NotResponding, None)
+        );
+    }
+
+    #[test]
+    fn quiet_tunnel_with_a_long_keepalive_interval_is_idle() {
+        let handshake = NOW - 300;
+        let dump = format!(
+            "priv\tpub\t60616\toff\n\
+             peer\t(none)\t192.0.2.1:51820\t0.0.0.0/0\t{handshake}\t92\t180\t600\n"
+        );
+        let peers = crate::wg::parse_dump(&dump);
+        let s = TunnelStats::from_peers(&peers).unwrap();
+        let (status, _) = tunnel_status(Some(&s), Some(sample(180, NOW - 5)), NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+    }
+
+    #[test]
+    fn keepalive_retries_after_the_session_lapsed_are_not_responding() {
+        let handshake = NOW - 600;
+        let dump = format!(
+            "priv\tpub\t60616\toff\n\
+             peer\t(none)\t192.0.2.1:51820\t0.0.0.0/0\t{handshake}\t5000\t9000\t25\n"
+        );
+        let peers = crate::wg::parse_dump(&dump);
+        let s = TunnelStats::from_peers(&peers).unwrap();
+        let (status, _) = tunnel_status(Some(&s), Some(sample(8000, NOW - 5)), NOW);
+        assert_eq!(status, OutboundVpnStatus::NotResponding);
+    }
+
+    #[test]
+    fn traffic_before_the_session_lapsed_stays_idle() {
+        let handshake = NOW - 600;
+        let prev = sample(4000, handshake + 100);
+        let (status, _) = tunnel_status(Some(&stats(handshake, 5000, 9000)), Some(prev), NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+    }
+
+    #[test]
+    fn sends_after_the_session_lapsed_are_not_responding_for_the_attempt_window() {
+        let handshake = NOW - 600;
+        let s = stats(handshake, 5000, 9000);
+        let prev = sample(8000, NOW - 5);
+
+        let (status, next) = tunnel_status(Some(&s), Some(prev), NOW);
+        assert_eq!(status, OutboundVpnStatus::NotResponding);
+
+        let later = NOW + ATTEMPT_WINDOW_SECS - 1;
+        let (status, next) = tunnel_status(Some(&s), next, later);
+        assert_eq!(status, OutboundVpnStatus::NotResponding);
+
+        let (status, _) = tunnel_status(Some(&s), next, NOW + ATTEMPT_WINDOW_SECS);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+    }
+
+    #[test]
+    fn counter_reset_forgets_the_attempt() {
+        let handshake = NOW - 600;
+        let prev = TxSample {
+            tx_bytes: 9000,
+            at: NOW - 5,
+            attempt_at: Some(NOW - 5),
+        };
+        let (status, next) = tunnel_status(Some(&stats(handshake, 0, 0)), Some(prev), NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+        assert_eq!(next.unwrap().attempt_at, None);
+    }
+
+    #[test]
+    fn a_new_handshake_clears_an_earlier_attempt() {
+        let prev = TxSample {
+            tx_bytes: 9000,
+            at: NOW - 5,
+            attempt_at: Some(NOW - 300),
+        };
+        let (status, next) = tunnel_status(Some(&stats(NOW - 200, 5000, 9000)), Some(prev), NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+        assert_eq!(next.unwrap().attempt_at, None);
+    }
+
+    #[test]
+    fn peers_without_an_endpoint_give_no_stats() {
+        let peer = WgPeerStats {
+            public_key: "k".into(),
+            endpoint: None,
+            latest_handshake: 0,
+            rx_bytes: 0,
+            tx_bytes: 0,
+        };
+        assert_eq!(TunnelStats::from_peers(&[peer]), None);
+        assert_eq!(TunnelStats::from_peers(&[]), None);
+    }
 
     #[derive(Clone)]
     #[allow(dead_code)]
@@ -4568,6 +4835,8 @@ config wireguard_wg_inner 'in_peer0'
                     mtu: wg.mtu,
                     hostname_endpoint: has_hostname_endpoint(&cfgs, &meta.interface),
                     dns: vec![],
+                    status: OutboundVpnStatus::Disabled,
+                    last_handshake_secs: None,
                 })
             })
             .collect();

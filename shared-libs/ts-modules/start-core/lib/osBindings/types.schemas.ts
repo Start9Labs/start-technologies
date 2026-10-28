@@ -3302,6 +3302,24 @@ export const PackageBackupInfo: z.ZodObject<{
 }).meta({
   id: 'PackageBackupInfo',
 })
+
+/**
+ * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
+ */
+export const PackageIcon: z.ZodUnion<readonly [typeof DataUrl, z.ZodString]> =
+  /* @__PURE__ */ z
+    .union([
+      DataUrl,
+      z.string().meta({
+        description:
+          "A path under the registry's `/icons/`, led by the scheme that names the file.",
+      }),
+    ])
+    .meta({
+      id: 'PackageIcon',
+      description:
+        'Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.',
+    })
 export const PackageInfoShort: z.ZodObject<{
   releaseNotes: typeof LocaleString
 }> = /* @__PURE__ */ object({ releaseNotes: LocaleString }).meta({
@@ -4210,7 +4228,7 @@ export const DependencyMetadata: z.ZodIntersection<
       z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
       z.ZodNullable<typeof LocaleString>
     >
-    icon: z.ZodOptional<z.ZodNullable<typeof DataUrl>>
+    icon: z.ZodOptional<z.ZodNullable<typeof PackageIcon>>
     description: z.ZodCodec<
       z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
       z.ZodNullable<typeof LocaleString>
@@ -4228,7 +4246,7 @@ export const DependencyMetadata: z.ZodIntersection<
   .intersection(
     object({
       title: wire(LocaleString.nullable().optional(), LocaleString.nullable()),
-      icon: DataUrl.nullable().optional(),
+      icon: PackageIcon.nullable().optional(),
       description: wire(
         LocaleString.nullable().optional(),
         LocaleString.nullable(),
@@ -5285,10 +5303,7 @@ export const OsIndex: z.ZodObject<{ versions: typeof OsVersionInfoMap }> =
   })
 export const PackageVersionInfo: z.ZodIntersection<
   z.ZodObject<{
-    /**
-     * Absent for clients that load icons from the registry's `/icons/` route.
-     */
-    icon: z.ZodOptional<z.ZodNullable<typeof DataUrl>>
+    icon: z.ZodOptional<z.ZodNullable<typeof PackageIcon>>
     dependencyMetadata: z.ZodRecord<z.ZodString, typeof DependencyMetadata>
     sourceVersion: z.ZodCodec<
       z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -5308,13 +5323,7 @@ export const PackageVersionInfo: z.ZodIntersection<
 > = /* @__PURE__ */ z
   .intersection(
     object({
-      /**
-       * Absent for clients that load icons from the registry's `/icons/` route.
-       */
-      icon: DataUrl.nullable().optional().meta({
-        description:
-          "Absent for clients that load icons from the registry's `/icons/` route.",
-      }),
+      icon: PackageIcon.nullable().optional(),
       dependencyMetadata: z.record(z.string(), DependencyMetadata),
       sourceVersion: wire(
         z.string().nullable().optional(),

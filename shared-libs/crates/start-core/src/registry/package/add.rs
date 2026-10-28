@@ -14,6 +14,7 @@ use crate::prelude::*;
 use crate::progress::FullProgressTracker;
 use crate::registry::asset::BufferedHttpSource;
 use crate::registry::context::RegistryContext;
+use crate::registry::package::icon::icons_dir;
 use crate::registry::package::index::PackageVersionInfo;
 use crate::s9pk::S9pk;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
@@ -47,7 +48,8 @@ pub async fn add_package(
         signature,
     }: AddPackageParams,
 ) -> Result<(), Error> {
-    uploader.verify_commitment(&commitment, SIG_CONTEXT, &signature)?;
+    let signature =
+        crate::sign::compat::verify_commitment(&uploader, &commitment, SIG_CONTEXT, &signature)?;
     let peek = ctx.db.peek().await;
     let uploader_guid = peek.as_index().as_signers().get_signer(&uploader)?;
 
@@ -74,7 +76,7 @@ pub async fn add_package(
 
     let manifest = s9pk.as_manifest();
 
-    let mut info = PackageVersionInfo::from_s9pk(&s9pk, urls).await?;
+    let mut info = PackageVersionInfo::from_s9pk(&s9pk, urls, &icons_dir(&ctx.datadir)).await?;
     for (_, s9pk) in &mut info.s9pks {
         if !s9pk.signatures.contains_key(&uploader) && s9pk.commitment == commitment {
             s9pk.signatures.insert(uploader.clone(), signature.clone());
@@ -361,7 +363,8 @@ pub async fn add_mirror(
         signature,
     }: AddMirrorParams,
 ) -> Result<(), Error> {
-    uploader.verify_commitment(&commitment, SIG_CONTEXT, &signature)?;
+    let signature =
+        crate::sign::compat::verify_commitment(&uploader, &commitment, SIG_CONTEXT, &signature)?;
     let peek = ctx.db.peek().await;
     let uploader_guid = peek.as_index().as_signers().get_signer(&uploader)?;
 
@@ -373,7 +376,8 @@ pub async fn add_mirror(
 
     let manifest = s9pk.as_manifest();
 
-    let mut info = PackageVersionInfo::from_s9pk(&s9pk, vec![url]).await?;
+    let mut info =
+        PackageVersionInfo::from_s9pk(&s9pk, vec![url], &icons_dir(&ctx.datadir)).await?;
     for (_, s9pk) in &mut info.s9pks {
         if !s9pk.signatures.contains_key(&uploader) && s9pk.commitment == commitment {
             s9pk.signatures.insert(uploader.clone(), signature.clone());

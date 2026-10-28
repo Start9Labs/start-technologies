@@ -1,1 +1,0 @@
-- **Requests are signed with a new layout.** Managing a server or publishing to a registry requires StartOS 0.4.0.3, StartTunnel 1.4.0, or start-registry 1.2.0 or later.

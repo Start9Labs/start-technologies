@@ -42,7 +42,7 @@ Each VPN server has a client management page listing all peers. Navigate to a VP
 
 ### Adding a Client
 
-1. Select the VPN server and click "Add".
+1. Open the VPN server's client list ("Manage clients" in its actions menu) and click "Add".
 
 1. Configure the client:
    - **Label** — A name for the client (e.g. "My iPhone", "Work Laptop").
@@ -57,7 +57,7 @@ Each VPN server has a client management page listing all peers. Navigate to a VP
 
 ### Viewing Client Configuration
 
-Right after a client is created, its full configuration is displayed in two formats:
+Right after a client is created, its full configuration is displayed in two formats. It opens blurred — click the eye icon to reveal it before copying, downloading, or scanning it.
 
 - **File** — Displays the configuration as text. Use the copy button to copy to clipboard, or the download button to save as a `.conf` file that WireGuard apps can import.
 - **QR** — Displays the configuration as a QR code. Scan with the WireGuard mobile app to configure the client without manual entry.
@@ -65,7 +65,7 @@ Right after a client is created, its full configuration is displayed in two form
 If you entered the device's own public key, the configuration is shown as text only, with a placeholder where the private key belongs. Replace the placeholder with the device's private key, or copy the other values, including the preshared key, into the device's existing WireGuard tunnel.
 
 > [!IMPORTANT]
-> This is the only time the full configuration is available. The auto-generated private key is never stored on the router, so download or copy the configuration (or scan the QR code) before closing the dialog. The "View Config" action on the client list later shows the configuration with a placeholder where the private key belongs. If you lose the configuration, delete the client and create a new one.
+> This is the only time the full configuration is available. The auto-generated private key is never stored on the router, so download or copy the configuration (or scan the QR code) before closing the dialog. The "View Config" action on the client list later shows the configuration without its private key or preshared key. If you lose the configuration, delete the client and create a new one.
 
 ### Changing Client Routing
 

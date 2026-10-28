@@ -1,1 +1,0 @@
-- **The identity key can live in gpg-agent.** Set `id-key-gpg: <key>` in the config (or pass `--id-key-gpg`) to a fingerprint, key ID, or user ID to sign with an Ed25519 key held by gpg-agent instead of `id.key.pem`. Requires GnuPG 2.3 or later. Servers running StartOS 0.4.0.3 or earlier cannot verify registry assets signed only by such a key.

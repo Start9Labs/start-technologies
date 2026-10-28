@@ -23,6 +23,8 @@ cargo build -p exver
 cargo test  -p exver
 ```
 
+`make start-core-test` also runs this crate's unit tests with `serde` enabled.
+
 ## Gotchas
 
 - Flavor-aware ordering is partial. `ExtendedVersion::partial_cmp` returns `None` when flavors

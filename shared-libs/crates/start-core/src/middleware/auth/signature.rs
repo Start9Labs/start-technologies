@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::Request;
-use chrono::Utc;
+use chrono::TimeDelta;
 use http::header::USER_AGENT;
 use http::{Extensions, HeaderMap, HeaderValue};
 use itertools::Itertools;
@@ -26,7 +26,7 @@ use crate::prelude::*;
 use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::commitment::Commitment;
 use crate::sign::commitment::request::RequestCommitment;
-use crate::sign::{AnySignature, AnySigningKey, AnyVerifyingKey, Signer};
+use crate::sign::{AnySignature, AnyVerifyingKey, Signer};
 use crate::util::serde::Base64;
 use crate::util::sync::SyncMutex;
 
@@ -60,7 +60,7 @@ impl SignatureAuthMetadata for LoginMetadata {
 }
 
 /// Returns the enrolled key, or `None` for signed login requests.
-pub(crate) fn check_enrolled(
+pub fn check_enrolled(
     pubkey: Option<&AnyVerifyingKey>,
     login: bool,
     is_enrolled: impl FnOnce(&InternedString) -> Result<bool, Error>,
@@ -88,6 +88,9 @@ pub(crate) fn check_enrolled(
 pub trait SignatureAuthContext: DbContext {
     type AdditionalMetadata: DeserializeOwned + SignatureAuthMetadata + Send;
     type CheckPubkeyRes: Send;
+    /// How far a key's persisted `last_active` may lag its latest request.
+    /// Zero persists every request.
+    const LAST_ACTIVE_RESOLUTION: TimeDelta = TimeDelta::zero();
     fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T;
     /// Whether the clock can be trusted - otherwise nonces are LRU evicted
     fn clock_synced(&self) -> impl Future<Output = bool> + Send + Sync;
@@ -261,27 +264,7 @@ impl SignatureAuthContext for RpcContext {
     }
     async fn post_auth_hook(&self, key: Self::CheckPubkeyRes, _: &RpcRequest) -> Result<(), Error> {
         if let Some(key) = key {
-            let ephemeral = self.ephemeral_auth_keys.mutate(|keys| {
-                if let Some(entry) = keys.0.get_mut(&*key) {
-                    entry.last_active = Utc::now();
-                    true
-                } else {
-                    false
-                }
-            });
-            if !ephemeral {
-                self.db
-                    .mutate(|db| {
-                        db.as_private_mut().as_session_pubkeys_mut().mutate(|keys| {
-                            if let Some(entry) = keys.0.get_mut(&*key) {
-                                entry.last_active = Utc::now();
-                            }
-                            Ok(())
-                        })
-                    })
-                    .await
-                    .result?;
-            }
+            crate::auth::touch_last_active(self, &key).await?;
         }
         Ok(())
     }
@@ -322,7 +305,7 @@ fn startos_signing_identities(
 }
 
 /// Formats an IP as `url::Url::host_str` renders it.
-pub(crate) fn url_host_str(ip: IpAddr) -> InternedString {
+pub fn url_host_str(ip: IpAddr) -> InternedString {
     match ip {
         IpAddr::V4(ip) => InternedString::from_display(&ip),
         IpAddr::V6(ip) => InternedString::from_display(&lazy_format!("[{ip}]")),
@@ -642,6 +625,11 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
         async {
             let verified = self.signer.take().transpose()?;
             let signer = verified.as_ref().map(|(signer, _)| signer);
+            let login = metadata.additional.is_login();
+            let db = context.db().peek().await;
+            let res = context.check_pubkey(&db, signer, metadata.additional)?;
+            // Injected only for an accepted signer: another method may still
+            // admit the request after a rejected one.
             if metadata.get_signer {
                 if let Some(signer) = signer {
                     request.params["__Auth_signer"] = to_value(signer)?;
@@ -652,9 +640,6 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
                     request.params["__Auth_userAgent"] = to_value(&user_agent)?;
                 }
             }
-            let login = metadata.additional.is_login();
-            let db = context.db().peek().await;
-            let res = context.check_pubkey(&db, signer, metadata.additional)?;
             if login {
                 if let Some((_, address)) = verified {
                     super::login_rate_limit::check(address, &self.origin)?;
@@ -752,6 +737,7 @@ mod tests {
     use http::HeaderValue;
 
     use super::*;
+    use crate::sign::AnySigningKey;
 
     /// Produced by the TypeScript client (`lib/auth/signature.ts`) for secret
     /// key 0102…1f20, context "start-9.local", and the JSON body below. Guards

@@ -3,8 +3,9 @@ config system
 	option hostname 'router'
 	option timezone 'UTC'
 	option ttylogin '0'
-	option log_size '512'
-	option log_file '/etc/log/messages'
+	option log_size '32768'
+	option log_buffer_size '512'
+	option log_file '/var/log/messages'
 	option urandom_seed '0'
 
 config timeserver 'ntp'

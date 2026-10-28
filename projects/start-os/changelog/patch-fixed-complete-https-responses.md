@@ -1,1 +1,0 @@
-- **Large HTTP responses arrive complete through service HTTPS addresses when the backend closes the connection.**

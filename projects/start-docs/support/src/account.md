@@ -1,6 +1,6 @@
 # Your Account
 
-A Start9 Support account is created with an access code, and is yours for life. This page covers where to find your code, creating the account, and getting back in when you forget your password.
+A Start9 Support account is created with an access code, and is yours for life. This page covers where to find your code, creating the account, getting back in when you forget your password, and deleting the account.
 
 ## Access Codes
 
@@ -28,3 +28,16 @@ Sign in with your email and password. **Sign out** is in the account menu, which
 Choose **Forgot your password?** on the sign-in page, enter your email, and open the link that arrives to choose a new password.
 
 An emailed link works once and expires. If a link says it has expired, was already used or is not valid, request a new one from the same page.
+
+## Email
+
+Start9 Support emails you only about your account: sign-up and password links, and a recovered access code. Chats are never emailed.
+
+## Deleting Your Account
+
+Choose **Delete account** in **Settings**, under **Security**, and enter your password.
+
+- **At once** — you are signed out everywhere, your chats close, and other customers can no longer read them.
+- **30 days later** — your account is deleted for good, with your chats, files and private threads, unless the law requires Start9 to keep them. The [Privacy Policy](https://support.start9.com/privacy) says when that can be.
+
+Your access code cannot be used again, so coming back means a new code. To keep a copy of a chat, [export it](chats.md#exporting-a-chat) before you delete the account.

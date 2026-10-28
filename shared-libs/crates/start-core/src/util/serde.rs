@@ -14,6 +14,7 @@ use openssl::pkey::{PKey, Private};
 use openssl::x509::X509;
 use rpc_toolkit::{
     CliBindings, Context, HandlerArgs, HandlerArgsFor, HandlerFor, HandlerTypes, PrintCliResult,
+    output,
 };
 use serde::de::DeserializeOwned;
 use serde::ser::{SerializeMap, SerializeSeq};
@@ -450,10 +451,13 @@ mod yaml_tests {
 }
 
 pub fn display_serializable<T: Serialize>(format: IoFormat, result: T) -> Result<(), Error> {
-    format.to_writer(std::io::stdout(), &result)?;
+    use std::io::Write as _;
+    let mut stdout = output::stdout();
+    format.to_writer(&mut stdout, &result)?;
     if format == IoFormat::JsonPretty {
-        println!()
+        writeln!(stdout)?;
     }
+    stdout.flush()?;
     Ok(())
 }
 
@@ -884,7 +888,7 @@ impl Serialize for Port {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Reversible<T, Container = Vec<T>>
 where
     for<'a> &'a Container: IntoDoubleEndedIterator<&'a T>,
@@ -893,12 +897,25 @@ where
     data: Container,
     phantom: PhantomData<T>,
 }
+impl<T, Container> Clone for Reversible<T, Container>
+where
+    for<'a> &'a Container: IntoDoubleEndedIterator<&'a T>,
+    Container: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            reversed: self.reversed,
+            data: self.data.clone(),
+            phantom: PhantomData,
+        }
+    }
+}
 impl<T, Container> Reversible<T, Container>
 where
     for<'a> &'a Container: IntoDoubleEndedIterator<&'a T>,
 {
     pub fn new(data: Container) -> Self {
-        Reversible {
+        Self {
             reversed: false,
             data,
             phantom: PhantomData,
@@ -958,7 +975,7 @@ where
     where
         D: Deserializer<'de>,
     {
-        Ok(Reversible::new(Deserialize::deserialize(deserializer)?))
+        Ok(Self::new(Deserialize::deserialize(deserializer)?))
     }
     fn deserialize_in_place<D>(deserializer: D, place: &mut Self) -> Result<(), D::Error>
     where

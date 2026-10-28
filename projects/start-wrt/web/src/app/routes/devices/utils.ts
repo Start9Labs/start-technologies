@@ -29,6 +29,8 @@ export interface Device extends DeviceTableItem {
   allowAutoPortForward: boolean
   /** May publish DNS records into the router's resolver (default off). */
   allowDnsInjection: boolean
+  /** Its IPv6 router advertisements reach the rest of the LAN (default off). */
+  allowRouterAdvertisements: boolean
 }
 
 // Form for editing a device. IPv6 has no controls: the device chooses its own
@@ -38,6 +40,7 @@ export function getDeviceForm(builder: NonNullableFormBuilder) {
     name: builder.control('', [CustomValidators.hostname()]),
     allowAutoPortForward: builder.control(false),
     allowDnsInjection: builder.control(false),
+    allowRouterAdvertisements: builder.control(false),
     ip: builder.group({
       ipv4Static: builder.control(false),
       ipv4: builder.control('', [CustomValidators.ipv4()]),
@@ -54,6 +57,14 @@ export interface DeviceUpdateData {
   ipv4Static: boolean
   ipv4: string
 }
+
+/** A permission is undefined when it didn't change. */
+export type DevicePermissionChanges = Partial<
+  Pick<
+    Device,
+    'allowAutoPortForward' | 'allowDnsInjection' | 'allowRouterAdvertisements'
+  >
+>
 
 export function updateDeviceValidators(
   form: ReturnType<typeof getDeviceForm>,

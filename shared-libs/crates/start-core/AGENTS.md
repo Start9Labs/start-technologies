@@ -25,7 +25,7 @@ Topical references: [rpc-toolkit.md](rpc-toolkit.md), [patchdb.md](patchdb.md),
 Install stable Rust and Docker. `rust-analyzer` is recommended.
 
 - `cargo check -p start-core` — type-check the library.
-- `make start-core-test` — run the test suite (wraps `run-tests.sh`, which builds `testenv.Dockerfile`
+- `make start-core-test` — run the start-core and exver test suites (wraps `run-tests.sh`, which builds `testenv.Dockerfile`
   over the Rust builder with Node 24 and SquashFS oracle tools, uses the `test` and `ts` features, and
   skips `export_` tests). `RUST_BUILDER_IMAGE` selects a prebuilt test image instead. Or run a single
   test directly: `cargo test -p start-core <name> --features=test` (add `ts` for binding tests).
@@ -48,6 +48,8 @@ project structure, conventions, build process, or product context.
 See [rpc-toolkit.md](rpc-toolkit.md) for handler patterns.
 
 ## Gotchas
+
+- **Console output uses `rpc_toolkit::output`.** `lib.rs` imports `rpc_toolkit`'s macros with `#[macro_use]`, whose four print macros shadow `std`'s crate-wide. A glob re-export cannot shadow them (E0659). Use `rpc_toolkit::output`'s stdout/stderr writers for serializers and generators, and the prelude's `print_table` for tables. Broken output pipes exit with status 141; network and filesystem errors retain their normal handling.
 
 - **Process invocation: use `.invoke(ErrorKind::...)`, not `.status()`.** When running CLI commands via `tokio::process::Command`, the `Invoke` trait (from `crate::util::Invoke`) captures stdout/stderr and checks exit codes. `.status()` leaks stderr directly to system logs and creates noise in production. For check-then-act patterns (e.g. `iptables -C`), use `.invoke(...).await.is_ok()` / `.is_err()` instead of `.status().await.map_or(false, |s| s.success())`.
 - **File I/O: prefer `crate::util::io` over `tokio::fs`** when an equivalent helper exists. These helpers add error context and mount-aware behavior that `tokio::fs` doesn't.

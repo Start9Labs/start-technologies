@@ -13,6 +13,8 @@ use axum::routing::{any, get, post};
 use axum::{Extension, Json, Router};
 use rpc_toolkit::Server;
 use serde::Deserialize;
+use startos::middleware::auth::local::LocalAuthContext;
+use startos::middleware::auth::Auth;
 use startos::net::tls::TlsListener;
 use startos::net::web_server::{Accept, Acceptor, DynAccept, MetadataVisitor, WebServer};
 use tokio::signal::unix::SignalKind;
@@ -25,7 +27,6 @@ use visit_rs::Visit;
 use crate::continuations::{self, RpcContinuations};
 use crate::embedded_web::serve_embedded;
 use crate::luci_proxy::{self, ProxyClient};
-use crate::middleware::SessionAuth;
 use crate::prelude::*;
 use crate::setup::{self, FlashMode, SetupEvent};
 use crate::{init_logging, main_api, ssl, ServerContext};
@@ -65,18 +66,17 @@ fn ndjson_error(message: &str) -> Response<Body> {
 /// GET /ws/rpc/{guid} — WebSocket continuation handler (e.g., update progress).
 async fn ws_continuation_handler(
     axum::extract::Path(guid): axum::extract::Path<String>,
-    headers: axum::http::HeaderMap,
     ws: axum::extract::ws::WebSocketUpgrade,
-    Extension(continuations): Extension<RpcContinuations>,
+    Extension(continuations): Extension<Arc<RpcContinuations>>,
 ) -> axum::response::Response {
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
 
-    if !crate::middleware::validate_session_from_headers(&headers).await {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-    let guid = crate::continuations::Guid::from_str(&guid);
-    match continuations.get_ws_handler(&guid).await {
+    let handler = match continuations::Guid::from(&guid) {
+        Some(guid) => continuations.get_ws_handler(&guid).await,
+        None => None,
+    };
+    match handler {
         Some(handler) => ws.on_upgrade(handler),
         None => StatusCode::NOT_FOUND.into_response(),
     }
@@ -153,39 +153,20 @@ fn root_ca_response(
     }
 }
 
-/// Initialize SSL certificates. Returns true if HTTPS is ready.
-async fn init_ssl() -> bool {
+/// Sets up the CA and the HTTPS certificate store. `None` serves HTTP alone.
+async fn init_tls(ctx: ServerContext) -> Option<crate::tls::RouterTlsHandler> {
     if let Err(e) = ssl::ensure_root_ca().await {
         tracing::error!("Root CA generation failed: {e}");
-        return false;
+        return None;
     }
-
     if let Err(e) = ssl::ensure_intermediate_ca().await {
         tracing::error!("intermediate CA generation failed: {e}");
-        return false;
+        return None;
     }
-
-    let addrs = ssl::read_lan_addresses(std::path::Path::new("/etc/config")).await;
-    if let Err(e) = ssl::ensure_server_cert(&addrs).await {
-        tracing::error!("server cert generation failed: {e}");
-        return false;
-    }
-
-    // Verify the cert files are valid by attempting to load them as TLS
-    // materials. If they're corrupt, force-regenerate once.
-    if ssl::TlsMaterials::load_from_disk().is_err() {
-        tracing::warn!("TLS materials parse failed with existing certs, regenerating");
-        if let Err(e) = ssl::regenerate_server_cert(&addrs).await {
-            tracing::error!("cert regeneration failed: {e}");
-            return false;
-        }
-        if ssl::TlsMaterials::load_from_disk().is_err() {
-            tracing::error!("TLS materials parse still failing after regeneration");
-            return false;
-        }
-    }
-
-    true
+    crate::tls::init(ctx)
+        .await
+        .map_err(|e| tracing::error!("certificate store setup failed: {e}"))
+        .ok()
 }
 
 /// Identifies which logical listener (HTTP or HTTPS) accepted a given
@@ -204,13 +185,15 @@ impl<V: MetadataVisitor> Visit<V> for WebserverListener {
 
 #[instrument(skip_all)]
 async fn inner_main() -> Result<(), Error> {
-    // Generate local auth cookie so CLI commands over SSH bypass session auth
-    crate::auth::init_local_auth_cookie().await?;
+    <ServerContext as LocalAuthContext>::init_auth_cookie().await?;
 
     let setup_mode = setup::is_setup_mode().await;
 
-    let continuations = RpcContinuations::new();
-    let open_authed = crate::continuations::OpenAuthedContinuations::new();
+    let continuations = Arc::new(RpcContinuations::new());
+    let ctx = ServerContext {
+        continuations: continuations.clone(),
+        auth: Arc::new(crate::auth::AuthState::open().await?),
+    };
     let app_state;
 
     if setup_mode {
@@ -293,16 +276,19 @@ async fn inner_main() -> Result<(), Error> {
         if let Err(e) = crate::published_ports::heal_published_ports("/etc/config").await {
             tracing::error!("Published-port firewall repair failed: {e}");
         }
+        if let Err(e) = crate::lan_guard::heal_ra_allow("/etc/config").await {
+            tracing::error!("LAN guard repair failed: {e}");
+        }
         if let Err(e) = crate::vpn_client::heal_vpn_clients("/etc/config").await {
             tracing::error!("Outbound VPN repair failed: {e}");
         }
-        if let Err(e) = crate::system::apply_remote_access(ServerContext::default()).await {
+        if let Err(e) = crate::system::apply_remote_access(ctx.clone()).await {
             tracing::error!("Remote access rule apply failed: {e}");
         }
         if let Err(e) = crate::dns::heal_smartdns_conf("/etc/config").await {
             tracing::error!("SmartDNS config repair failed: {e}");
         }
-        if let Err(e) = crate::profiles::heal_dns_forwarding(ServerContext::default()).await {
+        if let Err(e) = crate::profiles::heal_dns_forwarding(ctx.clone()).await {
             tracing::error!("DNS forwarding repair failed: {e}");
         }
         // Repairs a reservation name from a release that let one through, which
@@ -318,9 +304,7 @@ async fn inner_main() -> Result<(), Error> {
             tracing::error!("DHCP fingerprint hook setup failed: {e}");
         }
         // Apply WAN schedule enforcement (UCI firewall rules)
-        if let Err(e) =
-            crate::profiles::evaluate_and_apply_schedules(&ServerContext::default()).await
-        {
+        if let Err(e) = crate::profiles::evaluate_and_apply_schedules(&ctx).await {
             tracing::error!("Failed to evaluate WAN schedules at boot: {e}");
         }
 
@@ -332,11 +316,10 @@ async fn inner_main() -> Result<(), Error> {
         // stop firing after an upgrade. No-op when there are no windows; also
         // self-heals crontab drift on any boot. Both regenerators strip only their
         // own tagged lines, so running them in sequence over the shared file is safe.
-        let schedule_ctx = ServerContext::default();
-        if let Err(e) = crate::profiles::regenerate_schedule_crontab(&schedule_ctx).await {
+        if let Err(e) = crate::profiles::regenerate_schedule_crontab(&ctx).await {
             tracing::error!("Failed to regenerate WAN schedule crontab at boot: {e}");
         }
-        if let Err(e) = crate::wifi::regenerate_blackout_crontab(&schedule_ctx).await {
+        if let Err(e) = crate::wifi::regenerate_blackout_crontab(&ctx).await {
             tracing::error!("Failed to regenerate WiFi blackout crontab at boot: {e}");
         }
         if let Err(e) =
@@ -373,8 +356,7 @@ async fn inner_main() -> Result<(), Error> {
         };
     }
 
-    // Initialize SSL: ensure Root CA and server cert exist
-    let tls_ready = init_ssl().await;
+    let tls = init_tls(ctx.clone()).await;
 
     if !setup_mode {
         // The IGD UUID derives from the initialized root CA.
@@ -403,12 +385,11 @@ async fn inner_main() -> Result<(), Error> {
         }
     }
 
-    let ctx = ServerContext {
-        continuations: continuations.clone(),
-        open_authed_continuations: open_authed,
-    };
-    let handler =
-        Server::new(move || ready(Ok(ctx.clone())), main_api()).middleware(SessionAuth::new());
+    if !setup_mode {
+        tokio::spawn(crate::auth::reap_idle_keys(ctx.clone()));
+    }
+    let handler = Server::new(move || ready(Ok(ctx.clone())), main_api())
+        .middleware(Auth::new().with_local_auth().with_signature_auth());
 
     let proxy_client = ProxyClient(
         reqwest::Client::builder()
@@ -447,20 +428,16 @@ async fn inner_main() -> Result<(), Error> {
         // RPC continuation endpoint (binary I/O for backup/restore/diagnostics)
         .route(
             "/rest/rpc/{guid}",
-            any(continuations::continuation_handler).layer(DefaultBodyLimit::max(10 * 1024 * 1024)),
+            any(continuations::continuation_handler)
+                .layer(DefaultBodyLimit::max(continuations::MAX_UPLOAD_BYTES)),
         )
-        // WebSocket continuation endpoint (progress streaming for updates).
+        // WebSocket continuation endpoint (update progress, live logs).
         // Registered with `any` (not `get`) so HTTP/2 CONNECT requests (RFC
         // 8441 extended CONNECT, used for WebSocket-over-h2) reach the
-        // upgrade extractor — same reasoning as /api/logs below.
+        // upgrade extractor instead of being rejected with 405.
         .route("/ws/rpc/{guid}", any(ws_continuation_handler))
         // Streaming flash endpoint for setup wizard
         .route("/api/setup/flash", post(setup_flash_handler))
-        // WebSocket endpoint for live log streaming. Registered with `any`
-        // (not `get`) so HTTP/2 CONNECT requests (RFC 8441 extended CONNECT,
-        // used for WebSocket-over-h2) reach the upgrade extractor instead of
-        // being rejected with 405 by the method router.
-        .route("/api/logs", any(crate::logs::logs_ws_handler))
         // Root CA download (no auth required)
         .route(
             "/static/local-root-ca.crt",
@@ -513,13 +490,12 @@ async fn inner_main() -> Result<(), Error> {
     let mut listeners: BTreeMap<WebserverListener, DynAccept> = BTreeMap::new();
     listeners.insert(WebserverListener::Http, http_listener.into_dyn());
 
-    if tls_ready {
-        let materials = ssl::init_tls_materials()?;
+    if let Some(tls) = tls {
         let https_addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 443));
         let https_listener = startos::net::utils::bind_tokio_listener_reuse_port(https_addr)
             .with_kind(ErrorKind::Network)?;
         tracing::info!("HTTPS listening on {}", https_addr);
-        let tls = TlsListener::new(https_listener, ssl::StaticTlsHandler::new(materials));
+        let tls = TlsListener::new(https_listener, tls);
         listeners.insert(WebserverListener::Https, tls.into_dyn());
     } else {
         tracing::warn!("HTTPS disabled — TLS setup failed, serving HTTP only");
