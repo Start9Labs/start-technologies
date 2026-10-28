@@ -10,7 +10,6 @@ mod m_01_registry_asset_array;
 mod m_02_ed25519ph_signature_label;
 mod m_03_commitment_type_tags;
 mod m_04_icon_store;
-mod m_05_os_release_note_translations;
 
 pub trait RegistryMigration {
     fn name(&self) -> &'static str {
@@ -26,7 +25,6 @@ pub const MIGRATIONS: &[&dyn RegistryMigration] = &[
     &m_02_ed25519ph_signature_label::Ed25519phSignatureLabel,
     &m_03_commitment_type_tags::CommitmentTypeTags,
     &m_04_icon_store::IconStore,
-    &m_05_os_release_note_translations::OsReleaseNoteTranslations,
 ];
 
 #[instrument(skip_all)]

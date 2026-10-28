@@ -82,7 +82,7 @@ additional field; newer clients can still consume English-only registries.
 `--release-notes-translations` accepts a JSON object; omitting it clears translations.
 Promotion carries both fields unchanged. Publishers need the updated CLI to pass the
 new option. Older registries ignore the additional request field and retain English.
-The additive schema migration leaves existing English-only records untouched.
+Existing English-only records deserialize unchanged with no migration.
 
 ## Persistence
 
