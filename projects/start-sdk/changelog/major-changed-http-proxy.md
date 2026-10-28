@@ -1,3 +1,4 @@
-- Configure HTTP proxy authentication and forwarded headers under `bindPort`'s `proxy` option, independently of `addSsl`. HTTP-family bindings enforce proxy authentication on both the original and TLS-wrapper legs.
-- Move `addSsl.auth` to `proxy.auth` and `addSsl.addXForwardedHeaders` to `proxy.addXForwardedHeaders` when rebuilding packages. Raw TCP, SSH, and DNS bindings accept only TLS options under `addSsl`.
+- Configure HTTP proxy authentication and forwarded headers under `bindPort`'s `proxy` option, independently of `addSsl`. Proxy authentication applies to both the original and TLS-wrapper legs.
+- Inherit proxy defaults from the protocol: enabled for HTTP-family protocols, disabled otherwise. Every protocol accepts an explicit `proxy` object or `proxy: null` override.
+- Move `addSsl.auth` to `proxy.auth` and `addSsl.addXForwardedHeaders` to `proxy.addXForwardedHeaders` when rebuilding packages. Keep TLS settings under `addSsl`.
 - Require StartOS 0.4.0.5 or later for packages built with this SDK.

@@ -72,41 +72,24 @@ export const knownProtocols = {
 
 export type Scheme = string | null
 
-type KnownProtocols = typeof knownProtocols
-type HttpProtocols = {
-  [K in keyof KnownProtocols]: KnownProtocols[K]['proxy'] extends null
-    ? never
-    : K
-}[keyof KnownProtocols]
-
-type ProtocolsWithSslVariants = {
-  [K in keyof KnownProtocols]: KnownProtocols[K] extends { withSsl: string }
-    ? K
-    : never
-}[keyof KnownProtocols]
-
 type BindOptionsByKnownProtocol = {
+  protocol: keyof typeof knownProtocols
   preferredExternalPort?: BindOptions['preferredExternalPort']
-} & (
-  | {
-      protocol: ProtocolsWithSslVariants
-      addSsl?: Partial<AddSslOptions> | null
-      proxy?: Partial<ProxyOptions>
-    }
-  | {
-      protocol: Exclude<HttpProtocols, ProtocolsWithSslVariants>
-      addSsl?: Partial<AddSslOptions>
-      proxy?: Partial<ProxyOptions>
-    }
-  | {
-      protocol: Exclude<keyof KnownProtocols, HttpProtocols>
-      addSsl?: Partial<AddSslOptions> | null
-      proxy?: never
-    }
-)
+  addSsl?: Partial<AddSslOptions> | null
+  proxy?: BindOptions['proxy']
+}
+
 export type BindOptionsByProtocol =
   | BindOptionsByKnownProtocol
-  | (Omit<BindOptions, 'proxy'> & { protocol: null; proxy?: null })
+  | (BindOptions & { protocol: null })
+
+function resolveProxyOptions(
+  defaults: ProxyOptions | null,
+  override: BindOptions['proxy'],
+): ProxyOptions | null {
+  const proxy = override === undefined ? defaults : override
+  return proxy === null ? null : { ...defaultHttpProxy, ...defaults, ...proxy }
+}
 
 const hasStringProtocol = (v: unknown): v is { protocol: string } =>
   z.looseObject({ protocol: z.string() }).validate(v)
@@ -324,7 +307,7 @@ export class MultiHost {
       id: this.options.id,
       internalPort,
       ...bindOptions,
-      proxy: null,
+      proxy: resolveProxyOptions(null, options.proxy),
     }
     await this.options.effects.bind(binderOptions)
 
@@ -350,9 +333,7 @@ export class MultiHost {
             ...options.addSsl,
           }
         : null
-    const proxy = protoInfo.proxy
-      ? { ...protoInfo.proxy, ...('proxy' in options ? options.proxy : null) }
-      : null
+    const proxy = resolveProxyOptions(protoInfo.proxy, options.proxy)
 
     const secure: Security | null = protoInfo.secure ?? null
 

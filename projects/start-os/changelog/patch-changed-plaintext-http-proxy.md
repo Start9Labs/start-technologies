@@ -1,1 +1,1 @@
-- Proxy plaintext HTTP service connections through StartOS. Applications see StartOS as the TCP peer; client IPs are available through `X-Forwarded-For` when forwarded-header generation is enabled.
+- Proxy plaintext service connections through StartOS when HTTP proxying is enabled. Applications see StartOS as the TCP peer; client IPs are available through `X-Forwarded-For` when forwarded-header generation is enabled.

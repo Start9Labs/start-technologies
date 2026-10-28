@@ -53,6 +53,87 @@ describe('MultiHost.bindPort HTTP proxy configuration', () => {
     },
   )
 
+  test.each(['http', 'https', 'ws', 'wss'] as const)(
+    '%s can disable its default proxy without changing TLS defaults',
+    async protocol => {
+      const { host, bind } = fixture()
+      await host.bindPort(8080, { protocol, proxy: null })
+      expect(bind).toHaveBeenCalledWith(
+        expect.objectContaining({
+          proxy: null,
+          addSsl: expect.objectContaining({ preferredExternalPort: 443 }),
+        }),
+      )
+    },
+  )
+
+  test.each([
+    ['http', null, null],
+    ['https', { ssl: true }, 'https'],
+    ['ws', null, null],
+    ['wss', { ssl: true }, 'wss'],
+  ] as const)(
+    '%s can disable both proxying and TLS termination',
+    async (protocol, secure, sslScheme) => {
+      const { host, bind } = fixture()
+      const origin = await host.bindPort(8080, {
+        protocol,
+        addSsl: null,
+        proxy: null,
+      })
+      expect(origin.scheme).toBe(protocol)
+      expect(origin.sslScheme).toBe(sslScheme)
+      expect(bind).toHaveBeenCalledWith(
+        expect.objectContaining({
+          secure,
+          addSsl: null,
+          proxy: null,
+        }),
+      )
+    },
+  )
+
+  test.each(['ssh', 'dns', null] as const)(
+    '%s can opt into HTTP proxying with partial overrides',
+    async protocol => {
+      const { host, bind } = fixture()
+      const auth: ProxyAuth = {
+        type: 'bearer',
+        tokens: ['secret'],
+        realm: null,
+      }
+      const options =
+        protocol === null
+          ? { protocol, preferredExternalPort: 8080, secure: null }
+          : { protocol }
+      await host.bindPort(8080, { ...options, proxy: { auth } })
+      expect(bind).toHaveBeenCalledWith(
+        expect.objectContaining({
+          proxy: { type: 'http', addXForwardedHeaders: true, auth },
+        }),
+      )
+    },
+  )
+
+  test('protocol:null can rewrap TLS with explicit HTTP proxy options', async () => {
+    const { host, bind } = fixture()
+    await host.bindPort(8080, {
+      protocol: null,
+      preferredExternalPort: 8080,
+      secure: { ssl: true },
+      addSsl: { preferredExternalPort: 8443, alpn: null },
+      proxy: { addXForwardedHeaders: false },
+    })
+    expect(bind).toHaveBeenCalledWith({
+      id: 'service',
+      internalPort: 8080,
+      preferredExternalPort: 8080,
+      secure: { ssl: true },
+      addSsl: { preferredExternalPort: 8443, alpn: null },
+      proxy: { type: 'http', addXForwardedHeaders: false, auth: null },
+    })
+  })
+
   test.each(['http', 'ws'] as const)(
     '%s can configure an HTTP proxy without an SSL wrapper',
     async protocol => {
@@ -178,19 +259,10 @@ describe('MultiHost.bindPort HTTP proxy configuration', () => {
     })
   })
 
-  test('public bind options reject HTTP configuration on raw protocols', () => {
+  test('public proxy options accept only HTTP proxy types', () => {
     const accept = (options: BindOptionsByProtocol) => options
-    const proxy = { type: 'http' } as const
-    // @ts-expect-error HTTPS proxying requires TLS termination.
-    accept({ protocol: 'https', addSsl: null })
-    // @ts-expect-error WSS proxying requires TLS termination.
-    accept({ protocol: 'wss', addSsl: null })
-    // @ts-expect-error SSH cannot use an HTTP proxy.
-    accept({ protocol: 'ssh', proxy })
-    // @ts-expect-error DNS cannot use an HTTP proxy.
-    accept({ protocol: 'dns', proxy })
-    // @ts-expect-error An unknown protocol cannot use an HTTP proxy.
-    accept({ protocol: null, proxy })
+    // @ts-expect-error Only the HTTP proxy type is implemented.
+    accept({ protocol: 'http', proxy: { type: 'socks' } })
   })
 
   test('public SSL options reject legacy HTTP fields', () => {

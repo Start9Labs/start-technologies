@@ -213,21 +213,23 @@ The handler then re-runs when the new value lands, updating the interface in pla
 
 | Option                          | Type                                                                       | Description                                                                                                                                                                         |
 | ------------------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `protocol`                      | `'http'` \| `'https'` \| `'ws'` \| `'wss'` \| `'ssh'` \| `'dns'` \| `null` | The container's protocol. Use `null` for another raw protocol.                                                                                                                      |
+| `protocol`                      | `'http'` \| `'https'` \| `'ws'` \| `'wss'` \| `'ssh'` \| `'dns'` \| `null` | Protocol defaults and URL scheme. Use `null` to configure the binding explicitly.                                                                                                   |
 | `preferredExternalPort`         | `number`                                                                   | The preferred external port for the original protocol.                                                                                                                              |
-| `addSsl`                        | `object` \| `null`                                                         | TLS termination options, independent of HTTP proxying. HTTP-family protocols add TLS by default; `http`/`ws` accept `null` for plaintext HTTP proxying.                             |
+| `addSsl`                        | `object` \| `null`                                                         | TLS termination options, independent of HTTP proxying. HTTP-family protocols add TLS by default; `null` skips the wrapper.                                                          |
 | `addSsl.alpn`                   | `string[]` \| `null`                                                       | The ALPN protocols StartOS answers a client with, from those it asked for. `null` answers with whatever it asked for. Defaults to `['http/1.1']` for `http`/`ws`, otherwise `null`. |
 | `addSsl.preferredExternalPort`  | `number`                                                                   | External port for the TLS wrapper. Defaults to `443`.                                                                                                                               |
 | `addSsl.upstreamCertValidation` | `'disable'` \| `{ certificate: string }` \| _omitted_                      | How the OS validates your container's TLS cert when it [rewraps SSL](#rewrapping-ssl-to-a-tls-container). Omit to validate against the StartOS root CA.                             |
-| `proxy`                         | `object`                                                                   | HTTP proxy options for `http`, `https`, `ws`, and `wss`. Raw protocols use no HTTP proxy.                                                                                           |
+| `proxy`                         | `object` \| `null`                                                         | Overrides HTTP proxy defaults. `null` disables proxying.                                                                                                                            |
 | `proxy.type`                    | `'http'`                                                                   | Identifies HTTP traffic. Defaults to `'http'`.                                                                                                                                      |
 | `proxy.addXForwardedHeaders`    | `boolean`                                                                  | Generate trusted forwarded headers. Defaults to `true` in `bindPort`.                                                                                                               |
 | `proxy.auth`                    | `ProxyAuth` \| `null`                                                      | Auth gate on both the original and TLS-wrapper legs. Defaults to `null`. See [Authenticating at the Proxy](#authenticating-at-the-proxy).                                           |
 | `secure`                        | `{ ssl: boolean }` \| `null`                                               | For `protocol: null`, whether the original port is safe to expose on untrusted networks and whether it speaks TLS itself. See [Choosing `secure`](#choosing-secure).                |
 
-HTTP proxying and TLS termination are separate: `proxy` describes HTTP handling, while `addSsl` adds a TLS wrapper to any TCP protocol. HTTP-family bindings remain HTTP-aware even with `proxy: { addXForwardedHeaders: false, auth: null }`. For `http`/`ws`, setting `addSsl: null` retains plaintext HTTP proxying without adding a TLS leg. HTTP proxying for `https`/`wss` requires TLS termination through `addSsl`.
+Omitting `proxy` inherits the protocol's default: enabled for `http`, `https`, `ws`, and `wss`, otherwise `null`. Set `proxy: null` to forward traffic without HTTP handling. An explicit object enables HTTP proxying for any protocol and merges partial settings with the defaults. The service must speak HTTP on that binding; proxying does not translate other application protocols. Setting `proxy: { addXForwardedHeaders: false, auth: null }` retains HTTP parsing.
 
-Both HTTP legs connect to the container from StartOS, rather than preserving the client's TCP source address. With forwarded-header generation enabled, applications identify the client through `X-Forwarded-For`.
+HTTP proxying and TLS termination are separate: `proxy` describes HTTP handling, while `addSsl` adds a TLS wrapper to any TCP protocol. For `http`/`ws`, setting `addSsl: null` retains plaintext HTTP proxying without adding a TLS leg. When the container speaks TLS (`https`, `wss`, or `secure: { ssl: true }`), HTTP proxying requires termination through `addSsl`; disable both `proxy` and `addSsl` for TLS passthrough.
+
+Both HTTP-proxied legs connect to the container from StartOS, rather than preserving the client's TCP source address. With forwarded-header generation enabled, applications identify the client through `X-Forwarded-For`.
 
 The HTTP proxy strips client-supplied `X-Forwarded-*` values even when header generation is disabled. TLS legs generate `X-Forwarded-Proto: https`; plaintext legs strip that header and generate no replacement. Treat a missing header as plaintext rather than trusting a client-provided scheme.
 
@@ -637,7 +639,7 @@ On a raw-TCP binding (`protocol: null`), `secure` says whether the protocol is s
 
 ## Authenticating at the Proxy
 
-For protocols that StartOS fronts with its reverse proxy (`http`, `https`, `ws`, `wss`), you can gate an interface with HTTP authentication by setting `proxy.auth`. The OS reverse proxy validates the `Authorization` header on every incoming request _before_ forwarding it to your container. Requests that fail get `401 Unauthorized` with a `WWW-Authenticate` challenge and never reach your service. You do **not** need to build auth into the service or run a sidecar proxy — the platform enforces it at the edge.
+Gate an HTTP-proxied binding with HTTP authentication by setting `proxy.auth`. The OS reverse proxy validates the `Authorization` header on every incoming request _before_ forwarding it to your container. Requests that fail get `401 Unauthorized` with a `WWW-Authenticate` challenge and never reach your service. You do **not** need to build auth into the service or run a sidecar proxy — the platform enforces it at the edge.
 
 `auth` takes a `ProxyAuth`, which is one of two shapes:
 
@@ -670,7 +672,7 @@ const apiOrigin = await apiMulti.bindPort(apiPort, {
 | `tokens` (bearer)     | `Array<string>`                 | Accepted bearer tokens. Any match passes.                                                                                                                            |
 | `realm`               | `string` \| `null`              | Realm advertised in the 401 `WWW-Authenticate` challenge. Defaults to `"StartOS"`. Use a stable realm across bindings that share credentials so browsers reuse them. |
 
-The gate applies to every HTTP request on both the original and TLS-wrapper legs, including bridge and other enabled plaintext addresses. `proxy` is accepted only for `http`, `https`, `ws`, and `wss`; raw TCP (`protocol: null`), SSH, and DNS have no HTTP handling.
+The gate applies to every HTTP request on both the original and TLS-wrapper legs, including bridge and other enabled plaintext addresses, whenever HTTP proxying is enabled.
 
 > [!NOTE]
 > The `username` field on `createInterface` is unrelated to this gate — it only embeds a username in the _displayed_ URL (e.g. `https://user@host/`). The enforced credential check is `proxy.auth`.
