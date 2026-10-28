@@ -462,7 +462,9 @@ fn host_names(snapshot: &NetSnapshot, leases: &[crate::devices::DhcpLease]) -> H
             continue;
         };
         if let Some(p) = profile_for(&snapshot.profiles, ip) {
-            if valid(&lease.hostname) {
+            if lease.instance.as_deref() == Some(format!("dns_{}", p.interface).as_str())
+                && valid(&lease.hostname)
+            {
                 hosts
                     .leased
                     .entry(p.interface.clone())
@@ -2094,12 +2096,19 @@ mod tests {
         );
     }
 
-    fn lease(mac: &str, ip: Ipv4Addr, hostname: &str, expires: u64) -> crate::devices::DhcpLease {
+    fn lease(
+        instance: &str,
+        mac: &str,
+        ip: Ipv4Addr,
+        hostname: &str,
+        expires: u64,
+    ) -> crate::devices::DhcpLease {
         crate::devices::DhcpLease {
             mac: mac.into(),
             ip: ip.to_string(),
             hostname: hostname.into(),
             expires,
+            instance: Some(instance.into()),
         }
     }
 
@@ -2139,25 +2148,35 @@ mod tests {
         let (snapshot, reach) = name_fixture();
         let leases = [
             lease(
+                "dns_lan",
                 "AA:00:00:00:00:01",
                 Ipv4Addr::new(192, 168, 1, 110),
                 "Debian",
                 0,
             ),
             lease(
+                "dns_guest",
                 "AA:00:00:00:00:02",
                 Ipv4Addr::new(192, 168, 101, 20),
                 "phone",
                 0,
             ),
-            lease("AA:00:00:00:00:03", Ipv4Addr::new(192, 168, 1, 111), "*", 0),
             lease(
+                "dns_lan",
+                "AA:00:00:00:00:03",
+                Ipv4Addr::new(192, 168, 1, 111),
+                "*",
+                0,
+            ),
+            lease(
+                "dns_lan",
                 "AA:00:00:00:00:04",
                 Ipv4Addr::new(192, 168, 1, 112),
                 "-bad",
                 0,
             ),
             lease(
+                "dns_lan",
                 "AA:00:00:00:00:05",
                 Ipv4Addr::new(192, 168, 1, 113),
                 "DESKTOP_1",
@@ -2177,6 +2196,22 @@ mod tests {
     }
 
     #[test]
+    fn former_main_instance_leases_are_rendered_for_their_own_profile() {
+        let (snapshot, reach) = name_fixture();
+        let leases = [lease(
+            "cfg_main",
+            "AA:00:00:00:00:01",
+            Ipv4Addr::new(192, 168, 1, 110),
+            "debian",
+            0,
+        )];
+        let rendered = rendered_names(&snapshot, &reach, &leases);
+        assert_eq!(rendered[0], "192.168.1.110 debian.lan\n");
+        assert_eq!(rendered[1], rendered[0]);
+        assert_eq!(rendered[2], "");
+    }
+
+    #[test]
     fn a_profiles_own_device_keeps_a_shared_name() {
         let (mut snapshot, reach) = name_fixture();
         snapshot
@@ -2187,18 +2222,21 @@ mod tests {
             .insert("BB:00:00:00:00:02".into(), "nas".into());
         let leases = [
             lease(
+                "dns_lan",
                 "BB:00:00:00:00:01",
                 Ipv4Addr::new(192, 168, 1, 110),
                 "debian",
                 0,
             ),
             lease(
+                "dns_guest",
                 "BB:00:00:00:00:03",
                 Ipv4Addr::new(192, 168, 101, 30),
                 "debian",
                 0,
             ),
             lease(
+                "dns_lan",
                 "BB:00:00:00:00:04",
                 Ipv4Addr::new(192, 168, 1, 50),
                 "nas",
@@ -2232,6 +2270,7 @@ mod tests {
             .named
             .insert("CC:00:00:00:00:03".into(), "ghost".into());
         let leases = [lease(
+            "dns_lan",
             "CC:00:00:00:00:02",
             Ipv4Addr::new(192, 168, 1, 70),
             "android-1234",
@@ -2262,24 +2301,28 @@ mod tests {
             .insert("DD:00:00:00:00:02".into(), "cam".into());
         let leases = [
             lease(
+                "dns_lan",
                 "DD:00:00:00:00:01",
                 Ipv4Addr::new(192, 168, 1, 80),
                 "cam",
                 2_000_000_000,
             ),
             lease(
+                "dns_guest",
                 "DD:00:00:00:00:02",
                 Ipv4Addr::new(192, 168, 101, 80),
                 "cam",
                 1_000_000_000,
             ),
             lease(
+                "dns_lan",
                 "DD:00:00:00:00:03",
                 Ipv4Addr::new(192, 168, 1, 90),
                 "box",
                 1_000_000_000,
             ),
             lease(
+                "dns_guest",
                 "DD:00:00:00:00:04",
                 Ipv4Addr::new(192, 168, 101, 90),
                 "box",
@@ -2287,12 +2330,14 @@ mod tests {
             ),
             // A device seen on two profiles is served at its later lease.
             lease(
+                "dns_lan",
                 "DD:00:00:00:00:05",
                 Ipv4Addr::new(192, 168, 1, 100),
                 "roamer",
                 1_000_000_000,
             ),
             lease(
+                "dns_guest",
                 "DD:00:00:00:00:05",
                 Ipv4Addr::new(192, 168, 101, 100),
                 "roamer",
