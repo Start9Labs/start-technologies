@@ -12,6 +12,7 @@ lazy_static::lazy_static! {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Version;
 
+// Includes earlier 0.4.0.5 migration revisions during direct upgrades.
 impl VersionT for Version {
     type Previous = v0_4_0_5::Version;
     type PreUpRes = ();
@@ -25,11 +26,10 @@ impl VersionT for Version {
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
     }
-    fn up(self, _db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
-        Ok(Value::Null)
+    fn up(self, db: &mut Value, input: Self::PreUpRes) -> Result<Value, Error> {
+        v0_4_0_5::Version.up(db, input)
     }
     async fn post_up(self, ctx: &RpcContext, input: Value) -> Result<(), Error> {
-        // Includes 0.4.0.5 servers whose migration revision predates balance initialization.
         v0_4_0_5::Version.post_up(ctx, input).await
     }
     fn down(self, _db: &mut Value) -> Result<(), Error> {

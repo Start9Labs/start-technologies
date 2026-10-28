@@ -444,7 +444,7 @@ async fn cached_certificates_keep_working_after_provider_configuration_is_remove
             days,
         );
         let cert = AcmeCert {
-            key: Pem(PKey::private_key_from_der(&key.serialize_der()).unwrap()),
+            key: Der64(PKey::private_key_from_pkcs8(&key.serialize_der()).unwrap()),
             fullchain: vec![Pem(certificate)],
         };
         AcmeCertCache(&db)
