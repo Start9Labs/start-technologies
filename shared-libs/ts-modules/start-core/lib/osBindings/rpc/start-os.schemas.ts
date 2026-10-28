@@ -729,10 +729,6 @@ export const KeyboardOptions: z.ZodObject<{
 }).meta({
   id: 'KeyboardOptions',
 })
-export const KillParams: z.ZodObject<{ ids: z.ZodArray<z.ZodString> }> =
-  /* @__PURE__ */ object({ ids: z.array(z.string()) }).meta({
-    id: 'KillParams',
-  })
 export const ListNotificationParams: z.ZodObject<{
   before: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodInt>>,
@@ -1665,15 +1661,12 @@ export const AttachParams: z.ZodObject<{
 })
 
 /**
- * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
- * key is a sign-in: it carries the same metadata a session used to (when it
- * was created, when it was last used, and the user agent that enrolled it).
+ * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export const AuthKeys: z.ZodRecord<z.ZodString, typeof Session> =
   /* @__PURE__ */ z.record(z.string(), Session).meta({
     id: 'AuthKeys',
-    description:
-      "The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled\nkey is a sign-in: it carries the same metadata a session used to (when it\nwas created, when it was last used, and the user agent that enrolled it).",
+    description: 'Enrolled sign-ins indexed by canonical DER64 SPKI.',
   })
 export const CancelInstallParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
@@ -2209,6 +2202,11 @@ export const IpInfo: z.ZodObject<{
   }),
 }).meta({
   id: 'IpInfo',
+})
+export const KillParams: z.ZodObject<{
+  ids: z.ZodArray<typeof AnyVerifyingKey>
+}> = /* @__PURE__ */ object({ ids: z.array(AnyVerifyingKey) }).meta({
+  id: 'KillParams',
 })
 export const LegacyAlpnInfo: z.ZodUnion<
   readonly [

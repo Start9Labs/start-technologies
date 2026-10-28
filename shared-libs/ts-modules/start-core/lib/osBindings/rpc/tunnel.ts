@@ -118,7 +118,6 @@ export type Guid = z.output<typeof schemas.Guid>
 export type HasUnenrolledKeys = z.output<typeof schemas.HasUnenrolledKeys>
 export type HttpRedirectStatus = z.output<typeof schemas.HttpRedirectStatus>
 export type IoFormatInput = z.input<typeof schemas.IoFormat>
-export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type ListDevicesParamsInput = z.input<typeof schemas.ListDevicesParams>
 export type ListParamsInput = z.input<typeof schemas.ListParams>
 export type LogoutParamsInput = z.input<typeof schemas.LogoutParams>
@@ -189,11 +188,10 @@ export type ApplyWithPathParamsInput = z.input<
 >
 
 /**
- * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
- * key is a sign-in: it carries the same metadata a session used to (when it
- * was created, when it was last used, and the user agent that enrolled it).
+ * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
+export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LoginParamsInput = z.input<typeof schemas.LoginParams>
 export type RemoveKeyParamsInput = z.input<typeof schemas.RemoveKeyParams>
 export type SetDeviceKindParamsInput = z.input<
