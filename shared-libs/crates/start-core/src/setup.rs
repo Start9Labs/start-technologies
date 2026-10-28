@@ -25,13 +25,13 @@ use crate::context::rpc::InitRpcContextPhases;
 use crate::context::setup::SetupResult;
 use crate::context::{CliContext, RpcContext, SetupContext};
 use crate::db::model::Database;
-use crate::disk::REPAIR_DISK_PATH;
 use crate::disk::fsck::RepairStrategy;
 use crate::disk::main::{DEFAULT_PASSWORD, ImportMode};
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::disk::util::{DiskInfo, StartOsRecoveryInfo, pvscan, recovery_info};
+use crate::disk::{LIVE_MEDIUM_PATH, REPAIR_DISK_PATH};
 use crate::hostname::{ServerHostname, repair_hostname};
 use crate::init::{InitPhases, InitResult, init};
 use crate::net::ssl::root_ca_start_time;
@@ -158,8 +158,6 @@ pub fn disk<C: Context>() -> ParentHandler<C> {
             .with_call_remote::<CliContext>(),
     )
 }
-
-const LIVE_MEDIUM_PATH: &str = "/run/live/medium";
 
 pub async fn list_disks(_ctx: SetupContext) -> Result<Vec<DiskInfo>, Error> {
     let mut disks = crate::disk::util::list(

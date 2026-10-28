@@ -6,7 +6,7 @@ import {
 } from 'src/app/services/patch-db/data-model'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
 import { BTC_ICON, LND_ICON, PROXY_ICON, REGISTRY_ICON } from './api-icons'
-import { ActionRes } from './api.types'
+import { ActionRes, Result } from './api.types'
 
 import markdown from './md-sample.md'
 
@@ -1334,6 +1334,51 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       },
     ],
   }
+
+  export const Disks: Result<'disk.list'> = [
+    {
+      logicalname: '/dev/sdb',
+      stablePath: '/dev/disk/by-path/pci-0000:00:14.0-usb-0:2:1.0-scsi-0:0:0:0',
+      partitionTable: null,
+      vendor: 'SanDisk',
+      model: 'Extreme Pro',
+      partitions: [],
+      capacity: 2000000000000,
+      guid: null,
+      filesystem: null,
+    },
+    {
+      logicalname: '/dev/sdc',
+      stablePath: '/dev/disk/by-path/pci-0000:00:14.0-usb-0:3:1.0-scsi-0:0:0:0',
+      partitionTable: 'gpt',
+      vendor: 'Samsung',
+      model: 'T7',
+      partitions: [
+        {
+          logicalname: '/dev/sdc1',
+          stablePath:
+            '/dev/disk/by-path/pci-0000:00:14.0-usb-0:3:1.0-scsi-0:0:0:0-part1',
+          label: 'Old Backups',
+          capacity: 1000000000000,
+          used: 100000000000,
+          available: 900000000000,
+          startOs: {
+            '1234-5678-9876-5432': {
+              hostname: 'server-name',
+              timestamp: new Date().toISOString(),
+              version: '0.4.0',
+            },
+          },
+          legacyBackup: false,
+          guid: null,
+          filesystem: null,
+        },
+      ],
+      capacity: 1000000000000,
+      guid: null,
+      filesystem: null,
+    },
+  ]
 
   export const BackupTargets: { [id: string]: T.BackupTarget } = {
     hsbdjhasbasda: {

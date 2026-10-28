@@ -127,6 +127,7 @@ export type Epp = z.output<typeof schemas.Epp>
  * Selects how aggressively an EPP-capable CPU pursues performance.
  */
 export type EppInput = z.input<typeof schemas.Epp>
+export type FormatDiskParamsInput = z.input<typeof schemas.FormatDiskParams>
 export type ForwardTarget = z.output<typeof schemas.ForwardTarget>
 export type GatewayId = z.output<typeof schemas.GatewayId>
 export type GatewayIdInput = z.input<typeof schemas.GatewayId>
