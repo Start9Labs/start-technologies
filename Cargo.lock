@@ -7631,7 +7631,7 @@ dependencies = [
 
 [[package]]
 name = "start-cli"
-version = "2.5.2"
+version = "2.5.3"
 dependencies = [
  "start-core",
  "tracing",
@@ -7855,6 +7855,7 @@ dependencies = [
  "async_cell",
  "axum",
  "base64 0.22.1",
+ "blake3",
  "chrono",
  "clap",
  "color-eyre",

@@ -111,8 +111,9 @@ pub async fn call(
     product: Product,
     device_info: Option<&DeviceInfo>,
     method: &str,
-    params: Value,
+    mut params: Value,
 ) -> Result<Value, RpcError> {
+    super::compat::pem_wire(&mut params);
     registry
         .path_segments_mut()
         .map_err(|_| Error::new(eyre!("cannot extend URL path"), ErrorKind::ParseUrl))?
@@ -158,6 +159,85 @@ mod tests {
                 reads_ed25519ph: false,
             }
         );
+    }
+
+    #[tokio::test]
+    async fn unsigned_calls_keep_pem_parameters_and_client_headers() {
+        use axum::Json;
+        use axum::routing::post;
+        use imbl_value::json;
+        use tokio::net::TcpListener;
+
+        use crate::sign::AnyVerifyingKey;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let registry: Url = format!("http://{}", listener.local_addr().unwrap())
+            .parse()
+            .unwrap();
+        let app = axum::Router::new().route(
+            "/rpc/v0",
+            post(|headers: HeaderMap, Json(request): Json<Value>| async move {
+                Json(json!({
+                    "jsonrpc": "2.0",
+                    "id": request["id"],
+                    "result": {
+                        "method": request["method"],
+                        "params": request["params"],
+                        "client": headers[REGISTRY_CLIENT_HEADER].to_str().unwrap(),
+                        "deviceInfo": headers.get(DEVICE_INFO_HEADER).map(|h| h.to_str().unwrap()),
+                    },
+                }))
+            }),
+        );
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let key = AnyVerifyingKey::Ed25519(
+            ed25519_dalek::SigningKey::from_bytes(&[13; 32]).verifying_key(),
+        );
+        let params = json!({ "signer": key });
+        assert!(!params["signer"].as_str().unwrap().contains("BEGIN"));
+        for (product, header) in [
+            (
+                Product::StartOs,
+                "os.version=0.4.0.5&os.compat=*&os.platform=x86_64",
+            ),
+            (
+                Product::StartWrt,
+                "os.version=1.3.1&os.compat=^1.2.0&os.platform=spacemit,k1-x",
+            ),
+        ] {
+            let device_info =
+                DeviceInfo::from_header_value(&HeaderValue::from_static(header)).unwrap();
+            for device_info in [None, Some(&device_info)] {
+                let response = call(
+                    Client::new(),
+                    registry.clone(),
+                    product,
+                    device_info,
+                    "signer.get",
+                    params.clone(),
+                )
+                .await
+                .unwrap();
+                assert_eq!(response["method"].as_str(), Some("signer.get"));
+                assert_eq!(
+                    response["params"]["signer"].as_str(),
+                    Some(key.to_string().as_str())
+                );
+                let client = RegistryClient::from_header_value(
+                    &HeaderValue::from_str(response["client"].as_str().unwrap()).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(client, RegistryClient::current(Some(product)));
+                assert_eq!(
+                    response["deviceInfo"],
+                    to_value(
+                        &device_info.map(|d| d.to_header_value().to_str().unwrap().to_owned())
+                    )
+                    .unwrap(),
+                );
+            }
+        }
+        server.abort();
     }
 
     #[test]

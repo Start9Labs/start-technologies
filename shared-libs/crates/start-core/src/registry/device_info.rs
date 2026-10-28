@@ -226,6 +226,7 @@ pub struct DeviceInfoMiddleware {
     device_info: Option<DeviceInfo>,
     req: Option<RpcRequest>,
     legacy_signatures: bool,
+    legacy_pem: bool,
     legacy_os_versions: bool,
     inline_icons_for: Option<RpcRequest>,
 }
@@ -237,6 +238,7 @@ impl DeviceInfoMiddleware {
             device_info: None,
             req: None,
             legacy_signatures: false,
+            legacy_pem: true,
             legacy_os_versions: false,
             inline_icons_for: None,
         }
@@ -298,10 +300,26 @@ impl DeviceInfoMiddleware {
                     .unwrap_or(false),
                 Product::StartWrt => true,
             };
+        self.legacy_pem = match product {
+            Product::StartOs => client_version
+                .as_ref()
+                .map(reads_pem)
+                .transpose()?
+                .unwrap_or(true),
+            Product::StartWrt => true,
+        };
+        if request.method.as_str().starts_with("db.") {
+            self.legacy_pem = false;
+            self.legacy_signatures = false;
+        }
         self.legacy_os_versions =
             self.legacy_signatures && request.method.as_str() == "os.version.get";
         Ok(())
     }
+}
+
+fn reads_pem(version: &Version) -> Result<bool, Error> {
+    Ok(version < &"0.4.0.5".parse::<Version>()?)
 }
 
 /// Whether a StartOS version reads `id-Ed25519` as Ed25519ph.
@@ -445,6 +463,9 @@ impl Middleware<RegistryContext> for DeviceInfoMiddleware {
                 drop_unsigned_os_versions(res);
             }
         }
+        if let (true, Ok(res)) = (self.legacy_pem, &mut response.result) {
+            super::compat::pem_wire(res);
+        }
     }
 }
 
@@ -473,6 +494,77 @@ mod tests {
     fn request(method: &str, params: Value) -> RpcRequest {
         from_value(json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }))
             .unwrap()
+    }
+
+    #[test]
+    fn pem_responses_follow_product_and_version() {
+        for (header, product, legacy) in [
+            (None, Product::StartOs, true),
+            (
+                Some("os.version=0.4.0.4&os.compat=*&os.platform=x86_64"),
+                Product::StartOs,
+                true,
+            ),
+            (
+                Some("os.version=0.4.0.5&os.compat=*&os.platform=x86_64"),
+                Product::StartOs,
+                false,
+            ),
+            (
+                Some("os.version=1.3.1&os.compat=*&os.platform=spacemit,k1-x"),
+                Product::StartWrt,
+                true,
+            ),
+        ] {
+            let mut middleware = DeviceInfoMiddleware::new();
+            middleware.device_info_header = header.map(HeaderValue::from_static);
+            middleware
+                .prepare_request(
+                    product,
+                    Metadata {
+                        get_device_info: false,
+                    },
+                    &mut request("index", json!({})),
+                )
+                .unwrap();
+            assert_eq!(middleware.legacy_pem, legacy);
+        }
+        for (version, legacy) in [("0.4.0.4", true), ("0.4.0.5", false)] {
+            let mut middleware = DeviceInfoMiddleware::new();
+            middleware
+                .prepare_request(
+                    Product::StartOs,
+                    Metadata {
+                        get_device_info: false,
+                    },
+                    &mut request("os.version.get", json!({ "sourceVersion": version })),
+                )
+                .unwrap();
+            assert_eq!(middleware.legacy_pem, legacy);
+        }
+    }
+
+    #[test]
+    fn raw_database_responses_keep_the_stored_encoding() {
+        for product in [Product::StartOs, Product::StartWrt] {
+            for method in ["db.dump", "db.subscribe"] {
+                let mut middleware = DeviceInfoMiddleware::new();
+                middleware.device_info_header = Some(HeaderValue::from_static(
+                    "os.version=0.4.0.2&os.compat=*&os.platform=x86_64",
+                ));
+                middleware
+                    .prepare_request(
+                        product,
+                        Metadata {
+                            get_device_info: false,
+                        },
+                        &mut request(method, json!({})),
+                    )
+                    .unwrap();
+                assert!(!middleware.legacy_pem);
+                assert!(!middleware.legacy_signatures);
+            }
+        }
     }
 
     #[test]
@@ -602,6 +694,27 @@ mod tests {
                 .unwrap();
                 assert!(!middleware.legacy_signatures, "{product}");
                 assert!(!middleware.legacy_os_versions, "{product}");
+            }
+        }
+    }
+
+    #[test]
+    fn signature_capability_does_not_select_key_encoding() {
+        for (product, version, pem, legacy_signatures) in [
+            (Product::StartOs, "0.4.0.2", true, true),
+            (Product::StartOs, "0.4.0.4", true, false),
+            (Product::StartOs, "0.4.0.5", false, false),
+            (Product::StartWrt, "1.3.1", true, true),
+        ] {
+            for client in [None, Some(RegistryClient::current(Some(product)))] {
+                let middleware =
+                    prepare(product, client, None, json!({ "sourceVersion": version })).unwrap();
+                assert_eq!(middleware.legacy_pem, pem, "{product} {version} {client:?}");
+                assert_eq!(
+                    middleware.legacy_signatures,
+                    client.is_none() && legacy_signatures,
+                    "{product} {version} {client:?}",
+                );
             }
         }
     }
