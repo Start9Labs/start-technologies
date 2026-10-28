@@ -1,3 +1,4 @@
+import { getEventListeners } from 'node:events'
 import { Daemon } from '../mainFn/Daemon'
 import { EXIT_SUCCESS, HealthDaemon } from '../mainFn/HealthDaemon'
 import { HealthCheckResult } from '../health/checkFns'
@@ -149,6 +150,35 @@ describe('Daemon.stop vs Daemon.term (subcontainer lifecycle)', () => {
     // term() is idempotent — a second term() must not double-destroy.
     await daemon.term()
     expect(sub.destroyFsCount).toBe(1)
+  })
+})
+
+describe('Daemon restart loop', () => {
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => jest.useRealTimers())
+
+  it('holds one abort listener across retries of a failing command', async () => {
+    const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const daemon = Daemon.of<Manifest>()(fakeEffects(), null, {
+      fn: async () => {
+        throw new Error('boom')
+      },
+    })
+    await daemon.start()
+    const signal: AbortSignal = (daemon as any).loop.abort.signal
+
+    const listeners: number[] = []
+    for (let i = 0; i < 4; i++) {
+      await jest.advanceTimersByTimeAsync(30_000)
+      listeners.push(getEventListeners(signal, 'abort').length)
+    }
+    expect(daemon.failedExits).toBeGreaterThan(11)
+    expect(listeners).toEqual([1, 1, 1, 1])
+
+    // Under fake timers the pending backoff only ends through the abort.
+    await daemon.term()
+    expect(getEventListeners(signal, 'abort')).toHaveLength(0)
+    logged.mockRestore()
   })
 })
 

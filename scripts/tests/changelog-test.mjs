@@ -59,8 +59,17 @@ function compilerFixture(t) {
   function fragment(
     name = 'patch-fixed-example.md',
     body = '- Fixed example.\n',
+    userFacing = true,
   ) {
-    return write(`${PRODUCT}/changelog/${name}`, body)
+    return write(
+      `${PRODUCT}/changelog/${name}`,
+      userFacing === null
+        ? body
+        : Buffer.concat([
+            Buffer.from(`---\nuser-facing: ${userFacing}\n---\n\n`),
+            Buffer.from(body),
+          ]),
+    )
   }
   function cli(args, success = true) {
     const result = run(process.execPath, [SCRIPT, ...args])
@@ -573,7 +582,7 @@ test('changed unrelated PR after ancestor CLI release', t => {
   const releaseCommit = commit()
   const path = write(
     `${product}/changelog/patch-fixed-pending.md`,
-    '- Pending CLI fix.\n',
+    '---\nuser-facing: false\n---\n\n- Pending CLI fix.\n',
   )
   const base = commit()
   git('tag', 'start-cli/v2.3.0', releaseCommit)
@@ -581,7 +590,10 @@ test('changed unrelated PR after ancestor CLI release', t => {
   const unrelated = commit()
   assert.deepEqual(cli(['changed', base]).stdout, Buffer.from('\n'))
   contains(cli(['check-version', product], false).stderr, "expected '2.3.1'")
-  writeFileSync(path, '- Revised pending CLI fix.\n')
+  writeFileSync(
+    path,
+    '---\nuser-facing: false\n---\n\n- Revised pending CLI fix.\n',
+  )
   commit()
   assert.deepEqual(
     cli(['changed', unrelated]).stdout,
@@ -801,7 +813,7 @@ test('modified path is pending but identical ancestor path is not', t => {
   const path = fragment('minor-added-feature.md', '- Released feature.\n')
   commit()
   tag('0.4.0.3')
-  writeFileSync(path, '- Revised feature.\n')
+  fragment('minor-added-feature.md', '- Revised feature.\n')
   manifest('0.4.1')
   cli(['check-version', PRODUCT])
   cli(['check-version', PRODUCT, '0.4.0.3'], false)
@@ -874,10 +886,185 @@ test('check version semver product', t => {
   const { git, write, manifest, cli } = compilerFixture(t)
   const product = 'projects/start-sdk'
   git('tag', 'start-sdk/v2.0.9')
-  write(`${product}/changelog/minor-added-feature.md`, '- Feature.\n')
+  write(
+    `${product}/changelog/minor-added-feature.md`,
+    '---\nuser-facing: false\n---\n\n- Feature.\n',
+  )
   manifest('2.1.0', product)
   cli(['check-version', product])
   cli(['check-version', product, '2.0.10'], false)
+})
+
+test('fragment audience is mandatory and boolean', t => {
+  const { fragment, cli } = compilerFixture(t)
+  for (const body of [
+    '- Missing metadata.\n',
+    '---\nuser-facing: yes\n---\n\n- Invalid.\n',
+    '---\nuser-facing: "false"\n---\n\n- Invalid.\n',
+    '---\nuser-facing: true\nextra: value\n---\n\n- Invalid.\n',
+  ]) {
+    fragment(undefined, body, null)
+    contains(
+      cli(['validate', PRODUCT], false).stderr,
+      'user-facing: true or false',
+    )
+  }
+  for (const facing of [true, false]) {
+    fragment(undefined, '- Valid.\n', facing)
+    cli(['validate', PRODUCT])
+  }
+})
+
+test('highlights share fragment bodies and preserve release framing', t => {
+  const { fragment, cli, render, write } = compilerFixture(t)
+  fragment(
+    'patch-fixed-z.md',
+    '- Visible fix.\n  With details.\n\n- Another fix.\n',
+  )
+  fragment('minor-added-a.md', '- Visible feature.\n')
+  fragment('patch-changed-internal.md', '- Internal change.\n', false)
+  write(
+    `${PRODUCT}/release-notes/0.4.0.1.md`,
+    'Lede.\n\n## Important\n\nKeep this notice.\n',
+  )
+  const notes = cli(['notes', PRODUCT, '0.4.0.1']).stdout
+  assert.equal(
+    notes.toString(),
+    'Lede.\n\n## Highlights\n\n- Visible feature.\n\n- Visible fix.\n  With details.\n\n- Another fix.\n\n## Important\n\nKeep this notice.\n',
+  )
+  contains(render(), 'Internal change.')
+  excludes(notes, 'Internal change.')
+  excludes(notes, 'user-facing:')
+  excludes(render(), 'user-facing:')
+})
+
+test('notes compile without framing or an origin connection', t => {
+  const { fragment, cli, git } = compilerFixture(t)
+  git('remote', 'set-url', 'origin', '/unavailable-origin')
+  assert.equal(
+    cli(['notes', PRODUCT, '0.4.0.1']).stdout.toString(),
+    '## Highlights\n',
+  )
+  fragment(undefined, '- Highlight.\n')
+  assert.equal(
+    cli(['notes', PRODUCT, '0.4.0.1']).stdout.toString(),
+    '## Highlights\n\n- Highlight.\n',
+  )
+  fragment(undefined, '- Internal.\n', false)
+  assert.equal(
+    cli(['notes', PRODUCT, '0.4.0.1']).stdout.toString(),
+    '## Highlights\n',
+  )
+})
+
+test('sync archives highlights before consuming tagged fragments', t => {
+  const { root, fragment, write, cli, commit, tag, git } = compilerFixture(t)
+  const path = `${PRODUCT}/release-notes/0.4.0.1.md`
+  const framing = 'Lede.\n\n## Important\n\nImportant notice.\n'
+  write(path, framing)
+  const consumed = fragment(undefined, '- Tagged highlight.\n')
+  fragment('patch-changed-internal.md', '- Internal.\n', false)
+  commit()
+  const release = tag('0.4.0.1', true)
+  const expected = cli(['notes', PRODUCT, '0.4.0.1', '--ref', release]).stdout
+  fragment('minor-added-new.md', '- Future highlight.\n')
+  commit()
+  cli(['sync'])
+  assert.equal(existsSync(consumed), false)
+  assert.deepEqual(readFileSync(join(root, path)), expected)
+  excludes(expected, 'Future highlight.')
+  excludes(expected, 'Internal.')
+  cli(['sync'])
+  assert.deepEqual(readFileSync(join(root, path)), expected)
+  commit()
+  assert.deepEqual(
+    cli(['notes', PRODUCT, '0.4.0.1', '--ref', release]).stdout,
+    expected,
+  )
+  assert.equal(git('show', `${release}:${path}`), framing)
+  const upcoming = cli(['notes', PRODUCT, '0.4.0.2']).stdout
+  contains(upcoming, 'Future highlight.')
+  excludes(upcoming, 'Tagged highlight.')
+})
+
+test('notes ownership excludes lingering ancestor fragments and preserves legacy releases', t => {
+  const { root, fragment, write, cli, commit, tag } = compilerFixture(t)
+  const legacy =
+    'Legacy lede.\r\n\r\n## Highlights\r\n\r\n- Curated legacy highlight.\r\n'
+  const legacyPath = `${PRODUCT}/release-notes/0.4.0.md`
+  write(legacyPath, legacy)
+  fragment(undefined, '- Legacy changelog.\n', null)
+  commit()
+  const old = tag('0.4.0')
+  fragment('patch-added-first.md', '- First highlight.\n')
+  commit()
+  const first = tag('0.4.0.1', true)
+  fragment('patch-fixed-second.md', '- Second highlight.\n')
+  commit()
+  const second = tag('0.4.0.2')
+  const notes = cli(['notes', PRODUCT, '0.4.0.2', '--ref', second]).stdout
+  contains(notes, 'Second highlight.')
+  excludes(notes, 'First highlight.')
+  excludes(notes, 'Legacy changelog.')
+  cli(['sync'])
+  assert.equal(readFileSync(join(root, legacyPath), 'utf8'), legacy)
+  assert.equal(
+    cli(['notes', PRODUCT, '0.4.0', '--ref', old]).stdout.toString(),
+    legacy,
+  )
+  assert.equal(
+    cli(['notes', PRODUCT, '0.4.0.1', '--ref', first]).stdout.toString(),
+    '## Highlights\n\n- First highlight.\n',
+  )
+  assert.equal(
+    readFileSync(join(root, `${PRODUCT}/release-notes/0.4.0.2.md`), 'utf8'),
+    '## Highlights\n\n- Second highlight.\n',
+  )
+  assert.equal(
+    cli(['notes', PRODUCT, '0.4.0.2']).stdout.toString(),
+    '## Highlights\n\n- Second highlight.\n',
+  )
+})
+
+test('audience-only tag changes cannot rewrite archived highlights', t => {
+  const { root, fragment, cli, commit, tag, git } = compilerFixture(t)
+  fragment(undefined, '- Released highlight.\n')
+  commit()
+  tag('0.4.0.1')
+  cli(['sync'])
+  const path = join(root, PRODUCT, 'release-notes/0.4.0.1.md')
+  const archived = readFileSync(path)
+  commit()
+  fragment(undefined, '- Released highlight.\n', false)
+  commit()
+  git('tag', '-f', 'start-os/v0.4.0.1')
+  contains(cli(['sync'], false).stderr, 'remove ## Highlights')
+  assert.deepEqual(readFileSync(path), archived)
+})
+
+test('notes reject authored highlights before release', t => {
+  const { fragment, write, cli } = compilerFixture(t)
+  write(
+    `${PRODUCT}/release-notes/0.4.0.1.md`,
+    'Lede.\n\n## Highlights\n\n- Hand-written.\n',
+  )
+  fragment(undefined, '- Compiled.\n')
+  contains(
+    cli(['notes', PRODUCT, '0.4.0.1'], false).stderr,
+    'release-notes/0.4.0.1.md: remove ## Highlights',
+  )
+})
+
+test('notes and fragment consumption are atomic on framing conflicts', t => {
+  const { fragment, write, cli, commit, tag } = compilerFixture(t)
+  const path = `${PRODUCT}/release-notes/0.4.0.1.md`
+  write(path, 'Tagged lede.\n')
+  const pending = fragment()
+  commit()
+  tag('0.4.0.1')
+  write(path, 'Edited after tag.\n')
+  contains(cli(['sync'], false).stderr, 'release notes differ')
+  assert.ok(existsSync(pending))
 })
 
 test('consumption does not follow replacement symlink', t => {
