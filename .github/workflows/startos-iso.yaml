@@ -549,6 +549,12 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION"
 
+      - name: Compile release notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh notes start-os > "$RUNNER_TEMP/release-notes.md"
+
       - name: Determine platforms
         id: platforms
         run: |
@@ -671,8 +677,7 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          NOTES=$(CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh notes start-os) \
-            || { echo "::warning::No release notes for v${VERSION}; registering without them."; NOTES=""; }
+          NOTES=$(cat "$RUNNER_TEMP/release-notes.md")
           start-cli --registry="${{ env.REGISTRY }}" registry os version add \
             "$VERSION" "v${VERSION}" "$NOTES" ">=0.3.5 <=${VERSION}"
 

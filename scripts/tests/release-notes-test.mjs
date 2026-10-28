@@ -225,6 +225,37 @@ test('sparse deploy canonical versions and notes', t => {
     contains(derived, '- Generated feature.')
     excludes(derived, '- Feature.')
     contains(derived, `/tree/${ref}/projects/${project}/changelog`)
+    const compose = deploy
+      .split('      - name: Compile release notes\n')[1]
+      ?.split('        run: |\n')[1]
+      ?.split('\n      - ')[0]
+    assert.ok(compose)
+    assert.ok(
+      deploy.indexOf('Compile release notes') <
+        deploy.indexOf('Drop the previous alpha build'),
+    )
+    const composeShell = compose
+      .split('\n')
+      .map(line => line.slice(10))
+      .join('\n')
+      .replaceAll('${{ github.sha }}', ref)
+    const runnerTemp = join(root, `notes-${project}`)
+    mkdirSync(runnerTemp)
+    const compile = () =>
+      run('bash', ['-e', '-c', composeShell], {
+        cwd: checkout,
+        env: { ...env, VERSION: version, RUNNER_TEMP: runnerTemp },
+        encoding: 'utf8',
+      })
+    const compiled = compile()
+    assert.equal(compiled.status, 0, compiled.stderr)
+    assert.equal(text(join(runnerTemp, 'release-notes.md')), derived)
+    const fragmentPath = `checkout-${project}/projects/${project}/changelog/patch-fixed-feature.md`
+    write(fragmentPath, '---\nuser-facing: invalid\n---\n\n- Invalid.\n')
+    const invalid = compile()
+    assert.notEqual(invalid.status, 0)
+    contains(invalid.stderr, 'user-facing: true or false')
+    write(fragmentPath, METADATA + '- Generated feature.\n')
     env.VERSION = version
     assert.equal(script('notes', project, true, checkout).stdout, derived)
     delete env.VERSION

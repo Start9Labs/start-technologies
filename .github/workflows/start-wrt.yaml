@@ -259,6 +259,12 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION"
 
+      - name: Compile release notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh notes start-wrt > "$RUNNER_TEMP/release-notes.md"
+
       - name: Download image artifact
         uses: actions/download-artifact@v8
         with:
@@ -340,8 +346,7 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          NOTES=$(CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh notes start-wrt) \
-            || { echo "::warning::No release notes for v${VERSION}; registering without them."; NOTES=""; }
+          NOTES=$(cat "$RUNNER_TEMP/release-notes.md")
           start-cli --registry="${{ env.REGISTRY }}" registry os version add \
             "$VERSION" "v${VERSION}" "$NOTES" ">=0.1.0-beta.1 <=${VERSION}"
 
