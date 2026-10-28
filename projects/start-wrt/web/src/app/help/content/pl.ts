@@ -468,7 +468,7 @@ Opisowa nazwa tego hasła, taka jak „Dom” lub „Sieć dla gości”. Pojawi
 
 ### Hasło
 
-Hasło, którego urządzenia będą używać do łączenia się. Musi mieć co najmniej 8 znaków. Użyj przycisku generowania, aby utworzyć silne losowe hasło. Zmiana hasła rozłącza urządzenia używające starego hasła, dopóki nie połączą się ponownie przy użyciu nowego.
+Hasło, którego urządzenia będą używać do łączenia się. Musi mieć co najmniej 8 znaków. Użyj przycisku generowania, aby utworzyć silne losowe hasło. Zmiana hasła może na krótko rozłączyć wszystkie urządzenia Wi-Fi. Urządzenia używające starego hasła muszą połączyć się ponownie przy użyciu nowego.
 
 ### Profil bezpieczeństwa
 

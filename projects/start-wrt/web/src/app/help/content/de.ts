@@ -468,7 +468,7 @@ Ein aussagekräftiger Name für dieses Passwort, etwa „Zuhause“ oder „Gast
 
 ### Passwort
 
-Das Passwort, das Geräte zum Verbinden verwenden. Muss mindestens 8 Zeichen lang sein. Verwenden Sie die Schaltfläche zum Generieren, um ein starkes, zufälliges Passwort zu erstellen. Eine Änderung trennt Geräte, die das alte Passwort verwenden, bis sie sich mit dem neuen erneut verbinden.
+Das Passwort, das Geräte zum Verbinden verwenden. Muss mindestens 8 Zeichen lang sein. Verwenden Sie die Schaltfläche zum Generieren, um ein starkes, zufälliges Passwort zu erstellen. Eine Passwortänderung kann kurzzeitig alle Wi-Fi-Geräte trennen. Geräte, die das alte Passwort verwenden, müssen sich mit dem neuen erneut verbinden.
 
 ### Sicherheitsprofil
 

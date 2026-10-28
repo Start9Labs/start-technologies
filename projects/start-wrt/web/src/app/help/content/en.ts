@@ -466,7 +466,7 @@ A descriptive name for this password, such as "Home" or "Guest Network". It appe
 
 ### Password
 
-The password devices will use to connect. Must be at least 8 characters. Use the generate button to create a strong random password. Changing it disconnects devices using the old password until they reconnect with the new one.
+The password devices will use to connect. Must be at least 8 characters. Use the generate button to create a strong random password. Changing a password may briefly disconnect all Wi-Fi devices. Devices using the old password must reconnect with the new one.
 
 ### Security Profile
 

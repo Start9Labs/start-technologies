@@ -468,7 +468,7 @@ Un nombre descriptivo para esta contraseña, como «Casa» o «Red de invitados�
 
 ### Contraseña
 
-La contraseña que usarán los dispositivos para conectarse. Debe tener al menos 8 caracteres. Usa el botón de generar para crear una contraseña aleatoria fuerte. Al cambiarla, los dispositivos que usan la contraseña anterior se desconectan hasta que se vuelvan a conectar con la nueva.
+La contraseña que usarán los dispositivos para conectarse. Debe tener al menos 8 caracteres. Usa el botón de generar para crear una contraseña aleatoria fuerte. Cambiar una contraseña puede desconectar brevemente todos los dispositivos Wi-Fi. Los dispositivos que usan la contraseña anterior deben volver a conectarse con la nueva.
 
 ### Perfil de seguridad
 
