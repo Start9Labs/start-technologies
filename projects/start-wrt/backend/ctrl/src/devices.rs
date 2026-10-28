@@ -1018,6 +1018,13 @@ async fn ping_unreachable_macs(
     (unreachable, live_ipv4s)
 }
 
+pub(crate) async fn verified_ipv4_neighbors(
+    entries: &[ArpEntry],
+) -> std::collections::HashSet<String> {
+    let (targets, _) = non_wifi_probe_candidates(entries, &HashMap::new());
+    ping_unreachable_macs(targets).await.1
+}
+
 /// GUA (`2000::/3`) or ULA (`fc00::/7`) — the two address classes [`pick_ipv6`]
 /// can return. Link-local and every other scope is filtered out downstream, so
 /// probing one would only cost a second for an address that is never displayed.
@@ -1161,7 +1168,7 @@ fn live_ipv6_candidates<'a>(
 /// *old* bridge (not yet decayed), `non_wifi_probe_candidates` skips probing the
 /// new STALE entry, so the new IP is absent from `live_ipv4s` and the old
 /// REACHABLE entry wins (rank 0) until it ages to STALE — a few tens of seconds.
-fn choose_ipv4_entry<'a>(
+pub(crate) fn choose_ipv4_entry<'a>(
     arp_list: &[&'a ArpEntry],
     live_ipv4s: &std::collections::HashSet<String>,
 ) -> Option<&'a ArpEntry> {
@@ -1275,9 +1282,13 @@ async fn live_device_vlan(mac: &str, networks: &[ProfileNetwork]) -> Option<u16>
         get_bridge_fdb(),
         current_lease_ips(),
     );
-    let arp = parse_arp_output(&arp_output);
-    let arp_list: Vec<&ArpEntry> = arp.iter().filter(|e| e.mac == mac).collect();
-    let chosen = choose_ipv4_entry(&arp_list, &std::collections::HashSet::new());
+    let arp: Vec<ArpEntry> = parse_arp_output(&arp_output)
+        .into_iter()
+        .filter(|e| e.mac == mac)
+        .collect();
+    let live_ipv4s = verified_ipv4_neighbors(&arp).await;
+    let arp_list: Vec<&ArpEntry> = arp.iter().collect();
+    let chosen = choose_ipv4_entry(&arp_list, &live_ipv4s);
     let live_ipv4 = chosen
         .map(|e| e.ip.clone())
         .or_else(|| leases.and_then(|mut l| l.remove(mac)));
@@ -1758,10 +1769,12 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             chosen_arp,
             &arp_list,
             fdb_by_mac.get(mac),
-            live_ipv4.as_deref().or(reserved_ipv4.as_deref()),
+            live_ipv4.as_deref(),
             &profile_networks,
         );
-        let security_profile = vlan.and_then(|vlan| profile_by_vlan.get(&vlan).cloned());
+        let security_profile = vlan
+            .or_else(|| device_vlan(None, &[], None, reserved_ipv4.as_deref(), &profile_networks))
+            .and_then(|vlan| profile_by_vlan.get(&vlan).cloned());
         let profile_address = vlan
             .and_then(|vlan| profile_networks.iter().find(|p| p.vlan == vlan))
             .and_then(|p| p.address);
