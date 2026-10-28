@@ -14,7 +14,7 @@ use crate::notifications::Notifications;
 use crate::prelude::*;
 use crate::ssh::SshKeys;
 use crate::system::KeyboardOptions;
-use crate::util::serde::Pem;
+use crate::util::serde::{Der64, Pem};
 
 pub mod package;
 pub mod private;
@@ -47,7 +47,7 @@ impl Database {
                 os_security_notifications: BTreeMap::new(),
                 cifs: CifsTargets::new(),
                 package_stores: BTreeMap::new(),
-                developer_key: Pem(account.developer_key.clone()),
+                developer_key: Der64(account.developer_key.clone()),
             },
         })
     }
