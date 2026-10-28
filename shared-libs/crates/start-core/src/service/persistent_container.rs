@@ -112,6 +112,7 @@ pub struct PersistentContainer {
     assets: Vec<MountGuard>,
     pub(super) images: BTreeMap<ImageId, Arc<MountGuard>>,
     pub(super) subcontainers: Arc<Mutex<BTreeMap<Guid, Subcontainer>>>,
+    pub(crate) shared_volumes: Arc<Mutex<crate::shared_volumes::mounts::SharedVolumeMounts>>,
     pub(super) state: Arc<watch::Sender<ServiceState>>,
     pub(super) net_service: NetService,
     destroyed: bool,
@@ -321,6 +322,7 @@ impl PersistentContainer {
             assets,
             images,
             subcontainers: Arc::new(Mutex::new(BTreeMap::new())),
+            shared_volumes: Arc::new(Mutex::new(Default::default())),
             state: Arc::new(watch::channel(ServiceState::new()).0),
             net_service,
             destroyed: false,
@@ -459,6 +461,7 @@ impl PersistentContainer {
         let assets = std::mem::take(&mut self.assets);
         let images = std::mem::take(&mut self.images);
         let subcontainers = self.subcontainers.clone();
+        let shared_volumes = self.shared_volumes.clone();
         let lxc_container = self.lxc_container.take();
         let net_service = std::mem::replace(&mut self.net_service, NetService::dummy());
         self.destroyed = true;
@@ -477,6 +480,7 @@ impl PersistentContainer {
                 )
                 .await;
             }
+            shared_volumes.lock().await.clear();
             net_service.remove_all().await.log_err();
             for (_, volume) in volumes {
                 errs.handle(volume.unmount(true).await);

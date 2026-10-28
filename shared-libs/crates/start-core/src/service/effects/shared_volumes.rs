@@ -33,10 +33,7 @@ fn granted_volumes(
     catalog: BTreeMap<SharedVolumeId, SharedVolume>,
 ) -> Result<Vec<GrantedSharedVolume>, Error> {
     if !capable {
-        return Err(Error::new(
-            eyre!(t!("shared-volumes.access-denied")),
-            ErrorKind::Authorization,
-        ));
+        return Err(crate::shared_volumes::access_denied());
     }
     Ok(catalog
         .into_iter()
@@ -83,6 +80,132 @@ pub async fn get_shared_volumes(
         );
     }
     Ok(result)
+}
+
+#[derive(Serialize, Deserialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct MountSharedVolumeParams {
+    pub id: SharedVolumeId,
+    pub subcontainer: crate::rpc_continuations::Guid,
+    pub mountpoint: std::path::PathBuf,
+    pub subpath: Option<std::path::PathBuf>,
+    pub readonly: bool,
+}
+
+rpc_toolkit::reflect_ts!(MountSharedVolumeParams);
+rpc_toolkit::ts_export!(MountSharedVolumeParams, namespaces = [""]);
+
+#[derive(Debug, Clone, Serialize, Deserialize, VisitVariants)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SharedVolumeMountResult {
+    Mounted,
+    Unavailable {
+        reason: SharedVolumeUnavailableReason,
+    },
+}
+
+rpc_toolkit::reflect_ts!(SharedVolumeMountResult);
+rpc_toolkit::ts_export!(SharedVolumeMountResult, namespaces = [""]);
+
+#[derive(Debug, Clone, Serialize, Deserialize, VisitVariants)]
+#[serde(rename_all = "camelCase")]
+pub enum SharedVolumeUnavailableReason {
+    SourceUnavailable,
+    Timeout,
+}
+
+rpc_toolkit::reflect_ts!(SharedVolumeUnavailableReason);
+
+async fn authorize_mount(
+    service: &crate::service::Service,
+    id: &SharedVolumeId,
+    readonly: bool,
+) -> Result<(), Error> {
+    service
+        .seed
+        .ctx
+        .db
+        .peek()
+        .await
+        .as_public()
+        .as_shared_volumes()
+        .as_idx(id)
+        .ok_or_else(crate::shared_volumes::access_denied)?
+        .de()?
+        .authorize(
+            service
+                .seed
+                .persistent_container
+                .s9pk
+                .as_manifest()
+                .shared_volumes,
+            &service.seed.id,
+            readonly,
+        )
+}
+
+pub async fn mount_shared_volume(
+    context: EffectContext,
+    MountSharedVolumeParams {
+        id,
+        subcontainer,
+        mountpoint,
+        subpath,
+        readonly,
+    }: MountSharedVolumeParams,
+) -> Result<SharedVolumeMountResult, Error> {
+    use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
+    use crate::disk::mount::guard::GenericMountGuard;
+    use crate::util::Invoke;
+    let service = context.deref()?;
+    let container = &service.seed.persistent_container;
+    let mut mounts = container.shared_volumes.lock().await;
+    mounts.check_allowed()?;
+    authorize_mount(&service, &id, readonly).await?;
+    if let Some(subpath) = &subpath {
+        crate::shared_volumes::mounts::confined_relative(subpath)?;
+    }
+    let subcontainers = container.subcontainers.lock().await;
+    let root = subcontainers
+        .get(&subcontainer)
+        .or_not_found("subcontainer")?
+        .overlay
+        .path();
+    tokio::process::Command::new("mount")
+        .arg("--make-rshared")
+        .arg(root)
+        .invoke(ErrorKind::Filesystem)
+        .await?;
+    let location = mounts.prepare(&subcontainer, root, &mountpoint).await?;
+    let source = match crate::shared_volumes::source::open_source(
+        &service.seed.ctx,
+        &id,
+        if readonly { ReadOnly } else { ReadWrite },
+    )
+    .await
+    {
+        Ok(source) => source,
+        Err(error) => {
+            authorize_mount(&service, &id, readonly).await?;
+            return Ok(SharedVolumeMountResult::Unavailable {
+                reason: if matches!(error.kind, ErrorKind::Timeout) {
+                    SharedVolumeUnavailableReason::Timeout
+                } else {
+                    SharedVolumeUnavailableReason::SourceUnavailable
+                },
+            });
+        }
+    };
+    authorize_mount(&service, &id, readonly).await?;
+    mounts.attach(
+        &subcontainer,
+        location,
+        id,
+        source,
+        subpath.as_deref(),
+        readonly,
+    )?;
+    Ok(SharedVolumeMountResult::Mounted)
 }
 
 #[cfg(test)]

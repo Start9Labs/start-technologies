@@ -67,6 +67,13 @@ pub async fn destroy_subcontainer_fs(
                 .await
                 .with_kind(ErrorKind::Unknown)??;
         }
+        context
+            .seed
+            .persistent_container
+            .shared_volumes
+            .lock()
+            .await
+            .remove_subcontainer(&guid);
         overlay.overlay.unmount(true).await?;
     } else {
         tracing::warn!(

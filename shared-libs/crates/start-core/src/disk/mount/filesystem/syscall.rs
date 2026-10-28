@@ -19,7 +19,10 @@ use crate::prelude::*;
 
 // libc's musl targets omit these linux/mount.h flags.
 const MOVE_MOUNT_F_EMPTY_PATH: libc::c_uint = 0x00000004;
+const MOVE_MOUNT_T_EMPTY_PATH: libc::c_uint = 0x00000040;
 const MOVE_MOUNT_BENEATH: libc::c_uint = 0x00000200;
+const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
+const RESOLVE_BENEATH: u64 = 0x08;
 
 // open_tree_attr(2) — added in Linux 6.15. libc 0.2 only defines
 // SYS_open_tree_attr for m68k, but the number is unified at 467 across
@@ -119,7 +122,95 @@ pub fn open_tree_attr_idmap(
     fd_from_raw(r, "open_tree_attr IDMAP")
 }
 
+/// Clones a pinned directory without including its child mounts.
+pub fn open_tree_clone_fd(source: BorrowedFd) -> Result<OwnedFd, Error> {
+    let empty = cstr_str("")?;
+    let raw = unsafe {
+        libc::syscall(
+            libc::SYS_open_tree,
+            source.as_raw_fd(),
+            empty.as_ptr(),
+            OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC | AT_EMPTY_PATH as libc::c_uint,
+        )
+    };
+    fd_from_raw(raw, "open_tree fd")
+}
+
+/// Pins a directory below the root, rejecting path and symlink escapes.
+pub fn open_beneath(base: &Path, relative: &Path) -> Result<OwnedFd, Error> {
+    let base = cstr_path(base)?;
+    let root = fd_from_raw(
+        unsafe {
+            libc::open(
+                base.as_ptr(),
+                libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC,
+            )
+        } as i64,
+        "open root",
+    )?;
+    let path = cstr_path(if relative.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        relative
+    })?;
+    #[repr(C)]
+    struct OpenHow {
+        flags: u64,
+        mode: u64,
+        resolve: u64,
+    }
+    let how = OpenHow {
+        flags: (libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC) as u64,
+        mode: 0,
+        resolve: RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS,
+    };
+    let raw = unsafe {
+        libc::syscall(
+            libc::SYS_openat2,
+            root.as_raw_fd(),
+            path.as_ptr(),
+            &how,
+            std::mem::size_of::<OpenHow>(),
+        )
+    };
+    if raw < 0 {
+        let error = io::Error::last_os_error();
+        let kind = match error.raw_os_error() {
+            Some(libc::EXDEV | libc::ELOOP | libc::ENOENT | libc::ENOTDIR | libc::EINVAL) => {
+                ErrorKind::InvalidRequest
+            }
+            _ => ErrorKind::Filesystem,
+        };
+        return Err(Error::new(error, kind));
+    }
+    fd_from_raw(raw, "openat2 confined directory")
+}
+
+/// Detaches the pinned mount, including when its directory has moved.
+pub fn unmount_fd(mount: BorrowedFd) -> Result<(), Error> {
+    let path = cstr_path(Path::new(&format!("/proc/self/fd/{}", mount.as_raw_fd())))?;
+    let raw = unsafe { libc::umount2(path.as_ptr(), libc::MNT_DETACH) };
+    if raw < 0
+        && matches!(
+            io::Error::last_os_error().raw_os_error(),
+            Some(libc::EINVAL | libc::ENOENT)
+        )
+    {
+        return Ok(());
+    }
+    check(raw as i64, "umount fd")
+}
+
 fn move_mount(detached: BorrowedFd, to: &Path, flags: libc::c_uint) -> Result<(), Error> {
+    move_mount_at(detached, AT_FDCWD, to, flags)
+}
+
+fn move_mount_at(
+    detached: BorrowedFd,
+    target: RawFd,
+    to: &Path,
+    flags: libc::c_uint,
+) -> Result<(), Error> {
     let empty = cstr_str("")?;
     let t = cstr_path(to)?;
     let r = unsafe {
@@ -127,7 +218,7 @@ fn move_mount(detached: BorrowedFd, to: &Path, flags: libc::c_uint) -> Result<()
             libc::SYS_move_mount,
             detached.as_raw_fd(),
             empty.as_ptr(),
-            AT_FDCWD,
+            target,
             t.as_ptr(),
             MOVE_MOUNT_F_EMPTY_PATH | flags,
         )
@@ -175,6 +266,16 @@ impl DetachedMount {
     /// Attach the detached mount at the requested path.
     pub fn attach(self, mountpoint: &Path) -> Result<(), Error> {
         move_mount(self.fd.as_fd(), mountpoint, 0)
+    }
+    /// Attaches to a pinned directory and retains a handle to the attached mount.
+    pub fn attach_to_fd(self, target: BorrowedFd) -> Result<OwnedFd, Error> {
+        move_mount_at(
+            self.fd.as_fd(),
+            target.as_raw_fd(),
+            Path::new(""),
+            MOVE_MOUNT_T_EMPTY_PATH,
+        )?;
+        Ok(self.fd)
     }
     /// Insert beneath the top mount; detaching the top reveals this mount. Requires Linux 6.5+.
     pub fn attach_beneath(self, mountpoint: &Path) -> Result<(), Error> {

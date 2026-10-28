@@ -6,6 +6,9 @@ use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
 use crate::PackageId;
+
+pub mod mounts;
+pub mod source;
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::prelude::*;
@@ -35,6 +38,14 @@ impl TryFrom<String> for SharedVolumeId {
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         Ok(Self(uuid::Uuid::from_str(&value)?.to_string()))
+    }
+}
+
+impl FromStr for SharedVolumeId {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::try_from(value.to_owned()).with_kind(ErrorKind::InvalidRequest)
     }
 }
 
@@ -126,18 +137,26 @@ impl SharedVolume {
         if grant.is_some_and(|grant| readonly || !grant.readonly) {
             Ok(())
         } else {
-            Err(Error::new(
-                eyre!(t!("shared-volumes.access-denied")),
-                ErrorKind::Authorization,
-            ))
+            Err(access_denied())
         }
     }
+}
+
+pub(crate) fn access_denied() -> Error {
+    Error::new(
+        eyre!(t!("shared-volumes.access-denied")),
+        ErrorKind::Authorization,
+    )
 }
 
 pub fn handler<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand("create", from_fn_async(create).no_cli())
         .subcommand("rename", from_fn_async(rename).no_cli())
+        .subcommand("set-grant", from_fn_async(set_grant).no_cli())
+        .subcommand("remove", from_fn_async(remove).no_cli())
+        .subcommand("delete-data", from_fn_async(delete_data).no_cli())
+        .subcommand("inspect", from_fn_async(inspect).no_cli())
 }
 
 #[derive(Deserialize, Serialize, VisitVariants)]
@@ -176,7 +195,7 @@ pub async fn create(
     let id = SharedVolumeId::new();
     let (source, credentials) = match source {
         CreateSharedVolumeSource::Local => {
-            tokio::fs::create_dir_all(local_path(crate::DATA_DIR, &id)).await?;
+            source::create_local_directory(&local_path(crate::DATA_DIR, &id)).await?;
             (SharedVolumeSource::Local, None)
         }
         CreateSharedVolumeSource::Cifs(Cifs {
@@ -240,6 +259,158 @@ pub async fn rename(
         })
         .await
         .result
+}
+
+#[derive(Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSharedVolumeGrantParams {
+    pub id: SharedVolumeId,
+    pub package_id: PackageId,
+    pub grant: Option<SharedVolumeGrant>,
+}
+
+rpc_toolkit::reflect_ts!(SetSharedVolumeGrantParams);
+
+pub async fn set_grant(
+    ctx: RpcContext,
+    SetSharedVolumeGrantParams {
+        id,
+        package_id,
+        grant,
+    }: SetSharedVolumeGrantParams,
+) -> Result<(), Error> {
+    use crate::db::model::package::ManifestPreference;
+    let service = ctx.services.get(&package_id).await;
+    let mut mounts = if let Some(service) = service.as_ref() {
+        Some(service.shared_volume_mounts().lock().await)
+    } else {
+        None
+    };
+    ctx.db
+        .mutate(|db| {
+            if grant.is_some()
+                && !db
+                    .as_public()
+                    .as_package_data()
+                    .as_idx(&package_id)
+                    .or_not_found(&package_id)?
+                    .as_state_info()
+                    .as_manifest(ManifestPreference::Old)
+                    .as_shared_volumes()
+                    .de()?
+            {
+                return Err(access_denied());
+            }
+            let volume = db
+                .as_public_mut()
+                .as_shared_volumes_mut()
+                .as_idx_mut(&id)
+                .or_not_found(&id)?;
+            if let Some(grant) = &grant {
+                volume.as_grants_mut().insert(&package_id, grant)?;
+            } else {
+                volume.as_grants_mut().remove(&package_id)?;
+            }
+            Ok(())
+        })
+        .await
+        .result?;
+    if let Some(mounts) = &mut mounts {
+        mounts.reconcile_grant(&id, grant.as_ref())?;
+    }
+    Ok(())
+}
+
+#[derive(Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedVolumeParams {
+    pub id: SharedVolumeId,
+}
+
+rpc_toolkit::reflect_ts!(SharedVolumeParams);
+
+pub async fn remove(
+    ctx: RpcContext,
+    SharedVolumeParams { id }: SharedVolumeParams,
+) -> Result<(), Error> {
+    let packages = ctx
+        .db
+        .mutate(|db| {
+            db.as_public_mut().as_shared_volumes_mut().remove(&id)?;
+            db.as_private_mut()
+                .as_shared_volume_credentials_mut()
+                .remove(&id)?;
+            db.as_public().as_package_data().keys()
+        })
+        .await
+        .result?;
+    for package_id in &packages {
+        let service = ctx.services.get(package_id).await;
+        if let Some(service) = service.as_ref() {
+            service
+                .shared_volume_mounts()
+                .lock()
+                .await
+                .reconcile_grant(&id, None)?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn delete_data(
+    ctx: RpcContext,
+    SharedVolumeParams { id }: SharedVolumeParams,
+) -> Result<(), Error> {
+    if ctx
+        .db
+        .peek()
+        .await
+        .as_public()
+        .as_shared_volumes()
+        .contains_key(&id)?
+    {
+        return Err(Error::new(
+            eyre!(t!("shared-volumes.remove-before-delete")),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    remove(ctx, SharedVolumeParams { id: id.clone() }).await?;
+    tokio::fs::remove_dir_all(local_path(crate::DATA_DIR, &id)).await?;
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedVolumeInspection {
+    pub availability: SharedVolumeAvailability,
+    pub available: Option<u64>,
+    pub error: Option<String>,
+}
+
+rpc_toolkit::reflect_ts!(SharedVolumeInspection);
+
+pub async fn inspect(
+    ctx: RpcContext,
+    SharedVolumeParams { id }: SharedVolumeParams,
+) -> Result<SharedVolumeInspection, Error> {
+    use crate::disk::mount::filesystem::ReadOnly;
+    use crate::disk::mount::guard::GenericMountGuard;
+    match source::open_source(&ctx, &id, ReadOnly).await {
+        Ok(guard) => {
+            let available = crate::disk::util::get_available(guard.path()).await.ok();
+            guard.unmount().await?;
+            Ok(SharedVolumeInspection {
+                availability: SharedVolumeAvailability::Available,
+                available,
+                error: None,
+            })
+        }
+        Err(error) => Ok(SharedVolumeInspection {
+            availability: SharedVolumeAvailability::Unavailable,
+            available: None,
+            error: Some(error.to_string()),
+        }),
+    }
 }
 
 #[cfg(test)]
