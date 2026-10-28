@@ -3471,6 +3471,20 @@ control.start-critical-task-check-failed:
   pl_PL: "Ostrzeżenie: zażądano uruchomienia usługi %{id}, ale sprawdzenie blokujących zadań krytycznych nie powiodło się"
 
 # shutdown.rs
+shared-volumes.access-denied:
+  en_US: "This service does not have the required volume access"
+  de_DE: "Dieser Dienst hat nicht den erforderlichen Zugriff auf das Volume"
+  es_ES: "Este servicio no tiene el acceso necesario al volumen"
+  fr_FR: "Ce service ne dispose pas de l'accès requis au volume"
+  pl_PL: "Ta usługa nie ma wymaganego dostępu do woluminu"
+
+shared-volumes.name-required:
+  en_US: "Enter a volume name"
+  de_DE: "Einen Namen für das Volume eingeben"
+  es_ES: "Introduce un nombre para el volumen"
+  fr_FR: "Saisissez un nom de volume"
+  pl_PL: "Podaj nazwę woluminu"
+
 shutdown.beginning-restart:
   en_US: "Beginning server restart"
   de_DE: "Server-Neustart wird begonnen"

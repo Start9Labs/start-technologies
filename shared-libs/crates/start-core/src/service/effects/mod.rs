@@ -20,6 +20,7 @@ mod net;
 pub mod notification;
 pub mod plugin;
 mod prelude;
+mod shared_volumes;
 pub mod subcontainer;
 mod system;
 mod version;
@@ -87,6 +88,10 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
             from_fn_async(dependency::check_dependencies)
                 .no_display()
                 .with_call_remote::<ContainerCliContext>(),
+        )
+        .subcommand(
+            "get-shared-volumes",
+            from_fn_async(shared_volumes::get_shared_volumes).no_cli(),
         )
         .subcommand("mount", from_fn_async(dependency::mount).no_cli())
         .subcommand(
