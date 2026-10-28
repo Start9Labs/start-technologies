@@ -30,7 +30,6 @@ pub struct SecurityUpdate {
 }
 
 const SEND_TIMEOUT: Duration = Duration::from_secs(15);
-const RECEIVE_TIMEOUT: Duration = Duration::from_secs(360);
 
 fn catalog(index: OsIndex) -> SecurityCatalog {
     index
@@ -114,10 +113,10 @@ async fn subscribe(mut socket: WebSocket, mut receiver: watch::Receiver<Utf8Byte
                     return;
                 }
             }
-            message = timeout(RECEIVE_TIMEOUT, socket.recv()) => {
+            message = socket.recv() => {
                 match message {
-                    Ok(Some(Ok(Message::Ping(_) | Message::Pong(_)))) => {}
-                    Ok(Some(Ok(Message::Close(_)))) => {
+                    Some(Ok(Message::Ping(_) | Message::Pong(_))) => {}
+                    Some(Ok(Message::Close(_))) => {
                         let _ = timeout(SEND_TIMEOUT, socket.flush()).await;
                         return;
                     }
@@ -388,16 +387,18 @@ mod tests {
         let (url, _server) = serve(receiver).await;
         let (mut socket, _) = connect_async(&url).await.unwrap();
         receive(&mut socket).await;
-        tokio::time::pause();
-        tokio::time::advance(Duration::from_secs(31)).await;
-        tokio::time::resume();
-        assert!(matches!(receive(&mut socket).await, ClientMessage::Ping(_)));
-        socket.flush().await.unwrap();
-        socket
-            .send(ClientMessage::Ping(vec![1].into()))
-            .await
-            .unwrap();
-        assert!(matches!(receive(&mut socket).await, ClientMessage::Pong(_)));
+        for _ in 0..13 {
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(31)).await;
+            tokio::time::resume();
+            assert!(matches!(receive(&mut socket).await, ClientMessage::Ping(_)));
+            socket.flush().await.unwrap();
+            socket
+                .send(ClientMessage::Ping(vec![1].into()))
+                .await
+                .unwrap();
+            assert!(matches!(receive(&mut socket).await, ClientMessage::Pong(_)));
+        }
         tokio::time::pause();
         tokio::time::advance(Duration::from_secs(31)).await;
         tokio::time::resume();
