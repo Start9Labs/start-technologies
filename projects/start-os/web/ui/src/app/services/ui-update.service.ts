@@ -56,7 +56,9 @@ export class UiUpdateService {
           break
         case 'NO_NEW_VERSION_DETECTED':
           if (['idle', 'checking'].includes(this.state().status))
-            this.transition({ status: this.outdated() ? 'ready' : 'idle' })
+            this.transition({
+              status: this.outdated() || this.refreshing() ? 'ready' : 'idle',
+            })
           break
         case 'VERSION_INSTALLATION_FAILED':
           this.fail(event.error)

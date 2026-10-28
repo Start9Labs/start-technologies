@@ -590,6 +590,20 @@ for (const outcome of [
   })
 }
 
+test('Refresh during a retry completes when the worker finds no new version and the UI matches the server', async t => {
+  const f = uiFixture(t)
+  f.events.next(failed)
+  assert.equal(f.ui.outdated(), false)
+  void f.ui.check()
+  f.ui.refresh()
+  assert.equal(f.reloads, 0)
+  f.events.next(noUpdate)
+  f.checks[0].resolve(false)
+  await tick()
+  assert.equal(f.ui.state().status, 'reloading')
+  assert.equal(f.reloads, 1)
+})
+
 test('a rejected check stays actionable without reloading the working UI, and can be retried', async t => {
   const f = uiFixture(t)
   f.version('0.4.0.5')
