@@ -685,7 +685,13 @@ export const SubnetParams: z.ZodObject<{ subnet: z.ZodString }> =
 export const TunnelCertData: z.ZodObject<{
   key: typeof literal_0
   cert: typeof literal_0
-}> = /* @__PURE__ */ object({ key: literal_0, cert: literal_0 }).meta({
+}> = /* @__PURE__ */ object({
+  key: literal_0.meta({
+    description:
+      'Standard Base64 DER with padding. Deserialization also accepts legacy PEM armor.',
+  }),
+  cert: literal_0,
+}).meta({
   id: 'TunnelCertData',
 })
 export const TunnelUpdateResult: z.ZodObject<{
@@ -809,15 +815,12 @@ export const AddKeyParams: z.ZodObject<{
 })
 
 /**
- * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
- * key is a sign-in: it carries the same metadata a session used to (when it
- * was created, when it was last used, and the user agent that enrolled it).
+ * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export const AuthKeys: z.ZodRecord<z.ZodString, typeof Session> =
   /* @__PURE__ */ z.record(z.string(), Session).meta({
     id: 'AuthKeys',
-    description:
-      "The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled\nkey is a sign-in: it carries the same metadata a session used to (when it\nwas created, when it was last used, and the user agent that enrolled it).",
+    description: 'Enrolled sign-ins indexed by canonical DER64 SPKI.',
   })
 export const DnsRecords: z.ZodArray<typeof DnsRecordEntry> = /* @__PURE__ */ z
   .array(DnsRecordEntry)
