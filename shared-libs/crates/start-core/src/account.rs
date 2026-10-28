@@ -8,7 +8,7 @@ use crate::db::model::DatabaseModel;
 use crate::hostname::{ServerHostname, generate_hostname, generate_id};
 use crate::net::ssl::{CertBranding, gen_nistp256, make_root_cert};
 use crate::prelude::*;
-use crate::util::serde::Pem;
+use crate::util::serde::{Der64, Pem};
 
 fn hash_password(password: &str) -> Result<String, Error> {
     argon2::hash_encoded(
@@ -90,13 +90,13 @@ impl AccountInfo {
             .ser(Pem::new_ref(&self.ssh_key))?;
         db.as_private_mut()
             .as_developer_key_mut()
-            .ser(Pem::new_ref(&self.developer_key))?;
+            .ser(Der64::new_ref(&self.developer_key))?;
         let key_store = db.as_private_mut().as_key_store_mut();
         let cert_store = key_store.as_local_certs_mut();
         if cert_store.as_root_cert().de()?.0 != self.root_ca_cert {
             cert_store
                 .as_root_key_mut()
-                .ser(Pem::new_ref(&self.root_ca_key))?;
+                .ser(Der64::new_ref(&self.root_ca_key))?;
             cert_store
                 .as_root_cert_mut()
                 .ser(Pem::new_ref(&self.root_ca_cert))?;
@@ -107,7 +107,7 @@ impl AccountInfo {
                 &int_key,
                 &branding,
             )?;
-            cert_store.as_int_key_mut().ser(&Pem(int_key))?;
+            cert_store.as_int_key_mut().ser(&Der64(int_key))?;
             cert_store.as_int_cert_mut().ser(&Pem(int_cert))?;
             cert_store.as_leaves_mut().ser(&BTreeMap::new())?;
         }

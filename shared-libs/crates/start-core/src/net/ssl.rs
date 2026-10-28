@@ -43,7 +43,7 @@ use crate::net::tls::{TlsHandler, TlsHandlerAction};
 use crate::net::utils::is_global_ip;
 use crate::net::web_server::{Accept, ExtractVisitor, TcpMetadata, extract};
 use crate::prelude::*;
-use crate::util::serde::{HandlerExtSerde, Pem};
+use crate::util::serde::{Der64, HandlerExtSerde, Pem};
 
 pub(crate) fn x509_sha256_fingerprint(cert: &X509Ref) -> Result<String, ErrorStack> {
     Ok(format_x509_fingerprint(
@@ -111,9 +111,9 @@ impl CertBranding {
 #[model = "Model<Self>"]
 #[serde(rename_all = "camelCase")]
 pub struct CertStore {
-    pub root_key: Pem<PKey<Private>>,
+    pub root_key: Der64<PKey<Private>>,
     pub root_cert: Pem<X509>,
-    pub int_key: Pem<PKey<Private>>,
+    pub int_key: Der64<PKey<Private>>,
     pub int_cert: Pem<X509>,
     pub leaves: BTreeMap<JsonKey<BTreeSet<InternedString>>, CertData>,
 }
@@ -126,9 +126,9 @@ impl CertStore {
             branding,
         )?;
         Ok(Self {
-            root_key: Pem::new(account.root_ca_key.clone()),
+            root_key: Der64::new(account.root_ca_key.clone()),
             root_cert: Pem::new(account.root_ca_cert.clone()),
-            int_key: Pem::new(int_key),
+            int_key: Der64::new(int_key),
             int_cert: Pem::new(int_cert),
             leaves: BTreeMap::new(),
         })
@@ -267,9 +267,9 @@ fn asn1_time_to_system_time(time: &Asn1TimeRef) -> Result<SystemTime, Error> {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PKeyPair {
-    #[serde(with = "crate::util::serde::pem")]
+    #[serde(with = "crate::util::serde::der64")]
     pub ed25519: PKey<Private>,
-    #[serde(with = "crate::util::serde::pem")]
+    #[serde(with = "crate::util::serde::der64")]
     pub nistp256: PKey<Private>,
 }
 impl PartialEq for PKeyPair {

@@ -15,6 +15,7 @@ use tracing::instrument;
 
 use crate::bins::set_locale;
 use crate::context::{CliContext, RpcContext};
+use crate::db::model::Database;
 use crate::db::model::public::RestartReason;
 use crate::disk::util::{get_available, get_used};
 use crate::logs::{LogSource, LogsParams, SYSTEM_UNIT};
@@ -31,6 +32,7 @@ use crate::util::serde::{WithIoFormat, display_serializable};
 use crate::util::sync::Watch;
 use crate::{MAIN_DATA, PACKAGE_DATA};
 
+mod disk_health;
 pub(crate) mod trust_ca;
 
 pub fn experimental<C: Context>() -> ParentHandler<C> {
@@ -695,9 +697,9 @@ pub async fn metrics_follow(
 
 pub async fn launch_metrics_task<F: FnMut() -> Receiver<Option<Shutdown>>>(
     cache: &Watch<Option<Metrics>>,
+    db: &TypedPatchDb<Database>,
     mut mk_shutdown: F,
 ) {
-    // fetch init temp
     let init_temp = match get_temp().await {
         Ok(a) => Some(a),
         Err(e) => {
@@ -712,7 +714,6 @@ pub async fn launch_metrics_task<F: FnMut() -> Receiver<Option<Shutdown>>>(
             None
         }
     };
-    // fetch init cpu
     let init_cpu;
     let proc_stat;
     loop {
@@ -747,7 +748,6 @@ pub async fn launch_metrics_task<F: FnMut() -> Receiver<Option<Shutdown>>>(
         }
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
-    // fetch init memory
     let init_mem;
     loop {
         match get_mem_info().await {
@@ -768,7 +768,6 @@ pub async fn launch_metrics_task<F: FnMut() -> Receiver<Option<Shutdown>>>(
         }
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
-    // fetch init disk usage
     let init_disk;
     loop {
         match get_disk_info().await {
@@ -802,16 +801,12 @@ pub async fn launch_metrics_task<F: FnMut() -> Receiver<Option<Shutdown>>>(
     }));
 
     let mut task_vec = Vec::new();
-    // launch persistent temp task
     if should_launch_temp_task {
         task_vec.push(launch_temp_task(cache, mk_shutdown()).boxed());
     }
-    // launch persistent cpu task
     task_vec.push(launch_cpu_task(cache, proc_stat, mk_shutdown()).boxed());
-    // launch persistent mem task
     task_vec.push(launch_mem_task(cache, mk_shutdown()).boxed());
-    // launch persistent disk task
-    task_vec.push(launch_disk_task(cache, mk_shutdown()).boxed());
+    task_vec.push(launch_disk_task(cache, db, mk_shutdown()).boxed());
 
     futures::future::join_all(task_vec).await;
 }
@@ -900,10 +895,11 @@ async fn launch_mem_task(cache: &Watch<Option<Metrics>>, mut shutdown: Receiver<
 }
 async fn launch_disk_task(
     cache: &Watch<Option<Metrics>>,
+    db: &TypedPatchDb<Database>,
     mut shutdown: Receiver<Option<Shutdown>>,
 ) {
+    let mut disk_health = disk_health::DiskHealth::default();
     loop {
-        // run df and capture output
         match get_disk_info().await {
             Ok(a) => {
                 cache.send_if_modified(|c| {
@@ -926,6 +922,10 @@ async fn launch_disk_task(
                 );
                 tracing::debug!("{:?}", e);
             }
+        }
+        tokio::select! {
+            _ = shutdown.recv() => return,
+            _ = disk_health.check(db) => (),
         }
         tokio::select! {
             _ = shutdown.recv() => return,
