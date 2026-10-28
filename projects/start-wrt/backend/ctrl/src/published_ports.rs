@@ -82,7 +82,7 @@ pub(crate) fn may_affect_v6_rules(mac: &str) -> bool {
 
 // ── Types ──────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitVariants)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, visit_rs::VisitVariants)]
 #[serde(rename_all = "lowercase")]
 pub enum Protocol {
     Tcp,
@@ -558,7 +558,10 @@ struct RawPort {
 /// Extract raw published ports from firewall config sections.
 async fn extract_ports(arena: &Arena, uci_root: &std::path::Path) -> Result<Vec<RawPort>, Error> {
     let cfgs = parse_all(uci_root, arena, &["firewall"]).await?;
+    Ok(raw_ports(&cfgs))
+}
 
+fn raw_ports(cfgs: &Configs) -> Vec<RawPort> {
     // Collect redirects and rules with _pp_id metadata
     let mut redirects_by_id: HashMap<String, FirewallRedirect> = HashMap::new();
     let mut rules_by_id: HashMap<String, FirewallRule> = HashMap::new();
@@ -634,7 +637,7 @@ async fn extract_ports(arena: &Arena, uci_root: &std::path::Path) -> Result<Vec<
         }
     }
 
-    Ok(ports)
+    ports
 }
 
 fn sections_to_raw_port(
@@ -718,6 +721,14 @@ fn compute_status(
             PublishedPortStatus::Error,
             Some("No addresses available".into()),
         );
+    }
+
+    if port.ipv4 && device.inactive_ipv4_reservation.is_some() {
+        let reason = Some("IPv4 reservation outside the device's profile".into());
+        if port.ipv6 && has_ipv6 {
+            return (PublishedPortStatus::Partial, reason);
+        }
+        return (PublishedPortStatus::Error, reason);
     }
 
     if port.ipv6 && !has_ipv6 {
@@ -1011,6 +1022,7 @@ pub async fn set<C: CtrlContext>(
         } else {
             HashMap::new()
         };
+        validate_reservation_zones(&cfgs, &req.ports, &device_info, &mac_zones)?;
 
         // Remove all existing published-port sections (name starts with "pp_")
         cfgs["firewall"].sections.retain(|section| {
@@ -1334,6 +1346,59 @@ fn validate_device_addresses(
         }
     }
     Ok(())
+}
+
+/// Refuses an enabled IPv4 port on a device whose reservation lies in another
+/// zone than the neighbor table places it in.
+fn validate_reservation_zones(
+    cfgs: &Configs,
+    ports: &[PublishedPortInput],
+    device_info: &HashMap<String, DeviceNetInfo>,
+    mac_zones: &HashMap<String, String>,
+) -> Result<(), Error> {
+    let stored = raw_ports(cfgs);
+    for port in ports.iter().filter(|p| p.enabled && p.ipv4) {
+        if stored.iter().any(|s| same_ipv4_forward(s, port)) {
+            continue;
+        }
+        let mac = port.device_mac.to_uppercase();
+        let Some(info) = device_info.get(&mac).filter(|i| i.has_static_ipv4) else {
+            continue;
+        };
+        let Some(reserved) = info.ipv4.as_deref() else {
+            continue;
+        };
+        let by_address = reserved
+            .parse::<Ipv4Addr>()
+            .ok()
+            .and_then(|ip| zone_for_ipv4(cfgs, ip));
+        if let (Some(by_address), Some(by_neighbor)) = (by_address, mac_zones.get(&mac)) {
+            if by_address != *by_neighbor {
+                return Err(Error::new(
+                    eyre!(
+                        "port forward '{}': device {} is reserved {reserved}, outside the subnet of the profile it is on; change its reservation or disable the port",
+                        port.label,
+                        port.device_mac
+                    ),
+                    ErrorKind::InvalidValue,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn same_ipv4_forward(stored: &RawPort, port: &PublishedPortInput) -> bool {
+    let public_port = |p: &Option<String>, ports: &str| p.clone().unwrap_or_else(|| ports.into());
+    stored.id == port.id
+        && stored.enabled
+        && stored.ipv4
+        && stored.device_mac.eq_ignore_ascii_case(&port.device_mac)
+        && stored.ports == port.ports
+        && stored.protocol == port.protocol
+        && stored.source == port.source
+        && public_port(&stored.ipv4_public_port, &stored.ports)
+            == public_port(&port.ipv4_public_port, &port.ports)
 }
 
 fn active_ipv4_ranges(ports: &[PublishedPortInput]) -> Vec<(u16, u16)> {
@@ -2702,6 +2767,8 @@ config rule 'pp_a_v6'
             ipv4: ipv4.map(str::to_string),
             ipv6: ipv6.map(str::to_string),
             ipv4_static: false,
+            inactive_ipv4_reservation: None,
+            profile_network: None,
             allow_auto_port_forward: false,
             allow_dns_injection: false,
             allow_router_advertisements: false,
@@ -2709,6 +2776,25 @@ config rule 'pp_a_v6'
             speed: None,
             data_usage: None,
         }
+    }
+
+    #[test]
+    fn status_flags_an_inactive_reservation() {
+        let mut dev = online_device(Some("192.168.101.20"), Some("2001:db8:abcd::99"));
+        dev.ipv4_static = true;
+        dev.inactive_ipv4_reservation = Some("192.168.1.50".into());
+
+        let ipv4_only = RawPort {
+            ipv6: false,
+            ..raw_v6_port(true, None)
+        };
+        let (status, reason) = compute_status(&ipv4_only, Some(&dev));
+        assert!(matches!(status, PublishedPortStatus::Error), "{status:?}");
+        assert!(reason.unwrap().contains("reservation"));
+
+        let both = raw_v6_port(true, Some("2001:db8:abcd::99"));
+        let (status, _) = compute_status(&both, Some(&dev));
+        assert!(matches!(status, PublishedPortStatus::Partial), "{status:?}");
     }
 
     #[test]
@@ -3418,6 +3504,100 @@ config rule 'pp_v6only_v6'
         let arena = Arena::new();
         let cfg = uciedit::Config::parse_str(&arena, fw).unwrap();
         v6_rule_dests(&cfg)
+    }
+
+    #[tokio::test]
+    async fn reservation_in_another_zone_refuses_the_port() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall(dir.path(), FORWARDINGS);
+        std::fs::write(dir.path().join("network"), NETWORK).unwrap();
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["firewall", "network"])
+            .await
+            .unwrap();
+        let info = offline_device();
+        let ports = [make_port("p", true, false)];
+        let zones = |zone: &str| HashMap::from([("AA:BB:CC:DD:EE:FF".to_string(), zone.into())]);
+
+        let err = validate_reservation_zones(&cfgs, &ports, &info, &zones("lan_guest"))
+            .expect_err("reservation in lan, device in lan_guest");
+        assert!(err.to_string().contains("192.168.1.50"), "{err}");
+        validate_reservation_zones(&cfgs, &ports, &info, &zones("lan")).unwrap();
+        validate_reservation_zones(&cfgs, &ports, &info, &HashMap::new()).unwrap();
+
+        let disabled = [PublishedPortInput {
+            enabled: false,
+            ..make_port("p", true, false)
+        }];
+        validate_reservation_zones(&cfgs, &disabled, &info, &zones("lan_guest")).unwrap();
+    }
+
+    #[tokio::test]
+    async fn reservation_in_another_zone_keeps_an_unchanged_port() {
+        let stored = |enabled: &str| {
+            format!(
+                "{FORWARDINGS}
+config redirect 'pp_p'
+\toption name 'Port p'
+\toption src 'wan'
+\toption dest 'lan'
+\toption target 'DNAT'
+\tlist proto 'tcp'
+\toption src_dport '80'
+\toption dest_port '80'
+\toption dest_ip '192.168.1.50'
+\toption enabled '{enabled}'
+\toption _pp_id 'p'
+\toption _pp_mac 'AA:BB:CC:DD:EE:FF'
+"
+            )
+        };
+        async fn check(firewall: String, port: PublishedPortInput) -> Result<(), Error> {
+            let dir = tempfile::tempdir().unwrap();
+            setup_firewall(dir.path(), &firewall);
+            std::fs::write(dir.path().join("network"), NETWORK).unwrap();
+            let arena = Arena::new();
+            let cfgs = parse_all(dir.path(), &arena, &["firewall", "network"])
+                .await
+                .unwrap();
+            let zones = HashMap::from([("AA:BB:CC:DD:EE:FF".to_string(), "lan_guest".to_string())]);
+            validate_reservation_zones(&cfgs, &[port], &offline_device(), &zones)
+        }
+
+        let renamed = PublishedPortInput {
+            label: "Renamed".into(),
+            ..make_port("p", true, false)
+        };
+        check(stored("1"), renamed).await.unwrap();
+
+        let changed = [
+            PublishedPortInput {
+                ports: "81".into(),
+                ..make_port("p", true, false)
+            },
+            PublishedPortInput {
+                ipv4_public_port: Some("8080".into()),
+                ..make_port("p", true, false)
+            },
+            PublishedPortInput {
+                protocol: Protocol::Udp,
+                ..make_port("p", true, false)
+            },
+            PublishedPortInput {
+                source: "10.0.0.0/8".into(),
+                ..make_port("p", true, false)
+            },
+            make_port("q", true, false),
+        ];
+        for port in changed {
+            let desc = format!("{port:?}");
+            check(stored("1"), port)
+                .await
+                .expect_err(&format!("changed port {desc} accepted"));
+        }
+        check(stored("0"), make_port("p", true, false))
+            .await
+            .expect_err("enabling a stored disabled port");
     }
 
     fn offline_device() -> HashMap<String, DeviceNetInfo> {

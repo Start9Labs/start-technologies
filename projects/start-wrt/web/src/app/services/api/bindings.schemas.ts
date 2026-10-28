@@ -1532,6 +1532,9 @@ export const Device: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * The reservation when DHCP applies it, otherwise the live address.
+   */
   ipv4: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
@@ -1541,6 +1544,21 @@ export const Device: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
   ipv4_static: z.ZodBoolean
+  /**
+   * A reservation outside the subnet of the device's profile, which DHCP
+   * does not apply.
+   */
+  inactive_ipv4_reservation: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * The router's address on the device's profile, with its prefix length.
+   */
+  profile_network: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
   /**
    * Whether this device may auto-create port forwards via PCP/UPnP
    * (default off; set via `devices set-auto-forward`).
@@ -1601,9 +1619,36 @@ export const Device: z.ZodObject<{
   }),
   status: DeviceStatus,
   connection: wire(z.string().nullable().optional(), z.string().nullable()),
-  ipv4: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * The reservation when DHCP applies it, otherwise the live address.
+   */
+  ipv4: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'The reservation when DHCP applies it, otherwise the live address.',
+  }),
   ipv6: wire(z.string().nullable().optional(), z.string().nullable()),
   ipv4_static: z.boolean(),
+  /**
+   * A reservation outside the subnet of the device's profile, which DHCP
+   * does not apply.
+   */
+  inactive_ipv4_reservation: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ).meta({
+    description:
+      "A reservation outside the subnet of the device's profile, which DHCP\ndoes not apply.",
+  }),
+  /**
+   * The router's address on the device's profile, with its prefix length.
+   */
+  profile_network: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ).meta({
+    description:
+      "The router's address on the device's profile, with its prefix length.",
+  }),
   /**
    * Whether this device may auto-create port forwards via PCP/UPnP
    * (default off; set via `devices set-auto-forward`).

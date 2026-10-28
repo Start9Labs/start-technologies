@@ -70,9 +70,15 @@ pub struct Device {
     pub hostname: Option<String>,
     pub status: DeviceStatus,
     pub connection: Option<String>,
+    /// The reservation when DHCP applies it, otherwise the live address.
     pub ipv4: Option<String>,
     pub ipv6: Option<String>,
     pub ipv4_static: bool,
+    /// A reservation outside the subnet of the device's profile, which DHCP
+    /// does not apply.
+    pub inactive_ipv4_reservation: Option<String>,
+    /// The router's address on the device's profile, with its prefix length.
+    pub profile_network: Option<String>,
     /// Whether this device may auto-create port forwards via PCP/UPnP
     /// (default off; set via `devices set-auto-forward`).
     pub allow_auto_port_forward: bool,
@@ -1182,7 +1188,106 @@ fn choose_ipv4_entry<'a>(
 struct ProfileNetwork {
     vlan: u16,
     device: String,
-    subnet: Option<Ipv4Net>,
+    name: String,
+    /// The router's address on the profile, with its prefix length.
+    address: Option<Ipv4Net>,
+}
+
+fn profile_networks(cfgs: &Configs, lookup: &Lookup) -> Vec<ProfileNetwork> {
+    lookup
+        .list()
+        .iter()
+        .filter_map(|p| {
+            let iface = cfgs["network"]
+                .sections
+                .iter()
+                .find(|s| s.name().as_deref() == Some(p.interface.as_str()))?
+                .get::<NetworkInterface>()
+                .ok()?;
+            let address = if iface.proto == InterfaceProto::STATIC {
+                iface
+                    .ipaddr
+                    .zip(iface.netmask)
+                    .and_then(|(ip, mask)| Ipv4Net::with_netmask(ip, mask).ok())
+            } else {
+                None
+            };
+            Some(ProfileNetwork {
+                vlan: p.vlan_tag,
+                device: iface.device,
+                name: p.fullname.clone(),
+                address,
+            })
+        })
+        .collect()
+}
+
+/// Refuses an address DHCP cannot hand the device: outside the subnet of its
+/// profile, or of every profile when its profile is unknown, or not a host
+/// address there.
+fn validate_reservation(
+    ip: Ipv4Addr,
+    networks: &[ProfileNetwork],
+    current_vlan: Option<u16>,
+) -> Result<(), Error> {
+    let current = current_vlan
+        .and_then(|vlan| networks.iter().find(|p| p.vlan == vlan))
+        .filter(|p| p.address.is_some());
+    let candidates: Vec<&ProfileNetwork> = match current {
+        Some(p) => vec![p],
+        None => networks.iter().filter(|p| p.address.is_some()).collect(),
+    };
+    if candidates.is_empty() {
+        return Ok(());
+    }
+    let invalid = |msg: String| Err(Error::new(eyre!("{msg}"), ErrorKind::InvalidValue));
+    let Some((profile, net)) = candidates
+        .iter()
+        .filter_map(|p| Some((*p, p.address?)))
+        .find(|(_, net)| net.contains(&ip))
+    else {
+        return match current.and_then(|p| Some((p, p.address?))) {
+            Some((p, net)) => invalid(format!(
+                "{ip} is outside {}, the subnet of the {} profile this device is on",
+                net.trunc(),
+                p.name
+            )),
+            None => invalid(format!("{ip} is outside the subnet of every profile")),
+        };
+    };
+    if ip == net.addr() {
+        return invalid(format!(
+            "{ip} is the router's address on the {} profile",
+            profile.name
+        ));
+    }
+    if ip == net.network() || ip == net.broadcast() {
+        return invalid(format!("{ip} is not a host address in {}", net.trunc()));
+    }
+    Ok(())
+}
+
+/// The VLAN of the profile the device is on, from the neighbor table, the
+/// bridge, and its lease, never its reservation.
+async fn live_device_vlan(mac: &str, networks: &[ProfileNetwork]) -> Option<u16> {
+    let (arp_output, fdb, leases) = tokio::join!(
+        run_cmd("ip", &["neigh", "show"]),
+        get_bridge_fdb(),
+        current_lease_ips(),
+    );
+    let arp = parse_arp_output(&arp_output);
+    let arp_list: Vec<&ArpEntry> = arp.iter().filter(|e| e.mac == mac).collect();
+    let chosen = choose_ipv4_entry(&arp_list, &std::collections::HashSet::new());
+    let live_ipv4 = chosen
+        .map(|e| e.ip.clone())
+        .or_else(|| leases.and_then(|mut l| l.remove(mac)));
+    device_vlan(
+        chosen,
+        &arp_list,
+        fdb.get(mac),
+        live_ipv4.as_deref(),
+        networks,
+    )
 }
 
 fn device_vlan(
@@ -1209,7 +1314,7 @@ fn device_vlan(
             let ip = ipv4?.parse::<Ipv4Addr>().ok()?;
             profile_networks
                 .iter()
-                .find(|p| p.subnet.is_some_and(|net| net.contains(&ip)))
+                .find(|p| p.address.is_some_and(|net| net.contains(&ip)))
                 .map(|p| p.vlan)
         })
 }
@@ -1368,30 +1473,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 .iter()
                 .map(|p| (p.vlan_tag, p.fullname.clone()))
                 .collect();
-            let profile_networks: Vec<ProfileNetwork> = lookup
-                .list()
-                .iter()
-                .filter_map(|p| {
-                    let iface = cfgs["network"]
-                        .sections
-                        .iter()
-                        .find(|s| s.name().as_deref() == Some(p.interface.as_str()))?
-                        .get::<NetworkInterface>()
-                        .ok()?;
-                    let subnet = if iface.proto == InterfaceProto::STATIC {
-                        iface.ipaddr.zip(iface.netmask).and_then(|(ip, mask)| {
-                            Ipv4Net::with_netmask(ip, mask).ok().map(|net| net.trunc())
-                        })
-                    } else {
-                        None
-                    };
-                    Some(ProfileNetwork {
-                        vlan: p.vlan_tag,
-                        device: iface.device,
-                        subnet,
-                    })
-                })
-                .collect();
+            let profile_networks = profile_networks(&cfgs, &lookup);
 
             // VPN server info and peer configs from UCI
             let vpn_servers = get_vpn_server_info(&cfgs, &lookup);
@@ -1660,33 +1742,38 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             DeviceStatus::Offline
         };
 
-        // IPv4: the configured static reservation (UCI `host.ip`) is
-        // authoritative when set — it's the address the device is pinned to.
-        // Surfacing it first stops the edit form from snapping back to the live
-        // DHCP address after a reservation is saved (the client keeps its old
-        // lease until it renews, so ARP/lease still hold the previous IP for a
-        // while). Otherwise fall back to the best live ARP neighbour — the one
-        // chosen by choose_ipv4_entry, which picks the device's current address
-        // when a stale entry lingers on its old bridge after roaming VLANs —
-        // then the DHCP lease.
+        // A reservation in the profile's subnet outranks the live address the
+        // device holds until its lease renews.
         let chosen_arp = choose_ipv4_entry(&arp_list, &live_ipv4s);
-        let ipv4 = host
-            .and_then(|h| h.ip.clone())
-            .or_else(|| chosen_arp.map(|e| e.ip.clone()))
+        let live_ipv4 = chosen_arp
+            .map(|e| e.ip.clone())
             .or_else(|| lease.map(|l| l.ip.clone()));
+        let reserved_ipv4 = host.and_then(|h| h.ip.clone());
         // Only addresses the device demonstrably still answers for — see
         // live_ipv6_candidates. Unlike the IPv4 field there is no reservation or
         // lease to fall back on, so an unverified address would be pure fiction.
         let ipv6 = pick_ipv6(live_ipv6_candidates(&arp_list, live_ipv6s.as_ref()).into_iter());
 
-        let security_profile = device_vlan(
+        let vlan = device_vlan(
             chosen_arp,
             &arp_list,
             fdb_by_mac.get(mac),
-            ipv4.as_deref(),
+            live_ipv4.as_deref().or(reserved_ipv4.as_deref()),
             &profile_networks,
-        )
-        .and_then(|vlan| profile_by_vlan.get(&vlan).cloned());
+        );
+        let security_profile = vlan.and_then(|vlan| profile_by_vlan.get(&vlan).cloned());
+        let profile_address = vlan
+            .and_then(|vlan| profile_networks.iter().find(|p| p.vlan == vlan))
+            .and_then(|p| p.address);
+        let inactive_ipv4_reservation = reserved_ipv4.clone().filter(|ip| {
+            ip.parse::<Ipv4Addr>()
+                .is_ok_and(|ip| profile_address.is_some_and(|net| !net.contains(&ip)))
+        });
+        let ipv4 = if inactive_ipv4_reservation.is_some() {
+            live_ipv4
+        } else {
+            reserved_ipv4.or(live_ipv4)
+        };
 
         // Fully-resolved display name. UCI static host (user-assigned) wins,
         // then the live DHCP-lease hostname, then a live mDNS `.local` name,
@@ -1770,6 +1857,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             ipv4,
             ipv6,
             ipv4_static: host.map(|h| h.ip.is_some()).unwrap_or(false),
+            inactive_ipv4_reservation,
+            profile_network: profile_address.map(|net| net.to_string()),
             allow_auto_port_forward: host.is_some_and(|h| h._allow_pcp.as_deref() == Some("1")),
             allow_dns_injection: host.is_some_and(|h| h._allow_dns_inject.as_deref() == Some("1")),
             allow_router_advertisements: host.is_some_and(|h| h._allow_ra.as_deref() == Some("1")),
@@ -1877,6 +1966,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 ipv4: peer_cfg.ip.clone(),
                 ipv6: None,
                 ipv4_static: true,
+                inactive_ipv4_reservation: None,
+                profile_network: None,
                 // No MAC to authorize, so a VPN peer can never be auto-forward capable.
                 allow_auto_port_forward: false,
                 allow_dns_injection: peer_cfg.allow_dns_injection,
@@ -1971,6 +2062,33 @@ pub(crate) fn validate_device_name(name: &str) -> Result<(), Error> {
     ))
 }
 
+/// Passes an unchanged reservation, so a rename never fails on one a profile
+/// move left outside the device's subnet.
+async fn check_reservation_change<C: CtrlContext>(
+    ctx: &C,
+    mac: &str,
+    ip: Ipv4Addr,
+) -> Result<(), Error> {
+    let arena = Arena::new();
+    let cfgs = parse_all(ctx.uci_root(), &arena, &["dhcp", "startwrt", "network"]).await?;
+    let mut stored = None;
+    cfgs["dhcp"].each::<DhcpHost, Error>(|_, host| {
+        if host.mac.eq_ignore_ascii_case(mac) {
+            stored = host.ip.and_then(|ip| ip.parse::<Ipv4Addr>().ok());
+        }
+    })?;
+    if stored == Some(ip) {
+        return Ok(());
+    }
+    let networks = profile_networks(&cfgs, &Lookup::parse(ServerContext::default(), &cfgs)?);
+    let current_vlan = if ctx.effectful() {
+        live_device_vlan(mac, &networks).await
+    } else {
+        None
+    };
+    validate_reservation(ip, &networks, current_vlan)
+}
+
 /// `hostid` is deliberately left untouched: IPv6 addresses are chosen by the
 /// device (SLAAC), so there is no user-facing IPv6 reservation. The suffix is
 /// backend bookkeeping, pinned by published-ports for its prefix-rotation
@@ -2007,13 +2125,16 @@ pub async fn update<C: CtrlContext>(
         validate_device_name(name)?;
     }
     let pinned = req.ipv4_static && !req.ipv4.is_empty();
-    if pinned && req.ipv4.parse::<std::net::Ipv4Addr>().is_err() {
-        return Err(Error::new(
-            eyre!("invalid static IPv4 address: {}", req.ipv4),
-            ErrorKind::InvalidValue,
-        ));
-    }
     let mac_upper = req.mac.to_uppercase();
+    if pinned {
+        let Ok(ip) = req.ipv4.parse::<Ipv4Addr>() else {
+            return Err(Error::new(
+                eyre!("invalid static IPv4 address: {}", req.ipv4),
+                ErrorKind::InvalidValue,
+            ));
+        };
+        check_reservation_change(&ctx, &mac_upper, ip).await?;
+    }
     let suffix = if pinned {
         format!(" — static IPv4: {}", req.ipv4)
     } else {
@@ -3039,14 +3160,143 @@ config wireguard_wg_lan 'wg_lan_0'
             ProfileNetwork {
                 vlan: 1,
                 device: "br-lan.1".into(),
-                subnet: Some("192.168.1.0/24".parse().unwrap()),
+                name: "Admin".into(),
+                address: Some("192.168.1.1/24".parse().unwrap()),
             },
             ProfileNetwork {
                 vlan: 20,
                 device: "br-lan.20".into(),
-                subnet: Some("192.168.20.0/24".parse().unwrap()),
+                name: "Guest".into(),
+                address: Some("192.168.20.1/24".parse().unwrap()),
             },
         ]
+    }
+
+    fn reservation_error(ip: &str, current_vlan: Option<u16>) -> Option<String> {
+        validate_reservation(ip.parse().unwrap(), &profile_networks(), current_vlan)
+            .err()
+            .map(|err| err.to_string())
+    }
+
+    #[test]
+    fn reservation_must_sit_in_the_device_profile() {
+        assert_eq!(reservation_error("192.168.20.50", Some(20)), None);
+        let err = reservation_error("192.168.1.50", Some(20)).expect("other profile refused");
+        assert!(err.contains("192.168.20.0/24"), "{err}");
+        assert!(err.contains("Guest"), "{err}");
+    }
+
+    #[test]
+    fn reservation_for_unplaced_device_needs_some_profile() {
+        assert_eq!(reservation_error("192.168.1.50", None), None);
+        assert_eq!(reservation_error("192.168.20.50", None), None);
+        let err = reservation_error("10.0.0.5", None).expect("no profile refused");
+        assert!(err.contains("every profile"), "{err}");
+    }
+
+    #[test]
+    fn reservation_refuses_non_host_addresses() {
+        for ip in ["192.168.20.0", "192.168.20.255", "192.168.20.1"] {
+            assert!(reservation_error(ip, Some(20)).is_some(), "{ip} accepted");
+            assert!(
+                reservation_error(ip, None).is_some(),
+                "{ip} accepted unplaced"
+            );
+        }
+    }
+
+    #[test]
+    fn reservation_checks_nothing_without_a_static_subnet() {
+        let mut networks = profile_networks();
+        for p in &mut networks {
+            p.address = None;
+        }
+        assert!(validate_reservation("10.0.0.5".parse().unwrap(), &networks, Some(20)).is_ok());
+    }
+
+    #[derive(Clone)]
+    struct TestContext(std::path::PathBuf);
+
+    impl rpc_toolkit::Context for TestContext {
+        fn runtime(&self) -> Option<std::sync::Arc<tokio::runtime::Runtime>> {
+            None
+        }
+    }
+
+    impl CtrlContext for TestContext {
+        fn uci_root(&self) -> std::path::PathBuf {
+            self.0.clone()
+        }
+        fn effectful(&self) -> bool {
+            false
+        }
+    }
+
+    const UPDATE_STARTWRT: &str = "\
+config profile lan
+\toption fullname 'Admin'
+\toption interface 'lan'
+\toption vlan_tag '1'
+
+config profile guest
+\toption fullname 'Guest'
+\toption interface 'guest'
+\toption vlan_tag '101'
+";
+
+    const UPDATE_NETWORK: &str = "\
+config interface 'lan'
+\toption device 'br-lan.1'
+\toption proto 'static'
+\toption ipaddr '192.168.1.1'
+\toption netmask '255.255.255.0'
+
+config interface 'guest'
+\toption device 'br-lan.101'
+\toption proto 'static'
+\toption ipaddr '192.168.101.1'
+\toption netmask '255.255.255.0'
+";
+
+    async fn update_reservation(dhcp: &str, ipv4: &str) -> (Result<(), Error>, String) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("startwrt"), UPDATE_STARTWRT).unwrap();
+        std::fs::write(dir.path().join("network"), UPDATE_NETWORK).unwrap();
+        std::fs::write(dir.path().join("dhcp"), dhcp).unwrap();
+        let result = update(
+            TestContext(dir.path().to_path_buf()),
+            DeserializeStdin(DeviceUpdateReq {
+                mac: "aa:bb:cc:dd:ee:ff".into(),
+                name: None,
+                ipv4_static: true,
+                ipv4: ipv4.into(),
+            }),
+        )
+        .await;
+        let written = std::fs::read_to_string(dir.path().join("dhcp")).unwrap();
+        (result, written)
+    }
+
+    #[tokio::test]
+    async fn update_refuses_reservation_outside_every_profile() {
+        let (result, written) = update_reservation("", "10.0.0.5").await;
+        assert!(result.is_err());
+        assert!(!written.contains("10.0.0.5"), "{written}");
+    }
+
+    #[tokio::test]
+    async fn update_writes_reservation_in_a_profile() {
+        let (result, written) = update_reservation("", "192.168.101.50").await;
+        result.unwrap();
+        assert!(written.contains("option ip '192.168.101.50'"), "{written}");
+    }
+
+    #[tokio::test]
+    async fn update_keeps_an_unchanged_out_of_profile_reservation() {
+        let dhcp = "config host\n\toption mac 'AA:BB:CC:DD:EE:FF'\n\toption ip '10.0.0.5'\n";
+        let (result, written) = update_reservation(dhcp, "10.0.0.5").await;
+        result.unwrap();
+        assert!(written.contains("option ip '10.0.0.5'"), "{written}");
     }
 
     fn fdb_entry(vlan: Option<u16>) -> FdbEntry {

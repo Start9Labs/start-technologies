@@ -16,6 +16,8 @@ export interface DeviceTableItem {
   ipv4?: string
   ipv6?: string
   ipv4Static?: boolean
+  /** A reservation outside the subnet of the device's profile; DHCP ignores it. */
+  inactiveIpv4Reservation?: string
   dataUsage?: number // GB
   speed?: { up: number | null; down: number | null }
 }
@@ -31,6 +33,13 @@ export interface Device extends DeviceTableItem {
   allowDnsInjection: boolean
   /** Its IPv6 router advertisements reach the rest of the LAN (default off). */
   allowRouterAdvertisements: boolean
+  /** The router's address on the device's profile, as in `192.168.2.1/24`. */
+  profileNetwork?: string
+}
+
+/** The stored reservation, whether or not DHCP applies it. */
+export function reservedIpv4(device: Device): string {
+  return device.inactiveIpv4Reservation ?? device.ipv4 ?? ''
 }
 
 // Form for editing a device. IPv6 has no controls: the device chooses its own
@@ -66,9 +75,11 @@ export type DevicePermissionChanges = Partial<
   >
 >
 
+/** An unchanged reservation stays valid, so other edits still save. */
 export function updateDeviceValidators(
   form: ReturnType<typeof getDeviceForm>,
   ipv4Static: boolean,
+  device: Device | null,
 ): void {
   const { ipv4 } = form.controls.ip.controls
 
@@ -76,6 +87,13 @@ export function updateDeviceValidators(
   ipv4.addValidators([CustomValidators.ipv4()])
   if (ipv4Static) {
     ipv4.addValidators([Validators.required])
+    if (device?.profileNetwork) {
+      const inNetwork = CustomValidators.ipv4HostIn(device.profileNetwork)
+      const unchanged = device.ipv4Static ? reservedIpv4(device) : null
+      ipv4.addValidators(control =>
+        control.value === unchanged ? null : inNetwork(control),
+      )
+    }
   }
   ipv4.updateValueAndValidity()
 }
@@ -84,6 +102,8 @@ export const DEVICE_VALIDATION_ERRORS = {
   required: 'Required',
   hostname: 'Letters, digits, and hyphens only',
   ipv4: 'Invalid IPv4 address',
+  outsideProfile: "Outside the subnet of this device's profile",
+  notHost: 'Not a usable host address',
 }
 
 export const DEVICE_LABELS = {

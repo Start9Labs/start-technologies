@@ -573,4 +573,7 @@ export const ENGLISH: Record<string, number> = {
   'Lets this device announce IPv6 routes to your other devices (needed by Thread border routers such as an Apple TV, HomePod, or Home Assistant). Off by default.': 596,
   'Allow IPv6 Router Advertisements?': 597,
   'This device will be able to give your other devices IPv6 addresses, routes, DNS servers, and a default gateway, and could route their IPv6 traffic around the router. Grant this only to a device you trust, such as a Thread border router.': 598,
+  "Outside the subnet of this device's profile": 599,
+  'Not a usable host address': 600,
+  "This reservation is outside the subnet of the profile this device is on, so the device gets an address from the profile's pool instead. Reserve an address in its profile's subnet.": 601,
 }

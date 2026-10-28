@@ -849,9 +849,16 @@ struct Device {
     status: DeviceStatus,
     /// "Ethernet", "Wi-Fi 2.4GHz", "Wi-Fi 5GHz", etc.
     connection: Option<String>,
+    /// The reservation when DHCP applies it, otherwise the live address.
     ipv4: Option<String>,
     ipv6: Option<String>,
     ipv4_static: bool,
+    /// A reservation outside the subnet of the profile the device is on,
+    /// which DHCP does not apply. `None` when the device's profile is unknown.
+    inactive_ipv4_reservation: Option<String>,
+    /// The router's address on the device's profile, with its prefix length
+    /// (`192.168.2.1/24`). `None` for a VPN peer or an unplaced device.
+    profile_network: Option<String>,
     /// Whether this device may auto-create port forwards via PCP/UPnP
     /// (default off; toggled via `devices.set-auto-forward`). Always false for
     /// VPN peers (no MAC to authorize).
@@ -910,6 +917,10 @@ struct DeviceUpdateReq {
 // Every field lands in the config dnsmasq reads, which it refuses to start on
 // if malformed, so each is validated: a bad one is rejected with
 // `InvalidValue` and nothing is written.
+// A changed reservation must be a host address, other than the router's, in
+// the subnet of the profile the device is on (from the neighbor table, the
+// bridge, and its lease); for a device on no known profile, in some profile's
+// subnet. An unchanged reservation is accepted as stored.
 // Response: null
 // Backend: creates/updates DHCP host section, reloads dnsmasq.
 // No IPv6 fields: devices choose their own IPv6 addresses (SLAAC), so there is
@@ -1038,14 +1049,18 @@ enum PublishedPortStatus {
     Active,
     /// One protocol works but the other can't: the device has no IPv4 ("IPv4
     /// unavailable") or no IPv6 ("IPv6 unavailable") address, or the IPv6
-    /// forward is stranded on an old prefix ("IPv6 address out of date").
+    /// forward is stranded on an old prefix ("IPv6 address out of date"), or
+    /// the IPv4 forward targets a reservation outside the subnet of the
+    /// device's profile ("IPv4 reservation outside the device's profile").
     Partial,
     /// Device offline, or not in the device list ("Device not found")
     Paused,
     /// No usable address ("No addresses available"), or (IPv6-only) the forward
     /// is stranded on an old delegated prefix ("IPv6 address out of date" — the
     /// device's current GUA is in a different /64; normally repaired by the
-    /// ipv6_tracker-triggered reconcile, or the wan6 hotplug's).
+    /// ipv6_tracker-triggered reconcile, or the wan6 hotplug's), or (IPv4
+    /// without a working IPv6 forward) the reservation is outside the subnet of
+    /// the device's profile ("IPv4 reservation outside the device's profile").
     Error,
     Disabled,
 }
@@ -1167,6 +1182,12 @@ Validation (errors with `MissingDeviceAddress`, rejecting the whole request):
   ULA or link-local address — unless the port already has an IPv6 rule for the
   same `id` and `device_mac`. A new IPv6 port, one newly switched to IPv6, or
   one moved to another device needs the device online with a GUA.
+
+An enabled `ipv4` port whose device's reservation lies in another zone than the
+neighbor table places the device in is rejected with `InvalidValue`, unless
+the stored port already forwards the same ports, protocol, public port, and
+source to that device. The check needs the device online and is skipped in
+configs-only mode.
 
 An `ipv6` port's rule pins the tracker-elected stable GUA the device holds
 within a currently-assigned prefix; with none (e.g. saved mid-prefix-rotation),

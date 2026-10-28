@@ -69,6 +69,8 @@ export class DevicesApiService {
       ipv4: d.ipv4 || undefined,
       ipv6: d.ipv6 || undefined,
       ipv4Static: d.ipv4_static,
+      inactiveIpv4Reservation: d.inactive_ipv4_reservation || undefined,
+      profileNetwork: d.profile_network || undefined,
       allowAutoPortForward: d.allow_auto_port_forward,
       allowDnsInjection: d.allow_dns_injection,
       allowRouterAdvertisements: d.allow_router_advertisements,
