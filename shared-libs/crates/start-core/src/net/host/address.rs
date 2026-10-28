@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 
 use clap::Parser;
 use imbl_value::InternedString;
@@ -58,7 +57,8 @@ fn handle_duplicates(db: &mut DatabaseModel) -> Result<(), Error> {
     let mut not_in_use = Vec::new();
     for host in all_hosts(db) {
         let host = host?;
-        let in_use = host.as_bindings().de()?.values().any(|v| v.enabled);
+        let in_use = host.as_bindings().de()?.values().any(|v| v.enabled)
+            || host.as_binding_ranges().de()?.values().any(|v| v.enabled);
         if !in_use {
             not_in_use.push(host);
             continue;
@@ -244,14 +244,7 @@ pub struct AddPublicDomainRes {
 rpc_toolkit::reflect_ts!(AddPublicDomainRes);
 rpc_toolkit::ts_export!(AddPublicDomainRes, namespaces = [""]);
 
-/// Reconcile a public domain on a *sibling* binding or range — one the domain
-/// was not directly added to. A public domain is scoped to its target binding,
-/// so by default it is isolated here. The exception is the non-SSL case: with no
-/// SNI, the domain shares the bare WAN IP's packets, so if a co-located public
-/// WAN address (IPv4 or a WAN IPv6 GUA, same gateway + port) is already enabled
-/// we honor it and move the whole {domain, IPv4, GUA} group on together — a
-/// dual-stack domain links the v4 and v6 sides. SSL rows carry their own SNI and
-/// are always isolated.
+// Non-TLS domains share their gateway's WAN IP exposure.
 fn reconcile_public_domain_on_sibling(
     addresses: &mut DerivedAddressInfo,
     fqdn: &InternedString,
@@ -273,12 +266,9 @@ fn reconcile_public_domain_on_sibling(
             nonssl_ports.push(port);
         }
     }
-    // SSL rows are isolated to the target (SNI distinguishes them from the IP).
     for port in ssl_ports {
         addresses.disabled.insert((fqdn.clone(), port));
     }
-    // Non-SSL: honor an already-enabled co-located WAN address (IPv4 or GUA) and
-    // move the whole {domain, IPv4, GUA} group to match; otherwise isolate it.
     for port in nonssl_ports {
         let wan_enabled = addresses.available.iter().any(|b| {
             !b.ssl
@@ -297,12 +287,7 @@ fn reconcile_public_domain_on_sibling(
     }
 }
 
-/// Reconcile a private domain on a binding or range. Unlike a public domain, a
-/// private domain stays on by default — LAN is trusted, so it is not isolated.
-/// The exception: if the binding's own bare LAN IPv4 at this gateway+port has
-/// been disabled, honor that and take the whole {private domain, LAN IPv4,
-/// GUA-as-local} group down too. SSL private domains carry their own SNI and are
-/// left on.
+// Non-TLS private domains follow their gateway's LAN IP exposure.
 fn reconcile_private_domain_on_sibling(
     addresses: &mut DerivedAddressInfo,
     fqdn: &InternedString,
@@ -325,7 +310,6 @@ fn reconcile_private_domain_on_sibling(
         }
     }
     for port in nonssl_ports {
-        // On unless the bare LAN IPv4 at this gateway+port is explicitly disabled.
         let lan_disabled = addresses.available.iter().any(|b| {
             !b.ssl
                 && b.port == Some(port)
@@ -336,8 +320,89 @@ fn reconcile_private_domain_on_sibling(
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PublicDomainTarget {
+    Binding(u16),
+    Range(u16),
+}
+
+impl Host {
+    fn public_domain_target(
+        &self,
+        internal_port: u16,
+        fqdn: &InternedString,
+    ) -> Result<(PublicDomainTarget, u16), Error> {
+        let binding = self.bindings.get(&internal_port);
+        let range = self.binding_ranges.get(&internal_port);
+        // A dormant binding may share the active range's start port.
+        let (target, addresses) = match (binding, range) {
+            (Some(binding), range)
+                if binding.enabled || range.is_none_or(|range| !range.enabled) =>
+            {
+                (
+                    PublicDomainTarget::Binding(internal_port),
+                    &binding.addresses,
+                )
+            }
+            (_, Some(range)) => (PublicDomainTarget::Range(internal_port), &range.addresses),
+            _ => {
+                return Err(Error::new(
+                    eyre!("binding not found for internal port {internal_port}"),
+                    ErrorKind::NotFound,
+                ));
+            }
+        };
+        let port = addresses
+            .available
+            .iter()
+            .filter(|address| address.public && &address.hostname == fqdn)
+            .max_by_key(|address| address.ssl)
+            .and_then(|address| address.port)
+            .ok_or_else(|| {
+                Error::new(
+                    eyre!("no public address found for {fqdn} on port {internal_port}"),
+                    ErrorKind::NotFound,
+                )
+            })?;
+        Ok((target, port))
+    }
+
+    fn enable_new_public_domain(
+        &mut self,
+        target: PublicDomainTarget,
+        fqdn: &InternedString,
+        gateway: &GatewayId,
+    ) {
+        let bindings = self
+            .bindings
+            .iter_mut()
+            .map(|(&port, binding)| (PublicDomainTarget::Binding(port), &mut binding.addresses));
+        let ranges = self
+            .binding_ranges
+            .iter_mut()
+            .map(|(&port, range)| (PublicDomainTarget::Range(port), &mut range.addresses));
+        for (binding, addresses) in bindings.chain(ranges) {
+            if binding == target {
+                let nonssl_port = addresses.available.iter().find_map(|address| {
+                    if !address.ssl && address.public && &address.hostname == fqdn
+                        && matches!(&address.metadata, HostnameMetadata::PublicDomain { gateway: gw } if gw == gateway)
+                    {
+                        address.port
+                    } else {
+                        None
+                    }
+                });
+                if let Some(port) = nonssl_port {
+                    set_nonssl_wan_group(addresses, gateway, port, true);
+                }
+            } else {
+                reconcile_public_domain_on_sibling(addresses, fqdn, gateway);
+            }
+        }
+    }
+}
+
 impl Model<Host> {
-    /// The host's public domains as `(fqdn, gateway)` pairs.
     fn public_domain_gateways(&self) -> Result<Vec<(InternedString, GatewayId)>, Error> {
         Ok(self
             .as_public_domains()
@@ -347,14 +412,8 @@ impl Model<Host> {
             .collect())
     }
 
-    /// Reconcile a newly-bound single-port binding against the host's existing
-    /// public domains — a domain added earlier must not silently leak onto a
-    /// binding added afterwards. A fresh binding is always a sibling (never a
-    /// domain's target), so this isolates each domain unless the binding's own
-    /// WAN address is already enabled. Call after `update_addresses` has
-    /// synthesized the domain rows, then re-run `update_addresses` so the port
-    /// forwards reflect the isolation. Only run for a genuinely new binding —
-    /// re-running it on a re-bind would clobber a domain's target binding.
+    /// Isolates existing public domains on a new binding unless its WAN IP is enabled.
+    /// Call between `update_addresses` passes, only for newly-created bindings.
     pub fn reconcile_public_domains_on_new_binding(
         &mut self,
         internal_port: u16,
@@ -393,181 +452,92 @@ impl Model<Host> {
     }
 }
 
-pub async fn add_public_domain<Kind: HostApiKind>(
-    ctx: RpcContext,
-    AddPublicDomainParams {
+fn configure_public_domain<Kind: HostApiKind>(
+    db: &mut DatabaseModel,
+    params: &AddPublicDomainParams,
+    inheritance: &Kind::Inheritance,
+) -> Result<u16, Error> {
+    let AddPublicDomainParams {
         fqdn,
         acme,
         gateway,
         internal_port,
-    }: AddPublicDomainParams,
+    } = params;
+    if let Some(acme) = acme {
+        if !db
+            .as_public()
+            .as_server_info()
+            .as_network()
+            .as_acme()
+            .contains_key(acme)?
+        {
+            return Err(Error::new(
+                eyre!(
+                    "unknown acme provider {}, please run acme.init for this provider first",
+                    acme.0
+                ),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+    }
+
+    let is_new = !Kind::host_for(inheritance, db)?
+        .as_public_domains()
+        .keys()?
+        .contains(fqdn);
+
+    Kind::host_for(inheritance, db)?
+        .as_public_domains_mut()
+        .insert(
+            fqdn,
+            &PublicDomainConfig {
+                acme: acme.clone(),
+                gateway: gateway.clone(),
+            },
+        )?;
+    handle_duplicates(db)?;
+    let hostname = ServerHostname::load(db.as_public().as_server_info())?;
+    let gateways = db
+        .as_public()
+        .as_server_info()
+        .as_network()
+        .as_gateways()
+        .de()?;
+    let available_ports = db.as_private().as_available_ports().de()?;
+    let host = Kind::host_for(inheritance, db)?;
+    host.update_addresses(&hostname, &gateways, &available_ports)?;
+
+    let ext_port = host.mutate(|host| {
+        let (target, port) = host.public_domain_target(*internal_port, fqdn)?;
+        // Re-adding a domain preserves the operator's address choices.
+        if is_new {
+            host.enable_new_public_domain(target, fqdn, gateway);
+        }
+        Ok(port)
+    })?;
+
+    host.update_addresses(&hostname, &gateways, &available_ports)?;
+    Ok(ext_port)
+}
+
+pub async fn add_public_domain<Kind: HostApiKind>(
+    ctx: RpcContext,
+    mut params: AddPublicDomainParams,
     inheritance: Kind::Inheritance,
 ) -> Result<AddPublicDomainRes, Error> {
-    // Domains are matched byte-for-byte against the browser's lowercased
-    // `location.hostname` — normalize at the boundary (covers UI and CLI).
-    let fqdn = InternedString::intern(fqdn.to_ascii_lowercase());
-    let authority = acme.clone();
+    // Browser hostnames are lowercased; domain matching is byte-for-byte.
+    params.fqdn = InternedString::intern(params.fqdn.to_ascii_lowercase());
     let ext_port = ctx
         .db
-        .mutate(|db| {
-            if let Some(acme) = &acme {
-                if !db
-                    .as_public()
-                    .as_server_info()
-                    .as_network()
-                    .as_acme()
-                    .contains_key(&acme)?
-                {
-                    return Err(Error::new(eyre!("unknown acme provider {}, please run acme.init for this provider first", acme.0), ErrorKind::InvalidRequest));
-                }
-            }
-
-            // Adding a domain that is already present is a no-op for exposure:
-            // we re-affirm the config below, but skip the target force-enable and
-            // the sibling/range reconcile so a re-add can't re-isolate a binding
-            // whose WAN IP the operator has since enabled, or clobber any other
-            // per-address choice. Enabling an existing domain on a binding is done
-            // through set-address-enabled, not by re-adding it.
-            let is_new = !Kind::host_for(&inheritance, db)?
-                .as_public_domains()
-                .keys()?
-                .contains(&fqdn);
-
-            Kind::host_for(&inheritance, db)?
-                .as_public_domains_mut()
-                .insert(
-                    &fqdn,
-                    &PublicDomainConfig {
-                        acme,
-                        gateway: gateway.clone(),
-                    },
-                )?;
-            handle_duplicates(db)?;
-            let hostname = ServerHostname::load(db.as_public().as_server_info())?;
-            let gateways = db
-                .as_public()
-                .as_server_info()
-                .as_network()
-                .as_gateways()
-                .de()?;
-            let available_ports = db.as_private().as_available_ports().de()?;
-            let host = Kind::host_for(&inheritance, db)?;
-            host.update_addresses(&hostname, &gateways, &available_ports)?;
-
-            // Find the external port for the target binding to health-check.
-            // Prefer the SSL (vhost) port over the plaintext one: a domain is
-            // normally reached over TLS, so that is the forward the operator
-            // wants validated.
-            let bindings = host.as_bindings().de()?;
-            let target_bind = bindings
-                .get(&internal_port)
-                .ok_or_else(|| Error::new(eyre!("binding not found for internal port {internal_port}"), ErrorKind::NotFound))?;
-            let ext_port = target_bind
-                .addresses
-                .available
-                .iter()
-                .filter(|a| a.public && a.hostname == fqdn)
-                .max_by_key(|a| a.ssl)
-                .and_then(|a| a.port)
-                .ok_or_else(|| Error::new(eyre!("no public address found for {fqdn} on port {internal_port}"), ErrorKind::NotFound))?;
-
-            // A NEW domain gets force-enabled on its target binding and
-            // reconciled across the rest of the host; re-adding an existing one
-            // leaves every binding's/range's exposure exactly as it is.
-            if is_new {
-                // On the target binding, enable the WAN IPv4 and all
-                // public domains on the same gateway+port (no SNI without SSL).
-                host.as_bindings_mut().mutate(|b| {
-                    if let Some(bind) = b.get_mut(&internal_port) {
-                        let non_ssl_port = bind.addresses.available.iter().find_map(|a| {
-                            if a.ssl || !a.public || a.hostname != fqdn {
-                                return None;
-                            }
-                            if let HostnameMetadata::PublicDomain { gateway: gw } = &a.metadata {
-                                if *gw == gateway {
-                                    return a.port;
-                                }
-                            }
-                            None
-                        });
-                        if let Some(dp) = non_ssl_port {
-                            for a in &bind.addresses.available {
-                                if a.ssl || !a.public {
-                                    continue;
-                                }
-                                if let HostnameMetadata::Ipv4 { gateway: gw } = &a.metadata {
-                                    if *gw == gateway {
-                                        if let Some(sa) = a.to_socket_addr() {
-                                            if sa.port() == dp {
-                                                bind.addresses.enabled.insert(sa);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            // No SNI without SSL, so the domain reaches v6 only via
-                            // the bare GUA — expose it like the WAN IPv4 above (v6 has
-                            // no NAT; the GUA is directly routable).
-                            if let Some(ip_info) =
-                                gateways.get(&gateway).and_then(|g| g.ip_info.as_ref())
-                            {
-                                for subnet in &ip_info.subnets {
-                                    if let IpAddr::V6(ip) = subnet.addr() {
-                                        if !crate::net::utils::ipv6_is_local(ip) {
-                                            let gua = SocketAddrV6::new(ip, dp, 0, 0);
-                                            bind.addresses.gua_wan.insert(gua);
-                                            bind.addresses.enabled.insert(SocketAddr::V6(gua));
-                                        }
-                                    }
-                                }
-                            }
-                            for a in &bind.addresses.available {
-                                if a.ssl {
-                                    continue;
-                                }
-                                if let HostnameMetadata::PublicDomain { gateway: gw } = &a.metadata {
-                                    if *gw == gateway && a.port == Some(dp) {
-                                        bind.addresses.disabled.remove(&(a.hostname.clone(), dp));
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Every other binding: isolate the domain by default, but honor
-                    // an already-enabled non-SSL WAN IP by enabling the domain there
-                    // to match (no SNI — the same packets as the bare IP).
-                    for (&port, bind) in b.iter_mut() {
-                        if port == internal_port {
-                            continue;
-                        }
-                        reconcile_public_domain_on_sibling(&mut bind.addresses, &fqdn, &gateway);
-                    }
-                    Ok(())
-                })?;
-
-                // Same reconciliation for every port range (parity with the sibling
-                // bindings above). Ranges are IPv4-only and non-SSL, so a domain is
-                // disabled on a range unless the range's own WAN IP is already
-                // enabled — in which case the domain is enabled to match, since
-                // without SNI it is reachable via that same forward anyway.
-                host.as_binding_ranges_mut().mutate(|ranges| {
-                    for range in ranges.values_mut() {
-                        reconcile_public_domain_on_sibling(&mut range.addresses, &fqdn, &gateway);
-                    }
-                    Ok(())
-                })?;
-            }
-
-            // Re-project: the gua_wan change above must flow into the GUA's
-            // HostnameInfo.public so it is treated as WAN-exposed.
-            Kind::host_for(&inheritance, db)?
-                .update_addresses(&hostname, &gateways, &available_ports)?;
-
-            Ok(ext_port)
-        })
+        .mutate(|db| configure_public_domain::<Kind>(db, &params, &inheritance))
         .await
         .result?;
+    let AddPublicDomainParams {
+        fqdn,
+        acme: authority,
+        gateway,
+        ..
+    } = params;
 
     let ctx2 = ctx.clone();
     let fqdn2 = fqdn.clone();
@@ -766,10 +736,313 @@ pub async fn list_addresses<Kind: HostApiKind>(
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use super::*;
-    use crate::net::service_interface::{HostnameInfo, HostnameMetadata};
+    use crate::db::model::public::{IpInfo, NetworkInterfaceInfo};
+    use crate::net::forward::AvailablePorts;
+    use crate::net::host::ForPackage;
+    use crate::net::host::binding::{
+        AddSslOptions, BindInfo, BindOptions, RangeBindInfo, Security,
+    };
+    use crate::net::service_interface::{HostnameInfo, HostnameMetadata, RangeServiceInterface};
 
     const FQDN: &str = "turn.start9.dev";
+
+    fn range(external_start_port: u16) -> RangeBindInfo {
+        RangeBindInfo {
+            enabled: true,
+            external_start_port,
+            number_of_ports: 3,
+            addresses: DerivedAddressInfo::default(),
+            interface: Some(RangeServiceInterface {
+                id: "range".parse().unwrap(),
+                name: "Range".into(),
+                description: String::new(),
+                scheme: None,
+            }),
+        }
+    }
+
+    fn single(port: u16, ssl_port: Option<u16>) -> BindInfo {
+        BindInfo::new(
+            &mut AvailablePorts::new(),
+            BindOptions {
+                preferred_external_port: port,
+                add_ssl: ssl_port.map(|preferred_external_port| AddSslOptions {
+                    preferred_external_port,
+                    add_x_forwarded_headers: false,
+                    alpn: None,
+                    upstream_cert_validation: None,
+                    auth: None,
+                }),
+                secure: Some(Security { ssl: false }),
+            },
+            true,
+        )
+        .unwrap()
+    }
+
+    fn database(host: Host) -> DatabaseModel {
+        let gateway = NetworkInterfaceInfo {
+            ip_info: Some(Arc::new(IpInfo {
+                subnets: [
+                    "192.0.2.2/24".parse::<ipnet::IpNet>().unwrap(),
+                    "2001:db8::1/64".parse().unwrap(),
+                ]
+                .into_iter()
+                .collect(),
+                wan_ip: Some("64.23.194.12".parse().unwrap()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        DatabaseModel::from(imbl_value::json!({
+            "public": {
+                "ui": {},
+                "serverInfo": {
+                    "hostname": "server",
+                    "network": {
+                        "host": imbl_value::to_value(&Host::default()).unwrap(),
+                        "gateways": { "wg1": imbl_value::to_value(&gateway).unwrap() },
+                        "acme": {},
+                    },
+                },
+                "packageData": { "rustdesk-server": { "hosts": { "rustdesk": imbl_value::to_value(&host).unwrap() } } },
+            },
+            "private": { "availablePorts": imbl_value::to_value(&AvailablePorts::new()).unwrap() },
+        }))
+    }
+
+    fn inheritance() -> <ForPackage as HostApiKind>::Inheritance {
+        (
+            "rustdesk-server".parse().unwrap(),
+            "rustdesk".parse().unwrap(),
+        )
+    }
+
+    fn add_domain(db: &mut DatabaseModel, internal_port: u16) -> Result<u16, Error> {
+        configure_public_domain::<ForPackage>(
+            db,
+            &AddPublicDomainParams {
+                fqdn: InternedString::intern(FQDN),
+                acme: None,
+                gateway: gw("wg1"),
+                internal_port,
+            },
+            &inheritance(),
+        )
+    }
+
+    fn package_host(db: &mut DatabaseModel) -> &mut Model<Host> {
+        ForPackage::host_for(&inheritance(), db).unwrap()
+    }
+
+    #[test]
+    fn public_domain_on_range_only_host_enables_the_range_and_forward() {
+        let mut host = Host::default();
+        host.binding_ranges.insert(21115, range(42000));
+        let mut db = database(host);
+
+        assert_eq!(add_domain(&mut db, 21115).unwrap(), 42000);
+
+        let host = package_host(&mut db).de().unwrap();
+        assert!(
+            host.public_domains
+                .contains_key(&InternedString::intern(FQDN))
+        );
+        let addresses = &host.binding_ranges[&21115].addresses;
+        assert!(addresses.enabled().contains(&domain(false, 42000, "wg1")));
+        assert!(
+            addresses
+                .enabled
+                .contains(&"64.23.194.12:42000".parse().unwrap())
+        );
+        assert!(addresses.gua_wan.is_empty());
+        let forward = host.port_forwards.iter().next().unwrap();
+        assert_eq!(host.port_forwards.len(), 1);
+        assert_eq!(forward.src.to_string(), "64.23.194.12:42000");
+        assert_eq!(forward.dst.to_string(), "192.0.2.2:21115");
+        assert_eq!(forward.count, 3);
+    }
+
+    #[test]
+    fn range_target_reconciles_single_port_and_range_siblings() {
+        let mut host = Host::default();
+        host.binding_ranges.insert(21115, range(42000));
+        host.binding_ranges.insert(21118, range(43000));
+        let mut exposed = range(44000);
+        exposed
+            .addresses
+            .enabled
+            .insert("64.23.194.12:44000".parse().unwrap());
+        host.binding_ranges.insert(21121, exposed);
+        host.bindings.insert(8080, single(8080, Some(8443)));
+        let mut db = database(host);
+
+        add_domain(&mut db, 21115).unwrap();
+
+        let host = package_host(&mut db).de().unwrap();
+        assert!(!domain_disabled(
+            &host.binding_ranges[&21115].addresses,
+            42000
+        ));
+        assert!(domain_disabled(
+            &host.binding_ranges[&21118].addresses,
+            43000
+        ));
+        assert!(!domain_disabled(
+            &host.binding_ranges[&21121].addresses,
+            44000
+        ));
+        assert!(domain_disabled(&host.bindings[&8080].addresses, 8080));
+        assert!(domain_disabled(&host.bindings[&8080].addresses, 8443));
+    }
+
+    #[test]
+    fn readding_range_domain_preserves_address_overrides() {
+        let mut host = Host::default();
+        host.binding_ranges.insert(21115, range(42000));
+        host.binding_ranges.insert(21118, range(43000));
+        let mut db = database(host);
+        add_domain(&mut db, 21115).unwrap();
+        package_host(&mut db)
+            .as_binding_ranges_mut()
+            .mutate(|ranges| {
+                let target = &mut ranges.get_mut(&21115).unwrap().addresses;
+                target.enabled.clear();
+                target
+                    .disabled
+                    .insert((InternedString::intern(FQDN), 42000));
+                let sibling = &mut ranges.get_mut(&21118).unwrap().addresses;
+                sibling
+                    .enabled
+                    .insert("64.23.194.12:43000".parse().unwrap());
+                sibling
+                    .disabled
+                    .remove(&(InternedString::intern(FQDN), 43000));
+                Ok(())
+            })
+            .unwrap();
+        let before = imbl_value::to_value(package_host(&mut db).as_binding_ranges()).unwrap();
+
+        assert_eq!(add_domain(&mut db, 21115).unwrap(), 42000);
+
+        assert_eq!(
+            imbl_value::to_value(package_host(&mut db).as_binding_ranges()).unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn single_port_target_prefers_tls_probe_and_enables_dual_stack_plaintext() {
+        let mut host = Host::default();
+        host.bindings.insert(8080, single(8080, Some(8443)));
+        host.binding_ranges.insert(21115, range(42000));
+        let mut db = database(host);
+
+        assert_eq!(add_domain(&mut db, 8080).unwrap(), 8443);
+
+        let host = package_host(&mut db).de().unwrap();
+        let addresses = &host.bindings[&8080].addresses;
+        assert!(
+            addresses
+                .enabled
+                .contains(&"64.23.194.12:8080".parse().unwrap())
+        );
+        assert!(
+            addresses
+                .gua_wan
+                .contains(&"[2001:db8::1]:8080".parse().unwrap())
+        );
+        assert!(addresses.enabled().contains(&domain(true, 8443, "wg1")));
+        assert!(domain_disabled(
+            &host.binding_ranges[&21115].addresses,
+            42000
+        ));
+    }
+
+    #[test]
+    fn domain_target_requires_a_binding_or_range_start_port() {
+        let mut host = Host::default();
+        host.binding_ranges.insert(21115, range(42000));
+        let mut db = database(host);
+
+        assert!(
+            add_domain(&mut db, 21116)
+                .unwrap_err()
+                .to_string()
+                .contains("binding not found")
+        );
+    }
+
+    #[test]
+    fn active_range_takes_precedence_over_a_dormant_single_port_binding() {
+        let mut host = Host::default();
+        let mut dormant = single(21115, None);
+        dormant.enabled = false;
+        host.bindings.insert(21115, dormant);
+        host.binding_ranges.insert(21115, range(42000));
+        let mut db = database(host);
+
+        assert_eq!(add_domain(&mut db, 21115).unwrap(), 42000);
+
+        let host = package_host(&mut db).de().unwrap();
+        assert!(!domain_disabled(
+            &host.binding_ranges[&21115].addresses,
+            42000
+        ));
+        assert!(domain_disabled(&host.bindings[&21115].addresses, 21115));
+    }
+
+    #[test]
+    fn active_single_port_binding_takes_precedence_over_a_dormant_range() {
+        let mut host = Host::default();
+        host.bindings.insert(21115, single(21115, None));
+        let mut dormant = range(42000);
+        dormant.enabled = false;
+        host.binding_ranges.insert(21115, dormant);
+        let mut db = database(host);
+
+        assert_eq!(add_domain(&mut db, 21115).unwrap(), 21115);
+
+        let host = package_host(&mut db).de().unwrap();
+        assert!(!domain_disabled(&host.bindings[&21115].addresses, 21115));
+        assert!(domain_disabled(
+            &host.binding_ranges[&21115].addresses,
+            42000
+        ));
+    }
+
+    #[test]
+    fn enabled_ranges_keep_domain_ownership() {
+        let mut host = Host::default();
+        host.binding_ranges.insert(21115, range(42000));
+        let mut db = database(host);
+        add_domain(&mut db, 21115).unwrap();
+        let mut server_host = Host::default();
+        server_host.bindings.insert(80, single(80, None));
+        server_host.public_domains.insert(
+            InternedString::intern(FQDN),
+            PublicDomainConfig {
+                gateway: gw("wg1"),
+                acme: None,
+            },
+        );
+        db.as_public_mut()
+            .as_server_info_mut()
+            .as_network_mut()
+            .as_host_mut()
+            .ser(&server_host)
+            .unwrap();
+
+        assert!(
+            handle_duplicates(&mut db)
+                .unwrap_err()
+                .to_string()
+                .contains("already in use")
+        );
+    }
 
     fn gw(name: &str) -> GatewayId {
         GatewayId::from(InternedString::intern(name))
@@ -799,7 +1072,6 @@ mod test {
         }
     }
 
-    // A WAN-exposed IPv6 GUA (public=true, projected from gua_wan).
     fn gua(port: u16, gateway: &str) -> HostnameInfo {
         HostnameInfo {
             ssl: false,
@@ -817,9 +1089,6 @@ mod test {
         a.disabled.contains(&(InternedString::intern(FQDN), port))
     }
 
-    /// The edge case that motivated this: a sibling whose non-SSL WAN IP is
-    /// already enabled must keep the domain ENABLED (in lockstep), not disable
-    /// it — otherwise the domain reads "disabled" while still reachable.
     #[test]
     fn non_ssl_domain_follows_enabled_wan_ip() {
         let fqdn = InternedString::intern(FQDN);
@@ -836,8 +1105,6 @@ mod test {
         );
     }
 
-    /// The domain must equally follow an enabled WAN IPv6 GUA (no SNI over v6
-    /// either), not just an enabled IPv4 WAN address.
     #[test]
     fn non_ssl_domain_follows_enabled_gua() {
         let fqdn = InternedString::intern(FQDN);
@@ -854,17 +1121,14 @@ mod test {
         );
     }
 
-    /// Transitive dual-stack link: enabling the WAN IPv4 on a non-SSL sibling
-    /// that has a domain also publishes the co-located GUA (the domain is
-    /// dual-stack, so v4 and v6 must move together).
     #[test]
     fn enabling_v4_with_domain_publishes_gua() {
         let fqdn = InternedString::intern(FQDN);
         let mut a = DerivedAddressInfo::default();
         a.available.insert(domain(false, 42000, "wg1"));
         a.available.insert(wan_ip(42000, "wg1"));
-        a.available.insert(gua(42000, "wg1")); // GUA present, not yet published
-        a.enabled.insert("64.23.194.12:42000".parse().unwrap()); // only v4 enabled
+        a.available.insert(gua(42000, "wg1"));
+        a.enabled.insert("64.23.194.12:42000".parse().unwrap());
 
         reconcile_public_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
 
@@ -880,7 +1144,6 @@ mod test {
         assert!(!domain_disabled(&a, 42000), "domain enabled");
     }
 
-    /// Default isolate behavior: WAN IP not enabled -> domain disabled.
     #[test]
     fn non_ssl_domain_disabled_when_wan_ip_off() {
         let fqdn = InternedString::intern(FQDN);
@@ -896,7 +1159,6 @@ mod test {
         );
     }
 
-    /// SSL rows have their own SNI, so they are always isolated regardless of IP.
     #[test]
     fn ssl_domain_is_always_isolated() {
         let fqdn = InternedString::intern(FQDN);
@@ -910,7 +1172,6 @@ mod test {
         assert!(domain_disabled(&a, 5349), "SSL domain must stay isolated");
     }
 
-    /// An enabled WAN IP on a *different* gateway must not enable the domain.
     #[test]
     fn enabled_wan_ip_on_other_gateway_is_not_honored() {
         let fqdn = InternedString::intern(FQDN);
@@ -958,14 +1219,12 @@ mod test {
         });
         let priv_key = (fqdn.clone(), 42000u16);
 
-        // Default: the bare LAN IPv4 is on, so the private domain stays ON.
         reconcile_private_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
         assert!(
             !a.disabled.contains(&priv_key),
             "a private domain is on by default (LAN is not isolated)"
         );
 
-        // Operator disables the bare LAN IPv4 -> the private domain is honored off.
         a.disabled
             .insert((InternedString::intern("10.0.0.5"), 42000));
         reconcile_private_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
