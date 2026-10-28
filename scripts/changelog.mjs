@@ -26,6 +26,7 @@ const FILENAME = new RegExp(
   `^(${TIERS.join('|')})-(${KINDS.join('|')})-[a-z0-9]+(?:-[a-z0-9]+)*\\.md$`,
 )
 const PRODUCT = /^projects\/([a-z0-9]+(?:-[a-z0-9]+)*)$/
+const HIGHLIGHTS = /^## Highlights[ \t]*\r?$/m
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { maxBuffer: Infinity, ...options })
@@ -50,11 +51,23 @@ function productPath(value) {
   return value
 }
 
-function parseFragment(path, data) {
+function parseFragment(path, data, requireMetadata = true) {
   const match = FILENAME.exec(basename(path))
   if (!match || match[0] !== basename(path))
     throw new Error(`${path}: expected <${TIERS.join('|')}>-<kind>-<name>.md`)
-  const body = decodeUtf8(data).trim()
+  let body = decodeUtf8(data).trim()
+  let userFacing = null
+  const metadata = /^---\r?\nuser-facing: (true|false)\r?\n---(?:\r?\n|$)/.exec(
+    body,
+  )
+  if (metadata) {
+    userFacing = metadata[1] === 'true'
+    body = body.slice(metadata[0].length).trim()
+  } else if (requireMetadata || body.startsWith('---')) {
+    throw new Error(
+      `${path}: expected frontmatter with user-facing: true or false`,
+    )
+  }
   if (!body) throw new Error(`${path}: empty fragment`)
   if (
     /^\s{0,3}#{1,6}(?:\s|$)/m.test(body) ||
@@ -64,7 +77,7 @@ function parseFragment(path, data) {
   }
   if (!/^[-+*]\s+\S/.test(body))
     throw new Error(`${path}: body must start with a Markdown bullet item`)
-  return { path, tier: match[1], kind: match[2], data, body }
+  return { path, tier: match[1], kind: match[2], data, body, userFacing }
 }
 
 function hasSymlink(path) {
@@ -128,14 +141,14 @@ function taggedFragments(product, ref) {
       parseFragment(
         path,
         regularBlob(entry.slice(0, separator), `${ref}:${path}`),
+        false,
       ),
     )
   }
   return fragments
 }
 
-function taggedHistory(product, ref) {
-  const path = `${product}/CHANGELOG.md`
+function taggedFile(path, ref) {
   const entry = treeEntry(ref, path)
   return entry === null
     ? Buffer.alloc(0)
@@ -143,10 +156,22 @@ function taggedHistory(product, ref) {
 }
 
 function originTags() {
+  return releaseTags(git('ls-remote', '--tags', 'origin'))
+}
+
+function localTags() {
+  return releaseTags(
+    git(
+      'for-each-ref',
+      '--format=%(if)%(*objectname)%(then)%(*objectname)%(else)%(objectname)%(end)%09%(refname)',
+      'refs/tags',
+    ),
+  )
+}
+
+function releaseTags(output) {
   const tags = new Map()
-  for (const line of decodeUtf8(git('ls-remote', '--tags', 'origin'))
-    .trim()
-    .split('\n')) {
+  for (const line of decodeUtf8(output).trim().split('\n')) {
     if (!line) continue
     let [sha, name] = line.split('\t')
     name = name.replace(/^refs\/tags\//, '')
@@ -238,16 +263,22 @@ function ownedFragments(release, earlier) {
   )
 }
 
+function fragmentLines(fragments) {
+  return [...fragments]
+    .sort((a, b) => compareText(a.path, b.path))
+    .flatMap(fragment => [fragment.body, ''])
+}
+
 function releaseSection(version, fragments) {
   const lines = [`## [${version}]`, '']
   for (const kind of KINDS) {
-    const group = fragments
-      .filter(item => item.kind === kind)
-      .sort((a, b) => compareText(a.path, b.path))
-    if (group.length) {
-      lines.push(`### ${kind[0].toUpperCase()}${kind.slice(1)}`, '')
-      for (const fragment of group) lines.push(fragment.body, '')
-    }
+    const group = fragments.filter(item => item.kind === kind)
+    if (group.length)
+      lines.push(
+        `### ${kind[0].toUpperCase()}${kind.slice(1)}`,
+        '',
+        ...fragmentLines(group),
+      )
   }
   return Buffer.from(`${lines.join('\n')}\n`)
 }
@@ -352,7 +383,7 @@ function render(product, version, ref) {
   ).trim()
   const path = `${product}/CHANGELOG.md`
   const history = ref
-    ? taggedHistory(product, commit)
+    ? taggedFile(path, commit)
     : existsSync(path)
       ? readFileSync(path)
       : Buffer.alloc(0)
@@ -364,6 +395,58 @@ function render(product, version, ref) {
   )
   releases.push({ product, version, commit, fragments })
   return compileReleases(history, releases)[0]
+}
+
+function notesPath(product, version) {
+  return `${product}/release-notes/${version}.md`
+}
+
+function hasAudienceMetadata(fragments) {
+  return fragments.some(fragment => fragment.userFacing !== null)
+}
+
+function compileNotes(path, notes, fragments) {
+  if (!hasAudienceMetadata(fragments))
+    return notes.length ? notes : Buffer.from('## Highlights\n')
+  const text = decodeUtf8(notes)
+  if (HIGHLIGHTS.test(text))
+    throw new Error(
+      `${path}: remove ## Highlights; it is compiled from fragments`,
+    )
+  const highlights = [
+    '## Highlights',
+    '',
+    ...fragmentLines(fragments.filter(fragment => fragment.userFacing)),
+  ].join('\n')
+  const important = /^## Important[ \t]*\r?$/m.exec(text)
+  const position = important ? important.index : text.length
+  const composed = `${text.slice(0, position).trimEnd()}\n\n${highlights}\n${text.slice(position)}`
+  return markdownFormatter()(Buffer.from(composed.trim() + '\n'))
+}
+
+function renderNotes(product, version, ref) {
+  parseVersion(basename(product), version)
+  const path = notesPath(product, version)
+  const notes = ref
+    ? taggedFile(path, ref)
+    : existsSync(path)
+      ? readFileSync(path)
+      : Buffer.alloc(0)
+  const fragments = ref
+    ? taggedFragments(product, ref)
+    : workingFragments(product)
+  if (!fragments.size) return compileNotes(path, notes, [])
+  const commit = decodeUtf8(
+    git('rev-parse', '--verify', `${ref || 'HEAD'}^{commit}`),
+  ).trim()
+  const releases = originReleases(commit, product, localTags()).filter(
+    release => release.version !== version,
+  )
+  return compileNotes(
+    path,
+    notes,
+    ownedFragments({ product, version, commit, fragments }, releases),
+  )
 }
 
 function checkManifestVersion(
@@ -426,6 +509,25 @@ function sync() {
       history,
       releases.filter(item => item.product === product),
     )
+    for (const [index, release] of releases.entries()) {
+      if (release.product !== product) continue
+      const fragments = ownedFragments(release, releases.slice(0, index))
+      if (!hasAudienceMetadata(fragments)) continue
+      const path = notesPath(product, release.version)
+      if (hasSymlink(path)) throw new Error(`${path}: symlinks are not allowed`)
+      const source = taggedFile(path, release.commit)
+      const compiled = compileNotes(path, source, fragments)
+      const existing = existsSync(path) ? readFileSync(path) : Buffer.alloc(0)
+      if (
+        existing.length &&
+        !existing.equals(compiled) &&
+        !existing.equals(source)
+      )
+        throw new Error(
+          `${path}: release notes differ from the tagged source and compiled output`,
+        )
+      updates.push({ path, history: existing, compiled, consumed: [] })
+    }
     updates.push({ path, history, compiled, consumed })
   }
   for (const { path, history, compiled, consumed } of updates) {
@@ -448,7 +550,7 @@ function sync() {
 }
 
 const USAGE =
-  'usage: changelog.mjs projects | changed BASE | validate PRODUCT | version PRODUCT | check-version PRODUCT [VERSION] | render PRODUCT VERSION [--ref REF] | section VERSION | sync'
+  'usage: changelog.mjs projects | changed BASE | validate PRODUCT | version PRODUCT | check-version PRODUCT [VERSION] | render PRODUCT VERSION [--ref REF] | notes PRODUCT VERSION [--ref REF] | section VERSION | sync'
 
 try {
   const { values, positionals } = parseArgs({
@@ -466,13 +568,14 @@ try {
     version: [1],
     'check-version': [1, 2],
     render: [2],
+    notes: [2],
     section: [1],
     sync: [0],
   }
   if (
     !values.help &&
     (!counts[command]?.includes(args.length) ||
-      (values.ref !== undefined && command !== 'render'))
+      (values.ref !== undefined && !['render', 'notes'].includes(command)))
   ) {
     throw new Error(USAGE)
   }
@@ -487,6 +590,8 @@ try {
     checkManifestVersion(productPath(args[0]), args[1])
   else if (command === 'render')
     process.stdout.write(render(productPath(args[0]), args[1], values.ref))
+  else if (command === 'notes')
+    process.stdout.write(renderNotes(productPath(args[0]), args[1], values.ref))
   else if (command === 'section')
     process.stdout.write(compiledSection(readFileSync(0), args[0]))
   else sync()

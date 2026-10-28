@@ -132,28 +132,23 @@ changelog_link() {
 }
 
 composed_notes() {
-    local notes pre_update
-    notes=$(notes_path "$PROJECT")
-    if [ ! -f "$notes" ]; then
-        >&2 echo "No release notes at ${notes#"$REPO_ROOT/"} — write them before releasing ${PROJECT} v${VERSION}."
-        return 1
-    fi
-    pre_update=$(pre_update_notes_path "$PROJECT")
-    {
-        if [ -s "$pre_update" ]; then
-            cat "$pre_update"
+    local pre_update="projects/$PROJECT/release-notes/${VERSION}.pre-update.md"
+    if [ -n "${NOTES_REF:-}" ]; then
+        if git -C "$REPO_ROOT" cat-file -e "${NOTES_REF}:${pre_update}" 2>/dev/null; then
+            git -C "$REPO_ROOT" show "${NOTES_REF}:${pre_update}"
             printf '\n\n'
         fi
-        cat "$notes"
-    }
+    elif [ -s "$REPO_ROOT/$pre_update" ]; then
+        cat "$REPO_ROOT/$pre_update"
+        printf '\n\n'
+    fi
+    (cd "$REPO_ROOT" && node scripts/changelog.mjs notes "projects/$PROJECT" "$VERSION" ${NOTES_REF:+--ref "$NOTES_REF"})
 }
 
 curated_notes() {
     composed_notes | place_changelog_link
 }
 
-# Put the changelog link at the end of stdin's Highlights section, dropping any
-# copy already there. Notes with no Highlights section take it at the end.
 place_changelog_link() {
     awk -v link="$(changelog_link)" -v prefix="$CHANGELOG_LINK_PREFIX" '
         index($0, prefix) == 1 { dropped = 1; next }
@@ -281,11 +276,9 @@ missing_registry_assets() {
     echo "$missing"
 }
 
-# CI registers a build before its notes are written, so set them on the source
-# registry from the working tree before promoting. The compat range is whatever
-# that registration used; `version add` upserts the entry.
 refresh_registry_notes() {
-    local registry=$1 range
+    local registry=$1 range notes
+    notes=$(curated_notes) || return
     load_registry_index "$registry"
     range=$(jq -r --arg v "$VERSION" '.versions[$v].sourceVersion // empty' <<< "$_INDEX_JSON")
     if [ -z "$range" ]; then
@@ -294,7 +287,7 @@ refresh_registry_notes() {
     fi
     echo "Setting ${VERSION} release notes on ${registry}..."
     start-cli --registry="$registry" registry os version add \
-        "$VERSION" "v${VERSION}" "$(curated_notes)" "$range"
+        "$VERSION" "v${VERSION}" "$notes" "$range"
     _INDEX_REGISTRY=""
 }
 
@@ -606,23 +599,33 @@ resolve_alpha_commit() {
     echo "  To work from that tree: git checkout ${alpha_hash}"
 }
 
-# Release metadata must match the commit that built the promoted artifacts.
+compiled_metadata_matches() {
+    local current tagged
+    current=$(cd "$REPO_ROOT" && node scripts/changelog.mjs "$1" "projects/$PROJECT" "$VERSION") || return
+    tagged=$(cd "$REPO_ROOT" && node scripts/changelog.mjs "$1" "projects/$PROJECT" "$VERSION" --ref "$2") || return
+    [ "$current" = "$tagged" ]
+}
+
 assert_metadata_matches_adopted() {
     local adopted file untracked
     adopted=$(tag_commit_sha)
     for file in "$REPO_ROOT/projects/$PROJECT/changelog" "$(notes_path "$PROJECT")" "$(pre_update_notes_path "$PROJECT")"; do
-        untracked=$(cd "$REPO_ROOT" && git ls-files --others --exclude-standard -- "$file")
-        if [ -z "$untracked" ] && (cd "$REPO_ROOT" && git diff --quiet "$adopted" -- "$file"); then
-            continue
-        fi
+        case "$file" in
+            */changelog)
+                if compiled_metadata_matches render "$adopted"; then continue; fi ;;
+            "$(notes_path "$PROJECT")")
+                if compiled_metadata_matches notes "$adopted"; then continue; fi ;;
+            *)
+                untracked=$(cd "$REPO_ROOT" && git ls-files --others --exclude-standard -- "$file")
+                if [ -z "$untracked" ] && (cd "$REPO_ROOT" && git diff --quiet "$adopted" -- "$file"); then continue; fi ;;
+        esac
         if [ -n "${UNCOMMITTED_NOTES:-}" ] && [ "$file" != "$REPO_ROOT/projects/$PROJECT/changelog" ]; then
             >&2 echo "  ! ${file#"$REPO_ROOT/"} differs from ${adopted}; releasing it anyway (UNCOMMITTED_NOTES)"
             continue
         fi
 
         >&2 echo "  ✗ ${file#"$REPO_ROOT/"} differs between the working tree and the"
-        >&2 echo "    commit being tagged (${adopted}). The release is composed from"
-        >&2 echo "    the working tree, so it would not match the tag."
+        >&2 echo "    commit being tagged (${adopted}). Generated release metadata would not match the tag."
         >&2 echo
         >&2 echo "      git checkout ${adopted}"
         >&2 echo "      ./scripts/manage-release.sh release ${PROJECT}"
@@ -831,12 +834,9 @@ cmd_pre_check() {
         errors=1
     fi
 
-    local notes
-    notes=$(notes_path "$PROJECT")
-    if [ -s "$notes" ]; then
-        echo "  ✓ release notes at ${notes#"$REPO_ROOT/"}"
+    if (cd "$REPO_ROOT" && node scripts/changelog.mjs notes "projects/$PROJECT" "$VERSION" > /dev/null); then
+        echo "  ✓ release highlights compile"
     else
-        >&2 echo "  ✗ no release notes at ${notes#"$REPO_ROOT/"} — write this release's notes (lede, '## Highlights', optional '## Important'); put pre-update warnings in $(basename "$(pre_update_notes_path "$PROJECT")")"
         errors=1
     fi
 
@@ -1323,18 +1323,16 @@ cmd_tag() {
 
 cmd_create_gh_release() (
     require_kind os cli deb npm wrt
-    # os/cli/deb/wrt reference their pulled artifacts in the notes; npm (the SDK)
-    # ships to npm and its notes are just the changelog link, so it needs no
-    # release dir.
     if [ "$KIND" != npm ]; then
         enter_release_dir
         ensure_img_gz
     fi
-    local changelog_dir draft
+    local changelog_dir draft notes_ref="$TAG"
+    if [ -n "${UNCOMMITTED_NOTES:-}" ]; then notes_ref=; fi
     changelog_dir=$(mktemp -d)
     trap 'rm -rf "$changelog_dir"' EXIT
     (cd "$REPO_ROOT" && node scripts/changelog.mjs render "projects/$PROJECT" "$VERSION" --ref "$TAG") > "$changelog_dir/CHANGELOG.md"
-    release_body "$(cat "$changelog_dir/CHANGELOG.md")" > "$changelog_dir/notes.md"
+    NOTES_REF="$notes_ref" release_body "$(cat "$changelog_dir/CHANGELOG.md")" > "$changelog_dir/notes.md"
     echo "Creating GitHub release ${TAG}..."
     if draft=$(gh release view -R "$REPO" "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
         gh release edit -R "$REPO" "$TAG" --title "$(project_display_name "$PROJECT") v${VERSION}" --notes-file "$changelog_dir/notes.md"
@@ -1481,6 +1479,8 @@ cmd_index() {
 
 cmd_register() {
     require_kind wrt
+    local notes
+    notes=$(curated_notes) || return
     # Register + index a CI build into the source (beta) registry, where beta
     # routers soak it before `release` promotes it into production. Normally
     # the CI deploy job (start-wrt.yaml) does this itself right after the S3
@@ -1491,7 +1491,7 @@ cmd_register() {
     enter_release_dir
     echo "Registering StartWRT ${VERSION} in ${STARTWRT_SOURCE_REGISTRY}..."
     start-cli --registry="$STARTWRT_SOURCE_REGISTRY" registry os version add \
-        "$VERSION" "v$VERSION" "$(curated_notes)" "${STARTWRT_COMPAT_FLOOR} <=$VERSION"
+        "$VERSION" "v$VERSION" "$notes" "${STARTWRT_COMPAT_FLOOR} <=$VERSION"
 
     # start-cli infers the asset slot from the file extension and only accepts
     # iso/img/squashfs. Both images ship gzipped, so present each under a
@@ -1576,7 +1576,7 @@ cmd_cosign() {
 }
 
 release_body() {
-    echo "<!-- Generated by scripts/manage-release.sh from projects/${PROJECT}/release-notes/${VERSION}.md, its optional .pre-update.md companion, and changelog fragments — edits made here are overwritten. -->"
+    echo "<!-- Generated by scripts/manage-release.sh from changelog fragments and optional projects/${PROJECT}/release-notes/${VERSION}.md and .pre-update.md framing — edits made here are overwritten. -->"
     echo
     composed_notes
     echo
@@ -1784,8 +1784,9 @@ Subcommands:
                      available) and upload signatures.tar.gz. (os/cli/deb/wrt.)
   cosign             Add your personal GPG signature to an existing release's
                      signatures.tar.gz. (os/cli/deb/wrt; run 'pull' first.)
-  notes              Print this release's curated notes, prefixed by the optional
-                     release-notes/<version>.pre-update.md — what the registries
+  notes              Print compiled Highlights and release-manager framing,
+                     prefixed by optional release-notes/<version>.pre-update.md
+                     — what the registries
                      serve to the in-product update screens. (all projects.)
   body               Print the whole GitHub release body: notes, an expandable
                      changelog, downloads and checksums. (all projects.)
