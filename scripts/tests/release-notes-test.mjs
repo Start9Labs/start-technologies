@@ -14,6 +14,7 @@ import { REPO, fixture } from './fixtures.mjs'
 const VERSION = '1.2.3'
 const MAIN =
   'Lede.\n\n## Highlights\n\n- Feature.\n\n## Important\n\nFollow up.\n'
+const FRAMING = 'Lede.\n\n## Important\n\nFollow up.\n'
 const PRE_UPDATE = '## ⚠️ Before You Update\n\n> Prepare first.'
 const METADATA = '---\nuser-facing: true\n---\n\n'
 
@@ -164,7 +165,7 @@ test('sparse deploy canonical versions and notes', t => {
     ['start-wrt', 'start-wrt.yaml', VERSION, '123'],
   ]
   for (const [project, , version] of cases) {
-    write(`projects/${project}/release-notes/${version}.md`, MAIN)
+    write(`projects/${project}/release-notes/${version}.md`, FRAMING)
     write(
       `projects/${project}/changelog/patch-fixed-feature.md`,
       METADATA + '- Generated feature.\n',
@@ -223,7 +224,7 @@ test('sparse deploy canonical versions and notes', t => {
     const derived = script('notes', project, true, checkout).stdout
     contains(derived, PRE_UPDATE)
     contains(derived, '- Generated feature.')
-    excludes(derived, '- Feature.')
+    contains(derived, 'Follow up.')
     contains(derived, `/tree/${ref}/projects/${project}/changelog`)
     const compose = deploy
       .split('      - name: Compile release notes\n')[1]
@@ -288,6 +289,7 @@ test('release links GitHub release without depending on tag CI', t => {
 test('source links survive fragment consumption', t => {
   const { env, write, script, git, commit } = releaseFixture(t)
   git('init', '-q')
+  write(`projects/start-sdk/release-notes/${VERSION}.md`, FRAMING)
   write(
     'projects/start-sdk/changelog/patch-fixed-example.md',
     METADATA + '- Fixed feature.\n',
@@ -313,6 +315,7 @@ test('source links survive fragment consumption', t => {
 test('GitHub body carries the notes and changelog without the link', t => {
   const { root, write, script, git, commit } = releaseFixture(t)
   git('init', '-q')
+  write(`projects/start-sdk/release-notes/${VERSION}.md`, FRAMING)
   git('remote', 'add', 'origin', root)
   write(`projects/start-sdk/release-notes/${VERSION}.pre-update.md`, PRE_UPDATE)
   write(
@@ -487,6 +490,7 @@ test('release uploads changelog from tag before publication', t => {
     releaseFixture(t)
   delete env.CHANGELOG_REF
   git('init', '-q')
+  write(`projects/start-sdk/release-notes/${VERSION}.md`, FRAMING)
   write(
     'projects/start-sdk/CHANGELOG.md',
     '# Changelog\n\n## [1.2.2]\n\n- Old change.\n',

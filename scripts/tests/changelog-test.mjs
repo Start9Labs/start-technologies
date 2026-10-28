@@ -1038,8 +1038,21 @@ test('audience-only tag changes cannot rewrite archived highlights', t => {
   fragment(undefined, '- Released highlight.\n', false)
   commit()
   git('tag', '-f', 'start-os/v0.4.0.1')
-  contains(cli(['sync'], false).stderr, 'release notes differ')
+  contains(cli(['sync'], false).stderr, 'remove ## Highlights')
   assert.deepEqual(readFileSync(path), archived)
+})
+
+test('notes reject authored highlights before release', t => {
+  const { fragment, write, cli } = compilerFixture(t)
+  write(
+    `${PRODUCT}/release-notes/0.4.0.1.md`,
+    'Lede.\n\n## Highlights\n\n- Hand-written.\n',
+  )
+  fragment(undefined, '- Compiled.\n')
+  contains(
+    cli(['notes', PRODUCT, '0.4.0.1'], false).stderr,
+    'release-notes/0.4.0.1.md: remove ## Highlights',
+  )
 })
 
 test('notes and fragment consumption are atomic on framing conflicts', t => {

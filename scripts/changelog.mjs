@@ -263,16 +263,22 @@ function ownedFragments(release, earlier) {
   )
 }
 
+function fragmentLines(fragments) {
+  return [...fragments]
+    .sort((a, b) => compareText(a.path, b.path))
+    .flatMap(fragment => [fragment.body, ''])
+}
+
 function releaseSection(version, fragments) {
   const lines = [`## [${version}]`, '']
   for (const kind of KINDS) {
-    const group = fragments
-      .filter(item => item.kind === kind)
-      .sort((a, b) => compareText(a.path, b.path))
-    if (group.length) {
-      lines.push(`### ${kind[0].toUpperCase()}${kind.slice(1)}`, '')
-      for (const fragment of group) lines.push(fragment.body, '')
-    }
+    const group = fragments.filter(item => item.kind === kind)
+    if (group.length)
+      lines.push(
+        `### ${kind[0].toUpperCase()}${kind.slice(1)}`,
+        '',
+        ...fragmentLines(group),
+      )
   }
   return Buffer.from(`${lines.join('\n')}\n`)
 }
@@ -399,30 +405,22 @@ function hasAudienceMetadata(fragments) {
   return fragments.some(fragment => fragment.userFacing !== null)
 }
 
-function compileNotes(notes, fragments) {
+function compileNotes(path, notes, fragments) {
   if (!hasAudienceMetadata(fragments))
     return notes.length ? notes : Buffer.from('## Highlights\n')
+  const text = decodeUtf8(notes)
+  if (HIGHLIGHTS.test(text))
+    throw new Error(
+      `${path}: remove ## Highlights; it is compiled from fragments`,
+    )
   const highlights = [
     '## Highlights',
     '',
-    ...fragments
-      .filter(fragment => fragment.userFacing)
-      .sort((a, b) => compareText(a.path, b.path))
-      .flatMap(fragment => [fragment.body, '']),
+    ...fragmentLines(fragments.filter(fragment => fragment.userFacing)),
   ].join('\n')
-  const text = decodeUtf8(notes)
-  const heading = HIGHLIGHTS.exec(text)
-  let composed
-  if (heading) {
-    const afterHeading = heading.index + heading[0].length
-    const next = /^## /m.exec(text.slice(afterHeading))
-    const end = next ? afterHeading + next.index : text.length
-    composed = `${text.slice(0, heading.index)}${highlights}\n${text.slice(end)}`
-  } else {
-    const important = /^## Important[ \t]*\r?$/m.exec(text)
-    const position = important ? important.index : text.length
-    composed = `${text.slice(0, position).trimEnd()}\n\n${highlights}\n${text.slice(position)}`
-  }
+  const important = /^## Important[ \t]*\r?$/m.exec(text)
+  const position = important ? important.index : text.length
+  const composed = `${text.slice(0, position).trimEnd()}\n\n${highlights}\n${text.slice(position)}`
   return markdownFormatter()(Buffer.from(composed.trim() + '\n'))
 }
 
@@ -437,7 +435,7 @@ function renderNotes(product, version, ref) {
   const fragments = ref
     ? taggedFragments(product, ref)
     : workingFragments(product)
-  if (!fragments.size) return compileNotes(notes, [])
+  if (!fragments.size) return compileNotes(path, notes, [])
   const commit = decodeUtf8(
     git('rev-parse', '--verify', `${ref || 'HEAD'}^{commit}`),
   ).trim()
@@ -445,6 +443,7 @@ function renderNotes(product, version, ref) {
     release => release.version !== version,
   )
   return compileNotes(
+    path,
     notes,
     ownedFragments({ product, version, commit, fragments }, releases),
   )
@@ -517,12 +516,12 @@ function sync() {
       const path = notesPath(product, release.version)
       if (hasSymlink(path)) throw new Error(`${path}: symlinks are not allowed`)
       const source = taggedFile(path, release.commit)
-      const compiled = compileNotes(source, fragments)
+      const compiled = compileNotes(path, source, fragments)
       const existing = existsSync(path) ? readFileSync(path) : Buffer.alloc(0)
       if (
         existing.length &&
         !existing.equals(compiled) &&
-        (!existing.equals(source) || HIGHLIGHTS.test(decodeUtf8(existing)))
+        !existing.equals(source)
       )
         throw new Error(
           `${path}: release notes differ from the tagged source and compiled output`,
