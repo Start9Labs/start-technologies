@@ -246,6 +246,7 @@ jobs:
             projects/start-wrt/release-notes/*
             projects/start-wrt/changelog/*
             scripts/
+            shared-libs/crates/start-core/locales/release-notes.json
           sparse-checkout-cone-mode: false
 
       - uses: actions/setup-node@v6
@@ -263,7 +264,7 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh notes start-wrt > "$RUNNER_TEMP/release-notes.md"
+          CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh registry-notes start-wrt > "$RUNNER_TEMP/release-notes.json"
 
       - name: Download image artifact
         uses: actions/download-artifact@v8
@@ -286,6 +287,7 @@ jobs:
             "$DOWNLOAD_URL" -o /tmp/start-cli
           sudo install -m 755 /tmp/start-cli /usr/local/bin/start-cli
           echo "start-cli: $(start-cli --version)"
+          ./scripts/manage-release.sh check-registry-notes-cli start-wrt
 
       - name: Set up developer key
         run: |
@@ -346,9 +348,11 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          NOTES=$(cat "$RUNNER_TEMP/release-notes.md")
+          NOTES=$(jq -r '.releaseNotes' "$RUNNER_TEMP/release-notes.json")
+          TRANSLATIONS=$(jq -c '.releaseNotesTranslations' "$RUNNER_TEMP/release-notes.json")
           start-cli --registry="${{ env.REGISTRY }}" registry os version add \
-            "$VERSION" "v${VERSION}" "$NOTES" ">=0.1.0-beta.1 <=${VERSION}"
+            "$VERSION" "v${VERSION}" "$NOTES" ">=0.1.0-beta.1 <=${VERSION}" \
+            --release-notes-translations "$TRANSLATIONS"
 
       - name: Index assets in the target registry
         run: |

@@ -99,7 +99,7 @@ A pre-release version instead takes prerelease segments: `exver::Version::new([0
 
 ### 5. Release notes
 
-**`projects/start-os/release-notes/X.Y.Z.N.md`** — this release's curated notes: a lede, `## Highlights`, an optional `## Important`. Put pre-update instructions in an optional sibling **`X.Y.Z.N.pre-update.md`**, headed `## ⚠️ Before You Update`. `manage-release.sh` prefixes the companion to the main notes for the GitHub release and registry entry. The post-update notification uses the main notes alone. **The image packages the main file by name** (`projects/start-os/build.mk`), so the StartOS image does not build until it exists.
+**`projects/start-os/release-notes/X.Y.Z.N.md`** — optional authored framing: a lede and optional `## Important`. Do not author `## Highlights`; the shared compiler generates it from user-facing changelog fragments. Put pre-update instructions in an optional sibling **`X.Y.Z.N.pre-update.md`**, headed `## ⚠️ Before You Update`. `manage-release.sh` prefixes the companion to the generated main notes for the GitHub release and registry entry. The post-update notification uses the main notes alone. **The image renders notes from fragments and optional framing** (`projects/start-os/build.mk`); it does not require an authored main file.
 
 ### 6. Release-gated docs
 
@@ -127,7 +127,7 @@ cargo test -p start-core --features test version::   # incl. current_matches_man
 - [ ] Create `shared-libs/crates/start-core/src/version/vX_Y_Z_N.rs`
 - [ ] Update `shared-libs/crates/start-core/src/version/mod.rs` in 5 locations
 - [ ] Add the StartOS changelog fragments
-- [ ] Write `projects/start-os/release-notes/X.Y.Z.N.md` (the image won't build without it), plus `X.Y.Z.N.pre-update.md` for any pre-update instructions
+- [ ] Add optional framing in `projects/start-os/release-notes/X.Y.Z.N.md`, plus `X.Y.Z.N.pre-update.md` for any pre-update instructions; leave Highlights to the compiler
 - [ ] Bump the release link in `projects/start-os/docs/src/`
 - [ ] Run `make manpages` and commit the generated version updates
 - [ ] Update `projects/start-sdk/lib/StartSdk.ts` `OSVersion` — **only** on breaking SDK changes

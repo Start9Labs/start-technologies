@@ -485,18 +485,10 @@ function noteLocales(product, version, fragments, ref) {
       .filter(fragment => fragment.userFacing)
       .flatMap(fragment => [...fragment.translations.keys()]),
   )
-  const directory = `${product}/release-notes`
-  const paths = ref
-    ? decodeUtf8(
-        git('ls-tree', '-r', '--name-only', '-z', ref, '--', directory),
-      ).split('\0')
-    : existsSync(directory)
-      ? readdirSync(directory).map(name => `${directory}/${name}`)
-      : []
-  for (const path of paths) {
+  for (const path of notePaths(product, ref)) {
     const name = basename(path)
     if (
-      dirname(path) !== directory ||
+      dirname(path) !== `${product}/release-notes` ||
       !name.startsWith(`${version}.`) ||
       !name.endsWith('.md')
     )
@@ -505,6 +497,17 @@ function noteLocales(product, version, fragments, ref) {
     if (isLocale(locale) && locale !== ENGLISH) locales.add(locale)
   }
   return [...locales].sort(compareText)
+}
+
+function notePaths(product, ref) {
+  const directory = `${product}/release-notes`
+  return ref
+    ? decodeUtf8(
+        git('ls-tree', '-r', '--name-only', '-z', ref, '--', directory),
+      ).split('\0')
+    : existsSync(directory)
+      ? readdirSync(directory).map(name => `${directory}/${name}`)
+      : []
 }
 
 function locales(product, version, ref) {
@@ -611,6 +614,151 @@ function renderNotesBundle(product, version, ref) {
       decodeUtf8(renderNotes(product, version, ref, locale)),
     ]),
   )
+}
+
+function preUpdateNotes(product, version, ref, locale = ENGLISH) {
+  const path = notesPath(product, version, locale).replace(
+    /\.md$/,
+    '.pre-update.md',
+  )
+  const notes = decodeUtf8(sourceFile(path, ref))
+  return (
+    notes || (locale === ENGLISH ? '' : preUpdateNotes(product, version, ref))
+  )
+}
+
+function composeReleaseNotes(notes, warning) {
+  return warning ? `${warning}\n\n${notes}` : notes
+}
+
+function releaseNotes(product, version, ref) {
+  return composeReleaseNotes(
+    decodeUtf8(renderNotes(product, version, ref)),
+    preUpdateNotes(product, version, ref),
+  )
+}
+
+function releaseNoteLabels(ref) {
+  const path = 'shared-libs/crates/start-core/locales/release-notes.json'
+  const tagged = ref ? decodeUtf8(sourceFile(path, ref)) : ''
+  return JSON.parse(
+    tagged || readFileSync(new URL(`../${path}`, import.meta.url)),
+  )['release-notes.full-changelog']
+}
+
+function changelogLink(product, version, ref, locale, labels) {
+  const base = 'https://github.com/Start9Labs/start-technologies'
+  let url = `${base}/releases/tag/${basename(product)}/v${version}`
+  let pending = false
+  if (ref) {
+    pending =
+      spawnSync('git', ['cat-file', '-e', `${ref}:${product}/changelog`])
+        .status === 0
+    const anchor = version.replaceAll('.', '').replaceAll('+', '').toLowerCase()
+    url = pending
+      ? `${base}/tree/${ref}/${product}/changelog`
+      : `${base}/blob/${ref}/${product}/CHANGELOG.md#${anchor}`
+  }
+  let label = labels[locale] ?? labels[ENGLISH]
+  if (pending && locale === ENGLISH)
+    label =
+      '**[Full changelog fragments for v%{version}](%{url})** — changes awaiting release.'
+  return label.replaceAll('%{version}', version).replaceAll('%{url}', url)
+}
+
+function placeChangelogLink(notes, link, heading) {
+  const lines = notes.split('\n')
+  if (lines.at(-1) === '') lines.pop()
+  const output = []
+  let inHighlights = false
+  let placed = false
+  let dropped = false
+  for (const line of lines) {
+    if (line.startsWith('**[Full changelog')) {
+      dropped = true
+      continue
+    }
+    if (dropped) {
+      dropped = false
+      if (!line) continue
+    }
+    if (line.startsWith('## ')) {
+      if (inHighlights) {
+        output.push(link, '')
+        placed = true
+        inHighlights = false
+      }
+      if (line.replace(/\r$/, '') === heading?.replace(/\r$/, ''))
+        inHighlights = true
+    }
+    output.push(line)
+  }
+  if (!placed) output.push(...(lines.length ? [''] : []), link)
+  return `${output.join('\n')}\n`
+}
+
+function highlightsHeading(framing) {
+  const marker = framing.indexOf(HIGHLIGHTS_MARKER)
+  return marker < 0
+    ? null
+    : [...framing.slice(0, marker).matchAll(/^## [^\r\n]+/gm)].at(-1)?.[0]
+}
+
+function registryHighlightsHeading(product, version, ref, locale, notes) {
+  if (locale === ENGLISH) return /^## highlights[^\r\n]*/im.exec(notes)?.[0]
+  const path = notesPath(product, version, locale)
+  const authored = highlightsHeading(decodeUtf8(sourceFile(path, ref)))
+  if (authored) return authored
+  const tagged = spawnSync(
+    'git',
+    ['show', `refs/tags/${basename(product)}/v${version}:${path}`],
+    { maxBuffer: Infinity },
+  )
+  const archived =
+    tagged.status === 0 ? highlightsHeading(decodeUtf8(tagged.stdout)) : null
+  return (
+    archived ?? HIGHLIGHTS.exec(notes)?.[0] ?? /^## [^\r\n]+/m.exec(notes)?.[0]
+  )
+}
+
+function registryNotes(product, version, ref, changelogRef) {
+  const bundle = renderNotesBundle(product, version, ref)
+  const labels = releaseNoteLabels(ref)
+  for (const path of notePaths(product, ref)) {
+    const prefix = `${product}/release-notes/${version}.`
+    if (!path.startsWith(prefix) || !path.endsWith('.pre-update.md')) continue
+    const locale = path.slice(prefix.length, -'.pre-update.md'.length)
+    if (
+      isLocale(locale) &&
+      locale !== ENGLISH &&
+      !Object.hasOwn(bundle, locale)
+    )
+      bundle[locale] = decodeUtf8(renderNotes(product, version, ref, locale))
+  }
+  const composed = Object.fromEntries(
+    Object.entries(bundle).map(([locale, notes]) => {
+      const heading = registryHighlightsHeading(
+        product,
+        version,
+        ref,
+        locale,
+        notes,
+      )
+      return [
+        locale,
+        placeChangelogLink(
+          composeReleaseNotes(
+            notes,
+            preUpdateNotes(product, version, ref, locale),
+          ),
+          changelogLink(product, version, changelogRef, locale, labels),
+          heading,
+        ),
+      ]
+    }),
+  )
+  const { en_US: english, ...translations } = composed
+  return { releaseNotes: english, releaseNotesTranslations: translations }
 }
 
 function checkManifestVersion(
@@ -732,7 +880,7 @@ function sync() {
 }
 
 const USAGE =
-  'usage: changelog.mjs projects | changed BASE | validate PRODUCT | version PRODUCT | check-version PRODUCT [VERSION] | render PRODUCT VERSION [--ref REF] | notes PRODUCT VERSION [--ref REF] [--locale LOCALE] | notes-bundle PRODUCT VERSION [--ref REF] | locales PRODUCT VERSION [--ref REF] | archives PRODUCT [--ref REF] | section VERSION | sync'
+  'usage: changelog.mjs projects | changed BASE | validate PRODUCT | version PRODUCT | check-version PRODUCT [VERSION] | render PRODUCT VERSION [--ref REF] | notes PRODUCT VERSION [--ref REF] [--locale LOCALE] | notes-bundle PRODUCT VERSION [--ref REF] | release-notes PRODUCT VERSION [--ref REF] | registry-notes PRODUCT VERSION [--ref REF] [--changelog-ref REF] | locales PRODUCT VERSION [--ref REF] | archives PRODUCT [--ref REF] | section VERSION | sync'
 
 try {
   const { values, positionals } = parseArgs({
@@ -740,6 +888,7 @@ try {
     options: {
       ref: { type: 'string' },
       locale: { type: 'string' },
+      'changelog-ref': { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
   })
@@ -753,6 +902,8 @@ try {
     render: [2],
     notes: [2],
     'notes-bundle': [2],
+    'release-notes': [2],
+    'registry-notes': [2],
     locales: [2],
     archives: [1],
     section: [1],
@@ -762,9 +913,16 @@ try {
     !values.help &&
     (!counts[command]?.includes(args.length) ||
       (values.ref !== undefined &&
-        !['render', 'notes', 'notes-bundle', 'locales', 'archives'].includes(
-          command,
-        )) ||
+        ![
+          'render',
+          'notes',
+          'notes-bundle',
+          'release-notes',
+          'registry-notes',
+          'locales',
+          'archives',
+        ].includes(command)) ||
+      (values['changelog-ref'] !== undefined && command !== 'registry-notes') ||
       (values.locale !== undefined &&
         (command !== 'notes' || !isLocale(values.locale))))
   ) {
@@ -789,6 +947,21 @@ try {
     console.log(
       JSON.stringify(
         renderNotesBundle(productPath(args[0]), args[1], values.ref),
+      ),
+    )
+  else if (command === 'release-notes')
+    process.stdout.write(
+      releaseNotes(productPath(args[0]), args[1], values.ref),
+    )
+  else if (command === 'registry-notes')
+    console.log(
+      JSON.stringify(
+        registryNotes(
+          productPath(args[0]),
+          args[1],
+          values.ref,
+          values['changelog-ref'],
+        ),
       ),
     )
   else if (command === 'locales')

@@ -31,6 +31,8 @@ function releaseFixture(t) {
     copyFileSync(join(REPO, 'scripts', script), join(root, 'scripts', script))
   for (const config of ['package.json', '.prettierrc.json'])
     copyFileSync(join(REPO, config), join(root, config))
+  const labels = 'shared-libs/crates/start-core/locales/release-notes.json'
+  write(labels, readFileSync(join(REPO, labels)))
   const main = write(`projects/start-sdk/release-notes/${VERSION}.md`, MAIN)
   const preUpdate = join(
     root,
@@ -251,7 +253,10 @@ test('sparse deploy canonical versions and notes', t => {
       })
     const compiled = compile()
     assert.equal(compiled.status, 0, compiled.stderr)
-    assert.equal(text(join(runnerTemp, 'release-notes.md')), derived)
+    assert.deepEqual(JSON.parse(text(join(runnerTemp, 'release-notes.json'))), {
+      releaseNotes: derived,
+      releaseNotesTranslations: {},
+    })
     const fragmentPath = `checkout-${project}/projects/${project}/changelog/patch-fixed-feature.md`
     write(fragmentPath, '---\nuser-facing: invalid\n---\n\n- Invalid.\n')
     const invalid = compile()
@@ -938,4 +943,458 @@ cp = $(if $(filter %/release-notes.md,$(2))$(findstring /release-notes/,$(2)),$(
   assert.equal(text(join(stage, 'release-notes.md')), generatedOnly)
   assert.equal(text(copies), copiedBeforeFailure)
   assert.deepEqual(renderTemps(), [])
+})
+
+test('registry payload composes localized notes, warnings, fallbacks and links', t => {
+  const f = releaseFixture(t)
+  const { root, env, write, script, run, git, commit } = f
+  delete env.CHANGELOG_REF
+  git('init', '-q')
+  git('remote', 'add', 'origin', root)
+  write(`projects/start-sdk/release-notes/${VERSION}.md`, FRAMING)
+  write(`projects/start-sdk/release-notes/${VERSION}.pre-update.md`, PRE_UPDATE)
+  write(
+    `projects/start-sdk/release-notes/${VERSION}.pl_PL.md`,
+    'Wstęp.\n\n## Nowości\n\n<!-- highlights -->\n\n## Ważne\n\nWażna uwaga.\n',
+  )
+  write(
+    `projects/start-sdk/release-notes/${VERSION}.pl_PL.pre-update.md`,
+    '## Przed aktualizacją\n\nPolskie ostrzeżenie.\n',
+  )
+  write(
+    `projects/start-sdk/release-notes/${VERSION}.de_DE.md`,
+    '## Neuigkeiten\n\n<!-- highlights -->\n\n## Wichtig\n\nHinweis.\n',
+  )
+  write(`projects/start-sdk/release-notes/${VERSION}.de_DE.pre-update.md`, '')
+  write(
+    `projects/start-sdk/release-notes/${VERSION}.es_ES.md`,
+    '## Novedades\n\n<!-- highlights -->\n',
+  )
+  write(
+    `projects/start-sdk/release-notes/${VERSION}.fr_FR.pre-update.md`,
+    '## Avant la mise à jour\n\nAttention.\n',
+  )
+  write(
+    'projects/start-sdk/changelog/patch-added-feature.md',
+    METADATA + '- Feature.\n',
+  )
+  write(
+    'projects/start-sdk/changelog/patch-added-feature.pl_PL.md',
+    '- Funkcja.\n',
+  )
+  write(
+    'projects/start-sdk/changelog/patch-fixed-other.md',
+    METADATA + '- Another fix.\n',
+  )
+  write(
+    'projects/start-sdk/changelog/patch-changed-internal.md',
+    '---\nuser-facing: false\n---\n\n- Internal.\n',
+  )
+  commit()
+  const snapshot = git('rev-parse', 'HEAD').trim()
+  const payload = () => JSON.parse(script('registry-notes').stdout)
+  const notes = payload()
+  const { releaseNotes: english, releaseNotesTranslations: translations } =
+    notes
+  assert.deepEqual(Object.keys(translations).sort(), [
+    'de_DE',
+    'es_ES',
+    'fr_FR',
+    'pl_PL',
+  ])
+  assert.equal(Object.hasOwn(translations, 'en_US'), false)
+  assert.equal(script('notes').stdout, english)
+  contains(english, PRE_UPDATE)
+  contains(english, 'Lede.')
+  contains(english, 'Follow up.')
+  contains(english, '/releases/tag/start-sdk/v1.2.3')
+  assert.ok(english.indexOf('Full changelog') < english.indexOf('## Important'))
+  contains(translations.pl_PL, 'Wstęp.')
+  contains(translations.pl_PL, 'Ważna uwaga.')
+  contains(translations.pl_PL, '- Funkcja.')
+  contains(translations.pl_PL, '- Another fix.')
+  contains(translations.pl_PL, 'Polskie ostrzeżenie.')
+  contains(translations.pl_PL, 'Pełna lista zmian')
+  excludes(translations.pl_PL, 'Prepare first.')
+  assert.ok(
+    translations.pl_PL.indexOf('Pełna lista zmian') <
+      translations.pl_PL.indexOf('## Ważne'),
+  )
+  contains(translations.de_DE, PRE_UPDATE)
+  contains(translations.de_DE, '- Feature.')
+  contains(translations.de_DE, '- Another fix.')
+  contains(translations.de_DE, 'Vollständiges Änderungsprotokoll')
+  assert.ok(
+    translations.de_DE.indexOf('Vollständiges') <
+      translations.de_DE.indexOf('## Wichtig'),
+  )
+  contains(translations.es_ES, PRE_UPDATE)
+  contains(translations.es_ES, 'Registro completo de cambios')
+  contains(translations.fr_FR, 'Attention.')
+  contains(translations.fr_FR, '- Feature.')
+  contains(translations.fr_FR, 'Journal complet des modifications')
+  for (const body of [english, ...Object.values(translations)]) {
+    excludes(body, 'Internal.')
+    excludes(body, '<!-- highlights -->')
+  }
+  const welcome = run(
+    process.execPath,
+    ['scripts/changelog.mjs', 'notes-bundle', 'projects/start-sdk', VERSION],
+    { encoding: 'utf8' },
+  )
+  assert.equal(welcome.status, 0, welcome.stderr)
+  excludes(welcome.stdout, 'Prepare first.')
+  excludes(welcome.stdout, 'Polskie ostrzeżenie.')
+  excludes(welcome.stdout, 'Attention.')
+  excludes(welcome.stdout, 'Full changelog')
+  const github = script('body').stdout
+  contains(github, PRE_UPDATE)
+  contains(github, 'Lede.')
+  contains(github, 'Follow up.')
+  excludes(github, 'Wstęp.')
+  excludes(github, 'Full changelog for')
+
+  env.CHANGELOG_REF = snapshot
+  const pending = payload()
+  contains(pending.releaseNotes, 'Full changelog fragments for v1.2.3')
+  contains(pending.releaseNotes, 'changes awaiting release.')
+  contains(
+    pending.releaseNotesTranslations.pl_PL,
+    `/tree/${snapshot}/projects/start-sdk/changelog`,
+  )
+  env.NOTES_REF = snapshot
+  write(
+    `projects/start-sdk/release-notes/${VERSION}.pl_PL.pre-update.md`,
+    'Later warning.\n',
+  )
+  write(
+    'projects/start-sdk/changelog/patch-fixed-other.md',
+    METADATA + '- Later fix.\n',
+  )
+  assert.deepEqual(
+    payload(),
+    pending,
+    'publishing from a ref uses its notes and warnings',
+  )
+  delete env.NOTES_REF
+  delete env.CHANGELOG_REF
+})
+
+test('registry publishers pass English prose and a separate non-English JSON flag', t => {
+  const { root, env, write, run, script } = releaseFixture(t)
+  write(`projects/start-wrt/release-notes/${VERSION}.md`, MAIN)
+  write(
+    `projects/start-wrt/release-notes/${VERSION}.pl_PL.md`,
+    'Polskie nowości.\n',
+  )
+  const expected = JSON.parse(script('registry-notes', 'start-wrt').stdout)
+  const capture = join(root, 'arguments')
+  const harness = `
+source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
+REPO_ROOT="$PWD"; PROJECT=start-wrt; KIND=wrt; VERSION=1.2.3
+load_registry_index() { _INDEX_JSON='{"versions":{"1.2.3":{"sourceVersion":">=0.1.0"}}}'; }
+enter_release_dir() { :; }
+release_files() { :; }
+start-cli() {
+    if [ "$1" = registry ]; then echo --release-notes-translations
+    else printf '%s\\0' "$@" > "${capture}"
+    fi
+}
+`
+  for (const command of [
+    'refresh_registry_notes fixture-registry',
+    'cmd_register',
+  ]) {
+    const result = run('bash', ['-c', harness + command], { encoding: 'utf8' })
+    assert.equal(result.status, 0, result.stderr)
+    const args = text(capture).split('\0').slice(0, -1)
+    assert.deepEqual(args.slice(1, 7), [
+      'registry',
+      'os',
+      'version',
+      'add',
+      VERSION,
+      `v${VERSION}`,
+    ])
+    assert.equal(args[7], expected.releaseNotes.trimEnd())
+    assert.equal(args[9], '--release-notes-translations')
+    assert.deepEqual(JSON.parse(args[10]), expected.releaseNotesTranslations)
+  }
+  for (const [workflow, name] of [
+    ['startos-iso.yaml', 'Register OS version'],
+    ['start-wrt.yaml', 'Register StartWRT version in the target registry'],
+  ]) {
+    const source = text(join(REPO, '.github/workflows', workflow))
+    const step = source
+      .split(`      - name: ${name}\n`)[1]
+      .split('        run: |\n')[1]
+      .split('\n      - ')[0]
+    const shell = step
+      .split('\n')
+      .map(line => line.slice(10))
+      .join('\n')
+      .replaceAll('${{ env.REGISTRY }}', 'fixture-registry')
+    const runnerTemp = join(root, 'runner')
+    write('runner/release-notes.json', JSON.stringify(expected))
+    const result = run(
+      'bash',
+      [
+        '-e',
+        '-c',
+        `start-cli() { printf '%s\\0' "$@" > "${capture}"; }\n${shell}`,
+      ],
+      { encoding: 'utf8', env: { ...env, RUNNER_TEMP: runnerTemp } },
+    )
+    assert.equal(result.status, 0, result.stderr)
+    const args = text(capture).split('\0').slice(0, -1)
+    assert.equal(args[7], expected.releaseNotes.trimEnd())
+    assert.equal(args[9], '--release-notes-translations')
+    assert.deepEqual(JSON.parse(args[10]), expected.releaseNotesTranslations)
+  }
+})
+
+test('localized compiler failures prevent registry writes and warning edits block alpha adoption', t => {
+  const { root, write, run, git, commit } = releaseFixture(t)
+  git('init', '-q')
+  git('remote', 'add', 'origin', root)
+  write(`projects/start-wrt/release-notes/${VERSION}.md`, FRAMING)
+  write(
+    `projects/start-wrt/release-notes/${VERSION}.pl_PL.md`,
+    '## Nowości\n\n<!-- highlights -->\n',
+  )
+  write(
+    'projects/start-wrt/changelog/patch-fixed-feature.md',
+    METADATA + '- Feature.\n',
+  )
+  commit()
+  const adopted = git('rev-parse', 'HEAD').trim()
+  const harness = `
+source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
+REPO_ROOT="$PWD"; PROJECT=start-wrt; KIND=wrt; VERSION=1.2.3; COMMIT="${adopted}"
+`
+  const check = () =>
+    run('bash', ['-c', harness + 'assert_metadata_matches_adopted'], {
+      encoding: 'utf8',
+    })
+  assert.equal(check().status, 0)
+  const warning = `projects/start-wrt/release-notes/${VERSION}.pl_PL.pre-update.md`
+  write(warning, 'Translated preparation.\n')
+  const changed = check()
+  assert.notEqual(changed.status, 0)
+  contains(changed.stderr, 'localized pre-update warnings')
+  unlinkSync(join(root, warning))
+  const marker = join(root, 'registry-write')
+  write(
+    `projects/start-wrt/release-notes/${VERSION}.pl_PL.md`,
+    '## Nowości\n\n- Invalid authored highlights.\n',
+  )
+  for (const command of [
+    'refresh_registry_notes fixture-registry',
+    'cmd_register',
+  ]) {
+    const failed = run(
+      'bash',
+      [
+        '-c',
+        harness +
+          `
+load_registry_index() { touch "${marker}"; }
+enter_release_dir() { touch "${marker}"; }
+start-cli() { touch "${marker}"; }
+${command}
+`,
+      ],
+      { encoding: 'utf8' },
+    )
+    assert.notEqual(failed.status, 0)
+    contains(failed.stderr, 'localized framing needs <!-- highlights -->')
+    assert.equal(existsSync(marker), false)
+  }
+})
+
+test('registry source refs pin shared link translations and reject mismatched alpha metadata', t => {
+  const { root, env, write, script, run, git, commit } = releaseFixture(t)
+  delete env.CHANGELOG_REF
+  git('init', '-q')
+  git('remote', 'add', 'origin', root)
+  write(`projects/start-sdk/release-notes/${VERSION}.md`, FRAMING)
+  write(
+    `projects/start-sdk/release-notes/${VERSION}.pl_PL.md`,
+    '## Nowości\n\n<!-- highlights -->\n',
+  )
+  write(
+    'projects/start-sdk/changelog/patch-fixed-feature.md',
+    METADATA + '- Feature.\n',
+  )
+  commit()
+  const adopted = git('rev-parse', 'HEAD').trim()
+  const original = JSON.parse(script('registry-notes').stdout)
+  const catalog = 'shared-libs/crates/start-core/locales/release-notes.json'
+  const labels = JSON.parse(text(join(root, catalog)))
+  labels['release-notes.full-changelog'].pl_PL =
+    '**[Zmieniony odsyłacz %{version}](%{url})**'
+  write(catalog, JSON.stringify(labels))
+  contains(
+    JSON.parse(script('registry-notes').stdout).releaseNotesTranslations.pl_PL,
+    'Zmieniony odsyłacz',
+  )
+  const pinned = run(
+    process.execPath,
+    [
+      'scripts/changelog.mjs',
+      'registry-notes',
+      'projects/start-sdk',
+      VERSION,
+      '--ref',
+      adopted,
+    ],
+    { encoding: 'utf8' },
+  )
+  assert.equal(pinned.status, 0, pinned.stderr)
+  assert.deepEqual(JSON.parse(pinned.stdout), original)
+  const mismatch = run(
+    'bash',
+    [
+      '-c',
+      `
+source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
+REPO_ROOT="$PWD"; PROJECT=start-sdk; KIND=npm; VERSION=1.2.3; COMMIT="${adopted}"
+assert_metadata_matches_adopted
+`,
+    ],
+    { encoding: 'utf8' },
+  )
+  assert.notEqual(mismatch.status, 0)
+  contains(mismatch.stderr, 'release-note bundle')
+})
+
+test('archived localized Highlights retain their link position and source URL', t => {
+  const { root, env, write, script, run, git, commit } = releaseFixture(t)
+  git('init', '-q')
+  git('remote', 'add', 'origin', root)
+  write(`projects/start-sdk/release-notes/${VERSION}.md`, FRAMING)
+  write(
+    `projects/start-sdk/release-notes/${VERSION}.pl_PL.md`,
+    'Wstęp.\n\n## Przedmowa\n\nUwaga.\n\n## Nowości\n\n<!-- highlights -->\n\n## Ważne\n\nWażna uwaga.\n',
+  )
+  write(
+    'projects/start-sdk/changelog/patch-fixed-feature.md',
+    METADATA + '- Feature.\n',
+  )
+  commit()
+  git('-c', 'tag.gpgsign=false', 'tag', 'start-sdk/v1.2.3')
+  env.CHANGELOG_REF = 'HEAD'
+  const pending = JSON.parse(script('registry-notes').stdout)
+  const synced = run(process.execPath, ['scripts/changelog.mjs', 'sync'], {
+    encoding: 'utf8',
+  })
+  assert.equal(synced.status, 0, synced.stderr)
+  commit()
+  const archived = JSON.parse(script('registry-notes').stdout)
+  const polish = archived.releaseNotesTranslations.pl_PL
+  contains(polish, '/blob/HEAD/projects/start-sdk/CHANGELOG.md#123')
+  assert.ok(polish.indexOf('- Feature.') < polish.indexOf('Pełna lista zmian'))
+  assert.ok(polish.indexOf('Pełna lista zmian') < polish.indexOf('## Ważne'))
+  assert.equal(
+    polish.replace(
+      /blob\/HEAD\/projects\/start-sdk\/CHANGELOG.md#123/,
+      'tree/HEAD/projects/start-sdk/changelog',
+    ),
+    pending.releaseNotesTranslations.pl_PL,
+  )
+})
+
+test('CLI capability gates registry writes and CI uploads without gating pure notes', t => {
+  const { root, env, write, script, run, nodeExecutable } = releaseFixture(t)
+  write(`projects/start-wrt/release-notes/${VERSION}.md`, MAIN)
+  const marker = join(root, 'registry-write')
+  const helpCalls = join(root, 'help-calls')
+  nodeExecutable(
+    'bin/start-cli',
+    `
+import { appendFileSync, writeFileSync } from 'node:fs'
+const args = process.argv.slice(2)
+if (args.at(-1) === '--help') {
+  appendFileSync(process.env.HELP_CALLS, JSON.stringify(args) + '\\n')
+  console.log(process.env.CLI_HELP || 'English-only CLI help')
+  process.exit(Number(process.env.HELP_STATUS || 0))
+}
+writeFileSync(process.env.WRITE_MARKER, JSON.stringify(args))
+`,
+  )
+  Object.assign(env, {
+    PATH: `${join(root, 'bin')}:${env.PATH}`,
+    HELP_CALLS: helpCalls,
+    WRITE_MARKER: marker,
+  })
+  script('notes', 'start-wrt')
+  script('registry-notes', 'start-wrt')
+  assert.equal(existsSync(marker), false)
+  assert.equal(
+    existsSync(helpCalls),
+    false,
+    'note compilation must not require an installed CLI',
+  )
+  const harness = `
+source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
+REPO_ROOT="$PWD"; PROJECT=start-wrt; KIND=wrt; VERSION=1.2.3
+load_registry_index() { touch "${marker}"; }
+enter_release_dir() { touch "${marker}"; }
+`
+  for (const command of [
+    'refresh_registry_notes fixture-registry',
+    'cmd_register',
+  ]) {
+    const rejected = run('bash', ['-c', harness + command], {
+      encoding: 'utf8',
+    })
+    assert.notEqual(rejected.status, 0)
+    contains(rejected.stderr, 'update it before publishing registry notes')
+    assert.equal(existsSync(marker), false)
+  }
+  for (const [workflow, product, upload] of [
+    ['startos-iso.yaml', 'start-os', 'Upload to S3'],
+    ['start-wrt.yaml', 'start-wrt', 'Upload images to S3'],
+  ]) {
+    const source = text(join(REPO, '.github/workflows', workflow)).split(
+      '\n  deploy:\n',
+    )[1]
+    const install = source
+      .split('      - name: Install start-cli\n')[1]
+      .split('\n      - name: ')[0]
+    const command = `./scripts/manage-release.sh check-registry-notes-cli ${product}`
+    contains(install, command)
+    assert.ok(source.indexOf(command) < source.indexOf(`- name: ${upload}`))
+    assert.ok(
+      source.indexOf(command) <
+        source.indexOf('- name: Drop the previous alpha build'),
+    )
+    const rejected = run('bash', ['-e', '-c', command], { encoding: 'utf8' })
+    assert.notEqual(rejected.status, 0)
+    contains(rejected.stderr, 'lacks --release-notes-translations')
+  }
+  env.CLI_HELP = 'Options:\n  --release-notes-translations <JSON>\n'
+  script('check-registry-notes-cli', 'start-wrt')
+  env.HELP_STATUS = '1'
+  script('check-registry-notes-cli', 'start-wrt', false)
+  assert.equal(existsSync(marker), false)
+  for (const call of text(helpCalls).trim().split('\n'))
+    assert.deepEqual(JSON.parse(call), [
+      'registry',
+      'os',
+      'version',
+      'add',
+      '--help',
+    ])
+})
+
+test('historical CRLF English notes retain changelog link placement', t => {
+  const { write, script } = releaseFixture(t)
+  write(
+    `projects/start-sdk/release-notes/${VERSION}.md`,
+    MAIN.replaceAll('\n', '\r\n'),
+  )
+  const notes = script().stdout
+  contains(notes, 'Lede.\r\n')
+  assert.ok(notes.indexOf('Full changelog') < notes.indexOf('## Important'))
 })

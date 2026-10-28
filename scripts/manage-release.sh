@@ -39,7 +39,6 @@ S3_CDN="https://startos-images.nyc3.cdn.digitaloceanspaces.com"
 S3_ORIGIN="https://startos-images.nyc3.digitaloceanspaces.com"
 START9_GPG_KEY="2D63C217"
 SDK_NPM_PACKAGE="@start9labs/start-sdk"
-CHANGELOG_LINK_PREFIX="**[Full changelog"
 CHANGELOG_SUMMARY="<summary>Full changelog</summary>"
 
 # The S3 origin, deliberately NOT the `*.cdn.*` host that apt/start9*.list point
@@ -118,48 +117,20 @@ pre_update_notes_path() {
     echo "${notes%.md}.pre-update.md"
 }
 
-changelog_link() {
-    local ref="${CHANGELOG_REF:-}"
-    if [ -z "$ref" ]; then
-        echo "${CHANGELOG_LINK_PREFIX} for v${VERSION}](https://github.com/${REPO}/releases/tag/${TAG})** — every change in this release."
-    elif (cd "$REPO_ROOT" && git cat-file -e "${ref}:projects/${PROJECT}/changelog" 2>/dev/null); then
-        echo "${CHANGELOG_LINK_PREFIX} fragments for v${VERSION}](https://github.com/${REPO}/tree/${ref}/projects/${PROJECT}/changelog)** — changes awaiting release."
-    else
-        local anchor="${VERSION//./}"
-        anchor="${anchor//+/}"
-        echo "${CHANGELOG_LINK_PREFIX} for v${VERSION}](https://github.com/${REPO}/blob/${ref}/projects/${PROJECT}/CHANGELOG.md#${anchor,,})** — every change in this release."
-    fi
-}
+composed_notes() (
+    cd "$REPO_ROOT"
+    node scripts/changelog.mjs release-notes "projects/$PROJECT" "$VERSION" \
+        ${NOTES_REF:+--ref "$NOTES_REF"}
+)
 
-composed_notes() {
-    local pre_update="projects/$PROJECT/release-notes/${VERSION}.pre-update.md"
-    if [ -n "${NOTES_REF:-}" ]; then
-        if git -C "$REPO_ROOT" cat-file -e "${NOTES_REF}:${pre_update}" 2>/dev/null; then
-            git -C "$REPO_ROOT" show "${NOTES_REF}:${pre_update}"
-            printf '\n\n'
-        fi
-    elif [ -s "$REPO_ROOT/$pre_update" ]; then
-        cat "$REPO_ROOT/$pre_update"
-        printf '\n\n'
-    fi
-    (cd "$REPO_ROOT" && node scripts/changelog.mjs notes "projects/$PROJECT" "$VERSION" ${NOTES_REF:+--ref "$NOTES_REF"})
-}
+registry_notes() (
+    cd "$REPO_ROOT"
+    node scripts/changelog.mjs registry-notes "projects/$PROJECT" "$VERSION" \
+        ${NOTES_REF:+--ref "$NOTES_REF"} ${CHANGELOG_REF:+--changelog-ref "$CHANGELOG_REF"}
+)
 
 curated_notes() {
-    composed_notes | place_changelog_link
-}
-
-place_changelog_link() {
-    awk -v link="$(changelog_link)" -v prefix="$CHANGELOG_LINK_PREFIX" '
-        index($0, prefix) == 1 { dropped = 1; next }
-        dropped { dropped = 0; if ($0 == "") next }
-        /^## / {
-            if (in_highlights) { print link; print ""; placed = 1; in_highlights = 0 }
-            if (tolower($0) ~ /^## highlights/) in_highlights = 1
-        }
-        { print }
-        END { if (!placed) { if (NR) print ""; print link } }
-    '
+    registry_notes | jq -j '.releaseNotes'
 }
 
 project_display_name() {
@@ -276,9 +247,21 @@ missing_registry_assets() {
     echo "$missing"
 }
 
+check_registry_notes_cli() {
+    local help
+    help=$(start-cli registry os version add --help) || return
+    if ! grep -q -- '--release-notes-translations' <<< "$help"; then
+        >&2 echo "  ✗ start-cli lacks --release-notes-translations; update it before publishing registry notes."
+        return 1
+    fi
+}
+
 refresh_registry_notes() {
-    local registry=$1 range notes
-    notes=$(curated_notes) || return
+    local registry=$1 range payload notes translations
+    payload=$(registry_notes) || return
+    check_registry_notes_cli || return
+    notes=$(jq -r '.releaseNotes' <<< "$payload")
+    translations=$(jq -c '.releaseNotesTranslations' <<< "$payload")
     load_registry_index "$registry"
     range=$(jq -r --arg v "$VERSION" '.versions[$v].sourceVersion // empty' <<< "$_INDEX_JSON")
     if [ -z "$range" ]; then
@@ -287,7 +270,8 @@ refresh_registry_notes() {
     fi
     echo "Setting ${VERSION} release notes on ${registry}..."
     start-cli --registry="$registry" registry os version add \
-        "$VERSION" "v${VERSION}" "$notes" "$range"
+        "$VERSION" "v${VERSION}" "$notes" "$range" \
+        --release-notes-translations "$translations"
     _INDEX_REGISTRY=""
 }
 
@@ -633,6 +617,14 @@ assert_metadata_matches_adopted() {
         >&2 echo "      ./scripts/manage-release.sh release ${PROJECT}"
         return 1
     done
+    if ! compiled_metadata_matches registry-notes "$adopted"; then
+        if [ -n "${UNCOMMITTED_NOTES:-}" ]; then
+            >&2 echo "  ! release-note bundle (including localized pre-update warnings) differs from ${adopted}; releasing it anyway (UNCOMMITTED_NOTES)"
+        else
+            >&2 echo "  ✗ release-note bundle (including localized pre-update warnings) differs from the commit being tagged (${adopted})."
+            return 1
+        fi
+    fi
 }
 
 # Clear every payload this staging path produces, both halves. Clearing only the
@@ -836,11 +828,15 @@ cmd_pre_check() {
         errors=1
     fi
 
-    if (cd "$REPO_ROOT" && node scripts/changelog.mjs notes-bundle "projects/$PROJECT" "$VERSION" > /dev/null); then
-        echo "  ✓ release highlights compile"
+    if (cd "$REPO_ROOT" && node scripts/changelog.mjs registry-notes "projects/$PROJECT" "$VERSION" > /dev/null); then
+        echo "  ✓ release notes compile"
     else
         errors=1
     fi
+
+    case "$KIND" in
+        os | wrt) check_registry_notes_cli || errors=1 ;;
+    esac
 
     # releases/latest can resolve to another product's release.
     if [ "$KIND" = os ]; then
@@ -1481,8 +1477,11 @@ cmd_index() {
 
 cmd_register() {
     require_kind wrt
-    local notes
-    notes=$(curated_notes) || return
+    local payload notes translations
+    payload=$(registry_notes) || return
+    check_registry_notes_cli || return
+    notes=$(jq -r '.releaseNotes' <<< "$payload")
+    translations=$(jq -c '.releaseNotesTranslations' <<< "$payload")
     # Register + index a CI build into the source (beta) registry, where beta
     # routers soak it before `release` promotes it into production. Normally
     # the CI deploy job (start-wrt.yaml) does this itself right after the S3
@@ -1493,7 +1492,8 @@ cmd_register() {
     enter_release_dir
     echo "Registering StartWRT ${VERSION} in ${STARTWRT_SOURCE_REGISTRY}..."
     start-cli --registry="$STARTWRT_SOURCE_REGISTRY" registry os version add \
-        "$VERSION" "v$VERSION" "$notes" "${STARTWRT_COMPAT_FLOOR} <=$VERSION"
+        "$VERSION" "v$VERSION" "$notes" "${STARTWRT_COMPAT_FLOOR} <=$VERSION" \
+        --release-notes-translations "$translations"
 
     # start-cli infers the asset slot from the file extension and only accepts
     # iso/img/squashfs. Both images ship gzipped, so present each under a
@@ -1690,6 +1690,11 @@ cmd_notes() {
     curated_notes
 }
 
+cmd_registry_notes() {
+    require_kind os cli deb npm wrt
+    registry_notes
+}
+
 cmd_body() {
     require_kind os cli deb npm wrt
     if [ "$KIND" != npm ]; then
@@ -1788,8 +1793,12 @@ Subcommands:
                      signatures.tar.gz. (os/cli/deb/wrt; run 'pull' first.)
   notes              Print compiled Highlights and release-manager framing,
                      prefixed by optional release-notes/<version>.pre-update.md
-                     — what the registries
-                     serve to the in-product update screens. (all projects.)
+                     and a full-changelog link. English Markdown. (all projects.)
+  check-registry-notes-cli
+                     Check the installed CLI supports translated registry notes.
+  registry-notes     Print the registry publishing JSON: English releaseNotes
+                     and non-English releaseNotesTranslations, with localized
+                     warnings and changelog links. (all projects.)
   body               Print the whole GitHub release body: notes, an expandable
                      changelog, downloads and checksums. (all projects.)
   release            Run the full applicable pipeline for the project, skipping
@@ -1863,6 +1872,8 @@ case "$SUBCOMMAND" in
     sign) cmd_sign ;;
     cosign) cmd_cosign ;;
     notes) cmd_notes ;;
+    registry-notes) cmd_registry_notes ;;
+    check-registry-notes-cli) check_registry_notes_cli ;;
     body) cmd_body ;;
     release) cmd_release ;;
     *)

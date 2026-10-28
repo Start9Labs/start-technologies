@@ -537,6 +537,7 @@ jobs:
             scripts
             projects/start-os/release-notes
             projects/start-os/changelog
+            shared-libs/crates/start-core/locales
 
       - uses: actions/setup-node@v6
         with:
@@ -553,7 +554,7 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh notes start-os > "$RUNNER_TEMP/release-notes.md"
+          CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh registry-notes start-os > "$RUNNER_TEMP/release-notes.json"
 
       - name: Determine platforms
         id: platforms
@@ -605,6 +606,7 @@ jobs:
             "$DOWNLOAD_URL" -o /tmp/start-cli
           sudo install -m 755 /tmp/start-cli /usr/local/bin/start-cli
           echo "start-cli: $(start-cli --version)"
+          ./scripts/manage-release.sh check-registry-notes-cli start-os
 
       - name: Configure S3
         run: |
@@ -677,9 +679,11 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          NOTES=$(cat "$RUNNER_TEMP/release-notes.md")
+          NOTES=$(jq -r '.releaseNotes' "$RUNNER_TEMP/release-notes.json")
+          TRANSLATIONS=$(jq -c '.releaseNotesTranslations' "$RUNNER_TEMP/release-notes.json")
           start-cli --registry="${{ env.REGISTRY }}" registry os version add \
-            "$VERSION" "v${VERSION}" "$NOTES" ">=0.3.5 <=${VERSION}"
+            "$VERSION" "v${VERSION}" "$NOTES" ">=0.3.5 <=${VERSION}" \
+            --release-notes-translations "$TRANSLATIONS"
 
       - name: Index assets in registry
         run: |
