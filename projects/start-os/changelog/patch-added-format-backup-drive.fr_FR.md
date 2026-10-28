@@ -1,0 +1,1 @@
+- **Formater un disque de sauvegarde depuis StartOS.** Dans `Système > Créer une sauvegarde`, « Formater un disque » efface un disque connecté et y crée une seule partition Btrfs prête pour les sauvegardes. Le disque contenant StartOS ou ses données est refusé. Également disponible avec `start-cli disk format`.
