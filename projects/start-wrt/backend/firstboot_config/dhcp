@@ -34,6 +34,7 @@ config dhcp lan
 	option ra		server
 	option dhcpv6		server
 	option ra_management	1
+	option force	1
 
 config dhcp wan
 	option interface	wan

@@ -15,27 +15,27 @@ The `s9pk.mk` file contains all the common build logic shared across StartOS pac
 
 ### Targets
 
-| Target               | Description                                          |
-| -------------------- | ---------------------------------------------------- |
-| `make` or `make all` | Build for all architectures (default)                |
-| `make x86`           | Build for x86_64 only                                |
-| `make arm`           | Build for aarch64 only                               |
-| `make riscv`         | Build for riscv64 only                               |
-| `make universal`     | Build a single package containing all architectures  |
-| `make format`        | Format `startos/` with the SDK's Prettier config     |
-| `make install`       | Install the most recent .s9pk to your StartOS server |
-| `make clean`         | Remove build artifacts                               |
+| Target               | Description                                         |
+| -------------------- | --------------------------------------------------- |
+| `make` or `make all` | Build for all architectures (default)               |
+| `make x86`           | Build for x86_64 only                               |
+| `make arm`           | Build for aarch64 only                              |
+| `make riscv`         | Build for riscv64 only                              |
+| `make universal`     | Build a single package containing all architectures |
+| `make format`        | Format `startos/` with the SDK's Prettier config    |
+| `make install`       | Build for your server's architecture and install    |
+| `make clean`         | Remove build artifacts                              |
 
 ### Variables
 
-| Variable       | Default                        | Description                                 |
-| -------------- | ------------------------------ | ------------------------------------------- |
-| `ARCHES`       | `x86 arm riscv`                | Architectures to build by default           |
-| `TARGETS`      | `arches`                       | Default build target                        |
-| `VARIANT`      | (unset)                        | Optional variant suffix for package name    |
-| `TS_CHECK`     | `npx tsc --noEmit`             | Type-check step of the build gate           |
-| `FORMAT_CHECK` | `npx prettier --check startos` | Formatting step of the build gate           |
-| `JS_BUNDLE`    | `npx ncc build …`              | Bundle step producing `javascript/index.js` |
+| Variable    | Default                        | Description                                 |
+| ----------- | ------------------------------ | ------------------------------------------- |
+| `ARCHES`    | `x86 arm riscv`                | Architectures to build by default           |
+| `TARGETS`   | `$(ARCHES)`                    | Default build targets                       |
+| `VARIANT`   | (unset)                        | Optional variant suffix for package name    |
+| `TS_CHECK`  | `npx tsc --noEmit`             | Type-check step of the build gate           |
+| `FORMAT`    | `npx prettier --write startos` | Formatting step of the build                |
+| `JS_BUNDLE` | `npx ncc build …`              | Bundle step producing `javascript/index.js` |
 
 ## Makefile
 
@@ -58,10 +58,10 @@ include node_modules/@start9labs/start-sdk/s9pk.mk
 .PHONY: generic rocm
 
 generic:
-	$(MAKE) all_arches VARIANT=generic
+	$(MAKE) arches VARIANT=generic
 
 rocm:
-	ROCM=1 $(MAKE) all_arches VARIANT=rocm ARCHES=x86_64
+	ROCM=1 $(MAKE) arches VARIANT=rocm ARCHES=x86_64
 ```
 
 This produces packages named `myservice_generic_x86_64.s9pk` and `myservice_rocm_x86_64.s9pk`.
@@ -105,9 +105,9 @@ make clean
 You can chain multiple targets in a single invocation:
 
 ```bash
-make clean arm                    # Clean, then build ARM package
-make clean x86 install            # Clean, build x86 package, then install
-make clean universal install      # Clean, build universal, then install
+make clean arm          # Clean, then build ARM package
+make clean install      # Clean, build for your server, then install
+make clean universal    # Clean, then build a universal package
 ```
 
 ## Prerequisites
@@ -118,7 +118,7 @@ The build also needs the tools from [Environment Setup](./environment-setup.md) 
 
 ## Installation
 
-`make install` builds nothing on its own — it uploads the most recently built `.s9pk` to a StartOS device, so build first (for development, just your device's architecture — `make x86` or `make arm`). It resolves the device from your workspace `.startos/config.yaml` (the `host.default` profile) or an explicit `-H`.
+`make install` queries your StartOS device's architecture, builds the current variant for that architecture when its inputs have changed or the artifact is missing, and installs that exact `.s9pk`. It resolves the device from your workspace `.startos/config.yaml` (the `host.default` profile).
 
 1. Point your workspace at the device. Edit `.startos/config.yaml` (at the workspace root, **not** `~/.startos/config.yaml`) so `host.default` is your device's address:
 
@@ -135,15 +135,15 @@ The build also needs the tools from [Environment Setup](./environment-setup.md) 
 
    Enter your StartOS master password when prompted.
 
-3. Build and install for your device's architecture (`x86` or `arm`) — the fast path for development:
+3. Build and install for your device's architecture:
 
    ```sh
-   make x86 install       # or: make arm install
+   make install
    ```
 
-   (`make install` on its own installs the most recent build. Reach for `make universal`
-   only when publishing — building all architectures is slower and unnecessary for local
-   testing.)
+   For packages with variants, use `make install VARIANT=<variant>` to build and install
+   that variant. With `VARIANT` unset, this builds the package's default variant.
+   Other `.s9pk` files in the directory do not affect which artifact is installed.
 
 > [!NOTE]
 > `make install` talks to the device over HTTPS, so your computer must trust the device's certificate — the same trust you set up to open its web interface in a browser. If it isn't trusted yet, import the device's root CA into your system trust store; or, for a one-off, sideload the `.s9pk` through the web interface instead (see [Sideloading](/start-os/sideloading.html)), which needs no certificate setup.
@@ -174,7 +174,7 @@ Build Complete!
 **Installing a package:**
 
 ```
-$ make arm install
+$ make install
 
 Installing to working-finalist.local ...
 Sideloading 100%

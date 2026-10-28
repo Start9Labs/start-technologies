@@ -9,10 +9,12 @@ export class WanIpv4Service extends FormService<WanIpv4Form> {
   private readonly api = inject(ApiService)
   private readonly i18n = inject(i18nPipe)
   readonly assignedIp = signal<string | null>(null)
+  readonly carrier = signal(true)
 
   async load(): Promise<WanIpv4Form> {
     const res = await this.api.wanIpv4Get()
     this.assignedIp.set(res.assigned_ip)
+    this.carrier.set(res.carrier)
     return {
       ip: {
         mode: res.mode,

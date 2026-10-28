@@ -110,30 +110,55 @@ tui-hint[data-appearance='onDark'] {
   color: #222 !important;
 }
 
+@keyframes startOsDropdownShadow {
+  from {
+    box-shadow: none;
+  }
+}
+
 tui-dropdown[data-appearance='start-os'][data-appearance='start-os'] {
   border: 0;
-  backdrop-filter: brightness(5) blur(0.25rem);
-  background-color: color-mix(
-    in hsl,
-    var(--tui-background-elevation-3) 85%,
-    transparent
-  );
-  background-image:
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.15), transparent),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.15), transparent);
-  background-size: 1px 100%;
-  background-repeat: no-repeat;
-  background-position:
-    top left,
-    top right;
+  background: none;
   box-shadow:
     0 0.25rem 0.125rem rgba(0, 0, 0, 0.25),
     0 -0.125rem 0.25rem rgba(55, 155, 255, 0.08),
     0 0 0.5rem rgba(0, 0, 0, 0.3),
-    inset 0 -0.125rem rgba(255, 255, 255, 0.03),
-    inset 0 1px rgba(255, 255, 255, 0.15),
-    inset 0 0 1rem rgba(0, 0, 0, 0.25),
     var(--tui-shadow-medium);
+
+  // Opacity on the host would cut the wrapper's backdrop-filter off from the page.
+  &.tui-enter,
+  &.tui-leave {
+    animation-name: startOsDropdownShadow;
+
+    > .t-wrapper {
+      animation-name: tuiFade, tuiSlide;
+      animation-duration: inherit;
+      animation-direction: inherit;
+      animation-timing-function: inherit;
+    }
+  }
+
+  // A backdrop-filter on the host zeroes Taiga's anchor detector and hides the dropdown.
+  > .t-wrapper {
+    backdrop-filter: brightness(5) blur(0.25rem);
+    background-color: color-mix(
+      in hsl,
+      var(--tui-background-elevation-3) 85%,
+      transparent
+    );
+    background-image:
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.15), transparent),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.15), transparent);
+    background-size: 1px 100%;
+    background-repeat: no-repeat;
+    background-position:
+      top left,
+      top right;
+    box-shadow:
+      inset 0 -0.125rem rgba(255, 255, 255, 0.03),
+      inset 0 1px rgba(255, 255, 255, 0.15),
+      inset 0 0 1rem rgba(0, 0, 0, 0.25);
+  }
 
   input {
     // Checkmark

@@ -33,7 +33,8 @@ export class BackupsCreateService {
     pkgIds: string[],
   ): Promise<void> {
     this.tasks.run(
-      async () => await this.api.createBackup({ targetId, packageIds: pkgIds }),
+      async () =>
+        await this.api.rpc.backup.create({ targetId, packageIds: pkgIds }),
       'Beginning backup',
     )
   }

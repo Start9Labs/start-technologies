@@ -1,7 +1,7 @@
 import { InputSpec } from '../actions/input/builder/inputSpec'
 import { Value } from '../actions/input/builder/value'
 import { Variants } from '../actions/input/builder/variants'
-import { z } from '../zExport'
+import * as z from '../z'
 
 const spec = InputSpec.of({
   rpc: Value.object(

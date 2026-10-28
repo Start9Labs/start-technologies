@@ -1,5 +1,5 @@
 import { FileHelper } from '../../util/fileHelper'
-import { z } from '@start9labs/start-core/zExport'
+import * as z from '@start9labs/start-core/z'
 
 const file = FileHelper.json(process.argv[2], z.object({ count: z.number() }))
 async function run() {

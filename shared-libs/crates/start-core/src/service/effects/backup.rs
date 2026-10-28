@@ -1,12 +1,14 @@
 use crate::progress::Progress;
 use crate::service::effects::prelude::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct SetBackupProgress {
     pub progress: Progress,
 }
+
+rpc_toolkit::reflect_ts!(SetBackupProgress);
+rpc_toolkit::ts_export!(SetBackupProgress, namespaces = [""]);
 
 pub async fn set_backup_progress(
     context: EffectContext,

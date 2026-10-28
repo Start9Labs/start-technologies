@@ -8,7 +8,7 @@ import {
 import * as INI from 'ini'
 import * as fs from 'node:fs/promises'
 import * as YAML from 'yaml'
-import { z } from '@start9labs/start-core/zExport'
+import * as z from '@start9labs/start-core/z'
 import * as T from '@start9labs/start-core/types'
 import { asError, deepEqual } from '@start9labs/start-core/util'
 import { MappedWatchable } from '@start9labs/start-core/util/Watchable'
@@ -84,9 +84,10 @@ function fileMerge(...args: any[]): any {
       arg &&
       typeof res === 'object' &&
       typeof arg === 'object' &&
-      !Array.isArray(res) &&
-      !Array.isArray(arg)
+      isPlainObject(res) &&
+      isPlainObject(arg)
     ) {
+      res = { ...res }
       for (const key of Object.keys(arg)) {
         res[key] = fileMerge(res[key], arg[key])
       }

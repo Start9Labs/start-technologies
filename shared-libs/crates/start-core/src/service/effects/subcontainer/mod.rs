@@ -26,13 +26,15 @@ pub use sync::*;
 #[cfg(not(target_os = "linux"))]
 use sync_dummy as sync;
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, visit_rs::VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct DestroySubcontainerFsParams {
     guid: Guid,
 }
+
+rpc_toolkit::reflect_ts!(DestroySubcontainerFsParams);
+rpc_toolkit::ts_export!(DestroySubcontainerFsParams, namespaces = [""]);
 #[instrument(skip_all)]
 pub async fn destroy_subcontainer_fs(
     context: EffectContext,
@@ -74,15 +76,16 @@ pub async fn destroy_subcontainer_fs(
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Deserialize, Serialize, Parser, visit_rs::VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct CreateSubcontainerFsParams {
     image_id: ImageId,
-    #[ts(type = "string | null")]
     name: Option<InternedString>,
 }
+
+rpc_toolkit::reflect_ts!(CreateSubcontainerFsParams);
+rpc_toolkit::ts_export!(CreateSubcontainerFsParams, namespaces = [""]);
 #[instrument(skip_all)]
 pub async fn create_subcontainer_fs(
     context: EffectContext,
@@ -158,6 +161,20 @@ pub async fn create_subcontainer_fs(
             .arg(&mountpoint)
             .invoke(ErrorKind::Filesystem)
             .await?;
+        let etc = mountpoint.join("etc");
+        match tokio::fs::create_dir(&etc).await {
+            Ok(()) => {
+                Command::new("chown")
+                    .arg("100000:100000")
+                    .arg(&etc)
+                    .invoke(ErrorKind::Filesystem)
+                    .await?;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
+            Err(e) => {
+                return Err(e).with_ctx(|_| (ErrorKind::Filesystem, format!("mkdir {etc:?}")));
+            }
+        }
         write_file_owned_atomic(
             mountpoint.join("etc/hostname"),
             format!("{container_guid}\n"),

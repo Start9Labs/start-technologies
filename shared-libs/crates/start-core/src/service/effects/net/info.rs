@@ -12,15 +12,16 @@ use crate::service::rpc::CallbackId;
 use crate::util::Invoke;
 use crate::{GatewayId, PackageId};
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, TS)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct GetContainerIpParams {
-    #[ts(optional)]
     package_id: Option<PackageId>,
-    #[ts(optional)]
+
     callback: Option<CallbackId>,
 }
+
+rpc_toolkit::reflect_ts!(GetContainerIpParams);
+rpc_toolkit::ts_export!(GetContainerIpParams, namespaces = [""]);
 
 pub async fn get_container_ip(
     context: EffectContext,
@@ -59,13 +60,14 @@ pub async fn get_container_ip(
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, TS)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct GetOutboundGatewayParams {
-    #[ts(optional)]
     callback: Option<CallbackId>,
 }
+
+rpc_toolkit::reflect_ts!(GetOutboundGatewayParams);
+rpc_toolkit::ts_export!(GetOutboundGatewayParams, namespaces = [""]);
 
 pub async fn get_outbound_gateway(
     context: EffectContext,

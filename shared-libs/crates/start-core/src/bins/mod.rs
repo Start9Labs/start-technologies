@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 
 use rust_i18n::t;
 
+pub mod completions;
 pub mod container_cli;
 pub mod deprecated;
 pub mod registry;
@@ -64,9 +65,13 @@ pub fn set_locale(lang: &str) {
     rust_i18n::set_locale(best.unwrap_or(lang));
 }
 
+/// Help text that is not a locale key stays as written.
 pub fn translate_cli(mut cmd: clap::Command) -> clap::Command {
     fn translate(s: impl std::fmt::Display) -> String {
-        t!(s.to_string()).into_owned()
+        let s = s.to_string();
+        crate::_rust_i18n_try_translate(&rust_i18n::locale(), &s)
+            .map(std::borrow::Cow::into_owned)
+            .unwrap_or(s)
     }
     if let Some(s) = cmd.get_about() {
         let s = translate(s);

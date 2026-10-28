@@ -1,0 +1,1 @@
+- Strukturell typisierte Schlüssel werden ohne PEM-Hülle gespeichert; bestehende Anmeldungen und vertrauenswürdige Signaturschlüssel für Updates bleiben beim Upgrade erhalten.

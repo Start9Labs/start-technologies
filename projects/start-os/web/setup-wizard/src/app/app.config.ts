@@ -48,7 +48,7 @@ export const APP_CONFIG: ApplicationConfig = {
       withPreloading(PreloadAllModules),
     ),
     I18N_PROVIDERS,
-    provideSetupLogsService(ApiService),
+    provideSetupLogsService(ApiService, api => api.rpc.setup.logs.follow({})),
     tuiButtonOptionsProvider({ size: 'm' }),
     {
       provide: ApiService,

@@ -30,8 +30,8 @@ export default class SystemOSComponent {
   private readonly api = inject(ApiService)
 
   protected readonly follow = (params: FollowServerLogsReq) =>
-    this.api.followServerLogs(params)
+    this.api.rpc.server.logs.follow(params)
 
-  protected readonly fetch = (params: T.LogsParams) =>
-    this.api.getServerLogs(params)
+  protected readonly fetch = (params: T.LogsParamsInput) =>
+    this.api.rpc.server.logs(params)
 }

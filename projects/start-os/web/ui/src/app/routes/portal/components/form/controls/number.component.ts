@@ -10,7 +10,10 @@ import { HintPipe } from '../pipes/hint.pipe'
 @Component({
   selector: 'form-number',
   template: `
-    <tui-textfield [tuiNumberFormat]="{ precision, decimalMode: 'not-zero' }">
+    <tui-textfield
+      [tuiNumberFormat]="{ precision, decimalMode: 'not-zero' }"
+      [invalid]="control.invalid()"
+    >
       @if (spec.name) {
         <label tuiLabel>
           {{ spec.name }}
@@ -25,9 +28,8 @@ import { HintPipe } from '../pipes/hint.pipe'
         [min]="spec.min"
         [max]="spec.max"
         [step]="spec.step || 0"
-        [invalid]="control.invalid()"
         [disabled]="!!spec.disabled"
-        [readOnly]="readOnly"
+        [readonly]="readOnly"
         [placeholder]="placeholder"
         [(ngModel)]="value"
         (blur)="control.onTouched()"

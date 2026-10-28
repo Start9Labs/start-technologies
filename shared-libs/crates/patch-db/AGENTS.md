@@ -37,6 +37,9 @@ The web workspace consumes the built TS client; the monorepo's root `build/commo
 
 ## Operating rules
 
+- **Reflection ownership** — Core's optional `reflect` feature derives
+  `VisitFields` for the `Dump` struct, supplying raw facts and static traversal. RPC's `ts` + `patch-db` consumer owns TypeScript bridges
+  and enables reflection; do not add a leaf-to-RPC dependency or TS feature.
 - **Wire format** — Rust and TS define `Revision`, `Dump`, and patch operations independently. Changes to one side must be mirrored in the other. The definitions live in `core/src/patch.rs` and `client/lib/types.ts`; patch application lives in `json-patch/` and `client/lib/json-patch-lib.ts`.
 - **Patch operations** — Only `add`, `remove`, and `replace` are used. The TS client does not implement `test`, `move`, or `copy`.
 - **Immutable patch application** — The TS client applies patches by shallow-copying objects/arrays, not mutating in place. This is intentional for UI framework change detection.

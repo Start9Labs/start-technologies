@@ -18,17 +18,18 @@ start-technologies/ (monorepo root)
 ├── projects/start-tunnel/docs/    ← StartTunnel book
 ├── projects/start-sdk/docs/       ← Service Packaging book (book name: "packaging")
 ├── projects/start-wrt/docs/       ← StartWRT book
-└── projects/start-docs/           ← THIS project: site build + landing + bitcoin-guides
+└── projects/start-docs/           ← THIS project: site build + landing + bitcoin-guides + support
     ├── build.sh          ← builds all books into docs/ output
     ├── serve.sh          ← build + local dev server
     ├── versions.conf     ← book → version list (single source of truth)
     ├── theme/            ← shared theme (CSS, JS, favicon); books symlink here
     ├── landing/          ← static landing page at docs.start9.com/
     ├── scripts/          ← build-time tooling (llms.txt generator)
-    └── bitcoin-guides/   ← Bitcoin Guides book
-        ├── book.toml
-        ├── theme -> ../theme
-        └── src/ (SUMMARY.md, README.md, archival-vs-pruned.md, electrum-servers.md, ...)
+    ├── bitcoin-guides/   ← Bitcoin Guides book
+    │   ├── book.toml
+    │   ├── theme -> ../theme
+    │   └── src/ (SUMMARY.md, README.md, archival-vs-pruned.md, electrum-servers.md, ...)
+    └── support/          ← Start9 Support book (support.start9.com's user guide)
 ```
 
 This multi-book design was chosen over a single monolithic book because:
@@ -75,6 +76,8 @@ start-os=0.4.0.x
 start-tunnel=1.0.x
 packaging=0.4.0.x
 bitcoin-guides=1.0.x
+start-wrt=1.2.x
+support=1.0.x
 ```
 
 `versions.conf` is the single source of truth — `build.sh` and the routing it writes into the tree (the redirect stubs and `404.html`) derive from it. Adding a book takes one line here (plus a `book_dir()` mapping if it lives outside this project).

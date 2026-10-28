@@ -88,7 +88,7 @@ export class BackupsTargetModal {
   async ngOnInit() {
     try {
       this.serverId = (await getServerInfo(this.patch)).id
-      this.targets = (await this.api.getBackupTargets({})).saved
+      this.targets = (await this.api.rpc.backup.target.list({})).saved
     } catch (e: any) {
       this.errorService.handleError(e)
     } finally {

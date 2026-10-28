@@ -79,6 +79,16 @@ export function windowsOverlap(windows: ScheduleWindowLike[]): boolean {
   return false
 }
 
+/** True if a window covers the minute of the week (0 = Sunday 00:00). */
+export function windowsCover(
+  windows: ScheduleWindowLike[],
+  minuteOfWeek: number,
+): boolean {
+  return toWeekSegments(windows).some(
+    ([s, e]) => s <= minuteOfWeek && minuteOfWeek < e,
+  )
+}
+
 /**
  * True if the windows tile the entire week with no gap. Such a schedule produces
  * no cron edges, so the backend rejects it (`covers_full_week`); the FE warns

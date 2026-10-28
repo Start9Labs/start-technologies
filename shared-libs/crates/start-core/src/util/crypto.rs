@@ -16,7 +16,6 @@ use rand::rngs::ThreadRng;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use tracing::instrument;
-use ts_rs::TS;
 
 use crate::prelude::*;
 
@@ -61,12 +60,13 @@ pub fn decrypt_slice(input: impl AsRef<[u8]>, password: impl AsRef<[u8]>) -> Vec
     res
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 pub struct EncryptedWire {
-    #[ts(type = "any")]
     encrypted: Value,
 }
+
+rpc_toolkit::reflect_ts!(EncryptedWire);
+rpc_toolkit::ts_export!(EncryptedWire, namespaces = [""]);
 impl EncryptedWire {
     /// Encrypt `plaintext` against the recipient's public ECDH key,
     /// producing the same JWE flattened-JSON payload shape that the

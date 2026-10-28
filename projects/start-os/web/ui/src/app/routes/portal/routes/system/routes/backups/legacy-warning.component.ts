@@ -70,7 +70,7 @@ export class BackupLegacyWarningComponent {
       )
       .subscribe(() =>
         this.tasks.run(async () => {
-          await this.api.deleteLegacyBackup({ targetId: this.id() })
+          await this.api.rpc.backup.target.deleteLegacy({ targetId: this.id() })
           this.service.clearLegacy(this.id())
           this.alerts
             .open(

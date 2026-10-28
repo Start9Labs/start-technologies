@@ -19,7 +19,7 @@
   "devDependencies": {
     "@types/node": "22.15.19",
     "husky": "^4.3.8",
-    "lint-staged": "^13.2.0",
+    "lint-staged": "^17.6.0",
     "prettier": "^3.5.3",
     "ts-node": "^10.9.0",
     "tslint": "6.1.3",

@@ -90,7 +90,7 @@ export default class LoadingPage {
     progress: T.FullProgress
   } | null> {
     try {
-      const res = await this.api.getStatus()
+      const res = await this.api.rpc.setup.status({})
 
       if (res.status === 'running') {
         return res
@@ -109,7 +109,7 @@ export default class LoadingPage {
 
   async restart(): Promise<void> {
     this.tasks.run(async () => {
-      await this.api.restart()
+      await this.api.rpc.setup.restart({})
       this.dialog
         .openAlert('Wait 1-2 minutes and refresh the page', {
           label: 'Server is restarting',

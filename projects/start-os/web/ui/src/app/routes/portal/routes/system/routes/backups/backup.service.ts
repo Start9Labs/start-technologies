@@ -38,7 +38,7 @@ export class BackupService {
       this.serverId = await firstValueFrom(
         this.patch.watch$('serverInfo', 'id'),
       )
-      const targets = await this.api.getBackupTargets({})
+      const targets = await this.api.rpc.backup.target.list({})
 
       this.cifs.set(
         Object.entries(targets)

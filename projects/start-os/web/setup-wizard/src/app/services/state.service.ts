@@ -1,7 +1,7 @@
 import { inject, Injectable } from '@angular/core'
 import { Router } from '@angular/router'
-import { T } from '@start9labs/start-core'
-import { ApiService } from './api.service'
+import { ApiService, Params } from './api.service'
+import { normalizeCifsPath } from '../utils/cifs'
 
 export type SetupType = 'fresh' | 'restore' | 'attach' | 'transfer'
 
@@ -64,7 +64,7 @@ export class StateService {
   }
 
   async attachDrive(password: string | null): Promise<void> {
-    await this.api.attach({
+    await this.api.rpc.setup.attach({
       guid: this.dataDriveGuid,
       password: password ? await this.api.encrypt(password) : null,
       kiosk: this.kiosk,
@@ -73,22 +73,26 @@ export class StateService {
 
   // Fresh setup requires a password; restore and transfer allow null.
   async executeSetup(password: string | null, hostname: string): Promise<void> {
-    let recoverySource: T.RecoverySource<T.EncryptedWire> | null = null
+    let recoverySource: Params<'setup.execute'>['recoverySource'] = null
 
     if (this.recoverySource) {
       if (this.recoverySource.type === 'migrate') {
         recoverySource = this.recoverySource
       } else {
+        const target = this.recoverySource.target
         recoverySource = {
           type: 'backup',
-          target: this.recoverySource.target,
+          target:
+            target.type === 'cifs'
+              ? { ...target, path: normalizeCifsPath(target.path) }
+              : target,
           serverId: this.recoverySource.serverId,
           password: await this.api.encrypt(this.recoverySource.password),
         }
       }
     }
 
-    await this.api.execute({
+    await this.api.rpc.setup.execute({
       guid: this.dataDriveGuid,
       password: password ? await this.api.encrypt(password) : null,
       hostname,

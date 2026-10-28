@@ -124,10 +124,8 @@ impl TableOfContents {
                 )
             })
         }
-        #[allow(dead_code)]
         fn as_opt(fs: FileSection) -> Option<FileSection> {
             if fs.position | fs.length == 0 {
-                // 0/0 is not a valid file section
                 None
             } else {
                 Some(fs)
@@ -140,7 +138,7 @@ impl TableOfContents {
             icon: from_table(&table, "icon")?,
             docker_images: from_table(&table, "docker_images")?,
             assets: from_table(&table, "assets")?,
-            scripts: table.get("scripts".as_bytes()).cloned(),
+            scripts: table.get("scripts".as_bytes()).copied().and_then(as_opt),
         })
     }
 }

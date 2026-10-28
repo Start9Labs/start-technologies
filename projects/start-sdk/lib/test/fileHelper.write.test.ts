@@ -3,7 +3,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FileHelper } from '../util/fileHelper'
-import { z } from '@start9labs/start-core/zExport'
+import * as z from '@start9labs/start-core/z'
 import { UPDATE_TIMEOUT_MS } from '../util/fileAccess'
 
 jest.mock('node:fs/promises', () => {

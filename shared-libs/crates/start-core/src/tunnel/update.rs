@@ -3,13 +3,12 @@ use std::process::Stdio;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::instrument;
-use ts_rs::TS;
 
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::util::Invoke;
 
-#[derive(Deserialize, Serialize, TS)]
+#[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct TunnelUpdateResult {
     /// "up-to-date", "update-available", or "updating"
@@ -19,6 +18,9 @@ pub struct TunnelUpdateResult {
     /// Available candidate version
     pub candidate: String,
 }
+
+rpc_toolkit::reflect_ts!(TunnelUpdateResult);
+rpc_toolkit::ts_export!(TunnelUpdateResult, namespaces = ["tunnel"]);
 
 #[instrument(skip_all)]
 pub async fn check_update(_ctx: TunnelContext) -> Result<TunnelUpdateResult, Error> {
@@ -93,9 +95,4 @@ fn parse_version_field(policy: &str, field: &str) -> Option<String> {
         .and_then(|l| l.split_whitespace().nth(1))
         .filter(|v| *v != "(none)")
         .map(|s| s.to_string())
-}
-
-#[test]
-fn export_bindings_tunnel_update() {
-    TunnelUpdateResult::export_all_to("bindings/tunnel").unwrap();
 }

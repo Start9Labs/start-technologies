@@ -69,10 +69,9 @@ constructs one during deserialization.
 
 - **`arbitrary`** pulls in `proptest`/`proptest-derive` and enables `imbl/proptest`, adding the `Arbitrary`
   impl and the strategy functions in `arbitrary.rs`. Used by `json-patch` for property-based tests.
-- **`ts-rs`** enables `ts_rs.rs`, which implements the `TS` trait for `Value` and `InOMap` so TypeScript type
-  definitions can be generated. Required by `start_core`.
 
-Both are off by default.
+`arbitrary` is off by default. RPC owns `Value`'s `unknown` and `InOMap`'s map
+bridges in its `ts` consumer, using a one-way dependency on this crate.
 
 ## Further reading
 

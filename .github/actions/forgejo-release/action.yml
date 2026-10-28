@@ -1,0 +1,29 @@
+name: Publish Forgejo release
+description: Update release notes and replace same-named assets without deleting the release
+inputs:
+  tag_name:
+    description: Existing release tag
+    required: true
+  name:
+    description: Release title
+    required: true
+  body_path:
+    description: File containing release notes
+    required: true
+  files:
+    description: Newline-separated asset paths
+    required: false
+  token:
+    description: Repository token with release write access
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        RELEASE_TAG: ${{ inputs.tag_name }}
+        RELEASE_NAME: ${{ inputs.name }}
+        RELEASE_BODY_PATH: ${{ inputs.body_path }}
+        RELEASE_FILES: ${{ inputs.files }}
+        FORGE_TOKEN: ${{ inputs.token }}
+      run: node "$GITHUB_ACTION_PATH/main.mjs"

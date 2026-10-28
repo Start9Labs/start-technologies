@@ -63,17 +63,18 @@ pub async fn shutdown(context: EffectContext) -> Result<(), Error> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct GetStatusParams {
-    #[ts(optional)]
     pub package_id: Option<PackageId>,
-    #[ts(optional)]
+
     #[arg(skip)]
     pub callback: Option<CallbackId>,
 }
+
+rpc_toolkit::reflect_ts!(GetStatusParams);
+rpc_toolkit::ts_export!(GetStatusParams, namespaces = [""]);
 
 pub async fn get_status(
     context: EffectContext,
@@ -104,13 +105,15 @@ pub async fn get_status(
     Ok(status)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, visit_rs::VisitVariants)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub enum SetMainStatusStatus {
     Running,
     Stopped,
 }
+
+rpc_toolkit::reflect_ts!(SetMainStatusStatus);
+rpc_toolkit::ts_export!(SetMainStatusStatus, namespaces = [""]);
 impl FromStr for SetMainStatusStatus {
     type Err = color_eyre::eyre::Report;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -128,13 +131,15 @@ impl ValueParserFactory for SetMainStatusStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Parser, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, Parser, visit_rs::VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct SetMainStatus {
     status: SetMainStatusStatus,
 }
+
+rpc_toolkit::reflect_ts!(SetMainStatus);
+rpc_toolkit::ts_export!(SetMainStatus, namespaces = [""]);
 pub async fn set_main_status(
     context: EffectContext,
     SetMainStatus { status }: SetMainStatus,

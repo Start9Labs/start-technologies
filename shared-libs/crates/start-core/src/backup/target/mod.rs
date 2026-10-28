@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use tokio::sync::Mutex;
 use tracing::instrument;
-use ts_rs::TS;
 
 use self::cifs::CifsBackupTarget;
 use crate::PackageId;
@@ -34,8 +33,7 @@ use crate::util::{FromStrParser, VersionString};
 
 pub mod cifs;
 
-#[derive(Debug, Deserialize, Serialize, TS)]
-#[ts(export)]
+#[derive(Debug, Deserialize, Serialize, VisitVariants)]
 #[serde(tag = "type")]
 #[serde(rename_all = "camelCase")]
 pub enum BackupTarget {
@@ -49,12 +47,18 @@ pub enum BackupTarget {
     Cifs(CifsBackupTarget),
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, TS)]
-#[ts(export, type = "string")]
+rpc_toolkit::reflect_ts!(BackupTarget);
+rpc_toolkit::ts_export!(BackupTarget, namespaces = [""]);
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, VisitVariants)]
+#[visit(ts(type = "z.string()"))]
 pub enum BackupTargetId {
     Disk { logicalname: PathBuf },
     Cifs { id: u32 },
 }
+
+rpc_toolkit::reflect_ts!(BackupTargetId);
+rpc_toolkit::ts_export!(BackupTargetId, namespaces = [""]);
 impl BackupTargetId {
     pub fn load(self, db: &DatabaseModel) -> Result<BackupTargetFS, Error> {
         Ok(match self {
@@ -111,14 +115,16 @@ impl Serialize for BackupTargetId {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
-#[ts(export)]
+#[derive(Debug, Deserialize, Serialize, VisitVariants)]
 #[serde(tag = "type")]
 #[serde(rename_all = "camelCase")]
 pub enum BackupTargetFS {
     Disk(BlockDev<PathBuf>),
     Cifs(Cifs),
 }
+
+rpc_toolkit::reflect_ts!(BackupTargetFS);
+rpc_toolkit::ts_export!(BackupTargetFS, namespaces = [""]);
 impl FileSystem for BackupTargetFS {
     async fn mount<P: AsRef<Path> + Send>(
         &self,
@@ -218,28 +224,28 @@ pub async fn list(ctx: RpcContext) -> Result<BTreeMap<BackupTargetId, BackupTarg
         .collect())
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
-#[ts(export)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupInfo {
-    #[ts(type = "string")]
     pub version: Version,
-    #[ts(type = "string | null")]
     pub timestamp: Option<DateTime<Utc>>,
     pub package_backups: BTreeMap<PackageId, PackageBackupInfo>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
-#[ts(export)]
+rpc_toolkit::reflect_ts!(BackupInfo);
+rpc_toolkit::ts_export!(BackupInfo, namespaces = [""]);
+
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct PackageBackupInfo {
     pub title: InternedString,
     pub version: VersionString,
-    #[ts(type = "string")]
     pub os_version: Version,
-    #[ts(type = "string")]
     pub timestamp: DateTime<Utc>,
 }
+
+rpc_toolkit::reflect_ts!(PackageBackupInfo);
+rpc_toolkit::ts_export!(PackageBackupInfo, namespaces = [""]);
 
 fn display_backup_info(params: WithIoFormat<InfoParams>, info: BackupInfo) -> Result<(), Error> {
     use prettytable::*;
@@ -274,13 +280,12 @@ fn display_backup_info(params: WithIoFormat<InfoParams>, info: BackupInfo) -> Re
         ];
         table.add_row(row);
     }
-    table.print_tty(false)?;
+    print_table(&table)?;
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct InfoParams {
@@ -291,6 +296,9 @@ pub struct InfoParams {
     #[arg(help = "help.arg.backup-password")]
     password: String,
 }
+
+rpc_toolkit::reflect_ts!(InfoParams);
+rpc_toolkit::ts_export!(InfoParams, namespaces = [""]);
 
 #[instrument(skip(ctx, password))]
 pub async fn info(
@@ -320,7 +328,7 @@ lazy_static::lazy_static! {
         Mutex::new(BTreeMap::new());
 }
 
-#[derive(Deserialize, Serialize, Parser)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
@@ -334,6 +342,8 @@ pub struct MountParams {
     #[arg(long, help = "help.arg.allow-partial-backup")]
     allow_partial: bool,
 }
+
+rpc_toolkit::reflect_ts!(MountParams);
 
 #[instrument(skip_all)]
 pub async fn mount(
@@ -403,15 +413,17 @@ pub async fn mount(
     Ok(res)
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct UmountParams {
     #[arg(help = "help.arg.backup-target-id")]
     target_id: Option<BackupTargetId>,
 }
+
+rpc_toolkit::reflect_ts!(UmountParams);
+rpc_toolkit::ts_export!(UmountParams, namespaces = [""]);
 
 #[instrument(skip_all)]
 pub async fn umount(_: RpcContext, UmountParams { target_id }: UmountParams) -> Result<(), Error> {
@@ -435,15 +447,17 @@ pub async fn umount(_: RpcContext, UmountParams { target_id }: UmountParams) -> 
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct DeleteLegacyParams {
     #[arg(help = "help.arg.backup-target-id")]
     target_id: BackupTargetId,
 }
+
+rpc_toolkit::reflect_ts!(DeleteLegacyParams);
+rpc_toolkit::ts_export!(DeleteLegacyParams, namespaces = [""]);
 
 /// Delete this server's pre-V2 `StartOSBackups/<server_id>` backup from a target,
 /// freeing the space it occupied. Other servers' legacy backups and the current

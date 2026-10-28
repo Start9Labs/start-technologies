@@ -19,7 +19,7 @@ Fix every `tsc` and pack error. A pre-existing error is still an error.
 ## 1 · Install
 
 ```bash
-make x86 install    # builds and installs to host.default; see makefile.md
+make install
 ```
 
 Or pack and install explicitly against a named host:

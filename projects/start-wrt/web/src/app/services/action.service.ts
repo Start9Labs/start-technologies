@@ -25,6 +25,8 @@ export interface ActionOptions {
   reconnectMessage: string
   /** What to do once the router is reachable again (default: 'none'). */
   onReconnect: OnReconnect
+  /** Errors to reject with instead of toasting; the caller handles them. */
+  rethrow?: (e: unknown) => boolean
 }
 
 @Injectable({ providedIn: 'root' })
@@ -87,6 +89,7 @@ export class ActionService {
 
       return true
     } catch (e: any) {
+      if (options.rethrow?.(e)) throw e
       console.error(e)
       this.alerts
         .open(e.message || options.fail || e, { appearance: 'negative' })

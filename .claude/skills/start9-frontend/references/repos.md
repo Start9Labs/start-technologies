@@ -8,7 +8,8 @@
   precedes cargo. `brochure-marketplace` **auto-deploys to marketplace.start9.com on merge to
   `master`**.
 - **start9-store** — SSR; browser APIs only via tokens/`afterNextRender`;
-  `TUI_MEDIA.mobile: 1120` is measured — adding a nav item means re-measuring; light theme is a
+  the header collapses to its drawer below `TUI_MEDIA.tablet` (1024), so a new nav item means
+  re-checking that the row still fits at 1024; light theme is a
   deliberate deferral of design; checkout is a redirect in Phase 1 (Shopify) — multi-step
   checkout is Phase 2 (Vendure).
 - **ops-server** — admin-only actions check `adminService.isAdmin()`. Never commit `.env`.

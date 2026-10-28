@@ -26,11 +26,11 @@ export const setupServiceInterfaces: SetupServiceInterfaces = <
     await fn({
       effects: {
         ...effects,
-        bind: (params: T.BindParams) => {
+        bind: (params: T.BindParamsInput) => {
           bindings.push({ id: params.id, internalPort: params.internalPort })
           return effects.bind(params)
         },
-        bindRange: (params: T.BindRangeParams) => {
+        bindRange: (params: T.BindRangeParamsInput) => {
           // Record the range under its internal start port — the same key Rust
           // uses for binding_ranges and the BindId clearBindings matches against.
           // Without this the trailing clearBindings would disable the range the
@@ -41,12 +41,14 @@ export const setupServiceInterfaces: SetupServiceInterfaces = <
           })
           return effects.bindRange(params)
         },
-        exportServiceInterface: (params: T.ExportServiceInterfaceParams) => {
+        exportServiceInterface: (
+          params: T.ExportServiceInterfaceParamsInput,
+        ) => {
           interfaces.push(params.id)
           return effects.exportServiceInterface(params)
         },
         exportRangeServiceInterface: (
-          params: T.ExportRangeServiceInterfaceParams,
+          params: T.ExportRangeServiceInterfaceParamsInput,
         ) => {
           interfaces.push(params.id)
           return effects.exportRangeServiceInterface(params)

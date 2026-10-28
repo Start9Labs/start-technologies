@@ -10,7 +10,7 @@ import { HintPipe } from '../pipes/hint.pipe'
 @Component({
   selector: 'form-textarea',
   template: `
-    <tui-textfield>
+    <tui-textfield [invalid]="control.invalid()">
       @if (spec.name) {
         <label tuiLabel>
           {{ spec.name }}
@@ -22,13 +22,12 @@ import { HintPipe } from '../pipes/hint.pipe'
       <textarea
         placeholder="Placeholder"
         tuiTextarea
-        [min]="spec.minRows"
-        [max]="spec.maxRows"
+        [minRows]="spec.minRows"
+        [maxRows]="spec.maxRows"
         [attr.maxLength]="spec.maxLength"
         [disabled]="!!spec.disabled"
-        [readOnly]="readOnly"
+        [readonly]="readOnly"
         [placeholder]="spec.placeholder || ''"
-        [invalid]="control.invalid()"
         [(ngModel)]="value"
         (blur)="control.onTouched()"
       ></textarea>

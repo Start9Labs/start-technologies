@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::db::model::package::CurrentDependencyKind;
 use crate::prelude::*;
@@ -10,10 +8,12 @@ use crate::s9pk::manifest::LocaleString;
 use crate::util::PathOrUrl;
 use crate::{Error, PackageId};
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, HasModel, TS)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct Dependencies(pub BTreeMap<PackageId, DepInfo>);
+
+rpc_toolkit::reflect_ts!(Dependencies);
+rpc_toolkit::ts_export!(Dependencies, namespaces = [""]);
 impl Map for Dependencies {
     type Key = PackageId;
     type Value = DepInfo;
@@ -25,7 +25,7 @@ impl Map for Dependencies {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, HasModel)]
+#[derive(Clone, Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct DepInfo {
@@ -38,58 +38,40 @@ pub struct DepInfo {
     #[serde(flatten)]
     pub metadata: Option<MetadataSrc>,
 }
-impl TS for DepInfo {
-    type WithoutGenerics = Self;
-    fn decl() -> String {
-        format!("type {} = {}", Self::name(), Self::inline())
-    }
-    fn decl_concrete() -> String {
-        Self::decl()
-    }
-    fn name() -> String {
-        "DepInfo".into()
-    }
-    fn inline() -> String {
-        "{ description: LocaleString | null, optional: boolean, versionRange?: string | null, kind?: 'exists' | 'running' | null, healthChecks?: string[] } & MetadataSrc".into()
-    }
-    fn inline_flattened() -> String {
-        Self::inline()
-    }
-    fn visit_dependencies(v: &mut impl ts_rs::TypeVisitor)
-    where
-        Self: 'static,
-    {
-        v.visit::<MetadataSrc>();
-        v.visit::<LocaleString>();
-    }
-    fn output_path() -> Option<&'static std::path::Path> {
-        Some(Path::new("DepInfo.ts"))
-    }
-}
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(DepInfo);
+rpc_toolkit::ts_export!(DepInfo, namespaces = [""]);
+
+#[derive(Clone, Debug, Deserialize, Serialize, VisitVariants)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub enum MetadataSrc {
     Metadata(Metadata),
     S9pk(Option<PathOrUrl>), // backwards compatibility
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(MetadataSrc);
+rpc_toolkit::ts_export!(MetadataSrc, namespaces = [""]);
+
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct Metadata {
     pub title: LocaleString,
     pub icon: PathOrUrl,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, HasModel, TS)]
+rpc_toolkit::reflect_ts!(Metadata);
+rpc_toolkit::ts_export!(Metadata, namespaces = [""]);
+
+#[derive(Clone, Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
+#[visit(ts(rename = "ServiceDependencyMetadata"))]
 pub struct DependencyMetadata {
-    #[ts(type = "string")]
     pub title: LocaleString,
 }
+
+rpc_toolkit::reflect_ts!(DependencyMetadata);
+rpc_toolkit::ts_export!(DependencyMetadata, namespaces = [""]);
 
 #[cfg(test)]
 mod tests {

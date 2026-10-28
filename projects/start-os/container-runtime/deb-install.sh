@@ -5,7 +5,7 @@ set -e
 apt-get update
 apt-get install -y curl rsync qemu-user-static nodejs
 
-sed -i '/\(^\|#\)DNSStubListener=/c\DNSStubListener=no' /etc/systemd/resolved.conf
+cp /usr/lib/startos/resolved.conf /etc/systemd/resolved.conf
 sed -i '/\(^\|#\)Storage=/c\Storage=persistent' /etc/systemd/journald.conf
 sed -i '/\(^\|#\)Compress=/c\Compress=yes' /etc/systemd/journald.conf
 sed -i '/\(^\|#\)SystemMaxUse=/c\SystemMaxUse=1G' /etc/systemd/journald.conf

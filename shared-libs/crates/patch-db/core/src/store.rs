@@ -28,11 +28,15 @@ lazy_static! {
         std::sync::Mutex::new(HashMap::new());
 }
 
-pub struct Store {
+struct FileStorage {
     path: PathBuf,
     file: FdLock<File>,
     file_cursor: u64,
     _lock: OwnedMutexGuard<()>,
+}
+
+pub struct Store {
+    storage: Option<FileStorage>,
     persistent: Value,
     revision: u64,
     broadcast: Broadcast,
@@ -96,10 +100,12 @@ impl Store {
             let file_cursor = f.stream_position()?;
 
             Ok::<_, Error>(Store {
-                path,
-                file: f.map(File::from_std),
-                file_cursor,
-                _lock,
+                storage: Some(FileStorage {
+                    path,
+                    file: f.map(File::from_std),
+                    file_cursor,
+                    _lock,
+                }),
                 persistent,
                 revision,
                 broadcast: Broadcast::new(),
@@ -113,8 +119,10 @@ impl Store {
     pub async fn close(mut self) -> Result<(), Error> {
         use tokio::io::AsyncWriteExt;
 
-        self.file.flush().await?;
-        self.file.shutdown().await?;
+        if let Some(storage) = &mut self.storage {
+            storage.file.flush().await?;
+            storage.file.shutdown().await?;
+        }
 
         Ok(())
     }
@@ -170,20 +178,17 @@ impl Store {
     ) -> Result<Option<Arc<Revision>>, Error> {
         self.put_value(ptr, &imbl_value::to_value(&value)?).await
     }
-    /// Compresses the database file by writing a fresh snapshot.
-    ///
-    /// Sets `*committed = true` once the atomic backup rename succeeds (point
-    /// of no return — the new state will be recovered on restart regardless of
-    /// main file state).  Before that point, the caller can safely undo.
+    /// Sets `*committed` once the backup rename makes rollback unsafe.
     pub(crate) async fn compress(&mut self, committed: &mut bool) -> Result<(), Error> {
         use tokio::io::AsyncWriteExt;
-        let bak = self.path.with_extension("bak");
+        let Some(storage) = &mut self.storage else {
+            return Ok(());
+        };
+        let bak = storage.path.with_extension("bak");
         let bak_tmp = bak.with_extension("bak.tmp");
         let revision_cbor = serde_cbor::to_vec(&self.revision)?;
         let data_cbor = serde_cbor::to_vec(&self.persistent)?;
 
-        // Phase 1: Create atomic backup. If this fails, the main file is
-        // untouched and the caller can safely undo the in-memory patch.
         let mut backup_file = File::create(&bak_tmp).await?;
         backup_file.write_all(&revision_cbor).await?;
         backup_file.write_all(&data_cbor).await?;
@@ -192,22 +197,15 @@ impl Store {
         tokio::fs::rename(&bak_tmp, &bak).await?;
         *committed = true;
 
-        // Point of no return: the backup exists with the new state. On restart,
-        // Store::open will rename it over the main file. From here, errors
-        // must NOT cause an in-memory undo.
+        storage.file.set_len(0).await?;
+        storage.file.seek(SeekFrom::Start(0)).await?;
+        storage.file.write_all(&revision_cbor).await?;
+        storage.file.write_all(&data_cbor).await?;
+        storage.file.flush().await?;
+        storage.file.sync_all().await?;
+        storage.file_cursor = storage.file.stream_position().await?;
 
-        // Phase 2: Rewrite main file. If this fails, the backup ensures crash
-        // recovery. We propagate the error but signal that undo is unsafe.
-        self.file.set_len(0).await?;
-        self.file.seek(SeekFrom::Start(0)).await?;
-        self.file.write_all(&revision_cbor).await?;
-        self.file.write_all(&data_cbor).await?;
-        self.file.flush().await?;
-        self.file.sync_all().await?;
-        self.file_cursor = self.file.stream_position().await?;
-
-        // Phase 3: Remove backup. Non-fatal — on restart, the backup (which
-        // matches the main file) will be harmlessly applied.
+        // A leftover backup is recovered on open.
         let _ = tokio::fs::remove_file(&bak).await;
 
         Ok(())
@@ -215,7 +213,6 @@ impl Store {
     pub(crate) async fn apply(&mut self, patch: DiffPatch) -> Result<Option<Arc<Revision>>, Error> {
         use tokio::io::AsyncWriteExt;
 
-        // eject if noop
         if (patch.0).0.is_empty() {
             return Ok(None);
         }
@@ -246,34 +243,30 @@ impl Store {
         #[cfg(feature = "tracing")]
         tracing::trace!("Attempting to apply patch: {:?}", patch);
 
-        // apply patch in memory
-        let patch_bin = serde_cbor::to_vec(&*patch)?;
         let mut updated = TentativeUpdated::new(self, &patch)?;
 
-        if updated.store.revision % 4096 == 0 {
-            let mut committed = false;
-            let res = updated.store.compress(&mut committed).await;
-            if committed {
-                updated.undo.take();
+        if let Some(storage) = &mut updated.store.storage {
+            let patch_bin = serde_cbor::to_vec(&*patch)?;
+            if updated.store.revision % 4096 == 0 {
+                let mut committed = false;
+                let res = updated.store.compress(&mut committed).await;
+                if committed {
+                    updated.undo.take();
+                }
+                res?;
+            } else {
+                if storage.file.stream_position().await? != storage.file_cursor {
+                    storage.file.set_len(storage.file_cursor).await?;
+                    storage
+                        .file
+                        .seek(SeekFrom::Start(storage.file_cursor))
+                        .await?;
+                }
+                storage.file.write_all(&patch_bin).await?;
+                storage.file.flush().await?;
+                storage.file.sync_all().await?;
+                storage.file_cursor += patch_bin.len() as u64;
             }
-            res?;
-        } else {
-            if updated.store.file.stream_position().await? != updated.store.file_cursor {
-                updated
-                    .store
-                    .file
-                    .set_len(updated.store.file_cursor)
-                    .await?;
-                updated
-                    .store
-                    .file
-                    .seek(SeekFrom::Start(updated.store.file_cursor))
-                    .await?;
-            }
-            updated.store.file.write_all(&patch_bin).await?;
-            updated.store.file.flush().await?;
-            updated.store.file.sync_all().await?;
-            updated.store.file_cursor += patch_bin.len() as u64;
         }
         drop(updated.undo.take());
         drop(updated);
@@ -286,15 +279,15 @@ impl Store {
     }
 }
 
-// Iterative drop to prevent stack overflow when dropping deeply nested Value trees.
-// Without this, the compiler-generated recursive Drop can exhaust the call stack.
+// Iterative drop prevents stack overflow on deeply nested values.
 impl Drop for Store {
     fn drop(&mut self) {
-        if let Ok(mut lock) = OPEN_STORES.lock() {
-            lock.remove(&self.path);
+        if let Some(storage) = &self.storage {
+            if let Ok(mut lock) = OPEN_STORES.lock() {
+                lock.remove(&storage.path);
+            }
         }
 
-        // Only Array and Object can cause deep recursion
         match &self.persistent {
             Value::Array(vec) if !vec.is_empty() => {}
             Value::Object(map) if !map.is_empty() => {}
@@ -319,8 +312,6 @@ impl Drop for Store {
         take_children(&mut self.persistent, &mut stack);
         while let Some(mut value) = stack.pop() {
             take_children(&mut value, &mut stack);
-            // `value` drops here with an empty container,
-            // so the recursive Drop::drop returns immediately
         }
     }
 }
@@ -379,6 +370,21 @@ pub struct PatchDb {
     pub(crate) store: Arc<RwLock<Store>>,
 }
 impl PatchDb {
+    /// Creates an independent database with a null root and revision zero.
+    ///
+    /// State is shared by cloned handles and discarded when the last handle drops.
+    /// No files are created or accessed.
+    pub fn in_memory() -> Self {
+        Self {
+            store: Arc::new(RwLock::new(Store {
+                storage: None,
+                persistent: Value::Null,
+                revision: 0,
+                broadcast: Broadcast::new(),
+            })),
+        }
+    }
+
     pub async fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         Ok(PatchDb {
             store: Arc::new(RwLock::new(Store::open(path).await?)),
@@ -488,7 +494,6 @@ impl PatchDb {
                 store.apply(diff).await?;
                 return Ok((new, res));
             }
-            // State changed since we read it; retry with the fresh value
         }
     }
 }

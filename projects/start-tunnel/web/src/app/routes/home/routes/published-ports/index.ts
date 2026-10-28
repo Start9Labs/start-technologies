@@ -95,6 +95,7 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
                   tuiIconButton
                   size="xs"
                   tuiDropdown
+                  tuiDropdownAlign="end"
                   tuiDropdownAuto
                   appearance="flat-grayscale"
                   iconStart="@tui.ellipsis-vertical"
@@ -309,13 +310,13 @@ export default class PublishedPorts {
 
     try {
       if (forward.ipVersion === 'ipv6') {
-        await this.api.setPinholeEnabled({
+        await this.api.rpc.pinhole.setEnabled({
           gua: forward.externalip,
           externalPort: Number(forward.externalport),
           enabled: !forward.enabled,
         })
       } else {
-        await this.api.setForwardEnabled({
+        await this.api.rpc.portForward.setEnabled({
           source: `${forward.externalip}:${forward.externalport}`,
           enabled: !forward.enabled,
           hostname: forward.hostname,
@@ -364,12 +365,12 @@ export default class PublishedPorts {
       .subscribe(() =>
         this.tasks.run(async () => {
           if (forward.ipVersion === 'ipv6') {
-            await this.api.deletePinhole({
+            await this.api.rpc.pinhole.remove({
               gua: forward.externalip,
               externalPort: Number(forward.externalport),
             })
           } else {
-            await this.api.deleteForward({
+            await this.api.rpc.portForward.remove({
               source: `${forward.externalip}:${forward.externalport}`,
               hostname: forward.hostname,
             })

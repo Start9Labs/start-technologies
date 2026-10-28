@@ -7,7 +7,7 @@ import {
 import { OSVersion } from '../StartSdk'
 import { Dependencies } from '../dependencies'
 import { VersionGraph } from '../version/VersionGraph'
-import { version as sdkVersion } from '../../package.json'
+import sdkPackage from '@start9labs/start-sdk/package.json'
 
 /**
  * Retypes every key the SDK does not define, so declaring one is a compile
@@ -82,7 +82,7 @@ export function buildManifest<
     dependencies: dependencies.manifestDependencies(),
     gitHash: null,
     osVersion: manifest.osVersion ?? OSVersion,
-    sdkVersion,
+    sdkVersion: sdkPackage.version,
     version: versions.current.options.version,
     releaseNotes: versions.current.options.releaseNotes,
     satisfies: versions.current.options.satisfies || [],
@@ -90,7 +90,13 @@ export function buildManifest<
     canMigrateFrom: versions.canMigrateFrom().toString(),
     images,
     hardwareRequirements: {
-      device: manifest.hardwareRequirements?.device || [],
+      device: (manifest.hardwareRequirements?.device ?? []).map(d => ({
+        product: null,
+        vendor: null,
+        capabilities: null,
+        driver: null,
+        ...d,
+      })),
       ram: manifest.hardwareRequirements?.ram || null,
       arch: Object.values(images).reduce(
         (arch, inputSpec) => {

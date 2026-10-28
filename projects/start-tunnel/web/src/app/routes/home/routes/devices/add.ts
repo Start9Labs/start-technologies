@@ -266,13 +266,13 @@ export class DevicesAdd {
 
     this.tasks.run(async () => {
       if (device) {
-        await this.api.editDevice({ ...data, kind: device.kind })
+        await this.api.rpc.device.add({ ...data, kind: device.kind })
       } else {
-        await this.api.addDevice({ ...data, kind })
+        await this.api.rpc.device.add({ ...data, kind })
       }
 
       if (wanIp.ip !== (device?.wanIp ?? null)) {
-        await this.api.setDeviceWan({
+        await this.api.rpc.device.setWan({
           subnet: data.subnet,
           ip,
           wanIp: wanIp.ip,
@@ -282,14 +282,14 @@ export class DevicesAdd {
       // addDevice sets both flags on for a server; only sync the ones unchecked.
       if (!device && kind === 'server') {
         if (!dnsInjection) {
-          await this.api.setDnsInjection({
+          await this.api.rpc.device.setDnsInjection({
             subnet: data.subnet,
             ip,
             enabled: false,
           })
         }
         if (!autoPortForward) {
-          await this.api.setAutoPortForward({
+          await this.api.rpc.device.setAutoPortForward({
             subnet: data.subnet,
             ip,
             enabled: false,
@@ -298,7 +298,7 @@ export class DevicesAdd {
       }
 
       if (!device) {
-        const config = await this.api.showDeviceConfig({
+        const config = await this.api.rpc.device.showConfig({
           subnet: data.subnet,
           ip,
         })

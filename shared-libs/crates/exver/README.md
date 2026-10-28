@@ -13,6 +13,8 @@ distributors.
 - Rust only. TypeScript callers do not use this crate — `@start9labs/start-core` carries a separate
   reimplementation of ExVer, which `@start9labs/start-sdk` re-exports as `ExtendedVersion` /
   `Version` / `VersionRange`.
+- Rust RPC bindings use the scalar bridge owned by `rpc-toolkit` with `ts` and
+  `exver` enabled; exver itself exposes no TypeScript feature.
 
 This module was designed to address the problem of releasing updates to StartOS Packages where the upstream project was
 either unaware of or apathetic towards supporting their application on the StartOS platform. In most cases, the original

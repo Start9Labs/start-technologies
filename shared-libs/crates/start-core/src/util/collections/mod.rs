@@ -15,7 +15,8 @@ pub fn ordmap_retain<K: Ord + Clone, V: Clone, F: FnMut(&K, &mut V) -> bool>(
     let mut prev = None;
     loop {
         let next = if let Some(k) = prev.take() {
-            map.range((Bound::Excluded(k), Bound::Unbounded)).next()
+            map.range::<_, K>((Bound::Excluded(k), Bound::Unbounded))
+                .next()
         } else {
             map.get_min().map(|(k, v)| (k, v))
         };
@@ -52,7 +53,8 @@ impl<'a, K: Ord + Clone, V: Clone> Iterator for OrdMapIterMut<'a, K, V> {
         unsafe {
             let map: &'a mut OrdMap<K, V> = self.map.as_mut().unwrap();
             let Some((k, _)) = (if let Some(k) = self.prev.take() {
-                map.range((Bound::Excluded(k), Bound::Unbounded)).next()
+                map.range::<_, K>((Bound::Excluded(k), Bound::Unbounded))
+                    .next()
             } else {
                 map.get_min().map(|(k, v)| (k, v))
             }) else {

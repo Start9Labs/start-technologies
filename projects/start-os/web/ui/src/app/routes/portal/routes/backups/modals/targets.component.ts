@@ -88,7 +88,7 @@ export class BackupsTargetsModal implements OnInit {
     this.targets.set(null)
 
     try {
-      this.targets.set(await this.api.getBackupTargets({}))
+      this.targets.set(await this.api.rpc.backup.target.list({}))
     } catch (e: any) {
       this.errorService.handleError(e)
       this.targets.set({ unknownDisks: [], saved: {} })
@@ -97,7 +97,7 @@ export class BackupsTargetsModal implements OnInit {
 
   async onDelete(id: string) {
     this.tasks.run(async () => {
-      await this.api.removeBackupTarget({ id })
+      await this.api.rpc.backup.target.cifs.remove({ id })
 
       const saved = this.targets()?.saved || {}
 
@@ -194,7 +194,8 @@ export class BackupsTargetsModal implements OnInit {
     handler: (response: RR.AddBackupTargetRes) => void = () => {},
   ): Promise<boolean> {
     return this.tasks.run(
-      async () => handler(await this.api.addBackupTarget(type, value)),
+      async () =>
+        handler(await this.api.rpc.backup.target.cifs.add(type, value)),
       'Saving target',
     )
   }
@@ -207,7 +208,7 @@ export class BackupsTargetsModal implements OnInit {
       | RR.UpdateDiskBackupTargetReq,
   ): Promise<boolean> {
     return this.tasks.run(
-      async () => await this.api.updateBackupTarget(type, value),
+      async () => await this.api.rpc.backup.target.cifs.update(type, value),
       'Saving target',
     )
   }

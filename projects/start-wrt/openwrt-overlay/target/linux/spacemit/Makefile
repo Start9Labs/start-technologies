@@ -13,12 +13,6 @@ SUBTARGETS:=k1-sbc
 
 KERNEL_PATCHVER:=6.18
 
-# Armbian forward-ported vendor kernel (mainline 6.18.19 + SpacemiT patches)
-# Must be set BEFORE include target.mk so kernel.mk evaluates them correctly.
-CONFIG_KERNEL_GIT_CLONE_URI:=https://github.com/jmontleon/linux-bianbu.git
-CONFIG_KERNEL_GIT_REF:=linux-6.18.y
-CONFIG_KERNEL_GIT_LOCAL_REPOSITORY:=""
-
 include $(INCLUDE_DIR)/target.mk
 
 DEFAULT_PACKAGES += mkf2fs e2fsprogs

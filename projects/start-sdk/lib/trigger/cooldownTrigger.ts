@@ -1,7 +1,10 @@
+import { Trigger } from '.'
+import { delay } from './delay'
+
 /**
  * A trigger that polls at a fixed interval.
  *
- * @param timeMs - Milliseconds to wait between each health check invocation
+ * @param timeMs - Milliseconds to wait between each health check invocation; `Infinity` never polls
  *
  * @example
  * ```ts
@@ -13,10 +16,10 @@
  * }
  * ```
  */
-export function cooldownTrigger(timeMs: number) {
+export function cooldownTrigger(timeMs: number): Trigger {
   return async function* () {
     while (true) {
-      await new Promise(resolve => setTimeout(resolve, timeMs))
+      await delay(timeMs)
       yield
     }
   }

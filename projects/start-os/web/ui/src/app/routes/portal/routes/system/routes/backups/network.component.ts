@@ -85,15 +85,15 @@ const ERROR =
               <button
                 tuiIconButton
                 tuiDropdown
+                tuiDropdownAlign="end"
                 size="s"
                 appearance="flat-grayscale"
                 iconStart="@tui.ellipsis-vertical"
-                [tuiDropdownOpen]="!!opens[$index]"
-                (tuiDropdownOpenChange)="opens[$index] = $event"
+                tuiDropdownAuto
                 (click)="$event.stopPropagation()"
               >
                 {{ 'More' | i18n }}
-                <tui-data-list *tuiDropdown>
+                <tui-data-list *tuiDropdown="let close" (click)="close()">
                   <button tuiOption (click)="edit(target)">
                     {{ 'Edit' | i18n }}
                   </button>
@@ -219,8 +219,6 @@ export class BackupNetworkComponent {
   readonly service = inject(BackupService)
   readonly networkFolders = output<MappedBackupTarget<CifsBackupTarget>>()
 
-  opens: Record<number, boolean> = {}
-
   select(target: MappedBackupTarget<CifsBackupTarget>) {
     if (!target.entry.mountable) {
       this.dialog.openAlert(ERROR, { label: 'Unable to connect' }).subscribe()
@@ -258,12 +256,15 @@ export class BackupNetworkComponent {
             text: this.i18n.transform('Connect'),
             handler: async (value: T.CifsAddParams) =>
               this.tasks.run(async () => {
-                const res = await this.api.updateBackupTarget({
+                const res = await this.api.rpc.backup.target.cifs.update({
                   id: target.id,
                   ...value,
                 })
 
-                target.entry = Object.values(res)[0]!
+                const entry = Object.values(res)[0]
+                if (!entry || entry.type !== 'cifs')
+                  throw new Error('Invalid response from server')
+                target.entry = entry
                 this.service.cifs.update(cifs => [...cifs])
               }, 'Testing connectivity to shared folder'),
           },
@@ -279,7 +280,7 @@ export class BackupNetworkComponent {
       .pipe(filter(Boolean))
       .subscribe(() =>
         this.tasks.run(async () => {
-          await this.api.removeBackupTarget({ id })
+          await this.api.rpc.backup.target.cifs.remove({ id })
           this.service.cifs.update(cifs => cifs.filter((_, i) => i !== index))
         }, 'Removing'),
       )
@@ -287,10 +288,12 @@ export class BackupNetworkComponent {
 
   private async addTarget(v: T.CifsAddParams): Promise<boolean> {
     return this.tasks.run(async () => {
-      const [item] = Object.entries(await this.api.addBackupTarget(v))
+      const [item] = Object.entries(
+        await this.api.rpc.backup.target.cifs.add(v),
+      )
       const [id, entry] = item || []
 
-      if (!id || !entry) {
+      if (!id || !entry || entry.type !== 'cifs') {
         throw 'Invalid response from server'
       }
 

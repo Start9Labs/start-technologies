@@ -1,0 +1,18 @@
+Subject: feeds: drop the target package feed from the apk distfeeds list
+
+downloads.openwrt.org publishes no package feed for the spacemit target,
+so the generated line makes `apk upgrade` refuse to run.
+
+Start9 downstream patch (start-technologies projects/start-wrt).
+Applies to: openwrt v25.12.6
+
+--- a/include/feeds.mk
++++ b/include/feeds.mk
+@@ -48,7 +48,6 @@
+ # 1: destination file
+ define FeedSourcesAppendAPK
+ ( \
+-  echo '%U/targets/%S/packages/packages.adb'; \
+   $(strip $(if $(CONFIG_PER_FEED_REPO), \
+ 	echo '%U/packages/%A/base/packages.adb'; \
+ 	$(if $(CONFIG_BUILDBOT), \

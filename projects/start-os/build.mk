@@ -7,8 +7,10 @@ BUILD_SRC := $(call ls-files, projects/start-os/build/lib) build/lib/scripts/for
 IMAGE_RECIPE_SRC := $(call ls-files, projects/start-os/build/image-recipe/)
 STARTD_SRC := projects/start-os/startd.service projects/start-os/services.slice projects/start-os/startos-shutdown.service projects/start-os/startos-restart.service $(BUILD_SRC)
 STARTOS_RELEASE_NOTES := projects/start-os/release-notes/$(shell cat $(VERSION_FILE)).md
-COMPILED_TARGETS := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox target/$(RUST_ARCH)-unknown-linux-musl/release/start-container projects/start-os/container-runtime/rootfs.$(ARCH).squashfs
-STARTOS_TARGETS := $(STARTD_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE) $(STARTOS_RELEASE_NOTES) $(COMPILED_TARGETS) target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs $(PLATFORM_FILE) \
+STARTOS_LOCALIZED_RELEASE_NOTES := $(filter-out %.pre-update.md,$(wildcard $(basename $(STARTOS_RELEASE_NOTES)).*.md))
+STARTOS_RELEASE_NOTES_SRC := scripts/changelog.mjs scripts/changelog-version.mjs shared-libs/crates/start-core/locales/release-notes.json .prettierrc.json package.json $(wildcard $(STARTOS_RELEASE_NOTES)) $(STARTOS_LOCALIZED_RELEASE_NOTES) $(call ls-files, projects/start-os/changelog)
+COMPILED_TARGETS := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox target/$(RUST_ARCH)-unknown-linux-musl/release/start-container target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs projects/start-os/container-runtime/rootfs.$(ARCH).squashfs
+STARTOS_TARGETS := $(STARTD_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE) $(STARTOS_RELEASE_NOTES_SRC) $(COMPILED_TARGETS) $(PLATFORM_FILE) \
 	$(shell if [ "$(PLATFORM)" = "raspberrypi" ]; then \
 		echo target/aarch64-unknown-linux-musl/release/pi-beep; \
 	fi) \
@@ -29,10 +31,13 @@ backup-fs-test: $(call ls-files, projects/start-os/backup-fs/src) projects/start
 container-runtime-test: projects/start-os/container-runtime/node_modules/.package-lock.json $(call ls-files, projects/start-os/container-runtime/src) projects/start-os/container-runtime/package.json projects/start-os/container-runtime/tsconfig.json
 	cd projects/start-os/container-runtime && npm test
 
-start-os-scripts-test: projects/start-os/build/lib/scripts/normalize-fstab projects/start-os/build/tests/normalize-fstab-test.sh projects/start-os/build/image-recipe/raspberrypi/img/usr/lib/startos/scripts/init_resize.sh projects/start-os/build/tests/init-resize-test.sh projects/start-os/build/image-recipe/build.sh projects/start-os/build/tests/backports-pref-test.sh
+start-os-scripts-test: projects/start-os/build/tests/dns-config-test.sh projects/start-os/build/lib/resolved.conf projects/start-os/container-runtime/deb-install.sh projects/start-os/container-runtime/update-image.sh projects/start-os/build/lib/scripts/normalize-fstab projects/start-os/build/tests/normalize-fstab-test.sh projects/start-os/build/image-recipe/raspberrypi/img/usr/lib/startos/scripts/init_resize.sh projects/start-os/build/tests/init-resize-test.sh projects/start-os/build/image-recipe/build.sh projects/start-os/build/tests/backports-pref-test.sh projects/start-os/build/lib/scripts/gather-debug-info projects/start-os/debian/postinst projects/start-os/build/tests/crash-diagnostics-test.sh projects/start-os/build/tests/btrfsmaintenance-test.sh projects/start-os/build/dpkg-deps/depends
 	./projects/start-os/build/tests/normalize-fstab-test.sh
 	./projects/start-os/build/tests/init-resize-test.sh
 	./projects/start-os/build/tests/backports-pref-test.sh
+	./projects/start-os/build/tests/crash-diagnostics-test.sh
+	./projects/start-os/build/tests/dns-config-test.sh
+	./projects/start-os/build/tests/btrfsmaintenance-test.sh
 
 projects/start-os/build/lib/migration-images/.done: projects/start-os/build/save-migration-images.sh
 	ARCH=$(ARCH) ./projects/start-os/build/save-migration-images.sh projects/start-os/build/lib/migration-images
@@ -40,7 +45,7 @@ projects/start-os/build/lib/migration-images/.done: projects/start-os/build/save
 
 start-os-deb: results/$(BASENAME).deb
 
-results/$(BASENAME).deb: debian/build.sh $(call ls-files,projects/start-os/debian) $(STARTOS_TARGETS)
+results/$(BASENAME).deb: debian/build.sh build/common.mk build/bash-completion projects/start-os/build.mk $(call ls-files,projects/start-os/debian) $(STARTOS_TARGETS)
 	PLATFORM=$(PLATFORM) REQUIRES=debian ./build/os-compat/run-compat.sh ./debian/build.sh
 
 start-os-$(IMAGE_TYPE): results/$(BASENAME).$(IMAGE_TYPE)
@@ -65,13 +70,14 @@ results/$(BASENAME).migration.squashfs: results/$(BASENAME).squashfs projects/st
 		--pattern 'startos-*_$(PLATFORM).iso' --dir results/migration-base --clobber
 	docker run --rm -v "$(CURDIR)":/w -w /w -e OWNER_UID="$$(id -u)" -e OWNER_GID="$$(id -g)" start9/build-env bash -euc 'apt-get update -qq && apt-get install -yq --no-install-recommends xorriso && projects/start-os/build/assemble-migration-payload.sh --arch $(ARCH) --new-squashfs results/$(BASENAME).squashfs --old-image "$$(ls -1 results/migration-base/startos-*_$(PLATFORM).iso | head -n1)" --out $@'
 
-# For creating os images. DO NOT USE
-start-os-install: $(STARTOS_TARGETS)
+# The caller must set DESTDIR when staging an image.
+start-os-install: $(STARTOS_TARGETS) build/bash-completion
 	$(call mkdir,$(DESTDIR)/usr/bin)
 	$(call mkdir,$(DESTDIR)/usr/sbin)
 	$(call cp,target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox,$(DESTDIR)/usr/bin/startbox)
 	$(call ln,/usr/bin/startbox,$(DESTDIR)/usr/bin/startd)
 	$(call ln,/usr/bin/startbox,$(DESTDIR)/usr/bin/start-cli)
+	$(call install-bash-completion,start-cli)
 	if [ "$(PLATFORM)" = "raspberrypi" ]; then $(call cp,target/aarch64-unknown-linux-musl/release/pi-beep,$(DESTDIR)/usr/bin/pi-beep); fi
 	if /bin/bash -c '[[ "${ENVIRONMENT}" =~ (^|-)unstable($$|-) ]]'; then \
 		$(call cp,target/$(RUST_ARCH)-unknown-linux-musl/release/flamegraph,$(DESTDIR)/usr/bin/flamegraph); \
@@ -104,7 +110,17 @@ start-os-install: $(STARTOS_TARGETS)
 	$(call cp,build/env/ENVIRONMENT.txt,$(DESTDIR)/usr/lib/startos/ENVIRONMENT.txt)
 	$(call cp,build/env/GIT_HASH.txt,$(DESTDIR)/usr/lib/startos/GIT_HASH.txt)
 	$(call cp,build/env/VERSION.txt,$(DESTDIR)/usr/lib/startos/VERSION.txt)
-	$(call cp,$(STARTOS_RELEASE_NOTES),$(DESTDIR)/usr/lib/startos/release-notes.md)
+	@set -e; notes=$$(mktemp -d .release-notes.XXXXXX); trap 'rm -rf "$$notes"' EXIT; \
+		node scripts/changelog.mjs notes projects/start-os "$$(cat $(VERSION_FILE))" > "$$notes/main.md"; \
+		locales=$$(node scripts/changelog.mjs locales projects/start-os "$$(cat $(VERSION_FILE))"); \
+		for locale in $$locales; do \
+			node scripts/changelog.mjs notes projects/start-os "$$(cat $(VERSION_FILE))" --locale "$$locale" > "$$notes/$$locale.md"; \
+		done; \
+		$(call cp,$$notes/main.md,$(DESTDIR)/usr/lib/startos/release-notes.md); \
+		$(call mkdir,$(DESTDIR)/usr/lib/startos/release-notes); \
+		for locale in $$locales; do \
+			$(call cp,$$notes/$$locale.md,$(DESTDIR)/usr/lib/startos/release-notes/$$locale.md); \
+		done
 
 start-os-update-overlay: $(STARTOS_TARGETS)
 	@echo "\033[33m!!! THIS WILL ONLY REFLASH YOUR DEVICE IN MEMORY !!!\033[0m"
@@ -193,7 +209,7 @@ projects/start-os/container-runtime/dist/node_modules/.package-lock.json project
 	./projects/start-os/container-runtime/install-dist-deps.sh
 	touch projects/start-os/container-runtime/dist/node_modules/.package-lock.json
 
-projects/start-os/container-runtime/rootfs.$(ARCH).squashfs: projects/start-os/container-runtime/debian.$(ARCH).squashfs projects/start-os/container-runtime/container-runtime.service projects/start-os/container-runtime/update-image.sh projects/start-os/container-runtime/update-image-local.sh projects/start-os/container-runtime/deb-install.sh projects/start-os/container-runtime/dist/index.js projects/start-os/container-runtime/dist/node_modules/.package-lock.json target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
+projects/start-os/container-runtime/rootfs.$(ARCH).squashfs: projects/start-os/build/lib/resolved.conf projects/start-os/container-runtime/debian.$(ARCH).squashfs projects/start-os/container-runtime/container-runtime.service projects/start-os/container-runtime/update-image.sh projects/start-os/container-runtime/update-image-local.sh projects/start-os/container-runtime/deb-install.sh projects/start-os/container-runtime/dist/index.js projects/start-os/container-runtime/dist/node_modules/.package-lock.json target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
 	ARCH=$(ARCH) ./projects/start-os/container-runtime/update-image-local.sh
 
 projects/start-os/build/lib/depends projects/start-os/build/lib/conflicts: $(ENVIRONMENT_FILE) $(PLATFORM_FILE) $(shell ls projects/start-os/build/dpkg-deps/*)

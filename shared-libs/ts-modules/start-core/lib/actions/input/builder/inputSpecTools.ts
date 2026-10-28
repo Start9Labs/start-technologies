@@ -9,7 +9,7 @@ import {
   ValueSpecText,
 } from '../inputSpecTypes'
 import { DefaultString } from '../inputSpecTypes'
-import { z } from '../../../zExport'
+import * as z from '../../../z'
 import { ListValueSpecText } from '../inputSpecTypes'
 
 export interface InputSpecTools<OuterType> {

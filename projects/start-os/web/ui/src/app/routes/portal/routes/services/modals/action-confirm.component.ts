@@ -2,12 +2,13 @@ import { Component } from '@angular/core'
 import { i18nPipe } from '@start9labs/shared'
 import { TuiButton, TuiDialogContext, TuiNotification } from '@taiga-ui/core'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
+import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
 import { PackageActionData } from './action-input.component'
 
 @Component({
   template: `
     <div class="service-title">
-      <img [src]="pkgInfo.icon" alt="" />
+      <img [pkgIcon]="pkgInfo.id" />
       <h4>{{ pkgInfo.title }}</h4>
     </div>
     <div tuiNotification appearance="warning">
@@ -43,7 +44,7 @@ import { PackageActionData } from './action-input.component'
       margin-top: 1.5rem;
     }
   `,
-  imports: [TuiButton, TuiNotification, i18nPipe],
+  imports: [TuiButton, TuiNotification, i18nPipe, PkgIconDirective],
 })
 export class ActionConfirmModal {
   readonly context =

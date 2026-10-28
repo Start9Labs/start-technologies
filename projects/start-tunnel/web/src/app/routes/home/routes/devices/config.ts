@@ -31,9 +31,9 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
       <tui-textfield>
         <textarea
           tuiTextarea
-          [min]="16"
-          [max]="16"
-          [readOnly]="true"
+          [minRows]="16"
+          [maxRows]="16"
+          [readonly]="true"
           [value]="config"
         ></textarea>
         <tui-icon tuiCopy />

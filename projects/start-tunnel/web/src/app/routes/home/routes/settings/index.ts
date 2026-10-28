@@ -264,7 +264,7 @@ export default class Settings {
     this.toggling.set(redirect.ip)
 
     try {
-      await this.api.setHttpRedirectEnabled({
+      await this.api.rpc.httpRedirect.setEnabled({
         ip: redirect.ip,
         enabled: !redirect.enabled,
       })
@@ -309,7 +309,7 @@ export default class Settings {
     this.restarting.set(true)
 
     try {
-      await this.api.restart()
+      await this.api.rpc.restart({})
       this.dialogs
         .open(
           this.i18n.transform(
@@ -330,7 +330,9 @@ export default class Settings {
   protected async onLogout() {
     this.tasks.run(async () => {
       // Best-effort revoke — logout must still work offline.
-      await this.api.logout().catch(e => console.error('Failed to log out', e))
+      await this.api.rpc.auth
+        .logout({})
+        .catch(e => console.error('Failed to log out', e))
       this.auth.deauthenticate()
     })
   }

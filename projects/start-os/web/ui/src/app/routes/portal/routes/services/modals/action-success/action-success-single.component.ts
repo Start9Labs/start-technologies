@@ -15,7 +15,7 @@ import { SingleResult } from './types'
     <tui-textfield>
       <input
         tuiInput
-        [readOnly]="true"
+        [readonly]="true"
         [ngModel]="single.value"
         [type]="single.masked && masked ? 'password' : 'text'"
       />

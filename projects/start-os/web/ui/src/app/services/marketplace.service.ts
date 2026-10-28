@@ -6,6 +6,8 @@ import {
   MarketplacePkg,
   StoreDataWithUrl,
   StoreIdentity,
+  packageResponse,
+  packagesResponse,
 } from '@start9labs/marketplace'
 import {
   defaultRegistries,
@@ -15,7 +17,7 @@ import {
   sameUrl,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
-import { PatchDB } from 'patch-db-client'
+import { PatchDB, pathFromArray } from 'patch-db-client'
 import {
   BehaviorSubject,
   catchError,
@@ -37,6 +39,7 @@ import {
   tap,
 } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
+import { PackageIconService } from 'src/app/services/package-icon.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { StorageService } from 'src/app/services/storage.service'
 
@@ -47,6 +50,7 @@ const { start9, community } = defaultRegistries
 })
 export class MarketplaceService extends AbstractMarketplaceService {
   private readonly api = inject(ApiService)
+  private readonly icons = inject(PackageIconService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly exver = inject(Exver)
   private readonly storage = inject(StorageService)
@@ -156,8 +160,12 @@ export class MarketplaceService extends AbstractMarketplaceService {
     )
   }
 
+  override fetchIcon$(registry: string, icon: string): Observable<string> {
+    return this.icons.getRegistry$(registry, icon)
+  }
+
   fetchInfo$(registry: string): Observable<T.RegistryInfo> {
-    return from(this.api.getRegistryInfo({ registry })).pipe(
+    return from(this.api.rpc.registry.info({ registry })).pipe(
       map(info => ({
         ...info,
         categories: {
@@ -204,13 +212,15 @@ export class MarketplaceService extends AbstractMarketplaceService {
 
   private fetchPackages$(url: string): Observable<MarketplacePkg[]> {
     return from(
-      this.api.getRegistryPackages({
-        registry: url,
-        id: null,
-        targetVersion: null,
-        sourceVersion: null,
-        otherVersions: 'short',
-      }),
+      this.api.rpc.registry.package
+        .get({
+          registry: url,
+          id: null,
+          targetVersion: null,
+          sourceVersion: null,
+          otherVersions: 'short',
+        })
+        .then(packagesResponse),
     ).pipe(
       map(packages =>
         Object.entries(packages).flatMap(([id, pkgInfo]) =>
@@ -236,13 +246,15 @@ export class MarketplaceService extends AbstractMarketplaceService {
     sourceVersion: string | null = null,
   ): Observable<MarketplacePkg | null> {
     return from(
-      this.api.getRegistryPackage({
-        registry: url,
-        id,
-        targetVersion: version ? `=${version}` : null,
-        sourceVersion,
-        otherVersions: 'short',
-      }),
+      this.api.rpc.registry.package
+        .get({
+          registry: url,
+          id,
+          targetVersion: version ? `=${version}` : null,
+          sourceVersion,
+          otherVersions: 'short',
+        })
+        .then(packageResponse),
     ).pipe(
       map(pkgInfo =>
         this.convertRegistryPkgToMarketplacePkg(id, version, flavor, pkgInfo),
@@ -286,7 +298,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
       registry: url,
     }
 
-    await this.api.installPackage(params)
+    await this.api.rpc.package.install(params)
   }
 
   async connect(url: string): Promise<void> {
@@ -304,7 +316,10 @@ export class MarketplaceService extends AbstractMarketplaceService {
 
     // validates the registry is reachable and provides a display name
     const info = await firstValueFrom(this.fetchInfo$(url))
-    await this.api.setDbValue<string | null>(['registries', url], info.name)
+    await this.api.rpc.db.put.ui({
+      pointer: pathFromArray(['registries', url]),
+      value: info.name,
+    })
 
     return url
   }
@@ -314,7 +329,10 @@ export class MarketplaceService extends AbstractMarketplaceService {
     const filtered: Record<string, string | null> = Object.fromEntries(
       Object.entries(raw).filter(([key]) => !sameUrl(key, url)),
     )
-    await this.api.setDbValue(['registries'], filtered)
+    await this.api.rpc.db.put.ui({
+      pointer: pathFromArray(['registries']),
+      value: filtered,
+    })
 
     // If the deleted registry was the persisted selection, clear it so the next
     // load falls back to the default rather than the deleted one.
@@ -330,7 +348,10 @@ export class MarketplaceService extends AbstractMarketplaceService {
     newName: string,
   ): Promise<void> {
     if (oldName !== newName) {
-      this.api.setDbValue<string>(['registries', url], newName)
+      this.api.rpc.db.put.ui({
+        pointer: pathFromArray(['registries', url]),
+        value: newName,
+      })
     }
   }
 }

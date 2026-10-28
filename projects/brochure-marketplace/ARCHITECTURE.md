@@ -30,8 +30,8 @@ src/
     components/
       main.component.ts        the marketplace view (registry picker, tiles, CTA)
     services/
-      api.service.ts           abstract ApiService (the data contract)
-      live-api.service.ts      real impl: RPC over HTTP to registries (prod)
+      api.service.ts           abstract ApiService: registry(url) -> generated RpcClient<RPC.Registry>, plus static-asset proxy
+      live-api.service.ts      real impl: one client per registry root, RPC over HTTP (prod)
       mock-api.service.ts      fixture impl backed by api.fixures.ts (dev)
       marketplace.service.ts   AbstractMarketplaceService impl (registry state)
       localize.ts              collapses LocaleString metadata to the active locale at ingress

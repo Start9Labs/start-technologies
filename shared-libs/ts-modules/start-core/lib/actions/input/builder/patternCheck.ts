@@ -1,5 +1,5 @@
 import { Pattern } from '../inputSpecTypes'
-import { z } from '../../../zExport'
+import * as z from '../../../z'
 
 /**
  * Anchors a pattern the way Angular's `Validators.pattern` does for a string

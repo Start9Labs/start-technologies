@@ -8,11 +8,142 @@ This file tracks notable changes since the move to the monorepo, and is what eac
 [GitHub release](https://github.com/Start9Labs/start-technologies/releases) links to
 for the detail behind its highlights.
 
+## [0.4.0.4]
+
+### Fixed
+
+- Action menus near the right edge of the screen size to fit their items.
+
+- Service interfaces on automatically assigned ports no longer occasionally fail to accept connections because StartOS was using the port for an outbound connection.
+
+- On the server itself, `start-cli auth login` and `auth logout` explain that no login is needed there, instead of failing with an unclear error.
+
+- Restore the Gateways list to connected gateways, hiding stale bridge entries.
+
+- Menus and dropdowns open when the browser or OS has reduced motion turned on.
+
+- Revoking a sign-in immediately closes its idle streams.
+
+- The Start menu and the More menus in Backups and Certificate Authorities close after you choose an item.
+
+- The serial console login prompt starts only on servers that have a serial port.
+
+- Fixed services whose container image has no `/etc`, such as one built `FROM scratch`, failing to start.
+
+- Opening System Settings from the Start menu or the System tab while already in System shows General Settings.
+
+- A gateway's WAN IP is shown while another gateway is selected for outbound traffic.
+
+### Security
+
+- Link-Local Multicast Name Resolution (LLMNR, port 5355) is disabled.
+
+- The RPC port mapper (port 111) is disabled. NFS shares mount over NFSv4, or over NFSv3 with `-o nolock`.
+
 ## [0.4.0.3]
+
+### Added
+
+- Bash tab completion for `start-cli` is enabled automatically in new shells.
+
+- **Crash diagnostics survive subsequent boots.** Available kernel crash records
+  are preserved on the data drive. `gather-debug-info` collects them together with
+  kernel logs, the previous boot's journal, watchdog status and NVMe power-state
+  information.
+
+- Diagnostic mode has an **Update server** button that downloads the latest StartOS release, or reinstalls the current one, to apply on restart.
+
+- Forward Email is a provider choice under **System > SMTP**, and the providers are listed alphabetically.
+
+- **Servers with a watchdog restart after a system hang.** StartOS keeps the
+  hardware watchdog armed with a one-minute timeout where a supported device is
+  available.
+
+- Added in-memory database support to patch-db for ephemeral application state.
 
 ### Changed
 
+- **The marketplace and service pages load package icons as they are shown**, instead of with every registry listing and database update, so they open faster. Icons show a loading placeholder and are cached across page reloads.
+
+- **Legacy v1 package conversion creates SquashFS images natively**, preserving container filesystem ownership and permissions.
+
 - **NVIDIA images include driver 580.178.04**, with Linux 7.2 compatibility.
+
+- **StartOS publishes a private domain's record to a router over TCP when it
+  has no WireGuard key to sign the update with.** A router that accepts DNS
+  UPDATE only over UDP no longer receives these records.
+
+- **Static DNS servers that point back at the server itself are refused**, such as `0.0.0.0`, `::`, or a loopback address.
+
+### Removed
+
+- **The `tunnel.*` RPC passthrough is removed.** It forwarded StartTunnel API calls signed with the server's key.
+
+### Fixed
+
+- Certificate acquisition trusts custom certificate authorities installed in the host trust store.
+- Certificate failure notifications include the authority's explanation, including Let's Encrypt's unpause link for paused domains.
+
+- Bash tab completion works for nested `start-cli` subcommands and their options.
+
+- **Large HTTP responses arrive complete through service HTTPS addresses when the backend closes the connection.**
+
+- **Required tasks preserve a service's desired running status.** Services resume automatically when the last blocking task clears, unless explicitly stopped. CLI `package start` records running intent and warns while critical tasks block execution.
+
+- Private domains keep resolving over the server's IPv6 address when the network changes its IPv6 prefix.
+
+- Keep expanded form fields correctly spaced after focusing inputs.
+- Respect configured form-list limits when adding entries.
+
+- Fixed service effects losing supplied event IDs, including the ID shared by opening and submitting an action input form. Supplied IDs take precedence over the caller's event ID.
+
+- Services start on servers set to a language other than English, including those running PostgreSQL.
+
+- **The Software Update badge clears after an OS update, and the update dialog opens only when a newer release is available.**
+
+- **A package installs reliably while it is still downloading or uploading.**
+
+- Services record the time of their most recent successful backup.
+
+- **`start-cli package install` reports a package missing from the registry it asked**, naming
+  that registry, instead of prompting to choose from an empty list of flavors.
+
+- Restoring a service that is still installed is refused with an error; uninstall it first.
+
+- Stop a service daemon's entire process tree when its image-provided init exceeds the shutdown timeout.
+
+- **Services keep their internal IPv6 bridge address enabled.** Address switches
+  affect access from other networks while service-to-service access stays available.
+
+- **Setup accepts backslash-separated network backup paths** when verifying or restoring a CIFS share.
+
+- Failed service updates no longer restore stale data from an earlier update when a new rollback snapshot cannot be created.
+
+- A command that cannot be started in a service subcontainer, such as through `start-cli package attach`, now reports the command and working directory it tried.
+
+- **Services that read an optional dependency's manifest can initialize when that dependency is not installed.**
+
+### Security
+
+- Enforce action access permissions when services request another service’s action form, preventing unauthorized reads of form fields and prefilled values.
+
+- **Update dependencies with security fixes**, including TLS certificate verification and handshake handling, HTTP/2 flow control, and XML parsing.
+
+- Keep diagnostic mode off public HTTPS domains after a server error.
+
+- Keep service and system DNS forwarding on their selected outbound gateways. Edit gateway names and DNS together, and show resolver addresses with automatic/public-fallback indicators.
+- Control outbound gateway selection and independent OS/service DNS overrides on dedicated Outbound Traffic tabs; services using gateway DNS use the gateway's settings rather than the OS override.
+- Resolve configured WireGuard endpoint names through the physical connection for host-only tunnel bootstrap; service DNS retains its outbound gateway.
+- Keep setup and early diagnostic host DNS available through the automatic physical gateway and retain stored DNS policy after it loads even if initialization fails.
+- Keep private DNS answers aligned with their gateway when an interface address moves.
+- Preserve existing system-wide static DNS settings as overrides on known gateways during upgrade.
+
+- Block UI-initiated OS updates unless their registry metadata lists a trusted signer. The trust list is stored on the server, initially includes drbonez, matthill, and Start9, and supports labeled CLI management.
+- Require a valid signature from a built-in trusted signer for diagnostic OS updates.
+
+- Isolate login rate limits by server address, ingress gateway, and public or private access. Log the client IP, gateway, and address on the first blocked attempt per throttle window.
+- Reject signed requests using another gateway's address or a private-only address over public access.
+- Reject remote requests using unconfigured loopback signing addresses.
 
 ## [0.4.0.2]
 
@@ -21,6 +152,8 @@ for the detail behind its highlights.
 - **Update dependencies with security fixes**, including Angular, DOMPurify, networking libraries, and the service runtime. Replace the unmaintained YAML library while preserving configuration formats.
 
 ### Fixed
+
+- **Concurrent service commands and `package attach` calls run without intermittent filesystem errors.**
 
 - **Large packages sideload successfully in the UI over slow connections.** A failed upload shows an error message.
 

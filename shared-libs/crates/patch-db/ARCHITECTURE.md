@@ -25,7 +25,7 @@ patch-db is split into two layers that communicate over a transport boundary:
 └─────────────────────────────────────────────┘
 ```
 
-The Rust side owns the persistent state and produces patches. The TypeScript side consumes those patches and maintains a local mirror for reactive UI bindings. They are separate implementations of the same concepts (not WASM/FFI) — compatibility is maintained through shared RFC 6901/6902 semantics.
+The Rust side owns the database state and produces patches. The TypeScript side consumes those patches and maintains a local mirror for reactive UI bindings. They are separate implementations of the same concepts (not WASM/FFI) — compatibility is maintained through shared RFC 6901/6902 semantics.
 
 ## Project structure
 
@@ -54,7 +54,7 @@ The main database engine. Key types:
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `PatchDb`            | Thread-safe async handle (clone to share). All reads/writes go through this.                                                      |
 | `TypedPatchDb<T>`    | Generic wrapper that enforces a schema type `T` via `HasModel`.                                                                   |
-| `Store`              | Internal state container. File-backed with CBOR. Holds the current `Value`, revision counter, and `Broadcast`.                    |
+| `Store`              | Internal state container. Holds the current `Value`, revision counter, `Broadcast`, and optional CBOR file storage.               |
 | `Dump`               | Snapshot: `{ id: u64, value: Value }`                                                                                             |
 | `Revision`           | Incremental change: `{ id: u64, patch: DiffPatch }`                                                                               |
 | `DiffPatch`          | Newtype over `json_patch::Patch` with scoping, rebasing, and key-tracking methods.                                                |
@@ -75,8 +75,8 @@ PatchDb::put / apply / apply_function / mutate
   ▼
 Store::apply(DiffPatch)
   ├─ Apply patch in-memory (with undo on failure)
-  ├─ Serialize patch as CBOR, append to file
-  ├─ Compress (rewrite snapshot) every 4096 revisions
+  ├─ For file-backed stores: serialize patch as CBOR, append to file
+  ├─ For file-backed stores: compress (rewrite snapshot) every 4096 revisions
   └─ Broadcast::send(Revision)
        └─ For each ScopedSender: scope patch to pointer, send if non-empty
 ```
@@ -198,7 +198,13 @@ Operations are applied immutably — objects are spread-copied, arrays are slice
 
 ## Storage format
 
-The on-disk format is a sequence of CBOR values:
+`PatchDb::in_memory()` creates an independent database with a null root and
+revision zero. It shares the read, mutation, and broadcast paths with file-backed
+databases, without file storage or file locks. Cloned handles share the store;
+its state is discarded when the last handle drops.
+
+`PatchDb::open(path)` creates or opens a file-backed database. The on-disk format
+is a sequence of CBOR values:
 
 ```
 [ revision: u64 ] [ value: Value ] [ patch₁ ] [ patch₂ ] ... [ patchₙ ]

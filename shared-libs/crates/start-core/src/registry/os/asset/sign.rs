@@ -8,7 +8,6 @@ use imbl_value::InternedString;
 use itertools::Itertools;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::context::CliContext;
 use crate::prelude::*;
@@ -20,8 +19,7 @@ use crate::registry::os::index::OsVersionInfo;
 use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::sign::commitment::blake3::Blake3Commitment;
-use crate::sign::ed25519::Ed25519;
-use crate::sign::{AnySignature, AnyVerifyingKey, SignatureScheme};
+use crate::sign::{AnySignature, AnyVerifyingKey};
 use crate::util::io::open_file;
 use crate::util::serde::Base64;
 
@@ -47,19 +45,19 @@ pub fn sign_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct SignAssetParams {
-    #[ts(type = "string")]
     version: Version,
-    #[ts(type = "string")]
     platform: InternedString,
-    #[ts(skip)]
+    #[visit(ts(skip))]
     #[serde(rename = "__Auth_signer")]
     signer: AnyVerifyingKey,
     signature: AnySignature,
 }
+
+rpc_toolkit::reflect_ts!(SignAssetParams);
+rpc_toolkit::ts_export!(SignAssetParams, namespaces = [""]);
 
 async fn sign_asset(
     ctx: RegistryContext,
@@ -107,7 +105,7 @@ async fn sign_asset(
             .as_idx_mut(&platform)
             .or_not_found(&platform)?
             .mutate(|s| {
-                signer.scheme().verify_commitment(
+                let signature = crate::sign::compat::verify_commitment(
                     &signer,
                     &s.commitment,
                     SIG_CONTEXT,
@@ -198,8 +196,10 @@ pub async fn cli_sign_asset(
         hash: Base64(*blake3.as_bytes()),
         size,
     };
-    let signature =
-        AnySignature::Ed25519(Ed25519.sign_commitment(ctx.id_key()?, &commitment, SIG_CONTEXT)?);
+    let signature = ctx
+        .id_key()?
+        .sign_commitment(&commitment, SIG_CONTEXT)
+        .await?;
     sign_phase.complete();
 
     index_phase.start();

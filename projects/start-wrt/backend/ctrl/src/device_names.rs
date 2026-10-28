@@ -25,8 +25,7 @@
 //! atomic rename swaps inodes rather than mutating in place, so the external
 //! `tar`/`fs::read` that copies it always sees one complete document — a live
 //! SQLite file copied the same way could be torn mid-write. The in-memory map is
-//! authoritative (mirrors the `sessions.json` pattern in `auth.rs`); disk is
-//! rewritten only when the map actually changes.
+//! authoritative; disk is rewritten only when the map actually changes.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -54,7 +53,7 @@ const TOUCH_INTERVAL_SECS: i64 = 24 * 60 * 60;
 /// One device's cached identity. `hostname: Option` (rather than a separate
 /// map) keeps pre-fingerprint `device_names.json` files loading unchanged:
 /// legacy entries always carried a hostname, and the new fields default.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct CachedName {
     pub hostname: Option<String>,
@@ -62,6 +61,7 @@ pub struct CachedName {
     pub fingerprint: Option<crate::device_ident::Fingerprint>,
     last_seen: i64,
 }
+rpc_toolkit::reflect_ts!(CachedName);
 
 /// What `devices::list` saw for one MAC during a single poll.
 pub struct Observation {

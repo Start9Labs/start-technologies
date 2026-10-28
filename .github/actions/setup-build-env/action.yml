@@ -8,52 +8,33 @@ runs:
       with:
         node-version: '22'
 
-    - name: Install dependencies
-      run: |
-        # The runner image's Microsoft apt sources 403 intermittently, and one failing source fails the whole update.
-        grep -rl 'packages\.microsoft\.com' /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -r rm -f || true
-        sudo apt-get update
-        sudo apt-get install -y --no-install-recommends \
-          build-essential \
-          clang \
-          libclang-dev \
-          squashfs-tools-ng \
-          qemu-user-static
-      shell: bash
-
-    - name: Setup Rust
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        toolchain: stable
-
     - name: Set up QEMU
+      id: qemu
+      continue-on-error: true
       uses: docker/setup-qemu-action@v4
+
+    - name: Set up QEMU (mirror.gcr.io)
+      if: steps.qemu.outcome == 'failure'
+      uses: docker/setup-qemu-action@v4
+      with:
+        image: mirror.gcr.io/tonistiigi/binfmt:latest
 
     - name: Set up Docker
       uses: docker/setup-docker-action@v5
 
     - name: Set up Docker Buildx
+      id: buildx
+      continue-on-error: true
       uses: docker/setup-buildx-action@v4
 
+    - name: Set up Docker Buildx (mirror.gcr.io)
+      if: steps.buildx.outcome == 'failure'
+      uses: docker/setup-buildx-action@v4
+      with:
+        driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
+        buildkitd-config-inline: |
+          [registry."docker.io"]
+            mirrors = ["mirror.gcr.io"]
+
     - name: Install start-cli
-      run: |
-        ARCH=$(uname -m)
-        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-        ASSET_NAME="start-cli_${ARCH}-${OS}"
-        DOWNLOAD_URL=$(curl -fsS \
-          -H "Authorization: token ${{ github.token }}" \
-          https://api.github.com/repos/Start9Labs/start-technologies/releases \
-          | jq -r '[.[].assets[] | select(.name=="'"$ASSET_NAME"'")] | first | .browser_download_url')
-        if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-          echo "Error: Could not find asset '$ASSET_NAME' in Start9Labs/start-technologies releases"
-          exit 1
-        fi
-        curl -fsSL \
-          -H "Authorization: token ${{ github.token }}" \
-          -H "Accept: application/octet-stream" \
-          "$DOWNLOAD_URL" -o /tmp/start-cli
-        sudo install -m 755 /tmp/start-cli /usr/local/bin/start-cli
-        rm /tmp/start-cli
-        echo ""
-        echo "start-cli: $(start-cli --version)"
-      shell: bash
+      uses: Start9Labs/start-technologies/.github/actions/install-start-cli@master

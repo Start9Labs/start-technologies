@@ -56,3 +56,4 @@ docs/USER.md
 /.angular
 /out-tsc
 /config.json
+/proxy.conf.json

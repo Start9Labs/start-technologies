@@ -14,10 +14,10 @@ import { TuiHeader } from '@taiga-ui/layout'
 import { filter } from 'rxjs'
 import { Placeholder } from 'src/app/components/placeholder'
 import { DevicesApiService } from 'src/app/routes/devices/service'
-import { InboundService, VpnServerPeer } from '../../service'
+import { InboundService, VpnServer, VpnServerPeer } from '../../service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 
-import { CLIENT_CONFIG } from './dialog-config'
+import { CLIENT_CONFIG, ClientConfigData } from './dialog-config'
 import { ADD_CLIENT, ClientDialogData } from './dialog-add'
 import { RENAME_CLIENT } from './dialog-rename'
 
@@ -97,13 +97,13 @@ import { RENAME_CLIENT } from './dialog-rename'
                   </button>
                   <button
                     tuiOption
-                    iconStart="@tui.repeat"
-                    (click)="changeRouting(item)"
+                    iconStart="@tui.globe"
+                    (click)="toggleDnsInjection(item)"
                   >
                     {{
-                      (item.route_all
-                        ? 'Switch to LAN only'
-                        : 'Switch to all traffic'
+                      (item.allow_dns_injection
+                        ? 'Revoke DNS record publishing'
+                        : 'Allow DNS record publishing'
                       ) | i18n
                     }}
                   </button>
@@ -193,49 +193,29 @@ export default class InboundClients {
     const server = this.server()
     if (!server) return
 
-    const peerIps = server.peers.map(p => p.ip).filter(Boolean) as string[]
-    const usedIps = [
-      ...new Set([
-        server.server_address,
-        ...(this.deviceIps() ?? []),
-        ...peerIps,
-      ]),
-    ]
-
     this.dialogs
       .open<VpnServerPeer>(ADD_CLIENT, {
         label: this.i18n.transform('Add client device'),
         data: {
           serverAddress: server.server_address,
-          usedIps,
+          usedIps: this.usedIps(server),
         } satisfies ClientDialogData,
       })
-      .subscribe(async peer => {
-        const response = await this.service.addPeer(server.profile, peer)
-        if (response?.client_config) {
-          this.dialogs
-            .open(CLIENT_CONFIG, {
-              data: {
-                name: peer.name,
-                config: response.client_config,
-              },
-            })
-            .subscribe()
-        }
-      })
+      .subscribe(peer => this.addAndShowConfig(server.profile, peer))
   }
 
   rename(peer: VpnServerPeer) {
     const profile = this.server()?.profile
-    if (!profile) return
+    const publicKey = peer.public_key
+    if (!profile || !publicKey) return
 
     this.dialogs
       .open<string>(RENAME_CLIENT, {
         label: this.i18n.transform('Rename Device'),
         data: peer.name,
       })
-      .subscribe(newName => {
-        this.service.addPeer(profile, { ...peer, name: newName })
+      .subscribe(name => {
+        this.service.renamePeer(profile, publicKey, name)
       })
   }
 
@@ -264,73 +244,37 @@ export default class InboundClients {
         data: {
           name: peer.name,
           config,
-        },
+          placeholderKey: true,
+        } satisfies ClientConfigData,
       })
       .subscribe()
   }
 
-  changeRouting(peer: VpnServerPeer) {
-    const server = this.server()
-    if (!server || !peer.public_key) return
+  toggleDnsInjection(peer: VpnServerPeer) {
+    const profile = this.server()?.profile
+    if (!profile || !peer.public_key) return
+    const publicKey = peer.public_key
 
-    const newRouteAll = !peer.route_all
+    if (peer.allow_dns_injection) {
+      this.service.setPeerDnsInjection(profile, publicKey, false)
+      return
+    }
 
     this.dialogs
-      .open(TUI_CONFIRM, {
-        label: this.i18n.transform('Change routing mode?'),
+      .open<boolean>(TUI_CONFIRM, {
+        label: this.i18n.transform('Allow DNS Record Publishing?'),
         data: {
-          content: `${this.i18n.transform('This will delete the existing peer and create a new one with')} ${newRouteAll ? this.i18n.transform('all traffic') : this.i18n.transform('LAN only')} ${this.i18n.transform('routing. You will need to reconfigure your device with the new config.')}`,
-          yes: this.i18n.transform('Continue'),
+          content: this.i18n.transform(
+            'This device will be able to publish DNS names that resolve on your whole network. Grant this only to a device you trust, such as your own StartOS server.',
+          ),
+          yes: this.i18n.transform('Allow'),
           no: this.i18n.transform('Cancel'),
         },
       })
       .pipe(filter(Boolean))
-      .subscribe(async () => {
-        await this.service.deletePeer(server.profile, peer.public_key!)
-
-        // Refresh device IPs so the deleted peer's IP is no longer reserved
-        const devices = await this.devices.get()
-        this.deviceIps.set(devices.map(d => d.ipv4).filter(Boolean) as string[])
-
-        const peerIps = server.peers
-          .filter(p => p.public_key !== peer.public_key)
-          .map(p => p.ip)
-          .filter(Boolean) as string[]
-        const usedIps = [
-          ...new Set([
-            server.server_address,
-            ...(this.deviceIps() ?? []),
-            ...peerIps,
-          ]),
-        ]
-
-        this.dialogs
-          .open<VpnServerPeer>(ADD_CLIENT, {
-            label: this.i18n.transform('Reconfigure client device'),
-            data: {
-              serverAddress: server.server_address,
-              usedIps,
-              defaults: {
-                name: peer.name,
-                ip: peer.ip,
-                route_all: newRouteAll,
-              },
-            } satisfies ClientDialogData,
-          })
-          .subscribe(async newPeer => {
-            const response = await this.service.addPeer(server.profile, newPeer)
-            if (response?.client_config) {
-              this.dialogs
-                .open(CLIENT_CONFIG, {
-                  data: {
-                    name: newPeer.name,
-                    config: response.client_config,
-                  },
-                })
-                .subscribe()
-            }
-          })
-      })
+      .subscribe(() =>
+        this.service.setPeerDnsInjection(profile, publicKey, true),
+      )
   }
 
   delete(peer: VpnServerPeer) {
@@ -343,5 +287,31 @@ export default class InboundClients {
           this.service.deletePeer(profile, peer.public_key)
         }
       })
+  }
+
+  private usedIps(server: VpnServer): string[] {
+    const peerIps = server.peers.map(p => p.ip).filter(Boolean) as string[]
+    return [
+      ...new Set([
+        server.server_address,
+        ...(this.deviceIps() ?? []),
+        ...peerIps,
+      ]),
+    ]
+  }
+
+  private async addAndShowConfig(profile: string, peer: VpnServerPeer) {
+    const response = await this.service.addPeer(profile, peer)
+    if (response) {
+      this.dialogs
+        .open(CLIENT_CONFIG, {
+          data: {
+            name: peer.name,
+            config: response.client_config,
+            placeholderKey: !!peer.public_key,
+          } satisfies ClientConfigData,
+        })
+        .subscribe()
+    }
   }
 }

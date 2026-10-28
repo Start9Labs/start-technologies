@@ -18,6 +18,7 @@ shared `start-core` crate.
 | Tunnel module root             | `shared-libs/crates/start-core/src/tunnel/mod.rs`  |
 | Angular UI                     | `projects/start-tunnel/web/`                       |
 | systemd unit                   | `projects/start-tunnel/start-tunneld.service`      |
+| Kernel settings (sysctl.d)     | `projects/start-tunnel/sysctl.conf`                |
 | User & reference docs (mdbook) | `projects/start-tunnel/docs/`                      |
 
 `src/main.rs` embeds the compiled UI (`web/dist/static/start-tunnel`) via
@@ -96,7 +97,9 @@ daemon over the same JSON-RPC API.
 
 - `web/src/app/app.routes.ts` — `home` (authed) vs `login` routes.
 - `web/src/app/services/api/` — `LiveApiService` (real RPC) and
-  `MockApiService`, selected by `useMocks` in the workspace `config.json`.
+  `MockApiService`, selected by `useMocks` in the workspace `config.json`. Both
+  expose the server's methods as `rpc`, a generated `RpcClient<RPC.Tunnel>`; the
+  mock backs it with a method-keyed handler table.
 - `web/src/app/services/patch-db/` — PatchDB client; UI state mirrors the daemon
   db via the patch stream.
 - `web/tsconfig.json` resolves `@start9labs/shared` and

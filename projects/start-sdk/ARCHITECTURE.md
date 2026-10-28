@@ -24,7 +24,7 @@ The Start SDK builds on a shared core library to form a layered architecture: **
 └─────────────────────────────────────────────────────────────┘
 ```
 
-The SDK follows [Semantic Versioning](https://semver.org/) and is versioned independently of StartOS. Each `CHANGELOG.md` heading records the SDK version and the StartOS release it targets.
+The SDK follows [Semantic Versioning](https://semver.org/) and is versioned independently of StartOS. `package.json` owns its version; `changelog/` holds pending fragments and `CHANGELOG.md` records generated release history.
 
 ## Place in the monorepo
 
@@ -38,7 +38,9 @@ The core library (`shared-libs/ts-modules/start-core/`) is a self-contained libr
 
 Auto-generated TypeScript files defining every type exchanged between the SDK and the StartOS runtime. They mirror the Rust types in the monorepo's `shared-libs/crates/start-core` (the `start-core` crate with library name `start_core`) and cover the full surface area of the system: manifests, actions, health checks, service interfaces, bind parameters, dependency requirements, SSL, domains, SMTP, networking, images, and more. When the Rust types change, these bindings must be regenerated.
 
-All bindings are re-exported through `shared-libs/ts-modules/start-core/lib/osBindings/index.ts`.
+Each root is a module pair: `*.schemas.ts` holds runtime [zod](https://zod.dev) schemas (one per Rust type; `z.input` is the deserialization shape, `z.output` the serialization shape, and `z.toJSONSchema` renders either), and the sibling type-only module projects them as the `Foo` / `FooInput` types consumers import. `shared-libs/ts-modules/start-core/lib/osBindings/index.ts` re-exports the types; `osBindings/schemas.ts` is the matching barrel of validators (`schemas.Manifest`, `schemas.Tunnel.*`, `schemas.RPC.StartOS` and the other API trees), exported from `@start9labs/start-core` and the SDK as `schemas`. Every schema initializer is `/* @__PURE__ */`-annotated, and both `@start9labs/start-core` and the SDK ship an ESM copy of their output beside the CommonJS one (`esm/`, built by a second `tsc` pass from `tsconfig.esm.json`). Each `package.json` `exports` map routes the `import` condition to the ESM copy and `require` to CommonJS, for the root and every subpath alike, so a bundle never holds both copies of one module (`shared-libs/ts-modules/scripts/esm-extensions.mjs` turns tsc's output into the `.mjs` modules native Node loads as written, with extensioned relative specifiers and JSON import attributes, which tsc does not write); `sideEffects: false` on start-core lets those bundlers drop the schema modules a consumer never imports. The map lists each directory a consumer imports by its index (`@start9labs/start-core/util`, `@start9labs/start-sdk/lib/health/checkFns`); `lib/test/packageExports.test.ts` in each package fails when a directory index lacks its entry.
+
+`@start9labs/start-core` also exports `createRpcClient`, which turns a type tree such as `RPC.StartOS` into nested camelCase methods (`api.package.host.binding.setAddressEnabled(params, { timeout })`) typed by each node's parameters and result, inherited parameters included. It is a `Proxy` that derives the dotted method from the property path and hands it to a caller-supplied transport, so it carries no schema; `tableTransport` dispatches to a method-keyed handler table (`RpcHandlers<RPC.StartOS>`) for mocks. The StartOS UI, setup wizard, StartTunnel and brochure web apps call their servers through it, keeping only their non-RPC surface (uploads, static assets, websockets) hand-written.
 
 Key types include:
 
@@ -218,7 +220,7 @@ The `.build()` method returns an object containing the entire SDK surface area, 
 | **Init/Uninit**  | `setupInit`, `setupUninit`, `setupOnInit`, `setupOnUninit`                                                                          | Lifecycle hooks                                   |
 | **Containers**   | `SubContainer.of`, `SubContainer.withTemp`, `Mounts.of`                                                                             | Container execution with mounts                   |
 | **Forms**        | `InputSpec.of`, `Value`, `Variants`, `List`                                                                                         | Form input builders                               |
-| **Triggers**     | `trigger.defaultTrigger`, `.cooldownTrigger`, `.statusTrigger`                                                                      | Health check polling strategies                   |
+| **Triggers**     | `trigger.defaultTrigger`, `.cooldownTrigger`, `.statusTrigger`, `.onceTrigger`                                                      | Health check polling strategies                   |
 | **Reactive**     | `getContainerIp`, `getStatus`, `getSystemSmtp`, `getOutboundGateway`, `getSslCertificate`, `getServiceManifest`                     | Subscription-based data access                    |
 | **Plugins**      | `plugin.url.register`, `plugin.url.exportUrl`                                                                                       | Plugin system (gated by manifest `plugins` field) |
 | **Effects**      | `restart`, `shutdown`, `setHealth`, `mount`, `clearBindings`, ...                                                                   | Direct effect wrappers                            |
@@ -314,13 +316,15 @@ health/
 
 Health checks are paired with **triggers** that control polling behavior:
 
-- `defaultTrigger` — 1 s while pending (`starting`/`waiting`/`failure`), 30 s otherwise
+- `defaultTrigger` — 1 s while `starting` or `failure`, 30 s otherwise
+- `daemonReadyTrigger` — a daemon's `ready` check without its own trigger: `defaultTrigger`, except that `loading` or `waiting` before the first `success` backs off from 1 s, doubling to 30 s (selected in `HealthDaemon`, not exported on `sdk.trigger`)
 - `cooldownTrigger` — Fixed interval between checks
 - `statusTrigger` — Per-status polling intervals with a default fallback
+- `onceTrigger` — One check at start
 
 ### Primary URL (`lib/primaryUrl/`)
 
-`setupPrimaryUrl.ts` builds the action behind `sdk.setupPrimaryUrl` over the package's `get`/`set`, plus `bestUsable` and `setupTask`. Both judge the stored URL against the interface's `nonLocal` addresses. `bestUsable` is a `Watchable.combine` over the package's `get` reader and the host, so the caller picks the read strategy; it resolves the URL when read, leaving the store as the user set it. `setupTask` is an init script that passes those addresses to StartOS as an `input-not-matches` task's accepted input, and StartOS decides when the task is active.
+`setupPrimaryUrl.ts` builds the action behind `sdk.setupPrimaryUrl` over the package's `get`/`set`, plus `bestUsable` and `setupTask`. Both judge the stored URL against the interface's `nonLocal` addresses. `bestUsable` is a `Watchable.combine` over the package's `get` reader and the host, so the caller picks the read strategy; it resolves the URL when read, leaving the store as the user set it. `setupTask` is an init script that watches both and creates a plain task while the URL is unresolved, clearing it otherwise. It never hands StartOS an `input-not-matches` condition: StartOS evaluates one by asking the service for its action input, which it cannot do while that service initializes, so it would assume a new task active and a critical one would stop the service.
 
 ### Backup System (`lib/backup/`)
 
@@ -430,6 +434,7 @@ Polling strategy functions that determine when health checks run:
 sdk.trigger.defaultTrigger
 sdk.trigger.cooldownTrigger(30_000)
 sdk.trigger.statusTrigger(30_000, { starting: 5_000, failure: 5_000 })
+sdk.trigger.onceTrigger
 ```
 
 ## Build Pipeline

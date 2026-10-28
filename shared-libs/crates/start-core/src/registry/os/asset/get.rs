@@ -8,7 +8,6 @@ use imbl_value::{InternedString, json};
 use itertools::Itertools;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::context::CliContext;
 use crate::prelude::*;
@@ -33,6 +32,7 @@ pub fn get_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "iso",
             from_fn_async(cli_get_os_asset)
+                .no_ts()
                 .no_display()
                 .with_about("about.download-iso"),
         )
@@ -45,6 +45,7 @@ pub fn get_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "img",
             from_fn_async(cli_get_os_asset)
+                .no_ts()
                 .no_display()
                 .with_about("about.download-img"),
         )
@@ -57,20 +58,21 @@ pub fn get_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "squashfs",
             from_fn_async(cli_get_os_asset)
+                .no_ts()
                 .no_display()
                 .with_about("about.download-squashfs"),
         )
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct GetOsAssetParams {
-    #[ts(type = "string")]
     pub version: Version,
-    #[ts(type = "string")]
     pub platform: InternedString,
 }
+
+rpc_toolkit::reflect_ts!(GetOsAssetParams);
+rpc_toolkit::ts_export!(GetOsAssetParams, namespaces = [""]);
 
 async fn get_os_asset(
     ctx: RegistryContext,

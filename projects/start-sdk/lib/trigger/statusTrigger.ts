@@ -1,5 +1,6 @@
 import { HealthStatus } from '@start9labs/start-core/types'
 import { Trigger } from '.'
+import { delay } from './delay'
 
 type StatusIntervals = { [K in HealthStatus]?: number }
 
@@ -8,6 +9,7 @@ type StatusIntervals = { [K in HealthStatus]?: number }
  *
  * Map each health check result to a cooldown duration in milliseconds.
  * Any status without an explicit interval uses the default (30 s if omitted).
+ * An interval of `Infinity` stops polling once that status is reported.
  *
  * @param defaultMs - Fallback interval (ms) for any status not listed. Defaults to 30 s.
  * @param intervals - Per-status overrides
@@ -30,7 +32,7 @@ export function statusTrigger(
       const ms = lastResult
         ? (intervals[lastResult] ?? defaultMs)
         : (intervals.starting ?? defaultMs)
-      await new Promise(resolve => setTimeout(resolve, ms))
+      await delay(ms)
       yield
     }
   }

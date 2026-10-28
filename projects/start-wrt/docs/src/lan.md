@@ -11,15 +11,15 @@ Configure the router's LAN IPv4 addressing.
   - `172.16.0.0/12` — the second octet is editable, `16`–`31`.
   - `10.0.0.0/8` — the second octet is editable, `0`–`255`.
 
-  The default is `192.168`, so existing networks are unaffected. Only RFC 1918 private ranges are accepted; out-of-range values are flagged inline (e.g. "Second octet must be 16–31") and block saving rather than being auto-corrected. Each [Security Profile](security-profiles.md) receives its own `/24` subnet within this block, allowing up to 255 separate subnets with 254 devices each.
+  The default is `192.168`, so existing networks are unaffected. Only RFC 1918 private ranges are accepted; out-of-range values are flagged inline (e.g. "Allowed: 16–31") and block saving rather than being auto-corrected. Each [Security Profile](security-profiles.md) receives its own `/24` subnet within this block, allowing up to 255 separate subnets. A profile's DHCP hands out addresses `.2`–`.199`; `.200`–`.254` are reserved for its [Inbound VPN](inbound-vpn.md).
 
 - **Router address** — The router's LAN IP is the gateway (`.1`) of the primary **Admin** [Security Profile](security-profiles.md)'s subnet. The first two octets come from the Network Block above; the third octet is set by the Admin profile's **Subnet** field, not on this page. For example, with the `192.168.x.x` block and an Admin subnet of `1`, the router is reachable at `192.168.1.1`. This is the address you use to access the web interface (or simply `router.lan`).
 
 > [!NOTE]
-> DHCP is managed automatically for each Security Profile. You do not need to configure DHCP ranges or lease times.
+> DHCP is managed automatically for each Security Profile. You do not need to configure DHCP ranges or lease times. The router does not forward DHCP or IPv6 router advertisements from another device between its ports and Wi-Fi networks, so a modem plugged into a LAN port instead of the WAN port cannot hand addresses to devices on the router's Wi-Fi. A device that needs to send router advertisements, such as a Thread border router, can be allowed to on its [device page](devices.md#device-detail-page).
 
 > [!WARNING]
-> Changing the Network Block changes the router's LAN address. If you are connected to the gateway IP address (opposed to `router.lan`), you will need to navigate to the new address to access the web interface. If any inbound VPN servers exist, they will be deleted because their client configurations become invalid with the new addressing.
+> Changing the Network Block changes the router's LAN address. The page reconnects at the new address once your device has an address in the new block. If any inbound VPN servers exist, they will be deleted because their client configurations become invalid with the new addressing.
 
 > [!NOTE]
 > Changing the second octet counts as a subnet change. Like other subnet changes, it is blocked while any device has a static IP reservation. Remove those reservations first.
@@ -30,7 +30,7 @@ Configure IPv6 addressing on the LAN.
 
 - **Enable** — Toggle to enable or disable IPv6 on the LAN. IPv6 addressing uses Stateless Address Autoconfiguration (SLAAC): devices generate their own IPv6 addresses from the router's advertised prefix.
 
-- **Prefix Length** — Shown when IPv6 is enabled. The LAN IPv6 prefix length must be larger (a higher number) than your WAN prefix to create a valid subnet. For example, if your ISP assigns you a `/48` prefix, you can use `/56`, `/60`, or `/64` for the LAN. A `/64` is recommended for most home networks.
+- **Prefix Length** — Shown when IPv6 is enabled. A value from `/48` to `/64`, no shorter than the prefix your ISP delegated. The page summary shows that size as **Delegated Prefix** (**None** when the ISP has delegated none). For example, if your ISP delegates a `/56`, you can use `/56`, `/60`, or `/64` for the LAN; on a `/64` delegation, only `/64`. A `/64` is recommended for most home networks.
 
 > [!NOTE]
 > While any enabled [Published Ports](published-ports.md) rule forwards over IPv6, IPv6 cannot be disabled — devices would lose the addresses those rules depend on. Disable or delete those rules first.

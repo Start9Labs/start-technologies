@@ -1,0 +1,1 @@
+- Używa kompaktowego kodowania kluczy i podpisów w indeksie, zachowując odpowiedzi zgodne z PEM dla starszych klientów.

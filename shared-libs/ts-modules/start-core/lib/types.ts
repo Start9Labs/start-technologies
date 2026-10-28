@@ -1,5 +1,7 @@
 export * as inputSpecTypes from './actions/input/inputSpecTypes'
 export * from './osBindings'
+// Packages annotate their manifest's device filters with this name.
+export type { DeviceFilterInput as DeviceFilter } from './osBindings'
 export { SDKManifest } from './types/ManifestTypes'
 export { Effects }
 import { InputSpec as InputSpecClass } from './actions/input/builder/inputSpec'

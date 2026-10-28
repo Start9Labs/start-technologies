@@ -98,11 +98,13 @@ impl digest::Update for AnyDigest {
 
 // ── AnyVerifyingKey ──────────────────────────────────────────────────
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, visit_rs::VisitVariants)]
+#[visit(opaque, ts(type = "z.string()"))]
 #[non_exhaustive]
 pub enum AnyVerifyingKey {
     Ed25519(ed25519_dalek::VerifyingKey),
 }
+rpc_toolkit::reflect_ts!(AnyVerifyingKey);
 
 impl AnyVerifyingKey {
     pub fn scheme(&self) -> AnyScheme {
@@ -168,10 +170,12 @@ impl Serialize for AnyVerifyingKey {
 
 // ── AnySignature ─────────────────────────────────────────────────────
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, visit_rs::VisitVariants)]
+#[visit(opaque, ts(type = "z.string()"))]
 pub enum AnySignature {
     Ed25519(ed25519_dalek::Signature),
 }
+rpc_toolkit::reflect_ts!(AnySignature);
 
 impl FromStr for AnySignature {
     type Err = Error;

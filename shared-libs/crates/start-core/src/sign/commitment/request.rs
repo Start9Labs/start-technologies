@@ -9,31 +9,31 @@ use http::HeaderValue;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWrite;
 use tokio_util::io::StreamReader;
-use ts_rs::TS;
 use url::Url;
 
 use crate::prelude::*;
 use crate::s9pk::merkle_archive::hash::VerifyingWriter;
-use crate::sign::commitment::{Commitment, Digestable};
+use crate::sign::commitment::{Commitment, Digestable, SignedCommitment};
 use crate::util::serde::Base64;
 
-#[derive(Clone, Debug, Deserialize, Serialize, HasModel, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Deserialize, Serialize, HasModel, PartialEq, Eq, VisitFields)]
+#[serde(rename_all = "camelCase", tag = "type", rename = "request")]
 #[model = "Model<Self>"]
-#[ts(export)]
+#[visit(ts(rename = "RequestCommitment"))]
 pub struct RequestCommitment {
-    #[ts(type = "number")]
     pub timestamp: i64,
-    #[ts(type = "number")]
     pub nonce: u64,
-    #[ts(type = "number")]
     pub size: u64,
     pub blake3: Base64<[u8; 32]>,
 }
+
+rpc_toolkit::reflect_ts!(RequestCommitment);
+rpc_toolkit::ts_export!(RequestCommitment, namespaces = [""]);
 impl RequestCommitment {
     pub fn append_query(&self, url: &mut Url) {
         use base64::Engine;
         url.query_pairs_mut()
+            .append_pair("commitment", Self::TYPE_NAME)
             .append_pair("timestamp", &self.timestamp.to_string())
             .append_pair("nonce", &self.nonce.to_string())
             .append_pair("size", &self.size.to_string())
@@ -46,6 +46,17 @@ impl RequestCommitment {
     pub fn from_query(query: &HeaderValue) -> Result<Self, Error> {
         use base64::Engine;
         let query: BTreeMap<_, _> = form_urlencoded::parse(query.as_bytes()).collect();
+        if let Some(ty) = query.get("commitment") {
+            if ty != Self::TYPE_NAME {
+                return Err(Error::new(
+                    eyre!(
+                        "{}",
+                        t!("sign.commitment.request.unsupported-type", ty = ty)
+                    ),
+                    ErrorKind::InvalidSignature,
+                ));
+            }
+        }
         Ok(Self {
             timestamp: query.get("timestamp").or_not_found("timestamp")?.parse()?,
             nonce: query.get("nonce").or_not_found("nonce")?.parse()?,
@@ -61,6 +72,10 @@ impl RequestCommitment {
             ),
         })
     }
+}
+impl SignedCommitment for RequestCommitment {
+    const TYPE_ID: u8 = 3;
+    const TYPE_NAME: &'static str = "request";
 }
 impl Digestable for RequestCommitment {
     fn update<D: Update>(&self, digest: &mut D) {

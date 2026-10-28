@@ -2,11 +2,18 @@
 
 After unboxing your Start9 router or completing a fresh install, follow these steps to get up and running. The entire process takes just a few minutes.
 
-## Connect to Wi-Fi
+## Connect the Router
+
+1. Connect your modem or upstream router to the Ethernet port labeled **WAN**, and the included switch to the port labeled **LAN**, for wired devices on your network.
 
 1. Power on the router.
 
-1. On your phone or computer, connect to the `StartWRT` Wi-Fi network using the password printed on the sticker on the bottom of the device.
+1. Connect your phone or computer to the router, either:
+   - **Over Wi-Fi:** join the `StartWRT` network using the password printed on the sticker on the bottom of the device.
+   - **Over Ethernet:** plug it into the switch.
+
+> [!NOTE]
+> Routers sold in the United States ship without Wi-Fi. Set up over Ethernet, and see [Installing the Wi-Fi Module](wifi-module.md) to add it.
 
 ## Create Your Admin Password
 
@@ -43,7 +50,7 @@ The StartWRT web interface is organized into five sections:
 - **System** — [General settings](settings.md), [SSH keys](ssh.md), [backups](backups.md), [logs](settings.md#logs)
 
 > [!TIP]
-> Toggle **Help Mode** from the header to get a plain-language explanation of everything on the current page, including links to external resources.
+> Toggle **Help** in the header to get a plain-language explanation of everything on the current page, including links to external resources.
 
 ## Next Steps
 

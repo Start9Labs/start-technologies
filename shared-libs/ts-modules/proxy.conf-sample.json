@@ -1,16 +1,38 @@
 {
-  "/rpc/v1": {
-    "target": "http://<CHANGE_ME>"
-  },
-  "/ws/**": {
-    "target": "wss://159.223.45.210",
+  "/rpc/**": {
+    "target": "https://<CHANGE_ME>",
     "secure": false,
-    "ws": true
+    "changeOrigin": true
+  },
+  "/s9pk/**": {
+    "target": "https://<CHANGE_ME>",
+    "secure": false,
+    "changeOrigin": true
+  },
+  "/registry/**": {
+    "target": "https://<CHANGE_ME>",
+    "secure": false,
+    "changeOrigin": true
+  },
+  "/static/**": {
+    "target": "https://<CHANGE_ME>",
+    "secure": false,
+    "changeOrigin": true
   },
   "/public/**": {
-    "target": "http://<CHANGE_ME>"
+    "target": "https://<CHANGE_ME>",
+    "secure": false,
+    "changeOrigin": true
   },
-  "/rest/rpc/**": {
-    "target": "http://<CHANGE_ME>"
+  "/rest/**": {
+    "target": "https://<CHANGE_ME>",
+    "secure": false,
+    "changeOrigin": true
+  },
+  "/ws/**": {
+    "target": "https://<CHANGE_ME>",
+    "secure": false,
+    "changeOrigin": true,
+    "ws": true
   }
 }

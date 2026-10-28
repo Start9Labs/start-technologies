@@ -2,11 +2,11 @@ import { ValueSpec } from '../inputSpecTypes'
 import { Value } from './value'
 import { _ } from '../../../util'
 import { Effects } from '../../../Effects'
-import { z } from '../../../zExport'
+import * as z from '../../../z'
 import { DeepPartial } from '../../../types'
 import { InputSpecTools, createInputSpecTools } from './inputSpecTools'
 
-/** Makes every key optional at every level; each object keeps its own unknown-key mode and a discriminated union its discriminator. */
+/** Every key optional at every level; each object keeps its own unknown-key mode and a discriminated union its discriminator, unlike `z.deepPartial`. */
 function deepPartial(schema: z.ZodType): any {
   const def = (schema as any)._zod.def
   switch (def.type) {
@@ -40,8 +40,7 @@ function deepPartial(schema: z.ZodType): any {
       const options = def.options.map((o: z.ZodType) => {
         const d = (o as any)._zod.def
         if (!def.discriminator || d.type !== 'object') return deepPartial(o)
-        const partial = deepPartial(o)
-        return partial.extend({
+        return deepPartial(o).extend({
           [def.discriminator]: d.shape[def.discriminator],
         })
       })

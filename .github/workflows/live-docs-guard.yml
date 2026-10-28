@@ -9,32 +9,42 @@ name: live-docs guard
 # into live-docs onto master unattended, so a PR that touched code would land a stale
 # tree on master with nobody reviewing it as a code change.
 on:
-  # `edited` covers a retarget: the branch filter sees the new base, so a PR
-  # moved onto live-docs is checked without waiting for its next push.
-  pull_request:
+  # pull_request_target runs this base-branch copy without waiting for a maintainer to
+  # approve a fork's workflows, so the guard has spoken before anyone can merge. It reads
+  # the changed paths from the API and never checks out or runs the pull request's code.
+  # `edited` covers a retarget: the branch filter sees the new base, so a PR moved onto
+  # live-docs is checked without waiting for its next push.
+  pull_request_target:
     branches: ['live-docs']
     types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   docs-only:
     name: Docs-only
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
       - name: Reject changes outside the published books
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
 
-          changed=$(git diff --name-only "$BASE...$HEAD")
+          expected=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '.changed_files')
+          files=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR/files")
+
+          # The files API caps responses at 3,000 files, including paginated responses.
+          if ! jq -e --argjson expected "$expected" 'add | length == $expected' <<<"$files" >/dev/null; then
+            echo "::error::The changed-file list is incomplete; this pull request cannot be validated."
+            exit 1
+          fi
+
+          # Both rename endpoints must be published book paths.
+          changed=$(jq -r '.[][] | .filename, (.previous_filename // empty)' <<<"$files" | sort -u)
 
           # A rule, not a mirror of docs-deploy.yml's paths: a new product's book
           # matches the moment it exists, with nothing to keep in step.

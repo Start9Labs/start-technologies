@@ -3,21 +3,22 @@ use std::collections::BTreeSet;
 use imbl_value::InternedString;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
-use ts_rs::TS;
 
 use crate::prelude::*;
 use crate::util::Invoke;
 
 const KNOWN_CLASSES: &[&str] = &["processor", "display"];
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitVariants)]
 #[serde(tag = "class")]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub enum LshwDevice {
     Processor(LshwProcessor),
     Display(LshwDisplay),
 }
+
+rpc_toolkit::reflect_ts!(LshwDevice);
+rpc_toolkit::ts_export!(LshwDevice, namespaces = [""]);
 impl LshwDevice {
     pub fn class(&self) -> &'static str {
         match self {
@@ -35,12 +36,14 @@ impl LshwDevice {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 pub struct LshwProcessor {
     pub product: Option<InternedString>,
     pub vendor: Option<InternedString>,
     pub capabilities: BTreeSet<InternedString>,
 }
+
+rpc_toolkit::reflect_ts!(LshwProcessor);
 impl LshwProcessor {
     #[instrument(skip_all)]
     fn from_value(value: &Value) -> Self {
@@ -57,13 +60,15 @@ impl LshwProcessor {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 pub struct LshwDisplay {
     pub product: Option<InternedString>,
     pub vendor: Option<InternedString>,
     pub capabilities: BTreeSet<InternedString>,
     pub driver: Option<InternedString>,
 }
+
+rpc_toolkit::reflect_ts!(LshwDisplay);
 impl LshwDisplay {
     #[instrument(skip_all)]
     fn from_value(value: &Value) -> Self {

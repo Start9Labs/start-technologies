@@ -42,12 +42,12 @@ export class UpdateService {
   }
 
   async checkUpdate(): Promise<void> {
-    const result = await this.api.checkUpdate()
+    const result = await this.api.rpc.update.check({})
     this.setResult(result)
   }
 
   async applyUpdate(): Promise<void> {
-    const result = await this.api.applyUpdate()
+    const result = await this.api.rpc.update.apply({})
     this.setResult(result)
   }
 
@@ -77,7 +77,7 @@ export class UpdateService {
     interval(5000)
       .pipe(
         switchMap(() =>
-          from(this.api.checkUpdate()).pipe(catchError(() => EMPTY)),
+          from(this.api.rpc.update.check({})).pipe(catchError(() => EMPTY)),
         ),
         takeWhile(result => result.status === 'updating', true),
       )

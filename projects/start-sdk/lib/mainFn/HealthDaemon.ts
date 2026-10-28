@@ -1,5 +1,6 @@
 import { HealthCheckResult } from '../health/checkFns'
-import { defaultTrigger } from '../trigger/defaultTrigger'
+import { isInGracePeriod } from '../health/isInGracePeriod'
+import { daemonReadyTrigger, defaultTrigger } from '../trigger/defaultTrigger'
 import { Ready } from './Daemons'
 import { Daemon } from './Daemon'
 import { SetHealth, Effects, SDKManifest } from '@start9labs/start-core/types'
@@ -18,6 +19,7 @@ export class HealthDaemon<Manifest extends SDKManifest> {
   private _health: HealthCheckResult = { result: 'waiting', message: null }
   private healthWatchers: Array<() => unknown> = []
   private running = false
+  private terminated = false
   private transition: Promise<void> = Promise.resolve()
   private started?: number
   private resolveReady: (() => void) | undefined
@@ -46,7 +48,9 @@ export class HealthDaemon<Manifest extends SDKManifest> {
     signal?: NodeJS.Signals | undefined
     timeout?: number | undefined
   }) {
+    this.terminated = true
     this.healthWatchers = []
+    await this.transition.catch(() => {})
     this.running = false
     await this.stopSession()
 
@@ -81,7 +85,7 @@ export class HealthDaemon<Manifest extends SDKManifest> {
   }
 
   private async applyRunning(newStatus: boolean) {
-    if (this.running === newStatus) return
+    if (this.terminated || this.running === newStatus) return
 
     this.running = newStatus
 
@@ -165,7 +169,9 @@ export class HealthDaemon<Manifest extends SDKManifest> {
 
   private async runHealthCheckLoop(signal: AbortSignal): Promise<void> {
     if (this.ready === 'EXIT_SUCCESS') return
-    const trigger = (this.ready.trigger ?? defaultTrigger)(() => ({
+    const trigger = (
+      this.ready.trigger ?? (this.daemon ? daemonReadyTrigger : defaultTrigger)
+    )(() => ({
       lastResult: this._health.result,
     }))
 
@@ -223,8 +229,8 @@ export class HealthDaemon<Manifest extends SDKManifest> {
     let result = health.result
     if (
       result === 'failure' &&
-      this.started &&
-      performance.now() - this.started <= (this.ready.gracePeriod ?? 10_000)
+      this.started !== undefined &&
+      isInGracePeriod(this.started, this.ready.gracePeriod)
     )
       result = 'starting'
     if (result === 'failure') {
@@ -239,6 +245,7 @@ export class HealthDaemon<Manifest extends SDKManifest> {
   }
 
   async updateStatus() {
+    if (this.terminated) return
     const healths = this.dependencies.map(d => ({
       health: d.running && d._health,
       id: d.id,

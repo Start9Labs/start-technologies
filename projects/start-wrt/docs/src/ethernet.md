@@ -6,7 +6,7 @@ Each physical Ethernet port on the StartWRT router maps to a [Security Profile](
 
 When a device is plugged into an Ethernet port, the router assigns it to the profile mapped to that port. The device receives an IP address on that profile's subnet and is subject to that profile's firewall rules, VPN routing, and schedule restrictions.
 
-Behind the scenes, StartWRT uses bridge VLAN filtering to isolate traffic between ports. Each port tags traffic with a different VLAN ID, ensuring devices on different profiles cannot communicate at Layer 2 unless explicitly allowed.
+Behind the scenes, StartWRT uses bridge VLAN filtering to isolate traffic between ports. Each profile has its own VLAN, and each port belongs to the VLAN of the profile mapped to it, so devices on different profiles cannot communicate at Layer 2. Traffic between profiles passes through the router's firewall, as each profile's LAN access allows.
 
 ## WAN Port
 
@@ -43,9 +43,7 @@ If you need to use a different physical port for your ISP connection:
 
 ## Example
 
-| Port   | Profile | Use Case                                           |
-| ------ | ------- | -------------------------------------------------- |
-| Port 1 | _(WAN)_ | Connected to ISP modem                             |
-| Port 2 | Admin   | Desktop computer with full LAN and Internet access |
-| Port 3 | Admin   | StartOS server with full LAN and Internet access   |
-| Port 4 | Guest   | Guest-accessible Ethernet jack in the living room  |
+| Port | Profile | Use Case                                                                                                |
+| ---- | ------- | ------------------------------------------------------------------------------------------------------- |
+| eth1 | _(WAN)_ | Connected to ISP modem                                                                                  |
+| eth0 | Admin   | The included switch, with a desktop computer and a StartOS server that get full LAN and Internet access |

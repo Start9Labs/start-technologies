@@ -282,7 +282,7 @@ export class PublishedPortsAdd {
     this.tasks.run(async () => {
       if (v4) {
         // The external IP is fixed server-side to the target device's WAN.
-        await this.api.addForward({
+        await this.api.rpc.portForward.add({
           externalPort: externalport!,
           target: `${device!.ip}:${internalport}`,
           label,
@@ -291,7 +291,7 @@ export class PublishedPortsAdd {
         })
       }
       if (v6 && device!.ipv6) {
-        await this.api.addPinhole({
+        await this.api.rpc.pinhole.add({
           gua: device!.ipv6,
           externalPort: externalport!,
           internalPort:

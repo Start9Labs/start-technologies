@@ -8,7 +8,7 @@ import {
   ValueSpecListOf,
 } from '../inputSpecTypes'
 import { withPatterns } from './patternCheck'
-import { z } from '../../../zExport'
+import * as z from '../../../z'
 
 /**
  * Builder class for defining list-type form fields.

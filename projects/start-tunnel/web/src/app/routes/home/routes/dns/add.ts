@@ -6,7 +6,7 @@ import {
   inject,
   Signal,
 } from '@angular/core'
-import { toSignal } from '@angular/core/rxjs-interop'
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop'
 import {
   AbstractControl,
   NonNullableFormBuilder,
@@ -46,7 +46,6 @@ interface DnsAddData {
   readonly devices: Signal<readonly MappedDevice[]>
 }
 
-// Sentinel "device" for manual entry; ip === '' marks the Other branch.
 const OTHER: MappedDevice = { ip: '', name: 'Other (custom)' }
 
 function ipValidator(v6: boolean): ValidatorFn {
@@ -210,15 +209,20 @@ export class DnsAdd {
     () => this.isAddr() && this.device()?.ip === '',
   )
   protected readonly deviceItems = computed(() => [
-    ...this.context.data.devices(),
+    ...this.context.data.devices().flatMap(({ ip, ipv6, name }) => {
+      const address = this.type() === 'AAAA' ? ipv6 : ip
+      return address ? [{ ip: address, name }] : []
+    }),
     { ...OTHER, name: this.i18n.transform('Other (custom)') },
   ])
+
+  private readonly resetDevice = this.form.controls.type.valueChanges
+    .pipe(takeUntilDestroyed())
+    .subscribe(() => this.form.controls.device.reset())
 
   protected readonly stringifyDevice = ({ name, ip }: MappedDevice) =>
     ip ? `${name} (${ip})` : name
 
-  // Keep only the controls relevant to the current type/branch enabled, so
-  // form.invalid reflects exactly what the user must fill in.
   private readonly reconcile = effect(() => {
     const c = this.form.controls
     const addr = this.isAddr()
@@ -245,7 +249,7 @@ export class DnsAdd {
         : value.trim()
 
     this.tasks.run(async () => {
-      await this.api.addDnsRecord({ name, type, value: finalValue, ttl })
+      await this.api.rpc.dns.add({ name, type, value: finalValue, ttl })
       this.context.$implicit.complete()
     })
   }

@@ -42,7 +42,23 @@ Each target holds a folder you name — `lnd-channel-backups` or `bark-backups` 
 
 ### Google Drive
 
-Free personal accounts work. In the [Google Cloud Console](https://console.cloud.google.com/), enable the Drive API for a project and create an OAuth client ID of type **Desktop app**. Paste its Client ID and Client Secret into the form and submit once: the result contains a sign-in link. Open it, approve the access, and your browser ends on an `http://localhost` address that does not load. Copy the `code=` value from the address bar — or the whole address — into **Authorization Code** and submit again. The folder path is a folder name in your Drive root. A refresh token you already have can be pasted instead of going through the browser.
+Free personal accounts work, through an app you create in your own Google Cloud project. **Publish that app before you sign in.** Every new app starts in Testing, and while it is in Testing Google ends each sign-in after 7 days, so backups to Drive stop a week after setup. Nothing in Google's setup says so. If yours stopped about a week after you set them up, that is why: publish the app, then sign in again, because a sign-in made while the app was in Testing still ends.
+
+Publishing a new app now needs a home page, a privacy policy link and an authorized domain. Google added that requirement recently, and apps published before it were never asked for one. It does not check that the domain is yours. Without a website to point them at, sign in again before each week runs out, or use Dropbox, Nextcloud or SFTP instead.
+
+In the [Google Cloud Console](https://console.cloud.google.com/):
+
+1. Create a project, then search for **Google Drive API** and enable it.
+
+1. Open **Google Auth Platform** and click **Get started**. Give the app a name and your email as the support email, choose **External** under **Audience** (Internal is only for Google Workspace organizations), add your contact email, and create it.
+
+1. Under **Clients**, create a client of type **Desktop app**, and copy its **Client ID** and **Client Secret**. Google may show the secret only once.
+
+1. Under **Branding**, fill in **Application home page** and **Application privacy policy link**, both full `https://` addresses, and add their domain under **Authorized domains** without `https://`. These three are newly required: Google does not mark them, but **Audience** refuses to publish until they are there. Google does not ask you to prove you own the domain. Leave **App logo** empty: a logo, or more than 10 authorized domains, makes Google require verification before it publishes.
+
+1. Under **Audience**, click **Publish app** and confirm. **Publishing status** should then read **In production**.
+
+Paste the Client ID and Client Secret into the form and submit once: the result contains a sign-in link. Open it and continue past Google's warning that it hasn't verified the app. Approve the access, and your browser ends on an `http://localhost` address that does not load. Copy the whole address, or just its `code=` value, into **Authorization Code** and submit again. The folder path is a folder name in your Drive root. A refresh token you already have can be pasted instead of going through the browser.
 
 ### Dropbox
 

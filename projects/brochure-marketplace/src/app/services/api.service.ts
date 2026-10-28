@@ -1,20 +1,11 @@
-import {
-  GetPackageRes,
-  GetPackagesRes,
-  MarketplacePkg,
-} from '@start9labs/marketplace'
-import { T } from '@start9labs/start-core'
+import { MarketplacePkg } from '@start9labs/marketplace'
+import { RPC, RpcClient } from '@start9labs/start-core'
+
+export type RegistryClient = RpcClient<RPC.Registry>
 
 export abstract class ApiService {
-  abstract getRegistryInfo(registryUrl: string): Promise<T.RegistryInfo>
-
-  abstract getRegistryPackage(
-    registryUrl: string,
-    id: string,
-    targetVersion: string | null,
-  ): Promise<GetPackageRes>
-
-  abstract getRegistryPackages(registryUrl: string): Promise<GetPackagesRes>
+  /** The registry's RPC methods, as generated from its bindings. */
+  abstract registry(url: string): RegistryClient
 
   abstract getStaticProxy(
     pkg: MarketplacePkg,

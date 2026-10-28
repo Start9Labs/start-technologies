@@ -8,7 +8,7 @@ Call `sdk.setupPrimaryUrl()` with the interface the URL belongs to, the file mod
 
 Where the URL is an address of the service's own web UI, pass the same read to `createInterface`'s `preferredLauncherAddress` in `setupInterfaces` as well, so StartOS's **Open UI** control opens the address the service is configured for instead of the one that suits the admin's connection. See [Choosing a Primary URL](interfaces.md#choosing-a-primary-url) for the code, and [Nominating an Address to Open](interfaces.md#nominating-an-address-to-open) for what a nomination does.
 
-To tell the user when the choice is unset or gone, list `primaryUrl.setupTask(severity, { reason })` after `actions` in `setupInit()`. StartOS clears the task once the stored URL is one of the interface's addresses again.
+To tell the user when the choice is unset or gone, list `primaryUrl.setupTask(severity, { reason })` after `actions` in `setupInit()`. The task clears itself once the stored URL is one of the interface's addresses again.
 
 For a service whose hostname is permanent and cannot change after initial setup (Synapse), use a critical task on install with `visibility: 'hidden'` instead, so it's a one-time choice.
 

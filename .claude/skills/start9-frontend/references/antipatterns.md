@@ -22,7 +22,8 @@ providers: [tuiLinkOptionsProvider({ appearance: 'action-grayscale' })]
 **2. Hand-rolled card/heading/list CSS → layout primitives.** Custom `.card`/`.head` divs with
 60 lines of CSS become `<section tuiCardLarge="compact" appearance="secondary-grayscale">` +
 `<header tuiHeader><h3 tuiTitle>` + `<ul tuiList="s">`. A `role="table"` div grid with 60 lines
-of CSS becomes `tuiCell` rows + `| keyvalue`. If you're writing flexbox to lay out a
+of CSS becomes `tuiCell` rows + `| keyvalue`; label/value pairs are a `<dl tuiList>` of `dt`/`dd`
+(`compact` when dense), not `tuiSubtitle` stacks. If you're writing flexbox to lay out a
 title/subtitle/actions row, you missed a primitive.
 
 **3. Per-component loader + try/catch + error toast → `TaskService.run(task, 'Saving')`.**
@@ -47,17 +48,21 @@ in favor of semantic elements directly inside `tui-root`; an element component w
 text content (Taiga hides it visually) instead of `aria-label`; bare `<label>` + flex CSS →
 `<label tuiLabel>`; styled `<span class="divider">` → `<hr>`; `autocomplete="new-password"` on
 password fields; `TuiAutoFocus` on the first focusable in dialogs/drawers, never on phones.
+A field that collapses behind a toggle stays in the tab order and expands on
+`(focus)="open.set(true)"`. It doesn't drop out with `aria-hidden` + `tabIndex="-1"`.
 
 **7. Fine-tuning CSS → deleted.** Every `letter-spacing`, `text-transform`, `vertical-align`
-nudge, and `margin-top` ladder goes; vertical rhythm comes from `:host { display: grid;
-gap: 2rem }`. Physical properties → logical (`inset-block-start`, `inline-size`,
+nudge, and `margin-top` ladder goes; vertical rhythm comes from the primitives' own spacing
+plus one margin on the element that needs more (styling.md). A `:host` flex column whose only
+job is a `gap` gets deleted. Physical properties → logical (`inset-block-start`, `inline-size`,
 `margin-block-end`) in every touched file.
 
 **8. Specificity hacks → deleted.** `!important` globals get scoped without it; `::ng-deep`
 layout pokes die with the primitive that replaces them; custom appearance CSS
 (`[tuiCardLarge] { background: … }`) → `appearance="floating"`. When a global override _is_
 warranted: the doubled-selector trick (`.g-negative.g-negative { … }`,
-`tui-dropdown[data-appearance='start-os'][data-appearance='start-os']`), never `!important`.
+`tui-dropdown[data-appearance='start-os'][data-appearance='start-os']`); `!important` only in a
+`g-*` utility that must beat an appearance's state selectors (`g-active`).
 
 **9. Form ceremony → `NonNullableFormBuilder` shorthand** (see forms.md), with single-use private
 fields inlined into the group literal.

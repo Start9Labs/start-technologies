@@ -8,12 +8,14 @@ import {
 } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { Router } from '@angular/router'
-import { CaWizard } from '@start9labs/shared'
+import { AuthKeyService, CaWizard } from '@start9labs/shared'
 import { TuiButton, TuiError, TuiInput, TuiTextfield } from '@taiga-ui/core'
 import { TuiButtonLoading } from '@taiga-ui/kit'
 import { ApiService } from 'src/app/services/api/api.service'
 import { AuthService } from 'src/app/services/auth.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { i18nKey } from 'src/app/i18n/i18n.providers'
+import { RpcError } from 'src/app/services/rpc.service'
 
 @Component({
   template: `
@@ -41,7 +43,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
             {{ 'Login' | i18n }}
           </button>
         </tui-textfield>
-        <tui-error [error]="error() ? ('Password is invalid' | i18n) : null" />
+        <tui-error [error]="(error() | i18n) || null" />
       </form>
     }
   `,
@@ -90,6 +92,7 @@ export default class Login {
   private readonly auth = inject(AuthService)
   private readonly router = inject(Router)
   private readonly api = inject(ApiService)
+  private readonly authKeys = inject(AuthKeyService)
   private readonly document = inject(DOCUMENT)
 
   private readonly isLanHttp = computed(() => {
@@ -101,18 +104,32 @@ export default class Login {
 
   protected readonly password = signal('')
   protected readonly loading = signal(false)
-  protected readonly error = linkedSignal<boolean>(
-    () => !!this.password() && false,
-  )
+  protected readonly error = linkedSignal<string, i18nKey | null>({
+    source: () => this.password(),
+    computation: () => null,
+  })
 
   protected async login() {
     this.loading.set(true)
     try {
-      await this.api.login({ password: this.password() })
+      const key = await this.authKeys.create()
+      try {
+        await this.api.login({
+          password: this.password(),
+          pubkey: key.pubkeyPem,
+        })
+      } catch (e) {
+        await this.authKeys.rollback()
+        throw e
+      }
       this.auth.authenticated.set(true)
       this.router.navigate(['.'])
     } catch (e) {
-      this.error.set(true)
+      this.error.set(
+        e instanceof RpcError && e.code === 7
+          ? 'Password is invalid'
+          : (((e as { message?: string }).message || String(e)) as i18nKey),
+      )
     } finally {
       this.loading.set(false)
     }

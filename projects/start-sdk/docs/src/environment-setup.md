@@ -11,11 +11,11 @@ You must have a computer running StartOS to test your packages. Follow the [inst
 
 ## Docker
 
-[Docker](https://docs.docker.com/get-docker/) is essential for building and managing container images that will be used for the final `.s9pk` build. It handles pulling base images and building custom container images from Dockerfiles.
+[Docker](https://docs.docker.com/get-docker/) supplies registry images and builds custom images from Dockerfiles. Packages using only local OCI layouts and legacy package conversion do not require it.
 
-Follow the [official Docker installation guide](https://docs.docker.com/engine/install/) for your platform.
+Install Docker with Engine API 1.48 or newer for platform-specific image export. Follow the [official Docker installation guide](https://docs.docker.com/engine/install/) for your platform.
 
-Docker must be **running** when you build a package, and your user must be able to use it:
+Docker must be **running** for `dockerTag` and `dockerBuild` image sources, and your user must be able to use it:
 
 {{#tabs global="platform"}}
 
@@ -39,6 +39,14 @@ Start Docker Desktop; it runs the daemon for you. (Docker Desktop covers Windows
 
 > [!TIP]
 > Confirm it works with `docker run --rm hello-world` before continuing.
+
+Custom `dockerBuild` images export OCI directly through Buildx. The selected builder must support the OCI exporter. If Docker's default builder uses the classic image store, create and select a container-backed builder once:
+
+```sh
+docker buildx create --name start9 --driver docker-container --use
+```
+
+An existing OCI-capable builder can be selected with `BUILDX_BUILDER`. Podman builds use its native OCI image store and OCI archive export; set `STARTOS_USE_PODMAN=1` to use Podman.
 
 ## Make
 
@@ -82,32 +90,6 @@ nvm use 22
 ```
 
 Alternatively, download Node.js v22 (or newer) directly from [nodejs.org](https://nodejs.org/) — make sure `node --version` reports v22+ afterward.
-
-## SquashFS
-
-SquashFS is used to create compressed filesystem images that package your compiled service code.
-
-{{#tabs global="platform"}}
-
-{{#tab name="Linux"}}
-
-```sh
-sudo apt install squashfs-tools squashfs-tools-ng
-```
-
-{{#endtab}}
-
-{{#tab name="Mac"}}
-
-Requires [Homebrew](https://brew.sh/):
-
-```sh
-brew install squashfs
-```
-
-{{#endtab}}
-
-{{#endtabs}}
 
 ## cURL
 
@@ -201,7 +183,6 @@ docker run --rm hello-world   # confirms the daemon is running and you have acce
 make --version
 node --version                # must be v22 or newer
 npm --version
-mksquashfs -version
 git --version
 curl --version
 jq --version
@@ -295,7 +276,7 @@ host:
 ```
 
 > [!TIP]
-> Setting `host.default` lets you install with `make install` — the recommended way to work on a package, since it builds and pushes to your device in one repeatable command. It also requires logging in once with `start-cli auth login` (it prompts for your StartOS master password). If you'd rather not set up the CLI yet, you can sideload the `.s9pk` through the web interface instead — see [Quick Start](./quick-start.md#install-to-startos).
+> Setting `host.default` lets `make install` build the current variant for your device's architecture when needed and install that exact package. It also requires logging in once with `start-cli auth login` (it prompts for your StartOS master password). If you'd rather not set up the CLI yet, you can sideload the `.s9pk` through the web interface instead — see [Quick Start](./quick-start.md#install-to-startos).
 
 Any `start-cli` command takes `-H`/`--host` and `-r`/`--registry`. Pass a **profile name** to use one of these entries, or a **URL** to target something directly:
 
@@ -308,7 +289,7 @@ start-cli -H https://my-box.local <command>  # a URL works too
 With no flag, the `default` entry is used. `start-cli` finds this config by walking up from the current directory, so it works anywhere inside the workspace.
 
 > [!NOTE]
-> As of `@start9labs/start-sdk` 2.0, `make install` and `make publish` resolve their target through `start-cli` — the workspace `.startos/config.yaml` profiles, or `-H` / `-r`. See [Makefile](./makefile.md).
+> `make install` and `make publish` resolve their targets through the workspace profiles used by `start-cli`. To override a profile for one command, invoke `start-cli` directly with `-H` or `-r`. See [Makefile](./makefile.md).
 
 ### Keep it current
 

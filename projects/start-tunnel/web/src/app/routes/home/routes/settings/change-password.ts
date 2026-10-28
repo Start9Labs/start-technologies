@@ -128,7 +128,9 @@ export class ChangePasswordDialog {
     this.loading.set(true)
 
     try {
-      await this.api.setPassword({ password: this.form.getRawValue().password })
+      await this.api.rpc.auth.setPassword({
+        password: this.form.getRawValue().password,
+      })
       this.alerts
         .open(this.i18n.transform('Password changed'), {
           label: this.i18n.transform('Success'),

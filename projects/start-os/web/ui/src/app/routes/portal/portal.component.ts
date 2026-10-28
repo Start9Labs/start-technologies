@@ -186,7 +186,7 @@ export class PortalComponent {
   restart() {
     this.tasks.run(async () => {
       this.bar.set(false)
-      await this.api.restartServer({})
+      await this.api.rpc.server.restart({})
     }, 'Beginning restart')
   }
 }

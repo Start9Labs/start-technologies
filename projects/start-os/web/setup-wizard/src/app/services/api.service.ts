@@ -1,54 +1,29 @@
 import * as jose from 'node-jose'
-import {
-  DiskInfo,
-  FullKeyboard,
-  SetLanguageParams,
-  StartOSDiskInfo,
-} from '@start9labs/shared'
-import { T } from '@start9labs/start-core'
+import { RPC, RpcClient, T } from '@start9labs/start-core'
 import { Observable } from 'rxjs'
-import { InstallOsParams, InstallOsRes } from '../types'
+
+export type Api = RPC.Setup | RPC.StartOS
+export type ApiClient = RpcClient<RPC.Setup> & RpcClient<RPC.StartOS>
+export type Params<M extends RPC.RpcMethod<Api>> = RPC.RpcParamType<Api, M>
+export type Result<M extends RPC.RpcMethod<Api>> = RPC.RpcReturnType<Api, M>
 
 export abstract class ApiService {
   pubkey?: jose.JWK.Key
 
-  // echo
-  abstract echo(params: T.EchoParams, url: string): Promise<string>
+  /** The server's RPC methods, as generated from its bindings. */
+  abstract readonly rpc: ApiClient
 
-  // Status & Setup
-  abstract getStatus(): Promise<T.SetupStatusRes> // setup.status
-  abstract getPubKey(): Promise<void> // setup.get-pubkey
-  abstract setKeyboard(params: FullKeyboard): Promise<null> // setup.set-keyboard
-  abstract setLanguage(params: SetLanguageParams): Promise<null> // setup.set-language
-
-  // Install
-  abstract getDisks(): Promise<DiskInfo[]> // setup.disk.list
-  abstract installOs(params: InstallOsParams): Promise<InstallOsRes> // setup.install-os
-
-  // Setup execution
-  abstract attach(params: T.AttachParams): Promise<T.SetupProgress> // setup.attach
-  abstract execute(params: T.SetupExecuteParams): Promise<T.SetupProgress> // setup.execute
-
-  // Recovery helpers
-  abstract verifyCifs(
-    cifs: T.VerifyCifsParams,
-  ): Promise<Record<string, StartOSDiskInfo>> // setup.cifs.verify
-
-  // Completion
-  abstract complete(): Promise<T.SetupResult> // setup.complete
-  abstract exit(): Promise<void> // setup.exit
-  abstract shutdown(): Promise<void> // setup.shutdown
-
-  // Logs & Progress
-  abstract initFollowLogs(): Promise<T.LogFollowResponse> // setup.logs.follow
+  /** Reaches a server other than the one serving the UI. */
+  abstract echo(params: Params<'echo'>, url: string): Promise<Result<'echo'>>
   abstract openWebsocket$<T>(guid: string): Observable<T>
 
-  // Restart (for error recovery)
-  abstract restart(): Promise<void> // setup.restart
+  async loadPubKey(): Promise<void> {
+    this.pubkey = await jose.JWK.asKey(await this.rpc.setup.getPubkey({}))
+  }
 
   async encrypt(toEncrypt: string): Promise<T.EncryptedWire> {
     if (!this.pubkey) throw new Error('No pubkey found!')
-    const encrypted = await jose.JWE.createEncrypt(this.pubkey!)
+    const encrypted = await jose.JWE.createEncrypt(this.pubkey)
       .update(toEncrypt)
       .final()
     return { encrypted }

@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 use tokio::sync::broadcast::Sender;
 use tracing::instrument;
-use ts_rs::TS;
 
 use crate::MAIN_DATA;
 use crate::context::RpcContext;
@@ -41,17 +40,19 @@ lazy_static::lazy_static! {
     });
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct SetupResult {
-    #[ts(type = "string")]
     pub hostname: ServerHostname,
     pub root_ca: Pem<X509>,
     pub needs_restart: bool,
 }
 
+rpc_toolkit::reflect_ts!(SetupResult);
+rpc_toolkit::ts_export!(SetupResult, namespaces = [""]);
+
 pub struct SetupContextSeed {
+    pub(crate) dns: Arc<crate::net::dns::DnsController>,
     pub webserver: WebServerAcceptorSetter<WildcardListener>,
     pub config: SyncMutex<ServerConfig>,
     pub disable_encryption: bool,
@@ -75,11 +76,13 @@ impl SetupContext {
     pub fn init(
         webserver: &WebServer<WildcardListener>,
         config: ServerConfig,
+        dns: Arc<crate::net::dns::DnsController>,
     ) -> Result<Self, Error> {
         let (shutdown, _) = tokio::sync::broadcast::channel(1);
         let mut progress = FullProgressTracker::new();
         progress.enable_logging(true);
         Ok(Self(Arc::new(SetupContextSeed {
+            dns,
             webserver: webserver.acceptor_setter(),
             disable_encryption: config.disable_encryption.unwrap_or(false),
             config: SyncMutex::new(config),

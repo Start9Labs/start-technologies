@@ -6,6 +6,7 @@ beep
 binfmt-support
 bmon
 btrfs-progs
+btrfsmaintenance
 ca-certificates
 cifs-utils
 conntrack

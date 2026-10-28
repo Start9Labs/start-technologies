@@ -1,9 +1,9 @@
 # Update to StartOS 0.4.0
 
-StartOS 0.4.0 is a completely new operating system. There are two ways to update to it, both of which preserve your services and data and migrate them to the new format — but they are not equally reliable:
+StartOS 0.4.0 is a completely new operating system. There are two ways to update to it, both of which preserve your services and data and migrate them to the new format:
 
-- A **flash update** — you boot the 0.4.0 installer from a USB drive and install it over your existing server. **This is the recommended method.**
 - An **over-the-air update** — your server downloads 0.4.0 itself and applies it on the next restart.
+- A **flash update** — you boot the 0.4.0 installer from a USB drive and install it over your existing server.
 
 Both are covered in [Install StartOS 0.4.0](#install-startos-040) below.
 
@@ -80,17 +80,23 @@ With all services stopped, create a [full system backup](/0.3.5.x/user-manual/ba
 
 ## Install StartOS 0.4.0
 
-> [!WARNING]
-> **Flash updating is the more reliable method, and the one we recommend.** If you can physically reach your server and boot it from a USB drive, update that way.
->
-> The over-the-air update needs neither a USB drive nor physical access, but it is the more failure-prone of the two. If you take it, the backup from Step 6 is your fallback.
-
 ### Step 7: Install 0.4.0
 
 Pick your method below. Everything above applies to both, and the two paths rejoin at [Step 8](#step-8-wait-for-the-migration).
 
 {{#tabs}}
-{{#tab name="Flash Update (Recommended)"}}
+{{#tab name="Over the Air"}}
+
+Once StartOS 0.4.0 is available for your server, it is offered under **System → Software Update**. If it is not offered yet, check again later. (Raspberry Pi is never offered the update — use the flash update.)
+
+1. Go to **System → Software Update**, review the release notes, and click **Begin Update**. The download (~3 GB) runs in the background while your server continues running.
+
+1. When the download completes, the System page shows **Update Complete. Restart to apply changes**. Restart your server through the StartOS UI.
+
+1. **Your server does not immediately come back at its old address on this restart.** Wait a few minutes for it to reboot, then go to `http://start.local` — the same address the USB installer uses. The migration begins — continue with [Step 8](#step-8-wait-for-the-migration).
+
+{{#endtab}}
+{{#tab name="Flash Update"}}
 
 1. Flash the 0.4.0 installer to a USB drive from any computer, following the [Download](installing-startos.md#download) and [Flash](installing-startos.md#flash) sections of the install guide. Your server can keep running while you do this.
 
@@ -119,17 +125,6 @@ Pick your method below. Everything above applies to both, and the two paths rejo
    > If you do not select "Preserve", all data on the drive will be erased.
 
 1. Optionally set a new password, or skip to keep your current password. If you have forgotten your password, this is where you set a new one. The migration begins — continue with [Step 8](#step-8-wait-for-the-migration).
-
-{{#endtab}}
-{{#tab name="Over the Air"}}
-
-Once StartOS 0.4.0 is available for your server, it is offered under **System → Software Update**. If it is not offered yet, check again later. (Raspberry Pi is never offered the update — use the flash update.)
-
-1. Go to **System → Software Update**, review the release notes, and click **Begin Update**. The download (~3 GB) runs in the background while your server continues running.
-
-1. When the download completes, the System page shows **Update Complete. Restart to apply changes**. Restart your server through the StartOS UI.
-
-1. **Your server does not immediately come back at its old address on this restart.** Wait a few minutes for it to reboot, then go to `http://start.local` — the same address the USB installer uses. The migration begins — continue with [Step 8](#step-8-wait-for-the-migration).
 
 {{#endtab}}
 {{#endtabs}}

@@ -12,7 +12,7 @@ import { HintPipe } from '../pipes/hint.pipe'
 @Component({
   selector: 'form-text',
   template: `
-    <tui-textfield>
+    <tui-textfield [invalid]="control.invalid()">
       @if (spec.name) {
         <label tuiLabel>
           {{ spec.name }}
@@ -29,8 +29,7 @@ import { HintPipe } from '../pipes/hint.pipe'
         [style.-webkit-text-security]="spec.masked && masked ? 'disc' : null"
         [placeholder]="spec.placeholder || ''"
         [disabled]="!!spec.disabled"
-        [readOnly]="readOnly"
-        [invalid]="control.invalid()"
+        [readonly]="readOnly"
         [(ngModel)]="value"
         (blur)="control.onTouched()"
       />

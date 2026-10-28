@@ -210,7 +210,7 @@ export default class SuccessPage implements AfterViewInit {
   }
 
   exitKiosk() {
-    this.api.exit()
+    this.api.rpc.setup.exit({})
   }
 
   openLocalAddress() {
@@ -223,7 +223,7 @@ export default class SuccessPage implements AfterViewInit {
     this.rebooting.set(true)
 
     try {
-      await this.api.exit()
+      await this.api.rpc.setup.exit({})
       await this.pollForServer()
       this.rebooted.set(true)
       this.rebooting.set(false)
@@ -235,14 +235,14 @@ export default class SuccessPage implements AfterViewInit {
 
   private async complete() {
     try {
-      const result = await this.api.complete()
+      const result = await this.api.rpc.setup.complete({})
       this.result.set(result)
 
       if (!this.stateService.kiosk) {
         this.lanAddress.set(`http://${result.hostname}.local`)
 
         if (!result.needsRestart) {
-          await this.api.exit()
+          await this.api.rpc.setup.exit({})
         }
       }
     } catch (e: any) {

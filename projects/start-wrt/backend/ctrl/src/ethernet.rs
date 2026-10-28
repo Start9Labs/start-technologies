@@ -13,6 +13,7 @@ use crate::invoke::Invoke;
 use crate::prelude::*;
 use crate::profiles::{self, ProfileId, ProfileIdOpt};
 use crate::utils::{DeserializeStdin, HandlerExtSerde};
+use crate::wan::WAN6_DEVICE;
 use crate::CtrlContext;
 
 pub const DEFAULT_LAN_BRIDGE: &str = "br-lan";
@@ -34,17 +35,19 @@ pub fn find_lan_bridge(cfgs: &Configs) -> Result<Option<NetworkDevice>, Error> {
 pub const DEFAULT_WAN_INTERFACE: &str = "wan";
 pub const DEFAULT_WAN6_INTERFACE: &str = "wan6";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct Port<Id: Ord = ProfileId> {
     pub profile: Option<Id>,
 }
+rpc_toolkit::reflect_ts!(impl [Id: Ord] for Port<Id> where [Option<Id>: rpc_toolkit::ts::TS]);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct Ethernet<Id: Ord = ProfileId> {
     pub wan_ipv6: bool,
     pub wan_port: Option<String>,
     pub ports: BTreeMap<String, Port<Id>>,
 }
+rpc_toolkit::reflect_ts!(impl [Id: Ord] for Ethernet<Id> where [BTreeMap<String, Port<Id>>: rpc_toolkit::ts::TS]);
 
 /// `ethernet.set` request: the desired port layout plus a confirmation flag.
 /// Reassigning a port to a different profile moves its devices to a new subnet,
@@ -52,20 +55,22 @@ pub struct Ethernet<Id: Ord = ProfileId> {
 /// and such ports exist, `set` applies nothing and returns them in
 /// `EthernetSetResult` for a confirmation dialog; with the flag true it deletes
 /// those published ports as part of the reassignment.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct EthernetSetRequest {
     #[serde(flatten)]
     pub ethernet: Ethernet<ProfileIdOpt>,
     #[serde(default)]
     pub confirm_published_port_deletion: bool,
 }
+rpc_toolkit::reflect_ts!(EthernetSetRequest);
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, visit_rs::VisitFields)]
 pub struct EthernetSetResult {
     /// Non-empty (and nothing applied) when published ports would be deleted and
     /// the caller hasn't confirmed yet. Empty once the change is applied.
     pub pending_published_port_deletions: Vec<crate::published_ports::AffectedPublishedPort>,
 }
+rpc_toolkit::reflect_ts!(EthernetSetResult);
 
 /// Names of ports whose profile (VLAN) assignment is changing: present in
 /// `old_ports` but resolving to a different VLAN than `requested`. Newly added
@@ -183,10 +188,8 @@ fn get_config(ctx: impl CtrlContext, cfgs: &Configs) -> Result<Ethernet, Error> 
     })
 }
 
-/// IEEE 802.3 Clause 28 `break_link_timer` requires 1200–1500 ms of link pulse
-/// suppression for the link partner to reliably detect carrier loss.  We use 2 s
-/// to provide margin above the 1.5 s maximum.
-const PORT_BOUNCE_DOWN_SECS: u64 = 2;
+/// Outlasts NetworkManager's carrier-loss debounce: 6 s, or 10 s after it changes the MTU.
+const PORT_BOUNCE_DOWN_SECS: u64 = 10;
 
 #[instrument(skip_all)]
 pub async fn set<C: CtrlContext>(
@@ -225,7 +228,7 @@ pub async fn set<C: CtrlContext>(
         let macs = crate::devices::get_bridge_fdb()
             .await
             .into_iter()
-            .filter(|(_, port)| changed_ports.contains(port))
+            .filter(|(_, entry)| changed_ports.contains(&entry.port))
             .map(|(mac, _)| mac)
             .collect();
         (macs, changed_ports)
@@ -370,17 +373,27 @@ pub async fn set<C: CtrlContext>(
                     // just briefly reassociate.  Run sequentially so it
                     // doesn't race the network reload.
                     let dhcp_changed = !affected_macs.is_empty();
+                    let uci_root = ctx.uci_root();
                     tokio::spawn(async move {
                         let _ = crate::run_quiet_async(
                             tokio::process::Command::new("/etc/init.d/network").arg("reload"),
                         )
                         .await;
+                        if dhcp_changed {
+                            crate::published_ports::sync_v6_mac_bind_logged(uci_root).await;
+                        }
                         let _ = crate::run_quiet_async(
                             tokio::process::Command::new("/etc/init.d/firewall").arg("reload"),
                         )
                         .await;
-                        let _ =
-                            crate::run_quiet_async(&mut tokio::process::Command::new("wifi")).await;
+                        if let Err(e) = crate::wifi::reload_wifi(
+                            "/etc/config",
+                            crate::wifi::WifiReload::Restart,
+                        )
+                        .await
+                        {
+                            tracing::warn!("WiFi restart failed: {e}");
+                        }
                         if dhcp_changed {
                             crate::published_ports::reload_dnsmasq();
                             // odhcpd owns IPv6 leases/hostids; reload so a cleared
@@ -511,11 +524,9 @@ fn set_config(
                 && section.name().as_deref() == Some(DEFAULT_WAN6_INTERFACE)
             {
                 pending_ipv6 = false;
-                if let Some(wan_port) = &ethernet.wan_port {
-                    if ethernet.wan_ipv6 {
-                        iface.device = wan_port.clone();
-                        section.set(&iface)?;
-                    }
+                if ethernet.wan_port.is_some() && ethernet.wan_ipv6 && iface.device != WAN6_DEVICE {
+                    iface.device = WAN6_DEVICE.to_string();
+                    section.set(&iface)?;
                 }
             }
         }
@@ -554,7 +565,7 @@ fn set_config(
         if pending_ipv6 {
             cfgs["network"].append(
                 &NetworkInterface {
-                    device: wan_port.clone(),
+                    device: WAN6_DEVICE.to_string(),
                     proto: InterfaceProto::DHCPV6,
                     ..Default::default()
                 },
@@ -1413,7 +1424,7 @@ config interface 'wan'
         .await
         .unwrap();
 
-        let after = get(ctx).await.unwrap();
+        let after = get(ctx.clone()).await.unwrap();
         assert_eq!(
             after.wan_port.as_deref(),
             Some("eth2"),
@@ -1426,6 +1437,21 @@ config interface 'wan'
         assert!(
             after.ports.contains_key("eth2"),
             "WAN port should appear in ports map"
+        );
+
+        let arena = Arena::new();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["network"])
+            .await
+            .unwrap();
+        let wan6 = cfgs["network"]
+            .sections
+            .iter()
+            .find(|s| s.name().as_deref() == Some(DEFAULT_WAN6_INTERFACE))
+            .and_then(|s| s.get_typed::<NetworkInterface>().unwrap())
+            .expect("wan6 should survive the round-trip");
+        assert_eq!(
+            wan6.device, WAN6_DEVICE,
+            "wan6 should follow the wan interface"
         );
     }
 
@@ -1639,7 +1665,7 @@ config interface 'guest'
                 if section.name().as_deref() == Some("wan6")
                     && iface.proto == InterfaceProto::DHCPV6
                 {
-                    assert_eq!(iface.device, "eth1");
+                    assert_eq!(iface.device, WAN6_DEVICE);
                     found_wan6 = true;
                 }
             }

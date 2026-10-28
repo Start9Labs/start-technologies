@@ -92,7 +92,7 @@ L’adresse IP ou le nom de domaine où le serveur VPN peut être joint par les 
 
 ### Profil de sécurité
 
-L’ensemble initial de droits d’accès et de restrictions attribué aux clients lorsqu’ils se connectent au serveur VPN. Sélectionnez un profil ou un planning déjà créé, ou créez-en un nouveau.
+L’ensemble initial de droits d’accès et de restrictions attribué aux clients lorsqu’ils se connectent au serveur VPN. Sélectionnez un profil ou un planning déjà créé, ou créez-en un nouveau. Le profil est fixé une fois le serveur créé ; pour déplacer un VPN vers un autre profil, supprimez-le et ajoutez-en un nouveau.
 
 ### Port
 
@@ -111,7 +111,7 @@ L’adresse IP attribuée sur le réseau local. Elle a été configurée lors de
 
 ### Acheminement
 
-Affiche le mode d’acheminement du trafic du client. « Tout le trafic » achemine tout le trafic Internet par le tunnel VPN. « LAN uniquement » achemine seulement le trafic du réseau local par le tunnel. Utilisez le menu d’actions pour basculer entre les modes.`,
+Affiche le mode d’acheminement du trafic du client. « Tout le trafic » achemine tout le trafic Internet par le tunnel VPN. « LAN uniquement » achemine seulement le trafic du réseau local par le tunnel. Pour le modifier, supprimez le client et ajoutez-le de nouveau avec l’acheminement souhaité.`,
   '/inbound/client/dialog-add': `## VPN entrants
 
 ### Étiquette
@@ -139,7 +139,7 @@ Affiche la configuration sous forme de texte. Utilisez le bouton de copie pour l
 
 ### QR
 
-Affiche la configuration sous forme de QR code. Scannez-le avec l’application mobile WireGuard pour configurer l’appareil client sans saisie manuelle.`,
+Affiche la configuration sous forme de QR code lorsque le routeur a généré la clé privée de l’appareil. Scannez-le avec l’application mobile WireGuard pour configurer l’appareil client sans saisie manuelle.`,
   '/inbound/client/dialog-rename': `## Renommer le client
 
 ### Nom
@@ -164,9 +164,9 @@ IPv6 permet à vos appareils d’être directement joignables depuis Internet sa
 
 ### Longueur du préfixe
 
-La longueur du préfixe détermine la taille de l’espace d’adressage IPv6 de votre LAN. Elle doit être **plus grande** (un nombre plus élevé) que votre préfixe WAN pour créer un sous-réseau valide.
+La longueur du préfixe détermine la taille de l’espace d’adressage IPv6 de votre LAN. Choisissez une valeur de /48 à /64, sans préfixe plus court que celui délégué par votre FAI. Le résumé indique cette taille sous **Préfixe délégué** (**Aucun** en l’absence de délégation).
 
-Par exemple, si votre ISP vous attribue un préfixe /48, vous pouvez utiliser /56, /60 ou /64 pour votre LAN. Un préfixe /64 est recommandé pour la plupart des réseaux domestiques.`,
+Par exemple, avec une délégation /56, vous pouvez utiliser /56, /60 ou /64 pour votre LAN ; avec une délégation /64, utilisez /64. Un préfixe /64 est recommandé pour la plupart des réseaux domestiques.`,
   '/outbound': `## VPN sortants
 
 Les VPN sortants acheminent votre trafic Internet par des tunnels chiffrés vers des serveurs distants, renforçant la confidentialité et la sécurité.
@@ -187,7 +187,7 @@ Acheminez un VPN par un autre pour davantage de confidentialité. Votre trafic r
 Téléversez un fichier de configuration WireGuard fourni par votre fournisseur de VPN (Mullvad, ProtonVPN, IVPN, etc.) pour créer un nouveau client VPN.`,
   '/outbound/vpn': `## VPN sortants
 
-<details><summary>Étiquette</summary> Un nom convivial pour identifier cette connexion VPN. Utilisez un nom descriptif comme « Mullvad Suède » ou « VPN du travail ». </details> <details><summary>Se connecte à</summary> L’endroit où le trafic de ce VPN doit être acheminé :<ul><li><b>Internet :</b> Le trafic ressort directement vers Internet par ce VPN.</li><li><b>Un autre VPN :</b> Chaîner d’abord par un autre VPN pour plus de confidentialité. Votre trafic sera chiffré plusieurs fois et ressortira par plusieurs serveurs.</li></ul><b>Remarque :</b> Le chaînage de VPN augmente la latence et peut réduire les débits. </details> <details><summary>Chemin de connexion</summary> Affiche l’itinéraire complet que prend votre trafic depuis ce VPN jusqu’à Internet. Par exemple : Mullvad → Proton → Internet signifie que le trafic est chiffré par Mullvad, envoyé via Proton, puis ressort vers Internet.</details>`,
+<details><summary>Étiquette</summary> Un nom convivial pour identifier cette connexion VPN. Utilisez un nom descriptif comme « Mullvad Suède » ou « VPN du travail ». </details> <details><summary>Se connecte à</summary> L’endroit où le trafic de ce VPN doit être acheminé :<ul><li><b>Internet :</b> Le trafic ressort directement vers Internet par ce VPN.</li><li><b>Un autre VPN :</b> Chaîner d’abord par un autre VPN pour plus de confidentialité. Votre trafic sera chiffré plusieurs fois et ressortira par plusieurs serveurs.</li></ul><b>Remarque :</b> Le chaînage de VPN augmente la latence et peut réduire les débits. </details> <details><summary>Serveurs DNS</summary> Résolveurs joints via le tunnel par les profils acheminés par ce VPN qui n’ont pas de serveurs DNS propres. Laissez vide pour utiliser les serveurs DNS personnalisés du système via le tunnel — ou, si le système utilise le DNS de votre fournisseur d’accès, les serveurs de celui-ci hors du tunnel. </details> <details><summary>Chemin de connexion</summary> Affiche l’itinéraire complet que prend votre trafic depuis ce VPN jusqu’à Internet. Par exemple : Mullvad → Proton → Internet signifie que le trafic est chiffré par Mullvad, envoyé via Proton, puis ressort vers Internet.</details>`,
   '/outbound/dialog': `## VPN sortants
 
 Les clients VPN établissent une connexion sortante vers un serveur VPN, permettant aux appareils d’envoyer et de recevoir des données comme s’ils étaient directement connectés au réseau privé. Masque votre adresse IP, contourne les restrictions géographiques et protège les données sensibles sur les réseaux Wi-Fi publics.
@@ -202,7 +202,11 @@ Téléversez un fichier **.conf** WireGuard fourni par votre fournisseur de VPN.
 
 ### Cible
 
-Le saut suivant dans le chemin d’une connexion VPN en couches.`,
+Le saut suivant dans le chemin d’une connexion VPN en couches.
+
+### Serveurs DNS
+
+Facultatif. Remplace les serveurs DNS du fichier de configuration. Les profils acheminés par ce VPN résolvent via le tunnel avec ces serveurs, sauf s’ils définissent les leurs. S’il n’y en a ni ici, ni dans la configuration, ni dans le DNS personnalisé du système, ces profils résolvent via votre fournisseur d’accès, hors du tunnel.`,
   '/profiles': `## Profils
 
 Les profils de sécurité définissent des segments de réseau aux autorisations isolées. Chaque profil contrôle l’accès à Internet et la communication avec les autres profils de votre réseau local.
@@ -213,7 +217,7 @@ Un nom descriptif pour le profil de sécurité, tel que « Invité » ou « Appa
 
 ### DNS
 
-Les serveurs DNS utilisés par les appareils de ce profil — ceux du système (« Système »), les serveurs personnalisés du profil (« Personnalisé »), ou, lors de l’acheminement par un VPN, ceux du VPN (« VPN »).
+Les serveurs DNS utilisés par les appareils de ce profil — ceux du système (« Système »), les serveurs personnalisés du profil (« Personnalisé »), ou, lors de l’acheminement par un VPN, ceux du VPN (« VPN »). « Système (hors VPN) » signifie qu’un profil acheminé par un VPN n’a aucun serveur DNS à utiliser via le tunnel et résout via votre fournisseur d’accès, hors du tunnel.
 
 ### Sortant
 
@@ -473,7 +477,7 @@ Contrôle ce à quoi l’appareil connecté peut accéder sur le réseau. Attrib
 
 ### Pays
 
-Le pays dont le routeur suit la réglementation Wi-Fi. Il détermine les canaux que chaque bande peut utiliser et la puissance d’émission autorisée. Tant qu’aucun pays n’est sélectionné, le routeur fonctionne avec un sous-ensemble prudent valable dans le monde entier : canaux 1–11 en 2,4 GHz et canaux 36–48 en 5 GHz à puissance réduite. Changer de pays réinitialise la sélection des canaux sur Auto. Choisissez le pays où le routeur se trouve physiquement.
+Le pays dont le routeur suit la réglementation Wi-Fi. Il détermine les canaux que chaque bande peut utiliser et la puissance d’émission autorisée. Tant qu’aucun pays n’est sélectionné, le routeur fonctionne avec un sous-ensemble prudent valable dans le monde entier : canaux 1–11 en 2,4 GHz et canaux 36–48 en 5 GHz à puissance réduite. Changer de pays réinitialise la sélection des canaux sur Auto et ramène à 80 MHz une largeur de canal supérieure à 80 MHz. Choisissez le pays où le routeur se trouve physiquement.
 
 ### Activer le Wi-Fi
 
@@ -497,7 +501,11 @@ Lors de l’utilisation des deux bandes de fréquence, cette option crée des SS
 
 ### Canaux
 
-Canaux spécifiques au sein de chaque bande de fréquence. Sélectionnez « Auto » pour que le routeur choisisse le meilleur canal, ou choisissez un canal spécifique pour éviter les interférences des réseaux voisins. « Auto » ignore les canaux à détection radar (DFS). Vous pouvez en choisir un manuellement, mais le réseau 5 GHz met alors une minute ou plus à apparaître à chaque démarrage du routeur, le temps qu’il écoute les radars.`,
+Canaux spécifiques au sein de chaque bande de fréquence. Sélectionnez « Auto » pour que le routeur choisisse le meilleur canal, ou choisissez un canal spécifique pour éviter les interférences des réseaux voisins. « Auto » ignore les canaux à détection radar (DFS). Vous pouvez en choisir un manuellement, mais le réseau 5 GHz met alors une minute ou plus à apparaître à chaque démarrage du routeur, le temps qu’il écoute les radars.
+
+### Largeur de canal
+
+La part de la bande qu’occupe chaque réseau. Les canaux plus larges sont plus rapides, mais chevauchent davantage de réseaux voisins et portent un peu moins loin. Chaque liste indique les largeurs que le canal sélectionné peut utiliser dans le pays sélectionné. En 2,4 GHz, un réseau de 40 MHz démarre plutôt à 20 MHz si un réseau voisin le chevauche.`,
 }
 
 export default HELP_FR

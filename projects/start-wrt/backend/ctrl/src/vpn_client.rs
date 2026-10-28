@@ -28,7 +28,7 @@ struct UciVpnClient {
 
 // === Public API Types ===
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct OutboundVpn {
     pub id: String,
     pub label: String,
@@ -44,22 +44,48 @@ pub struct OutboundVpn {
     pub mtu: Option<u16>,
     /// The server is named by hostname; only `Internet` is a valid target.
     pub hostname_endpoint: bool,
+    /// Resolvers reached through the tunnel. Empty leaves profiles routed through
+    /// this VPN on the system DNS servers, or on the ISP's outside the tunnel.
+    pub dns: Vec<IpAddr>,
+    pub status: OutboundVpnStatus,
+    /// Seconds since the tunnel's latest handshake, measured on the router.
+    /// `None` when it has never completed one.
+    pub last_handshake_secs: Option<u64>,
 }
+rpc_toolkit::reflect_ts!(OutboundVpn);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, visit_rs::VisitVariants)]
+#[serde(rename_all = "kebab-case")]
+pub enum OutboundVpnStatus {
+    Disabled,
+    /// A handshake completed within the session lifetime.
+    Connected,
+    /// Nothing has sent through the tunnel since its session lapsed.
+    Idle,
+    /// The router is sending through the tunnel and the server is not answering.
+    NotResponding,
+}
+rpc_toolkit::reflect_ts!(OutboundVpnStatus);
+
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct OutboundVpnCreateRequest {
     pub label: String,
     pub target: String,
     /// Raw WireGuard .conf file contents
     pub config: String,
+    /// Replaces the config's `DNS =` servers. Absent keeps them.
+    #[serde(default)]
+    pub dns: Option<Vec<IpAddr>>,
 }
+rpc_toolkit::reflect_ts!(OutboundVpnCreateRequest);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct OutboundVpnCreateResponse {
     pub id: String,
 }
+rpc_toolkit::reflect_ts!(OutboundVpnCreateResponse);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct OutboundVpnUpdateRequest {
     pub id: String,
     pub label: String,
@@ -68,19 +94,25 @@ pub struct OutboundVpnUpdateRequest {
     /// chain MTU for a VPN connecting through another, else the kernel's.
     #[serde(default)]
     pub mtu: Option<u16>,
+    /// Replaces the resolvers reached through the tunnel. Absent keeps them.
+    #[serde(default)]
+    pub dns: Option<Vec<IpAddr>>,
 }
+rpc_toolkit::reflect_ts!(OutboundVpnUpdateRequest);
 
-#[derive(Debug, Clone, Serialize, Deserialize, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, Parser, visit_rs::VisitFields)]
 pub struct OutboundVpnDeleteRequest {
     #[clap(short, long)]
     pub id: String,
 }
+rpc_toolkit::reflect_ts!(OutboundVpnDeleteRequest);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct OutboundVpnSetEnabledRequest {
     pub id: String,
     pub enabled: bool,
 }
+rpc_toolkit::reflect_ts!(OutboundVpnSetEnabledRequest);
 
 // === Parsed WireGuard Config ===
 
@@ -88,7 +120,7 @@ pub struct OutboundVpnSetEnabledRequest {
 struct ParsedWgConfig {
     private_key: String,
     addresses: Vec<String>,
-    dns: Vec<String>,
+    dns: Vec<IpAddr>,
     mtu: Option<u16>,
     public_key: String,
     preshared_key: Option<String>,
@@ -371,7 +403,13 @@ fn parse_wireguard_config(config: &str) -> Result<ParsedWgConfig, Error> {
             "interface" => match key.as_str() {
                 "privatekey" => private_key = value.to_string(),
                 "address" => addresses = value.split(',').map(|s| s.trim().to_string()).collect(),
-                "dns" => dns = value.split(',').map(|s| s.trim().to_string()).collect(),
+                // Non-address entries are wg-quick search domains.
+                "dns" => {
+                    dns = value
+                        .split(',')
+                        .filter_map(|s| s.trim().parse().ok())
+                        .collect()
+                }
                 "mtu" => {
                     let parsed = value.parse::<u32>().map_err(|_| {
                         Error::new(
@@ -720,7 +758,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<OutboundVpn>, Error> {
 
     let server_interfaces = get_vpn_server_interfaces(&cfgs);
 
-    let clients: Vec<OutboundVpn> = cfgs["startwrt"]
+    let mut clients: Vec<OutboundVpn> = cfgs["startwrt"]
         .sections
         .iter()
         .filter_map(|section| section.get::<UciVpnClient>().ok())
@@ -744,6 +782,10 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<OutboundVpn>, Error> {
 
             let used_by = get_used_by_profiles(&cfgs, &meta.interface);
             let hostname_endpoint = has_hostname_endpoint(&cfgs, &meta.interface);
+            let dns = crate::dns::vpn_dns_servers(&cfgs, &meta.interface)
+                .iter()
+                .filter_map(|s| s.parse().ok())
+                .collect();
 
             Some(OutboundVpn {
                 id: meta.interface.clone(),
@@ -754,11 +796,120 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<OutboundVpn>, Error> {
                 supports_ipv6,
                 mtu,
                 hostname_endpoint,
+                dns,
+                status: OutboundVpnStatus::Disabled,
+                last_handshake_secs: None,
             })
         })
         .collect();
 
+    fill_tunnel_status(&mut clients).await;
+
     Ok(clients)
+}
+
+/// How long a send seen after the session lapsed counts as an unanswered handshake.
+const ATTEMPT_WINDOW_SECS: u64 = 120;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TxSample {
+    tx_bytes: u64,
+    at: u64,
+    attempt_at: Option<u64>,
+}
+
+static TX_SAMPLES: std::sync::Mutex<std::collections::BTreeMap<String, TxSample>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TunnelStats {
+    latest_handshake: u64,
+    rx_bytes: u64,
+    tx_bytes: u64,
+}
+
+impl TunnelStats {
+    /// `None` when no peer has an endpoint to send to.
+    fn from_peers(peers: &[crate::wg::WgPeerStats]) -> Option<Self> {
+        let mut peers = peers.iter().filter(|p| p.endpoint.is_some()).peekable();
+        peers.peek()?;
+        Some(peers.fold(
+            TunnelStats {
+                latest_handshake: 0,
+                rx_bytes: 0,
+                tx_bytes: 0,
+            },
+            |acc, p| TunnelStats {
+                latest_handshake: acc.latest_handshake.max(p.latest_handshake),
+                rx_bytes: acc.rx_bytes + p.rx_bytes,
+                tx_bytes: acc.tx_bytes + p.tx_bytes,
+            },
+        ))
+    }
+}
+
+fn tunnel_status(
+    stats: Option<&TunnelStats>,
+    prev: Option<TxSample>,
+    now: u64,
+) -> (OutboundVpnStatus, Option<TxSample>) {
+    let Some(stats) = stats else {
+        return (OutboundVpnStatus::NotResponding, None);
+    };
+    let lapsed_at = stats.latest_handshake + crate::wg::REJECT_AFTER_SECS;
+    let attempt_at = match prev {
+        Some(p) if stats.tx_bytes > p.tx_bytes && p.at >= lapsed_at => Some(now),
+        Some(p) if stats.tx_bytes >= p.tx_bytes => p.attempt_at.filter(|t| *t >= lapsed_at),
+        _ => None,
+    };
+    let status = if now < lapsed_at {
+        OutboundVpnStatus::Connected
+    } else if stats.rx_bytes == 0 && stats.tx_bytes > crate::wg::HANDSHAKE_INITIATION_BYTES {
+        OutboundVpnStatus::NotResponding
+    } else if attempt_at.is_some_and(|t| now.saturating_sub(t) < ATTEMPT_WINDOW_SECS) {
+        OutboundVpnStatus::NotResponding
+    } else {
+        OutboundVpnStatus::Idle
+    };
+    let sample = TxSample {
+        tx_bytes: stats.tx_bytes,
+        at: now,
+        attempt_at,
+    };
+    (status, Some(sample))
+}
+
+async fn fill_tunnel_status(clients: &mut [OutboundVpn]) {
+    let dumps = futures::future::join_all(clients.iter().map(|c| async move {
+        if c.enabled {
+            crate::wg::show_dump(&c.id).await
+        } else {
+            None
+        }
+    }))
+    .await;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+
+    let mut samples = TX_SAMPLES.lock().unwrap();
+    for (client, peers) in clients.iter_mut().zip(dumps) {
+        if !client.enabled {
+            samples.remove(&client.id);
+            continue;
+        }
+        let stats = peers.as_deref().and_then(TunnelStats::from_peers);
+        let (status, sample) = tunnel_status(stats.as_ref(), samples.get(&client.id).copied(), now);
+        client.status = status;
+        client.last_handshake_secs = stats
+            .filter(|s| s.latest_handshake > 0)
+            .map(|s| now.saturating_sub(s.latest_handshake));
+        match sample {
+            Some(sample) => samples.insert(client.id.clone(), sample),
+            None => samples.remove(&client.id),
+        };
+    }
+    samples.retain(|id, _| clients.iter().any(|c| c.id == *id));
 }
 
 /// Create a new outbound VPN client from a WireGuard .conf file
@@ -769,7 +920,10 @@ pub async fn create(
 ) -> Result<OutboundVpnCreateResponse, Error> {
     validate_label(&req.label)?;
 
-    let parsed = parse_wireguard_config(&req.config)?;
+    let mut parsed = parse_wireguard_config(&req.config)?;
+    if let Some(dns) = req.dns {
+        parsed.dns = dns;
+    }
     let interface_name = sanitize_interface_name(&req.label)?;
 
     let mut retries = 4;
@@ -873,7 +1027,12 @@ pub async fn update(
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs = parse_all("/etc/config", &arena, &["network", "startwrt"]).await?;
+        let mut cfgs = parse_all(
+            "/etc/config",
+            &arena,
+            &["network", "startwrt", "firewall", "dhcp"],
+        )
+        .await?;
 
         let old_target = update_client_metadata(&mut cfgs, &req.id, &req.label, &req.target)?;
         // Only on an actual retarget, mirroring guard_subnet_collision: a
@@ -888,6 +1047,13 @@ pub async fn update(
 
         let mtu = req.mtu.or_else(|| chain_mtu(&cfgs, &req.id));
         let mtu_changed = set_interface_mtu(&mut cfgs, &req.id, mtu, &arena);
+        let dns_changed = match &req.dns {
+            Some(dns) => set_interface_dns(&mut cfgs, &req.id, dns, &arena),
+            None => false,
+        };
+        if dns_changed {
+            crate::profiles::rewrite_all_dns_forwarding(&mut cfgs)?;
+        }
 
         rewrite_vpn_chain_routes(&mut cfgs)?;
 
@@ -912,6 +1078,9 @@ pub async fn update(
                 // don't need this).
                 if mtu_changed {
                     restart_wireguard_interface(&req.id).await?;
+                }
+                if dns_changed {
+                    crate::dns::heal_smartdns_conf("/etc/config").await?;
                 }
                 reload_system().await?;
                 crate::activity::log(
@@ -1099,6 +1268,7 @@ pub async fn delete(ctx: ServerContext, args: OutboundVpnDeleteRequest) -> Resul
                 return Err(err.into());
             }
             Ok(()) => {
+                crate::dns::heal_smartdns_conf("/etc/config").await?;
                 // network reload will see the WG interface is gone from config
                 // and tear it down atomically — no separate ifdown needed.
                 reload_system().await?;
@@ -1287,6 +1457,7 @@ pub async fn set_enabled(
                         tokio::process::Command::new("ifdown").arg(interface_name),
                     )
                     .await;
+                    crate::dns::heal_smartdns_conf("/etc/config").await?;
                 }
                 reload_system().await?;
                 let action = if req.enabled { "enabled" } else { "disabled" };
@@ -1881,6 +2052,55 @@ fn set_mtu_option<'a>(section: &mut Section<'a>, mtu: Option<u16>, arena: &'a Ar
     true
 }
 
+/// Replace the `dns` list on a WG interface section. Returns `true` when it changed.
+fn set_dns_list<'a>(section: &mut Section<'a>, dns: &[IpAddr], arena: &'a Arena) -> bool {
+    let current: Vec<String> = section
+        .lines
+        .iter()
+        .filter_map(|line| match line {
+            Line::List { list, item, .. } if list.as_str() == "dns" => {
+                Some(item.as_str().to_string())
+            }
+            _ => None,
+        })
+        .collect();
+    let desired: Vec<String> = dns.iter().map(|ip| ip.to_string()).collect();
+    if current == desired {
+        return false;
+    }
+
+    section
+        .lines
+        .retain(|line| !matches!(line, Line::List { list, .. } if list.as_str() == "dns"));
+    for ip in desired {
+        let ip_str: &str = arena.alloc(ip);
+        section.lines.push(Line::List {
+            list: Token::from_str("dns", arena),
+            item: Token::from_str(ip_str, arena),
+            comment: LineComment::None,
+        });
+    }
+    true
+}
+
+/// Set the `dns` list on a WG client interface. Returns `true` when it changed.
+fn set_interface_dns<'a>(
+    cfgs: &mut Configs<'a>,
+    interface: &str,
+    dns: &[IpAddr],
+    arena: &'a Arena,
+) -> bool {
+    cfgs["network"]
+        .sections
+        .iter_mut()
+        .find(|s| {
+            s.name().as_deref() == Some(interface)
+                && s.get::<WgInterface>()
+                    .is_ok_and(|iface| iface.is_wireguard())
+        })
+        .is_some_and(|section| set_dns_list(section, dns, arena))
+}
+
 /// Create a WireGuard client interface section in network config
 fn create_wg_client_interface<'a>(
     cfgs: &mut Configs<'a>,
@@ -1960,17 +2180,8 @@ fn create_wg_client_interface<'a>(
         });
     }
 
-    // dns (list) — stored for reference but peerdns=0 prevents global use
-    for dns_entry in &parsed.dns {
-        let dns_str: &str = arena.alloc(dns_entry.clone());
-        lines.push(Line::List {
-            list: Token::from_str("dns", arena),
-            item: Token::from_str(dns_str, arena),
-            comment: LineComment::None,
-        });
-    }
-
-    let section = Section { arena, lines };
+    let mut section = Section { arena, lines };
+    set_dns_list(&mut section, &parsed.dns, arena);
     cfgs["network"].sections.push(section);
 
     Ok(())
@@ -2081,8 +2292,150 @@ mod tests {
     use tokio::runtime::Runtime;
 
     use super::*;
-    use crate::wg::{Base64, WgKey};
+    use crate::wg::{Base64, WgKey, WgPeerStats};
     use crate::CtrlContext;
+
+    const NOW: u64 = 1_800_000_000;
+
+    fn stats(latest_handshake: u64, rx_bytes: u64, tx_bytes: u64) -> TunnelStats {
+        TunnelStats {
+            latest_handshake,
+            rx_bytes,
+            tx_bytes,
+        }
+    }
+
+    fn sample(tx_bytes: u64, at: u64) -> TxSample {
+        TxSample {
+            tx_bytes,
+            at,
+            attempt_at: None,
+        }
+    }
+
+    #[test]
+    fn recent_handshake_is_connected() {
+        let (status, _) = tunnel_status(Some(&stats(NOW - 10, 92, 1480)), None, NOW);
+        assert_eq!(status, OutboundVpnStatus::Connected);
+    }
+
+    #[test]
+    fn unanswered_tunnel_is_not_responding() {
+        let (status, _) = tunnel_status(Some(&stats(0, 0, 1480)), None, NOW);
+        assert_eq!(status, OutboundVpnStatus::NotResponding);
+    }
+
+    #[test]
+    fn a_single_unanswered_initiation_is_still_idle() {
+        let one = crate::wg::HANDSHAKE_INITIATION_BYTES;
+        let (status, _) = tunnel_status(Some(&stats(0, 0, one)), None, NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+        let (status, _) = tunnel_status(Some(&stats(0, 0, 2 * one)), None, NOW);
+        assert_eq!(status, OutboundVpnStatus::NotResponding);
+    }
+
+    #[test]
+    fn unused_tunnel_is_idle() {
+        let (status, _) = tunnel_status(Some(&stats(0, 0, 0)), None, NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+    }
+
+    #[test]
+    fn missing_peer_is_not_responding() {
+        assert_eq!(
+            tunnel_status(None, None, NOW),
+            (OutboundVpnStatus::NotResponding, None)
+        );
+    }
+
+    #[test]
+    fn quiet_tunnel_with_a_long_keepalive_interval_is_idle() {
+        let handshake = NOW - 300;
+        let dump = format!(
+            "priv\tpub\t60616\toff\n\
+             peer\t(none)\t192.0.2.1:51820\t0.0.0.0/0\t{handshake}\t92\t180\t600\n"
+        );
+        let peers = crate::wg::parse_dump(&dump);
+        let s = TunnelStats::from_peers(&peers).unwrap();
+        let (status, _) = tunnel_status(Some(&s), Some(sample(180, NOW - 5)), NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+    }
+
+    #[test]
+    fn keepalive_retries_after_the_session_lapsed_are_not_responding() {
+        let handshake = NOW - 600;
+        let dump = format!(
+            "priv\tpub\t60616\toff\n\
+             peer\t(none)\t192.0.2.1:51820\t0.0.0.0/0\t{handshake}\t5000\t9000\t25\n"
+        );
+        let peers = crate::wg::parse_dump(&dump);
+        let s = TunnelStats::from_peers(&peers).unwrap();
+        let (status, _) = tunnel_status(Some(&s), Some(sample(8000, NOW - 5)), NOW);
+        assert_eq!(status, OutboundVpnStatus::NotResponding);
+    }
+
+    #[test]
+    fn traffic_before_the_session_lapsed_stays_idle() {
+        let handshake = NOW - 600;
+        let prev = sample(4000, handshake + 100);
+        let (status, _) = tunnel_status(Some(&stats(handshake, 5000, 9000)), Some(prev), NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+    }
+
+    #[test]
+    fn sends_after_the_session_lapsed_are_not_responding_for_the_attempt_window() {
+        let handshake = NOW - 600;
+        let s = stats(handshake, 5000, 9000);
+        let prev = sample(8000, NOW - 5);
+
+        let (status, next) = tunnel_status(Some(&s), Some(prev), NOW);
+        assert_eq!(status, OutboundVpnStatus::NotResponding);
+
+        let later = NOW + ATTEMPT_WINDOW_SECS - 1;
+        let (status, next) = tunnel_status(Some(&s), next, later);
+        assert_eq!(status, OutboundVpnStatus::NotResponding);
+
+        let (status, _) = tunnel_status(Some(&s), next, NOW + ATTEMPT_WINDOW_SECS);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+    }
+
+    #[test]
+    fn counter_reset_forgets_the_attempt() {
+        let handshake = NOW - 600;
+        let prev = TxSample {
+            tx_bytes: 9000,
+            at: NOW - 5,
+            attempt_at: Some(NOW - 5),
+        };
+        let (status, next) = tunnel_status(Some(&stats(handshake, 0, 0)), Some(prev), NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+        assert_eq!(next.unwrap().attempt_at, None);
+    }
+
+    #[test]
+    fn a_new_handshake_clears_an_earlier_attempt() {
+        let prev = TxSample {
+            tx_bytes: 9000,
+            at: NOW - 5,
+            attempt_at: Some(NOW - 300),
+        };
+        let (status, next) = tunnel_status(Some(&stats(NOW - 200, 5000, 9000)), Some(prev), NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+        assert_eq!(next.unwrap().attempt_at, None);
+    }
+
+    #[test]
+    fn peers_without_an_endpoint_give_no_stats() {
+        let peer = WgPeerStats {
+            public_key: "k".into(),
+            endpoint: None,
+            latest_handshake: 0,
+            rx_bytes: 0,
+            tx_bytes: 0,
+        };
+        assert_eq!(TunnelStats::from_peers(&[peer]), None);
+        assert_eq!(TunnelStats::from_peers(&[]), None);
+    }
 
     #[derive(Clone)]
     #[allow(dead_code)]
@@ -2122,6 +2475,11 @@ mod tests {
              AllowedIPs = 0.0.0.0/0, ::/0\n\
              PersistentKeepalive = 25\n"
         )
+    }
+
+    /// `wg_conf` without its `DNS =` line.
+    fn wg_conf_no_dns(private_key: &str, public_key: &str) -> String {
+        wg_conf(private_key, public_key).replace("DNS = 10.2.0.1\n", "")
     }
 
     /// Write base configs: two profiles (Admin/lan/vlan99, Guest/guest/vlan101)
@@ -2349,7 +2707,7 @@ config interface 'wg_guest'
         assert_eq!(parsed.private_key, privkey);
         assert_eq!(parsed.public_key, pubkey);
         assert_eq!(parsed.addresses, vec!["10.2.0.2/32"]);
-        assert_eq!(parsed.dns, vec!["10.2.0.1"]);
+        assert_eq!(parsed.dns, vec![IpAddr::from([10, 2, 0, 1])]);
         assert_eq!(parsed.endpoint_host.as_deref(), Some("vpn.example.com"));
         assert_eq!(parsed.endpoint_port.as_deref(), Some("51820"));
         assert_eq!(parsed.allowed_ips, vec!["0.0.0.0/0", "::/0"]);
@@ -2357,6 +2715,49 @@ config interface 'wg_guest'
         assert!(parsed.preshared_key.is_none());
         // wg_conf() omits MTU → inherit default
         assert_eq!(parsed.mtu, None);
+    }
+
+    #[test]
+    fn test_parse_wg_config_without_dns() {
+        let conf = wg_conf_no_dns(&gen_key(), &gen_key());
+        assert!(!conf.contains("DNS"));
+        assert!(parse_wireguard_config(&conf).unwrap().dns.is_empty());
+    }
+
+    #[test]
+    fn test_parse_wg_config_dns_drops_search_domains() {
+        let conf = wg_conf(&gen_key(), &gen_key())
+            .replace("DNS = 10.2.0.1", "DNS = 10.2.0.1, fd00::1, corp.example");
+        assert_eq!(
+            parse_wireguard_config(&conf).unwrap().dns,
+            vec![
+                IpAddr::from([10, 2, 0, 1]),
+                "fd00::1".parse::<IpAddr>().unwrap()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_wg_client_interface_without_dns_writes_no_dns_list() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_base_configs(dir.path());
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        let parsed = parse_wireguard_config(&wg_conf_no_dns(&gen_key(), &gen_key())).unwrap();
+        create_wg_client_interface(&mut cfgs, "wg_test", &parsed, &arena).unwrap();
+        assert!(crate::dns::vpn_dns_servers(&cfgs, "wg_test").is_empty());
+
+        let dns = [IpAddr::from([1, 1, 1, 1])];
+        assert!(set_interface_dns(&mut cfgs, "wg_test", &dns, &arena));
+        assert!(!set_interface_dns(&mut cfgs, "wg_test", &dns, &arena));
+        assert_eq!(
+            crate::dns::vpn_dns_servers(&cfgs, "wg_test"),
+            vec!["1.1.1.1"]
+        );
+        assert!(set_interface_dns(&mut cfgs, "wg_test", &[], &arena));
+        assert!(crate::dns::vpn_dns_servers(&cfgs, "wg_test").is_empty());
     }
 
     #[test]
@@ -4433,6 +4834,9 @@ config wireguard_wg_inner 'in_peer0'
                     supports_ipv6: wg.addresses.iter().any(|a| a.contains(':')),
                     mtu: wg.mtu,
                     hostname_endpoint: has_hostname_endpoint(&cfgs, &meta.interface),
+                    dns: vec![],
+                    status: OutboundVpnStatus::Disabled,
+                    last_handshake_secs: None,
                 })
             })
             .collect();

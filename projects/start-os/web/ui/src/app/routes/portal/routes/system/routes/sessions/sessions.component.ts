@@ -67,7 +67,7 @@ import { SessionsTableComponent } from './table.component'
 export default class SystemSessionsComponent {
   private readonly tasks = inject(TaskService)
   private readonly api = inject(ApiService)
-  private readonly sessions$ = from(this.api.getSessions({}))
+  private readonly sessions$ = from(this.api.rpc.auth.session.list({}))
   private readonly local$ = new Subject<readonly SessionWithId[]>()
 
   protected sessions = viewChild<SessionsTableComponent<SessionWithId>>('table')
@@ -105,7 +105,7 @@ export default class SystemSessionsComponent {
         .map(s => s.id) || []
 
     this.tasks.run(async () => {
-      await this.api.killSessions({ ids })
+      await this.api.rpc.auth.session.kill({ ids })
       this.local$.next(all.filter(s => !ids.includes(s.id)))
       this.sessions()?.selected.set([])
     }, 'Terminating sessions')

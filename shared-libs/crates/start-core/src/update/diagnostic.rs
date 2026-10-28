@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use clap::{ArgAction, Parser};
 use color_eyre::eyre::eyre;
 use exver::{Version, VersionRange};
 use futures::{StreamExt, TryStreamExt};
@@ -10,45 +11,46 @@ use imbl_value::json;
 use itertools::Itertools;
 use reqwest::{Client, Url};
 use rpc_toolkit::HandlerArgs;
+use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 use tracing::instrument;
 
 use crate::PLATFORM;
 use crate::context::{CliContext, DiagnosticContext};
-use crate::middleware::auth::signature::{self, SigningContext};
+use crate::middleware::auth::signature;
 use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker, PhasedProgressBar, ProgressUnits};
-use crate::registry::os::SIG_CONTEXT;
+use crate::registry::asset::RegistryAsset;
 use crate::registry::os::index::OsVersionInfo;
 use crate::rpc_continuations::{Guid, RpcContinuation};
-use crate::sign::AnySigningKey;
+use crate::sign::commitment::blake3::Blake3Commitment;
 use crate::update::{UpdateProgressHandles, UpdateSystemParams, UpdateSystemRes, do_update};
 use crate::version::{Current, VersionT};
 
-/// `SigningContext` for unauthenticated registry calls in diagnostic mode.
-struct UnsignedRegistry(Client);
-impl AsRef<Client> for UnsignedRegistry {
-    fn as_ref(&self) -> &Client {
-        &self.0
-    }
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
+pub struct DiagnosticUpdateSystemParams {
+    #[arg(
+        long = "to",
+        value_name = "TARGET",
+        help = "help.arg.update-target-version"
+    )]
+    target_version: Option<VersionRange>,
+    #[arg(long = "no-progress", action = ArgAction::SetFalse, help = "help.arg.no-progress")]
+    #[serde(default)]
+    progress: bool,
 }
-impl SigningContext for UnsignedRegistry {
-    fn signing_key(&self) -> Result<AnySigningKey, Error> {
-        Err(Error::new(
-            eyre!("diagnostic mode has no signing key"),
-            ErrorKind::Authorization,
-        ))
-    }
-}
+rpc_toolkit::reflect_ts!(DiagnosticUpdateSystemParams);
 
 #[instrument(skip_all)]
 pub async fn update_system(
     ctx: DiagnosticContext,
-    UpdateSystemParams {
+    DiagnosticUpdateSystemParams {
         target_version: target,
-        registry,
         progress: report_progress,
-    }: UpdateSystemParams,
+    }: DiagnosticUpdateSystemParams,
 ) -> Result<UpdateSystemRes, Error> {
     let guard = ctx.update_in_progress.mutate(|slot| {
         if Arc::strong_count(slot) > 1 {
@@ -63,6 +65,11 @@ pub async fn update_system(
             ErrorKind::InvalidRequest,
         ));
     };
+
+    #[cfg(not(feature = "beta"))]
+    let registry = "https://registry.start9.com".parse()?;
+    #[cfg(feature = "beta")]
+    let registry = "https://beta-registry.start9.com".parse()?;
 
     run_update(ctx, target, registry, report_progress, guard).await
 }
@@ -94,7 +101,7 @@ async fn run_update(
             ErrorKind::Registry,
         ));
     }
-    asset.validate(SIG_CONTEXT, asset.all_signers())?;
+    validate_signatures(&asset)?;
 
     let tracker = FullProgressTracker::new();
     let prune_phase = tracker.add_phase("Pruning Old OS Images".into(), Some(2));
@@ -155,6 +162,10 @@ async fn run_update(
         target: Some(target_version),
         progress,
     })
+}
+
+pub(super) fn validate_signatures(asset: &RegistryAsset<Blake3Commitment>) -> Result<(), Error> {
+    super::validate_update_signatures(asset, Some(super::signers::initial_signer_policy()))
 }
 
 async fn stream_progress(
@@ -222,13 +233,11 @@ async fn get_versions(
         .map_err(|_| Error::new(eyre!("cannot extend URL path"), ErrorKind::ParseUrl))?
         .push("rpc")
         .push("v0");
-    let sig_context = registry.host_str().map(|s| s.to_string());
-    let ctx = UnsignedRegistry(client.clone());
-    let res = signature::call_remote(
-        &ctx,
+    let res = signature::call_remote_with_client(
+        None,
+        client.clone(),
         registry,
         HeaderMap::new(),
-        sig_context.as_deref(),
         "os.version.get",
         json!({
             "sourceVersion": source,

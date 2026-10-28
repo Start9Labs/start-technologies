@@ -208,7 +208,7 @@ export class MarketplaceControlsComponent {
     if (!file) throw new Error('no file detected')
 
     this.tasks.run(async () => {
-      const res = await this.api.sideloadPackage()
+      const res = await this.api.rpc.package.sideload({})
       this.api
         .uploadFile(res.upload, file)
         .catch(e => this.error.handleError(e))

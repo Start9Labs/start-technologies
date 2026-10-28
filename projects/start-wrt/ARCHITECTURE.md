@@ -9,7 +9,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 - **Router OS:** OpenWrt (SpacemiT K1 / BananaPi F3 target)
 - **Config storage:** UCI files (`/etc/config/`) — no separate database
 - **API:** JSON-RPC 2.0 over HTTP POST at `/rpc/v1`
-- **Auth:** Password + session cookie (SHA-256 hashed tokens, 1-day expiry)
+- **Auth:** Password login enrolls a browser-held Ed25519 key that signs every request (`start-core` signature auth); the CLI on the router uses a local token
 
 ## Project Structure
 
@@ -38,6 +38,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 ├── openwrt-patches/     # Start9 patches to upstream OpenWrt files (patch -p1 at setup)
 ├── openwrt-overlay/     # Start9 additions to the OpenWrt tree (spacemit target, boot pkgs; rsynced at setup)
 ├── build/               # Build scripts, OpenWrt diffconfig + version pin
+├── bench/               # Live-bench driver for a physical test router (see AGENTS.md "Live bench")
 ├── docs/                # User-facing docs book (src/, book.toml) + cross-cutting specs/proposals
 └── API_CONTRACT.md      # Complete RPC endpoint contract with Rust types
 ```
@@ -46,17 +47,17 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 
 - **`backend/`** — Rust daemon and CLI. Produces a single binary `startwrt` that is symlinked as `startwrt-ctrld` (daemon) and `startwrt-cli` (CLI). Handles all backend logic: RPC API, security profiles, WiFi, Ethernet, VPN, authentication, and UCI config management. See [backend/ARCHITECTURE.md](backend/ARCHITECTURE.md).
 
-- **`web/`** — Angular SPA using Taiga UI. Signal-based state, zoneless change detection, standalone components. Communicates with the backend exclusively via JSON-RPC 2.0. Embeds contextual help on every page. See [web/ARCHITECTURE.md](web/ARCHITECTURE.md).
+- **`web/`** — Angular SPA using Taiga UI. Signal-based state, zoneless change detection, standalone components. Communicates with the backend over JSON-RPC 2.0 at `/rpc/v1`, plus the streaming and continuation routes listed under Data Flow. Embeds contextual help on every page. See [web/ARCHITECTURE.md](web/ARCHITECTURE.md).
 
-- **`openwrt/`** — Disposable build workspace (plain directory, no git repo) rebuilt by `build/openwrt-setup.sh` from the sha256-pinned upstream OpenWrt release tarball (`build/openwrt-version`) plus the Start9 delta: `openwrt-patches/` modifies a handful of upstream build-infra files, `openwrt-overlay/` adds the SpacemiT K1 target (`target/linux/spacemit/`) and boot packages (`opensbi-spacemit`, `uboot-spacemit`). The build system compiles the Rust backend + Angular frontend, stages them into `openwrt/files/`, and produces a flashable image.
+- **`openwrt/`** — Disposable build workspace (plain directory, no git repo) rebuilt by `build/openwrt-setup.sh` from the sha256-pinned upstream OpenWrt release tarball (`build/openwrt-version`) plus the Start9 delta: `openwrt-patches/` modifies a handful of upstream files (build infrastructure and a few runtime scripts), `openwrt-overlay/` adds the SpacemiT K1 target (`target/linux/spacemit/`) and boot packages (`opensbi-spacemit`, `uboot-spacemit`). The build system compiles the Rust backend + Angular frontend, stages them into `openwrt/files/`, and produces a flashable image.
 
 ## Data Flow
 
 ```
 Browser (Angular SPA)
-  → HTTP POST /rpc/v1  (JSON-RPC 2.0, session cookie)
+  → HTTP POST /rpc/v1  (JSON-RPC 2.0, X-Start-Auth-Sig request signature)
   → Axum router on port 80/443
-  → SessionAuth middleware (validates cookie, rate-limits login)
+  → start-core Auth middleware (verifies signature or local token, rate-limits login)
   → rpc-toolkit handler dispatch
   → Handler reads/writes UCI files via uciedit (arena-based, atomic writes)
   → Handler calls /etc/init.d/<service> reload to apply changes
@@ -65,11 +66,11 @@ Browser (Angular SPA)
 
 Additional HTTP routes:
 
-- `GET /api/logs` — WebSocket for live log streaming
 - `POST /api/setup/flash` — NDJSON streaming for setup wizard
 - `GET|POST /rest/rpc/{guid}` — Continuation endpoint for backup/restore/diagnostics
+- `GET /ws/rpc/{guid}` — WebSocket continuation for update progress and live logs
 - `GET /static/local-root-ca.crt`, `GET /static/local-root-ca.mobileconfig` — Root CA download, as a certificate or an Apple configuration profile (no auth)
-- `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` — LuCI reverse proxy (localhost:8080)
+- `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` — LuCI reverse proxy (localhost:8080); `/luci` redirects to `/cgi-bin/luci`
 - Fallback — Serves embedded web UI
 
 The daemon also runs **port-control servers** (`ctrl/src/port_control.rs`) for
@@ -83,16 +84,19 @@ are tracked in memory to avoid flash writes; UCI is only written on
 create/change/remove. The OpenWrt image must **not** ship `miniupnpd` — it
 would conflict on these ports and manage forwards outside the UCI model.
 
-**Open problem — LAN source spoofing.** PCP authorization resolves the claimed
-UDP source address through the neighbor table, so a LAN host can act as an
+**Open problem — same-segment LAN source spoofing.** PCP authorization resolves
+the claimed UDP source address through the neighbor table. A request arriving on
+a different LAN bridge than the claimed device is rejected (the arrival interface
+comes from `IP_PKTINFO`), but a host on the same bridge can still act as an
 authorized neighbor: opening ports that expose _that_ device, or tearing its
 mappings down. StartTunnel avoids this only because WireGuard authenticates the
-source address; a LAN bridge has no equivalent, no standard addresses it (RFC
-6887 assumes a trusted internal network; RFC 7652 authentication is unused in
-practice; miniupnpd does nothing here), and the mitigations we know of are
-unsatisfying. Deliberately unsolved and wanting a better idea — the per-device,
-default-off permission bounds it to explicitly trusted devices. Detail and the
-candidate approaches are in the `port_control.rs` module doc.
+source address; a LAN bridge has no equivalent within a segment, and no standard
+addresses it (RFC 6887 assumes a trusted internal network; RFC 7652
+authentication is unused in practice; miniupnpd does nothing here). Closing it
+needs L2 source guard, which the K1's single wired bridge cannot provide — the
+per-device, default-off permission bounds it to explicitly trusted devices, and
+untrusted devices belong in their own profile. Detail is in the
+`port_control.rs` module doc.
 
 ## Security Profiles
 
@@ -153,7 +157,7 @@ The binary is self-contained — the web UI is embedded via `include_dir`. Facto
 
 ## Key Design Decisions
 
-1. **One SSID, many passwords.** Per-password VLAN assignment via `wpa_psk_file` with dynamic VLAN.
+1. **One SSID, many passwords.** Per-password VLAN assignment via `wpa_psk_file` with dynamic VLAN. This is why the network is WPA2-PSK and not WPA3-SAE: the AP identifies which password a WPA2 client used by testing each candidate against the handshake MIC, but SAE requires the AP to commit to a single password before it can test anything — the same property that blocks offline dictionary attacks. hostapd can only select among several `sae_password`s by a cleartext password identifier (which mainstream client UIs don't expose) or a pre-registered MAC (defeated by MAC randomization), so WPA3 would break password-to-profile mapping.
 
 2. **VLANs for isolation.** Layer 2 isolation via bridge VLAN filtering. On boards with a hardware switch (DSA), filtering happens in silicon; on boards without (BPI-F3), it's done in the kernel's software bridge. The UCI `bridge-vlan` configuration is the same either way. An earlier nftables approach was abandoned because in-hardware switching bypasses the OS.
 

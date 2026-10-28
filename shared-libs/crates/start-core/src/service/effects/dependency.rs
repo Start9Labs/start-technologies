@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use clap::builder::ValueParserFactory;
 use exver::VersionRange;
+use patch_db::ModelExt;
 use rust_i18n::t;
 
 use crate::db::model::package::{
@@ -25,8 +26,7 @@ use crate::util::{FromStrParser, VersionString};
 use crate::volume::data_dir;
 use crate::{DATA_DIR, HealthCheckId, PackageId, ReplayId, VolumeId};
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct MountTarget {
     package_id: PackageId,
@@ -36,9 +36,12 @@ pub struct MountTarget {
     #[serde(default)]
     idmap: Vec<IdMap>,
     #[serde(skip_deserializing)]
-    #[ts(skip)]
+    #[visit(ts(skip))]
     filetype: FileType,
 }
+
+rpc_toolkit::reflect_ts!(MountTarget);
+rpc_toolkit::ts_export!(MountTarget, namespaces = [""]);
 
 /// The LXC base idmap every subcontainer mount carries: container ids 0..65535
 /// map to host ids 100000..165535.
@@ -129,13 +132,15 @@ fn pointer_idmap(custom: &[IdMap]) -> Vec<IdMap> {
     out
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct MountParams {
     location: PathBuf,
     target: MountTarget,
 }
+
+rpc_toolkit::reflect_ts!(MountParams);
+rpc_toolkit::ts_export!(MountParams, namespaces = [""]);
 
 fn relative_components(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
@@ -235,23 +240,23 @@ pub async fn get_installed_packages(context: EffectContext) -> Result<BTreeSet<P
         .keys()
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, visit_rs::VisitVariants)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 #[serde(rename_all_fields = "camelCase")]
-#[ts(export)]
 pub enum DependencyRequirement {
     Running {
         id: PackageId,
         health_checks: BTreeSet<HealthCheckId>,
-        #[ts(type = "string")]
         version_range: VersionRange,
     },
     Exists {
         id: PackageId,
-        #[ts(type = "string")]
         version_range: VersionRange,
     },
 }
+
+rpc_toolkit::reflect_ts!(DependencyRequirement);
+rpc_toolkit::ts_export!(DependencyRequirement, namespaces = [""]);
 // filebrowser:exists,bitcoind:running:foo+bar+baz
 impl FromStr for DependencyRequirement {
     type Err = Error;
@@ -311,14 +316,16 @@ impl ValueParserFactory for DependencyRequirement {
         FromStrParser::new()
     }
 }
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, visit_rs::VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "camelCase")]
-#[ts(export)]
 pub struct SetDependenciesParams {
     dependencies: Vec<DependencyRequirement>,
 }
+
+rpc_toolkit::reflect_ts!(SetDependenciesParams);
+rpc_toolkit::ts_export!(SetDependenciesParams, namespaces = [""]);
 fn required_base(info: &DepInfo) -> Option<(CurrentDependencyKind, VersionRange)> {
     if info.optional {
         return None;
@@ -370,7 +377,6 @@ async fn dependency_info(
 ) -> Result<CurrentDependencyInfo, Error> {
     Ok(CurrentDependencyInfo {
         title: s9pk.dependency_metadata(dep_id).await?.map(|m| m.title),
-        icon: s9pk.dependency_icon_data_url(dep_id).await?,
         kind,
         version_range,
     })
@@ -439,11 +445,7 @@ pub async fn set_dependencies(
                 .as_idx_mut(id)
                 .or_not_found(id)?;
             let deps = CurrentDependencies(deps);
-            let blocked = pde.has_blocking_task(id)?;
             pde.as_current_dependencies_mut().ser(&deps)?;
-            if !blocked && pde.has_blocking_task(id)? {
-                pde.as_status_info_mut().stop()?;
-            }
             Ok(())
         })
         .await
@@ -487,17 +489,17 @@ pub async fn get_dependencies(context: EffectContext) -> Result<Vec<DependencyRe
         .collect())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Parser, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, Parser, visit_rs::VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct CheckDependenciesParam {
-    #[ts(optional)]
     package_ids: Option<Vec<PackageId>>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+
+rpc_toolkit::reflect_ts!(CheckDependenciesParam);
+rpc_toolkit::ts_export!(CheckDependenciesParam, namespaces = [""]);
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct CheckDependenciesResult {
     package_id: PackageId,
     title: Option<String>,
@@ -507,6 +509,9 @@ pub struct CheckDependenciesResult {
     tasks: BTreeMap<ReplayId, TaskEntry>,
     health_checks: BTreeMap<HealthCheckId, NamedHealthCheckResult>,
 }
+
+rpc_toolkit::reflect_ts!(CheckDependenciesResult);
+rpc_toolkit::ts_export!(CheckDependenciesResult, namespaces = [""]);
 pub async fn check_dependencies(
     context: EffectContext,
     CheckDependenciesParam { package_ids }: CheckDependenciesParam,
@@ -577,16 +582,18 @@ pub async fn check_dependencies(
     Ok(results)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct GetServiceManifestParams {
     pub package_id: PackageId,
-    #[ts(optional)]
+
     #[arg(skip)]
     pub callback: Option<CallbackId>,
 }
+
+rpc_toolkit::reflect_ts!(GetServiceManifestParams);
+rpc_toolkit::ts_export!(GetServiceManifestParams, namespaces = [""]);
 
 pub async fn get_service_manifest(
     context: EffectContext,
@@ -594,7 +601,7 @@ pub async fn get_service_manifest(
         package_id,
         callback,
     }: GetServiceManifestParams,
-) -> Result<Manifest, Error> {
+) -> Result<Option<Manifest>, Error> {
     use crate::db::model::package::PackageState;
 
     let context = context.deref()?;
@@ -604,10 +611,12 @@ pub async fn get_service_manifest(
         .expect("valid json pointer");
     let mut watch = context.seed.ctx.db.watch(ptr).await.typed::<PackageState>();
 
-    let manifest = watch
-        .peek_and_mark_seen()?
-        .as_manifest(ManifestPreference::Old)
-        .de()?;
+    let state = watch.peek_and_mark_seen()?;
+    let manifest = if state.as_value().is_null() {
+        None
+    } else {
+        Some(state.as_manifest(ManifestPreference::Old).de()?)
+    };
 
     if let Some(callback) = callback {
         let callback = callback.register(&context.seed.persistent_container);

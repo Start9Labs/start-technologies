@@ -71,7 +71,7 @@ export interface ProfileDialogResult {
   fullname?: string
   gateway_ip: string
   outbound: string
-  lan_access: LanAccess<ProfileIdOpt>
+  lan_access: LanAccess
   wan_access: WanAccess
   access_to_new_profiles: boolean
   owns_lan: boolean
@@ -161,6 +161,10 @@ function nonEmptyList(control: AbstractControl): ValidationErrors | null {
                 tuiAnimated
                 tuiChevron
                 [stringify]="'fullname' | tuiStringify"
+                [invalid]="
+                  form.controls.lanAccessProfiles.touched &&
+                  form.controls.lanAccessProfiles.invalid
+                "
               >
                 @if (!context.data.otherProfiles.length) {
                   <label tuiLabel>{{ 'No other profiles' | i18n }}</label>
@@ -169,10 +173,6 @@ function nonEmptyList(control: AbstractControl): ValidationErrors | null {
                   tuiInputChip
                   tuiSelectLike
                   [disabled]="!context.data.otherProfiles.length"
-                  [invalid]="
-                    form.controls.lanAccessProfiles.touched &&
-                    form.controls.lanAccessProfiles.invalid
-                  "
                   [placeholder]="
                     multi().length ? '' : ('Allowed profiles' | i18n)
                   "
@@ -456,6 +456,11 @@ class AddProfile {
     { initialValue: this.form.controls.lanAccessType.value },
   )
 
+  private readonly accessToNewProfiles = toSignal(
+    this.form.controls.accessToNewProfiles.valueChanges,
+    { initialValue: this.form.controls.accessToNewProfiles.value },
+  )
+
   protected readonly wanAccessType = toSignal(
     this.form.controls.wanAccessType.valueChanges,
     { initialValue: this.form.controls.wanAccessType.value },
@@ -503,6 +508,7 @@ class AddProfile {
     effect(() => {
       const needsSelection =
         this.lanAccessType() === 'whitelist' &&
+        !this.accessToNewProfiles() &&
         this.context.data.otherProfiles.length > 0
       const group = this.form.controls.lanAccessProfiles
       group.setValidators(needsSelection ? [atLeastOneSelected] : [])
@@ -709,7 +715,7 @@ class AddProfile {
       const val = this.form.getRawValue()
 
       // Build LAN access
-      let lan_access: LanAccess<ProfileIdOpt>
+      let lan_access: LanAccess
       if (val.lanAccessType === 'all') {
         lan_access = 'ALL'
       } else if (val.lanAccessType === 'none') {
@@ -770,7 +776,9 @@ class AddProfile {
         outbound: val.outboundType === 'vpn' ? val.outboundVpn : 'wan',
         lan_access,
         wan_access,
-        access_to_new_profiles: val.accessToNewProfiles,
+        access_to_new_profiles:
+          lan_access === 'ALL' ||
+          (typeof lan_access !== 'string' && val.accessToNewProfiles),
         owns_lan: this.existing?.owns_lan || false,
         dns_override: dns_override?.length ? dns_override : undefined,
         schedule_windows: this.scheduleWindows(),

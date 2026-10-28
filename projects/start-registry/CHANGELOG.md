@@ -2,7 +2,32 @@
 
 All notable changes to `start-registry` (the Start Registry server) are documented here. This project is versioned **independently** (starting at `1.0.0`); its version lives in `Cargo.toml`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.1]
+
+### Fixed
+
+- StartOS 0.4.0.3 servers now receive pure Ed25519 signatures on OS and package assets. They were previously stripped, which blocked updating to an OS release signed with a gpg-held key.
+
+## [1.2.0]
+
+### Added
+
+- **Package icons are served from a content-addressed store under `/icons/`**, and may be cached indefinitely. Each icon is stored once however many package versions and dependents use it. `package get` refers to an icon by its path under `/icons/` for StartOS 0.4.0.3 and later and for clients that send no device info; earlier StartOS versions still receive icons inline. A reverse proxy in front of the registry must forward `/icons/`.
+
+### Changed
+
+- **Registry signatures carry their actual scheme.** Ed25519ph signatures are now labeled with their own algorithm identifier instead of `id-Ed25519`, which now marks only pure Ed25519 signatures (made by keys held in gpg-agent). Existing signatures are relabeled on upgrade. StartOS 0.4.0.3 and earlier still receive the old labels, without the pure signatures they cannot verify. Older start-cli versions can still publish packages, add mirrors, and add or sign OS assets; accepted legacy signatures receive the correct Ed25519ph label before storage.
+- **A registry serving StartWRT must set `startwrt: true`** in its config (or pass `--startwrt`), so routers keep receiving the labels they understand.
+
+### Security
+
+- **Update dependencies with security fixes**, including TLS certificate verification and handshake handling, HTTP/2 flow control, and XML parsing.
+
+- Reject remote requests using unconfigured loopback signing addresses.
+
 ## [1.1.1]
+
+- **`info set-icon` and `info set-description` accept `--clear` to remove a registry's icon and description.** Supply either a value or `--clear`, but not both. Over RPC, the existing setters accept `null` in their `icon` or `description` field to clear it; existing values still set it.
 
 - **`package get` hides a revision once a newer revision of the same upstream version runs on all
   the same hardware.** Use `package get <id> full --all-revisions` (`allRevisions: true`,

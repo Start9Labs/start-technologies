@@ -14,12 +14,12 @@ use openssl::pkey::{PKey, Private};
 use openssl::x509::X509;
 use rpc_toolkit::{
     CliBindings, Context, HandlerArgs, HandlerArgsFor, HandlerFor, HandlerTypes, PrintCliResult,
+    output,
 };
 use serde::de::DeserializeOwned;
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::Digest;
-use ts_rs::TS;
 
 use super::IntoDoubleEndedIterator;
 use crate::prelude::*;
@@ -245,7 +245,9 @@ impl<'de> serde::de::Deserialize<'de> for ValuePrimitive {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, VisitVariants,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum IoFormat {
     Json,
@@ -255,6 +257,8 @@ pub enum IoFormat {
     Toml,
     TomlPretty,
 }
+
+rpc_toolkit::reflect_ts!(IoFormat);
 impl Default for IoFormat {
     fn default() -> Self {
         IoFormat::JsonPretty
@@ -447,19 +451,24 @@ mod yaml_tests {
 }
 
 pub fn display_serializable<T: Serialize>(format: IoFormat, result: T) -> Result<(), Error> {
-    format.to_writer(std::io::stdout(), &result)?;
+    use std::io::Write as _;
+    let mut stdout = output::stdout();
+    format.to_writer(&mut stdout, &result)?;
     if format == IoFormat::JsonPretty {
-        println!()
+        writeln!(stdout)?;
     }
+    stdout.flush()?;
     Ok(())
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, VisitFields)]
 pub struct WithIoFormat<T> {
     pub format: Option<IoFormat>,
     #[serde(flatten)]
     pub rest: T,
 }
+
+rpc_toolkit::reflect_ts!(impl [T] for WithIoFormat<T> where [T: rpc_toolkit::ts::TS]);
 impl<T: FromArgMatches> FromArgMatches for WithIoFormat<T> {
     fn from_arg_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
         Ok(Self {
@@ -511,6 +520,25 @@ impl<T: HandlerFor<C>, C: Context> HandlerExtSerde<C> for T {
 
 #[derive(Debug, Clone)]
 pub struct DisplaySerializable<T>(pub T);
+impl<T> rpc_toolkit::Adapter for DisplaySerializable<T> {
+    type Inner = T;
+    fn as_inner(&self) -> &T {
+        &self.0
+    }
+}
+#[cfg(feature = "ts")]
+impl<T> rpc_toolkit::ts::PassthroughReturnTS for DisplaySerializable<T> {}
+#[cfg(feature = "ts")]
+impl<T> rpc_toolkit::ts::PassthroughChildrenTS for DisplaySerializable<T> {}
+#[cfg(feature = "ts")]
+impl<T: rpc_toolkit::ts::ParamsTS> rpc_toolkit::ts::ParamsTS for DisplaySerializable<T> {
+    fn params_ts(&self) -> Box<dyn Fn(&mut rpc_toolkit::ts::TSVisitor) + Send + Sync + '_> {
+        rpc_toolkit::ts::intersection_writer(
+            rpc_toolkit::ts::type_writer::<WithIoFormat<rpc_toolkit::Empty>>(),
+            self.0.params_ts(),
+        )
+    }
+}
 impl<T: HandlerTypes> HandlerTypes for DisplaySerializable<T> {
     type Params = WithIoFormat<T::Params>;
     type InheritedParams = T::InheritedParams;
@@ -612,8 +640,10 @@ where
     }
 }
 
-#[derive(Deserialize, Serialize, TS, Clone)]
+#[derive(Deserialize, Serialize, VisitFields, Clone)]
 pub struct StdinDeserializable<T>(pub T);
+
+rpc_toolkit::reflect_ts!(impl [T] for StdinDeserializable<T> where [T: rpc_toolkit::ts::TS]);
 impl<T> Default for StdinDeserializable<T>
 where
     T: Default,
@@ -674,9 +704,12 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, TS)]
-#[ts(export, type = "string")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, VisitFields)]
+#[visit(opaque, ts(type = "z.string()"))]
 pub struct Duration(std::time::Duration);
+
+rpc_toolkit::reflect_ts!(Duration);
+rpc_toolkit::ts_export!(Duration, namespaces = [""]);
 impl Deref for Duration {
     type Target = std::time::Duration;
     fn deref(&self) -> &Self::Target {
@@ -842,7 +875,6 @@ impl<'de> Deserialize<'de> for Port {
     where
         D: Deserializer<'de>,
     {
-        //TODO: if number, be permissive
         deserialize_number_permissive(deserializer).map(Port)
     }
 }
@@ -855,7 +887,7 @@ impl Serialize for Port {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Reversible<T, Container = Vec<T>>
 where
     for<'a> &'a Container: IntoDoubleEndedIterator<&'a T>,
@@ -864,12 +896,25 @@ where
     data: Container,
     phantom: PhantomData<T>,
 }
+impl<T, Container> Clone for Reversible<T, Container>
+where
+    for<'a> &'a Container: IntoDoubleEndedIterator<&'a T>,
+    Container: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            reversed: self.reversed,
+            data: self.data.clone(),
+            phantom: PhantomData,
+        }
+    }
+}
 impl<T, Container> Reversible<T, Container>
 where
     for<'a> &'a Container: IntoDoubleEndedIterator<&'a T>,
 {
     pub fn new(data: Container) -> Self {
-        Reversible {
+        Self {
             reversed: false,
             data,
             phantom: PhantomData,
@@ -929,7 +974,7 @@ where
     where
         D: Deserializer<'de>,
     {
-        Ok(Reversible::new(Deserialize::deserialize(deserializer)?))
+        Ok(Self::new(Deserialize::deserialize(deserializer)?))
     }
     fn deserialize_in_place<D>(deserializer: D, place: &mut Self) -> Result<(), D::Error>
     where
@@ -939,10 +984,15 @@ where
     }
 }
 
+#[derive(VisitFields)]
+#[visit(wire = "std::collections::BTreeMap<K, V>")]
+#[visit(opaque, type_attributes(visit::wire))]
 pub struct KeyVal<K, V> {
     pub key: K,
     pub value: V,
 }
+
+rpc_toolkit::reflect_ts!(impl [K, V] for KeyVal<K, V> where [std::collections::BTreeMap<K, V>: rpc_toolkit::ts::TS]);
 impl<K: Serialize, V: Serialize> Serialize for KeyVal<K, V> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -978,9 +1028,11 @@ impl<'de, K: Deserialize<'de>, V: Deserialize<'de>> Deserialize<'de> for KeyVal<
     }
 }
 
-#[derive(TS)]
-#[ts(type = "string", concrete(T = Vec<u8>))]
+#[derive(VisitFields)]
+#[visit(opaque, ts(type = "z.string()"))]
 pub struct Base16<T>(pub T);
+
+rpc_toolkit::reflect_ts!(impl [T] for Base16<T> where []);
 impl<'de, T: TryFrom<Vec<u8>>> Deserialize<'de> for Base16<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -1013,9 +1065,11 @@ impl<T: AsRef<[u8]>> std::fmt::Display for Base16<T> {
     }
 }
 
-#[derive(TS)]
-#[ts(type = "string", concrete(T = Vec<u8>))]
+#[derive(VisitFields)]
+#[visit(opaque, ts(type = "z.string()"))]
 pub struct Base32<T>(pub T);
+
+rpc_toolkit::reflect_ts!(impl [T] for Base32<T> where []);
 impl<T: AsRef<[u8]>> Base32<T> {
     pub fn to_lower_string(&self) -> String {
         base32::encode(
@@ -1068,9 +1122,16 @@ pub const BASE64: base64::engine::GeneralPurpose =
             .with_decode_padding_mode(base64::engine::DecodePaddingMode::Indifferent),
     );
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, TS)]
-#[ts(type = "string", concrete(T = Vec<u8>))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, VisitFields)]
+#[visit(opaque, ts(type = "z.string()"))]
 pub struct Base64<T>(pub T);
+
+rpc_toolkit::reflect_ts!(impl [T] for Base64<T> where []);
+rpc_toolkit::ts_export!(
+    Base64<Vec<u8>>,
+    name = "Base64",
+    namespaces = ["", "tunnel"]
+);
 impl<T: AsRef<[u8]>> Base64<T> {
     pub fn to_padded_string(&self) -> String {
         base64::engine::general_purpose::STANDARD.encode(self.0.as_ref())
@@ -1133,7 +1194,7 @@ impl<T> Deref for Base64<T> {
 /// A parameter that arrives as structured `T` over the JSON-RPC wire, but as a
 /// JSON **string** argument on the CLI. serde is a pure passthrough to `T` (the
 /// wire carries `T` directly — no double-encoding), while the clap `ValueParser`
-/// parses the string argument as JSON. Pair with `#[ts(as = "T")]` on the field
+/// parses the string argument as JSON. Pair with `#[visit(wire = "T")]` on the field
 /// so the generated binding shows `T`, not a string.
 #[derive(Debug, Clone)]
 pub struct CliFromJsonString<T>(pub T);
@@ -1172,6 +1233,7 @@ impl<T: DeserializeOwned + Clone + Send + Sync + 'static> ValueParserFactory
 
 #[derive(Clone, Debug)]
 pub struct Regex(regex::Regex);
+rpc_toolkit::impl_ts!(Regex => "z.string()", "z.ZodString");
 impl From<Regex> for regex::Regex {
     fn from(value: Regex) -> Self {
         value.0
@@ -1214,7 +1276,6 @@ impl PartialEq for Regex {
     }
 }
 
-// TODO: make this not allocate
 #[derive(Debug)]
 pub struct NoOutput;
 impl<'de> Deserialize<'de> for NoOutput {
@@ -1289,6 +1350,9 @@ pub fn apply_expr(input: jaq_core::Val, expr: &str) -> Result<jaq_core::Val, Err
 
     Ok(res)
 }
+
+pub mod der64;
+pub use der64::{Der64, DerEncoding};
 
 pub trait PemEncoding: Sized {
     fn from_pem<E: serde::de::Error>(pem: &str) -> Result<Self, E>;
@@ -1365,30 +1429,6 @@ impl PemEncoding for ed25519_dalek::SigningKey {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Pkcs8Doc {
-    pub tag: String,
-    pub document: pkcs8::Document,
-}
-
-impl PemEncoding for Pkcs8Doc {
-    fn from_pem<E: serde::de::Error>(pem: &str) -> Result<Self, E> {
-        let (tag, document) = pkcs8::Document::from_pem(pem).map_err(E::custom)?;
-        Ok(Pkcs8Doc {
-            tag: tag.into(),
-            document,
-        })
-    }
-    fn to_pem<E: serde::ser::Error>(&self) -> Result<String, E> {
-        der::pem::encode_string(
-            &self.tag,
-            pkcs8::LineEnding::default(),
-            self.document.as_bytes(),
-        )
-        .map_err(E::custom)
-    }
-}
-
 pub mod pem {
     use serde::{Deserialize, Deserializer, Serializer};
 
@@ -1410,9 +1450,18 @@ pub mod pem {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Hash, TS)]
-#[ts(type = "string", concrete(T = ed25519_dalek::VerifyingKey))]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Hash, VisitFields,
+)]
+#[visit(opaque, ts(type = "z.string()"))]
 pub struct Pem<T: PemEncoding>(#[serde(with = "pem")] pub T);
+
+rpc_toolkit::reflect_ts!(impl [T: PemEncoding] for Pem<T> where []);
+rpc_toolkit::ts_export!(
+    Pem<ed25519_dalek::VerifyingKey>,
+    name = "Pem",
+    namespaces = ["", "tunnel"]
+);
 impl<T: PemEncoding> Pem<T> {
     pub fn new(value: T) -> Self {
         Pem(value)
@@ -1452,9 +1501,12 @@ impl<T: PemEncoding> ValueParserFactory for Pem<T> {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, TS)]
-#[ts(export, type = "string | number[]")]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, VisitFields)]
+#[visit(ts(type = "z.union([z.string(), z.array(z.number())])"))]
 pub struct MaybeUtf8String(pub Vec<u8>);
+
+rpc_toolkit::reflect_ts!(MaybeUtf8String);
+rpc_toolkit::ts_export!(MaybeUtf8String, namespaces = [""]);
 impl std::fmt::Debug for MaybeUtf8String {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Ok(s) = std::str::from_utf8(&self.0) {

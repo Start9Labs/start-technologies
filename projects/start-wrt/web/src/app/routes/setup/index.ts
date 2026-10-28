@@ -150,13 +150,8 @@ export default class Setup {
     try {
       await this.api.setInitialPassword({
         password: this.form.value.password!,
+        timezone: getBrowserTimezone(),
       })
-      // Best-effort: persist the browser's zone as the default. The backend
-      // resolves the POSIX string from its authoritative table; if the zone is
-      // unknown it errors, which we swallow here (correctable later in Settings).
-      await this.api
-        .setTimezone({ timezone: getBrowserTimezone() })
-        .catch(() => {})
       this.auth.initialized.set(true)
       this.complete.set(true)
     } catch (e: any) {

@@ -84,8 +84,7 @@ export default class Logs {
   private destroyed = false
 
   constructor() {
-    // Open the live stream first (synchronously, before any await) so a quick
-    // destroy/recreate cycle doesn't lose the socket. The snapshot RPC is
+    // Open the live stream before loading the snapshot. The snapshot RPC is
     // best-effort historical context for what happened before this view.
     this.connectWs()
     this.loadInitial()
@@ -106,10 +105,17 @@ export default class Logs {
     }
   }
 
-  private connectWs() {
+  private async connectWs() {
+    let guid: string
+    try {
+      guid = (await this.api.followLogs()).guid
+    } catch {
+      this.reconnect()
+      return
+    }
     if (this.destroyed) return
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${location.host}/api/logs`)
+    const ws = new WebSocket(`${protocol}//${location.host}/ws/rpc/${guid}`)
     this.ws = ws
 
     ws.onopen = () => {
@@ -125,13 +131,13 @@ export default class Logs {
       }
     }
 
-    ws.onclose = () => {
-      if (this.destroyed) return
-      if (this.reconnectAttempts < 5) {
-        this.reconnectAttempts++
-        this.reconnectTimer = setTimeout(() => this.connectWs(), 3000)
-      }
-    }
+    ws.onclose = () => this.reconnect()
+  }
+
+  private reconnect() {
+    if (this.destroyed || this.reconnectAttempts >= 5) return
+    this.reconnectAttempts++
+    this.reconnectTimer = setTimeout(() => this.connectWs(), 3000)
   }
 
   private checkAutoScroll() {

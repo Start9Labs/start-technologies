@@ -4,7 +4,7 @@ Operating instructions for AI developers working on the docs-site project (the `
 
 ## What this is
 
-This project owns the **site build infra** (`build.sh`, `serve.sh`, `versions.conf`, `theme/`, `scripts/`), the **landing page** (`landing/`), and the **Bitcoin Guides** book (`bitcoin-guides/`).
+This project owns the **site build infra** (`build.sh`, `serve.sh`, `versions.conf`, `theme/`, `scripts/`), the **landing page** (`landing/`), the **Bitcoin Guides** book (`bitcoin-guides/`), and the **Start9 Support** book (`support/`).
 
 ## Layout
 
@@ -49,7 +49,7 @@ Because a tag sync overwrites this whole project from the tagged tree, never han
 
 Use the root toolchain, then:
 
-1. Install [mdBook](https://rust-lang.github.io/mdBook/) (v0.5.2 to match CI) and [mdbook-tabs](https://github.com/niccoloforlini/mdbook-tabs):
+1. Install [mdBook](https://rust-lang.github.io/mdBook/) (v0.5.2 to match CI) and [mdbook-tabs](https://github.com/RustForWeb/mdbook-plugins):
 
    ```
    cargo install mdbook --version 0.5.2
@@ -78,6 +78,10 @@ Each book's pages are flat Markdown files directly under its `src/` (no subdirec
 ### Page Structure
 
 Every page should have introductory prose (1–2 sentences) between the H1 heading and the first H2. This text is auto-extracted for `llms.txt` to help AI decide which pages to fetch. When creating a new page, add it to the book's `src/SUMMARY.md` or it won't appear in the sidebar or build.
+
+### Adjacent Technologies
+
+**Link to good upstream docs instead of restating them.** A third-party guide copied into a book drifts as soon as the original changes. Give the Start9 side — what to select and which values to enter — and link the upstream page for the rest. Restate upstream steps only where its own docs are missing or wrong.
 
 ### Admonitions
 

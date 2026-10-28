@@ -21,6 +21,13 @@ acme.order-failed-title:
   fr_FR: "Impossible d'obtenir un certificat pour %{domain}"
   pl_PL: "Nie udało się uzyskać certyfikatu dla %{domain}"
 
+acme.order-invalid:
+  en_US: "The certificate authority rejected the order"
+  de_DE: "Die Zertifizierungsstelle hat den Auftrag abgelehnt"
+  es_ES: "La autoridad de certificación rechazó la solicitud"
+  fr_FR: "L'autorité de certification a rejeté la demande"
+  pl_PL: "Urząd certyfikacji odrzucił zamówienie"
+
 acme.order-timed-out:
   en_US: "The certificate authority did not answer in time"
   de_DE: "Die Zertifizierungsstelle hat nicht rechtzeitig geantwortet"
@@ -382,6 +389,27 @@ setup.password-required:
   pl_PL: "Hasło jest wymagane do nowej konfiguracji"
 
 # system.rs
+system.disk-health.check-failed:
+  en_US: "Could not check Btrfs allocation"
+  de_DE: "Btrfs-Speicherzuweisung konnte nicht geprüft werden"
+  es_ES: "No se pudo comprobar la asignación de espacio de Btrfs"
+  fr_FR: "Impossible de vérifier l’allocation de l’espace Btrfs"
+  pl_PL: "Nie udało się sprawdzić przydziału miejsca Btrfs"
+
+system.disk-health.low-unallocated-message:
+  en_US: "The data filesystem at %{path} has little unallocated space left for Btrfs metadata. Services may fail to write even when disk metrics show free space. Weekly maintenance reclaims unused chunks; if this warning persists, free space or expand the data drive."
+  de_DE: "Das Daten-Dateisystem unter %{path} hat nur noch wenig nicht zugewiesenen Speicher für Btrfs-Metadaten. Schreibvorgänge von Diensten können fehlschlagen, obwohl die Speicheranzeige freien Platz meldet. Die wöchentliche Wartung gibt ungenutzte Chunks frei. Wenn diese Warnung bestehen bleibt, geben Sie Speicher frei oder erweitern Sie das Datenlaufwerk."
+  es_ES: "El sistema de archivos de datos en %{path} tiene poco espacio sin asignar para los metadatos de Btrfs. Los servicios pueden fallar al escribir aunque las métricas indiquen espacio libre. El mantenimiento semanal recupera bloques sin usar; si esta advertencia persiste, libere espacio o amplíe la unidad de datos."
+  fr_FR: "Le système de fichiers de données à %{path} dispose de peu d’espace non alloué pour les métadonnées Btrfs. Les écritures des services peuvent échouer même si les indicateurs affichent de l’espace libre. La maintenance hebdomadaire récupère les blocs inutilisés ; si cet avertissement persiste, libérez de l’espace ou agrandissez le disque de données."
+  pl_PL: "System plików danych w %{path} ma mało nieprzydzielonego miejsca na metadane Btrfs. Zapis danych przez usługi może się nie udać, nawet gdy wskaźniki pokazują wolne miejsce. Cotygodniowa konserwacja odzyskuje nieużywane bloki; jeśli ostrzeżenie nie znika, zwolnij miejsce lub powiększ dysk danych."
+
+system.disk-health.low-unallocated-title:
+  en_US: "Data drive metadata space is low"
+  de_DE: "Wenig Speicher für Metadaten auf dem Datenlaufwerk"
+  es_ES: "Poco espacio para metadatos en la unidad de datos"
+  fr_FR: "Espace insuffisant pour les métadonnées du disque de données"
+  pl_PL: "Mało miejsca na metadane na dysku danych"
+
 system.epp-not-available:
   en_US: "Energy performance preference %{epp} not available"
   de_DE: "Energie-Leistungs-Präferenz %{epp} nicht verfügbar"
@@ -1161,7 +1189,20 @@ disk.main.running-e2fsck:
   fr_FR: "Exécution de e2fsck avant la conversion de %{name} d'ext4 vers btrfs"
   pl_PL: "Uruchamianie e2fsck przed konwersją %{name} z ext4 na btrfs"
 
-# disk/util.rs
+disk.mount.filesystem.cifs.hostname-unresolved:
+  en_US: "Failed to resolve hostname %{hostname} using %{resolver}: %{error}"
+  de_DE: "Hostname %{hostname} konnte über %{resolver} nicht aufgelöst werden: %{error}"
+  es_ES: "No se pudo resolver el nombre de host %{hostname} mediante %{resolver}: %{error}"
+  fr_FR: "Impossible de résoudre le nom d'hôte %{hostname} via %{resolver} : %{error}"
+  pl_PL: "Nie udało się rozwiązać nazwy hosta %{hostname} przy użyciu %{resolver}: %{error}"
+
+disk.mount.filesystem.cifs.no-dns-addresses:
+  en_US: "DNS returned no addresses"
+  de_DE: "DNS hat keine Adressen zurückgegeben"
+  es_ES: "DNS no devolvió ninguna dirección"
+  fr_FR: "DNS n'a renvoyé aucune adresse"
+  pl_PL: "DNS nie zwrócił żadnych adresów"
+
 disk.util.not-canonical-block-device:
   en_US: "not a canonical block device"
   de_DE: "kein kanonisches Blockgerät"
@@ -1296,6 +1337,84 @@ disk.fsck.e2fsck-error:
   fr_FR: "e2fsck : %{stderr}"
   pl_PL: "e2fsck: %{stderr}"
 
+# disk/format.rs
+disk.format.formatted:
+  en_US: "Formatted %{partition}"
+  de_DE: "%{partition} formatiert"
+  es_ES: "%{partition} formateada"
+  fr_FR: "%{partition} formatée"
+  pl_PL: "Sformatowano %{partition}"
+
+disk.format.in-use:
+  en_US: "%{disk} is in use by %{by}; unplug and reconnect it, or choose another drive"
+  de_DE: "%{disk} wird von %{by} verwendet; trennen und erneut anschließen oder ein anderes Laufwerk wählen"
+  es_ES: "%{disk} está en uso por %{by}; desconéctela y vuelva a conectarla, o elija otra unidad"
+  fr_FR: "%{disk} est utilisé par %{by} ; débranchez-le et rebranchez-le, ou choisissez un autre disque"
+  pl_PL: "%{disk} jest używany przez %{by}; odłącz i podłącz ponownie lub wybierz inny dysk"
+
+disk.format.label-control-characters:
+  en_US: "The label must not contain control characters"
+  de_DE: "Die Bezeichnung darf keine Steuerzeichen enthalten"
+  es_ES: "La etiqueta no debe contener caracteres de control"
+  fr_FR: "L’étiquette ne doit pas contenir de caractères de contrôle"
+  pl_PL: "Etykieta nie może zawierać znaków sterujących"
+
+disk.format.label-empty:
+  en_US: "The label must not be empty"
+  de_DE: "Die Bezeichnung darf nicht leer sein"
+  es_ES: "La etiqueta no debe estar vacía"
+  fr_FR: "L’étiquette ne doit pas être vide"
+  pl_PL: "Etykieta nie może być pusta"
+
+disk.format.label-too-long:
+  en_US: "The label must be at most %{max} bytes"
+  de_DE: "Die Bezeichnung darf höchstens %{max} Bytes lang sein"
+  es_ES: "La etiqueta debe tener como máximo %{max} bytes"
+  fr_FR: "L’étiquette ne doit pas dépasser %{max} octets"
+  pl_PL: "Etykieta może mieć najwyżej %{max} bajtów"
+
+disk.format.live-medium:
+  en_US: "%{disk} is the medium this system booted from"
+  de_DE: "%{disk} ist das Medium, von dem dieses System gestartet wurde"
+  es_ES: "%{disk} es el medio desde el que arrancó este sistema"
+  fr_FR: "%{disk} est le support depuis lequel ce système a démarré"
+  pl_PL: "%{disk} to nośnik, z którego uruchomiono ten system"
+
+disk.format.not-a-drive:
+  en_US: "%{disk} is not a whole drive"
+  de_DE: "%{disk} ist kein ganzes Laufwerk"
+  es_ES: "%{disk} no es una unidad completa"
+  fr_FR: "%{disk} n’est pas un disque entier"
+  pl_PL: "%{disk} nie jest całym dyskiem"
+
+disk.format.startos-data:
+  en_US: "%{disk} holds StartOS data"
+  de_DE: "%{disk} enthält StartOS-Daten"
+  es_ES: "%{disk} contiene datos de StartOS"
+  fr_FR: "%{disk} contient des données StartOS"
+  pl_PL: "%{disk} zawiera dane StartOS"
+
+disk.format.system-drive:
+  en_US: "%{disk} holds the StartOS system"
+  de_DE: "%{disk} enthält das StartOS-System"
+  es_ES: "%{disk} contiene el sistema StartOS"
+  fr_FR: "%{disk} contient le système StartOS"
+  pl_PL: "%{disk} zawiera system StartOS"
+
+disk.format.too-small:
+  en_US: "%{disk} is too small for backups; choose a drive of at least 1 GiB"
+  de_DE: "%{disk} ist zu klein für Sicherungen; wählen Sie ein Laufwerk mit mindestens 1 GiB"
+  es_ES: "%{disk} es demasiado pequeña para copias de seguridad; elija una unidad de al menos 1 GiB"
+  fr_FR: "%{disk} est trop petit pour les sauvegardes ; choisissez un disque d’au moins 1 Gio"
+  pl_PL: "%{disk} jest za mały na kopie zapasowe; wybierz dysk o pojemności co najmniej 1 GiB"
+
+disk.format.unsupported-sector-size:
+  en_US: "This drive uses an unsupported sector size (%{size} bytes); StartOS can format drives with 512- or 4096-byte sectors"
+  de_DE: "Dieses Laufwerk verwendet eine nicht unterstützte Sektorgröße (%{size} Bytes); StartOS kann Laufwerke mit 512- oder 4096-Byte-Sektoren formatieren"
+  es_ES: "Esta unidad usa un tamaño de sector no compatible (%{size} bytes); StartOS puede formatear unidades con sectores de 512 o 4096 bytes"
+  fr_FR: "Ce disque utilise une taille de secteur non prise en charge (%{size} octets) ; StartOS peut formater des disques à secteurs de 512 ou 4096 octets"
+  pl_PL: "Ten dysk używa nieobsługiwanego rozmiaru sektora (%{size} bajtów); StartOS może formatować dyski o sektorach 512 lub 4096 bajtów"
+
 # disk/mount/util.rs
 disk.mount.binding:
   en_US: "Binding %{src} to %{dst}"
@@ -1303,6 +1422,14 @@ disk.mount.binding:
   es_ES: "Vinculando %{src} a %{dst}"
   fr_FR: "Liaison de %{src} à %{dst}"
   pl_PL: "Wiązanie %{src} do %{dst}"
+
+# install/mod.rs
+install.version-not-found-on-registry:
+  en_US: "No version of %{id} that satisfies %{version} is available from %{registry}"
+  de_DE: "Keine Version von %{id}, die %{version} erfüllt, ist bei %{registry} verfügbar"
+  es_ES: "Ninguna versión de %{id} que satisfaga %{version} está disponible en %{registry}"
+  fr_FR: "Aucune version de %{id} satisfaisant %{version} n'est disponible sur %{registry}"
+  pl_PL: "Żadna wersja %{id} spełniająca %{version} nie jest dostępna w %{registry}"
 
 # os_install/mod.rs
 os-install.invalid-partuuid:
@@ -1726,6 +1853,12 @@ backup.restore.package-error:
   es_ES: "Error al restaurar el paquete %{id}: %{error}"
   fr_FR: "Erreur lors de la restauration du paquet %{id} : %{error}"
   pl_PL: "Błąd przywracania pakietu %{id}: %{error}"
+backup.restore.package-installed:
+  en_US: "Cannot restore %{id}: it is already installed. Uninstall it first."
+  de_DE: "%{id} kann nicht wiederhergestellt werden: Es ist bereits installiert. Deinstalliere es zuerst."
+  es_ES: "No se puede restaurar %{id}: ya está instalado. Desinstálalo primero."
+  fr_FR: "Impossible de restaurer %{id} : il est déjà installé. Désinstallez-le d’abord."
+  pl_PL: "Nie można przywrócić %{id}: jest już zainstalowany. Najpierw go odinstaluj."
 
 # backup/target/cifs.rs
 backup.target.cifs.target-not-found:
@@ -2193,6 +2326,13 @@ net.dns.could-not-determine-source-interface:
   fr_FR: "Impossible de déterminer l'interface source de %{src}"
   pl_PL: "Nie można określić interfejsu źródłowego %{src}"
 
+net.dns.empty-servers:
+  en_US: "Specify at least one DNS server or select automatic DNS"
+  de_DE: "Mindestens einen DNS-Server angeben oder automatisches DNS auswählen"
+  es_ES: "Especifique al menos un servidor DNS o seleccione DNS automático"
+  fr_FR: "Indiquez au moins un serveur DNS ou sélectionnez le DNS automatique"
+  pl_PL: "Podaj co najmniej jeden serwer DNS lub wybierz automatyczny DNS"
+
 net.dns.error-resolving-internal:
   en_US: "Error resolving internal DNS: %{error}"
   de_DE: "Fehler bei der Auflösung des internen DNS: %{error}"
@@ -2200,12 +2340,26 @@ net.dns.error-resolving-internal:
   fr_FR: "Erreur de résolution DNS interne : %{error}"
   pl_PL: "Błąd rozwiązywania wewnętrznego DNS: %{error}"
 
+net.dns.invalid-server:
+  en_US: "%{server} is not a valid upstream DNS server"
+  de_DE: "%{server} ist kein gültiger vorgelagerter DNS-Server"
+  es_ES: "%{server} no es un servidor DNS de origen válido"
+  fr_FR: "%{server} n'est pas un serveur DNS amont valide"
+  pl_PL: "%{server} nie jest prawidłowym nadrzędnym serwerem DNS"
+
 net.dns.server-thread-exited:
   en_US: "DNS Server Thread has exited"
   de_DE: "DNS-Server-Thread wurde beendet"
   es_ES: "El hilo del servidor DNS ha terminado"
   fr_FR: "Le thread du serveur DNS s'est terminé"
   pl_PL: "Wątek serwera DNS zakończył się"
+
+net.dns.static-server-is-self:
+  en_US: "%{server} points back at this server and cannot be used as an upstream DNS server"
+  de_DE: "%{server} verweist auf diesen Server selbst und kann nicht als Upstream-DNS-Server verwendet werden"
+  es_ES: "%{server} apunta a este mismo servidor y no puede usarse como servidor DNS de origen"
+  fr_FR: "%{server} renvoie vers ce serveur lui-même et ne peut pas être utilisé comme serveur DNS amont"
+  pl_PL: "%{server} wskazuje na ten serwer i nie może być użyty jako nadrzędny serwer DNS"
 
 # lxc/mod.rs
 lxc.mod.rootfs-not-empty:
@@ -2271,7 +2425,6 @@ lxc.mod.cleaned-up-containers:
   fr_FR: "Conteneurs LXC orphelins nettoyés avec succès"
   pl_PL: "Pomyślnie wyczyszczono wiszące kontenery LXC"
 
-# version/release_notes.rs
 release-notes.welcome-message:
   en_US: "Click \"View details\" for what's new in this release."
   de_DE: "Klicken Sie auf \"Details anzeigen\", um zu sehen, was in dieser Version neu ist."
@@ -2314,6 +2467,14 @@ migration.services-failed-message:
   es_ES: "No se pudieron migrar los siguientes servicios desde 0.3.5.1: %{services}\nSUS DATOS ESTÁN SEGUROS. Simplemente reinstale estos servicios desde el marketplace."
   fr_FR: "Échec de la migration des services suivants depuis 0.3.5.1 : %{services}\nVOS DONNÉES SONT EN SÉCURITÉ. Réinstallez simplement ces services depuis le marketplace."
   pl_PL: "Nie udało się zmigrować następujących usług z 0.3.5.1: %{services}\nTWOJE DANE SĄ BEZPIECZNE. Po prostu zainstaluj ponownie te usługi z marketplace."
+
+# version/v0_4_0_5.rs
+migration.initial-balance-failed:
+  en_US: "Could not start the initial Btrfs balance; continuing startup"
+  de_DE: "Der erste Btrfs-Ausgleich konnte nicht gestartet werden; der Systemstart wird fortgesetzt"
+  es_ES: "No se pudo iniciar el balanceo inicial de Btrfs; el arranque continúa"
+  fr_FR: "Impossible de lancer l’équilibrage Btrfs initial ; le démarrage continue"
+  pl_PL: "Nie udało się uruchomić początkowego równoważenia Btrfs; uruchamianie systemu jest kontynuowane"
 
 # registry/admin.rs
 registry.admin.unknown-signer:
@@ -2543,6 +2704,13 @@ registry.package.remove-mirror.unauthorized:
   pl_PL: "Brak autoryzacji"
 
 # registry/package/index.rs
+registry.package.icon.invalid-name:
+  en_US: "invalid package icon name: %{name}"
+  de_DE: "Ungültiger Paketsymbolname: %{name}"
+  es_ES: "nombre de icono de paquete no válido: %{name}"
+  fr_FR: "nom d'icône de paquet invalide : %{name}"
+  pl_PL: "nieprawidłowa nazwa ikony pakietu: %{name}"
+
 registry.package.index.metadata-mismatch:
   en_US: "package metadata mismatch: remove the existing version first, then re-add"
   de_DE: "Paketmetadaten stimmen nicht überein: vorhandene Version zuerst entfernen, dann erneut hinzufügen"
@@ -2586,6 +2754,58 @@ registry.package.signer.not-authorized:
   es_ES: "El firmante %{signer} no está autorizado para firmar %{id}"
   fr_FR: "Le signataire %{signer} n'est pas autorisé à signer pour %{id}"
   pl_PL: "Sygnatariusz %{signer} nie jest autoryzowany do podpisywania %{id}"
+
+# sign/commitment/request.rs
+sign.commitment.request.unsupported-type:
+  en_US: "Unsupported request commitment type %{ty}"
+  de_DE: "Nicht unterstützter Anfrage-Commitment-Typ %{ty}"
+  es_ES: "Tipo de compromiso de solicitud no admitido %{ty}"
+  fr_FR: "Type d'engagement de requête non pris en charge %{ty}"
+  pl_PL: "Nieobsługiwany typ zobowiązania żądania %{ty}"
+
+# sign/mod.rs
+sign.context-too-long:
+  en_US: "Signing context is longer than 255 bytes"
+  de_DE: "Signaturkontext ist länger als 255 Bytes"
+  es_ES: "El contexto de firma supera los 255 bytes"
+  fr_FR: "Le contexte de signature dépasse 255 octets"
+  pl_PL: "Kontekst podpisu jest dłuższy niż 255 bajtów"
+
+sign.unknown-signature-algorithm:
+  en_US: "Unknown signature algorithm"
+  de_DE: "Unbekannter Signaturalgorithmus"
+  es_ES: "Algoritmo de firma desconocido"
+  fr_FR: "Algorithme de signature inconnu"
+  pl_PL: "Nieznany algorytm podpisu"
+
+# sign/gpg_agent.rs
+sign.gpg-agent.ambiguous-key:
+  en_US: "Several Ed25519 signing keys match %{key}: %{candidates}. Append ! to a fingerprint to choose one"
+  de_DE: "Mehrere Ed25519-Signaturschlüssel passen zu %{key}: %{candidates}. Hängen Sie ! an einen Fingerabdruck an, um einen auszuwählen"
+  es_ES: "Varias claves de firma Ed25519 coinciden con %{key}: %{candidates}. Añada ! a una huella para elegir una"
+  fr_FR: "Plusieurs clés de signature Ed25519 correspondent à %{key} : %{candidates}. Ajoutez ! à une empreinte pour en choisir une"
+  pl_PL: "Do %{key} pasuje kilka kluczy podpisujących Ed25519: %{candidates}. Dodaj ! do odcisku, aby wybrać jeden"
+
+sign.gpg-agent.command-failed:
+  en_US: "gpg-agent %{command} failed: %{error}"
+  de_DE: "gpg-agent %{command} fehlgeschlagen: %{error}"
+  es_ES: "gpg-agent %{command} falló: %{error}"
+  fr_FR: "gpg-agent %{command} a échoué : %{error}"
+  pl_PL: "gpg-agent %{command} nie powiódł się: %{error}"
+
+sign.gpg-agent.malformed-response:
+  en_US: "Malformed response from gpg-agent"
+  de_DE: "Fehlerhafte Antwort von gpg-agent"
+  es_ES: "Respuesta mal formada de gpg-agent"
+  fr_FR: "Réponse malformée de gpg-agent"
+  pl_PL: "Nieprawidłowa odpowiedź od gpg-agent"
+
+sign.gpg-agent.no-signing-key:
+  en_US: "No Ed25519 signing key with its secret in the GnuPG keyring matches %{key}"
+  de_DE: "Kein Ed25519-Signaturschlüssel mit geheimem Teil im GnuPG-Schlüsselbund passt zu %{key}"
+  es_ES: "Ninguna clave de firma Ed25519 con su parte secreta en el llavero de GnuPG coincide con %{key}"
+  fr_FR: "Aucune clé de signature Ed25519 avec sa partie secrète dans le trousseau GnuPG ne correspond à %{key}"
+  pl_PL: "Żaden klucz podpisujący Ed25519 z częścią tajną w bazie kluczy GnuPG nie pasuje do %{key}"
 
 # service/mod.rs
 service.mod.service-actor-held-after-shutdown:
@@ -3096,6 +3316,13 @@ middleware.auth.enrolled-key-mismatch:
   fr_FR: "La clé enregistrée doit correspondre à la clé avec laquelle la demande de connexion a été signée."
   pl_PL: "Zarejestrowany klucz musi być zgodny z kluczem, którym podpisano żądanie logowania."
 
+middleware.auth.local-login-unnecessary:
+  en_US: "Login is unnecessary when using the local auth cookie."
+  de_DE: "Bei Verwendung des lokalen Authentifizierungs-Cookies ist keine Anmeldung erforderlich."
+  es_ES: "No es necesario iniciar sesión al usar la cookie de autenticación local."
+  fr_FR: "La connexion est inutile lorsque le cookie d'authentification local est utilisé."
+  pl_PL: "Logowanie nie jest potrzebne podczas korzystania z lokalnego pliku cookie uwierzytelniania."
+
 # middleware/auth/signature.rs
 middleware.auth.key-not-authorized:
   en_US: "Key is not authorized"
@@ -3230,11 +3457,18 @@ update.failed-title:
 
 # control.rs
 control.start-critical-task:
-  en_US: "Service %{id} has an unresolved critical task; use --force to start"
-  de_DE: "Der Dienst %{id} hat eine ungelöste kritische Aufgabe; verwenden Sie --force zum Starten"
-  es_ES: "El servicio %{id} tiene una tarea crítica sin resolver; use --force para iniciar"
-  fr_FR: "Le service %{id} a une tâche critique non résolue ; utilisez --force pour démarrer"
-  pl_PL: "Usługa %{id} ma nierozwiązane zadanie krytyczne; użyj --force aby uruchomić"
+  en_US: "Warning: startup requested for service %{id}; unresolved critical tasks block runtime startup until they are resolved"
+  de_DE: "Warnung: Start für Dienst %{id} angefordert; ungelöste kritische Aufgaben blockieren den Start bis zu ihrer Erledigung"
+  es_ES: "Advertencia: se solicitó el inicio del servicio %{id}; las tareas críticas pendientes bloquean el inicio hasta que se resuelvan"
+  fr_FR: "Avertissement : démarrage demandé pour le service %{id} ; les tâches critiques non résolues bloquent le démarrage jusqu’à leur résolution"
+  pl_PL: "Ostrzeżenie: zażądano uruchomienia usługi %{id}; nierozwiązane zadania krytyczne blokują uruchomienie do czasu ich rozwiązania"
+
+control.start-critical-task-check-failed:
+  en_US: "Warning: startup requested for service %{id}, but checking for blocking critical tasks failed"
+  de_DE: "Warnung: Start für Dienst %{id} angefordert, aber die Prüfung auf blockierende kritische Aufgaben ist fehlgeschlagen"
+  es_ES: "Advertencia: se solicitó el inicio del servicio %{id}, pero falló la comprobación de tareas críticas bloqueantes"
+  fr_FR: "Avertissement : démarrage demandé pour le service %{id}, mais la vérification des tâches critiques bloquantes a échoué"
+  pl_PL: "Ostrzeżenie: zażądano uruchomienia usługi %{id}, ale sprawdzenie blokujących zadań krytycznych nie powiodło się"
 
 # shutdown.rs
 shutdown.beginning-restart:
@@ -3314,6 +3548,13 @@ auth.passwords-do-not-match:
   es_ES: "Las contraseñas no coinciden"
   fr_FR: "Les mots de passe ne correspondent pas"
   pl_PL: "Hasła nie pasują do siebie"
+
+auth.local-logout-unnecessary:
+  en_US: "Logout is unnecessary when using the local auth cookie."
+  de_DE: "Bei Verwendung des lokalen Authentifizierungs-Cookies ist keine Abmeldung erforderlich."
+  es_ES: "No es necesario cerrar sesión al usar la cookie de autenticación local."
+  fr_FR: "La déconnexion est inutile lorsque le cookie d'authentification local est utilisé."
+  pl_PL: "Wylogowanie nie jest potrzebne podczas korzystania z lokalnego pliku cookie uwierzytelniania."
 
 # util/tui.rs
 util.tui.terminal-must-be-interactive:
@@ -3609,6 +3850,13 @@ help.arg.destination-path:
   fr_FR: "Chemin de destination pour le téléchargement"
   pl_PL: "Ścieżka docelowa do pobrania"
 
+help.arg.id-key-gpg:
+  en_US: "GnuPG key (fingerprint, key ID, or user ID) to sign with through gpg-agent instead of the identity key file"
+  de_DE: "GnuPG-Schlüssel (Fingerabdruck, Schlüssel-ID oder Benutzer-ID), mit dem über gpg-agent statt mit der Identitätsschlüsseldatei signiert wird"
+  es_ES: "Clave de GnuPG (huella, ID de clave o ID de usuario) con la que firmar mediante gpg-agent en lugar del archivo de clave de identidad"
+  fr_FR: "Clé GnuPG (empreinte, ID de clé ou ID utilisateur) avec laquelle signer via gpg-agent au lieu du fichier de clé d'identité"
+  pl_PL: "Klucz GnuPG (odcisk, ID klucza lub ID użytkownika) do podpisywania przez gpg-agent zamiast pliku klucza tożsamości"
+
 help.arg.id-key-path:
   en_US: "Path to identity signing key"
   de_DE: "Pfad zum Identitäts-Signaturschlüssel"
@@ -3728,13 +3976,6 @@ help.arg.force-remove-package:
   fr_FR: "Forcer la suppression même si le paquet a des versions"
   pl_PL: "Wymuś usunięcie nawet jeśli pakiet ma wersje"
 
-help.arg.force-start:
-  en_US: "Start the service even if it has an unresolved critical task"
-  de_DE: "Den Dienst starten, auch wenn er eine ungelöste kritische Aufgabe hat"
-  es_ES: "Iniciar el servicio aunque tenga una tarea crítica sin resolver"
-  fr_FR: "Démarrer le service même s'il a une tâche critique non résolue"
-  pl_PL: "Uruchom usługę nawet jeśli ma nierozwiązane zadanie krytyczne"
-
 help.arg.force-stderr-tty:
   en_US: "Force stderr to be treated as a TTY"
   de_DE: "stderr als TTY behandeln erzwingen"
@@ -3755,6 +3996,20 @@ help.arg.force-uninstall:
   es_ES: "Ignorar errores en el script de desinicialización del servicio"
   fr_FR: "Ignorer les erreurs dans le script de désinitialisation du service"
   pl_PL: "Ignoruj błędy w skrypcie deinicjalizacji usługi"
+
+help.arg.format-disk:
+  en_US: "Drive to erase, e.g. /dev/sdb"
+  de_DE: "Zu löschendes Laufwerk, z. B. /dev/sdb"
+  es_ES: "Unidad que se borrará, p. ej. /dev/sdb"
+  fr_FR: "Disque à effacer, p. ex. /dev/sdb"
+  pl_PL: "Dysk do wymazania, np. /dev/sdb"
+
+help.arg.format-label:
+  en_US: "Filesystem label of at most 255 bytes (default: StartOS Backups)"
+  de_DE: "Dateisystembezeichnung mit höchstens 255 Bytes (Standard: StartOS Backups)"
+  es_ES: "Etiqueta del sistema de archivos de como máximo 255 bytes (predeterminado: StartOS Backups)"
+  fr_FR: "Étiquette du système de fichiers de 255 octets au plus (par défaut : StartOS Backups)"
+  pl_PL: "Etykieta systemu plików o długości najwyżej 255 bajtów (domyślnie: StartOS Backups)"
 
 help.arg.from-registry-url:
   en_US: "Source registry URL to promote from"
@@ -4106,6 +4361,13 @@ help.arg.registry-name:
   es_ES: "Nombre del registro"
   fr_FR: "Nom du registre"
   pl_PL: "Nazwa rejestru"
+
+help.arg.registry-startwrt:
+  en_US: "Serve StartWRT clients"
+  de_DE: "StartWRT-Clients bedienen"
+  es_ES: "Atender a clientes de StartWRT"
+  fr_FR: "Servir les clients StartWRT"
+  pl_PL: "Obsługuj klientów StartWRT"
 
 help.arg.registry-url:
   en_US: "URL of the registry"
@@ -4463,6 +4725,20 @@ help.arg.cifs-username:
   es_ES: "Nombre de usuario de autenticación CIFS"
   fr_FR: "Nom d'utilisateur d'authentification CIFS"
   pl_PL: "Nazwa użytkownika uwierzytelniania CIFS"
+
+help.arg.clear-registry-description:
+  en_US: "Remove the registry description"
+  de_DE: "Die Registry-Beschreibung entfernen"
+  es_ES: "Eliminar la descripción del registro"
+  fr_FR: "Supprimer la description du registre"
+  pl_PL: "Usuń opis rejestru"
+
+help.arg.clear-registry-icon:
+  en_US: "Remove the registry icon"
+  de_DE: "Das Registry-Symbol entfernen"
+  es_ES: "Eliminar el icono del registro"
+  fr_FR: "Supprimer l'icône du registre"
+  pl_PL: "Usuń ikonę rejestru"
 
 help.arg.database-path:
   en_US: "Path to the database file"
@@ -4828,13 +5104,6 @@ help.arg.tunnel-name:
   es_ES: "Nombre del túnel"
   fr_FR: "Nom du tunnel"
   pl_PL: "Nazwa tunelu"
-
-help.arg.tunnel-url:
-  en_US: "Tunnel server URL"
-  de_DE: "Tunnel-Server-URL"
-  es_ES: "URL del servidor de túnel"
-  fr_FR: "URL du serveur tunnel"
-  pl_PL: "URL serwera tunelu"
 
 help.arg.version-headline:
   en_US: "Short headline for the version"
@@ -5531,6 +5800,13 @@ about.commands-setup:
   fr_FR: "Commandes liées à la configuration initiale"
   pl_PL: "Polecenia związane z początkową konfiguracją"
 
+about.commands-os-update-signers:
+  en_US: "Manage trusted OS update signers"
+  de_DE: "Vertrauenswürdige Unterzeichner für Betriebssystem-Updates verwalten"
+  es_ES: "Administrar firmantes de confianza para actualizaciones del sistema"
+  fr_FR: "Gérer les signataires de confiance des mises à jour du système"
+  pl_PL: "Zarządzaj zaufanymi sygnatariuszami aktualizacji systemu"
+
 about.commands-ssh-keys:
   en_US: "Commands for interacting with ssh keys i.e. add, delete, list"
   de_DE: "Befehle zur Interaktion mit SSH-Schlüsseln, z.B. hinzufügen, löschen, auflisten"
@@ -5888,6 +6164,13 @@ about.forget-disconnected-gateway:
   fr_FR: "Oublier une passerelle déconnectée"
   pl_PL: "Zapomnij odłączoną bramę"
 
+about.format-disk:
+  en_US: "Erase a drive and format it as one Btrfs partition"
+  de_DE: "Ein Laufwerk löschen und als eine Btrfs-Partition formatieren"
+  es_ES: "Borrar una unidad y formatearla como una única partición Btrfs"
+  fr_FR: "Effacer un disque et le formater en une seule partition Btrfs"
+  pl_PL: "Wymaż dysk i sformatuj go jako jedną partycję Btrfs"
+
 about.generate-certificate-for-webserver:
   en_US: "Generate a certificate for the webserver"
   de_DE: "Zertifikat für den Webserver generieren"
@@ -5929,6 +6212,13 @@ about.get-device-info:
   es_ES: "Mostrar información del dispositivo"
   fr_FR: "Afficher les informations de l'appareil"
   pl_PL: "Wyświetl informacje o urządzeniu"
+
+about.get-os-update-signer:
+  en_US: "Get a trusted OS update signer's label"
+  de_DE: "Bezeichnung eines vertrauenswürdigen Update-Unterzeichners abrufen"
+  es_ES: "Obtener la etiqueta de un firmante de confianza de actualizaciones del sistema"
+  fr_FR: "Obtenir le libellé d’un signataire de confiance des mises à jour du système"
+  pl_PL: "Pobierz etykietę zaufanego sygnatariusza aktualizacji systemu"
 
 about.get-id-pubkey:
   en_US: "Get the identity public key"
@@ -7100,6 +7390,41 @@ about.view-or-edit-injected-dns-records:
   es_ES: "Ver o editar registros DNS inyectados"
   fr_FR: "Voir ou modifier les enregistrements DNS injectés"
   pl_PL: "Wyświetl lub edytuj wstrzyknięte rekordy DNS"
+
+tunnel.web.listen-port-forwarded:
+  en_US: "An enabled plain port forward includes this listen port; disable or remove it, or use SNI hostnames first."
+  de_DE: "Eine aktivierte einfache Portweiterleitung enthält diesen Port; deaktivieren oder entfernen Sie sie zuerst oder verwenden Sie SNI-Hostnamen."
+  es_ES: "Un reenvío de puertos simple habilitado incluye este puerto; desactívelo o elimínelo primero, o use nombres SNI."
+  fr_FR: "Une redirection de port simple activée inclut ce port ; désactivez-la ou supprimez-la d'abord, ou utilisez des noms SNI."
+  pl_PL: "Włączone zwykłe przekierowanie portu obejmuje ten port; najpierw je wyłącz lub usuń albo użyj nazw SNI."
+
+tunnel.web.ui-fallback-failed:
+  en_US: "UI fallback registration on %{address} failed (code %{code})"
+  de_DE: "Registrierung der UI-Ausweichroute auf %{address} fehlgeschlagen (Code %{code})"
+  es_ES: "Error al registrar la ruta de respaldo de la interfaz en %{address} (código %{code})"
+  fr_FR: "Échec de l'enregistrement de la route de secours de l'interface sur %{address} (code %{code})"
+  pl_PL: "Rejestracja trasy zapasowej panelu na %{address} nie powiodła się (kod %{code})"
+
+tunnel.web.ui-port-reserved:
+  en_US: "This port range includes the enabled admin UI's listen port; use SNI hostnames to share it, or disable the UI or change its listen address first."
+  de_DE: "Dieser Portbereich enthält den Port der aktivierten Verwaltungsoberfläche; verwenden Sie SNI-Hostnamen zur gemeinsamen Nutzung oder deaktivieren Sie zuerst die Oberfläche oder ändern Sie ihre Adresse."
+  es_ES: "Este rango incluye el puerto de la interfaz de administración habilitada; use nombres SNI para compartirlo, o desactive primero la interfaz o cambie su dirección."
+  fr_FR: "Cette plage inclut le port de l'interface d'administration activée ; utilisez des noms SNI pour le partager, ou désactivez d'abord l'interface ou changez son adresse."
+  pl_PL: "Ten zakres obejmuje port włączonego panelu administracyjnego; użyj nazw SNI, aby go współdzielić, albo najpierw wyłącz panel lub zmień jego adres."
+
+update.signers.already-exists:
+  en_US: "This public key is already a trusted OS update signer"
+  de_DE: "Dieser öffentliche Schlüssel ist bereits als Update-Unterzeichner vertrauenswürdig"
+  es_ES: "Esta clave pública ya es un firmante de confianza de actualizaciones del sistema"
+  fr_FR: "Cette clé publique est déjà un signataire de confiance des mises à jour du système"
+  pl_PL: "Ten klucz publiczny jest już zaufanym sygnatariuszem aktualizacji systemu"
+
+update.signers.not-found:
+  en_US: "Trusted OS update signer not found"
+  de_DE: "Vertrauenswürdiger Update-Unterzeichner nicht gefunden"
+  es_ES: "No se encontró el firmante de confianza de actualizaciones del sistema"
+  fr_FR: "Signataire de confiance des mises à jour du système introuvable"
+  pl_PL: "Nie znaleziono zaufanego sygnatariusza aktualizacji systemu"
 
 # volume.rs
 volume.restore-conflict:

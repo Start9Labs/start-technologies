@@ -46,7 +46,11 @@ If your package only ever tracks one upstream line — most do — ignore all of
 
 `UPDATING.md` at the package root is the package-specific recipe: where its version string lives, which registry and tag format to look for, and exactly which field to edit. Follow it. It is also **not automatically correct** — if its command contradicts what you can actually observe, trust the observation, fix the file in the same change, and say so in the pull request.
 
-Four disciplines apply on top of it.
+Five disciplines apply on top of it.
+
+### Only the wrapped application is upstream
+
+The `<upstream>` half of a package version is the wrapped application's version, so a new release of that application is the only upstream change that moves it. A base image is upstream when the application arrives through it — a newer Alpine carries a newer Tor to a package that installs Tor from it — and not when it only supplies a runtime for code the package owns. Anything else `UPDATING.md` pins beside the application, such as a database image or a bundled plugin, is refreshed along with a release or a revision bump, never as the reason for one.
 
 ### A release existing does not mean the artifact exists
 

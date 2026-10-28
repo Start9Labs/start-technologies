@@ -3,10 +3,11 @@ import { Component, input } from '@angular/core'
 import { RouterLink } from '@angular/router'
 import { i18nKey, i18nPipe } from '@start9labs/shared'
 import { TuiIcon, TuiTitle, TuiCell } from '@taiga-ui/core'
-import { TuiAvatar } from '@taiga-ui/kit'
+import { TuiAvatar, TuiSkeleton } from '@taiga-ui/kit'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
 import { PkgDependencyErrors } from 'src/app/services/dep-error.service'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
+import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
 import { ToManifestPipe } from '../../../pipes/to-manifest'
 
 @Component({
@@ -31,14 +32,16 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
         "
         [class.error]="getError(d.key)"
       >
-        <span tuiAvatar appearance="action-grayscale" [round]="false">
+        <span
+          tuiAvatar
+          appearance="action-grayscale"
+          [round]="false"
+          [tuiSkeleton]="icon.loading()"
+        >
           <img
-            alt=""
-            [src]="
-              services[d.key]?.icon ||
-              d.value.icon ||
-              'assets/img/service-icons/fallback.png'
-            "
+            #icon="pkgIcon"
+            [pkgIcon]="services[d.key] || pkg()"
+            [dependency]="services[d.key] ? undefined : d.key"
           />
         </span>
         <span tuiTitle>
@@ -83,11 +86,13 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
     RouterLink,
     TuiCell,
     TuiAvatar,
+    TuiSkeleton,
     TuiTitle,
     TuiIcon,
     PlaceholderComponent,
     i18nPipe,
     ToManifestPipe,
+    PkgIconDirective,
   ],
 })
 export class ServiceDependenciesComponent {

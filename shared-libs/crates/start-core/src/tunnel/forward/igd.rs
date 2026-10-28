@@ -295,6 +295,16 @@ pub(super) async fn apply_peer_forward_range(
     if lo <= 80 && 80 <= lo.saturating_add(count.saturating_sub(1)) {
         return Err(718); // ConflictInMappingEntry — port 80 owned by the redirect
     }
+    let web = ctx
+        .db
+        .peek()
+        .await
+        .as_webserver()
+        .de()
+        .map_err(|_| 501u16)?;
+    if web.reserves_plain_forward(source, count) {
+        return Err(718);
+    }
     match current_forward(ctx, source).await {
         // The external port is SNI-demuxed. A single hostname-less MAP becomes the
         // port's fallback (a bare public IP sharing the port with named domains);

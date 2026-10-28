@@ -30,7 +30,7 @@ Yes. StartWRT is built on OpenWrt, and the full CLI is accessible over [SSH](ssh
 
 You have two options:
 
-1. **Factory reset** — Perform a [factory reset](factory-reset.md) from the web interface (if you are still logged in). This wipes all settings but preserves the Wi-Fi password.
+1. **Factory reset** — Perform a [factory reset](factory-reset.md) from the web interface (if you are still logged in). This wipes all settings; Wi-Fi comes back up with the sticker password.
 2. **Reflash** — Boot from a microSD card and choose "Keep settings" to reinstall the firmware while preserving settings. You will be prompted to create a new admin password. See [Installing StartWRT](installing.md).
 
 ## What if I lose my Wi-Fi sticker password?
@@ -47,7 +47,7 @@ No. StartWRT has no telemetry, no analytics, and no phone-home behavior. For ful
 
 - **Time synchronization (NTP)** — Enabled by default. The router keeps its clock accurate by querying the `openwrt.pool.ntp.org` servers.
 - **Update checks** — Whenever you load the web interface while logged in, it checks for newer firmware releases so it can notify you. _Installing_ an update always requires your explicit action — StartWRT never updates automatically, and you can also update entirely offline by reflashing from a microSD card. See [Updating](updating.md).
-- **Dynamic DNS** — Only if you have configured a [DDNS](ddns.md) provider, the router periodically registers its public IP with that provider.
+- **Dynamic DNS** — Only if you have configured a [DDNS](ddns.md) provider, the router periodically registers its WAN address with that provider.
 
 ## Can I use StartWRT with StartOS?
 
@@ -56,6 +56,10 @@ Absolutely. StartWRT and [StartOS](/start-os/) are complementary products. Start
 ## Why can't my StartOS server or game console open ports on its own?
 
 Automatic port forwarding (UPnP/PCP) is off for every device until you allow it. Open the device's [detail page](devices.md#device-detail-page) and turn on **Allow automatic port forwarding**. A device can only ever forward ports to itself, and the router refuses requests for ports a manual [Published Ports](published-ports.md) rule or the router itself uses — remote access to its web interface, SSH, or an inbound VPN. See [Automatic port forwarding](published-ports.md#automatic-port-forwarding).
+
+## Why can't my phone resolve `.local` names over the VPN?
+
+`.local` names are resolved by mDNS, which does not cross a VPN. Over the [Inbound VPN](inbound-vpn.md), use a name the router serves, such as a [published DNS record](devices.md#device-detail-page) or the device's `.lan` hostname, or connect the device to the network directly.
 
 ## Where can I report bugs or request features?
 

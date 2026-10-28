@@ -252,7 +252,7 @@ export class PortForwardsModalComponent {
     this.loading.update(l => ({ ...l, [index]: true }))
 
     try {
-      const result = await this.api.checkPort({
+      const result = await this.api.rpc.net.gateway.checkPort({
         gateway: this.context.data.gatewayId,
         port,
       })

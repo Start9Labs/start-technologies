@@ -4,9 +4,7 @@ import { T } from '@start9labs/start-core'
 export interface MappedDevice {
   readonly ip: string
   readonly name: string
-  // The device's IPv6 GUA (computed via the backend host_v6), or null/absent
-  // when its subnet has no IPv6 prefix. Presence is what makes a v6 pinhole
-  // possible. Optional so consumers that don't care about v6 (e.g. DNS) can omit it.
+  // Absent when the subnet has no IPv6 prefix.
   readonly ipv6?: string | null
 }
 

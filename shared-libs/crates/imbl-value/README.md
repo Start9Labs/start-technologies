@@ -6,8 +6,8 @@ A JSON `Value` type built on `imbl`.
 structures from the [`imbl`](https://crates.io/crates/imbl) crate: arrays are `imbl::Vector`, objects are an
 insertion-order-preserving `InOMap`, and strings are `Arc<String>`. Cloning a value is therefore cheap, and
 snapshots structurally share memory. Numbers reuse `serde_json::Number`, so numeric behavior matches
-`serde_json` exactly. The crate ships its own serde (de)serialization, a `json!` macro, and optional proptest
-and ts-rs integrations.
+`serde_json` exactly. The crate ships its own serde (de)serialization, a `json!` macro and optional proptest
+integration. RPC owns the TypeScript bridges for `Value` and `InOMap`.
 
 ## Place in the monorepo
 
@@ -51,8 +51,9 @@ let back: Config = from_value(v).unwrap();
 ## Features
 
 - `arbitrary` — proptest `Arbitrary` impl and value/number/array/object strategies (off by default).
-- `ts-rs` — `TS` impls for `Value`/`InOMap` for TypeScript type generation (off by default; required by
-  `start_core`).
+
+Enable `rpc-toolkit/ts` for consumer-owned `Value` (`unknown`) and `InOMap` (map)
+bridges; this crate does not depend on that consumer.
 
 ## Provenance
 

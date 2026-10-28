@@ -1,7 +1,10 @@
 import { DatePipe } from '@angular/common'
 import { Component, inject, input, signal } from '@angular/core'
 import { RouterLink } from '@angular/router'
-import { MarketplacePkg } from '@start9labs/marketplace'
+import {
+  MarketplaceIconDirective,
+  MarketplacePkg,
+} from '@start9labs/marketplace'
 import {
   DialogService,
   i18nPipe,
@@ -23,6 +26,7 @@ import {
   TuiChevron,
   TuiFade,
   TuiProgressCircle,
+  TuiSkeleton,
 } from '@taiga-ui/kit'
 import { filter } from 'rxjs'
 import { InstallingProgressPipe } from 'src/app/routes/portal/routes/services/pipes/install-progress.pipe'
@@ -47,8 +51,13 @@ import UpdatesComponent from './updates.component'
             appearance="action-grayscale"
             size="s"
             [round]="false"
+            [tuiSkeleton]="icon.loading()"
           >
-            <img alt="" [src]="item().icon" />
+            <img
+              #icon="marketplaceIcon"
+              [marketplaceIcon]="item()"
+              [registry]="parent.current()?.url"
+            />
           </span>
           <span tuiTitle [style.margin]="'-0.125rem 0 0'">
             <b tuiFade>{{ item().title }}</b>
@@ -255,6 +264,7 @@ import UpdatesComponent from './updates.component'
     }
   `,
   imports: [
+    MarketplaceIconDirective,
     RouterLink,
     TuiExpand,
     TuiButton,
@@ -264,6 +274,7 @@ import UpdatesComponent from './updates.component'
     TuiLink,
     TuiIcon,
     TuiProgressCircle,
+    TuiSkeleton,
     TuiTitle,
     TuiFade,
     LocalizePipe,

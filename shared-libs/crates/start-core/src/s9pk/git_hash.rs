@@ -2,14 +2,15 @@ use std::ops::Deref;
 use std::path::Path;
 
 use tokio::process::Command;
-use ts_rs::TS;
 
 use crate::prelude::*;
 use crate::util::Invoke;
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, TS, PartialEq, Eq)]
-#[ts(type = "string")]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, VisitFields, PartialEq, Eq)]
+#[visit(ts(type = "z.string()"))]
 pub struct GitHash(String);
+
+rpc_toolkit::reflect_ts!(GitHash);
 
 impl GitHash {
     /// The commit hash at `path` (suffixed `-modified` if the tree is dirty), or `None`

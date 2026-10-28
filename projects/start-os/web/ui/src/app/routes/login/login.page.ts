@@ -145,7 +145,7 @@ export default class LoginPage {
       }
       const key = await this.authKeys.create()
       try {
-        await this.api.login({
+        await this.api.rpc.auth.login({
           password: this.password(),
           pubkey: key.pubkeyPem,
           // kiosk mode re-enrolls on every browser restart; don't persist

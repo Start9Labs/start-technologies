@@ -11,16 +11,15 @@ $(CLI_TARGETS): $(CORE_SRC) $(ENVIRONMENT_FILE) projects/start-cli/build/build-c
 	ARCH=$(ARCH) PROFILE=$(PROFILE) ./projects/start-cli/build/build-cli.sh
 	touch $@
 
-# Stage the binary into DESTDIR (used by debian/build.sh and for a system install).
-# For a local PATH install instead, run build-cli.sh --install.
-start-cli-install: $(CLI_TARGETS)
+start-cli-install: $(CLI_TARGETS) build/bash-completion
 	$(call mkdir,$(DESTDIR)/usr/bin)
 	$(call cp,$(CLI_TARGETS),$(DESTDIR)/usr/bin/start-cli)
+	$(call install-bash-completion,start-cli)
 
 start-cli-deb: results/$(CLI_BASENAME).deb
 
-results/$(CLI_BASENAME).deb: debian/build.sh $(CLI_TARGETS)
-	PROJECT=start-cli PLATFORM=$(ARCH) REQUIRES=debian ./build/os-compat/run-compat.sh ./debian/build.sh
+results/$(CLI_BASENAME).deb: debian/build.sh build/common.mk build/bash-completion projects/start-cli/build.mk $(CLI_TARGETS)
+	PROJECT=start-cli PLATFORM=$(ARCH) REQUIRES=debian DEPENDS=bash-completion ./build/os-compat/run-compat.sh ./debian/build.sh
 
 .PHONY: start-cli-clean
 start-cli-clean:

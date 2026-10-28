@@ -29,8 +29,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for how it's built. [README.md](README.md
   used only by the deprecated `compile()` and `Compiled`.
 - `src/ffi/mod.rs` — **deprecated** C FFI bindings (`ffi_select`, `ffi_path_compile`, …). Do not add
   new FFI here.
-- `wasm/`, `benchmark/` — auxiliary build targets (separate Cargo manifests, own READMEs). `lua/`,
-  `docs/`, `*.sh` build scripts are inherited from the original project and unused by the Rust crate.
+- `benchmark/` — auxiliary build target (separate Cargo manifest, own README). `lua/`,
+  `*.sh` build scripts are inherited from the original project and unused by the Rust crate.
 - `tests/` — one integration-test crate (`array_filter`, `common`, `filter`,
   `jsonpath_examples`, `lib`, `op`, `paths`, `precompile`, `readme`, `return_type`, `selector`).
 
@@ -53,8 +53,7 @@ cargo test  -p jsonpath_lib selector_delete   # a single test by name
 - **Edition 2015.** `Cargo.toml` sets no `edition`, so it defaults to 2015 — old `extern crate`
   syntax, two-element `use {a, b}` paths, etc.
 - **Package name ≠ dir name.** The crate is `jsonpath_lib`; cargo `-p` flags must use that.
-- **`cdylib` + `rlib`.** The lib emits both crate types; the `cdylib` feeds the `wasm/` bindings.
-  Changing public types may require rebuilding those bindings.
+- **`cdylib` + `rlib`.** The lib emits both crate types; the `cdylib` exports the deprecated `ffi` module.
 - **Two parser stacks.** Prefer the `paths`/`selector` APIs (`select`, `selector`, `PathCompiled`)
   over the deprecated `parser`/`select` ones (`compile`, `Compiled`). Note `start-core` still
   consumes the deprecated `Compiled` type.

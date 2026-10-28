@@ -15,16 +15,15 @@ new. `CLAUDE.md` is a one-line `@AGENTS.md` import; edit this file, not that one
   Holds the unit tests, including the `intern → drop` deadlock regression test.
 - `src/serde.rs` — feature-gated (`serde`): `Serialize`/`Deserialize` for `InternedString` via an
   `InternedStringVisitor` (deserializes any string/bytes form by interning it).
-- `src/ts_rs.rs` — feature-gated (`ts-rs`): `ts_rs::TS` impl that reports the type as `"string"`,
-  plus a test that exports a struct embedding `InternedString`.
+- RPC owns `InternedString`'s TypeScript string bridge in `rpc_toolkit::ts`.
 
 ## Build & test (run from the repo root)
 
 ```bash
 cargo build -p yasi                  # build with default (no) features
-cargo build -p yasi --all-features   # build with serde + ts-rs
+cargo build -p yasi --all-features   # build with serde
 cargo test  -p yasi                  # run unit tests (incl. the deadlock regression test)
-cargo test  -p yasi --all-features   # also run the serde / ts-rs paths
+cargo test  -p yasi --all-features   # also run the serde paths
 make start-core-format                     # format the shared Rust crates (incl. yasi)
 make start-core-format-check               # CI read-only format check
 ```
@@ -33,8 +32,9 @@ make start-core-format-check               # CI read-only format check
 
 - `Cargo.toml` declares `edition = "2024"` and the code uses 2024 features (let-chains in `eq`
   closures). Build with a toolchain that supports edition 2024.
-- Features `serde` and `ts-rs` are **not** in `default`. Consumers opt in (e.g. `imbl-value`
-  enables `serde` and forwards `ts-rs`); plain `cargo test -p yasi` exercises neither module.
+- `serde` is **not** in `default`. Consumers opt in (e.g. `imbl-value` enables it);
+  plain `cargo test -p yasi` does not exercise serialization. TypeScript support
+  belongs to RPC's consumer, without a leaf-to-RPC dependency.
 - Strings of 20 bytes or fewer (`STACK_STR_SIZE`) are inlined in `StringRepr::Stack` and never
   touch the global `TABLE` — they are not deduplicated and incur no lock. The regression test
   deliberately uses keys longer than 20 bytes to force the table path.

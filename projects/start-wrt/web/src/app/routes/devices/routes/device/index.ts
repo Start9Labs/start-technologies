@@ -1,6 +1,10 @@
 import { Component, computed, effect, inject } from '@angular/core'
-import { toSignal } from '@angular/core/rxjs-interop'
-import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms'
+import { toObservable, toSignal } from '@angular/core/rxjs-interop'
+import {
+  FormControl,
+  NonNullableFormBuilder,
+  ReactiveFormsModule,
+} from '@angular/forms'
 import { ActivatedRoute, Router, RouterLink } from '@angular/router'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import {
@@ -12,20 +16,26 @@ import {
   TuiTitle,
 } from '@taiga-ui/core'
 import { provideTranslatedValidationErrors } from 'src/app/i18n/validation-errors'
-import { TuiSkeleton, TuiSwitch } from '@taiga-ui/kit'
+import { TUI_CONFIRM, TuiSkeleton, TuiSwitch } from '@taiga-ui/kit'
 import { TuiHeader } from '@taiga-ui/layout'
-import { startWith } from 'rxjs'
+import { catchError, EMPTY, filter, from, startWith, switchMap } from 'rxjs'
 import { Footer } from 'src/app/components/footer'
 import { Form } from 'src/app/components/form'
 import { DevicesService } from 'src/app/routes/devices/service'
 import {
   DEVICE_VALIDATION_ERRORS,
+  DevicePermissionChanges,
   getDeviceForm,
   updateDeviceValidators,
 } from 'src/app/routes/devices/utils'
-import { ApiService } from 'src/app/services/api/api.service'
+import {
+  ApiService,
+  InjectedDnsRecordFromApi,
+} from 'src/app/services/api/api.service'
 import { DeviceSummary } from './summary'
+import { InjectedRecordsTable } from './records'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { i18nKey } from 'src/app/i18n/i18n.providers'
 
 @Component({
   template: `
@@ -88,7 +98,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
         <div>
           <tui-textfield>
             <label tuiLabel>{{ 'IPv4 address' | i18n }}</label>
-            <input tuiInput formControlName="ipv4" [readOnly]="!ipv4Static()" />
+            <input tuiInput formControlName="ipv4" [readonly]="!ipv4Static()" />
           </tui-textfield>
           <tui-error formControlName="ipv4" />
         </div>
@@ -100,7 +110,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
         <div>
           <tui-textfield>
             <label tuiLabel>{{ 'IPv6 address' | i18n }}</label>
-            <input tuiInput [readOnly]="true" [value]="data()?.ipv6 ?? ''" />
+            <input tuiInput [readonly]="true" [value]="data()?.ipv6 ?? ''" />
           </tui-textfield>
         </div>
         <div class="g-secondary">
@@ -127,15 +137,70 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
             }}
           </div>
         </section>
+        <section>
+          <label tuiLabel>
+            <input
+              tuiSwitch
+              type="checkbox"
+              formControlName="allowDnsInjection"
+              (click)="onDnsInjectionToggle($event)"
+            />
+            {{ 'Allow DNS record publishing' | i18n }}
+          </label>
+          <div class="g-secondary">
+            {{
+              'Lets this device publish DNS names for itself into the router, so every device on your network can resolve them (used by StartOS servers for private domains). Off by default; published names appear below.'
+                | i18n
+            }}
+          </div>
+        </section>
+        <section>
+          <label tuiLabel>
+            <input
+              tuiSwitch
+              type="checkbox"
+              formControlName="allowRouterAdvertisements"
+              (click)="onRouterAdvertisementsToggle($event)"
+            />
+            {{ 'Allow IPv6 router advertisements' | i18n }}
+          </label>
+          <div class="g-secondary">
+            {{
+              'Lets this device announce IPv6 routes to your other devices (needed by Thread border routers such as an Apple TV, HomePod, or Home Assistant). Off by default.'
+                | i18n
+            }}
+          </div>
+        </section>
       </fieldset>
       @if (data()) {
         <footer appFooter></footer>
       }
     </form>
+    @if (deviceRecords().length) {
+      <header tuiHeader="h6">
+        <hgroup tuiTitle>
+          <h3>{{ 'Published DNS records' | i18n }}</h3>
+          <p tuiSubtitle>
+            {{
+              'Names this device has published into the router. They expire on their own when the device stops publishing them; turning the permission off removes them immediately.'
+                | i18n
+            }}
+          </p>
+        </hgroup>
+      </header>
+      <table
+        [style.margin-block.rem]="1"
+        [injectedRecords]="deviceRecords()"
+      ></table>
+    }
   `,
   styles: `
     header[tuiHeader='h6'] {
       align-items: center;
+    }
+
+    header[tuiHeader='h6'],
+    table {
       max-width: 50rem;
     }
   `,
@@ -156,6 +221,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
     TuiError,
     TuiHintDirective,
     TuiSwitch,
+    InjectedRecordsTable,
     i18nPipe,
   ],
 })
@@ -181,6 +247,21 @@ export default class DeviceDetail {
     { requireSync: true },
   )
 
+  // Re-read on every device poll. A failed read keeps the last list.
+  private readonly allRecords = toSignal(
+    toObservable(this.service.data).pipe(
+      switchMap(() =>
+        from(this.api.dnsInjectedList()).pipe(catchError(() => EMPTY)),
+      ),
+    ),
+    { initialValue: [] as InjectedDnsRecordFromApi[] },
+  )
+  readonly deviceRecords = computed(() =>
+    this.allRecords().filter(
+      r => r.owner_mac?.toUpperCase() === this.mac.toUpperCase(),
+    ),
+  )
+
   constructor() {
     // Refresh device data to get latest info
     this.service.refresh()
@@ -195,6 +276,8 @@ export default class DeviceDetail {
         this.form.reset({
           name: data.customName ?? '',
           allowAutoPortForward: data.allowAutoPortForward,
+          allowDnsInjection: data.allowDnsInjection,
+          allowRouterAdvertisements: data.allowRouterAdvertisements,
           ip: {
             ipv4Static: data.ipv4Static,
             ipv4: data.ipv4 ?? '',
@@ -208,6 +291,50 @@ export default class DeviceDetail {
     effect(() => {
       updateDeviceValidators(this.form, this.ipv4Static())
     })
+  }
+
+  protected onDnsInjectionToggle(event: Event) {
+    this.confirmEnable(
+      event,
+      this.form.controls.allowDnsInjection,
+      'Allow DNS Record Publishing?',
+      'This device will be able to publish DNS names that resolve on your whole network. Grant this only to a device you trust, such as your own StartOS server.',
+    )
+  }
+
+  protected onRouterAdvertisementsToggle(event: Event) {
+    this.confirmEnable(
+      event,
+      this.form.controls.allowRouterAdvertisements,
+      'Allow IPv6 Router Advertisements?',
+      'This device will be able to give your other devices IPv6 addresses, routes, DNS servers, and a default gateway, and could route their IPv6 traffic around the router. Grant this only to a device you trust, such as a Thread border router.',
+    )
+  }
+
+  // Enabling asks first; the control flips only on confirmation.
+  private confirmEnable(
+    event: Event,
+    control: FormControl<boolean>,
+    label: i18nKey,
+    content: i18nKey,
+  ) {
+    if (control.value) return
+    event.preventDefault()
+    this.dialogs
+      .open<boolean>(TUI_CONFIRM, {
+        label: this.i18n.transform(label),
+        data: {
+          content: this.i18n.transform(content),
+          yes: this.i18n.transform('Allow'),
+          no: this.i18n.transform('Cancel'),
+        },
+      })
+      .pipe(filter(Boolean))
+      .subscribe(() => {
+        control.setValue(true)
+        // Keeps the pristine-gated reset effect from undoing the choice.
+        control.markAsDirty()
+      })
   }
 
   private async loadDependencies() {
@@ -232,12 +359,10 @@ export default class DeviceDetail {
     const ipv4Changed =
       formValue.ip.ipv4Static && formValue.ip.ipv4 !== (this.data()?.ipv4 ?? '')
 
-    // Only send the permission when it actually changed — it's a separate
-    // endpoint, and revoking it closes the device's existing forwards.
-    const allowAutoForward =
-      formValue.allowAutoPortForward !== this.data()?.allowAutoPortForward
-        ? formValue.allowAutoPortForward
-        : undefined
+    // A permission is sent only when it changed; revoking one tears down what
+    // the device created with it.
+    const changed = (key: keyof DevicePermissionChanges) =>
+      formValue[key] !== this.data()?.[key] ? formValue[key] : undefined
 
     const success = await this.service.update(
       this.mac,
@@ -246,7 +371,11 @@ export default class DeviceDetail {
         ipv4Static: formValue.ip.ipv4Static,
         ipv4: formValue.ip.ipv4,
       },
-      allowAutoForward,
+      {
+        allowAutoPortForward: changed('allowAutoPortForward'),
+        allowDnsInjection: changed('allowDnsInjection'),
+        allowRouterAdvertisements: changed('allowRouterAdvertisements'),
+      },
     )
 
     if (success) {
@@ -275,6 +404,8 @@ export default class DeviceDetail {
       this.form.reset({
         name: data.name,
         allowAutoPortForward: data.allowAutoPortForward,
+        allowDnsInjection: data.allowDnsInjection,
+        allowRouterAdvertisements: data.allowRouterAdvertisements,
         ip: {
           ipv4Static: data.ipv4Static,
           ipv4: data.ipv4 ?? '',

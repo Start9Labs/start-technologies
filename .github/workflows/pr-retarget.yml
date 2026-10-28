@@ -34,6 +34,13 @@ jobs:
       pull-requests: read
     uses: ./.github/workflows/test.yaml
 
+  rust-builder:
+    if: github.event.changes.base
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/rust-builder.yaml
+
   start-cli:
     if: github.event.changes.base
     permissions:

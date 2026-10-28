@@ -4,7 +4,7 @@ import { RouterLink } from '@angular/router'
 import { ErrorService, i18nPipe } from '@start9labs/shared'
 import { TUI_BREAKPOINT, TuiButton, TuiIcon } from '@taiga-ui/core'
 import { TuiSegmented } from '@taiga-ui/kit'
-import { PatchDB } from 'patch-db-client'
+import { PatchDB, pathFromArray } from 'patch-db-client'
 import { map, shareReplay, take } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel, ServicesView } from 'src/app/services/patch-db/data-model'
@@ -147,7 +147,12 @@ export default class DashboardComponent {
     this.view.set(next)
     // Chained so rapid clicks reach the server in click order and the last wins.
     this.write = this.write
-      .then(() => this.api.setDbValue<ServicesView>(['servicesView'], next))
+      .then(() =>
+        this.api.rpc.db.put.ui({
+          pointer: pathFromArray(['servicesView']),
+          value: next,
+        }),
+      )
       .catch(e => this.errorService.handleError(e))
   }
 }

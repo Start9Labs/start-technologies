@@ -117,6 +117,8 @@ export const current = VersionInfo.of({
 })
 ```
 
+Write `version` as a quoted string literal — never a template literal or an expression built from a constant such as an upstream-version pin. The release workflow reads it from the file's text to name the git tag, and fails on anything else.
+
 ### index.ts
 
 ```typescript
@@ -200,9 +202,17 @@ When making changes to the StartOS wrapper without upstream changes:
 2. Increment downstream revision
 3. Apply the [migration rule](#when-to-create-a-new-version-file) — edit `current.ts` in place unless the version it currently holds carries a migration
 
+### A version is released once the reference registry serves it
+
+`tagAndRelease` re-releases a version in place on every push until the registry named by `REFERENCE_REGISTRY` serves it ([Project Structure — .github/workflows/](./project-structure.md#githubworkflows)), so only that registry makes a version permanent. A follow-up to a version it does not serve yet ships under that same version, its notes added to the ones already there. Check before you bump: `start-cli -r <reference-registry> registry package get <id> short --format json`. Release notes likewise cover every change since the version the reference registry last served; the notes of a version that never reached it carry forward into the next.
+
+**Before you claim a version, check the package's open pull requests for one that already claims it.** Two branches on one version ship different bytes under the same string. Whether to fold one into the other or move one to the next revision is for the people who own both to decide, not for either branch to settle alone.
+
 ## Release Notes
 
 `releaseNotes` renders as markdown in the StartOS UI. **Describe what changed in the release.** Read the upstream release notes / changelog for the bumped range, pull out the highlights that matter to a user (notable features, important fixes, security patches, breaking changes / required actions), and summarize them. Then link to the complete upstream release notes or changelog so the user can read the full detail. If the upstream release is genuinely trivial (e.g. a dependency-only patch), say that explicitly.
+
+**Release notes are the only home for what an update asks of the user.** A step to take before or after updating, a warning, a credential to rotate, a client to upgrade: each goes here and nowhere else. `instructions.md` and `README.md` describe the service as it is to someone who never ran an older version, so an update adds nothing to them unless it changes that description ([Writing Instructions — What does not belong](./writing-instructions.md#what-does-not-belong-in-instructions)).
 
 **Match the length to the content.** A small release is a sentence or two; a larger one earns bullets, and bold section headers (`**Features**`, `**Fixes**`, `**Internal**`) once it spans more than one category. Localize prose and headers in every locale; don't leave them in English.
 

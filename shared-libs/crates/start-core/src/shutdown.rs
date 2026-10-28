@@ -1,6 +1,5 @@
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::PLATFORM;
 use crate::context::RpcContext;
@@ -119,9 +118,8 @@ fn systemd_is_stopping() -> bool {
         .unwrap_or(false)
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct ShutdownParams {
@@ -133,6 +131,9 @@ pub struct ShutdownParams {
     #[serde(default)]
     wait: bool,
 }
+
+rpc_toolkit::reflect_ts!(ShutdownParams);
+rpc_toolkit::ts_export!(ShutdownParams, namespaces = [""]);
 
 async fn begin_shutdown(ctx: &RpcContext, restart: bool, wait: bool) {
     ctx.shutdown

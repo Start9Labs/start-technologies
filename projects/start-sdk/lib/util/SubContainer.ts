@@ -481,10 +481,9 @@ export class SubContainerEager<
   }
 
   /**
-   * Internal factory. Accepts an explicit `identity` so a lazy handle can
-   * thread its identity through to the eager it materializes into.
-   * External callers use {@link SubContainer.eager} (which generates its
-   * own identity) or {@link SubContainer.of} (lazy).
+   * Internal factory preserving a lazy handle's identity.
+   * The creation hook runs before mounting, while context ownership can still change.
+   * External callers use {@link SubContainer.eager} or {@link SubContainer.of}.
    */
   static async _of<Manifest extends T.SDKManifest, Effects extends T.Effects>(
     effects: Effects,
@@ -495,12 +494,20 @@ export class SubContainerEager<
     mounts: Mounts<Manifest> | null,
     name: string,
     identity: symbol,
+    onCreate?: (sub: SubContainerEager<Manifest, Effects>) => void,
   ): Promise<SubContainerEager<Manifest, Effects>> {
     const { imageId, sharedRun } = image
     const [rootfs, guid] = await effects.subcontainer.createFs({
       imageId,
       name,
     })
+
+    try {
+      await fs.mkdir(`${rootfs}/proc`, { recursive: true })
+    } catch (e) {
+      await effects.subcontainer.destroyFs({ guid })
+      throw e
+    }
 
     const res = new SubContainerEager<Manifest, Effects>(
       effects,
@@ -509,11 +516,10 @@ export class SubContainerEager<
       guid,
       identity,
     )
-    // Arm context cleanup before mounting — if the try below throws,
-    // _destroyImmediate unregisters as it tears the partial container down.
     registerForContextCleanup(effects, res)
 
     try {
+      onCreate?.(res)
       if (mounts) {
         await res.mount(mounts)
       }
@@ -523,6 +529,7 @@ export class SubContainerEager<
       }
 
       await fs.mkdir(`${rootfs}/etc`, { recursive: true })
+      await fs.rm(`${rootfs}/etc/resolv.conf`, { force: true })
       await fs.copyFile('/etc/resolv.conf', `${rootfs}/etc/resolv.conf`)
 
       for (const dirPart of shared) {
@@ -768,7 +775,8 @@ export class SubContainerEager<
       ],
       spawnOptions,
     )
-    abort?.signal.addEventListener('abort', () => child.kill('SIGKILL'))
+    const kill = () => child.kill('SIGKILL')
+    abort?.signal.addEventListener('abort', kill)
     if (spawnOptions.input) {
       await new Promise<null>((resolve, reject) => {
         try {
@@ -823,6 +831,7 @@ export class SubContainerEager<
       child.stderr.on('data', appendData(stderr))
       child.on('exit', (code, signal) => {
         clearTimeout(killTimeout)
+        abort?.signal.removeEventListener('abort', kill)
         const result = {
           exitCode: code,
           exitSignal: signal,
@@ -1009,6 +1018,7 @@ export class SubContainerLazy<
 
   private materialized: Promise<SubContainerEager<Manifest, Effects>> | null =
     null
+  private created: SubContainerEager<Manifest, Effects> | null = null
   private destroyRequested = false
   private detachRequested = false
   private holds = new Set<{
@@ -1046,8 +1056,13 @@ export class SubContainerLazy<
       this.mounts,
       this.name,
       this.identity,
+      eager => {
+        this.created = eager
+        if (this.detachRequested) eager.detach()
+      },
     )
       .catch(e => {
+        this.created = null
         this.materialized = null
         logErrorOnce(e)
         throw e
@@ -1057,7 +1072,6 @@ export class SubContainerLazy<
           if (!hold.release) hold.release = eager.hold()
         }
         if (this.destroyRequested) eager.destroy().catch(logErrorOnce)
-        else if (this.detachRequested) eager.detach()
         return eager
       }))
   }
@@ -1134,13 +1148,13 @@ export class SubContainerLazy<
   }
 
   /**
-   * Detach from the creating context's `onLeaveContext` cleanup. If already
-   * materialized, detaches the underlying eager; otherwise records the intent
-   * so materialization detaches immediately. Idempotent.
+   * Detach from the creating context's `onLeaveContext` cleanup, including
+   * during materialization. The caller owns teardown through {@link destroy}.
+   * Idempotent.
    */
   detach(): void {
     this.detachRequested = true
-    this.materialized?.then(e => e.detach()).catch(logErrorOnce)
+    this.created?.detach()
   }
 
   /**

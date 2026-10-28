@@ -26,10 +26,9 @@ use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::rustls::crypto::CryptoProvider;
-use tokio_rustls::rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
+use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio_rustls::rustls::server::ClientHello;
 use tracing::instrument;
-use ts_rs::TS;
 use visit_rs::Visit;
 
 use crate::SOURCE_DATE;
@@ -44,7 +43,7 @@ use crate::net::tls::{TlsHandler, TlsHandlerAction};
 use crate::net::utils::is_global_ip;
 use crate::net::web_server::{Accept, ExtractVisitor, TcpMetadata, extract};
 use crate::prelude::*;
-use crate::util::serde::{HandlerExtSerde, Pem};
+use crate::util::serde::{Der64, HandlerExtSerde, Pem};
 
 pub(crate) fn x509_sha256_fingerprint(cert: &X509Ref) -> Result<String, ErrorStack> {
     Ok(format_x509_fingerprint(
@@ -108,13 +107,13 @@ impl CertBranding {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel)]
+#[derive(Debug, Clone, Deserialize, Serialize, HasModel)]
 #[model = "Model<Self>"]
 #[serde(rename_all = "camelCase")]
 pub struct CertStore {
-    pub root_key: Pem<PKey<Private>>,
+    pub root_key: Der64<PKey<Private>>,
     pub root_cert: Pem<X509>,
-    pub int_key: Pem<PKey<Private>>,
+    pub int_key: Der64<PKey<Private>>,
     pub int_cert: Pem<X509>,
     pub leaves: BTreeMap<JsonKey<BTreeSet<InternedString>>, CertData>,
 }
@@ -127,9 +126,9 @@ impl CertStore {
             branding,
         )?;
         Ok(Self {
-            root_key: Pem::new(account.root_ca_key.clone()),
+            root_key: Der64::new(account.root_ca_key.clone()),
             root_cert: Pem::new(account.root_ca_cert.clone()),
-            int_key: Pem::new(int_key),
+            int_key: Der64::new(int_key),
             int_cert: Pem::new(int_cert),
             leaves: BTreeMap::new(),
         })
@@ -268,9 +267,9 @@ fn asn1_time_to_system_time(time: &Asn1TimeRef) -> Result<SystemTime, Error> {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PKeyPair {
-    #[serde(with = "crate::util::serde::pem")]
+    #[serde(with = "crate::util::serde::der64")]
     pub ed25519: PKey<Private>,
-    #[serde(with = "crate::util::serde::pem")]
+    #[serde(with = "crate::util::serde::der64")]
     pub nistp256: PKey<Private>,
 }
 impl PartialEq for PKeyPair {
@@ -675,11 +674,10 @@ pub fn ssl_api<C: Context>() -> ParentHandler<C> {
     )
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 #[group(skip)]
-#[ts(export)]
 pub struct GenerateCertificateParams {
     #[arg(help = "help.arg.hostnames")]
     pub hostnames: Vec<String>,
@@ -688,13 +686,18 @@ pub struct GenerateCertificateParams {
     pub ed25519: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(GenerateCertificateParams);
+rpc_toolkit::ts_export!(GenerateCertificateParams, namespaces = [""]);
+
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct GenerateCertificateResponse {
     pub key: String,
     pub fullchain: String,
 }
+
+rpc_toolkit::reflect_ts!(GenerateCertificateResponse);
+rpc_toolkit::ts_export!(GenerateCertificateResponse, namespaces = [""]);
 
 pub async fn generate_certificate(
     ctx: RpcContext,
@@ -802,54 +805,58 @@ where
         )?]
         .into_iter()
         .collect();
-        let branding = self.branding.clone();
-        let cert = self
-            .db
-            .mutate(move |db| M::access_mut(db).cert_for(&hostnames, &branding))
-            .await
-            .result
-            .log_err()?;
-        let cfg = ServerConfig::builder_with_provider(self.crypto_provider.clone())
-            .with_safe_default_protocol_versions()
-            .log_err()?
-            .with_no_client_auth();
-        if hello
-            .signature_schemes()
-            .contains(&tokio_rustls::rustls::SignatureScheme::ED25519)
-        {
-            cfg.with_single_cert(
-                cert.fullchain_ed25519()
-                    .into_iter()
-                    .map(|c| {
-                        Ok(tokio_rustls::rustls::pki_types::CertificateDer::from(
-                            c.to_der()?,
-                        ))
-                    })
-                    .collect::<Result<_, Error>>()
-                    .log_err()?,
-                PrivateKeyDer::from(PrivatePkcs8KeyDer::from(
-                    cert.leaf.keys.ed25519.private_key_to_pkcs8().log_err()?,
-                )),
-            )
-        } else {
-            cfg.with_single_cert(
-                cert.fullchain_nistp256()
-                    .into_iter()
-                    .map(|c| {
-                        Ok(tokio_rustls::rustls::pki_types::CertificateDer::from(
-                            c.to_der()?,
-                        ))
-                    })
-                    .collect::<Result<_, Error>>()
-                    .log_err()?,
-                PrivateKeyDer::from(PrivatePkcs8KeyDer::from(
-                    cert.leaf.keys.nistp256.private_key_to_pkcs8().log_err()?,
-                )),
-            )
-        }
-        .log_err()
+        root_ca_config(
+            &self.db,
+            &self.crypto_provider,
+            &self.branding,
+            hello,
+            hostnames,
+        )
+        .await
         .map(TlsHandlerAction::Tls)
     }
+}
+
+/// The local CA's certificate for these names, signed with the key type the
+/// client accepts.
+pub async fn root_ca_config<M>(
+    db: &TypedPatchDb<M>,
+    crypto_provider: &Arc<CryptoProvider>,
+    branding: &CertBranding,
+    hello: &ClientHello<'_>,
+    hostnames: BTreeSet<InternedString>,
+) -> Option<ServerConfig>
+where
+    M: HasModel<Model = Model<M>> + DbAccessMut<CertStore> + Send + Sync,
+{
+    let branding = branding.clone();
+    let cert = db
+        .mutate(move |db| M::access_mut(db).cert_for(&hostnames, &branding))
+        .await
+        .result
+        .log_err()?;
+    let (chain, key) = if hello
+        .signature_schemes()
+        .contains(&tokio_rustls::rustls::SignatureScheme::ED25519)
+    {
+        (cert.fullchain_ed25519(), &cert.leaf.keys.ed25519)
+    } else {
+        (cert.fullchain_nistp256(), &cert.leaf.keys.nistp256)
+    };
+    let chain = chain
+        .into_iter()
+        .map(|c| Ok(CertificateDer::from(c.to_der()?)))
+        .collect::<Result<Vec<_>, Error>>()
+        .log_err()?;
+    let key = PrivateKeyDer::from(PrivatePkcs8KeyDer::from(
+        key.private_key_to_pkcs8().log_err()?,
+    ));
+    ServerConfig::builder_with_provider(crypto_provider.clone())
+        .with_safe_default_protocol_versions()
+        .log_err()?
+        .with_no_client_auth()
+        .with_single_cert(chain, key)
+        .log_err()
 }
 
 #[cfg(test)]
