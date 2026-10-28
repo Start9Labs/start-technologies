@@ -68,7 +68,8 @@ fn forbidden() -> Response {
 
 /// Serves `/mcp` for requests addressed to one of the server's own names.
 pub fn router(ctx: RpcContext, http: HttpServer<RpcContext>) -> Result<Router, Error> {
-    let service = server(http)?.service(StreamableHttpServerConfig::default().disable_allowed_hosts());
+    let service =
+        server(http)?.service(StreamableHttpServerConfig::default().disable_allowed_hosts());
     Ok(Router::new().route(
         "/mcp",
         any(move |request: Request| {
@@ -130,7 +131,11 @@ mod test {
 
     #[test]
     fn hosts_match_identities_without_ports_or_case() {
-        let identities = ["startos.local".into(), "[fe80::1]".into(), "localhost".into()];
+        let identities = [
+            "startos.local".into(),
+            "[fe80::1]".into(),
+            "localhost".into(),
+        ];
         for (host, known) in [
             ("startos.local", true),
             ("StartOS.Local:443", true),
