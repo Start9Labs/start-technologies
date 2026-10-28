@@ -213,9 +213,10 @@ impl CallRemote<RegistryContext> for CliContext {
         &self,
         mut method: &str,
         _: OrdMap<&'static str, Value>,
-        params: Value,
+        mut params: Value,
         _: Empty,
     ) -> Result<Value, RpcError> {
+        super::compat::pem_wire(&mut params);
         let local_auth = local_auth_header::<RegistryContext>().await;
 
         let (url, is_local) = if let Some(url) = &self.registry_url {
@@ -276,9 +277,10 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
         &self,
         mut method: &str,
         metadata: OrdMap<&'static str, Value>,
-        params: Value,
+        mut params: Value,
         RegistryUrlParams { mut registry }: RegistryUrlParams,
     ) -> Result<Value, RpcError> {
+        super::compat::pem_wire(&mut params);
         let mut headers = HeaderMap::new();
         let mut device_info = None;
         if metadata
@@ -393,7 +395,7 @@ impl SignatureAuthContext for RegistryContext {
     ) -> Result<(), Error> {
         for (_, signer) in db.as_index_mut().as_signers_mut().as_entries_mut()? {
             signer.as_keys_mut().mutate(|signer_keys| {
-                signer_keys.retain(|k| !keys.contains(&*k.interned_pem()));
+                signer_keys.retain(|k| !keys.contains(&*k.interned_der64()));
                 Ok(())
             })?;
         }

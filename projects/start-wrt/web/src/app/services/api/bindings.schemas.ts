@@ -556,10 +556,6 @@ export const IoFormat: z.ZodEnum<{
   .meta({
     id: 'IoFormat',
   })
-export const KillParams: z.ZodObject<{ ids: z.ZodArray<z.ZodString> }> =
-  /* @__PURE__ */ object({ ids: z.array(z.string()) }).meta({
-    id: 'KillParams',
-  })
 export const LanIpv4Response: z.ZodObject<{
   address: z.ZodString
   netmask: z.ZodString
@@ -1453,15 +1449,12 @@ export const ActivityListResponse: z.ZodObject<{
 })
 
 /**
- * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
- * key is a sign-in: it carries the same metadata a session used to (when it
- * was created, when it was last used, and the user agent that enrolled it).
+ * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export const AuthKeys: z.ZodRecord<z.ZodString, typeof Session> =
   /* @__PURE__ */ z.record(z.string(), Session).meta({
     id: 'AuthKeys',
-    description:
-      "The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled\nkey is a sign-in: it carries the same metadata a session used to (when it\nwas created, when it was last used, and the user agent that enrolled it).",
+    description: 'Enrolled sign-ins indexed by canonical DER64 SPKI.',
   })
 export const BackupCreateRes: z.ZodObject<{
   guid: typeof Guid
@@ -1778,6 +1771,11 @@ export const FollowLogsRes: z.ZodObject<{
   }),
 }).meta({
   id: 'FollowLogsRes',
+})
+export const KillParams: z.ZodObject<{
+  ids: z.ZodArray<typeof AnyVerifyingKey>
+}> = /* @__PURE__ */ object({ ids: z.array(AnyVerifyingKey) }).meta({
+  id: 'KillParams',
 })
 export const LoginParams: z.ZodObject<{
   password: z.ZodString

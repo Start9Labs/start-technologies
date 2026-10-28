@@ -1,0 +1,1 @@
+- Ajoute `disk format` pour effacer un disque et le préparer avec une seule partition Btrfs destinée aux sauvegardes StartOS.
