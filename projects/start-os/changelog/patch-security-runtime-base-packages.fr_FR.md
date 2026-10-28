@@ -1,0 +1,1 @@
+- Les paquets système des conteneurs de services incluent les correctifs de sécurité Debian disponibles, dont celui du décodeur Brotli.

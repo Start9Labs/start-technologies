@@ -1,0 +1,1 @@
+- Dodano `disk format`, aby wymazać dysk i przygotować na nim jedną partycję Btrfs na kopie zapasowe StartOS.
