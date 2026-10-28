@@ -24,7 +24,6 @@ arc-swap = "1.7"
 async_cell = "0.2.2"
 axum = { version = "0.8.6", features = ["ws", "multipart", "http2"] }
 base64 = "0.22"
-blake3 = "1"
 chrono = { version = "0.4.42", features = ["serde", "std"] }
 clap = "4.5.37"
 color-eyre = "0.6.3"

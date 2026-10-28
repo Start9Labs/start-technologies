@@ -8,8 +8,10 @@ use startos::registry::asset::RegistryAsset;
 use startos::registry::client::Product;
 use startos::registry::os::index::OsVersionInfo;
 use startos::registry::os::SIG_CONTEXT;
+use startos::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use startos::sign::commitment::blake3::Blake3Commitment;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use startos::sign::commitment::Commitment;
+use startos::util::io::IOHook;
 use tokio::process::Command;
 
 use crate::continuations::{Guid, RpcContinuation};
@@ -283,15 +285,29 @@ async fn do_update(
     let firmware_path = Path::new("/tmp/firmware.bin");
 
     // Phase 1: Download
-    download(&asset, client, firmware_path, |bytes_written| {
-        download_phase.set_done(bytes_written);
-    })
-    .await?;
+    let mut file = tokio::fs::File::create(firmware_path)
+        .await
+        .map_err(|e| Error::other(format!("creating download file: {e}")))?;
+    let phase = &mut *download_phase;
+    let mut written = 0u64;
+    let mut writer = IOHook::new(&mut file);
+    writer.post_write(move |buf| {
+        written += buf.len() as u64;
+        phase.set_done(written);
+    });
+    asset.download(client.clone(), &mut writer).await?;
+    drop(writer);
+    file.sync_all()
+        .await
+        .map_err(|e| Error::other(format!("syncing download file: {e}")))?;
     download_phase.complete();
 
     // Phase 2: Verify (re-read and check blake3)
     verify_phase.start();
-    verify_file(&asset.commitment, firmware_path).await?;
+    asset
+        .commitment
+        .check(&MultiCursorFile::open(&file).await?)
+        .await?;
     verify_phase.complete();
 
     // Phase 3: Apply via sysupgrade
@@ -333,107 +349,6 @@ pub(crate) fn asset_for_platform<'a>(
         .get(platform)
         .or_else(|| info.img.get(platform))
         .or_else(|| info.iso.get(platform))
-}
-
-/// Downloads from the first URL that answers, checking size and BLAKE3 as it writes.
-async fn download(
-    asset: &RegistryAsset<Blake3Commitment>,
-    client: &reqwest::Client,
-    dst: &Path,
-    on_progress: impl FnMut(u64),
-) -> Result<(), Error> {
-    let mut last_err = None;
-    for url in &asset.urls {
-        match client.get(url.clone()).send().await {
-            Ok(response) if response.status().is_success() => {
-                return download_to_file(&asset.commitment, response, dst, on_progress).await;
-            }
-            Ok(response) => {
-                last_err = Some(format!("HTTP {} from {}", response.status(), url));
-            }
-            Err(e) => {
-                last_err = Some(format!("request to {} failed: {e}", url));
-            }
-        }
-    }
-    Err(Error::other(format!(
-        "all asset URLs failed; last error: {}",
-        last_err.unwrap_or_else(|| "no URLs".to_string())
-    )))
-}
-
-async fn download_to_file(
-    commitment: &Blake3Commitment,
-    mut response: reqwest::Response,
-    path: &Path,
-    mut on_progress: impl FnMut(u64),
-) -> Result<(), Error> {
-    let mut file = tokio::fs::File::create(path)
-        .await
-        .map_err(|e| Error::other(format!("creating download file: {e}")))?;
-    let mut hasher = blake3::Hasher::new();
-    let mut total_written: u64 = 0;
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|e| Error::other(format!("downloading chunk: {e}")))?
-    {
-        hasher.update(&chunk);
-        file.write_all(&chunk)
-            .await
-            .map_err(|e| Error::other(format!("writing chunk: {e}")))?;
-        total_written += chunk.len() as u64;
-        on_progress(total_written);
-    }
-    file.flush()
-        .await
-        .map_err(|e| Error::other(format!("flushing download file: {e}")))?;
-    file.sync_all()
-        .await
-        .map_err(|e| Error::other(format!("syncing download file: {e}")))?;
-    if total_written != commitment.size {
-        return Err(Error::other(format!(
-            "download size mismatch: expected {}, got {}",
-            commitment.size, total_written
-        )));
-    }
-    if *hasher.finalize().as_bytes() != *commitment.hash {
-        return Err(Error::other("BLAKE3 hash mismatch after download"));
-    }
-    Ok(())
-}
-
-async fn verify_file(commitment: &Blake3Commitment, path: &Path) -> Result<(), Error> {
-    let mut file = tokio::fs::File::open(path)
-        .await
-        .map_err(|e| Error::other(format!("opening file for verification: {e}")))?;
-    let metadata = file
-        .metadata()
-        .await
-        .map_err(|e| Error::other(format!("reading file metadata: {e}")))?;
-    if metadata.len() != commitment.size {
-        return Err(Error::other(format!(
-            "file size mismatch: expected {}, got {}",
-            commitment.size,
-            metadata.len()
-        )));
-    }
-    let mut hasher = blake3::Hasher::new();
-    let mut buf = vec![0u8; 64 * 1024];
-    loop {
-        let n = file
-            .read(&mut buf)
-            .await
-            .map_err(|e| Error::other(format!("reading file for verification: {e}")))?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    if *hasher.finalize().as_bytes() != *commitment.hash {
-        return Err(Error::other("BLAKE3 hash mismatch"));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

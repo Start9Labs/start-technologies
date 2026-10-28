@@ -7865,7 +7865,6 @@ dependencies = [
  "async_cell",
  "axum",
  "base64 0.22.1",
- "blake3",
  "chrono",
  "clap",
  "color-eyre",
