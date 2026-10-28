@@ -361,6 +361,8 @@ A network folder backup sends your encrypted backup over the LAN to a shared fol
 
 ### Step 2. Connect from StartOS
 
+The **Hostname** field accepts an IP address, a DNS name containing a dot (such as `nas.home.arpa`), a `.local` mDNS name, or a bare NetBIOS computer name. For DNS, enter the full name rather than a bare name such as `nas`.
+
 1. In StartOS, go to `System > Create Backup`.
 
 1. Under `Network Folders`, click "New".
