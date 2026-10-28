@@ -30,10 +30,12 @@ use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::device_info::{DEVICE_INFO_HEADER, DeviceInfo};
 use crate::registry::migrations::run_migrations;
+use crate::registry::os::security;
 use crate::registry::package::icon::{icons_dir, referenced_icons, sweep_icons};
 use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
 use crate::sign::AnyVerifyingKey;
+use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::append_file;
 use crate::util::sync::SyncMutex;
 
@@ -97,6 +99,8 @@ pub struct RegistryContextSeed {
     pub client: Client,
     pub shutdown: Sender<()>,
     pub metrics_db: SyncMutex<Connection>,
+    pub security_catalog: tokio::sync::watch::Receiver<axum::extract::ws::Utf8Bytes>,
+    pub _security_catalog_task: NonDetachingJoinHandle<()>,
 }
 
 #[derive(Clone)]
@@ -161,6 +165,7 @@ impl RegistryContext {
                 ErrorKind::NotFound,
             ));
         }
+        let (security_catalog, security_catalog_task) = security::init(&db).await?;
         Ok(Self(Arc::new(RegistryContextSeed {
             hostnames: config.registry_hostname.clone(),
             listen: config.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN),
@@ -182,6 +187,8 @@ impl RegistryContext {
                 .with_kind(crate::ErrorKind::ParseUrl)?,
             shutdown,
             metrics_db,
+            security_catalog,
+            _security_catalog_task: security_catalog_task,
         })))
     }
 }

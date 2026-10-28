@@ -83,7 +83,6 @@ export type ActionId = z.output<typeof schemas.ActionId>
 export type ActionIdInput = z.input<typeof schemas.ActionId>
 export type ActionResultV0 = z.output<typeof schemas.ActionResultV0>
 export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
-export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type AnySignature = z.output<typeof schemas.AnySignature>
 export type AnySignatureInput = z.input<typeof schemas.AnySignature>
 export type AnyVerifyingKey = z.output<typeof schemas.AnyVerifyingKey>
@@ -145,6 +144,7 @@ export type GetOsVersionParamsInput = z.input<typeof schemas.GetOsVersionParams>
 export type GetUsersParamsInput = z.input<typeof schemas.GetUsersParams>
 export type GigaBytes = z.output<typeof schemas.GigaBytes>
 export type GitHash = z.output<typeof schemas.GitHash>
+export type GitHashInput = z.input<typeof schemas.GitHash>
 export type Governor = z.output<typeof schemas.Governor>
 export type GovernorInput = z.input<typeof schemas.Governor>
 export type Guid = z.output<typeof schemas.Guid>
@@ -324,6 +324,7 @@ export type AddPublicDomainParamsInput = z.input<
   typeof schemas.AddPublicDomainParams
 >
 export type AddTunnelParamsInput = z.input<typeof schemas.AddTunnelParams>
+export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type AddressInfo = z.output<typeof schemas.AddressInfo>
 
 /**

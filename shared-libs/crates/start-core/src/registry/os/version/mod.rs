@@ -15,6 +15,7 @@ use crate::prelude::*;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfo;
 use crate::registry::os::index::OsVersionInfo;
+use crate::s9pk::git_hash::GitHash;
 use crate::sign::AnyVerifyingKey;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 
@@ -71,6 +72,13 @@ pub struct AddVersionParams {
     pub release_notes: String,
     #[arg(help = "help.arg.source-version-range")]
     pub source_version: VersionRange,
+    #[arg(long, help = "help.arg.os-git-hash")]
+    pub git_hash: Option<GitHash>,
+    #[arg(long, help = "help.arg.expected-os-git-hash")]
+    pub expected_git_hash: Option<GitHash>,
+    #[arg(long, help = "help.arg.os-security")]
+    #[serde(default)]
+    pub security: bool,
     #[arg(skip)]
     #[visit(ts(skip))]
     #[serde(rename = "__Auth_signer")]
@@ -87,6 +95,9 @@ pub async fn add_version(
         headline,
         release_notes,
         source_version,
+        git_hash,
+        expected_git_hash,
+        security,
         signer,
     }: AddVersionParams,
 ) -> Result<(), Error> {
@@ -100,9 +111,14 @@ pub async fn add_version(
                 .as_versions_mut()
                 .upsert(&version, || Ok(OsVersionInfo::default()))?
                 .mutate(|i| {
+                    if let Some(expected) = expected_git_hash {
+                        i.require_git_hash(&expected)?;
+                    }
                     i.headline = headline;
                     i.release_notes = release_notes;
                     i.source_version = source_version;
+                    i.git_hash = git_hash;
+                    i.security = security;
                     i.authorized.extend(signer);
                     Ok(())
                 })
@@ -170,8 +186,7 @@ pub async fn get_version(
         platform,
         device_info,
     }: GetOsVersionParams,
-) -> Result<Value, Error> // BTreeMap<Version, OsVersionInfo>
-{
+) -> Result<Value, Error> {
     let source = source.or_else(|| device_info.as_ref().map(|d| d.os.version.clone()));
     let platform = platform.or_else(|| device_info.as_ref().map(|d| d.os.platform.clone()));
     if let (Some(server_id), Some(arch)) = (server_id, &platform) {
@@ -222,10 +237,7 @@ pub async fn get_version(
     Ok(res)
 }
 
-pub fn display_version_info<T>(
-    params: WithIoFormat<T>,
-    info: Value, // BTreeMap<Version, OsVersionInfo>,
-) -> Result<(), Error> {
+pub fn display_version_info<T>(params: WithIoFormat<T>, info: Value) -> Result<(), Error> {
     use prettytable::*;
 
     let info = from_value::<BTreeMap<Version, OsVersionInfo>>(info)?;
@@ -239,6 +251,8 @@ pub fn display_version_info<T>(
         "VERSION",
         "HEADLINE",
         "RELEASE NOTES",
+        "GIT HASH",
+        "SECURITY",
         "ISO PLATFORMS",
         "IMG PLATFORMS",
         "SQUASHFS PLATFORMS",
@@ -248,6 +262,8 @@ pub fn display_version_info<T>(
             &version.to_string(),
             &info.headline,
             &info.release_notes,
+            info.git_hash.as_deref().unwrap_or("N/A"),
+            info.security,
             &info.iso.keys().into_iter().join(", "),
             &info.img.keys().into_iter().join(", "),
             &info.squashfs.keys().into_iter().join(", "),
@@ -255,4 +271,45 @@ pub fn display_version_info<T>(
     }
     print_table(&table)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn publication_accepts_release_metadata_from_cli_and_rpc() {
+        let params = AddVersionParams::try_parse_from([
+            "add",
+            "0.4.0.5",
+            "Update",
+            "Notes",
+            ">=0.4.0",
+            "--git-hash",
+            "0123456789abcdef",
+            "--security",
+        ])
+        .unwrap();
+        let value = to_value(&params).unwrap();
+        assert_eq!(value["gitHash"].as_str(), Some("0123456789abcdef"));
+        assert_eq!(value["security"].as_bool(), Some(true));
+        let params: AddVersionParams = from_value(value).unwrap();
+        assert_eq!(params.git_hash.as_deref(), Some("0123456789abcdef"));
+        assert!(params.security);
+    }
+
+    #[test]
+    fn legacy_publication_defaults_to_no_security_metadata() {
+        let params =
+            AddVersionParams::try_parse_from(["add", "0.4.0.5", "Update", "Notes", ">=0.4.0"])
+                .unwrap();
+        assert!(params.git_hash.is_none());
+        assert!(!params.security);
+        let mut value = to_value(&params).unwrap();
+        value.as_object_mut().unwrap().remove("gitHash");
+        value.as_object_mut().unwrap().remove("security");
+        let params: AddVersionParams = from_value(value).unwrap();
+        assert!(params.git_hash.is_none());
+        assert!(!params.security);
+    }
 }

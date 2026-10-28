@@ -37,6 +37,7 @@ Defined in `shared-libs/crates/start-core/src/registry/mod.rs`:
 
 - `POST /rpc/{*path}` — JSON-RPC, wrapped in `Cors`, `Auth` (local + signature auth), and `DeviceInfoMiddleware`.
 - `GET /ws/rpc/{*path}` — WebSocket RPC continuations, keyed by a `Guid`.
+- `GET /os/security` — public WebSocket sending the current security catalog immediately and whenever it changes.
 - `/rest/rpc/{*path}` — REST continuation channel (e.g. large asset streams), keyed by a `Guid`.
 - `GET /icons/{*path}` — a package or dependency icon from the content-addressed store, unauthenticated and immutable. Package versions refer to an icon by this path, `blake3/<hash>.<ext>`; `DeviceInfoMiddleware` inlines it as a data URL for StartOS before 0.4.0.3.
 
@@ -60,6 +61,12 @@ The public `db.subscribe` RPC accepts `{ "pointer": <JSON Pointer> }`. The point
 `/index` or any descendant; omitting it or passing `null` selects `/index`. The response contains
 an initial `{ id, value }` dump and a continuation `guid`. Connecting to `/ws/rpc/<guid>` streams
 revisions whose JSON Patch paths are relative to the selected subtree.
+
+The `/os/security` WebSocket sends complete JSON `SecurityCatalog` snapshots keyed by OS version.
+Each entry contains `gitHash`, `sourceVersion`, and the available SquashFS `platforms` for a release
+marked `security`. `RegistryContext` owns one database watch and caches the serialized catalog;
+subscribers share its bytes and retain only the latest update. The endpoint uses 2 KiB read buffers,
+1 KiB incoming message/frame limits, bounded sends, and the shared WebSocket Ping/Pong heartbeat.
 
 ## Data model
 

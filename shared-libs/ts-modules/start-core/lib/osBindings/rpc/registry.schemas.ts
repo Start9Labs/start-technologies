@@ -10,19 +10,6 @@ const literal_1 = /* @__PURE__ */ z.union([
   z.record(z.string(), z.string()),
 ])
 const literal_2 = /* @__PURE__ */ z.enum(['processor', 'display'])
-export const AddVersionParams: z.ZodObject<{
-  version: z.ZodString
-  headline: z.ZodString
-  releaseNotes: z.ZodString
-  sourceVersion: z.ZodString
-}> = /* @__PURE__ */ object({
-  version: z.string(),
-  headline: z.string(),
-  releaseNotes: z.string(),
-  sourceVersion: z.string(),
-}).meta({
-  id: 'AddVersionParams',
-})
 export const AnySignature: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'AnySignature',
 })
@@ -435,6 +422,31 @@ export const AddPackageToCategoryParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ id: z.string(), package: PackageId }).meta({
   id: 'AddPackageToCategoryParams',
 })
+export const AddVersionParams: z.ZodObject<{
+  version: z.ZodString
+  headline: z.ZodString
+  releaseNotes: z.ZodString
+  sourceVersion: z.ZodString
+  gitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  expectedGitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  version: z.string(),
+  headline: z.string(),
+  releaseNotes: z.string(),
+  sourceVersion: z.string(),
+  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  expectedGitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  security: wire(z.boolean().optional(), z.boolean()),
+}).meta({
+  id: 'AddVersionParams',
+})
 export const ApplyWithPathParams: z.ZodIntersection<
   z.ZodObject<{
     path: z.ZodCodec<
@@ -599,6 +611,17 @@ export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
   releaseNotes: z.ZodString
   sourceVersion: z.ZodString
+  /**
+   * Commit that produced the OS image, if recorded at publication.
+   */
+  gitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  /**
+   * Whether the release includes security fixes.
+   */
+  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   authorized: z.ZodArray<typeof Guid>
   iso: z.ZodRecord<
     z.ZodString,
@@ -616,6 +639,19 @@ export const OsVersionInfo: z.ZodObject<{
   headline: z.string(),
   releaseNotes: z.string(),
   sourceVersion: z.string(),
+  /**
+   * Commit that produced the OS image, if recorded at publication.
+   */
+  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()).meta({
+    description:
+      'Commit that produced the OS image, if recorded at publication.',
+  }),
+  /**
+   * Whether the release includes security fixes.
+   */
+  security: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Whether the release includes security fixes.',
+  }),
   authorized: z.array(Guid),
   iso: z.record(z.string(), RegistryAsset(Blake3Commitment)),
   squashfs: z.record(z.string(), RegistryAsset(Blake3Commitment)),
