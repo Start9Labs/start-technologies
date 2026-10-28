@@ -291,11 +291,27 @@ export const AddVersionParams: z.ZodObject<{
   version: z.ZodString
   headline: z.ZodString
   releaseNotes: z.ZodString
+  /**
+   * Omitting this clears previously published translations.
+   */
+  releaseNotesTranslations: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>,
+    z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>
+  >
   sourceVersion: z.ZodString
 }> = /* @__PURE__ */ object({
   version: z.string(),
   headline: z.string(),
   releaseNotes: z.string(),
+  /**
+   * Omitting this clears previously published translations.
+   */
+  releaseNotesTranslations: wire(
+    z.record(z.string(), z.string()).nullable().optional(),
+    z.record(z.string(), z.string()).nullable(),
+  ).meta({
+    description: 'Omitting this clears previously published translations.',
+  }),
   sourceVersion: z.string(),
 }).meta({
   id: 'AddVersionParams',
@@ -3258,6 +3274,10 @@ export const OsUpdateSignerKeyParams: z.ZodObject<{
 export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
   releaseNotes: z.ZodString
+  /**
+   * Locale Markdown excluding `en_US`; missing languages fall back to `release_notes`.
+   */
+  releaseNotesTranslations: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>
   sourceVersion: z.ZodString
   authorized: z.ZodArray<typeof Guid>
   iso: z.ZodRecord<
@@ -3275,6 +3295,13 @@ export const OsVersionInfo: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   headline: z.string(),
   releaseNotes: z.string(),
+  /**
+   * Locale Markdown excluding `en_US`; missing languages fall back to `release_notes`.
+   */
+  releaseNotesTranslations: z.record(z.string(), z.string()).optional().meta({
+    description:
+      'Locale Markdown excluding `en_US`; missing languages fall back to `release_notes`.',
+  }),
   sourceVersion: z.string(),
   authorized: z.array(Guid),
   iso: z.record(z.string(), RegistryAsset(Blake3Commitment)),
