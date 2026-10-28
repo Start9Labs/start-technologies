@@ -1,1 +1,5 @@
+---
+user-facing: true
+---
+
 - Every network now answers Firefox's DNS-over-HTTPS canary domain, so Firefox's default-enabled DoH steps aside on all of them and device names resolve there. DoH a user turned on explicitly is untouched.

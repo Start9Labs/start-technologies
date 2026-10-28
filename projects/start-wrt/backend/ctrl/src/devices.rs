@@ -209,6 +209,7 @@ pub(crate) struct DhcpLease {
     /// Unix expiry from the lease file; dnsmasq writes `0` for a lease that
     /// never expires.
     pub(crate) expires: u64,
+    pub(crate) instance: Option<String>,
 }
 
 /// Placeholder name for a device no source could name at all — not even a
@@ -278,6 +279,7 @@ fn parse_dhcp_leases(output: &str) -> Vec<DhcpLease> {
                 ip: parts[2].to_string(),
                 hostname: parts[3].to_string(),
                 expires: parts[0].parse().unwrap_or(0),
+                instance: None,
             });
         }
     }
@@ -305,24 +307,44 @@ pub(crate) async fn current_lease_ips() -> Option<HashMap<String, String>> {
 /// Every unexpired lease across every lease file; `None` as for
 /// [`current_lease_ips`].
 pub(crate) async fn current_leases() -> Option<Vec<DhcpLease>> {
-    if dhcp_lease_files().await.is_empty() {
+    let files = dhcp_lease_files().await;
+    if files.is_empty() {
         return None;
     }
+    let instances = dnsmasq_instance_option("dhcp-leasefile")
+        .into_iter()
+        .map(|(instance, file)| (std::path::PathBuf::from(file), instance))
+        .collect();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
-    Some(
-        parse_dhcp_leases(&read_all_dhcp_leases().await)
-            .into_iter()
-            .filter(|l| l.expires == 0 || l.expires > now)
-            .collect(),
-    )
+    Some(read_current_leases(&files, &instances, now).await)
+}
+
+async fn read_current_leases(
+    files: &[std::path::PathBuf],
+    instances: &HashMap<std::path::PathBuf, String>,
+    now: u64,
+) -> Vec<DhcpLease> {
+    let mut leases = Vec::new();
+    for file in files {
+        let Ok(content) = tokio::fs::read_to_string(file).await else {
+            continue;
+        };
+        for mut lease in parse_dhcp_leases(&content) {
+            if lease.expires == 0 || lease.expires > now {
+                lease.instance = instances.get(file).cloned();
+                leases.push(lease);
+            }
+        }
+    }
+    leases
 }
 
 /// Directory and filename prefix for dnsmasq lease files.
 ///
-/// StartWRT runs a separate dnsmasq instance per profile when the profile uses
-/// custom or VPN DNS (see `profiles.rs`), each writing its own lease file at
+/// StartWRT runs a separate dnsmasq instance per profile (see `profiles.rs`),
+/// each writing its own lease file at
 /// `/tmp/dhcp.leases.dns_<interface>`; the base `/tmp/dhcp.leases` only holds
 /// clients of the main dnsmasq instance. To see every lease we must read them
 /// all. (odhcpd's IPv6 lease file lives under `/tmp/hosts/` and is not matched.)
@@ -2356,6 +2378,37 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn current_leases_keep_the_serving_instance() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("dhcp.leases");
+        let lan = dir.path().join("dhcp.leases.dns_lan");
+        let retired = dir.path().join("dhcp.leases.dns_retired");
+        std::fs::write(&main, "0 aa:00:00:00:00:01 192.168.1.110 old *\n").unwrap();
+        std::fs::write(
+            &lan,
+            "200 aa:00:00:00:00:02 192.168.1.111 current *\n100 aa:00:00:00:00:03 192.168.1.112 expired *\n",
+        )
+        .unwrap();
+        std::fs::write(&retired, "200 aa:00:00:00:00:04 192.168.2.110 retired *\n").unwrap();
+        let instances = HashMap::from([
+            (main.clone(), "cfg_main".into()),
+            (lan.clone(), "dns_lan".into()),
+        ]);
+        let leases = read_current_leases(&[main, lan, retired], &instances, 100).await;
+        assert_eq!(
+            leases
+                .iter()
+                .map(|lease| (lease.hostname.as_str(), lease.instance.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("old", Some("cfg_main")),
+                ("current", Some("dns_lan")),
+                ("retired", None),
+            ]
+        );
+    }
 
     #[test]
     fn instance_options_come_from_each_running_generated_config() {
