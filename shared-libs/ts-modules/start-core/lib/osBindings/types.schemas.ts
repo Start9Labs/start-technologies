@@ -287,19 +287,6 @@ export const ActionVisibility: z.ZodUnion<
   .meta({
     id: 'ActionVisibility',
   })
-export const AddVersionParams: z.ZodObject<{
-  version: z.ZodString
-  headline: z.ZodString
-  releaseNotes: z.ZodString
-  sourceVersion: z.ZodString
-}> = /* @__PURE__ */ object({
-  version: z.string(),
-  headline: z.string(),
-  releaseNotes: z.string(),
-  sourceVersion: z.string(),
-}).meta({
-  id: 'AddVersionParams',
-})
 export const Algorithm: z.ZodEnum<{ ecdsa: 'ecdsa'; ed25519: 'ed25519' }> =
   /* @__PURE__ */ z.enum(['ecdsa', 'ed25519']).meta({
     id: 'Algorithm',
@@ -1990,6 +1977,19 @@ export const AddTunnelParams: z.ZodObject<{
 }).meta({
   id: 'AddTunnelParams',
 })
+export const AddVersionParams: z.ZodObject<{
+  version: z.ZodString
+  headline: z.ZodString
+  releaseNotes: typeof LocaleString
+  sourceVersion: z.ZodString
+}> = /* @__PURE__ */ object({
+  version: z.string(),
+  headline: z.string(),
+  releaseNotes: LocaleString,
+  sourceVersion: z.string(),
+}).meta({
+  id: 'AddVersionParams',
+})
 export const AddressInfo: z.ZodObject<{
   username: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -3279,7 +3279,7 @@ export const OsUpdateSignerKeyParams: z.ZodObject<{
 })
 export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
-  releaseNotes: z.ZodString
+  releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
   authorized: z.ZodArray<typeof Guid>
   iso: z.ZodRecord<
@@ -3296,7 +3296,7 @@ export const OsVersionInfo: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   headline: z.string(),
-  releaseNotes: z.string(),
+  releaseNotes: LocaleString,
   sourceVersion: z.string(),
   authorized: z.array(Guid),
   iso: z.record(z.string(), RegistryAsset(Blake3Commitment)),

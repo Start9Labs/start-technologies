@@ -1,0 +1,1 @@
+- Almacena claves con tipos estructurales sin la envoltura PEM, conservando los inicios de sesión existentes y los firmantes de actualizaciones de confianza durante las actualizaciones.
