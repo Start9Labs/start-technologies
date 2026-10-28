@@ -3478,12 +3478,40 @@ shared-volumes.access-denied:
   fr_FR: "Ce service ne dispose pas de l'accès requis au volume"
   pl_PL: "Ta usługa nie ma wymaganego dostępu do woluminu"
 
+shared-volumes.backup-isolation:
+  en_US: "Volumes are inaccessible during service backup and restore"
+  de_DE: "Volumes sind während der Sicherung und Wiederherstellung eines Dienstes nicht zugänglich"
+  es_ES: "Los volúmenes no son accesibles durante la copia de seguridad y restauración de un servicio"
+  fr_FR: "Les volumes sont inaccessibles pendant la sauvegarde et la restauration d'un service"
+  pl_PL: "Woluminy są niedostępne podczas tworzenia kopii zapasowej i przywracania usługi"
+
+shared-volumes.invalid-path:
+  en_US: "Volume paths must stay within their permitted directory"
+  de_DE: "Volume-Pfade müssen innerhalb ihres zulässigen Verzeichnisses bleiben"
+  es_ES: "Las rutas de los volúmenes deben permanecer dentro de su directorio permitido"
+  fr_FR: "Les chemins des volumes doivent rester dans leur répertoire autorisé"
+  pl_PL: "Ścieżki woluminów muszą pozostawać w dozwolonym katalogu"
+
 shared-volumes.name-required:
   en_US: "Enter a volume name"
   de_DE: "Einen Namen für das Volume eingeben"
   es_ES: "Introduce un nombre para el volumen"
   fr_FR: "Saisissez un nom de volume"
   pl_PL: "Podaj nazwę woluminu"
+
+shared-volumes.remove-before-delete:
+  en_US: "Remove the volume definition before deleting its local data"
+  de_DE: "Die Volume-Definition vor dem Löschen ihrer lokalen Daten entfernen"
+  es_ES: "Elimina la definición del volumen antes de borrar sus datos locales"
+  fr_FR: "Supprimez la définition du volume avant de supprimer ses données locales"
+  pl_PL: "Usuń definicję woluminu przed usunięciem jego danych lokalnych"
+
+shared-volumes.source-unavailable:
+  en_US: "The volume source is unavailable. Check the source, network and credentials."
+  de_DE: "Die Volume-Quelle ist nicht verfügbar. Quelle, Netzwerk und Zugangsdaten prüfen."
+  es_ES: "La fuente del volumen no está disponible. Comprueba la fuente, la red y las credenciales."
+  fr_FR: "La source du volume est indisponible. Vérifiez la source, le réseau et les identifiants."
+  pl_PL: "Źródło woluminu jest niedostępne. Sprawdź źródło, sieć i dane uwierzytelniające."
 
 shutdown.beginning-restart:
   en_US: "Beginning server restart"

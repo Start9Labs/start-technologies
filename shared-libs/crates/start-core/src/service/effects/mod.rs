@@ -93,6 +93,10 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
             "get-shared-volumes",
             from_fn_async(shared_volumes::get_shared_volumes).no_cli(),
         )
+        .subcommand(
+            "mount-shared-volume",
+            from_fn_async(shared_volumes::mount_shared_volume).no_cli(),
+        )
         .subcommand("mount", from_fn_async(dependency::mount).no_cli())
         .subcommand(
             "bind-mount",

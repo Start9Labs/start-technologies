@@ -292,6 +292,12 @@ pub struct Service {
     seed: Arc<ServiceActorSeed>,
 }
 impl Service {
+    pub(crate) fn shared_volume_mounts(
+        &self,
+    ) -> &tokio::sync::Mutex<crate::shared_volumes::mounts::SharedVolumeMounts> {
+        &self.seed.persistent_container.shared_volumes
+    }
+
     pub fn is_initialized(&self) -> bool {
         self.seed.persistent_container.state.borrow().rt_initialized
     }
