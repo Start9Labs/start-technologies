@@ -134,19 +134,21 @@ cat << EOF > /etc/issue.net
 StartOS v${VERSION}
 EOF
 
-# change timezone
 ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime
 
-rm /etc/resolv.conf
-echo "nameserver 127.0.0.1" > /etc/resolv.conf
-echo "nameserver 1.1.1.1" >> /etc/resolv.conf # Cloudflare DNS Fallback
+resolv_conf=/etc/resolv.conf
+# live-build restores the saved resolver after chroot customization.
+if [ "$(cat /etc/debian_chroot 2>/dev/null)" = live ]; then
+	resolv_conf=/etc/resolv.conf.orig
+fi
+rm -f "$resolv_conf"
+echo "nameserver 127.0.0.1" > "$resolv_conf"
 
-# switch to network-manager
 echo "#" > /etc/network/interfaces
 cat << EOF > /etc/NetworkManager/NetworkManager.conf
 [main]
 plugins=ifupdown,keyfile
-dns=systemd-resolved
+dns=none
 
 [ifupdown]
 managed=true
@@ -190,8 +192,7 @@ set_config /etc/systemd/journald.conf ForwardToSyslog no
 set_config /etc/lvm/lvm.conf issue_discards 1
 set_config /etc/containers/registries.conf unqualified-search-registries '["docker.io"]'
 sed -i 's/\(#\|\^\)\s*\([^=]\+\)=\(suspend\|hibernate\)\s*$/\2=ignore/g' /etc/systemd/logind.conf
-set_config /etc/systemd/resolved.conf MulticastDNS no
-set_config /etc/systemd/resolved.conf DNSStubListener no
+cp /usr/lib/startos/resolved.conf /etc/systemd/resolved.conf
 set_config /etc/default/lxc-net LXC_DHCP_CONFILE /etc/dnsmasq.conf
 # Dual-stack lxcbr0: a ULA (fd00:3::/64) + SLAAC RA, so containers get a v6.
 set_config /etc/default/lxc-net LXC_IPV6_ADDR '"fd00:3::1"'

@@ -2769,12 +2769,8 @@ pub(crate) fn ensure_vpn_outbound_zone(cfgs: &mut Configs, wg_name: &str) -> Res
     Ok(zone_name)
 }
 
-/// After routing changes, remove `vpn_<X>` zones (and any forwardings or rules
-/// that reference them) when no profile uses `wg_X` as outbound. Also strips
-/// stray `wg_X` entries from the wan zone (pre-migration leftovers from when
-/// VPN outbounds lived directly in the wan zone).
-pub(crate) fn cleanup_orphaned_vpn_zones(cfgs: &mut Configs) {
-    // Collect all VPN interface names referenced by any profile's outbound
+/// VPN interfaces that some profile routes its outbound traffic through.
+fn profile_vpn_outbounds(cfgs: &Configs) -> std::collections::HashSet<String> {
     let mut referenced_vpns = std::collections::HashSet::new();
     for section in &cfgs["startwrt"].sections {
         if section.ty() != "profile" {
@@ -2787,6 +2783,34 @@ pub(crate) fn cleanup_orphaned_vpn_zones(cfgs: &mut Configs) {
             }
         }
     }
+    referenced_vpns
+}
+
+/// Removes `wg_X` entries no profile routes through from the wan zone.
+/// Returns whether the firewall config changed.
+pub(crate) fn strip_unreferenced_wan_zone_vpns(cfgs: &mut Configs) -> Result<bool, Error> {
+    let referenced_vpns = profile_vpn_outbounds(cfgs);
+    for section in &mut cfgs["firewall"].sections {
+        if let Ok(mut zone) = section.get::<FirewallZone>() {
+            if zone.name == DEFAULT_WAN_ZONE {
+                let before_len = zone.network.len();
+                zone.network
+                    .retain(|n| !n.starts_with("wg_") || referenced_vpns.contains(n));
+                if zone.network.len() == before_len {
+                    return Ok(false);
+                }
+                section.set(&zone)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// After routing changes, remove `vpn_<X>` zones (and any forwardings or rules
+/// that reference them) when no profile uses `wg_X` as outbound.
+pub(crate) fn cleanup_orphaned_vpn_zones(cfgs: &mut Configs) {
+    let referenced_vpns = profile_vpn_outbounds(cfgs);
     let referenced_zone_names: std::collections::HashSet<String> = referenced_vpns
         .iter()
         .map(|wg| resolve_outbound_zone(wg))
@@ -2832,22 +2856,7 @@ pub(crate) fn cleanup_orphaned_vpn_zones(cfgs: &mut Configs) {
         true
     });
 
-    // 3. Defense in depth: strip any stray wg_X entries still in the wan zone.
-    for section in &mut cfgs["firewall"].sections {
-        if let Ok(mut zone) = section.get::<FirewallZone>() {
-            if zone.name == DEFAULT_WAN_ZONE {
-                let before_len = zone.network.len();
-                zone.network
-                    .retain(|n| !n.starts_with("wg_") || referenced_vpns.contains(n));
-                if zone.network.len() != before_len {
-                    let _ = section.set(&zone);
-                }
-                break;
-            }
-        }
-    }
-
-    // 4. The global DNAT-return ip rules exist only to keep port-forward replies
+    // 3. The global DNAT-return ip rules exist only to keep port-forward replies
     //    on the main table for VPN-routed profiles. With no VPN-routed profile
     //    left they have no consumer — tear them down so they exist iff at least
     //    one VPN-routed profile does, mirroring the zone lifecycle above.

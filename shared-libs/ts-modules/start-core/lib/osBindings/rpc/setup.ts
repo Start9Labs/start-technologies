@@ -77,15 +77,20 @@ export type RpcSchemaTree<Schema> = {
         ? { [Name in keyof Schema[Key]]: RpcSchemaTree<Schema[Key][Name]> }
         : never
 }
+export type CapabilityVerdict = z.output<typeof schemas.CapabilityVerdict>
 export type CifsInput = z.input<typeof schemas.Cifs>
 export type DataDriveInput = z.input<typeof schemas.DataDrive>
+export type DnsSource = z.output<typeof schemas.DnsSource>
 export type EncryptedWireInput = z.input<typeof schemas.EncryptedWire>
+export type GatewayId = z.output<typeof schemas.GatewayId>
+export type GatewayType = z.output<typeof schemas.GatewayType>
 export type Guid = z.output<typeof schemas.Guid>
 export type HostIdInput = z.input<typeof schemas.HostId>
 export type IoFormatInput = z.input<typeof schemas.IoFormat>
 export type KeyboardOptionsInput = z.input<typeof schemas.KeyboardOptions>
 export type LogEntry = z.output<typeof schemas.LogEntry>
 export type NamedProgress = z.output<typeof schemas.NamedProgress>
+export type NetworkInterfaceType = z.output<typeof schemas.NetworkInterfaceType>
 export type PackageIdInput = z.input<typeof schemas.PackageId>
 export type PartitionTable = z.output<typeof schemas.PartitionTable>
 export type ProgressUnits = z.output<typeof schemas.ProgressUnits>
@@ -109,8 +114,27 @@ export type SetLanguageParamsInput = z.input<typeof schemas.SetLanguageParams>
 export type SetupInfo = z.output<typeof schemas.SetupInfo>
 export type AttachParamsInput = z.input<typeof schemas.AttachParams>
 export type BackupTargetFSInput = z.input<typeof schemas.BackupTargetFS>
+
+/**
+ * Per-gateway DNS intent and effective upstreams. `static_servers` is the persisted
+ * override; `servers` and `source` are derived from it and the link configuration.
+ * Without an override or gateway-provided resolvers, the public fallback is used.
+ */
+export type DnsSettings = z.output<typeof schemas.DnsSettings>
 export type FullProgress = z.output<typeof schemas.FullProgress>
+
+/**
+ * Whether the gateway reachable via this interface speaks each port-mapping
+ * protocol, as last probed. Fed by the watcher's periodic probes and by
+ * failure/success evidence from the port-map client, and synced to the db so a
+ * chronically uncooperative gateway is visible (and skipped) instead of being
+ * retried forever.
+ */
+export type GatewayPortMapCapabilities = z.output<
+  typeof schemas.GatewayPortMapCapabilities
+>
 export type InstallOsParamsInput = z.input<typeof schemas.InstallOsParams>
+export type IpInfo = z.output<typeof schemas.IpInfo>
 export type LogFollowResponse = z.output<typeof schemas.LogFollowResponse>
 export type LogResponse = z.output<typeof schemas.LogResponse>
 export type RequiresHostIdInput = z.input<typeof schemas.RequiresHostId>
@@ -124,9 +148,16 @@ export type SetupResult = z.output<typeof schemas.SetupResult>
  */
 export type StartOsRecoveryInfo = z.output<typeof schemas.StartOsRecoveryInfo>
 export type VerifyCifsParamsInput = z.input<typeof schemas.VerifyCifsParams>
+export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
 export type PartitionInfo = z.output<typeof schemas.PartitionInfo>
 export type Progress = z.output<typeof schemas.Progress>
 export type SetupProgress = z.output<typeof schemas.SetupProgress>
 export type DiskInfo = z.output<typeof schemas.DiskInfo>
+export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 export type SetupStatusRes = z.output<typeof schemas.SetupStatusRes>
+
+/**
+ * Active DNS authority and its bootstrap gateway.
+ */
+export type DnsStatus = z.output<typeof schemas.DnsStatus>
 export type Api = RpcSchemaTree<typeof schemas.Api>

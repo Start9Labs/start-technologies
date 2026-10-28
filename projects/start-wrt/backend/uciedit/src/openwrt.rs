@@ -177,6 +177,9 @@ pub struct NetworkInterface {
     pub username: Option<String>,
     #[uci(default)]
     pub password: Option<String>,
+    /// Unset is `auto`: pppd then runs its own DHCPv6 client beside `wan6`.
+    #[uci(default)]
+    pub ipv6: Option<String>,
     // MAC override
     #[uci(default)]
     pub macaddr: Option<String>,

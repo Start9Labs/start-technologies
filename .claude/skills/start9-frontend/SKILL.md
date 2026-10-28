@@ -1,6 +1,6 @@
 ---
 name: start9-frontend
-description: Start9 house style for every Angular + Taiga UI web frontend (StartOS ui/setup-wizard, StartWRT, StartTunnel, brochure-marketplace, start9-store, ops-server, support-server). Use BEFORE writing or reviewing any frontend code in these apps — components, templates, styles/CSS, forms, dialogs/toasts, routing, state, DI, i18n — and when bootstrapping a new Start9 web UI or upgrading Angular/Taiga. Includes doctrine, recipes, an antipattern catalog distilled from the fleet's refactor history, and a verified Taiga 5 API reference.
+description: Start9 house style for every Angular + Taiga UI web frontend (StartOS ui/setup-wizard, StartWRT, StartTunnel, brochure-marketplace, start9-store, ops-server, support-server, start-equity). Use BEFORE writing or reviewing any frontend code in these apps — components, templates, styles/CSS, forms, dialogs/toasts, routing, state, DI, i18n — and when bootstrapping a new Start9 web UI or upgrading Angular/Taiga. Includes doctrine, recipes, an antipattern catalog distilled from the fleet's refactor history, and a verified Taiga 5 API reference.
 ---
 
 # Start9 Frontend — Angular + Taiga UI house style
@@ -37,14 +37,15 @@ exactly what this skill exists to eliminate. Never guess a Taiga API: verify aga
 
 | App                    | Location                                        | Angular | Taiga | Zone                       | Theme                                | i18n               | Backend                                             |
 | ---------------------- | ----------------------------------------------- | ------- | ----- | -------------------------- | ------------------------------------ | ------------------ | --------------------------------------------------- |
-| StartOS `ui`           | `start-technologies` `projects/start-os/web/ui` | 22      | 5.11  | zone.js (zoneless pending) | dark, `provideTaiga({mode})`         | yes (shared dicts) | JSON-RPC + PatchDB push                             |
-| `setup-wizard`         | `projects/start-os/web/setup-wizard`            | 22      | 5.11  | zone.js                    | dark                                 | yes (shared)       | JSON-RPC                                            |
-| `start-tunnel`         | `projects/start-tunnel/web`                     | 22      | 5.11  | **zoneless**               | dark                                 | yes (local dicts)  | JSON-RPC + PatchDB                                  |
-| `start-wrt`            | `projects/start-wrt/web`                        | 22      | 5.11  | **zoneless**               | dual (`TUI_DARK_MODE`)               | yes (local dicts)  | JSON-RPC, own HTTP stack, 5s polling                |
-| `brochure-marketplace` | `projects/brochure-marketplace`                 | 22      | 5.11  | zone.js (legacy)           | dark                                 | yes (shared)       | registry RPC direct                                 |
-| `start9-store`         | `ops/start9-store/web`                          | 22      | 5.22  | **zoneless**               | light                                | no                 | REST + Zod via `/api` BFF, **SSR**                  |
-| `ops-server`           | `ops/ops-server/web`                            | 22      | 5.14  | **zoneless**               | dark, `#07a4ff`, Montserrat          | no                 | REST `/_api`, same-origin Express                   |
-| `support-server`       | `ops/support-server/portal/web`                 | 22      | 5.27  | **zoneless**               | dual (theme setting), StartOS tokens | yes (local dicts)  | RPC `/api` + socket.io, same-origin; `mock/` in dev |
+| StartOS `ui`           | `start-technologies` `projects/start-os/web/ui` | 22      | 5.29  | zone.js (zoneless pending) | dark, `provideTaiga({mode})`         | yes (shared dicts) | JSON-RPC + PatchDB push                             |
+| `setup-wizard`         | `projects/start-os/web/setup-wizard`            | 22      | 5.29  | zone.js                    | dark                                 | yes (shared)       | JSON-RPC                                            |
+| `start-tunnel`         | `projects/start-tunnel/web`                     | 22      | 5.29  | **zoneless**               | dark                                 | yes (local dicts)  | JSON-RPC + PatchDB                                  |
+| `start-wrt`            | `projects/start-wrt/web`                        | 22      | 5.29  | **zoneless**               | dual (`TUI_DARK_MODE`)               | yes (local dicts)  | JSON-RPC, own HTTP stack, 5s polling                |
+| `brochure-marketplace` | `projects/brochure-marketplace`                 | 22      | 5.29  | zone.js (legacy)           | dark                                 | yes (shared)       | registry RPC direct                                 |
+| `start9-store`         | `ops/start9-store/web`                          | 22      | 5.29  | **zoneless**               | light                                | no                 | REST + Zod via `/api` BFF, **SSR**                  |
+| `ops-server`           | `ops/ops-server/web`                            | 22      | 5.29  | **zoneless**               | dark, `#07a4ff`, Montserrat          | no                 | REST `/_api`, same-origin Express                   |
+| `support-server`       | `ops/support-server/portal/web`                 | 22      | 5.29  | **zoneless**               | dual (theme setting), StartOS tokens | yes (local dicts)  | RPC `/api` + socket.io, same-origin; `mock/` in dev |
+| `start-equity`         | `ops/start-equity/web`                          | 22      | 5.29  | **zoneless**               | dual (OS, `TUI_DARK_MODE` toggle)    | no                 | REST `/_api`, same-origin Express; `MockApiService` |
 
 TypeScript ~6.0, rxjs ~7.8 everywhere. Taiga is **pinned exact** — bump only with the
 maintainer's blessing. Monorepo apps share **one Angular workspace rooted at the repo root**;

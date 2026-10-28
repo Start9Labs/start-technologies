@@ -9,7 +9,11 @@ import { Control } from './control'
 @Component({
   selector: 'form-color',
   template: `
-    <tui-textfield iconStart=" " [tuiTextfieldCleaner]="false">
+    <tui-textfield
+      iconStart=" "
+      [tuiTextfieldCleaner]="false"
+      [invalid]="control.invalid()"
+    >
       @if (spec.name) {
         <label tuiLabel>
           {{ spec.name }}
@@ -21,8 +25,7 @@ import { Control } from './control'
       <input
         placeholder="#000000"
         tuiInputColor
-        [invalid]="control.invalid()"
-        [readOnly]="readOnly"
+        [readonly]="readOnly"
         [disabled]="!!spec.disabled"
         [(ngModel)]="value"
         (blur)="control.onTouched()"

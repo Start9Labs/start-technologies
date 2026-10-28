@@ -51,6 +51,7 @@ format-check:
 .PHONY: release-notes-test package-ci-test
 release-notes-test:
 	node --test scripts/tests/*-test.mjs
+	bash scripts/tests/release-resume-test.sh
 
 package-ci-test:
 	node --test .github/actions/tests/*.test.mjs

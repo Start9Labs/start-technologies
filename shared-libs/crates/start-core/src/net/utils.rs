@@ -26,6 +26,7 @@ const LISTEN_BACKLOG: i32 = 1024;
 fn build_listen_socket(
     addr: SocketAddr,
     reuse_port: bool,
+    v6_only: bool,
 ) -> std::io::Result<std::net::TcpListener> {
     let domain = match addr {
         SocketAddr::V4(_) => socket2::Domain::IPV4,
@@ -33,6 +34,9 @@ fn build_listen_socket(
     };
     let socket = socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))?;
     socket.set_reuse_address(true)?;
+    if v6_only {
+        socket.set_only_v6(true)?;
+    }
     if reuse_port {
         // SO_REUSEADDR alone does not let a dual-stack wildcard catch-all listener
         // share a TCP port with the per-address specific listeners bound alongside
@@ -58,7 +62,7 @@ fn build_listen_socket(
 /// otherwise reach for `mio::net::TcpListener::bind`.
 pub fn bind_mio_listener(addr: SocketAddr) -> std::io::Result<mio::net::TcpListener> {
     Ok(mio::net::TcpListener::from_std(build_listen_socket(
-        addr, false,
+        addr, false, false,
     )?))
 }
 
@@ -66,7 +70,7 @@ pub fn bind_mio_listener(addr: SocketAddr) -> std::io::Result<mio::net::TcpListe
 /// ([`LISTEN_BACKLOG`]) instead of tokio's hardcoded 128. Use everywhere we'd
 /// otherwise reach for `tokio::net::TcpListener::bind`.
 pub fn bind_tokio_listener(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
-    tokio::net::TcpListener::from_std(build_listen_socket(addr, false)?)
+    tokio::net::TcpListener::from_std(build_listen_socket(addr, false, false)?)
 }
 
 /// Like [`bind_tokio_listener`], but with SO_REUSEPORT so a wildcard catch-all
@@ -75,7 +79,12 @@ pub fn bind_tokio_listener(addr: SocketAddr) -> std::io::Result<tokio::net::TcpL
 pub fn bind_tokio_listener_reuse_port(
     addr: SocketAddr,
 ) -> std::io::Result<tokio::net::TcpListener> {
-    tokio::net::TcpListener::from_std(build_listen_socket(addr, true)?)
+    tokio::net::TcpListener::from_std(build_listen_socket(addr, true, false)?)
+}
+
+/// Binds IPv6 without claiming the corresponding IPv4 addresses.
+pub fn bind_tokio_listener_v6_only(addr: SocketAddrV6) -> std::io::Result<tokio::net::TcpListener> {
+    tokio::net::TcpListener::from_std(build_listen_socket(addr.into(), false, true)?)
 }
 
 /// Detect silent peer death within ~2 min instead of the Linux default ~2h.

@@ -20,15 +20,12 @@ export class AppComponent implements OnInit {
 
   async ngOnInit() {
     try {
-      // Determine if we're in kiosk mode
       this.stateService.kiosk = ['localhost', '127.0.0.1'].includes(
         this.document.location.hostname,
       )
 
-      // Get pubkey for encryption
       await this.api.loadPubKey()
 
-      // Check setup status to determine initial route
       const status = await this.api.rpc.setup.status({})
 
       switch (status.status) {
@@ -37,7 +34,6 @@ export class AppComponent implements OnInit {
           break
 
         case 'incomplete':
-          // Store the data drive info from status
           if (status.guid) {
             this.stateService.dataDriveGuid = status.guid
           }
@@ -48,12 +44,10 @@ export class AppComponent implements OnInit {
           break
 
         case 'running':
-          // Setup is in progress, show loading page
           await this.router.navigate(['/loading'])
           break
 
         case 'complete':
-          // Setup execution finished, show success page
           await this.router.navigate(['/success'])
           break
       }

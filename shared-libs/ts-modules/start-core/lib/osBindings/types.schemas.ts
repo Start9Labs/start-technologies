@@ -531,20 +531,12 @@ export const DeviceFilter: z.ZodObject<{
 }).meta({
   id: 'DeviceFilter',
 })
-export const DnsSettings: z.ZodObject<{
-  dhcpServers: z.ZodArray<z.ZodString>
-  staticServers: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
-    z.ZodNullable<z.ZodArray<z.ZodString>>
-  >
-}> = /* @__PURE__ */ object({
-  dhcpServers: z.array(z.string()),
-  staticServers: wire(
-    z.array(z.string()).nullable().optional(),
-    z.array(z.string()).nullable(),
-  ),
-}).meta({
-  id: 'DnsSettings',
+export const DnsSource: z.ZodEnum<{
+  gateway: 'gateway'
+  static: 'static'
+  'public-fallback': 'public-fallback'
+}> = /* @__PURE__ */ z.enum(['gateway', 'static', 'public-fallback']).meta({
+  id: 'DnsSource',
 })
 export const Duration: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Duration',
@@ -1080,6 +1072,25 @@ export const NotificationLevel: z.ZodEnum<{
 }> = /* @__PURE__ */ z.enum(['success', 'info', 'warning', 'error']).meta({
   id: 'NotificationLevel',
 })
+
+/**
+ * An absent update preserves DNS intent; null servers select gateway DNS.
+ */
+export const OutboundDnsUpdate: z.ZodObject<{
+  servers: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
+    z.ZodNullable<z.ZodArray<z.ZodString>>
+  >
+}> = /* @__PURE__ */ object({
+  servers: wire(
+    z.array(z.string()).nullable().optional(),
+    z.array(z.string()).nullable(),
+  ),
+}).meta({
+  id: 'OutboundDnsUpdate',
+  description:
+    'An absent update preserves DNS intent; null servers select gateway DNS.',
+})
 export const PackageBackupReport: z.ZodObject<{
   error: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1366,19 +1377,6 @@ export const SetServerHostnameParams: z.ZodObject<{
   }),
 }).meta({
   id: 'SetServerHostnameParams',
-})
-export const SetStaticDnsParams: z.ZodObject<{
-  servers: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
-    z.ZodNullable<z.ZodArray<z.ZodString>>
-  >
-}> = /* @__PURE__ */ object({
-  servers: wire(
-    z.array(z.string()).nullable().optional(),
-    z.array(z.string()).nullable(),
-  ),
-}).meta({
-  id: 'SetStaticDnsParams',
 })
 export const SetWifiEnabledParams: z.ZodObject<{ enabled: z.ZodBoolean }> =
   /* @__PURE__ */ object({ enabled: z.boolean() }).meta({
@@ -2372,6 +2370,31 @@ export const DestroySubcontainerFsParams: z.ZodObject<{ guid: typeof Guid }> =
   /* @__PURE__ */ object({ guid: Guid }).meta({
     id: 'DestroySubcontainerFsParams',
   })
+
+/**
+ * Per-gateway DNS intent and effective upstreams. `static_servers` is the persisted
+ * override; `servers` and `source` are derived from it and the link configuration.
+ * Without an override or gateway-provided resolvers, the public fallback is used.
+ */
+export const DnsSettings: z.ZodObject<{
+  staticServers: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
+    z.ZodNullable<z.ZodArray<z.ZodString>>
+  >
+  servers: z.ZodArray<z.ZodString>
+  source: typeof DnsSource
+}> = /* @__PURE__ */ object({
+  staticServers: wire(
+    z.array(z.string()).nullable().optional(),
+    z.array(z.string()).nullable(),
+  ),
+  servers: z.array(z.string()),
+  source: DnsSource,
+}).meta({
+  id: 'DnsSettings',
+  description:
+    'Per-gateway DNS intent and effective upstreams. `static_servers` is the persisted\noverride; `servers` and `source` are derived from it and the link configuration.\nWithout an override or gateway-provided resolvers, the public fallback is used.',
+})
 export const DomainSettings: z.ZodObject<{ gateway: typeof GatewayId }> =
   /* @__PURE__ */ object({ gateway: GatewayId }).meta({
     id: 'DomainSettings',
@@ -2386,6 +2409,26 @@ export const DownloadsResponse: z.ZodObject<{
   byPackageVersion: z.array(PackageVersionCount),
 }).meta({
   id: 'DownloadsResponse',
+})
+export const EditGatewayParams: z.ZodObject<{
+  id: typeof GatewayId
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  dns: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof OutboundDnsUpdate>>,
+    z.ZodNullable<typeof OutboundDnsUpdate>
+  >
+}> = /* @__PURE__ */ object({
+  id: GatewayId,
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  dns: wire(
+    OutboundDnsUpdate.nullable().optional(),
+    OutboundDnsUpdate.nullable(),
+  ),
+}).meta({
+  id: 'EditGatewayParams',
 })
 export const EditSignerParams: z.ZodObject<{
   id: typeof Guid
@@ -2898,6 +2941,20 @@ export const IpInfo: z.ZodObject<{
   >
   ntpServers: z.ZodArray<z.ZodString>
   dnsServers: z.ZodArray<z.ZodString>
+  /**
+   * Lowest IPv4 default-route metric in `main`, or `None` when absent.
+   */
+  defaultRouteV4: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  /**
+   * Lowest IPv6 default-route metric in `main`, or `None` when absent.
+   */
+  defaultRouteV6: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
 }> = /* @__PURE__ */ object({
   name: z.string(),
   scopeId: z.int(),
@@ -2910,6 +2967,20 @@ export const IpInfo: z.ZodObject<{
   wanIp: wire(z.string().nullable().optional(), z.string().nullable()),
   ntpServers: z.array(z.string()),
   dnsServers: z.array(z.string()),
+  /**
+   * Lowest IPv4 default-route metric in `main`, or `None` when absent.
+   */
+  defaultRouteV4: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description:
+      'Lowest IPv4 default-route metric in `main`, or `None` when absent.',
+  }),
+  /**
+   * Lowest IPv6 default-route metric in `main`, or `None` when absent.
+   */
+  defaultRouteV6: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description:
+      'Lowest IPv6 default-route metric in `main`, or `None` when absent.',
+  }),
 }).meta({
   id: 'IpInfo',
 })
@@ -3574,8 +3645,16 @@ export const SetDefaultOutboundParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof GatewayId>>,
     z.ZodNullable<typeof GatewayId>
   >
+  dns: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof OutboundDnsUpdate>>,
+    z.ZodNullable<typeof OutboundDnsUpdate>
+  >
 }> = /* @__PURE__ */ object({
   gateway: wire(GatewayId.nullable().optional(), GatewayId.nullable()),
+  dns: wire(
+    OutboundDnsUpdate.nullable().optional(),
+    OutboundDnsUpdate.nullable(),
+  ),
 }).meta({
   id: 'SetDefaultOutboundParams',
 })
@@ -3612,11 +3691,34 @@ export const SetOutboundGatewayParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof GatewayId>>,
     z.ZodNullable<typeof GatewayId>
   >
+  dns: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof OutboundDnsUpdate>>,
+    z.ZodNullable<typeof OutboundDnsUpdate>
+  >
 }> = /* @__PURE__ */ object({
   package: PackageId,
   gateway: wire(GatewayId.nullable().optional(), GatewayId.nullable()),
+  dns: wire(
+    OutboundDnsUpdate.nullable().optional(),
+    OutboundDnsUpdate.nullable(),
+  ),
 }).meta({
   id: 'SetOutboundGatewayParams',
+})
+export const SetStaticDnsParams: z.ZodObject<{
+  gateway: typeof GatewayId
+  servers: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
+    z.ZodNullable<z.ZodArray<z.ZodString>>
+  >
+}> = /* @__PURE__ */ object({
+  gateway: GatewayId,
+  servers: wire(
+    z.array(z.string()).nullable().optional(),
+    z.array(z.string()).nullable(),
+  ),
+}).meta({
+  id: 'SetStaticDnsParams',
 })
 export const SetupExecuteParams: z.ZodObject<{
   guid: z.ZodString
@@ -4243,6 +4345,11 @@ export const MountParams: z.ZodObject<{
 )
 export const NetworkInterfaceInfo: z.ZodCodec<
   z.ZodObject<{
+    /**
+     * Exact names eligible for host-only DNS bootstrap over the underlay.
+     */
+    wireguardEndpointDomains: z.ZodOptional<z.ZodArray<z.ZodString>>
+    dns: z.ZodOptional<typeof DnsSettings>
     name: z.ZodOptional<z.ZodNullable<z.ZodString>>
     secure: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>
     ipInfo: z.ZodOptional<z.ZodNullable<typeof IpInfo>>
@@ -4257,6 +4364,11 @@ export const NetworkInterfaceInfo: z.ZodCodec<
     dnsUpdate: z.ZodOptional<typeof CapabilityVerdict>
   }>,
   z.ZodObject<{
+    /**
+     * Exact names eligible for host-only DNS bootstrap over the underlay.
+     */
+    wireguardEndpointDomains: z.ZodArray<z.ZodString>
+    dns: typeof DnsSettings
     name: z.ZodNullable<z.ZodString>
     secure: z.ZodNullable<z.ZodBoolean>
     ipInfo: z.ZodNullable<typeof IpInfo>
@@ -4272,6 +4384,14 @@ export const NetworkInterfaceInfo: z.ZodCodec<
   }>
 > = /* @__PURE__ */ wire(
   object({
+    /**
+     * Exact names eligible for host-only DNS bootstrap over the underlay.
+     */
+    wireguardEndpointDomains: z.array(z.string()).optional().meta({
+      description:
+        'Exact names eligible for host-only DNS bootstrap over the underlay.',
+    }),
+    dns: DnsSettings.optional(),
     name: z.string().nullable().optional(),
     secure: z.boolean().nullable().optional(),
     ipInfo: IpInfo.nullable().optional(),
@@ -4289,6 +4409,14 @@ export const NetworkInterfaceInfo: z.ZodCodec<
     }),
   }),
   object({
+    /**
+     * Exact names eligible for host-only DNS bootstrap over the underlay.
+     */
+    wireguardEndpointDomains: z.array(z.string()).meta({
+      description:
+        'Exact names eligible for host-only DNS bootstrap over the underlay.',
+    }),
+    dns: DnsSettings,
     name: z.string().nullable(),
     secure: z.boolean().nullable(),
     ipInfo: IpInfo.nullable(),
@@ -5098,6 +5226,14 @@ export const MetricsFollowResponse: z.ZodObject<{
 }> = /* @__PURE__ */ object({ guid: Guid, metrics: Metrics }).meta({
   id: 'MetricsFollowResponse',
 })
+export const NetworkGatewayInfo: z.ZodObject<{
+  id: typeof GatewayId
+  info: typeof NetworkInterfaceInfo
+}> = /* @__PURE__ */ object({ id: GatewayId, info: NetworkInterfaceInfo }).meta(
+  {
+    id: 'NetworkGatewayInfo',
+  },
+)
 export const OsIndex: z.ZodObject<{ versions: typeof OsVersionInfoMap }> =
   /* @__PURE__ */ object({ versions: OsVersionInfoMap }).meta({
     id: 'OsIndex',
@@ -5234,6 +5370,42 @@ export const Dependencies: z.ZodRecord<z.ZodString, typeof DepInfo> =
   /* @__PURE__ */ z.record(z.string(), DepInfo).meta({
     id: 'Dependencies',
   })
+
+/**
+ * Active DNS authority and its bootstrap gateway.
+ */
+export const DnsStatus: z.ZodObject<{
+  /**
+   * True until stored network policy takes authority.
+   */
+  bootstrap: z.ZodBoolean
+  /**
+   * Present only before stored network policy takes authority.
+   */
+  gateway: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof NetworkGatewayInfo>>,
+    z.ZodNullable<typeof NetworkGatewayInfo>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * True until stored network policy takes authority.
+   */
+  bootstrap: z.boolean().meta({
+    description: 'True until stored network policy takes authority.',
+  }),
+  /**
+   * Present only before stored network policy takes authority.
+   */
+  gateway: wire(
+    NetworkGatewayInfo.nullable().optional(),
+    NetworkGatewayInfo.nullable(),
+  ).meta({
+    description: 'Present only before stored network policy takes authority.',
+  }),
+}).meta({
+  id: 'DnsStatus',
+  description: 'Active DNS authority and its bootstrap gateway.',
+})
 export const GetPackageResponse: z.ZodObject<{
   categories: z.ZodArray<z.ZodString>
   best: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
@@ -5538,10 +5710,13 @@ export const NetworkInfo: z.ZodObject<{
     z.ZodOptional<z.ZodRecord<z.ZodString, typeof AcmeSettings>>,
     z.ZodRecord<z.ZodString, typeof AcmeSettings>
   >
-  dns: z.ZodCodec<z.ZodOptional<typeof DnsSettings>, typeof DnsSettings>
   defaultOutbound: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof GatewayId>>,
     z.ZodNullable<typeof GatewayId>
+  >
+  outboundDns: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
+    z.ZodNullable<z.ZodArray<z.ZodString>>
   >
   passthroughs: z.ZodCodec<
     z.ZodOptional<z.ZodArray<typeof PassthroughInfo>>,
@@ -5558,8 +5733,11 @@ export const NetworkInfo: z.ZodObject<{
     z.record(z.string(), AcmeSettings).optional(),
     z.record(z.string(), AcmeSettings),
   ),
-  dns: wire(DnsSettings.optional(), DnsSettings),
   defaultOutbound: wire(GatewayId.nullable().optional(), GatewayId.nullable()),
+  outboundDns: wire(
+    z.array(z.string()).nullable().optional(),
+    z.array(z.string()).nullable(),
+  ),
   passthroughs: wire(
     z.array(PassthroughInfo).optional(),
     z.array(PassthroughInfo),
@@ -5623,6 +5801,10 @@ export const PackageDataEntry: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof GatewayId>>,
     z.ZodNullable<typeof GatewayId>
   >
+  outboundDns: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
+    z.ZodNullable<z.ZodArray<z.ZodString>>
+  >
   plugin: z.ZodCodec<z.ZodOptional<typeof PackagePlugin>, typeof PackagePlugin>
 }> = /* @__PURE__ */ object({
   stateInfo: PackageState,
@@ -5637,6 +5819,10 @@ export const PackageDataEntry: z.ZodObject<{
   hosts: Hosts,
   storeExposedDependents: z.array(z.string()),
   outboundGateway: wire(GatewayId.nullable().optional(), GatewayId.nullable()),
+  outboundDns: wire(
+    z.array(z.string()).nullable().optional(),
+    z.array(z.string()).nullable(),
+  ),
   plugin: wire(PackagePlugin.optional(), PackagePlugin),
 }).meta({
   id: 'PackageDataEntry',

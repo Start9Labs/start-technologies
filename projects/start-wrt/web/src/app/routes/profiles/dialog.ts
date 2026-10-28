@@ -161,6 +161,10 @@ function nonEmptyList(control: AbstractControl): ValidationErrors | null {
                 tuiAnimated
                 tuiChevron
                 [stringify]="'fullname' | tuiStringify"
+                [invalid]="
+                  form.controls.lanAccessProfiles.touched &&
+                  form.controls.lanAccessProfiles.invalid
+                "
               >
                 @if (!context.data.otherProfiles.length) {
                   <label tuiLabel>{{ 'No other profiles' | i18n }}</label>
@@ -169,10 +173,6 @@ function nonEmptyList(control: AbstractControl): ValidationErrors | null {
                   tuiInputChip
                   tuiSelectLike
                   [disabled]="!context.data.otherProfiles.length"
-                  [invalid]="
-                    form.controls.lanAccessProfiles.touched &&
-                    form.controls.lanAccessProfiles.invalid
-                  "
                   [placeholder]="
                     multi().length ? '' : ('Allowed profiles' | i18n)
                   "

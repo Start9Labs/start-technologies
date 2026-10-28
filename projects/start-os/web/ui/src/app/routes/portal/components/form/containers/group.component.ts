@@ -50,6 +50,10 @@ import { FormUnionComponent } from './union.component'
     }
   `,
   styles: `
+    form-group > form-array:first-child {
+      margin-block-start: 0;
+    }
+
     form-group .g-form-control:not(:first-child) {
       display: block;
       margin-top: 1rem;

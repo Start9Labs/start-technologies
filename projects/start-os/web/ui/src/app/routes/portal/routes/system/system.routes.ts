@@ -71,16 +71,15 @@ export default [
         path: 'gateways',
         loadComponent: () => import('./routes/gateways/gateways.component'),
       },
-      // {
-      //   path: 'authorities',
-      //   title: titleResolver,
-      //   loadComponent: () =>
-      //     import('./routes/authorities/authorities.component'),
-      // },
+      {
+        path: 'outbound-traffic',
+        title: titleResolver,
+        data: { title: 'Outbound Traffic' },
+        loadComponent: () => import('./routes/outbound-traffic'),
+      },
       {
         path: 'dns',
-        title: titleResolver,
-        loadComponent: () => import('./routes/dns/dns.component'),
+        redirectTo: 'gateways',
       },
       {
         path: 'os-logs',

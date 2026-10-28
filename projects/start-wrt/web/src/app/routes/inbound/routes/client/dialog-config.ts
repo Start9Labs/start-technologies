@@ -67,9 +67,9 @@ export interface ClientConfigData {
       <tui-textfield [class.masked]="masked()">
         <textarea
           tuiTextarea
-          [min]="19"
-          [max]="19"
-          [readOnly]="true"
+          [minRows]="19"
+          [maxRows]="19"
+          [readonly]="true"
           [value]="context.data.config"
         ></textarea>
         <tui-icon tuiCopy />

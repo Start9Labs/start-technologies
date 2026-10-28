@@ -1,0 +1,1 @@
+- Stop a service daemon's entire process tree when its image-provided init exceeds the shutdown timeout.

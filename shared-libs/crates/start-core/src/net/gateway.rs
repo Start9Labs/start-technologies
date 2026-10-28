@@ -34,6 +34,7 @@ use crate::db::model::public::{
     CapabilityVerdict, GatewayPortMapCapabilities, IpInfo, NetworkInterfaceInfo,
     NetworkInterfaceType,
 };
+use crate::net::dns::{OutboundDnsUpdate, validate_dns_update};
 use crate::net::forward::{START9_BRIDGE_IFACE, nft_ensure_base};
 use crate::net::gateway::device::DeviceProxy;
 use crate::net::host::all_hosts;
@@ -128,6 +129,12 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
                 .no_display()
                 .with_about("about.rename-gateway")
                 .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "edit",
+            from_fn_async(edit_gateway)
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_cli(),
         )
         .subcommand(
             "set-secure",
@@ -240,9 +247,53 @@ pub(crate) async fn wireguard_psk(interface: &str) -> Result<Option<[u8; 32]>, E
 
 /// Update2 flag: persist the change to disk (NM_SETTINGS_UPDATE2_FLAG_TO_DISK).
 const NM_UPDATE2_TO_DISK: u32 = 0x1;
-/// Resolver priority for an imported WireGuard config's `DNS =` — preferred but
-/// not exclusive (positive, below the LAN default). Mirrors import_wireguard.
 const WG_DNS_PRIORITY: i32 = 10;
+
+fn endpoint_domain(endpoint: &str) -> Option<InternedString> {
+    let (host, port) = endpoint.rsplit_once(':')?;
+    port.parse::<u16>().ok()?;
+    let host = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim_end_matches('.');
+    if host.parse::<IpAddr>().is_ok() {
+        return None;
+    }
+    let name = hickory_server::proto::rr::Name::from_ascii(host).ok()?;
+    Some(InternedString::intern(
+        name.to_lowercase().to_utf8().trim_end_matches('.'),
+    ))
+}
+
+pub(crate) fn wireguard_config_domains(config: &str) -> Result<OrdSet<InternedString>, Error> {
+    Ok(WgConfig::parse(config)?
+        .peers
+        .into_iter()
+        .filter_map(|peer| peer.endpoint)
+        .filter_map(|endpoint| endpoint_domain(&endpoint))
+        .collect())
+}
+
+fn settings_endpoint_domains(
+    settings: &HashMap<String, HashMap<String, OwnedValue>>,
+) -> Result<OrdSet<InternedString>, Error> {
+    let Some(peers) = settings.get("wireguard").and_then(|wg| wg.get("peers")) else {
+        return Ok(OrdSet::new());
+    };
+    let peers = Vec::<HashMap<String, OwnedValue>>::try_from(
+        peers.try_clone().with_kind(ErrorKind::Network)?,
+    )
+    .with_kind(ErrorKind::Network)?;
+    Ok(peers
+        .into_iter()
+        .filter_map(|mut peer| peer.remove("endpoint"))
+        .map(String::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .with_kind(ErrorKind::Network)?
+        .into_iter()
+        .filter_map(|endpoint| endpoint_domain(&endpoint))
+        .collect())
+}
 
 struct WgPeer {
     public_key: String,
@@ -251,9 +302,6 @@ struct WgPeer {
     persistent_keepalive: Option<u32>,
 }
 
-/// The fields of a WireGuard `.conf` we map onto a NetworkManager connection.
-/// `AllowedIPs` is intentionally dropped: like `sanitize_config` (tunnel.rs) we
-/// force a full-tunnel `0.0.0.0/0, ::/0` so every gateway routes the same way.
 struct WgConfig {
     private_key: String,
     addresses: Vec<(IpAddr, u8)>,
@@ -443,8 +491,6 @@ impl WgConfig {
                     })
                     .collect();
                 s.insert("address-data".into(), ov(address_data.into())?);
-                // import_wireguard sets dns-priority on every active protocol,
-                // regardless of whether this config carries resolvers.
                 s.insert("dns-priority".into(), ov(WG_DNS_PRIORITY.into())?);
                 if !dns.is_empty() {
                     let dns_val = if is_v4 {
@@ -470,7 +516,6 @@ impl WgConfig {
                     };
                     s.insert("dns".into(), ov(dns_val)?);
                     s.insert("dns-search".into(), ov(vec!["~".to_string()].into())?);
-                    s.insert("dns-priority".into(), ov(WG_DNS_PRIORITY.into())?);
                 }
             }
             settings.insert(proto.into(), s);
@@ -586,6 +631,21 @@ async fn set_name(
     RenameGatewayParams { id, name }: RenameGatewayParams,
 ) -> Result<(), Error> {
     ctx.net_controller.net_iface.set_name(&id, name).await
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+struct EditGatewayParams {
+    id: GatewayId,
+    name: Option<InternedString>,
+    dns: Option<OutboundDnsUpdate>,
+}
+
+rpc_toolkit::reflect_ts!(EditGatewayParams);
+rpc_toolkit::ts_export!(EditGatewayParams, namespaces = [""]);
+
+async fn edit_gateway(ctx: RpcContext, params: EditGatewayParams) -> Result<(), Error> {
+    ctx.net_controller.net_iface.edit(params).await
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
@@ -963,11 +1023,11 @@ pub async fn check_dns(
     ctx: RpcContext,
     CheckDnsParams { gateway, fqdn }: CheckDnsParams,
 ) -> Result<bool, Error> {
-    use hickory_server::net::runtime::TokioRuntimeProvider;
     use hickory_server::resolver::Resolver;
     use hickory_server::resolver::config::{ResolverConfig, ResolverOpts};
 
     use crate::net::dns::forward_name_server;
+    use crate::net::dns::upstream::GatewayRuntime;
 
     let ip_info = ctx.net_controller.net_iface.watcher.ip_info();
     let gw_info = ip_info
@@ -996,10 +1056,13 @@ pub async fn check_dns(
         opts.timeout = Duration::from_secs(5);
         opts.attempts = 1;
 
-        let resolver = Resolver::builder_with_config(config, TokioRuntimeProvider::default())
-            .with_options(opts)
-            .build()
-            .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Network))?;
+        let resolver = Resolver::builder_with_config(
+            config,
+            GatewayRuntime::new(gateway.clone(), gw_ip_info.scope_id),
+        )
+        .with_options(opts)
+        .build()
+        .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Network))?;
 
         if let Ok(lookup) = resolver.lookup_ip(&*fqdn).await {
             if lookup.iter().any(|ip| expected.contains(&ip)) {
@@ -1017,6 +1080,8 @@ pub async fn check_dns(
 struct SetDefaultOutboundParams {
     #[arg(help = "help.arg.gateway-id")]
     gateway: Option<GatewayId>,
+    #[arg(skip)]
+    dns: Option<OutboundDnsUpdate>,
 }
 
 rpc_toolkit::reflect_ts!(SetDefaultOutboundParams);
@@ -1024,11 +1089,23 @@ rpc_toolkit::ts_export!(SetDefaultOutboundParams, namespaces = [""]);
 
 async fn set_default_outbound(
     ctx: RpcContext,
-    SetDefaultOutboundParams { gateway }: SetDefaultOutboundParams,
+    params: SetDefaultOutboundParams,
 ) -> Result<(), Error> {
-    if let Some(ref gw) = gateway {
-        let ip_info = ctx.net_controller.net_iface.watcher.ip_info();
-        let info = ip_info
+    params
+        .save(&ctx.db, &ctx.net_controller.net_iface.watcher.ip_info())
+        .await
+}
+
+fn validate_outbound_gateway_change(
+    previous: Option<GatewayId>,
+    gateway: &Option<GatewayId>,
+    interfaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+) -> Result<(), Error> {
+    if previous.as_ref() == gateway.as_ref() {
+        return Ok(());
+    }
+    if let Some(gw) = gateway {
+        let info = interfaces
             .get(gw)
             .ok_or_else(|| Error::new(eyre!("unknown gateway: {gw}"), ErrorKind::NotFound))?;
         ensure_code!(
@@ -1037,16 +1114,32 @@ async fn set_default_outbound(
             "gateway {gw} is not connected"
         );
     }
-    ctx.db
-        .mutate(|db| {
-            db.as_public_mut()
-                .as_server_info_mut()
-                .as_network_mut()
-                .as_default_outbound_mut()
-                .ser(&gateway)
+    Ok(())
+}
+
+impl SetDefaultOutboundParams {
+    async fn save(
+        self,
+        db: &TypedPatchDb<Database>,
+        interfaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    ) -> Result<(), Error> {
+        let dns = validate_dns_update(self.dns, interfaces)?;
+        db.mutate(|db| {
+            let network = db.as_public_mut().as_server_info_mut().as_network_mut();
+            validate_outbound_gateway_change(
+                network.as_default_outbound().de()?,
+                &self.gateway,
+                interfaces,
+            )?;
+            network.as_default_outbound_mut().ser(&self.gateway)?;
+            if let Some(dns) = dns {
+                network.as_outbound_dns_mut().ser(&dns)?;
+            }
+            Ok(())
         })
         .await
         .result
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
@@ -1057,6 +1150,8 @@ pub struct SetOutboundGatewayParams {
     package: PackageId,
     #[arg(help = "help.arg.gateway-id")]
     gateway: Option<GatewayId>,
+    #[arg(skip)]
+    dns: Option<OutboundDnsUpdate>,
 }
 
 rpc_toolkit::reflect_ts!(SetOutboundGatewayParams);
@@ -1064,30 +1159,40 @@ rpc_toolkit::ts_export!(SetOutboundGatewayParams, namespaces = [""]);
 
 pub async fn set_outbound_gateway(
     ctx: RpcContext,
-    SetOutboundGatewayParams { package, gateway }: SetOutboundGatewayParams,
+    params: SetOutboundGatewayParams,
 ) -> Result<(), Error> {
-    if let Some(ref gw) = gateway {
-        let ip_info = ctx.net_controller.net_iface.watcher.ip_info();
-        let info = ip_info
-            .get(gw)
-            .ok_or_else(|| Error::new(eyre!("unknown gateway: {gw}"), ErrorKind::NotFound))?;
-        ensure_code!(
-            info.ip_info.is_some(),
-            ErrorKind::InvalidRequest,
-            "gateway {gw} is not connected"
-        );
-    }
-    ctx.db
-        .mutate(|db| {
-            db.as_public_mut()
+    params
+        .save(&ctx.db, &ctx.net_controller.net_iface.watcher.ip_info())
+        .await
+}
+
+impl SetOutboundGatewayParams {
+    async fn save(
+        self,
+        db: &TypedPatchDb<Database>,
+        interfaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    ) -> Result<(), Error> {
+        let dns = validate_dns_update(self.dns, interfaces)?;
+        db.mutate(|db| {
+            let package = db
+                .as_public_mut()
                 .as_package_data_mut()
-                .as_idx_mut(&package)
-                .or_not_found(&package)?
-                .as_outbound_gateway_mut()
-                .ser(&gateway)
+                .as_idx_mut(&self.package)
+                .or_not_found(&self.package)?;
+            validate_outbound_gateway_change(
+                package.as_outbound_gateway().de()?,
+                &self.gateway,
+                interfaces,
+            )?;
+            package.as_outbound_gateway_mut().ser(&self.gateway)?;
+            if let Some(dns) = dns {
+                package.as_outbound_dns_mut().ser(&dns)?;
+            }
+            Ok(())
         })
         .await
         .result
+    }
 }
 
 #[proxy(
@@ -1207,6 +1312,9 @@ trait Ip6Config {
     fn address_data(&self) -> Result<Vec<AddressData>, Error>;
 
     #[zbus(property)]
+    fn route_data(&self) -> Result<Vec<RouteData>, Error>;
+
+    #[zbus(property)]
     fn gateway(&self) -> Result<String, Error>;
 
     // IP6Config has no `NameserverData`; its resolvers are `Nameservers` (aay),
@@ -1234,6 +1342,7 @@ struct RouteData {
     dest: String,
     prefix: u32,
     table: Option<u32>,
+    metric: Option<u32>,
 }
 
 #[derive(Clone, Debug, DeserializeDict, ZValue, ZType)]
@@ -1527,7 +1636,7 @@ struct PolicyRoutingGuard {
 async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
     let active_tables: BTreeSet<u32> = active_ifaces
         .iter()
-        .filter_map(|iface| if_nametoindex(iface.as_str()).ok().map(|idx| 1000 + idx))
+        .filter_map(|iface| if_nametoindex(iface.as_str()).ok().map(gateway_table_id))
         .collect();
 
     // A source rule is deleted by the selector it was added with.
@@ -1560,7 +1669,7 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
             let Ok(table_id) = token.parse::<u32>() else {
                 continue;
             };
-            if table_id < 1000 || active_tables.contains(&table_id) {
+            if table_id < GATEWAY_TABLE_BASE || active_tables.contains(&table_id) {
                 continue;
             }
             stale.insert(table_id);
@@ -1790,10 +1899,12 @@ fn device_type_of(raw: u32) -> Option<NetworkInterfaceType> {
     }
 }
 
-/// The policy-routing table id (`1000 + ifindex`) for an interface, or `None`
-/// for interface types we don't policy-route (bridges, loopback). Single source
-/// of truth shared by the coordinator (which renders the nft mark rules) and
-/// `watch_ip` (which installs the matching routes and ip rule).
+const GATEWAY_TABLE_BASE: u32 = 1000;
+
+pub(crate) const fn gateway_table_id(index: u32) -> u32 {
+    GATEWAY_TABLE_BASE + index
+}
+
 fn policy_table_for(device_type: Option<NetworkInterfaceType>, iface: &GatewayId) -> Option<u32> {
     if matches!(
         device_type,
@@ -1802,7 +1913,7 @@ fn policy_table_for(device_type: Option<NetworkInterfaceType>, iface: &GatewayId
         return None;
     }
     if_nametoindex(iface.as_str())
-        .map(|idx| 1000 + idx)
+        .map(gateway_table_id)
         .log_err()
 }
 
@@ -1963,6 +2074,21 @@ async fn watch_ip(
                     until
                         .run(async {
                             let device_type = device_type_of(device_proxy.device_type().await?);
+                            let domains =
+                                settings_endpoint_domains(&settings_proxy.get_settings().await?)?;
+                            write_to.send_if_modified(|interfaces| {
+                                if interfaces
+                                    .get(&iface)
+                                    .is_some_and(|info| info.wireguard_endpoint_domains == domains)
+                                {
+                                    return false;
+                                }
+                                interfaces
+                                    .entry(iface.clone())
+                                    .or_default()
+                                    .wireguard_endpoint_domains = domains;
+                                true
+                            });
 
                             let name = InternedString::from(active_connection_proxy.id().await?);
 
@@ -1979,6 +2105,7 @@ async fn watch_ip(
                                     ip4_proxy.receive_nameserver_data_changed().await.stub(),
                                 )
                                 .with_stream(ip6_proxy.receive_address_data_changed().await.stub())
+                                .with_stream(ip6_proxy.receive_route_data_changed().await.stub())
                                 .with_stream(ip6_proxy.receive_gateway_changed().await.stub())
                                 .with_stream(ip6_proxy.receive_nameservers_changed().await.stub());
 
@@ -2431,7 +2558,16 @@ async fn poll_ip_info(
     // request has a 5-second timeout per URL and is easily cancelled by
     // D-Bus signals via the Until mechanism, which would prevent the
     // gateway from ever appearing if we waited.
+    let default_metric = |routes: Vec<RouteData>| {
+        routes
+            .into_iter()
+            .filter(|r| r.prefix == 0 && r.table.unwrap_or(254) == 254)
+            .filter_map(|r| r.metric)
+            .min()
+    };
     let mut ip_info = IpInfo {
+        default_route_v4: default_metric(ip4_proxy.route_data().await?),
+        default_route_v6: default_metric(ip6_proxy.route_data().await?),
         name: name.clone(),
         scope_id,
         device_type,
@@ -2443,6 +2579,12 @@ async fn poll_ip_info(
     };
 
     write_to.send_if_modified(|m: &mut OrdMap<GatewayId, NetworkInterfaceInfo>| {
+        let wireguard_endpoint_domains = m
+            .get(iface)
+            .map(|i| i.wireguard_endpoint_domains.clone())
+            .unwrap_or_default();
+        let mut dns = m.get(iface).map(|i| i.dns.clone()).unwrap_or_default();
+        dns.refresh(Some(&ip_info));
         let (name, secure, gateway_type, prev_wan_ip, port_map, dns_update) = m.get(iface).map_or(
             (
                 None,
@@ -2468,6 +2610,8 @@ async fn poll_ip_info(
         m.insert(
             iface.clone(),
             NetworkInterfaceInfo {
+                wireguard_endpoint_domains,
+                dns,
                 name,
                 secure,
                 ip_info: Some(ip_info.clone()),
@@ -2774,12 +2918,29 @@ impl NetworkInterfaceWatcher {
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct NetworkInterfaceController {
-    db: TypedPatchDb<Database>,
+    pub(crate) db: TypedPatchDb<Database>,
     pub watcher: NetworkInterfaceWatcher,
     synced: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
     _sync: NonDetachingJoinHandle<()>,
 }
 impl NetworkInterfaceController {
+    #[cfg(test)]
+    pub(crate) fn with_test_interfaces(
+        db: TypedPatchDb<Database>,
+        interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+    ) -> Self {
+        Self {
+            db,
+            watcher: NetworkInterfaceWatcher {
+                activated: Watch::new(BTreeMap::new()),
+                ip_info: interfaces,
+                _watcher: tokio::spawn(async {}).into(),
+            },
+            synced: Watch::new(OrdMap::new()),
+            _sync: tokio::spawn(async {}).into(),
+        }
+    }
+
     /// Returns once the database lists every connection NetworkManager activated at startup.
     pub async fn settle(&self) {
         match tokio::time::timeout(SETTLE_TIMEOUT, self.settled()).await {
@@ -2917,7 +3078,7 @@ impl NetworkInterfaceController {
 
             match if_nametoindex(gw_id.as_str()) {
                 Ok(idx) => {
-                    desired.gateway_tables.insert(1000 + idx);
+                    desired.gateway_tables.insert(gateway_table_id(idx));
                 }
                 Err(e) => {
                     tracing::error!("failed to get ifindex for {gw_id}: {e}");
@@ -2995,6 +3156,7 @@ impl NetworkInterfaceController {
                         Ok(mut info) => {
                             for (_, info) in OrdMapIterMut::from(&mut info) {
                                 info.ip_info = None;
+                                info.dns.refresh(None);
                             }
                             info
                         }
@@ -3171,33 +3333,66 @@ impl NetworkInterfaceController {
         Ok(())
     }
 
-    pub async fn set_name(&self, interface: &GatewayId, name: InternedString) -> Result<(), Error> {
-        let mut sub = self
-            .db
-            .subscribe(
-                "/public/serverInfo/network/gateways"
-                    .parse::<JsonPointer<_, _>>()
-                    .with_kind(ErrorKind::Database)?
-                    .join_end(interface.as_str())
-                    .join_end("name"),
-            )
-            .await;
-        let changed = self.watcher.ip_info.send_if_modified(|i| {
-            i.get_mut(interface)
-                .map(|i| {
-                    if i.name.as_ref() != Some(&name) {
-                        i.name = Some(name);
-                        true
-                    } else {
-                        false
-                    }
-                })
-                .unwrap_or(false)
-        });
-        if changed {
-            sub.recv().await;
-        }
+    pub async fn set_dns(
+        &self,
+        interface: &GatewayId,
+        servers: Option<std::collections::VecDeque<SocketAddr>>,
+    ) -> Result<(), Error> {
+        self.update_intent(interface, None, Some(servers)).await
+    }
 
+    pub async fn set_name(&self, interface: &GatewayId, name: InternedString) -> Result<(), Error> {
+        self.update_intent(interface, Some(name), None).await
+    }
+
+    async fn edit(&self, params: EditGatewayParams) -> Result<(), Error> {
+        let dns = validate_dns_update(params.dns, &self.watcher.ip_info())?;
+        self.update_intent(&params.id, params.name, dns).await
+    }
+
+    async fn update_intent(
+        &self,
+        interface: &GatewayId,
+        name: Option<InternedString>,
+        dns: Option<Option<std::collections::VecDeque<SocketAddr>>>,
+    ) -> Result<(), Error> {
+        let mut watch = self
+            .db
+            .watch(
+                "/public/serverInfo/network/gateways"
+                    .parse::<JsonPointer>()
+                    .unwrap()
+                    .join_end(interface.as_str()),
+            )
+            .await
+            .typed::<Option<NetworkInterfaceInfo>>();
+        let mut expected = None;
+        self.watcher.ip_info.send_if_modified(|interfaces| {
+            let Some(info) = interfaces.get_mut(interface) else {
+                return false;
+            };
+            if let Some(name) = &name {
+                info.name = Some(name.clone());
+            }
+            if let Some(dns) = &dns {
+                info.dns.static_servers = dns.clone();
+                info.dns.refresh(info.ip_info.as_deref());
+            }
+            expected = Some((name, dns));
+            true
+        });
+        let (name, dns) = expected.or_not_found(lazy_format!("gateway {interface}"))?;
+        watch
+            .wait_for(|info| {
+                info.as_ref().is_some_and(|info| {
+                    name.as_ref()
+                        .is_none_or(|name| info.name.as_ref() == Some(name))
+                        && dns
+                            .as_ref()
+                            .is_none_or(|dns| &info.dns.static_servers == dns)
+                })
+            })
+            .await?;
         Ok(())
     }
 
@@ -3269,11 +3464,15 @@ pub fn lookup_info_by_addr(
     })
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
+#[visit(ts(rename = "NetworkGatewayInfo"))]
 pub struct GatewayInfo {
     pub id: GatewayId,
     pub info: NetworkInterfaceInfo,
 }
+
+rpc_toolkit::reflect_ts!(GatewayInfo);
+
 impl<V: MetadataVisitor> Visit<V> for GatewayInfo {
     fn visit(&self, visitor: &mut V) -> <V as visit_rs::Visitor>::Result {
         visitor.visit(self)
@@ -3316,6 +3515,10 @@ impl WildcardListener {
             ip_info,
             _watcher: Some(watcher_handle),
         })
+    }
+
+    pub(crate) fn subscribe(&self) -> Watch<OrdMap<GatewayId, NetworkInterfaceInfo>> {
+        self.ip_info.clone_unseen()
     }
 
     /// Replace the ip_info source with the one from the NetworkInterfaceController.
@@ -3540,11 +3743,463 @@ mod carries_v6_tests {
 }
 
 #[cfg(test)]
+mod dns_config_tests {
+    use super::*;
+
+    async fn policy_fixture() -> (
+        tempfile::TempDir,
+        TypedPatchDb<Database>,
+        OrdMap<GatewayId, NetworkInterfaceInfo>,
+    ) {
+        let temp = tempfile::tempdir().unwrap();
+        let db = TypedPatchDb::<Database>::load_unchecked(
+            patch_db::PatchDb::open(temp.path().join("db"))
+                .await
+                .unwrap(),
+        );
+        db.put(&patch_db::json_ptr::ROOT, &imbl_value::json!({"public": {
+            "serverInfo": {"network": {"defaultOutbound": "eth0", "outboundDns": ["192.0.2.53:53"]}},
+            "packageData": {"pkg": {"outboundGateway": "eth0", "outboundDns": ["192.0.2.53:53"]}}
+        }})).await.unwrap();
+        let interfaces = ["eth0", "wg0"]
+            .into_iter()
+            .map(|id| {
+                (
+                    id.parse::<GatewayId>().unwrap(),
+                    NetworkInterfaceInfo {
+                        ip_info: Some(Arc::new(IpInfo {
+                            subnets: [
+                                "192.0.2.10/24".parse::<IpNet>().unwrap(),
+                                "2001:db8::10/64".parse::<IpNet>().unwrap(),
+                            ]
+                            .into_iter()
+                            .collect(),
+                            ..Default::default()
+                        })),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+        (temp, db, interfaces)
+    }
+
+    async fn save_both(
+        db: &TypedPatchDb<Database>,
+        interfaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+        params: Value,
+    ) {
+        from_value::<SetDefaultOutboundParams>(params.clone())
+            .unwrap()
+            .save(db, interfaces)
+            .await
+            .unwrap();
+        from_value::<SetOutboundGatewayParams>(params)
+            .unwrap()
+            .save(db, interfaces)
+            .await
+            .unwrap();
+    }
+
+    async fn assert_policy_dns(db: &TypedPatchDb<Database>, expected: Value) {
+        let db = db.peek().await;
+        let public = db.as_public();
+        assert_eq!(
+            to_value(
+                &public
+                    .as_server_info()
+                    .as_network()
+                    .as_outbound_dns()
+                    .de()
+                    .unwrap()
+            )
+            .unwrap(),
+            expected
+        );
+        assert_eq!(
+            to_value(
+                &public
+                    .as_package_data()
+                    .as_idx(&"pkg".parse().unwrap())
+                    .unwrap()
+                    .as_outbound_dns()
+                    .de()
+                    .unwrap()
+            )
+            .unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn requester_dns_keeps_existing_cli_grammar() {
+        let host =
+            SetDefaultOutboundParams::try_parse_from(["set-default-outbound", "eth0"]).unwrap();
+        assert!(host.dns.is_none());
+        assert!(
+            SetDefaultOutboundParams::try_parse_from(["set-default-outbound"])
+                .unwrap()
+                .gateway
+                .is_none()
+        );
+        let package =
+            SetOutboundGatewayParams::try_parse_from(["set-outbound-gateway", "pkg", "eth0"])
+                .unwrap();
+        assert!(package.dns.is_none());
+        assert!(
+            SetOutboundGatewayParams::try_parse_from(["set-outbound-gateway", "pkg"])
+                .unwrap()
+                .gateway
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn requester_dns_updates_preserve_clear_and_normalize_atomically() {
+        let (_temp, db, interfaces) = policy_fixture().await;
+        for params in [
+            imbl_value::json!({"package": "pkg", "gateway": "wg0"}),
+            imbl_value::json!({"package": "pkg", "gateway": null, "dns": null}),
+        ] {
+            save_both(&db, &interfaces, params).await;
+            assert_policy_dns(&db, imbl_value::json!(["192.0.2.53:53"])).await;
+        }
+        save_both(
+            &db,
+            &interfaces,
+            imbl_value::json!({"package": "pkg", "gateway": "wg0", "dns": {"servers": null}}),
+        )
+        .await;
+        assert_policy_dns(&db, Value::Null).await;
+        save_both(&db, &interfaces, imbl_value::json!({"package": "pkg", "gateway": "eth0", "dns": {"servers": ["192.0.2.54", "[2001:db8::54]:5353"]}})).await;
+        assert_policy_dns(
+            &db,
+            imbl_value::json!(["192.0.2.54:53", "[2001:db8::54]:5353"]),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn invalid_requester_dns_never_changes_gateway_or_dns() {
+        let (_temp, db, interfaces) = policy_fixture().await;
+        let before: Value = db.peek().await.clone().into();
+        for servers in [
+            imbl_value::json!([]),
+            imbl_value::json!(["bad"]),
+            imbl_value::json!(["127.0.0.1"]),
+            imbl_value::json!(["192.0.2.10"]),
+            imbl_value::json!(["2001:db8::10"]),
+            imbl_value::json!(["192.0.2.53:0"]),
+        ] {
+            let params = imbl_value::json!({"package": "pkg", "gateway": "wg0", "dns": {"servers": servers}});
+            assert!(
+                from_value::<SetDefaultOutboundParams>(params.clone())
+                    .unwrap()
+                    .save(&db, &interfaces)
+                    .await
+                    .is_err()
+            );
+            assert!(
+                from_value::<SetOutboundGatewayParams>(params)
+                    .unwrap()
+                    .save(&db, &interfaces)
+                    .await
+                    .is_err()
+            );
+            let after: Value = db.peek().await.clone().into();
+            assert_eq!(before, after);
+        }
+    }
+
+    #[tokio::test]
+    async fn requester_dns_can_edit_retained_unavailable_selections_but_cannot_select_them() {
+        let (_temp, db, mut interfaces) = policy_fixture().await;
+        for removed in [false, true] {
+            if removed {
+                interfaces.remove(&"eth0".parse::<GatewayId>().unwrap());
+            } else {
+                interfaces
+                    .get_mut(&"eth0".parse::<GatewayId>().unwrap())
+                    .unwrap()
+                    .ip_info = None;
+            }
+            save_both(&db, &interfaces, imbl_value::json!({"package": "pkg", "gateway": "eth0", "dns": {"servers": ["192.0.2.54"]}})).await;
+            assert_policy_dns(&db, imbl_value::json!(["192.0.2.54:53"])).await;
+        }
+        save_both(
+            &db,
+            &interfaces,
+            imbl_value::json!({"package": "pkg", "gateway": "wg0"}),
+        )
+        .await;
+        let before: Value = db.peek().await.clone().into();
+        for gateway in ["eth0", "missing"] {
+            let params =
+                imbl_value::json!({"package": "pkg", "gateway": gateway, "dns": {"servers": null}});
+            assert!(
+                from_value::<SetDefaultOutboundParams>(params.clone())
+                    .unwrap()
+                    .save(&db, &interfaces)
+                    .await
+                    .is_err()
+            );
+            assert!(
+                from_value::<SetOutboundGatewayParams>(params)
+                    .unwrap()
+                    .save(&db, &interfaces)
+                    .await
+                    .is_err()
+            );
+            let after: Value = db.peek().await.clone().into();
+            assert_eq!(before, after);
+        }
+    }
+
+    #[tokio::test]
+    async fn gateway_edit_rejects_invalid_dns_and_missing_gateway_without_watcher_changes() {
+        let (_temp, db, interfaces) = policy_fixture().await;
+        let interfaces = Watch::new(interfaces);
+        let controller = NetworkInterfaceController::with_test_interfaces(db, interfaces.clone());
+        let before = interfaces.read();
+        let mut changed = interfaces.clone();
+        changed.mark_seen();
+        for params in [
+            imbl_value::json!({"id": "eth0", "name": "Renamed", "dns": {"servers": []}}),
+            imbl_value::json!({"id": "eth0", "name": "Renamed", "dns": {"servers": ["192.0.2.10"]}}),
+            imbl_value::json!({"id": "missing", "name": "Renamed", "dns": {"servers": ["192.0.2.53"]}}),
+        ] {
+            assert!(controller.edit(from_value(params).unwrap()).await.is_err());
+            assert_eq!(
+                to_value(&interfaces.read()).unwrap(),
+                to_value(&before).unwrap()
+            );
+            assert!(
+                tokio::time::timeout(Duration::from_millis(10), changed.changed())
+                    .await
+                    .is_err()
+            );
+        }
+        assert!(
+            controller
+                .set_name(&"missing".parse().unwrap(), "Renamed".into())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_edit_publishes_name_and_dns_together_and_preserves_omitted_intent() {
+        let (_temp, db, interfaces) = policy_fixture().await;
+        let gateway: GatewayId = "eth0".parse().unwrap();
+        let interfaces = Watch::new(interfaces);
+        let controller =
+            NetworkInterfaceController::with_test_interfaces(db.clone(), interfaces.clone());
+        for (params, name, servers) in [
+            (
+                imbl_value::json!({"id": "eth0", "name": "Alias", "dns": {"servers": ["192.0.2.54"]}}),
+                Some("Alias"),
+                Some(vec!["192.0.2.54:53".parse::<SocketAddr>().unwrap()]),
+            ),
+            (
+                imbl_value::json!({"id": "eth0", "name": null, "dns": {"servers": null}}),
+                Some("Alias"),
+                None,
+            ),
+            (
+                imbl_value::json!({"id": "eth0", "name": "Renamed", "dns": null}),
+                Some("Renamed"),
+                None,
+            ),
+            (imbl_value::json!({"id": "eth0"}), Some("Renamed"), None),
+        ] {
+            let mut changed = interfaces.clone();
+            changed.mark_seen();
+            let publish_db = db.clone();
+            let id = gateway.clone();
+            let publish = tokio::spawn(async move {
+                changed.changed().await;
+                let snapshot = changed.read();
+                let info = snapshot.get(&id).unwrap();
+                assert_eq!(info.name.as_deref(), name);
+                assert_eq!(
+                    info.dns
+                        .static_servers
+                        .as_ref()
+                        .map(|s| s.iter().cloned().collect::<Vec<_>>()),
+                    servers
+                );
+                publish_db
+                    .mutate(|db| {
+                        db.as_public_mut()
+                            .as_server_info_mut()
+                            .as_network_mut()
+                            .as_gateways_mut()
+                            .ser(&snapshot)
+                    })
+                    .await
+                    .result
+                    .unwrap();
+            });
+            tokio::time::timeout(
+                Duration::from_secs(1),
+                controller.edit(from_value(params).unwrap()),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            publish.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn independent_gateway_edits_acknowledge_a_coalesced_persisted_snapshot() {
+        let (_temp, db, interfaces) = policy_fixture().await;
+        let gateway: GatewayId = "eth0".parse().unwrap();
+        let interfaces = Watch::new(interfaces);
+        let controller =
+            NetworkInterfaceController::with_test_interfaces(db.clone(), interfaces.clone());
+        let servers: std::collections::VecDeque<SocketAddr> =
+            ["192.0.2.54:53".parse().unwrap()].into();
+        let mut changed = interfaces.clone();
+        let publish = async {
+            changed
+                .wait_for(|interfaces| {
+                    let info = interfaces.get(&gateway).unwrap();
+                    info.name.as_deref() == Some("Alias")
+                        && info.dns.static_servers.as_ref() == Some(&servers)
+                })
+                .await;
+            db.mutate(|db| {
+                db.as_public_mut()
+                    .as_server_info_mut()
+                    .as_network_mut()
+                    .as_gateways_mut()
+                    .ser(&changed.read())
+            })
+            .await
+            .result
+            .unwrap();
+        };
+        let (dns, name, ()) = tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::join!(
+                controller.set_dns(&gateway, Some(servers.clone())),
+                controller.set_name(&gateway, "Alias".into()),
+                publish
+            )
+        })
+        .await
+        .unwrap();
+        dns.unwrap();
+        name.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dns_override_acknowledges_intent_despite_link_dns_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = TypedPatchDb::<Database>::load_unchecked(
+            patch_db::PatchDb::open(temp.path().join("db"))
+                .await
+                .unwrap(),
+        );
+        let gateway: GatewayId = "eth0".parse().unwrap();
+        let mut info = NetworkInterfaceInfo {
+            ip_info: Some(Arc::new(IpInfo {
+                dns_servers: ["192.0.2.1".parse::<IpAddr>().unwrap()]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        info.dns.static_servers = Some(["192.0.2.53:53".parse().unwrap()].into());
+        info.dns.refresh(info.ip_info.as_deref());
+        let interfaces = Watch::new(
+            [(gateway.clone(), info)]
+                .into_iter()
+                .collect::<OrdMap<_, _>>(),
+        );
+        db.put(
+            &patch_db::json_ptr::ROOT,
+            &imbl_value::json!({ "public": { "serverInfo": { "network": { "gateways": {} } } } }),
+        )
+        .await
+        .unwrap();
+        db.mutate(|db| {
+            db.as_public_mut()
+                .as_server_info_mut()
+                .as_network_mut()
+                .as_gateways_mut()
+                .ser(&interfaces.read())
+        })
+        .await
+        .result
+        .unwrap();
+        let controller =
+            NetworkInterfaceController::with_test_interfaces(db.clone(), interfaces.clone());
+        let mut changed = interfaces.clone();
+        changed.mark_seen();
+        let publish = tokio::spawn(async move {
+            changed.changed().await;
+            changed.send_if_modified(|interfaces| {
+                let info = interfaces
+                    .get_mut(&"eth0".parse::<GatewayId>().unwrap())
+                    .unwrap();
+                Arc::make_mut(info.ip_info.as_mut().unwrap()).dns_servers =
+                    ["192.0.2.2".parse::<IpAddr>().unwrap()]
+                        .into_iter()
+                        .collect();
+                info.dns.refresh(info.ip_info.as_deref());
+                true
+            });
+            db.mutate(|db| {
+                db.as_public_mut()
+                    .as_server_info_mut()
+                    .as_network_mut()
+                    .as_gateways_mut()
+                    .ser(&changed.read())
+            })
+            .await
+            .result
+            .unwrap();
+        });
+        tokio::time::timeout(Duration::from_secs(1), controller.set_dns(&gateway, None))
+            .await
+            .unwrap()
+            .unwrap();
+        publish.await.unwrap();
+        assert_eq!(
+            interfaces.read().get(&gateway).unwrap().dns.servers,
+            ["192.0.2.2:53".parse().unwrap()]
+        );
+    }
+}
+
+#[cfg(test)]
 mod wg_config_tests {
     use super::*;
 
     fn as_str(v: &OwnedValue) -> String {
         v.downcast_ref::<zbus::zvariant::Str>().unwrap().to_string()
+    }
+
+    #[test]
+    fn endpoint_bootstrap_domains_come_from_configured_peers() {
+        let config = "[Interface]\nPrivateKey = key\n[Peer]\nPublicKey = peer\nEndpoint = VPN.Example.:51820\n[Peer]\nPublicKey = peer2\nEndpoint = 192.0.2.1:51820\n[Peer]\nPublicKey = peer3\nEndpoint = [2001:db8::1]:51820\n";
+        let expected: OrdSet<InternedString> = [InternedString::from_static("vpn.example")]
+            .into_iter()
+            .collect();
+        assert_eq!(wireguard_config_domains(config).unwrap(), expected);
+        let settings = WgConfig::parse(config)
+            .unwrap()
+            .to_nm_settings("wg0", None)
+            .unwrap();
+        assert_eq!(settings_endpoint_domains(&settings).unwrap(), expected);
+        assert!(
+            settings_endpoint_domains(&HashMap::new())
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(endpoint_domain("vpn.example:not-a-port"), None);
     }
 
     #[test]

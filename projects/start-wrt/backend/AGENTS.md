@@ -23,6 +23,7 @@ crates are members of the **root** Cargo workspace (build with `cargo build -p s
 - After UCI writes, call `/etc/init.d/<service> reload` — but only when `ctx.effectful()` is true. Reloading unconditionally breaks `--configs-only` CLI mode.
 - Use `uciedit`'s retry mechanism for writes that may conflict with concurrent writes (profile creation already retries 4 times). Don't add ad-hoc retry loops.
 - The generic `uci.get` / `uci.set` / `uci.edit` / `file.*` / `exec` endpoints are vestigial — every feature has a purpose-built smart endpoint and no frontend code calls the generics. Don't reach for them when adding new functionality; add a typed handler instead. See `../API_CONTRACT.md` for the full contract.
+- A one-time fix to saved configuration from an earlier release is a migration: append it to `MIGRATIONS` in `ctrl/src/migrate.rs`, which runs it once at boot before `network`. Don't use a `uci-defaults` script, which reruns after every sysupgrade, or a daemon startup reconciler, which reruns every boot. Never reorder or remove entries, because the record on each router counts them. Each migration must leave correct a configuration it already migrated, or one from any earlier release: the runner replays migrations after power loss, after restoring a backup without a record, and on a pre-runner install. Check state before acting rather than appending or renaming unconditionally.
 - For dev authentication, set `STARTWRT_DEV_PASSWORD` to bypass `/etc/shadow`. Don't try to populate `/etc/shadow` on a dev machine.
 
 ## Adding a New RPC Endpoint

@@ -42,6 +42,10 @@ how `startbox` dispatches to `startd`, `start-cli`, etc. The per-entrypoint logi
 - `src/util/` — Shared utilities (process invocation, IO, guards — see `core-rust-patterns.md`)
 - `src/version/` — Migrations and version logic (see `VERSION_BUMP.md`, `exver.md`)
 
+## DNS lifecycle
+
+`startd` creates one shared `DnsController` before selecting setup, initialization, or diagnostic UI. Those contexts and the runtime `NetController` share its handle and listener-reconciliation task. Attaching the persisted `NetworkInterfaceController` transfers DNS authority and keeps that controller alive independently of later RPC initialization success. See [DNS forwarding](policy-routing.md#dns-forwarding) for bootstrap policy, watcher handoff, and requester-based routing.
+
 ## RPC Pattern
 
 The API is JSON-RPC (not REST). All endpoints are RPC methods organized in a hierarchical command structure using [rpc-toolkit](https://github.com/Start9Labs/start-technologies/tree/master/shared-libs/crates/rpc-toolkit). Handlers are registered in a tree of `ParentHandler` nodes, with four handler types: `from_fn_async` (standard), `from_fn_async_local` (non-Send), `from_fn` (sync), and `from_fn_blocking` (blocking). Metadata like `.with_about()` drives middleware and documentation.

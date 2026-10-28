@@ -10,7 +10,6 @@ use futures::FutureExt;
 use patch_db::json_ptr::ROOT;
 use rpc_toolkit::{CliApp, HandlerExt, from_fn};
 use rust_i18n::t;
-use tokio::net::TcpListener;
 use tokio::signal::unix::signal;
 use tracing::instrument;
 use visit_rs::Visit;
@@ -24,6 +23,7 @@ use crate::prelude::*;
 use crate::tunnel::context::{TunnelConfig, TunnelContext};
 use crate::tunnel::tunnel_router;
 use crate::tunnel::web::TunnelCertHandler;
+use crate::tunnel::web::listener::UiListener;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::logger::LOGGER;
 
@@ -51,6 +51,7 @@ async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
         );
         let acceptor_setter = server.acceptor_setter();
         let https_db = ctx.db.clone();
+        let https_sni = ctx.sni.clone();
         let https_thread: NonDetachingJoinHandle<()> = tokio::spawn(async move {
             let mut sub = https_db.subscribe("/webserver".parse().unwrap()).await;
             while {
@@ -63,12 +64,7 @@ async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
                             if !a.contains_key(&key) {
                                 match (|| {
                                     Ok::<_, Error>(TlsListener::new(
-                                        TcpListener::from_std(
-                                            mio::net::TcpListener::bind(addr)
-                                                .with_kind(ErrorKind::Network)?
-                                                .into(),
-                                        )
-                                        .with_kind(ErrorKind::Network)?,
+                                        UiListener::bind(addr, https_sni.clone())?,
                                         TunnelCertHandler {
                                             db: https_db.clone(),
                                             crypto_provider: Arc::new(tokio_rustls::rustls::crypto::ring::default_provider()),
@@ -113,8 +109,6 @@ async fn inner_main(config: &TunnelConfig) -> Result<Option<bool>, Error> {
         })
         .into();
 
-        // Reconcile the per-IPv4 HTTP→HTTPS redirect listeners on every db
-        // revision: the reactive analogue of the `/webserver` HTTPS block above.
         let redirect_ctx = ctx.clone();
         let redirect_thread: NonDetachingJoinHandle<()> = tokio::spawn(async move {
             let mut listeners: BTreeMap<SocketAddr, NonDetachingJoinHandle<()>> = BTreeMap::new();

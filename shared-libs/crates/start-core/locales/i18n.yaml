@@ -2208,12 +2208,26 @@ net.dns.could-not-determine-source-interface:
   fr_FR: "Impossible de déterminer l'interface source de %{src}"
   pl_PL: "Nie można określić interfejsu źródłowego %{src}"
 
+net.dns.empty-servers:
+  en_US: "Specify at least one DNS server or select automatic DNS"
+  de_DE: "Mindestens einen DNS-Server angeben oder automatisches DNS auswählen"
+  es_ES: "Especifique al menos un servidor DNS o seleccione DNS automático"
+  fr_FR: "Indiquez au moins un serveur DNS ou sélectionnez le DNS automatique"
+  pl_PL: "Podaj co najmniej jeden serwer DNS lub wybierz automatyczny DNS"
+
 net.dns.error-resolving-internal:
   en_US: "Error resolving internal DNS: %{error}"
   de_DE: "Fehler bei der Auflösung des internen DNS: %{error}"
   es_ES: "Error al resolver DNS interno: %{error}"
   fr_FR: "Erreur de résolution DNS interne : %{error}"
   pl_PL: "Błąd rozwiązywania wewnętrznego DNS: %{error}"
+
+net.dns.invalid-server:
+  en_US: "%{server} is not a valid upstream DNS server"
+  de_DE: "%{server} ist kein gültiger vorgelagerter DNS-Server"
+  es_ES: "%{server} no es un servidor DNS de origen válido"
+  fr_FR: "%{server} n'est pas un serveur DNS amont valide"
+  pl_PL: "%{server} nie jest prawidłowym nadrzędnym serwerem DNS"
 
 net.dns.server-thread-exited:
   en_US: "DNS Server Thread has exited"
@@ -7150,6 +7164,27 @@ about.view-or-edit-injected-dns-records:
   es_ES: "Ver o editar registros DNS inyectados"
   fr_FR: "Voir ou modifier les enregistrements DNS injectés"
   pl_PL: "Wyświetl lub edytuj wstrzyknięte rekordy DNS"
+
+tunnel.web.listen-port-forwarded:
+  en_US: "An enabled plain port forward includes this listen port; disable or remove it, or use SNI hostnames first."
+  de_DE: "Eine aktivierte einfache Portweiterleitung enthält diesen Port; deaktivieren oder entfernen Sie sie zuerst oder verwenden Sie SNI-Hostnamen."
+  es_ES: "Un reenvío de puertos simple habilitado incluye este puerto; desactívelo o elimínelo primero, o use nombres SNI."
+  fr_FR: "Une redirection de port simple activée inclut ce port ; désactivez-la ou supprimez-la d'abord, ou utilisez des noms SNI."
+  pl_PL: "Włączone zwykłe przekierowanie portu obejmuje ten port; najpierw je wyłącz lub usuń albo użyj nazw SNI."
+
+tunnel.web.ui-fallback-failed:
+  en_US: "UI fallback registration on %{address} failed (code %{code})"
+  de_DE: "Registrierung der UI-Ausweichroute auf %{address} fehlgeschlagen (Code %{code})"
+  es_ES: "Error al registrar la ruta de respaldo de la interfaz en %{address} (código %{code})"
+  fr_FR: "Échec de l'enregistrement de la route de secours de l'interface sur %{address} (code %{code})"
+  pl_PL: "Rejestracja trasy zapasowej panelu na %{address} nie powiodła się (kod %{code})"
+
+tunnel.web.ui-port-reserved:
+  en_US: "This port range includes the enabled admin UI's listen port; use SNI hostnames to share it, or disable the UI or change its listen address first."
+  de_DE: "Dieser Portbereich enthält den Port der aktivierten Verwaltungsoberfläche; verwenden Sie SNI-Hostnamen zur gemeinsamen Nutzung oder deaktivieren Sie zuerst die Oberfläche oder ändern Sie ihre Adresse."
+  es_ES: "Este rango incluye el puerto de la interfaz de administración habilitada; use nombres SNI para compartirlo, o desactive primero la interfaz o cambie su dirección."
+  fr_FR: "Cette plage inclut le port de l'interface d'administration activée ; utilisez des noms SNI pour le partager, ou désactivez d'abord l'interface ou changez son adresse."
+  pl_PL: "Ten zakres obejmuje port włączonego panelu administracyjnego; użyj nazw SNI, aby go współdzielić, albo najpierw wyłącz panel lub zmień jego adres."
 
 # volume.rs
 volume.restore-conflict:

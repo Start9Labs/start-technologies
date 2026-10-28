@@ -314,6 +314,7 @@ impl ServiceMap {
                                         hosts: Default::default(),
                                         store_exposed_dependents: Default::default(),
                                         outbound_gateway: None,
+                                        outbound_dns: None,
                                         plugin: Default::default(),
                                     },
                                 )?;

@@ -78,13 +78,18 @@ export type RpcSchemaTree<Schema> = {
         : never
 }
 export type ApiState = z.output<typeof schemas.ApiState>
+export type CapabilityVerdict = z.output<typeof schemas.CapabilityVerdict>
 export type DiagnosticUpdateSystemParamsInput = z.input<
   typeof schemas.DiagnosticUpdateSystemParams
 >
+export type DnsSource = z.output<typeof schemas.DnsSource>
+export type GatewayId = z.output<typeof schemas.GatewayId>
+export type GatewayType = z.output<typeof schemas.GatewayType>
 export type Guid = z.output<typeof schemas.Guid>
 export type HostIdInput = z.input<typeof schemas.HostId>
 export type IoFormatInput = z.input<typeof schemas.IoFormat>
 export type LogEntry = z.output<typeof schemas.LogEntry>
+export type NetworkInterfaceType = z.output<typeof schemas.NetworkInterfaceType>
 export type PackageIdInput = z.input<typeof schemas.PackageId>
 export type QueryDnsParamsInput = z.input<typeof schemas.QueryDnsParams>
 
@@ -94,9 +99,35 @@ export type QueryDnsParamsInput = z.input<typeof schemas.QueryDnsParams>
  * IPv4 and an `AAAA` at the box's IPv6 GUA. Either may be absent.
  */
 export type QueryDnsRes = z.output<typeof schemas.QueryDnsRes>
+
+/**
+ * Per-gateway DNS intent and effective upstreams. `static_servers` is the persisted
+ * override; `servers` and `source` are derived from it and the link configuration.
+ * Without an override or gateway-provided resolvers, the public fallback is used.
+ */
+export type DnsSettings = z.output<typeof schemas.DnsSettings>
+
+/**
+ * Whether the gateway reachable via this interface speaks each port-mapping
+ * protocol, as last probed. Fed by the watcher's periodic probes and by
+ * failure/success evidence from the port-map client, and synced to the db so a
+ * chronically uncooperative gateway is visible (and skipped) instead of being
+ * retried forever.
+ */
+export type GatewayPortMapCapabilities = z.output<
+  typeof schemas.GatewayPortMapCapabilities
+>
+export type IpInfo = z.output<typeof schemas.IpInfo>
 export type LogFollowResponse = z.output<typeof schemas.LogFollowResponse>
 export type LogResponse = z.output<typeof schemas.LogResponse>
 export type RequiresHostIdInput = z.input<typeof schemas.RequiresHostId>
 export type RequiresPackageIdInput = z.input<typeof schemas.RequiresPackageId>
 export type UpdateSystemRes = z.output<typeof schemas.UpdateSystemRes>
+export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
+export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
+
+/**
+ * Active DNS authority and its bootstrap gateway.
+ */
+export type DnsStatus = z.output<typeof schemas.DnsStatus>
 export type Api = RpcSchemaTree<typeof schemas.Api>

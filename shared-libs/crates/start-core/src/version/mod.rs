@@ -798,7 +798,7 @@ mod tests {
         }, "packageData": { "service": { "setting": "preserved" } } },
             "payload": { "unchanged": true } });
         let payload = db["payload"].clone();
-        let packages = db["public"]["packageData"].clone();
+        let packages = json!({ "service": { "setting": "preserved", "outboundDns": null } });
         let pre_ups = PreUps::load(&previous, &target).await.unwrap();
         migrate_from_unchecked(&previous, &target, pre_ups, &mut db).unwrap();
         assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.0.3"));
@@ -810,7 +810,7 @@ mod tests {
             db["public"]["serverInfo"]["postInitMigrationTodos"]["0.4.0.3"],
             Value::Null
         );
-        assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
+        assert_eq!(applied_migration_revision(&mut db).unwrap(), 2);
         assert_eq!(db["payload"], payload);
         assert_eq!(db["public"]["packageData"], packages);
         rollback_to_unchecked(&target, &previous, &mut db).unwrap();
@@ -832,7 +832,7 @@ mod tests {
             "version": "0.4.0.3",
             "packageVersionCompat": ">=0.3.0 <0.5.0",
             "postInitMigrationTodos": {},
-            "latestMigrationRevision": 0,
+            "latestMigrationRevision": 2,
         }, "packageData": { "service": { "setting": "preserved" } } } });
         let packages = db["public"]["packageData"].clone();
         let pre_ups = PreUps::load(&previous, &target).await.unwrap();
@@ -850,7 +850,7 @@ mod tests {
         assert_eq!(db["public"]["packageData"], packages);
         rollback_to_unchecked(&target, &previous, &mut db).unwrap();
         assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.0.3"));
-        assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
+        assert_eq!(applied_migration_revision(&mut db).unwrap(), 2);
         assert_eq!(db["public"]["packageData"], packages);
     }
 

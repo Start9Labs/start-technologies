@@ -192,7 +192,13 @@ async fn setup_init(
     hostname: Option<ServerHostname>,
     init_phases: InitPhases,
 ) -> Result<(AccountInfo, InitResult), Error> {
-    let init_result = init(&ctx.webserver, &ctx.config.peek(|c| c.clone()), init_phases).await?;
+    let init_result = init(
+        &ctx.webserver,
+        ctx.dns.clone(),
+        &ctx.config.peek(|c| c.clone()),
+        init_phases,
+    )
+    .await?;
     let language = ctx.language.peek(|a| a.clone());
     let keyboard = ctx.keyboard.peek(|a| a.clone());
 
@@ -336,6 +342,7 @@ pub async fn attach(
 
         let rpc_ctx = RpcContext::init(
             &setup_ctx.webserver,
+            setup_ctx.dns.clone(),
             &setup_ctx.config.peek(|c| c.clone()),
             disk_guid,
             Some(net_ctrl),
@@ -1044,10 +1051,11 @@ async fn fresh_setup(
 
     let config = ctx.config.peek(|c| c.clone());
 
-    let init_result = init(&ctx.webserver, &config, init_phases).await?;
+    let init_result = init(&ctx.webserver, ctx.dns.clone(), &config, init_phases).await?;
 
     let rpc_ctx = RpcContext::init(
         &ctx.webserver,
+        ctx.dns.clone(),
         &config,
         guid,
         Some(init_result),
@@ -1199,6 +1207,7 @@ async fn migrate(
 
     let rpc_ctx = RpcContext::init(
         &ctx.webserver,
+        ctx.dns.clone(),
         &ctx.config.peek(|c| c.clone()),
         guid,
         Some(net_ctrl),

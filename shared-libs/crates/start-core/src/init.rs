@@ -155,6 +155,7 @@ async fn persist_pstore_archive(source: &Path, destination: &Path) -> Result<(),
 #[instrument(skip_all)]
 pub async fn init(
     webserver: &WebServerAcceptorSetter<WildcardListener>,
+    dns: Arc<crate::net::dns::DnsController>,
     cfg: &ServerConfig,
     InitPhases {
         preinit,
@@ -239,13 +240,14 @@ pub async fn init(
     let net_ctrl = Arc::new(
         NetController::init(
             db.clone(),
+            dns,
+            webserver,
             cfg.socks_listen.unwrap_or(DEFAULT_SOCKS_LISTEN),
             cfg.max_proxy_conns_per_target
                 .unwrap_or(crate::net::vhost::MAX_PROXY_CONNS_PER_TARGET),
         )
         .await?,
     );
-    webserver.send_modify(|wl| wl.set_ip_info(net_ctrl.net_iface.watcher.subscribe()));
     let os_net_service = net_ctrl.os_bindings().await?;
     start_net.complete();
 

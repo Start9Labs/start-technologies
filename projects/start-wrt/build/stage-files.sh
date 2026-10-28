@@ -178,16 +178,17 @@ for f in "$PROJECT_DIR"/backend/nftables/ruleset-pre/*.nft; do
     cp "$f" "${FILES_DIR}/usr/share/nftables.d/ruleset-pre/$(basename "$f")"
 done
 
-# Deletes the copies earlier images staged in /etc/nftables.d. fw4 would load
-# them alongside the ones above.
-mkdir -p "${FILES_DIR}/etc/uci-defaults"
-cat > "${FILES_DIR}/etc/uci-defaults/90-startwrt-nftables" << 'NFTEOF'
-#!/bin/sh
-rm -f /etc/nftables.d/10-startwrt-dnat-mark.nft \
-	/etc/nftables.d/11-startwrt-inbound6-mark.nft \
-	/etc/nftables.d/12-startwrt-sni-divert.nft \
-	/etc/nftables.d/13-startwrt-dns-update-divert.nft
-NFTEOF
+# Runs one-time upgrade migrations after uci-defaults and before network.
+cat > "${FILES_DIR}/etc/init.d/startwrt-migrate" << 'MIGRATEEOF'
+#!/bin/sh /etc/rc.common
+
+START=15
+
+start() {
+    /usr/bin/startwrt-cli migrate 2>&1 | logger -t startwrt-migrate
+}
+MIGRATEEOF
+chmod +x "${FILES_DIR}/etc/init.d/startwrt-migrate"
 
 # sysupgrade keep.d — additional files to include in config backups
 mkdir -p "${FILES_DIR}/lib/upgrade/keep.d"
@@ -200,6 +201,7 @@ cat > "${FILES_DIR}/lib/upgrade/keep.d/startwrt" << 'KEEPEOF'
 /etc/ssl/private/startwrt-server.key
 /etc/nlbwmon/data/
 /etc/startwrt/pending-update
+/etc/startwrt/migrations
 # Persistent device-identity cache (hostnames + DHCP fingerprints). Written
 # atomically (temp + rename), so a live `sysupgrade --create-backup` always
 # captures one complete JSON document.

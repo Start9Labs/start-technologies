@@ -45,7 +45,6 @@ import { FormObjectComponent } from './object.component'
         + {{ 'Add' | i18n }}
       </button>
     </div>
-    <!-- TODO: Remove ngModel in Taiga v5.0 -->
     <tui-error
       [ngModel]=""
       [ngModelOptions]="{ standalone: true }"
@@ -206,8 +205,8 @@ export class FormArrayComponent {
   get canAdd(): boolean {
     return (
       !this.spec.disabled &&
-      (!this.spec.maxLength ||
-        this.spec.maxLength >= this.array.control.controls.length)
+      (this.spec.maxLength == null ||
+        this.array.control.length < this.spec.maxLength)
     )
   }
 

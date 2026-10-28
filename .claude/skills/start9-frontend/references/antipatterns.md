@@ -48,10 +48,13 @@ in favor of semantic elements directly inside `tui-root`; an element component w
 text content (Taiga hides it visually) instead of `aria-label`; bare `<label>` + flex CSS →
 `<label tuiLabel>`; styled `<span class="divider">` → `<hr>`; `autocomplete="new-password"` on
 password fields; `TuiAutoFocus` on the first focusable in dialogs/drawers, never on phones.
+A field that collapses behind a toggle stays in the tab order and expands on
+`(focus)="open.set(true)"`. It doesn't drop out with `aria-hidden` + `tabIndex="-1"`.
 
 **7. Fine-tuning CSS → deleted.** Every `letter-spacing`, `text-transform`, `vertical-align`
-nudge, and `margin-top` ladder goes; vertical rhythm comes from `:host { display: grid;
-gap: 2rem }`. Physical properties → logical (`inset-block-start`, `inline-size`,
+nudge, and `margin-top` ladder goes; vertical rhythm comes from the primitives' own spacing
+plus one margin on the element that needs more (styling.md). A `:host` flex column whose only
+job is a `gap` gets deleted. Physical properties → logical (`inset-block-start`, `inline-size`,
 `margin-block-end`) in every touched file.
 
 **8. Specificity hacks → deleted.** `!important` globals get scoped without it; `::ng-deep`

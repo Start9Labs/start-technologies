@@ -373,8 +373,6 @@ if [ -n "\${KVER_ALL}" ]; then
     fi
 fi
 
-cp /etc/resolv.conf /etc/resolv.conf.bak
-
 if [ "${IB_SUITE}" = trixie ] && [ "${IB_TARGET_ARCH}" != riscv64 ]; then
     echo 'deb https://deb.debian.org/debian/ bookworm main' > /etc/apt/sources.list.d/bookworm.list
     apt-get update
@@ -423,7 +421,6 @@ lb chroot
 lb installer
 lb binary_chroot
 lb chroot_prep install all mode-apt-install-binary mode-archives-chroot
-mv chroot/chroot/etc/resolv.conf.bak chroot/chroot/etc/resolv.conf
 lb binary_rootfs
 
 cp $prep_results_dir/binary/live/filesystem.squashfs $RESULTS_DIR/$IMAGE_BASENAME.squashfs

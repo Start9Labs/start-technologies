@@ -166,13 +166,11 @@ async fn restore(ctx: ServerContext) -> Result<BackupRestoreRes, Error> {
                     .await
                     .map_err(Error::from)?;
 
-                // Validate tar.gz
-                if let Err(_) = Command::new("tar")
+                let Ok(listing) = Command::new("tar")
                     .args(["-tzf", tmp_path])
-                    .capture(false)
                     .invoke(ErrorKind::Filesystem.into())
                     .await
-                {
+                else {
                     let _ = tokio::fs::remove_file(tmp_path).await;
                     crate::activity::log(
                         "backup",
@@ -185,7 +183,7 @@ async fn restore(ctx: ServerContext) -> Result<BackupRestoreRes, Error> {
                         eyre!("Invalid backup archive"),
                         ErrorKind::InvalidRequest,
                     ));
-                }
+                };
 
                 // Apply the backup
                 let apply = Command::new("sysupgrade")
@@ -204,6 +202,15 @@ async fn restore(ctx: ServerContext) -> Result<BackupRestoreRes, Error> {
                         Some(&e.to_string()),
                     );
                     return Err(e.into());
+                }
+
+                if let Err(e) = crate::migrate::forget_unless_restored(
+                    std::path::Path::new("/"),
+                    &String::from_utf8_lossy(&listing),
+                )
+                .await
+                {
+                    tracing::error!("failed to reset migration record after restore: {e}");
                 }
 
                 crate::activity::log(

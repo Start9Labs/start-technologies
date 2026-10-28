@@ -1,0 +1,6 @@
+- Keep service and system DNS forwarding on their selected outbound gateways. Edit gateway names and DNS together, and show resolver addresses with automatic/public-fallback indicators.
+- Control outbound gateway selection and independent OS/service DNS overrides on dedicated Outbound Traffic tabs; services using gateway DNS use the gateway's settings rather than the OS override.
+- Resolve configured WireGuard endpoint names through the physical connection for host-only tunnel bootstrap; service DNS retains its outbound gateway.
+- Keep setup and early diagnostic host DNS available through the automatic physical gateway and retain stored DNS policy after it loads even if initialization fails.
+- Keep private DNS answers aligned with their gateway when an interface address moves.
+- Preserve existing system-wide static DNS settings as overrides on known gateways during upgrade.

@@ -215,6 +215,13 @@ sudo bash projects/start-os/build/tests/subcontainer-exec-test.sh /path/to/start
 
 It exercises concurrent execs, rootfs isolation, read-only roots, user/workdir/environment settings,
 nested user namespaces, and command exit codes. It requires root and a statically linked BusyBox.
+The launch teardown regression uses the same fixtures in a private mount namespace:
+
+```sh
+sudo unshare --mount --propagation private bash projects/start-os/build/tests/subcontainer-launch-test.sh /path/to/start-container /path/to/static-busybox
+```
+
+It checks that killing the launch parent kills the image init and its descendants, as root and a numeric user.
 The end-to-end attach suite runs on a StartOS VM with an installed package whose selected
 subcontainer is running and provides `sh`:
 

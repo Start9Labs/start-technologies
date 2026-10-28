@@ -8,8 +8,10 @@ import { GatewayService } from 'src/app/services/gateway.service'
 @Component({
   selector: 'gateways-table',
   template: `
-    <table [appTable]="['Name', 'Type', $any('LAN IP'), $any('WAN IP'), null]">
-      @for (gateway of gatewayService.gateways(); track $index) {
+    <table
+      [appTable]="['Name', 'Type', $any('LAN IP'), $any('WAN IP'), 'DNS', null]"
+    >
+      @for (gateway of gatewayService.configuredGateways(); track gateway.id) {
         <tr [gateway]="gateway"></tr>
       } @empty {
         <tr>

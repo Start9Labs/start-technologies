@@ -68,6 +68,7 @@ pub async fn add_tunnel(
     }: AddTunnelParams,
 ) -> Result<GatewayId, Error> {
     let gateway_type = gateway_type.unwrap_or_else(|| gateway_type_from_config(&config));
+    let wireguard_endpoint_domains = crate::net::gateway::wireguard_config_domains(&config)?;
 
     let ifaces = ctx.net_controller.net_iface.watcher.subscribe();
     let mut iface = GatewayId::from(InternedString::intern("wg0"));
@@ -77,6 +78,8 @@ pub async fn add_tunnel(
                 i.insert(
                     iface.clone(),
                     NetworkInterfaceInfo {
+                        wireguard_endpoint_domains,
+                        dns: Default::default(),
                         name: Some(name),
                         secure: None,
                         ip_info: None,
@@ -109,7 +112,17 @@ pub async fn add_tunnel(
         .await
         .typed::<Option<IpInfo>>();
 
-    crate::net::gateway::add_wireguard_config(iface.as_str(), &config).await?;
+    if let Err(error) = crate::net::gateway::add_wireguard_config(iface.as_str(), &config).await {
+        ifaces.send_if_modified(|interfaces| {
+            if interfaces.get(&iface).is_some_and(|i| i.ip_info.is_none()) {
+                interfaces.remove(&iface);
+                true
+            } else {
+                false
+            }
+        });
+        return Err(error);
+    }
 
     ip_info.wait_for(|ip_info| ip_info.is_some()).await?;
 
@@ -329,11 +342,7 @@ pub async fn update_tunnel(
         ));
     }
 
-    // Apply the new config in place (Update2 + Reapply) rather than deleting and
-    // re-importing the connection. The wg device is never torn down, so updating
-    // the gateway that carries this very request doesn't drop its own transport —
-    // and if the handler is cancelled, the gateway is simply left on its old (or
-    // new) config, never in a half-deleted state.
+    // Reapply keeps the device carrying this RPC alive.
     crate::net::gateway::update_wireguard_config(id.as_str(), &config).await
 }
 

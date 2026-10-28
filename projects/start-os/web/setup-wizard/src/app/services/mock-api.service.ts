@@ -17,6 +17,45 @@ export class MockApiService extends ApiService {
   private statusIndex = 0
   private installCompleted = false
   private readonly handlers: RpcHandlers<Api> = {
+    'net.dns.status': async () => {
+      if (this.statusIndex >= 2) return { bootstrap: false, gateway: null }
+      return {
+        bootstrap: true,
+        gateway: {
+          id: 'eth0',
+          info: {
+            name: null,
+            secure: null,
+            type: 'inbound-outbound',
+            wireguardEndpointDomains: [],
+            portMap: {
+              pcp: { supported: null, at: null },
+              natPmp: { supported: null, at: null },
+              upnp: { supported: null, at: null },
+              pcpHostname: { supported: null, at: null },
+            },
+            dnsUpdate: { supported: null, at: null },
+            dns: {
+              staticServers: null,
+              servers: ['192.168.1.1:53'],
+              source: 'gateway',
+            },
+            ipInfo: {
+              name: 'Wired Connection 1',
+              scopeId: 1,
+              deviceType: 'ethernet',
+              subnets: ['192.168.1.0/24'],
+              wanIp: null,
+              ntpServers: [],
+              lanIp: ['192.168.1.2'],
+              defaultRouteV4: 100,
+              defaultRouteV6: null,
+              dnsServers: ['192.168.1.1'],
+            },
+          },
+        },
+      }
+    },
     'setup.status': async () => {
       await pauseFor(500)
 

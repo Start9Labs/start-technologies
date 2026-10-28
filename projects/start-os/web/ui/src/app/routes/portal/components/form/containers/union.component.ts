@@ -32,8 +32,11 @@ import { FormGroupComponent } from './group.component'
     }
 
     .group {
-      display: block;
-      margin-top: 1rem;
+      display: flow-root;
+    }
+
+    .group:not(:empty) {
+      margin-block-start: 1rem;
     }
   `,
   viewProviders: [tuiProvide(ControlContainer, FormGroupName)],
@@ -51,11 +54,7 @@ export class FormUnionComponent implements OnChanges {
 
   selectSpec!: IST.ValueSpecSelect
 
-  // Per-instance memory of values entered in not-currently-selected variants,
-  // so switching away and back restores them. This MUST be instance state, not
-  // stashed on `spec`: a list renders every row with the SAME variant spec
-  // object, so writing to `spec.others` leaks one row's variant values into
-  // another row when you switch into that variant.
+  // List rows share specs; variant memory belongs to each union instance.
   private readonly others: Record<string, any> = {}
 
   private readonly form = inject(FormGroupName)

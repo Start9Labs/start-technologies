@@ -28,6 +28,14 @@ pub fn main(args: VecDeque<OsString>) {
             }
             return;
         }
+        Some("migrate") => {
+            let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+            if let Err(e) = rt.block_on(crate::migrate::run(std::path::Path::new("/"))) {
+                eprintln!("migrate failed: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
         Some("verify") => {
             let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
             if let Err(e) = rt.block_on(crate::verify::run_verify()) {

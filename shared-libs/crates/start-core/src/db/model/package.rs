@@ -1,4 +1,5 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
@@ -412,6 +413,8 @@ pub struct PackageDataEntry {
     pub hosts: Hosts,
     pub store_exposed_dependents: Vec<JsonPointer>,
     pub outbound_gateway: Option<GatewayId>,
+    #[serde(default)]
+    pub outbound_dns: Option<VecDeque<SocketAddr>>,
     #[serde(default)]
     pub plugin: PackagePlugin,
 }

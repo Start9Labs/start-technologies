@@ -2261,6 +2261,8 @@ mod port_map_tests {
         info.insert(
             GatewayId::from(InternedString::intern(GATEWAY)),
             NetworkInterfaceInfo {
+                wireguard_endpoint_domains: Default::default(),
+                dns: Default::default(),
                 name: None,
                 secure: None,
                 ip_info: Some(Arc::new(IpInfo {
@@ -2275,6 +2277,8 @@ mod port_map_tests {
                     wan_ip: None,
                     ntp_servers: Default::default(),
                     dns_servers: Default::default(),
+                    default_route_v4: None,
+                    default_route_v6: None,
                 })),
                 gateway_type: GatewayType::InboundOutbound,
                 port_map: Default::default(),

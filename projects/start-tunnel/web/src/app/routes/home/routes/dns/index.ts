@@ -23,6 +23,7 @@ import { PatchDB } from 'patch-db-client'
 import { filter, map } from 'rxjs'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { PlaceholderComponent } from 'src/app/routes/home/components/placeholder'
+import { deviceIpv6 } from 'src/app/routes/home/routes/devices/utils'
 import { MappedDevice } from 'src/app/routes/home/routes/published-ports/utils'
 import { ApiService } from 'src/app/services/api/api.service'
 import { TunnelData } from 'src/app/services/patch-db/data-model'
@@ -172,39 +173,30 @@ export default class Dns {
     (this.records() || []).filter(r => r.source !== null),
   )
 
-  private readonly devices: Signal<MappedDevice[]> = toSignal(
-    this.patch
-      .watch$('wg', 'subnets')
-      .pipe(
-        map(subnets =>
-          Object.values(subnets).flatMap(({ clients }) =>
-            Object.entries(clients).map(([ip, { name }]) => ({ ip, name })),
-          ),
-        ),
-      ),
-    { initialValue: [] },
-  )
-
-  // DNS records point a name at a server, so the picker lists servers only.
-  protected readonly servers: Signal<MappedDevice[]> = toSignal(
+  private readonly devices = toSignal(
     this.patch.watch$('wg', 'subnets').pipe(
       map(subnets =>
-        Object.values(subnets).flatMap(({ clients }) =>
-          Object.entries(clients)
-            .filter(([, c]) => c.kind === 'server')
-            .map(([ip, { name }]) => ({ ip, name })),
+        Object.values(subnets).flatMap(({ clients, ipv6 }) =>
+          Object.entries(clients).map(([ip, { name, kind }]) => ({
+            ip,
+            name,
+            kind,
+            ipv6: deviceIpv6(ipv6, ip),
+          })),
         ),
       ),
     ),
     { initialValue: [] },
   )
 
+  protected readonly servers: Signal<MappedDevice[]> = computed(() =>
+    this.devices().filter(device => device.kind === 'server'),
+  )
+
   protected readonly byName: TuiComparator<T.Tunnel.DnsRecordEntry> = (a, b) =>
     (a.name || '').localeCompare(b.name || '')
   protected readonly byType: TuiComparator<T.Tunnel.DnsRecordEntry> = (a, b) =>
     (a.type || '').localeCompare(b.type || '')
-  // Sort by the rendered display so the order matches the visible "name (ip)"
-  // text (falls back to raw rdata for non-A/AAAA records).
   protected readonly byServer: TuiComparator<T.Tunnel.DnsRecordEntry> = (
     a,
     b,
@@ -212,9 +204,6 @@ export default class Dns {
   protected readonly byTtl: TuiComparator<T.Tunnel.DnsRecordEntry> = (a, b) =>
     a.ttl - b.ttl
 
-  // Only A/AAAA values are server IPs; for those, show the server's friendly
-  // name and IP (the injecting server for automatic records, the selected one
-  // for manual). CNAME/TXT/other rdata renders verbatim.
   protected serverDisplay(record: {
     type: string
     source: string | null
@@ -223,8 +212,8 @@ export default class Dns {
     if (record.type !== 'A' && record.type !== 'AAAA') return record.value
 
     const ip = record.source ?? record.value
-    const name = this.devices().find(d => d.ip === ip)?.name
-    return name ? `${name} (${ip})` : record.value
+    const name = this.devices().find(d => d.ip === ip || d.ipv6 === ip)?.name
+    return name ? `${name} (${record.value})` : record.value
   }
 
   protected onAdd(): void {

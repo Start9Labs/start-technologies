@@ -92,7 +92,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
         <div>
           <tui-textfield>
             <label tuiLabel>{{ 'IPv4 address' | i18n }}</label>
-            <input tuiInput formControlName="ipv4" [readOnly]="!ipv4Static()" />
+            <input tuiInput formControlName="ipv4" [readonly]="!ipv4Static()" />
           </tui-textfield>
           <tui-error formControlName="ipv4" />
         </div>
@@ -104,7 +104,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
         <div>
           <tui-textfield>
             <label tuiLabel>{{ 'IPv6 address' | i18n }}</label>
-            <input tuiInput [readOnly]="true" [value]="data()?.ipv6 ?? ''" />
+            <input tuiInput [readonly]="true" [value]="data()?.ipv6 ?? ''" />
           </tui-textfield>
         </div>
         <div class="g-secondary">

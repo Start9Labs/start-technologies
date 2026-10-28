@@ -49,7 +49,7 @@ Because a tag sync overwrites this whole project from the tagged tree, never han
 
 Use the root toolchain, then:
 
-1. Install [mdBook](https://rust-lang.github.io/mdBook/) (v0.5.2 to match CI) and [mdbook-tabs](https://github.com/niccoloforlini/mdbook-tabs):
+1. Install [mdBook](https://rust-lang.github.io/mdBook/) (v0.5.2 to match CI) and [mdbook-tabs](https://github.com/RustForWeb/mdbook-plugins):
 
    ```
    cargo install mdbook --version 0.5.2
