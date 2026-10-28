@@ -538,13 +538,16 @@ pub struct BindOptions {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, VisitVariants)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
 pub enum ProxyOptions {
     Http {
         /// Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
         /// Client-supplied `X-Forwarded-*` headers are stripped on both legs.
         #[serde(default)]
-        #[serde(rename = "addXForwardedHeaders")]
         add_x_forwarded_headers: bool,
         /// Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
         #[serde(default)]
