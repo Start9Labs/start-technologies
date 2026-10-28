@@ -3,8 +3,8 @@ use std::io::Read;
 
 use ed25519_dalek::VerifyingKey;
 use pgp::armor::{BlockType, Dearmor};
-use pgp::composed::{Deserializable, SignedPublicKey};
-use pgp::packet::{Packet, PacketParser, SignatureType};
+use pgp::composed::{Deserializable, PacketBodyReader, SignedPublicKey};
+use pgp::packet::{PacketHeader, SignatureType};
 use pgp::types::{EddsaLegacyPublicParams, KeyDetails, PublicParams, Tag};
 use serde::{Deserialize, Serialize};
 
@@ -144,16 +144,19 @@ fn public_certificates(value: &str) -> Result<Vec<SignedPublicKey>, Error> {
     if !trailing.trim().is_empty() {
         return Err(invalid_key());
     }
-    let packets = PacketParser::new(body.as_slice())
-        .collect::<pgp::errors::Result<Vec<_>>>()
-        .with_kind(ErrorKind::Deserialization)?;
-    if packets
-        .iter()
-        .any(|packet| matches!(packet, Packet::SecretKey(_) | Packet::SecretSubkey(_)))
-    {
-        return Err(invalid_key());
+    let mut remaining = body.as_slice();
+    while !remaining.is_empty() {
+        let header =
+            PacketHeader::try_from_reader(&mut remaining).with_kind(ErrorKind::Deserialization)?;
+        if matches!(header.tag(), Tag::SecretKey | Tag::SecretSubkey) {
+            return Err(invalid_key());
+        }
+        let mut packet =
+            PacketBodyReader::new(header, &mut remaining).with_kind(ErrorKind::Deserialization)?;
+        std::io::copy(&mut packet, &mut std::io::sink()).with_kind(ErrorKind::Deserialization)?;
     }
-    SignedPublicKey::from_packets(packets.into_iter().map(Ok).peekable())
+    SignedPublicKey::from_bytes_many(body.as_slice())
+        .with_kind(ErrorKind::Deserialization)?
         .collect::<pgp::errors::Result<Vec<_>>>()
         .with_kind(ErrorKind::Deserialization)
 }
@@ -186,6 +189,7 @@ fn primary_revoked(certificate: &SignedPublicKey) -> Result<bool, Error> {
 
 #[cfg(test)]
 mod tests {
+    use pgp::packet::{Packet, PacketParser};
     use pgp::ser::Serialize as _;
 
     use super::*;
@@ -258,6 +262,50 @@ mod tests {
         assert_eq!(export.armored, source);
         assert_eq!(export.fingerprints.len(), 2);
         assert_eq!(imported.keys.len(), 1);
+    }
+
+    #[test]
+    fn retains_unsupported_public_metadata_without_changing_signing_trust() {
+        use base64::Engine as _;
+        use pgp::packet::PacketHeader;
+        use pgp::types::{ExperimentalTag, PacketHeaderVersion, PacketLength};
+
+        let (certificate, _) = SignedPublicKey::from_armor_single(
+            include_str!("fixtures/start9-public.asc").as_bytes(),
+        )
+        .unwrap();
+        let mut bytes = certificate.to_bytes().unwrap();
+        PacketHeader::from_parts(
+            PacketHeaderVersion::New,
+            Tag::Experimental(ExperimentalTag::new(60).unwrap()),
+            PacketLength::Fixed(3),
+        )
+        .unwrap()
+        .to_writer(&mut bytes)
+        .unwrap();
+        bytes.extend_from_slice(b"abc");
+        let source = format!(
+            "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n{}\n-----END PGP PUBLIC KEY BLOCK-----\n",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        );
+        let (certificates, _) = SignedPublicKey::from_armor_many(source.as_bytes()).unwrap();
+        assert_eq!(
+            certificates
+                .collect::<pgp::errors::Result<Vec<_>>>()
+                .unwrap()
+                .len(),
+            1
+        );
+        let imported = parse_public_keys(&[source.clone()]).unwrap();
+        assert_eq!(
+            imported.keys,
+            BTreeSet::from([
+                "MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg="
+                    .parse()
+                    .unwrap()
+            ])
+        );
+        assert_eq!(imported.gpg_exports.first().unwrap().armored, source);
     }
 
     #[test]
