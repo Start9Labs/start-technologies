@@ -1,5 +1,5 @@
 import { Component, computed, inject } from '@angular/core'
-import { toSignal } from '@angular/core/rxjs-interop'
+import { toObservable, toSignal } from '@angular/core/rxjs-interop'
 import { ActivatedRoute, Router, RouterModule } from '@angular/router'
 import { i18nKey, i18nPipe } from '@start9labs/shared'
 import {
@@ -12,13 +12,12 @@ import {
 import { TuiAvatar, TuiFade } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
 import { distinctUntilChanged, filter, map, switchMap, tap } from 'rxjs'
+import { PackageIconService } from 'src/app/services/package-icon.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { TitleDirective } from 'src/app/services/title.service'
 import { getManifest } from 'src/app/utils/get-package-data'
 
-// `exact` gates routerLinkActive: the dashboard ('./') must match exactly or it
-// would light up on every sub-route; `interfaces` is inexact so it stays active
-// on its detail sub-pages (interfaces/:id). Leaf routes are exact.
+// Dashboard matching is exact; interfaces includes its detail routes.
 type NavItem = { title: i18nKey; icon: string; link: string; exact: boolean }
 
 @Component({
@@ -28,7 +27,7 @@ type NavItem = { title: i18nKey; icon: string; link: string; exact: boolean }
         *title
         class="title"
         tabindex="-1"
-        [style.--background]="'url(' + service()?.icon + ')'"
+        [style.--background]="'url(' + icon() + ')'"
       >
         <a routerLink=".." tuiIconButton iconStart="@tui.arrow-left">
           {{ 'Back' | i18n }}
@@ -39,14 +38,14 @@ type NavItem = { title: i18nKey; icon: string; link: string; exact: boolean }
           [round]="false"
           [style.margin-inline-end.rem]="0.75"
         >
-          <img alt="" [src]="service()?.icon" />
+          <img alt="" [src]="icon()" />
         </span>
         <span tuiFade>{{ manifest()?.title }}</span>
       </div>
       <aside class="g-aside">
         <header tuiCell routerLink="./">
           <span tuiAvatar appearance="action-grayscale" [round]="false">
-            <img alt="" [src]="service()?.icon" />
+            <img alt="" [src]="icon()" />
           </span>
           <span tuiTitle>
             <strong tuiFade>{{ manifest()?.title }}</strong>
@@ -60,6 +59,7 @@ type NavItem = { title: i18nKey; icon: string; link: string; exact: boolean }
               tuiAppearance="action-grayscale"
               routerLinkActive="active"
               [routerLinkActiveOptions]="{ exact: item.exact }"
+              [attr.aria-label]="item.title | i18n"
               [routerLink]="item.link"
             >
               <tui-icon [icon]="item.icon" />
@@ -73,7 +73,7 @@ type NavItem = { title: i18nKey; icon: string; link: string; exact: boolean }
   `,
   host: {
     class: 'g-page',
-    '[style.--background]': '"url(" + service()?.icon + ")"',
+    '[style.--background]': '"url(" + icon() + ")"',
   },
   styles: `
     :host {
@@ -193,6 +193,7 @@ export class ServiceOutletComponent {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly router = inject(Router)
   private readonly params = inject(ActivatedRoute).paramMap
+  private readonly icons = inject(PackageIconService)
 
   protected readonly nav: NavItem[] = [
     {
@@ -216,6 +217,12 @@ export class ServiceOutletComponent {
     { title: 'logs', icon: '@tui.scroll-text', link: 'logs', exact: true },
     { title: 'about', icon: '@tui.info', link: 'about', exact: true },
     {
+      title: 'Outbound Traffic',
+      icon: '@tui.globe',
+      link: 'outbound-traffic',
+      exact: true,
+    },
+    {
       title: 'actions & config',
       icon: '@tui.cog',
       link: 'actions',
@@ -231,11 +238,17 @@ export class ServiceOutletComponent {
       distinctUntilChanged(),
       switchMap(id => this.patch.watch$('packageData', id)),
       tap(pkg => {
-        // if package disappears, navigate to list page
         if (!pkg) {
           this.router.navigate(['services'])
         }
       }),
+    ),
+  )
+
+  protected readonly icon = toSignal(
+    toObservable(this.service).pipe(
+      filter(Boolean),
+      switchMap(pkg => this.icons.get(pkg)),
     ),
   )
 

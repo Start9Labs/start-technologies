@@ -243,7 +243,7 @@ export class PrivateDnsValidationComponent {
     this.loading.set(true)
 
     try {
-      const result = await this.api.checkDns({
+      const result = await this.api.rpc.net.gateway.checkDns({
         gateway: this.context.data.gateway.id,
         fqdn: this.context.data.fqdn,
       })

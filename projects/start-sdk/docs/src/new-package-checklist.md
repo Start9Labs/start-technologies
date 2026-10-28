@@ -52,8 +52,8 @@ The scaffold names its arbitrary ids `example-*` (`example-volume`, `example-ima
 - Write `instructions.md` (per [Writing Instructions](writing-instructions.md)).
 - Fill in `UPDATING.md` — what "upstream" means for this package, where the pin lives, and how
   to bump it.
-- Write the `## This repo` bullets in `AGENTS.md`, or delete the section. A simple package
-  needs none.
+- Replace the comment in `AGENTS.md` with this package's own instructions, or delete it. A
+  simple package needs none.
 
 ## Build, test, ship
 

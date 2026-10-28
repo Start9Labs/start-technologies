@@ -3,11 +3,7 @@ import {
   withFetch,
   withInterceptorsFromDi,
 } from '@angular/common/http'
-import {
-  ApplicationConfig,
-  provideZoneChangeDetection,
-  signal,
-} from '@angular/core'
+import { ApplicationConfig, provideZoneChangeDetection } from '@angular/core'
 import {
   PreloadAllModules,
   provideRouter,
@@ -23,7 +19,6 @@ import {
 } from '@start9labs/shared'
 import {
   tuiButtonOptionsProvider,
-  tuiTextfieldOptionsProvider,
   provideTaiga,
   tuiHintOptionsProvider,
   tuiDialogOptionsProvider,
@@ -53,7 +48,7 @@ export const APP_CONFIG: ApplicationConfig = {
       withPreloading(PreloadAllModules),
     ),
     I18N_PROVIDERS,
-    provideSetupLogsService(ApiService),
+    provideSetupLogsService(ApiService, api => api.rpc.setup.logs.follow({})),
     tuiButtonOptionsProvider({ size: 'm' }),
     {
       provide: ApiService,
@@ -68,6 +63,5 @@ export const APP_CONFIG: ApplicationConfig = {
       useValue: version,
     },
     provideHttpClient(withInterceptorsFromDi(), withFetch()),
-    tuiTextfieldOptionsProvider({ cleaner: signal(false) }),
   ],
 }

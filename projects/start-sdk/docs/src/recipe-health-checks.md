@@ -4,9 +4,9 @@ Every daemon already includes a `ready` check that tells StartOS when it's start
 
 ## Solution
 
-Use `.addHealthCheck()` on the daemon chain in `setupMain()`. Each health check has an ID, a `ready` function that returns a result, and a `requires` array specifying which daemons must be running first. The check function typically execs a CLf1040sdI command or calls an API to assess the condition. Return `result: 'loading'` with a progress message for ongoing work (e.g. syncing), `result: 'success'` when complete, or `result: 'disabled'` when the check doesn't apply. Health check IDs are what dependency packages reference in their `healthChecks` array — a dependent service can require that your sync progress check passes before it considers your service ready.
+Use `.addHealthCheck()` on the daemon chain in `setupMain()`. Each health check has an ID, a `ready` function that returns a result, and a `requires` array specifying which daemons must be running first. The check function typically execs a CLI command or calls an API to assess the condition. Return `result: 'loading'` with a progress message for ongoing work (e.g. syncing), `result: 'success'` when complete, or `result: 'disabled'` when the check doesn't apply. Health check IDs are what dependency packages reference in their `healthChecks` array — a dependent service can require that your sync progress check passes before it considers your service ready.
 
-For checks that call expensive RPCs or APIs, set a `trigger` to control polling frequency. The default polls every 1 s while pending, which can overload a service doing heavy work (block validation, indexing). Use `sdk.trigger.cooldownTrigger(ms)` for a fixed interval, or `sdk.trigger.statusTrigger({ starting: 5_000, loading: 30_000, ... })` for per-status intervals.
+For checks that call expensive RPCs or APIs, set a `trigger` to control polling frequency. The default polls every 1 s while `starting` or `failure`, which can overload a service doing heavy work (block validation, indexing). Use `sdk.trigger.cooldownTrigger(ms)` for a fixed interval, or `sdk.trigger.statusTrigger(30_000, { starting: 5_000 })` for per-status intervals.
 
 **Reference:** [Main](main.md) (Health Checks, Polling Triggers) · [Dependencies](dependencies.md)
 

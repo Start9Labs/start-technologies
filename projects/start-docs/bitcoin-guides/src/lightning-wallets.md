@@ -118,15 +118,27 @@ Primarily a Bitcoin wallet — see [Bitcoin Wallets](bitcoin-wallets.md#fullynod
 
 The most capable mobile Lightning wallet, and the one with the most ways in. It can also run an embedded node on the phone itself, with no remote connection at all.
 
-**To connect,** in Zeus go to **Settings → Connect a node → +**, choose your implementation, and take the matching credential from your server:
+**To connect,** add a wallet in Zeus's settings, set **Wallet Interface** on its **Wallet Configuration** screen, and take the matching credential from your server:
 
-| Your node                        | Zeus implementation | Take from                                            |
-| -------------------------------- | ------------------- | ---------------------------------------------------- |
-| LND                              | LND                 | The **REST** interface's `lndconnect://` QR          |
-| Core Lightning                   | CLNRest             | The **CLNrest** interface URL, rune already embedded |
-| LND, without exposing an address | LNC                 | Lightning Terminal's Connect page                    |
+| Your node                        | Wallet Interface | Take from                                            |
+| -------------------------------- | ---------------- | ---------------------------------------------------- |
+| LND                              | LND              | The **REST** interface's `lndconnect://` QR          |
+| Core Lightning                   | CLNRest          | The **CLNrest** interface URL, rune already embedded |
+| LND, without exposing an address | LNC              | Lightning Terminal's Connect page                    |
 
-Enable Tor in Zeus only if you are actually using a `.onion` address. For a LAN or clearnet address, leave certificate validation on and install the [StartOS Root CA](/start-os/trust-ca.html) on the phone.
+Choose the interface before entering anything: switching it clears the fields.
+
+For Core Lightning, Zeus takes the CLNrest URL in three fields rather than whole:
+
+| Field          | Value                                                                                            |
+| -------------- | ------------------------------------------------------------------------------------------------ |
+| Server Address | The host with `http://` in front for a `.onion` address, or `https://` for a LAN or clearnet one |
+| REST Port      | The number after the host's `:`                                                                  |
+| Rune           | Everything after `rune=`                                                                         |
+
+Never put `clnrest+http://` or `clnrest+https://` in the address field, and never leave the scheme off: Zeus then assumes `https://`, and an onion address fails with `record overflow`.
+
+Turn on **Use Tor** only for a `.onion` address, with **Certificate Validation** off. For a LAN or clearnet address, leave Use Tor off and certificate validation on, and install the [StartOS Root CA](/start-os/trust-ca.html) on the phone.
 
 - [Zeus website](https://zeusln.com/)
 - [Connecting Zeus to StartOS](https://docs.zeusln.app/for-users/remote-connections/startos)
@@ -155,7 +167,7 @@ A self-hosted payment processor: invoices, point-of-sale, and e-commerce plugins
 
 - **Connects to:** Core Lightning only
 
-Blockstream's official web dashboard for Core Lightning. It is part of the Core Lightning service rather than a separate install, and is reached through that service's **Web UI** interface.
+Blockstream's official web dashboard for Core Lightning. It is part of the Core Lightning service rather than a separate install, and is reached through that service's **Web UI** interface. Its **Bitcoin Wallet → Deposit** gives a receive address for the node's on-chain wallet, which is how you fund the node before opening a channel.
 
 - [Source code](https://github.com/ElementsProject/cln-application)
 

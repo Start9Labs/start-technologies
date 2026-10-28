@@ -170,6 +170,10 @@ If a service is running low on space, you have two options today:
 
 Support for multiple drives is planned for StartOS 0.4.1. There is no release date yet.
 
+## What does “Data drive metadata space is low” mean?
+
+Btrfs needs unallocated space for metadata even when the disk metrics show free space inside existing data chunks. The upgrade migration to StartOS 0.4.0.5 starts a filtered balance on both data filesystems in the background after they are mounted; weekly maintenance reclaims unused chunks thereafter. StartOS raises this notification when unallocated space falls below 5% of a filesystem's size, capped at 10 GiB. The notification names the affected filesystem. If the warning persists, free space or [move to a larger data drive](#can-i-add-a-second-drive-to-give-a-service-more-storage).
+
 ## Can I run two copies of the same service?
 
 Yes, but it is not officially supported. StartOS identifies a service by its package ID and installs each ID once, so a second copy means maintaining your own fork of the package under a unique ID, including its updates. It also won't work with dependent services: a service that depends on the original looks for it by ID and cannot be pointed at the fork.
@@ -183,6 +187,18 @@ Yes, but it is not officially supported. StartOS identifies a service by its pac
 1. Build with `make x86` or `make arm` (see the [build guide](/packaging/makefile.html)), then [sideload](sideloading.md) the `.s9pk` or publish it to a [registry of your own](/packaging/host-registry.html). Repeat for each new release, keeping your ID.
 
 The fork is a separate service with its own settings, addresses, data and [backups](backup-create.md), and starts empty.
+
+## My server restarted on its own
+
+On servers with a supported hardware watchdog, StartOS keeps a watchdog timer armed with a requested timeout of one minute. If a system hang prevents the operating system from refreshing that timer, the hardware resets the server. The effective timeout depends on the device. This is an abrupt reset: in-flight writes can be lost.
+
+An unexpected restart can also follow a power interruption or a kernel crash. To inspect the previous boot, [connect via SSH](ssh.md) and run:
+
+```sh
+sudo journalctl -b -1 -n 200 --no-pager
+```
+
+Where the kernel and firmware provide persistent crash records, StartOS preserves the systemd-pstore archive under `/media/startos/data/main/pstore/`. A watchdog reset may leave no crash record. `sudo gather-debug-info` collects available records, kernel logs, the previous boot's journal, watchdog status and NVMe power-state information for [support](https://start9.com/contact).
 
 ## Issue with a particular service
 

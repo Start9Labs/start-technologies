@@ -46,7 +46,11 @@ If your package only ever tracks one upstream line — most do — ignore all of
 
 `UPDATING.md` at the package root is the package-specific recipe: where its version string lives, which registry and tag format to look for, and exactly which field to edit. Follow it. It is also **not automatically correct** — if its command contradicts what you can actually observe, trust the observation, fix the file in the same change, and say so in the pull request.
 
-Four disciplines apply on top of it.
+Five disciplines apply on top of it.
+
+### Only the wrapped application is upstream
+
+The `<upstream>` half of a package version is the wrapped application's version, so a new release of that application is the only upstream change that moves it. A base image is upstream when the application arrives through it — a newer Alpine carries a newer Tor to a package that installs Tor from it — and not when it only supplies a runtime for code the package owns. Anything else `UPDATING.md` pins beside the application, such as a database image or a bundled plugin, is refreshed along with a release or a revision bump, never as the reason for one.
 
 ### A release existing does not mean the artifact exists
 
@@ -63,13 +67,17 @@ GitHub's "Latest" badge is unreliable in both directions: it can sit on a prerel
 
 ### Scale scrutiny to the size of the jump
 
-Classify the jump first; the tier decides how much of upstream you read. A project still on `0.x` has no major position — its minor **is** its major — and upstream's own notes outrank the number: a release that says reindex, migrate, or "requires `<dependency>` N+" is a major whatever its version string says.
+Identify upstream's versioning scheme before classifying the jump; the tier decides how much of upstream you read. Preserve the [full upstream version](versions.md#preserve-the-upstream-version) in every case. The tier is a review scope, not a reason to coerce a version into SemVer.
 
-| Jump                      | What it needs                                                                                                                                                                                                                                                 |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Patch** (1.2.3 → 1.2.4) | Bump the pin and verify the artifact. Nothing else — no changelog survey, no source reading.                                                                                                                                                                  |
-| **Minor** (1.2.x → 1.3.0) | Read the changelog and release notes for what is worth exposing: a setting a user would want (an action), a new precondition (a task), a readiness or progress signal (a health check), a config option. Wire in what is high-value and leave the rest alone. |
-| **Major** (1.x → 2.0)     | Everything Minor needs, plus the breaking-change pass below and a decision on a [data migration](./recipe-version-migrations.md).                                                                                                                             |
+For projects that follow **SemVer**, use the positions in the table below. Treat a SemVer `0.x` minor jump as a major jump for review. For **CalVer, build numbers, or other schemes**, read upstream's release policy and notes to classify the actual impact: compatible bugfixes take the patch scope, compatible features take the minor scope, and breaking changes take the major scope. A changed year, month, or build counter does not establish any of those on its own. If the policy and notes leave compatibility unclear, do the breaking-change pass rather than assuming a patch.
+
+Upstream's own notes outrank the number: reindexing, data migration, or a raised dependency requirement takes the major review scope regardless of the version scheme.
+
+| SemVer jump / review scope | What it needs                                                                                                                                                                                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Patch** (1.2.3 → 1.2.4)  | Bump the pin and verify the artifact. Nothing else — no changelog survey, no source reading.                                                                                                                                                                  |
+| **Minor** (1.2.x → 1.3.0)  | Read the changelog and release notes for what is worth exposing: a setting a user would want (an action), a new precondition (a task), a readiness or progress signal (a health check), a config option. Wire in what is high-value and leave the rest alone. |
+| **Major** (1.x → 2.0)      | Everything Minor needs, plus the breaking-change pass below and a decision on a [data migration](./recipe-version-migrations.md).                                                                                                                             |
 
 **The breaking-change pass re-verifies every assumption the package encodes about upstream — against the new source, not the old comment.** Each is a place a bump breaks the package without breaking the build:
 

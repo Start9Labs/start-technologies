@@ -3,6 +3,7 @@ import { i18nPipe } from '@start9labs/shared'
 import { TuiButton } from '@taiga-ui/core'
 import { TuiAvatar } from '@taiga-ui/kit'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
+import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { ActionService } from 'src/app/services/action.service'
 import {
@@ -17,7 +18,7 @@ import { PluginItemComponent } from './item.component'
     <header>
       @if (pluginGroup().pluginPkgInfo; as pkgInfo) {
         <span tuiAvatar size="xs">
-          <img [src]="pkgInfo.icon" alt="" />
+          <img [pkgIcon]="pkgInfo.id" />
         </span>
       }
       {{ pluginGroup().pluginName }}
@@ -78,6 +79,7 @@ import { PluginItemComponent } from './item.component'
     i18nPipe,
     PluginItemComponent,
     TuiAvatar,
+    PkgIconDirective,
   ],
 })
 export class PluginAddressesComponent {

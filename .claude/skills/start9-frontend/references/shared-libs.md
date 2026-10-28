@@ -6,9 +6,13 @@
 `DownloadHTMLService`, `Exver` (version algebra façade), `SetupLogsService` +
 `provideSetupLogsService(Api)`, `i18nService`/`i18nPipe`/`LocalizePipe` + `I18N_PROVIDERS`,
 `MarkdownComponent`/`MARKDOWN` + `PromptModal`/`PROMPT` (ready `PolymorpheusComponent` dialogs),
-`InitializingComponent`/`LogsWindowComponent`, `DocsLinkDirective` (+`VERSION`),
+`InitializingComponent`/`LogsWindowComponent`, `CaWizard` (+`CA_TRUST_CHECK`),
+`DocsLinkDirective` (+`VERSION`, optional),
+`IconDirective` (abstract base for an async icon `<img>`: subclass supplies `src`, null until
+resolved; it owns the fallback and exposes `loading` until the image loads or fails for the
+avatar's `[tuiSkeleton]`; `FALLBACK_ICON`),
 `SafeLinksDirective`, pipes (`convertBytes`, `empty`, `compareExver`, `leafProgress`,
-`markdown`, `trustUrl`), `RELATIVE_URL` token, `HttpError`/`RpcError`, disk/RPC/http types,
+`markdown`), `RELATIVE_URL` token, `HttpError`/`RpcError`, disk/RPC/http types,
 utils (`convertAnsi`, `formatProgress`, `getPkgId`, `pauseFor`, `@debounce`, `sameUrl`,
 `isValidHttpUrl`, `registryUrl`, `hostnameValidator`, `hostnameValidationErrors`,
 `randomHostname`, keyboards/languages data,
@@ -20,11 +24,19 @@ release-notes/flavors/dependencies/links, registry picker) abstracted over
 (`MARKETPLACE_REGISTRY_ALERTS`), and pass install buttons as templates
 (`contentChild(TemplateRef)`).
 
-`@start9labs/start-core`: generated OS types (`T.*` — the ts-rs projection of the Rust
-backend), `IST`/`ISB` input-spec types/builders, `VersionRange`/`ExtendedVersion`, `S9pk`,
-utils, zod re-export. **Never hand-edit `osBindings/*.ts`** — change the Rust type and run
-`make start-core-ts-bindings`; a Rust `///` doc comment on an exported type changes the emitted
-`.ts`.
+`@start9labs/start-core`: generated serde-aware types (`T.*`) and server method trees
+(`RPC.StartOS`, `Setup`, `Init`, `Diagnostic`, `Registry`, `Tunnel`, `Effects`),
+`IST`/`ISB` input-spec types/builders, `VersionRange`/`ExtendedVersion`, `S9pk`, utils,
+zod re-export. `RPC.RpcMethod`, `RpcParamType` and `RpcReturnType` select request and
+result types from method literals. Use input declarations for requests; output
+DTOs may contain required nullable fields absent from inputs. **Never hand-edit
+`osBindings/*.ts`** — change the owning Rust schema and run `make start-core-ts-bindings`,
+then rebuild core and SDK before checking consumers.
+
+StartWRT uses its own generated `Api` in `services/api/bindings.ts` and streaming
+schemas in `events.ts`; run `make start-wrt-rpc-bindings`. Keep its aborting
+transport. Shared `HttpService` remains a JSON-RPC transport boundary; product
+wrappers infer results rather than accepting caller-selected return types.
 
 Library authoring (when you add to `shared`/`marketplace`): configurability layers in order —
 signal inputs → content projection/`contentChild(TemplateRef)`/`PolymorpheusContent` → abstract

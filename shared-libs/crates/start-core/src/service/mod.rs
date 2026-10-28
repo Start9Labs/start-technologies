@@ -15,22 +15,19 @@ use futures::stream::FusedStream;
 use futures::{FutureExt, SinkExt, StreamExt, TryStreamExt};
 use imbl_value::{InternedString, json};
 use itertools::Itertools;
-use nix::sys::signal::Signal;
 use persistent_container::PersistentContainer;
 use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
 use service_actor::ServiceActor;
 use termion::raw::IntoRawMode;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-use ts_rs::TS;
 use url::Url;
 
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::package::{
-    InstalledState, ManifestPreference, PackageState, PackageStateMatchModelRef, TaskSeverity,
-    UpdatingState,
+    InstalledState, ManifestPreference, PackageState, PackageStateMatchModelRef, UpdatingState,
 };
 use crate::disk::mount::filesystem::ReadOnly;
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
@@ -51,13 +48,14 @@ use crate::util::io::{
     AsyncReadStream, AtomicFile, TermSize, delete_file, maybe_read_file_to_string,
 };
 use crate::util::net::WebSocket;
-use crate::util::serde::Pem;
+use crate::util::serde::Der64;
 use crate::util::sync::SyncMutex;
 use crate::util::tui::choose;
 use crate::volume::{PKG_VOLUME_DIR, data_dir};
 use crate::{ActionId, CAP_1_KiB, DATA_DIR, ImageId, PackageId};
 
 pub mod action;
+mod attach_input;
 pub mod cli;
 pub mod effects;
 pub mod persistent_container;
@@ -127,8 +125,10 @@ async fn report_failed_rollback(
 
 struct RootCommand(pub String);
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default, VisitFields)]
 pub struct MiB(pub u64);
+
+rpc_toolkit::reflect_ts!(MiB);
 
 impl MiB {
     pub fn new(value: u64) -> Self {
@@ -146,12 +146,14 @@ impl std::fmt::Display for MiB {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default, VisitFields)]
 pub struct ServiceStats {
     pub container_id: Arc<ContainerId>,
     pub memory_usage: MiB,
     pub memory_limit: MiB,
 }
+
+rpc_toolkit::reflect_ts!(ServiceStats);
 
 pub struct ServiceRef(Arc<Service>);
 impl ServiceRef {
@@ -328,10 +330,10 @@ impl Service {
             .flatten_ok()
             .map(|a| a.and_then(|a| a))
             .try_collect()?;
-        let procedure_id = Guid::new();
+        let event_id = Guid::new();
         for action_id in tasks {
             if let Some(input) = self
-                .get_action_input(procedure_id.clone(), action_id.clone(), Value::Null, None)
+                .get_action_input(event_id.clone(), action_id.clone(), Value::Null, None)
                 .await
                 .log_err()
                 .flatten()
@@ -347,18 +349,9 @@ impl Service {
                 for (action_id, input) in &action_input {
                     for (_, pde) in db.as_public_mut().as_package_data_mut().as_entries_mut()? {
                         pde.as_tasks_mut().mutate(|tasks| {
-                            Ok(update_tasks(tasks, service_id, action_id, input, false))
+                            update_tasks(tasks, service_id, action_id, input, false);
+                            Ok(())
                         })?;
-                    }
-                }
-                for (_, pde) in db.as_public_mut().as_package_data_mut().as_entries_mut()? {
-                    if pde
-                        .as_tasks()
-                        .de()?
-                        .into_iter()
-                        .any(|(_, t)| t.active && t.task.severity == TaskSeverity::Critical)
-                    {
-                        pde.as_status_info_mut().stop()?;
                     }
                 }
                 Ok(())
@@ -372,7 +365,7 @@ impl Service {
     async fn new(
         ctx: RpcContext,
         s9pk: S9pk,
-        procedure_id: Guid,
+        event_id: Guid,
         init_kind: Option<InitKind>,
         recovery_source: Option<impl GenericMountGuard>,
         init_progress: Option<crate::progress::PhaseProgressTrackerHandle>,
@@ -390,6 +383,19 @@ impl Service {
             .await
             .result?;
         let persistent_container = PersistentContainer::new(&ctx, s9pk).await?;
+        let required =
+            effects::dependency::required_base_dependencies(&persistent_container.s9pk).await?;
+        ctx.db
+            .mutate(|db| {
+                db.as_public_mut()
+                    .as_package_data_mut()
+                    .as_idx_mut(&id)
+                    .or_not_found(&id)?
+                    .as_current_dependencies_mut()
+                    .ser(&required)
+            })
+            .await
+            .result?;
         let seed = Arc::new(ServiceActorSeed {
             id,
             persistent_container,
@@ -417,7 +423,7 @@ impl Service {
         service
             .seed
             .persistent_container
-            .init(service.weak(), procedure_id, init_kind)
+            .init(service.weak(), event_id, init_kind)
             .await?;
         service.recheck_tasks().await?;
         if let Some(recovery_guard) = recovery_guard {
@@ -697,8 +703,7 @@ impl Service {
         let manifest = s9pk.as_manifest().clone();
         crate::volume::ensure_volume_root(&manifest.id).await?;
         let developer_key = s9pk.as_archive().signer();
-        let icon = s9pk.icon_data_url().await?;
-        let procedure_id = Guid::new();
+        let event_id = Guid::new();
         let (finalization_progress, overall_progress) = match progress {
             Some(InstallProgressHandles {
                 finalization_progress,
@@ -709,7 +714,7 @@ impl Service {
         let service = Self::new(
             ctx.clone(),
             s9pk,
-            procedure_id.clone(),
+            event_id.clone(),
             Some(kind),
             recovery_source,
             finalization_progress,
@@ -724,7 +729,7 @@ impl Service {
                     .as_idx_mut(&manifest.id)
                     .or_not_found(&manifest.id)?;
                 let actions = entry.as_actions().keys()?;
-                if entry.as_tasks_mut().mutate(|t| {
+                entry.as_tasks_mut().mutate(|t| {
                     t.retain(|id, v| {
                         v.task.package_id != manifest.id
                             || if actions.contains(&v.task.action_id) {
@@ -740,17 +745,15 @@ impl Service {
                                 false
                             }
                     });
-                    Ok(t.iter()
-                        .any(|(_, t)| t.active && t.task.severity == TaskSeverity::Critical))
-                })? {
-                    entry.as_status_info_mut().stop()?;
-                }
+                    Ok(())
+                })?;
                 entry
                     .as_state_info_mut()
                     .ser(&PackageState::Installed(InstalledState { manifest }))?;
                 entry.as_s9pk_mut().ser(s9pk_path)?;
-                entry.as_developer_key_mut().ser(&Pem::new(developer_key))?;
-                entry.as_icon_mut().ser(&icon)?;
+                entry
+                    .as_developer_key_mut()
+                    .ser(&Der64::new(developer_key))?;
                 entry.as_registry_mut().ser(registry)?;
                 entry.as_status_info_mut().as_error_mut().ser(&None)?;
 
@@ -891,13 +894,15 @@ struct ServiceActorSeed {
     init_phase: SyncMutex<Option<crate::progress::PhaseProgressTrackerHandle>>,
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 pub struct RebuildParams {
     #[arg(help = "help.arg.package-id")]
     pub id: PackageId,
 }
+
+rpc_toolkit::reflect_ts!(RebuildParams);
+rpc_toolkit::ts_export!(RebuildParams, namespaces = [""]);
 pub async fn rebuild(ctx: RpcContext, RebuildParams { id }: RebuildParams) -> Result<(), Error> {
     ctx.services.load(&ctx, &id, LoadDisposition::Retry).await?;
     Ok(())
@@ -916,27 +921,25 @@ impl std::fmt::Display for SubcontainerInfo {
     }
 }
 
-#[derive(Deserialize, Serialize, TS)]
+#[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachParams {
     pub id: PackageId,
-    #[ts(type = "string[]")]
+    #[visit(opaque, wire = "Vec<String>", type_attributes(visit::wire))]
     pub command: Vec<OsString>,
     pub tty: bool,
     pub stderr_tty: bool,
     pub pty_size: Option<TermSize>,
-    #[ts(skip)]
+    #[visit(ts(skip))]
     #[serde(rename = "__Auth_signer")]
     signer: Option<InternedString>,
-    #[ts(type = "string | null")]
     subcontainer: Option<Guid>,
-    #[ts(type = "string | null")]
     name: Option<InternedString>,
-    #[ts(type = "string | null")]
     image_id: Option<ImageId>,
-    #[ts(type = "string | null")]
     user: Option<InternedString>,
 }
+
+rpc_toolkit::reflect_ts!(AttachParams);
 pub async fn attach(
     ctx: RpcContext,
     AttachParams {
@@ -1195,40 +1198,7 @@ pub async fn attach(
                 }
                 msg = ws.try_next() => {
                     if let Some(msg) = msg.with_kind(ErrorKind::Network)? {
-                        match msg {
-                            Message::Text(in_ty) => {
-                                current_in = in_ty;
-                            }
-                            Message::Binary(data) => {
-                                match &*current_in {
-                                    "stdin" => {
-                                        if let Some(stdin) = &mut stdin {
-                                            stdin.write_all(&data).await?;
-                                        }
-                                    }
-                                    "close-stdin" => {
-                                        stdin.take();
-                                    }
-                                    "signal" => {
-                                        if data.len() != 4 {
-                                            return Err(Error::new(
-                                                eyre!("{}", t!("service.mod.invalid-byte-length-for-signal", length = data.len())),
-                                                ErrorKind::InvalidRequest
-                                            ));
-                                        }
-                                        let mut sig_buf = [0u8; 4];
-                                        sig_buf.clone_from_slice(&data);
-                                        nix::sys::signal::kill(
-                                            pid,
-                                            Signal::try_from(i32::from_be_bytes(sig_buf))
-                                                .with_kind(ErrorKind::InvalidRequest)?
-                                        ).with_kind(ErrorKind::Filesystem)?;
-                                    }
-                                    _ => (),
-                                }
-                            }
-                            _ => ()
-                        }
+                        attach_input::handle(msg, &mut current_in, &mut stdin, pid).await?;
                     } else {
                         return Ok(())
                     }
@@ -1240,9 +1210,7 @@ pub async fn attach(
         }
 
         let exit = child.wait().await?;
-        // Send the exit code, not `into_raw()`'s wait status: the client hands this
-        // straight to `std::process::exit`, which keeps only the low byte, and a
-        // normal exit encodes as `code << 8` — so every code would arrive as 0.
+        // The client expects an exit code, not an encoded wait status.
         let code = exit
             .code()
             .unwrap_or_else(|| 128 + exit.signal().unwrap_or_default());

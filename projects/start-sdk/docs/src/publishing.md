@@ -38,7 +38,8 @@ Every subsequent change or version bump is another PR through the same cycle —
 
 Before publishing to your own registry — or before opening / updating a PR on the Start9-Community fork — walk through this. For community submissions, these checks must pass **before** you open the PR: the merge triggers the build, and anything wrong will ship directly to community-beta.
 
-1. **Tag convention followed.** Your version tag matches [Git Tag Conventions](./versions.md#git-tag-conventions).
-2. **All checks pass.** `tsc --noEmit`, tests, and the pack step must be green.
-3. **README is current.** Every action, volume, port, dependency, and limitation matches the code. No version numbers anywhere — see [Writing READMEs](./writing-readmes.md).
-4. **Tested end-to-end on StartOS.** Installed cleanly, service started, UI loaded (if applicable), health checks went green. Uninstall and reinstall to confirm teardown works.
+1. **SDK is current.** Compare `npm view @start9labs/start-sdk version` with the pin in `package.json`. If a newer SDK is out, bump to it first ([Bumping the SDK](./maintaining-a-package.md#bumping-the-sdk)) — every check below runs against it. A PR on an outdated SDK costs a review round trip.
+2. **Tag convention followed.** Your version tag matches [Git Tag Conventions](./versions.md#git-tag-conventions).
+3. **All checks pass.** `tsc --noEmit`, tests, and the pack step must be green.
+4. **README is current.** Every action, volume, port, dependency, and limitation matches the code. No version numbers anywhere — see [Writing READMEs](./writing-readmes.md).
+5. **Tested end-to-end on StartOS.** Installed cleanly, service started, UI loaded (if applicable), health checks went green. Uninstall and reinstall to confirm teardown works.

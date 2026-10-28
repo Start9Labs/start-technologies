@@ -6,12 +6,16 @@ use serde::Deserialize;
 use crate::context::RpcContext;
 use crate::db::model::Database;
 use crate::middleware::auth::local::{LocalAuth, LocalAuthContext};
-use crate::middleware::auth::signature::{SignatureAuth, SignatureAuthContext};
+use crate::middleware::auth::signature::{LoginMetadata, SignatureAuth, SignatureAuthContext};
 use crate::prelude::*;
 use crate::util::serde::const_true;
 
 pub mod local;
+mod login_rate_limit;
 pub mod signature;
+
+#[cfg(test)]
+mod tests;
 
 pub trait DbContext: Context {
     type Database: HasModel<Model = Model<Self::Database>> + Send + Sync;
@@ -28,28 +32,43 @@ impl DbContext for RpcContext {
 pub struct Metadata {
     #[serde(default = "const_true")]
     authenticated: bool,
+    #[serde(flatten)]
+    login_metadata: LoginMetadata,
 }
 
-pub struct Auth<C: Context>(Vec<DynMiddleware<C>>);
+pub struct Auth<C: Context> {
+    local: Option<DynMiddleware<C>>,
+    signature: Option<DynMiddleware<C>>,
+}
 impl<C: Context> Clone for Auth<C> {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        Self {
+            local: self.local.clone(),
+            signature: self.signature.clone(),
+        }
     }
 }
 impl<C: Context> Auth<C> {
     pub fn new() -> Self {
-        Self(Vec::new())
+        Self {
+            local: None,
+            signature: None,
+        }
+    }
+
+    fn methods(&mut self) -> impl Iterator<Item = &mut DynMiddleware<C>> {
+        self.local.iter_mut().chain(self.signature.iter_mut())
     }
 }
 impl<C: LocalAuthContext> Auth<C> {
     pub fn with_local_auth(mut self) -> Self {
-        self.0.push(DynMiddleware::new(LocalAuth::new()));
+        self.local = Some(DynMiddleware::new(LocalAuth::new()));
         self
     }
 }
 impl<C: SignatureAuthContext> Auth<C> {
     pub fn with_signature_auth(mut self) -> Self {
-        self.0.push(DynMiddleware::new(SignatureAuth::new()));
+        self.signature = Some(DynMiddleware::new(SignatureAuth::new()));
         self
     }
 }
@@ -60,7 +79,7 @@ impl<C: Context> Middleware<C> for Auth<C> {
         context: &C,
         request: &mut Request,
     ) -> Result<(), Response> {
-        for middleware in self.0.iter_mut() {
+        for middleware in self.methods() {
             middleware.process_http_request(context, request).await?;
         }
         Ok(())
@@ -73,32 +92,46 @@ impl<C: Context> Middleware<C> for Auth<C> {
     ) -> Result<(), RpcResponse> {
         let m: Metadata =
             from_value(metadata.clone()).map_err(|e| RpcResponse::from_result(Err(e)))?;
+        let mut authorized = false;
         let mut err = None;
-        for middleware in self.0.iter_mut() {
-            if let Err(e) = middleware
+        if let Some(local) = &mut self.local {
+            match local
                 .process_rpc_request(context, metadata.clone(), request)
                 .await
             {
-                if m.authenticated {
-                    err = Some(e);
+                Ok(()) => {
+                    if m.login_metadata.login {
+                        return Err(RpcResponse::from_result(Err(Error::new(
+                            eyre!("{}", t!("middleware.auth.local-login-unnecessary")),
+                            ErrorKind::InvalidRequest,
+                        ))));
+                    }
+                    authorized = true;
                 }
-            } else {
-                return Ok(());
+                Err(e) => err = Some(e),
             }
         }
-        if let Some(e) = err {
-            return Err(e);
+        if let Some(signature) = &mut self.signature {
+            match signature
+                .process_rpc_request(context, metadata, request)
+                .await
+            {
+                Ok(()) => authorized = true,
+                Err(e) => err = Some(e),
+            }
         }
-
-        Ok(())
+        match err {
+            Some(e) if !authorized && m.authenticated => Err(e),
+            _ => Ok(()),
+        }
     }
     async fn process_rpc_response(&mut self, context: &C, response: &mut RpcResponse) {
-        for middleware in self.0.iter_mut() {
+        for middleware in self.methods() {
             middleware.process_rpc_response(context, response).await;
         }
     }
     async fn process_http_response(&mut self, context: &C, response: &mut Response) {
-        for middleware in self.0.iter_mut() {
+        for middleware in self.methods() {
             middleware.process_http_response(context, response).await;
         }
     }

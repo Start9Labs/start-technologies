@@ -15,7 +15,7 @@ There are several reasons you might want a shell inside a running service contai
 - **Inspecting configuration** — View the generated config files or environment variables a service is actually running with.
 - **Advanced recovery** — In rare cases, manually repair data or state that cannot be fixed through the StartOS UI.
 
-Service processes receive the image's environment variables, then the server's language as `LANG`, then any variables the package sets, each overriding the last; a package can also remove one. `HOME` and `PATH` get defaults when none of these provides them.
+Service processes receive the server's language as `LANG` when the image includes that locale, then the image's environment variables, then any variables the package sets, each overriding the last; a package can also remove one. `HOME` and `PATH` get defaults when none of these provides them.
 
 ## Usage
 
@@ -42,6 +42,8 @@ To run one command instead of opening a shell, put it after `--`. Commands run a
 ```bash
 start-cli package attach <PACKAGE> -n <SUBCONTAINER> -u <USER> -- <COMMAND>
 ```
+
+An image without `/etc/passwd` runs commands as root with `HOME=/`. If it has no shell either, give the binary's absolute path after `--`.
 
 Type `exit` or press `Ctrl+D` to return to the host.
 

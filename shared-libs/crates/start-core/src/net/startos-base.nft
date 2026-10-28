@@ -2,6 +2,10 @@ add table ip startos
 add chain ip startos prerouting { type nat hook prerouting priority dstnat; policy accept; }
 add chain ip startos output { type nat hook output priority -100; policy accept; }
 add chain ip startos postrouting { type nat hook postrouting priority srcnat; policy accept; }
+# Pins a forwarded port's outbound traffic to its external address:port. Runs
+# ahead of lxc-net's masquerade and StartTunnel's egress masquerade, which share
+# priority srcnat with `postrouting`.
+add chain ip startos forward_snat { type nat hook postrouting priority srcnat - 1; policy accept; }
 add chain ip startos forward { type filter hook forward priority filter; policy drop; }
 add chain ip startos mangle_prerouting { type filter hook prerouting priority mangle; policy accept; }
 # 'route' (not filter) so restore-mark reroutes locally-generated replies (iptables mangle-OUTPUT parity)

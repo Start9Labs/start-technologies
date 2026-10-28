@@ -7,6 +7,7 @@ import {
   ISB,
   IST,
   types,
+  schemas,
   z,
   utils,
 } from '@start9labs/start-core'
@@ -20,9 +21,11 @@ export {
   ISB,
   IST,
   types,
+  schemas,
   z,
   utils,
 }
+export type { RPC } from '@start9labs/start-core'
 export { setupI18n } from './i18n'
 export * as T from './types'
 export { Daemons, configHash, DaemonsReconciler } from './mainFn/Daemons'
@@ -33,6 +36,7 @@ export {
   SubContainerLazy,
 } from './util/SubContainer'
 export { StartSdk } from './StartSdk'
+export { Dependency, Dependencies } from './dependencies'
 export { setupManifest, buildManifest } from './manifest/setupManifest'
 export { FileHelper } from './util/fileHelper'
 export {
@@ -43,6 +47,7 @@ export {
 
 export * as actions from '@start9labs/start-core/actions'
 export * as backup from './backup'
+export * as primaryUrl from './primaryUrl'
 export * as daemons from './mainFn/Daemons'
 export * as health from './health'
 export * as healthFns from './health/checkFns'

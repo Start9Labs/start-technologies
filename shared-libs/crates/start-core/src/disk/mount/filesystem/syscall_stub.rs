@@ -40,6 +40,9 @@ impl DetachedMount {
     pub fn attach(self, _mountpoint: &Path) -> Result<(), Error> {
         unsupported()
     }
+    pub fn attach_beneath(self, _mountpoint: &Path) -> Result<(), Error> {
+        unsupported()
+    }
 }
 
 pub async fn userns_fd_from_idmap(

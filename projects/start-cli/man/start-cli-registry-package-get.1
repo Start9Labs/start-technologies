@@ -4,7 +4,7 @@
 .SH NAME
 start\-cli\-registry\-package\-get \- List installation candidates
 .SH SYNOPSIS
-\fBstart\-cli registry package get\fR [\fB\-v\fR|\fB\-\-target\-version\fR] [\fB\-\-source\-version\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIID\fR] [\fIOTHER_VERSIONS\fR]
+\fBstart\-cli registry package get\fR [\fB\-v\fR|\fB\-\-target\-version\fR] [\fB\-\-source\-version\fR] [\fB\-\-all\-revisions\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIID\fR] [\fIOTHER_VERSIONS\fR]
 .SH DESCRIPTION
 List installation candidates
 .SH OPTIONS
@@ -14,6 +14,9 @@ Target version range constraint
 .TP
 \fB\-\-source\-version\fR \fI<SOURCE_VERSION>\fR
 Source version to upgrade from
+.TP
+\fB\-\-all\-revisions\fR
+Include superseded revisions of each upstream version
 .TP
 \fB\-\-format\fR
 

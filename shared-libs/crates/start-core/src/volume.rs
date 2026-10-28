@@ -91,10 +91,13 @@ impl InstallBackup {
         tokio::fs::metadata(&self.backup).await.is_ok()
     }
 
-    /// Marks an install that begins with no live root. Runs before the package entry exists.
+    /// Resolves pending restores, discards the previous rollback point, and marks a rootless
+    /// install. The caller must hold the package write lock and propagate errors before
+    /// entering Installing or Updating.
     pub async fn begin(&self) -> Result<(), Error> {
         // A pending restore can hold the only copy of a root that reads as absent.
         self.resolve_pending().await?;
+        btrfs::delete_tree(&self.backup).await?;
         // An unreadable root is not absent.
         if matches!(
             tokio::fs::metadata(&self.live).await,
@@ -111,11 +114,10 @@ impl InstallBackup {
         tokio::fs::metadata(&self.fresh).await.is_ok()
     }
 
-    /// Snapshots the live root as the new rollback point, staged at `backup_tmp` so the
-    /// previous backup is discarded only once its replacement exists. Returns false for a
-    /// non-subvolume root, where no constant-time backup is possible.
+    /// Stages a snapshot of the live root as this operation's rollback point. Call `begin`
+    /// before starting the operation. Returns false when the root is not a subvolume or
+    /// snapshot creation fails.
     pub async fn snapshot(&self) -> Result<bool, Error> {
-        // The backup being replaced may be the only complete copy of the package's data.
         self.resolve_pending().await?;
         if !btrfs::is_subvolume(&self.live).await {
             if tokio::fs::metadata(&self.live).await.is_ok() {
@@ -503,6 +505,106 @@ mod tests {
         })
     }
 
+    async fn btrfs_case() -> Result<Case, Error> {
+        let mut c = case().await?;
+        let parent = PathBuf::from(
+            std::env::var_os("BTRFS_TEST_VOLUMES_DIR")
+                .expect("BTRFS_TEST_VOLUMES_DIR must name a writable btrfs test directory"),
+        );
+        assert!(btrfs::is_btrfs(&parent).await);
+        c.volumes = parent.join(c._tmp.file_name().unwrap());
+        assert!(tokio::fs::symlink_metadata(&c.volumes).await.is_err());
+        btrfs::create_subvolume(&c.volumes).await?;
+        c.ib = InstallBackup::new(&c.volumes, &pkg());
+        Ok(c)
+    }
+
+    async fn set_readonly(path: &Path, readonly: bool) -> Result<(), Error> {
+        use crate::util::Invoke;
+
+        tokio::process::Command::new("btrfs")
+            .args(["property", "set", "-ts"])
+            .arg(path)
+            .args(["ro", if readonly { "true" } else { "false" }])
+            .invoke(ErrorKind::Filesystem)
+            .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires BTRFS_TEST_VOLUMES_DIR and btrfs subvolume permissions"]
+    async fn btrfs_begin_replaces_a_stale_backup_with_the_current_snapshot() -> Result<(), Error> {
+        let c = btrfs_case().await?;
+        btrfs::create_subvolume(&c.ib.live).await?;
+        btrfs::create_subvolume(&c.ib.backup).await?;
+        seed_tree(&c.ib.live, "current").await?;
+        seed_tree(&c.ib.backup, "stale").await?;
+
+        c.ib.begin().await?;
+        assert!(!c.ib.exists().await);
+        assert!(c.ib.snapshot().await?);
+        assert_eq!(read_marker(&c.ib.backup).await.as_deref(), Some("current"));
+        seed_tree(&c.ib.live, "updated").await?;
+        c.ib.restore().await?;
+
+        assert_eq!(read_marker(&c.ib.live).await.as_deref(), Some("current"));
+        assert!(!c.ib.exists().await);
+        assert!(tokio::fs::metadata(&c.ib.restore_old).await.is_err());
+        btrfs::delete_tree(&c.ib.live).await?;
+        btrfs::delete_tree(&c.volumes).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires BTRFS_TEST_VOLUMES_DIR and btrfs subvolume permissions"]
+    async fn btrfs_failed_snapshot_cannot_restore_a_stale_backup() -> Result<(), Error> {
+        let c = btrfs_case().await?;
+        btrfs::create_subvolume(&c.ib.live).await?;
+        btrfs::create_subvolume(&c.ib.backup).await?;
+        seed_tree(&c.ib.live, "current").await?;
+        seed_tree(&c.ib.backup, "stale").await?;
+
+        c.ib.begin().await?;
+        set_readonly(&c.volumes, true).await?;
+        let snapshot = c.ib.snapshot().await;
+        set_readonly(&c.volumes, false).await?;
+        assert!(!snapshot?);
+        c.ib.restore().await?;
+
+        assert_eq!(read_marker(&c.ib.live).await.as_deref(), Some("current"));
+        assert!(!c.ib.exists().await);
+        assert!(tokio::fs::metadata(&c.ib.backup_tmp).await.is_err());
+        btrfs::delete_tree(&c.ib.live).await?;
+        btrfs::delete_tree(&c.volumes).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires BTRFS_TEST_VOLUMES_DIR and btrfs subvolume permissions"]
+    async fn btrfs_begin_aborts_when_the_stale_backup_cannot_be_deleted() -> Result<(), Error> {
+        let c = btrfs_case().await?;
+        btrfs::create_subvolume(&c.ib.live).await?;
+        btrfs::create_subvolume(&c.ib.backup).await?;
+        seed_tree(&c.ib.live, "current").await?;
+        seed_tree(&c.ib.backup, "stale").await?;
+        write(&c.ib.fresh, "unchanged").await?;
+        set_readonly(&c.ib.backup, true).await?;
+        set_readonly(&c.volumes, true).await?;
+
+        let begin = c.ib.begin().await;
+        set_readonly(&c.volumes, false).await?;
+        set_readonly(&c.ib.backup, false).await?;
+
+        assert!(begin.is_err());
+        assert_eq!(read_marker(&c.ib.live).await.as_deref(), Some("current"));
+        assert_eq!(read_marker(&c.ib.backup).await.as_deref(), Some("stale"));
+        assert_eq!(tokio::fs::read_to_string(&c.ib.fresh).await?, "unchanged");
+        btrfs::delete_tree(&c.ib.backup).await?;
+        btrfs::delete_tree(&c.ib.live).await?;
+        btrfs::delete_tree(&c.volumes).await?;
+        Ok(())
+    }
+
     #[tokio::test]
     async fn restore_puts_the_backup_in_place_and_leaves_no_debris() -> Result<(), Error> {
         let c = case().await?;
@@ -527,6 +629,57 @@ mod tests {
 
         assert_eq!(read_marker(&c.ib.live).await.as_deref(), Some("live"));
         assert!(!c.ib.exists().await);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn begin_invalidates_a_stale_backup_before_a_non_subvolume_snapshot() -> Result<(), Error>
+    {
+        let c = case().await?;
+        seed_tree(&c.ib.live, "current").await?;
+        seed_tree(&c.ib.backup, "stale").await?;
+
+        c.ib.begin().await?;
+        assert!(!c.ib.snapshot().await?);
+        c.ib.restore().await?;
+
+        assert_eq!(read_marker(&c.ib.live).await.as_deref(), Some("current"));
+        assert!(!c.ib.exists().await);
+        assert!(!c.ib.is_fresh().await);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn begin_discards_a_stale_backup_when_the_live_root_is_missing() -> Result<(), Error> {
+        let c = case().await?;
+        seed_tree(&c.ib.backup, "stale").await?;
+
+        c.ib.begin().await?;
+        assert!(!c.ib.snapshot().await?);
+        c.ib.restore().await?;
+
+        assert!(!c.ib.exists().await);
+        assert!(tokio::fs::metadata(&c.ib.live).await.is_err());
+        assert!(c.ib.is_fresh().await);
+        c.ib.remove().await?;
+        assert!(!c.ib.is_fresh().await);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn begin_resolves_a_pending_restore_before_invalidating_the_backup() -> Result<(), Error>
+    {
+        let c = case().await?;
+        seed_tree(&c.ib.restore_old, "discarded").await?;
+        seed_tree(&c.ib.backup, "recovered").await?;
+        tokio::fs::create_dir_all(c.ib.live.join("data/db")).await?;
+
+        c.ib.begin().await?;
+
+        assert_eq!(read_marker(&c.ib.live).await.as_deref(), Some("recovered"));
+        assert!(!c.ib.exists().await);
+        assert!(!c.ib.is_fresh().await);
+        assert!(tokio::fs::metadata(&c.ib.restore_old).await.is_err());
         Ok(())
     }
 

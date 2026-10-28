@@ -1,4 +1,6 @@
-TS_FILES := $(shell git ls-files lib)
+include ../../../build/source-files.mk
+
+TS_FILES := $(call ls-files, lib)
 
 .PHONY: all dist test check fmt check-fmt clean node_modules
 
@@ -11,7 +13,7 @@ lib/exver/exver.ts: node_modules lib/exver/exver.pegjs
 # and the SDK (which vendors it into its published bundle).
 # Recipe body is npm/node only (no shell utilities) so it also works on Windows dev
 # machines; the cross-platform file ops live in package.json scripts.
-dist: $(TS_FILES) lib/exver/exver.ts package.json node_modules README.md LICENSE
+dist: $(TS_FILES) lib/exver/exver.ts package.json tsconfig.esm.json ../scripts/esm-extensions.mjs node_modules README.md LICENSE
 	npm run build
 	-@touch dist
 

@@ -1,34 +1,33 @@
 import { Injectable } from '@angular/core'
-import { ApiService } from './api.service'
-import { T } from '@start9labs/start-core'
-import { GetPackageRes, GetPackagesRes } from '@start9labs/marketplace'
+import { ApiService, RegistryClient } from './api.service'
+import { RPC, createRpcClient, tableTransport } from '@start9labs/start-core'
 import { Mock } from './api.fixures'
 
 import markdown from './md-sample.md'
 
 @Injectable()
 export class MockApiService extends ApiService {
+  private readonly client = createRpcClient<RegistryClient>(
+    tableTransport<RPC.Registry>({
+      info: async () => {
+        await this.pauseFor(1000)
+        return Mock.RegistryInfo
+      },
+      'package.get': async params => {
+        await this.pauseFor(1000)
+        return params.id
+          ? Mock.RegistryPackages[params.id]!
+          : Mock.RegistryPackages
+      },
+    }),
+  )
+
   constructor() {
     super()
   }
 
-  async getRegistryInfo(): Promise<T.RegistryInfo> {
-    await this.pauseFor(1000)
-    return Mock.RegistryInfo
-  }
-
-  async getRegistryPackage(
-    _registryUrl: string,
-    id: string,
-    _targetVersion: string | null,
-  ): Promise<GetPackageRes> {
-    await this.pauseFor(1000)
-    return Mock.RegistryPackages[id]!
-  }
-
-  async getRegistryPackages(): Promise<GetPackagesRes> {
-    await this.pauseFor(1000)
-    return Mock.RegistryPackages
+  registry(): RegistryClient {
+    return this.client
   }
 
   async getStaticProxy(): Promise<string> {

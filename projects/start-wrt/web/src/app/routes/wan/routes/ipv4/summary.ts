@@ -1,4 +1,5 @@
 import { Component, computed, inject } from '@angular/core'
+import { TuiBadge, TuiStatus } from '@taiga-ui/kit'
 import { Summary } from 'src/app/components/summary'
 import { injectFormService } from 'src/app/services/form.service'
 import { WanIpv4Form, IPV4_LABELS, netmaskFromPrefix } from './utils'
@@ -21,8 +22,19 @@ type SummaryField = (typeof SUMMARY_FIELDS)[number]
   selector: '[wanIpv4Summary]',
   template: `
     <section>
-      @if (assignedIp(); as ip) {
-        <div [appSummary]="ip">{{ 'Assigned IP' | i18n }}</div>
+      @if (service.data()) {
+        @if (connectedIp(); as ip) {
+          <div [appSummary]="ip">{{ 'Assigned IP' | i18n }}</div>
+        } @else {
+          <div appSummary>
+            {{ 'Assigned IP' | i18n }}
+            <span tuiSubtitle>
+              <span tuiBadge tuiStatus appearance="negative">
+                {{ 'Not connected' | i18n }}
+              </span>
+            </span>
+          </div>
+        }
       }
       @for (item of items(); track item.label) {
         @if (item.val; as val) {
@@ -31,12 +43,14 @@ type SummaryField = (typeof SUMMARY_FIELDS)[number]
       }
     </section>
   `,
-  imports: [Summary, i18nPipe],
+  imports: [TuiBadge, TuiStatus, Summary, i18nPipe],
 })
 export class WanIpv4Summary {
   protected readonly service = injectFormService<WanIpv4Form>()
   private readonly ipv4Service = inject(WanIpv4Service)
-  readonly assignedIp = this.ipv4Service.assignedIp
+  readonly connectedIp = computed(() =>
+    this.ipv4Service.carrier() ? this.ipv4Service.assignedIp() : null,
+  )
 
   readonly items = computed(() => {
     const ip = this.service.data()?.ip

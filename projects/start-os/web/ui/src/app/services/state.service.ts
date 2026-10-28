@@ -1,6 +1,7 @@
-import { Component, inject, Injectable } from '@angular/core'
+import { Component, inject, Injectable, signal } from '@angular/core'
 import { CanActivateFn, IsActiveMatchOptions, Router } from '@angular/router'
 import { i18nPipe } from '@start9labs/shared'
+import { T } from '@start9labs/start-core'
 import { TUI_TRUE_HANDLER } from '@taiga-ui/cdk'
 import {
   TuiLoader,
@@ -21,13 +22,14 @@ import {
 } from 'rxjs'
 import {
   catchError,
+  distinctUntilChanged,
   filter,
   map,
   shareReplay,
   skip,
   switchMap,
-  take,
   takeUntil,
+  takeWhile,
   tap,
 } from 'rxjs/operators'
 import { ServerState } from 'src/app/services/api/api.types'
@@ -68,6 +70,8 @@ export class StateService extends Observable<ServerState | null> {
   private readonly network$ = inject(NetworkService)
   private readonly trigger$ = new BehaviorSubject(true)
 
+  readonly dnsStatus = signal<T.DnsStatus | null>(null)
+
   private readonly disconnected$ = this.alerts.open(
     new PolymorpheusComponent(DisconnectedToast),
     { closable: false, appearance: 'negative', icon: '' },
@@ -83,9 +87,17 @@ export class StateService extends Observable<ServerState | null> {
     switchMap(() =>
       timer(0, 2000).pipe(
         exhaustMap(() =>
-          from(this.api.getState()).pipe(catchError(() => EMPTY)),
+          from(this.getState()).pipe(
+            tap(({ dnsStatus }) => this.dnsStatus.set(dnsStatus)),
+            map(({ state }) => state),
+            catchError(() => {
+              this.dnsStatus.set(null)
+              return EMPTY
+            }),
+          ),
         ),
-        take(1),
+        takeWhile(state => state !== 'running', true),
+        distinctUntilChanged(),
       ),
     ),
     tap(state => this.handleState(state)),
@@ -96,12 +108,10 @@ export class StateService extends Observable<ServerState | null> {
   constructor() {
     super(subscriber => this.stream$.subscribe(subscriber))
 
-    // Retrigger on offline
     this.network$
       .pipe(filter(v => !v))
       .subscribe(() => this.retrigger(false, 2000))
 
-    // Show toasts
     this.trigger$
       .pipe(
         filter(v => !v),
@@ -117,6 +127,17 @@ export class StateService extends Observable<ServerState | null> {
 
   retrigger(gracefully: boolean, delay: number) {
     setTimeout(() => this.trigger$.next(gracefully), delay)
+  }
+
+  private async getState() {
+    const state = await this.api.rpc.state({}, { timeout: 10000 })
+    const dnsStatus =
+      state === 'running'
+        ? null
+        : await this.api.rpc.net.dns
+            .status({}, { timeout: 2000 })
+            .catch(() => null)
+    return { state, dnsStatus }
   }
 
   private handleState(state: ServerState): void {

@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use chrono::{TimeDelta, Utc};
 use imbl::OrdMap;
 use imbl_value::InternedString;
 use josekit::jwk::Jwk;
@@ -33,7 +32,7 @@ use crate::disk::mount::guard::MountGuard;
 use crate::init::{InitResult, check_time_is_synchronized};
 use crate::install::PKG_ARCHIVE_DIR;
 use crate::lxc::LxcManager;
-use crate::middleware::auth::signature::{HasUnenrolledKeys, NonceCache};
+use crate::middleware::auth::signature::NonceCache;
 use crate::net::gateway::WildcardListener;
 use crate::net::net_controller::{NetController, NetService};
 use crate::net::socks::DEFAULT_SOCKS_LISTEN;
@@ -42,6 +41,8 @@ use crate::net::wifi::WpaCli;
 use crate::prelude::*;
 use crate::progress::{FullProgressTracker, PhaseProgressTrackerHandle};
 use crate::rpc_continuations::{Guid, OpenAuthedContinuations, RpcContinuations};
+use crate::s9pk::S9pk;
+use crate::s9pk::merkle_archive::source::DynFileSource;
 use crate::service::ServiceMap;
 use crate::service::effects::callbacks::ServiceCallbacks;
 use crate::service::effects::subcontainer::NVIDIA_OVERLAY_PATH;
@@ -68,6 +69,7 @@ pub struct RpcContextSeed {
     pub s9pk_arch: Option<&'static str>,
     pub services: ServiceMap,
     pub cancellable_installs: SyncMutex<BTreeMap<PackageId, oneshot::Sender<()>>>,
+    pub installing_s9pks: SyncMutex<BTreeMap<PackageId, S9pk<DynFileSource>>>,
     pub metrics_cache: Watch<Option<crate::system::Metrics>>,
     pub shutdown: broadcast::Sender<Option<Shutdown>>,
     pub lxc_manager: Arc<LxcManager>,
@@ -76,7 +78,7 @@ pub struct RpcContextSeed {
     pub callbacks: Arc<ServiceCallbacks>,
     pub wifi_manager: RwLock<Option<WpaCli>>,
     pub current_secret: Arc<Jwk>,
-    pub client: Client,
+    pub client: ReloadableHttpClient,
     pub start_time: Instant,
     pub crons: SyncMutex<BTreeMap<Guid, NonDetachingJoinHandle<()>>>,
 }
@@ -128,8 +130,40 @@ impl CleanupInitPhases {
 #[derive(Clone)]
 pub struct RpcContext(Arc<RpcContextSeed>);
 
-/// Drop enrolled keys idle for more than 30 days. No-op until the clock is
-/// NTP-synced, so a wrong boot-time clock can't reap live sessions.
+/// Clients acquired before a reload retain their previous trust configuration.
+pub struct ReloadableHttpClient {
+    client: SyncRwLock<Client>,
+    socks_proxy_url: String,
+}
+impl ReloadableHttpClient {
+    fn new(socks_proxy_url: String) -> Result<Self, Error> {
+        let client = Self::build_for_proxy(&socks_proxy_url)?;
+        Ok(Self {
+            client: SyncRwLock::new(client),
+            socks_proxy_url,
+        })
+    }
+
+    fn build_for_proxy(socks_proxy_url: &str) -> Result<Client, Error> {
+        Client::builder()
+            .proxy(Proxy::all(socks_proxy_url)?)
+            .build()
+            .with_kind(ErrorKind::ParseUrl)
+    }
+
+    pub fn get(&self) -> Client {
+        self.client.read()
+    }
+
+    pub fn reload(&self) -> Result<(), Error> {
+        let client = Self::build_for_proxy(&self.socks_proxy_url)?;
+        self.client.replace(client);
+        Ok(())
+    }
+}
+
+/// No-op until the clock is NTP-synced, so a wrong boot-time clock can't reap
+/// live sessions.
 fn reap_idle_sessions(
     continuations: &OpenAuthedContinuations<Option<InternedString>>,
     ephemeral: &SyncMutex<AuthKeys>,
@@ -138,26 +172,14 @@ fn reap_idle_sessions(
     if !db.as_public().as_server_info().as_ntp_synced().de()? {
         return Ok(());
     }
-    let now = Utc::now();
-    let expired = db
-        .as_private()
-        .as_session_pubkeys()
-        .as_entries()?
-        .into_iter()
-        .map(|(id, session)| Ok::<_, Error>((id, session.de()?.last_active)))
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .filter(|(_, last_active)| now - *last_active > TimeDelta::days(30))
-        .map(|(id, _)| id)
-        .collect::<Vec<_>>();
-    HasUnenrolledKeys::unenroll::<RpcContext>(continuations, Some(ephemeral), db, expired)?;
-    Ok(())
+    crate::auth::reap_idle_keys_in::<RpcContext>(continuations, Some(ephemeral), db)
 }
 
 impl RpcContext {
     #[instrument(skip_all)]
     pub async fn init(
         webserver: &WebServerAcceptorSetter<WildcardListener>,
+        dns: Arc<crate::net::dns::DnsController>,
         config: &ServerConfig,
         disk_guid: InternedString,
         init_result: Option<InitResult>,
@@ -193,6 +215,8 @@ impl RpcContext {
             let net_ctrl = Arc::new(
                 NetController::init(
                     db.clone(),
+                    dns,
+                    webserver,
                     socks_proxy,
                     config
                         .max_proxy_conns_per_target
@@ -200,7 +224,6 @@ impl RpcContext {
                 )
                 .await?,
             );
-            webserver.send_modify(|wl| wl.set_ip_info(net_ctrl.net_iface.watcher.subscribe()));
             let os_net_service = net_ctrl.os_bindings().await?;
             (net_ctrl, os_net_service)
         };
@@ -388,6 +411,7 @@ impl RpcContext {
             },
             services,
             cancellable_installs: SyncMutex::new(BTreeMap::new()),
+            installing_s9pks: SyncMutex::new(BTreeMap::new()),
             metrics_cache,
             rpc_continuations: RpcContinuations::new(),
             shutdown,
@@ -404,10 +428,7 @@ impl RpcContext {
                     )
                 })?,
             ),
-            client: Client::builder()
-                .proxy(Proxy::all(socks_proxy_url)?)
-                .build()
-                .with_kind(crate::ErrorKind::ParseUrl)?,
+            client: ReloadableHttpClient::new(socks_proxy_url)?,
             start_time: Instant::now(),
             crons,
         });
@@ -577,11 +598,6 @@ impl RpcContext {
             .await
     }
 }
-impl AsRef<Client> for RpcContext {
-    fn as_ref(&self) -> &Client {
-        &self.client
-    }
-}
 impl AsRef<Jwk> for RpcContext {
     fn as_ref(&self) -> &Jwk {
         &CURRENT_SECRET
@@ -622,5 +638,94 @@ impl Drop for RpcContext {
                 tracing::debug!("{:?}", eyre!(""))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use http::{HeaderMap, HeaderValue};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use super::*;
+
+    fn client_with_generation(generation: &'static str) -> Client {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-client-generation", HeaderValue::from_static(generation));
+        Client::builder().default_headers(headers).build().unwrap()
+    }
+
+    #[tokio::test]
+    async fn reloadable_http_client_replaces_future_clones() {
+        let proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_url = format!("socks5h://{}", proxy.local_addr().unwrap());
+        let proxy_server = tokio::spawn(async move {
+            let (mut stream, _) = proxy.accept().await.unwrap();
+            let mut request = [0; 64];
+            assert!(stream.read(&mut request).await.unwrap() > 0);
+        });
+        let target = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target_url = format!("http://{}", target.local_addr().unwrap());
+        let target_server = tokio::spawn(async move {
+            let (mut stream, _) = target.accept().await.unwrap();
+            let mut request = [0; 4096];
+            assert!(stream.read(&mut request).await.unwrap() > 0);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .unwrap();
+        });
+        let http = ReloadableHttpClient {
+            client: SyncRwLock::new(client_with_generation("old")),
+            socks_proxy_url: proxy_url,
+        };
+        let old = http.get();
+        http.reload().unwrap();
+
+        assert_client_generation(old, "old").await;
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                http.get().get(target_url).send()
+            )
+            .await
+            .unwrap()
+            .is_err()
+        );
+        proxy_server.await.unwrap();
+        target_server.abort();
+    }
+
+    #[tokio::test]
+    async fn reloadable_http_client_keeps_client_when_rebuild_fails() {
+        let http = ReloadableHttpClient {
+            client: SyncRwLock::new(client_with_generation("old")),
+            socks_proxy_url: "http://[::1".to_owned(),
+        };
+
+        assert!(http.reload().is_err());
+        assert_client_generation(http.get(), "old").await;
+    }
+
+    async fn assert_client_generation(client: Client, generation: &str) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = vec![0; 4096];
+            let len = stream.read(&mut request).await.unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .unwrap();
+            String::from_utf8(request[..len].to_vec()).unwrap()
+        });
+
+        client.get(&url).send().await.unwrap();
+        assert!(
+            server
+                .await
+                .unwrap()
+                .contains(&format!("x-client-generation: {generation}"))
+        );
     }
 }

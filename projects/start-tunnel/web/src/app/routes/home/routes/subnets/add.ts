@@ -284,11 +284,11 @@ export class SubnetsAdd {
 
     this.tasks.run(async () => {
       editing
-        ? await this.api.editSubnet({ subnet, name })
-        : await this.api.addSubnet({ subnet, name })
+        ? await this.api.rpc.subnet.add({ subnet, name })
+        : await this.api.rpc.subnet.add({ subnet, name })
 
       if (this.dnsChanged()) {
-        await this.api.setSubnetDns({
+        await this.api.rpc.subnet.setDns({
           subnet,
           mode,
           deviceIp:
@@ -301,12 +301,12 @@ export class SubnetsAdd {
 
       const wanIp = this.form.controls.wanIp.value.ip
       if (wanIp !== this.context.data.wanIp) {
-        await this.api.setSubnetWan({ subnet, wanIp })
+        await this.api.rpc.subnet.setWan({ subnet, wanIp })
       }
 
       const ipv6 = this.form.controls.ipv6.value.trim() || null
       if (ipv6 !== (this.context.data.ipv6 ?? null)) {
-        await this.api.setSubnetIpv6({ subnet, prefix: ipv6 })
+        await this.api.rpc.subnet.setIpv6({ subnet, prefix: ipv6 })
       }
       this.context.$implicit.complete()
     })

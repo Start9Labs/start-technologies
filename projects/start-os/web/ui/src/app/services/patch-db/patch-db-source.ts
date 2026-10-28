@@ -31,7 +31,14 @@ export class PatchDbSource extends Observable<Update<DataModel>[]> {
   private readonly api = inject(ApiService)
   private readonly state = inject(StateService)
   private readonly stream$ = inject(AuthService).isVerified$.pipe(
-    switchMap(verified => (verified ? this.api.subscribeToPatchDB({}) : EMPTY)),
+    switchMap(verified =>
+      verified
+        ? this.api.rpc.db.subscribe({}).then(({ dump, guid }) => ({
+            guid,
+            dump: { ...dump, value: dump.value as DataModel },
+          }))
+        : EMPTY,
+    ),
     switchMap(({ dump, guid }) =>
       this.api.openWebsocket$<Revision>(guid).pipe(
         bufferTime(250),

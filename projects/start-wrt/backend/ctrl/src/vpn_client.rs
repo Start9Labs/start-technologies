@@ -28,7 +28,7 @@ struct UciVpnClient {
 
 // === Public API Types ===
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct OutboundVpn {
     pub id: String,
     pub label: String,
@@ -42,46 +42,77 @@ pub struct OutboundVpn {
     /// Interface MTU, if explicitly set. `None` means the kernel default
     /// (1420 on a clean path) is in effect. Editable via `update`.
     pub mtu: Option<u16>,
+    /// The server is named by hostname; only `Internet` is a valid target.
+    pub hostname_endpoint: bool,
+    /// Resolvers reached through the tunnel. Empty leaves profiles routed through
+    /// this VPN on the system DNS servers, or on the ISP's outside the tunnel.
+    pub dns: Vec<IpAddr>,
+    pub status: OutboundVpnStatus,
+    /// Seconds since the tunnel's latest handshake, measured on the router.
+    /// `None` when it has never completed one.
+    pub last_handshake_secs: Option<u64>,
 }
+rpc_toolkit::reflect_ts!(OutboundVpn);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, visit_rs::VisitVariants)]
+#[serde(rename_all = "kebab-case")]
+pub enum OutboundVpnStatus {
+    Disabled,
+    /// A handshake completed within the session lifetime.
+    Connected,
+    /// Nothing has sent through the tunnel since its session lapsed.
+    Idle,
+    /// The router is sending through the tunnel and the server is not answering.
+    NotResponding,
+}
+rpc_toolkit::reflect_ts!(OutboundVpnStatus);
+
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct OutboundVpnCreateRequest {
     pub label: String,
     pub target: String,
     /// Raw WireGuard .conf file contents
     pub config: String,
+    /// Replaces the config's `DNS =` servers. Absent keeps them.
+    #[serde(default)]
+    pub dns: Option<Vec<IpAddr>>,
 }
+rpc_toolkit::reflect_ts!(OutboundVpnCreateRequest);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct OutboundVpnCreateResponse {
     pub id: String,
 }
+rpc_toolkit::reflect_ts!(OutboundVpnCreateResponse);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct OutboundVpnUpdateRequest {
     pub id: String,
     pub label: String,
     pub target: String,
-    /// Desired interface MTU. `Some(n)` writes `option mtu n`; `None` (or
-    /// absent) clears it so the tunnel inherits the kernel default. The web
-    /// edit form always submits the field's current value, so `None`
-    /// unambiguously means "clear". UCI is the single source of truth — there
-    /// is no stored `.conf` to round-trip.
+    /// Desired interface MTU. `None` (or absent) restores the default: the
+    /// chain MTU for a VPN connecting through another, else the kernel's.
     #[serde(default)]
     pub mtu: Option<u16>,
+    /// Replaces the resolvers reached through the tunnel. Absent keeps them.
+    #[serde(default)]
+    pub dns: Option<Vec<IpAddr>>,
 }
+rpc_toolkit::reflect_ts!(OutboundVpnUpdateRequest);
 
-#[derive(Debug, Clone, Serialize, Deserialize, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, Parser, visit_rs::VisitFields)]
 pub struct OutboundVpnDeleteRequest {
     #[clap(short, long)]
     pub id: String,
 }
+rpc_toolkit::reflect_ts!(OutboundVpnDeleteRequest);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct OutboundVpnSetEnabledRequest {
     pub id: String,
     pub enabled: bool,
 }
+rpc_toolkit::reflect_ts!(OutboundVpnSetEnabledRequest);
 
 // === Parsed WireGuard Config ===
 
@@ -89,7 +120,7 @@ pub struct OutboundVpnSetEnabledRequest {
 struct ParsedWgConfig {
     private_key: String,
     addresses: Vec<String>,
-    dns: Vec<String>,
+    dns: Vec<IpAddr>,
     mtu: Option<u16>,
     public_key: String,
     preshared_key: Option<String>,
@@ -372,7 +403,13 @@ fn parse_wireguard_config(config: &str) -> Result<ParsedWgConfig, Error> {
             "interface" => match key.as_str() {
                 "privatekey" => private_key = value.to_string(),
                 "address" => addresses = value.split(',').map(|s| s.trim().to_string()).collect(),
-                "dns" => dns = value.split(',').map(|s| s.trim().to_string()).collect(),
+                // Non-address entries are wg-quick search domains.
+                "dns" => {
+                    dns = value
+                        .split(',')
+                        .filter_map(|s| s.trim().parse().ok())
+                        .collect()
+                }
                 "mtu" => {
                     let parsed = value.parse::<u32>().map_err(|_| {
                         Error::new(
@@ -391,7 +428,12 @@ fn parse_wireguard_config(config: &str) -> Result<ParsedWgConfig, Error> {
                 "endpoint" => {
                     let endpoint = value.trim();
                     if let Some(colon_idx) = endpoint.rfind(':') {
-                        endpoint_host = Some(endpoint[..colon_idx].to_string());
+                        let host = &endpoint[..colon_idx];
+                        let host = host
+                            .strip_prefix('[')
+                            .and_then(|h| h.strip_suffix(']'))
+                            .unwrap_or(host);
+                        endpoint_host = Some(host.to_string());
                         endpoint_port = Some(endpoint[colon_idx + 1..].to_string());
                     }
                 }
@@ -716,7 +758,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<OutboundVpn>, Error> {
 
     let server_interfaces = get_vpn_server_interfaces(&cfgs);
 
-    let clients: Vec<OutboundVpn> = cfgs["startwrt"]
+    let mut clients: Vec<OutboundVpn> = cfgs["startwrt"]
         .sections
         .iter()
         .filter_map(|section| section.get::<UciVpnClient>().ok())
@@ -739,6 +781,11 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<OutboundVpn>, Error> {
             let mtu = wg_iface.mtu;
 
             let used_by = get_used_by_profiles(&cfgs, &meta.interface);
+            let hostname_endpoint = has_hostname_endpoint(&cfgs, &meta.interface);
+            let dns = crate::dns::vpn_dns_servers(&cfgs, &meta.interface)
+                .iter()
+                .filter_map(|s| s.parse().ok())
+                .collect();
 
             Some(OutboundVpn {
                 id: meta.interface.clone(),
@@ -748,11 +795,121 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<OutboundVpn>, Error> {
                 used_by,
                 supports_ipv6,
                 mtu,
+                hostname_endpoint,
+                dns,
+                status: OutboundVpnStatus::Disabled,
+                last_handshake_secs: None,
             })
         })
         .collect();
 
+    fill_tunnel_status(&mut clients).await;
+
     Ok(clients)
+}
+
+/// How long a send seen after the session lapsed counts as an unanswered handshake.
+const ATTEMPT_WINDOW_SECS: u64 = 120;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TxSample {
+    tx_bytes: u64,
+    at: u64,
+    attempt_at: Option<u64>,
+}
+
+static TX_SAMPLES: std::sync::Mutex<std::collections::BTreeMap<String, TxSample>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TunnelStats {
+    latest_handshake: u64,
+    rx_bytes: u64,
+    tx_bytes: u64,
+}
+
+impl TunnelStats {
+    /// `None` when no peer has an endpoint to send to.
+    fn from_peers(peers: &[crate::wg::WgPeerStats]) -> Option<Self> {
+        let mut peers = peers.iter().filter(|p| p.endpoint.is_some()).peekable();
+        peers.peek()?;
+        Some(peers.fold(
+            TunnelStats {
+                latest_handshake: 0,
+                rx_bytes: 0,
+                tx_bytes: 0,
+            },
+            |acc, p| TunnelStats {
+                latest_handshake: acc.latest_handshake.max(p.latest_handshake),
+                rx_bytes: acc.rx_bytes + p.rx_bytes,
+                tx_bytes: acc.tx_bytes + p.tx_bytes,
+            },
+        ))
+    }
+}
+
+fn tunnel_status(
+    stats: Option<&TunnelStats>,
+    prev: Option<TxSample>,
+    now: u64,
+) -> (OutboundVpnStatus, Option<TxSample>) {
+    let Some(stats) = stats else {
+        return (OutboundVpnStatus::NotResponding, None);
+    };
+    let lapsed_at = stats.latest_handshake + crate::wg::REJECT_AFTER_SECS;
+    let attempt_at = match prev {
+        Some(p) if stats.tx_bytes > p.tx_bytes && p.at >= lapsed_at => Some(now),
+        Some(p) if stats.tx_bytes >= p.tx_bytes => p.attempt_at.filter(|t| *t >= lapsed_at),
+        _ => None,
+    };
+    let status = if now < lapsed_at {
+        OutboundVpnStatus::Connected
+    } else if stats.rx_bytes == 0 && stats.tx_bytes > crate::wg::HANDSHAKE_INITIATION_BYTES {
+        OutboundVpnStatus::NotResponding
+    } else if attempt_at.is_some_and(|t| now.saturating_sub(t) < ATTEMPT_WINDOW_SECS) {
+        OutboundVpnStatus::NotResponding
+    } else {
+        OutboundVpnStatus::Idle
+    };
+    let sample = TxSample {
+        tx_bytes: stats.tx_bytes,
+        at: now,
+        attempt_at,
+    };
+    (status, Some(sample))
+}
+
+async fn fill_tunnel_status(clients: &mut [OutboundVpn]) {
+    let dumps = futures::future::join_all(clients.iter().map(|c| async move {
+        if c.enabled {
+            crate::wg::show_dump(&c.id).await
+        } else {
+            None
+        }
+    }))
+    .await;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+
+    let mut samples = TX_SAMPLES.lock().unwrap();
+    for (client, peers) in clients.iter_mut().zip(dumps) {
+        if !client.enabled {
+            samples.remove(&client.id);
+            continue;
+        }
+        let stats = peers.as_deref().and_then(TunnelStats::from_peers);
+        let (status, sample) = tunnel_status(stats.as_ref(), samples.get(&client.id).copied(), now);
+        client.status = status;
+        client.last_handshake_secs = stats
+            .filter(|s| s.latest_handshake > 0)
+            .map(|s| now.saturating_sub(s.latest_handshake));
+        match sample {
+            Some(sample) => samples.insert(client.id.clone(), sample),
+            None => samples.remove(&client.id),
+        };
+    }
+    samples.retain(|id, _| clients.iter().any(|c| c.id == *id));
 }
 
 /// Create a new outbound VPN client from a WireGuard .conf file
@@ -763,7 +920,10 @@ pub async fn create(
 ) -> Result<OutboundVpnCreateResponse, Error> {
     validate_label(&req.label)?;
 
-    let parsed = parse_wireguard_config(&req.config)?;
+    let mut parsed = parse_wireguard_config(&req.config)?;
+    if let Some(dns) = req.dns {
+        parsed.dns = dns;
+    }
     let interface_name = sanitize_interface_name(&req.label)?;
 
     let mut retries = 4;
@@ -813,6 +973,13 @@ pub async fn create(
         };
         cfgs["startwrt"].append(&meta, Some(&interface_name))?;
 
+        guard_chain_hop(&cfgs, &interface_name)?;
+        guard_endpoint_unshared(&cfgs, &interface_name)?;
+        if parsed.mtu.is_none() {
+            let mtu = chain_mtu(&cfgs, &interface_name);
+            set_interface_mtu(&mut cfgs, &interface_name, mtu, &arena);
+        }
+
         rewrite_vpn_chain_routes(&mut cfgs)?;
 
         match dump_all("/etc/config", cfgs).await {
@@ -860,87 +1027,32 @@ pub async fn update(
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs = parse_all("/etc/config", &arena, &["network", "startwrt"]).await?;
+        let mut cfgs = parse_all(
+            "/etc/config",
+            &arena,
+            &["network", "startwrt", "firewall", "dhcp"],
+        )
+        .await?;
 
-        // Check for duplicate label (excluding self)
-        let label_conflict = cfgs["startwrt"]
-            .sections
-            .iter()
-            .filter_map(|s| s.get::<UciVpnClient>().ok())
-            .any(|m| m.label == req.label && m.interface != req.id);
-        if label_conflict {
-            return Err(Error::new(
-                eyre!("invalid label: {} (duplicate)", req.label),
-                ErrorKind::InvalidValue,
-            ));
-        }
-
-        // Find and update metadata, capturing old label for cascade and old
-        // target so the disabled-target guard fires only on an actual retarget
-        let mut found = false;
-        let mut old_label = String::new();
-        let mut old_target = String::new();
-        for section in &mut cfgs["startwrt"].sections {
-            let Ok(mut meta) = section.get::<UciVpnClient>() else {
-                continue;
-            };
-            if meta.interface != req.id {
-                continue;
-            }
-
-            old_label = meta.label.clone();
-            old_target = meta.target.clone();
-            meta.label = req.label.clone();
-            meta.target = req.target.clone();
-            section.set(&meta)?;
-            found = true;
-            break;
-        }
-
-        if !found {
-            return Err(Error::new(
-                eyre!("VPN client {} not found", req.id),
-                ErrorKind::NotFound,
-            ));
-        }
-
-        validate_target(&cfgs, &req.target, &req.label)?;
+        let old_target = update_client_metadata(&mut cfgs, &req.id, &req.label, &req.target)?;
         // Only on an actual retarget, mirroring guard_subnet_collision: a
         // no-op edit (label, MTU) must not be blocked by a broken chain that
         // already exists in the stored config — otherwise a router that
         // already chains onto a disabled VPN becomes uneditable.
         if req.target != old_target {
             guard_target_enabled(&cfgs, &req.target)?;
+            guard_chain_hop(&cfgs, &req.id)?;
+            guard_endpoint_unshared(&cfgs, &req.id)?;
         }
 
-        // Cascade label rename: update any VPN clients targeting the old label
-        if old_label != req.label {
-            for section in &mut cfgs["startwrt"].sections {
-                let Ok(mut meta) = section.get::<UciVpnClient>() else {
-                    continue;
-                };
-                if meta.target == old_label {
-                    meta.target = req.label.clone();
-                    let _ = section.set(&meta);
-                }
-            }
-        }
-
-        // Apply the MTU to the WG interface (network config). `None` clears it,
-        // restoring the kernel default. UCI is the single source of truth.
-        let mut mtu_changed = false;
-        for section in &mut cfgs["network"].sections {
-            if section.name().as_deref() != Some(req.id.as_str()) {
-                continue;
-            }
-            let Ok(iface) = section.get::<WgInterface>() else {
-                continue;
-            };
-            if !iface.is_wireguard() {
-                continue;
-            }
-            mtu_changed = set_mtu_option(section, req.mtu, &arena);
-            break;
+        let mtu = req.mtu.or_else(|| chain_mtu(&cfgs, &req.id));
+        let mtu_changed = set_interface_mtu(&mut cfgs, &req.id, mtu, &arena);
+        let dns_changed = match &req.dns {
+            Some(dns) => set_interface_dns(&mut cfgs, &req.id, dns, &arena),
+            None => false,
+        };
+        if dns_changed {
+            crate::profiles::rewrite_all_dns_forwarding(&mut cfgs)?;
         }
 
         rewrite_vpn_chain_routes(&mut cfgs)?;
@@ -967,6 +1079,9 @@ pub async fn update(
                 if mtu_changed {
                     restart_wireguard_interface(&req.id).await?;
                 }
+                if dns_changed {
+                    crate::dns::heal_smartdns_conf("/etc/config").await?;
+                }
                 reload_system().await?;
                 crate::activity::log(
                     "vpn-client",
@@ -979,6 +1094,65 @@ pub async fn update(
             }
         }
     }
+}
+
+/// Set a VPN client's label and target, carrying a rename into the targets of
+/// the VPNs chained through it. Returns the previous target.
+fn update_client_metadata(
+    cfgs: &mut Configs,
+    id: &str,
+    label: &str,
+    target: &str,
+) -> Result<String, Error> {
+    let label_conflict = cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<UciVpnClient>().ok())
+        .any(|m| m.label == label && m.interface != id);
+    if label_conflict {
+        return Err(Error::new(
+            eyre!("invalid label: {label} (duplicate)"),
+            ErrorKind::InvalidValue,
+        ));
+    }
+
+    let mut previous = None;
+    for section in &mut cfgs["startwrt"].sections {
+        let Ok(mut meta) = section.get::<UciVpnClient>() else {
+            continue;
+        };
+        if meta.interface != id {
+            continue;
+        }
+        previous = Some((meta.label.clone(), meta.target.clone()));
+        meta.label = label.to_string();
+        meta.target = target.to_string();
+        section.set(&meta)?;
+        break;
+    }
+    let Some((old_label, old_target)) = previous else {
+        return Err(Error::new(
+            eyre!("VPN client {id} not found"),
+            ErrorKind::NotFound,
+        ));
+    };
+
+    if old_label != label {
+        for section in &mut cfgs["startwrt"].sections {
+            let Ok(mut meta) = section.get::<UciVpnClient>() else {
+                continue;
+            };
+            if meta.target == old_label {
+                meta.target = label.to_string();
+                section.set(&meta)?;
+            }
+        }
+    }
+
+    // After the rename: a chain walked through the old label would end there.
+    validate_target(cfgs, target, label)?;
+
+    Ok(old_target)
 }
 
 /// Delete an outbound VPN client
@@ -1094,6 +1268,7 @@ pub async fn delete(ctx: ServerContext, args: OutboundVpnDeleteRequest) -> Resul
                 return Err(err.into());
             }
             Ok(()) => {
+                crate::dns::heal_smartdns_conf("/etc/config").await?;
                 // network reload will see the WG interface is gone from config
                 // and tear it down atomically — no separate ifdown needed.
                 reload_system().await?;
@@ -1282,6 +1457,7 @@ pub async fn set_enabled(
                         tokio::process::Command::new("ifdown").arg(interface_name),
                     )
                     .await;
+                    crate::dns::heal_smartdns_conf("/etc/config").await?;
                 }
                 reload_system().await?;
                 let action = if req.enabled { "enabled" } else { "disabled" };
@@ -1304,10 +1480,22 @@ pub async fn set_enabled(
 
 // === VPN Chain Routing ===
 
-/// Read the `endpoint_host` from a peer section (`wireguard_<interface>`).
-/// Strips the surrounding `[...]` of a bracketed IPv6 literal so the returned
-/// string parses as `IpAddr` directly. (The literal in UCI keeps the brackets;
-/// `wireguard.sh` handles them before passing to `wg`.)
+/// Name prefix of the route sending a chained VPN's endpoint through its target.
+const CHAIN_ROUTE_PREFIX: &str = "vcr_";
+/// Name prefix of the `unreachable` fallback beneath each chain route.
+const CHAIN_BLOCK_PREFIX: &str = "vcrb_";
+/// Metric of the chain fallback, above any metric netifd assigns.
+const CHAIN_BLOCK_METRIC: u32 = 2048;
+
+/// WireGuard's interface MTU when none is set.
+const DEFAULT_WG_MTU: u16 = 1420;
+/// Outer IPv4 + UDP + WireGuard header and tag.
+const WG_OVERHEAD_V4: u16 = 60;
+/// Outer IPv6 + UDP + WireGuard header and tag.
+const WG_OVERHEAD_V6: u16 = 80;
+
+/// Read the `endpoint_host` from a peer section (`wireguard_<interface>`),
+/// without the brackets of an IPv6 literal.
 fn get_peer_endpoint_host(cfgs: &Configs, interface: &str) -> Option<String> {
     let peer_type = format!("wireguard_{}", interface);
     cfgs["network"]
@@ -1331,20 +1519,217 @@ fn get_peer_endpoint_host(cfgs: &Configs, interface: &str) -> Option<String> {
         })
 }
 
-/// Idempotently rebuild all VPN chain endpoint routes (`vcr_*` sections).
+fn has_hostname_endpoint(cfgs: &Configs, interface: &str) -> bool {
+    get_peer_endpoint_host(cfgs, interface).is_some_and(|host| host.parse::<IpAddr>().is_err())
+}
+
+fn get_peer_allowed_ips(cfgs: &Configs, interface: &str) -> Vec<String> {
+    let peer_type = format!("wireguard_{}", interface);
+    cfgs["network"]
+        .sections
+        .iter()
+        .filter(|s| s.ty() == peer_type)
+        .flat_map(|s| s.lines.iter())
+        .filter_map(|line| match line {
+            Line::List { list, item, .. } if list.as_str() == "allowed_ips" => {
+                Some(item.as_str().to_string())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Whether an `allowed_ips` entry covers an address. A bare address is a host entry.
+fn allowed_ip_covers(entry: &str, addr: IpAddr) -> bool {
+    let entry = entry.trim();
+    if let Ok(net) = entry.parse::<ipnet::IpNet>() {
+        return net.contains(&addr);
+    }
+    entry.parse::<IpAddr>().is_ok_and(|host| host == addr)
+}
+
+fn client_by_interface(cfgs: &Configs, interface: &str) -> Option<UciVpnClient> {
+    cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<UciVpnClient>().ok())
+        .find(|meta| meta.interface == interface)
+}
+
+fn client_by_label(cfgs: &Configs, label: &str) -> Option<UciVpnClient> {
+    cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<UciVpnClient>().ok())
+        .find(|meta| meta.label == label)
+}
+
+/// Reject a chained VPN whose endpoint its target cannot carry.
 ///
-/// For each VPN client whose target is another VPN (not "Internet"), creates a
-/// host route in the main routing table sending the VPN's peer endpoint
-/// through its target VPN's tunnel interface. This ensures WireGuard's locally-
-/// generated UDP packets traverse the chain instead of exiting via WAN.
-/// IPv4 endpoints produce a `route` /32; IPv6 endpoints produce a `route6` /128.
+/// Its endpoint must be an IP address, and the target's tunnel must have an
+/// address of that family and route that address. Passes a VPN that connects
+/// over the Internet, and defers an unknown target to `validate_target`.
+fn guard_chain_hop(cfgs: &Configs, interface: &str) -> Result<(), Error> {
+    let Some(client) = client_by_interface(cfgs, interface) else {
+        return Ok(());
+    };
+    if client.target == "Internet" {
+        return Ok(());
+    }
+    let Some(target) = client_by_label(cfgs, &client.target) else {
+        return Ok(());
+    };
+    let label = &client.label;
+    let target_label = &target.label;
+
+    let host = get_peer_endpoint_host(cfgs, interface).unwrap_or_default();
+    let Ok(addr) = host.parse::<IpAddr>() else {
+        return Err(Error::new(
+            eyre!(
+                "'{label}' names its server as '{host}', but a VPN connecting through \
+                 another needs its server's IP address — import a config whose Endpoint \
+                 is an IP address to connect it through '{target_label}'"
+            ),
+            ErrorKind::InvalidValue,
+        ));
+    };
+
+    let target_addresses = wg_interface(cfgs, &target.interface)
+        .map(|wg| wg.addresses)
+        .unwrap_or_default();
+    let family_ok = target_addresses.iter().any(|a| match addr {
+        IpAddr::V4(_) => !a.contains(':'),
+        IpAddr::V6(_) => a.contains(':'),
+    });
+    if !family_ok {
+        let family = if addr.is_ipv4() { "IPv4" } else { "IPv6" };
+        return Err(Error::new(
+            eyre!(
+                "'{target_label}' has no {family} address, so it cannot carry '{label}', \
+                 whose server is at {addr}"
+            ),
+            ErrorKind::InvalidValue,
+        ));
+    }
+
+    let allowed = get_peer_allowed_ips(cfgs, &target.interface);
+    if !allowed.iter().any(|entry| allowed_ip_covers(entry, addr)) {
+        return Err(Error::new(
+            eyre!(
+                "'{target_label}' does not route {addr} (its AllowedIPs are {}), so it \
+                 cannot carry '{label}'",
+                if allowed.is_empty() {
+                    "empty".to_string()
+                } else {
+                    allowed.join(", ")
+                }
+            ),
+            ErrorKind::InvalidValue,
+        ));
+    }
+
+    Ok(())
+}
+
+/// Reject a VPN whose endpoint address another VPN shares when either is chained.
+///
+/// A chain route captures every packet the router sends to that address.
+fn guard_endpoint_unshared(cfgs: &Configs, interface: &str) -> Result<(), Error> {
+    let Some(client) = client_by_interface(cfgs, interface) else {
+        return Ok(());
+    };
+    let Some(addr) =
+        get_peer_endpoint_host(cfgs, interface).and_then(|host| host.parse::<IpAddr>().ok())
+    else {
+        return Ok(());
+    };
+
+    let conflict = cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<UciVpnClient>().ok())
+        .filter(|other| other.interface != interface)
+        .filter(|other| client.target != "Internet" || other.target != "Internet")
+        .find(|other| {
+            get_peer_endpoint_host(cfgs, &other.interface)
+                .and_then(|host| host.parse::<IpAddr>().ok())
+                == Some(addr)
+        });
+    if let Some(other) = conflict {
+        return Err(Error::new(
+            eyre!(
+                "'{}' and '{}' share the server {addr}; a VPN connecting through another \
+                 must be the only one using its server address",
+                client.label,
+                other.label
+            ),
+            ErrorKind::InvalidValue,
+        ));
+    }
+
+    Ok(())
+}
+
+/// The MTU that fits through the target tunnel, or `None` for a VPN
+/// connecting over the Internet.
+fn chain_mtu(cfgs: &Configs, interface: &str) -> Option<u16> {
+    let client = client_by_interface(cfgs, interface)?;
+    if client.target == "Internet" {
+        return None;
+    }
+    let target = client_by_label(cfgs, &client.target)?;
+    let outer = wg_interface(cfgs, &target.interface)
+        .and_then(|wg| wg.mtu)
+        .unwrap_or(DEFAULT_WG_MTU);
+    let overhead = match get_peer_endpoint_host(cfgs, interface)
+        .and_then(|host| host.parse::<IpAddr>().ok())
+    {
+        Some(IpAddr::V4(_)) => WG_OVERHEAD_V4,
+        _ => WG_OVERHEAD_V6,
+    };
+    Some(outer.saturating_sub(overhead).max(MIN_WG_MTU as u16))
+}
+
+/// Set the `mtu` option of a WireGuard interface. Returns whether it changed.
+fn set_interface_mtu<'a>(
+    cfgs: &mut Configs<'a>,
+    interface: &str,
+    mtu: Option<u16>,
+    arena: &'a Arena,
+) -> bool {
+    for section in &mut cfgs["network"].sections {
+        if section.name().as_deref() != Some(interface) {
+            continue;
+        }
+        if !section
+            .get::<WgInterface>()
+            .is_ok_and(|iface| iface.is_wireguard())
+        {
+            continue;
+        }
+        return set_mtu_option(section, mtu, arena);
+    }
+    false
+}
+
+/// Idempotently rebuild all VPN chain endpoint routes (`vcr_*`, `vcrb_*`).
+///
+/// Each VPN client targeting another VPN gets a host route in the main table
+/// sending its peer endpoint through the target's tunnel interface, and an
+/// `unreachable` route on loopback beneath it: netifd drops the tunnel route
+/// while the target is down, and the endpoint must then be unreachable rather
+/// than reached over the WAN. A routed VPN gets `nohostroute`: netifd's own
+/// endpoint host route would copy the fallback as a unicast route over it.
+/// IPv4 endpoints produce `route` /32s; IPv6 endpoints `route6` /128s.
 pub(crate) fn rewrite_vpn_chain_routes(cfgs: &mut Configs) -> Result<(), Error> {
     use uciedit::openwrt::{NetworkRoute, NetworkRoute6};
 
-    // 1. Remove all existing vcr_* route / route6 sections
-    cfgs["network"]
-        .sections
-        .retain(|s| !s.name().map(|n| n.starts_with("vcr_")).unwrap_or(false));
+    // 1. Remove all existing chain route / route6 sections
+    cfgs["network"].sections.retain(|s| {
+        !s.name()
+            .map(|n| n.starts_with(CHAIN_ROUTE_PREFIX) || n.starts_with(CHAIN_BLOCK_PREFIX))
+            .unwrap_or(false)
+    });
 
     // 2. Build label → interface map from all VPN client entries
     let vpn_clients: Vec<UciVpnClient> = cfgs["startwrt"]
@@ -1359,6 +1744,7 @@ pub(crate) fn rewrite_vpn_chain_routes(cfgs: &mut Configs) -> Result<(), Error> 
         .collect();
 
     // 3. For each VPN client with target ≠ "Internet", create a chain route
+    let mut routed = std::collections::BTreeSet::new();
     for client in &vpn_clients {
         if client.target == "Internet" {
             continue;
@@ -1372,33 +1758,237 @@ pub(crate) fn rewrite_vpn_chain_routes(cfgs: &mut Configs) -> Result<(), Error> 
             continue;
         };
 
-        // Only create routes for IP literals, skip hostnames
+        // Only IP literals can be routed; `guard_chain_hop` refuses to chain a hostname.
         let Ok(addr) = endpoint_host.parse::<IpAddr>() else {
             continue;
         };
 
-        let route_name = format!("vcr_{}", client.interface);
+        routed.insert(client.interface.clone());
+        let route_name = format!("{CHAIN_ROUTE_PREFIX}{}", client.interface);
+        let block_name = format!("{CHAIN_BLOCK_PREFIX}{}", client.interface);
         match addr {
             IpAddr::V4(_) => {
+                let target = format!("{}/32", endpoint_host);
                 cfgs["network"].append(
                     &NetworkRoute {
                         interface: target_interface.to_string(),
-                        target: format!("{}/32", endpoint_host),
+                        target: target.clone(),
                         ..Default::default()
                     },
                     Some(&route_name),
+                )?;
+                cfgs["network"].append(
+                    &NetworkRoute {
+                        interface: "loopback".to_string(),
+                        target,
+                        metric: Some(CHAIN_BLOCK_METRIC),
+                        kind: Some("unreachable".to_string()),
+                        ..Default::default()
+                    },
+                    Some(&block_name),
                 )?;
             }
             IpAddr::V6(_) => {
+                let target = format!("{}/128", endpoint_host);
                 cfgs["network"].append(
                     &NetworkRoute6 {
                         interface: target_interface.to_string(),
-                        target: format!("{}/128", endpoint_host),
+                        target: target.clone(),
                         ..Default::default()
                     },
                     Some(&route_name),
                 )?;
+                cfgs["network"].append(
+                    &NetworkRoute6 {
+                        interface: "loopback".to_string(),
+                        target,
+                        metric: Some(CHAIN_BLOCK_METRIC),
+                        kind: Some("unreachable".to_string()),
+                        ..Default::default()
+                    },
+                    Some(&block_name),
+                )?;
             }
+        }
+    }
+
+    // 4. netifd's endpoint host route belongs only to unrouted VPNs
+    for client in &vpn_clients {
+        let routed = routed.contains(&client.interface);
+        for section in &mut cfgs["network"].sections {
+            if section.name().as_deref() == Some(client.interface.as_str()) {
+                set_nohostroute_option(section, routed);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Set `nohostroute '1'`, or remove the option.
+fn set_nohostroute_option(section: &mut Section<'_>, on: bool) {
+    section.lines.retain(
+        |line| !matches!(line, Line::Option { option, .. } if option.as_str() == "nohostroute"),
+    );
+    if on {
+        let arena = section.arena;
+        section.lines.push(Line::Option {
+            option: Token::from_str("nohostroute", arena),
+            value: Token::from_str("1", arena),
+            comment: LineComment::None,
+        });
+    }
+}
+
+/// The chain route sections and each VPN client's `nohostroute`, order-independent.
+fn chain_route_snapshot(cfgs: &Configs) -> Vec<String> {
+    let mut sections: Vec<String> = cfgs["network"]
+        .sections
+        .iter()
+        .filter(|s| {
+            s.name()
+                .map(|n| n.starts_with(CHAIN_ROUTE_PREFIX) || n.starts_with(CHAIN_BLOCK_PREFIX))
+                .unwrap_or(false)
+        })
+        .map(|s| {
+            s.lines
+                .iter()
+                .filter(|line| !matches!(line, Line::Empty))
+                .map(|line| line.to_string())
+                .collect()
+        })
+        .collect();
+    for client in cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<UciVpnClient>().ok())
+    {
+        let nohostroute = cfgs["network"]
+            .sections
+            .iter()
+            .filter(|s| s.name().as_deref() == Some(client.interface.as_str()))
+            .flat_map(|s| s.lines.iter())
+            .find_map(|line| match line {
+                Line::Option { option, value, .. } if option.as_str() == "nohostroute" => {
+                    Some(value.as_str().to_string())
+                }
+                _ => None,
+            });
+        sections.push(format!("{} nohostroute={nohostroute:?}", client.interface));
+    }
+    sections.sort();
+    sections
+}
+
+/// Strip brackets from IPv6 `endpoint_host`s of outbound VPN peers. Returns
+/// the interfaces changed.
+fn unbracket_endpoint_hosts<'a>(cfgs: &mut Configs<'a>, arena: &'a Arena) -> Vec<String> {
+    let interfaces: Vec<String> = cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<UciVpnClient>().ok())
+        .map(|meta| meta.interface)
+        .collect();
+
+    let mut changed = Vec::new();
+    for interface in interfaces {
+        let peer_type = format!("wireguard_{interface}");
+        for section in &mut cfgs["network"].sections {
+            if section.ty() != peer_type {
+                continue;
+            }
+            for line in &mut section.lines {
+                let Line::Option { option, value, .. } = line else {
+                    continue;
+                };
+                if option.as_str() != "endpoint_host" {
+                    continue;
+                }
+                let raw = value.as_str().to_string();
+                let Some(bare) = raw.strip_prefix('[').and_then(|s| s.strip_suffix(']')) else {
+                    continue;
+                };
+                let bare: &str = arena.alloc(bare.to_string());
+                *value = Token::from_str(bare, arena);
+                if !changed.contains(&interface) {
+                    changed.push(interface.clone());
+                }
+            }
+        }
+    }
+    changed
+}
+
+/// Repairs outbound VPN config an earlier release wrote: bracketed IPv6
+/// endpoints and chains without their fail-closed fallback.
+/// Retarget every chained VPN with a hostname endpoint to `Internet`.
+/// Returns the labels retargeted.
+fn unchain_hostname_endpoints(cfgs: &mut Configs) -> Result<Vec<String>, Error> {
+    let hostname_interfaces: Vec<String> = cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<UciVpnClient>().ok())
+        .filter(|meta| meta.target != "Internet")
+        .filter(|meta| has_hostname_endpoint(cfgs, &meta.interface))
+        .map(|meta| meta.interface)
+        .collect();
+
+    let mut unchained = Vec::new();
+    for section in &mut cfgs["startwrt"].sections {
+        let Ok(mut meta) = section.get::<UciVpnClient>() else {
+            continue;
+        };
+        if !hostname_interfaces.contains(&meta.interface) {
+            continue;
+        }
+        unchained.push(meta.label.clone());
+        meta.target = "Internet".to_string();
+        section.set(&meta)?;
+    }
+    Ok(unchained)
+}
+
+pub async fn heal_vpn_clients(uci_root: impl AsRef<std::path::Path>) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root.as_ref(), &arena, &["network", "startwrt"]).await?;
+
+    let unbracketed = unbracket_endpoint_hosts(&mut cfgs, &arena);
+    let unchained = unchain_hostname_endpoints(&mut cfgs)?;
+    let before = chain_route_snapshot(&cfgs);
+    rewrite_vpn_chain_routes(&mut cfgs)?;
+    let routes_changed = chain_route_snapshot(&cfgs) != before;
+
+    if unbracketed.is_empty() && unchained.is_empty() && !routes_changed {
+        return Ok(());
+    }
+
+    let enabled: Vec<String> = unbracketed
+        .iter()
+        .filter(|iface| wg_interface(&cfgs, iface).is_some_and(|wg| !wg.disabled()))
+        .cloned()
+        .collect();
+
+    dump_all(uci_root.as_ref(), cfgs).await?;
+    drop(arena);
+
+    for label in &unchained {
+        crate::activity::log(
+            "vpn-client",
+            "unchained",
+            true,
+            &format!(
+                "Outbound VPN '{label}' now connects over the Internet — a VPN connecting through another needs its server's IP address, not a hostname"
+            ),
+            None,
+        );
+    }
+
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/network").arg("reload"))
+            .await;
+    for interface in &enabled {
+        if let Err(e) = restart_wireguard_interface(interface).await {
+            tracing::error!("Failed to restart {interface} after repairing its endpoint: {e}");
         }
     }
 
@@ -1460,6 +2050,55 @@ fn set_mtu_option<'a>(section: &mut Section<'a>, mtu: Option<u16>, arena: &'a Ar
         });
     }
     true
+}
+
+/// Replace the `dns` list on a WG interface section. Returns `true` when it changed.
+fn set_dns_list<'a>(section: &mut Section<'a>, dns: &[IpAddr], arena: &'a Arena) -> bool {
+    let current: Vec<String> = section
+        .lines
+        .iter()
+        .filter_map(|line| match line {
+            Line::List { list, item, .. } if list.as_str() == "dns" => {
+                Some(item.as_str().to_string())
+            }
+            _ => None,
+        })
+        .collect();
+    let desired: Vec<String> = dns.iter().map(|ip| ip.to_string()).collect();
+    if current == desired {
+        return false;
+    }
+
+    section
+        .lines
+        .retain(|line| !matches!(line, Line::List { list, .. } if list.as_str() == "dns"));
+    for ip in desired {
+        let ip_str: &str = arena.alloc(ip);
+        section.lines.push(Line::List {
+            list: Token::from_str("dns", arena),
+            item: Token::from_str(ip_str, arena),
+            comment: LineComment::None,
+        });
+    }
+    true
+}
+
+/// Set the `dns` list on a WG client interface. Returns `true` when it changed.
+fn set_interface_dns<'a>(
+    cfgs: &mut Configs<'a>,
+    interface: &str,
+    dns: &[IpAddr],
+    arena: &'a Arena,
+) -> bool {
+    cfgs["network"]
+        .sections
+        .iter_mut()
+        .find(|s| {
+            s.name().as_deref() == Some(interface)
+                && s.get::<WgInterface>()
+                    .is_ok_and(|iface| iface.is_wireguard())
+        })
+        .is_some_and(|section| set_dns_list(section, dns, arena))
 }
 
 /// Create a WireGuard client interface section in network config
@@ -1541,17 +2180,8 @@ fn create_wg_client_interface<'a>(
         });
     }
 
-    // dns (list) — stored for reference but peerdns=0 prevents global use
-    for dns_entry in &parsed.dns {
-        let dns_str: &str = arena.alloc(dns_entry.clone());
-        lines.push(Line::List {
-            list: Token::from_str("dns", arena),
-            item: Token::from_str(dns_str, arena),
-            comment: LineComment::None,
-        });
-    }
-
-    let section = Section { arena, lines };
+    let mut section = Section { arena, lines };
+    set_dns_list(&mut section, &parsed.dns, arena);
     cfgs["network"].sections.push(section);
 
     Ok(())
@@ -1662,8 +2292,150 @@ mod tests {
     use tokio::runtime::Runtime;
 
     use super::*;
-    use crate::wg::{Base64, WgKey};
+    use crate::wg::{Base64, WgKey, WgPeerStats};
     use crate::CtrlContext;
+
+    const NOW: u64 = 1_800_000_000;
+
+    fn stats(latest_handshake: u64, rx_bytes: u64, tx_bytes: u64) -> TunnelStats {
+        TunnelStats {
+            latest_handshake,
+            rx_bytes,
+            tx_bytes,
+        }
+    }
+
+    fn sample(tx_bytes: u64, at: u64) -> TxSample {
+        TxSample {
+            tx_bytes,
+            at,
+            attempt_at: None,
+        }
+    }
+
+    #[test]
+    fn recent_handshake_is_connected() {
+        let (status, _) = tunnel_status(Some(&stats(NOW - 10, 92, 1480)), None, NOW);
+        assert_eq!(status, OutboundVpnStatus::Connected);
+    }
+
+    #[test]
+    fn unanswered_tunnel_is_not_responding() {
+        let (status, _) = tunnel_status(Some(&stats(0, 0, 1480)), None, NOW);
+        assert_eq!(status, OutboundVpnStatus::NotResponding);
+    }
+
+    #[test]
+    fn a_single_unanswered_initiation_is_still_idle() {
+        let one = crate::wg::HANDSHAKE_INITIATION_BYTES;
+        let (status, _) = tunnel_status(Some(&stats(0, 0, one)), None, NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+        let (status, _) = tunnel_status(Some(&stats(0, 0, 2 * one)), None, NOW);
+        assert_eq!(status, OutboundVpnStatus::NotResponding);
+    }
+
+    #[test]
+    fn unused_tunnel_is_idle() {
+        let (status, _) = tunnel_status(Some(&stats(0, 0, 0)), None, NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+    }
+
+    #[test]
+    fn missing_peer_is_not_responding() {
+        assert_eq!(
+            tunnel_status(None, None, NOW),
+            (OutboundVpnStatus::NotResponding, None)
+        );
+    }
+
+    #[test]
+    fn quiet_tunnel_with_a_long_keepalive_interval_is_idle() {
+        let handshake = NOW - 300;
+        let dump = format!(
+            "priv\tpub\t60616\toff\n\
+             peer\t(none)\t192.0.2.1:51820\t0.0.0.0/0\t{handshake}\t92\t180\t600\n"
+        );
+        let peers = crate::wg::parse_dump(&dump);
+        let s = TunnelStats::from_peers(&peers).unwrap();
+        let (status, _) = tunnel_status(Some(&s), Some(sample(180, NOW - 5)), NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+    }
+
+    #[test]
+    fn keepalive_retries_after_the_session_lapsed_are_not_responding() {
+        let handshake = NOW - 600;
+        let dump = format!(
+            "priv\tpub\t60616\toff\n\
+             peer\t(none)\t192.0.2.1:51820\t0.0.0.0/0\t{handshake}\t5000\t9000\t25\n"
+        );
+        let peers = crate::wg::parse_dump(&dump);
+        let s = TunnelStats::from_peers(&peers).unwrap();
+        let (status, _) = tunnel_status(Some(&s), Some(sample(8000, NOW - 5)), NOW);
+        assert_eq!(status, OutboundVpnStatus::NotResponding);
+    }
+
+    #[test]
+    fn traffic_before_the_session_lapsed_stays_idle() {
+        let handshake = NOW - 600;
+        let prev = sample(4000, handshake + 100);
+        let (status, _) = tunnel_status(Some(&stats(handshake, 5000, 9000)), Some(prev), NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+    }
+
+    #[test]
+    fn sends_after_the_session_lapsed_are_not_responding_for_the_attempt_window() {
+        let handshake = NOW - 600;
+        let s = stats(handshake, 5000, 9000);
+        let prev = sample(8000, NOW - 5);
+
+        let (status, next) = tunnel_status(Some(&s), Some(prev), NOW);
+        assert_eq!(status, OutboundVpnStatus::NotResponding);
+
+        let later = NOW + ATTEMPT_WINDOW_SECS - 1;
+        let (status, next) = tunnel_status(Some(&s), next, later);
+        assert_eq!(status, OutboundVpnStatus::NotResponding);
+
+        let (status, _) = tunnel_status(Some(&s), next, NOW + ATTEMPT_WINDOW_SECS);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+    }
+
+    #[test]
+    fn counter_reset_forgets_the_attempt() {
+        let handshake = NOW - 600;
+        let prev = TxSample {
+            tx_bytes: 9000,
+            at: NOW - 5,
+            attempt_at: Some(NOW - 5),
+        };
+        let (status, next) = tunnel_status(Some(&stats(handshake, 0, 0)), Some(prev), NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+        assert_eq!(next.unwrap().attempt_at, None);
+    }
+
+    #[test]
+    fn a_new_handshake_clears_an_earlier_attempt() {
+        let prev = TxSample {
+            tx_bytes: 9000,
+            at: NOW - 5,
+            attempt_at: Some(NOW - 300),
+        };
+        let (status, next) = tunnel_status(Some(&stats(NOW - 200, 5000, 9000)), Some(prev), NOW);
+        assert_eq!(status, OutboundVpnStatus::Idle);
+        assert_eq!(next.unwrap().attempt_at, None);
+    }
+
+    #[test]
+    fn peers_without_an_endpoint_give_no_stats() {
+        let peer = WgPeerStats {
+            public_key: "k".into(),
+            endpoint: None,
+            latest_handshake: 0,
+            rx_bytes: 0,
+            tx_bytes: 0,
+        };
+        assert_eq!(TunnelStats::from_peers(&[peer]), None);
+        assert_eq!(TunnelStats::from_peers(&[]), None);
+    }
 
     #[derive(Clone)]
     #[allow(dead_code)]
@@ -1703,6 +2475,11 @@ mod tests {
              AllowedIPs = 0.0.0.0/0, ::/0\n\
              PersistentKeepalive = 25\n"
         )
+    }
+
+    /// `wg_conf` without its `DNS =` line.
+    fn wg_conf_no_dns(private_key: &str, public_key: &str) -> String {
+        wg_conf(private_key, public_key).replace("DNS = 10.2.0.1\n", "")
     }
 
     /// Write base configs: two profiles (Admin/lan/vlan99, Guest/guest/vlan101)
@@ -1930,7 +2707,7 @@ config interface 'wg_guest'
         assert_eq!(parsed.private_key, privkey);
         assert_eq!(parsed.public_key, pubkey);
         assert_eq!(parsed.addresses, vec!["10.2.0.2/32"]);
-        assert_eq!(parsed.dns, vec!["10.2.0.1"]);
+        assert_eq!(parsed.dns, vec![IpAddr::from([10, 2, 0, 1])]);
         assert_eq!(parsed.endpoint_host.as_deref(), Some("vpn.example.com"));
         assert_eq!(parsed.endpoint_port.as_deref(), Some("51820"));
         assert_eq!(parsed.allowed_ips, vec!["0.0.0.0/0", "::/0"]);
@@ -1938,6 +2715,49 @@ config interface 'wg_guest'
         assert!(parsed.preshared_key.is_none());
         // wg_conf() omits MTU → inherit default
         assert_eq!(parsed.mtu, None);
+    }
+
+    #[test]
+    fn test_parse_wg_config_without_dns() {
+        let conf = wg_conf_no_dns(&gen_key(), &gen_key());
+        assert!(!conf.contains("DNS"));
+        assert!(parse_wireguard_config(&conf).unwrap().dns.is_empty());
+    }
+
+    #[test]
+    fn test_parse_wg_config_dns_drops_search_domains() {
+        let conf = wg_conf(&gen_key(), &gen_key())
+            .replace("DNS = 10.2.0.1", "DNS = 10.2.0.1, fd00::1, corp.example");
+        assert_eq!(
+            parse_wireguard_config(&conf).unwrap().dns,
+            vec![
+                IpAddr::from([10, 2, 0, 1]),
+                "fd00::1".parse::<IpAddr>().unwrap()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_wg_client_interface_without_dns_writes_no_dns_list() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_base_configs(dir.path());
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        let parsed = parse_wireguard_config(&wg_conf_no_dns(&gen_key(), &gen_key())).unwrap();
+        create_wg_client_interface(&mut cfgs, "wg_test", &parsed, &arena).unwrap();
+        assert!(crate::dns::vpn_dns_servers(&cfgs, "wg_test").is_empty());
+
+        let dns = [IpAddr::from([1, 1, 1, 1])];
+        assert!(set_interface_dns(&mut cfgs, "wg_test", &dns, &arena));
+        assert!(!set_interface_dns(&mut cfgs, "wg_test", &dns, &arena));
+        assert_eq!(
+            crate::dns::vpn_dns_servers(&cfgs, "wg_test"),
+            vec!["1.1.1.1"]
+        );
+        assert!(set_interface_dns(&mut cfgs, "wg_test", &[], &arena));
+        assert!(crate::dns::vpn_dns_servers(&cfgs, "wg_test").is_empty());
     }
 
     #[test]
@@ -2083,7 +2903,7 @@ config interface 'wg_guest'
         );
 
         let parsed = parse_wireguard_config(&conf).unwrap();
-        assert_eq!(parsed.endpoint_host.as_deref(), Some("[2001:db8::1]"));
+        assert_eq!(parsed.endpoint_host.as_deref(), Some("2001:db8::1"));
         assert_eq!(parsed.endpoint_port.as_deref(), Some("51820"));
     }
 
@@ -4013,6 +4833,10 @@ config wireguard_wg_inner 'in_peer0'
                     used_by: vec![],
                     supports_ipv6: wg.addresses.iter().any(|a| a.contains(':')),
                     mtu: wg.mtu,
+                    hostname_endpoint: has_hostname_endpoint(&cfgs, &meta.interface),
+                    dns: vec![],
+                    status: OutboundVpnStatus::Disabled,
+                    last_handshake_secs: None,
                 })
             })
             .collect();
@@ -4025,6 +4849,450 @@ config wireguard_wg_inner 'in_peer0'
         assert!(
             !proton.supports_ipv6,
             "v4-only VPN must report supports_ipv6=false"
+        );
+    }
+
+    // === Chain hardening ===
+
+    /// Two VPN clients: `wg_inner` (label "Inner") chains through `wg_outer`
+    /// (label "Outer"), with the given peer/interface fields.
+    fn setup_two_hop(
+        dir: &Path,
+        inner_endpoint: &str,
+        outer_endpoint: &str,
+        outer_addresses: &[&str],
+        outer_allowed: &[&str],
+        outer_mtu: Option<u16>,
+    ) {
+        std::fs::write(
+            dir.join("startwrt"),
+            "\
+config vpn_client wg_outer
+\toption interface 'wg_outer'
+\toption label 'Outer'
+\toption target 'Internet'
+
+config vpn_client wg_inner
+\toption interface 'wg_inner'
+\toption label 'Inner'
+\toption target 'Outer'
+",
+        )
+        .unwrap();
+
+        let addresses: String = outer_addresses
+            .iter()
+            .map(|a| format!("\tlist addresses '{a}'\n"))
+            .collect();
+        let allowed: String = outer_allowed
+            .iter()
+            .map(|a| format!("\tlist allowed_ips '{a}'\n"))
+            .collect();
+        let mtu = outer_mtu
+            .map(|m| format!("\toption mtu '{m}'\n"))
+            .unwrap_or_default();
+        std::fs::write(
+            dir.join("network"),
+            format!(
+                "\
+config interface 'wg_outer'
+\toption proto 'wireguard'
+\toption private_key '{k1}'
+{mtu}{addresses}
+config wireguard_wg_outer 'outer_peer0'
+\toption public_key '{p1}'
+\toption endpoint_host '{outer_endpoint}'
+\toption endpoint_port '51820'
+{allowed}
+config interface 'wg_inner'
+\toption proto 'wireguard'
+\toption private_key '{k2}'
+\tlist addresses '10.9.0.2/32'
+
+config wireguard_wg_inner 'inner_peer0'
+\toption public_key '{p2}'
+\toption endpoint_host '{inner_endpoint}'
+\toption endpoint_port '51820'
+\tlist allowed_ips '0.0.0.0/0'
+",
+                k1 = gen_key(),
+                p1 = gen_key(),
+                k2 = gen_key(),
+                p2 = gen_key(),
+            ),
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_rewrite_chain_routes_adds_unreachable_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_chain_with_ip_endpoints(dir.path());
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        rewrite_vpn_chain_routes(&mut cfgs).unwrap();
+
+        let block = cfgs["network"]
+            .sections
+            .iter()
+            .find(|s| s.name().as_deref() == Some("vcrb_wg_mullvad_sto"))
+            .expect("chain route needs a fail-closed fallback")
+            .get::<uciedit::openwrt::NetworkRoute>()
+            .unwrap();
+        assert_eq!(block.interface, "loopback");
+        assert_eq!(block.target, "185.65.135.70/32");
+        assert_eq!(block.kind.as_deref(), Some("unreachable"));
+        assert_eq!(block.metric, Some(CHAIN_BLOCK_METRIC));
+        assert!(block.table.is_none(), "fallback belongs in the main table");
+
+        let nohostroute = |iface: &str| {
+            cfgs["network"]
+                .sections
+                .iter()
+                .find(|s| s.name().as_deref() == Some(iface))
+                .unwrap()
+                .lines
+                .iter()
+                .find_map(|line| match line {
+                    Line::Option { option, value, .. } if option.as_str() == "nohostroute" => {
+                        Some(value.as_str().to_string())
+                    }
+                    _ => None,
+                })
+        };
+        assert_eq!(nohostroute("wg_mullvad_sto").as_deref(), Some("1"));
+        assert_eq!(nohostroute("wg_mullvad_dal"), None);
+
+        assert!(
+            !cfgs["network"]
+                .sections
+                .iter()
+                .any(|s| s.name().as_deref() == Some("vcrb_wg_mullvad_dal")),
+            "an Internet-targeted VPN needs no fallback"
+        );
+
+        // Rebuilding keeps exactly one fallback.
+        rewrite_vpn_chain_routes(&mut cfgs).unwrap();
+        let blocks = cfgs["network"]
+            .sections
+            .iter()
+            .filter(|s| s.name().is_some_and(|n| n.starts_with(CHAIN_BLOCK_PREFIX)))
+            .count();
+        assert_eq!(blocks, 1);
+    }
+
+    #[tokio::test]
+    async fn test_rewrite_chain_routes_ipv6_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_chain_with_ipv6_endpoint(dir.path());
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        rewrite_vpn_chain_routes(&mut cfgs).unwrap();
+
+        let block = cfgs["network"]
+            .sections
+            .iter()
+            .find(|s| s.name().as_deref() == Some("vcrb_wg_inner"))
+            .expect("v6 chain route needs a fail-closed fallback");
+        assert_eq!(block.ty(), "route6");
+        let block = block.get::<uciedit::openwrt::NetworkRoute6>().unwrap();
+        assert_eq!(block.interface, "loopback");
+        assert_eq!(block.target, "2001:db8::1/128");
+        assert_eq!(block.kind.as_deref(), Some("unreachable"));
+    }
+
+    #[tokio::test]
+    async fn test_guard_chain_hop_accepts_routable_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_chain_with_ip_endpoints(dir.path());
+
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        guard_chain_hop(&cfgs, "wg_mullvad_sto").unwrap();
+        guard_chain_hop(&cfgs, "wg_mullvad_dal").unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_guard_chain_hop_rejects_hostname_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_two_hop(
+            dir.path(),
+            "vpn.example.com",
+            "1.2.3.4",
+            &["10.8.0.2/32"],
+            &["0.0.0.0/0"],
+            None,
+        );
+
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        let err = guard_chain_hop(&cfgs, "wg_inner").unwrap_err();
+        assert!(err.to_string().contains("vpn.example.com"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_guard_chain_hop_rejects_target_without_family() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_two_hop(
+            dir.path(),
+            "2001:db8::1",
+            "1.2.3.4",
+            &["10.8.0.2/32"],
+            &["0.0.0.0/0", "::/0"],
+            None,
+        );
+
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        let err = guard_chain_hop(&cfgs, "wg_inner").unwrap_err();
+        assert!(err.to_string().contains("no IPv6 address"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_guard_chain_hop_rejects_uncovered_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_two_hop(
+            dir.path(),
+            "5.6.7.8",
+            "1.2.3.4",
+            &["10.8.0.2/32"],
+            &["10.0.0.0/8", "192.168.0.1"],
+            None,
+        );
+
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        let err = guard_chain_hop(&cfgs, "wg_inner").unwrap_err();
+        assert!(err.to_string().contains("does not route 5.6.7.8"), "{err}");
+    }
+
+    #[test]
+    fn test_allowed_ip_covers() {
+        let v4: IpAddr = "5.6.7.8".parse().unwrap();
+        let v6: IpAddr = "2001:db8::1".parse().unwrap();
+        assert!(allowed_ip_covers("0.0.0.0/0", v4));
+        assert!(allowed_ip_covers(" 5.6.0.0/16", v4));
+        assert!(allowed_ip_covers("5.6.7.8", v4));
+        assert!(!allowed_ip_covers("5.6.7.9", v4));
+        assert!(!allowed_ip_covers("::/0", v4));
+        assert!(allowed_ip_covers("::/0", v6));
+        assert!(!allowed_ip_covers("0.0.0.0/0", v6));
+    }
+
+    #[tokio::test]
+    async fn test_guard_endpoint_unshared() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_two_hop(
+            dir.path(),
+            "1.2.3.4",
+            "1.2.3.4",
+            &["10.8.0.2/32"],
+            &["0.0.0.0/0"],
+            None,
+        );
+
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        // Chained VPN sharing its target's server: its chain route would
+        // capture the target's own packets.
+        assert!(guard_endpoint_unshared(&cfgs, "wg_inner").is_err());
+        // The Internet-targeted side sees the same conflict.
+        assert!(guard_endpoint_unshared(&cfgs, "wg_outer").is_err());
+
+        let dir = tempfile::tempdir().unwrap();
+        setup_two_hop(
+            dir.path(),
+            "5.6.7.8",
+            "1.2.3.4",
+            &["10.8.0.2/32"],
+            &["0.0.0.0/0"],
+            None,
+        );
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        guard_endpoint_unshared(&cfgs, "wg_inner").unwrap();
+        guard_endpoint_unshared(&cfgs, "wg_outer").unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_guard_endpoint_unshared_allows_unchained_pair() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_vpn_chain_configs(
+            dir.path(),
+            &[("wg_a", "A", "Internet"), ("wg_b", "B", "Internet")],
+        );
+        std::fs::write(
+            dir.path().join("network"),
+            "\
+config wireguard_wg_a 'a_peer0'
+\toption endpoint_host '1.2.3.4'
+
+config wireguard_wg_b 'b_peer0'
+\toption endpoint_host '1.2.3.4'
+",
+        )
+        .unwrap();
+
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        guard_endpoint_unshared(&cfgs, "wg_a").unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_chain_mtu() {
+        let cases: &[(&str, Option<u16>, Option<u16>)] = &[
+            ("5.6.7.8", None, Some(1360)),
+            ("2001:db8::1", None, Some(1340)),
+            ("5.6.7.8", Some(1380), Some(1320)),
+            ("2001:db8::1", Some(1300), Some(MIN_WG_MTU as u16)),
+        ];
+        for (endpoint, outer_mtu, expected) in cases {
+            let dir = tempfile::tempdir().unwrap();
+            setup_two_hop(
+                dir.path(),
+                endpoint,
+                "1.2.3.4",
+                &["10.8.0.2/32"],
+                &["0.0.0.0/0"],
+                *outer_mtu,
+            );
+            let arena = Arena::new();
+            let cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+                .await
+                .unwrap();
+            assert_eq!(
+                chain_mtu(&cfgs, "wg_inner"),
+                *expected,
+                "endpoint {endpoint}, target MTU {outer_mtu:?}"
+            );
+            assert_eq!(chain_mtu(&cfgs, "wg_outer"), None);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_update_rejects_cycle_through_renamed_label() {
+        // C chains through B; renaming B while pointing it at C closes B2 → C → B2.
+        let dir = tempfile::tempdir().unwrap();
+        setup_vpn_chain_configs(dir.path(), &[("wg_b", "B", "Internet"), ("wg_c", "C", "B")]);
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["startwrt"]).await.unwrap();
+        let err = update_client_metadata(&mut cfgs, "wg_b", "B2", "C").unwrap_err();
+        assert!(matches!(err.kind, ErrorKind::VpnChainCycle), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_update_client_metadata_cascades_rename() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_vpn_chain_configs(dir.path(), &[("wg_b", "B", "Internet"), ("wg_c", "C", "B")]);
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["startwrt"]).await.unwrap();
+        let old_target = update_client_metadata(&mut cfgs, "wg_b", "B2", "Internet").unwrap();
+        assert_eq!(old_target, "Internet");
+        let c = client_by_interface(&cfgs, "wg_c").unwrap();
+        assert_eq!(c.target, "B2");
+    }
+
+    #[tokio::test]
+    async fn test_unchain_hostname_endpoints() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_two_hop(
+            dir.path(),
+            "vpn.example.com",
+            "1.2.3.4",
+            &["10.8.0.2/32"],
+            &["0.0.0.0/0"],
+            None,
+        );
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        assert_eq!(
+            unchain_hostname_endpoints(&mut cfgs).unwrap(),
+            vec!["Inner"]
+        );
+        assert_eq!(
+            client_by_interface(&cfgs, "wg_inner").unwrap().target,
+            "Internet"
+        );
+        assert!(unchain_hostname_endpoints(&mut cfgs).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_unchain_keeps_chain_through_hostname_target() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_two_hop(
+            dir.path(),
+            "5.6.7.8",
+            "outer.example.com",
+            &["10.8.0.2/32"],
+            &["0.0.0.0/0"],
+            None,
+        );
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        assert!(unchain_hostname_endpoints(&mut cfgs).unwrap().is_empty());
+        assert_eq!(
+            client_by_interface(&cfgs, "wg_inner").unwrap().target,
+            "Outer"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_unbracket_endpoint_hosts_and_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_chain_with_ipv6_endpoint(dir.path());
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        assert_eq!(
+            unbracket_endpoint_hosts(&mut cfgs, &arena),
+            vec!["wg_inner"]
+        );
+        let stored = cfgs["network"].dump_str();
+        assert!(
+            stored.contains("2001:db8::1") && !stored.contains("[2001:db8::1]"),
+            "{stored}"
+        );
+        assert!(unbracket_endpoint_hosts(&mut cfgs, &arena).is_empty());
+
+        let before = chain_route_snapshot(&cfgs);
+        rewrite_vpn_chain_routes(&mut cfgs).unwrap();
+        let after = chain_route_snapshot(&cfgs);
+        assert_ne!(before, after, "missing chain routes must count as a change");
+        rewrite_vpn_chain_routes(&mut cfgs).unwrap();
+        assert_eq!(
+            after,
+            chain_route_snapshot(&cfgs),
+            "a rebuild must be stable"
         );
     }
 }

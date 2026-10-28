@@ -1,16 +1,156 @@
 # Changelog
 
-## 3.0.0 — StartOS 0.4.0.2
+## [3.1.1]
+
+### Fixed
+
+- Fixed subcontainer startup from an image with no `/proc`, such as one built `FROM scratch`. Rebuild packages with this SDK version to receive the fix.
+
+- Fixed subcontainer startup with a symlinked `/etc/resolv.conf` and preserved other files linked to an image's resolver. Rebuild packages with this SDK version to receive the fix.
+
+## [3.1.0]
+
+### Added
+
+- New service packages include Forgejo Actions workflows alongside GitHub Actions, with build artifacts, releases, registry publishing, and automatic `next` branch synchronization.
+
+- Forward Email is a provider preset in the SMTP input spec, and the presets are listed alphabetically.
+
+- Package manifests accept local OCI image layout directories and tar archives through `source.ociLayout`, with optional reference selection.
+
+- **`sdk.trigger.onceTrigger` runs a health check once, when it starts.** Use it with `gracePeriod: 0` for a check whose result cannot change until `main` restarts.
+
+- **`schemas` exports zod validators for every OS type.** `schemas.Manifest.parse(...)` and friends validate values against the same shapes as the `T` types; `schemas.RPC` holds the StartOS and effects API trees, and `z.toJSONSchema(schema, { io: 'input' | 'output' })` renders JSON Schema for either wire direction. Schemas a package never imports are dropped from its bundle.
 
 ### Changed
+
+- `make` formats `startos/` instead of rejecting unformatted source. A `Makefile` that overrode `FORMAT_CHECK` overrides `FORMAT` instead.
+
+- **zod `4.4.3` → `4.6.7`.** `z.deepPartial` is now zod's own: it keeps each object's unknown-key mode but re-unions a discriminated union without its discriminator, as upstream documents; the `zod-deep-partial` dependency is gone and `z.deepLoose` is unchanged. `InputSpec.partialValidator` keeps its own contract (discriminators required, enum-keyed records partial). Also from upstream: `z.compile()` and `.validate()`, `.exactPartial()`, string length bounds counted in code points, and `z.toJSONSchema` merging object intersections and referencing a registered root through `$defs`.
+
+### Fixed
+
+- A daemon that `requires` another starts soon after that daemon becomes ready, even when its ready check reported `loading` while starting.
+- Health checks reporting `waiting` poll every 30 seconds by default, with faster polling while a daemon first becomes ready.
+
+- Health checks created with `health.HealthCheck` poll again after stop/start, including checks using `onceTrigger`, and respect the trigger's initial delay.
+
+- `make install` builds the current variant for the target server's architecture when needed and installs that exact package.
+
+- Keep running daemons' lazy subcontainers alive through dynamic reconciles while their filesystems are still being prepared.
+
+- An action input field that is not required accepts an omitted key, read as `null`, so a service calling the action need not send it.
+
+- `cooldownTrigger` and `statusTrigger` wait out an interval longer than about 24.8 days instead of polling every millisecond, and an interval of `Infinity` stops polling.
+
+- A health check with `gracePeriod: 0` reports its first result as returned, never as `starting`.
+
+## [3.0.6]
+
+### Fixed
+
+- **Manifests, notifications and `getContainerIp` type-check as written for 3.0.4.** Dockerfile images may omit `workdir`, device filters and notifications may omit their optional fields, and `getContainerIp` for the service's own container returns a string.
+- **Action result values require every field**, including `launchable`; set it to `false` where a value has no link to open.
+
+## [3.0.5]
+
+### Changed
+
+- **Shared types distinguish serde inputs from outputs.** `T.FooInput` describes accepted requests and constructor values; `T.Foo` describes serialized values, including required nullable fields. Action and network builders use input types. `RPC` exposes generated method, parameter and result inference. Rust documentation is available in editor hovers, and `RecoverySource<Password>` and `RegistryAsset<Commitment>` retain their caller-selected field types.
+
+- **Effects types describe their actual wire results.** `getContainerIp` may return `null` for an unavailable dependency, `getSslCertificate` returns a variable-length string array, and `mount` resolves to `null`, not a path.
+
+### Fixed
+
+- Fixed a service restart during startup leaving a daemon from the previous run running alongside the new one.
+
+## [3.0.4]
+
+### Fixed
+
+- **`sdk.action.run` can run actions with input from init, dependency init handlers, and main**, as well as action handlers.
+
+- **`sdk.getServiceManifest` reads `null` for a package that is not installed**, instead of failing, and a `.const()` read re-runs once it is installed.
+
+## 3.0.3 — StartOS 0.4.0.2
+
+### Added
+
+- **`setupPrimaryUrl` takes `filter`, `ssl` and `fallback`.** `filter` and
+  `ssl` narrow the addresses offered. `fallback: false` starts the form and
+  the task with nothing selected, and makes `bestUsable` `null` while nothing
+  is stored or the stored hostname is gone
+
+### Changed
+
+- **`setupPrimaryUrl` prefers a public domain.** With nothing stored, or the
+  stored hostname gone, the form, the task and `bestUsable` use a public
+  domain, HTTPS first, ahead of the `.local` address
+- **`setupPrimaryUrl`'s task is raised even when the interface offers no
+  address**, and stays active until one is offered and chosen
+
+### Fixed
+
+- **A file model built on an `InputSpec`'s `partialValidator` keeps keys the
+  spec does not declare**, at every level the spec builds with
+  `z.looseObject`, and a `z.discriminatedUnion` in a hidden field keeps the
+  variant its discriminator names. Drop a `z.deepLoose()` wrapped around it
+- **`setupPrimaryUrl`'s task exists only while the URL is unresolved**, so
+  updating a running service to a release that adds a critical one leaves it
+  running
+- **A YAML file model keeps custom tags that parse to class instances**, such
+  as `!include` and `!secret`, when it writes
+- **`setupPrimaryUrl` treats an empty stored URL as unset**
+- **`i18n()` inserts a parameter value verbatim, at every occurrence.** A
+  value containing `$&`, `` $` `` or `$'` was rewritten, and a placeholder
+  used twice was filled only once
+
+## 3.0.2 — StartOS 0.4.0.2
+
+### Fixed
+
+- **A flavor switch records the exact version installed as the service's
+  data version**, so the receiving package's later migrations run. A range
+  recorded by an earlier switch is replaced by the current version at the
+  next initialization; the migrations it skipped are not replayed, so a
+  package that needs one of them on such an install has to do that work
+  outside a migration
+
+## 3.0.1 — StartOS 0.4.0.2
+
+### Changed
+
+- **Breaking — file models parse with their shape exactly as written.** A
+  `z.object` shape deletes every key it doesn't declare on the next `merge()`,
+  `write()` or `update()`. Build every file model with `z.looseObject` at every
+  nesting level; use `z.object` only for a file you have fully modeled and will
+  always keep fully modeled. A `z.discriminatedUnion` keeps the variant its
+  discriminator names
+
+## 3.0.0 — StartOS 0.4.0.2
+
+### Security
+
+- **Update SDK build and test dependencies with security fixes.**
+
+### Changed
+
+- **Breaking — read-only volume and asset mounts are enforced.** Writes through a volume mount declared `readonly: true`, or through any asset mount, fail with `EROFS`. Mount volumes writable wherever the service writes to them. Copy assets that need modification into a writable volume
+
+- **Breaking — `Watchable<A>` takes only the type it reads.** A reader that
+  maps a raw value extends `MappedWatchable<Raw, Mapped>` and implements
+  `fetchRaw`/`produceRaw` in place of `fetch`/`produce`. A type written
+  `Watchable<Raw, Mapped>` becomes `Watchable<Mapped>`
+
+- **Breaking — define dependencies once in `dependencies.ts`.** Create each base with `sdk.Dependency.required` or `.optional` (including metadata, version range, kind and health checks), add it to `sdk.Dependencies.of()`, and pass the builder to `buildManifest(versionGraph, sdkManifest, dependencies)` and `setupInit`. Move runtime conditions to `enabled` and `withDynamicNarrowing`, tasks to `withInit`, and use `dependencies.check(effects)` in place of `sdk.checkDependencies(effects)`. The base version range, kind, and health checks are also included in the package manifest and registry metadata, allowing StartOS to record required dependencies independently of init effects and enforce the published base for enabled optional dependencies. `enabled`, the narrowing, and each `.withInit` handler rerun independently when a watched value changes; the requirements are republished only when they change, and init handlers run only while the dependency is enabled. StartOS hides the tasks a service created on a dependency while that dependency is disabled.
 
 - **Breaking — `sdk.action.run` opens the action's form and passes it to
   `input`.** `input` is a function from the opened form to the input to submit;
   a plain value is no longer accepted. The run then answers that form, which is
   what lets a service run an action that takes input — another service's that
   `access` admits, via the new `packageId`, or its own. `prefill` seeds the
-  form. Underneath, `effects.action.getInput` accepts `prefill` and
-  `effects.action.run` accepts the `eventId` the form was opened under
+  form. Underneath, `effects.action.getInput` accepts `prefill`, and the form
+  and the run that answers it share the calling procedure's event id
 
 - **Breaking — a filled address lists the server's `.local` name whenever the
   user has it enabled, and `utils.mdnsResolvable` is removed.** `.local` was
@@ -103,6 +243,16 @@
 
 ### Added
 
+- **`waitFor` takes an optional `AbortSignal`**, as `watch` does, and rejects
+  with `AbortedError` when it aborts, including while waiting for a file or
+  its parent directory to be created. Pass one to cancel a wait you race against
+  a timeout. `watch` and `waitFor` end at once on a signal that has already
+  aborted.
+
+- **`FileHelper.update(effects, change)`** computes a complete replacement under the writer lock. The callback receives the validated current value and returns the replacement or `null` to skip writing. Reads inside it remain reentrant; nested writes, merges, or updates to the same file throw immediately. The callback has a five-second deadline, which also bounds file access it starts; a timed-out callback cannot commit later.
+
+- **`preDownloadAlert` in `setupManifest()`** displays a localized Markdown confirmation before downloading an update from an installed version matching `when.sourceVersion`.
+
 - **An `env` variable set to `undefined` is removed from the process**,
   including one the image or StartOS would otherwise supply, such as `LANG`.
 
@@ -140,6 +290,23 @@
   so handle its absence. See
   [Hardware Virtualization (KVM)](https://docs.start9.com/packaging/manifest.html#hardware-virtualization-kvm)
 
+- **`Watchable.combine(effects, [a, b], map?, eq?)` builds one reader from
+  several.** Its raw value is the tuple of the sources' values, and `map`/`eq`
+  work as on any reader: it emits when `map`'s result differs from the last by
+  `eq`. `Watchable.from(effects, source, eq?)` makes a reader of a single
+  source. A source is any `WatchSource` (`once()` and `watch(abort)`), which
+  every `Watchable` is
+
+- **`sdk.setupPrimaryUrl()` replaces the hand-rolled "Set Primary URL" action
+  and watcher.** Give it the interface the URL belongs to, a reader for the
+  stored choice (`storeJson.read(s => s.primaryUrl)`) and a function that
+  writes it. It returns the action to register;
+  `bestUsable(effects)`, a reader for the stored URL while its hostname is one
+  of the interface's addresses and the `.local` address otherwise; and
+  `setupTask(severity, options)`, an init script that keeps a task raised while
+  the stored URL is unset or gone, which StartOS clears once it is back. See
+  [Set a Primary URL](https://docs.start9.com/packaging/recipe-primary-url.html)
+
 - **`createInterface` accepts `preferredLauncherAddress`.** A UI interface can
   nominate the absolute URL that StartOS should open when a service depends on
   one canonical origin. See
@@ -162,6 +329,18 @@
   See [Result Types](https://docs.start9.com/packaging/actions.html#result-types)
 
 ### Fixed
+
+- **An awaited `waitFor` waits until its predicate holds.** Awaiting
+  `waitFor` on a status, file or other reader no longer fails with
+  `AbortedError` after garbage collection while the condition is still false.
+
+- **A file model's reads see every change to the file.** `watch`, `const` and
+  `waitFor` no longer miss a write made while the previous value was being
+  read or handled, or a file created just as the wait began.
+
+- **FileHelper writes replace files atomically.** Writers hold a cross-process lock on the file, waiting up to ten seconds for it, and `merge()` and `update()` hold it through their complete read-modify-write; replacements retain the file's owner and permissions.
+
+- **Own-volume file mounts follow atomic source replacement in running subcontainers.** Refreshes preserve idmaps and readonly settings and run before FileHelper operations return and commands launch. Refresh failures propagate to the caller, including after a write has replaced the source. Existing descriptors retain the previous inode until the application reopens the file.
 
 - **Reactive init re-runs receive `kind: null`** after the initial install,
   update, or restore pass. Lifecycle-only work guarded by `kind` runs once for
@@ -261,6 +440,12 @@
   side
 
 - **Backup and restore progress no longer falls back mid-sync**
+
+- **`checkPortListening` counts a TCP port as listening only while a socket is
+  in the `LISTEN` state.** It matched any socket on the port, so the
+  connections a process leaves in `TIME_WAIT` when it exits kept its port
+  reading as listening for up to a minute: a daemon's `ready` check passed, and
+  the health checks that require it ran, while nothing was listening
 
 ### Security
 

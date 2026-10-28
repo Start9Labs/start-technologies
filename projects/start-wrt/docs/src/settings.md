@@ -12,7 +12,7 @@ When a firmware update is available, a "vX.Y.Z released!" panel appears at the t
 
 - **Theme** — System, Dark, or Light. System follows your browser or OS preference.
 - **Language** — A dropdown for the web interface language. Available languages are English, Spanish, German, French, and Polish (English is the fallback). The choice is saved per-router (server-side) — there is no automatic browser-language detection.
-- **Timezone** — A searchable combo box populated from the device, listing hundreds of IANA time zones (e.g. labelled like "(GMT-6) America/Denver"). It's auto-detected from your browser during [initial setup](initial-setup.md) (falling back to UTC if detection fails). Changing the timezone restarts the schedule engine so that [WAN Blackout](security-profiles.md#wan-blackout) and [Wi-Fi Blackout](wifi-schedules.md) windows fire at the correct local time. It also affects activity timestamps and log timestamps.
+- **Timezone** — A searchable combo box populated from the device, listing hundreds of IANA time zones (e.g. labelled like "(GMT-6) America/Denver"). It's auto-detected from your browser during [initial setup](initial-setup.md) (falling back to UTC if detection fails). Changing the timezone restarts the schedule engine so that [WAN Blackout](security-profiles.md#wan-blackout) and [Wi-Fi Blackout](wifi-schedules.md) windows fire at the correct local time. It also sets the time zone of log timestamps. Activity timestamps are shown in your browser's time zone.
 
 Theme and Language changes are previewed immediately when you select them, and saved when you click "Save". If you leave the page without saving, the preview reverts to your saved settings.
 
@@ -28,15 +28,20 @@ The options control direct WAN-side access only:
 - **Never** — No WAN-side access at all, even from an upstream private network. The web interface is reachable only from the local network (including through an Inbound VPN).
 - **Always** — WAN-side connections are accepted from any address. With a public IP, the web interface is reachable from anywhere on the Internet via the WAN IP or a [Dynamic DNS](ddns.md) domain.
 
+Changing the setting ends any open WAN-side SSH session from an address the new setting does not accept. Sessions from addresses it still accepts stay open.
+
 > [!WARNING]
 > Selecting "Always" exposes your router's admin interface to the public Internet. Only use this if you understand the security implications and have a strong admin password.
 
 > [!NOTE]
-> The ports Remote Access uses are protected from [Published Ports](published-ports.md): publishing 80, 443, or 22 to a device asks for confirmation first, and a device's [automatic port forwarding](published-ports.md#automatic-port-forwarding) request for them is refused. [Hostname routes](published-ports.md#hostname-routes-shared-ports) are the exception — they share port 443 with Remote Access, each connection going to the device whose hostname it names and everything else to the router.
+> While Remote Access accepts WAN connections — "Always", or "When behind NAT" while the router's WAN address is private — the ports it uses are protected from [Published Ports](published-ports.md): publishing 80, 443, or 22 to a device asks for confirmation first, and a device's [automatic port forwarding](published-ports.md#automatic-port-forwarding) request for them is refused. [Hostname routes](published-ports.md#hostname-routes-shared-ports) are the exception — they share port 443 with Remote Access, each connection going to the device whose hostname it names and everything else to the router.
+
+> [!NOTE]
+> While port 443 is published to a device — by a [Published Port](published-ports.md) or a device's [hostname routes](published-ports.md#hostname-routes-shared-ports) — and port 80 is not, plain `http://` to the router's WAN address is answered with a redirect to `https://` instead of the web interface, under every option above, "Never" included. See [Reaching a Published Port from Your Own Network](published-ports.md#reaching-a-published-port-from-your-own-network).
 
 ### Security
 
-- **Download Root CA** — Download the router's Root CA certificate, saved as `startwrt-ca.crt`. See [Trusting Your Root CA](trust-ca.md) for installation instructions.
+- **Download Root CA** — Download the router's Root CA: a configuration profile on iPhone and iPad, `startwrt-ca.crt` elsewhere. See [Trusting Your Root CA](trust-ca.md) for installation instructions.
 
 ### About
 
@@ -53,6 +58,8 @@ Change your admin password. The admin password protects the web interface and is
 1. Enter and confirm your new password (minimum 12 characters).
 
 1. Click "Save".
+
+Saving signs out every other browser and `startwrt-cli` login. The browser you saved from stays signed in.
 
 ## SSH Keys
 

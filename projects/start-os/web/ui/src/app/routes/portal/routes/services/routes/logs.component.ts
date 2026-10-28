@@ -21,8 +21,8 @@ export default class ServiceLogsRoute {
   readonly id = getPkgId()
 
   readonly follow = async (params: FollowServerLogsReq) =>
-    this.api.followPackageLogs({ id: this.id, ...params })
+    this.api.rpc.package.logs.follow({ id: this.id, ...params })
 
-  readonly fetch = async (params: T.LogsParams) =>
-    this.api.getPackageLogs({ id: this.id, ...params })
+  readonly fetch = async (params: T.LogsParamsInput) =>
+    this.api.rpc.package.logs({ id: this.id, ...params })
 }

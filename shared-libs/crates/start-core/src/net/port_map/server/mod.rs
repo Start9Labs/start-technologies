@@ -206,6 +206,29 @@ fn error_response(opcode: u8, result: u8, epoch: u32) -> Vec<u8> {
     r
 }
 
+/// Validates the common header in RFC 6887 §8.3 order, returning the opcode
+/// or the reply to send instead. NAT-PMP requests get `UNSUPP_VERSION`.
+fn check_header(
+    peer: impl std::fmt::Display,
+    req: &[u8],
+    epoch: u32,
+) -> Result<u8, Option<Vec<u8>>> {
+    if req.len() < 2 || req[1] & RESPONSE_BIT != 0 {
+        tracing::debug!("PCP: dropped {}-byte datagram from {peer}", req.len());
+        return Err(None);
+    }
+    let opcode = req[1] & 0x7f;
+    if req[0] != PCP_VERSION {
+        tracing::debug!("PCP: refused version {} from {peer}", req[0]);
+        return Err(Some(error_response(opcode, UNSUPP_VERSION, epoch)));
+    }
+    if req.len() < HEADER_LEN {
+        tracing::debug!("PCP: dropped {}-byte datagram from {peer}", req.len());
+        return Err(None);
+    }
+    Ok(opcode)
+}
+
 /// An ANNOUNCE response, carrying the Start9 capability marker only when the
 /// gateway really speaks the HOSTNAME extension — a client checks the marker
 /// before emitting the (Private-Use) option, so it must never be a lie.
@@ -336,16 +359,10 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
     req: &[u8],
     epoch: u32,
 ) -> Option<Vec<u8>> {
-    if req.len() < HEADER_LEN {
-        return None;
-    }
-    let opcode = req[1] & 0x7f;
-    if req[1] & RESPONSE_BIT != 0 {
-        return None;
-    }
-    if req[0] != PCP_VERSION {
-        return Some(error_response(opcode, UNSUPP_VERSION, epoch));
-    }
+    let opcode = match check_header(peer, req, epoch) {
+        Ok(opcode) => opcode,
+        Err(reply) => return reply,
+    };
     // Answer ANNOUNCE for any peer (the marker only reveals "I speak HOSTNAME");
     // it must precede the MAP-only check, which would otherwise reject opcode 0.
     if opcode == OPCODE_ANNOUNCE {
@@ -626,16 +643,10 @@ pub async fn handle6<B: GatewayBackend + ?Sized>(
     req: &[u8],
     epoch: u32,
 ) -> Option<Vec<u8>> {
-    if req.len() < HEADER_LEN {
-        return None;
-    }
-    let opcode = req[1] & 0x7f;
-    if req[1] & RESPONSE_BIT != 0 {
-        return None;
-    }
-    if req[0] != PCP_VERSION {
-        return Some(error_response(opcode, UNSUPP_VERSION, epoch));
-    }
+    let opcode = match check_header(peer, req, epoch) {
+        Ok(opcode) => opcode,
+        Err(reply) => return reply,
+    };
     if opcode == OPCODE_ANNOUNCE {
         tracing::debug!("PCP ANNOUNCE from {peer}");
         return Some(announce_response(epoch, backend.sni().is_some()));
@@ -855,6 +866,44 @@ mod tests {
         assert_eq!(resp[1], RESPONSE_BIT | OPCODE_ANNOUNCE);
         assert_eq!(resp[3], SUCCESS);
         assert!(has_start9_capability(&resp[HEADER_LEN..]));
+    }
+
+    #[tokio::test]
+    async fn handle_refuses_nat_pmp_with_unsupp_version() {
+        let stub = Stub(SniDemux::new());
+        let external_address = [0u8, 0];
+        let map_udp = [0u8, 1, 0, 0, 0x13, 0x88, 0x13, 0x88, 0, 0, 0, 0x3c];
+        for req in [&external_address[..], &map_udp[..]] {
+            let resp = handle(&stub, Ipv4Addr::new(10, 59, 0, 2), req, 7)
+                .await
+                .expect("NAT-PMP answered");
+            assert_eq!(resp.len(), HEADER_LEN);
+            assert_eq!(resp[0], PCP_VERSION);
+            assert_eq!(resp[1], RESPONSE_BIT | req[1]);
+            assert_eq!(
+                u16::from_be_bytes([resp[2], resp[3]]),
+                UNSUPP_VERSION as u16
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn handle6_refuses_nat_pmp_with_unsupp_version() {
+        let stub = Stub(SniDemux::new());
+        let resp = handle6(&stub, Ipv6Addr::LOCALHOST, &[0, 0], 7)
+            .await
+            .expect("NAT-PMP answered");
+        assert_eq!(resp[3], UNSUPP_VERSION);
+    }
+
+    #[tokio::test]
+    async fn handle_drops_what_rfc6887_drops() {
+        let stub = Stub(SniDemux::new());
+        let short_pcp = [PCP_VERSION, OPCODE_MAP, 0, 0];
+        let response = [0u8, RESPONSE_BIT];
+        for req in [&[0u8][..], &response[..], &short_pcp[..]] {
+            assert!(handle(&stub, Ipv4Addr::LOCALHOST, req, 0).await.is_none());
+        }
     }
 
     #[tokio::test]

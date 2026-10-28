@@ -1,10 +1,12 @@
-import { Component, inject, signal } from '@angular/core'
+import { Component, computed, effect, inject, signal } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms'
 import {
   TuiButton,
   TuiDialogContext,
   TuiError,
   TuiInput,
+  TuiNotification,
   TuiTextfield,
   tuiTextfieldOptionsProvider,
 } from '@taiga-ui/core'
@@ -18,12 +20,15 @@ import {
 } from '@taiga-ui/kit'
 import { TuiForm } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
+import { switchMap } from 'rxjs'
 import { provideHelp } from 'src/app/help/help'
 import { ModalHelp } from 'src/app/help/modal-help'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import {
   AddClientDialogData,
+  configDnsServers,
   getAddOutboundVpnForm,
+  hasHostnameEndpoint,
   OUTBOUND_VALIDATION_ERRORS,
 } from './utils'
 
@@ -66,8 +71,25 @@ import {
       <tui-textfield tuiChevron [stringify]="stringifyTarget">
         <label tuiLabel>{{ 'Target' | i18n }}</label>
         <input tuiSelect formControlName="target" />
-        <tui-data-list-wrapper *tuiDropdown [items]="context.data.targets" />
+        <tui-data-list-wrapper *tuiDropdown [items]="targets()" />
       </tui-textfield>
+      <tui-textfield>
+        <label tuiLabel>{{ 'DNS servers' | i18n }}</label>
+        <input
+          tuiInput
+          [placeholder]="configDns().join(', ')"
+          formControlName="dns"
+        />
+      </tui-textfield>
+      <tui-error formControlName="dns" />
+      @if (dnsMissing()) {
+        <div tuiNotification appearance="warning">
+          {{
+            'No DNS servers: profiles using this VPN resolve through your ISP, outside the tunnel, unless system DNS uses custom servers.'
+              | i18n
+          }}
+        </div>
+      }
       <footer>
         <button
           tuiButton
@@ -99,6 +121,7 @@ import {
     TuiChevron,
     TuiButton,
     TuiInput,
+    TuiNotification,
     i18nPipe,
   ],
 })
@@ -111,11 +134,40 @@ class AddClient {
     this.context.data.existingLabels,
   )
 
+  private readonly config = toSignal(
+    this.form.controls.config.valueChanges.pipe(
+      switchMap(async file => (await file?.text().catch(() => '')) ?? ''),
+    ),
+    { initialValue: '' },
+  )
+
+  protected readonly targets = computed(() =>
+    hasHostnameEndpoint(this.config())
+      ? ['Internet']
+      : this.context.data.targets,
+  )
+
+  protected readonly configDns = computed(() => configDnsServers(this.config()))
+
+  private readonly dns = toSignal(this.form.controls.dns.valueChanges, {
+    initialValue: '',
+  })
+
+  protected readonly dnsMissing = computed(
+    () => !!this.config() && !this.configDns().length && !this.dns().trim(),
+  )
+
   // Translates the 'Internet' option; user VPN labels pass through unchanged.
   protected readonly stringifyTarget = (v: string): string =>
     this.i18n.transform(v)
 
   constructor() {
+    effect(() => {
+      const { target } = this.form.controls
+      if (!this.targets().includes(target.value)) {
+        target.setValue('Internet')
+      }
+    })
     // The config control uses an async validator (WireGuard content check), so
     // its status settles to INVALID *after* the value changes — listen on
     // statusChanges, not valueChanges, or the error never gets marked touched

@@ -29,17 +29,19 @@
 export class ThingComponent {
   private readonly api = inject(ApiService)
 
-  readonly item = input.required<Item>({ alias: 'appThing' })
   protected readonly loading = signal(false)
+
+  public readonly item = input.required<Item>({ alias: 'appThing' })
 }
 ```
 
 - **One file.** Inline template, inline styles. Multiple small components/directives per file is
   fine (a dialog + its `PolymorpheusComponent` const; a toast component inside a service file).
 - **Member conventions:** injected deps `private readonly`; template-facing members
-  `protected readonly`; signal inputs/outputs `readonly` (public only when a parent binds them).
-  No `public` keyword noise otherwise. A dependency the template reads is itself
-  `protected readonly` — `verification.loading()`, `verification.resend()`,
+  `protected readonly`; signal inputs, outputs and models `public readonly`, keyword written
+  out. Fields go private, then protected, then public, with the constructor after them. A
+  dependency the template reads is itself `protected readonly` — `verification.loading()`,
+  `verification.resend()`,
   `breakpoint() === 'mobile'` in the template — not re-aliased into fields
   (`loading = this.verification.loading`), wrapped in methods, or reshaped into a one-use
   `computed` (`mobile = computed(() => this.breakpoint() === 'mobile')`).
@@ -96,7 +98,10 @@ export class Form {}
 ```
 
 One attribute = Taiga form + card + skeleton-on-loading, input forwarded. Twelve start-wrt
-dialogs attach contextual help the same way: `hostDirectives: [ModalHelp]`.
+dialogs attach contextual help the same way: `hostDirectives: [ModalHelp]`. A side effect that
+runs exactly while one component lives — support-server's paging sounds behind the staff rail —
+is a `@Directive()` in that component's `hostDirectives`, not a root service it injects only to
+start.
 
 ### `host: {}` carries all host concerns
 
@@ -123,7 +128,10 @@ host: {
 - Outputs: `output()` — rare; prefer `model()` or URL state.
 - Queries: `viewChild()`, `contentChild()` — e.g.
   `contentChild<TemplateRef<{ $implicit: Pkg }>>(TemplateRef)` for app-supplied fragments.
-- Derivation: `computed()`. Reset-on-source-change: `linkedSignal`:
+- Derivation: `computed()`. A computation that reads one signal several times names it as a
+  default parameter instead of opening a block:
+  `computed((chat = this.opened.conversation()) => !!chat && !chat.escalated)`.
+  Reset-on-source-change: `linkedSignal`, never an `effect` that `untracked`-sets a signal:
 
 ```ts
 // Drawer auto-closes on navigation or resize — zero per-link handlers:
@@ -177,11 +185,35 @@ validation`).
 - **Attribute order** on an element: `*structuralDirective`, `#templateRef`, `booleanAttr`,
   `stringAttr="value"`, `[input]="value"`, `[(twoWay)]="value"`, `(output)="handler($event)"`.
 - **The URL is component state** for anything shareable: drawers open when query params match
-  (`?id=…&flavor=…`), pagination writes `queryParams` and a single `queryParamMap` subscription
-  loops it back; search/registry/category selections live in query params (linkable + SSR-safe).
+  (`?id=…&flavor=…`), pagination writes `queryParams` and reads them back as route-bound inputs
+  (routing.md); search/registry/category selections live in query params (linkable + SSR-safe).
 - i18n (monorepo apps): **every** user-facing literal goes through `| i18n` (or
   `inject(i18nPipe).transform(...)` in TS); backend `LocaleString`s through `| localize`.
 - Rendered markdown is always the triple: `[innerHTML]="text | markdown | dompurify"` plus the
   `safeLinks` directive (forces `target="_blank" rel="noreferrer"` on external links).
 - Text stacks use `tuiTitle`/`tuiSubtitle` with `<b>` for the title — never custom
   heading/caption CSS: `<span tuiTitle><b>{{ title }}</b><span tuiSubtitle>{{ sub }}</span></span>`.
+- **A cell's children sit flat in the `[tuiCell]`.** A single-line title is one element,
+  `<span tuiTitle tuiFade>`, with no inner span. Trailing `<time tuiSubtitle>`, badges and
+  statuses are direct children, and the title's own flex pushes them to the end. Taiga already
+  lays these out, so `[tuiTitle] { flex: 1; min-inline-size: 0 }`, a `[tuiAccessories]` gap and
+  per-row `white-space: nowrap` all get deleted. Set `nowrap` once on the element that wraps the
+  rows, never on a host that also renders empty or error states.
+
+### Sticky page headers
+
+A scrolling page puts its header **inside** the `tui-scrollbar`, as its first child, made
+sticky and translucent by a global utility (support-server's `g-header`: sticky, padded,
+`backdrop-filter` over a `color-mix()` of the page background). A header in a flex column above
+the scrollbar, wrapped in a `.page`/`.chat` div, gets rewritten. When a child component owns the
+scrollbar, it renders the `<header tuiHeader class="g-header"><ng-content /></header>` and the
+route projects the title and accessories into it. The route then styles its semantic children
+directly (`header, section { inline-size: min(100%, 48rem); margin-inline: auto }`). A back link
+goes above the title, as a `<p tuiCaption>` in the header's `hgroup`. Inside the `<h1>` it
+becomes part of the heading's accessible name.
+
+`tuiHeader` goes on the `<header>` itself, never on a `div` inside it. A bare title is
+`<h1 tuiTitle>`. When the heading has a subtitle or inline content such as a count
+`tuiBadge`, wrap it as `<hgroup tuiTitle><h1>…</h1></hgroup>`, since `tuiTitle` is a column and
+would stack the badge under the words. `aside tuiAccessories` is the header's direct child,
+beside the title.

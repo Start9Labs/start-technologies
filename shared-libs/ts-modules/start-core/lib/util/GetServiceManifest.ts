@@ -1,12 +1,11 @@
 import { Effects } from '../Effects'
 import { Manifest, PackageId } from '../osBindings'
 import { deepEqual } from './deepEqual'
-import { Watchable } from './Watchable'
+import { MappedWatchable } from './Watchable'
 
-export class GetServiceManifest<Mapped = Manifest | null> extends Watchable<
-  Manifest | null,
-  Mapped
-> {
+export class GetServiceManifest<
+  Mapped = Manifest | null,
+> extends MappedWatchable<Manifest | null, Mapped> {
   protected readonly label = 'GetServiceManifest'
 
   constructor(
@@ -20,8 +19,14 @@ export class GetServiceManifest<Mapped = Manifest | null> extends Watchable<
     super(effects, options)
   }
 
-  protected fetch(callback?: () => void) {
-    return this.effects.getServiceManifest({ ...this.opts, callback })
+  protected async fetchRaw(callback?: () => void) {
+    try {
+      return await this.effects.getServiceManifest({ ...this.opts, callback })
+    } catch (e) {
+      // StartOS 0.4.0.2 rejects for a package that is not installed, and subscribes nothing.
+      if (await this.effects.getStatus({ ...this.opts, callback })) throw e
+      return null
+    }
   }
 }
 

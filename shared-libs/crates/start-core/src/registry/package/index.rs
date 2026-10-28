@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 use std::u32;
 
 use chrono::Utc;
@@ -6,14 +7,15 @@ use exver::{Version, VersionRange};
 use imbl_value::InternedString;
 use patch_db::ModelExt;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 use url::Url;
 
 use crate::PackageId;
+use crate::db::model::package::CurrentDependencyKind;
 use crate::prelude::*;
 use crate::registry::asset::RegistryAsset;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfo;
+use crate::registry::package::icon::{PackageIcon, store_icon_async};
 use crate::rpc_continuations::Guid;
 use crate::s9pk::S9pk;
 use crate::s9pk::git_hash::GitHash;
@@ -22,47 +24,59 @@ use crate::s9pk::merkle_archive::source::FileSource;
 use crate::service::effects::plugin::PluginId;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::sign::{AnySignature, AnyVerifyingKey};
-use crate::util::{DataUrl, VersionString};
+use crate::util::VersionString;
 
-#[derive(Debug, Default, Deserialize, Serialize, HasModel, TS)]
+#[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct PackageIndex {
     pub categories: BTreeMap<InternedString, Category>,
     pub packages: BTreeMap<PackageId, PackageInfo>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize, HasModel, TS)]
+rpc_toolkit::reflect_ts!(PackageIndex);
+rpc_toolkit::ts_export!(PackageIndex, namespaces = [""]);
+
+#[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct PackageInfo {
-    #[ts(as = "BTreeMap::<Guid, String>")]
     pub authorized: BTreeMap<Guid, VersionRange>,
     pub versions: BTreeMap<VersionString, PackageVersionInfo>,
-    #[ts(type = "string[]")]
     pub categories: BTreeSet<InternedString>,
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel, TS)]
+rpc_toolkit::reflect_ts!(PackageInfo);
+rpc_toolkit::ts_export!(PackageInfo, namespaces = [""]);
+
+#[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct Category {
     pub name: LocaleString,
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel, TS, PartialEq)]
+rpc_toolkit::reflect_ts!(Category);
+rpc_toolkit::ts_export!(Category, namespaces = [""]);
+
+#[derive(Debug, Deserialize, Serialize, HasModel, PartialEq, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct DependencyMetadata {
     pub title: Option<LocaleString>,
-    pub icon: Option<DataUrl<'static>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<PackageIcon>,
     pub description: Option<LocaleString>,
     pub optional: bool,
+    #[serde(default)]
+    pub version_range: Option<VersionRange>,
+    #[serde(flatten)]
+    pub kind: Option<CurrentDependencyKind>,
 }
+
+rpc_toolkit::reflect_ts!(DependencyMetadata);
+rpc_toolkit::ts_export!(DependencyMetadata, namespaces = [""]);
+
 impl DependencyMetadata {
     pub fn localize_for(&mut self, locale: &str) {
         self.title.as_mut().map(|t| t.localize_for(locale));
@@ -74,30 +88,43 @@ fn placeholder_url() -> Url {
     "https://example.com".parse().unwrap()
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, HasModel, TS, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreDownloadAlertWhen {
+    pub source_version: VersionRange,
+}
+
+rpc_toolkit::reflect_ts!(PreDownloadAlertWhen);
+rpc_toolkit::ts_export!(PreDownloadAlertWhen, namespaces = [""]);
+
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreDownloadAlert {
+    pub message: LocaleString,
+    pub when: PreDownloadAlertWhen,
+}
+
+rpc_toolkit::reflect_ts!(PreDownloadAlert);
+rpc_toolkit::ts_export!(PreDownloadAlert, namespaces = [""]);
+
+#[derive(Clone, Debug, Deserialize, Serialize, HasModel, VisitFields, PartialEq)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct PackageMetadata {
-    #[ts(type = "string")]
     pub title: InternedString,
     pub description: Description,
     pub release_notes: LocaleString,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_download_alert: Option<PreDownloadAlert>,
     pub git_hash: Option<GitHash>,
-    #[ts(type = "string")]
     pub license: InternedString,
-    #[ts(type = "string")]
-    #[serde(default = "placeholder_url")] // TODO: remove
+    #[serde(default = "placeholder_url")]
     pub package_repo: Url,
-    #[ts(type = "string")]
     pub upstream_repo: Url,
-    #[ts(type = "string")]
     pub marketing_url: Option<Url>,
-    #[ts(type = "string | null")]
     pub donation_url: Option<Url>,
     #[serde(default = "current_version")]
-    #[ts(type = "string")]
     pub os_version: Version,
-    #[ts(type = "string | null")]
     pub sdk_version: Option<Version>,
     #[serde(default)]
     pub hardware_acceleration: bool,
@@ -116,26 +143,31 @@ pub struct PackageMetadata {
     pub satisfies: BTreeSet<VersionString>,
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel, TS)]
+rpc_toolkit::reflect_ts!(PackageMetadata);
+
+#[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct PackageVersionInfo {
     #[serde(flatten)]
     pub metadata: PackageMetadata,
-    pub icon: DataUrl<'static>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<PackageIcon>,
     pub dependency_metadata: BTreeMap<PackageId, DependencyMetadata>,
-    #[ts(type = "string | null")]
     pub source_version: Option<VersionRange>,
     pub s9pks: Vec<(HardwareRequirements, RegistryAsset<MerkleArchiveCommitment>)>,
 }
+
+rpc_toolkit::reflect_ts!(PackageVersionInfo);
+rpc_toolkit::ts_export!(PackageVersionInfo, namespaces = [""]);
 impl PackageVersionInfo {
     pub async fn from_s9pk<S: FileSource + Clone>(
         s9pk: &S9pk<S>,
         urls: Vec<Url>,
+        icons: &Path,
     ) -> Result<Self, Error> {
         let manifest = s9pk.as_manifest();
-        let icon = s9pk.icon_data_url().await?;
+        let icon = Some(store_icon_async(icons, s9pk.icon_data_url().await?).await?);
         let mut dependency_metadata = BTreeMap::new();
         for (id, info) in &manifest.dependencies.0 {
             let dep_meta = s9pk.dependency_metadata(id).await?;
@@ -143,9 +175,14 @@ impl PackageVersionInfo {
                 id.clone(),
                 DependencyMetadata {
                     title: dep_meta.map(|m| m.title),
-                    icon: s9pk.dependency_icon_data_url(id).await?,
+                    icon: match s9pk.dependency_icon_data_url(id).await? {
+                        Some(icon) => Some(store_icon_async(icons, icon).await?),
+                        None => None,
+                    },
                     description: info.description.clone(),
                     optional: info.optional,
+                    version_range: info.version_range.clone(),
+                    kind: info.kind.clone(),
                 },
             );
         }
@@ -162,7 +199,7 @@ impl PackageVersionInfo {
                     commitment: s9pk.as_archive().commitment().await?,
                     signatures: [(
                         AnyVerifyingKey::Ed25519(s9pk.as_archive().signer()),
-                        AnySignature::Ed25519(s9pk.as_archive().signature().await?),
+                        AnySignature::Ed25519ph(s9pk.as_archive().signature().await?),
                     )]
                     .into_iter()
                     .collect(),
@@ -289,6 +326,14 @@ impl Model<PackageVersionInfo> {
                 self.as_metadata_mut()
                     .as_release_notes_mut()
                     .mutate(|r| Ok(r.localize_for(locale)))?;
+                self.as_metadata_mut()
+                    .as_pre_download_alert_mut()
+                    .mutate(|alert| {
+                        if let Some(alert) = alert {
+                            alert.message.localize_for(locale);
+                        }
+                        Ok(())
+                    })?;
             }
         }
 
@@ -305,6 +350,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn registry_dependency_metadata_preserves_base_requirement() {
+        let metadata: DependencyMetadata = serde_json::from_str(
+            r#"{"title":"Bitcoin","icon":null,"description":null,"optional":false,"versionRange":">=31.1:17","kind":"running","healthChecks":["bitcoind"]}"#,
+        )
+        .unwrap();
+        assert!(
+            matches!(metadata.kind, Some(CurrentDependencyKind::Running { ref health_checks }) if health_checks.contains(&"bitcoind".parse().unwrap()))
+        );
+        let json = serde_json::to_value(&metadata).unwrap();
+        assert_eq!(json["kind"], "running");
+        assert_eq!(json["healthChecks"], serde_json::json!(["bitcoind"]));
+        assert_eq!(json["versionRange"], ">=31.1:17");
+
+        let old: DependencyMetadata = serde_json::from_str(
+            r#"{"title":"Bitcoin","icon":null,"description":null,"optional":false}"#,
+        )
+        .unwrap();
+        assert!(old.kind.is_none());
+        assert!(old.version_range.is_none());
+    }
+
+    #[test]
     fn old_manifest_defaults_hardware_virtualization_to_false() {
         let metadata = PackageMetadata {
             title: "Test Package".into(),
@@ -313,6 +380,12 @@ mod tests {
                 long: LocaleString::Translated("Long".into()),
             },
             release_notes: LocaleString::Translated("Notes".into()),
+            pre_download_alert: Some(PreDownloadAlert {
+                message: LocaleString::Translated("Back up before updating".into()),
+                when: PreDownloadAlertWhen {
+                    source_version: ">=1.0.0:0".parse().unwrap(),
+                },
+            }),
             git_hash: None,
             license: "MIT".into(),
             package_repo: "https://example.com/package".parse().unwrap(),
@@ -329,13 +402,52 @@ mod tests {
             satisfies: BTreeSet::new(),
         };
         let mut old_manifest = serde_json::to_value(metadata).unwrap();
+        assert_eq!(
+            old_manifest["preDownloadAlert"]["message"],
+            "Back up before updating"
+        );
         old_manifest
             .as_object_mut()
             .unwrap()
             .remove("hardwareVirtualization");
+        old_manifest
+            .as_object_mut()
+            .unwrap()
+            .remove("preDownloadAlert");
 
         let parsed: PackageMetadata = serde_json::from_value(old_manifest).unwrap();
 
         assert!(!parsed.hardware_virtualization);
+        assert!(parsed.pre_download_alert.is_none());
+    }
+
+    #[test]
+    fn pre_download_alert_round_trips() {
+        let alert = PreDownloadAlert {
+            message: LocaleString::LanguageMap(
+                [
+                    ("en_US".into(), "Back up before updating".into()),
+                    ("fr_FR".into(), "Sauvegardez avant la mise à jour".into()),
+                ]
+                .into_iter()
+                .collect(),
+            ),
+            when: PreDownloadAlertWhen {
+                source_version: ">=1.0.0:0 && <2.0.0:0".parse().unwrap(),
+            },
+        };
+        let encoded = serde_json::to_value(&alert).unwrap();
+        assert_eq!(encoded["when"]["sourceVersion"], ">=1.0.0:0 <2.0.0:0");
+        assert_eq!(
+            encoded["message"]["fr_FR"],
+            "Sauvegardez avant la mise à jour"
+        );
+        let mut localized = serde_json::from_value::<PreDownloadAlert>(encoded).unwrap();
+        assert_eq!(localized, alert);
+        localized.message.localize_for("fr_FR");
+        assert_eq!(
+            localized.message,
+            LocaleString::Translated("Sauvegardez avant la mise à jour".into())
+        );
     }
 }

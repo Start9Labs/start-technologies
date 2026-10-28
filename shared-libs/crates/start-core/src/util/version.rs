@@ -3,14 +3,16 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use ts_rs::TS;
 
-#[derive(Debug, Clone, TS)]
-#[ts(type = "string", rename = "Version")]
+#[derive(Debug, Clone, visit_rs::VisitFields)]
+#[visit(ts(type = "z.string()"))]
+#[visit(ts(rename = "Version"))]
 pub struct VersionString {
     version: exver::ExtendedVersion,
     string: String,
 }
+
+rpc_toolkit::reflect_ts!(VersionString);
 impl VersionString {
     pub fn as_str(&self) -> &str {
         self.string.as_str()

@@ -447,7 +447,7 @@ impl UploadHandle {
     }
     async fn process_body<E: Into<Box<dyn std::error::Error + Send + Sync + 'static>>>(
         &mut self,
-        mut body: impl Stream<Item = Result<Bytes, E>> + Unpin,
+        body: impl Stream<Item = Result<Bytes, E>> + Unpin,
     ) {
         let expected = self.progress.borrow().expected_size;
         if let Some(total) = expected {
@@ -457,25 +457,15 @@ impl UploadHandle {
                 .log_err();
             self.progress.send_modify(|p| p.tracker.set_total(total));
         }
-        while let Some(next) = body.next().await {
-            let chunk = match next.map_err(std::io::Error::other) {
-                Ok(chunk) => chunk,
-                Err(e) => {
-                    self.progress.send_if_modified(|p| p.handle_error(&e));
-                    break;
-                }
-            };
-            if let Err(e) = self.file.write_all(&chunk).await {
+        match write_stream(body, &mut self.file, &self.progress, &mut self.pacer).await {
+            Err(StreamError::Read(e)) => {
+                let e = std::io::Error::other(e);
                 self.progress.send_if_modified(|p| p.handle_error(&e));
-                break;
             }
-            let len = chunk.len() as u64;
-            self.progress.send_modify(|p| {
-                p.written += len;
-                p.tracker += len;
-            });
-            let written = self.progress.borrow().written;
-            self.pacer.pace(written).await.log_err();
+            Err(StreamError::Write(e)) => {
+                self.progress.send_if_modified(|p| p.handle_error(&e));
+            }
+            Ok(()) => (),
         }
         if let Err(e) = self.file.sync_all().await {
             self.progress.send_if_modified(|p| p.handle_error(&e));
@@ -486,6 +476,59 @@ impl Drop for UploadHandle {
     fn drop(&mut self) {
         self.progress.send_if_modified(|p| p.complete());
     }
+}
+
+enum StreamError<E> {
+    Read(E),
+    Write(std::io::Error),
+}
+
+/// Publishes each chunk once flushed (readers open their own handle) while the next is received;
+/// a read error surfaces only after every chunk received before it is published.
+async fn write_stream<E>(
+    mut stream: impl Stream<Item = Result<Bytes, E>> + Unpin,
+    file: &mut tokio::fs::File,
+    progress: &watch::Sender<Progress>,
+    pacer: &mut WritebackPacer,
+) -> Result<(), StreamError<E>> {
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Bytes>(4);
+    let read = async move {
+        while let Some(chunk) = stream.next().await {
+            if tx.send(chunk?).await.is_err() {
+                break;
+            }
+        }
+        Ok::<_, E>(())
+    };
+    let write = async move {
+        while let Some(chunk) = rx.recv().await {
+            file.write_all(&chunk).await?;
+            file.flush().await?;
+            report_written(progress, pacer, chunk.len() as u64).await;
+        }
+        Ok::<_, std::io::Error>(())
+    };
+    let mut read = std::pin::pin!(read);
+    let mut write = std::pin::pin!(write);
+    // The writer only finishes first by failing; dropping the reader then stops reception.
+    let read = tokio::select! {
+        read = &mut read => read,
+        write = &mut write => return write.map_err(StreamError::Write),
+    };
+    write.await.map_err(StreamError::Write)?;
+    read.map_err(StreamError::Read)
+}
+
+async fn report_written(progress: &watch::Sender<Progress>, pacer: &mut WritebackPacer, len: u64) {
+    if len == 0 {
+        return;
+    }
+    progress.send_modify(|p| {
+        p.written += len;
+        p.tracker += len;
+    });
+    let written = progress.borrow().written;
+    pacer.pace(written).await.log_err();
 }
 
 pub struct DownloadAttemptContext {
@@ -591,21 +634,17 @@ impl DownloadHandle {
             }
 
             let stream_result: Result<(), Error> = async {
-                let mut stream = response.bytes_stream();
-                while let Some(next) = stream.next().await {
-                    let chunk = next.map_err(|e| Error::new(e, ErrorKind::Network))?;
-                    self.file
-                        .write_all(&chunk)
-                        .await
-                        .map_err(|e| Error::new(e, ErrorKind::Filesystem))?;
-                    let len = chunk.len() as u64;
-                    self.progress.send_modify(|p| {
-                        p.written += len;
-                        p.tracker += len;
-                    });
-                    let written = self.progress.borrow().written;
-                    self.pacer.pace(written).await.log_err();
-                }
+                write_stream(
+                    response.bytes_stream(),
+                    &mut self.file,
+                    &self.progress,
+                    &mut self.pacer,
+                )
+                .await
+                .map_err(|e| match e {
+                    StreamError::Read(e) => Error::new(e, ErrorKind::Network),
+                    StreamError::Write(e) => Error::new(e, ErrorKind::Filesystem),
+                })?;
                 Ok(())
             }
             .await;

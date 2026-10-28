@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
-use std::net::{IpAddr, Ipv4Addr, SocketAddrV4, SocketAddrV6};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -25,7 +25,8 @@ use crate::util::serde::{HandlerExtSerde, display_serializable};
 use crate::util::sync::Watch;
 
 pub const START9_BRIDGE_IFACE: &str = "lxcbr0";
-const EPHEMERAL_PORT_START: u16 = 49152;
+/// The host's `ip_local_port_range` ends below this; see `projects/start-os/debian/postinst`.
+const DYNAMIC_PORT_START: u16 = 49152;
 // Reserved by/for host daemons (mDNS 5353, LLMNR 5355, postgres 5432, X11
 // forwarding 6010). 9050/9051 are claimable on purpose: they were the 0.3.x
 // host tor daemon's reservation (gone in 0.4.x), and the tor service now binds
@@ -68,7 +69,7 @@ impl AvailablePorts {
     pub fn alloc(&mut self, ssl: bool) -> Result<u16, Error> {
         let mut rng = crate::util::crypto::os_rng();
         for _ in 0..1000 {
-            let port = rng.random_range(EPHEMERAL_PORT_START..u16::MAX);
+            let port = rng.random_range(DYNAMIC_PORT_START..u16::MAX);
             if !self.0.contains_key(&port) {
                 self.0.insert(port, ssl);
                 return Ok(port);
@@ -164,7 +165,7 @@ pub fn forward_api<C: Context>() -> ParentHandler<C> {
                 table.add_row(row![external, target.target, target.reqs]);
             }
 
-            table.print_tty(false)?;
+            print_table(&table)?;
 
             Ok(())
         })
@@ -399,7 +400,13 @@ fn is_forward_script_tag(tag: &str) -> bool {
 async fn remove_stale_forward_rules() -> Result<(), Error> {
     let mut script = String::new();
     for family in ["ip", "ip6"] {
-        for chain in ["prerouting", "output", "postrouting", "forward"] {
+        for chain in [
+            "prerouting",
+            "output",
+            "postrouting",
+            "forward",
+            "forward_snat",
+        ] {
             for line in nft_list_chain(family, chain).await.lines() {
                 let Some(tag) = line
                     .split_once("comment \"")
@@ -928,15 +935,19 @@ fn err_has_exited<T>(_: T) -> Error {
     )
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 pub struct ForwardTable(pub BTreeMap<u16, ForwardTarget>);
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+rpc_toolkit::reflect_ts!(ForwardTable);
+
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 pub struct ForwardTarget {
     pub target: SocketAddrV4,
     pub target_prefix: u8,
     pub reqs: String,
 }
+
+rpc_toolkit::reflect_ts!(ForwardTarget);
 
 impl From<&InterfaceForwardState> for ForwardTable {
     fn from(value: &InterfaceForwardState) -> Self {
@@ -1175,6 +1186,10 @@ async fn unforward(
 /// The lxcbr0 IPv6 bridge subnet (a ULA), assigned by lxc-net (see
 /// `debian/postinst`). Containers get a SLAAC address in it.
 pub(crate) const START9_BRIDGE_V6_SUBNET: &str = "fd00:3::/64";
+
+/// The host's own address on the lxcbr0 bridge, pinned in `debian/postinst`
+/// beside the subnet above. The IPv6 counterpart of [`crate::HOST_IP`].
+pub(crate) const START9_BRIDGE_V6_ADDR: Ipv6Addr = Ipv6Addr::new(0xfd00, 3, 0, 0, 0, 0, 0, 1);
 
 /// IPv6 counterpart of [`forward`]: DNAT `source` (a host GUA:port) to `target`
 /// (the container's ULA:port) via the `forward-port6` script. `src_filter`

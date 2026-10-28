@@ -5,7 +5,7 @@ use imbl_value::json;
 
 use crate::action::{ActionInput, ActionResult};
 use crate::db::model::package::{
-    ActionVisibility, AllowedStatuses, TaskCondition, TaskEntry, TaskInput, TaskSeverity,
+    ActionVisibility, AllowedStatuses, TaskCondition, TaskEntry, TaskInput,
 };
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
@@ -27,7 +27,7 @@ impl Handler<GetActionInput> for ServiceActor {
     }
     async fn handle(
         &mut self,
-        id: Guid,
+        event_id: Guid,
         GetActionInput {
             id: action_id,
             prefill,
@@ -38,7 +38,7 @@ impl Handler<GetActionInput> for ServiceActor {
         let container = &self.0.persistent_container;
         container
             .execute::<Option<ActionInput>>(
-                id,
+                event_id,
                 ProcedureName::GetActionInput(action_id),
                 json!({ "prefill": prefill, "caller": caller }),
                 Some(Duration::from_secs(30)),
@@ -53,7 +53,7 @@ impl Service {
     /// user and for the OS evaluating a task.
     pub async fn get_action_input(
         &self,
-        id: Guid,
+        event_id: Guid,
         action_id: ActionId,
         prefill: Value,
         caller: Option<PackageId>,
@@ -78,7 +78,7 @@ impl Service {
         }
         self.actor
             .send(
-                id,
+                event_id,
                 GetActionInput {
                     id: action_id,
                     prefill,
@@ -111,8 +111,7 @@ pub fn update_tasks(
     action_id: &ActionId,
     input: &Value,
     was_run: bool,
-) -> bool {
-    let mut critical_activated = false;
+) {
     tasks.retain(|_, v| {
         if &v.task.package_id != package_id || &v.task.action_id != action_id {
             return true;
@@ -129,9 +128,6 @@ pub fn update_tasks(
                             }
                         } else if accept.iter().all(|a| conflicts(a, input)) {
                             v.active = true;
-                            if v.task.severity == TaskSeverity::Critical {
-                                critical_activated = true;
-                            }
                         }
                     }
                     None => {
@@ -150,7 +146,6 @@ pub fn update_tasks(
             !was_run
         }
     });
-    critical_activated
 }
 
 pub(super) struct RunAction {
@@ -165,7 +160,7 @@ impl Handler<RunAction> for ServiceActor {
     }
     async fn handle(
         &mut self,
-        id: Guid,
+        event_id: Guid,
         RunAction {
             ref action_id,
             input,
@@ -218,7 +213,7 @@ impl Handler<RunAction> for ServiceActor {
         }
         let result = container
             .execute::<Option<ActionResult>>(
-                id.clone(),
+                event_id.clone(),
                 ProcedureName::RunAction(action_id.clone()),
                 json!({
                     "input": input,
@@ -234,11 +229,10 @@ impl Handler<RunAction> for ServiceActor {
             .db
             .mutate(|db| {
                 for (_, pde) in db.as_public_mut().as_package_data_mut().as_entries_mut()? {
-                    if pde.as_tasks_mut().mutate(|tasks| {
-                        Ok(update_tasks(tasks, &package_id, action_id, &input, true))
-                    })? {
-                        pde.as_status_info_mut().stop()?;
-                    }
+                    pde.as_tasks_mut().mutate(|tasks| {
+                        update_tasks(tasks, &package_id, action_id, &input, true);
+                        Ok(())
+                    })?;
                 }
                 Ok(())
             })
@@ -253,14 +247,14 @@ impl Service {
     /// `None` for the user.
     pub async fn run_action(
         &self,
-        id: Guid,
+        event_id: Guid,
         action_id: ActionId,
         input: Value,
         caller: Option<PackageId>,
     ) -> Result<Option<ActionResult>, Error> {
         self.actor
             .send(
-                id,
+                event_id,
                 RunAction {
                     action_id,
                     input,

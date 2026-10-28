@@ -588,7 +588,7 @@ export const matchOldValueSpecList: z.ZodType<OldValueSpecList> =
         spec: matchOldListValueSpecUnion,
       }),
     ]),
-  ) as unknown as z.ZodType<OldValueSpecList>
+  )
 
 type OldValueSpecPointer = {
   type: 'pointer'
@@ -626,7 +626,7 @@ const matchOldValueSpecPointer: z.ZodType<OldValueSpecPointer> = z.intersection(
       multi: z.boolean(),
     }),
   ]),
-) as unknown as z.ZodType<OldValueSpecPointer>
+)
 
 type OldValueSpecString = z.infer<typeof matchOldValueSpecString>
 
@@ -644,11 +644,11 @@ export const matchOldValueSpec: z.ZodType<OldValueSpec> = z.union([
   matchOldValueSpecString,
   matchOldValueSpecNumber,
   matchOldValueSpecBoolean,
-  matchOldValueSpecObject as z.ZodType<OldValueSpecObject>,
+  matchOldValueSpecObject,
   matchOldValueSpecEnum,
-  matchOldValueSpecList as z.ZodType<OldValueSpecList>,
-  matchOldValueSpecUnion as z.ZodType<OldValueSpecUnion>,
-  matchOldValueSpecPointer as z.ZodType<OldValueSpecPointer>,
+  matchOldValueSpecList,
+  matchOldValueSpecUnion,
+  matchOldValueSpecPointer,
 ])
 
 export class Range {

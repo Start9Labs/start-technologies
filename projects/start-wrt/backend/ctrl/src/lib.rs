@@ -14,18 +14,21 @@ pub mod device_names;
 pub mod devices;
 pub mod diagnostics;
 pub mod dns;
+pub mod dns_inject;
 pub mod eeprom;
 pub mod embedded_web;
 pub mod ethernet;
 pub mod exec;
 pub mod files;
 pub mod flash;
+pub mod http_redirect;
 pub mod init;
 pub mod ipv6_tracker;
 pub mod lan;
+pub mod lan_guard;
 pub mod logs;
 pub mod luci_proxy;
-pub mod middleware;
+pub mod migrate;
 pub mod port_control;
 pub mod profiles;
 pub mod progress;
@@ -36,6 +39,7 @@ pub mod sign;
 pub mod ssh_keys;
 pub mod ssl;
 pub mod system;
+pub mod tls;
 pub mod uci;
 pub mod update;
 pub mod utils;
@@ -46,18 +50,20 @@ pub mod wan;
 pub mod wg;
 pub mod wifi;
 
-use std::fs::{File, OpenOptions};
-use std::io::BufReader;
+use std::io::IsTerminal;
 use std::ops::Deref;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use clap::Parser;
 use color_eyre::eyre::eyre;
-use cookie_store::CookieStore;
 pub use error::{Error, ErrorKind};
-use reqwest_cookie_store::CookieStoreMutex;
+use http::header::AUTHORIZATION;
+use http::HeaderMap;
+use startos::auth::IdKeyContext;
+use startos::middleware::auth::local::{is_loopback, local_auth_header};
+use startos::middleware::auth::signature::SigningContext;
+use startos::sign::{AnySigningKey, Signer};
 use tokio::runtime::Runtime;
 
 /// Non-ambiguous character set for generated passwords.
@@ -92,10 +98,8 @@ pub fn generate_password(charset: &[u8], len: usize) -> String {
 use imbl_value::imbl::OrdMap;
 use imbl_value::Value;
 use rpc_toolkit::reqwest::{self, Client, Url};
-use rpc_toolkit::yajrc::{GenericRpcMethod, Id, RpcError, RpcRequest};
-use rpc_toolkit::{
-    from_fn_async, CallRemote, Context, Empty, HandlerExt, ParentHandler, RpcResponse,
-};
+use rpc_toolkit::yajrc::RpcError;
+use rpc_toolkit::{from_fn_async, CallRemote, Context, Empty, HandlerExt, ParentHandler};
 
 pub trait CtrlContext: Context + Clone {
     fn uci_root(&self) -> PathBuf;
@@ -111,10 +115,10 @@ pub trait CtrlContext: Context + Clone {
     }
 }
 
-fn cookies_path() -> PathBuf {
+fn id_key_path() -> PathBuf {
     std::env::var("HOME")
-        .map(|h| PathBuf::from(h).join(".startwrt").join(".cookies.json"))
-        .unwrap_or_else(|_| PathBuf::from("/tmp/.startwrt-cookies.json"))
+        .map(|h| PathBuf::from(h).join(".startwrt").join("id.key.pem"))
+        .unwrap_or_else(|_| PathBuf::from("/root/.startwrt/id.key.pem"))
 }
 
 /// CLI arguments parsed by clap
@@ -125,68 +129,21 @@ pub struct CliArgs {
     pub config_root: PathBuf,
     #[clap(long)]
     pub configs_only: bool,
-    #[clap(long, default_value = "http://router.lan/rpc/v1")]
-    pub host: Url,
+    /// Server URL [default: http://127.0.0.1/rpc/v1 on the router, else http://router.lan/rpc/v1]
+    #[clap(long)]
+    pub host: Option<Url>,
 }
 
-/// Inner context with cookie persistence on Drop
 pub struct CliContextSeed {
     pub config_root: PathBuf,
     pub configs_only: bool,
     pub host: Url,
     pub client: Client,
-    pub cookie_store: Arc<CookieStoreMutex>,
-    pub cookie_path: PathBuf,
+    pub id_key_path: PathBuf,
+    id_key: OnceLock<Signer>,
     runtime: OnceLock<Arc<Runtime>>,
 }
 
-impl Drop for CliContextSeed {
-    fn drop(&mut self) {
-        let tmp = format!("{}.tmp", self.cookie_path.display());
-        let parent_dir = self.cookie_path.parent().unwrap_or(Path::new("/"));
-        if !parent_dir.exists() {
-            if let Err(e) = std::fs::create_dir_all(parent_dir) {
-                tracing::warn!("Failed to create cookie directory: {}", e);
-                return;
-            }
-        }
-        let file = match OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)
-        {
-            Ok(f) => f,
-            Err(e) => {
-                tracing::warn!("Failed to create cookie temp file: {}", e);
-                return;
-            }
-        };
-        let mut writer = match fd_lock_rs::FdLock::lock(file, fd_lock_rs::LockType::Exclusive, true)
-        {
-            Ok(w) => w,
-            Err(e) => {
-                tracing::warn!("Failed to lock cookie file: {}", e);
-                return;
-            }
-        };
-        let store = self.cookie_store.lock().unwrap();
-        if let Err(e) = cookie_store::serde::json::save(&store, &mut *writer) {
-            tracing::warn!("Failed to save cookies: {}", e);
-            return;
-        }
-        if let Err(e) = writer.sync_all() {
-            tracing::warn!("Failed to sync cookie file: {}", e);
-            return;
-        }
-        if let Err(e) = std::fs::rename(&tmp, &self.cookie_path) {
-            tracing::warn!("Failed to rename cookie file: {}", e);
-        }
-    }
-}
-
-/// CLI context with session persistence
 #[derive(Clone)]
 pub struct CliContext(Arc<CliContextSeed>);
 
@@ -198,62 +155,75 @@ impl Deref for CliContext {
     }
 }
 
+fn default_host(on_router: bool) -> Url {
+    if on_router {
+        "http://127.0.0.1/rpc/v1"
+    } else {
+        "http://router.lan/rpc/v1"
+    }
+    .parse()
+    .unwrap()
+}
+
 impl CliContext {
     pub fn init(args: CliArgs) -> Result<Self, Error> {
-        let cookie_path = cookies_path();
-        let cookie_store = Arc::new(CookieStoreMutex::new(if cookie_path.exists() {
-            cookie_store::serde::json::load(BufReader::new(File::open(&cookie_path).map_err(
-                |e| {
-                    Error::new(
-                        eyre!("Failed to open cookie file: {}", e),
-                        ErrorKind::Filesystem,
-                    )
-                },
-            )?))
-            .unwrap_or_default()
-        } else {
-            CookieStore::default()
-        }));
+        let on_router = std::fs::read_to_string(crate::auth::LOCAL_AUTH_COOKIE_PATH).is_ok();
+        let host = args.host.unwrap_or_else(|| default_host(on_router));
 
-        // If the local auth cookie exists (running on the router), inject it
-        // so the server's auth middleware trusts us without a session.
-        if let Ok(local_token) = std::fs::read_to_string(crate::auth::LOCAL_AUTH_COOKIE_PATH) {
-            let local_token = local_token.trim();
-            let domain = args.host.host_str().unwrap_or("localhost");
-            let cookie_value =
-                format!("local={local_token}; Domain={domain}; Path=/; SameSite=Strict");
-            if let Ok(cookie) = cookie_store::RawCookie::parse(cookie_value) {
-                cookie_store
-                    .lock()
-                    .unwrap()
-                    .insert_raw(&cookie, &args.host)
-                    .ok();
-            }
-        }
-
-        let client = Client::builder()
-            .cookie_provider(cookie_store.clone())
-            .build()
-            .map_err(|e| {
-                Error::new(
-                    eyre!("Failed to build HTTP client: {}", e),
-                    ErrorKind::Network,
-                )
-            })?;
+        let client = Client::builder().build().map_err(|e| {
+            Error::new(
+                eyre!("Failed to build HTTP client: {}", e),
+                ErrorKind::Network,
+            )
+        })?;
 
         Ok(Self(Arc::new(CliContextSeed {
             config_root: args.config_root,
             configs_only: args.configs_only,
-            host: args.host,
+            host,
             client,
-            cookie_store,
-            cookie_path,
+            id_key_path: id_key_path(),
+            id_key: OnceLock::new(),
             runtime: OnceLock::new(),
         })))
     }
 
     pub fn client(&self) -> &Client {
         &self.client
+    }
+
+    /// The key enrolled by `auth login`.
+    pub fn id_key(&self) -> Result<&Signer, startos::Error> {
+        if let Some(key) = self.id_key.get() {
+            return Ok(key);
+        }
+        let key = startos::developer::load_signing_key(&self.id_key_path)?;
+        Ok(self
+            .id_key
+            .get_or_init(|| Signer::Key(AnySigningKey::Ed25519(key))))
+    }
+
+    /// Enrolls the identity key by password, generating it first if absent.
+    pub async fn login(&self) -> Result<(), RpcError> {
+        Ok(startos::auth::login::<ServerContext, _>(self, LOGIN_METHOD).await?)
+    }
+
+    async fn call(&self, method: &str, params: Value) -> Result<Value, RpcError> {
+        let mut headers = HeaderMap::new();
+        if is_loopback(&self.host) {
+            if let Some(auth) = local_auth_header::<ServerContext>().await {
+                headers.insert(AUTHORIZATION, auth);
+            }
+        }
+        startos::middleware::auth::signature::call_remote(
+            self,
+            self.host.clone(),
+            headers,
+            self.host.host_str(),
+            method,
+            params,
+        )
+        .await
     }
 
     /// Build URL for a continuation endpoint.
@@ -313,6 +283,29 @@ impl CliContext {
     }
 }
 
+const LOGIN_METHOD: &str = "auth.login";
+
+impl AsRef<Client> for CliContext {
+    fn as_ref(&self) -> &Client {
+        &self.client
+    }
+}
+
+impl SigningContext for CliContext {
+    fn signing_key(&self) -> Result<Signer, startos::Error> {
+        Ok(self.id_key()?.clone())
+    }
+}
+
+impl IdKeyContext for CliContext {
+    fn id_key(&self) -> Result<&Signer, startos::Error> {
+        CliContext::id_key(self)
+    }
+    fn id_key_path(&self) -> &Path {
+        &self.id_key_path
+    }
+}
+
 impl Context for CliContext {
     fn runtime(&self) -> Option<Arc<Runtime>> {
         Some(
@@ -351,76 +344,34 @@ impl CallRemote<ServerContext> for CliContext {
         params: Value,
         _extra: Empty,
     ) -> Result<Value, RpcError> {
-        // Mirror start-os's `signature::call_remote`: always speak JSON.
-        // rpc-toolkit's own `call_remote_http` sends CBOR when the `cbor`
-        // feature is on — and it is, because the start-os submodule pulls
-        // rpc-toolkit with default features (`default = ["cbor"]`), which
-        // feature-unification forces on for the whole build. The rpc-toolkit
-        // HTTP server only ever parses JSON request bodies, so a CBOR body
-        // fails to parse before any handler runs. Auth is carried by the
-        // cookie store on `self.client` (local auth cookie / loopback), so we
-        // don't need start-os's signature header.
-        let rpc_req = RpcRequest {
-            id: Some(Id::Number(0.into())),
-            method: GenericRpcMethod::<_, _, Value>::new(method),
-            params,
-        };
-        let body = serde_json::to_vec(&rpc_req)?;
-        let res = self
-            .client()
-            .request(reqwest::Method::POST, self.host.clone())
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .header(reqwest::header::ACCEPT, "application/json")
-            .header(reqwest::header::CONTENT_LENGTH, body.len())
-            .body(body)
-            .send()
-            .await?;
-
-        // The rpc-toolkit server answers RPC-level errors with a 200 + a
-        // JSON-RPC error body, so a non-2xx here is an HTTP/infrastructure
-        // failure (proxy, auth rejection, body limit, …). Surface it clearly
-        // rather than feeding the (likely non-JSON) body to the parser below.
-        if !res.status().is_success() {
-            let status = res.status();
-            let txt = res.text().await.unwrap_or_default();
-            let reason = status.canonical_reason().unwrap_or_else(|| status.as_str());
-            let detail = if txt.is_empty() {
-                reason.to_string()
-            } else {
-                format!("{reason}: {txt}")
-            };
-            return Err(Error::new(eyre!("{detail}"), ErrorKind::Network).into());
-        }
-
-        match res
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-        {
-            Some("application/json") => {
-                serde_json::from_slice::<RpcResponse>(&*res.bytes().await?)
-                    .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Deserialization))?
-                    .result
+        match self.call(method, params.clone()).await {
+            Err(e)
+                if e.code == ErrorKind::Authorization as i32
+                    && method != LOGIN_METHOD
+                    && std::io::stdin().is_terminal() =>
+            {
+                eprintln!(
+                    "Not logged in to {}.",
+                    self.host.host_str().unwrap_or_default()
+                );
+                self.login().await?;
+                self.call(method, params).await
             }
-            _ => Err(Error::new(
-                eyre!("unexpected content type from daemon"),
-                ErrorKind::Network,
-            )
-            .into()),
+            res => res,
         }
     }
 }
 
 #[derive(Clone)]
 pub struct ServerContext {
-    pub continuations: continuations::RpcContinuations,
-    pub open_authed_continuations: continuations::OpenAuthedContinuations,
+    pub continuations: Arc<continuations::RpcContinuations>,
+    pub auth: Arc<auth::AuthState>,
 }
 impl Default for ServerContext {
     fn default() -> Self {
         Self {
-            continuations: continuations::RpcContinuations::new(),
-            open_authed_continuations: continuations::OpenAuthedContinuations::new(),
+            continuations: Arc::new(continuations::RpcContinuations::new()),
+            auth: Arc::new(auth::AuthState::in_memory()),
         }
     }
 }
@@ -457,6 +408,7 @@ pub fn main_api<C: CtrlContext + Clone>() -> ParentHandler<C> {
         .subcommand("setup", setup::setup::<C>())
         .subcommand("system", system::system::<C>())
         .subcommand("devices", devices::devices::<C>())
+        .subcommand("dns", dns_inject::dns::<C>())
         .subcommand("wan", wan::wan::<C>())
         .subcommand("lan", lan::lan::<C>())
         .subcommand("published-ports", published_ports::published_ports::<C>())

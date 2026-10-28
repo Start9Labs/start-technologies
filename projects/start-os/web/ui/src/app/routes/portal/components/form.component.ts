@@ -81,6 +81,7 @@ export interface FormContext<T> {
       </footer>
     </form>
   `,
+  host: { '[class._dialog]': '!!context' },
   styles: `
     .note {
       margin-top: 1rem;
@@ -93,14 +94,18 @@ export interface FormContext<T> {
     }
 
     footer {
-      position: sticky;
-      bottom: 0;
-      z-index: 10;
       display: flex;
       justify-content: flex-end;
       padding: 1rem 0;
-      margin: 1rem -1px -1rem;
+      margin-block-start: 1rem;
       gap: 1rem;
+    }
+
+    :host(._dialog) footer {
+      position: sticky;
+      bottom: 0;
+      z-index: 10;
+      margin: 1rem -1px -1rem;
       background: var(--tui-background-elevation-1);
       box-shadow: inset 0 1px var(--tui-background-neutral-1);
     }
@@ -119,7 +124,7 @@ export class FormComponent<T extends Record<string, any>> implements OnInit {
   private readonly confirm = inject(TuiConfirmService, { optional: true })
   private readonly formService = inject(FormService)
   private readonly invalidService = inject(InvalidService)
-  private readonly context = injectContext<
+  protected readonly context = injectContext<
     TuiDialogContext<void, FormContext<T>>
   >({ optional: true })
 

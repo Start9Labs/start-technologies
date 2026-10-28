@@ -11,7 +11,6 @@ use imbl_value::InternedString;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tracing::instrument;
-use ts_rs::TS;
 
 use super::PackageBackupReport;
 use super::target::{BackupTargetId, PackageBackupInfo};
@@ -32,9 +31,8 @@ use crate::util::io::{AtomicFile, dir_copy};
 use crate::util::serde::IoFormat;
 use crate::version::VersionT;
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct BackupParams {
@@ -47,6 +45,9 @@ pub struct BackupParams {
     #[arg(help = "help.arg.backup-password")]
     password: crate::auth::PasswordType,
 }
+
+rpc_toolkit::reflect_ts!(BackupParams);
+rpc_toolkit::ts_export!(BackupParams, namespaces = [""]);
 
 struct BackupStatusGuard(Option<TypedPatchDb<Database>>);
 impl BackupStatusGuard {
@@ -475,12 +476,22 @@ async fn perform_backup(
     backup_guard.unencrypted_metadata.timestamp = timestamp.clone();
     backup_guard.metadata.version = crate::version::Current::default().semver().into();
     backup_guard.metadata.timestamp = Some(timestamp);
+    let package_timestamps: BTreeMap<_, _> = backup_report
+        .iter()
+        .filter(|(_, report)| report.error.is_none())
+        .filter_map(|(id, _)| Some((id.clone(), package_backups.get(id)?.timestamp)))
+        .collect();
     backup_guard.metadata.package_backups = package_backups;
 
     backup_guard.save_and_unmount().await?;
 
     ctx.db
         .mutate(|v| {
+            for (id, timestamp) in &package_timestamps {
+                if let Some(pde) = v.as_public_mut().as_package_data_mut().as_idx_mut(id) {
+                    pde.as_last_backup_mut().ser(&Some(*timestamp))?;
+                }
+            }
             v.as_public_mut()
                 .as_server_info_mut()
                 .as_last_backup_mut()

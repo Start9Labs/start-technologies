@@ -7,7 +7,7 @@ use crate::net::host::all_hosts;
 use crate::net::service_interface::{HostnameInfo, HostnameMetadata};
 use crate::prelude::*;
 use crate::volume::PKG_VOLUME_DIR;
-use crate::{DATA_DIR, PACKAGE_DATA, PackageId};
+use crate::{DATA_DIR, PackageId};
 
 pub async fn cleanup(ctx: &RpcContext, id: &PackageId, soft: bool) -> Result<(), Error> {
     Ok(
@@ -88,7 +88,9 @@ pub async fn cleanup(ctx: &RpcContext, id: &PackageId, soft: bool) -> Result<(),
                 crate::util::btrfs::delete_tree(&path).await?;
                 #[cfg(not(feature = "dev"))]
                 {
-                    let logs_dir = Path::new(PACKAGE_DATA).join("logs").join(&manifest.id);
+                    let logs_dir = Path::new(crate::PACKAGE_DATA)
+                        .join("logs")
+                        .join(&manifest.id);
                     crate::util::io::delete_dir(&logs_dir).await?;
                 }
             }

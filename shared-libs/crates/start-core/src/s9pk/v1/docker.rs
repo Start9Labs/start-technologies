@@ -45,6 +45,7 @@ impl<R: AsyncRead + AsyncSeek + Unpin + Send + Sync> DockerReader<R> {
             return Ok(multiarch.available);
         }
 
+        rdr.seek(SeekFrom::Start(0)).await?;
         let Some(manifest) = tokio_tar::Archive::new(&mut *rdr)
             .entries()?
             .try_filter_map(|e| {
@@ -71,7 +72,13 @@ impl<R: AsyncRead + AsyncSeek + Unpin + Send + Sync> DockerReader<R> {
         struct Manifest {
             config: PathBuf,
         }
-        let Manifest { config } = from_json_async_reader(manifest).await?;
+        let manifests: Vec<Manifest> = from_json_async_reader(manifest).await?;
+        let Manifest { config } = manifests.into_iter().next().ok_or_else(|| {
+            Error::new(
+                eyre!("Single arch legacy s9pk has no images"),
+                ErrorKind::ParseS9pk,
+            )
+        })?;
         rdr.seek(SeekFrom::Start(0)).await?;
         let Some(config) = tokio_tar::Archive::new(rdr)
             .entries()?
@@ -141,6 +148,7 @@ impl<R: AsyncRead + AsyncSeek + Unpin + Send + Sync> DockerReader<R> {
                 ))
             }
         } else {
+            rdr.seek(SeekFrom::Start(0)).await?;
             Ok(Self::SingleArch(rdr))
         }
     }

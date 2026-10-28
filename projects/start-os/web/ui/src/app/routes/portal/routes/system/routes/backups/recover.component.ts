@@ -151,7 +151,7 @@ export class BackupsRecoverComponent {
     const params = { ids, targetId, password, serverId }
 
     this.tasks.run(async () => {
-      await this.api.restorePackages(params)
+      await this.api.rpc.package.backup.restore(params)
       this.context.$implicit.complete()
       this.router.navigate(['services'])
     }, 'Initializing')

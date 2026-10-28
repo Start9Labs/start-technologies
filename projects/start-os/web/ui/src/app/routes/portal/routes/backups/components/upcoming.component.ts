@@ -97,7 +97,7 @@ import { GetBackupIconPipe } from '../pipes/get-backup-icon.pipe'
 export class BackupsUpcomingComponent {
   private readonly api = inject(ApiService)
 
-  readonly targets = toSignal(from(this.api.getBackupTargets({})))
+  readonly targets = toSignal(from(this.api.rpc.backup.target.list({})))
   readonly current = toSignal(
     inject<PatchDB<DataModel>>(PatchDB)
       // @TODO 041 remove "as any" once this feature is real

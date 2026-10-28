@@ -91,7 +91,7 @@ export default class NotificationsComponent implements OnInit {
   async getMore(params: T.ListNotificationParams) {
     try {
       this.notifications.set(null)
-      this.notifications.set(await this.api.getNotifications(params))
+      this.notifications.set(await this.api.rpc.notification.list(params))
     } catch (e: any) {
       this.errorService.handleError(e)
     }
@@ -104,7 +104,7 @@ export default class NotificationsComponent implements OnInit {
         .map(n => n.id) || []
 
     this.tasks.run(async () => {
-      await this.api.deleteNotifications({ ids })
+      await this.api.rpc.notification.remove({ ids })
       this.notifications.set(all.filter(n => !ids.includes(n.id)))
     }, 'Deleting')
   }

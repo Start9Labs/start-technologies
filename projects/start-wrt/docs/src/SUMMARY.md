@@ -4,6 +4,12 @@
 
 ---
 
+# US Customers
+
+- [Installing the Wi-Fi Module](wifi-module.md)
+
+---
+
 # Getting Started
 
 - [Installing StartWRT](installing.md)

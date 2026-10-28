@@ -27,6 +27,8 @@ start9-workspace/
 └── hello-world-startos/    ← your new package
 ```
 
+Keep starting your AI sessions from the workspace root, not from inside `hello-world-startos/` — that's where the agent context loads from (see [Environment Setup](./environment-setup.md#create-the-workspace)).
+
 > [!TIP]
 > Already have a package repo? Clone it into the workspace alongside `start-technologies/` and build it the same way.
 
@@ -53,10 +55,10 @@ This is the way to work on a package: build and push to your device in a single 
 Then build and install for your device's architecture in one step, from the package directory:
 
 ```sh
-make x86 install        # or: make arm install
+make install
 ```
 
-Every later change is just another `make x86 install`. See [Makefile — Installation](./makefile.md#installation) for details (including the one-time certificate trust `make install` needs).
+`make install` detects the device's architecture and rebuilds when needed. Every later change is just another `make install`. See [Makefile — Installation](./makefile.md#installation) for details (including the one-time certificate trust `make install` needs).
 
 ### Alternative: sideload via the web interface
 

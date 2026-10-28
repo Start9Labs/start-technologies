@@ -1,6 +1,6 @@
 # WAN Settings
 
-The WAN (Wide Area Network) page configures how the router connects to the Internet through your ISP. Most users will not need to change these settings — StartWRT auto-detects your Internet connection on first boot. Navigate to `Internet > WAN Settings`.
+The WAN (Wide Area Network) page configures how the router connects to the Internet through your ISP. Most users will not need to change these settings. Navigate to `Internet > WAN Settings`.
 
 ## IPv4
 
@@ -28,13 +28,13 @@ Configure IPv6 if your ISP supports it.
 - **6RD** — Tunnels IPv6 over an IPv4 connection. Required by some ISPs that do not provide native IPv6. Configuration fields: IPv6 Prefix, IPv6 Prefix Length, IPv4 Prefix Length, and Border Relay IP (the IPv4 address of the ISP's relay server).
 - **Disabled** — No IPv6 on the WAN interface.
 
-For SLAAC and DHCPv6, an optional **IPv6 Prefix** field lets you request a specific prefix length from your ISP for prefix delegation (e.g. `/48`, `/56`, `/64`). Leave empty to let your ISP decide automatically.
+For SLAAC and DHCPv6, an optional **IPv6 Prefix** field lets you request a specific prefix length from your ISP for prefix delegation (e.g. `/48`, `/56`, `/64`). Leave empty to let your ISP decide automatically. The request is a hint the ISP may ignore; the size it actually delegated appears as **Delegated Prefix** on the [LAN IPv6](lan.md#ipv6) page.
 
 > [!NOTE]
 > IPv6 cannot be set to Disabled while any enabled [Published Ports](published-ports.md) rules use IPv6 — the option is grayed out with a hint. Remove or disable those rules first.
 
 > [!TIP]
-> A **6in4** tunnel is another way to reach IPv6 on an ISP that provides none. Unlike 6RD, which your ISP has to offer, a 6in4 tunnel comes from a third-party broker such as Hurricane Electric and works on any connection with a public IPv4 address — but not behind [CGNAT](cgnat.md), which blocks the protocol the tunnel uses. There is no UI for it; the `6in4` package ships in the image and is configured over [SSH](ssh.md) by adding an interface to `/etc/config/network`. The web interface does not manage such an interface — the WAN page and its summary read it back as IPv6 **Disabled** — so keep managing it over SSH rather than from the IPv6 settings here.
+> A **6in4** tunnel is another way to reach IPv6 on an ISP that provides none. Unlike 6RD, which your ISP has to offer, a 6in4 tunnel comes from a third-party broker such as Hurricane Electric and works on any connection with a public IPv4 address — but not behind [CGNAT](cgnat.md), which blocks the protocol the tunnel uses. There is no UI for it; the `6in4` package ships in the image and is configured over [SSH](ssh.md) by adding an interface to `/etc/config/network`. The web interface does not manage such an interface — the WAN page shows only the `wan6` interface, and reads IPv6 as **Disabled** if the tunnel replaces it — so keep managing the tunnel over SSH rather than from the IPv6 settings here.
 
 The WAN summary shows an IPv6 status badge indicating whether IPv6 is Enabled or Disabled, along with its mode (SLAAC, DHCPv6, Static, or 6RD).
 

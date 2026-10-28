@@ -1,12 +1,10 @@
 # AGENTS.md — brochure
 
-Practical instructions for agents working on the public Start9 Marketplace web app (marketplace.start9.com). CLAUDE.md is a one-line `@AGENTS.md` import. See [ARCHITECTURE.md](ARCHITECTURE.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
-
-**Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
+Practical instructions for agents working on the public Start9 Marketplace web app (marketplace.start9.com). CLAUDE.md is a one-line `@AGENTS.md` import. See [ARCHITECTURE.md](ARCHITECTURE.md) for structure.
 
 ## What this is
 
-A single-page Angular 22 app that wraps the shared `@start9labs/marketplace` library to browse package registries. It is **not** the marketing landing page (that's `projects/start-docs/landing`), despite the "brochure" name. It is a **public website** that **auto-deploys on merge to `master`** via `.github/workflows/deploy-brochure.yml` — unlike `ui`, `setup-wizard`, and `start-tunnel`, which ship inside the OS image.
+A single-page Angular app that wraps the shared `@start9labs/marketplace` library to browse package registries. It is **not** the marketing landing page (`projects/start-docs/landing` is the documentation site's landing page), despite the "brochure" name. It is a **public website** that **auto-deploys on merge to `master`** via `.github/workflows/deploy-brochure.yml` — unlike `ui`, `setup-wizard`, and `start-tunnel`, which ship in their owning product artifacts.
 
 ## Layout
 

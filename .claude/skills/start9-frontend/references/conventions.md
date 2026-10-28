@@ -8,7 +8,9 @@
   `npm run check:i18n` (and per-app `check:i18n:wrt`/`:tunnel`) scans for misses.
 - `shared` hosts the dictionaries for ui/setup-wizard/brochure; start-wrt, start-tunnel, and
   support-server's portal keep local copies of the same machinery (consolidation into shared
-  is planned — don't grow them further apart). ops-server and start9-store are English-only:
+  is planned — don't grow them further apart). A shared component translates through the shared
+  `I18N` token, not the app's; start-wrt fills it in `i18nService.setLangLocal`, and an app
+  that does not renders shared components in English. ops-server and start9-store are English-only:
   hardcode strings there.
 - Shared-lib services translate centrally: `DialogService`/`TaskService` accept `i18nKey`-typed
   labels, so callers pass English keys and never pre-translate.

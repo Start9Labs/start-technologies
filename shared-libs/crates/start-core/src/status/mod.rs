@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::HealthCheckId;
 use crate::error::ErrorData;
@@ -12,16 +11,17 @@ use crate::status::health_check::NamedHealthCheckResult;
 
 pub mod health_check;
 
-#[derive(Debug, Default, Deserialize, Serialize, HasModel, TS)]
+#[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct StatusInfo {
     pub health: BTreeMap<HealthCheckId, NamedHealthCheckResult>,
     pub error: Option<ErrorData>,
-    #[ts(type = "string | null")]
     pub started: Option<DateTime<Utc>>,
     pub desired: DesiredStatus,
 }
+
+rpc_toolkit::reflect_ts!(StatusInfo);
 impl StatusInfo {
     pub fn stop(&mut self) {
         self.desired = self.desired.stop();
@@ -36,22 +36,7 @@ impl Model<StatusInfo> {
     pub fn started(&mut self) -> Result<(), Error> {
         self.as_started_mut()
             .map_mutate(|s| Ok(Some(s.unwrap_or_else(|| Utc::now()))))?;
-        self.as_desired_mut().map_mutate(|s| {
-            Ok(match s {
-                DesiredStatus::Restarting {
-                    restart_again: true,
-                } => {
-                    // Clear the flag but stay Restarting so actor will stop→start again
-                    DesiredStatus::Restarting {
-                        restart_again: false,
-                    }
-                }
-                DesiredStatus::Restarting {
-                    restart_again: false,
-                } => DesiredStatus::Running,
-                a => a,
-            })
-        })?;
+        self.as_desired_mut().map_mutate(|s| Ok(s.started()))?;
         Ok(())
     }
     pub fn stop(&mut self) -> Result<(), Error> {
@@ -96,7 +81,7 @@ impl Model<StatusInfo> {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, VisitVariants)]
 #[serde(tag = "main")]
 #[serde(rename_all = "kebab-case")]
 #[serde(rename_all_fields = "camelCase")]
@@ -114,6 +99,8 @@ pub enum DesiredStatus {
         on_complete: StartStop,
     },
 }
+
+rpc_toolkit::reflect_ts!(DesiredStatus);
 impl Default for DesiredStatus {
     fn default() -> Self {
         Self::Stopped
@@ -184,15 +171,129 @@ impl DesiredStatus {
         }
     }
 
+    /// The desired status once a start completes.
+    pub fn started(&self) -> Self {
+        match self {
+            Self::Restarting {
+                restart_again: true,
+            } => Self::Restarting {
+                restart_again: false,
+            },
+            Self::Restarting {
+                restart_again: false,
+            } => Self::Running,
+            x => *x,
+        }
+    }
+
     pub fn restart(&self, started: bool) -> Self {
         match self {
             Self::Running => Self::Restarting {
-                restart_again: false,
+                restart_again: !started,
             },
             Self::Restarting { .. } if !started => Self::Restarting {
                 restart_again: true,
             },
             x => *x,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restart_during_start_survives_completion() {
+        for restart_in_progress in [false, true] {
+            for requests in [1, 2, 3] {
+                let mut status = Model::new(&StatusInfo::default()).unwrap();
+                status.start().unwrap();
+                if restart_in_progress {
+                    status.started().unwrap();
+                    status.restart().unwrap();
+                    status.stopped().unwrap();
+                }
+
+                for _ in 0..requests {
+                    status.restart().unwrap();
+                }
+                assert_eq!(
+                    status.de().unwrap().desired,
+                    DesiredStatus::Restarting {
+                        restart_again: true,
+                    }
+                );
+                assert!(status.de().unwrap().started.is_none());
+
+                status.started().unwrap();
+                assert_eq!(
+                    status.de().unwrap().desired,
+                    DesiredStatus::Restarting {
+                        restart_again: false,
+                    }
+                );
+                assert!(status.de().unwrap().started.is_some());
+
+                status.stopped().unwrap();
+                status.started().unwrap();
+                assert_eq!(status.de().unwrap().desired, DesiredStatus::Running);
+                assert!(status.de().unwrap().started.is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn restart_after_start_needs_one_stop_start_cycle() {
+        let mut status = Model::new(&StatusInfo::default()).unwrap();
+        status.start().unwrap();
+        status.started().unwrap();
+        for _ in 0..3 {
+            status.restart().unwrap();
+            assert_eq!(
+                status.de().unwrap().desired,
+                DesiredStatus::Restarting {
+                    restart_again: false,
+                }
+            );
+        }
+        status.stopped().unwrap();
+        status.started().unwrap();
+        assert_eq!(status.de().unwrap().desired, DesiredStatus::Running);
+    }
+
+    #[test]
+    fn stop_cancels_restart_during_start() {
+        let mut status = Model::new(&StatusInfo::default()).unwrap();
+        status.start().unwrap();
+        status.restart().unwrap();
+        status.stop().unwrap();
+        status.started().unwrap();
+        assert_eq!(status.de().unwrap().desired, DesiredStatus::Stopped);
+        status.stopped().unwrap();
+        assert!(status.de().unwrap().started.is_none());
+    }
+
+    #[test]
+    fn restart_preserves_stopped_backup_and_update_states() {
+        for desired in [
+            DesiredStatus::Stopped,
+            DesiredStatus::BackingUp {
+                on_complete: StartStop::Start,
+            },
+            DesiredStatus::BackingUp {
+                on_complete: StartStop::Stop,
+            },
+            DesiredStatus::Updating {
+                on_complete: StartStop::Start,
+            },
+            DesiredStatus::Updating {
+                on_complete: StartStop::Stop,
+            },
+        ] {
+            for started in [false, true] {
+                assert_eq!(desired.restart(started), desired);
+            }
         }
     }
 }

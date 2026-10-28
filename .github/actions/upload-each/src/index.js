@@ -1,7 +1,7 @@
-const path = require('path')
-const core = require('@actions/core')
-const glob = require('@actions/glob')
-const { DefaultArtifactClient } = require('@actions/artifact')
+import path from 'node:path'
+import * as core from '@actions/core'
+import * as glob from '@actions/glob'
+import { DefaultArtifactClient } from '@actions/artifact'
 
 async function run() {
   const pattern = core.getInput('pattern', { required: true })

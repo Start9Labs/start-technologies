@@ -10,7 +10,6 @@ use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_f
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::instrument;
-use ts_rs::TS;
 
 use crate::account::AccountInfo;
 use crate::context::config::ServerConfig;
@@ -32,7 +31,7 @@ use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::s9pk::v2::pack::{CONTAINER_DATADIR, CONTAINER_TOOL};
 use crate::ssh::SSH_DIR;
 use crate::system::{get_mem_info, sync_kiosk};
-use crate::util::io::{IOHook, open_file};
+use crate::util::io::{IOHook, dir_copy, open_file};
 use crate::util::lshw::lshw;
 use crate::util::{Invoke, cpupower};
 use crate::{Error, MAIN_DATA, PACKAGE_DATA, ResultExt};
@@ -141,9 +140,22 @@ pub async fn run_script<P: AsRef<Path>>(path: P, mut progress: PhaseProgressTrac
     progress.complete();
 }
 
+async fn persist_pstore_archive(source: &Path, destination: &Path) -> Result<(), Error> {
+    let mut archive = match tokio::fs::read_dir(source).await {
+        Ok(archive) => archive,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.into()),
+    };
+    if archive.next_entry().await?.is_some() {
+        dir_copy(source, destination, None).await?;
+    }
+    Ok(())
+}
+
 #[instrument(skip_all)]
 pub async fn init(
     webserver: &WebServerAcceptorSetter<WildcardListener>,
+    dns: Arc<crate::net::dns::DnsController>,
     cfg: &ServerConfig,
     InitPhases {
         preinit,
@@ -164,6 +176,16 @@ pub async fn init(
         postinit,
     }: InitPhases,
 ) -> Result<InitResult, Error> {
+    if let Err(e) = persist_pstore_archive(
+        Path::new("/var/lib/systemd/pstore"),
+        &Path::new(MAIN_DATA).join("pstore"),
+    )
+    .await
+    {
+        tracing::warn!("could not persist systemd-pstore archive: {e}");
+        tracing::debug!("{e:?}");
+    }
+
     if let Some(progress) = preinit {
         run_script("/media/startos/config/preinit.sh", progress).await;
     }
@@ -218,13 +240,14 @@ pub async fn init(
     let net_ctrl = Arc::new(
         NetController::init(
             db.clone(),
+            dns,
+            webserver,
             cfg.socks_listen.unwrap_or(DEFAULT_SOCKS_LISTEN),
             cfg.max_proxy_conns_per_target
                 .unwrap_or(crate::net::vhost::MAX_PROXY_CONNS_PER_TARGET),
         )
         .await?,
     );
-    webserver.send_modify(|wl| wl.set_ip_info(net_ctrl.net_iface.watcher.subscribe()));
     let os_net_service = net_ctrl.os_bindings().await?;
     start_net.complete();
 
@@ -277,9 +300,7 @@ pub async fn init(
         account.root_ca_cert.to_pem()?,
     )
     .await?;
-    Command::new("update-ca-certificates")
-        .invoke(crate::ErrorKind::OpenSsl)
-        .await?;
+    crate::system::trust_ca::update_trust_store().await?;
     load_ca_cert.complete();
 
     load_wifi.start();
@@ -466,6 +487,7 @@ pub fn init_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "logs",
             from_fn_async(crate::logs::cli_logs::<InitContext, Empty>)
+                .no_ts()
                 .no_display()
                 .with_about("about.display-os-logs"),
         )
@@ -476,6 +498,7 @@ pub fn init_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "kernel-logs",
             from_fn_async(crate::logs::cli_logs::<InitContext, Empty>)
+                .no_ts()
                 .no_display()
                 .with_about("about.display-kernel-logs"),
         )
@@ -488,13 +511,15 @@ pub fn init_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct InitProgressRes {
     pub progress: FullProgress,
     pub guid: Guid,
 }
+
+rpc_toolkit::reflect_ts!(InitProgressRes);
+rpc_toolkit::ts_export!(InitProgressRes, namespaces = [""]);
 
 pub async fn init_progress(ctx: InitContext) -> Result<InitProgressRes, Error> {
     let progress_tracker = ctx.progress.clone();
@@ -580,4 +605,106 @@ pub async fn cli_init_progress(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::persist_pstore_archive;
+
+    #[tokio::test]
+    async fn pstore_archive_preserves_nested_and_flat_files() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("archive");
+        let destination = root.path().join("main/pstore");
+        let efi = "2026-06-01-120000/dmesg-efi-123456789";
+        let ramoops = "dmesg-ramoops-0";
+        let console = "console-ramoops-0";
+        tokio::fs::create_dir_all(source.join("2026-06-01-120000"))
+            .await
+            .unwrap();
+        tokio::fs::write(source.join(efi), b"EFI panic\0\xff")
+            .await
+            .unwrap();
+        tokio::fs::write(source.join(ramoops), b"ramoops panic")
+            .await
+            .unwrap();
+        tokio::fs::write(source.join(console), b"console output")
+            .await
+            .unwrap();
+
+        persist_pstore_archive(&source, &destination).await.unwrap();
+        persist_pstore_archive(&source, &destination).await.unwrap();
+        tokio::fs::remove_dir_all(&source).await.unwrap();
+        tokio::fs::create_dir(&source).await.unwrap();
+        persist_pstore_archive(&source, &destination).await.unwrap();
+        tokio::fs::remove_dir(&source).await.unwrap();
+        persist_pstore_archive(&source, &destination).await.unwrap();
+
+        assert_eq!(
+            tokio::fs::read(destination.join(efi)).await.unwrap(),
+            b"EFI panic\0\xff"
+        );
+        assert_eq!(
+            tokio::fs::read(destination.join(ramoops)).await.unwrap(),
+            b"ramoops panic"
+        );
+        assert_eq!(
+            tokio::fs::read(destination.join(console)).await.unwrap(),
+            b"console output"
+        );
+
+        tokio::fs::create_dir_all(&source).await.unwrap();
+        tokio::fs::write(source.join("dmesg-ramoops-1"), b"later panic")
+            .await
+            .unwrap();
+        persist_pstore_archive(&source, &destination).await.unwrap();
+        assert_eq!(
+            tokio::fs::read(destination.join("dmesg-ramoops-1"))
+                .await
+                .unwrap(),
+            b"later panic"
+        );
+        assert_eq!(
+            tokio::fs::read(destination.join(ramoops)).await.unwrap(),
+            b"ramoops panic"
+        );
+    }
+
+    #[tokio::test]
+    async fn pstore_archive_empty_or_absent_source_leaves_destination_untouched() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("archive");
+        let destination = root.path().join("main/pstore");
+        persist_pstore_archive(&source, &destination).await.unwrap();
+        assert!(!destination.exists());
+        tokio::fs::create_dir(&source).await.unwrap();
+        persist_pstore_archive(&source, &destination).await.unwrap();
+        assert!(!destination.exists());
+    }
+
+    #[tokio::test]
+    async fn pstore_archive_reports_copy_errors() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("archive");
+        let destination = root.path().join("pstore");
+        tokio::fs::create_dir(&source).await.unwrap();
+        tokio::fs::write(source.join("dmesg-ramoops-0"), b"panic")
+            .await
+            .unwrap();
+        tokio::fs::write(&destination, b"existing evidence")
+            .await
+            .unwrap();
+
+        assert!(persist_pstore_archive(&source, &destination).await.is_err());
+        assert_eq!(
+            tokio::fs::read(&destination).await.unwrap(),
+            b"existing evidence"
+        );
+        assert_eq!(
+            tokio::fs::read(source.join("dmesg-ramoops-0"))
+                .await
+                .unwrap(),
+            b"panic"
+        );
+    }
 }

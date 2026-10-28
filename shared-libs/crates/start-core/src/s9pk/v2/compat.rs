@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use exver::{ExtendedVersion, Version, VersionRange};
 use tokio::io::{AsyncRead, AsyncSeek, AsyncWriteExt};
-use tokio::process::Command;
 
 use crate::dependencies::{DepInfo, Dependencies};
 use crate::prelude::*;
@@ -16,10 +15,12 @@ use crate::s9pk::merkle_archive::source::TmpSource;
 use crate::s9pk::merkle_archive::{Entry, MerkleArchive};
 use crate::s9pk::v1::manifest::{Manifest as ManifestV1, PackageProcedure};
 use crate::s9pk::v1::reader::S9pkReader;
-use crate::s9pk::v2::pack::{CONTAINER_TOOL, ImageSource, PackSource};
+use crate::s9pk::v2::pack::{
+    PackSource, SqfsDir, docker_platform, javascript_squashfs, write_image,
+};
 use crate::s9pk::v2::{S9pk, SIG_CONTEXT};
-use crate::util::Invoke;
 use crate::util::io::{TmpDir, create_file};
+use crate::util::squashfs::Squashfs;
 use crate::{ImageId, PackageId, VolumeId};
 
 pub const MAGIC_AND_VERSION: &[u8] = &[0x3b, 0x3b, 0x01];
@@ -33,19 +34,8 @@ impl S9pk<TmpSource<PackSource>> {
         tmp_dir: Arc<TmpDir>,
         signer: ed25519_dalek::SigningKey,
     ) -> Result<Self, Error> {
-        Command::new(*CONTAINER_TOOL)
-            .arg("run")
-            .arg("--rm")
-            .arg("--privileged")
-            .arg("tonistiigi/binfmt")
-            .arg("--install")
-            .arg("all")
-            .invoke(ErrorKind::Docker)
-            .await?;
-
         let mut archive = DirectoryContents::<TmpSource<PackSource>>::new();
 
-        // manifest.json
         let manifest_raw = reader.manifest().await?;
         let manifest = from_value::<ManifestV1>(manifest_raw.clone())?;
         let mut new_manifest = Manifest::try_from(manifest.clone())?;
@@ -61,7 +51,6 @@ impl S9pk<TmpSource<PackSource>> {
             })
             .collect();
 
-        // LICENSE.md
         let license: Arc<[u8]> = reader.license().await?.to_vec().await?.into();
         archive.insert_path(
             "LICENSE.md",
@@ -71,8 +60,6 @@ impl S9pk<TmpSource<PackSource>> {
             )),
         )?;
 
-        // instructions.md — v1 packages may lack instructions; stub a placeholder so a
-        // missing file never breaks migration.
         let instructions = match reader.instructions().await {
             Ok(handle) => handle.to_vec().await.unwrap_or_default(),
             Err(e) => {
@@ -93,7 +80,6 @@ impl S9pk<TmpSource<PackSource>> {
             )),
         )?;
 
-        // icon.*
         let icon: Arc<[u8]> = reader.icon().await?.to_vec().await?.into();
         archive.insert_path(
             format!("icon.{}", manifest.assets.icon_type()),
@@ -103,64 +89,37 @@ impl S9pk<TmpSource<PackSource>> {
             )),
         )?;
 
-        // images
-        for arch in reader.docker_arches().await? {
-            Command::new(*CONTAINER_TOOL)
-                .arg("load")
-                .input(Some(&mut reader.docker_images(&arch).await?))
-                .invoke(ErrorKind::Docker)
-                .await?;
+        for saved_arch in reader.docker_arches().await? {
+            let arch = super::image::package_architecture(&saved_arch);
+            let saved = Squashfs::from_tar(reader.docker_images(&saved_arch).await?).await?;
             for (image, system) in &images {
                 let mut image_config = new_manifest.images.remove(image).unwrap_or_default();
-                image_config.arch.insert(arch.as_str().into());
+                image_config.arch.insert(arch.into());
                 new_manifest.images.insert(image.clone(), image_config);
                 let image_name = if *system {
                     format!("start9/{}:latest", image)
                 } else {
                     format!("start9/{}/{}:{}", manifest.id, image, manifest.version)
                 };
-                ImageSource::DockerTag(image_name.clone())
-                    .load(
-                        tmp_dir.clone(),
-                        &new_manifest.id,
-                        &new_manifest.version,
-                        image,
-                        &arch,
-                        &mut archive,
-                    )
-                    .await?;
-                Command::new(*CONTAINER_TOOL)
-                    .arg("rmi")
-                    .arg("-f")
-                    .arg(&image_name)
-                    .invoke(ErrorKind::Docker)
-                    .await?;
+                let filesystem =
+                    super::image::from_archive(&saved, &docker_platform(&arch), Some(&image_name))
+                        .await?;
+                write_image(filesystem, tmp_dir.clone(), image, &arch, &mut archive).await?;
             }
         }
 
-        // assets
-        let asset_dir = tmp_dir.join("assets");
-        tokio::fs::create_dir_all(&asset_dir).await?;
-        // preserve file modes — the default drops them, stripping +x off executable assets
-        tokio_tar::ArchiveBuilder::new(reader.assets().await?)
-            .set_preserve_permissions(true)
-            .build()
-            .unpack(&asset_dir)
-            .await?;
-        let sqfs_path = asset_dir.with_extension("squashfs");
-        Command::new("mksquashfs")
-            .arg(&asset_dir)
-            .arg(&sqfs_path)
-            .invoke(ErrorKind::Filesystem)
-            .await?;
         archive.insert_path(
             "assets.squashfs",
-            Entry::file(TmpSource::new(tmp_dir.clone(), PackSource::File(sqfs_path))),
+            Entry::file(TmpSource::new(
+                tmp_dir.clone(),
+                PackSource::Squashfs(Arc::new(SqfsDir::new(
+                    Squashfs::from_tar(reader.assets().await?).await?,
+                    tmp_dir.clone(),
+                ))),
+            )),
         )?;
 
-        // javascript
         let js_dir = tmp_dir.join("javascript");
-        let sqfs_path = js_dir.with_extension("squashfs");
         tokio::fs::create_dir_all(&js_dir).await?;
         if let Some(mut scripts) = reader.scripts().await? {
             let mut js_file = create_file(js_dir.join("embassy.js")).await?;
@@ -174,14 +133,15 @@ impl S9pk<TmpSource<PackSource>> {
                 .await?;
             js_file.sync_all().await?;
         }
-        Command::new("mksquashfs")
-            .arg(&js_dir)
-            .arg(&sqfs_path)
-            .invoke(ErrorKind::Filesystem)
-            .await?;
         archive.insert_path(
             Path::new("javascript.squashfs"),
-            Entry::file(TmpSource::new(tmp_dir.clone(), PackSource::File(sqfs_path))),
+            Entry::file(TmpSource::new(
+                tmp_dir.clone(),
+                PackSource::Squashfs(Arc::new(SqfsDir::new(
+                    javascript_squashfs(&js_dir).await?,
+                    tmp_dir.clone(),
+                ))),
+            )),
         )?;
 
         archive.insert_path(
@@ -262,6 +222,7 @@ impl TryFrom<ManifestV1> for Manifest {
             metadata: PackageMetadata {
                 title: format!("{} (Legacy)", value.title).into(),
                 release_notes: LocaleString::Translated(value.release_notes),
+                pre_download_alert: None,
                 license: value.license.into(),
                 package_repo: value.wrapper_repo,
                 upstream_repo: value.upstream_repo,
@@ -299,6 +260,8 @@ impl TryFrom<ManifestV1> for Manifest {
                             DepInfo {
                                 description: value.description.map(LocaleString::Translated),
                                 optional: !value.requirement.required(),
+                                version_range: None,
+                                kind: None,
                                 metadata: None,
                             },
                         )
@@ -326,6 +289,9 @@ impl TryFrom<ManifestV1> for Manifest {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 #[cfg(test)]
 mod test {

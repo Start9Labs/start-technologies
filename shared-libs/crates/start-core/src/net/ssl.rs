@@ -26,10 +26,9 @@ use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::rustls::crypto::CryptoProvider;
-use tokio_rustls::rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
+use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio_rustls::rustls::server::ClientHello;
 use tracing::instrument;
-use ts_rs::TS;
 use visit_rs::Visit;
 
 use crate::SOURCE_DATE;
@@ -44,7 +43,21 @@ use crate::net::tls::{TlsHandler, TlsHandlerAction};
 use crate::net::utils::is_global_ip;
 use crate::net::web_server::{Accept, ExtractVisitor, TcpMetadata, extract};
 use crate::prelude::*;
-use crate::util::serde::{HandlerExtSerde, Pem};
+use crate::util::serde::{Der64, HandlerExtSerde, Pem};
+
+pub(crate) fn x509_sha256_fingerprint(cert: &X509Ref) -> Result<String, ErrorStack> {
+    Ok(format_x509_fingerprint(
+        cert.digest(MessageDigest::sha256())?.as_ref(),
+    ))
+}
+
+fn format_x509_fingerprint(digest: &[u8]) -> String {
+    digest
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(":")
+}
 
 pub fn should_use_cert(cert: &X509Ref) -> Result<bool, ErrorStack> {
     Ok(cert
@@ -94,13 +107,13 @@ impl CertBranding {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel)]
+#[derive(Debug, Clone, Deserialize, Serialize, HasModel)]
 #[model = "Model<Self>"]
 #[serde(rename_all = "camelCase")]
 pub struct CertStore {
-    pub root_key: Pem<PKey<Private>>,
+    pub root_key: Der64<PKey<Private>>,
     pub root_cert: Pem<X509>,
-    pub int_key: Pem<PKey<Private>>,
+    pub int_key: Der64<PKey<Private>>,
     pub int_cert: Pem<X509>,
     pub leaves: BTreeMap<JsonKey<BTreeSet<InternedString>>, CertData>,
 }
@@ -113,9 +126,9 @@ impl CertStore {
             branding,
         )?;
         Ok(Self {
-            root_key: Pem::new(account.root_ca_key.clone()),
+            root_key: Der64::new(account.root_ca_key.clone()),
             root_cert: Pem::new(account.root_ca_cert.clone()),
-            int_key: Pem::new(int_key),
+            int_key: Der64::new(int_key),
             int_cert: Pem::new(int_cert),
             leaves: BTreeMap::new(),
         })
@@ -254,9 +267,9 @@ fn asn1_time_to_system_time(time: &Asn1TimeRef) -> Result<SystemTime, Error> {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PKeyPair {
-    #[serde(with = "crate::util::serde::pem")]
+    #[serde(with = "crate::util::serde::der64")]
     pub ed25519: PKey<Private>,
-    #[serde(with = "crate::util::serde::pem")]
+    #[serde(with = "crate::util::serde::der64")]
     pub nistp256: PKey<Private>,
 }
 impl PartialEq for PKeyPair {
@@ -329,6 +342,21 @@ pub fn gen_nistp256() -> Result<PKey<Private>, Error> {
     Ok(PKey::from_ec_key(EcKey::generate(EC_GROUP.as_ref())?)?)
 }
 
+/// Appends a hashed `subjectKeyIdentifier` and an `authorityKeyIdentifier` carrying
+/// only that key identifier, the form CA/B Forum BR 7.1.2.1.3 requires on a root.
+fn append_self_signed_key_identifiers(
+    builder: &mut X509Builder,
+    cfg: &conf::ConfRef,
+) -> Result<(), ErrorStack> {
+    let subject_key_identifier =
+        SubjectKeyIdentifier::new().build(&builder.x509v3_context(None, Some(cfg)))?;
+    builder.append_extension(subject_key_identifier)?;
+    let authority_key_identifier = AuthorityKeyIdentifier::new()
+        .keyid(true)
+        .build(&builder.x509v3_context(None, Some(cfg)))?;
+    builder.append_extension(authority_key_identifier)
+}
+
 #[instrument(skip_all)]
 pub fn make_root_cert(
     root_key: &PKey<Private>,
@@ -361,15 +389,8 @@ pub fn make_root_cert(
 
     // Extensions
     let cfg = conf::Conf::new(conf::ConfMethod::default())?;
-    let ctx = builder.x509v3_context(None, Some(&cfg));
-    // subjectKeyIdentifier = hash
-    let subject_key_identifier = SubjectKeyIdentifier::new().build(&ctx)?;
-    // authorityKeyIdentifier = keyid,issuer:always
-    let authority_key_identifier = AuthorityKeyIdentifier::new()
-        .keyid(false)
-        .issuer(true)
-        .build(&ctx)?;
-    // basicConstraints = critical, CA:true, pathlen:0
+    append_self_signed_key_identifiers(&mut builder, &cfg)?;
+    // basicConstraints = critical, CA:true
     let basic_constraints = BasicConstraints::new().critical().ca().build()?;
     // keyUsage = critical, digitalSignature, cRLSign, keyCertSign
     let key_usage = KeyUsage::new()
@@ -378,8 +399,6 @@ pub fn make_root_cert(
         .crl_sign()
         .key_cert_sign()
         .build()?;
-    builder.append_extension(subject_key_identifier)?;
-    builder.append_extension(authority_key_identifier)?;
     builder.append_extension(basic_constraints)?;
     builder.append_extension(key_usage)?;
     builder.sign(&root_key, MessageDigest::sha256())?;
@@ -422,7 +441,7 @@ pub fn make_int_cert(
         .keyid(true)
         .issuer(true)
         .build(&ctx)?;
-    // basicConstraints = critical, CA:true, pathlen:0
+    // basicConstraints = critical, CA:true
     let basic_constraints = BasicConstraints::new().critical().ca().pathlen(0).build()?;
     // keyUsage = critical, digitalSignature, cRLSign, keyCertSign
     let key_usage = KeyUsage::new()
@@ -618,13 +637,8 @@ pub fn make_self_signed(
 
     // Extensions
     let cfg = conf::Conf::new(conf::ConfMethod::default())?;
+    append_self_signed_key_identifiers(&mut builder, &cfg)?;
     let ctx = builder.x509v3_context(None, Some(&cfg));
-
-    let subject_key_identifier = SubjectKeyIdentifier::new().build(&ctx)?;
-    let authority_key_identifier = AuthorityKeyIdentifier::new()
-        .keyid(false)
-        .issuer(true)
-        .build(&ctx)?;
     let subject_alt_name = applicant.1.x509_extension().build(&ctx)?;
     let basic_constraints = BasicConstraints::new().build()?;
     let key_usage = KeyUsage::new()
@@ -633,8 +647,6 @@ pub fn make_self_signed(
         .key_encipherment()
         .build()?;
 
-    builder.append_extension(subject_key_identifier)?;
-    builder.append_extension(authority_key_identifier)?;
     builder.append_extension(subject_alt_name)?;
     builder.append_extension(basic_constraints)?;
     builder.append_extension(key_usage)?;
@@ -662,11 +674,10 @@ pub fn ssl_api<C: Context>() -> ParentHandler<C> {
     )
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 #[group(skip)]
-#[ts(export)]
 pub struct GenerateCertificateParams {
     #[arg(help = "help.arg.hostnames")]
     pub hostnames: Vec<String>,
@@ -675,13 +686,18 @@ pub struct GenerateCertificateParams {
     pub ed25519: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(GenerateCertificateParams);
+rpc_toolkit::ts_export!(GenerateCertificateParams, namespaces = [""]);
+
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct GenerateCertificateResponse {
     pub key: String,
     pub fullchain: String,
 }
+
+rpc_toolkit::reflect_ts!(GenerateCertificateResponse);
+rpc_toolkit::ts_export!(GenerateCertificateResponse, namespaces = [""]);
 
 pub async fn generate_certificate(
     ctx: RpcContext,
@@ -789,53 +805,106 @@ where
         )?]
         .into_iter()
         .collect();
-        let branding = self.branding.clone();
-        let cert = self
-            .db
-            .mutate(move |db| M::access_mut(db).cert_for(&hostnames, &branding))
-            .await
-            .result
-            .log_err()?;
-        let cfg = ServerConfig::builder_with_provider(self.crypto_provider.clone())
-            .with_safe_default_protocol_versions()
-            .log_err()?
-            .with_no_client_auth();
-        if hello
-            .signature_schemes()
-            .contains(&tokio_rustls::rustls::SignatureScheme::ED25519)
-        {
-            cfg.with_single_cert(
-                cert.fullchain_ed25519()
-                    .into_iter()
-                    .map(|c| {
-                        Ok(tokio_rustls::rustls::pki_types::CertificateDer::from(
-                            c.to_der()?,
-                        ))
-                    })
-                    .collect::<Result<_, Error>>()
-                    .log_err()?,
-                PrivateKeyDer::from(PrivatePkcs8KeyDer::from(
-                    cert.leaf.keys.ed25519.private_key_to_pkcs8().log_err()?,
-                )),
-            )
-        } else {
-            cfg.with_single_cert(
-                cert.fullchain_nistp256()
-                    .into_iter()
-                    .map(|c| {
-                        Ok(tokio_rustls::rustls::pki_types::CertificateDer::from(
-                            c.to_der()?,
-                        ))
-                    })
-                    .collect::<Result<_, Error>>()
-                    .log_err()?,
-                PrivateKeyDer::from(PrivatePkcs8KeyDer::from(
-                    cert.leaf.keys.nistp256.private_key_to_pkcs8().log_err()?,
-                )),
-            )
-        }
-        .log_err()
+        root_ca_config(
+            &self.db,
+            &self.crypto_provider,
+            &self.branding,
+            hello,
+            hostnames,
+        )
+        .await
         .map(TlsHandlerAction::Tls)
+    }
+}
+
+/// The local CA's certificate for these names, signed with the key type the
+/// client accepts.
+pub async fn root_ca_config<M>(
+    db: &TypedPatchDb<M>,
+    crypto_provider: &Arc<CryptoProvider>,
+    branding: &CertBranding,
+    hello: &ClientHello<'_>,
+    hostnames: BTreeSet<InternedString>,
+) -> Option<ServerConfig>
+where
+    M: HasModel<Model = Model<M>> + DbAccessMut<CertStore> + Send + Sync,
+{
+    let branding = branding.clone();
+    let cert = db
+        .mutate(move |db| M::access_mut(db).cert_for(&hostnames, &branding))
+        .await
+        .result
+        .log_err()?;
+    let (chain, key) = if hello
+        .signature_schemes()
+        .contains(&tokio_rustls::rustls::SignatureScheme::ED25519)
+    {
+        (cert.fullchain_ed25519(), &cert.leaf.keys.ed25519)
+    } else {
+        (cert.fullchain_nistp256(), &cert.leaf.keys.nistp256)
+    };
+    let chain = chain
+        .into_iter()
+        .map(|c| Ok(CertificateDer::from(c.to_der()?)))
+        .collect::<Result<Vec<_>, Error>>()
+        .log_err()?;
+    let key = PrivateKeyDer::from(PrivatePkcs8KeyDer::from(
+        key.private_key_to_pkcs8().log_err()?,
+    ));
+    ServerConfig::builder_with_provider(crypto_provider.clone())
+        .with_safe_default_protocol_versions()
+        .log_err()?
+        .with_no_client_auth()
+        .with_single_cert(chain, key)
+        .log_err()
+}
+
+#[cfg(test)]
+mod fingerprint_tests {
+    use super::*;
+
+    #[test]
+    fn fingerprint_bytes_are_uppercase_zero_padded_and_colon_separated() {
+        assert_eq!(format_x509_fingerprint(&[0, 1, 10, 255]), "00:01:0A:FF");
+    }
+}
+
+#[cfg(test)]
+mod self_signed_cert_tests {
+    use super::*;
+
+    fn assert_self_signed_identifiers(cert: &X509, key: &PKey<Private>) {
+        assert!(cert.verify(key).unwrap());
+        assert_eq!(
+            cert.authority_key_id().unwrap().as_slice(),
+            cert.subject_key_id().unwrap().as_slice()
+        );
+        assert!(cert.authority_issuer().is_none());
+        assert!(cert.authority_serial().is_none());
+    }
+
+    #[test]
+    fn root_ca_authority_key_identifier_is_its_key_id() {
+        let key = gen_nistp256().unwrap();
+        let branding = CertBranding::start_os("test");
+        let root = make_root_cert(&key, &branding, SystemTime::now()).unwrap();
+        assert_self_signed_identifiers(&root, &key);
+
+        let intermediate_key = gen_nistp256().unwrap();
+        let intermediate = make_int_cert((&key, &root), &intermediate_key, &branding).unwrap();
+        assert_eq!(
+            intermediate.authority_key_id().unwrap().as_slice(),
+            root.subject_key_id().unwrap().as_slice()
+        );
+        assert!(intermediate.verify(&key).unwrap());
+    }
+
+    #[test]
+    fn self_signed_leaf_authority_key_identifier_is_its_key_id() {
+        let key = gen_nistp256().unwrap();
+        let san = SANInfo::new(&BTreeSet::from([InternedString::intern("example.local")]));
+        let leaf = make_self_signed((&key, &san), &CertBranding::start_os("test")).unwrap();
+        assert_self_signed_identifiers(&leaf, &key);
     }
 }
 

@@ -7,7 +7,7 @@
 #
 # fw3 expressed this as a mangle rule with `-m conntrack --ctstate DNAT`; fw4
 # has no UCI option for `ct status dnat`, so it lives here. fw4 auto-includes
-# /etc/nftables.d/*.nft into the `inet fw4` table. Marking all DNAT-state
+# /usr/share/nftables.d/table-pre/*.nft into the `inet fw4` table. Marking all DNAT-state
 # packets is harmless when no dnat_return ip-rule is present.
 
 chain startwrt_dnat_mark {

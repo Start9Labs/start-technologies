@@ -7,7 +7,7 @@ keywords = ["arc", "intern", "string", "display"]
 license = "MIT"
 name = "yasi"
 repository = "https://github.com/Start9Labs/start-technologies"
-version = "0.1.12"
+version = "0.2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
@@ -18,5 +18,4 @@ hashbrown = { version = "0.13", features = ["raw"] }
 lazy_static = "1.5"
 serde = { version = "1", optional = true }
 tinyvec = "1.10"
-ts-rs = { version = "9", optional = true }
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }

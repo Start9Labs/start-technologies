@@ -1,0 +1,21 @@
+Subject: kernel: netfilter: add kmod-nft-core dep to kmod-nf-flow
+
+From kernel 6.18.40, nf_flow_table.ko carries the flowtable path
+discovery code, which references nf_tables symbols, so kmod-nf-flow
+needs kmod-nft-core.
+
+Backport of openwrt b837748095 (main).
+Start9 downstream patch (start-technologies projects/start-wrt).
+Applies to: openwrt v25.12.6
+
+--- a/package/kernel/linux/modules/netfilter.mk
++++ b/package/kernel/linux/modules/netfilter.mk
+@@ -212,7 +212,7 @@ define KernelPackage/nf-flow
+ 	CONFIG_NETFILTER_INGRESS=y \
+ 	CONFIG_NF_FLOW_TABLE \
+ 	CONFIG_NF_FLOW_TABLE_HW
+-  DEPENDS:=+kmod-nf-conntrack
++  DEPENDS:=+kmod-nf-conntrack +kmod-nft-core
+   FILES:= $(LINUX_DIR)/net/netfilter/nf_flow_table.ko
+   AUTOLOAD:=$(call AutoProbe,nf_flow_table nf_flow_table_hw)
+ endef

@@ -2,7 +2,7 @@
 edition = "2021"
 license = "MIT"
 name = "startwrt-core"
-version = "1.2.0"      # VERSION_BUMP
+version = "1.3.1"      # VERSION_BUMP
 
 [lib]
 name = "startwrt"
@@ -12,22 +12,21 @@ path = "src/lib.rs"
 name = "startwrt"
 path = "src/bin/startwrt.rs"
 
+[features]
+ts = ["rpc-toolkit/ts", "startos/ts"]
+
+[[example]]
+name = "generate_rpc_bindings"
+required-features = ["ts"]
+
 [dependencies]
-num_enum = "0.7"
-# `start-core` is the monorepo's shared backend lib (was the embedded start-os
-# submodule's `core/` crate). Aliased to `startos` so the existing `use startos::…`
-# imports resolve unchanged.
-arc-swap = "1.7"
 async_cell = "0.2.2"
 axum = { version = "0.8.6", features = ["ws", "multipart", "http2"] }
-base32 = "0.5.1"
 base64 = "0.22"
-basic-cookies = "0.1.5"
 blake3 = "1"
 chrono = { version = "0.4.42", features = ["serde", "std"] }
 clap = "4.5.37"
 color-eyre = "0.6.3"
-cookie_store = "0.22"
 der = { version = "0.7", features = ["pem", "derive", "oid"] }
 digest = "0.10.7"
 dirs = "6"
@@ -42,6 +41,8 @@ flate2 = "1"
 form_urlencoded = "1"
 futures = "0.3.31"
 futures-util = "0.3"
+# Must match start-core's pin so hickory types interoperate across the crates.
+hickory-server = { version = "0.26.1", features = ["resolver", "dnssec-ring"] }
 http = "1.0"
 imbl-value = { path = "../../../../shared-libs/crates/imbl-value" }
 include_dir = "0.7"
@@ -57,8 +58,10 @@ nix = { version = "0.29.0", features = [
   "socket",
   "uio",
 ] }
+num_enum = "0.7"
 openssh-keys = "0.6.2"
 openssl = { version = "0.10", features = ["vendored"] }
+patch-db = { path = "../../../../shared-libs/crates/patch-db/core" }
 pkcs8 = { version = "0.10", features = ["pem"] }
 pwhash = "1.0.0"
 rand = "0.9.1"
@@ -70,12 +73,10 @@ reqwest = { version = "0.12", default-features = false, features = [
   "json",
   "stream",
 ] }
-reqwest_cookie_store = "0.9"
 rpassword = "7.3.1"
 rpc-toolkit = { path = "../../../../shared-libs/crates/rpc-toolkit", default-features = false }
 rusqlite = { version = "0.34", features = ["bundled"] }
 rustls = "0.23"
-rustls-pemfile = "2"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.140"
@@ -84,6 +85,7 @@ sha-crypt = "0.5.0"
 sha2 = "0.10.8"
 socket2 = { version = "0.6.0", features = ["all"] }
 startos = { package = "start-core", path = "../../../../shared-libs/crates/start-core" }
+strum = { version = "0.27.1", features = ["derive"] }
 syslog-tracing = "0.3"
 tempfile = "3.14.0"
 thiserror = "2.0.12"
@@ -102,10 +104,11 @@ tokio = { version = "1.41.1", features = [
   "signal",
 ] }
 tokio-rustls = "0.26"
+tokio-util = "0.7.9"
 tower-http = { version = "0.6", features = ["cors", "set-header"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uciedit = { path = "../uciedit" }
 url = { version = "2", features = ["serde"] }
-visit-rs = "0.1"
+visit-rs = { path = "../../../../shared-libs/crates/visit-rs" }
 x25519-dalek = { version = "2", features = ["static_secrets"] }

@@ -10,22 +10,20 @@ import { toSignal } from '@angular/core/rxjs-interop'
 import { ActivatedRoute, Router } from '@angular/router'
 import { i18nPipe, LocalizePipe } from '@start9labs/shared'
 import { TuiButtonX, TuiCell, TuiPopup, TuiTitle } from '@taiga-ui/core'
-import { TuiAvatar, TuiDrawer } from '@taiga-ui/kit'
+import { TuiAvatar, TuiDrawer, TuiSkeleton } from '@taiga-ui/kit'
 import { TuiCardLarge, tuiCardOptionsProvider } from '@taiga-ui/layout'
 import { debounceTime } from 'rxjs'
 
 import { MarketplacePkg } from '../types'
+import { MarketplaceIconDirective } from './icon.directive'
 import { MarketplacePreviewComponent } from './preview.component'
 
 @Component({
   selector: 'button[marketplaceTile]',
   template: `
     <span tuiCell>
-      <span tuiAvatar [round]="false">
-        <img
-          alt=""
-          [src]="pkg().icon || 'assets/img/service-icons/fallback.png'"
-        />
+      <span tuiAvatar [round]="false" [tuiSkeleton]="icon.loading()">
+        <img #icon="marketplaceIcon" [marketplaceIcon]="pkg()" />
       </span>
       <span tuiTitle>
         <b>{{ pkg().title }}</b>
@@ -80,10 +78,12 @@ import { MarketplacePreviewComponent } from './preview.component'
     MarketplacePreviewComponent,
     LocalizePipe,
     TuiAvatar,
+    TuiSkeleton,
     TuiTitle,
     TuiCell,
     TuiButtonX,
     i18nPipe,
+    MarketplaceIconDirective,
   ],
 })
 export class MarketplaceTileComponent {

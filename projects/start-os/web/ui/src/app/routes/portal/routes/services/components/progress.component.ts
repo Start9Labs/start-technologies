@@ -53,7 +53,9 @@ export class ServiceInstallProgressComponent {
   async cancel() {
     this.tasks.run(
       async () =>
-        await this.api.cancelInstallPackage({ id: getManifest(this.pkg()).id }),
+        await this.api.rpc.package.cancelInstall({
+          id: getManifest(this.pkg()).id,
+        }),
     )
   }
 }

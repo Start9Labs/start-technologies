@@ -17,6 +17,20 @@ These apply to all subcommands.
 - `-t, --tunnel <URL>` — Tunnel server address
 - `-p, --proxy <URL>` — HTTP/SOCKS proxy
 - `--id-key-path <PATH>` — Identity signing key path (`--developer-key-path` is accepted as an alias)
+- `--id-key-gpg <KEY>` — Sign through gpg-agent with this GnuPG key (fingerprint, key ID, or user ID) instead of the identity key file
+
+## Shell Completion
+
+The Debian package and StartOS image enable Bash tab completion automatically in new shells. For other installations, add `eval "$(start-cli completions bash)"` to `~/.bashrc`. `start-cli completions <shell>` also supports Zsh, fish, elvish, and PowerShell.
+
+## From the Browser Console
+
+The same API is reachable from the StartOS web interface. While logged in, open your browser's developer console and call a command through `rpcClient.rpc`, writing its path in camelCase and passing its arguments as an object:
+
+```js
+await rpcClient.rpc.server.setHostname({ hostname: 'my-server' })
+await rpcClient.rpc.package.start({ id: 'bitcoind' })
+```
 
 ## Authentication
 
@@ -24,7 +38,7 @@ Log in, log out, manage enrolled device keys, and reset the master password.
 
 ### `start-cli auth login`
 
-Log in and enroll this device's signing key. A command run at a terminal before that prompts for the password itself; a script runs this first.
+Log in and enroll this device's signing key. Required before running any commands against a remote server.
 
 ### `start-cli auth logout <SESSION>`
 
@@ -104,6 +118,27 @@ Display hardware and device information.
 
 Tear down and rebuild all service containers.
 
+### `start-cli server trust-ca --cert <PEM>`
+
+Add a PEM-encoded CA root to the StartOS host trust store. Pass the certificate text with `--cert`.
+Use shell substitution to read it from a file or standard input:
+
+```sh
+start-cli --host https://server.local server trust-ca --cert="$(cat company-root.crt)"
+cat company-root.crt | start-cli --host https://server.local server trust-ca --cert="$(cat)"
+```
+
+The command requires authentication and reports the certificate subject and SHA-256 fingerprint.
+StartOS identifies the root by that fingerprint, so installing the same certificate again keeps a
+single copy. StartOS's own HTTPS connections, such as registry, update, and package downloads, trust
+the root immediately, and it persists across reboots and OS updates. It is added alongside the
+StartOS local Root CA and the distribution trust bundle.
+
+This command changes the host trust store. Services use the trust store provided by their package,
+so configure custom roots within a service separately when supported.
+
+- `--format` — Output format
+
 ### `start-cli server set-hostname <HOSTNAME>`
 
 Set the server's name, which is its `.local` address without the `.local` on the end.
@@ -162,7 +197,7 @@ on Librem Mini v2 systems when no preference is saved and the setting is availab
 
 ### `start-cli server experimental zram`
 
-Enable or disable ZRAM compressed swap. ZRAM is disabled by default.
+Enable or disable ZRAM compressed swap.
 
 - `--enable` — Enable zram
 
@@ -225,9 +260,7 @@ Install a package from the registry or sideload a local `.s9pk` file.
 
 ### `start-cli package start <ID>`
 
-Start a service. Blocked if the service has an unresolved critical task, unless `--force` is passed.
-
-- `--force` — Start even if the service has an unresolved critical task
+Request that a service run. If active critical tasks block execution, the CLI warns and records running intent. The service starts automatically when its blocking tasks clear.
 
 ### `start-cli package stop <ID>`
 
@@ -235,7 +268,9 @@ Stop a running service.
 
 ### `start-cli package restart <ID>`
 
-Restart a running service.
+Restart a running service. If the service is still starting, StartOS lets startup
+complete, then stops and starts the service again. Repeated restart requests during
+the same startup coalesce into one additional restart.
 
 ### `start-cli package uninstall <ID>`
 
@@ -263,7 +298,7 @@ Open a shell inside a service's subcontainer (within the LXC container), or run 
 
 ### `start-cli package stats`
 
-Display LXC container resource usage for every installed service.
+Display LXC container memory usage and limit for every installed service. It does not report CPU use.
 
 - `--format` — Output format
 
@@ -658,7 +693,7 @@ Disable kiosk mode.
 
 ## Disks
 
-List and repair storage devices.
+List, repair, and format storage devices.
 
 ### `start-cli disk list`
 
@@ -670,6 +705,12 @@ partitions are omitted.
 ### `start-cli disk repair`
 
 Repair filesystem issues on the data partition.
+
+### `start-cli disk format <DISK>`
+
+Erase a whole drive and leave it with a single Btrfs partition ready for backups, then print the new partition. The drive holding StartOS or its data, the live boot medium, anything mounted, and drives smaller than 1 GiB are refused.
+
+- `--label <LABEL>` — Volume label, at most 255 bytes (default `StartOS Backups`)
 
 ## Diagnostics
 
@@ -805,7 +846,7 @@ Add a container image to the s9pk.
 - `--workdir <PATH>` — Build context directory
 - `--docker-tag <TAG>` — Docker image tag
 - `--arch <ARCH>` — CPU architecture filter
-- `--no-emulation` — Require a native image for the requested architecture
+- `--emulate-missing-as <ARCH>` — Emulate missing arch
 - `--nvidia-container` — Enable NVIDIA support
 
 ## Registry
@@ -820,7 +861,7 @@ List registry metadata and all packages.
 
 ### `start-cli registry info`
 
-Display the registry name and icon.
+Display the registry name, icon, and description.
 
 - `--format` — Output format
 
@@ -828,9 +869,21 @@ Display the registry name and icon.
 
 Set the registry's display name.
 
-### `start-cli registry info set-icon <ICON>`
+### `start-cli registry info set-icon [ICON] [--clear]`
 
-Set the registry's icon from a file path.
+Set the registry's icon from a file path, an http(s) URL, or a data URL. Supply either `ICON` or `--clear`, but not both.
+
+- `--clear` — Remove the registry's icon
+
+Over RPC, pass `null` in the setter's `icon` field to clear it; a value sets it.
+
+### `start-cli registry info set-description [DESCRIPTION] [--clear]`
+
+Set the registry's description (markdown), shown above its services in the marketplace. Supply either `DESCRIPTION` or `--clear`, but not both.
+
+- `--clear` — Remove the registry's description
+
+Over RPC, pass `null` in the setter's `description` field to clear it; a value sets it.
 
 ### Registry Admin Management
 
@@ -1111,10 +1164,6 @@ Display initialization kernel logs. Same log options as `server logs`.
 Create a new developer signing key.
 
 ## Utilities
-
-### `start-cli completions <SHELL>`
-
-Print a completion script for `bash`, `zsh`, `fish`, `elvish` or `powershell`. `eval "$(start-cli completions bash)"` in a shell profile enables tab completion.
 
 ### `start-cli echo <MESSAGE>`
 

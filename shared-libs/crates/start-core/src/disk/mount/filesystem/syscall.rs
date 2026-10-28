@@ -1,13 +1,5 @@
-//! Minimal wrappers around the Linux mount API needed for idmapped binds.
-//!
-//! The mount layer otherwise uses `mount(8)` (see the `FileSystem` impls).
-//! The one thing no higher-level interface exposes is `open_tree_attr(2)`
-//! (Linux 6.15+), which atomically clones a mount and applies an idmap —
-//! required for the nested-idmap case (idmapping a clone whose source
-//! filesystem is already idmapped, i.e. the in-LXC-userns inner bind). That,
-//! plus the userns-fd-from-idmap helper it needs, is all this module
-//! provides. Everything goes through `libc::syscall` because neither `nix`
-//! nor `rustix` exposes `open_tree_attr`.
+//! Detached Linux bind mounts with optional idmaps and read-only attributes.
+//! `open_tree_attr` requires Linux 6.15+ for cloning an already-idmapped source.
 
 use std::ffi::{CString, OsString};
 use std::io;
@@ -25,10 +17,9 @@ use tokio::process::Command;
 
 use crate::prelude::*;
 
-// linux/mount.h. Defined locally because libc 0.2 only exports
-// `MOVE_MOUNT_F_EMPTY_PATH` for gnu-linux, not for the musl targets we also
-// cross-build against.
+// libc's musl targets omit these linux/mount.h flags.
 const MOVE_MOUNT_F_EMPTY_PATH: libc::c_uint = 0x00000004;
+const MOVE_MOUNT_BENEATH: libc::c_uint = 0x00000200;
 
 // open_tree_attr(2) — added in Linux 6.15. libc 0.2 only defines
 // SYS_open_tree_attr for m68k, but the number is unified at 467 across
@@ -128,9 +119,7 @@ pub fn open_tree_attr_idmap(
     fd_from_raw(r, "open_tree_attr IDMAP")
 }
 
-/// `move_mount(detached, "", AT_FDCWD, to, MOVE_MOUNT_F_EMPTY_PATH)` — attach
-/// a detached mount fd at a path.
-fn move_mount(detached: BorrowedFd, to: &Path) -> Result<(), Error> {
+fn move_mount(detached: BorrowedFd, to: &Path, flags: libc::c_uint) -> Result<(), Error> {
     let empty = cstr_str("")?;
     let t = cstr_path(to)?;
     let r = unsafe {
@@ -140,7 +129,7 @@ fn move_mount(detached: BorrowedFd, to: &Path) -> Result<(), Error> {
             empty.as_ptr(),
             AT_FDCWD,
             t.as_ptr(),
-            MOVE_MOUNT_F_EMPTY_PATH,
+            MOVE_MOUNT_F_EMPTY_PATH | flags,
         )
     };
     check(r, "move_mount")
@@ -183,9 +172,13 @@ impl DetachedMount {
     pub fn set_readonly(&self, ro: bool) -> Result<(), Error> {
         mount_setattr_ro(self.fd.as_fd(), ro)
     }
-    /// `move_mount` the detached mount onto `mountpoint`, consuming self.
+    /// Attach the detached mount at the requested path.
     pub fn attach(self, mountpoint: &Path) -> Result<(), Error> {
-        move_mount(self.fd.as_fd(), mountpoint)
+        move_mount(self.fd.as_fd(), mountpoint, 0)
+    }
+    /// Insert beneath the top mount; detaching the top reveals this mount. Requires Linux 6.5+.
+    pub fn attach_beneath(self, mountpoint: &Path) -> Result<(), Error> {
+        move_mount(self.fd.as_fd(), mountpoint, MOVE_MOUNT_BENEATH)
     }
 }
 

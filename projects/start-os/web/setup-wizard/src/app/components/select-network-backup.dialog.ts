@@ -29,7 +29,7 @@ interface Data {
         </p>
       </hgroup>
     </header>
-    <tui-textfield [stringify]="stringify">
+    <tui-textfield [stringify]="stringify" [tuiTextfieldCleaner]="false">
       <label tuiLabel>{{ 'Backups' | i18n }}</label>
       <input tuiSelect [(ngModel)]="selectedServer" />
       <tui-data-list-wrapper

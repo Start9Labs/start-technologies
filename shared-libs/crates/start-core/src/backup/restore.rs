@@ -7,7 +7,6 @@ use patch_db::json_ptr::ROOT;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::instrument;
-use ts_rs::TS;
 
 use super::target::BackupTargetId;
 use crate::PackageId;
@@ -28,11 +27,10 @@ use crate::setup::SetupExecuteProgress;
 use crate::system::{save_language, sync_kiosk};
 use crate::util::serde::{IoFormat, Pem};
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
-#[ts(export)]
 pub struct RestorePackageParams {
     #[arg(help = "help.arg.backup-target-id")]
     pub target_id: BackupTargetId,
@@ -43,6 +41,9 @@ pub struct RestorePackageParams {
     #[arg(long, help = "help.arg.server-id")]
     pub server_id: Option<String>,
 }
+
+rpc_toolkit::reflect_ts!(RestorePackageParams);
+rpc_toolkit::ts_export!(RestorePackageParams, namespaces = [""]);
 
 // #[command(rename = "restore", display(display_none))]
 #[instrument(skip(ctx, password))]
@@ -56,6 +57,15 @@ pub async fn restore_packages_rpc(
     }: RestorePackageParams,
 ) -> Result<(), Error> {
     let peek = ctx.db.peek().await;
+    if let Some(id) = ids
+        .iter()
+        .find(|id| peek.as_public().as_package_data().as_idx(*id).is_some())
+    {
+        return Err(Error::new(
+            eyre!("{}", t!("backup.restore.package-installed", id = id)),
+            ErrorKind::InvalidRequest,
+        ));
+    }
     let fs = target_id.load(&peek)?;
     let server_id = match server_id {
         Some(id) => id,
@@ -159,10 +169,11 @@ pub async fn recover_full_server(
 
     let config = ctx.config.peek(|c| c.clone());
 
-    let init_result = init(&ctx.webserver, &config, init_phases).await?;
+    let init_result = init(&ctx.webserver, ctx.dns.clone(), &config, init_phases).await?;
 
     let rpc_ctx = RpcContext::init(
         &ctx.webserver,
+        ctx.dns.clone(),
         &config,
         disk_guid.clone(),
         Some(init_result),

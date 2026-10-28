@@ -2,30 +2,16 @@
 # This file is imported by ./Makefile. Make edits there
 
 PACKAGE_ID := $(shell awk -F"'" '/id:/ {print $$2}' startos/manifest/index.ts)
-# INGREDIENTS is the whole source-dependency list, javascript/index.js included —
-# nothing else ties the s9pk to your TypeScript. $(shell) discards exit status,
-# so a failure here would leave it empty, detaching every source file from the
-# s9pk's prerequisites; make would then call an existing s9pk up to date and
-# print "Build Complete" over the *previous* build. The sentinel turns that into
-# an error. Not $(.SHELLSTATUS): it is undefined on the GNU Make 3.81 that
-# macOS still ships, where the guard would fire on every build instead.
+# GNU Make 3.81 lacks .SHELLSTATUS; the sentinel preserves command failures.
 INGREDIENTS := $(shell start-cli s9pk list-ingredients 2>/dev/null || echo __LIST_INGREDIENTS_FAILED__)
 ifneq ($(filter __LIST_INGREDIENTS_FAILED__,$(INGREDIENTS)),)
 $(error `start-cli s9pk list-ingredients` failed, so make cannot tell which files the s9pk depends on and would silently repack the previous build. Run it directly to see the error.)
 endif
-# Resolve the actual git dir so this works inside git worktrees, where .git
-# is a file pointing at <main>/.git/worktrees/<name> rather than a directory.
 GIT_DIR := $(shell git rev-parse --git-dir 2>/dev/null)
-# These are rebuild triggers (the manifest embeds the commit hash), not build
-# requirements — pack degrades to a null gitHash on its own. $(wildcard) drops
-# whichever don't exist: a freshly `git init`ed repo has no index until the
-# first `git add`, and a hard prerequisite on it halts make with "No rule to
-# make target".
+# Packaging supports repositories without an index or commit.
 GIT_DEPS := $(if $(GIT_DIR),$(wildcard $(GIT_DIR)/HEAD $(GIT_DIR)/index))
 ARCHES ?= x86 arm riscv
-# TARGETS is the list of leaf make-targets the build matrix fans out over.
-# Defaults to the arches; variant packages override (e.g. immich, ollama, vllm
-# set this to a list of variant or variant-arch leaf targets).
+# Release CI fans out over these leaf build targets.
 TARGETS ?= $(ARCHES)
 ifdef VARIANT
 BASE_NAME := $(PACKAGE_ID)_$(VARIANT)
@@ -40,11 +26,8 @@ endif
 SDK_DIR := node_modules/@start9labs/start-sdk
 PRETTIER_CONFIG := $(SDK_DIR)/prettier.config.json
 
-# The SDK supplies typescript, prettier and ncc, so these resolve from your
-# node_modules without the package declaring them. Override any of them in
-# ./Makefile above the include to customize a step.
 TS_CHECK ?= npx tsc --noEmit
-FORMAT_CHECK ?= npx prettier --config $(PRETTIER_CONFIG) --check startos
+FORMAT ?= npx prettier --config $(PRETTIER_CONFIG) --write startos
 JS_BUNDLE ?= rm -rf javascript && npx ncc build startos/index.ts -o javascript
 
 define SUMMARY
@@ -72,9 +55,6 @@ all: $(TARGETS)
 
 arches: $(ARCHES)
 
-# Generic make-variable introspection. Used by the release workflow to
-# read $(TARGETS) and fan out one matrix runner per target. `make -s
-# print-TARGETS` echoes the list with no other output.
 print-%:
 	@echo '$($*)'
 
@@ -102,11 +82,10 @@ ingredients: $(INGREDIENTS)
 	@echo "   Re-evaluating ingredients..."
 
 install: | check-deps check-init
-	@if [ -z "$$(ls *.s9pk 2>/dev/null)" ]; then \
-		echo "Error: No .s9pk file found. Run 'make' first."; \
-		exit 1; \
-	fi; \
-	S9PK=$$(start-cli s9pk select) || exit 1; \
+	@device_info=$$(start-cli server device-info --format json) || exit 1; \
+	arch=$$(printf '%s' "$$device_info" | jq -er '.hardware.arch') || exit 1; \
+	S9PK="$(BASE_NAME)_$$arch.s9pk"; \
+	$(MAKE) --no-print-directory "$$S9PK" || exit 1; \
 	printf "\n🚀 Installing %s ...\n" "$$S9PK"; \
 	start-cli package install -s "$$S9PK"
 
@@ -140,11 +119,11 @@ check-init:
 javascript/index.js: $(shell find startos -type f) tsconfig.json node_modules
 	$(TS_CHECK)
 	@if [ -f $(SDK_DIR)/lint.mjs ]; then node $(SDK_DIR)/lint.mjs; else echo "   ⚠ SDK lint runner not found; skipping (update @start9labs/start-sdk)"; fi
-	$(FORMAT_CHECK)
+	$(FORMAT)
 	$(JS_BUNDLE)
 
 format: | node_modules
-	npx prettier --config $(PRETTIER_CONFIG) --write startos
+	$(FORMAT)
 
 node_modules: package-lock.json package.json
 	npm ci

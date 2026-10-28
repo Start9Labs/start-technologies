@@ -1,18 +1,23 @@
+use std::net::IpAddr;
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
-use uciedit::Configs;
+use uciedit::openwrt::NetworkInterface;
+use uciedit::{parse_all, Arena, Configs};
 
 use crate::prelude::*;
-use crate::profiles::UciProfile;
+use crate::profiles::{UciProfile, DEFAULT_WAN_ZONE};
 use crate::CtrlContext;
 
 /// A single DNS server entry with protocol info.
 /// `ssl: false` = plain UDP on port 53.
 /// `ssl: true`  = DNS-over-HTTPS via SmartDNS (`server-https`).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, visit_rs::VisitFields)]
 pub struct DnsServer {
     pub address: String, // always an IPv4 address
     pub ssl: bool,
 }
+rpc_toolkit::reflect_ts!(DnsServer);
 
 /// SmartDNS bind port constants.
 pub const SMARTDNS_SYSTEM_PORT: u16 = 5300;
@@ -28,6 +33,95 @@ pub struct SmartDnsGroup {
     pub name: String,
     pub port: u16,
     pub servers: Vec<DnsServer>,
+    /// Interface the upstream sockets are bound to. Unset follows the main table.
+    pub interface: Option<String>,
+}
+
+/// Where a profile's DNS queries are resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfileDns {
+    /// The WAN's DHCP-supplied resolvers, through the main dnsmasq.
+    Isp,
+    /// The WAN's DHCP-supplied resolvers, reached around the profile's VPN.
+    IspOutsideVpn,
+    /// The system SmartDNS group.
+    System,
+    /// A per-profile SmartDNS group, bound to the VPN interface when `via` is set.
+    Group {
+        servers: Vec<DnsServer>,
+        custom: bool,
+        via: Option<String>,
+    },
+    /// The VPN's own resolvers, forwarded by dnsmasq through its interface.
+    Vpn { servers: Vec<String>, via: String },
+}
+
+impl ProfileDns {
+    /// The `dns_source` reported for the profile.
+    pub fn source(&self) -> &'static str {
+        match self {
+            Self::Group { custom: true, .. } => "custom",
+            Self::Vpn { .. } => "vpn",
+            Self::IspOutsideVpn => "system-outside-vpn",
+            Self::Isp | Self::System | Self::Group { custom: false, .. } => "system",
+        }
+    }
+
+    /// Whether the profile's port-53 traffic is redirected to its own dnsmasq.
+    pub fn redirects(&self) -> bool {
+        !matches!(self, Self::Isp | Self::IspOutsideVpn)
+    }
+}
+
+/// Resolves a profile's DNS route. A VPN-routed profile never resolves through
+/// SmartDNS's WAN-bound system group.
+pub fn profile_dns(cfgs: &Configs, outbound: &str, dns_override: &[DnsServer]) -> ProfileDns {
+    let via = (outbound != DEFAULT_WAN_ZONE).then(|| outbound.to_string());
+    if !dns_override.is_empty() {
+        return ProfileDns::Group {
+            servers: dns_override.to_vec(),
+            custom: true,
+            via,
+        };
+    }
+    let system = get_system_dns_servers(cfgs);
+    let Some(via) = via else {
+        return if system.is_empty() {
+            ProfileDns::Isp
+        } else {
+            ProfileDns::System
+        };
+    };
+    let servers = vpn_dns_servers(cfgs, &via);
+    if !servers.is_empty() {
+        ProfileDns::Vpn { servers, via }
+    } else if !system.is_empty() {
+        ProfileDns::Group {
+            servers: system,
+            custom: false,
+            via: Some(via),
+        }
+    } else {
+        ProfileDns::IspOutsideVpn
+    }
+}
+
+/// The `list dns` entries of a VPN interface that are IP addresses.
+pub fn vpn_dns_servers(cfgs: &Configs, vpn_interface: &str) -> Vec<String> {
+    cfgs["network"]
+        .sections
+        .iter()
+        .find(|s| s.name().as_deref() == Some(vpn_interface))
+        .and_then(|s| s.get::<NetworkInterface>().ok())
+        .map(|iface| {
+            iface
+                .dns
+                .iter()
+                .filter(|s| s.parse::<IpAddr>().is_ok())
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Generate the full `smartdns.conf` content from a list of groups.
@@ -36,19 +130,26 @@ pub fn generate_smartdns_conf(groups: &[SmartDnsGroup]) -> String {
 
     for group in groups {
         conf.push('\n');
-        conf.push_str(&format!(
-            "bind 127.0.0.1:{} -group {} -no-rule-addr -no-rule-nameserver -no-rule-ipset -no-rule-soa -no-dualstack-selection\n",
-            group.port, group.name
-        ));
+        for bind in ["bind", "bind-tcp"] {
+            conf.push_str(&format!(
+                "{bind} 127.0.0.1:{} -group {} -no-rule-addr -no-rule-nameserver -no-rule-ipset -no-rule-soa -no-dualstack-selection\n",
+                group.port, group.name
+            ));
+        }
+        let interface = group
+            .interface
+            .as_ref()
+            .map(|i| format!(" -interface {i}"))
+            .unwrap_or_default();
         for server in &group.servers {
             if server.ssl {
                 conf.push_str(&format!(
-                    "server-https https://{}/dns-query -group {} -exclude-default-group\n",
+                    "server-https https://{}/dns-query -group {} -exclude-default-group{interface}\n",
                     server.address, group.name
                 ));
             } else {
                 conf.push_str(&format!(
-                    "server {} -group {} -exclude-default-group\n",
+                    "server {} -group {} -exclude-default-group{interface}\n",
                     server.address, group.name
                 ));
             }
@@ -98,24 +199,34 @@ pub fn collect_smartdns_groups(cfgs: &Configs) -> Vec<SmartDnsGroup> {
             name: "system".into(),
             port: SMARTDNS_SYSTEM_PORT,
             servers: system_servers,
+            interface: None,
         });
     }
 
-    // Per-profile DNS groups (only for profiles with custom dns_override)
     for section in &cfgs["startwrt"].sections {
-        if let Ok(profile) = section.get::<UciProfile>() {
-            let servers = parse_dns_server_list(&profile.dns_override);
-            if !servers.is_empty() {
-                groups.push(SmartDnsGroup {
-                    name: format!("profile_{}", profile.interface),
-                    port: smartdns_port_for_vlan(profile.vlan_tag),
-                    servers,
-                });
-            }
+        let Ok(profile) = section.get::<UciProfile>() else {
+            continue;
+        };
+        let outbound = profile.outbound.as_deref().unwrap_or(DEFAULT_WAN_ZONE);
+        let dns_override = parse_dns_server_list(&profile.dns_override);
+        if let ProfileDns::Group { servers, via, .. } = profile_dns(cfgs, outbound, &dns_override) {
+            groups.push(SmartDnsGroup {
+                name: format!("profile_{}", profile.interface),
+                port: smartdns_port_for_vlan(profile.vlan_tag),
+                servers,
+                interface: via,
+            });
         }
     }
 
     groups
+}
+
+/// Collects the SmartDNS groups from the UCI configs under `uci_root`.
+pub async fn load_smartdns_groups(uci_root: impl AsRef<Path>) -> Result<Vec<SmartDnsGroup>, Error> {
+    let arena = Arena::new();
+    let cfgs = parse_all(uci_root.as_ref(), &arena, &["startwrt", "network"]).await?;
+    Ok(collect_smartdns_groups(&cfgs))
 }
 
 /// Regenerate `/etc/smartdns/smartdns.conf` from current config state and restart SmartDNS.
@@ -157,6 +268,18 @@ pub async fn apply_smartdns_groups(groups: Vec<SmartDnsGroup>) -> Result<(), Err
     Ok(())
 }
 
+/// Rewrites the SmartDNS config from UCI, restarting SmartDNS only when it differs.
+/// sysupgrade does not keep the config file.
+pub async fn heal_smartdns_conf(uci_root: impl AsRef<Path>) -> Result<(), Error> {
+    let groups = load_smartdns_groups(uci_root).await?;
+    let wanted = (!groups.is_empty()).then(|| generate_smartdns_conf(&groups));
+    let current = tokio::fs::read_to_string(SMARTDNS_CONF_PATH).await.ok();
+    if current == wanted {
+        return Ok(());
+    }
+    apply_smartdns_groups(groups).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,6 +296,7 @@ mod tests {
         let groups = vec![SmartDnsGroup {
             name: "system".into(),
             port: 5300,
+            interface: None,
             servers: vec![
                 DnsServer {
                     address: "1.1.1.1".into(),
@@ -186,6 +310,7 @@ mod tests {
         }];
         let conf = generate_smartdns_conf(&groups);
         assert!(conf.contains("bind 127.0.0.1:5300 -group system"));
+        assert!(conf.contains("bind-tcp 127.0.0.1:5300 -group system"));
         assert!(conf.contains("server 1.1.1.1 -group system -exclude-default-group"));
         assert!(conf.contains(
             "server-https https://8.8.8.8/dns-query -group system -exclude-default-group"
@@ -198,6 +323,7 @@ mod tests {
             SmartDnsGroup {
                 name: "system".into(),
                 port: 5300,
+                interface: None,
                 servers: vec![DnsServer {
                     address: "9.9.9.9".into(),
                     ssl: false,
@@ -206,6 +332,7 @@ mod tests {
             SmartDnsGroup {
                 name: "profile_guest".into(),
                 port: 5401,
+                interface: None,
                 servers: vec![
                     DnsServer {
                         address: "1.1.1.1".into(),
@@ -298,6 +425,7 @@ mod tests {
             SmartDnsGroup {
                 name: "system".into(),
                 port: 5300,
+                interface: None,
                 servers: vec![DnsServer {
                     address: "9.9.9.9".into(),
                     ssl: false,
@@ -306,6 +434,7 @@ mod tests {
             SmartDnsGroup {
                 name: "profile_guest".into(),
                 port: 5401,
+                interface: None,
                 servers: vec![
                     DnsServer {
                         address: "1.1.1.1".into(),
@@ -325,12 +454,40 @@ server-name startwrt-smartdns
 log-level warn
 
 bind 127.0.0.1:5300 -group system -no-rule-addr -no-rule-nameserver -no-rule-ipset -no-rule-soa -no-dualstack-selection
+bind-tcp 127.0.0.1:5300 -group system -no-rule-addr -no-rule-nameserver -no-rule-ipset -no-rule-soa -no-dualstack-selection
 server 9.9.9.9 -group system -exclude-default-group
 
 bind 127.0.0.1:5401 -group profile_guest -no-rule-addr -no-rule-nameserver -no-rule-ipset -no-rule-soa -no-dualstack-selection
+bind-tcp 127.0.0.1:5401 -group profile_guest -no-rule-addr -no-rule-nameserver -no-rule-ipset -no-rule-soa -no-dualstack-selection
 server 1.1.1.1 -group profile_guest -exclude-default-group
 server-https https://8.8.8.8/dns-query -group profile_guest -exclude-default-group
 ";
         assert_eq!(conf, expected);
+    }
+
+    #[test]
+    fn test_generate_smartdns_conf_binds_vpn_group_upstreams() {
+        let groups = vec![SmartDnsGroup {
+            name: "profile_guest".into(),
+            port: 5401,
+            servers: vec![
+                DnsServer {
+                    address: "1.1.1.1".into(),
+                    ssl: false,
+                },
+                DnsServer {
+                    address: "8.8.8.8".into(),
+                    ssl: true,
+                },
+            ],
+            interface: Some("wg_proton".into()),
+        }];
+        let conf = generate_smartdns_conf(&groups);
+        assert!(conf.contains(
+            "server 1.1.1.1 -group profile_guest -exclude-default-group -interface wg_proton\n"
+        ));
+        assert!(conf.contains(
+            "server-https https://8.8.8.8/dns-query -group profile_guest -exclude-default-group -interface wg_proton\n"
+        ));
     }
 }

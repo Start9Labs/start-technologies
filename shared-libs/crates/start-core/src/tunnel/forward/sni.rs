@@ -63,9 +63,17 @@ impl PortBindings {
     fn is_empty(&self) -> bool {
         self.hostnames.is_empty() && self.fallback.is_none()
     }
-    /// Selects exact, wildcard, then admissible fallback targets.
-    /// Returns the target and source-preservation policy.
+    #[cfg(test)]
     fn select(&self, sni: Option<&str>, peer: Ipv4Addr) -> Option<(SocketAddrV4, bool)> {
+        self.select_with_fallback(sni, peer, None)
+    }
+
+    fn select_with_fallback(
+        &self,
+        sni: Option<&str>,
+        peer: Ipv4Addr,
+        local_fallback: Option<Fallback>,
+    ) -> Option<(SocketAddrV4, bool)> {
         if let Some(name) = sni {
             if let Some(b) = self.hostnames.get(name) {
                 return Some((b.target, true));
@@ -76,7 +84,7 @@ impl PortBindings {
                 }
             }
         }
-        let f = self.fallback?;
+        let f = local_fallback.or(self.fallback)?;
         match f.source {
             FallbackSource::Any => {}
             FallbackSource::PrivateOnly if peer.is_private() => {}
@@ -84,6 +92,16 @@ impl PortBindings {
         }
         Some((f.target, f.transparent))
     }
+}
+
+fn inherited_local_fallback(
+    ports: &BTreeMap<PortKey, PortBindings>,
+    key: PortKey,
+) -> Option<Fallback> {
+    ports
+        .get(&(Ipv4Addr::UNSPECIFIED, key.1))
+        .and_then(|e| e.fallback)
+        .filter(|f| !f.transparent)
 }
 
 /// One live hostname route, as reported by [`SniDemux::snapshot`].
@@ -102,7 +120,6 @@ pub struct SniRoute {
 type OnChange = Box<dyn Fn(u16, bool) + Send + Sync>;
 
 /// Resolves a target's local subnet prefix for hairpin detection.
-/// `None` preserves the client source address.
 pub type LocalPrefix = Arc<dyn Fn(Ipv4Addr) -> BoxFuture<'static, Option<u8>> + Send + Sync>;
 
 /// A registration that can restore the exact prior bindings.
@@ -323,6 +340,7 @@ impl SniDemux {
     }
 
     /// Registers a source-scoped fallback to a gateway-local listener.
+    /// An unspecified external address also supplies the fallback to address-specific listeners.
     pub fn register_local_fallback(
         self: &Arc<Self>,
         ext_ip: Ipv4Addr,
@@ -387,7 +405,7 @@ impl SniDemux {
                 }
             }
         });
-        self.reap_if_empty(key);
+        self.prune();
     }
 
     /// Live hostname routes, excluding port-level fallbacks.
@@ -483,15 +501,16 @@ impl SniDemux {
     }
 
     fn reap_if_empty(&self, key: PortKey) {
-        let empty = self
-            .ports
-            .mutate(|ports| ports.get(&key).is_none_or(|e| e.is_empty()));
+        let empty = self.ports.peek(|ports| {
+            ports.get(&key).is_none_or(PortBindings::is_empty)
+                && inherited_local_fallback(ports, key).is_none()
+        });
         if empty {
             self.ports.mutate(|ports| {
                 ports.remove(&key);
             });
             if let Some(handle) = self.listeners.mutate(|l| l.remove(&key)) {
-                drop(handle); // aborts the listener task
+                drop(handle);
                 if let Some(cb) = &self.on_change {
                     cb(key.1, false);
                 }
@@ -600,13 +619,13 @@ async fn handle_conn(
         return;
     };
     let selected = ports.peek(|p| {
+        let local_fallback = inherited_local_fallback(p, key);
         p.get(&key)
-            .and_then(|e| e.select(sni.as_deref(), *peer.ip()))
+            .and_then(|e| e.select_with_fallback(sni.as_deref(), *peer.ip(), local_fallback))
     });
     let Some((target, transparent)) = selected else {
         return;
     };
-    // Same-subnet clients need the gateway source address for return traffic.
     let transparent = transparent && !is_hairpin(&local_prefix, *peer.ip(), *target.ip()).await;
     let mut upstream = if transparent {
         // A failed source-preserving connection must not fall back to gateway source.
@@ -637,8 +656,10 @@ async fn handle_conn(
     let _ = copy_bidirectional(&mut conn, &mut upstream).await;
 }
 
-/// Whether the peer and target share a known local subnet.
 async fn is_hairpin(local_prefix: &Option<LocalPrefix>, peer: Ipv4Addr, target: Ipv4Addr) -> bool {
+    if peer == target {
+        return true;
+    }
     let Some(resolve) = local_prefix else {
         return false;
     };
@@ -692,6 +713,14 @@ impl Default for SniDemux {
 mod tests {
     use super::*;
 
+    fn free_port() -> u16 {
+        std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
     /// A rustls-generated ClientHello carrying SNI.
     fn real_client_hello(sni: &str) -> Vec<u8> {
         use tokio_rustls::rustls::pki_types::ServerName;
@@ -712,6 +741,121 @@ mod tests {
         buf
     }
 
+    #[tokio::test]
+    async fn ui_fallback_survives_shared_port_routes_and_listener_changes() {
+        use crate::net::web_server::Accept;
+        use crate::tunnel::web::listener::UiListener;
+
+        for listen_ip in [Ipv4Addr::UNSPECIFIED, Ipv4Addr::LOCALHOST] {
+            let probe = std::net::TcpListener::bind((listen_ip, 0)).unwrap();
+            let port = probe.local_addr().unwrap().port();
+            drop(probe);
+            let demux = SniDemux::new();
+            let source = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port);
+            let service = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+                .await
+                .unwrap();
+            let SocketAddr::V4(target) = service.local_addr().unwrap() else {
+                unreachable!()
+            };
+            let hostname = "service.example.com".to_owned();
+            demux
+                .register(
+                    *source.ip(),
+                    port,
+                    std::slice::from_ref(&hostname),
+                    target,
+                    None,
+                )
+                .unwrap();
+
+            let mut ui = UiListener::bind((listen_ip, port).into(), demux.clone()).unwrap();
+            for name in ["admin.example.com", "service.example.com"] {
+                let hello = real_client_hello(name);
+                let mut client = TcpStream::connect(source).await.unwrap();
+                client.write_all(&hello).await.unwrap();
+                let mut upstream = if name == hostname {
+                    Box::pin(
+                        timeout(Duration::from_secs(2), service.accept())
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .0,
+                    ) as crate::net::web_server::AcceptStream
+                } else {
+                    timeout(
+                        Duration::from_secs(2),
+                        futures::future::poll_fn(|cx| ui.poll_accept(cx)),
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .1
+                };
+                let mut received = vec![0; hello.len()];
+                timeout(Duration::from_secs(2), upstream.read_exact(&mut received))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(received, hello);
+                upstream.write_all(b"reachable").await.unwrap();
+                let mut reply = [0; 9];
+                timeout(Duration::from_secs(2), client.read_exact(&mut reply))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(&reply, b"reachable");
+            }
+
+            let payload = b"\x16\x03\x01\x00\x00";
+            let mut client = TcpStream::connect(source).await.unwrap();
+            client.write_all(payload).await.unwrap();
+            let (_, mut upstream) = timeout(
+                Duration::from_secs(2),
+                futures::future::poll_fn(|cx| ui.poll_accept(cx)),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            let mut received = [0; 5];
+            upstream.read_exact(&mut received).await.unwrap();
+            assert_eq!(&received, payload);
+
+            drop(ui);
+            demux.ports.peek(|p| {
+                assert!(
+                    p.get(&(listen_ip, port))
+                        .is_none_or(|b| b.fallback.is_none())
+                );
+                assert_eq!(
+                    p[&(*source.ip(), port)].select(None, Ipv4Addr::LOCALHOST),
+                    None
+                );
+            });
+            let mut ui = UiListener::bind((listen_ip, port).into(), demux.clone()).unwrap();
+            let mut client = TcpStream::connect(source).await.unwrap();
+            client.write_all(payload).await.unwrap();
+            timeout(
+                Duration::from_secs(2),
+                futures::future::poll_fn(|cx| ui.poll_accept(cx)),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            demux.unregister(*source.ip(), port, &[hostname], target);
+            assert!(demux.snapshot().is_empty());
+            let mut client = TcpStream::connect(source).await.unwrap();
+            client.write_all(payload).await.unwrap();
+            timeout(
+                Duration::from_secs(2),
+                futures::future::poll_fn(|cx| ui.poll_accept(cx)),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        }
+    }
+
     #[test]
     fn parses_sni() {
         let hello = real_client_hello("git.example.com");
@@ -727,7 +871,7 @@ mod tests {
     async fn fallback_register_ownership_and_coexistence() {
         let demux = SniDemux::new();
         let ip: Ipv4Addr = Ipv4Addr::LOCALHOST;
-        let port = 44300u16;
+        let port = free_port();
         let fb = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 9), 443);
         let host_target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
 
@@ -779,7 +923,7 @@ mod tests {
     async fn local_fallback_source_policy() {
         let demux = SniDemux::new();
         let ip = Ipv4Addr::LOCALHOST;
-        let port = 44320u16;
+        let port = free_port();
         let ui = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 443);
         let host_target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
         demux
@@ -994,7 +1138,7 @@ mod tests {
     async fn a_device_repoints_its_own_bindings() {
         let demux = SniDemux::new();
         let ip = Ipv4Addr::LOCALHOST;
-        let port = 44301u16;
+        let port = free_port();
         let hostname = ["a.example.com".to_string()];
         let mine = |port| SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), port);
         let theirs = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 2), 9443);
@@ -1131,6 +1275,65 @@ mod tests {
         let before = events.peek(|e| e.len());
         demux.rekey_ipv4(new_ip);
         assert_eq!(events.peek(|e| e.len()), before);
+    }
+
+    #[tokio::test]
+    async fn self_hairpin_needs_no_subnet_resolver() {
+        let target = Ipv4Addr::new(10, 59, 0, 2);
+        assert!(is_hairpin(&None, target, target).await);
+        assert!(!is_hairpin(&None, Ipv4Addr::new(10, 59, 0, 3), target).await);
+        let unknown: LocalPrefix = Arc::new(|_| Box::pin(async { None }));
+        assert!(is_hairpin(&Some(unknown), target, target).await);
+    }
+
+    #[tokio::test]
+    async fn self_hairpin_relays_hostname_and_fallback_traffic() {
+        for named in [true, false] {
+            let backend = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+                .await
+                .unwrap();
+            let SocketAddr::V4(target) = backend.local_addr().unwrap() else {
+                unreachable!();
+            };
+            let probe = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            let port = probe.local_addr().unwrap().port();
+            drop(probe);
+            let demux = SniDemux::new();
+            if named {
+                demux
+                    .register(
+                        Ipv4Addr::LOCALHOST,
+                        port,
+                        &["probe.example.com".into()],
+                        target,
+                        None,
+                    )
+                    .unwrap();
+            } else {
+                demux
+                    .register_fallback(Ipv4Addr::LOCALHOST, port, target)
+                    .unwrap();
+            }
+            timeout(Duration::from_secs(3), async {
+                let hello = real_client_hello("probe.example.com");
+                let mut client = TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+                    .await
+                    .unwrap();
+                client.write_all(&hello).await.unwrap();
+                let (mut upstream, _) = backend.accept().await.unwrap();
+                let mut received = vec![0; hello.len()];
+                upstream.read_exact(&mut received).await.unwrap();
+                assert_eq!(received, hello);
+                upstream.write_all(b"reply").await.unwrap();
+                let mut reply = [0; 5];
+                client.read_exact(&mut reply).await.unwrap();
+                assert_eq!(&reply, b"reply");
+                client.shutdown().await.unwrap();
+                upstream.shutdown().await.unwrap();
+            })
+            .await
+            .expect("self-hairpin relay timed out");
+        }
     }
 
     #[tokio::test]

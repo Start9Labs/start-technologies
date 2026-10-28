@@ -14,7 +14,7 @@ Every gateway routes outbound traffic from your server to the Internet. Some gat
 
 - **Outbound only** — routes outbound traffic but does not accept inbound connections. Commercial VPN providers (Mullvad, ProtonVPN, etc.) are outbound-only gateways. These are used as [outbound VPNs](outbound-vpn.md).
 
-Service interface address tables list inbound/outbound gateways, where you can enable addresses for incoming connections. Outbound-only gateways remain available in the system-wide and per-service outbound gateway selectors.
+Service interface address tables list inbound/outbound gateways, where you can enable addresses for incoming connections. Every gateway, outbound-only included, can be selected for [outbound traffic](outbound-traffic.md).
 
 > [!NOTE]
 > A StartTunnel gateway can also carry IPv6. If the tunnel subnet your server belongs to has an [IPv6 prefix delegated](/start-tunnel/ipv6.html), your server receives its own global IPv6 address (GUA) through the gateway — usable for [DualStack public domains](clearnet.md) and controlled from each interface's address list (see [Interfaces](interfaces.md)).
@@ -39,6 +39,14 @@ Service interface address tables list inbound/outbound gateways, where you can e
 ## Updating a Gateway's Config
 
 To re-import a gateway's WireGuard config — for example, a StartTunnel config re-issued with new settings — open the gateway's `⋮` menu, choose "Update config", and paste or upload the new file. The config is replaced **in place**: the gateway keeps its identity, so its port forwards and private/public domains are preserved. (Re-adding via "Add" would instead create a separate gateway.)
+
+## DNS Settings
+
+The **DNS** column shows each gateway's effective resolver addresses, marked **(Auto)** for gateway-provided DNS or **(Fallback)** for public fallback. Choose **Edit** from the gateway's `⋮` menu to change its name and [DNS settings](dns.md) together.
+
+## Outbound Traffic
+
+Which gateway carries the OS's and each service's outbound connections is set under [Outbound Traffic](outbound-traffic.md).
 
 ## Secure Gateways
 

@@ -41,9 +41,17 @@ function passwordsMatch(control: AbstractControl): ValidationErrors | null {
       <header tuiHeader>
         <hgroup tuiTitle>
           <h2>{{ 'Setup complete' | i18n }}</h2>
-          <p tuiSubtitle>{{ 'You can close this window.' | i18n }}</p>
+          <p tuiSubtitle>
+            {{
+              'Open router.lan in your browser to secure your connection to your router.'
+                | i18n
+            }}
+          </p>
         </hgroup>
       </header>
+      <a tuiButton href="http://router.lan" target="_blank">
+        {{ 'Open router.lan' | i18n }}
+      </a>
     } @else {
       <header tuiHeader>
         <h2 tuiTitle>{{ 'Create admin password' | i18n }}</h2>
@@ -142,13 +150,8 @@ export default class Setup {
     try {
       await this.api.setInitialPassword({
         password: this.form.value.password!,
+        timezone: getBrowserTimezone(),
       })
-      // Best-effort: persist the browser's zone as the default. The backend
-      // resolves the POSIX string from its authoritative table; if the zone is
-      // unknown it errors, which we swallow here (correctable later in Settings).
-      await this.api
-        .setTimezone({ timezone: getBrowserTimezone() })
-        .catch(() => {})
       this.auth.initialized.set(true)
       this.complete.set(true)
     } catch (e: any) {

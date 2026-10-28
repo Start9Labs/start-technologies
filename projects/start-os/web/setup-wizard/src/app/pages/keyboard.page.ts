@@ -87,7 +87,7 @@ export default class KeyboardPage {
 
     try {
       // Send keyboard to backend
-      await this.api.setKeyboard({
+      await this.api.rpc.setup.setKeyboard({
         layout: this.selected.layout,
         keymap: this.selected.keymap,
         model: null,

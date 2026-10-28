@@ -14,6 +14,7 @@ import { Authority, AuthorityService } from './authority.service'
         <button
           tuiIconButton
           tuiDropdown
+          tuiDropdownAlign="end"
           size="s"
           appearance="flat-grayscale"
           iconStart="@tui.ellipsis-vertical"
@@ -21,7 +22,7 @@ import { Authority, AuthorityService } from './authority.service'
           [(tuiDropdownOpen)]="open"
         >
           {{ 'More' | i18n }}
-          <tui-data-list *tuiDropdown>
+          <tui-data-list *tuiDropdown="let close" (click)="close()">
             @if (authority.url) {
               <button
                 tuiOption

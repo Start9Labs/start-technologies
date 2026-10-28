@@ -7,7 +7,7 @@ use tokio::process::Command;
 use crate::prelude::*;
 use crate::ServerContext;
 
-#[derive(Parser, Serialize, Deserialize)]
+#[derive(Parser, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct ExecReq {
     pub command: String,
     pub args: Vec<String>,
@@ -15,14 +15,16 @@ pub struct ExecReq {
     #[clap(long, default_value = "5000")]
     pub timeout: u64,
 }
+rpc_toolkit::reflect_ts!(ExecReq);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecRes {
     pub stdout: String,
     pub stderr: String,
     pub exit_code: i32,
 }
+rpc_toolkit::reflect_ts!(ExecRes);
 
 #[instrument(skip_all)]
 pub async fn exec_command(_ctx: ServerContext, req: ExecReq) -> Result<ExecRes, Error> {

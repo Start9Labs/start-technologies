@@ -62,17 +62,29 @@ jobs:
           collected=0
           for wf in start-cli.yaml start-tunnel.yaml start-registry.yaml; do
             product="${wf%.yaml}"
-            # --event push is load-bearing, not a tidiness filter. `-b master`
-            # alone matches any run whose head branch is named master, which
-            # includes a pull_request run from a fork branch of that name — this
-            # job would then collect and sign attacker-built .debs into alpha.
-            # It also excludes workflow_dispatch builds, which may be
-            # dev-flavoured or partial-arch. The select() re-asserts it on the
-            # returned row so the query fails closed.
-            run_id=$(gh run list -R "$GITHUB_REPOSITORY" -w "$wf" -b master \
-              --event push -s success -L 1 --json databaseId,event \
-              -q '.[] | select(.event == "push") | .databaseId')
-            if [ -z "$run_id" ] || [ "$run_id" = null ]; then
+            # Filter and order client-side: with branch/event/status query
+            # filters, the runs API answers this job's token with months-old
+            # runs instead of the newest one.
+            # event == "push" is load-bearing, not a tidiness filter. A master
+            # head branch alone matches a pull_request run from a fork branch of
+            # that name — this job would then collect and sign attacker-built
+            # .debs into alpha. It also excludes workflow_dispatch builds, which
+            # may be dev-flavoured or partial-arch.
+            page=1
+            while :; do
+              selection=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$wf/runs?per_page=100&page=$page" \
+                --jq '[(.workflow_runs | length), ([.workflow_runs[]
+                  | select(.event == "push" and .head_branch == "master"
+                      and .conclusion == "success"
+                      and .head_repository.full_name == env.GITHUB_REPOSITORY)]
+                  | max_by(.created_at) | .id)] | @tsv')
+              read -r run_count run_id <<< "$selection"
+              if [ -n "$run_id" ] || [ "$run_count" -eq 0 ]; then
+                break
+              fi
+              page=$((page + 1))
+            done
+            if [ -z "$run_id" ]; then
               echo "::warning::$product has no successful master run; the suite keeps whatever version it already holds."
               continue
             fi
@@ -83,7 +95,7 @@ jobs:
               echo "::warning::$product run $run_id has no .deb artifacts left; skipping it."
               continue
             fi
-            echo "$product: collected from run $run_id"
+            echo "$product: collected from run $run_id ($(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq .head_sha))"
             collected=1
           done
           if [ "$collected" != 1 ]; then

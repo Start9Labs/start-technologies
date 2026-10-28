@@ -1,6 +1,7 @@
 import { Component, computed, input } from '@angular/core'
 import { RouterLink } from '@angular/router'
-import { TuiAvatar } from '@taiga-ui/kit'
+import { TuiAvatar, TuiSkeleton } from '@taiga-ui/kit'
+import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
 import { ServiceUptimeComponent } from 'src/app/routes/portal/routes/services/components/uptime.component'
 import { PkgDependencyErrors } from 'src/app/services/dep-error.service'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
@@ -11,8 +12,8 @@ import { StatusComponent } from './status.component'
   selector: 'tr[appService]',
   template: `
     <td [style.width.rem]="3">
-      <i tuiAvatar size="s" [round]="false">
-        <img alt="logo" [src]="pkg().icon" />
+      <i tuiAvatar size="s" [round]="false" [tuiSkeleton]="icon.loading()">
+        <img #icon="pkgIcon" [pkgIcon]="pkg()" />
       </i>
     </td>
     <td class="title">
@@ -67,7 +68,14 @@ import { StatusComponent } from './status.component'
       width: 21rem;
     }
   `,
-  imports: [RouterLink, ServiceUptimeComponent, StatusComponent, TuiAvatar],
+  imports: [
+    RouterLink,
+    ServiceUptimeComponent,
+    StatusComponent,
+    TuiAvatar,
+    TuiSkeleton,
+    PkgIconDirective,
+  ],
 })
 export class ServiceComponent {
   readonly pkg = input.required<PackageDataEntry>()

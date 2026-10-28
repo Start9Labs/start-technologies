@@ -1,4 +1,5 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
@@ -8,20 +9,20 @@ use patch_db::HasModel;
 use patch_db::json_ptr::JsonPointer;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::net::host::Hosts;
 use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::s9pk::manifest::{LocaleString, Manifest};
 use crate::status::StatusInfo;
-use crate::util::DataUrl;
-use crate::util::serde::{Pem, is_partial_of};
+use crate::util::serde::{Der64, is_partial_of};
 use crate::{ActionId, GatewayId, HealthCheckId, HostId, PackageId, ReplayId};
 
-#[derive(Debug, Default, Deserialize, Serialize, TS)]
-#[ts(export)]
+#[derive(Debug, Default, Deserialize, Serialize, VisitFields)]
 pub struct AllPackageData(pub BTreeMap<PackageId, PackageDataEntry>);
+
+rpc_toolkit::reflect_ts!(AllPackageData);
+rpc_toolkit::ts_export!(AllPackageData, namespaces = [""]);
 impl Map for AllPackageData {
     type Key = PackageId;
     type Value = PackageDataEntry;
@@ -39,11 +40,10 @@ pub enum ManifestPreference {
     New,
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel, TS)]
+#[derive(Debug, Deserialize, Serialize, HasModel, VisitVariants)]
 #[serde(rename_all = "camelCase")]
 #[serde(tag = "state")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub enum PackageState {
     Installing(InstallingState),
     Restoring(InstallingState),
@@ -51,6 +51,9 @@ pub enum PackageState {
     Installed(InstalledState),
     Removing(InstalledState),
 }
+
+rpc_toolkit::reflect_ts!(PackageState);
+rpc_toolkit::ts_export!(PackageState, namespaces = [""]);
 impl PackageState {
     pub fn expect_installed(&self) -> Result<&InstalledState, Error> {
         match self {
@@ -274,42 +277,49 @@ impl Model<PackageState> {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel, TS)]
+#[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct InstallingState {
     pub installing_info: InstallingInfo,
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel, TS)]
+rpc_toolkit::reflect_ts!(InstallingState);
+rpc_toolkit::ts_export!(InstallingState, namespaces = [""]);
+
+#[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct UpdatingState {
     pub manifest: Manifest,
     pub s9pk: PathBuf,
     pub installing_info: InstallingInfo,
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel, TS)]
+rpc_toolkit::reflect_ts!(UpdatingState);
+rpc_toolkit::ts_export!(UpdatingState, namespaces = [""]);
+
+#[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct InstalledState {
     pub manifest: Manifest,
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel, TS)]
+rpc_toolkit::reflect_ts!(InstalledState);
+rpc_toolkit::ts_export!(InstalledState, namespaces = [""]);
+
+#[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct InstallingInfo {
     pub new_manifest: Manifest,
     pub progress: FullProgress,
 }
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, TS)]
-#[ts(export)]
+
+rpc_toolkit::reflect_ts!(InstallingInfo);
+rpc_toolkit::ts_export!(InstallingInfo, namespaces = [""]);
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, VisitVariants)]
 #[serde(rename_all = "kebab-case")]
 pub enum AllowedStatuses {
     OnlyRunning,
@@ -317,21 +327,26 @@ pub enum AllowedStatuses {
     Any,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[ts(export)]
+rpc_toolkit::reflect_ts!(AllowedStatuses);
+rpc_toolkit::ts_export!(AllowedStatuses, namespaces = [""]);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, VisitVariants)]
 #[serde(rename_all = "kebab-case")]
 pub enum ActionAccess {
     Public,
     Dependent,
     User,
 }
+
+rpc_toolkit::reflect_ts!(ActionAccess);
+rpc_toolkit::ts_export!(ActionAccess, namespaces = [""]);
 impl Default for ActionAccess {
     fn default() -> Self {
         Self::User
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, HasModel, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct ActionMetadata {
@@ -360,12 +375,12 @@ pub struct ActionMetadata {
     ///   - "dependent" — only services that declare this package as a current dependency
     ///   - "user" — only the user (other services must create a task). Default when omitted.
     /// Services that lack direct access can always queue a task with `effects.action.createTask`.
-    #[ts(optional)]
     pub access: Option<ActionAccess>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, TS)]
-#[ts(export)]
+rpc_toolkit::reflect_ts!(ActionMetadata);
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, VisitVariants)]
 #[serde(rename_all = "kebab-case")]
 #[serde(rename_all_fields = "camelCase")]
 pub enum ActionVisibility {
@@ -373,62 +388,69 @@ pub enum ActionVisibility {
     Disabled(String),
     Enabled,
 }
+
+rpc_toolkit::reflect_ts!(ActionVisibility);
+rpc_toolkit::ts_export!(ActionVisibility, namespaces = [""]);
 impl Default for ActionVisibility {
     fn default() -> Self {
         Self::Enabled
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, HasModel, TS)]
+#[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct PackageDataEntry {
     pub state_info: PackageState,
     pub s9pk: PathBuf,
     pub status_info: StatusInfo,
-    #[ts(type = "string | null")]
     pub registry: Option<Url>,
-    #[ts(type = "string")]
-    pub developer_key: Pem<ed25519_dalek::VerifyingKey>,
-    pub icon: DataUrl<'static>,
-    #[ts(type = "string | null")]
+    pub developer_key: Der64<ed25519_dalek::VerifyingKey>,
     pub last_backup: Option<DateTime<Utc>>,
     pub current_dependencies: CurrentDependencies,
     pub actions: BTreeMap<ActionId, ActionMetadata>,
     pub tasks: BTreeMap<ReplayId, TaskEntry>,
     pub hosts: Hosts,
-    #[ts(type = "string[]")]
     pub store_exposed_dependents: Vec<JsonPointer>,
-    #[ts(type = "string | null")]
     pub outbound_gateway: Option<GatewayId>,
+    #[serde(default)]
+    pub outbound_dns: Option<VecDeque<SocketAddr>>,
     #[serde(default)]
     pub plugin: PackagePlugin,
 }
+
+rpc_toolkit::reflect_ts!(PackageDataEntry);
+rpc_toolkit::ts_export!(PackageDataEntry, namespaces = [""]);
 impl AsRef<PackageDataEntry> for PackageDataEntry {
     fn as_ref(&self) -> &PackageDataEntry {
         self
     }
 }
 
-#[derive(Debug, Default, Deserialize, Serialize, HasModel, TS)]
+#[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct PackagePlugin {
     pub url: Option<UrlPluginRegistration>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(PackagePlugin);
+rpc_toolkit::ts_export!(PackagePlugin, namespaces = [""]);
+
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct UrlPluginRegistration {
     pub table_action: ActionId,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, TS)]
-#[ts(export)]
+rpc_toolkit::reflect_ts!(UrlPluginRegistration);
+rpc_toolkit::ts_export!(UrlPluginRegistration, namespaces = [""]);
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, VisitFields)]
 pub struct CurrentDependencies(pub BTreeMap<PackageId, CurrentDependencyInfo>);
+
+rpc_toolkit::reflect_ts!(CurrentDependencies);
+rpc_toolkit::ts_export!(CurrentDependencies, namespaces = [""]);
 impl CurrentDependencies {
     pub fn map(
         mut self,
@@ -438,6 +460,12 @@ impl CurrentDependencies {
     ) -> Self {
         self.0 = transform(self.0);
         self
+    }
+}
+impl CurrentDependencies {
+    /// Whether tasks on the target count against the owning package.
+    pub fn is_task_target(&self, owner: &PackageId, target: &PackageId) -> bool {
+        target == owner || self.0.contains_key(target)
     }
 }
 impl Map for CurrentDependencies {
@@ -451,19 +479,19 @@ impl Map for CurrentDependencies {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS, HasModel)]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields, HasModel)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct CurrentDependencyInfo {
     pub title: Option<LocaleString>,
-    pub icon: Option<DataUrl<'static>>,
     #[serde(flatten)]
     pub kind: CurrentDependencyKind,
-    #[ts(type = "string")]
     pub version_range: VersionRange,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(CurrentDependencyInfo);
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, VisitVariants)]
 #[serde(rename_all = "kebab-case")]
 #[serde(tag = "kind")]
 pub enum CurrentDependencyKind {
@@ -471,95 +499,125 @@ pub enum CurrentDependencyKind {
     #[serde(rename_all = "camelCase")]
     Running {
         #[serde(default)]
-        #[ts(type = "string[]")]
         health_checks: BTreeSet<HealthCheckId>,
     },
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS, HasModel)]
+rpc_toolkit::reflect_ts!(CurrentDependencyKind);
+
+impl Model<PackageDataEntry> {
+    /// Whether an active critical task on the package or a current dependency blocks starting.
+    pub fn has_blocking_task(&self, id: &PackageId) -> Result<bool, Error> {
+        let deps = self.as_current_dependencies().de()?;
+        Ok(self.as_tasks().de()?.into_values().any(|t| {
+            t.active
+                && t.task.severity == TaskSeverity::Critical
+                && deps.is_task_target(id, &t.task.package_id)
+        }))
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields, HasModel)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 #[model = "Model<Self>"]
 pub struct TaskEntry {
     pub task: Task,
     pub active: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS, HasModel)]
+rpc_toolkit::reflect_ts!(TaskEntry);
+rpc_toolkit::ts_export!(TaskEntry, namespaces = [""]);
+
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields, HasModel)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 #[model = "Model<Self>"]
+#[visit(ts(input_rename = "TaskParams"))]
 pub struct Task {
     pub package_id: PackageId,
     pub action_id: ActionId,
     #[serde(default)]
     pub severity: TaskSeverity,
-    #[ts(optional)]
+
     pub reason: Option<String>,
-    #[ts(optional)]
+
     pub when: Option<TaskTrigger>,
-    #[ts(optional)]
+
     pub input: Option<TaskInput>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq, PartialOrd, Ord)]
+rpc_toolkit::reflect_ts!(Task);
+rpc_toolkit::ts_export!(Task, namespaces = [""]);
+
+#[derive(Clone, Debug, Deserialize, Serialize, VisitVariants, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "kebab-case")]
-#[ts(export)]
 pub enum TaskSeverity {
     Optional,
     Important,
     Critical,
 }
+
+rpc_toolkit::reflect_ts!(TaskSeverity);
+rpc_toolkit::ts_export!(TaskSeverity, namespaces = [""]);
 impl Default for TaskSeverity {
     fn default() -> Self {
         TaskSeverity::Important
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct TaskTrigger {
     #[serde(default)]
     pub once: bool,
     pub condition: TaskCondition,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(TaskTrigger);
+rpc_toolkit::ts_export!(TaskTrigger, namespaces = [""]);
+
+#[derive(Clone, Debug, Deserialize, Serialize, VisitVariants)]
 #[serde(rename_all = "kebab-case")]
-#[ts(export)]
 pub enum TaskCondition {
     InputNotMatches,
 }
 
-#[derive(Clone, Debug, Serialize, TS)]
+rpc_toolkit::reflect_ts!(TaskCondition);
+rpc_toolkit::ts_export!(TaskCondition, namespaces = [""]);
+
+#[derive(Clone, Debug, Serialize, VisitVariants)]
 #[serde(rename_all = "kebab-case")]
 #[serde(tag = "kind")]
+#[visit(input_wire = "TaskInputRepr")]
+#[visit(type_attributes(visit::input_wire))]
 pub enum TaskInput {
     Partial {
-        #[ts(type = "Record<string, unknown>[]")]
+        #[visit(ts(type = "z.array(z.record(z.string(), z.unknown()))"))]
         accept: Vec<Value>,
-        #[ts(type = "Record<string, unknown>")]
+        #[visit(ts(type = "z.record(z.string(), z.unknown())"))]
         set: Value,
     },
 }
-// Accepts both the current `{ accept, set }` shape and the legacy `{ value }`
-// shape emitted by s9pks built against the pre-2.0 SDK.
+
+rpc_toolkit::reflect_ts!(TaskInput);
+#[derive(Deserialize, VisitVariants)]
+#[serde(rename_all = "kebab-case", tag = "kind")]
+enum TaskInputRepr {
+    Partial {
+        #[serde(default)]
+        accept: Option<Vec<Value>>,
+        #[serde(default)]
+        set: Option<Value>,
+        #[serde(default)]
+        value: Option<Value>,
+    },
+}
+
+rpc_toolkit::reflect_ts!(TaskInputRepr);
+
 impl<'de> Deserialize<'de> for TaskInput {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "kebab-case", tag = "kind")]
-        enum Repr {
-            Partial {
-                #[serde(default)]
-                accept: Option<Vec<Value>>,
-                #[serde(default)]
-                set: Option<Value>,
-                #[serde(default)]
-                value: Option<Value>,
-            },
-        }
-        let Repr::Partial { accept, set, value } = Repr::deserialize(deserializer)?;
+        let TaskInputRepr::Partial { accept, set, value } =
+            TaskInputRepr::deserialize(deserializer)?;
         match (accept, set, value) {
             (Some(accept), Some(set), _) => Ok(Self::Partial { accept, set }),
             (_, _, Some(value)) => Ok(Self::Partial {

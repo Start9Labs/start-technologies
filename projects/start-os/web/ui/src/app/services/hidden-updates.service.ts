@@ -1,6 +1,6 @@
 import { inject, Injectable } from '@angular/core'
 import { ErrorService } from '@start9labs/shared'
-import { PatchDB } from 'patch-db-client'
+import { PatchDB, pathFromArray } from 'patch-db-client'
 import {
   BehaviorSubject,
   combineLatest,
@@ -60,7 +60,10 @@ export class HiddenUpdatesService {
         const merged = Array.from(
           new Set([...(persisted[id] || []), ...latestOpt]),
         )
-        return this.api.setDbValue<string[]>(['hiddenUpdates', id], merged)
+        return this.api.rpc.db.put.ui({
+          pointer: pathFromArray(['hiddenUpdates', id]),
+          value: merged,
+        })
       })
       .catch(e => {
         const current = this.optimistic$.value

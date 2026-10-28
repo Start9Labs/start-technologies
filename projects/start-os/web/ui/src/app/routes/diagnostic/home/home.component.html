@@ -28,12 +28,33 @@
       }
       <button
         tuiButton
+        appearance="secondary"
+        [disabled]="!!updateProgress() || updated()"
+        (click)="update()"
+      >
+        {{ 'Update server' | i18n }}
+      </button>
+      <button
+        tuiButton
         appearance="secondary-destructive"
         (click)="presentAlertRepairDisk()"
       >
         {{ 'Repair drive' | i18n }}
       </button>
     </div>
+    @if (updateProgress(); as progress) {
+      <h2 class="subtitle">
+        {{ (reinstall() ? 'Reinstalling' : 'Updating') | i18n }}
+        StartOS {{ updateTarget() }}: {{ (progress.total * 100).toFixed(0) }}%
+      </h2>
+      <progress tuiProgressBar [attr.value]="progress.total"></progress>
+      <p [innerHTML]="progress.message"></p>
+    } @else if (updated()) {
+      <h2 class="subtitle">
+        StartOS {{ updateTarget() }}:
+        {{ 'Download complete. Restart to apply.' | i18n }}
+      </h2>
+    }
   }
 } @else {
   <h1 class="title">{{ 'Server is restarting' | i18n }}</h1>

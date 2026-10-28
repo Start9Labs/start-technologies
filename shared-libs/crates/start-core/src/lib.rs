@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate rpc_toolkit;
+
 use const_format::formatcp;
 
 rust_i18n::i18n!("locales", fallback = ["en_US"]);
@@ -96,40 +99,43 @@ use imbl_value::Value;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{
     CallRemoteHandler, Context, Empty, HandlerExt, ParentHandler, from_fn, from_fn_async,
-    from_fn_async_local, from_fn_blocking,
+    from_fn_async_local,
 };
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::context::{CliContext, DiagnosticContext, InitContext, RpcContext};
 use crate::disk::fsck::RequiresReboot;
 use crate::registry::context::{RegistryContext, RegistryUrlParams};
 use crate::system::kiosk;
-use crate::tunnel::context::TunnelUrlParams;
+use crate::util::output::print_table;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, visit_rs::VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
-#[ts(export)]
 pub struct EchoParams {
     #[arg(help = "help.arg.echo-message")]
     message: String,
 }
 
+rpc_toolkit::reflect_ts!(EchoParams);
+rpc_toolkit::ts_export!(EchoParams, namespaces = [""]);
+
 pub fn echo<C: Context>(_: C, EchoParams { message }: EchoParams) -> Result<String, RpcError> {
     Ok(message)
 }
 
-#[derive(Debug, Deserialize, Serialize, TS)]
+#[derive(Debug, Deserialize, Serialize, visit_rs::VisitVariants)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub enum ApiState {
     Error,
     Initializing,
     Running,
 }
+
+rpc_toolkit::reflect_ts!(ApiState);
+rpc_toolkit::ts_export!(ApiState, namespaces = [""]);
 impl std::fmt::Display for ApiState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(&self, f)
@@ -181,7 +187,26 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "auth",
-            auth::auth::<C, RpcContext>().with_about("about.commands-authentication"),
+            auth::auth::<C, RpcContext, CliContext>()
+                .subcommand(
+                    "reset-password",
+                    from_fn_async(auth::reset_password_impl).no_cli(),
+                )
+                .subcommand(
+                    "reset-password",
+                    from_fn_async(auth::cli_reset_password)
+                        .no_display()
+                        .with_about("about.reset-password"),
+                )
+                .subcommand(
+                    "get-pubkey",
+                    from_fn_async(auth::get_pubkey)
+                        .with_metadata("authenticated", Value::Bool(false))
+                        .no_display()
+                        .with_about("about.get-pubkey-from-server")
+                        .with_call_remote::<CliContext>(),
+                )
+                .with_about("about.commands-authentication"),
         )
         .subcommand("db", db::db::<C>().with_about("about.commands-db"))
         .subcommand("ssh", ssh::ssh::<C>().with_about("about.commands-ssh-keys"))
@@ -211,11 +236,6 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "tunnel",
-            CallRemoteHandler::<RpcContext, _, _, TunnelUrlParams>::new(tunnel::api::tunnel_api())
-                .no_cli(),
-        )
-        .subcommand(
-            "tunnel",
             tunnel::api::tunnel_api::<CliContext>().with_about("about.commands-tunnel"),
         )
         .subcommand("s9pk", s9pk::rpc::s9pk().with_about("about.commands-s9pk"))
@@ -231,11 +251,12 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "pubkey",
-            from_fn_blocking(developer::pubkey).with_about("about.get-id-pubkey"),
+            from_fn_async(developer::pubkey).with_about("about.get-id-pubkey"),
         )
         .subcommand(
             "completions",
             from_fn(bins::start_cli::completions)
+                .no_ts()
                 .no_display()
                 .with_about("about.print-shell-completions"),
         )
@@ -259,6 +280,7 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
         api = api.subcommand(
             "flash-os",
             from_fn_async(os_install::cli_install_os)
+                .no_ts()
                 .no_display()
                 .with_about("about.flash-startos"),
         );
@@ -321,6 +343,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "logs",
             from_fn_async(logs::cli_logs::<RpcContext, Empty>)
+                .no_ts()
                 .no_display()
                 .with_about("about.display-os-logs"),
         )
@@ -331,6 +354,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "kernel-logs",
             from_fn_async(logs::cli_logs::<RpcContext, Empty>)
+                .no_ts()
                 .no_display()
                 .with_about("about.display-kernel-logs"),
         )
@@ -384,6 +408,10 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                 .with_about("about.check-update-startos"),
         )
         .subcommand(
+            "update-signers",
+            update::signers::api::<C>().with_about("about.commands-os-update-signers"),
+        )
+        .subcommand(
             "update-firmware",
             from_fn_async(|_: RpcContext| async {
                 if let Some(firmware) = firmware::check_for_firmware_update().await? {
@@ -398,6 +426,16 @@ pub fn server<C: Context>() -> ParentHandler<C> {
             })
             .with_about("about.update-firmware")
             .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "trust-ca",
+            from_fn_async(system::trust_ca::install)
+                .with_display_serializable()
+                .with_custom_display_fn(|handle, result| {
+                    system::trust_ca::display(handle.params, result)
+                })
+                .with_about("about.trust-custom-ca-root")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "set-smtp",
@@ -475,6 +513,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "install",
             from_fn_async_local(install::cli_install)
+                .no_ts()
                 .no_display()
                 .with_about("about.install-package"),
         )
@@ -511,9 +550,13 @@ pub fn package<C: Context>() -> ParentHandler<C> {
             "start",
             from_fn_async(control::start)
                 .with_metadata("sync_db", Value::Bool(true))
+                .no_cli(),
+        )
+        .subcommand(
+            "start",
+            from_fn_async(control::cli_start)
                 .no_display()
-                .with_about("about.start-service")
-                .with_call_remote::<CliContext>(),
+                .with_about("about.start-service"),
         )
         .subcommand(
             "stop",
@@ -573,7 +616,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
                             table.add_row(row![&*id, "N/A", "0 MiB", "0 MiB", "0"]);
                         }
                     }
-                    table.print_tty(false)?;
+                    print_table(&table)?;
                     Ok(())
                 })
                 .with_about("about.list-lxc-container-info")
@@ -587,6 +630,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "logs",
             from_fn_async(logs::cli_logs::<RpcContext, logs::PackageIdParams>)
+                .no_ts()
                 .no_display()
                 .with_about("about.display-package-logs"),
         )
@@ -604,6 +648,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "attach",
             from_fn_async_local(service::cli_attach)
+                .no_ts()
                 .no_display()
                 .with_about("about.execute-commands-container"),
         )

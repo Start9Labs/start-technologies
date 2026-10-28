@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 
 use imbl::OrdMap;
 use tokio::process::Command;
-use ts_rs::TS;
 
 use crate::prelude::*;
 use crate::util::Invoke;
@@ -17,10 +16,13 @@ pub const GOVERNOR_HEIRARCHY: &[Governor] = &[
 ];
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, TS,
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, VisitFields,
 )]
-#[ts(export, type = "string")]
+#[visit(ts(type = "z.string()"))]
 pub struct Governor(Cow<'static, str>);
+
+rpc_toolkit::reflect_ts!(Governor);
+rpc_toolkit::ts_export!(Governor, namespaces = [""]);
 impl std::str::FromStr for Governor {
     type Err = std::convert::Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -153,10 +155,13 @@ const CPU_ROOT: &str = "/sys/devices/system/cpu";
 
 /// Selects how aggressively an EPP-capable CPU pursues performance.
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, TS,
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, VisitFields,
 )]
-#[ts(export, type = "string")]
+#[visit(ts(type = "z.string()"))]
 pub struct Epp(Cow<'static, str>);
+
+rpc_toolkit::reflect_ts!(Epp);
+rpc_toolkit::ts_export!(Epp, namespaces = [""]);
 
 const LIBREM_MINI_V2: &str = "librem_mini_v2";
 const LIBREM_MINI_V2_EPP: Epp = Epp(Cow::Borrowed("balance_power"));

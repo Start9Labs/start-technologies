@@ -1,6 +1,6 @@
 # Web — StartWRT Admin UI
 
-Single-page application for managing the StartWRT router. Angular 22, TypeScript 6, Taiga UI v5. Signal-based state, zoneless change detection, standalone components.
+Single-page application for managing the StartWRT router. Angular, TypeScript, Taiga UI. Signal-based state, zoneless change detection, standalone components.
 
 Communicates with the backend over JSON-RPC 2.0 at `/rpc/v1`. Every page includes contextual help via a collapsible aside panel.
 
@@ -34,5 +34,4 @@ The same mock build is published to router-demo.start9.com on every `master` pus
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — Frontend internals: project structure, patterns, styling, API layer
-- [CONTRIBUTING.md](CONTRIBUTING.md) — Development guide: setup, adding routes, Taiga UI lookup
-- [AGENTS.md](AGENTS.md) — AI-developer operating rules (`CLAUDE.md` is a one-line `@AGENTS.md` import)
+- [AGENTS.md](AGENTS.md) — Development setup and project-specific rules

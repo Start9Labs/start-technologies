@@ -1,19 +1,15 @@
 import { Component, inject, input } from '@angular/core'
 import { DialogService, i18nPipe, TaskService } from '@start9labs/shared'
 import { ISB } from '@start9labs/start-core'
-import {
-  TuiButton,
-  TuiDataList,
-  TuiDropdown,
-  TuiIcon,
-  TuiInput,
-} from '@taiga-ui/core'
+import { TuiButton, TuiDataList, TuiDropdown, TuiIcon } from '@taiga-ui/core'
 import { filter } from 'rxjs'
 import { FormComponent } from 'src/app/routes/portal/components/form.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { FormDialogService } from 'src/app/services/form-dialog.service'
 import { GatewayPlus } from 'src/app/services/gateway.service'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
+
+import EditGateway from './edit'
 import { PORT_FORWARDS_MODAL } from './port-forwards.component'
 
 @Component({
@@ -50,20 +46,28 @@ import { PORT_FORWARDS_MODAL } from './port-forwards.component'
       >
         {{ gateway.ipInfo.wanIp || ('Error' | i18n) }}
       </td>
+      <td [attr.data-label]="'DNS' | i18n">
+        {{ gateway.dns.servers.join(', ') }}
+        @if (gateway.dns.source === 'gateway') {
+          ({{ 'Auto' | i18n }})
+        } @else if (gateway.dns.source === 'public-fallback') {
+          ({{ 'Fallback' | i18n }})
+        }
+      </td>
       <td>
         <button
           tuiIconButton
           tuiDropdown
+          tuiDropdownAlign="end"
+          tuiDropdownAuto
           size="s"
           appearance="flat-grayscale"
           iconStart="@tui.ellipsis-vertical"
-          [tuiAppearanceState]="open ? 'hover' : null"
-          [(tuiDropdownOpen)]="open"
         >
           {{ 'More' | i18n }}
-          <tui-data-list *tuiDropdown>
-            <button tuiOption (click)="rename()">
-              {{ 'Rename' | i18n }}
+          <tui-data-list *tuiDropdown="let close" (click)="close()">
+            <button tuiOption (click)="edit()">
+              {{ 'Edit' | i18n }}
             </button>
             @if (gateway.type !== 'outbound-only') {
               <button tuiOption (click)="viewPortForwards()">
@@ -89,12 +93,12 @@ import { PORT_FORWARDS_MODAL } from './port-forwards.component'
       margin-right: 0.7rem;
     }
 
-    td:first-child {
-      width: 24rem;
-    }
-
     td:last-child {
       text-align: right;
+    }
+
+    td[data-label] {
+      overflow-wrap: anywhere;
     }
 
     :host-context(tui-root._mobile) {
@@ -114,7 +118,8 @@ import { PORT_FORWARDS_MODAL } from './port-forwards.component'
       }
 
       td:nth-child(3),
-      td:nth-child(4) {
+      td:nth-child(4),
+      td:nth-child(5) {
         grid-area: auto / 1 / auto / 3;
 
         &::before {
@@ -130,12 +135,16 @@ import { PORT_FORWARDS_MODAL } from './port-forwards.component'
         content: 'WAN IP: ';
       }
 
+      td:nth-child(5)::before {
+        content: attr(data-label) ': ';
+      }
+
       td:last-child {
         grid-area: 1 / 3 / 6;
       }
     }
   `,
-  imports: [TuiButton, TuiDropdown, TuiDataList, TuiIcon, TuiInput, i18nPipe],
+  imports: [TuiButton, TuiDropdown, TuiDataList, TuiIcon, i18nPipe],
 })
 export class GatewaysItemComponent {
   private readonly dialog = inject(DialogService)
@@ -144,9 +153,11 @@ export class GatewaysItemComponent {
   private readonly formDialog = inject(FormDialogService)
   private readonly i18n = inject(i18nPipe)
 
-  readonly gateway = input.required<GatewayPlus>()
+  public readonly gateway = input.required<GatewayPlus>()
 
-  open = false
+  edit() {
+    this.formDialog.open(EditGateway, { size: 'm', data: this.gateway().id })
+  }
 
   viewPortForwards() {
     const { id, name } = this.gateway()
@@ -165,35 +176,11 @@ export class GatewaysItemComponent {
       .pipe(filter(Boolean))
       .subscribe(() =>
         this.tasks.run(
-          async () => await this.api.removeTunnel({ id: this.gateway().id }),
+          async () =>
+            await this.api.rpc.net.tunnel.remove({ id: this.gateway().id }),
           'Deleting',
         ),
       )
-  }
-
-  async rename() {
-    const { id, name } = this.gateway()
-    const renameSpec = ISB.InputSpec.of({
-      label: ISB.Value.text({
-        name: this.i18n.transform('Name'),
-        required: true,
-        default: name,
-      }),
-    })
-
-    this.formDialog.open(FormComponent, {
-      label: 'Rename',
-      data: {
-        spec: await configBuilderToSpec(renameSpec),
-        buttons: [
-          {
-            text: 'Save',
-            handler: (value: typeof renameSpec._TYPE) =>
-              this.update(id, value.label),
-          },
-        ],
-      },
-    })
   }
 
   async updateConfig() {
@@ -239,7 +226,7 @@ export class GatewaysItemComponent {
             handler: async (input: typeof spec._TYPE) =>
               this.tasks.run(
                 async () =>
-                  await this.api.updateTunnelConfig({
+                  await this.api.rpc.net.tunnel.update({
                     id,
                     config:
                       input.config.selection === 'paste'
@@ -252,12 +239,5 @@ export class GatewaysItemComponent {
         ],
       },
     })
-  }
-
-  private async update(id: string, name: string): Promise<boolean> {
-    return this.tasks.run(
-      async () => await this.api.updateTunnel({ id, name }),
-      'Saving',
-    )
   }
 }

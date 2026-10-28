@@ -81,7 +81,7 @@ export default class Login {
     try {
       const key = await this.authKeys.create()
       try {
-        await this.api.login({
+        await this.api.rpc.auth.login({
           password: this.password,
           pubkey: key.pubkeyPem,
           ephemeral: false,

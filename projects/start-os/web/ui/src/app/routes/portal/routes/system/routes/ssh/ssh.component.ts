@@ -92,7 +92,7 @@ export default class SystemSSHComponent {
 
   private readonly local$ = new Subject<readonly T.SshKeyResponse[]>()
 
-  readonly keys$ = merge(from(this.api.getSshKeys({})), this.local$)
+  readonly keys$ = merge(from(this.api.rpc.ssh.list({})), this.local$)
 
   protected tableKeys = viewChild<SSHTableComponent<T.SshKeyResponse>>('table')
 
@@ -121,7 +121,7 @@ export default class SystemSSHComponent {
             text: this.i18n.transform('Save'),
             handler: async ({ key }: typeof spec._TYPE) =>
               this.tasks.run(async () => {
-                const newKey = await this.api.addSshKey({ key })
+                const newKey = await this.api.rpc.ssh.add({ key })
                 this.local$.next([newKey, ...all])
               }, 'Saving'),
           },
@@ -141,7 +141,7 @@ export default class SystemSSHComponent {
         this.tasks.run(async () => {
           await Promise.all(
             fingerprints.map(fingerprint =>
-              this.api.deleteSshKey({ fingerprint }),
+              this.api.rpc.ssh.remove({ fingerprint }),
             ),
           )
           this.local$.next(

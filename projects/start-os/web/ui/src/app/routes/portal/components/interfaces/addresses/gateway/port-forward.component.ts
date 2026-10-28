@@ -132,7 +132,7 @@ export class PortForwardValidationComponent {
     this.loading.set(true)
 
     try {
-      const result = await this.api.checkPort({
+      const result = await this.api.rpc.net.gateway.checkPort({
         gateway: this.context.data.gateway.id,
         port: this.context.data.port,
       })

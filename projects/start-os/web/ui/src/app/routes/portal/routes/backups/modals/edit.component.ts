@@ -128,7 +128,7 @@ export class BackupsEditModal {
     injectContext<TuiDialogContext<BackupJob, BackupJobBuilder>>()
 
   readonly target = toSignal(
-    from(this.api.getBackupTargets({})).pipe(map(({ saved }) => saved)),
+    from(this.api.rpc.backup.target.list({})).pipe(map(({ saved }) => saved)),
   )
 
   readonly targetId = signal(this.job.targetId)

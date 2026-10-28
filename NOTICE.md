@@ -40,10 +40,9 @@ the font files in each directory.
 
 ### `.github/actions/upload-each/dist/index.js`
 
-A committed `ncc` bundle inlining this action's npm dependencies — 97 packages,
-of which 76 are MIT, 9 ISC, 7 Apache-2.0, 2 BlueOak-1.0.0, and one each
-0BSD, BSD-2-Clause and `Apache-2.0 AND BSD-3-Clause`. The
-per-dependency notices are generated alongside it as
+A committed `ncc` bundle inlining this action's npm dependencies under their
+upstream licenses. The per-dependency licenses and copyright notices are
+generated alongside it as
 [`.github/actions/upload-each/dist/index.js.LICENSES.txt`](.github/actions/upload-each/dist/index.js.LICENSES.txt);
 regenerate both together with `npm run build` in that directory.
 
@@ -57,6 +56,7 @@ someone else's work and carry that author's copyright as well as Start9's.
 | `shared-libs/crates/imbl-value/` (`de.rs`, `ser.rs`, `index.rs`, `macros.rs`)                 | [serde_json](https://github.com/serde-rs/json)                        | Erick Tryzelaar and David Tolnay (MIT OR Apache-2.0, used here under MIT) |
 | `shared-libs/crates/patch-db/json-patch/`                                                     | [idubrov/json-patch](https://github.com/idubrov/json-patch)           | Ivan Dubrov (MIT OR Apache-2.0)                                           |
 | `shared-libs/crates/jsonpath/`                                                                | [freestrings/jsonpath](https://github.com/freestrings/jsonpath)       | Changseok Han (MIT)                                                       |
+| `shared-libs/crates/visit-rs/`, `shared-libs/crates/visit-rs-derive/`                         | [dr-bonez/visit-rs](https://github.com/dr-bonez/visit-rs)             | Aiden McClelland (MIT)                                                    |
 | `projects/start-os/build/image-recipe/raspberrypi/img/usr/lib/startos/scripts/init_resize.sh` | [RPi-Distro/raspi-config](https://github.com/RPi-Distro/raspi-config) | Alex Bradbury (MIT)                                                       |
 
 ## Trademarks
@@ -68,6 +68,6 @@ rights are granted by the MIT license.
 
 ## Key material
 
-`projects/start-wrt/openwrt-overlay/` carries SpaceMiT's opkg signing keys and a
-vendor root CA certificate, shipped unmodified from the vendor BSP. They are key
-material rather than code, and are listed here for provenance.
+`projects/start-wrt/openwrt-overlay/` carries SpaceMiT's opkg signing keys,
+shipped unmodified from the vendor BSP. They are key material rather than code,
+and are listed here for provenance.

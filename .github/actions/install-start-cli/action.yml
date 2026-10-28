@@ -1,0 +1,32 @@
+name: 'Install start-cli'
+description: 'Installs the newest released start-cli for the runner into /usr/local/bin'
+runs:
+  using: 'composite'
+  steps:
+    - name: Install start-cli
+      env:
+        INSTALL_GITHUB_TOKEN: ${{ github.server_url == 'https://github.com' && github.token || '' }}
+      run: |
+        headers=()
+        if [ -n "$INSTALL_GITHUB_TOKEN" ]; then
+          headers=(-H "Authorization: token $INSTALL_GITHUB_TOKEN")
+        fi
+        ARCH=$(uname -m)
+        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+        ASSET_NAME="start-cli_${ARCH}-${OS}"
+        DOWNLOAD_URL=$(curl -fsS \
+          "${headers[@]}" \
+          https://api.github.com/repos/Start9Labs/start-technologies/releases \
+          | jq -r '[.[].assets[] | select(.name=="'"$ASSET_NAME"'")] | first | .browser_download_url')
+        if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
+          echo "Error: Could not find asset '$ASSET_NAME' in Start9Labs/start-technologies releases"
+          exit 1
+        fi
+        curl -fsSL \
+          "${headers[@]}" \
+          -H "Accept: application/octet-stream" \
+          "$DOWNLOAD_URL" -o /tmp/start-cli
+        sudo install -m 755 /tmp/start-cli /usr/local/bin/start-cli
+        rm /tmp/start-cli
+        echo "start-cli: $(start-cli --version)"
+      shell: bash

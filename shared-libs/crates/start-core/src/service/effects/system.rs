@@ -3,14 +3,16 @@ use crate::service::effects::prelude::*;
 use crate::service::rpc::CallbackId;
 use crate::system::SmtpValue;
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct GetSystemSmtpParams {
     #[arg(skip)]
     callback: Option<CallbackId>,
 }
+
+rpc_toolkit::reflect_ts!(GetSystemSmtpParams);
+rpc_toolkit::ts_export!(GetSystemSmtpParams, namespaces = [""]);
 pub async fn get_system_smtp(
     context: EffectContext,
     GetSystemSmtpParams { callback }: GetSystemSmtpParams,

@@ -1,6 +1,6 @@
 # Architecture — start-registry
 
-`start-registry` is one of the product wrappers in the `start-os` monorepo. The wrapper itself is tiny; nearly all logic lives in the shared backend crate `start-core` (`shared-libs/crates/start-core`, package `start-core`, lib name `start_core`).
+`start-registry` is one of the product wrappers in the `start-technologies` monorepo. The wrapper itself is tiny; nearly all logic lives in the shared backend crate `start-core` (`shared-libs/crates/start-core`, package `start-core`, lib name `start_core`).
 
 ## Place in the monorepo
 
@@ -38,6 +38,7 @@ Defined in `shared-libs/crates/start-core/src/registry/mod.rs`:
 - `POST /rpc/{*path}` — JSON-RPC, wrapped in `Cors`, `Auth` (local + signature auth), and `DeviceInfoMiddleware`.
 - `GET /ws/rpc/{*path}` — WebSocket RPC continuations, keyed by a `Guid`.
 - `/rest/rpc/{*path}` — REST continuation channel (e.g. large asset streams), keyed by a `Guid`.
+- `GET /icons/{*path}` — a package or dependency icon from the content-addressed store, unauthenticated and immutable. Package versions refer to an icon by this path, `blake3/<hash>.<ext>`; `DeviceInfoMiddleware` inlines it as a data URL for StartOS before 0.4.0.3.
 
 ## RPC API surface (`registry_api`)
 
@@ -70,11 +71,28 @@ revisions whose JSON Patch paths are relative to the selected subtree.
 
 Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hold versions, dependency `VersionRange`s, and `RegistryAsset`s. Assets carry **Blake3 commitments** (`sign/commitment/blake3`) for content addressing and integrity, and are signed by registered signers.
 
+OS versions use the shared `LocaleString` for `releaseNotes`, as package metadata does:
+a plain string or a locale-to-Markdown map. The compiler includes `en_US` in translated
+maps. Current clients receive the complete map and select locally with `LocalizePipe`.
+Existing English-only records deserialize unchanged without a migration.
+
+`os.version.add` replaces the entire `LocaleString`; promotion preserves it unchanged.
+The existing third positional CLI argument accepts prose or a JSON locale map. The
+`<RELEASE_NOTES_OR_JSON>` help marker lets publishers reject stale CLIs before writes.
+Registries must be upgraded before publishing maps.
+
+`DeviceInfoMiddleware` projects English notes in responses for StartOS before 0.4.0.5
+and string-only StartWRT clients. It uses the device version, or an explicit update
+source version without a device header. Headerless queries without a source version
+retain the full map. Projection covers OS version queries, the OS index and the full
+index; stored notes remain unchanged.
+
 ## Persistence
 
 `RegistryContext::init` resolves `datadir` (default `/var/lib/startos`) and:
 
 - Opens `<datadir>/registry.db` as a `TypedPatchDb<RegistryDatabase>`; initializes it on first run and runs pending migrations.
+- Stores package and dependency icons once each under `<datadir>/icons/blake3/`, named by the blake3 of their bytes, and deletes those the index no longer refers to.
 - Opens a SQLite connection for metrics.
 - Hosts asset files under the data directory.
 
@@ -85,5 +103,4 @@ The registry has no bundled UI of its own; the browsing/search/download UI is th
 ## Further reading
 
 - [README.md](./README.md) — what the registry is and how to run it.
-- [CONTRIBUTING.md](./CONTRIBUTING.md) — build, test, and contribution workflow.
-- [AGENTS.md](./AGENTS.md) — rules for agents working in this dir.
+- [AGENTS.md](./AGENTS.md) — build, test, and contribution workflow.

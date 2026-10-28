@@ -1,5 +1,6 @@
 import { TriggerInput } from './TriggerInput'
 export { cooldownTrigger } from './cooldownTrigger'
+export { onceTrigger } from './onceTrigger'
 export { statusTrigger } from './statusTrigger'
 
 /**

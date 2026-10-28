@@ -82,7 +82,7 @@ export class BackupRestoreComponent {
   private decrypt(serverId: string, password: string) {
     return this.tasks.run(async () => {
       const params = { targetId: this.target.id, serverId, password }
-      const backupInfo = await this.api.getBackupInfo(params)
+      const backupInfo = await this.api.rpc.backup.target.info(params)
       const data = { targetId: this.target.id, serverId, backupInfo, password }
 
       this.context.$implicit.complete()

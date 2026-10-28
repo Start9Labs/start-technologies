@@ -1,0 +1,7 @@
+export { Api as StartOS } from './start-os.schemas'
+export { Api as Setup } from './setup.schemas'
+export { Api as Init } from './init.schemas'
+export { Api as Diagnostic } from './diagnostic.schemas'
+export { Api as Registry } from './registry.schemas'
+export { Api as Tunnel } from './tunnel.schemas'
+export { Api as Effects } from './effects.schemas'

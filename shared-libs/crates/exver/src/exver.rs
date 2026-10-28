@@ -967,7 +967,7 @@ impl fmt::Display for VersionRange {
             Anchor(GTE, v) => write!(f, ">={}", v),
             Anchor(LT, v) => write!(f, "<{}", v),
             Anchor(NEQ, v) => write!(f, "!={}", v),
-            Anchor(EQ, v) => write!(f, "={}", v), // this is equivalent to above
+            Anchor(EQ, v) => write!(f, "={}", v),
             Anchor(LTE, v) => write!(f, "<={}", v),
             Anchor(GT, v) => write!(f, ">{}", v),
             And(a, b) => {
@@ -994,12 +994,15 @@ impl fmt::Display for VersionRange {
 impl std::str::FromStr for VersionRange {
     type Err = ParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        parse_version_range(
-            Grammar::parse(Rule::version_range, s)
-                .map_err(|e| ParseError::InvalidVersionRange(s.into(), Some(e)))?
-                .next()
-                .unwrap(),
-        )
+        // Pest requires at least 64 KiB of remaining stack.
+        stacker::maybe_grow(128 * 1024, 1024 * 1024, || {
+            parse_version_range(
+                Grammar::parse(Rule::version_range, s)
+                    .map_err(|e| ParseError::InvalidVersionRange(s.into(), Some(e)))?
+                    .next()
+                    .unwrap(),
+            )
+        })
     }
 }
 #[cfg(feature = "serde")]

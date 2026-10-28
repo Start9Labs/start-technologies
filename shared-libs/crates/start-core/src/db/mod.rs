@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use tokio::sync::watch;
 use tracing::instrument;
-use ts_rs::TS;
 
 use crate::context::{CliContext, RpcContext};
 use crate::prelude::*;
@@ -53,6 +52,7 @@ pub fn db<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "dump",
             from_fn_async(cli_dump)
+                .no_ts()
                 .with_display_serializable()
                 .with_about("about.filter-query-db"),
         )
@@ -70,6 +70,7 @@ pub fn db<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "apply",
             from_fn_async(cli_apply)
+                .no_ts()
                 .no_display()
                 .with_about("about.update-db-record"),
         )
@@ -135,34 +136,37 @@ async fn cli_dump(
     Ok(dump)
 }
 
-#[derive(Deserialize, Serialize, TS)]
+#[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct DumpParams {
-    #[ts(type = "string | null")]
-    pointer: Option<JsonPointer>,
+    pub pointer: Option<JsonPointer>,
 }
+
+rpc_toolkit::reflect_ts!(DumpParams);
 
 pub async fn dump(ctx: RpcContext, DumpParams { pointer }: DumpParams) -> Result<Dump, Error> {
     Ok(ctx.db.dump(pointer.as_ref().unwrap_or(&*PUBLIC)).await)
 }
 
-#[derive(Deserialize, Serialize, TS)]
+#[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct SubscribeParams {
-    #[ts(type = "string | null")]
-    pointer: Option<JsonPointer>,
-    #[ts(skip)]
+    pub pointer: Option<JsonPointer>,
+    #[visit(ts(skip))]
     #[serde(rename = "__Auth_signer")]
-    signer: Option<InternedString>,
+    pub signer: Option<InternedString>,
 }
 
-#[derive(Deserialize, Serialize, TS)]
+rpc_toolkit::reflect_ts!(SubscribeParams);
+
+#[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct SubscribeRes {
-    #[ts(type = "{ id: number; value: unknown }")]
     pub dump: Dump,
     pub guid: Guid,
 }
+
+rpc_toolkit::reflect_ts!(SubscribeRes);
 
 struct DbSubscriber {
     rev: u64,
@@ -334,14 +338,26 @@ async fn cli_apply(
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct ApplyParams {
     #[arg(help = "help.arg.db-apply-expr")]
-    expr: String,
+    pub expr: String,
 }
+
+rpc_toolkit::reflect_ts!(ApplyParams);
+
+#[derive(Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyWithPathParams {
+    #[serde(flatten)]
+    pub expression: ApplyParams,
+    pub path: Option<PathBuf>,
+}
+
+rpc_toolkit::reflect_ts!(ApplyWithPathParams);
 
 pub async fn apply(ctx: RpcContext, ApplyParams { expr }: ApplyParams) -> Result<(), Error> {
     ctx.db
@@ -375,26 +391,26 @@ pub fn put<C: Context>() -> ParentHandler<C> {
             .with_call_remote::<CliContext>(),
     )
 }
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct UiParams {
     #[arg(help = "help.arg.json-pointer")]
-    #[ts(type = "string")]
     pointer: JsonPointer,
     #[arg(help = "help.arg.json-value")]
-    #[ts(type = "any")]
     value: Value,
 }
+
+rpc_toolkit::reflect_ts!(UiParams);
 
 // #[command(display(display_serializable))]
 #[instrument(skip_all)]
 pub async fn ui(ctx: RpcContext, UiParams { pointer, value, .. }: UiParams) -> Result<(), Error> {
-    let ptr = "/public/ui"
+    let mut ptr = "/public/ui"
         .parse::<JsonPointer>()
-        .with_kind(ErrorKind::Database)?
-        + &pointer;
+        .with_kind(ErrorKind::Database)?;
+    ptr.append(&pointer);
     ctx.db.put(&ptr, &value).await?;
     Ok(())
 }

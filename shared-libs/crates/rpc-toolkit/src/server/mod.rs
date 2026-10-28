@@ -15,14 +15,17 @@ pub type RpcResponse = yajrc::RpcResponse<GenericRpcMethod>;
 pub type SingleOrBatchRpcRequest = yajrc::SingleOrBatchRpcRequest<GenericRpcMethod>;
 
 pub mod http;
+#[cfg(feature = "mcp")]
+pub mod mcp;
 pub mod socket;
 
 pub use http::*;
 pub use socket::*;
 
 pub struct Server<Context: crate::Context> {
-    make_ctx: Arc<dyn Fn() -> BoxFuture<'static, Result<Context, RpcError>> + Send + Sync>,
-    root_handler: Arc<AnyHandler<Context, Empty, ParentHandler<Context>>>,
+    pub(crate) make_ctx:
+        Arc<dyn Fn() -> BoxFuture<'static, Result<Context, RpcError>> + Send + Sync>,
+    pub(crate) root_handler: Arc<AnyHandler<Context, Empty, ParentHandler<Context>>>,
 }
 impl<Context: crate::Context> Clone for Server<Context> {
     fn clone(&self) -> Self {
@@ -50,11 +53,11 @@ impl<Context: crate::Context> Server<Context> {
         &self,
         method: &str,
         params: Value,
-    ) -> impl Future<Output = Result<Value, RpcError>> + Send + 'static {
+    ) -> impl Future<Output = Result<Value, RpcError>> + Send + 'static + use<Context> {
         let (make_ctx, root_handler, method) = (
             self.make_ctx.clone(),
             self.root_handler.clone(),
-            self.root_handler.method_from_dots(method),
+            self.root_handler.method_from_dots(method.as_ref()),
         );
 
         async move {
@@ -74,14 +77,11 @@ impl<Context: crate::Context> Server<Context> {
         &self,
         RpcRequest { id, method, params }: RpcRequest,
     ) -> impl Future<Output = RpcResponse> + Send + 'static {
-        let handle = (|| Ok::<_, RpcError>(self.handle_command(method.as_str(), params)))();
+        let handle = self.handle_command(method.as_str(), params);
         async move {
             RpcResponse {
                 id,
-                result: match handle {
-                    Ok(handle) => handle.await,
-                    Err(e) => Err(e),
-                },
+                result: handle.await,
             }
         }
     }

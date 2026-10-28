@@ -88,7 +88,7 @@ export function setupI18n<
 
     if (params) {
       for (const [paramName, value] of Object.entries(params)) {
-        result = result.replace(`\${${paramName}}`, formatValue(value))
+        result = result.replaceAll(`\${${paramName}}`, () => formatValue(value))
       }
     }
 

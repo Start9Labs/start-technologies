@@ -9,9 +9,109 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
-## [2.2.0]
+## [2.5.2]
+
+### Changed
+
+- Preserved image-provided `/etc/resolv.conf` symlinks and hardlinks when packing. Packages with symlinked resolvers need SDK 3.1.1 or later.
+
+## [2.5.1]
+
+### Fixed
+
+- Piping output into a command that stops reading early, such as `head`, no longer crashes the CLI.
+
+- Fixed macOS binaries aborting at launch on newer macOS versions.
+
+- Fixed services packed from an image whose `/etc/resolv.conf` is a symlink, such as a Nix-built image, failing to start on StartOS. Repack affected services with this version.
+
+## [2.5.0]
 
 ### Added
+
+- **The identity key can live in gpg-agent.** Set `id-key-gpg: <key>` in the config (or pass `--id-key-gpg`) to a fingerprint, key ID, or user ID to sign with an Ed25519 key held by gpg-agent instead of `id.key.pem`. Requires GnuPG 2.3 or later. Servers running StartOS 0.4.0.3 or earlier cannot verify registry assets signed only by such a key.
+
+- The Debian package enables Bash tab completion automatically in new shells.
+
+- Add `server update-signers` commands to add, get, list, relabel, and remove trusted OS update signing keys.
+
+### Changed
+
+- **Registry signatures carry their actual scheme.** Signatures made with `id.key.pem` are Ed25519ph labeled with their own algorithm identifier. Publishing requires start-registry 1.2.0 or later; reading from older registries still works.
+
+- **Requests are signed with a new layout.** Managing a server or publishing to a registry requires StartOS 0.4.0.3, StartTunnel 1.4.0, or start-registry 1.2.0 or later.
+
+- Set DNS overrides per gateway with `net dns set-static <GATEWAY> [SERVERS]...`; omit servers to restore automatic gateway DNS.
+
+### Fixed
+
+- Bash tab completion works for nested subcommands and their options.
+
+- **`package start` records running intent while critical tasks block execution and prints a warning.** The service starts when those tasks clear. The `--force` flag is removed; remove it from scripts.
+
+### Security
+
+- **Update dependencies with security fixes**, including TLS certificate verification and handshake handling, HTTP/2 flow control, and XML parsing.
+
+## [2.4.2]
+
+### Fixed
+
+- `s9pk pack` needs less free disk space to import a container image from a tag or OCI layout.
+
+## [2.4.1]
+
+### Fixed
+
+- `s9pk pack` accepts container images whose layers store absolute or `..` paths, such as Tailscale's, resolving them against the image root.
+
+## [2.4.0]
+
+### Added
+
+- Pack images from local OCI layout directories or archives, selecting nested multi-platform images by platform and optional reference. Docker Buildx exports OCI directly; its selected builder must support OCI output. Registry tags still use Docker/Podman, with exported configuration replacing image inspection. Legacy image conversion no longer requires a container engine or binfmt registration.
+
+### Changed
+
+- **`s9pk pack` and `s9pk edit add-image` create SquashFS images natively**, without requiring `mksquashfs` or `tar2sqfs` on the packaging workstation. Packaged JavaScript files are readable and directories traversable by the service runtime without changing source permissions. Container filesystems are reconstructed from hash-verified image layers without Docker container initialization state, preserving image timestamps and hardlink identity across layers. JavaScript and asset timestamps are normalized to zero, including v1 conversion. An immutable platform-specific image configuration, identical writer options, and the locked codec produce identical SquashFS bytes.
+
+### Fixed
+
+- **`s9pk edit add-image` re-signs edited packages with the workspace build key**, keeping their signatures valid.
+
+- **Package manifest paths containing apostrophes work during packing and validation.**
+
+## [2.3.0]
+
+### Added
+
+- **`registry package get <ID> full --all-revisions` lists every revision of a package a registry
+  holds.** Without `--all-revisions`, a registry running start-registry 1.1.1 or later hides a
+  revision once a newer revision of the same upstream version runs on the same hardware.
+
+- **`registry info set-icon --clear` and `registry info set-description --clear` remove a
+  registry's icon and description.**
+
+### Fixed
+
+- **`s9pk pack` and `s9pk edit add-image` preserve the requested platform's image configuration**, including its default command, with Docker and Podman. Docker packaging requires Docker 28.1+ (API 1.49+).
+
+- **`s9pk edit add-image` signs the updated archive**, keeping the edited package readable and valid.
+
+- **`package install` reports a package missing from the registry it asked**, naming that
+  registry, instead of prompting to choose from an empty list of flavors.
+
+## [2.2.0]
+
+### Security
+
+- **Update shared dependencies with security fixes.** Replace the unmaintained YAML library while preserving configuration formats.
+
+### Added
+
+- **`server trust-ca --cert <PEM>` adds a CA root to the server's host trust store.** Pass
+  the PEM certificate text directly or use shell substitution to read a file. The command
+  prints its subject and SHA-256 fingerprint.
 
 - **`s9pk edit add-image` enables CPU emulation by default** when the server uses
   another architecture. Use `--no-emulation` for images that require a native architecture.

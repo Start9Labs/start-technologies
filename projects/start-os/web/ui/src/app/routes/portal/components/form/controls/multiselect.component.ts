@@ -10,15 +10,19 @@ import { Control } from './control'
 @Component({
   selector: 'form-multiselect',
   template: `
-    <tui-textfield multi tuiChevron [disabledItemHandler]="disabledItemHandler">
+    <tui-textfield
+      multi
+      tuiChevron
+      [disabledItemHandler]="disabledItemHandler"
+      [invalid]="control.invalid()"
+    >
       @if (spec.name) {
         <label tuiLabel>{{ spec.name }}</label>
       }
       <select
         tuiMultiSelect
-        [invalid]="control.invalid()"
         [disabled]="disabled"
-        [readOnly]="readOnly"
+        [readonly]="readOnly"
         [items]="items"
         [ngModel]="selected()"
         (ngModelChange)="onSelected($event)"

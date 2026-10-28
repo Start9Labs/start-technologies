@@ -1,12 +1,6 @@
 import { inject, Injectable } from '@angular/core'
 import { blake3 } from '@noble/hashes/blake3'
-import {
-  GetPackageReq,
-  GetPackageRes,
-  GetPackagesReq,
-  GetPackagesRes,
-  MarketplacePkg,
-} from '@start9labs/marketplace'
+import { MarketplacePkg } from '@start9labs/marketplace'
 import {
   HttpOptions,
   HttpService,
@@ -14,12 +8,13 @@ import {
   RpcError,
   RPCOptions,
 } from '@start9labs/shared'
-import { T } from '@start9labs/start-core'
-import { ApiService } from './api.service'
+import { createRpcClient } from '@start9labs/start-core'
+import { ApiService, RegistryClient } from './api.service'
 
 @Injectable()
 export class LiveApiService extends ApiService {
   private readonly http = inject(HttpService)
+  private readonly registries = new Map<string, RegistryClient>()
 
   constructor() {
     super()
@@ -28,43 +23,20 @@ export class LiveApiService extends ApiService {
     window.rpcClient = this
   }
 
-  async getRegistryInfo(registryUrl: string): Promise<T.RegistryInfo> {
-    return this.registryRequest(registryUrl, {
-      method: 'info',
-      params: {},
-    })
-  }
-
-  async getRegistryPackage(
-    registryUrl: string,
-    id: string,
-    targetVersion: string | null,
-  ): Promise<GetPackageRes> {
-    const params: GetPackageReq = {
-      id,
-      targetVersion,
-      sourceVersion: null,
-      otherVersions: 'short',
+  registry(url: string): RegistryClient {
+    const root = `${new URL('rpc/v0', url)}`
+    let client = this.registries.get(root)
+    if (!client) {
+      client = createRpcClient<RegistryClient>({
+        call: (method, params, options) =>
+          this.rpcRequest(
+            { method, params: params as Record<string, unknown>, ...options },
+            root,
+          ),
+      })
+      this.registries.set(root, client)
     }
-
-    return this.registryRequest<GetPackageRes>(registryUrl, {
-      method: 'package.get',
-      params,
-    })
-  }
-
-  async getRegistryPackages(registryUrl: string): Promise<GetPackagesRes> {
-    const params: GetPackagesReq = {
-      id: null,
-      targetVersion: null,
-      sourceVersion: null,
-      otherVersions: 'short',
-    }
-
-    return this.registryRequest<GetPackagesRes>(registryUrl, {
-      method: 'package.get',
-      params,
-    })
+    return client
   }
 
   async getStaticProxy(
@@ -84,17 +56,9 @@ export class LiveApiService extends ApiService {
     })
   }
 
-  private async registryRequest<T>(
-    registryUrl: string,
-    options: RPCOptions,
-  ): Promise<T> {
-    // Hit the registry's RPC directly; the registry.* namespace + registry param is the StartOS host-proxy convention, absent on this static site.
-    return this.rpcRequest(options, `${new URL('rpc/v0', registryUrl)}`)
-  }
-
   private async rpcRequest<T>(
-    options: RPCOptions,
-    urlOverride?: string,
+    options: RPCOptions<Record<string, unknown>, string>,
+    urlOverride: string,
   ): Promise<T> {
     const res = await this.http.rpcRequest<T>(options, urlOverride)
     const body = res.body
@@ -110,7 +74,7 @@ export class LiveApiService extends ApiService {
     if (res.headers.get('File-Digest')) {
       const digest = res.headers.get('File-Digest')!
       let data: Uint8Array
-      if (opts.responseType === 'arrayBuffer') {
+      if (opts.responseType === 'arraybuffer') {
         data = Buffer.from(res.body as ArrayBuffer)
       } else if (opts.responseType === 'text') {
         data = Buffer.from(res.body as string)

@@ -12,14 +12,13 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::disk::mount::filesystem::idmapped::IdMap;
 use crate::disk::mount::filesystem::syscall::{self, DetachedMount};
 use crate::prelude::*;
 use crate::service::effects::ContainerCliContext;
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[command(rename_all = "kebab-case")]
 #[serde(rename_all = "camelCase")]
 pub struct BindMountParams {
@@ -37,6 +36,9 @@ pub struct BindMountParams {
     /// Mark the mount read-only via `mount_setattr(MOUNT_ATTR_RDONLY)`.
     #[arg(long, default_value_t = false)]
     pub readonly: bool,
+    /// Insert beneath the top mount; detaching the top reveals this mount.
+    #[arg(long, default_value_t = false, help = "help.arg.mount-beneath")]
+    pub beneath: bool,
     /// Treat the target as a regular file rather than a directory when
     /// creating it.
     #[arg(long, default_value_t = false)]
@@ -47,6 +49,8 @@ pub struct BindMountParams {
     pub idmap: Vec<IdMap>,
 }
 
+rpc_toolkit::reflect_ts!(BindMountParams);
+
 // The concrete context type keeps this subcommand off the RPC server's tree:
 // `handler()` only retains subcommands whose context matches the serving one.
 pub async fn bind_mount(_: ContainerCliContext, params: BindMountParams) -> Result<(), Error> {
@@ -55,6 +59,7 @@ pub async fn bind_mount(_: ContainerCliContext, params: BindMountParams) -> Resu
         target,
         recursive,
         readonly,
+        beneath,
         file,
         idmap,
     } = params;
@@ -89,6 +94,10 @@ pub async fn bind_mount(_: ContainerCliContext, params: BindMountParams) -> Resu
         detached.set_readonly(true)?;
     }
 
-    detached.attach(&target)?;
+    if beneath {
+        detached.attach_beneath(&target)?;
+    } else {
+        detached.attach(&target)?;
+    }
     Ok(())
 }

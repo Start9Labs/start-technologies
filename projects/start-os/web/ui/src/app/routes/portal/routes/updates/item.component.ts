@@ -1,7 +1,10 @@
 import { DatePipe } from '@angular/common'
 import { Component, inject, input, signal } from '@angular/core'
 import { RouterLink } from '@angular/router'
-import { MarketplacePkg } from '@start9labs/marketplace'
+import {
+  MarketplaceIconDirective,
+  MarketplacePkg,
+} from '@start9labs/marketplace'
 import {
   DialogService,
   i18nPipe,
@@ -23,6 +26,7 @@ import {
   TuiChevron,
   TuiFade,
   TuiProgressCircle,
+  TuiSkeleton,
 } from '@taiga-ui/kit'
 import { filter } from 'rxjs'
 import { InstallingProgressPipe } from 'src/app/routes/portal/routes/services/pipes/install-progress.pipe'
@@ -33,6 +37,7 @@ import {
   PackageDataEntry,
   UpdatingState,
 } from 'src/app/services/patch-db/data-model'
+import { MarketplaceAlertsService } from '../marketplace/services/alerts.service'
 import UpdatesComponent from './updates.component'
 
 @Component({
@@ -46,8 +51,13 @@ import UpdatesComponent from './updates.component'
             appearance="action-grayscale"
             size="s"
             [round]="false"
+            [tuiSkeleton]="icon.loading()"
           >
-            <img alt="" [src]="item().icon" />
+            <img
+              #icon="marketplaceIcon"
+              [marketplaceIcon]="item()"
+              [registry]="parent.current()?.url"
+            />
           </span>
           <span tuiTitle [style.margin]="'-0.125rem 0 0'">
             <b tuiFade>{{ item().title }}</b>
@@ -254,6 +264,7 @@ import UpdatesComponent from './updates.component'
     }
   `,
   imports: [
+    MarketplaceIconDirective,
     RouterLink,
     TuiExpand,
     TuiButton,
@@ -263,6 +274,7 @@ import UpdatesComponent from './updates.component'
     TuiLink,
     TuiIcon,
     TuiProgressCircle,
+    TuiSkeleton,
     TuiTitle,
     TuiFade,
     LocalizePipe,
@@ -278,6 +290,7 @@ export class UpdatesItemComponent {
   private readonly service = inject(MarketplaceService)
   private readonly dialog = inject(DialogService)
   private readonly hiddenUpdates = inject(HiddenUpdatesService)
+  private readonly alerts = inject(MarketplaceAlertsService)
 
   readonly parent = inject(UpdatesComponent)
   readonly expanded = signal(false)
@@ -290,8 +303,17 @@ export class UpdatesItemComponent {
   readonly pending = input.required<boolean>()
 
   async update() {
-    const { id, version } = this.item()
+    const { id, version, preDownloadAlert } = this.item()
     const url = this.parent.current()?.url || ''
+
+    if (
+      !(await this.alerts.alertPreDownload(
+        preDownloadAlert,
+        this.local().stateInfo.manifest.version,
+      ))
+    ) {
+      return
+    }
 
     this.ready.set(false)
 

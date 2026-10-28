@@ -46,5 +46,4 @@ MIT — see [LICENSE](LICENSE).
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how it's built and how the PWM driver works.
-- [CONTRIBUTING.md](CONTRIBUTING.md) — how to build, test, and contribute.
-- [AGENTS.md](AGENTS.md) — agent/dev operating rules (`CLAUDE.md` is a one-line `@AGENTS.md` import).
+- [AGENTS.md](AGENTS.md) — how to build, test, and contribute.

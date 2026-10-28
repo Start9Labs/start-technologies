@@ -17,7 +17,7 @@ import {
   withPreloading,
   withRouterConfig,
 } from '@angular/router'
-import { i18nPipe as i18nPipeShared, RELATIVE_URL } from '@start9labs/shared'
+import { AUTH_KEY_STORAGE_KEY, RELATIVE_URL } from '@start9labs/shared'
 import { tuiSheetDialogOptionsProvider } from '@taiga-ui/addon-mobile'
 import {
   provideTaiga,
@@ -39,7 +39,6 @@ import { I18N_PROVIDERS } from 'src/app/i18n/i18n.providers'
 import { i18nService } from 'src/app/i18n/i18n.service'
 
 import { routes } from './app.routes'
-import { i18nPipe } from './i18n/i18n.pipe'
 import { ApiService } from './services/api/api.service'
 import { LiveApiService } from './services/api/live-api.service'
 import { MockApiService } from './services/api/mock-api.service'
@@ -75,11 +74,6 @@ export const appConfig: ApplicationConfig = {
     tuiCardOptionsProvider({ space: 'compact', appearance: 'floating' }),
     tuiDialogOptionsProvider({ size: 's' }),
     tuiSheetDialogOptionsProvider({ bar: false, offset: 72 }),
-    // @TODO: Alex remove local i18n infrastructure in favor of shared one
-    {
-      provide: i18nPipeShared,
-      useExisting: i18nPipe,
-    },
     {
       provide: ApiService,
       useClass: useMocks ? MockApiService : LiveApiService,
@@ -96,8 +90,13 @@ export const appConfig: ApplicationConfig = {
       provide: RELATIVE_URL,
       useValue: `/${api.url}/${api.version}`,
     },
+    {
+      provide: AUTH_KEY_STORAGE_KEY,
+      useValue: '_startWrt/authKey',
+    },
     provideHttpClient(withInterceptorsFromDi(), withFetch()),
     provideAppInitializer(() => inject(AuthService).whenReady()),
+    // @TODO: Alex remove local i18n infrastructure in favor of shared one
     ...I18N_PROVIDERS,
     // Apply the language the Taiga switcher remembers at boot (pre-auth screens);
     // the authenticated shell (app.ts) later applies the backend-stored value.

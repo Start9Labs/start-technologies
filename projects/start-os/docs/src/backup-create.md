@@ -50,12 +50,24 @@ Even with proper backups the risk of data corruption is always non-zero. Therefo
 
 ## Physical Drive
 
-`EXT4` is the recommended format of your backup drive. `fat32` and `exFAT` are _not_ recommended and may not work.
+`Btrfs` is the recommended format of your backup drive. Existing `EXT4` backup drives remain supported. `fat32` and `exFAT` are _not_ recommended and may not work.
+
+A new drive, or one formatted for another system, can be prepared from StartOS: in `System > Create Backup`, click "Format a drive", choose the drive, and confirm. This erases everything on the drive and leaves a single `Btrfs` partition. The drive must be at least 1 GiB.
 
 > [!WARNING]
 > Backing up to USB thumb drives or SD card media is not recommended unless you are using high-endurance, high-quality storage. Low-quality flash memory is prone to corruption and failure over time.
 >
 > If you are using a Raspberry Pi, backup drive _must_ be self-powered, or be connected via a powered USB hub, to prevent possible data corruption.
+
+1. Plug the drive into your server.
+
+1. In StartOS, go to `System > Create Backup`. The drive appears under `Physical Drives`; if it doesn't, click "Refresh".
+
+1. Click the drive.
+
+1. Select the services to back up, or click "Toggle all", then click "Done".
+
+1. Enter your master password.
 
 ## Network Folder
 
@@ -349,9 +361,11 @@ A network folder backup sends your encrypted backup over the LAN to a shared fol
 
 ### Step 2. Connect from StartOS
 
+The **Hostname** field accepts an IP address, a DNS name containing a dot (such as `nas.home.arpa`), a `.local` mDNS name, or a bare NetBIOS computer name. For DNS, enter the full name rather than a bare name such as `nas`.
+
 1. In StartOS, go to `System > Create Backup`.
 
-1. Click "Open New".
+1. Under `Network Folders`, click "New".
 
 1. Complete the form:
 
@@ -436,3 +450,11 @@ A network folder backup sends your encrypted backup over the LAN to a shared fol
 
 > [!WARNING]
 > If you receive `Filesystem I/O Error mount error(13): Permission denied`, ensure you have entered the correct values. The hostname can be particularly tricky.
+
+### Step 3. Back Up
+
+1. Click the folder under `Network Folders`.
+
+1. Select the services to back up, or click "Toggle all", then click "Done".
+
+1. Enter your master password.

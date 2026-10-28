@@ -1,4 +1,4 @@
-// ** RPC types **
+import type { RPC } from '@start9labs/start-core'
 
 interface RPCBase {
   jsonrpc: '2.0'
@@ -18,27 +18,25 @@ export interface RPCErrorRes extends RPCBase {
   error: RPCErrorDetails
 }
 
-export interface RPCErrorDetails {
-  code: number
-  message: string
-  data?:
-    | {
-        details: string
-      }
-    | string
-}
+export type RPCErrorDetails = RPC.RpcReturnType<
+  RPC.Diagnostic,
+  'diagnostic.error'
+>
 
 export type RPCResponse<T> = RPCSuccessRes<T> | RPCErrorRes
 
-export interface RPCOptions {
-  method: string
+export interface RPCOptions<
+  Params = Record<string, unknown>,
+  Method extends string = string,
+> {
+  method: Method
   headers?: Record<string, string | string[]>
-  params: Record<string, any>
+  params: Params
   timeout?: number
 }
 
 export function isRpcError<Error, Result>(
   arg: { error: Error } | { result: Result },
 ): arg is { error: Error } {
-  return (arg as any).error !== undefined
+  return 'error' in arg
 }

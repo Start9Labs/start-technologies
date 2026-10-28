@@ -12,7 +12,7 @@ import { QRComponent } from 'src/app/routes/portal/components/qr.component'
       <label tuiLabel>{{ member.name }}</label>
       <input
         tuiInput
-        [readOnly]="true"
+        [readonly]="true"
         [ngModel]="member.value"
         [type]="member.masked && masked ? 'password' : 'text'"
       />

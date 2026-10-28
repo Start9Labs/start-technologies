@@ -317,7 +317,7 @@ Pass environment variables to a daemon or oneshot via the `env` option on `exec`
 })
 ```
 
-The process also receives the image's environment variables and the server's language as `LANG`; these `env` values override both. Set a variable to `undefined` to remove it, e.g. `env: { LANG: undefined }`.
+The process also receives the image's environment variables and, unless the image sets one, the server's language as `LANG` when the image includes that locale; these `env` values override both. Set a variable to `undefined` to remove it, e.g. `env: { LANG: undefined }`.
 
 ## Health Checks
 
@@ -397,13 +397,13 @@ The `fn` returns an object with `result` and `message`:
 
 Available on `sdk.healthCheck`:
 
-- **`checkPortListening(effects, port, { successMessage, errorMessage })`** — checks if a TCP/UDP port is bound by reading `/proc/net`. Lightweight, no network I/O. Preferred for daemon readiness checks.
+- **`checkPortListening(effects, port, { successMessage, errorMessage })`** — checks if a TCP port has a listening socket, or a UDP port is bound, by reading `/proc/net`. A TCP connection left in `TIME_WAIT` after its process exits does not count. Lightweight, no network I/O. Preferred for daemon readiness checks.
 - **`checkWebUrl(effects, url, { successMessage, errorMessage })`** — fetches a URL, succeeds on any HTTP response.
 - **`runHealthScript(command, subcontainer, { errorMessage })`** — runs a command in a subcontainer, succeeds on exit code 0.
 
 ### Polling Triggers
 
-By default, health checks poll every 1 s while the daemon is pending, then every 30 s once it reports a non-pending result (`success`, `loading`, or `disabled`). Override this with the `trigger` option on `ready`:
+By default, health checks poll every 1 s while `starting` or `failure`, and every 30 s while `success`, `loading`, `waiting`, or `disabled`. A daemon's `ready` check reporting `loading` or `waiting` before its first `success` is the exception: it backs off from 1 s, doubling to 30 s, so a daemon that `requires` it starts soon after it becomes ready. Override this with the `trigger` option on `ready`:
 
 ```typescript
 ready: {
@@ -415,8 +415,9 @@ ready: {
 
 Available triggers on `sdk.trigger`:
 
-- **`cooldownTrigger(ms)`** — fixed interval between checks, regardless of status.
-- **`statusTrigger(defaultMs, { success?, loading?, disabled?, starting?, waiting?, failure? })`** — per-status polling intervals in milliseconds. The first argument is the default interval for any status not explicitly listed.
+- **`cooldownTrigger(ms)`** — fixed interval between checks, regardless of status. The first check also waits `ms`.
+- **`statusTrigger(defaultMs, { success?, loading?, disabled?, starting?, waiting?, failure? })`** — per-status polling intervals in milliseconds. The first argument is the default interval for any status not explicitly listed. An interval of `Infinity` stops polling once that status is reported.
+- **`onceTrigger`** — one check, as soon as the health check starts. Use it for a result that cannot change until `main` restarts, such as one computed from configuration read with `.const()`: re-polling it only repeats the same result, and a failure writes a line to the service log on every poll. Pair it with `gracePeriod: 0`, or the single result is reported as `starting`.
 
 Use a slower trigger for expensive checks (RPC calls during heavy processing) to reduce load on the service:
 
@@ -429,6 +430,8 @@ trigger: sdk.trigger.statusTrigger(30_000, {
 
 ## Volume Mounts
 
+Volume mounts declared `readonly: true` and all asset mounts are read-only; writes through them fail with `EROFS`. Copy assets that need modification into a writable volume and mount that copy. `type: 'infer'` detects existing regular files; use `type: 'file'` when the file may need to be created.
+
 ```typescript
 sdk.Mounts.of()
   // Mount entire volume (directory)
@@ -438,13 +441,13 @@ sdk.Mounts.of()
     mountpoint: '/data',
     readonly: false,
   })
-  // Mount specific file from volume (requires type: 'file')
+  // Mount a specific file from the volume
   .mountVolume({
     volumeId: 'main',
     subpath: 'config.py',
     mountpoint: '/app/config.py',
     readonly: true,
-    type: 'file', // Required when mounting a single file
+    type: 'file',
   })
 ```
 
@@ -565,7 +568,7 @@ await appSub.execFail(['pg_restore', '-U', user, '-d', database, dumpFile], {
 Opt out whenever the runtime is set by something you cannot bound: the size of the data, the speed of a disk or backup target, or another process you are waiting on. Keep the default for commands that should answer promptly, where the timeout is what stops a wedged container from hanging the service.
 
 > [!NOTE]
-> On timeout the SDK sends `SIGKILL` to the process it spawned and reports `timed out after <n>ms and was killed with SIGKILL`; `exec()`'s result carries `timedOutAfter`, set to the limit that elapsed. The command itself runs inside the subcontainer and is not signalled — it stops when the subcontainer is torn down, so treat a timeout as "the SDK stopped waiting", not "the work stopped".
+> On timeout the SDK sends `SIGKILL` to the process it spawned and reports `timed out after <n>ms and was killed with SIGKILL`; `exec()`'s result carries `timedOutAfter`, set to the limit that elapsed.
 
 ## PostgreSQL Sidecar
 
@@ -658,7 +661,7 @@ const postgresSub = sdk.SubContainer.of(
       ])
       if (result.exitCode !== 0) {
         return {
-          result: 'loading',
+          result: 'starting',
           message: i18n('Waiting for PostgreSQL to be ready'),
         }
       }

@@ -9,7 +9,9 @@ import { tuiSetSignal } from '@taiga-ui/cdk'
 import { TuiHintDirective } from '@taiga-ui/core'
 import { i18nPipe } from '../i18n/i18n.pipe'
 
-export const VERSION = new InjectionToken<string>('VERSION')
+export const VERSION = new InjectionToken<string>('VERSION', {
+  factory: () => '',
+})
 
 @Directive({
   selector: '[docsLink]',
@@ -30,7 +32,9 @@ export class DocsLinkDirective {
     const path = this.path()
     const relative = path.startsWith('/') ? path : `/${path}`
 
-    return `https://docs.start9.com${relative}?version=${this.version}${this.fragment()}`
+    const query = this.version ? `?version=${this.version}` : ''
+
+    return `https://docs.start9.com${relative}${query}${this.fragment()}`
   })
 
   constructor() {

@@ -148,7 +148,7 @@ export class CustomValidators {
   }
 }
 
-function isValidIpv4(ip: string): boolean {
+export function isValidIpv4(ip: string): boolean {
   const ipv4Regex = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/
   const match = ip.match(ipv4Regex)
   if (!match) return false

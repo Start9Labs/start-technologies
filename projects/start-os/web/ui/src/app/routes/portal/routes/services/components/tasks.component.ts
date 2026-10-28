@@ -2,6 +2,7 @@ import { Component, computed, input } from '@angular/core'
 import { TuiTable } from '@taiga-ui/addon-table'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
+import { getLiveTasks } from 'src/app/utils/get-package-data'
 import { ServiceTaskComponent } from './task.component'
 import { i18nPipe } from '@start9labs/shared'
 
@@ -47,7 +48,7 @@ export class ServiceTasksComponent {
   readonly services = input.required<Record<string, PackageDataEntry>>()
 
   readonly tasks = computed(() =>
-    Object.entries(this.pkg().tasks)
+    getLiveTasks(this.pkg())
       .map(([replayId, entry]) => ({
         ...entry,
         task: { ...entry.task, replayId },

@@ -2,25 +2,45 @@ import { Effects } from '@start9labs/start-core/types'
 import { HealthCheckResult } from './HealthCheckResult'
 import * as fs from 'node:fs/promises'
 
-export function containsAddress(x: string, port: number, address?: bigint) {
+/** `TCP_LISTEN` in the state column of `/proc/net/tcp{,6}`. */
+const TCP_LISTEN = 0x0a
+
+export function containsAddress(
+  x: string,
+  port: number,
+  address?: bigint,
+  state?: number,
+) {
   const readPorts = x
     .split('\n')
     .filter(Boolean)
     .splice(1)
-    .map(x => x.split(' ').filter(Boolean)[1]?.split(':'))
-    .filter(x => x?.length > 1)
-    .map(([addr, p]) => [BigInt(`0x${addr}`), Number.parseInt(p, 16)] as const)
+    .map(x => x.split(' ').filter(Boolean))
+    .filter(cols => cols[1]?.split(':').length > 1)
+    .map(cols => {
+      const [addr, p] = cols[1].split(':')
+      return [
+        BigInt(`0x${addr}`),
+        Number.parseInt(p, 16),
+        Number.parseInt(cols[3], 16),
+      ] as const
+    })
   return !!readPorts.find(
-    ([addr, p]) => (address === undefined || address === addr) && port === p,
+    ([addr, p, st]) =>
+      (address === undefined || address === addr) &&
+      port === p &&
+      (state === undefined || state === st),
   )
 }
 
 /**
- * Check whether a TCP or UDP port is currently bound and listening.
+ * Check whether a TCP port has a listening socket, or a UDP port is bound.
  *
- * Reads `/proc/net/tcp{,6}` and `/proc/net/udp{,6}` to determine if any
- * socket is bound to the given port. This is a lightweight, non-intrusive
- * check — it does not open a connection or send any data.
+ * Reads `/proc/net/tcp{,6}` and `/proc/net/udp{,6}`. A TCP socket counts only in
+ * the `LISTEN` state, because connections that outlive their process keep the
+ * port in `/proc/net/tcp` in `TIME_WAIT` for up to a minute after nothing is
+ * listening on it. This is a lightweight, non-intrusive check — it does not open
+ * a connection or send any data.
  *
  * @param effects - The effects context
  * @param port - Port number to check
@@ -42,11 +62,17 @@ export async function checkPortListening(
   return Promise.race<HealthCheckResult>([
     Promise.resolve().then(async () => {
       const hasAddress =
-        containsAddress(await fs.readFile('/proc/net/tcp', 'utf-8'), port) ||
+        containsAddress(
+          await fs.readFile('/proc/net/tcp', 'utf-8'),
+          port,
+          undefined,
+          TCP_LISTEN,
+        ) ||
         containsAddress(
           await fs.readFile('/proc/net/tcp6', 'utf-8'),
           port,
           BigInt(0),
+          TCP_LISTEN,
         ) ||
         containsAddress(await fs.readFile('/proc/net/udp', 'utf-8'), port) ||
         containsAddress(

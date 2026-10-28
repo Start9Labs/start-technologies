@@ -12,7 +12,7 @@ StartOS's LND service can pull wallet and channel data directly from the followi
 
 - **Umbrel** 1.x
 - **myNode**
-- **another StartOS server**
+- **another StartOS server** running StartOS 0.4.0 or later. A server still on 0.3.5.x must [update to 0.4.0](/start-os/update-040.html) first.
 
 If your source platform is not listed, see [Other Platforms](#other-platforms) below.
 

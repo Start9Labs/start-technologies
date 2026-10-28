@@ -3,10 +3,12 @@ pub use imbl_value::InternedString;
 pub use lazy_format::lazy_format;
 pub use rust_i18n::t;
 pub use tracing::instrument;
+pub use visit_rs::{VisitFields, VisitVariants};
 
 pub use crate::db::prelude::*;
 pub use crate::ensure_code;
 pub use crate::error::{Error, ErrorCollection, ErrorKind, OptionExt, ResultExt};
+pub use crate::util::output::print_table;
 
 #[macro_export]
 macro_rules! dbg {

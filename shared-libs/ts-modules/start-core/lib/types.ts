@@ -1,10 +1,7 @@
 export * as inputSpecTypes from './actions/input/inputSpecTypes'
-export {
-  CurrentDependenciesResult,
-  OptionalDependenciesOf as OptionalDependencies,
-  RequiredDependenciesOf as RequiredDependencies,
-} from './dependencies/setupDependencies'
 export * from './osBindings'
+// Packages annotate their manifest's device filters with this name.
+export type { DeviceFilterInput as DeviceFilter } from './osBindings'
 export { SDKManifest } from './types/ManifestTypes'
 export { Effects }
 import { InputSpec as InputSpecClass } from './actions/input/builder/inputSpec'
@@ -48,8 +45,6 @@ export type MaybePromise<A> = Promise<A> | A
  * Every package must export implementations matching these types.
  */
 export namespace ExpectedExports {
-  version: 1
-
   /** For backing up service data though the startOS UI */
   export type createBackup = (options: { effects: Effects }) => Promise<unknown>
 

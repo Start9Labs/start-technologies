@@ -35,7 +35,7 @@ target/debug/start-cli s9pk pack ...                # build a package
 ```
 
 > In a StartOS image, `start-cli` is provided as a symlink to the multiplexed
-> `startbox` binary (see the OS `Makefile`), so it is always on the server's `PATH`.
+> `startbox` binary (see `projects/start-os/build.mk`), so it is always on the server's `PATH`.
 
 ## Connecting to a server
 
@@ -96,7 +96,7 @@ The full command tree comes from `start-core::main_api()`. Top-level groups incl
 - `echo`, `state`, `git-info` — diagnostics.
 - `completions` — a completion script for bash, zsh, fish, elvish or PowerShell.
 
-Run `start-cli <group> --help` for any group. Tab completion, in the shell's profile:
+Run `start-cli <group> --help` for any group. The Debian package and StartOS image enable Bash tab completion automatically in new shells. For other installations or shells, add completion to the shell's profile:
 
 ```sh
 eval "$(start-cli completions bash)"                          # bash
@@ -114,8 +114,7 @@ None are enabled by default.
 ## Documentation
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — how the crate is built (entrypoint, request flow, config).
-- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — how to contribute.
-- [`AGENTS.md`](./AGENTS.md) — agent/dev rules; `CLAUDE.md` is a one-line `@AGENTS.md` import.
+- [`AGENTS.md`](./AGENTS.md) — how to contribute.
 
 ## License
 

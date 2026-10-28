@@ -1,10 +1,10 @@
-import { z } from '../zExport'
+import * as z from '../z'
 import { Effects } from '../Effects'
 import { Origin } from './Origin'
 import { RangeOrigin } from './RangeOrigin'
-import { AddSslOptions } from '../osBindings'
+import { AddSslOptionsInput as AddSslOptions } from '../osBindings'
 import { Security } from '../osBindings'
-import { BindOptions } from '../osBindings'
+import { BindOptionsInput as BindOptions } from '../osBindings'
 import { AlpnInfo } from '../osBindings'
 import { ProxyAuth } from '../osBindings'
 import { BasicCredential } from '../osBindings'
@@ -87,7 +87,7 @@ export type BindOptionsByProtocol =
   | (BindOptions & { protocol: null })
 
 const hasStringProtocol = (v: unknown): v is { protocol: string } =>
-  z.looseObject({ protocol: z.string() }).safeParse(v).success
+  z.looseObject({ protocol: z.string() }).validate(v)
 
 /**
  * Hard cap on how many ports a single {@link MultiHost.bindPortRange} call
@@ -295,14 +295,7 @@ export class MultiHost {
     })
   }
 
-  private async bindPortForUnknown(
-    internalPort: number,
-    options: {
-      preferredExternalPort: number
-      addSsl: AddSslOptions | null
-      secure: { ssl: boolean } | null
-    },
-  ) {
+  private async bindPortForUnknown(internalPort: number, options: BindOptions) {
     const binderOptions = {
       id: this.options.id,
       internalPort,

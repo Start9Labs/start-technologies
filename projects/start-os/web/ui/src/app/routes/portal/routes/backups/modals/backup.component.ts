@@ -13,13 +13,13 @@ import { TuiBlock } from '@taiga-ui/kit'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { PatchDB } from 'patch-db-client'
 import { map, take } from 'rxjs'
+import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { getManifest } from 'src/app/utils/get-package-data'
 
 interface Package {
   id: string
   title: string
-  icon: string
   disabled: boolean
   checked: boolean
 }
@@ -30,7 +30,7 @@ interface Package {
       @if (pkgs(); as pkgs) {
         @for (pkg of pkgs; track $index) {
           <label tuiBlock>
-            <img class="icon" alt="" [src]="pkg.icon" />
+            <img class="icon" [pkgIcon]="pkg.id" />
             {{ pkg.title }}
             <input
               type="checkbox"
@@ -68,7 +68,15 @@ interface Package {
       border-radius: 100%;
     }
   `,
-  imports: [FormsModule, TuiButton, TuiGroup, TuiLoader, TuiBlock, TuiCheckbox],
+  imports: [
+    FormsModule,
+    TuiButton,
+    TuiGroup,
+    TuiLoader,
+    TuiBlock,
+    TuiCheckbox,
+    PkgIconDirective,
+  ],
 })
 export class BackupsBackupModal {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
@@ -87,7 +95,6 @@ export class BackupsBackupModal {
             return {
               id,
               title,
-              icon: pkg.icon,
               disabled: pkg.stateInfo.state !== 'installed',
               checked: false,
             }

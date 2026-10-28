@@ -1,29 +1,30 @@
+import type { RPC } from './index'
+
 import {
   ActionId,
   ActionInput,
-  ActionMetadata,
-  SetMainStatus,
+  ActionMetadataInput as ActionMetadata,
+  SetMainStatusInput as SetMainStatus,
   DependencyRequirement,
   CheckDependenciesResult,
-  CreateNotificationParams,
-  SetHealth,
-  BindParams,
-  BindRangeParams,
-  RetireHostParams,
-  RetireBindingParams,
+  CreateNotificationParamsInput as CreateNotificationParams,
+  SetHealthInput as SetHealth,
+  BindParamsInput as BindParams,
+  BindRangeParamsInput as BindRangeParams,
+  RetireHostParamsInput as RetireHostParams,
+  RetireBindingParamsInput as RetireBindingParams,
   HostId,
   NetInfo,
   Host,
-  ExportServiceInterfaceParams,
-  ExportRangeServiceInterfaceParams,
+  ExportServiceInterfaceParamsInput as ExportServiceInterfaceParams,
+  ExportRangeServiceInterfaceParamsInput as ExportRangeServiceInterfaceParams,
   ServiceInterface,
-  CreateTaskParams,
-  MountParams,
+  CreateTaskParamsInput as CreateTaskParams,
+  MountParamsInput as MountParams,
   StatusInfo,
   Manifest,
   HostnameInfo,
   Progress,
-  Guid,
 } from './osBindings'
 import {
   PackageId,
@@ -46,7 +47,6 @@ export type Effects = {
     options: { only: number[] } | { except: number[] },
   ) => Promise<null>
 
-  // action
   action: {
     /** Define an action that can be invoked by a user or service */
     export(options: { id: ActionId; metadata: ActionMetadata }): Promise<null>
@@ -61,8 +61,6 @@ export type Effects = {
     run<Input extends Record<string, unknown>>(options: {
       packageId?: PackageId
       actionId: ActionId
-      /** The `eventId` from the `getInput` whose form this input answers. Required by an action with input. */
-      eventId?: Guid
       input?: Input
     }): Promise<ActionResult | null>
     createTask(options: CreateTaskParams): Promise<null>
@@ -94,14 +92,14 @@ export type Effects = {
     packageIds?: PackageId[]
   }): Promise<CheckDependenciesResult[]>
   /** mount a volume of a dependency */
-  mount(options: MountParams): Promise<string>
+  mount(options: MountParams): Promise<RPC.RpcReturnType<RPC.Effects, 'mount'>>
   /** Returns a list of the ids of all installed packages */
   getInstalledPackages(): Promise<string[]>
-  /** Returns the manifest of a service */
+  /** Returns the manifest of a service, or null if it is not installed */
   getServiceManifest(options: {
     packageId: PackageId
     callback?: () => void
-  }): Promise<Manifest>
+  }): Promise<Manifest | null>
 
   // backup
   /**
@@ -226,7 +224,7 @@ export type Effects = {
   getContainerIp(options: {
     packageId?: PackageId
     callback?: () => void
-  }): Promise<string>
+  }): Promise<RPC.RpcReturnType<RPC.Effects, 'get-container-ip'>>
   /** Returns the IP address of StartOS */
   getOsIp(): Promise<string>
   /** Returns the effective outbound gateway for this service */
@@ -274,7 +272,7 @@ export type Effects = {
     hostnames: string[]
     algorithm?: 'ecdsa' | 'ed25519'
     callback?: () => void
-  }) => Promise<[string, string, string]>
+  }) => Promise<RPC.RpcReturnType<RPC.Effects, 'get-ssl-certificate'>>
   /** Returns a PEM encoded private key corresponding to the certificate for the hostnames specified */
   getSslKey: (options: {
     hostnames: string[]

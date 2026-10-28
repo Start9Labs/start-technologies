@@ -2,18 +2,19 @@ use std::str::FromStr;
 
 use clap::builder::ValueParserFactory;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 pub use crate::HealthCheckId;
 use crate::util::FromStrParser;
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct NamedHealthCheckResult {
     pub name: String,
     #[serde(flatten)]
     pub kind: NamedHealthCheckResultKind,
 }
+
+rpc_toolkit::reflect_ts!(NamedHealthCheckResult);
 // healthCheckName:kind:message OR healthCheckName:kind
 impl FromStr for NamedHealthCheckResult {
     type Err = color_eyre::eyre::Report;
@@ -55,7 +56,7 @@ impl ValueParserFactory for NamedHealthCheckResult {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, visit_rs::VisitVariants)]
 #[serde(rename_all = "camelCase")]
 #[serde(tag = "result")]
 pub enum NamedHealthCheckResultKind {
@@ -66,6 +67,8 @@ pub enum NamedHealthCheckResultKind {
     Loading { message: String },
     Failure { message: String },
 }
+
+rpc_toolkit::reflect_ts!(NamedHealthCheckResultKind);
 impl std::fmt::Display for NamedHealthCheckResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = &self.name;

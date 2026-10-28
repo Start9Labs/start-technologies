@@ -27,7 +27,7 @@ export class StandardActionsService {
 
   async rebuild(id: string) {
     this.tasks.run(async () => {
-      await this.api.rebuildPackage({ id })
+      await this.api.rpc.package.rebuild({ id })
       await this.router.navigate(['services', id])
     }, 'Rebuilding container')
   }
@@ -67,7 +67,7 @@ export class StandardActionsService {
 
   private async doUninstall(options: T.UninstallParams) {
     this.tasks.run(async () => {
-      await this.api.uninstallPackage(options)
+      await this.api.rpc.package.uninstall(options)
       await this.router.navigate([''])
     }, 'Beginning uninstall')
   }

@@ -8,7 +8,8 @@ import { T } from '@start9labs/start-core'
  * - `'loading'`  — operational but still catching up (e.g. syncing blocks)
  * - `'disabled'` — intentionally inactive (excluded by config)
  * - `'starting'` — not yet ready, still initializing
- * - `'waiting'`  — blocked on an external dependency
+ * - `'waiting'`  — cannot be ready until something outside the service is;
+ *   `message` names that thing, shown as "Waiting on <message>..."
  * - `'failure'`  — unhealthy, something is wrong
  *
  * Include a `message` string for display in the StartOS UI. Required for

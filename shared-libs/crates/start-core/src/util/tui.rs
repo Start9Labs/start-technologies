@@ -31,7 +31,7 @@ pub async fn prompt<T, E: std::fmt::Display, Parse: FnMut(&str) -> Result<T, E>>
     mut parse: Parse,
     default: Option<T>,
 ) -> Result<T, Error> {
-    let mut rl_ctx = ReadlineAsyncContext::try_new(Some(prompt))
+    let mut rl_ctx = ReadlineAsyncContext::try_new(Some(prompt), None)
         .await
         .map_err(map_miette)?
         .ok_or_else(noninteractive_err)?;
@@ -75,7 +75,7 @@ pub async fn prompt_multiline<
     mut handle_line: HandleLine,
 ) -> Result<T, Error> {
     println!("{prompt}");
-    let mut rl_ctx = ReadlineAsyncContext::try_new(None::<&str>)
+    let mut rl_ctx = ReadlineAsyncContext::try_new(None::<&str>, None)
         .await
         .map_err(map_miette)?
         .ok_or_else(noninteractive_err)?;

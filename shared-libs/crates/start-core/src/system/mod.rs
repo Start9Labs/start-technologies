@@ -12,10 +12,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::process::Command;
 use tokio::sync::broadcast::Receiver;
 use tracing::instrument;
-use ts_rs::TS;
 
 use crate::bins::set_locale;
 use crate::context::{CliContext, RpcContext};
+use crate::db::model::Database;
 use crate::db::model::public::RestartReason;
 use crate::disk::util::{get_available, get_used};
 use crate::logs::{LogSource, LogsParams, SYSTEM_UNIT};
@@ -31,6 +31,9 @@ use crate::util::io::{copy_file, open_file, write_file_atomic};
 use crate::util::serde::{WithIoFormat, display_serializable};
 use crate::util::sync::Watch;
 use crate::{MAIN_DATA, PACKAGE_DATA};
+
+mod disk_health;
+pub(crate) mod trust_ca;
 
 pub fn experimental<C: Context>() -> ParentHandler<C> {
     ParentHandler::new().subcommand(
@@ -119,7 +122,7 @@ pub async fn limit_container_memory() -> Result<(), Error> {
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
@@ -127,6 +130,8 @@ pub struct ZramParams {
     #[arg(long, help = "help.arg.enable-zram")]
     enable: bool,
 }
+
+rpc_toolkit::reflect_ts!(ZramParams);
 
 pub async fn zram(ctx: RpcContext, ZramParams { enable }: ZramParams) -> Result<(), Error> {
     let db = ctx.db.peek().await;
@@ -159,11 +164,13 @@ pub async fn zram(ctx: RpcContext, ZramParams { enable }: ZramParams) -> Result<
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
 pub struct GovernorInfo {
     current: Option<Governor>,
     available: BTreeSet<Governor>,
 }
+
+rpc_toolkit::reflect_ts!(GovernorInfo);
 
 pub(crate) fn display_governor_info(
     params: WithIoFormat<GovernorParams>,
@@ -184,11 +191,11 @@ pub(crate) fn display_governor_info(
             table.add_row(row![entry]);
         }
     }
-    table.print_tty(false)?;
+    print_table(&table)?;
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
@@ -196,6 +203,8 @@ pub struct GovernorParams {
     #[arg(help = "help.arg.governor-name")]
     set: Option<Governor>,
 }
+
+rpc_toolkit::reflect_ts!(GovernorParams);
 
 pub async fn governor(
     ctx: RpcContext,
@@ -234,13 +243,15 @@ pub async fn governor(
     Ok(GovernorInfo { current, available })
 }
 
-#[derive(Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct TimeInfo {
     now: String,
     uptime: u64,
 }
+
+rpc_toolkit::reflect_ts!(TimeInfo);
+rpc_toolkit::ts_export!(TimeInfo, namespaces = [""]);
 
 pub fn display_time(params: WithIoFormat<Empty>, arg: TimeInfo) -> Result<(), Error> {
     use std::fmt::Write;
@@ -281,7 +292,7 @@ pub fn display_time(params: WithIoFormat<Empty>, arg: TimeInfo) -> Result<(), Er
     let mut table = Table::new();
     table.add_row(row![bc -> "NOW", &arg.now]);
     table.add_row(row![bc -> "UPTIME", &uptime_string]);
-    table.print_tty(false)?;
+    print_table(&table)?;
     Ok(())
 }
 
@@ -336,7 +347,7 @@ pub fn display_device_info(params: WithIoFormat<Empty>, info: DeviceInfo) -> Res
             }
         }
     }
-    table.print_tty(false)?;
+    print_table(&table)?;
     Ok(())
 }
 
@@ -435,9 +446,11 @@ pub struct MetricLeaf<T> {
     unit: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, TS)]
-#[ts(type = "{ value: string, unit: string }")]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, VisitFields)]
+#[visit(ts(type = "z.object({ value: z.string(), unit: z.string() })"))]
 pub struct Celsius(f64);
+
+rpc_toolkit::reflect_ts!(Celsius);
 impl fmt::Display for Celsius {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:.1}°C", self.0)
@@ -464,9 +477,11 @@ impl<'de> Deserialize<'de> for Celsius {
         Ok(Celsius(s.value.parse().map_err(serde::de::Error::custom)?))
     }
 }
-#[derive(Clone, Debug, PartialEq, PartialOrd, TS)]
-#[ts(type = "{ value: string, unit: string }")]
+#[derive(Clone, Debug, PartialEq, PartialOrd, VisitFields)]
+#[visit(ts(type = "z.object({ value: z.string(), unit: z.string() })"))]
 pub struct Percentage(f64);
+
+rpc_toolkit::reflect_ts!(Percentage);
 impl Serialize for Percentage {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -491,9 +506,11 @@ impl<'de> Deserialize<'de> for Percentage {
     }
 }
 
-#[derive(Clone, Debug, TS)]
-#[ts(type = "{ value: string, unit: string }")]
+#[derive(Clone, Debug, VisitFields)]
+#[visit(ts(type = "z.object({ value: z.string(), unit: z.string() })"))]
 pub struct MebiBytes(pub f64);
+
+rpc_toolkit::reflect_ts!(MebiBytes);
 impl Serialize for MebiBytes {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -518,9 +535,11 @@ impl<'de> Deserialize<'de> for MebiBytes {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, TS)]
-#[ts(type = "{ value: string, unit: string }")]
+#[derive(Clone, Debug, PartialEq, PartialOrd, VisitFields)]
+#[visit(ts(type = "z.object({ value: z.string(), unit: z.string() })"))]
 pub struct GigaBytes(f64);
+
+rpc_toolkit::reflect_ts!(GigaBytes);
 impl Serialize for GigaBytes {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -545,13 +564,15 @@ impl<'de> Deserialize<'de> for GigaBytes {
     }
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, TS)]
+#[derive(Deserialize, Serialize, Clone, Debug, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct MetricsGeneral {
     pub temperature: Option<Celsius>,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, TS)]
+rpc_toolkit::reflect_ts!(MetricsGeneral);
+
+#[derive(Deserialize, Serialize, Clone, Debug, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct MetricsMemory {
     pub percentage_used: Percentage,
@@ -563,7 +584,9 @@ pub struct MetricsMemory {
     pub zram_used: MebiBytes,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, TS)]
+rpc_toolkit::reflect_ts!(MetricsMemory);
+
+#[derive(Deserialize, Serialize, Clone, Debug, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct MetricsCpu {
     percentage_used: Percentage,
@@ -573,7 +596,9 @@ pub struct MetricsCpu {
     wait: Percentage,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, TS)]
+rpc_toolkit::reflect_ts!(MetricsCpu);
+
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct MetricsDisk {
     percentage_used: Percentage,
@@ -582,9 +607,10 @@ pub struct MetricsDisk {
     capacity: GigaBytes,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, TS)]
+rpc_toolkit::reflect_ts!(MetricsDisk);
+
+#[derive(Deserialize, Serialize, Clone, Debug, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct Metrics {
     general: MetricsGeneral,
     memory: MetricsMemory,
@@ -592,28 +618,35 @@ pub struct Metrics {
     disk: MetricsDisk,
 }
 
+rpc_toolkit::reflect_ts!(Metrics);
+rpc_toolkit::ts_export!(Metrics, namespaces = [""]);
+
 // #[command(display(display_serializable))]
 pub async fn metrics(ctx: RpcContext) -> Result<Metrics, Error> {
     ctx.metrics_cache.read().or_not_found("No Metrics Found")
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, TS)]
+#[derive(Deserialize, Serialize, Clone, Debug, VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct MetricsFollowResponse {
     pub guid: Guid,
     pub metrics: Metrics,
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+rpc_toolkit::reflect_ts!(MetricsFollowResponse);
+rpc_toolkit::ts_export!(MetricsFollowResponse, namespaces = [""]);
+
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct MetricsFollowParams {
-    #[ts(skip)]
-    #[serde(rename = "__Auth_signer")] // from Auth middleware
+    #[visit(ts(skip))]
+    #[serde(rename = "__Auth_signer")]
     signer: Option<InternedString>,
 }
+
+rpc_toolkit::reflect_ts!(MetricsFollowParams);
 
 pub async fn metrics_follow(
     ctx: RpcContext,
@@ -664,9 +697,9 @@ pub async fn metrics_follow(
 
 pub async fn launch_metrics_task<F: FnMut() -> Receiver<Option<Shutdown>>>(
     cache: &Watch<Option<Metrics>>,
+    db: &TypedPatchDb<Database>,
     mut mk_shutdown: F,
 ) {
-    // fetch init temp
     let init_temp = match get_temp().await {
         Ok(a) => Some(a),
         Err(e) => {
@@ -681,7 +714,6 @@ pub async fn launch_metrics_task<F: FnMut() -> Receiver<Option<Shutdown>>>(
             None
         }
     };
-    // fetch init cpu
     let init_cpu;
     let proc_stat;
     loop {
@@ -716,7 +748,6 @@ pub async fn launch_metrics_task<F: FnMut() -> Receiver<Option<Shutdown>>>(
         }
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
-    // fetch init memory
     let init_mem;
     loop {
         match get_mem_info().await {
@@ -737,7 +768,6 @@ pub async fn launch_metrics_task<F: FnMut() -> Receiver<Option<Shutdown>>>(
         }
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
-    // fetch init disk usage
     let init_disk;
     loop {
         match get_disk_info().await {
@@ -771,16 +801,12 @@ pub async fn launch_metrics_task<F: FnMut() -> Receiver<Option<Shutdown>>>(
     }));
 
     let mut task_vec = Vec::new();
-    // launch persistent temp task
     if should_launch_temp_task {
         task_vec.push(launch_temp_task(cache, mk_shutdown()).boxed());
     }
-    // launch persistent cpu task
     task_vec.push(launch_cpu_task(cache, proc_stat, mk_shutdown()).boxed());
-    // launch persistent mem task
     task_vec.push(launch_mem_task(cache, mk_shutdown()).boxed());
-    // launch persistent disk task
-    task_vec.push(launch_disk_task(cache, mk_shutdown()).boxed());
+    task_vec.push(launch_disk_task(cache, db, mk_shutdown()).boxed());
 
     futures::future::join_all(task_vec).await;
 }
@@ -869,10 +895,11 @@ async fn launch_mem_task(cache: &Watch<Option<Metrics>>, mut shutdown: Receiver<
 }
 async fn launch_disk_task(
     cache: &Watch<Option<Metrics>>,
+    db: &TypedPatchDb<Database>,
     mut shutdown: Receiver<Option<Shutdown>>,
 ) {
+    let mut disk_health = disk_health::DiskHealth::default();
     loop {
-        // run df and capture output
         match get_disk_info().await {
             Ok(a) => {
                 cache.send_if_modified(|c| {
@@ -895,6 +922,10 @@ async fn launch_disk_task(
                 );
                 tracing::debug!("{:?}", e);
             }
+        }
+        tokio::select! {
+            _ = shutdown.recv() => return,
+            _ = disk_health.check(db) => (),
         }
         tokio::select! {
             _ = shutdown.recv() => return,
@@ -1154,9 +1185,15 @@ async fn get_disk_info() -> Result<MetricsDisk, Error> {
 }
 
 #[derive(
-    Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize, TS, clap::ValueEnum,
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    VisitVariants,
+    clap::ValueEnum,
 )]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub enum SmtpSecurity {
     #[default]
@@ -1164,9 +1201,11 @@ pub enum SmtpSecurity {
     Tls,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Parser, TS)]
+rpc_toolkit::reflect_ts!(SmtpSecurity);
+rpc_toolkit::ts_export!(SmtpSecurity, namespaces = [""]);
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct SmtpValue {
     #[arg(long, help = "help.arg.smtp-host")]
@@ -1185,6 +1224,9 @@ pub struct SmtpValue {
     #[serde(default)]
     pub security: SmtpSecurity,
 }
+
+rpc_toolkit::reflect_ts!(SmtpValue);
+rpc_toolkit::ts_export!(SmtpValue, namespaces = [""]);
 pub async fn set_system_smtp(ctx: RpcContext, smtp: SmtpValue) -> Result<(), Error> {
     let smtp = Some(smtp);
     ctx.db
@@ -1211,12 +1253,14 @@ pub async fn clear_system_smtp(ctx: RpcContext) -> Result<(), Error> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 pub struct SetEchoipUrlsParams {
     #[arg(help = "help.arg.echoip-urls")]
     pub urls: Vec<url::Url>,
 }
+
+rpc_toolkit::reflect_ts!(SetEchoipUrlsParams);
 
 pub async fn set_echoip_urls(
     ctx: RpcContext,
@@ -1233,9 +1277,8 @@ pub async fn set_echoip_urls(
         .result
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Parser, TS)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Parser, VisitFields)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct TestSmtpParams {
     #[arg(long, help = "help.arg.smtp-host")]
@@ -1254,6 +1297,9 @@ pub struct TestSmtpParams {
     #[serde(default)]
     pub security: SmtpSecurity,
 }
+
+rpc_toolkit::reflect_ts!(TestSmtpParams);
+rpc_toolkit::ts_export!(TestSmtpParams, namespaces = [""]);
 pub async fn test_smtp(
     _: RpcContext,
     TestSmtpParams {
@@ -1295,7 +1341,7 @@ pub async fn test_smtp(
     Ok(())
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS, Parser)]
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyboardOptions {
@@ -1311,6 +1357,8 @@ pub struct KeyboardOptions {
     #[serde(default)]
     pub options: Vec<InternedString>,
 }
+
+rpc_toolkit::reflect_ts!(KeyboardOptions);
 impl KeyboardOptions {
     /// NOTE: will error if kiosk inactive
     pub async fn apply_to_session(&self) -> Result<(), Error> {
@@ -1370,14 +1418,16 @@ pub async fn set_keyboard(ctx: RpcContext, options: KeyboardOptions) -> Result<(
     Ok(())
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS, Parser)]
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields, Parser)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct SetLanguageParams {
     #[arg(help = "help.arg.language-code")]
     pub language: InternedString,
 }
+
+rpc_toolkit::reflect_ts!(SetLanguageParams);
+rpc_toolkit::ts_export!(SetLanguageParams, namespaces = [""]);
 
 pub async fn save_language(language: &str) -> Result<(), Error> {
     write_file_atomic(
@@ -1452,11 +1502,13 @@ pub async fn test_get_disk_usage() {
     println!("{:?}", get_disk_info().await.unwrap())
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
 pub struct EppInfo {
     current: Option<Epp>,
     available: BTreeSet<Epp>,
 }
+
+rpc_toolkit::reflect_ts!(EppInfo);
 
 pub(crate) fn display_epp_info(
     params: WithIoFormat<EppParams>,
@@ -1477,11 +1529,11 @@ pub(crate) fn display_epp_info(
             table.add_row(row![entry]);
         }
     }
-    table.print_tty(false)?;
+    print_table(&table)?;
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
@@ -1489,6 +1541,8 @@ pub struct EppParams {
     #[arg(help = "help.arg.epp-name")]
     set: Option<Epp>,
 }
+
+rpc_toolkit::reflect_ts!(EppParams);
 
 /// `current` is read from the hardware rather than from the database, which
 /// holds only an explicit override.

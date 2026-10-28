@@ -1,0 +1,70 @@
+name: start-registry release image
+
+# A release publishes the image master already built from the tagged commit, never a rebuild.
+on:
+  push:
+    tags: ['start-registry/v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Released version to tag, e.g. 1.1.0
+        required: true
+      source:
+        description: Image to tag instead of the release commit's sha- image, e.g. ghcr.io/start9labs/startos-registry@sha256:…
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  tag:
+    name: Tag Release Image
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/start9labs/startos-registry
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag the image
+        env:
+          VERSION: ${{ inputs.version }}
+          SOURCE: ${{ inputs.source }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            VERSION="${GITHUB_REF_NAME#start-registry/v}"
+            commit="$GITHUB_SHA"
+          else
+            commit=$(git ls-remote --tags "https://github.com/$GITHUB_REPOSITORY" "start-registry/v$VERSION*" \
+              | awk -v t="refs/tags/start-registry/v$VERSION" \
+                  '$2 == t "^{}" { print $1; peeled = 1; exit } $2 == t { c = $1 } END { if (!peeled) print c }')
+            [ -n "$commit" ] || { echo "::error::No tag start-registry/v$VERSION"; exit 1; }
+          fi
+          SOURCE="${SOURCE:-$IMAGE:sha-$commit}"
+
+          digest() { docker buildx imagetools inspect "$1" --format '{{json .Manifest.Digest}}' | tr -d '"'; }
+
+          if ! source_digest=$(digest "$SOURCE"); then
+            echo "::error::$SOURCE does not exist; re-run by dispatch with the release commit's image digest as 'source'."
+            exit 1
+          fi
+          if existing=$(digest "$IMAGE:v$VERSION" 2>/dev/null); then
+            if [ "$existing" = "$source_digest" ]; then
+              echo "$IMAGE:v$VERSION already points at $source_digest"
+              exit 0
+            fi
+            echo "::error::$IMAGE:v$VERSION already points at $existing, not $source_digest; a release tag is never moved."
+            exit 1
+          fi
+
+          docker buildx imagetools create -t "$IMAGE:v$VERSION" "$IMAGE@$source_digest"
+          echo "Tagged $IMAGE:v$VERSION -> $source_digest (commit $commit)"

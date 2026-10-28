@@ -38,7 +38,7 @@ Nothing here is about contributing to the package. Build workflow, repo conventi
 
 **Open every H2 with prose.** One or two sentences between the heading and the first table or subsection, describing what the section covers. This text is extracted as the section's summary in the generated index, and it is what an agent reads to decide whether to fetch the section at all.
 
-**No version numbers anywhere.** Not upstream versions, not image tags, not dependency version ranges. The manifest and `setupDependencies()` are the source of truth; a copy here is wrong from the next bump onward.
+**No version numbers anywhere.** Not upstream versions, not image tags, not dependency version ranges. The dependency builder in `dependencies.ts` is the source of truth; a copy here is wrong from the next bump onward.
 
 ## Required structure
 
@@ -171,7 +171,7 @@ What this service needs from other services.
 
 For each dependency: its name, whether it is required or optional, the health checks that must pass before this service starts, any mounted volume (with mount point and read-only status), and why it is needed.
 
-Do **not** restate the version range — `setupDependencies()` declares it, and a copy goes stale the first time you raise the floor. If the service has no dependencies, state "None" explicitly.
+Do **not** restate the version range — `dependencies.ts` declares it, and a copy goes stale the first time you raise the floor. If the service has no dependencies, state "None" explicitly.
 
 ### Network Access and Interfaces
 

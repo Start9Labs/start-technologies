@@ -1,16 +1,17 @@
 use std::ffi::OsString;
+use std::io::Write;
 
-use clap::builder::PossibleValuesParser;
-use clap::{Parser, ValueEnum};
-use clap_complete::Shell;
-use rpc_toolkit::CliApp;
-use serde::{Deserialize, Serialize};
+use rpc_toolkit::{CliApp, output};
 use serde_json::Value;
 
+use super::completions::CompletionsParams;
 use crate::context::CliContext;
 use crate::context::config::ClientConfig;
-use crate::prelude::{Error, ErrorKind, eyre};
+use crate::prelude::Error;
 use crate::util::logger::LOGGER;
+
+#[cfg(test)]
+mod tests;
 
 fn app() -> CliApp<CliContext, ClientConfig> {
     CliApp::new(
@@ -21,57 +22,51 @@ fn app() -> CliApp<CliContext, ClientConfig> {
     .mutate_command(|cmd| cmd.name("start-cli").version(super::cli_version()))
 }
 
-#[derive(Deserialize, Serialize, Parser)]
-#[group(skip)]
-pub struct CompletionsParams {
-    #[arg(help = "help.arg.completions-shell", value_parser = shells())]
-    shell: String,
-}
-
-fn shells() -> PossibleValuesParser {
-    PossibleValuesParser::new(
-        Shell::value_variants()
-            .iter()
-            .filter_map(ValueEnum::to_possible_value),
-    )
-}
-
-pub fn completions(
-    _: CliContext,
-    CompletionsParams { shell }: CompletionsParams,
-) -> Result<(), Error> {
-    let shell = shell
-        .parse::<Shell>()
-        .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::InvalidRequest))?;
-    clap_complete::generate(
-        shell,
-        &mut app().into_command(),
-        "start-cli",
-        &mut std::io::stdout(),
-    );
-    Ok(())
+pub fn completions(_: CliContext, params: CompletionsParams) -> Result<(), Error> {
+    params.generate(app().into_command(), &mut output::stdout())
 }
 
 pub fn main(args: impl IntoIterator<Item = OsString>) {
     LOGGER.enable();
 
     if let Err(e) = app().run(args) {
-        match e.data {
-            Some(Value::String(s)) => eprintln!("{}: {}", e.message, s),
-            Some(Value::Object(o)) => {
-                if let Some(Value::String(s)) = o.get("details") {
-                    eprintln!("{}: {}", e.message, s);
+        let mut stderr = output::stderr();
+        let _ = match e.data {
+            Some(Value::String(s)) => writeln!(stderr, "{}: {}", e.message, s),
+            Some(Value::Object(o)) => match o.get("details") {
+                Some(Value::String(s)) => {
                     if let Some(Value::String(s)) = o.get("debug") {
                         tracing::debug!("{}", s)
                     }
+                    writeln!(stderr, "{}: {}", e.message, s)
                 }
-            }
-            Some(a) => eprintln!("{}: {}", e.message, a),
-            None => eprintln!("{}", e.message),
-        }
+                _ => Ok(()),
+            },
+            Some(a) => writeln!(stderr, "{}: {}", e.message, a),
+            None => writeln!(stderr, "{}", e.message),
+        };
 
         std::process::exit(e.code);
     }
+}
+
+#[test]
+fn bash_completion_start_cli() {
+    super::completions::assert_bash_completion(
+        app().into_command(),
+        &["start-cli", "server", "shut"],
+        "shutdown",
+    );
+    super::completions::assert_bash_completion(
+        app().into_command(),
+        &["start-cli", "server", "logs", "--lim"],
+        "--limit",
+    );
+    super::completions::assert_bash_completion(
+        app().into_command(),
+        &["start-cli", "completions", "ba"],
+        "bash",
+    );
 }
 
 #[test]
@@ -81,7 +76,6 @@ fn no_shadowed_args_start_cli() {
 
 #[test]
 fn export_manpage_start_cli() {
-    // Pages live with the start-cli product; anchored to start-core's crate dir.
     let dir = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../../projects/start-cli/man"

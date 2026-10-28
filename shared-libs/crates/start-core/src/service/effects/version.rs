@@ -5,14 +5,15 @@ use crate::service::effects::prelude::*;
 use crate::util::io::{delete_file, write_file_atomic};
 use crate::volume::PKG_VOLUME_DIR;
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct SetDataVersionParams {
-    #[ts(type = "string")]
     version: Option<String>,
 }
+
+rpc_toolkit::reflect_ts!(SetDataVersionParams);
+rpc_toolkit::ts_export!(SetDataVersionParams, namespaces = [""]);
 #[instrument(skip(context))]
 pub async fn set_data_version(
     context: EffectContext,

@@ -1,4 +1,4 @@
-//! WireGuard key management types.
+//! WireGuard keys and live interface state.
 
 use base64::Engine;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -174,9 +174,92 @@ pub fn generate_psk() -> Psk {
     bytes
 }
 
+/// Seconds after its latest handshake that a WireGuard session stops carrying data.
+pub const REJECT_AFTER_SECS: u64 = 180;
+
+/// Wire size of a handshake initiation; a session-less peer sends nothing else.
+pub const HANDSHAKE_INITIATION_BYTES: u64 = 148;
+
+/// A peer line of `wg show <interface> dump`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WgPeerStats {
+    pub public_key: String,
+    pub endpoint: Option<String>,
+    /// Unix seconds; 0 when no handshake has completed.
+    pub latest_handshake: u64,
+    pub rx_bytes: u64,
+    pub tx_bytes: u64,
+}
+
+/// Peers of a `wg show <interface> dump`, skipping its interface line.
+pub fn parse_dump(output: &str) -> Vec<WgPeerStats> {
+    output
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split('\t').collect();
+            if fields.len() < 8 {
+                return None;
+            }
+            Some(WgPeerStats {
+                public_key: fields[0].to_string(),
+                endpoint: Some(fields[2])
+                    .filter(|e| *e != "(none)")
+                    .map(str::to_string),
+                latest_handshake: fields[4].parse().unwrap_or(0),
+                rx_bytes: fields[5].parse().unwrap_or(0),
+                tx_bytes: fields[6].parse().unwrap_or(0),
+            })
+        })
+        .collect()
+}
+
+/// `None` when the interface does not exist.
+pub async fn show_dump(interface: &str) -> Option<Vec<WgPeerStats>> {
+    use crate::invoke::Invoke;
+
+    let out = tokio::process::Command::new("wg")
+        .args(["show", interface, "dump"])
+        .invoke(ErrorKind::Network.into())
+        .await
+        .ok()?;
+    Some(parse_dump(&String::from_utf8_lossy(&out)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_dump_reads_peers() {
+        let dump = "priv\tpub\t60616\toff\n\
+            peerA\t(none)\t192.0.2.1:51820\t0.0.0.0/0\t1700000000\t92\t1480\t25\n\
+            peerB\t(none)\t(none)\t10.0.0.0/8\t0\t0\t0\toff\n";
+        assert_eq!(
+            parse_dump(dump),
+            vec![
+                WgPeerStats {
+                    public_key: "peerA".into(),
+                    endpoint: Some("192.0.2.1:51820".into()),
+                    latest_handshake: 1_700_000_000,
+                    rx_bytes: 92,
+                    tx_bytes: 1480,
+                },
+                WgPeerStats {
+                    public_key: "peerB".into(),
+                    endpoint: None,
+                    latest_handshake: 0,
+                    rx_bytes: 0,
+                    tx_bytes: 0,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_dump_of_peerless_interface_is_empty() {
+        assert!(parse_dump("(none)\t(none)\t0\toff\n").is_empty());
+    }
 
     #[test]
     fn test_key_generation() {

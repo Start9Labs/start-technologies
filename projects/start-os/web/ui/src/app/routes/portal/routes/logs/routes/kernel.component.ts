@@ -30,8 +30,8 @@ export default class SystemKernelComponent {
   private readonly api = inject(ApiService)
 
   protected readonly follow = (params: FollowServerLogsReq) =>
-    this.api.followKernelLogs(params)
+    this.api.rpc.server.kernelLogs.follow(params)
 
-  protected readonly fetch = (params: T.LogsParams) =>
-    this.api.getKernelLogs(params)
+  protected readonly fetch = (params: T.LogsParamsInput) =>
+    this.api.rpc.server.kernelLogs(params)
 }

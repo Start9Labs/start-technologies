@@ -92,7 +92,7 @@ Die IP-Adresse oder der Domänenname, unter dem der VPN-Server von Clients errei
 
 ### Sicherheitsprofil
 
-Der anfängliche Satz an Zugriffsrechten und Einschränkungen, der Clients zugewiesen wird, wenn sie sich mit dem VPN-Server verbinden. Wählen Sie ein zuvor erstelltes Profil oder einen Zeitplan, oder erstellen Sie ein neues.
+Der anfängliche Satz an Zugriffsrechten und Einschränkungen, der Clients zugewiesen wird, wenn sie sich mit dem VPN-Server verbinden. Wählen Sie ein zuvor erstelltes Profil oder einen Zeitplan, oder erstellen Sie ein neues. Das Profil steht nach dem Erstellen des Servers fest; um ein VPN in ein anderes Profil zu verschieben, löschen Sie es und fügen Sie ein neues hinzu.
 
 ### Port
 
@@ -111,7 +111,7 @@ Die zugewiesene IP-Adresse im lokalen Netzwerk. Diese wurde beim Einrichten des 
 
 ### Routing
 
-Zeigt den Routing-Modus des Client-Datenverkehrs an. „Gesamter Datenverkehr“ leitet den gesamten Internetverkehr durch den VPN-Tunnel. „Nur LAN“ leitet nur den lokalen Netzwerkverkehr durch den Tunnel. Verwenden Sie das Aktionsmenü, um zwischen den Modi zu wechseln.`,
+Zeigt den Routing-Modus des Client-Datenverkehrs an. „Gesamter Datenverkehr“ leitet den gesamten Internetverkehr durch den VPN-Tunnel. „Nur LAN“ leitet nur den lokalen Netzwerkverkehr durch den Tunnel. Um ihn zu ändern, löschen Sie den Client und fügen Sie ihn mit dem gewünschten Routing erneut hinzu.`,
   '/inbound/client/dialog-add': `## Eingehende VPNs
 
 ### Bezeichnung
@@ -139,7 +139,7 @@ Zeigt die Konfiguration als Text an. Verwenden Sie die Schaltfläche zum Kopiere
 
 ### QR
 
-Zeigt die Konfiguration als QR-Code an. Scannen Sie ihn mit der mobilen WireGuard-App, um das Client-Gerät ohne manuelle Eingabe zu konfigurieren.`,
+Zeigt die Konfiguration als QR-Code an, wenn der Router den privaten Schlüssel des Geräts erzeugt hat. Scannen Sie ihn mit der mobilen WireGuard-App, um das Client-Gerät ohne manuelle Eingabe zu konfigurieren.`,
   '/inbound/client/dialog-rename': `## Client umbenennen
 
 ### Name
@@ -164,9 +164,9 @@ IPv6 ermöglicht es, dass Ihre Geräte ohne NAT direkt aus dem Internet erreichb
 
 ### Präfixlänge
 
-Die Präfixlänge bestimmt die Größe des IPv6-Adressraums Ihres LAN. Sie muss **größer** (eine höhere Zahl) als Ihr WAN-Präfix sein, um ein gültiges Subnetz zu bilden.
+Die Präfixlänge bestimmt die Größe des IPv6-Adressraums Ihres LAN. Wählen Sie einen Wert von /48 bis /64, der nicht kürzer als das von Ihrem Anbieter delegierte Präfix ist. Die Zusammenfassung zeigt diese Größe als **Delegiertes Präfix** (**Keine**, wenn kein Präfix delegiert wurde).
 
-Weist Ihnen Ihr ISP beispielsweise ein /48-Präfix zu, können Sie /56, /60 oder /64 für Ihr LAN verwenden. Für die meisten Heimnetzwerke wird ein /64-Präfix empfohlen.`,
+Bei einer /56-Delegation können Sie beispielsweise /56, /60 oder /64 für Ihr LAN verwenden; bei einer /64-Delegation verwenden Sie /64. Für die meisten Heimnetzwerke wird ein /64-Präfix empfohlen.`,
   '/outbound': `## Ausgehende VPNs
 
 Ausgehende VPNs leiten Ihren Internetverkehr durch verschlüsselte Tunnel zu entfernten Servern und verbessern so Privatsphäre und Sicherheit.
@@ -187,7 +187,7 @@ Leiten Sie ein VPN durch ein anderes für zusätzliche Privatsphäre. Ihr Datenv
 Laden Sie eine WireGuard-Konfigurationsdatei von Ihrem VPN-Anbieter (Mullvad, ProtonVPN, IVPN usw.) hoch, um einen neuen VPN-Client zu erstellen.`,
   '/outbound/vpn': `## Ausgehende VPNs
 
-<details><summary>Bezeichnung</summary> Ein einprägsamer Name zur Identifizierung dieser VPN-Verbindung. Verwenden Sie etwas Aussagekräftiges wie „Mullvad Schweden“ oder „Arbeits-VPN“. </details> <details><summary>Verbindet sich mit</summary> Wohin der Datenverkehr von diesem VPN geleitet werden soll:<ul><li><b>Internet:</b> Der Datenverkehr gelangt über dieses VPN direkt ins Internet.</li><li><b>Ein weiteres VPN:</b> Zuerst durch ein weiteres VPN verketten für zusätzliche Privatsphäre. Ihr Datenverkehr wird mehrfach verschlüsselt und verlässt das Netz über mehrere Server.</li></ul><b>Hinweis:</b> Das Verketten von VPNs erhöht die Latenz und kann die Geschwindigkeit verringern. </details> <details><summary>Verbindungspfad</summary> Zeigt den vollständigen Weg, den Ihr Datenverkehr von diesem VPN ins Internet nimmt. Zum Beispiel: Mullvad → Proton → Internet bedeutet, dass der Datenverkehr von Mullvad verschlüsselt, durch Proton gesendet wird und dann ins Internet gelangt.</details>`,
+<details><summary>Bezeichnung</summary> Ein einprägsamer Name zur Identifizierung dieser VPN-Verbindung. Verwenden Sie etwas Aussagekräftiges wie „Mullvad Schweden“ oder „Arbeits-VPN“. </details> <details><summary>Verbindet sich mit</summary> Wohin der Datenverkehr von diesem VPN geleitet werden soll:<ul><li><b>Internet:</b> Der Datenverkehr gelangt über dieses VPN direkt ins Internet.</li><li><b>Ein weiteres VPN:</b> Zuerst durch ein weiteres VPN verketten für zusätzliche Privatsphäre. Ihr Datenverkehr wird mehrfach verschlüsselt und verlässt das Netz über mehrere Server.</li></ul><b>Hinweis:</b> Das Verketten von VPNs erhöht die Latenz und kann die Geschwindigkeit verringern. </details> <details><summary>DNS-Server</summary> Resolver, die über dieses VPN geroutete Profile ohne eigene DNS-Server durch den Tunnel erreichen. Leer lassen, um die benutzerdefinierten DNS-Server des Systems durch den Tunnel zu nutzen – oder, wenn das System das DNS Ihres Internetanbieters verwendet, dessen Server außerhalb des Tunnels. </details> <details><summary>Verbindungspfad</summary> Zeigt den vollständigen Weg, den Ihr Datenverkehr von diesem VPN ins Internet nimmt. Zum Beispiel: Mullvad → Proton → Internet bedeutet, dass der Datenverkehr von Mullvad verschlüsselt, durch Proton gesendet wird und dann ins Internet gelangt.</details>`,
   '/outbound/dialog': `## Ausgehende VPNs
 
 VPN-Clients stellen eine ausgehende Verbindung zu einem VPN-Server her und ermöglichen es Geräten, Daten so zu senden und zu empfangen, als wären sie direkt mit dem privaten Netzwerk verbunden. Verbirgt Ihre IP-Adresse, umgeht geografische Beschränkungen und schützt sensible Daten in öffentlichen Wi-Fi-Netzwerken.
@@ -202,7 +202,11 @@ Laden Sie eine WireGuard- **.conf** -Datei von Ihrem VPN-Anbieter hoch. Diese Da
 
 ### Ziel
 
-Der nächste Knoten im Pfad einer mehrschichtigen VPN-Verbindung.`,
+Der nächste Knoten im Pfad einer mehrschichtigen VPN-Verbindung.
+
+### DNS-Server
+
+Optional. Ersetzt die DNS-Server aus der Konfigurationsdatei. Profile, die über dieses VPN geroutet werden, lösen Namen mit diesen Servern durch den Tunnel auf, sofern sie keine eigenen festlegen. Gibt es weder hier noch in der Konfiguration noch im benutzerdefinierten System-DNS Server, lösen diese Profile Namen über Ihren Internetanbieter außerhalb des Tunnels auf.`,
   '/profiles': `## Profile
 
 Sicherheitsprofile definieren Netzwerksegmente mit isolierten Berechtigungen. Jedes Profil steuert den Internetzugriff und die Kommunikation mit anderen Profilen in Ihrem lokalen Netzwerk.
@@ -213,7 +217,7 @@ Ein aussagekräftiger Name für das Sicherheitsprofil, etwa „Gast“ oder „I
 
 ### DNS
 
-Welche DNS-Server Geräte in diesem Profil verwenden – die des Systems („System“), die eigenen benutzerdefinierten Server des Profils („Benutzerdefiniert“) oder, beim Routing durch ein VPN, die des VPN („VPN“).
+Welche DNS-Server Geräte in diesem Profil verwenden – die des Systems („System“), die eigenen benutzerdefinierten Server des Profils („Benutzerdefiniert“) oder, beim Routing durch ein VPN, die des VPN („VPN“). „System (außerhalb des VPN)“ bedeutet, dass ein über ein VPN geroutetes Profil keine DNS-Server im Tunnel hat und Namen über Ihren Internetanbieter außerhalb des Tunnels auflöst.
 
 ### Ausgehend
 
@@ -473,7 +477,7 @@ Steuert, worauf das verbundene Gerät im Netzwerk zugreifen kann. Weisen Sie ein
 
 ### Land
 
-Das Land, dessen WLAN-Vorschriften der Router befolgt. Es bestimmt, welche Kanäle jedes Band nutzen darf und wie viel Sendeleistung erlaubt ist. Solange kein Land ausgewählt ist, verwendet der Router eine konservative weltweite Teilmenge: die 2,4-GHz-Kanäle 1–11 und die 5-GHz-Kanäle 36–48 mit reduzierter Leistung. Ein Wechsel des Landes setzt die Kanalauswahl auf Auto zurück. Wählen Sie das Land, in dem sich der Router physisch befindet.
+Das Land, dessen WLAN-Vorschriften der Router befolgt. Es bestimmt, welche Kanäle jedes Band nutzen darf und wie viel Sendeleistung erlaubt ist. Solange kein Land ausgewählt ist, verwendet der Router eine konservative weltweite Teilmenge: die 2,4-GHz-Kanäle 1–11 und die 5-GHz-Kanäle 36–48 mit reduzierter Leistung. Ein Wechsel des Landes setzt die Kanalauswahl auf Auto zurück und verringert eine Kanalbreite über 80 MHz auf 80 MHz. Wählen Sie das Land, in dem sich der Router physisch befindet.
 
 ### Wi-Fi aktivieren
 
@@ -497,7 +501,11 @@ Bei Verwendung beider Frequenzbänder erstellt diese Option separate SSIDs für 
 
 ### Kanäle
 
-Bestimmte Kanäle innerhalb jedes Frequenzbands. Wählen Sie „Auto“, damit der Router den besten Kanal auswählt, oder wählen Sie einen bestimmten Kanal, um Störungen durch benachbarte Netzwerke zu vermeiden. „Auto“ überspringt Kanäle mit Radarerkennung (DFS). Sie können einen solchen Kanal manuell wählen, doch das 5-GHz-Netz erscheint dann bei jedem Start des Routers erst nach einer Minute oder länger, während er auf Radar horcht.`,
+Bestimmte Kanäle innerhalb jedes Frequenzbands. Wählen Sie „Auto“, damit der Router den besten Kanal auswählt, oder wählen Sie einen bestimmten Kanal, um Störungen durch benachbarte Netzwerke zu vermeiden. „Auto“ überspringt Kanäle mit Radarerkennung (DFS). Sie können einen solchen Kanal manuell wählen, doch das 5-GHz-Netz erscheint dann bei jedem Start des Routers erst nach einer Minute oder länger, während er auf Radar horcht.
+
+### Kanalbreite
+
+Wie viel des Bands jedes Netz belegt. Breitere Kanäle sind schneller, überlappen aber mehr benachbarte Netze und reichen etwas weniger weit. Jede Auswahlliste zeigt die Breiten, die der gewählte Kanal im gewählten Land nutzen kann. Im 2,4-GHz-Band startet ein 40-MHz-Netz stattdessen mit 20 MHz, wenn ein benachbartes Netz es überlappt.`,
 }
 
 export default HELP_DE

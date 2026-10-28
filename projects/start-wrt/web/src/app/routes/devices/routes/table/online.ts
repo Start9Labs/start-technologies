@@ -1,8 +1,8 @@
 import { Component, input } from '@angular/core'
 import { RouterLink } from '@angular/router'
 import { TuiTable } from '@taiga-ui/addon-table'
-import { TuiFormatNumberPipe, TuiLink } from '@taiga-ui/core'
-import { TuiChip } from '@taiga-ui/kit'
+import { TuiLink } from '@taiga-ui/core'
+import { TuiChip, TuiFormatNumberPipe } from '@taiga-ui/kit'
 import { Placeholder } from 'src/app/components/placeholder'
 import { DeviceTableItem } from 'src/app/routes/devices/utils'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
@@ -51,7 +51,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
           </td>
           <td tuiTd>
             <a tuiLink routerLink="/profiles">
-              {{ item.securityProfile || ('Default' | i18n) }}
+              {{ item.securityProfile || '-' }}
             </a>
           </td>
           <td tuiTd>{{ item.mac || '-' }}</td>
@@ -76,13 +76,15 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
             <small class="g-secondary">GB</small>
           </td>
           <td tuiTd>
-            @if (item.speed) {
+            @if (item.speed?.up != null) {
               <div tuiChip size="xs" iconStart="@tui.arrow-up">
                 <span>
                   {{ item.speed.up | tuiFormatNumber }}
                   <small class="g-secondary">MB/s</small>
                 </span>
               </div>
+            }
+            @if (item.speed?.down != null) {
               <div tuiChip size="xs" iconStart="@tui.arrow-down">
                 <span>
                   {{ item.speed.down | tuiFormatNumber }}

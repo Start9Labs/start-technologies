@@ -16,7 +16,7 @@ export const I18N = new InjectionToken('', {
 })
 
 export const I18N_LOADER = new InjectionToken<
-  (lang: TuiLanguageName) => Promise<i18n>
+  (lang: TuiLanguageName) => Promise<i18n | null>
 >('')
 
 export const I18N_STORAGE = new InjectionToken<
@@ -24,6 +24,23 @@ export const I18N_STORAGE = new InjectionToken<
 >('', {
   factory: () => () => Promise.resolve(),
 })
+
+export async function loadDictionary(
+  language: TuiLanguageName,
+): Promise<i18n | null> {
+  switch (language) {
+    case 'spanish':
+      return import('./dictionaries/es').then(v => v.default)
+    case 'polish':
+      return import('./dictionaries/pl').then(v => v.default)
+    case 'german':
+      return import('./dictionaries/de').then(v => v.default)
+    case 'french':
+      return import('./dictionaries/fr').then(v => v.default)
+    default:
+      return null
+  }
+}
 
 export const I18N_PROVIDERS = [
   tuiLanguageSwitcher(async (language: TuiLanguageName): Promise<unknown> => {
@@ -40,23 +57,7 @@ export const I18N_PROVIDERS = [
         return import('@taiga-ui/i18n/languages/english')
     }
   }),
-  {
-    provide: I18N_LOADER,
-    useValue: async (language: TuiLanguageName): Promise<unknown> => {
-      switch (language) {
-        case 'spanish':
-          return import('./dictionaries/es').then(v => v.default)
-        case 'polish':
-          return import('./dictionaries/pl').then(v => v.default)
-        case 'german':
-          return import('./dictionaries/de').then(v => v.default)
-        case 'french':
-          return import('./dictionaries/fr').then(v => v.default)
-        default:
-          return null
-      }
-    },
-  },
+  { provide: I18N_LOADER, useValue: loadDictionary },
   tuiProvide(
     TuiLanguageSwitcherService,
     forwardRef(() => i18nService),

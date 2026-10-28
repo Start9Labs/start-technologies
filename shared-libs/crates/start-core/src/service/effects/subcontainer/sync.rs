@@ -151,25 +151,7 @@ impl ExecParams {
             "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         );
 
-        let mut uid = Err(None);
-        let mut gid = Err(None);
         let mut needs_home = true;
-
-        if let Some(user) = user {
-            if let Some((u, g)) = user.split_once(":") {
-                uid = Err(Some(u));
-                gid = Err(Some(g));
-            } else {
-                uid = Err(Some(user));
-            }
-        }
-
-        if let Some(u) = uid.err().flatten().and_then(|u| u.parse::<u32>().ok()) {
-            uid = Ok(u);
-        }
-        if let Some(g) = gid.err().flatten().and_then(|g| g.parse::<u32>().ok()) {
-            gid = Ok(g);
-        }
 
         let mut update_env = |line: &str| {
             if let Some((k, v)) = line.split_once("=") {
@@ -179,6 +161,17 @@ impl ExecParams {
                 cmd.env_remove(line);
             }
         };
+        for line in std::fs::read_to_string("/etc/default/locale")
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| {
+                l.split_once('=')
+                    .is_none_or(|(_, v)| locale_available(chroot, v))
+            })
+        {
+            update_env(line);
+        }
+
         if let Some(f) = env_file {
             let mut lines = BufReader::new(
                 File::open(&f).with_ctx(|_| (ErrorKind::Filesystem, format!("open r {f:?}")))?,
@@ -189,102 +182,21 @@ impl ExecParams {
             }
         }
 
-        for line in std::fs::read_to_string("/etc/default/locale")
-            .unwrap_or_default()
-            .lines()
-        {
-            update_env(line);
-        }
-
         for line in env {
             update_env(&line);
         }
 
-        let needs_gid = Err(None) == gid;
-        let mut username = InternedString::intern("root");
-        let mut handle_passwd_line = |line: &str| -> Option<()> {
-            let l = line.trim();
-            let mut split = l.split(":");
-            let user = split.next()?;
-            match uid {
-                Err(Some(u)) if u != user => return None,
-                _ => (),
-            }
-            split.next(); // throw away x
-            let u: u32 = split.next()?.parse().ok()?;
-            match uid {
-                Err(Some(_)) => uid = Ok(u),
-                Err(None) if u == 0 => uid = Ok(u),
-                Ok(uid) if uid != u => return None,
-                _ => (),
-            }
-
-            username = user.into();
-
-            if !needs_gid && !needs_home {
-                return Some(());
-            }
-            let g = split.next()?;
-            if needs_gid {
-                gid = Ok(g.parse().ok()?);
-            }
-
-            if needs_home {
-                split.next(); // throw away group name
-
-                let home = split.next()?;
-
-                cmd.env("HOME", home);
-            }
-
-            Some(())
-        };
-
-        let mut lines = BufReader::new(
-            File::open(chroot.join("etc/passwd"))
-                .with_ctx(|_| (ErrorKind::Filesystem, format!("open r /etc/passwd")))?,
-        )
-        .lines();
-        while let Some(line) = lines.next().transpose()? {
-            if handle_passwd_line(&line).is_some() {
-                break;
-            }
+        let ExecUser {
+            uid,
+            gid,
+            home,
+            groups,
+        } = ExecUser::resolve(chroot, user.as_deref())?;
+        if needs_home {
+            cmd.env("HOME", home);
         }
 
-        let mut groups = Vec::new();
-        let mut handle_group_line = |line: &str| -> Option<()> {
-            let l = line.trim();
-            let mut split = l.split(":");
-            let name = split.next()?;
-            split.next()?; // throw away x
-            let g = split.next()?.parse::<u32>().ok()?;
-            match gid {
-                Err(Some(n)) if n == name => gid = Ok(g),
-                _ => (),
-            }
-            let users = split.next()?;
-            if users.split(",").any(|u| u == &*username) {
-                groups.push(nix::unistd::Gid::from_raw(g));
-            }
-            Some(())
-        };
-        let mut lines = BufReader::new(
-            File::open(chroot.join("etc/group"))
-                .with_ctx(|_| (ErrorKind::Filesystem, format!("open r /etc/group")))?,
-        )
-        .lines();
-        while let Some(line) = lines.next().transpose()? {
-            if handle_group_line(&line).is_none() {
-                tracing::warn!("Invalid /etc/group line: {line}");
-            }
-        }
-
-        // Switch into the subcontainer rootfs via pivot_root rather than
-        // chroot. The kernel's `current_chrooted()` check rejects
-        // `unshare(CLONE_NEWUSER)` from a chrooted process, so a chrooted
-        // service can't spawn a rootless OCI runtime (podman/docker), which
-        // is the whole point of `manifest.userspaceFilesystems`. pivot_root runs
-        // inside its own mount namespace and doesn't trip that check.
+        // chroot prevents rootless OCI runtimes from creating user namespaces.
         nix::sched::unshare(CloneFlags::CLONE_NEWNS)
             .with_ctx(|_| (ErrorKind::Filesystem, "unshare mount ns"))?;
         nix::mount::mount(
@@ -295,7 +207,6 @@ impl ExecParams {
             None::<&str>,
         )
         .with_ctx(|_| (ErrorKind::Filesystem, "make / private"))?;
-        // pivot_root requires the new root to itself be a mount.
         nix::mount::mount(
             Some(chroot.as_path()),
             chroot.as_path(),
@@ -309,69 +220,322 @@ impl ExecParams {
                 lazy_format!("bind {chroot:?} on itself"),
             )
         })?;
-        let put_old = chroot.join(".put_old");
-        std::fs::create_dir_all(&put_old)
-            .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mkdir {put_old:?}")))?;
         std::env::set_current_dir(chroot)
             .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("chdir {chroot:?}")))?;
-        nix::unistd::pivot_root(".", ".put_old")
-            .with_ctx(|_| (ErrorKind::Filesystem, "pivot_root"))?;
+        nix::unistd::pivot_root(".", ".").with_ctx(|_| (ErrorKind::Filesystem, "pivot_root"))?;
+        // Keep '.' until the stacked old root is detached.
+        nix::mount::umount2(".", nix::mount::MntFlags::MNT_DETACH)
+            .with_ctx(|_| (ErrorKind::Filesystem, "umount old root"))?;
         std::env::set_current_dir("/").with_ctx(|_| (ErrorKind::Filesystem, "chdir /"))?;
-        nix::mount::umount2("/.put_old", nix::mount::MntFlags::MNT_DETACH)
-            .with_ctx(|_| (ErrorKind::Filesystem, "umount /.put_old"))?;
-        std::fs::remove_dir("/.put_old").ok();
-        if let Ok(uid) = uid {
-            if uid != 0 {
-                std::os::unix::fs::chown("/proc/self/fd/0", Some(uid), gid.ok()).ok();
-                std::os::unix::fs::chown("/proc/self/fd/1", Some(uid), gid.ok()).ok();
-                std::os::unix::fs::chown("/proc/self/fd/2", Some(uid), gid.ok()).ok();
-            }
+        if uid != 0 {
+            std::os::unix::fs::chown("/proc/self/fd/0", Some(uid), Some(gid)).ok();
+            std::os::unix::fs::chown("/proc/self/fd/1", Some(uid), Some(gid)).ok();
+            std::os::unix::fs::chown("/proc/self/fd/2", Some(uid), Some(gid)).ok();
         }
-        // Handle credential changes in pre_exec to control the order:
-        // setgroups must happen before setgid/setuid (requires CAP_SETGID)
-        {
-            let set_uid = uid.ok();
-            let set_gid = gid.ok();
-            unsafe {
-                cmd.pre_exec(move || {
-                    // Create a new session so entrypoint scripts that do
-                    // kill(0, SIGTERM) don't cascade to other subcontainers.
-                    // EPERM means we're already a session leader (e.g. pty_process
-                    // called setsid() for us), which is fine.
-                    match nix::unistd::setsid() {
-                        Ok(_) | Err(Errno::EPERM) => {}
-                        Err(e) => {
-                            return Err(std::io::Error::from_raw_os_error(e as i32));
-                        }
+        unsafe {
+            cmd.pre_exec(move || {
+                // pty_process may have already made this process a session leader.
+                match nix::unistd::setsid() {
+                    Ok(_) | Err(Errno::EPERM) => {}
+                    Err(e) => {
+                        return Err(std::io::Error::from_raw_os_error(e as i32));
                     }
-                    if !groups.is_empty() {
-                        nix::unistd::setgroups(&groups)
-                            .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
-                    }
-                    if let Some(gid) = set_gid {
-                        nix::unistd::setgid(nix::unistd::Gid::from_raw(gid))
-                            .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
-                    }
-                    if let Some(uid) = set_uid {
-                        nix::unistd::setuid(nix::unistd::Uid::from_raw(uid))
-                            .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
-                    }
-                    // Restore dumpable flag cleared by setuid so that
-                    // /proc/self/fd/* is owned by the current uid and
-                    // /dev/stderr works for the target user.
-                    libc::prctl(libc::PR_SET_DUMPABLE, 1, 0, 0, 0);
-                    Ok(())
-                });
-            }
+                }
+                nix::unistd::setgroups(&groups)
+                    .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+                nix::unistd::setgid(nix::unistd::Gid::from_raw(gid))
+                    .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+                nix::unistd::setuid(nix::unistd::Uid::from_raw(uid))
+                    .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+                // setuid clears dumpability and changes /proc/self/fd ownership.
+                libc::prctl(libc::PR_SET_DUMPABLE, 1, 0, 0, 0);
+                // Credential changes clear the parent-death signal.
+                if libc::prctl(libc::PR_SET_PDEATHSIG, SIGKILL) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
         }
         cmd.args(args);
 
-        if let Some(workdir) = workdir {
-            cmd.current_dir(workdir);
-        } else {
-            cmd.current_dir("/");
+        let workdir = workdir.as_deref().unwrap_or(Path::new("/"));
+        cmd.current_dir(workdir);
+        Err(cmd.exec()).with_ctx(|_| {
+            (
+                ErrorKind::Filesystem,
+                lazy_format!("exec {command:?} in {workdir:?}"),
+            )
+        })
+    }
+}
+
+struct ExecUser {
+    uid: u32,
+    gid: u32,
+    home: String,
+    groups: Vec<nix::unistd::Gid>,
+}
+
+impl ExecUser {
+    fn resolve(chroot: &Path, spec: Option<&str>) -> Result<Self, Error> {
+        let passwd = read_user_database(&chroot.join("etc/passwd"))?;
+        let group = read_user_database(&chroot.join("etc/group"))?;
+        let (user, group_spec) = match spec {
+            Some(spec) => spec
+                .split_once(':')
+                .map_or((spec, None), |(u, g)| (u, Some(g))),
+            None => ("0", None),
+        };
+
+        let uid_spec = user.parse::<u32>().ok();
+        let entry = user_database_entries(&passwd)
+            .find(|(name, uid, _)| uid_spec.map_or(*name == user, |u| u == *uid));
+        let uid = uid_spec
+            .or(entry.as_ref().map(|(_, uid, _)| *uid))
+            .or((user == "root").then_some(0))
+            .ok_or_else(|| {
+                Error::new(
+                    eyre!(
+                        "{}",
+                        t!(
+                            "service.effects.subcontainer.sync.unknown-user",
+                            user = user
+                        )
+                    ),
+                    ErrorKind::InvalidRequest,
+                )
+            })?;
+
+        let gid = match group_spec {
+            Some(g) => g
+                .parse()
+                .ok()
+                .or(user_database_entries(&group)
+                    .find(|(name, ..)| *name == g)
+                    .map(|(_, gid, _)| gid))
+                .or((g == "root").then_some(0))
+                .ok_or_else(|| {
+                    Error::new(
+                        eyre!(
+                            "{}",
+                            t!("service.effects.subcontainer.sync.unknown-group", group = g)
+                        ),
+                        ErrorKind::InvalidRequest,
+                    )
+                })?,
+            None => entry
+                .as_ref()
+                .and_then(|(_, _, rest)| rest.first()?.parse().ok())
+                .unwrap_or(0),
+        };
+
+        let home = entry
+            .as_ref()
+            .and_then(|(_, _, rest)| rest.get(2).copied())
+            .unwrap_or("/")
+            .to_owned();
+
+        let groups = match &entry {
+            Some((name, ..)) => user_database_entries(&group)
+                .filter(|(_, _, rest)| {
+                    rest.first()
+                        .is_some_and(|members| members.split(',').any(|m| m == *name))
+                })
+                .map(|(_, gid, _)| nix::unistd::Gid::from_raw(gid))
+                .collect(),
+            None => Vec::new(),
+        };
+
+        Ok(Self {
+            uid,
+            gid,
+            home,
+            groups,
+        })
+    }
+}
+
+fn read_user_database(path: &Path) -> Result<String, Error> {
+    match std::fs::read_to_string(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        res => res.with_ctx(|_| {
+            (
+                ErrorKind::Filesystem,
+                lazy_format!("read {}", path.display()),
+            )
+        }),
+    }
+}
+
+fn user_database_entries(db: &str) -> impl Iterator<Item = (&str, u32, Vec<&str>)> {
+    db.lines().filter_map(|line| {
+        let mut fields = line.trim().split(':');
+        let name = fields.next()?;
+        fields.next();
+        let id = fields.next()?.parse().ok()?;
+        Some((name, id, fields.collect()))
+    })
+}
+
+fn locale_available(chroot: &Path, locale: &str) -> bool {
+    if matches!(locale, "C" | "POSIX") || locale.starts_with("C.") {
+        return true;
+    }
+    let names = [locale.to_owned(), normalize_locale(locale)];
+    let dir = chroot.join("usr/lib/locale");
+    names.iter().any(|n| dir.join(n).join("LC_CTYPE").exists())
+        || locale_archive_names(&dir.join("locale-archive"))
+            .is_ok_and(|archive| archive.iter().any(|a| names.contains(a)))
+}
+
+/// glibc's `_nl_normalize_codeset`, which names locales in the archive.
+fn normalize_locale(locale: &str) -> String {
+    let (base, modifier) = locale.split_once('@').unzip();
+    let base = base.unwrap_or(locale);
+    let Some((lang, codeset)) = base.split_once('.') else {
+        return locale.to_owned();
+    };
+    let mut codeset: String = codeset
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    if codeset.chars().all(|c| c.is_ascii_digit()) {
+        codeset.insert_str(0, "iso");
+    }
+    match modifier {
+        Some(m) => format!("{lang}.{codeset}@{m}"),
+        None => format!("{lang}.{codeset}"),
+    }
+}
+
+fn locale_archive_names(path: &Path) -> std::io::Result<Vec<String>> {
+    use std::os::unix::fs::FileExt;
+
+    let file = File::open(path)?;
+    let mut head = [0u8; 32];
+    file.read_exact_at(&mut head, 0)?;
+    let word = |i: usize| u32::from_ne_bytes(head[i * 4..i * 4 + 4].try_into().unwrap()) as u64;
+    if word(0) != 0xde020109 {
+        return Ok(Vec::new());
+    }
+    let (namehash_offset, namehash_size) = (word(2), word(4));
+    let (string_offset, string_used) = (word(5), word(6));
+    let mut namehash = vec![0u8; namehash_size as usize * 12];
+    file.read_exact_at(&mut namehash, namehash_offset)?;
+    let mut strings = vec![0u8; string_used as usize];
+    file.read_exact_at(&mut strings, string_offset)?;
+    Ok(namehash
+        .chunks_exact(12)
+        .filter(|e| e[8..12] != [0; 4])
+        .filter_map(|e| {
+            let start = (u32::from_ne_bytes(e[4..8].try_into().unwrap()) as u64)
+                .checked_sub(string_offset)? as usize;
+            let name = strings.get(start..)?;
+            let end = name.iter().position(|&b| b == 0)?;
+            String::from_utf8(name[..end].to_vec()).ok()
+        })
+        .collect())
+}
+
+#[cfg(test)]
+mod locale_tests {
+    use super::*;
+
+    fn write_archive(path: &Path, names: &[&str]) {
+        let string_offset = 56 + (names.len() as u32 + 1) * 12;
+        let mut strings = Vec::new();
+        let mut namehash = Vec::new();
+        for name in names {
+            for word in [0, string_offset + strings.len() as u32, 1] {
+                namehash.extend(u32::to_ne_bytes(word));
+            }
+            strings.extend(name.bytes().chain([0]));
         }
-        Err(cmd.exec().into())
+        namehash.extend([0; 12]);
+        let mut archive = Vec::new();
+        for word in [
+            0xde020109,
+            0,
+            56,
+            names.len() as u32,
+            names.len() as u32 + 1,
+            string_offset,
+            strings.len() as u32,
+            strings.len() as u32,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ] {
+            archive.extend(u32::to_ne_bytes(word));
+        }
+        archive.extend(namehash);
+        archive.extend(strings);
+        std::fs::write(path, archive).unwrap();
+    }
+
+    #[test]
+    fn normalizes_codeset() {
+        assert_eq!(normalize_locale("es_ES.UTF-8"), "es_ES.utf8");
+        assert_eq!(normalize_locale("de_DE.8859-1@euro"), "de_DE.iso88591@euro");
+        assert_eq!(normalize_locale("sr_RS@latin"), "sr_RS@latin");
+    }
+
+    #[test]
+    fn finds_locales_the_image_generated() {
+        let dir = tempfile::tempdir().unwrap();
+        let locale_dir = dir.path().join("usr/lib/locale");
+        assert!(!locale_available(dir.path(), "es_ES.UTF-8"));
+        assert!(locale_available(dir.path(), "C.UTF-8"));
+
+        std::fs::create_dir_all(&locale_dir).unwrap();
+        write_archive(&locale_dir.join("locale-archive"), &["en_US.utf8"]);
+        assert!(locale_available(dir.path(), "en_US.UTF-8"));
+        assert!(!locale_available(dir.path(), "es_ES.UTF-8"));
+
+        std::fs::create_dir_all(locale_dir.join("es_ES.utf8")).unwrap();
+        std::fs::write(locale_dir.join("es_ES.utf8/LC_CTYPE"), "").unwrap();
+        assert!(locale_available(dir.path(), "es_ES.UTF-8"));
+    }
+}
+
+#[cfg(test)]
+mod user_database_tests {
+    use super::*;
+
+    #[test]
+    fn missing_user_database_runs_as_root() {
+        let dir = tempfile::tempdir().unwrap();
+        for spec in [None, Some("root"), Some("0:0"), Some("root:root")] {
+            let user = ExecUser::resolve(dir.path(), spec).unwrap();
+            assert_eq!((user.uid, user.gid, user.home.as_str()), (0, 0, "/"));
+            assert!(user.groups.is_empty());
+        }
+        assert!(ExecUser::resolve(dir.path(), Some("app")).is_err());
+        assert!(ExecUser::resolve(dir.path(), Some("0:app")).is_err());
+    }
+
+    #[test]
+    fn resolves_from_user_database() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("etc")).unwrap();
+        std::fs::write(
+            dir.path().join("etc/passwd"),
+            "root:x:0:0:root:/admin:/bin/sh\napp:x:1000:1001:app:/home/app:/bin/sh\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("etc/group"), "staff:x:2000:app\n").unwrap();
+        let user = ExecUser::resolve(dir.path(), None).unwrap();
+        assert_eq!((user.uid, user.gid, user.home.as_str()), (0, 0, "/admin"));
+        let user = ExecUser::resolve(dir.path(), Some("app:staff")).unwrap();
+        assert_eq!(
+            (user.uid, user.gid, user.home.as_str()),
+            (1000, 2000, "/home/app")
+        );
+        assert_eq!(user.groups, vec![nix::unistd::Gid::from_raw(2000)]);
     }
 }
 
@@ -876,7 +1040,6 @@ pub fn pipe_wrap(
     let orig_stdout_fd = std::io::stdout().as_raw_fd();
     let orig_stderr_fd = std::io::stderr().as_raw_fd();
 
-    // Relay child stdout → original stdout (which may be a socket)
     std::thread::spawn(move || {
         let mut reader = child_stdout;
         let mut buf = [0u8; 8192];
@@ -893,7 +1056,6 @@ pub fn pipe_wrap(
         }
     });
 
-    // Relay child stderr → original stderr
     std::thread::spawn(move || {
         let mut reader = child_stderr;
         let mut buf = [0u8; 8192];
@@ -910,7 +1072,6 @@ pub fn pipe_wrap(
         }
     });
 
-    // Forward signals to the child
     let child_pid = child.id() as i32;
     let mut sig = signal_hook::iterator::Signals::new(FWD_SIGNALS)?;
     std::thread::spawn(move || {

@@ -43,7 +43,7 @@ const jsonrpc = '2.0' as const
 
 const isResultSchema = z.looseObject({ result: z.any() })
 const isResult = (v: unknown): v is z.infer<typeof isResultSchema> =>
-  isResultSchema.safeParse(v).success
+  isResultSchema.validate(v)
 
 const idType = z.union([z.string(), z.number(), z.literal(null)])
 type IdType = null | string | number | undefined
@@ -149,7 +149,7 @@ const handleRpc = (id: IdType, method: string, result: Promise<RpcResult>) =>
 
 const hasIdSchema = z.looseObject({ id: idType })
 const hasId = (v: unknown): v is z.infer<typeof hasIdSchema> =>
-  hasIdSchema.safeParse(v).success
+  hasIdSchema.validate(v)
 export class RpcListener {
   shouldExit = false
   unixSocketServer = net.createServer(async server => {})

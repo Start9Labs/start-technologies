@@ -1,18 +1,17 @@
 //! Shared server-side RFC 2136 (DNS UPDATE) handling, used by both StartTunnel
 //! (in this crate) and StartWRT's `startwrt-ctrld` (which imports this crate).
 //!
-//! [`DnsInjector`] is an in-memory store of injected DNS records plus per-gateway
-//! policy plug-ins: an authorizer (does this source IP's "allow DNS injection"
-//! toggle permit it?), a TSIG key lookup (the per-device key derived from that
-//! device's WireGuard PSK), and an `on_change` hook (persist the records — to
-//! PatchDb on the tunnel, an addn-hosts file on StartWRT). [`InjectingHandler`]
-//! wraps a forwarding `RequestHandler`: an injected-name `Query` is answered
-//! locally, a TSIG-authenticated `Update` mutates the store, everything else is
-//! forwarded unchanged.
+//! [`DnsInjector`] is an in-memory store of injected DNS records with four
+//! hooks: an authorizer per source IP, a TSIG key lookup (the per-device key
+//! derived from its WireGuard PSK), a `pre_update` policy that sees an
+//! UPDATE's records and its [`UpdateAuth`] before they mutate the store, and
+//! an `on_change` notifier. [`InjectingHandler`] wraps a forwarding
+//! `RequestHandler`: an injected-name `Query` is answered locally, an
+//! authorized `Update` mutates the store, everything else is forwarded.
 //!
-//! UPDATEs are authenticated by **TSIG** (RFC 8945): the source IP alone is
-//! forgeable by any co-located service that can emit on the tunnel interface, so
-//! every UPDATE must carry a valid HMAC keyed off the device's root-only WG PSK.
+//! UPDATE authentication is **TSIG** (RFC 8945), HMAC keyed off the device's
+//! root-only WG PSK. The handler hands the verdict to `pre_update`, which
+//! decides what an unsigned UPDATE may do.
 //! TSIG proves the signer holds that PSK (no forgery) but not freshness: there's
 //! no anti-replay state, so a captured signature replays within `TSIG_FUDGE`.
 //! That's bounded to records the sending device may already mutate and is
@@ -22,11 +21,15 @@
 //! TSIG.
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use hickory_server::net::runtime::Time;
-use hickory_server::proto::op::{Header, HeaderCounts, Metadata, OpCode, ResponseCode};
+use hickory_server::net::xfer::Protocol;
+use hickory_server::proto::op::{Header, HeaderCounts, Message, Metadata, OpCode, ResponseCode};
 use hickory_server::proto::rr::rdata::{CNAME, TXT};
 use hickory_server::proto::rr::{DNSClass, LowerName, Name, RData, Record, RecordType};
 use hickory_server::server::{Request, RequestHandler, ResponseHandler, ResponseInfo};
@@ -37,7 +40,7 @@ use crate::util::sync::SyncMutex;
 
 /// One injected record. Kept Rust-only; each gateway maps it to its own
 /// serializable view for the API/UI.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct InjectedRecord {
     pub name: Name,
     pub rtype: RecordType,
@@ -128,26 +131,45 @@ fn parse_rdata(rtype: &str, value: &str) -> Result<(RecordType, RData), Error> {
     })
 }
 
+/// What vouches for an UPDATE's source.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UpdateAuth {
+    /// A valid TSIG from the source's key.
+    pub tsig: bool,
+    /// Arrived over TCP, whose handshake proves the source address.
+    pub tcp: bool,
+}
+
 type Authorizer = Box<dyn Fn(IpAddr) -> bool + Send + Sync>;
 /// The per-device derived TSIG key for a source IP, or `None` if it isn't an
 /// allowed DNS-injection device.
 type KeyLookup = Box<dyn Fn(IpAddr) -> Option<[u8; 32]> + Send + Sync>;
+/// Fired with a full snapshot after a mutation that changed the store.
 type OnChange = Box<dyn Fn(Vec<InjectedRecord>) + Send + Sync>;
+/// Runs on an authorized UPDATE's records before they mutate the store.
+/// Anything but `NoError` refuses the whole message.
+type PreUpdate =
+    Box<dyn Fn(IpAddr, Vec<Record>, UpdateAuth) -> BoxFuture<'static, ResponseCode> + Send + Sync>;
 
 pub struct DnsInjector {
     records: SyncMutex<BTreeMap<LowerName, Vec<InjectedRecord>>>,
     authorize: Authorizer,
     tsig_key: KeyLookup,
     on_change: OnChange,
+    pre_update: PreUpdate,
 }
 
 impl DnsInjector {
-    pub fn new(
+    pub fn new<F>(
         initial: Vec<InjectedRecord>,
         authorize: impl Fn(IpAddr) -> bool + Send + Sync + 'static,
         tsig_key: impl Fn(IpAddr) -> Option<[u8; 32]> + Send + Sync + 'static,
         on_change: impl Fn(Vec<InjectedRecord>) + Send + Sync + 'static,
-    ) -> Arc<Self> {
+        pre_update: impl Fn(IpAddr, Vec<Record>, UpdateAuth) -> F + Send + Sync + 'static,
+    ) -> Arc<Self>
+    where
+        F: Future<Output = ResponseCode> + Send + 'static,
+    {
         let mut records: BTreeMap<LowerName, Vec<InjectedRecord>> = BTreeMap::new();
         for r in initial {
             records.entry(LowerName::from(&r.name)).or_default().push(r);
@@ -157,6 +179,7 @@ impl DnsInjector {
             authorize: Box::new(authorize),
             tsig_key: Box::new(tsig_key),
             on_change: Box::new(on_change),
+            pre_update: Box::new(move |src, updates, auth| pre_update(src, updates, auth).boxed()),
         })
     }
 
@@ -189,33 +212,43 @@ impl DnsInjector {
 
     /// Manually add or replace a record (admin action; skips authorization).
     pub fn upsert(&self, record: InjectedRecord) {
-        self.records.mutate(|m| {
+        let changed = self.records.mutate(|m| {
             let v = m.entry(LowerName::from(&record.name)).or_default();
+            if v.contains(&record) {
+                return false;
+            }
             v.retain(|r| !(r.rtype == record.rtype && r.rdata == record.rdata));
             v.push(record);
+            true
         });
-        self.notify();
+        if changed {
+            self.notify();
+        }
     }
 
     /// Manually delete records for a name (optionally a single type).
     pub fn delete(&self, name: &Name, rtype: Option<RecordType>) {
-        self.records.mutate(|m| {
+        let changed = self.records.mutate(|m| {
             let key = LowerName::from(name);
             match rtype {
-                None => {
-                    m.remove(&key);
-                }
+                None => m.remove(&key).is_some(),
                 Some(rt) => {
-                    if let Some(v) = m.get_mut(&key) {
-                        v.retain(|r| r.rtype != rt);
-                        if v.is_empty() {
-                            m.remove(&key);
-                        }
+                    let Some(v) = m.get_mut(&key) else {
+                        return false;
+                    };
+                    let before = v.len();
+                    v.retain(|r| r.rtype != rt);
+                    let changed = v.len() != before;
+                    if v.is_empty() {
+                        m.remove(&key);
                     }
+                    changed
                 }
             }
         });
-        self.notify();
+        if changed {
+            self.notify();
+        }
     }
 
     fn lookup(&self, name: &LowerName, rtype: RecordType) -> Vec<Record> {
@@ -235,12 +268,59 @@ impl DnsInjector {
         self.records.peek(|m| m.contains_key(name))
     }
 
-    /// Apply an UPDATE's records (RFC 2136 §2.5) from `src`, after authorizing.
-    fn apply_update(&self, src: IpAddr, updates: &[Record]) -> ResponseCode {
+    /// Verifies and applies a raw UPDATE message; `msg` is its parse.
+    async fn update(&self, src: IpAddr, request: &[u8], msg: &Message, tcp: bool) -> ResponseCode {
+        let auth = UpdateAuth {
+            tsig: self.verify_tsig(src, request),
+            tcp,
+        };
+        self.apply_update(src, &msg.authorities, auth).await
+    }
+
+    /// The wire response to a raw UPDATE message from `src`.
+    pub async fn answer_update(
+        &self,
+        src: IpAddr,
+        request: &[u8],
+        tcp: bool,
+    ) -> Result<Vec<u8>, Error> {
+        let response = match Message::from_vec(request) {
+            Ok(msg) => {
+                let code = self.update(src, request, &msg, tcp).await;
+                let mut response = Message::error_msg(msg.metadata.id, OpCode::Update, code);
+                response.queries = msg.queries;
+                response
+            }
+            Err(_) => Message::error_msg(
+                request
+                    .get(..2)
+                    .map_or(0, |b| u16::from_be_bytes([b[0], b[1]])),
+                OpCode::Update,
+                ResponseCode::FormErr,
+            ),
+        };
+        response
+            .to_vec()
+            .map_err(|e| Error::new(eyre!("encode DNS UPDATE response: {e}"), ErrorKind::Network))
+    }
+
+    /// Applies an UPDATE's records (RFC 2136 §2.5) once the authorizer and
+    /// `pre_update` admit them.
+    async fn apply_update(
+        &self,
+        src: IpAddr,
+        updates: &[Record],
+        auth: UpdateAuth,
+    ) -> ResponseCode {
         if !(self.authorize)(src) {
             return ResponseCode::Refused;
         }
-        self.records.mutate(|m| {
+        let code = (self.pre_update)(src, updates.to_vec(), auth).await;
+        if code != ResponseCode::NoError {
+            return code;
+        }
+        let changed = self.records.mutate(|m| {
+            let mut changed = false;
             for rec in updates {
                 let key = LowerName::from(&rec.name);
                 match rec.dns_class {
@@ -254,15 +334,20 @@ impl DnsInjector {
                             source: src,
                         };
                         let v = m.entry(key).or_default();
-                        v.retain(|r| !(r.rtype == record.rtype && r.rdata == record.rdata));
-                        v.push(record);
+                        if !v.contains(&record) {
+                            v.retain(|r| !(r.rtype == record.rtype && r.rdata == record.rdata));
+                            v.push(record);
+                            changed = true;
+                        }
                     }
                     // Delete an RRset (a whole type, or every type for the name).
                     DNSClass::ANY => {
                         if rec.record_type() == RecordType::ANY {
-                            m.remove(&key);
+                            changed |= m.remove(&key).is_some();
                         } else if let Some(v) = m.get_mut(&key) {
+                            let before = v.len();
                             v.retain(|r| r.rtype != rec.record_type());
+                            changed |= v.len() != before;
                             if v.is_empty() {
                                 m.remove(&key);
                             }
@@ -272,7 +357,9 @@ impl DnsInjector {
                     DNSClass::NONE => {
                         if let Some(v) = m.get_mut(&key) {
                             let rdata = rec.data.clone();
+                            let before = v.len();
                             v.retain(|r| r.rdata != rdata);
+                            changed |= v.len() != before;
                             if v.is_empty() {
                                 m.remove(&key);
                             }
@@ -281,8 +368,11 @@ impl DnsInjector {
                     _ => {}
                 }
             }
+            changed
         });
-        self.notify();
+        if changed {
+            self.notify();
+        }
         ResponseCode::NoError
     }
 }
@@ -328,19 +418,20 @@ impl RequestHandler for InjectingHandler {
     ) -> ResponseInfo {
         match request.metadata.op_code {
             OpCode::Update => {
-                let src = request.src().ip();
-                // Require a valid TSIG (keyed off the device's WireGuard PSK)
-                // before touching the store: source IP alone is forgeable by any
-                // co-located service that can emit on the tunnel interface.
-                let code = if !self.injector.verify_tsig(src, request.as_slice()) {
-                    ResponseCode::Refused
-                } else {
-                    // Re-decode the raw message: MessageRequest hides the
-                    // authority section where the update RRs live.
-                    match hickory_server::proto::op::Message::from_vec(request.as_slice()) {
-                        Ok(msg) => self.injector.apply_update(src, &msg.authorities),
-                        Err(_) => ResponseCode::FormErr,
+                // MessageRequest hides the authority section the update RRs
+                // live in.
+                let code = match Message::from_vec(request.as_slice()) {
+                    Ok(msg) => {
+                        self.injector
+                            .update(
+                                request.src().ip(),
+                                request.as_slice(),
+                                &msg,
+                                request.protocol() != Protocol::Udp,
+                            )
+                            .await
                     }
+                    Err(_) => ResponseCode::FormErr,
                 };
                 let header = header_with_code(request, code);
                 response_handle
@@ -404,8 +495,28 @@ impl RequestHandler for InjectingHandler {
 mod tests {
     use super::*;
 
+    const SIGNED: UpdateAuth = UpdateAuth {
+        tsig: true,
+        tcp: false,
+    };
+
     fn injector() -> Arc<DnsInjector> {
-        DnsInjector::new(Vec::new(), |_| true, |_| None, |_| {})
+        DnsInjector::new(
+            Vec::new(),
+            |_| true,
+            |_| None,
+            |_| {},
+            |_, _, _| async { ResponseCode::NoError },
+        )
+    }
+
+    /// The policy StartTunnel installs: a valid TSIG or nothing.
+    async fn tsig_required(_: IpAddr, _: Vec<Record>, auth: UpdateAuth) -> ResponseCode {
+        if auth.tsig {
+            ResponseCode::NoError
+        } else {
+            ResponseCode::Refused
+        }
     }
 
     fn fqdn(s: &str) -> LowerName {
@@ -501,6 +612,7 @@ mod tests {
             |_| true,
             move |ip| (ip == src).then_some(key_a),
             |_| {},
+            tsig_required,
         );
         assert!(
             inj.verify_tsig(src, &signed),
@@ -512,7 +624,185 @@ mod tests {
             "no key for src rejected"
         );
 
-        let inj_b = DnsInjector::new(Vec::new(), |_| true, move |_| Some(key_b), |_| {});
+        let inj_b = DnsInjector::new(
+            Vec::new(),
+            |_| true,
+            move |_| Some(key_b),
+            |_| {},
+            tsig_required,
+        );
         assert!(!inj_b.verify_tsig(src, &signed), "wrong key rejected");
+    }
+
+    fn a_record(name: &str, addr: [u8; 4]) -> Record {
+        use hickory_server::proto::rr::rdata::A;
+        let mut n = Name::from_utf8(name).unwrap();
+        n.set_fqdn(true);
+        Record::from_rdata(n, 300, RData::A(A::from(Ipv4Addr::from(addr))))
+    }
+
+    /// An UPDATE that changes nothing does not fire `on_change`.
+    #[tokio::test]
+    async fn noop_updates_do_not_notify() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let fired = Arc::new(AtomicUsize::new(0));
+        let count = fired.clone();
+        let inj = DnsInjector::new(
+            Vec::new(),
+            |_| true,
+            |_| None,
+            move |_| {
+                count.fetch_add(1, Ordering::SeqCst);
+            },
+            |_, _, _| async { ResponseCode::NoError },
+        );
+        let src = IpAddr::V4(Ipv4Addr::new(10, 59, 0, 2));
+        let rec = a_record("host.example.com", [10, 59, 0, 2]);
+
+        assert_eq!(
+            inj.apply_update(src, std::slice::from_ref(&rec), UpdateAuth::default())
+                .await,
+            ResponseCode::NoError
+        );
+        assert_eq!(fired.load(Ordering::SeqCst), 1, "first assert notifies");
+        assert_eq!(
+            inj.apply_update(src, std::slice::from_ref(&rec), UpdateAuth::default())
+                .await,
+            ResponseCode::NoError
+        );
+        assert_eq!(fired.load(Ordering::SeqCst), 1, "re-assert is a no-op");
+
+        let other = a_record("host.example.com", [10, 59, 0, 3]);
+        assert_eq!(
+            inj.apply_update(src, &[other], UpdateAuth::default()).await,
+            ResponseCode::NoError
+        );
+        assert_eq!(fired.load(Ordering::SeqCst), 2, "a real change notifies");
+
+        let mut name = Name::from_utf8("host.example.com").unwrap();
+        name.set_fqdn(true);
+        inj.delete(&name, Some(RecordType::AAAA));
+        assert_eq!(
+            fired.load(Ordering::SeqCst),
+            2,
+            "deleting nothing is a no-op"
+        );
+        inj.delete(&name, None);
+        assert_eq!(fired.load(Ordering::SeqCst), 3, "a real delete notifies");
+    }
+
+    /// The response carries the request's id, zone and verdict; garbage gets
+    /// FORMERR under the id it starts with.
+    #[tokio::test]
+    async fn answer_update_echoes_id_and_zone() {
+        use hickory_server::proto::op::update_message::append;
+        use hickory_server::proto::rr::RecordSet;
+
+        let inj = DnsInjector::new(
+            Vec::new(),
+            |_| true,
+            |_| None,
+            |_| {},
+            |_, _, auth: UpdateAuth| async move {
+                if auth.tcp {
+                    ResponseCode::NoError
+                } else {
+                    ResponseCode::Refused
+                }
+            },
+        );
+        let mut name = Name::from_utf8("host.example.com").unwrap();
+        name.set_fqdn(true);
+        let mut rrset = RecordSet::new(name.clone(), RecordType::A, 0);
+        rrset.insert(a_record("host.example.com", [10, 59, 0, 2]), 0);
+        let request = append(rrset, name.base_name(), false, false);
+        let bytes = request.to_vec().unwrap();
+        let src = IpAddr::V4(Ipv4Addr::new(10, 59, 0, 2));
+
+        let reply =
+            Message::from_vec(&inj.answer_update(src, &bytes, true).await.unwrap()).unwrap();
+        assert_eq!(reply.metadata.id, request.metadata.id);
+        assert_eq!(reply.metadata.op_code, OpCode::Update);
+        assert_eq!(reply.metadata.response_code, ResponseCode::NoError);
+        assert_eq!(reply.queries, request.queries, "zone section echoed");
+        assert_eq!(inj.list().len(), 1);
+
+        let reply =
+            Message::from_vec(&inj.answer_update(src, &bytes, false).await.unwrap()).unwrap();
+        assert_eq!(reply.metadata.response_code, ResponseCode::Refused);
+
+        let reply = Message::from_vec(
+            &inj.answer_update(src, &[0x12, 0x34, 0xff], true)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(reply.metadata.id, 0x1234);
+        assert_eq!(reply.metadata.response_code, ResponseCode::FormErr);
+    }
+
+    /// A `pre_update` refusal reaches the client as that code and leaves the
+    /// store untouched and un-notified.
+    #[tokio::test]
+    async fn pre_update_refusal_leaves_store_untouched() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let fired = Arc::new(AtomicUsize::new(0));
+        let count = fired.clone();
+        let inj = DnsInjector::new(
+            Vec::new(),
+            |_| true,
+            |_| None,
+            move |_| {
+                count.fetch_add(1, Ordering::SeqCst);
+            },
+            |_, _, _| async { ResponseCode::Refused },
+        );
+        let src = IpAddr::V4(Ipv4Addr::new(10, 59, 0, 2));
+        let rec = a_record("host.example.com", [10, 59, 0, 2]);
+        assert_eq!(
+            inj.apply_update(src, &[rec], SIGNED).await,
+            ResponseCode::Refused
+        );
+        assert!(inj.list().is_empty(), "store untouched");
+        assert_eq!(fired.load(Ordering::SeqCst), 0, "no notify");
+    }
+
+    /// With StartTunnel's policy installed, every src × signed combination
+    /// yields the response code `handle_request` used to.
+    #[tokio::test]
+    async fn tunnel_policy_matches_old_tsig_refusal() {
+        let src = IpAddr::V4(Ipv4Addr::new(10, 59, 0, 2));
+        let inj = DnsInjector::new(
+            Vec::new(),
+            move |ip| ip == src,
+            |_| None,
+            |_| {},
+            tsig_required,
+        );
+        let rec = a_record("host.example.com", [10, 59, 0, 2]);
+        assert_eq!(
+            inj.apply_update(src, std::slice::from_ref(&rec), UpdateAuth::default())
+                .await,
+            ResponseCode::Refused,
+            "authorized but unsigned -> refused"
+        );
+        assert!(inj.list().is_empty());
+        assert_eq!(
+            inj.apply_update(
+                IpAddr::V4(Ipv4Addr::new(10, 59, 0, 9)),
+                std::slice::from_ref(&rec),
+                SIGNED
+            )
+            .await,
+            ResponseCode::Refused,
+            "unauthorized -> refused even when signed"
+        );
+        assert_eq!(
+            inj.apply_update(src, std::slice::from_ref(&rec), SIGNED)
+                .await,
+            ResponseCode::NoError,
+            "authorized and signed -> applied"
+        );
+        assert_eq!(inj.list().len(), 1);
     }
 }

@@ -1,8 +1,6 @@
 # AGENTS.md — Container Runtime
 
-Node.js/TypeScript service runtime that runs inside StartOS package LXC containers. Sub-component of the **start-os** product. `CLAUDE.md` is a one-line `@AGENTS.md` import — edit this file, not `CLAUDE.md`. Wire-protocol reference: [RPCSpec.md](RPCSpec.md); structure: [ARCHITECTURE.md](ARCHITECTURE.md); contributor workflow: [CONTRIBUTING.md](CONTRIBUTING.md).
-
-**Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
+Node.js/TypeScript service runtime that runs inside StartOS package LXC containers. Sub-component of the **start-os** product. `CLAUDE.md` is a one-line `@AGENTS.md` import — edit this file, not `CLAUDE.md`. Wire-protocol reference: [RPCSpec.md](RPCSpec.md); structure: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Layout
 
@@ -14,7 +12,7 @@ Node.js/TypeScript service runtime that runs inside StartOS package LXC containe
 
 ## Build & test (run from the repo root)
 
-Run from the monorepo root (`/path/to/start-os`):
+Run from the monorepo root (`/path/to/start-technologies`):
 
 ```bash
 cd projects/start-sdk && make bundle && cd -                  # build SDK dependency first
@@ -38,3 +36,10 @@ Tests are Jest + `ts-jest` (`jest.config.js`, `rootDir: ./src`). `mime` is mocke
 - Compiled JS is installed into the container at `/usr/lib/startos/init/index.js` (the systemd unit runs `start-container pipe-wrap node … /usr/lib/startos/init/index.js`).
 - `update-image-local.sh` mounts the **repo root** into `start9/build-env` (at `/root/start-os`) and runs `update-image.sh` inside it. `update-image.sh` `cd`s to its own dir (`projects/start-os/container-runtime/`), so it reaches the repo-root build output three levels up — it copies `start-container` from `../../../target/<arch>-unknown-linux-musl/release/`.
 - The squashfs lands at `rootfs.<arch>.squashfs` and is installed to `/usr/lib/startos/container-runtime/rootfs.squashfs`.
+
+## Host effects bindings
+
+`EffectCreator.ts` types the socket boundary against `RPC.Effects` generated from
+`start_core::service::effects::handler<EffectContext>`. Method literals select
+params and results; callback registration and event scoping stay in the adapter.
+Rebuild core and SDK after regeneration before checking this consumer.

@@ -4,25 +4,6 @@ Pending tasks for AI agents. Remove items when completed.
 
 ## Features
 
-- [ ] Extract TS-exported types into a lightweight sub-crate for fast binding generation
-
-  **Problem**: `make start-core-ts-bindings` compiles the entire `start-os` crate (with all dependencies: tokio,
-  axum, openssl, etc.) just to run test functions that serialize type definitions to `.ts` files.
-  Even in debug mode, this takes minutes. The generated output is pure type info — no runtime code
-  is needed.
-
-  **Goal**: Generate TS bindings in seconds by isolating exported types in a small crate with minimal
-  dependencies.
-
-  **Approach**: Create a `core/bindings-types/` sub-crate containing (or re-exporting) all 168
-  `#[ts(export)]` types. This crate depends only on `serde`, `ts-rs`, `exver`, and other type-only
-  crates — not on tokio, axum, openssl, etc. Then `build-ts.sh` runs `cargo test -p bindings-types`
-  instead of `cargo test -p start-os`.
-
-  **Challenge**: The exported types are scattered across `core/src/` and reference each other and
-  other crate types. Extracting them requires either moving the type definitions into the sub-crate
-  (and importing them back into `start-os`) or restructuring to share a common types crate.
-
 - [ ] Auto-configure port forwards via UPnP/NAT-PMP/PCP - @dr-bonez
 
   **Goal**: When a binding is marked public, automatically configure port forwards on the user's router

@@ -6,7 +6,7 @@ Tasks are notifications that prompt you to take action on a service. They appear
 
 Tasks have three levels:
 
-- **Required** — The service cannot be started while a required task exists. If a required task is created while the service is running, the service will be forcibly stopped. This means the service cannot safely run until the task is completed. For example, retrieving an auto-generated admin password after installation.
+- **Required** — The service remains stopped while an active required task exists. A running service stops and resumes automatically when the last blocking task clears, unless you explicitly stop it. For example, retrieving an auto-generated admin password after installation.
 - **Important** — The service will still run, but there might be issues. For example, configuring email settings for a service that uses notifications.
 - **Recommended** — The service will run fine without this, but it is something you should consider doing. For example, an optional integration that improves functionality.
 
