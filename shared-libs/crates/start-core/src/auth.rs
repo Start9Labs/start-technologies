@@ -1,3 +1,4 @@
+use std::borrow::{Borrow, BorrowMut};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -13,6 +14,7 @@ use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{
     CallRemote, Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async,
 };
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tracing::instrument;
@@ -28,12 +30,29 @@ use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 use crate::util::sync::SyncMutex;
 use crate::{Error, ResultExt, ensure_code};
 
-/// Sessions keyed by their credential: an enrolled key's PEM encoding, or a
-/// bearer token's hash.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, VisitFields)]
+/// Enrolled sign-ins indexed by canonical DER64 SPKI.
+#[derive(Debug, Clone, Default, Serialize, VisitFields)]
 pub struct AuthKeys(pub BTreeMap<InternedString, Session>);
 
+impl<'de> Deserialize<'de> for AuthKeys {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::sign::canonicalize_verifying_keys(BTreeMap::deserialize(deserializer)?)
+            .map(Self)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
 rpc_toolkit::reflect_ts!(AuthKeys);
+impl Borrow<BTreeMap<InternedString, Session>> for AuthKeys {
+    fn borrow(&self) -> &BTreeMap<InternedString, Session> {
+        &self.0
+    }
+}
+impl BorrowMut<BTreeMap<InternedString, Session>> for AuthKeys {
+    fn borrow_mut(&mut self) -> &mut BTreeMap<InternedString, Session> {
+        &mut self.0
+    }
+}
 impl AuthKeys {
     pub fn new() -> Self {
         Self(BTreeMap::new())
@@ -56,8 +75,11 @@ impl Map for AuthKeys {
 #[model = "Model<Self>"]
 pub struct Sessions {
     pub pubkeys: AuthKeys,
-    pub tokens: AuthKeys,
+    pub tokens: TokenSessions,
 }
+
+/// Bearer-token sessions indexed by token hash.
+pub type TokenSessions = BTreeMap<InternedString, Session>;
 
 rpc_toolkit::reflect_ts!(Sessions);
 rpc_toolkit::ts_export!(Sessions, namespaces = [""]);
@@ -73,7 +95,7 @@ pub trait LoginContext: SignatureAuthContext {
     /// The bearer-token store, keyed by token hash. `None` where tokens are unsupported.
     /// Never remove a token directly; [`revoke_tokens`] kills its continuations.
     #[allow(unused_variables)]
-    fn access_tokens(db: &mut Model<Self::Database>) -> Option<&mut Model<AuthKeys>> {
+    fn access_tokens(db: &mut Model<Self::Database>) -> Option<&mut Model<TokenSessions>> {
         None
     }
     fn check_password(db: &Model<Self::Database>, password: &str) -> Result<(), Error>;
@@ -108,7 +130,7 @@ impl LoginContext for RpcContext {
     fn access_auth_keys(db: &mut Model<Self::Database>) -> &mut Model<AuthKeys> {
         db.as_private_mut().as_sessions_mut().as_pubkeys_mut()
     }
-    fn access_tokens(db: &mut Model<Self::Database>) -> Option<&mut Model<AuthKeys>> {
+    fn access_tokens(db: &mut Model<Self::Database>) -> Option<&mut Model<TokenSessions>> {
         Some(db.as_private_mut().as_sessions_mut().as_tokens_mut())
     }
     fn check_password(db: &Model<Self::Database>, password: &str) -> Result<(), Error> {
@@ -329,8 +351,11 @@ pub async fn create_token<C: LoginContext>(
 /// Keys and tokens unused this long expire by default.
 pub const MAX_IDLE: TimeDelta = TimeDelta::days(30);
 
-fn expired_keys<C: LoginContext>(keys: &AuthKeys, now: DateTime<Utc>) -> Vec<InternedString> {
-    keys.0
+fn expired_keys<C: LoginContext>(
+    sessions: &BTreeMap<InternedString, Session>,
+    now: DateTime<Utc>,
+) -> Vec<InternedString> {
+    sessions
         .iter()
         .filter(|(_, session)| C::sign_in_expired(session, now))
         .map(|(key, _)| key.clone())
@@ -345,7 +370,7 @@ pub fn reap_idle_keys_in<C: LoginContext>(
     db: &mut Model<C::Database>,
 ) -> Result<(), Error> {
     let now = Utc::now();
-    let expired = expired_keys::<C>(&C::access_auth_keys(db).de()?, now);
+    let expired = expired_keys::<C>(&C::access_auth_keys(db).de()?.0, now);
     HasUnenrolledKeys::unenroll::<C>(continuations, ephemeral, db, expired)?;
     let expired = C::access_tokens(db)
         .map(|tokens| tokens.de())
@@ -399,12 +424,18 @@ fn pubkey_store<C: LoginContext>(db: &mut Model<C::Database>) -> Option<&mut Mod
     Some(C::access_auth_keys(db))
 }
 
-async fn persist_last_active<C: LoginContext>(
+async fn persist_last_active<C: LoginContext, S>(
     ctx: &C,
-    store: fn(&mut Model<C::Database>) -> Option<&mut Model<AuthKeys>>,
+    store: fn(&mut Model<C::Database>) -> Option<&mut Model<S>>,
     key: &InternedString,
     now: DateTime<Utc>,
-) -> Result<(), Error> {
+) -> Result<(), Error>
+where
+    S: Serialize
+        + DeserializeOwned
+        + Borrow<BTreeMap<InternedString, Session>>
+        + BorrowMut<BTreeMap<InternedString, Session>>,
+{
     if !C::LAST_ACTIVE_RESOLUTION.is_zero() {
         let mut peek = ctx.db().peek().await;
         let fresh = store(&mut peek)
@@ -412,7 +443,7 @@ async fn persist_last_active<C: LoginContext>(
             .transpose()?
             .and_then(|sessions| {
                 sessions
-                    .0
+                    .borrow()
                     .get(key)
                     .map(|session| now - session.last_active < C::LAST_ACTIVE_RESOLUTION)
             })
@@ -427,7 +458,7 @@ async fn persist_last_active<C: LoginContext>(
                 return Ok(());
             };
             sessions.mutate(|sessions| {
-                if let Some(session) = sessions.0.get_mut(key) {
+                if let Some(session) = sessions.borrow_mut().get_mut(key) {
                     session.last_active = now;
                 }
                 Ok(())
@@ -566,7 +597,7 @@ pub async fn login_impl<C: LoginContext>(
     }
 
     let now = Utc::now();
-    let pubkey = pubkey.to_string();
+    let pubkey = pubkey.interned_der64();
     let record = Session {
         name: None,
         logged_in: now,
@@ -582,13 +613,13 @@ pub async fn login_impl<C: LoginContext>(
         };
         C::check_password(&ctx.db().peek().await, &password)?;
         ephemeral_keys.mutate(|keys| {
-            keys.0.insert(InternedString::intern(&pubkey), record);
+            keys.0.insert(pubkey.clone(), record);
         });
     } else {
         ctx.db()
             .mutate(|db| {
                 C::check_password(db, &password)?;
-                C::access_auth_keys(db).insert(&InternedString::intern(&pubkey), &record)?;
+                C::access_auth_keys(db).insert(&pubkey, &record)?;
                 Ok(())
             })
             .await
@@ -697,7 +728,7 @@ fn display_sessions(params: WithIoFormat<ListParams>, arg: SessionList) -> Resul
         "USER AGENT",
     ]);
     let pubkeys = arg.sessions.pubkeys.0.into_iter().map(|s| ("pubkey", s));
-    let tokens = arg.sessions.tokens.0.into_iter().map(|s| ("token", s));
+    let tokens = arg.sessions.tokens.into_iter().map(|s| ("token", s));
     for (kind, (id, session)) in pubkeys.chain(tokens) {
         let mut row = row![
             kind,
@@ -762,7 +793,7 @@ pub async fn list<C: LoginContext>(
 pub struct KillParams {
     #[arg(long = "pubkey", help = "help.arg.session-pubkeys")]
     #[serde(default)]
-    pubkeys: Vec<InternedString>,
+    pubkeys: Vec<AnyVerifyingKey>,
     #[arg(long = "token", help = "help.arg.session-tokens")]
     #[serde(default)]
     tokens: Vec<InternedString>,
@@ -776,7 +807,8 @@ pub async fn kill<C: LoginContext>(
     ctx: C,
     KillParams { pubkeys, tokens }: KillParams,
 ) -> Result<(), Error> {
-    ctx.unenroll(pubkeys).await?;
+    ctx.unenroll(pubkeys.iter().map(AnyVerifyingKey::interned_der64))
+        .await?;
     let continuations = ctx.open_authed_continuations();
     ctx.db()
         .mutate(|db| revoke_tokens::<C>(continuations, db, tokens))

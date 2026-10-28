@@ -216,14 +216,12 @@ export type AddKeyParams = z.output<typeof schemas.AddKeyParams>
 export type AddKeyParamsInput = z.input<typeof schemas.AddKeyParams>
 
 /**
- * Sessions keyed by their credential: an enrolled key's PEM encoding, or a
- * bearer token's hash.
+ * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
 
 /**
- * Sessions keyed by their credential: an enrolled key's PEM encoding, or a
- * bearer token's hash.
+ * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export type AuthKeysInput = z.input<typeof schemas.AuthKeys>
 export type DnsRecords = z.output<typeof schemas.DnsRecords>

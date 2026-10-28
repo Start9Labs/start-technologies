@@ -100,7 +100,9 @@ mod tests {
     use serde::Serialize;
 
     use super::*;
-    use crate::auth::{AuthKeys, CreateTokenParams, Sessions, create_token, revoke_tokens};
+    use crate::auth::{
+        AuthKeys, CreateTokenParams, Sessions, TokenSessions, create_token, revoke_tokens,
+    };
     use crate::middleware::auth::signature::{
         AUTH_SIG_HEADER, LoginMetadata, NonceCache, SignatureAuthContext, SignatureHeader,
         check_enrolled,
@@ -177,7 +179,7 @@ mod tests {
         fn access_auth_keys(db: &mut Model<TestDb>) -> &mut Model<AuthKeys> {
             db.as_sessions_mut().as_pubkeys_mut()
         }
-        fn access_tokens(db: &mut Model<TestDb>) -> Option<&mut Model<AuthKeys>> {
+        fn access_tokens(db: &mut Model<TestDb>) -> Option<&mut Model<TokenSessions>> {
             Some(db.as_sessions_mut().as_tokens_mut())
         }
         fn check_password(_: &Model<TestDb>, _: &str) -> Result<(), Error> {
@@ -245,7 +247,7 @@ mod tests {
         let key = AnySigningKey::Ed25519(ed25519_dalek::SigningKey::generate(
             &mut crate::util::crypto::os_rng(),
         ));
-        let id = key.verifying_key().interned_pem();
+        let id = key.verifying_key().interned_der64();
         let now = chrono::Utc::now();
         ctx.db()
             .mutate(|db| {
@@ -304,7 +306,7 @@ mod tests {
         let created = create(&ctx, "claude").await;
         let sessions = ctx.db().peek().await.into_sessions().de().unwrap();
         assert!(sessions.pubkeys.0.is_empty());
-        let session = &sessions.tokens.0[&created.id];
+        let session = &sessions.tokens[&created.id];
         assert_eq!(session.name.as_deref(), Some("claude"));
         assert!(
             !serde_json::to_string(&sessions)
@@ -323,7 +325,7 @@ mod tests {
             .into_tokens()
             .de()
             .unwrap();
-        assert!(tokens.0[&created.id].last_active >= before);
+        assert!(tokens[&created.id].last_active >= before);
 
         let continuations = &ctx.0.continuations;
         ctx.db()

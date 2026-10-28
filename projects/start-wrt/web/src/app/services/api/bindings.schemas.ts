@@ -556,21 +556,6 @@ export const IoFormat: z.ZodEnum<{
   .meta({
     id: 'IoFormat',
   })
-export const KillParams: z.ZodObject<{
-  pubkeys: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodString>>,
-    z.ZodArray<z.ZodString>
-  >
-  tokens: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodString>>,
-    z.ZodArray<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  pubkeys: wire(z.array(z.string()).optional(), z.array(z.string())),
-  tokens: wire(z.array(z.string()).optional(), z.array(z.string())),
-}).meta({
-  id: 'KillParams',
-})
 export const LanIpv4Response: z.ZodObject<{
   address: z.ZodString
   netmask: z.ZodString
@@ -1464,14 +1449,12 @@ export const ActivityListResponse: z.ZodObject<{
 })
 
 /**
- * Sessions keyed by their credential: an enrolled key's PEM encoding, or a
- * bearer token's hash.
+ * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export const AuthKeys: z.ZodRecord<z.ZodString, typeof Session> =
   /* @__PURE__ */ z.record(z.string(), Session).meta({
     id: 'AuthKeys',
-    description:
-      "Sessions keyed by their credential: an enrolled key's PEM encoding, or a\nbearer token's hash.",
+    description: 'Enrolled sign-ins indexed by canonical DER64 SPKI.',
   })
 export const BackupCreateRes: z.ZodObject<{
   guid: typeof Guid
@@ -1788,6 +1771,21 @@ export const FollowLogsRes: z.ZodObject<{
   }),
 }).meta({
   id: 'FollowLogsRes',
+})
+export const KillParams: z.ZodObject<{
+  pubkeys: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof AnyVerifyingKey>>,
+    z.ZodArray<typeof AnyVerifyingKey>
+  >
+  tokens: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodString>>,
+    z.ZodArray<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  pubkeys: wire(z.array(AnyVerifyingKey).optional(), z.array(AnyVerifyingKey)),
+  tokens: wire(z.array(z.string()).optional(), z.array(z.string())),
+}).meta({
+  id: 'KillParams',
 })
 export const LoginParams: z.ZodObject<{
   password: z.ZodString
@@ -2733,8 +2731,11 @@ export const PublishedPortsSetResult: z.ZodObject<{
  */
 export const Sessions: z.ZodObject<{
   pubkeys: typeof AuthKeys
-  tokens: typeof AuthKeys
-}> = /* @__PURE__ */ object({ pubkeys: AuthKeys, tokens: AuthKeys }).meta({
+  tokens: z.ZodRecord<z.ZodString, typeof Session>
+}> = /* @__PURE__ */ object({
+  pubkeys: AuthKeys,
+  tokens: z.record(z.string(), Session),
+}).meta({
   id: 'Sessions',
   description: "The server's sessions, by credential type.",
 })

@@ -148,7 +148,6 @@ export type Guid = z.output<typeof schemas.Guid>
 export type HasUnenrolledKeys = z.output<typeof schemas.HasUnenrolledKeys>
 export type InjectedDnsRecord = z.output<typeof schemas.InjectedDnsRecord>
 export type IoFormatInput = z.input<typeof schemas.IoFormat>
-export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LanIpv4Response = z.output<typeof schemas.LanIpv4Response>
 export type LanIpv4SetRequestInput = z.input<typeof schemas.LanIpv4SetRequest>
 export type LanIpv6Response = z.output<typeof schemas.LanIpv6Response>
@@ -249,8 +248,7 @@ export type WifiRadioInput = z.input<typeof schemas.WifiRadio>
 export type ActivityListResponse = z.output<typeof schemas.ActivityListResponse>
 
 /**
- * Sessions keyed by their credential: an enrolled key's PEM encoding, or a
- * bearer token's hash.
+ * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
 export type BackupCreateRes = z.output<typeof schemas.BackupCreateRes>
@@ -274,6 +272,7 @@ export type EditArgsInput = z.input<typeof schemas.EditArgs>
 export type EthernetSetRequestInput = z.input<typeof schemas.EthernetSetRequest>
 export type EthernetSetResult = z.output<typeof schemas.EthernetSetResult>
 export type FollowLogsRes = z.output<typeof schemas.FollowLogsRes>
+export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LoginParamsInput = z.input<typeof schemas.LoginParams>
 export type LogsResponse = z.output<typeof schemas.LogsResponse>
 export type OutboundVpn = z.output<typeof schemas.OutboundVpn>

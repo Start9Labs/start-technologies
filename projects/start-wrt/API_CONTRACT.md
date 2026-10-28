@@ -66,7 +66,7 @@ The request must be signed by the key it enrolls. A valid local auth token rejec
 #[serde(rename_all = "camelCase")]
 struct LoginParams {
     password: String,
-    /// PEM-encoded Ed25519 public key to enroll
+    /// DER64 or PEM-encoded Ed25519 public key to enroll
     pubkey: AnyVerifyingKey,
     /// Enroll in memory only. Unsupported (InvalidRequest).
     #[serde(default)]
@@ -100,7 +100,7 @@ struct SessionList {
 }
 
 struct Sessions {
-    /// Enrolled keys by PEM: { name, loggedIn, lastActive, userAgent }.
+    /// Enrolled keys by DER64 SPKI: { name, loggedIn, lastActive, userAgent }.
     /// `lastActive` is persisted at most hourly.
     pubkeys: BTreeMap<String, Session>,
     /// Empty on StartWRT.
@@ -116,9 +116,9 @@ StartWRT revokes enrolled keys through `pubkeys`. The shared request also accept
 ```rust
 #[derive(Deserialize)]
 struct KillParams {
-    /// PEM-encoded keys to revoke
+    /// DER64 or PEM-encoded keys to revoke
     #[serde(default)]
-    pubkeys: Vec<String>,
+    pubkeys: Vec<AnyVerifyingKey>,
     #[serde(default)]
     tokens: Vec<String>,
 }

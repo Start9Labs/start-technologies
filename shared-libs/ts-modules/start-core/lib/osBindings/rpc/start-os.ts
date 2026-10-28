@@ -165,7 +165,6 @@ export type HostIdInput = z.input<typeof schemas.HostId>
 export type ImageIdInput = z.input<typeof schemas.ImageId>
 export type IoFormatInput = z.input<typeof schemas.IoFormat>
 export type KeyboardOptionsInput = z.input<typeof schemas.KeyboardOptions>
-export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type ListNotificationParamsInput = z.input<
   typeof schemas.ListNotificationParams
 >
@@ -338,8 +337,7 @@ export type ApplyWithPathParamsInput = z.input<
 export type AttachParamsInput = z.input<typeof schemas.AttachParams>
 
 /**
- * Sessions keyed by their credential: an enrolled key's PEM encoding, or a
- * bearer token's hash.
+ * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
 export type CancelInstallParamsInput = z.input<
@@ -410,6 +408,7 @@ export type InstalledVersionParamsInput = z.input<
   typeof schemas.InstalledVersionParams
 >
 export type IpInfo = z.output<typeof schemas.IpInfo>
+export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LegacyAlpnInfo = z.output<typeof schemas.LegacyAlpnInfo>
 export type ListPackageSignersParamsInput = z.input<
   typeof schemas.ListPackageSignersParams

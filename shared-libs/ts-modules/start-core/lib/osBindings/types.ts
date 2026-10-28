@@ -152,8 +152,6 @@ export type ImageMetadata = z.output<typeof schemas.ImageMetadata>
 export type ImageMetadataInput = z.input<typeof schemas.ImageMetadata>
 export type KeyboardOptions = z.output<typeof schemas.KeyboardOptions>
 export type KeyboardOptionsInput = z.input<typeof schemas.KeyboardOptions>
-export type KillParams = z.output<typeof schemas.KillParams>
-export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type ListNotificationParams = z.output<
   typeof schemas.ListNotificationParams
 >
@@ -494,14 +492,12 @@ export type AttachParams = z.output<typeof schemas.AttachParams>
 export type AttachParamsInput = z.input<typeof schemas.AttachParams>
 
 /**
- * Sessions keyed by their credential: an enrolled key's PEM encoding, or a
- * bearer token's hash.
+ * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
 
 /**
- * Sessions keyed by their credential: an enrolled key's PEM encoding, or a
- * bearer token's hash.
+ * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export type AuthKeysInput = z.input<typeof schemas.AuthKeys>
 export type BackupReport = z.output<typeof schemas.BackupReport>
@@ -738,6 +734,8 @@ export type InstalledVersionParamsInput = z.input<
 >
 export type IpInfo = z.output<typeof schemas.IpInfo>
 export type IpInfoInput = z.input<typeof schemas.IpInfo>
+export type KillParams = z.output<typeof schemas.KillParams>
+export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LegacyAlpnInfo = z.output<typeof schemas.LegacyAlpnInfo>
 export type LegacyAlpnInfoInput = z.input<typeof schemas.LegacyAlpnInfo>
 export type ListPackageSignersParams = z.output<
