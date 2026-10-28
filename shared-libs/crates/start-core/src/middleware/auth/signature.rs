@@ -5,6 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::Request;
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::TimeDelta;
 use http::header::USER_AGENT;
 use http::{Extensions, HeaderMap, HeaderValue};
@@ -27,7 +29,7 @@ use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::commitment::Commitment;
 use crate::sign::commitment::request::RequestCommitment;
 use crate::sign::{AnySignature, AnyVerifyingKey, Signer};
-use crate::util::serde::{Base64, Der64};
+use crate::util::serde::{Base64, DerEncoding};
 use crate::util::sync::SyncMutex;
 
 pub const AUTH_SIG_HEADER: &str = "X-Start-Auth-Sig";
@@ -513,26 +515,22 @@ impl SignatureHeader {
     pub fn to_header(&self) -> HeaderValue {
         let mut url: Url = "http://localhost".parse().unwrap();
         self.commitment.append_query(&mut url);
-        url.query_pairs_mut()
-            .append_pair("signer", &Der64::new_ref(&self.signer).to_string());
-        url.query_pairs_mut()
-            .append_pair("signature", &Der64::new_ref(&self.signature).to_string());
+        url.query_pairs_mut().append_pair(
+            "signer",
+            &encode_header_der(&self.signer).expect("encode verifying key"),
+        );
+        url.query_pairs_mut().append_pair(
+            "signature",
+            &encode_header_der(&self.signature).expect("encode signature"),
+        );
         HeaderValue::from_str(url.query().unwrap_or_default()).unwrap()
     }
     pub fn from_header(header: &HeaderValue) -> Result<Self, Error> {
         let query: BTreeMap<_, _> = form_urlencoded::parse(header.as_bytes()).collect();
         Ok(Self {
             commitment: RequestCommitment::from_query(&header)?,
-            signer: query
-                .get("signer")
-                .or_not_found("signer")?
-                .parse::<Der64<_>>()?
-                .0,
-            signature: query
-                .get("signature")
-                .or_not_found("signature")?
-                .parse::<Der64<_>>()?
-                .0,
+            signer: decode_header_der(query.get("signer").or_not_found("signer")?)?,
+            signature: decode_header_der(query.get("signature").or_not_found("signature")?)?,
         })
     }
     pub async fn sign(signer: &Signer, body: &[u8], context: &str) -> Result<Self, Error> {
@@ -556,6 +554,21 @@ impl SignatureHeader {
             signature,
         })
     }
+}
+
+fn encode_header_der(value: &impl DerEncoding) -> Result<String, Error> {
+    Ok(URL_SAFE_NO_PAD.encode(
+        value
+            .to_der::<serde_json::Error>()
+            .with_kind(ErrorKind::Serialization)?,
+    ))
+}
+
+fn decode_header_der<T: DerEncoding>(value: &str) -> Result<T, Error> {
+    let der = URL_SAFE_NO_PAD
+        .decode(value)
+        .with_kind(ErrorKind::Deserialization)?;
+    T::from_der::<serde_json::Error>(&der).with_kind(ErrorKind::Deserialization)
 }
 
 const REQUEST_AUTH_TAG: &[u8] = b"Start-Auth-Sig v2\0";
@@ -1111,7 +1124,7 @@ mod tests {
     #[tokio::test]
     async fn compact_header_round_trip() {
         let key = Signer::Key(AnySigningKey::Ed25519(
-            ed25519_dalek::SigningKey::from_bytes(&[7; 32]),
+            ed25519_dalek::SigningKey::from_bytes(&[2; 32]),
         ));
         let header = SignatureHeader::sign(&key, BODY, "start-9.local")
             .await
@@ -1121,6 +1134,14 @@ mod tests {
             !value.to_str().unwrap().contains("BEGIN"),
             "compact form must not be PEM-armored"
         );
+        let query: BTreeMap<_, _> = form_urlencoded::parse(value.as_bytes()).collect();
+        assert_eq!(
+            query["signer"],
+            "MCowBQYDK2VwAyEAgTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q"
+        );
+        for field in ["signer", "signature"] {
+            assert!(!query[field].contains(['+', '/', '=']));
+        }
         let parsed = SignatureHeader::from_header(&value).expect("compact header parses");
         verify_request(
             &parsed.signer,

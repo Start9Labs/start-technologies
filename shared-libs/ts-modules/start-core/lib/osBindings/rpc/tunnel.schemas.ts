@@ -589,7 +589,7 @@ export const TunnelCertData: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   key: literal_0.meta({
     description:
-      'Unpadded base64url DER. Deserialization also accepts legacy PEM armor.',
+      'Standard Base64 DER with padding. Deserialization also accepts legacy PEM armor.',
   }),
   cert: literal_0,
 }).meta({

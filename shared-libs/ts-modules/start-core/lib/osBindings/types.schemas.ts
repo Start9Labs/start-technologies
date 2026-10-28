@@ -5854,7 +5854,7 @@ export const PackageDataEntry: z.ZodObject<{
   registry: wire(z.string().nullable().optional(), z.string().nullable()),
   developerKey: literal_0.meta({
     description:
-      'Unpadded base64url DER. Deserialization also accepts legacy PEM armor.',
+      'Standard Base64 DER with padding. Deserialization also accepts legacy PEM armor.',
   }),
   lastBackup: wire(z.string().nullable().optional(), z.string().nullable()),
   currentDependencies: CurrentDependencies,

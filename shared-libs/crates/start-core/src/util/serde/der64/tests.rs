@@ -6,15 +6,31 @@ use super::*;
 use crate::util::serde::{IoFormat, Pem};
 
 #[test]
-fn der64_spki_has_stable_headerless_wire_form() {
-    let key = SigningKey::from_bytes(&[0; 32]).verifying_key();
-    let expected = "MCowBQYDK2VwAyEAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik";
+fn der64_spki_is_standard_base64_with_padding() {
+    let key = SigningKey::from_bytes(&[2; 32]).verifying_key();
+    let expected = "MCowBQYDK2VwAyEAgTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=";
     assert_eq!(Der64(key).to_string(), expected);
     assert_eq!(
         serde_json::to_string(&Der64(key)).unwrap(),
         format!("\"{expected}\"")
     );
     assert_eq!(expected.parse::<Der64<VerifyingKey>>().unwrap().0, key);
+    assert_eq!(
+        expected
+            .trim_end_matches('=')
+            .parse::<Der64<VerifyingKey>>()
+            .unwrap()
+            .0,
+        key
+    );
+    for input in [
+        "MCowBQYDK2VwAyEAgTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+        "MCowBQYDK2VwAyEAgTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q=",
+    ] {
+        let decoded = input.parse::<Der64<VerifyingKey>>().unwrap();
+        assert_eq!(decoded.0, key);
+        assert_eq!(decoded.to_string(), expected);
+    }
 }
 
 #[test]

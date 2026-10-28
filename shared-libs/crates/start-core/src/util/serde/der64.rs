@@ -2,12 +2,12 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use clap::builder::ValueParserFactory;
 use openssl::pkey::{PKey, Private};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use visit_rs::VisitFields;
 
+use super::{BASE64, Base64};
 use crate::prelude::*;
 use crate::util::FromStrParser;
 
@@ -79,7 +79,7 @@ pub fn deserialize<'de, T: DerEncoding, D: Deserializer<'de>>(
 }
 
 fn encode<T: DerEncoding, E: serde::ser::Error>(value: &T) -> Result<String, E> {
-    Ok(URL_SAFE_NO_PAD.encode(value.to_der::<E>()?))
+    Ok(Base64(value.to_der::<E>()?).to_padded_string())
 }
 
 fn decode<T: DerEncoding, E: serde::de::Error>(value: &str) -> Result<T, E> {
@@ -88,12 +88,14 @@ fn decode<T: DerEncoding, E: serde::de::Error>(value: &str) -> Result<T, E> {
             .map(|(_, der)| der)
             .map_err(E::custom)?
     } else {
-        URL_SAFE_NO_PAD.decode(value).map_err(E::custom)?
+        BASE64
+            .decode(value.replace('-', "+").replace('_', "/"))
+            .map_err(E::custom)?
     };
     T::from_der(&der)
 }
 
-/// Unpadded base64url DER. Deserialization also accepts legacy PEM armor.
+/// Standard Base64 DER with padding. Deserialization also accepts legacy PEM armor.
 #[repr(transparent)]
 #[derive(
     Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Hash, VisitFields,

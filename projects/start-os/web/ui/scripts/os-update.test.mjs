@@ -562,7 +562,7 @@ test('trusted signer matching ignores PEM whitespace but rejects unrelated keys 
 test('trusted signer matching equates legacy PEM and compact DER64', () => {
   const pem =
     '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=\n-----END PUBLIC KEY-----\n'
-  const der64 = 'MCowBQYDK2VwAyEAgpcI3hOExv1njCt-zJoYBartdyk4SKiqSIy3-9tcpOI'
+  const der64 = 'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI='
   assert.deepEqual(
     trustedOsUpdateSigners([pem], { [der64]: { label: 'signer' } }),
     [pem],
