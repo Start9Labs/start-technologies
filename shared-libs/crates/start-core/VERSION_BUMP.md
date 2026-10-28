@@ -105,7 +105,11 @@ A pre-release version instead takes prerelease segments: `exver::Version::new([0
 
 `projects/start-os/docs/src/installing-startos.md` (and `update-040.md`) pin the GitHub release link to the shipping version. `manage-release.sh pre-check start-os` fails on a stale or `releases/latest` link.
 
-### 7. SDK TypeScript version (only on breaking SDK changes)
+### 7. Generated man pages
+
+Run `make manpages` and commit the generated changes. `projects/start-os/man/start-container.1` includes the OS version in its header and version section, even when the CLI surface is unchanged. CI's `make manpages-check` rejects stale generated pages.
+
+### 8. SDK TypeScript version (only on breaking SDK changes)
 
 **`projects/start-sdk/lib/StartSdk.ts`** — update `OSVersion` **only** when the bump includes breaking changes the SDK relies on. `OSVersion` tracks compatibility for service developers, not the OS release cadence; routine bumps skip it.
 
@@ -125,6 +129,7 @@ cargo test -p start-core --features test version::   # incl. current_matches_man
 - [ ] Add the StartOS changelog fragments
 - [ ] Write `projects/start-os/release-notes/X.Y.Z.N.md` (the image won't build without it), plus `X.Y.Z.N.pre-update.md` for any pre-update instructions
 - [ ] Bump the release link in `projects/start-os/docs/src/`
+- [ ] Run `make manpages` and commit the generated version updates
 - [ ] Update `projects/start-sdk/lib/StartSdk.ts` `OSVersion` — **only** on breaking SDK changes
 - [ ] `cargo test` + `pre-check` pass
 
