@@ -109,11 +109,17 @@ start-os-install: $(STARTOS_TARGETS) build/bash-completion
 	$(call cp,build/env/ENVIRONMENT.txt,$(DESTDIR)/usr/lib/startos/ENVIRONMENT.txt)
 	$(call cp,build/env/GIT_HASH.txt,$(DESTDIR)/usr/lib/startos/GIT_HASH.txt)
 	$(call cp,build/env/VERSION.txt,$(DESTDIR)/usr/lib/startos/VERSION.txt)
-	@set -e; notes=$$(mktemp .release-notes.XXXXXX); trap 'rm -f "$$notes"' EXIT; \
-		node scripts/changelog.mjs notes projects/start-os "$$(cat $(VERSION_FILE))" > "$$notes"; \
-		$(call cp,$$notes,$(DESTDIR)/usr/lib/startos/release-notes.md)
-	$(call mkdir,$(DESTDIR)/usr/lib/startos/release-notes)
-	$(foreach notes,$(STARTOS_LOCALIZED_RELEASE_NOTES),$(call cp,$(notes),$(DESTDIR)/usr/lib/startos/release-notes/$(patsubst $(basename $(notdir $(STARTOS_RELEASE_NOTES))).%,%,$(notdir $(notes))));)
+	@set -e; notes=$$(mktemp -d .release-notes.XXXXXX); trap 'rm -rf "$$notes"' EXIT; \
+		node scripts/changelog.mjs notes projects/start-os "$$(cat $(VERSION_FILE))" > "$$notes/main.md"; \
+		locales=$$(node scripts/changelog.mjs locales projects/start-os "$$(cat $(VERSION_FILE))"); \
+		for locale in $$locales; do \
+			node scripts/changelog.mjs notes projects/start-os "$$(cat $(VERSION_FILE))" --locale "$$locale" > "$$notes/$$locale.md"; \
+		done; \
+		$(call cp,$$notes/main.md,$(DESTDIR)/usr/lib/startos/release-notes.md); \
+		$(call mkdir,$(DESTDIR)/usr/lib/startos/release-notes); \
+		for locale in $$locales; do \
+			$(call cp,$$notes/$$locale.md,$(DESTDIR)/usr/lib/startos/release-notes/$$locale.md); \
+		done
 
 start-os-update-overlay: $(STARTOS_TARGETS)
 	@echo "\033[33m!!! THIS WILL ONLY REFLASH YOUR DEVICE IN MEMORY !!!\033[0m"

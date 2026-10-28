@@ -419,7 +419,8 @@ assert_metadata_matches_adopted`
   function blocked(name = '1.2.3.pre-update.md') {
     const result = check()
     assert.notEqual(result.status, 0)
-    contains(result.stderr, `${name} differs`)
+    contains(result.stderr, name)
+    contains(result.stderr, 'differs')
   }
   write(`projects/start-sdk/release-notes/${VERSION}.pre-update.md`, PRE_UPDATE)
   blocked()
@@ -466,12 +467,19 @@ test('adopted release accepts compiled metadata after fragments are consumed', t
     'projects/start-sdk/changelog/patch-fixed-public.md',
     METADATA + '- Released fix.\n',
   )
+  const translation = write(
+    'projects/start-sdk/changelog/patch-fixed-public.pl_PL.md',
+    '- Poprawka.\n',
+  )
+  const localizedPath = `projects/start-sdk/release-notes/${VERSION}.pl_PL.md`
+  write(localizedPath, '## Nowości\n\n<!-- highlights -->\n')
   commit()
   const adopted = git('rev-parse', 'HEAD').trim()
   git('-c', 'tag.gpgsign=false', 'tag', 'start-sdk/v1.2.3')
   const synced = run(process.execPath, ['scripts/changelog.mjs', 'sync'])
   assert.equal(synced.status, 0, synced.stderr.toString())
   assert.equal(existsSync(path), false)
+  assert.equal(existsSync(translation), false)
   commit()
   const command = `source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
 REPO_ROOT="$PWD"; PROJECT=start-sdk; VERSION=1.2.3; COMMIT="${adopted}"
@@ -479,6 +487,12 @@ assert_metadata_matches_adopted`
   const check = () => run('bash', ['-c', command], { encoding: 'utf8' })
   const result = check()
   assert.equal(result.status, 0, result.stderr)
+  const localized = text(join(root, localizedPath))
+  write(localizedPath, localized + '\nChanged translated notice.\n')
+  const translatedChange = check()
+  assert.notEqual(translatedChange.status, 0)
+  contains(translatedChange.stderr, 'release-note bundle')
+  write(localizedPath, localized)
   write(
     'projects/start-sdk/changelog/patch-fixed-other.md',
     METADATA + '- New change.\n',
@@ -828,6 +842,25 @@ notes-inputs:
     'projects/start-os/changelog/patch-changed-internal.md',
     '---\nuser-facing: false\n---\n\n- Internal detail.\n',
   )
+  write(
+    `projects/start-os/release-notes/${version}.pl_PL.md`,
+    'Polska wersja.\n\n## Nowości\n\n<!-- highlights -->\n',
+  )
+  write(
+    `projects/start-os/release-notes/${version}.de_DE.md`,
+    '## Neuigkeiten\n\n<!-- highlights -->\n',
+  )
+  write(
+    'projects/start-os/changelog/patch-fixed-public.pl_PL.md',
+    '- Wygenerowana nowość.\n',
+  )
+  write(
+    'projects/start-os/changelog/patch-fixed-public.fr_FR.md',
+    '- Nouveauté générée.\n',
+  )
+  const polish = 'Polska wersja.\n\n## Nowości\n\n- Wygenerowana nowość.\n'
+  const german = '## Neuigkeiten\n\n- Generated highlight.\n'
+  const french = '## Highlights\n\n- Nouveauté générée.\n'
   commit()
   const generated = install()
   assert.equal(generated.status, 0, generated.stderr)
@@ -841,8 +874,9 @@ notes-inputs:
   contains(registry, PRE_UPDATE.split('\n')[0])
   excludes(welcome, 'Before You Update')
   excludes(registry, 'Internal detail.')
-  assert.equal(text(join(stage, 'release-notes/pl_PL.md')), 'Polskie nowości\n')
-  assert.equal(text(join(stage, 'release-notes/de_DE.md')), 'Neuigkeiten\n')
+  assert.equal(text(join(stage, 'release-notes/pl_PL.md')), polish)
+  assert.equal(text(join(stage, 'release-notes/de_DE.md')), german)
+  assert.equal(text(join(stage, 'release-notes/fr_FR.md')), french)
   assert.deepEqual(renderTemps(), [])
 
   unlinkSync(join(root, `projects/start-os/release-notes/${version}.md`))
@@ -866,14 +900,16 @@ cp = $(if $(filter %/release-notes.md,$(2))$(findstring /release-notes/,$(2)),$(
   for (const path of [
     'release-notes.md',
     'release-notes/de_DE.md',
+    'release-notes/fr_FR.md',
     'release-notes/pl_PL.md',
   ])
     unlinkSync(join(stage, path))
   const remote = install(remoteHarness)
   assert.equal(remote.status, 0, remote.stderr)
   assert.equal(text(join(stage, 'release-notes.md')), generatedOnly)
-  assert.equal(text(join(stage, 'release-notes/de_DE.md')), 'Neuigkeiten\n')
-  assert.equal(text(join(stage, 'release-notes/pl_PL.md')), 'Polskie nowości\n')
+  assert.equal(text(join(stage, 'release-notes/de_DE.md')), german)
+  assert.equal(text(join(stage, 'release-notes/pl_PL.md')), polish)
+  assert.equal(text(join(stage, 'release-notes/fr_FR.md')), french)
   assert.deepEqual(renderTemps(), [])
 
   const copiedBeforeFailure = text(copies)
@@ -884,6 +920,21 @@ cp = $(if $(filter %/release-notes.md,$(2))$(findstring /release-notes/,$(2)),$(
   const failed = install()
   assert.notEqual(failed.status, 0)
   contains(failed.stderr, 'user-facing: true or false')
+  assert.equal(text(join(stage, 'release-notes.md')), generatedOnly)
+  assert.equal(text(copies), copiedBeforeFailure)
+  assert.deepEqual(renderTemps(), [])
+
+  write(
+    'projects/start-os/changelog/patch-fixed-public.md',
+    METADATA + '- Updated English highlight.\n',
+  )
+  write(
+    `projects/start-os/release-notes/${version}.pl_PL.md`,
+    '## Nowości\n\n- Ręcznie napisane.\n',
+  )
+  const localeFailure = install()
+  assert.notEqual(localeFailure.status, 0)
+  contains(localeFailure.stderr, 'localized framing needs <!-- highlights -->')
   assert.equal(text(join(stage, 'release-notes.md')), generatedOnly)
   assert.equal(text(copies), copiedBeforeFailure)
   assert.deepEqual(renderTemps(), [])

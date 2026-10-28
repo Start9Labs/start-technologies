@@ -1,0 +1,1 @@
+- **Les commandes alimentées par un tube se terminent à la fin de leur entrée.** Les commandes comme `cat` exécutées via `package attach` reçoivent EOF de l'entrée standard fournie par un tube ou une redirection et se terminent normalement.

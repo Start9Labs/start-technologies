@@ -607,24 +607,26 @@ compiled_metadata_matches() {
 }
 
 assert_metadata_matches_adopted() {
-    local adopted file untracked
+    local adopted file untracked label
     adopted=$(tag_commit_sha)
     for file in "$REPO_ROOT/projects/$PROJECT/changelog" "$(notes_path "$PROJECT")" "$(pre_update_notes_path "$PROJECT")"; do
+        label="${file#"$REPO_ROOT/"}"
         case "$file" in
             */changelog)
                 if compiled_metadata_matches render "$adopted"; then continue; fi ;;
             "$(notes_path "$PROJECT")")
-                if compiled_metadata_matches notes "$adopted"; then continue; fi ;;
+                label="release-note bundle at $label (including locale companions)"
+                if compiled_metadata_matches notes-bundle "$adopted"; then continue; fi ;;
             *)
                 untracked=$(cd "$REPO_ROOT" && git ls-files --others --exclude-standard -- "$file")
                 if [ -z "$untracked" ] && (cd "$REPO_ROOT" && git diff --quiet "$adopted" -- "$file"); then continue; fi ;;
         esac
         if [ -n "${UNCOMMITTED_NOTES:-}" ] && [ "$file" != "$REPO_ROOT/projects/$PROJECT/changelog" ]; then
-            >&2 echo "  ! ${file#"$REPO_ROOT/"} differs from ${adopted}; releasing it anyway (UNCOMMITTED_NOTES)"
+            >&2 echo "  ! ${label} differs from ${adopted}; releasing it anyway (UNCOMMITTED_NOTES)"
             continue
         fi
 
-        >&2 echo "  ✗ ${file#"$REPO_ROOT/"} differs between the working tree and the"
+        >&2 echo "  ✗ ${label} differs between the working tree and the"
         >&2 echo "    commit being tagged (${adopted}). Generated release metadata would not match the tag."
         >&2 echo
         >&2 echo "      git checkout ${adopted}"
@@ -834,7 +836,7 @@ cmd_pre_check() {
         errors=1
     fi
 
-    if (cd "$REPO_ROOT" && node scripts/changelog.mjs notes "projects/$PROJECT" "$VERSION" > /dev/null); then
+    if (cd "$REPO_ROOT" && node scripts/changelog.mjs notes-bundle "projects/$PROJECT" "$VERSION" > /dev/null); then
         echo "  ✓ release highlights compile"
     else
         errors=1

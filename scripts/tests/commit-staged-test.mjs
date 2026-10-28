@@ -196,6 +196,14 @@ test('tag compiler workflow with local commit API', t => {
     'projects/start-sdk/changelog/patch-fixed-second-released.md',
     '---\nuser-facing: false\n---\n\n- Third released fix.\n',
   )
+  f.write(
+    'projects/start-sdk/changelog/patch-fixed-released.pl_PL.md',
+    '- Poprawka.\n\n- Druga poprawka.\n',
+  )
+  f.write(
+    'projects/start-sdk/release-notes/1.2.3.pl_PL.md',
+    '## Nowości\n\n<!-- highlights -->\n',
+  )
   f.write('projects/start-sdk/CHANGELOG.md', '# Changelog\n')
   f.git('add', 'scripts', 'projects', 'package.json', '.prettierrc.json')
   f.git('commit', '-qm', 'release')
@@ -312,6 +320,20 @@ console.log(JSON.stringify(race
     '## Highlights\n\n- Released fix.\n\n- Second released fix.\n',
   )
   assert.match(result.stderr, /head moved/)
+  const localizedPath = 'projects/start-sdk/release-notes/1.2.3.pl_PL.md'
+  const localized = f.git('show', `origin/master:${localizedPath}`)
+  assert.equal(localized, '## Nowości\n\n- Poprawka.\n\n- Druga poprawka.\n')
+  assert.ok(
+    !f
+      .git(
+        'ls-tree',
+        '-r',
+        '--name-only',
+        'origin/master',
+        'projects/start-sdk/changelog',
+      )
+      .includes('.pl_PL.md'),
+  )
   const master = f.git('rev-parse', 'origin/master')
   result = f.run('bash', ['-c', shell], { encoding: 'utf8' })
   assert.equal(result.status, 0, result.stdout + result.stderr)
@@ -338,6 +360,7 @@ console.log(JSON.stringify(race
   })
   assert.equal(copied.status, 0, copied.stdout + copied.stderr)
   assert.equal(f.git('show', `:${notesPath}`), notes)
+  assert.equal(f.git('show', `:${localizedPath}`), localized)
 })
 
 test('empty index makes no request', t => {

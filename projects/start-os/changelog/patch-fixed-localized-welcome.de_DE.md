@@ -1,0 +1,2 @@
+- **Willkommensdetails in Ihrer Sprache.** Die Neuerungen und der Verweis auf das vollständige Änderungsprotokoll in der Willkommensbenachrichtigung nach einem Update erscheinen in der Sprache des Servers. Wenn keine Übersetzung verfügbar ist, erscheinen die Neuerungen auf Englisch.
+- **Funktionierender Link zum vollständigen Änderungsprotokoll.** Die Willkommensbenachrichtigung verweist auf das veröffentlichte Änderungsprotokoll statt auf eine veraltete Kopie.
