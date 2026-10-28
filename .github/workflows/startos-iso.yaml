@@ -62,6 +62,7 @@ on:
       - 'projects/start-os/**'
       - 'shared-libs/**'
       - 'projects/start-sdk/**'
+      - 'projects/start-cli/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'angular.json'
@@ -73,6 +74,7 @@ on:
       - 'debian/**'
       - 'apt/**'
       - '.github/workflows/startos-iso.yaml'
+      - '.github/workflows/compile-start-cli.yaml'
       - '.github/actions/setup-build/**'
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-os/docs/**) shouldn't trigger a build.
@@ -92,6 +94,7 @@ on:
       - 'projects/start-os/**'
       - 'shared-libs/**'
       - 'projects/start-sdk/**'
+      - 'projects/start-cli/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'angular.json'
@@ -103,6 +106,7 @@ on:
       - 'debian/**'
       - 'apt/**'
       - '.github/workflows/startos-iso.yaml'
+      - '.github/workflows/compile-start-cli.yaml'
       - '.github/actions/setup-build/**'
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-os/docs/**) shouldn't trigger a build.
@@ -487,8 +491,8 @@ jobs:
           path: results/*.migration.squashfs
           retention-days: 14
 
-  deploy:
-    name: Deploy
+  publisher-cli:
+    name: Build publisher CLI
     needs: [image]
     # Explicit status check so the skipped PR-only `changes` job can't poison
     # the implicit success() through the needs chain (actions/runner#2205).
@@ -507,6 +511,14 @@ jobs:
           && contains(fromJson('["alpha", "beta"]'), github.event.inputs.deploy)
         )
       )
+    uses: ./.github/workflows/compile-start-cli.yaml
+    with:
+      triple: x86_64-unknown-linux-musl
+
+  deploy:
+    name: Deploy
+    needs: [image, publisher-cli]
+    if: ${{ !cancelled() && needs.image.result == 'success' && needs.publisher-cli.result == 'success' }}
     runs-on: ubuntu-latest
     # One lock for every deploy, not one per channel. The workflow-level group is
     # scoped by event, so a dispatch could otherwise run alongside a master-push
@@ -591,21 +603,15 @@ jobs:
           path: artifacts/
           merge-multiple: true
 
+      - name: Download publisher CLI
+        uses: actions/download-artifact@v8
+        with:
+          name: start-cli_x86_64-unknown-linux-musl
+          path: ${{ runner.temp }}/publisher-cli
+
       - name: Install start-cli
         run: |
-          ARCH=$(uname -m)
-          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-          ASSET_NAME="start-cli_${ARCH}-${OS}"
-          DOWNLOAD_URL=$(curl -fsS \
-            -H "Authorization: token ${{ github.token }}" \
-            https://api.github.com/repos/Start9Labs/start-technologies/releases \
-            | jq -r '[.[].assets[] | select(.name=="'"$ASSET_NAME"'")] | first | .browser_download_url')
-          curl -fsSL \
-            -H "Authorization: token ${{ github.token }}" \
-            -H "Accept: application/octet-stream" \
-            "$DOWNLOAD_URL" -o /tmp/start-cli
-          sudo install -m 755 /tmp/start-cli /usr/local/bin/start-cli
-          echo "start-cli: $(start-cli --version)"
+          sudo install -m 755 "$RUNNER_TEMP/publisher-cli/start-cli" /usr/local/bin/start-cli
           ./scripts/manage-release.sh check-registry-notes-cli start-os
 
       - name: Configure S3
