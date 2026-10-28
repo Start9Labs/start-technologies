@@ -170,6 +170,10 @@ If a service is running low on space, you have two options today:
 
 Support for multiple drives is planned for StartOS 0.4.1. There is no release date yet.
 
+## What does “Data drive metadata space is low” mean?
+
+Btrfs needs unallocated space for metadata even when the disk metrics show free space inside existing data chunks. The upgrade migration to StartOS 0.4.0.5 starts a filtered balance on both data filesystems in the background after they are mounted; weekly maintenance reclaims unused chunks thereafter. StartOS raises this notification when unallocated space falls below 5% of a filesystem's size, capped at 10 GiB. The notification names the affected filesystem. If the warning persists, free space or [move to a larger data drive](#can-i-add-a-second-drive-to-give-a-service-more-storage).
+
 ## Can I run two copies of the same service?
 
 Yes, but it is not officially supported. StartOS identifies a service by its package ID and installs each ID once, so a second copy means maintaining your own fork of the package under a unique ID, including its updates. It also won't work with dependent services: a service that depends on the original looks for it by ID and cannot be pointed at the fork.
