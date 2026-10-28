@@ -556,10 +556,6 @@ export const IoFormat: z.ZodEnum<{
   .meta({
     id: 'IoFormat',
   })
-export const KillParams: z.ZodObject<{ ids: z.ZodArray<z.ZodString> }> =
-  /* @__PURE__ */ object({ ids: z.array(z.string()) }).meta({
-    id: 'KillParams',
-  })
 export const LanIpv4Response: z.ZodObject<{
   address: z.ZodString
   netmask: z.ZodString
@@ -1121,6 +1117,12 @@ export const SetPreferencesReq: z.ZodObject<{
 }).meta({
   id: 'SetPreferencesReq',
 })
+export const SetRouterAdvertisementsReq: z.ZodObject<{
+  mac: z.ZodString
+  allow: z.ZodBoolean
+}> = /* @__PURE__ */ object({ mac: z.string(), allow: z.boolean() }).meta({
+  id: 'SetRouterAdvertisementsReq',
+})
 export const SetTimezoneParams: z.ZodObject<{
   /**
    * IANA timezone name, e.g. "America/New_York"
@@ -1447,15 +1449,12 @@ export const ActivityListResponse: z.ZodObject<{
 })
 
 /**
- * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
- * key is a sign-in: it carries the same metadata a session used to (when it
- * was created, when it was last used, and the user agent that enrolled it).
+ * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export const AuthKeys: z.ZodRecord<z.ZodString, typeof Session> =
   /* @__PURE__ */ z.record(z.string(), Session).meta({
     id: 'AuthKeys',
-    description:
-      "The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled\nkey is a sign-in: it carries the same metadata a session used to (when it\nwas created, when it was last used, and the user agent that enrolled it).",
+    description: 'Enrolled sign-ins indexed by canonical DER64 SPKI.',
   })
 export const BackupCreateRes: z.ZodObject<{
   guid: typeof Guid
@@ -1546,6 +1545,12 @@ export const Device: z.ZodObject<{
    * VPN peer).
    */
   allow_dns_injection: z.ZodBoolean
+  /**
+   * Whether the router forwards this device's IPv6 router advertisements
+   * to the rest of the LAN (`devices set-router-advertisements`). Always
+   * false for a VPN peer.
+   */
+  allow_router_advertisements: z.ZodBoolean
   security_profile: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
@@ -1608,6 +1613,15 @@ export const Device: z.ZodObject<{
   allow_dns_injection: z.boolean().meta({
     description:
       "Whether this device may publish DNS records into the router's resolver\n(`devices set-dns-injection`; `vpn-server peer-set-dns-injection` for a\nVPN peer).",
+  }),
+  /**
+   * Whether the router forwards this device's IPv6 router advertisements
+   * to the rest of the LAN (`devices set-router-advertisements`). Always
+   * false for a VPN peer.
+   */
+  allow_router_advertisements: z.boolean().meta({
+    description:
+      "Whether the router forwards this device's IPv6 router advertisements\nto the rest of the LAN (`devices set-router-advertisements`). Always\nfalse for a VPN peer.",
   }),
   security_profile: wire(
     z.string().nullable().optional(),
@@ -1757,6 +1771,11 @@ export const FollowLogsRes: z.ZodObject<{
   }),
 }).meta({
   id: 'FollowLogsRes',
+})
+export const KillParams: z.ZodObject<{
+  ids: z.ZodArray<typeof AnyVerifyingKey>
+}> = /* @__PURE__ */ object({ ids: z.array(AnyVerifyingKey) }).meta({
+  id: 'KillParams',
 })
 export const LoginParams: z.ZodObject<{
   password: z.ZodString
@@ -2893,6 +2912,13 @@ export const Api = {
         },
         'set-dns-injection': {
           _PARAMS: /* @__PURE__ */ SetDnsInjectionReq.meta({
+            description:
+              'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
+          }),
+          _RETURN: /* @__PURE__ */ z.null(),
+        },
+        'set-router-advertisements': {
+          _PARAMS: /* @__PURE__ */ SetRouterAdvertisementsReq.meta({
             description:
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),

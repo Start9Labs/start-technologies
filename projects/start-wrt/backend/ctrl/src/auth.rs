@@ -128,7 +128,7 @@ impl AuthState {
 
 impl ServerContext {
     /// Re-reads the ddns config only when its modification time changes.
-    async fn ddns_identity(&self) -> Option<InternedString> {
+    pub(crate) async fn ddns_identity(&self) -> Option<InternedString> {
         let path = self.uci_root().join("ddns");
         let modified = tokio::fs::metadata(&path)
             .await
@@ -144,9 +144,7 @@ impl ServerContext {
         let hostname = crate::wan::ddns_get(self.clone())
             .await
             .ok()
-            .filter(|ddns| ddns.enabled)
-            .and_then(|ddns| ddns.hostname)
-            .map(InternedString::from);
+            .and_then(enabled_ddns_hostname);
         self.auth.ddns.mutate(|cache| {
             *cache = DdnsIdentity {
                 modified,
@@ -265,6 +263,14 @@ pub async fn reap_idle_keys(ctx: ServerContext) {
     }
 }
 
+/// Lowercased; `None` while DDNS is disabled.
+fn enabled_ddns_hostname(ddns: crate::wan::WanDdnsResponse) -> Option<InternedString> {
+    ddns.enabled
+        .then_some(ddns.hostname)
+        .flatten()
+        .map(|hostname| InternedString::intern(hostname.to_ascii_lowercase()))
+}
+
 /// Every name and address a browser may sign for.
 fn signing_identities(
     addresses: impl IntoIterator<Item = IpAddr>,
@@ -272,7 +278,7 @@ fn signing_identities(
 ) -> BTreeSet<InternedString> {
     std::iter::once(InternedString::intern(crate::ssl::ROUTER_HOSTNAME))
         .chain(addresses.into_iter().map(url_host_str))
-        .chain(ddns.map(|hostname| InternedString::intern(hostname.to_ascii_lowercase())))
+        .chain(ddns)
         .collect()
 }
 
@@ -716,15 +722,38 @@ mod tests {
     }
 
     #[test]
-    fn ddns_signing_identity_matches_browser_hostname_case() {
-        let identities = signing_identities([], Some("Home.Example.COM".into()));
-        assert!(identities.contains("home.example.com"));
+    fn enabled_ddns_hostname_is_lowercased() {
+        let ddns = |enabled| crate::wan::WanDdnsResponse {
+            enabled,
+            provider: crate::wan::DdnsProvider::Cloudflare,
+            hostname: Some("Home.Example.COM".into()),
+            username: None,
+            password: None,
+            token: None,
+            zone: None,
+        };
+        assert_eq!(
+            enabled_ddns_hostname(ddns(true)).as_deref(),
+            Some("home.example.com")
+        );
+        assert_eq!(enabled_ddns_hostname(ddns(false)), None);
+    }
+
+    fn key_id(label: &str) -> InternedString {
+        use ed25519_dalek::pkcs8::EncodePublicKey;
+        ed25519_dalek::SigningKey::from_bytes(blake3::hash(label.as_bytes()).as_bytes())
+            .verifying_key()
+            .to_public_key_pem(Default::default())
+            .unwrap()
+            .parse::<AnyVerifyingKey>()
+            .unwrap()
+            .interned_der64()
     }
 
     #[tokio::test]
     async fn logout_requires_a_signing_key() {
         let ctx = ServerContext::default();
-        let key = InternedString::intern("key");
+        let key = key_id("key");
         ctx.auth
             .db
             .put(
@@ -755,9 +784,10 @@ mod tests {
         assert!(remaining.0.is_empty());
     }
 
-    async fn enroll(ctx: &ServerContext, keys: &[&str]) {
+    async fn enroll_named_keys(ctx: &ServerContext, names: &[&str]) {
         let now = Utc::now();
-        let keys: Vec<_> = keys.iter().map(|key| (*key, now)).collect();
+        let keys: Vec<_> = names.iter().map(|name| key_id(name)).collect();
+        let keys: Vec<_> = keys.iter().map(|key| (&**key, now)).collect();
         enroll_logged_in(ctx, &keys).await;
     }
 
@@ -816,7 +846,7 @@ mod tests {
         ResetPasswordParams {
             old_password: "old-admin-password".into(),
             new_password: "new-admin-password".into(),
-            signer: signer.map(InternedString::intern),
+            signer: signer.map(key_id),
         }
     }
 
@@ -835,7 +865,7 @@ mod tests {
     #[tokio::test]
     async fn set_password_unenrolls_every_other_key() {
         let ctx = ServerContext::default();
-        enroll(&ctx, &["caller", "other-a", "other-b"]).await;
+        enroll_named_keys(&ctx, &["caller", "other-a", "other-b"]).await;
         let dir = tempfile::TempDir::new().unwrap();
         let shadow = write_shadow(&dir, &hash("old-admin-password"));
 
@@ -843,17 +873,14 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            enrolled(&ctx).await,
-            BTreeSet::from([InternedString::intern("caller")])
-        );
+        assert_eq!(enrolled(&ctx).await, BTreeSet::from([key_id("caller")]));
         check_password_sync(&shadow, "new-admin-password").unwrap();
     }
 
     #[tokio::test]
     async fn local_set_password_unenrolls_every_key() {
         let ctx = ServerContext::default();
-        enroll(&ctx, &["browser", "cli"]).await;
+        enroll_named_keys(&ctx, &["browser", "cli"]).await;
         let dir = tempfile::TempDir::new().unwrap();
         let shadow = write_shadow(&dir, &hash("old-admin-password"));
 
@@ -867,7 +894,7 @@ mod tests {
     #[tokio::test]
     async fn failed_password_write_unenrolls_nothing() {
         let ctx = ServerContext::default();
-        enroll(&ctx, &["caller", "other"]).await;
+        enroll_named_keys(&ctx, &["caller", "other"]).await;
         let dir = tempfile::TempDir::new().unwrap();
         let shadow = write_shadow(&dir, &hash("old-admin-password"));
         let blocked_write = startos::util::io::to_tmp_path(&shadow).unwrap();
@@ -882,9 +909,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_kill_accepts_pem_and_der64_keys() {
+        let ctx = ServerContext::default();
+        enroll_named_keys(&ctx, &["pem", "der64"]).await;
+        let pem = key_id("pem")
+            .parse::<AnyVerifyingKey>()
+            .unwrap()
+            .to_string();
+        let params = imbl_value::from_value(json!({ "ids": [pem, key_id("der64")] })).unwrap();
+        startos::auth::kill(ctx.clone(), params).await.unwrap();
+        assert!(enrolled(&ctx).await.is_empty());
+    }
+
+    #[tokio::test]
     async fn initial_password_unenrolls_every_key() {
         let ctx = ServerContext::default();
-        enroll(&ctx, &["before-setup-a", "before-setup-b"]).await;
+        enroll_named_keys(&ctx, &["before-setup-a", "before-setup-b"]).await;
         let dir = tempfile::TempDir::new().unwrap();
         let shadow = write_shadow(&dir, "");
 
@@ -909,17 +949,20 @@ mod tests {
                 .unwrap()
         };
         let (expired, live) = (pubkey(1), pubkey(2));
-        let (expired_pem, live_pem) = (expired.to_string(), live.to_string());
+        let (expired_key, live_key) = (
+            expired.interned_der64().to_string(),
+            live.interned_der64().to_string(),
+        );
         let now = Utc::now();
         enroll_logged_in(
             &ctx,
             &[
                 (
-                    expired_pem.as_str(),
+                    expired_key.as_str(),
                     now - TimeDelta::hours(24) - TimeDelta::seconds(1),
                 ),
                 (
-                    live_pem.as_str(),
+                    live_key.as_str(),
                     now - TimeDelta::hours(23) - TimeDelta::minutes(59),
                 ),
             ],
@@ -934,7 +977,7 @@ mod tests {
             panic!("a key signed in over a day ago was accepted");
         };
         assert_eq!(err.kind, startos::ErrorKind::Authorization);
-        assert_eq!(check(&live).unwrap(), Some(live.interned_pem()));
+        assert_eq!(check(&live).unwrap(), Some(live.interned_der64()));
     }
 
     #[test]
@@ -952,9 +995,9 @@ mod tests {
         enroll_logged_in(
             &ctx,
             &[
-                ("in-use", now - TimeDelta::hours(25)),
-                ("fresh", now - TimeDelta::hours(1)),
-                ("future", now + TimeDelta::hours(1)),
+                (&key_id("in-use"), now - TimeDelta::hours(25)),
+                (&key_id("fresh"), now - TimeDelta::hours(1)),
+                (&key_id("future"), now + TimeDelta::hours(1)),
             ],
         )
         .await;
@@ -965,10 +1008,7 @@ mod tests {
             .await
             .result
             .unwrap();
-        assert_eq!(
-            enrolled(&ctx).await,
-            BTreeSet::from([InternedString::intern("fresh")])
-        );
+        assert_eq!(enrolled(&ctx).await, BTreeSet::from([key_id("fresh")]));
     }
 
     #[tokio::test]
@@ -979,7 +1019,7 @@ mod tests {
             .put(&patch_db::json_ptr::ROOT, &AuthDatabase::default())
             .await
             .unwrap();
-        let key = InternedString::intern("key");
+        let key = key_id("key");
         let enrolled = Utc::now() - TimeDelta::minutes(5);
         ctx.auth
             .db

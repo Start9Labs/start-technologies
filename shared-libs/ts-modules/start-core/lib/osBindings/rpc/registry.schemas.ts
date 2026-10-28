@@ -10,19 +10,6 @@ const literal_1 = /* @__PURE__ */ z.union([
   z.record(z.string(), z.string()),
 ])
 const literal_2 = /* @__PURE__ */ z.enum(['processor', 'display'])
-export const AddVersionParams: z.ZodObject<{
-  version: z.ZodString
-  headline: z.ZodString
-  releaseNotes: z.ZodString
-  sourceVersion: z.ZodString
-}> = /* @__PURE__ */ object({
-  version: z.string(),
-  headline: z.string(),
-  releaseNotes: z.string(),
-  sourceVersion: z.string(),
-}).meta({
-  id: 'AddVersionParams',
-})
 export const AnySignature: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'AnySignature',
 })
@@ -435,6 +422,19 @@ export const AddPackageToCategoryParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ id: z.string(), package: PackageId }).meta({
   id: 'AddPackageToCategoryParams',
 })
+export const AddVersionParams: z.ZodObject<{
+  version: z.ZodString
+  headline: z.ZodString
+  releaseNotes: typeof LocaleString
+  sourceVersion: z.ZodString
+}> = /* @__PURE__ */ object({
+  version: z.string(),
+  headline: z.string(),
+  releaseNotes: LocaleString,
+  sourceVersion: z.string(),
+}).meta({
+  id: 'AddVersionParams',
+})
 export const ApplyWithPathParams: z.ZodIntersection<
   z.ZodObject<{
     path: z.ZodCodec<
@@ -597,7 +597,7 @@ export const MetricsSummary: z.ZodObject<{
 })
 export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
-  releaseNotes: z.ZodString
+  releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
   authorized: z.ZodArray<typeof Guid>
   iso: z.ZodRecord<
@@ -614,7 +614,7 @@ export const OsVersionInfo: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   headline: z.string(),
-  releaseNotes: z.string(),
+  releaseNotes: LocaleString,
   sourceVersion: z.string(),
   authorized: z.array(Guid),
   iso: z.record(z.string(), RegistryAsset(Blake3Commitment)),

@@ -72,6 +72,9 @@ export abstract class ApiService {
   abstract devicesSetDnsInjection(
     params: RpcParamType<Api, 'devices.set-dns-injection'>,
   ): Promise<RpcReturnType<Api, 'devices.set-dns-injection'>>
+  abstract devicesSetRouterAdvertisements(
+    params: RpcParamType<Api, 'devices.set-router-advertisements'>,
+  ): Promise<RpcReturnType<Api, 'devices.set-router-advertisements'>>
   abstract devicesForget(params: { mac: string }): Promise<null>
   abstract devicesDataUsage(
     params: DeviceDataUsageReq,

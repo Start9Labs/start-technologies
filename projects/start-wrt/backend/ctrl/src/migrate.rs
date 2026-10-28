@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use tokio::io::AsyncWriteExt;
-use uciedit::openwrt::{InterfaceProto, NetworkInterface};
+use uciedit::openwrt::{Dhcp, InterfaceProto, NetworkInterface};
 use uciedit::{dump_all, parse_all, Arena, TypedSection};
 
 use crate::prelude::*;
@@ -30,6 +30,8 @@ const MIGRATIONS: &[Migration] = &[
     Migration::ExpandLogRetention,
     Migration::StoreLogsUnderVar,
     Migration::RemoveSessionsJson,
+    Migration::ForceDhcpPools,
+    Migration::RemoveServerCert,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -50,6 +52,10 @@ enum Migration {
     /// the activity log in `/etc/startwrt`.
     StoreLogsUnderVar,
     RemoveSessionsJson,
+    /// Earlier releases probed for another DHCP server before serving a pool.
+    ForceDhcpPools,
+    /// Earlier images served one certificate from `/etc/ssl`.
+    RemoveServerCert,
 }
 
 impl Migration {
@@ -62,6 +68,8 @@ impl Migration {
             Migration::ExpandLogRetention => expand_log_retention(root).await,
             Migration::StoreLogsUnderVar => store_logs_under_var(root).await,
             Migration::RemoveSessionsJson => remove_sessions_json(root).await,
+            Migration::ForceDhcpPools => force_dhcp_pools(root).await,
+            Migration::RemoveServerCert => remove_server_cert(root).await,
         }
     }
 }
@@ -166,6 +174,39 @@ async fn remove_sessions_json(root: &Path) -> Result<(), Error> {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
         _ => Ok(()),
     }
+}
+
+async fn force_dhcp_pools(root: &Path) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["dhcp"]).await?;
+    let mut changed = false;
+    for section in &mut cfgs["dhcp"].sections {
+        let Ok(mut dhcp) = section.get::<Dhcp>() else {
+            continue;
+        };
+        if dhcp.force != Some(true) {
+            dhcp.force = Some(true);
+            section.set(&dhcp)?;
+            changed = true;
+        }
+    }
+    if changed {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+async fn remove_server_cert(root: &Path) -> Result<(), Error> {
+    for path in [
+        "etc/ssl/certs/startwrt-server.pem",
+        "etc/ssl/private/startwrt-server.key",
+    ] {
+        match tokio::fs::remove_file(root.join(path)).await {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 async fn strip_unreferenced_wan_zone_vpns(root: &Path) -> Result<(), Error> {
@@ -337,6 +378,28 @@ config interface 'wan'
 \toption password 'pass'
 ";
 
+    const LEGACY_DHCP: &str = "\
+config dnsmasq
+\toption domain 'lan'
+
+config dhcp 'lan'
+\toption interface 'lan'
+\toption start '2'
+\toption limit '198'
+\toption leasetime '12h'
+
+config dhcp 'wan'
+\toption interface 'wan'
+\toption ignore '1'
+
+config dhcp 'guest'
+\toption interface 'guest'
+\toption start '2'
+\toption limit '198'
+\toption leasetime '12h'
+\toption force '0'
+";
+
     fn router(record: Option<&str>, has_run: bool) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("etc/config")).unwrap();
@@ -467,6 +530,7 @@ config forwarding
         );
         write(&dir, "etc/config/startwrt", LEGACY_PROFILES);
         write(&dir, "etc/config/system", SHIPPED_SYSTEM);
+        write(&dir, "etc/config/dhcp", LEGACY_DHCP);
         for migration in MIGRATIONS {
             migration.apply(dir.path()).await.unwrap();
         }
@@ -475,6 +539,7 @@ config forwarding
             read(&dir, "etc/config/firewall"),
             read(&dir, "etc/config/startwrt"),
             read(&dir, "etc/config/system"),
+            read(&dir, "etc/config/dhcp"),
         ];
         for migration in MIGRATIONS {
             migration.apply(dir.path()).await.unwrap();
@@ -483,6 +548,7 @@ config forwarding
         assert_eq!(read(&dir, "etc/config/firewall"), migrated[1]);
         assert_eq!(read(&dir, "etc/config/startwrt"), migrated[2]);
         assert_eq!(read(&dir, "etc/config/system"), migrated[3]);
+        assert_eq!(read(&dir, "etc/config/dhcp"), migrated[4]);
         assert_eq!(wan_ipv6(&dir).as_deref(), Some("1"));
         assert!(migrated[1].contains("option dest 'vlan_guest'"));
         assert!(migrated[2].contains("option lan_access 'all'"));
@@ -626,6 +692,26 @@ config forwarding
         write(&dir, "etc/config/system", &custom);
         store_logs_under_var(dir.path()).await.unwrap();
         assert_eq!(read(&dir, "etc/config/system"), custom);
+    }
+
+    #[tokio::test]
+    async fn dhcp_pools_skip_the_foreign_server_probe() {
+        let dir = router(Some("7\n"), true);
+        write(&dir, "etc/config/dhcp", LEGACY_DHCP);
+        run(dir.path()).await.unwrap();
+        assert_eq!(record(&dir), current());
+        let dhcp = read(&dir, "etc/config/dhcp");
+        let section = |name: &str| {
+            dhcp.split("\n\n")
+                .find(|s| s.contains(&format!("config dhcp '{name}'")))
+                .unwrap()
+                .to_string()
+        };
+        assert!(section("lan").contains("option force '1'"));
+        assert!(section("guest").contains("option force '1'"));
+        assert!(!section("guest").contains("option force '0'"));
+        assert!(!section("wan").contains("force"));
+        assert!(!dhcp.split("\n\n").next().unwrap().contains("force"));
     }
 
     #[tokio::test]

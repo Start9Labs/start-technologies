@@ -10,7 +10,7 @@ crates are members of the **root** Cargo workspace (build with `cargo build -p s
 
 - Run from the repo root, **always `-p`-scoped**:
   `cargo test -p startwrt-core -p uciedit -p uciedit_macros` (or `make start-wrt-test` to run the
-  same set inside the `start9/cargo-zigbuild` container, mirroring `start-core-test`).
+  same set inside the shared GHCR builder selected by `build/rust-builder/image.sh`, mirroring `start-core-test`).
 - **Footgun:** a bare `cargo test` from `backend/` selects the root workspace
   rather than only StartWRT. Scope with `-p` to avoid unrelated product builds and
   their prerequisites.

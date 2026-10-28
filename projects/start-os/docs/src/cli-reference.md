@@ -298,7 +298,7 @@ Open a shell inside a service's subcontainer (within the LXC container), or run 
 
 ### `start-cli package stats`
 
-Display LXC container resource usage for every installed service.
+Display LXC container memory usage and limit for every installed service. It does not report CPU use.
 
 - `--format` — Output format
 
@@ -693,7 +693,7 @@ Disable kiosk mode.
 
 ## Disks
 
-List and repair storage devices.
+List, repair, and format storage devices.
 
 ### `start-cli disk list`
 
@@ -705,6 +705,12 @@ partitions are omitted.
 ### `start-cli disk repair`
 
 Repair filesystem issues on the data partition.
+
+### `start-cli disk format <DISK>`
+
+Erase a whole drive and leave it with a single Btrfs partition ready for backups, then print the new partition. The drive holding StartOS or its data, the live boot medium, anything mounted, and drives smaller than 1 GiB are refused.
+
+- `--label <LABEL>` — Volume label, at most 255 bytes (default `StartOS Backups`)
 
 ## Diagnostics
 

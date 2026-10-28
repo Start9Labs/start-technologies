@@ -1169,6 +1169,7 @@ export class MockApiService extends ApiService {
         ipv4_static: !!host?.options.ip,
         allow_auto_port_forward: this.autoForwardAllowed.has(mac),
         allow_dns_injection: this.dnsInjectionAllowed.has(mac),
+        allow_router_advertisements: this.raAllowed.has(mac),
         security_profile: profile?.fullname ?? null,
         speed: def.status === 'online' ? def.speed : null,
         data_usage: def.dataUsage,
@@ -1252,6 +1253,27 @@ export class MockApiService extends ApiService {
     return null
   }
 
+  /** MACs whose IPv6 router advertisements reach the rest of the LAN. */
+  private raAllowed = new Set<string>()
+
+  async devicesSetRouterAdvertisements(
+    params: RpcParamType<Api, 'devices.set-router-advertisements'>,
+  ): Promise<RpcReturnType<Api, 'devices.set-router-advertisements'>> {
+    await pauseFor(250)
+    const macUpper = params.mac.toUpperCase()
+    if (params.allow) {
+      this.raAllowed.add(macUpper)
+    } else {
+      this.raAllowed.delete(macUpper)
+    }
+    this.logActivity(
+      'device',
+      'router-advertisements',
+      `${params.allow ? 'Allowed' : 'Blocked'} IPv6 router advertisements from ${macUpper}`,
+    )
+    return null
+  }
+
   async dnsInjectedList(): Promise<InjectedDnsRecordFromApi[]> {
     await pauseFor(250)
     const mac = '00:1A:2B:3C:4D:5E'
@@ -1296,6 +1318,7 @@ export class MockApiService extends ApiService {
       d => d.mac.toUpperCase() !== macUpper,
     )
     this.autoForwardAllowed.delete(macUpper)
+    this.raAllowed.delete(macUpper)
     this.logActivity(
       'device',
       'deleted',

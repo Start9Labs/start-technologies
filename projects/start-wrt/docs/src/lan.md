@@ -16,7 +16,7 @@ Configure the router's LAN IPv4 addressing.
 - **Router address** — The router's LAN IP is the gateway (`.1`) of the primary **Admin** [Security Profile](security-profiles.md)'s subnet. The first two octets come from the Network Block above; the third octet is set by the Admin profile's **Subnet** field, not on this page. For example, with the `192.168.x.x` block and an Admin subnet of `1`, the router is reachable at `192.168.1.1`. This is the address you use to access the web interface (or simply `router.lan`).
 
 > [!NOTE]
-> DHCP is managed automatically for each Security Profile. You do not need to configure DHCP ranges or lease times. The router does not forward DHCP or IPv6 router advertisements from another device between its ports and Wi-Fi networks, so a modem plugged into a LAN port instead of the WAN port cannot hand addresses to devices on the router's Wi-Fi.
+> DHCP is managed automatically for each Security Profile. You do not need to configure DHCP ranges or lease times. The router does not forward DHCP or IPv6 router advertisements from another device between its ports and Wi-Fi networks, so a modem plugged into a LAN port instead of the WAN port cannot hand addresses to devices on the router's Wi-Fi. A device that needs to send router advertisements, such as a Thread border router, can be allowed to on its [device page](devices.md#device-detail-page).
 
 > [!WARNING]
 > Changing the Network Block changes the router's LAN address. The page reconnects at the new address once your device has an address in the new block. If any inbound VPN servers exist, they will be deleted because their client configurations become invalid with the new addressing.

@@ -1,4 +1,0 @@
-- **Sign-in uses a key your browser holds.** Logging in creates a key the browser keeps but cannot export, and every request is signed with it, so no reusable credential crosses the network. This update signs everyone out once.
-- **A sign-in lasts 24 hours from when you log in**, even while you keep using it, so expect to log in again each day. It previously lasted until it went a day unused. Logging out or changing the admin password from another device ends it sooner; updates within those 24 hours do not.
-- **Changing the admin password signs out every other device.** The browser or CLI that made the change stays signed in. Before first-time setup sets a password, logging in is refused.
-- **`startwrt-cli auth login` enrolls a key** at `~/.startwrt/id.key.pem` instead of saving a cookie, and `startwrt-cli auth session list` and `auth session kill` show and revoke sign-ins. On the router itself the CLI needs no login, and `auth login` and `auth logout` say so.

@@ -1,5 +1,0 @@
-- A profile's LAN Access setting now reads back exactly as it was saved. A profile set to All keeps access to profiles created afterwards, instead of silently becoming a Whitelist of the profiles that existed when it was saved, and a Whitelist that includes every existing profile reads back as a Whitelist instead of All.
-- A profile that was set to All before this fix and has already lost access to newer profiles must be re-saved with LAN Access set to All.
-- A profile with LAN Access set to Same profile stays isolated from profiles created afterwards, even if its Whitelist option to include new profiles had been ticked before it was switched to Same profile.
-- A Whitelist with the option to include new profiles ticked can be saved with no profiles selected, and keeps that option when the last profile in it is deleted.
-- Forwardings between profiles' firewall zones added outside StartWRT, such as through LuCI, no longer show up as LAN Access.

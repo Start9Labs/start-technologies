@@ -502,6 +502,13 @@ export class SubContainerEager<
       name,
     })
 
+    try {
+      await fs.mkdir(`${rootfs}/proc`, { recursive: true })
+    } catch (e) {
+      await effects.subcontainer.destroyFs({ guid })
+      throw e
+    }
+
     const res = new SubContainerEager<Manifest, Effects>(
       effects,
       imageId,
@@ -522,6 +529,7 @@ export class SubContainerEager<
       }
 
       await fs.mkdir(`${rootfs}/etc`, { recursive: true })
+      await fs.rm(`${rootfs}/etc/resolv.conf`, { force: true })
       await fs.copyFile('/etc/resolv.conf', `${rootfs}/etc/resolv.conf`)
 
       for (const dirPart of shared) {
@@ -767,7 +775,8 @@ export class SubContainerEager<
       ],
       spawnOptions,
     )
-    abort?.signal.addEventListener('abort', () => child.kill('SIGKILL'))
+    const kill = () => child.kill('SIGKILL')
+    abort?.signal.addEventListener('abort', kill)
     if (spawnOptions.input) {
       await new Promise<null>((resolve, reject) => {
         try {
@@ -822,6 +831,7 @@ export class SubContainerEager<
       child.stderr.on('data', appendData(stderr))
       child.on('exit', (code, signal) => {
         clearTimeout(killTimeout)
+        abort?.signal.removeEventListener('abort', kill)
         const result = {
           exitCode: code,
           exitSignal: signal,

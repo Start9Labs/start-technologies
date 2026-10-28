@@ -4,9 +4,12 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../../.."
 
 set -ea
 
-RUST_BUILDER_IMAGE=${RUST_BUILDER_IMAGE:-start9/start-core-testenv}
-if [ "$RUST_BUILDER_IMAGE" = "start9/start-core-testenv" ]; then
-  docker build -t "$RUST_BUILDER_IMAGE" -f shared-libs/crates/start-core/testenv.Dockerfile .
+if [ "${RUST_BUILDER_IMAGE:-start9/start-core-testenv}" = "start9/start-core-testenv" ]; then
+  base_image=$(env -u RUST_BUILDER_IMAGE ./build/rust-builder/image.sh)
+  RUST_BUILDER_IMAGE=start9/start-core-testenv
+  docker buildx build --load -t "$RUST_BUILDER_IMAGE" \
+    --build-arg RUST_BUILDER_IMAGE="$base_image" \
+    -f shared-libs/crates/start-core/testenv.Dockerfile .
 fi
 
 source ./build/builder-alias.sh

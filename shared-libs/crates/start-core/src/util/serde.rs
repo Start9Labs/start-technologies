@@ -14,6 +14,7 @@ use openssl::pkey::{PKey, Private};
 use openssl::x509::X509;
 use rpc_toolkit::{
     CliBindings, Context, HandlerArgs, HandlerArgsFor, HandlerFor, HandlerTypes, PrintCliResult,
+    output,
 };
 use serde::de::DeserializeOwned;
 use serde::ser::{SerializeMap, SerializeSeq};
@@ -450,10 +451,13 @@ mod yaml_tests {
 }
 
 pub fn display_serializable<T: Serialize>(format: IoFormat, result: T) -> Result<(), Error> {
-    format.to_writer(std::io::stdout(), &result)?;
+    use std::io::Write as _;
+    let mut stdout = output::stdout();
+    format.to_writer(&mut stdout, &result)?;
     if format == IoFormat::JsonPretty {
-        println!()
+        writeln!(stdout)?;
     }
+    stdout.flush()?;
     Ok(())
 }
 
@@ -871,7 +875,6 @@ impl<'de> Deserialize<'de> for Port {
     where
         D: Deserializer<'de>,
     {
-        //TODO: if number, be permissive
         deserialize_number_permissive(deserializer).map(Port)
     }
 }
@@ -1273,7 +1276,6 @@ impl PartialEq for Regex {
     }
 }
 
-// TODO: make this not allocate
 #[derive(Debug)]
 pub struct NoOutput;
 impl<'de> Deserialize<'de> for NoOutput {
@@ -1349,6 +1351,9 @@ pub fn apply_expr(input: jaq_core::Val, expr: &str) -> Result<jaq_core::Val, Err
     Ok(res)
 }
 
+pub mod der64;
+pub use der64::{Der64, DerEncoding};
+
 pub trait PemEncoding: Sized {
     fn from_pem<E: serde::de::Error>(pem: &str) -> Result<Self, E>;
     fn to_pem<E: serde::ser::Error>(&self) -> Result<String, E>;
@@ -1421,30 +1426,6 @@ impl PemEncoding for ed25519_dalek::SigningKey {
         self.to_pkcs8_pem(pkcs8::LineEnding::LF)
             .map_err(E::custom)
             .map(|s| s.as_str().to_owned())
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Pkcs8Doc {
-    pub tag: String,
-    pub document: pkcs8::Document,
-}
-
-impl PemEncoding for Pkcs8Doc {
-    fn from_pem<E: serde::de::Error>(pem: &str) -> Result<Self, E> {
-        let (tag, document) = pkcs8::Document::from_pem(pem).map_err(E::custom)?;
-        Ok(Pkcs8Doc {
-            tag: tag.into(),
-            document,
-        })
-    }
-    fn to_pem<E: serde::ser::Error>(&self) -> Result<String, E> {
-        der::pem::encode_string(
-            &self.tag,
-            pkcs8::LineEnding::default(),
-            self.document.as_bytes(),
-        )
-        .map_err(E::custom)
     }
 }
 

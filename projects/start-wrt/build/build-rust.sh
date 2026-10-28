@@ -39,8 +39,6 @@ fi
 # cargo-zigbuild reads RUSTFLAGS to select its linker wrapper, so setting it
 # also makes it pick the clean generic_rv64 wrapper instead of the RVA23 one.
 if [ "$RUST_ARCH" = "riscv64gc" ]; then
-	# Clear the image's RVA23 default so our RUSTFLAGS takes effect
-	# (CARGO_TARGET_<triple>_RUSTFLAGS outranks RUSTFLAGS when both are set).
 	export CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS=""
 	# Deliberately NO `+v`. K1 implements V 1.0 but traps on misaligned
 	# vector-element accesses, and the Bianbu 6.6 kernel does not emulate

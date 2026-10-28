@@ -14,8 +14,6 @@ export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
 export type ActionResultValueInput = z.input<typeof schemas.ActionResultValue>
 export type ActionVisibility = z.output<typeof schemas.ActionVisibility>
 export type ActionVisibilityInput = z.input<typeof schemas.ActionVisibility>
-export type AddVersionParams = z.output<typeof schemas.AddVersionParams>
-export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type Algorithm = z.output<typeof schemas.Algorithm>
 export type AlgorithmInput = z.input<typeof schemas.Algorithm>
 export type AllowedStatuses = z.output<typeof schemas.AllowedStatuses>
@@ -148,8 +146,6 @@ export type ImageMetadata = z.output<typeof schemas.ImageMetadata>
 export type ImageMetadataInput = z.input<typeof schemas.ImageMetadata>
 export type KeyboardOptions = z.output<typeof schemas.KeyboardOptions>
 export type KeyboardOptionsInput = z.input<typeof schemas.KeyboardOptions>
-export type KillParams = z.output<typeof schemas.KillParams>
-export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type ListNotificationParams = z.output<
   typeof schemas.ListNotificationParams
 >
@@ -474,6 +470,8 @@ export type AddPublicDomainParamsInput = z.input<
 >
 export type AddTunnelParams = z.output<typeof schemas.AddTunnelParams>
 export type AddTunnelParamsInput = z.input<typeof schemas.AddTunnelParams>
+export type AddVersionParams = z.output<typeof schemas.AddVersionParams>
+export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type AddressInfo = z.output<typeof schemas.AddressInfo>
 export type AddressInfoInput = z.input<typeof schemas.AddressInfo>
 
@@ -490,16 +488,12 @@ export type AttachParams = z.output<typeof schemas.AttachParams>
 export type AttachParamsInput = z.input<typeof schemas.AttachParams>
 
 /**
- * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
- * key is a sign-in: it carries the same metadata a session used to (when it
- * was created, when it was last used, and the user agent that enrolled it).
+ * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
 
 /**
- * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
- * key is a sign-in: it carries the same metadata a session used to (when it
- * was created, when it was last used, and the user agent that enrolled it).
+ * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export type AuthKeysInput = z.input<typeof schemas.AuthKeys>
 export type BackupReport = z.output<typeof schemas.BackupReport>
@@ -736,6 +730,8 @@ export type InstalledVersionParamsInput = z.input<
 >
 export type IpInfo = z.output<typeof schemas.IpInfo>
 export type IpInfoInput = z.input<typeof schemas.IpInfo>
+export type KillParams = z.output<typeof schemas.KillParams>
+export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LegacyAlpnInfo = z.output<typeof schemas.LegacyAlpnInfo>
 export type LegacyAlpnInfoInput = z.input<typeof schemas.LegacyAlpnInfo>
 export type ListPackageSignersParams = z.output<

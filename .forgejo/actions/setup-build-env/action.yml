@@ -8,22 +8,6 @@ runs:
       uses: https://github.com/actions/setup-node@v6
       with:
         node-version: '22'
-    - name: Install dependencies
-      run: |
-        # The runner image's Microsoft apt sources 403 intermittently, and one failing source fails the whole update.
-        grep -rl 'packages\.microsoft\.com' /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -r rm -f || true
-        sudo apt-get update
-        sudo apt-get install -y --no-install-recommends \
-          build-essential \
-          clang \
-          libclang-dev \
-          squashfs-tools-ng \
-          qemu-user-static
-      shell: bash
-    - name: Setup Rust
-      uses: https://github.com/dtolnay/rust-toolchain@stable
-      with:
-        toolchain: stable
     - name: Set up QEMU
       id: qemu
       continue-on-error: true

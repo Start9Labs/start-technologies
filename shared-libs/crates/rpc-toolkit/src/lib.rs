@@ -1,3 +1,5 @@
+pub mod output;
+
 pub use clap;
 pub use cli::*;
 // pub use command::*;

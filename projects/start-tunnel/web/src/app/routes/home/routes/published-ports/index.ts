@@ -95,6 +95,7 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
                   tuiIconButton
                   size="xs"
                   tuiDropdown
+                  tuiDropdownAlign="end"
                   tuiDropdownAuto
                   appearance="flat-grayscale"
                   iconStart="@tui.ellipsis-vertical"

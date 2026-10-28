@@ -66,7 +66,7 @@ The request must be signed by the key it enrolls. A valid local auth token rejec
 #[serde(rename_all = "camelCase")]
 struct LoginParams {
     password: String,
-    /// PEM-encoded Ed25519 public key to enroll
+    /// DER64 or PEM-encoded Ed25519 public key to enroll
     pubkey: AnyVerifyingKey,
     /// Enroll in memory only. Unsupported (InvalidRequest).
     #[serde(default)]
@@ -96,7 +96,7 @@ unsigned local-token request is rejected as unnecessary.
 struct SessionList {
     /// The key that signed this request
     current: Option<String>,
-    /// Enrolled keys by PEM: { name, loggedIn, lastActive, userAgent }.
+    /// Enrolled keys by DER64 SPKI: { name, loggedIn, lastActive, userAgent }.
     /// `lastActive` is persisted at most hourly.
     sessions: BTreeMap<String, Session>,
 }
@@ -107,8 +107,8 @@ struct SessionList {
 ```rust
 #[derive(Deserialize)]
 struct KillParams {
-    /// PEM-encoded keys to revoke
-    ids: Vec<String>,
+    /// DER64 or PEM-encoded keys to revoke
+    ids: Vec<AnyVerifyingKey>,
 }
 // Response: null
 ```
@@ -677,8 +677,7 @@ struct LanIpv4SetRequest {
 // Backend: updates UCI network.lan ipaddr (netmask /24) — and every profile's
 // addresses on a /16 block change — then clears DHCP leases, cycles only the LAN
 // interface (plus every profile interface on a block change) with ifdown/ifup,
-// reloads the firewall, restarts dnsmasq and Wi-Fi, and regenerates the HTTPS
-// certificate.
+// reloads the firewall and dnsmasq, and restarts Wi-Fi.
 // Inbound VPN peers the change would break fail the call with
 //   ErrorKind::VpnPeersWouldBreak unless force is set.
 // Validation: address must fall inside an RFC 1918 block at one of the
@@ -732,8 +731,7 @@ struct LanIpv6SetRequest {
 // With SLAAC enabled, `prefix` outside 48..=64, or shorter than the live
 // delegated prefix, is rejected (`InvalidRequest`), matching the UI validator.
 // Backend: updates UCI dhcp + network for the LAN and every profile, reloads
-// odhcpd to withdraw the old prefix, restarts network, and regenerates the HTTPS
-// certificate.
+// odhcpd to withdraw the old prefix, and restarts network.
 // Disabling SLAAC while any *enabled* IPv6 published-port rule exists is
 // rejected (`PublishedPortsUseIpv6`): it would strand every pp_*_v6 pinhole on
 // an address no device will hold. The UI locks the toggle for the same reason;
@@ -862,6 +860,10 @@ struct Device {
     /// (`devices.set-dns-injection`; `vpn-server.peer-set-dns-injection` for a
     /// VPN peer).
     allow_dns_injection: bool,
+    /// Whether the router forwards this device's IPv6 router advertisements
+    /// to the rest of the LAN (`devices.set-router-advertisements`). Always
+    /// false for VPN peers.
+    allow_router_advertisements: bool,
     security_profile: Option<String>,
     /// Live throughput (MB/s, 1 decimal), computed from conntrack byte deltas
     /// between polls (`wg show` byte deltas for a VPN peer). Only set for online
@@ -947,6 +949,25 @@ struct SetDnsInjectionReq {
 // device has published.
 ```
 
+### `devices.set-router-advertisements`
+
+```rust
+#[derive(Deserialize)]
+struct SetRouterAdvertisementsReq {
+    mac: String,
+    allow: bool,
+}
+// Response: null
+// Backend: stores `_allow_ra` on the device's DHCP host section, creating one
+// if needed, renders the allowed MACs into the LAN guard's `ra_allow` set
+// (/usr/share/nftables.d/ruleset-pre/11-startwrt-lan-ra-allow.nft), and
+// reloads the firewall on every call, including one that changes nothing, so
+// repeating a request whose reload failed applies it. A failed reload is an
+// error even though the setting is saved. Default is off: the guard drops
+// router advertisements switched between bridge ports from any other source
+// MAC.
+```
+
 ### `devices.forget`
 
 ```rust
@@ -958,12 +979,14 @@ struct DeviceMacReq {
 // Backend: removes the DHCP host for the MAC and its remembered name, closes
 // any automatic (PCP/UPnP) forwards the device holds — forgetting it drops the
 // `_allow_pcp` flag with the host section, so those forwards would otherwise
-// outlive the authorization that created them — flushes
+// outlive the authorization that created them — removes it from the LAN
+// guard's router-advertisement allow list, flushes
 // matching neighbor/ARP entries (`ip neigh del`), and rewrites every dnsmasq
-// lease file (the base file plus per-profile /tmp/dhcp.leases.dns_*) with
-// dnsmasq stopped (stop → edit → start), so the in-memory lease can't
-// resurrect the entry. A still-connected device reappears on its next
-// network activity.
+// lease file (the base file plus per-profile /tmp/dhcp.leases.dns_*) with each
+// instance holding the lease stopped by name, so the in-memory lease can't
+// resurrect the entry, then reloads dnsmasq. A still-connected device reappears
+// on its next network activity. If the allow-list reload fails, the rest still
+// happens and the call returns the error; forgetting again retries it.
 ```
 
 ### `devices.data-usage`
@@ -2271,6 +2294,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `devices.update`                    | Devices         |                             |
 | `devices.set-auto-forward`          | Devices         |                             |
 | `devices.set-dns-injection`         | Devices         |                             |
+| `devices.set-router-advertisements` | Devices         |                             |
 | `devices.forget`                    | Devices         |                             |
 | `devices.data-usage`                | Devices         |                             |
 | `published-ports.list`              | Published Ports |                             |

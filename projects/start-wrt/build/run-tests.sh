@@ -1,11 +1,5 @@
 #!/bin/bash
 
-# Run start-wrt's Rust unit tests inside the start9/cargo-zigbuild container,
-# mirroring shared-libs/crates/start-core/run-tests.sh. Package-scoped to the
-# three start-wrt crates so it never tries to compile other workspace members
-# (notably startos-backup-fs -> fuser, which needs FUSE libs only present in the
-# container's sysroot). Host-target tests (`cargo test`, not zigbuild).
-
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 source ./builder-alias.sh

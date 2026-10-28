@@ -64,6 +64,7 @@ import { DNS_ADD } from './add'
                   tuiIconButton
                   size="xs"
                   tuiDropdown
+                  tuiDropdownAlign="end"
                   tuiDropdownAuto
                   appearance="flat-grayscale"
                   iconStart="@tui.ellipsis-vertical"

@@ -10,8 +10,8 @@ use serde::Serialize;
 
 use crate::util::PhantomData;
 use crate::{
-    CliBindings, Empty, HandlerArgs, HandlerArgsFor, HandlerFor, HandlerTypes, LeafHandler,
-    PrintCliResult,
+    println, CliBindings, Empty, HandlerArgs, HandlerArgsFor, HandlerFor, HandlerTypes,
+    LeafHandler, PrintCliResult,
 };
 
 pub struct FromFn<F, T, E, Args> {
