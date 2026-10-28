@@ -2425,7 +2425,6 @@ lxc.mod.cleaned-up-containers:
   fr_FR: "Conteneurs LXC orphelins nettoyés avec succès"
   pl_PL: "Pomyślnie wyczyszczono wiszące kontenery LXC"
 
-# version/release_notes.rs
 release-notes.welcome-message:
   en_US: "Click \"View details\" for what's new in this release."
   de_DE: "Klicken Sie auf \"Details anzeigen\", um zu sehen, was in dieser Version neu ist."

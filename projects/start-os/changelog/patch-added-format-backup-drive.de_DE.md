@@ -1,0 +1,1 @@
+- **Ein Sicherungslaufwerk in StartOS formatieren.** Unter `System > Sicherung erstellen` löscht „Laufwerk formatieren“ ein angeschlossenes Laufwerk und richtet darauf eine einzelne Btrfs-Partition für Sicherungen ein. Das Laufwerk mit StartOS oder dessen Daten ist ausgeschlossen. Auch als `start-cli disk format` verfügbar.

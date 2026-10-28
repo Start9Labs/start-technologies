@@ -1967,7 +1967,7 @@ export const AddTunnelParams: z.ZodObject<{
 export const AddVersionParams: z.ZodObject<{
   version: z.ZodString
   headline: z.ZodString
-  releaseNotes: z.ZodString
+  releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
   gitHash: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof GitHash>>,
@@ -1981,7 +1981,7 @@ export const AddVersionParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   version: z.string(),
   headline: z.string(),
-  releaseNotes: z.string(),
+  releaseNotes: LocaleString,
   sourceVersion: z.string(),
   gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
   expectedGitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
@@ -3267,7 +3267,7 @@ export const OsUpdateSignerKeyParams: z.ZodObject<{
 })
 export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
-  releaseNotes: z.ZodString
+  releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
   /**
    * Commit that produced the OS image, if recorded at publication.
@@ -3295,7 +3295,7 @@ export const OsVersionInfo: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   headline: z.string(),
-  releaseNotes: z.string(),
+  releaseNotes: LocaleString,
   sourceVersion: z.string(),
   /**
    * Commit that produced the OS image, if recorded at publication.

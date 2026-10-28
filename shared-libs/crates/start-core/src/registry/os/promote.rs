@@ -7,7 +7,7 @@ use url::Url;
 use crate::context::CliContext;
 use crate::prelude::*;
 use crate::registry::os::SIG_CONTEXT;
-use crate::registry::os::index::{OsIndex, OsVersionInfo};
+use crate::registry::os::index::OsIndex;
 use crate::registry::os::version::AddVersionParams;
 use crate::registry::package::promote::{call_registry, resolve_registry_url};
 use crate::s9pk::git_hash::GitHash;
@@ -68,7 +68,7 @@ pub async fn cli_os_promote(
         &ctx,
         to_url.clone(),
         "os.version.add",
-        to_value(&promoted_version(version.clone(), version_info))?,
+        to_value(&AddVersionParams::from_info(version.clone(), version_info))?,
     )
     .await?;
 
@@ -103,19 +103,20 @@ pub async fn cli_os_promote(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registry::os::index::OsVersionInfo;
 
     #[test]
     fn promotion_carries_release_metadata() {
         let info = OsVersionInfo {
             headline: "Security update".into(),
-            release_notes: "Release notes".into(),
+            release_notes: "Release notes".parse().unwrap(),
             source_version: ">=0.4.0".parse().unwrap(),
             git_hash: Some("0123456789abcdef".parse().unwrap()),
             security: true,
             ..Default::default()
         };
         let version: Version = "0.4.0.5".parse().unwrap();
-        let params = promoted_version(version.clone(), &info);
+        let params = AddVersionParams::from_info(version.clone(), &info);
         assert_eq!(params.version, version);
         assert_eq!(params.headline, info.headline);
         assert_eq!(params.release_notes, info.release_notes);
@@ -123,19 +124,6 @@ mod tests {
         assert_eq!(params.git_hash, info.git_hash);
         assert!(params.security);
         assert!(params.signer.is_none());
-    }
-}
-
-fn promoted_version(version: Version, info: &OsVersionInfo) -> AddVersionParams {
-    AddVersionParams {
-        version,
-        headline: info.headline.clone(),
-        release_notes: info.release_notes.clone(),
-        source_version: info.source_version.clone(),
-        git_hash: info.git_hash.clone(),
-        expected_git_hash: None,
-        security: info.security,
-        signer: None,
     }
 }
 

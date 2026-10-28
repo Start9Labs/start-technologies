@@ -73,14 +73,16 @@ jobs:
             git fetch --no-tags origin master
             git checkout --detach origin/master
             BASE=$(git rev-parse HEAD)
+            mkdir -p "$RUNNER_TEMP/scripts" "$RUNNER_TEMP/shared-libs/crates/start-core/locales"
             for script in changelog.mjs changelog-version.mjs commit-staged.mjs; do
-              git show "origin/master:scripts/$script" > "$RUNNER_TEMP/$script"
+              git show "origin/master:scripts/$script" > "$RUNNER_TEMP/scripts/$script"
             done
-            node "$RUNNER_TEMP/changelog.mjs" sync
+            git show origin/master:shared-libs/crates/start-core/locales/release-notes.json > "$RUNNER_TEMP/shared-libs/crates/start-core/locales/release-notes.json"
+            node "$RUNNER_TEMP/scripts/changelog.mjs" sync
             git add -- projects/
             if git diff --cached --quiet; then break; fi
             printf 'chore: compile released changelog fragments\n' > "$RUNNER_TEMP/changelog-message"
-            if node "$RUNNER_TEMP/commit-staged.mjs" "$RUNNER_TEMP/changelog-message" master "$BASE"; then
+            if node "$RUNNER_TEMP/scripts/commit-staged.mjs" "$RUNNER_TEMP/changelog-message" master "$BASE"; then
               break
             fi
             if [ "$attempt" = 3 ]; then exit 1; fi
@@ -193,14 +195,8 @@ jobs:
           git ls-tree -r --name-only origin/master -- projects/ \
             | grep -E '^projects/[^/]+/CHANGELOG\.md$' \
             | while read -r changelog; do git checkout origin/master -- "$changelog"; done
-          git ls-tree -r --name-only origin/master -- "projects/$PROJECT/release-notes/" \
-            | while read -r notes; do
-                version="${notes##*/}"
-                version="${version%.md}"
-                if git show-ref --verify --quiet "refs/tags/$PROJECT/v$version"; then
-                  git checkout origin/master -- "$notes"
-                fi
-              done
+          node "$RUNNER_TEMP/scripts/changelog.mjs" archives "projects/$PROJECT" --ref origin/master \
+            | while read -r notes; do git checkout origin/master -- "$notes"; done
           git rm -rfq --ignore-unmatch -- "projects/$PROJECT/changelog"
 
           git add -A

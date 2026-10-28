@@ -26,6 +26,16 @@ function prereleaseFixture(t) {
     write(`scripts/${name}`, '')
     copyFileSync(join(REPO, 'scripts', name), join(root, 'scripts', name))
   }
+  const labels = 'shared-libs/crates/start-core/locales/release-notes.json'
+  write(labels, readFileSync(join(REPO, labels)))
+  write(
+    'projects/start-os/changelog/patch-fixed-localized.md',
+    '---\nuser-facing: true\n---\n\n- Visible correction.\n',
+  )
+  write(
+    'projects/start-os/changelog/patch-fixed-localized.pl_PL.md',
+    '- Widoczna poprawka.\n',
+  )
   write(
     'package.json',
     JSON.stringify({
@@ -45,7 +55,14 @@ function prereleaseFixture(t) {
     '---\nuser-facing: false\n---\n\n- Security correction.\n',
   )
   function commit() {
-    git('add', 'scripts', 'package.json', '.prettierrc.json', 'projects')
+    git(
+      'add',
+      'scripts',
+      'package.json',
+      '.prettierrc.json',
+      'projects',
+      'shared-libs',
+    )
     git('commit', '--allow-empty', '-qm', 'fixture')
     return git('rev-parse', 'HEAD').trim()
   }
@@ -83,10 +100,12 @@ const write = (name, data) => writeFileSync(join(root, name + '.json'), JSON.str
 const flag = name => args[args.indexOf(name) + 1]
 const registry = args.find(arg => arg.startsWith('--registry='))?.slice(11)
 const channel = registry === ${JSON.stringify(ALPHA)} ? 'alpha' : 'beta'
-if (args.includes('index')) console.log(JSON.stringify(read(channel)))
+if (args.at(-1) === '--help') console.log('<RELEASE_NOTES_OR_JSON>')
+else if (args.includes('index')) console.log(JSON.stringify(read(channel)))
 else if (args.includes('promote')) {
   appendFileSync(join(root, 'promotions'), 'promote\\n')
   if (process.env.FAIL_PROMOTE === '1') process.exit(41)
+  if (flag('--expected-git-hash') !== read('alpha').versions[${JSON.stringify(VERSION)}].gitHash) throw new Error('promoted hash mismatch')
   write('beta', read('alpha'))
 } else if (args.includes('remove')) {
   appendFileSync(join(root, 'removals'), 'remove\\n')
@@ -94,7 +113,9 @@ else if (args.includes('promote')) {
 } else if (args.includes('add')) {
   const value = read(channel)
   const item = value.versions[${JSON.stringify(VERSION)}]
+  if (flag('--expected-git-hash') !== item.gitHash) throw new Error('metadata hash mismatch')
   item.gitHash = flag('--git-hash')
+  item.releaseNotes = JSON.parse(args.at(-2))
   item.security = args.includes('--security')
   write(channel, value)
 } else throw new Error('unexpected start-cli args: ' + args.join(' '))
@@ -187,6 +208,10 @@ test('prerelease adopts the indexed image commit and allocates another RC after 
   )
   assert.equal(data('beta.json').versions[VERSION].gitHash, imageCommit)
   assert.equal(data('beta.json').versions[VERSION].security, true)
+  const notes = data('beta.json').versions[VERSION].releaseNotes
+  assert.ok(notes.en_US.includes('Visible correction.'))
+  assert.ok(notes.pl_PL.includes('Widoczna poprawka.'))
+  assert.ok(notes.pl_PL.includes('Pełna lista zmian'))
   assert.equal(existsSync(join(root, 'removals')), false)
   assert.equal(
     JSON.parse(readFileSync(join(root, 'package.json'))).version,

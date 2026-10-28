@@ -9,6 +9,7 @@ use crate::registry::asset::RegistryAsset;
 use crate::registry::context::RegistryContext;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::git_hash::GitHash;
+use crate::s9pk::manifest::LocaleString;
 use crate::sign::commitment::blake3::Blake3Commitment;
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
@@ -41,7 +42,7 @@ impl Map for OsVersionInfoMap {
 #[model = "Model<Self>"]
 pub struct OsVersionInfo {
     pub headline: String,
-    pub release_notes: String,
+    pub release_notes: LocaleString,
     pub source_version: VersionRange,
     /// Commit that produced the OS image, if recorded at publication.
     #[serde(default)]
@@ -76,7 +77,10 @@ pub async fn get_os_index(ctx: RegistryContext) -> Result<OsIndex, Error> {
 
 #[cfg(test)]
 mod tests {
+    use imbl_value::json;
+
     use super::*;
+    use crate::registry::os::version::AddVersionParams;
 
     #[test]
     fn release_metadata_updates_require_the_expected_image_commit() {
@@ -87,5 +91,36 @@ mod tests {
         assert!(info.require_git_hash(&expected).is_err());
         info.git_hash = Some(expected.clone());
         info.require_git_hash(&expected).unwrap();
+    }
+
+    #[test]
+    fn notes_round_trip_and_promote_without_rewriting_legacy_records() {
+        for notes in [
+            json!("English notes"),
+            json!({ "en_US": "English notes", "pl_PL": "Polskie informacje" }),
+        ] {
+            let wire = json!({
+                "headline": "v0.4.0.5",
+                "releaseNotes": notes,
+                "sourceVersion": "*",
+                "authorized": [],
+                "iso": {},
+                "squashfs": {},
+                "img": {},
+            });
+            let info: OsVersionInfo = from_value(wire.clone()).unwrap();
+            assert!(info.git_hash.is_none());
+            assert!(!info.security);
+            let mut expected = wire.clone();
+            expected["gitHash"] = Value::Null;
+            expected["security"] = false.into();
+            assert_eq!(to_value(&info).unwrap(), expected);
+            let promotion = AddVersionParams::from_info("0.4.0.5".parse().unwrap(), &info);
+            assert_eq!(promotion.release_notes, info.release_notes);
+            assert_eq!(
+                to_value(&promotion).unwrap()["releaseNotes"],
+                wire["releaseNotes"]
+            );
+        }
     }
 }

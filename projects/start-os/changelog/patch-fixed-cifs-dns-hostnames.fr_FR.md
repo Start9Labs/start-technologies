@@ -1,0 +1,1 @@
+- Les sauvegardes et la restauration dans des dossiers réseau acceptent les noms d'hôte DNS contenant des points. Les noms d'ordinateur simples restent limités à NetBIOS, et les erreurs de résolution indiquent le résolveur utilisé.

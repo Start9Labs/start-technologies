@@ -1,0 +1,2 @@
+- Erhalten Sie eine Benachrichtigung, wenn die ausgewählte OS-Registry ein kompatibles Sicherheitsupdate veröffentlicht, auch bei geschlossenem Browser.
+- Beta-Updates können einen früheren Build mit derselben OS-Version ersetzen.
