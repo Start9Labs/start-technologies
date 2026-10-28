@@ -225,6 +225,7 @@ pub struct DeviceInfoMiddleware {
     device_info: Option<DeviceInfo>,
     req: Option<RpcRequest>,
     legacy_signatures: bool,
+    legacy_pem: bool,
     legacy_os_versions: bool,
     inline_icons: bool,
     legacy_os_notes: bool,
@@ -236,6 +237,7 @@ impl DeviceInfoMiddleware {
             device_info: None,
             req: None,
             legacy_signatures: false,
+            legacy_pem: true,
             legacy_os_versions: false,
             inline_icons: false,
             legacy_os_notes: false,
@@ -249,6 +251,7 @@ impl DeviceInfoMiddleware {
         request: &mut RpcRequest,
     ) -> Result<(), Error> {
         self.legacy_signatures = startwrt;
+        self.legacy_pem = true;
         self.legacy_os_notes = false;
         if let Some(header) = &self.device_info_header {
             let device_info = if metadata.get_device_info {
@@ -258,6 +261,7 @@ impl DeviceInfoMiddleware {
             };
             if let Some(device_info) = device_info {
                 self.legacy_signatures |= reads_legacy_signatures(&device_info.os.version)?;
+                self.legacy_pem = startwrt || reads_pem(&device_info.os.version)?;
                 self.inline_icons = reads_inline_icons(&device_info.os.version)?;
                 self.legacy_os_notes |= startwrt || reads_legacy_os_notes(&device_info.os.version)?;
                 if metadata.get_device_info {
@@ -269,14 +273,23 @@ impl DeviceInfoMiddleware {
             let params: GetOsVersionParams = from_value(request.params.clone())?;
             if let Some(version) = params.source_version {
                 self.legacy_signatures |= reads_legacy_signatures(&version)?;
+                self.legacy_pem = startwrt || reads_pem(&version)?;
                 self.legacy_os_notes |= startwrt || reads_legacy_os_notes(&version)?;
             }
+        }
+        if request.method.as_str().starts_with("db.") {
+            self.legacy_pem = false;
+            self.legacy_signatures = false;
         }
         self.legacy_os_versions =
             !startwrt && self.legacy_signatures && request.method.as_str() == "os.version.get";
         self.req = Some(request.clone());
         Ok(())
     }
+}
+
+fn reads_pem(version: &Version) -> Result<bool, Error> {
+    Ok(version < &"0.4.0.5".parse::<Version>()?)
 }
 
 fn reads_legacy_os_notes(version: &Version) -> Result<bool, Error> {
@@ -446,6 +459,9 @@ impl Middleware<RegistryContext> for DeviceInfoMiddleware {
                 drop_unsigned_os_versions(res);
             }
         }
+        if let (true, Ok(res)) = (self.legacy_pem, &mut response.result) {
+            super::compat::pem_wire(res);
+        }
     }
 }
 
@@ -474,6 +490,72 @@ mod tests {
     fn request(method: &str, params: Value) -> RpcRequest {
         from_value(json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }))
             .unwrap()
+    }
+
+    #[test]
+    fn pem_responses_follow_client_capability() {
+        for (header, startwrt, legacy) in [
+            (None, false, true),
+            (
+                Some("os.version=0.4.0.4&os.compat=*&os.platform=x86_64"),
+                false,
+                true,
+            ),
+            (
+                Some("os.version=0.4.0.5&os.compat=*&os.platform=x86_64"),
+                false,
+                false,
+            ),
+            (
+                Some("os.version=0.4.0.5&os.compat=*&os.platform=x86_64"),
+                true,
+                true,
+            ),
+        ] {
+            let mut middleware = DeviceInfoMiddleware::new();
+            middleware.device_info_header = header.map(HeaderValue::from_static);
+            middleware
+                .prepare_request(
+                    startwrt,
+                    Metadata {
+                        get_device_info: false,
+                    },
+                    &mut request("index", json!({})),
+                )
+                .unwrap();
+            assert_eq!(middleware.legacy_pem, legacy);
+        }
+        for (version, legacy) in [("0.4.0.4", true), ("0.4.0.5", false)] {
+            let mut middleware = DeviceInfoMiddleware::new();
+            middleware
+                .prepare_request(
+                    false,
+                    Metadata {
+                        get_device_info: false,
+                    },
+                    &mut request("os.version.get", json!({ "sourceVersion": version })),
+                )
+                .unwrap();
+            assert_eq!(middleware.legacy_pem, legacy);
+        }
+    }
+
+    #[test]
+    fn raw_database_responses_keep_the_stored_encoding() {
+        for method in ["db.dump", "db.subscribe"] {
+            let mut middleware = DeviceInfoMiddleware::new();
+            middleware
+                .prepare_request(
+                    true,
+                    Metadata {
+                        get_device_info: false,
+                    },
+                    &mut request(method, json!({})),
+                )
+                .unwrap();
+            assert!(!middleware.legacy_pem);
+            assert!(!middleware.legacy_signatures);
+        }
     }
 
     #[test]

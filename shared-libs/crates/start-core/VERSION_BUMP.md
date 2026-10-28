@@ -20,7 +20,7 @@ StartOS versions carry an optional fourth **revision** segment — `0.4.0.1` —
 
 ## Changelog
 
-A version bump pairs with fragments in `projects/start-os/changelog/` and release notes in the same change. Follow the root [`AGENTS.md`](../../../AGENTS.md) fragment rules and freshly query origin tags to establish what has shipped. Set root `package.json` to the fragment-derived version under those rules; it remains the canonical manifest. `CHANGELOG.md` is generated release history.
+A version bump pairs with fragments in `projects/start-os/changelog/`; release-note framing is optional. Follow the root [`AGENTS.md`](../../../AGENTS.md) fragment rules and freshly query origin tags to establish what has shipped. Set root `package.json` to the fragment-derived version under those rules; it remains the canonical manifest. `CHANGELOG.md` is generated release history.
 
 ## Files to update
 
@@ -99,7 +99,7 @@ A pre-release version instead takes prerelease segments: `exver::Version::new([0
 
 ### 5. Release notes
 
-**`projects/start-os/release-notes/X.Y.Z.N.md`** — optional authored framing: a lede and optional `## Important`. Do not author `## Highlights`; the shared compiler generates it from user-facing changelog fragments. Put pre-update instructions in an optional sibling **`X.Y.Z.N.pre-update.md`**, headed `## ⚠️ Before You Update`. `manage-release.sh` prefixes the companion to the generated main notes for the GitHub release and registry entry. The post-update notification uses the main notes alone. **The image renders notes from fragments and optional framing** (`projects/start-os/build.mk`); it does not require an authored main file.
+**`projects/start-os/release-notes/X.Y.Z.N.md`** — optional framing: a lede and optional `## Important`. The shared compiler generates `## Highlights` from fragments with `user-facing: true`; follow the root `AGENTS.md` release rules. Put pre-update instructions in an optional sibling **`X.Y.Z.N.pre-update.md`**, headed `## ⚠️ Before You Update`. `manage-release.sh` prefixes the companion to the compiled main notes for the GitHub release and registry entry. The image packages the compiled main notes without the pre-update companion.
 
 ### 6. Release-gated docs
 
@@ -127,7 +127,7 @@ cargo test -p start-core --features test version::   # incl. current_matches_man
 - [ ] Create `shared-libs/crates/start-core/src/version/vX_Y_Z_N.rs`
 - [ ] Update `shared-libs/crates/start-core/src/version/mod.rs` in 5 locations
 - [ ] Add the StartOS changelog fragments
-- [ ] Add optional framing in `projects/start-os/release-notes/X.Y.Z.N.md`, plus `X.Y.Z.N.pre-update.md` for any pre-update instructions; leave Highlights to the compiler
+- [ ] Add optional framing at `projects/start-os/release-notes/X.Y.Z.N.md` and `X.Y.Z.N.pre-update.md` for any pre-update instructions
 - [ ] Bump the release link in `projects/start-os/docs/src/`
 - [ ] Run `make manpages` and commit the generated version updates
 - [ ] Update `projects/start-sdk/lib/StartSdk.ts` `OSVersion` — **only** on breaking SDK changes
