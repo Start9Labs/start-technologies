@@ -2,7 +2,7 @@ use exver::VersionRange;
 use imbl_value::json;
 
 use super::v0_3_5::V0_3_0_COMPAT;
-use super::{VersionT, v0_4_0_3, v0_4_0_5};
+use super::{VersionT, v0_4_0_5};
 use crate::prelude::*;
 
 lazy_static::lazy_static! {
@@ -53,7 +53,7 @@ mod test {
 
     use super::*;
     use crate::update::signers::initial_signers;
-    use crate::version::Upgrade;
+    use crate::version::{Upgrade, v0_4_0_3};
 
     #[tokio::test]
     async fn upgrade_from_0_4_0_3_reruns_its_stale_migration() {
