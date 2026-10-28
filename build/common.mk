@@ -17,6 +17,8 @@ RUST_ARCH := $(shell if [ "$(ARCH)" = "riscv64" ]; then echo riscv64gc; else ech
 REGISTRY_BASENAME := $(shell PROJECT=start-registry PLATFORM=$(ARCH) ./build/env/basename.sh)
 TUNNEL_BASENAME := $(shell PROJECT=start-tunnel PLATFORM=$(ARCH) ./build/env/basename.sh)
 CLI_BASENAME := $(shell PROJECT=start-cli PLATFORM=$(ARCH) ./build/env/basename.sh)
+RUST_BUILDER_INPUTS := build/rust-builder/image.sh build/rust-builder/repository build/rust-builder/reference
+
 # Every Rust binary tracks its transitive path dependencies.
 CORE_SRC := $(call ls-files, shared-libs/crates/start-core) \
 	$(call ls-files, shared-libs/crates/exver) \
@@ -26,7 +28,7 @@ CORE_SRC := $(call ls-files, shared-libs/crates/start-core) \
 	$(call ls-files, shared-libs/crates/visit-rs) \
 	$(call ls-files, shared-libs/crates/visit-rs-derive) \
 	$(call ls-files, shared-libs/crates/yasi) \
-	$(call ls-files, shared-libs/crates/patch-db) build/builder-alias.sh $(GIT_HASH_FILE)
+	$(call ls-files, shared-libs/crates/patch-db) build/builder-alias.sh $(RUST_BUILDER_INPUTS) $(GIT_HASH_FILE)
 PATCH_DB_CLIENT_SRC := $(call ls-files, shared-libs/crates/patch-db/client)
 GZIP_BIN := $(shell which pigz || which gzip)
 TAR_BIN := $(shell which gtar || which tar)

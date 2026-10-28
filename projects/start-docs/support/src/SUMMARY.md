@@ -10,5 +10,4 @@
 - [Dux and Helix](dux-and-helix.md)
 - [Privacy](privacy.md)
 - [Notifications](notifications.md)
-- [Email](email.md)
 - [Settings](settings.md)

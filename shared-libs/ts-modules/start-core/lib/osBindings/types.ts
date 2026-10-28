@@ -14,8 +14,6 @@ export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
 export type ActionResultValueInput = z.input<typeof schemas.ActionResultValue>
 export type ActionVisibility = z.output<typeof schemas.ActionVisibility>
 export type ActionVisibilityInput = z.input<typeof schemas.ActionVisibility>
-export type AddVersionParams = z.output<typeof schemas.AddVersionParams>
-export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type Algorithm = z.output<typeof schemas.Algorithm>
 export type AlgorithmInput = z.input<typeof schemas.Algorithm>
 export type AllowedStatuses = z.output<typeof schemas.AllowedStatuses>
@@ -148,8 +146,6 @@ export type ImageMetadata = z.output<typeof schemas.ImageMetadata>
 export type ImageMetadataInput = z.input<typeof schemas.ImageMetadata>
 export type KeyboardOptions = z.output<typeof schemas.KeyboardOptions>
 export type KeyboardOptionsInput = z.input<typeof schemas.KeyboardOptions>
-export type KillParams = z.output<typeof schemas.KillParams>
-export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type ListNotificationParams = z.output<
   typeof schemas.ListNotificationParams
 >
@@ -392,8 +388,12 @@ export type TaskSeverity = z.output<typeof schemas.TaskSeverity>
 export type TaskSeverityInput = z.input<typeof schemas.TaskSeverity>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TimeInfoInput = z.input<typeof schemas.TimeInfo>
-export type UpdateSystemParams = z.output<typeof schemas.UpdateSystemParams>
-export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
+export type TrustedOsUpdateSigner = z.output<
+  typeof schemas.TrustedOsUpdateSigner
+>
+export type TrustedOsUpdateSignerInput = z.input<
+  typeof schemas.TrustedOsUpdateSigner
+>
 
 /**
  * How the OS reverse proxy validates the container's TLS certificate when it
@@ -470,6 +470,8 @@ export type AddPublicDomainParamsInput = z.input<
 >
 export type AddTunnelParams = z.output<typeof schemas.AddTunnelParams>
 export type AddTunnelParamsInput = z.input<typeof schemas.AddTunnelParams>
+export type AddVersionParams = z.output<typeof schemas.AddVersionParams>
+export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type AddressInfo = z.output<typeof schemas.AddressInfo>
 export type AddressInfoInput = z.input<typeof schemas.AddressInfo>
 
@@ -486,16 +488,12 @@ export type AttachParams = z.output<typeof schemas.AttachParams>
 export type AttachParamsInput = z.input<typeof schemas.AttachParams>
 
 /**
- * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
- * key is a sign-in: it carries the same metadata a session used to (when it
- * was created, when it was last used, and the user agent that enrolled it).
+ * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
 
 /**
- * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
- * key is a sign-in: it carries the same metadata a session used to (when it
- * was created, when it was last used, and the user agent that enrolled it).
+ * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export type AuthKeysInput = z.input<typeof schemas.AuthKeys>
 export type BackupReport = z.output<typeof schemas.BackupReport>
@@ -732,6 +730,8 @@ export type InstalledVersionParamsInput = z.input<
 >
 export type IpInfo = z.output<typeof schemas.IpInfo>
 export type IpInfoInput = z.input<typeof schemas.IpInfo>
+export type KillParams = z.output<typeof schemas.KillParams>
+export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LegacyAlpnInfo = z.output<typeof schemas.LegacyAlpnInfo>
 export type LegacyAlpnInfoInput = z.input<typeof schemas.LegacyAlpnInfo>
 export type ListPackageSignersParams = z.output<
@@ -776,10 +776,26 @@ export type NamedHealthCheckResultInput = z.input<
 >
 export type Notification = z.output<typeof schemas.Notification>
 export type NotificationInput = z.input<typeof schemas.Notification>
+export type OsUpdateSignerKeyParams = z.output<
+  typeof schemas.OsUpdateSignerKeyParams
+>
+export type OsUpdateSignerKeyParamsInput = z.input<
+  typeof schemas.OsUpdateSignerKeyParams
+>
 export type OsVersionInfo = z.output<typeof schemas.OsVersionInfo>
 export type OsVersionInfoInput = z.input<typeof schemas.OsVersionInfo>
 export type PackageBackupInfo = z.output<typeof schemas.PackageBackupInfo>
 export type PackageBackupInfoInput = z.input<typeof schemas.PackageBackupInfo>
+
+/**
+ * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
+ */
+export type PackageIcon = z.output<typeof schemas.PackageIcon>
+
+/**
+ * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
+ */
+export type PackageIconInput = z.input<typeof schemas.PackageIcon>
 export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PackageInfoShortInput = z.input<typeof schemas.PackageInfoShort>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
@@ -924,6 +940,12 @@ export type SetIconParams = z.output<typeof schemas.SetIconParams>
 export type SetIconParamsInput = z.input<typeof schemas.SetIconParams>
 export type SetMainStatus = z.output<typeof schemas.SetMainStatus>
 export type SetMainStatusInput = z.input<typeof schemas.SetMainStatus>
+export type SetOsUpdateSignerParams = z.output<
+  typeof schemas.SetOsUpdateSignerParams
+>
+export type SetOsUpdateSignerParamsInput = z.input<
+  typeof schemas.SetOsUpdateSignerParams
+>
 export type SetOutboundGatewayParams = z.output<
   typeof schemas.SetOutboundGatewayParams
 >
@@ -1088,6 +1110,8 @@ export type StatusInfo = z.output<typeof schemas.StatusInfo>
 export type StatusInfoInput = z.input<typeof schemas.StatusInfo>
 export type Task = z.output<typeof schemas.Task>
 export type TaskParams = z.input<typeof schemas.Task>
+export type UpdateSystemParams = z.output<typeof schemas.UpdateSystemParams>
+export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type UrlPluginClearUrlsParams = z.output<
   typeof schemas.UrlPluginClearUrlsParams
 >

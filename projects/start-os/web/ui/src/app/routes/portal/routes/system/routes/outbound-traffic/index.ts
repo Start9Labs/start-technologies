@@ -35,8 +35,7 @@ import {
           tuiIconButton
           size="xs"
           docsLink
-          path="/start-os/gateways.html"
-          fragment="#outbound-traffic"
+          path="/start-os/outbound-traffic.html"
           appearance="icon"
           iconStart="@tui.book-open-text"
         >

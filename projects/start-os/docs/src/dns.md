@@ -15,7 +15,7 @@ In **Auto** mode, StartOS uses DNS servers supplied by that gateway: [DHCP](http
 > [!WARNING]
 > When a gateway supplies no DNS servers, StartOS uses **Cloudflare's public resolvers at `1.1.1.1:53` and `[2606:4700:4700::1111]:53`**. The DNS column marks these addresses **(Fallback)**, and the gateway's editor identifies Cloudflare. These queries travel through the selected gateway, including when that gateway is a VPN.
 
-A service's explicit [outbound gateway](outbound-vpn.md#route-individual-services-through-vpn) takes precedence over the system-wide setting. Services without an override inherit the system-wide setting, as does the OS itself. With the system set to **Auto**, StartOS selects the physical connection with the preferred default route, preferring IPv4 and using IPv6 when no physical IPv4 default route is available. A disconnected selected gateway blocks its assigned DNS queries.
+Which gateway a requester uses, and whether it uses that gateway's DNS or its own static servers, is set on its [Outbound Traffic](outbound-traffic.md) page. A disconnected selected gateway blocks its assigned DNS queries.
 
 Host lookups of configured WireGuard endpoint hostnames use the automatic physical connection's DNS settings, allowing tunnels to reconnect. This exception applies to those exact endpoint names; service-originated lookups still follow the service's outbound gateway.
 
@@ -33,14 +33,6 @@ DNS overrides remain saved while a gateway is disconnected. When upgrading from 
 
 > [!NOTE]
 > If you want every device on your network to use a specific DNS provider, configure it in your router. A gateway's settings in StartOS affect requests routed through that gateway by StartOS and its services.
-
-## OS and Service DNS Overrides
-
-The **DNS** dropdown beside the outbound gateway selector defaults to **Use Gateway DNS**. Choose **Static** to supply servers for that requester instead. Its DNS queries still pass through the OS DNS server and travel through its selected outbound gateway; an unavailable gateway blocks them.
-
-Configure the OS under `System > Outbound Traffic`, directly below **Gateways**. Configure a service using its **Outbound Traffic** tab, directly above **Actions & Config**. The OS's static DNS override applies to the OS only. A service using **System default** for its gateway and **Use Gateway DNS** for DNS uses that gateway's own settings, not the OS's DNS override. Each service can save its own static servers independently.
-
-Gateway and DNS selections save together. DNS overrides remain saved while their gateway is disconnected. The host-only WireGuard endpoint exception above continues to use the physical connection's gateway DNS.
 
 ## Private Domains
 

@@ -1,0 +1,42 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+bridge=
+admin_vlan=
+
+find_bridge() {
+	local name
+	config_get name "$1" name
+	[ "$name" = br-lan ] && bridge=$1
+}
+
+find_admin_vlan() {
+	local device vlan
+	config_get device "$1" device
+	config_get vlan "$1" vlan
+	[ "$device" = br-lan ] && [ "$vlan" = 1 ] && admin_vlan=$1
+}
+
+config_load network
+config_foreach find_bridge device
+config_foreach find_admin_vlan bridge-vlan
+[ -n "$bridge" ] || exit 0
+wan=$(uci -q get network.wan.device)
+# A VLAN-tagged WAN such as eth4.7 reserves its port.
+wan=${wan%%.*}
+
+for path in /sys/class/net/*; do
+	[ "$(basename "$(readlink "$path/device/driver")")" = r8169 ] || continue
+	dev=$(basename "$path")
+	[ "$dev" = "$wan" ] && continue
+	case " $(uci -q get "network.$bridge.ports") " in
+	*" $dev "*) continue ;;
+	esac
+	uci add_list "network.$bridge.ports=$dev"
+	# A VLAN-filtering bridge drops ports outside every VLAN.
+	[ -n "$admin_vlan" ] && uci add_list "network.$admin_vlan.ports=$dev:u*"
+done
+
+uci commit network
+exit 0

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
     DdnsService, InterfaceProto, NetworkDevice, NetworkInterface, UciSystemDns,
 };
-use uciedit::{dump_all, parse_all, Arena, TypedSection};
+use uciedit::{dump_all, parse_all, read_all, Arena, TypedSection};
 
 use crate::dns::{self, DnsServer};
 use crate::invoke::Invoke;
@@ -1023,8 +1023,9 @@ pub async fn dns_set<C: CtrlContext>(
 
 #[instrument(skip_all)]
 pub async fn ddns_get<C: CtrlContext>(ctx: C) -> Result<WanDdnsResponse, Error> {
+    let bytes = read_all(ctx.uci_root(), &["ddns"]).await?;
     let arena = Arena::new();
-    let cfgs = parse_all(ctx.uci_root(), &arena, &["ddns"]).await?;
+    let cfgs = bytes.parse(&arena)?;
 
     for section in &cfgs["ddns"].sections {
         if section.name().as_deref() == Some(DDNS_SECTION) {

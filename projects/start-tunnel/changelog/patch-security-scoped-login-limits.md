@@ -1,2 +1,0 @@
-- Isolate login rate limits by server address and public or private access, and log the client IP and address on the first blocked attempt per throttle window.
-- Reject remote requests using unconfigured loopback signing addresses.

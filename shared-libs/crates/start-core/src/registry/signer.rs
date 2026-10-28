@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::prelude::*;
-use crate::sign::commitment::Digestable;
-use crate::sign::{AnySignature, AnyVerifyingKey, SignatureScheme};
+use crate::sign::commitment::SignedCommitment;
+use crate::sign::{AnySignature, AnyVerifyingKey};
 use crate::util::FromStrParser;
 
 #[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
@@ -25,8 +25,6 @@ rpc_toolkit::ts_export!(SignerInfo, namespaces = [""]);
 
 #[derive(Clone, Debug, Deserialize, Serialize, VisitVariants, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-
-// TODO: better types
 pub enum ContactInfo {
     Email(String),
     Matrix(String),
@@ -105,7 +103,7 @@ impl AcceptSigners {
     pub fn process_signature(
         &mut self,
         signer: &AnyVerifyingKey,
-        commitment: &impl Digestable,
+        commitment: &impl SignedCommitment,
         context: &str,
         signature: &AnySignature,
     ) -> Result<(), Error> {
@@ -114,9 +112,10 @@ impl AcceptSigners {
             Self::Accepted => Self::Accepted,
             Self::Signer(s) => {
                 if &s == signer {
-                    res = signer
-                        .scheme()
-                        .verify_commitment(signer, commitment, context, signature);
+                    res = crate::sign::compat::verify_commitment(
+                        signer, commitment, context, signature,
+                    )
+                    .map(|_| ());
                     Self::Accepted
                 } else {
                     Self::Signer(s)

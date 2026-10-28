@@ -83,13 +83,6 @@ export type ActionId = z.output<typeof schemas.ActionId>
 export type ActionIdInput = z.input<typeof schemas.ActionId>
 export type ActionResultV0 = z.output<typeof schemas.ActionResultV0>
 export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
-export type AddDnsRecordParamsInput = z.input<typeof schemas.AddDnsRecordParams>
-export type AddPinholeParamsInput = z.input<typeof schemas.AddPinholeParams>
-export type AddPortForwardParamsInput = z.input<
-  typeof schemas.AddPortForwardParams
->
-export type AddSubnetParamsInput = z.input<typeof schemas.AddSubnetParams>
-export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type AnySignature = z.output<typeof schemas.AnySignature>
 export type AnySignatureInput = z.input<typeof schemas.AnySignature>
 export type AnyVerifyingKey = z.output<typeof schemas.AnyVerifyingKey>
@@ -118,25 +111,6 @@ export type CountEntry = z.output<typeof schemas.CountEntry>
 export type DataUrl = z.output<typeof schemas.DataUrl>
 export type DataUrlInput = z.input<typeof schemas.DataUrl>
 export type DeviceFilter = z.output<typeof schemas.DeviceFilter>
-
-/**
- * Per-subnet DNS proxy configuration. WireGuard clients on a subnet are pointed
- * at the subnet's in-tunnel server address (`.1`) for DNS; the forward-only proxy
- * listening there resolves every query against the upstream(s) selected here.
- */
-export type DnsConfig = z.output<typeof schemas.DnsConfig>
-
-/**
- * Which upstream a subnet's DNS proxy forwards to. `Device`/`Custom` draw
- * their data from companion fields on [`SetSubnetDnsParams`].
- */
-export type DnsModeInput = z.input<typeof schemas.DnsMode>
-
-/**
- * A DNS record served by the tunnel (injected via RFC 2136 or added manually).
- * `value` is the rdata as text: an IP for A/AAAA, a name for CNAME, etc.
- */
-export type DnsRecordEntry = z.output<typeof schemas.DnsRecordEntry>
 export type DnsSource = z.output<typeof schemas.DnsSource>
 export type Dump = z.output<typeof schemas.Dump>
 export type DumpParamsInput = z.input<typeof schemas.DumpParams>
@@ -152,12 +126,12 @@ export type Epp = z.output<typeof schemas.Epp>
  * Selects how aggressively an EPP-capable CPU pursues performance.
  */
 export type EppInput = z.input<typeof schemas.Epp>
+export type FormatDiskParamsInput = z.input<typeof schemas.FormatDiskParams>
 export type ForwardTarget = z.output<typeof schemas.ForwardTarget>
 export type GatewayId = z.output<typeof schemas.GatewayId>
 export type GatewayIdInput = z.input<typeof schemas.GatewayId>
 export type GatewayType = z.output<typeof schemas.GatewayType>
 export type GatewayTypeInput = z.input<typeof schemas.GatewayType>
-export type GenerateCertParamsInput = z.input<typeof schemas.GenerateCertParams>
 export type GenerateCertificateParamsInput = z.input<
   typeof schemas.GenerateCertificateParams
 >
@@ -185,12 +159,9 @@ export type HasUnenrolledKeys = z.output<typeof schemas.HasUnenrolledKeys>
 export type HealthCheckId = z.output<typeof schemas.HealthCheckId>
 export type HostId = z.output<typeof schemas.HostId>
 export type HostIdInput = z.input<typeof schemas.HostId>
-export type HttpRedirectStatus = z.output<typeof schemas.HttpRedirectStatus>
 export type ImageIdInput = z.input<typeof schemas.ImageId>
 export type IoFormatInput = z.input<typeof schemas.IoFormat>
 export type KeyboardOptionsInput = z.input<typeof schemas.KeyboardOptions>
-export type KillParamsInput = z.input<typeof schemas.KillParams>
-export type ListDevicesParamsInput = z.input<typeof schemas.ListDevicesParams>
 export type ListNotificationParamsInput = z.input<
   typeof schemas.ListNotificationParams
 >
@@ -259,19 +230,9 @@ export type RemoveAssetParamsInput = z.input<typeof schemas.RemoveAssetParams>
 export type RemoveCategoryParamsInput = z.input<
   typeof schemas.RemoveCategoryParams
 >
-export type RemoveDeviceParamsInput = z.input<typeof schemas.RemoveDeviceParams>
-export type RemoveDnsRecordParamsInput = z.input<
-  typeof schemas.RemoveDnsRecordParams
->
 export type RemoveDomainParamsInput = z.input<typeof schemas.RemoveDomainParams>
 export type RemovePassthroughParamsInput = z.input<
   typeof schemas.RemovePassthroughParams
->
-export type RemovePinholeParamsInput = z.input<
-  typeof schemas.RemovePinholeParams
->
-export type RemovePortForwardParamsInput = z.input<
-  typeof schemas.RemovePortForwardParams
 >
 export type RemoveVersionParamsInput = z.input<
   typeof schemas.RemoveVersionParams
@@ -283,41 +244,18 @@ export type ServerHostname = z.output<typeof schemas.ServerHostname>
 export type ServiceInterfaceId = z.output<typeof schemas.ServiceInterfaceId>
 export type ServiceInterfaceType = z.output<typeof schemas.ServiceInterfaceType>
 export type Session = z.output<typeof schemas.Session>
-export type SetAutoPortForwardParamsInput = z.input<
-  typeof schemas.SetAutoPortForwardParams
->
 export type SetCountryParamsInput = z.input<typeof schemas.SetCountryParams>
-export type SetDeviceWanParamsInput = z.input<typeof schemas.SetDeviceWanParams>
-export type SetDnsInjectionParamsInput = z.input<
-  typeof schemas.SetDnsInjectionParams
->
 export type SetEchoipUrlsParamsInput = z.input<
   typeof schemas.SetEchoipUrlsParams
 >
-export type SetHttpRedirectEnabledParamsInput = z.input<
-  typeof schemas.SetHttpRedirectEnabledParams
->
 export type SetLanguageParamsInput = z.input<typeof schemas.SetLanguageParams>
-export type SetListenParamsInput = z.input<typeof schemas.SetListenParams>
 export type SetNameParamsInput = z.input<typeof schemas.SetNameParams>
-export type SetPasswordParamsInput = z.input<typeof schemas.SetPasswordParams>
-export type SetPinholeEnabledParamsInput = z.input<
-  typeof schemas.SetPinholeEnabledParams
->
-export type SetPortForwardEnabledParamsInput = z.input<
-  typeof schemas.SetPortForwardEnabledParams
->
 export type SetServerHostnameParamsInput = z.input<
   typeof schemas.SetServerHostnameParams
 >
-export type SetSubnetIpv6ParamsInput = z.input<
-  typeof schemas.SetSubnetIpv6Params
->
-export type SetSubnetWanParamsInput = z.input<typeof schemas.SetSubnetWanParams>
 export type SetWifiEnabledParamsInput = z.input<
   typeof schemas.SetWifiEnabledParams
 >
-export type ShowConfigParamsInput = z.input<typeof schemas.ShowConfigParams>
 export type ShutdownParamsInput = z.input<typeof schemas.ShutdownParams>
 export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 
@@ -334,23 +272,15 @@ export type SshPubKeyInput = z.input<typeof schemas.SshPubKey>
  * Ssid are the names of the wifis, usually human readable.
  */
 export type Ssid = z.output<typeof schemas.Ssid>
-export type SubnetParamsInput = z.input<typeof schemas.SubnetParams>
 export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type TermSizeInput = z.input<typeof schemas.TermSize>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TrustCaParamsInput = z.input<typeof schemas.TrustCaParams>
 export type TrustedCa = z.output<typeof schemas.TrustedCa>
-export type TunnelCertDataInput = z.input<typeof schemas.TunnelCertData>
-export type TunnelUpdateResult = z.output<typeof schemas.TunnelUpdateResult>
-export type TunnelUrlParamsInput = z.input<typeof schemas.TunnelUrlParams>
+export type TrustedOsUpdateSigner = z.output<
+  typeof schemas.TrustedOsUpdateSigner
+>
 export type UiParamsInput = z.input<typeof schemas.UiParams>
-export type UpdatePinholeLabelParamsInput = z.input<
-  typeof schemas.UpdatePinholeLabelParams
->
-export type UpdatePortForwardLabelParamsInput = z.input<
-  typeof schemas.UpdatePortForwardLabelParams
->
-export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 
 /**
  * How the OS reverse proxy validates the container's TLS certificate when it
@@ -364,33 +294,16 @@ export type UpstreamCertValidation = z.output<
 export type UsersResponse = z.output<typeof schemas.UsersResponse>
 export type Version = z.output<typeof schemas.Version>
 export type VersionInput = z.input<typeof schemas.Version>
-
-/**
- * A WireGuard client's role. A `Server` is a StartOS box that may configure the
- * gateway (DNS injection / auto port-forward); a `Client` is a plain peer with
- * no autoconfig. Stored and sticky — toggling the capability flags never changes
- * it; the migration backfills it from those flags.
- */
-export type WgClientKind = z.output<typeof schemas.WgClientKind>
-
-/**
- * A WireGuard client's role. A `Server` is a StartOS box that may configure the
- * gateway (DNS injection / auto port-forward); a `Client` is a plain peer with
- * no autoconfig. Stored and sticky — toggling the capability flags never changes
- * it; the migration backfills it from those flags.
- */
-export type WgClientKindInput = z.input<typeof schemas.WgClientKind>
 export type WifiAddParamsInput = z.input<typeof schemas.WifiAddParams>
 export type WifiSsidParamsInput = z.input<typeof schemas.WifiSsidParams>
 export type ZramParamsInput = z.input<typeof schemas.ZramParams>
+export type AcceptSignersInput = z.input<typeof schemas.AcceptSigners>
 export type ActionInput = z.output<typeof schemas.ActionInput>
 export type ActionResultMember = z.output<typeof schemas.ActionResultMember>
 export type ActionResultV1 = z.output<typeof schemas.ActionResultV1>
 export type AddAdminParamsInput = z.input<typeof schemas.AddAdminParams>
 export type AddAssetParamsInput = z.input<typeof schemas.AddAssetParams>
 export type AddCategoryParamsInput = z.input<typeof schemas.AddCategoryParams>
-export type AddDeviceParamsInput = z.input<typeof schemas.AddDeviceParams>
-export type AddKeyParamsInput = z.input<typeof schemas.AddKeyParams>
 export type AddMirrorParamsInput = z.input<typeof schemas.AddMirrorParams>
 export type AddPackageParamsInput = z.input<typeof schemas.AddPackageParams>
 export type AddPackageSignerParamsInput = z.input<
@@ -409,6 +322,7 @@ export type AddPublicDomainParamsInput = z.input<
   typeof schemas.AddPublicDomainParams
 >
 export type AddTunnelParamsInput = z.input<typeof schemas.AddTunnelParams>
+export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type AddressInfo = z.output<typeof schemas.AddressInfo>
 
 /**
@@ -421,9 +335,7 @@ export type ApplyWithPathParamsInput = z.input<
 export type AttachParamsInput = z.input<typeof schemas.AttachParams>
 
 /**
- * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
- * key is a sign-in: it carries the same metadata a session used to (when it
- * was created, when it was last used, and the user agent that enrolled it).
+ * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
 export type CancelInstallParamsInput = z.input<
@@ -494,6 +406,7 @@ export type InstalledVersionParamsInput = z.input<
   typeof schemas.InstalledVersionParams
 >
 export type IpInfo = z.output<typeof schemas.IpInfo>
+export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LegacyAlpnInfo = z.output<typeof schemas.LegacyAlpnInfo>
 export type ListPackageSignersParamsInput = z.input<
   typeof schemas.ListPackageSignersParams
@@ -510,8 +423,16 @@ export type MetricsSummary = z.output<typeof schemas.MetricsSummary>
 export type MountParamsInput = z.input<typeof schemas.MountParams>
 export type Notification = z.output<typeof schemas.Notification>
 export type OsInfo = z.output<typeof schemas.OsInfo>
+export type OsUpdateSignerKeyParamsInput = z.input<
+  typeof schemas.OsUpdateSignerKeyParams
+>
 export type OsVersionInfo = z.output<typeof schemas.OsVersionInfo>
 export type PackageBackupInfo = z.output<typeof schemas.PackageBackupInfo>
+
+/**
+ * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
+ */
+export type PackageIcon = z.output<typeof schemas.PackageIcon>
 export type PackageIdParamsInput = z.input<typeof schemas.PackageIdParams>
 export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
@@ -537,7 +458,6 @@ export type PublicDomainConfig = z.output<typeof schemas.PublicDomainConfig>
 export type RebuildParamsInput = z.input<typeof schemas.RebuildParams>
 export type RemoveAcmeParamsInput = z.input<typeof schemas.RemoveAcmeParams>
 export type RemoveAdminParamsInput = z.input<typeof schemas.RemoveAdminParams>
-export type RemoveKeyParamsInput = z.input<typeof schemas.RemoveKeyParams>
 export type RemoveMirrorParamsInput = z.input<typeof schemas.RemoveMirrorParams>
 export type RemovePackageFromCategoryParamsInput = z.input<
   typeof schemas.RemovePackageFromCategoryParams
@@ -566,18 +486,17 @@ export type SetDefaultOutboundParamsInput = z.input<
 export type SetDescriptionParamsInput = z.input<
   typeof schemas.SetDescriptionParams
 >
-export type SetDeviceKindParamsInput = z.input<
-  typeof schemas.SetDeviceKindParams
->
 export type SetGatewaySecureParamsInput = z.input<
   typeof schemas.SetGatewaySecureParams
 >
 export type SetIconParamsInput = z.input<typeof schemas.SetIconParams>
+export type SetOsUpdateSignerParamsInput = z.input<
+  typeof schemas.SetOsUpdateSignerParams
+>
 export type SetOutboundGatewayParamsInput = z.input<
   typeof schemas.SetOutboundGatewayParams
 >
 export type SetStaticDnsParamsInput = z.input<typeof schemas.SetStaticDnsParams>
-export type SetSubnetDnsParamsInput = z.input<typeof schemas.SetSubnetDnsParams>
 export type SideloadResponse = z.output<typeof schemas.SideloadResponse>
 export type SignAssetParamsInput = z.input<typeof schemas.SignAssetParams>
 export type SignerInfo = z.output<typeof schemas.SignerInfo>
@@ -602,7 +521,6 @@ export type UpdateTunnelParamsInput = z.input<typeof schemas.UpdateTunnelParams>
 export type VersionSignerParamsInput = z.input<
   typeof schemas.VersionSignerParams
 >
-export type WgConfig = z.output<typeof schemas.WgConfig>
 export type WifiListOut = z.output<typeof schemas.WifiListOut>
 export type ActionResult = z.output<typeof schemas.ActionResult>
 export type AddPublicDomainRes = z.output<typeof schemas.AddPublicDomainRes>
@@ -627,7 +545,7 @@ export type ResetPasswordParamsInput = z.input<
 >
 export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
 export type SessionList = z.output<typeof schemas.SessionList>
-export type WgSubnetClients = z.output<typeof schemas.WgSubnetClients>
+export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type WifiListInfo = z.output<typeof schemas.WifiListInfo>
 export type AddSslOptions = z.output<typeof schemas.AddSslOptions>
 export type BackupTarget = z.output<typeof schemas.BackupTarget>
@@ -646,7 +564,6 @@ export type MetricsFollowResponse = z.output<
 export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 export type OsIndex = z.output<typeof schemas.OsIndex>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
-export type WgSubnetConfig = z.output<typeof schemas.WgSubnetConfig>
 export type BindOptions = z.output<typeof schemas.BindOptions>
 
 /**

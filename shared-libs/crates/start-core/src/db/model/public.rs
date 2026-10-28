@@ -26,6 +26,7 @@ use crate::net::vhost::{AlpnInfo, PassthroughInfo};
 use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::system::{KeyboardOptions, SmtpValue};
+use crate::update::signers::{TrustedOsUpdateSigners, initial_signers};
 use crate::util::cpupower::{Epp, Governor};
 use crate::util::lshw::LshwDevice;
 use crate::util::serde::MaybeUtf8String;
@@ -131,6 +132,7 @@ impl Public {
                     restarting: false,
                     restart: None,
                 },
+                trusted_os_update_signers: initial_signers(),
                 unread_notification_count: 0,
                 pubkey: ssh_key::PublicKey::from(&account.ssh_key)
                     .to_openssh()
@@ -179,6 +181,8 @@ pub struct ServerInfo {
     #[serde(default)]
     pub status_info: ServerStatus,
     pub unread_notification_count: u64,
+    #[serde(default)]
+    pub trusted_os_update_signers: TrustedOsUpdateSigners,
     pub pubkey: String,
     pub ca_fingerprint: String,
     #[serde(default)]

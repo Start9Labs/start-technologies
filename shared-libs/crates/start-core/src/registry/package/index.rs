@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 use std::u32;
 
 use chrono::Utc;
@@ -14,6 +15,7 @@ use crate::prelude::*;
 use crate::registry::asset::RegistryAsset;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfo;
+use crate::registry::package::icon::{PackageIcon, store_icon_async};
 use crate::rpc_continuations::Guid;
 use crate::s9pk::S9pk;
 use crate::s9pk::git_hash::GitHash;
@@ -22,7 +24,7 @@ use crate::s9pk::merkle_archive::source::FileSource;
 use crate::service::effects::plugin::PluginId;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::sign::{AnySignature, AnyVerifyingKey};
-use crate::util::{DataUrl, VersionString};
+use crate::util::VersionString;
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -63,7 +65,7 @@ rpc_toolkit::ts_export!(Category, namespaces = [""]);
 pub struct DependencyMetadata {
     pub title: Option<LocaleString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub icon: Option<DataUrl<'static>>,
+    pub icon: Option<PackageIcon>,
     pub description: Option<LocaleString>,
     pub optional: bool,
     #[serde(default)]
@@ -149,9 +151,8 @@ rpc_toolkit::reflect_ts!(PackageMetadata);
 pub struct PackageVersionInfo {
     #[serde(flatten)]
     pub metadata: PackageMetadata,
-    /// Absent for clients that load icons from the registry's `/icons/` route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub icon: Option<DataUrl<'static>>,
+    pub icon: Option<PackageIcon>,
     pub dependency_metadata: BTreeMap<PackageId, DependencyMetadata>,
     pub source_version: Option<VersionRange>,
     pub s9pks: Vec<(HardwareRequirements, RegistryAsset<MerkleArchiveCommitment>)>,
@@ -163,9 +164,10 @@ impl PackageVersionInfo {
     pub async fn from_s9pk<S: FileSource + Clone>(
         s9pk: &S9pk<S>,
         urls: Vec<Url>,
+        icons: &Path,
     ) -> Result<Self, Error> {
         let manifest = s9pk.as_manifest();
-        let icon = Some(s9pk.icon_data_url().await?);
+        let icon = Some(store_icon_async(icons, s9pk.icon_data_url().await?).await?);
         let mut dependency_metadata = BTreeMap::new();
         for (id, info) in &manifest.dependencies.0 {
             let dep_meta = s9pk.dependency_metadata(id).await?;
@@ -173,7 +175,10 @@ impl PackageVersionInfo {
                 id.clone(),
                 DependencyMetadata {
                     title: dep_meta.map(|m| m.title),
-                    icon: s9pk.dependency_icon_data_url(id).await?,
+                    icon: match s9pk.dependency_icon_data_url(id).await? {
+                        Some(icon) => Some(store_icon_async(icons, icon).await?),
+                        None => None,
+                    },
                     description: info.description.clone(),
                     optional: info.optional,
                     version_range: info.version_range.clone(),
@@ -194,7 +199,7 @@ impl PackageVersionInfo {
                     commitment: s9pk.as_archive().commitment().await?,
                     signatures: [(
                         AnyVerifyingKey::Ed25519(s9pk.as_archive().signer()),
-                        AnySignature::Ed25519(s9pk.as_archive().signature().await?),
+                        AnySignature::Ed25519ph(s9pk.as_archive().signature().await?),
                     )]
                     .into_iter()
                     .collect(),

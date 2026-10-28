@@ -1,0 +1,1 @@
+- Las copias de seguridad y la recuperación mediante carpetas de red aceptan nombres de host DNS con puntos. Los nombres de equipo sin dominio siguen usando exclusivamente NetBIOS, y los errores de resolución indican el resolvedor utilizado.

@@ -26,6 +26,7 @@ import {
   TuiChevron,
   TuiFade,
   TuiProgressCircle,
+  TuiSkeleton,
 } from '@taiga-ui/kit'
 import { filter } from 'rxjs'
 import { InstallingProgressPipe } from 'src/app/routes/portal/routes/services/pipes/install-progress.pipe'
@@ -50,8 +51,10 @@ import UpdatesComponent from './updates.component'
             appearance="action-grayscale"
             size="s"
             [round]="false"
+            [tuiSkeleton]="icon.loading()"
           >
             <img
+              #icon="marketplaceIcon"
               [marketplaceIcon]="item()"
               [registry]="parent.current()?.url"
             />
@@ -271,6 +274,7 @@ import UpdatesComponent from './updates.component'
     TuiLink,
     TuiIcon,
     TuiProgressCircle,
+    TuiSkeleton,
     TuiTitle,
     TuiFade,
     LocalizePipe,

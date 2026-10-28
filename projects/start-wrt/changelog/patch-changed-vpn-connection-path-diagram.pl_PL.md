@@ -1,0 +1,1 @@
+- **Trasy wychodzących połączeń VPN są rysowane jako zagnieżdżone tunele.** Strona VPN pokazuje początek i koniec każdego tunelu w łańcuchu, które tunele biegną wewnątrz innych oraz serwer, przez który ruch opuszcza łańcuch.

@@ -16,7 +16,7 @@ use crate::s9pk::S9pk;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::merkle_archive::source::{ArchiveSource, Section};
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
-use crate::sign::commitment::{Commitment, Digestable};
+use crate::sign::commitment::{Commitment, SignedCommitment};
 use crate::sign::{AnySignature, AnyVerifyingKey};
 use crate::upload::{DownloadAttemptContext, DownloadHandle, UploadingFile};
 use crate::util::future::NonDetachingJoinHandle;
@@ -72,7 +72,7 @@ impl<Commitment> RegistryAsset<Commitment> {
         BufferedHttpSource::from_urls_with_path(path, &self.urls, client, progress).await
     }
 }
-impl<Commitment: Digestable> RegistryAsset<Commitment> {
+impl<Commitment: SignedCommitment> RegistryAsset<Commitment> {
     pub fn validate(&self, context: &str, mut accept: AcceptSigners) -> Result<&Commitment, Error> {
         for (signer, signature) in &self.signatures {
             accept.process_signature(signer, &self.commitment, context, signature)?;

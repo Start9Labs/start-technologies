@@ -17,7 +17,7 @@ export function outboundSettingsSpec(
 ) {
   return ISB.InputSpec.of({
     gateway: ISB.Value.select<Record<string, string>>({
-      name: i18n.transform('Outbound Gateway'),
+      name: i18n.transform('Gateway'),
       default: DEFAULT_GATEWAY,
       values: { [DEFAULT_GATEWAY]: i18n.transform(defaultName), ...gateways },
     }),

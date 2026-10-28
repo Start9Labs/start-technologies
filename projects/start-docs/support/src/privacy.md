@@ -1,6 +1,6 @@
 # Privacy
 
-Everything you write in a chat is seen by Start9's staff and by Dux, whose AI providers process it. This page covers what is masked before Dux sees it, and how to share something only Start9's staff can see.
+Everything you write in a chat is seen by Start9's staff, by other customers, and by Dux, whose AI providers process it. This page covers what is masked before Dux sees it, and how to share something only Start9's staff can see.
 
 ## Write as in a Public Group Chat
 
@@ -10,11 +10,11 @@ Before text reaches Dux, Start9 masks what it recognizes: seed phrases, private 
 
 ## Sharing Privately
 
-For something only Start9's staff should see — an email address, a shipping address, an order number, a receipt, payment details — use the lock in the message field. It adds a private note or a private attachment to your message. Dux sees only that one is there, never what it holds, and a person from Start9 picks it up. You can add one to the first message of a new chat too.
+Every Start9 Support customer can read your chats. For something only Start9's staff should see — an email address, a shipping address, an order number, a receipt, payment details — choose **Request a human** and say you have something private to share. The person opens the chat's private thread, the lock in its header, where you can write and attach files. Only you and Start9's staff read it; Dux and other customers never do.
 
-If a message you are about to send looks like it contains an email address, a card number, a phone number or a street address, the message field offers to **Move to a private note**; **Send anyway** sends it as written.
+If a message you are about to send looks like it contains an email address, a card number, a phone number or a street address, the message field holds it and warns you: **Edit message** to change it, or **Send anyway** to send it as written.
 
-To delete a private note or attachment, choose **Remove** on it. Its contents are removed from the chat for you and for Start9, and the message shows that it was there. A copy can remain in backups until they expire.
+To delete something from the private thread, choose **Remove for good** on it. It is removed for you and for Start9, and the thread shows that it was there. A copy can remain in backups until they expire.
 
 ## If You Shared a Secret
 

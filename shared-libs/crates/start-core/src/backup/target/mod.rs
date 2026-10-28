@@ -280,7 +280,7 @@ fn display_backup_info(params: WithIoFormat<InfoParams>, info: BackupInfo) -> Re
         ];
         table.add_row(row);
     }
-    table.print_tty(false)?;
+    print_table(&table)?;
     Ok(())
 }
 

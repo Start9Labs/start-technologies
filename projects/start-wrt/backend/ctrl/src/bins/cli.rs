@@ -56,6 +56,7 @@ pub fn main(args: VecDeque<OsString>) {
         |args: CliArgs| CliContext::init(args).map_err(|e| e.into()),
         main_api(),
     )
+    .mutate_command(startos::bins::translate_cli)
     .run(full_args)
     {
         match e.data {

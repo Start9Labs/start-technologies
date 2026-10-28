@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate rpc_toolkit;
+
 use const_format::formatcp;
 
 rust_i18n::i18n!("locales", fallback = ["en_US"]);
@@ -96,7 +99,7 @@ use imbl_value::Value;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{
     CallRemoteHandler, Context, Empty, HandlerExt, ParentHandler, from_fn, from_fn_async,
-    from_fn_async_local, from_fn_blocking,
+    from_fn_async_local,
 };
 use serde::{Deserialize, Serialize};
 
@@ -104,7 +107,7 @@ use crate::context::{CliContext, DiagnosticContext, InitContext, RpcContext};
 use crate::disk::fsck::RequiresReboot;
 use crate::registry::context::{RegistryContext, RegistryUrlParams};
 use crate::system::kiosk;
-use crate::tunnel::context::TunnelUrlParams;
+use crate::util::output::print_table;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 
 #[derive(Deserialize, Serialize, Parser, visit_rs::VisitFields)]
@@ -184,7 +187,26 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "auth",
-            auth::auth::<C, RpcContext>().with_about("about.commands-authentication"),
+            auth::auth::<C, RpcContext, CliContext>()
+                .subcommand(
+                    "reset-password",
+                    from_fn_async(auth::reset_password_impl).no_cli(),
+                )
+                .subcommand(
+                    "reset-password",
+                    from_fn_async(auth::cli_reset_password)
+                        .no_display()
+                        .with_about("about.reset-password"),
+                )
+                .subcommand(
+                    "get-pubkey",
+                    from_fn_async(auth::get_pubkey)
+                        .with_metadata("authenticated", Value::Bool(false))
+                        .no_display()
+                        .with_about("about.get-pubkey-from-server")
+                        .with_call_remote::<CliContext>(),
+                )
+                .with_about("about.commands-authentication"),
         )
         .subcommand("db", db::db::<C>().with_about("about.commands-db"))
         .subcommand("ssh", ssh::ssh::<C>().with_about("about.commands-ssh-keys"))
@@ -214,11 +236,6 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "tunnel",
-            CallRemoteHandler::<RpcContext, _, _, TunnelUrlParams>::new(tunnel::api::tunnel_api())
-                .no_cli(),
-        )
-        .subcommand(
-            "tunnel",
             tunnel::api::tunnel_api::<CliContext>().with_about("about.commands-tunnel"),
         )
         .subcommand("s9pk", s9pk::rpc::s9pk().with_about("about.commands-s9pk"))
@@ -234,7 +251,7 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "pubkey",
-            from_fn_blocking(developer::pubkey).with_about("about.get-id-pubkey"),
+            from_fn_async(developer::pubkey).with_about("about.get-id-pubkey"),
         )
         .subcommand(
             "completions",
@@ -389,6 +406,10 @@ pub fn server<C: Context>() -> ParentHandler<C> {
             from_fn_async(update::cli_update_system)
                 .no_display()
                 .with_about("about.check-update-startos"),
+        )
+        .subcommand(
+            "update-signers",
+            update::signers::api::<C>().with_about("about.commands-os-update-signers"),
         )
         .subcommand(
             "update-firmware",
@@ -595,7 +616,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
                             table.add_row(row![&*id, "N/A", "0 MiB", "0 MiB", "0"]);
                         }
                     }
-                    table.print_tty(false)?;
+                    print_table(&table)?;
                     Ok(())
                 })
                 .with_about("about.list-lxc-container-info")

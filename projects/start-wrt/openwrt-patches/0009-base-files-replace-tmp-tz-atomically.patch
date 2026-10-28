@@ -1,0 +1,23 @@
+Subject: base-files: replace /tmp/TZ atomically
+
+OpenWrt's musl maps /etc/TZ, a link to /tmp/TZ, afresh on every
+localtime call. The system service rewrites the file in place, so a
+reload truncates it under any process converting a time at that moment,
+and that process reads the emptied mapping and dies with SIGBUS. Write
+the new zone to a temporary file and rename it over /tmp/TZ.
+
+Start9 downstream patch (start-technologies projects/start-wrt).
+Applies to: openwrt v25.12.6
+
+--- a/package/base-files/files/etc/init.d/system
++++ b/package/base-files/files/etc/init.d/system
+@@ -21,7 +21,8 @@
+ 
+ 	echo "$hostname" > /proc/sys/kernel/hostname
+ 	[ -z "$conloglevel" -a -z "$buffersize" ] || dmesg ${conloglevel:+-n $conloglevel} ${buffersize:+-s $buffersize}
+-	echo "$timezone" > /tmp/TZ
++	echo "$timezone" > /tmp/TZ.$$
++	mv -f /tmp/TZ.$$ /tmp/TZ
+ 	[ -n "$zonename" ] && [ -f "/usr/share/zoneinfo/${zonename// /_}" ] \
+ 		&& ln -sf "/usr/share/zoneinfo/${zonename// /_}" /tmp/localtime \
+ 		&& rm -f /tmp/TZ

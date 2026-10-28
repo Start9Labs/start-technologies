@@ -1,1 +1,0 @@
-- **DNS servers for outbound VPNs.** Adding an outbound VPN or editing one now takes DNS servers, which replace the config file's `DNS =` line, and the page warns when a VPN has none.

@@ -164,9 +164,9 @@ IPv6 permet à vos appareils d’être directement joignables depuis Internet sa
 
 ### Longueur du préfixe
 
-La longueur du préfixe détermine la taille de l’espace d’adressage IPv6 de votre LAN. Elle doit être **plus grande** (un nombre plus élevé) que votre préfixe WAN pour créer un sous-réseau valide.
+La longueur du préfixe détermine la taille de l’espace d’adressage IPv6 de votre LAN. Choisissez une valeur de /48 à /64, sans préfixe plus court que celui délégué par votre FAI. Le résumé indique cette taille sous **Préfixe délégué** (**Aucun** en l’absence de délégation).
 
-Par exemple, si votre ISP vous attribue un préfixe /48, vous pouvez utiliser /56, /60 ou /64 pour votre LAN. Un préfixe /64 est recommandé pour la plupart des réseaux domestiques.`,
+Par exemple, avec une délégation /56, vous pouvez utiliser /56, /60 ou /64 pour votre LAN ; avec une délégation /64, utilisez /64. Un préfixe /64 est recommandé pour la plupart des réseaux domestiques.`,
   '/outbound': `## VPN sortants
 
 Les VPN sortants acheminent votre trafic Internet par des tunnels chiffrés vers des serveurs distants, renforçant la confidentialité et la sécurité.

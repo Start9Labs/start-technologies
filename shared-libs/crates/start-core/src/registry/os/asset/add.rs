@@ -23,8 +23,7 @@ use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::sign::commitment::blake3::Blake3Commitment;
-use crate::sign::ed25519::Ed25519;
-use crate::sign::{AnySignature, AnyVerifyingKey, SignatureScheme};
+use crate::sign::{AnySignature, AnyVerifyingKey};
 use crate::util::io::open_file;
 use crate::util::serde::Base64;
 
@@ -110,9 +109,8 @@ async fn add_asset(
     + UnwindSafe
     + Send,
 ) -> Result<(), Error> {
-    signer
-        .scheme()
-        .verify_commitment(&signer, &commitment, SIG_CONTEXT, &signature)?;
+    let signature =
+        crate::sign::compat::verify_commitment(&signer, &commitment, SIG_CONTEXT, &signature)?;
     ctx.db
         .mutate(|db| {
             let signer_guid = db.as_index().as_signers().get_signer(&signer)?;
@@ -249,8 +247,10 @@ pub async fn cli_add_asset(
         hash: Base64(*blake3.as_bytes()),
         size,
     };
-    let signature =
-        AnySignature::Ed25519(Ed25519.sign_commitment(ctx.id_key()?, &commitment, SIG_CONTEXT)?);
+    let signature = ctx
+        .id_key()?
+        .sign_commitment(&commitment, SIG_CONTEXT)
+        .await?;
     sign_phase.complete();
 
     verify_phase.start();

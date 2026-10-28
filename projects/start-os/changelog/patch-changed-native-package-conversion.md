@@ -1,1 +1,0 @@
-- **Legacy v1 package conversion creates SquashFS images natively**, preserving container filesystem ownership and permissions.

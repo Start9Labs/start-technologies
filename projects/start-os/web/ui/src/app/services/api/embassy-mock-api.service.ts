@@ -273,6 +273,15 @@ export class MockApiService extends ApiService {
         metrics: Mock.getMetrics(),
       }
     },
+    'server.device-info': async () => ({
+      os: {
+        version: mockPatchData.serverInfo.version,
+        compat: mockPatchData.serverInfo.packageVersionCompat,
+        platform: 'x86_64',
+        language: mockPatchData.serverInfo.language,
+      },
+      hardware: null,
+    }),
     'server.update': async params => {
       await pauseFor(2000)
       const initialProgress = {
@@ -351,6 +360,14 @@ export class MockApiService extends ApiService {
     'disk.repair': async params => {
       await pauseFor(2000)
       return null
+    },
+    'disk.list': async () => {
+      await pauseFor(1000)
+      return Mock.Disks
+    },
+    'disk.format': async ({ disk }) => {
+      await pauseFor(3000)
+      return `${disk}1`
     },
     'server.set-hostname': async params => {
       await pauseFor(1000)
@@ -1548,7 +1565,7 @@ export class MockApiService extends ApiService {
 
   async getStaticObjectUrl(url: string): Promise<string> {
     await pauseFor(500)
-    const id = url.match(/([^/]+?)(\.s9pk)?\/icon$/)?.[1] || ''
+    const id = url.match(/([^/]+?)(\.s9pk)?\/icon(\?|$)/)?.[1] || ''
     const icons: Record<string, string> = {
       bitcoind: BTC_ICON,
       lnd: LND_ICON,

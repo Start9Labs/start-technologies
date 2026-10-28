@@ -57,6 +57,15 @@ pub async fn restore_packages_rpc(
     }: RestorePackageParams,
 ) -> Result<(), Error> {
     let peek = ctx.db.peek().await;
+    if let Some(id) = ids
+        .iter()
+        .find(|id| peek.as_public().as_package_data().as_idx(*id).is_some())
+    {
+        return Err(Error::new(
+            eyre!("{}", t!("backup.restore.package-installed", id = id)),
+            ErrorKind::InvalidRequest,
+        ));
+    }
     let fs = target_id.load(&peek)?;
     let server_id = match server_id {
         Some(id) => id,

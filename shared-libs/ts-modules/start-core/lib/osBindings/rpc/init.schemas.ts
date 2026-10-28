@@ -754,6 +754,7 @@ export const Api = {
           ),
           _CHILDREN: {},
         },
+        'update-signers': { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
       },
     },
     setup: {

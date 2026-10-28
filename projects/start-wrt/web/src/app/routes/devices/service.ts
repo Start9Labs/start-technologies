@@ -5,6 +5,7 @@ import {
   DataUsagePeriod,
   DataUsagePoint,
   Device,
+  DevicePermissionChanges,
   DeviceUpdateData,
 } from './utils'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
@@ -42,6 +43,10 @@ export class DevicesApiService {
     await this.api.devicesSetDnsInjection({ mac, allow })
   }
 
+  async setRouterAdvertisements(mac: string, allow: boolean): Promise<void> {
+    await this.api.devicesSetRouterAdvertisements({ mac, allow })
+  }
+
   async forget(mac: string): Promise<void> {
     await this.api.devicesForget({ mac })
   }
@@ -66,6 +71,7 @@ export class DevicesApiService {
       ipv4Static: d.ipv4_static,
       allowAutoPortForward: d.allow_auto_port_forward,
       allowDnsInjection: d.allow_dns_injection,
+      allowRouterAdvertisements: d.allow_router_advertisements,
       securityProfile: d.security_profile || undefined,
       speed: d.speed || undefined,
       dataUsage: d.data_usage ?? undefined,
@@ -86,22 +92,31 @@ export class DevicesService extends FormService<Device[]> {
     // List doesn't have a single store operation
   }
 
-  // One action for the whole Save: one loader, one toast. A permission
-  // argument is undefined when it didn't change.
+  // One action for the whole Save: one loader, one toast.
   update(
     mac: string,
     data: DeviceUpdateData,
-    allowAutoForward?: boolean,
-    allowDnsInjection?: boolean,
+    permissions: DevicePermissionChanges,
   ) {
+    const {
+      allowAutoPortForward,
+      allowDnsInjection,
+      allowRouterAdvertisements,
+    } = permissions
     return this.actions.run(
       async () => {
         await this.devicesApi.update(mac, data)
-        if (allowAutoForward !== undefined) {
-          await this.devicesApi.setAutoForward(mac, allowAutoForward)
+        if (allowAutoPortForward !== undefined) {
+          await this.devicesApi.setAutoForward(mac, allowAutoPortForward)
         }
         if (allowDnsInjection !== undefined) {
           await this.devicesApi.setDnsInjection(mac, allowDnsInjection)
+        }
+        if (allowRouterAdvertisements !== undefined) {
+          await this.devicesApi.setRouterAdvertisements(
+            mac,
+            allowRouterAdvertisements,
+          )
         }
         await this.refreshAndWait()
       },

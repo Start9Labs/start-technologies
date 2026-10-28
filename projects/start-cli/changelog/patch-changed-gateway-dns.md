@@ -1,1 +1,0 @@
-- Set DNS overrides per gateway with `net dns set-static <GATEWAY> [SERVERS]...`; omit servers to restore automatic gateway DNS.

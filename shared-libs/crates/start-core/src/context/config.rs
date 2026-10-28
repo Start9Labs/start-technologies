@@ -186,6 +186,8 @@ pub struct ClientConfig {
     #[serde(alias = "developer-key-path")]
     #[arg(long, alias = "developer-key-path", help = "help.arg.id-key-path")]
     pub id_key_path: Option<PathBuf>,
+    #[arg(long, value_name = "KEY", help = "help.arg.id-key-gpg")]
+    pub id_key_gpg: Option<String>,
     /// PEM-encoded root CA certificate(s) to trust when talking to a
     /// StartOS server with a self-signed cert (e.g. immediately after
     /// `setup complete`, before the device's CA has been imported into
@@ -219,6 +221,7 @@ impl ContextConfig for ClientConfig {
         self.proxy = self.proxy.take().or(other.proxy);
         self.socks_listen = self.socks_listen.take().or(other.socks_listen);
         self.id_key_path = self.id_key_path.take().or(other.id_key_path);
+        self.id_key_gpg = self.id_key_gpg.take().or(other.id_key_gpg);
         self.root_ca = self.root_ca.take().or(other.root_ca);
         self.insecure = self.insecure || other.insecure;
     }

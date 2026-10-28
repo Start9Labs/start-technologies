@@ -1,2 +1,0 @@
-- Fix server selection for manual AAAA DNS records to use the server's IPv6 address and list servers with IPv6 configured.
-- Show server names alongside IPv6 addresses in DNS records.

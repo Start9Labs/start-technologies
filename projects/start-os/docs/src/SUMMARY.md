@@ -52,6 +52,7 @@
 - [Clearnet](clearnet.md)
 - [Public IP](public-ip.md)
 - [Gateways](gateways.md)
+- [Outbound Traffic](outbound-traffic.md)
 - [Private Domains](private-domains.md)
 - [DNS](dns.md)
 - [CGNAT](cgnat.md)

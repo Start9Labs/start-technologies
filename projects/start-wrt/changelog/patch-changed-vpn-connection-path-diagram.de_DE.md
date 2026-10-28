@@ -1,0 +1,1 @@
+- **Verbindungswege ausgehender VPNs erscheinen als ineinander verschachtelte Tunnel.** Die VPN-Seite zeigt Anfang und Ende jedes Tunnels der Kette, welche Tunnel innerhalb anderer verlaufen und über welchen Server der Verkehr austritt.

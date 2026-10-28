@@ -1,1 +1,0 @@
-- **A package installs reliably while it is still downloading or uploading.**

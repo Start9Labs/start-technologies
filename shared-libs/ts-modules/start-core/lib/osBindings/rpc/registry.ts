@@ -77,7 +77,6 @@ export type RpcSchemaTree<Schema> = {
         ? { [Name in keyof Schema[Key]]: RpcSchemaTree<Schema[Key][Name]> }
         : never
 }
-export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type AnySignature = z.output<typeof schemas.AnySignature>
 export type AnySignatureInput = z.input<typeof schemas.AnySignature>
 export type AnyVerifyingKey = z.output<typeof schemas.AnyVerifyingKey>
@@ -147,6 +146,7 @@ export type AddPackageSignerParamsInput = z.input<
 export type AddPackageToCategoryParamsInput = z.input<
   typeof schemas.AddPackageToCategoryParams
 >
+export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type ApplyWithPathParamsInput = z.input<
   typeof schemas.ApplyWithPathParams
 >
@@ -164,6 +164,11 @@ export type ListPackageSignersParamsInput = z.input<
 >
 export type MetricsSummary = z.output<typeof schemas.MetricsSummary>
 export type OsVersionInfo = z.output<typeof schemas.OsVersionInfo>
+
+/**
+ * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
+ */
+export type PackageIcon = z.output<typeof schemas.PackageIcon>
 export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PreDownloadAlert = z.output<typeof schemas.PreDownloadAlert>
 export type RemoveAdminParamsInput = z.input<typeof schemas.RemoveAdminParams>

@@ -43,7 +43,7 @@ where
     for<'a> &'a I: IntoIterator<Item = &'a P>,
     P: AsRef<Path>,
 {
-    let guid = create_pool(disks, pvscan, password.is_some()).await?;
+    let guid = create_pool::<I, P>(disks, pvscan, password.is_some()).await?;
     create_all_fs(&guid, &datadir, password).await?;
     export(&guid, datadir).await?;
     Ok(guid)

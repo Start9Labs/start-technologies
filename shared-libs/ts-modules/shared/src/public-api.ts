@@ -14,6 +14,7 @@ export * from './components/server.component'
 export * from './components/startup-dns-status'
 
 export * from './directives/docs-link.directive'
+export * from './directives/icon.directive'
 export * from './directives/safe-links.directive'
 
 export * from './i18n/i18n.pipe'

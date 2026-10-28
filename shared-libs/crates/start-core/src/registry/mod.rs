@@ -23,6 +23,7 @@ use crate::util::serde::HandlerExtSerde;
 
 pub mod admin;
 pub mod asset;
+mod compat;
 pub mod context;
 pub mod db;
 pub mod device_info;
@@ -124,20 +125,11 @@ pub fn registry_router(ctx: RegistryContext) -> Router {
             )
         })
         .route(
-            "/icons/{id}/{version}",
+            "/icons/{*path}",
             get({
                 let ctx = ctx.clone();
-                move |x::Path((id, version)): x::Path<(String, String)>| async move {
-                    package::icon::icon(&ctx, &id, &version, None).await
-                }
-            }),
-        )
-        .route(
-            "/icons/{id}/{version}/dependencies/{dependency}",
-            get({
-                let ctx = ctx.clone();
-                move |x::Path((id, version, dependency)): x::Path<(String, String, String)>| async move {
-                    package::icon::icon(&ctx, &id, &version, Some(&dependency)).await
+                move |x::Path(path): x::Path<String>| async move {
+                    package::icon::stored_icon(&ctx, &path).await
                 }
             }),
         )

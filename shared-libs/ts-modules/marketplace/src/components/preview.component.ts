@@ -17,7 +17,7 @@ import {
   MARKDOWN,
 } from '@start9labs/shared'
 import { TuiLoader, TuiNotification, TuiTitle } from '@taiga-ui/core'
-import { TuiAvatar, TuiFade } from '@taiga-ui/kit'
+import { TuiAvatar, TuiFade, TuiSkeleton } from '@taiga-ui/kit'
 import {
   tuiCardOptionsProvider,
   TuiHeader,
@@ -56,8 +56,8 @@ import { MarketplaceReleaseNotesComponent } from './release-notes.component'
       </div>
     } @else if (pkg$ | async; as pkg) {
       <header tuiHeader>
-        <span tuiAvatar [round]="false">
-          <img [marketplaceIcon]="pkg" />
+        <span tuiAvatar [round]="false" [tuiSkeleton]="icon.loading()">
+          <img #icon="marketplaceIcon" [marketplaceIcon]="pkg" />
         </span>
         <span tuiTitle tuiFade>{{ pkg.title }}</span>
         <span tuiAccessories><ng-content /></span>
@@ -108,6 +108,7 @@ import { MarketplaceReleaseNotesComponent } from './release-notes.component'
     TuiTitle,
     TuiHeader,
     TuiAvatar,
+    TuiSkeleton,
     TuiFade,
     MarketplaceDependenciesComponent,
     MarketplaceLinksComponent,

@@ -1,4 +1,4 @@
-import { EventEmitter } from 'node:events'
+import { EventEmitter, getEventListeners } from 'node:events'
 import * as cp from 'child_process'
 import { SubContainerEager } from '../util/SubContainer'
 import { FileMounts } from '../util/fileMounts'
@@ -76,5 +76,40 @@ describe('SubContainerEager.exec stdin', () => {
   test('does not throw when the caller inherited stdio', async () => {
     child.stdin = null
     await expect(run()).resolves.toBeDefined()
+  })
+})
+
+describe('SubContainerEager.exec abort', () => {
+  const spawned = (child: ReturnType<typeof fakeChild>) =>
+    (cp.spawn as unknown as jest.Mock).mockReset().mockReturnValue(child)
+
+  test('releases its abort listener once the command exits', async () => {
+    const abort = new AbortController()
+    for (let i = 0; i < 12; i++) {
+      spawned(fakeChild())
+      await subContainer().exec(['true'], { abort })
+    }
+    expect(getEventListeners(abort.signal, 'abort')).toHaveLength(0)
+  })
+
+  test('kills a running command when aborted', async () => {
+    const child = fakeChild()
+    child.on = EventEmitter.prototype.on
+    child.kill = jest.fn(() => child.emit('exit', null, 'SIGKILL'))
+    spawned(child)
+    const abort = new AbortController()
+
+    const running = subContainer().exec(['sleep', '60'], {
+      abort,
+      timeout: null,
+    })
+    while (!child.listenerCount('exit')) {
+      await new Promise(resolve => setImmediate(resolve))
+    }
+    abort.abort()
+
+    await expect(running).resolves.toMatchObject({ exitSignal: 'SIGKILL' })
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+    expect(getEventListeners(abort.signal, 'abort')).toHaveLength(0)
   })
 })

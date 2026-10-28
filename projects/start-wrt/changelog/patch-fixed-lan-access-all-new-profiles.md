@@ -1,4 +1,0 @@
-- A profile with LAN Access set to All now keeps access to profiles created afterwards, instead of silently becoming a Whitelist of the profiles that existed when it was saved.
-- A profile that was set to All before this fix and has already lost access to newer profiles must be re-saved with LAN Access set to All.
-- A profile with LAN Access set to Same profile stays isolated from profiles created afterwards, even if its Whitelist option to include new profiles had been ticked before it was switched to Same profile.
-- A Whitelist that includes every existing profile, with the option to include new profiles unticked, now reads back as a Whitelist instead of All.

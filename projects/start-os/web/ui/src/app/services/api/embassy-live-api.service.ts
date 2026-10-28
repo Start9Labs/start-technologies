@@ -74,7 +74,7 @@ export class LiveApiService extends ApiService {
     const { body, headers } = await this.httpResponse<ArrayBuffer>({
       method: 'GET',
       url,
-      responseType: 'arrayBuffer',
+      responseType: 'arraybuffer',
     })
 
     return URL.createObjectURL(
@@ -258,7 +258,7 @@ export class LiveApiService extends ApiService {
     if (res.headers.get('File-Digest')) {
       const digest = res.headers.get('File-Digest')!
       let data: Uint8Array
-      if (opts.responseType === 'arrayBuffer') {
+      if (opts.responseType === 'arraybuffer') {
         data = Buffer.from(res.body as ArrayBuffer)
       } else if (opts.responseType === 'text') {
         data = Buffer.from(res.body as string)

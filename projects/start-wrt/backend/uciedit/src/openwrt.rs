@@ -467,6 +467,9 @@ pub struct Dhcp {
     /// route when the router itself has no upstream IPv6 PD.
     #[uci(default)]
     pub ra_default: Option<String>,
+    /// Skips dnsmasq's probe for another DHCP server before serving the pool.
+    #[uci(default)]
+    pub force: Option<bool>,
 }
 
 #[derive(Debug, TypedSection, Default)]
@@ -482,6 +485,8 @@ pub struct ProfileDnsmasq {
     pub localservice: Option<String>,
     #[uci(default)]
     pub nonwildcard: Option<String>,
+    #[uci(default)]
+    pub localise_queries: Option<String>,
     #[uci(default)]
     pub listen_address: Vec<String>,
     #[uci(default)]
@@ -531,6 +536,10 @@ pub struct DhcpHost {
     /// denied.
     #[uci(default)]
     pub _allow_dns_inject: Option<String>,
+    /// "1" when the LAN guard forwards this device's IPv6 router
+    /// advertisements between bridge ports. Absent = dropped.
+    #[uci(default)]
+    pub _allow_ra: Option<String>,
 }
 
 #[derive(Debug, TypedSection, Default)]

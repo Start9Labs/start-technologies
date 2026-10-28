@@ -164,9 +164,9 @@ IPv6 allows your devices to be directly reachable from the internet without NAT,
 
 ### Prefix Length
 
-The prefix length determines the size of your LAN's IPv6 address space. It must be **larger** (a higher number) than your WAN prefix to create a valid subnet.
+The prefix length determines the size of your LAN's IPv6 address space. Choose a value from /48 to /64, no shorter than the prefix your ISP delegated. The summary shows that size as **Delegated Prefix** (**None** without a delegation).
 
-For example, if your ISP assigns you a /48 prefix, you can use /56, /60, or /64 for your LAN. A /64 prefix is recommended for most home networks.`,
+For example, on a /56 delegation, you can use /56, /60, or /64 for your LAN; on a /64 delegation, use /64. A /64 prefix is recommended for most home networks.`,
   '/outbound': `## Outbound VPNs
 
 Outbound VPNs route your internet traffic through encrypted tunnels to remote servers, enhancing privacy and security.

@@ -31,6 +31,8 @@ use crate::rpc_continuations::Guid;
 use crate::s9pk::init::{
     BUILD_KEY_FILE, STARTOS_DIR, complete_signing_workspace, find_signing_workspace,
 };
+use crate::sign::gpg_agent::GpgAgentKey;
+use crate::sign::{AnySigningKey, Signer};
 
 /// A configured target whose `.local` host is resolved on first use, so an
 /// unreachable one never fails a command that doesn't contact it.
@@ -76,7 +78,8 @@ pub struct CliContextSeed {
     pub tunnel_listen: Option<SocketAddr>,
     pub client: Client,
     pub id_key_path: PathBuf,
-    pub id_key: OnceCell<ed25519_dalek::SigningKey>,
+    pub id_key_gpg: Option<String>,
+    pub id_key: OnceCell<Signer>,
     pub root_ca: Vec<PathBuf>,
     pub insecure: bool,
 }
@@ -152,6 +155,7 @@ impl CliContext {
                 builder.build().expect("cannot fail")
             },
             id_key_path: config.id_key_path.unwrap_or_else(default_id_key_path),
+            id_key_gpg: config.id_key_gpg,
             id_key: OnceCell::new(),
             root_ca: config.root_ca.unwrap_or_default(),
             insecure: config.insecure,
@@ -180,8 +184,11 @@ impl CliContext {
 
     /// BLOCKING
     #[instrument(skip_all)]
-    pub fn id_key(&self) -> Result<&ed25519_dalek::SigningKey, Error> {
+    pub fn id_key(&self) -> Result<&Signer, Error> {
         self.id_key.get_or_try_init(|| {
+            if let Some(key) = &self.id_key_gpg {
+                return Ok(Signer::GpgAgent(GpgAgentKey::new(key)));
+            }
             migrate_legacy_key_file(
                 &self.id_key_path,
                 &self.id_key_path.with_file_name("developer.key.pem"),
@@ -202,7 +209,7 @@ impl CliContext {
                             ErrorKind::OpenSsl,
                         )
                     })?;
-                return Ok(secret.into());
+                return Ok(Signer::Key(AnySigningKey::Ed25519(secret.into())));
             }
             Err(Error::new(
                 eyre!("{}", t!("context.cli.id-key-does-not-exist")),
@@ -407,7 +414,7 @@ impl CallRemote<RpcContext> for CliContext {
                             .unwrap_or_default()
                     )
                 );
-                crate::auth::login::<RpcContext>(self, "auth.login").await?;
+                crate::auth::login::<RpcContext, _>(self, "auth.login").await?;
                 call().await
             }
             res => res,

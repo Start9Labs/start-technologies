@@ -1,0 +1,2 @@
+- **Nowości w Twoim języku.** Opis nowości i odsyłacz do pełnej listy zmian są wyświetlane w języku serwera przed aktualizacją i po niej. Jeśli tłumaczenie jest niedostępne, opis nowości jest wyświetlany po angielsku.
+- **Poprawny odsyłacz do pełnej listy zmian.** Powiadomienie powitalne odsyła do opublikowanej listy zmian zamiast do jej nieaktualnej kopii.

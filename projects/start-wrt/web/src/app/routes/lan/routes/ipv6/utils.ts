@@ -26,17 +26,24 @@ export function getLanIpv6Form(builder: NonNullableFormBuilder) {
 
 export type LanIpv6Form = FormRawValue<ReturnType<typeof getLanIpv6Form>>
 
-export function prefixValidator(wanPrefix: number): ValidatorFn {
+const MIN_PREFIX = 48
+const MAX_PREFIX = 64
+
+export function prefixValidator(delegatedPrefix: number | null): ValidatorFn {
   return (control: AbstractControl): ValidationErrors | null => {
     const value = control.value
     if (!value) return null
 
     const lanPrefix = prefixToNumber(value)
-    if (lanPrefix <= wanPrefix) {
-      return { minPrefix: { wanPrefix } }
+    if (lanPrefix < MIN_PREFIX || lanPrefix > MAX_PREFIX) {
+      return { prefixRange: true }
     }
-    if (lanPrefix >= 128) {
-      return { maxPrefix: true }
+    if (
+      delegatedPrefix !== null &&
+      delegatedPrefix <= MAX_PREFIX &&
+      lanPrefix < delegatedPrefix
+    ) {
+      return { delegatedPrefix: { delegatedPrefix } }
     }
     return null
   }
@@ -45,17 +52,17 @@ export function prefixValidator(wanPrefix: number): ValidatorFn {
 export const PREFIX_VALIDATION_ERRORS = {
   required: 'Required',
   pattern: 'Invalid prefix format',
-  minPrefix: tpl<{ wanPrefix: number }>(
-    'Your WAN prefix is /{wanPrefix}. Enter a value greater than {wanPrefix} and less than 128.',
-    ({ wanPrefix }) => ({ wanPrefix }),
+  prefixRange: 'Enter a value from 48 to 64.',
+  delegatedPrefix: tpl<{ delegatedPrefix: number }>(
+    'Your ISP delegated a /{delegatedPrefix} prefix. Enter a value from {delegatedPrefix} to 64.',
+    ({ delegatedPrefix }) => ({ delegatedPrefix }),
   ),
-  maxPrefix: 'Value must be less than 128.',
 }
 
 export function updateLanIpv6Validators(
   form: FormGroup<ReturnType<typeof getLanIpv6Form>['controls']>,
   slaacEnabled: boolean,
-  wanPrefix: number,
+  delegatedPrefix: number | null,
 ): void {
   const prefix = form.controls.subnet.controls.prefix
 
@@ -63,7 +70,7 @@ export function updateLanIpv6Validators(
     prefix.setValidators([
       Validators.required,
       Validators.pattern(/^\/\d{1,3}$/),
-      prefixValidator(wanPrefix),
+      prefixValidator(delegatedPrefix),
     ])
   } else {
     prefix.clearValidators()

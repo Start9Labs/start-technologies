@@ -407,10 +407,10 @@ rpc_toolkit::reflect_ts!(UiParams);
 // #[command(display(display_serializable))]
 #[instrument(skip_all)]
 pub async fn ui(ctx: RpcContext, UiParams { pointer, value, .. }: UiParams) -> Result<(), Error> {
-    let ptr = "/public/ui"
+    let mut ptr = "/public/ui"
         .parse::<JsonPointer>()
-        .with_kind(ErrorKind::Database)?
-        + &pointer;
+        .with_kind(ErrorKind::Database)?;
+    ptr.append(&pointer);
     ctx.db.put(&ptr, &value).await?;
     Ok(())
 }

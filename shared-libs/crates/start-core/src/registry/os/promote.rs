@@ -8,10 +8,9 @@ use crate::context::CliContext;
 use crate::prelude::*;
 use crate::registry::os::SIG_CONTEXT;
 use crate::registry::os::index::OsIndex;
+use crate::registry::os::version::AddVersionParams;
 use crate::registry::package::promote::{call_registry, resolve_registry_url};
 use crate::sign::commitment::blake3::Blake3Commitment;
-use crate::sign::ed25519::Ed25519;
-use crate::sign::{AnySignature, SignatureScheme};
 
 #[derive(Debug, Deserialize, Serialize, Parser)]
 #[group(skip)]
@@ -40,11 +39,9 @@ pub async fn cli_os_promote(
     let from_url = resolve_registry_url(from.as_ref(), &ctx)?;
     let to_url = resolve_registry_url(to.as_ref(), &ctx)?;
 
-    // Fetch OS index from source registry
     let res: Value = call_registry(&ctx, from_url, "os.index", imbl_value::json!({})).await?;
     let os_index: OsIndex = from_value(res)?;
 
-    // Find the target version
     let version_info = os_index.versions.0.get(&version).ok_or_else(|| {
         Error::new(
             eyre!(
@@ -55,21 +52,14 @@ pub async fn cli_os_promote(
         )
     })?;
 
-    // Add the version to the target registry
     call_registry(
         &ctx,
         to_url.clone(),
         "os.version.add",
-        imbl_value::json!({
-            "version": &version,
-            "headline": &version_info.headline,
-            "releaseNotes": &version_info.release_notes,
-            "sourceVersion": &version_info.source_version,
-        }),
+        to_value(&AddVersionParams::from_info(version.clone(), version_info))?,
     )
     .await?;
 
-    // Promote all assets for each type and platform
     promote_assets(
         &ctx,
         &to_url,
@@ -110,11 +100,10 @@ async fn promote_assets(
 ) -> Result<(), Error> {
     for (platform, asset) in assets {
         let commitment = &asset.commitment;
-        let signature = AnySignature::Ed25519(Ed25519.sign_commitment(
-            ctx.id_key()?,
-            commitment,
-            SIG_CONTEXT,
-        )?);
+        let signature = ctx
+            .id_key()?
+            .sign_commitment(commitment, SIG_CONTEXT)
+            .await?;
 
         call_registry(
             ctx,

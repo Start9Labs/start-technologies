@@ -9,7 +9,6 @@ use std::sync::{Arc, LazyLock, Weak};
 use std::task::{Poll, ready};
 use std::time::{Duration, Instant};
 
-use async_acme::acme::ACME_TLS_ALPN_NAME;
 use clap::Parser;
 use color_eyre::eyre::eyre;
 use futures::FutureExt;
@@ -35,8 +34,8 @@ use crate::db::model::Database;
 use crate::db::model::public::{AcmeSettings, NetworkInterfaceInfo};
 use crate::db::{DbAccessByKey, DbAccessMut};
 use crate::net::acme::{
-    AcmeCertStore, AcmeProvider, AcmeTlsAlpnCache, AcmeTlsHandler, GetAcmeProvider,
-    ReportOrderFailure,
+    ACME_TLS_ALPN_NAME, AcmeCertStore, AcmeProvider, AcmeTlsAlpnCache, AcmeTlsHandler,
+    GetAcmeProvider, ReportOrderFailure,
 };
 use crate::net::forward::START9_BRIDGE_V6_SUBNET;
 use crate::net::gateway::{
@@ -140,7 +139,7 @@ pub fn vhost_api<C: Context>() -> ParentHandler<C> {
                         }
                     }
 
-                    table.print_tty(false)?;
+                    print_table(&table)?;
 
                     Ok(())
                 })

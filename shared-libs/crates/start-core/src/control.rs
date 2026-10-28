@@ -135,7 +135,11 @@ mod tests {
                 CliContext::init(ClientConfig::try_parse_from(["test", "-H", &host]).unwrap())
                     .unwrap();
             ctx.id_key
-                .set(ed25519_dalek::SigningKey::from_bytes(&[7; 32]))
+                .set(crate::sign::Signer::Key(
+                    crate::sign::AnySigningKey::Ed25519(ed25519_dalek::SigningKey::from_bytes(
+                        &[7; 32],
+                    )),
+                ))
                 .unwrap();
             let result = cli_start(
                 ctx,
