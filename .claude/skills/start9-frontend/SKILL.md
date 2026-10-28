@@ -159,5 +159,6 @@ Softer review questions: does a `computed` just reshape for the template (→ pi
 named but used once (→ inline)? Does a field alias a service's signal or a method wrap its call
 (→ expose the service to the template)? Do form controls rename the API's fields (→ same names,
 no mapping)? Is the same appearance/size attribute repeated (→ option provider)? Is there a
-second DOM for mobile (→ one DOM + `_mobile` CSS)? Did copy ship in Title Case (→ sentence
+second DOM for mobile (→ one DOM + `_mobile` CSS)? Does a light theme block reuse dark status
+text colours (→ Taiga light palette, see bootstrap.md)? Did copy ship in Title Case (→ sentence
 case)? Is a Taiga API used that you didn't verify against the docs?

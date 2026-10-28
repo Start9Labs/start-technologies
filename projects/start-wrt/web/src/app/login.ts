@@ -67,7 +67,7 @@ import { RpcError } from 'src/app/services/rpc.service'
       height: 5rem;
     }
 
-    tui-textfield {
+    form {
       width: 18rem;
     }
 
