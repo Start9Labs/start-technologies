@@ -193,14 +193,17 @@ pub enum LocaleString {
 }
 
 rpc_toolkit::reflect_ts!(LocaleString);
+impl Default for LocaleString {
+    fn default() -> Self {
+        Self::Translated(String::new())
+    }
+}
 impl std::str::FromStr for LocaleString {
     type Err = std::convert::Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Try JSON parse first (for maps or quoted strings)
         if let Ok(parsed) = serde_json::from_str::<LocaleString>(s) {
             return Ok(parsed);
         }
-        // Fall back to plain string
         Ok(LocaleString::Translated(s.to_owned()))
     }
 }

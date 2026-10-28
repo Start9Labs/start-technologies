@@ -1,0 +1,1 @@
+- **Formatear una unidad de copia de seguridad desde StartOS.** En `Sistema > Crear copia de seguridad`, «Formatear una unidad» borra una unidad conectada y la deja con una única partición Btrfs preparada para copias de seguridad. Se rechaza la unidad que contiene StartOS o sus datos. También está disponible como `start-cli disk format`.
