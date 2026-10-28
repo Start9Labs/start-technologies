@@ -39,7 +39,7 @@ start-cli server update-signers update "$(cat signer.pem)" --label "Renamed sign
 start-cli server update-signers remove "$(cat signer.pem)"
 ```
 
-Keys use PEM format and identify entries; `update` changes the label. To replace a key, add its replacement and remove the old key. Labels do not grant trust to a different key. The UI uses this list before starting an update, and the downloader requires a valid signature from the accepted keys. Normal CLI updates and browser-console calls that omit signer requirements still verify signatures but do not enforce the saved trust list.
+Keys accept PEM or DER64 format and identify entries; `list` returns DER64, and `update` changes the label. To replace a key, add its replacement and remove the old key. Labels do not grant trust to a different key. The UI uses this list before starting an update, and the downloader requires a valid signature from the accepted keys. Normal CLI updates and browser-console calls that omit signer requirements still verify signatures but do not enforce the saved trust list.
 
 Diagnostic updates always require a valid signature from one of the built-in drbonez, matthill, or Start9 keys. Diagnostic mode cannot access the saved trust list.
 

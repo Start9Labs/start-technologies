@@ -389,6 +389,27 @@ setup.password-required:
   pl_PL: "Hasło jest wymagane do nowej konfiguracji"
 
 # system.rs
+system.disk-health.check-failed:
+  en_US: "Could not check Btrfs allocation"
+  de_DE: "Btrfs-Speicherzuweisung konnte nicht geprüft werden"
+  es_ES: "No se pudo comprobar la asignación de espacio de Btrfs"
+  fr_FR: "Impossible de vérifier l’allocation de l’espace Btrfs"
+  pl_PL: "Nie udało się sprawdzić przydziału miejsca Btrfs"
+
+system.disk-health.low-unallocated-message:
+  en_US: "The data filesystem at %{path} has little unallocated space left for Btrfs metadata. Services may fail to write even when disk metrics show free space. Weekly maintenance reclaims unused chunks; if this warning persists, free space or expand the data drive."
+  de_DE: "Das Daten-Dateisystem unter %{path} hat nur noch wenig nicht zugewiesenen Speicher für Btrfs-Metadaten. Schreibvorgänge von Diensten können fehlschlagen, obwohl die Speicheranzeige freien Platz meldet. Die wöchentliche Wartung gibt ungenutzte Chunks frei. Wenn diese Warnung bestehen bleibt, geben Sie Speicher frei oder erweitern Sie das Datenlaufwerk."
+  es_ES: "El sistema de archivos de datos en %{path} tiene poco espacio sin asignar para los metadatos de Btrfs. Los servicios pueden fallar al escribir aunque las métricas indiquen espacio libre. El mantenimiento semanal recupera bloques sin usar; si esta advertencia persiste, libere espacio o amplíe la unidad de datos."
+  fr_FR: "Le système de fichiers de données à %{path} dispose de peu d’espace non alloué pour les métadonnées Btrfs. Les écritures des services peuvent échouer même si les indicateurs affichent de l’espace libre. La maintenance hebdomadaire récupère les blocs inutilisés ; si cet avertissement persiste, libérez de l’espace ou agrandissez le disque de données."
+  pl_PL: "System plików danych w %{path} ma mało nieprzydzielonego miejsca na metadane Btrfs. Zapis danych przez usługi może się nie udać, nawet gdy wskaźniki pokazują wolne miejsce. Cotygodniowa konserwacja odzyskuje nieużywane bloki; jeśli ostrzeżenie nie znika, zwolnij miejsce lub powiększ dysk danych."
+
+system.disk-health.low-unallocated-title:
+  en_US: "Data drive metadata space is low"
+  de_DE: "Wenig Speicher für Metadaten auf dem Datenlaufwerk"
+  es_ES: "Poco espacio para metadatos en la unidad de datos"
+  fr_FR: "Espace insuffisant pour les métadonnées du disque de données"
+  pl_PL: "Mało miejsca na metadane na dysku danych"
+
 system.epp-not-available:
   en_US: "Energy performance preference %{epp} not available"
   de_DE: "Energie-Leistungs-Präferenz %{epp} nicht verfügbar"
@@ -2447,6 +2468,14 @@ migration.services-failed-message:
   es_ES: "No se pudieron migrar los siguientes servicios desde 0.3.5.1: %{services}\nSUS DATOS ESTÁN SEGUROS. Simplemente reinstale estos servicios desde el marketplace."
   fr_FR: "Échec de la migration des services suivants depuis 0.3.5.1 : %{services}\nVOS DONNÉES SONT EN SÉCURITÉ. Réinstallez simplement ces services depuis le marketplace."
   pl_PL: "Nie udało się zmigrować następujących usług z 0.3.5.1: %{services}\nTWOJE DANE SĄ BEZPIECZNE. Po prostu zainstaluj ponownie te usługi z marketplace."
+
+# version/v0_4_0_5.rs
+migration.initial-balance-failed:
+  en_US: "Could not start the initial Btrfs balance; continuing startup"
+  de_DE: "Der erste Btrfs-Ausgleich konnte nicht gestartet werden; der Systemstart wird fortgesetzt"
+  es_ES: "No se pudo iniciar el balanceo inicial de Btrfs; el arranque continúa"
+  fr_FR: "Impossible de lancer l’équilibrage Btrfs initial ; le démarrage continue"
+  pl_PL: "Nie udało się uruchomić początkowego równoważenia Btrfs; uruchamianie systemu jest kontynuowane"
 
 # registry/admin.rs
 registry.admin.unknown-signer:

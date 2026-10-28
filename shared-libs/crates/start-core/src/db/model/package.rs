@@ -15,7 +15,7 @@ use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::s9pk::manifest::{LocaleString, Manifest};
 use crate::status::StatusInfo;
-use crate::util::serde::{Pem, is_partial_of};
+use crate::util::serde::{Der64, is_partial_of};
 use crate::{ActionId, GatewayId, HealthCheckId, HostId, PackageId, ReplayId};
 
 #[derive(Debug, Default, Deserialize, Serialize, VisitFields)]
@@ -405,7 +405,7 @@ pub struct PackageDataEntry {
     pub s9pk: PathBuf,
     pub status_info: StatusInfo,
     pub registry: Option<Url>,
-    pub developer_key: Pem<ed25519_dalek::VerifyingKey>,
+    pub developer_key: Der64<ed25519_dalek::VerifyingKey>,
     pub last_backup: Option<DateTime<Utc>>,
     pub current_dependencies: CurrentDependencies,
     pub actions: BTreeMap<ActionId, ActionMetadata>,
