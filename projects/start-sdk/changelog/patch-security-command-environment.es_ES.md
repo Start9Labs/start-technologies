@@ -1,0 +1,3 @@
+- Mantiene los valores del entorno de comandos de daemons y subcontenedores fuera de las líneas de comandos de los procesos.
+- Conserva los valores multilínea del entorno de la imagen en paquetes construidos con start-cli 2.5.3 o posterior.
+- Los paquetes construidos con este SDK requieren StartOS 0.4.0.5 o posterior.

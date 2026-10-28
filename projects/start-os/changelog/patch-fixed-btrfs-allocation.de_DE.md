@@ -1,0 +1,2 @@
+- Ungenutzte Chunks auf dem Datenlaufwerk werden nach dem Update durch einen ersten Btrfs-Balance-Lauf im Hintergrund und anschließend durch wöchentliche Wartung freigegeben.
+- Eine Warnung erscheint, wenn der für Metadaten zuweisbare Platz auf dem Datenlaufwerk knapp wird, bevor Dienste trotz gemeldeten freien Speicherplatzes Schreibfehler erhalten.

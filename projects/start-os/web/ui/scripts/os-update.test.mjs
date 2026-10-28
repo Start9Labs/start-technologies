@@ -7,7 +7,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import test from 'node:test'
 import ts from 'typescript'
 import '@angular/compiler'
-import { createEnvironmentInjector, runInInjectionContext } from '@angular/core'
+import {
+  createEnvironmentInjector,
+  runInInjectionContext,
+  signal,
+} from '@angular/core'
 import { BehaviorSubject, EMPTY, Subject } from 'rxjs'
 
 // Presentation substitutes keep browser-only dependencies out of class-method tests.
@@ -25,6 +29,7 @@ boundary(
     'DialogService',
     'i18nPipe',
     'i18nService',
+    'LocalizePipe',
     'MarkdownPipe',
     'SafeLinksDirective',
   ],
@@ -50,7 +55,16 @@ boundary('@taiga-ui/kit', [
   'TuiButtonSelect',
   'TuiDataListWrapper',
 ])
-boundary('@taiga-ui/cdk', ['TuiAnimated'])
+boundary(
+  '@taiga-ui/cdk',
+  ['TuiAnimated'],
+  'export const tuiProvide = () => [];',
+)
+boundary(
+  '@taiga-ui/i18n',
+  ['TuiLanguageSwitcherService'],
+  'export const tuiLanguageSwitcher = () => [];',
+)
 boundary('@taiga-ui/dompurify', ['NgDompurifyPipe'])
 boundary(
   '@ng-web-apis/common',
@@ -131,6 +145,21 @@ registerHooks({
 })
 const { PatchDB } = await import('patch-db-client')
 const { OSService } = await import('src/app/services/os.service')
+const { i18nService: ProductionI18nService } = await import(
+  pathToFileURL(
+    resolve(root, 'shared-libs/ts-modules/shared/src/i18n/i18n.service.ts'),
+  ).href
+)
+const { LocalizePipe: ProductionLocalizePipe } = await import(
+  pathToFileURL(
+    resolve(root, 'shared-libs/ts-modules/shared/src/i18n/localize.pipe.ts'),
+  ).href
+)
+const { I18N } = await import(
+  pathToFileURL(
+    resolve(root, 'shared-libs/ts-modules/shared/src/i18n/i18n.providers.ts'),
+  ).href
+)
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
 const { TaskService, DialogService, i18nPipe, i18nService } =
   await import('@start9labs/shared')
@@ -417,6 +446,48 @@ test('strictly newer candidates sort descending; refresh failure preserves catal
   assert.deepEqual(f.os.updateCandidates(), [
     { version: '0.4.0.5', notes: 'refreshed', squashfs },
   ])
+})
+
+test('release notes select the live UI language without refetching or changing registry data', async t => {
+  const f = fixture(t, '0.4.0.2')
+  const info = {
+    releaseNotes: {
+      en_US: 'English notes',
+      pl_PL: 'Polskie informacje',
+      de_DE: 'Deutsche Hinweise',
+    },
+    squashfs,
+  }
+  const original = structuredClone(info)
+  await f.load({ '0.4.0.3': info })
+  const locale = Object.create(ProductionI18nService.prototype)
+  locale.language = 'polish'
+  const injector = createEnvironmentInjector([
+    { provide: ProductionI18nService, useValue: locale },
+    { provide: I18N, useValue: signal(null) },
+  ])
+  t.after(() => injector.destroy())
+  const pipe = runInInjectionContext(
+    injector,
+    () => new ProductionLocalizePipe(),
+  )
+  const notes = f.os.updateCandidates()[0].notes
+  assert.equal(pipe.transform(notes), 'Polskie informacje')
+  locale.language = 'german'
+  assert.equal(pipe.transform(notes), 'Deutsche Hinweise')
+  locale.language = 'french'
+  assert.equal(pipe.transform(notes), 'English notes')
+  locale.language = 'english'
+  assert.equal(pipe.transform(notes), 'English notes')
+  assert.equal(f.requests.length, 1)
+  assert.deepEqual(info, original)
+
+  await f.load({ '0.4.0.3': { releaseNotes: 'Legacy English', squashfs } })
+  locale.language = 'polish'
+  assert.equal(
+    pipe.transform(f.os.updateCandidates()[0].notes),
+    'Legacy English',
+  )
 })
 
 test('General checks but does not open a modal without candidates', async t => {
