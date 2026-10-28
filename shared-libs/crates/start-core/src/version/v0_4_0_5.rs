@@ -150,7 +150,7 @@ mod tests {
     async fn prior_revisions_upgrade_to_keyrings_once() {
         use patch_db::json_ptr::ROOT;
 
-        use crate::update::trusted_keys::{TrustedKeys, os_signers};
+        use crate::trusted_keys::{TrustedKeys, os_signers};
         use crate::version::Current;
         let key = AnyVerifyingKey::Ed25519(
             ed25519_dalek::SigningKey::from_bytes(&[43; 32]).verifying_key(),

@@ -469,9 +469,13 @@ mod tests {
             "../install/fixtures/production-bitcoind-31.1-26.json"
         ))
         .unwrap();
-        let alpha = crate::update::trusted_keys::initial_trusted_keys()["start9-alpha"].public_keys
-            [0]
-        .clone();
+        let keyrings = crate::trusted_keys::initial_trusted_keys();
+        let alpha = arm
+            .signatures
+            .keys()
+            .find(|key| keyrings["start9-alpha"].public_keys.contains(key))
+            .unwrap()
+            .clone();
         let mut x86 = arm.clone();
         assert!(x86.signatures.remove(&alpha).is_some());
         arm.signatures.retain(|key, _| key == &alpha);

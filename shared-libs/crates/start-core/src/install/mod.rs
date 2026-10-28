@@ -28,7 +28,7 @@ use crate::registry::package::get::GetPackageResponse;
 use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::s9pk::manifest::PackageId;
 use crate::s9pk::v2::SIG_CONTEXT;
-use crate::update::trusted_keys::{self, TrustContext};
+use crate::trusted_keys::{self, TrustContext};
 use crate::upload::upload;
 use crate::util::io::open_file;
 use crate::util::tui::choose;

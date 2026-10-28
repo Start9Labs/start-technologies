@@ -3,7 +3,7 @@ use exver::VersionRange;
 use super::v0_3_5::V0_3_0_COMPAT;
 use super::{VersionT, v0_4_0_5};
 use crate::prelude::*;
-use crate::update::trusted_keys::{migrate_signers, os_signers};
+use crate::trusted_keys::{migrate_signers, os_signers};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Version;

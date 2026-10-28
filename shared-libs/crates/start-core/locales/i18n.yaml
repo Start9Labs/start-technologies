@@ -7440,21 +7440,21 @@ update.signers.not-found:
   fr_FR: "Signataire de confiance des mises à jour du système introuvable"
   pl_PL: "Nie znaleziono zaufanego sygnatariusza aktualizacji systemu"
 
-update.trusted-keys.invalid:
+trusted-keys.invalid:
   en_US: "Enter a name and at least one Ed25519 public key"
   de_DE: "Geben Sie einen Namen und mindestens einen öffentlichen Ed25519-Schlüssel ein"
   es_ES: "Introduzca un nombre y al menos una clave pública Ed25519"
   fr_FR: "Saisissez un nom et au moins une clé publique Ed25519"
   pl_PL: "Podaj nazwę i co najmniej jeden klucz publiczny Ed25519"
 
-update.trusted-keys.not-found:
+trusted-keys.not-found:
   en_US: "Trusted keyring not found"
   de_DE: "Vertrauenswürdiger Schlüsselbund nicht gefunden"
   es_ES: "No se encontró el llavero de confianza"
   fr_FR: "Trousseau de confiance introuvable"
   pl_PL: "Nie znaleziono zaufanego pęku kluczy"
 
-update.trusted-keys.protected:
+trusted-keys.protected:
   en_US: "Built-in keyrings cannot be deleted; disable their trust instead"
   de_DE: "Integrierte Schlüsselbunde können nicht gelöscht werden; deaktivieren Sie stattdessen deren Vertrauen"
   es_ES: "Los llaveros integrados no se pueden eliminar; desactive su confianza"

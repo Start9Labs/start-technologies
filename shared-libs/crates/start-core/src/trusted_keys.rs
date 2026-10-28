@@ -1,7 +1,7 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::context::RpcContext;
 use crate::prelude::*;
@@ -9,6 +9,7 @@ use crate::registry::signer::AcceptSigners;
 use crate::sign::gpg::parse_public_keys;
 use crate::sign::{AnyVerifyingKey, canonicalize_verifying_keys};
 use crate::update::signers::{TrustedOsUpdateSigner, TrustedOsUpdateSigners, initial_signers};
+use crate::util::new_guid;
 
 pub type TrustedKeys = BTreeMap<InternedString, TrustedKey>;
 pub const START9: &str = "start9";
@@ -19,8 +20,13 @@ pub const START9: &str = "start9";
 #[model = "Model<Self>"]
 pub struct TrustedKey {
     pub name: String,
-    /// Ed25519 public keys encoded as padded standard Base64 DER.
-    pub public_keys: Vec<AnyVerifyingKey>,
+    /// Ed25519 public keys encoded as padded standard Base64 DER in canonical order.
+    #[serde(serialize_with = "serialize_public_keys")]
+    #[visit(
+        output_wire = "Vec<AnyVerifyingKey>",
+        type_attributes(visit::output_wire)
+    )]
+    pub public_keys: HashSet<AnyVerifyingKey>,
     /// False for built-in keyrings.
     pub removable: bool,
     pub marketplace: bool,
@@ -31,6 +37,15 @@ impl TrustedKey {
     fn trusts_os_key(&self, key: &AnyVerifyingKey) -> bool {
         self.os && self.public_keys.contains(key)
     }
+}
+
+fn serialize_public_keys<S: Serializer>(
+    keys: &HashSet<AnyVerifyingKey>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut keys = keys.iter().collect::<Vec<_>>();
+    keys.sort_unstable_by_key(|key| key.interned_der64());
+    keys.serialize(serializer)
 }
 
 rpc_toolkit::reflect_ts!(TrustedKey);
@@ -97,10 +112,10 @@ pub fn initial_trusted_keys() -> TrustedKeys {
         ("start9-alpha".into(), TrustedKey {
             name: "Start9 Alpha".into(),
             removable: false,
-            public_keys: vec![
+            public_keys: HashSet::from([
                 "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
                 "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
-            ],
+            ]),
             marketplace: false,
             os: false,
         }),
@@ -134,7 +149,7 @@ pub fn migrate_signers(legacy: TrustedOsUpdateSigners) -> Result<TrustedKeys, Er
     let grouped = if start9.os {
         start9.public_keys.clone()
     } else {
-        Vec::new()
+        HashSet::new()
     };
     for (key, signer) in legacy {
         let public_key: AnyVerifyingKey = key.parse()?;
@@ -143,7 +158,7 @@ pub fn migrate_signers(legacy: TrustedOsUpdateSigners) -> Result<TrustedKeys, Er
                 key,
                 TrustedKey {
                     name: signer.label,
-                    public_keys: vec![public_key],
+                    public_keys: HashSet::from([public_key]),
                     removable: true,
                     marketplace: true,
                     os: true,
@@ -208,14 +223,14 @@ rpc_toolkit::reflect_ts!(RemoveTrustedKeyParams);
 
 fn not_found() -> Error {
     Error::new(
-        eyre!("{}", t!("update.trusted-keys.not-found")),
+        eyre!("{}", t!("trusted-keys.not-found")),
         ErrorKind::NotFound,
     )
 }
 
 fn invalid_group() -> Error {
     Error::new(
-        eyre!("{}", t!("update.trusted-keys.invalid")),
+        eyre!("{}", t!("trusted-keys.invalid")),
         ErrorKind::InvalidRequest,
     )
 }
@@ -239,17 +254,11 @@ pub fn add_group(
     if public_keys.is_empty() {
         return Err(invalid_group());
     }
-    let mut normalized = Vec::new();
-    for key in public_keys {
-        if !normalized.contains(&key) {
-            normalized.push(key);
-        }
-    }
     keys.insert(
         id,
         TrustedKey {
             name,
-            public_keys: normalized,
+            public_keys: public_keys.into_iter().collect(),
             removable: true,
             marketplace: true,
             os: matches!(context, TrustContext::Os),
@@ -270,7 +279,7 @@ fn toggle_group(keys: &mut TrustedKeys, params: ToggleTrustedKeyParams) -> Resul
 pub fn remove_group(keys: &mut TrustedKeys, id: &str) -> Result<(), Error> {
     if !keys.get(id).ok_or_else(not_found)?.removable {
         return Err(Error::new(
-            eyre!("{}", t!("update.trusted-keys.protected")),
+            eyre!("{}", t!("trusted-keys.protected")),
             ErrorKind::InvalidRequest,
         ));
     }
@@ -286,13 +295,7 @@ async fn add(ctx: RpcContext, params: AddTrustedKeyParams) -> Result<(), Error> 
                 .as_server_info_mut()
                 .as_trusted_keys_mut()
                 .mutate(|keys| {
-                    add_group(
-                        keys,
-                        uuid::Uuid::new_v4().to_string().into(),
-                        params.name,
-                        public_keys,
-                        params.context,
-                    )
+                    add_group(keys, new_guid(), params.name, public_keys, params.context)
                 })
         })
         .await
@@ -432,6 +435,39 @@ mod tests {
     }
 
     #[test]
+    fn stored_arrays_deserialize_as_unique_key_sets() {
+        let key = "MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=";
+        let group: TrustedKey = from_value(imbl_value::json!({
+            "name": "Publisher", "publicKeys": [key, key],
+            "removable": true, "marketplace": true, "os": false,
+        }))
+        .unwrap();
+        assert_eq!(group.public_keys, HashSet::from([key.parse().unwrap()]));
+        assert_eq!(
+            to_value(&group).unwrap()["publicKeys"],
+            imbl_value::json!([key])
+        );
+    }
+
+    #[test]
+    fn public_key_set_serialization_is_canonical_across_reads() {
+        let first = "MCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=";
+        let second = "MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=";
+        let group: TrustedKey = from_value(imbl_value::json!({
+            "name": "Publisher", "publicKeys": [second, first, second],
+            "removable": true, "marketplace": true, "os": false,
+        }))
+        .unwrap();
+        assert_eq!(group.public_keys.len(), 2);
+        let saved = to_value(&group).unwrap();
+        assert_eq!(saved["publicKeys"], imbl_value::json!([first, second]));
+        for _ in 0..8 {
+            let reloaded: TrustedKey = from_value(saved.clone()).unwrap();
+            assert_eq!(to_value(&reloaded).unwrap(), saved);
+        }
+    }
+
+    #[test]
     fn pem_and_gpg_imports_persist_der64_keys() {
         let key = "MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=";
         let params: AddTrustedKeyParams = serde_json::from_value(serde_json::json!({
@@ -439,7 +475,7 @@ mod tests {
             "context": "marketplace",
             "publicKeys": [
                 format!("-----BEGIN PUBLIC KEY-----\n{key}\n-----END PUBLIC KEY-----\n"),
-                include_str!("../sign/fixtures/start9-public.asc"),
+                include_str!("sign/fixtures/start9-public.asc"),
             ],
         }))
         .unwrap();
@@ -520,7 +556,7 @@ mod tests {
             )
             .unwrap();
             assert_eq!(keys[id].name, "custom");
-            assert_eq!(keys[id].public_keys, [public_key.clone()]);
+            assert_eq!(keys[id].public_keys, HashSet::from([public_key.clone()]));
             assert!(keys[id].marketplace);
             assert_eq!(keys[id].os, os);
         }
@@ -533,7 +569,7 @@ mod tests {
     fn legacy_commands_disable_and_reenable_protected_os_trust() {
         let mut keys = initial_trusted_keys();
         let start9 = keys[START9].clone();
-        let key = start9.public_keys[0].clone();
+        let key = start9.public_keys.iter().next().unwrap().clone();
         legacy_remove(&mut keys, &key).unwrap();
         assert!(!keys[START9].os);
         assert!(keys[START9].marketplace);
@@ -549,7 +585,7 @@ mod tests {
     fn legacy_add_enables_existing_os_disabled_entry_without_changing_marketplace_trust() {
         let mut keys = initial_trusted_keys();
         let alpha = keys["start9-alpha"].clone();
-        let key = alpha.public_keys[0].clone();
+        let key = alpha.public_keys.iter().next().unwrap().clone();
         legacy_add(&mut keys, key.clone(), "ignored label".into()).unwrap();
         assert!(keys["start9-alpha"].os);
         assert!(!keys["start9-alpha"].marketplace);
@@ -563,7 +599,12 @@ mod tests {
     #[test]
     fn legacy_add_does_not_mutate_an_overlapping_disabled_entry_when_key_is_already_os_trusted() {
         let mut keys = initial_trusted_keys();
-        let key = keys["start9-alpha"].public_keys[0].clone();
+        let key = keys["start9-alpha"]
+            .public_keys
+            .iter()
+            .next()
+            .unwrap()
+            .clone();
         add_group(
             &mut keys,
             "zz-overlap".into(),
@@ -580,7 +621,7 @@ mod tests {
     #[test]
     fn legacy_key_commands_update_every_os_enabled_entry_containing_the_key() {
         let mut keys = initial_trusted_keys();
-        let key = keys[START9].public_keys[0].clone();
+        let key = keys[START9].public_keys.iter().next().unwrap().clone();
         add_group(
             &mut keys,
             "overlap".into(),

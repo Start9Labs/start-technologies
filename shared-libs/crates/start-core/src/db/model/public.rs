@@ -26,7 +26,7 @@ use crate::net::vhost::{AlpnInfo, PassthroughInfo};
 use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::system::{KeyboardOptions, SmtpValue};
-use crate::update::trusted_keys::{TrustedKeys, initial_trusted_keys};
+use crate::trusted_keys::{TrustedKeys, initial_trusted_keys};
 use crate::util::cpupower::{Epp, Governor};
 use crate::util::lshw::LshwDevice;
 use crate::util::serde::MaybeUtf8String;

@@ -18,12 +18,10 @@ use tracing::instrument;
 
 pub mod diagnostic;
 pub mod signers;
-pub mod trusted_keys;
 
 #[cfg(test)]
 mod signature_tests;
 
-use self::trusted_keys::TrustContext;
 use crate::PLATFORM;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::RestartReason;
@@ -44,6 +42,7 @@ use crate::sign::commitment::blake3::Blake3Commitment;
 use crate::sound::{
     CIRCLE_OF_5THS_SHORT, UPDATE_FAILED_1, UPDATE_FAILED_2, UPDATE_FAILED_3, UPDATE_FAILED_4,
 };
+use crate::trusted_keys::{self, TrustContext};
 use crate::util::Invoke;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::AtomicFile;

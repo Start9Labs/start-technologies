@@ -868,8 +868,8 @@ mod tests {
 
     #[tokio::test]
     async fn maintenance_revisions_upgrade_to_keyrings_and_roll_back() {
+        use crate::trusted_keys::{TrustedKeys, os_signers};
         use crate::update::signers::{TrustedOsUpdateSigners, initial_signers};
-        use crate::update::trusted_keys::{TrustedKeys, os_signers};
 
         let current = Version::from_exver_version(v0_4_1::Version.semver())
             .as_version_t()

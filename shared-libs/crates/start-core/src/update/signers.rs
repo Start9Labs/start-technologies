@@ -4,11 +4,11 @@ use clap::Parser;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
-use super::trusted_keys::{legacy_add, legacy_remove, legacy_update, os_signers};
 use crate::context::{CliContext, RpcContext};
 use crate::prelude::*;
 use crate::registry::signer::AcceptSigners;
 use crate::sign::AnyVerifyingKey;
+use crate::trusted_keys::{legacy_add, legacy_remove, legacy_update, os_signers};
 use crate::util::serde::HandlerExtSerde;
 
 pub type TrustedOsUpdateSigners = BTreeMap<InternedString, TrustedOsUpdateSigner>;
@@ -197,7 +197,7 @@ mod tests {
     fn legacy_crud_uses_shared_trusted_keys() {
         let canonical = initial_signers().into_keys().next().unwrap();
         let key: AnyVerifyingKey = canonical.replace('\n', "\r\n").parse().unwrap();
-        let mut keys = super::super::trusted_keys::TrustedKeys::new();
+        let mut keys = crate::trusted_keys::TrustedKeys::new();
         assert!(legacy_update(&mut keys, &key, "missing".into()).is_err());
         assert!(legacy_remove(&mut keys, &key).is_err());
         legacy_add(&mut keys, key.clone(), "custom signer".into()).unwrap();

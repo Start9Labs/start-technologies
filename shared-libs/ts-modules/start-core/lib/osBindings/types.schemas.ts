@@ -3982,7 +3982,7 @@ export const TestSmtpParams: z.ZodObject<{
 export const TrustedKey: z.ZodObject<{
   name: z.ZodString
   /**
-   * Ed25519 public keys encoded as padded standard Base64 DER.
+   * Ed25519 public keys encoded as padded standard Base64 DER in canonical order.
    */
   publicKeys: z.ZodArray<typeof AnyVerifyingKey>
   /**
@@ -3994,10 +3994,11 @@ export const TrustedKey: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   name: z.string(),
   /**
-   * Ed25519 public keys encoded as padded standard Base64 DER.
+   * Ed25519 public keys encoded as padded standard Base64 DER in canonical order.
    */
   publicKeys: z.array(AnyVerifyingKey).meta({
-    description: 'Ed25519 public keys encoded as padded standard Base64 DER.',
+    description:
+      'Ed25519 public keys encoded as padded standard Base64 DER in canonical order.',
   }),
   /**
    * False for built-in keyrings.
