@@ -1,0 +1,1 @@
+- **`server restart` y `server shutdown` esperan por defecto a que termine una copia de seguridad en curso.** `--force` la interrumpe. `server cancel-deferred-power` cancela la acción pendiente. Estos comandos requieren StartOS 0.4.1 o posterior.

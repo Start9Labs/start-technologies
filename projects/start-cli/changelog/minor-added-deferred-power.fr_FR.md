@@ -1,0 +1,1 @@
+- **`server restart` et `server shutdown` attendent par défaut la fin d’une sauvegarde en cours.** `--force` l’interrompt. `server cancel-deferred-power` annule l’action en attente. Ces commandes nécessitent StartOS 0.4.1 ou ultérieur.

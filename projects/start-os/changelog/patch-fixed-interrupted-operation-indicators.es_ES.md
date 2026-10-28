@@ -1,0 +1,1 @@
+- **Reiniciar el daemon de StartOS limpia los indicadores de copias, actualizaciones, reinicios y apagados interrumpidos**, incluida cualquier acción de encendido pendiente. Las operaciones interrumpidas dejan de aparecer como activas al arrancar el daemon.

@@ -1,0 +1,1 @@
+- **Ein Neustart des StartOS-Daemons entfernt unterbrochene Statusanzeigen für Sicherungen, Updates, Neustart und Herunterfahren**, einschließlich vorgemerkter Einschaltaktionen. Unterbrochene Vorgänge erscheinen nach dem Daemon-Start nicht weiter als laufend.
