@@ -1058,10 +1058,33 @@ test('registry payload composes localized notes, warnings, fallbacks and links',
   const pending = payload()
   contains(pending.releaseNotes, 'Full changelog fragments for v1.2.3')
   contains(pending.releaseNotes, 'changes awaiting release.')
-  contains(
-    pending.releaseNotesTranslations.pl_PL,
-    `/tree/${snapshot}/projects/start-sdk/changelog`,
-  )
+  for (const [locale, label, description] of [
+    [
+      'de_DE',
+      'Alle Änderungsfragmente für v1.2.3',
+      'noch nicht veröffentlichte Änderungen.',
+    ],
+    [
+      'es_ES',
+      'Fragmentos del registro completo de cambios de v1.2.3',
+      'cambios pendientes de publicación.',
+    ],
+    [
+      'fr_FR',
+      'Fragments du journal complet des modifications de la v1.2.3',
+      'modifications en attente de publication.',
+    ],
+    [
+      'pl_PL',
+      'Fragmenty pełnej listy zmian w wersji 1.2.3',
+      'zmiany oczekujące na wydanie.',
+    ],
+  ]) {
+    const body = pending.releaseNotesTranslations[locale]
+    contains(body, label)
+    contains(body, description)
+    contains(body, `/tree/${snapshot}/projects/start-sdk/changelog`)
+  }
   env.NOTES_REF = snapshot
   write(
     `projects/start-sdk/release-notes/${VERSION}.pl_PL.pre-update.md`,
@@ -1078,6 +1101,45 @@ test('registry payload composes localized notes, warnings, fallbacks and links',
   )
   delete env.NOTES_REF
   delete env.CHANGELOG_REF
+})
+
+test('older source catalogs fall back to shared pending-fragment labels', t => {
+  const { root, env, write, script, git, commit } = releaseFixture(t)
+  git('init', '-q')
+  git('remote', 'add', 'origin', root)
+  const catalog = 'shared-libs/crates/start-core/locales/release-notes.json'
+  const current = JSON.parse(text(join(root, catalog)))
+  const older = structuredClone(current)
+  delete older['release-notes.full-changelog-fragments']
+  write(catalog, JSON.stringify(older))
+  write(`projects/start-sdk/release-notes/${VERSION}.md`, FRAMING)
+  write(
+    `projects/start-sdk/release-notes/${VERSION}.pl_PL.md`,
+    '## Nowości\n\n<!-- highlights -->\n',
+  )
+  write(
+    'projects/start-sdk/changelog/patch-fixed-feature.md',
+    METADATA + '- Feature.\n',
+  )
+  commit()
+  const snapshot = git('rev-parse', 'HEAD').trim()
+  write(catalog, JSON.stringify(current))
+  env.NOTES_REF = snapshot
+  env.CHANGELOG_REF = snapshot
+  const notes = JSON.parse(script('registry-notes').stdout)
+  contains(notes.releaseNotes, 'Full changelog fragments for v1.2.3')
+  contains(
+    notes.releaseNotesTranslations.pl_PL,
+    'Fragmenty pełnej listy zmian w wersji 1.2.3',
+  )
+  contains(
+    notes.releaseNotesTranslations.pl_PL,
+    'zmiany oczekujące na wydanie.',
+  )
+  contains(
+    notes.releaseNotesTranslations.pl_PL,
+    `/tree/${snapshot}/projects/start-sdk/changelog`,
+  )
 })
 
 test('registry publishers pass English prose and a separate non-English JSON flag', t => {
@@ -1295,13 +1357,11 @@ test('archived localized Highlights retain their link position and source URL', 
   contains(polish, '/blob/HEAD/projects/start-sdk/CHANGELOG.md#123')
   assert.ok(polish.indexOf('- Feature.') < polish.indexOf('Pełna lista zmian'))
   assert.ok(polish.indexOf('Pełna lista zmian') < polish.indexOf('## Ważne'))
-  assert.equal(
-    polish.replace(
-      /blob\/HEAD\/projects\/start-sdk\/CHANGELOG.md#123/,
-      'tree/HEAD/projects/start-sdk/changelog',
-    ),
-    pending.releaseNotesTranslations.pl_PL,
-  )
+  const pendingPolish = pending.releaseNotesTranslations.pl_PL
+  contains(pendingPolish, 'Fragmenty pełnej listy zmian w wersji 1.2.3')
+  contains(pendingPolish, '/tree/HEAD/projects/start-sdk/changelog')
+  const withoutLink = body => body.replace(/^\*\*\[.+$/m, '<changelog link>')
+  assert.equal(withoutLink(polish), withoutLink(pendingPolish))
 })
 
 test('CLI capability gates registry writes and CI uploads without gating pure notes', t => {

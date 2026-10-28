@@ -641,9 +641,10 @@ function releaseNotes(product, version, ref) {
 function releaseNoteLabels(ref) {
   const path = 'shared-libs/crates/start-core/locales/release-notes.json'
   const tagged = ref ? decodeUtf8(sourceFile(path, ref)) : ''
-  return JSON.parse(
-    tagged || readFileSync(new URL(`../${path}`, import.meta.url)),
-  )['release-notes.full-changelog']
+  const defaults = JSON.parse(
+    readFileSync(new URL(`../${path}`, import.meta.url)),
+  )
+  return tagged ? { ...defaults, ...JSON.parse(tagged) } : defaults
 }
 
 function changelogLink(product, version, ref, locale, labels) {
@@ -659,10 +660,13 @@ function changelogLink(product, version, ref, locale, labels) {
       ? `${base}/tree/${ref}/${product}/changelog`
       : `${base}/blob/${ref}/${product}/CHANGELOG.md#${anchor}`
   }
-  let label = labels[locale] ?? labels[ENGLISH]
-  if (pending && locale === ENGLISH)
-    label =
-      '**[Full changelog fragments for v%{version}](%{url})** — changes awaiting release.'
+  const translations =
+    labels[
+      pending
+        ? 'release-notes.full-changelog-fragments'
+        : 'release-notes.full-changelog'
+    ]
+  const label = translations[locale] ?? translations[ENGLISH]
   return label.replaceAll('%{version}', version).replaceAll('%{url}', url)
 }
 

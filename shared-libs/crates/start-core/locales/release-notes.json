@@ -6,5 +6,12 @@
     "es_ES": "**[Registro completo de cambios de v%{version}](%{url})** — todos los cambios de esta versión.",
     "fr_FR": "**[Journal complet des modifications de la v%{version}](%{url})** — toutes les modifications de cette version.",
     "pl_PL": "**[Pełna lista zmian w wersji %{version}](%{url})** — wszystkie zmiany w tym wydaniu."
+  },
+  "release-notes.full-changelog-fragments": {
+    "en_US": "**[Full changelog fragments for v%{version}](%{url})** — changes awaiting release.",
+    "de_DE": "**[Alle Änderungsfragmente für v%{version}](%{url})** — noch nicht veröffentlichte Änderungen.",
+    "es_ES": "**[Fragmentos del registro completo de cambios de v%{version}](%{url})** — cambios pendientes de publicación.",
+    "fr_FR": "**[Fragments du journal complet des modifications de la v%{version}](%{url})** — modifications en attente de publication.",
+    "pl_PL": "**[Fragmenty pełnej listy zmian w wersji %{version}](%{url})** — zmiany oczekujące na wydanie."
   }
 }
