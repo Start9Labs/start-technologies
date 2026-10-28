@@ -31,6 +31,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::StoreLogsUnderVar,
     Migration::RemoveSessionsJson,
     Migration::ForceDhcpPools,
+    Migration::RemoveServerCert,
     Migration::ScopeReservedNames,
 ];
 
@@ -54,6 +55,8 @@ enum Migration {
     RemoveSessionsJson,
     /// Earlier releases probed for another DHCP server before serving a pool.
     ForceDhcpPools,
+    /// Earlier images served one certificate from `/etc/ssl`.
+    RemoveServerCert,
     /// Earlier releases served a reserved device's name to every profile.
     ScopeReservedNames,
 }
@@ -69,6 +72,7 @@ impl Migration {
             Migration::StoreLogsUnderVar => store_logs_under_var(root).await,
             Migration::RemoveSessionsJson => remove_sessions_json(root).await,
             Migration::ForceDhcpPools => force_dhcp_pools(root).await,
+            Migration::RemoveServerCert => remove_server_cert(root).await,
             Migration::ScopeReservedNames => scope_reserved_names(root).await,
         }
     }
@@ -211,6 +215,19 @@ async fn scope_reserved_names(root: &Path) -> Result<(), Error> {
     }
     if changed {
         dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+async fn remove_server_cert(root: &Path) -> Result<(), Error> {
+    for path in [
+        "etc/ssl/certs/startwrt-server.pem",
+        "etc/ssl/private/startwrt-server.key",
+    ] {
+        match tokio::fs::remove_file(root.join(path)).await {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            _ => {}
+        }
     }
     Ok(())
 }

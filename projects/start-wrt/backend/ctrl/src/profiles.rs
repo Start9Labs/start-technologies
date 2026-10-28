@@ -613,6 +613,8 @@ pub(crate) fn rewrite_dns_forwarding(cfgs: &mut Configs, profile: &Profile) -> R
             interface: vec![profile.id.interface.clone()],
             localservice: Some("1".to_string()),
             nonwildcard: Some("1".to_string()),
+            // Answers the router's name with this profile's own IPv4 gateway.
+            localise_queries: Some("1".to_string()),
             listen_address: vec![profile.gateway_ip.to_string()],
             notinterface: vec!["loopback".to_string()],
             rebind_domain: vec![],
@@ -620,7 +622,6 @@ pub(crate) fn rewrite_dns_forwarding(cfgs: &mut Configs, profile: &Profile) -> R
             rebind_localhost: isp.then(|| "1".to_string()),
             authoritative: Some("1".to_string()),
             domainneeded: Some("1".to_string()),
-            localise_queries: Some("1".to_string()),
             cachesize: Some("1000".to_string()),
             ednspacket_max: Some("1232".to_string()),
             localuse: Some("0".to_string()),
@@ -6870,6 +6871,7 @@ config zone
             vec![crate::dns_inject::inject_hosts_path("lan")]
         );
         assert_eq!(section.authoritative.as_deref(), Some("1"));
+        assert_eq!(section.localise_queries.as_deref(), Some("1"));
         assert_eq!(section.cachesize.as_deref(), Some("1000"));
         assert_eq!(
             (
@@ -6961,6 +6963,7 @@ config zone
                 vec![crate::dns_inject::inject_hosts_path(iface)]
             );
             assert_eq!(section.interface, vec![iface.to_string()]);
+            assert_eq!(section.localise_queries.as_deref(), Some("1"));
             assert_eq!(
                 section.server,
                 vec!["/use-application-dns.net/".to_string()],

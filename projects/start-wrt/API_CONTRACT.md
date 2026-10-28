@@ -677,8 +677,7 @@ struct LanIpv4SetRequest {
 // Backend: updates UCI network.lan ipaddr (netmask /24) — and every profile's
 // addresses on a /16 block change — then clears DHCP leases, cycles only the LAN
 // interface (plus every profile interface on a block change) with ifdown/ifup,
-// reloads the firewall and dnsmasq, restarts Wi-Fi, and regenerates the HTTPS
-// certificate.
+// reloads the firewall and dnsmasq, and restarts Wi-Fi.
 // Inbound VPN peers the change would break fail the call with
 //   ErrorKind::VpnPeersWouldBreak unless force is set.
 // Validation: address must fall inside an RFC 1918 block at one of the
@@ -732,8 +731,7 @@ struct LanIpv6SetRequest {
 // With SLAAC enabled, `prefix` outside 48..=64, or shorter than the live
 // delegated prefix, is rejected (`InvalidRequest`), matching the UI validator.
 // Backend: updates UCI dhcp + network for the LAN and every profile, reloads
-// odhcpd to withdraw the old prefix, restarts network, and regenerates the HTTPS
-// certificate.
+// odhcpd to withdraw the old prefix, and restarts network.
 // Disabling SLAAC while any *enabled* IPv6 published-port rule exists is
 // rejected (`PublishedPortsUseIpv6`): it would strand every pp_*_v6 pinhole on
 // an address no device will hold. The UI locks the toggle for the same reason;

@@ -298,7 +298,7 @@ Open a shell inside a service's subcontainer (within the LXC container), or run 
 
 ### `start-cli package stats`
 
-Display LXC container resource usage for every installed service.
+Display LXC container memory usage and limit for every installed service. It does not report CPU use.
 
 - `--format` — Output format
 
