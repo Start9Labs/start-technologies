@@ -66,7 +66,7 @@ Remove one or more enrolled device keys.
 
 Restart, shut down, update, and configure the server.
 
-Backup-safe restart and shutdown require StartOS 0.4.1 or later. The `--force` flag and `cancel-deferred-power` command require start-cli 2.5.0 or later.
+Backup-safe restart and shutdown require StartOS 0.4.1 or later. The `--force` flag and `cancel-deferred-power` command require start-cli 2.6.0 or later.
 
 ### `start-cli server restart`
 
