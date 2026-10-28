@@ -2,6 +2,7 @@ use exver::VersionRange;
 
 use super::v0_3_5::V0_3_0_COMPAT;
 use super::{VersionT, v0_4_0_5};
+use crate::context::RpcContext;
 use crate::prelude::*;
 
 lazy_static::lazy_static! {
@@ -26,6 +27,10 @@ impl VersionT for Version {
     }
     fn up(self, _db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
         Ok(Value::Null)
+    }
+    async fn post_up(self, ctx: &RpcContext, input: Value) -> Result<(), Error> {
+        // Includes 0.4.0.5 servers whose migration revision predates balance initialization.
+        v0_4_0_5::Version.post_up(ctx, input).await
     }
     fn down(self, _db: &mut Value) -> Result<(), Error> {
         Ok(())
