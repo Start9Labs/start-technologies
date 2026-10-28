@@ -174,6 +174,10 @@ test('sparse deploy canonical versions and notes', t => {
       `projects/${project}/release-notes/${version}.pre-update.md`,
       PRE_UPDATE,
     )
+    write(
+      `projects/${project}/changelog/patch-security-internal.md`,
+      '---\nuser-facing: false\n---\n\n- Security correction.\n',
+    )
   }
   git('init', '-q')
   commit()
@@ -251,6 +255,8 @@ test('sparse deploy canonical versions and notes', t => {
     const compiled = compile()
     assert.equal(compiled.status, 0, compiled.stderr)
     assert.equal(text(join(runnerTemp, 'release-notes.md')), derived)
+    assert.equal(text(join(runnerTemp, 'release-security')), 'true\n')
+    contains(deploy, '--git-hash "${{ github.sha }}" "${SECURITY_ARGS[@]}"')
     const fragmentPath = `checkout-${project}/projects/${project}/changelog/patch-fixed-feature.md`
     write(fragmentPath, '---\nuser-facing: invalid\n---\n\n- Invalid.\n')
     const invalid = compile()

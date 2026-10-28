@@ -179,7 +179,9 @@ function releaseTags(output) {
     name = name.replace(/\^\{\}$/, '')
     const match = /^([a-z0-9]+(?:-[a-z0-9]+)*)\/v(.+)$/.exec(name)
     if (!match || !Object.hasOwn(MANIFESTS, match[1])) continue
-    parseVersion(match[1], match[2])
+    const [, prerelease] = parseVersion(match[1], match[2])
+    if (match[1] === 'start-os' && prerelease?.match(/^rc\.[1-9][0-9]*$/))
+      continue
     if (!tags.has(name) || peeled) tags.set(name, sha)
   }
   return tags
@@ -432,21 +434,22 @@ function renderNotes(product, version, ref) {
     : existsSync(path)
       ? readFileSync(path)
       : Buffer.alloc(0)
+  return compileNotes(path, notes, releaseFragments(product, version, ref))
+}
+
+function releaseFragments(product, version, ref) {
+  parseVersion(basename(product), version)
   const fragments = ref
     ? taggedFragments(product, ref)
     : workingFragments(product)
-  if (!fragments.size) return compileNotes(path, notes, [])
+  if (!fragments.size) return []
   const commit = decodeUtf8(
     git('rev-parse', '--verify', `${ref || 'HEAD'}^{commit}`),
   ).trim()
   const releases = originReleases(commit, product, localTags()).filter(
     release => release.version !== version,
   )
-  return compileNotes(
-    path,
-    notes,
-    ownedFragments({ product, version, commit, fragments }, releases),
-  )
+  return ownedFragments({ product, version, commit, fragments }, releases)
 }
 
 function checkManifestVersion(
@@ -550,7 +553,7 @@ function sync() {
 }
 
 const USAGE =
-  'usage: changelog.mjs projects | changed BASE | validate PRODUCT | version PRODUCT | check-version PRODUCT [VERSION] | render PRODUCT VERSION [--ref REF] | notes PRODUCT VERSION [--ref REF] | section VERSION | sync'
+  'usage: changelog.mjs projects | changed BASE | validate PRODUCT | version PRODUCT | check-version PRODUCT [VERSION] | render PRODUCT VERSION [--ref REF] | notes PRODUCT VERSION [--ref REF] | security PRODUCT VERSION [--ref REF] | section VERSION | sync'
 
 try {
   const { values, positionals } = parseArgs({
@@ -569,13 +572,15 @@ try {
     'check-version': [1, 2],
     render: [2],
     notes: [2],
+    security: [2],
     section: [1],
     sync: [0],
   }
   if (
     !values.help &&
     (!counts[command]?.includes(args.length) ||
-      (values.ref !== undefined && !['render', 'notes'].includes(command)))
+      (values.ref !== undefined &&
+        !['render', 'notes', 'security'].includes(command)))
   ) {
     throw new Error(USAGE)
   }
@@ -592,6 +597,12 @@ try {
     process.stdout.write(render(productPath(args[0]), args[1], values.ref))
   else if (command === 'notes')
     process.stdout.write(renderNotes(productPath(args[0]), args[1], values.ref))
+  else if (command === 'security')
+    console.log(
+      releaseFragments(productPath(args[0]), args[1], values.ref).some(
+        fragment => fragment.kind === 'security',
+      ),
+    )
   else if (command === 'section')
     process.stdout.write(compiledSection(readFileSync(0), args[0]))
   else sync()
