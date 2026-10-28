@@ -1,0 +1,2 @@
+- **Ajouter des domaines publics aux interfaces avec des plages de ports.** Pour les services dont les interfaces exposent une plage de ports, il est possible d'ajouter des domaines publics depuis l'interface web ou la CLI.
+- Les plages de ports activées conservent l'attribution de leurs domaines configurés lors de la recherche de doublons.

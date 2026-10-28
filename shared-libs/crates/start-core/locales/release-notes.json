@@ -1,0 +1,31 @@
+{
+  "_version": 2,
+  "release-notes.full-changelog": {
+    "en_US": "**[Full changelog for v%{version}](%{url})** — every change in this release.",
+    "de_DE": "**[Vollständiges Änderungsprotokoll für v%{version}](%{url})** — alle Änderungen in dieser Version.",
+    "es_ES": "**[Registro completo de cambios de v%{version}](%{url})** — todos los cambios de esta versión.",
+    "fr_FR": "**[Journal complet des modifications de la v%{version}](%{url})** — toutes les modifications de cette version.",
+    "pl_PL": "**[Pełna lista zmian w wersji %{version}](%{url})** — wszystkie zmiany w tym wydaniu."
+  },
+  "release-notes.full-changelog-fragments": {
+    "en_US": "**[Full changelog fragments for v%{version}](%{url})** — changes awaiting release.",
+    "de_DE": "**[Alle Änderungsfragmente für v%{version}](%{url})** — noch nicht veröffentlichte Änderungen.",
+    "es_ES": "**[Fragmentos del registro completo de cambios de v%{version}](%{url})** — cambios pendientes de publicación.",
+    "fr_FR": "**[Fragments du journal complet des modifications de la v%{version}](%{url})** — modifications en attente de publication.",
+    "pl_PL": "**[Fragmenty pełnej listy zmian w wersji %{version}](%{url})** — zmiany oczekujące na wydanie."
+  },
+  "release-notes.highlights-title": {
+    "en_US": "Highlights",
+    "de_DE": "Neuerungen",
+    "es_ES": "Novedades",
+    "fr_FR": "Nouveautés",
+    "pl_PL": "Nowości"
+  },
+  "release-notes.security-title": {
+    "en_US": "Security",
+    "de_DE": "Sicherheit",
+    "es_ES": "Seguridad",
+    "fr_FR": "Sécurité",
+    "pl_PL": "Bezpieczeństwo"
+  }
+}

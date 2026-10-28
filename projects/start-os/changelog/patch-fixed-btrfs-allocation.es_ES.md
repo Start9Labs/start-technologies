@@ -1,0 +1,2 @@
+- Recupera bloques de asignación sin usar de la unidad de datos mediante un equilibrado Btrfs inicial en segundo plano tras actualizar y un mantenimiento semanal posterior.
+- Avisa cuando queda poco espacio para asignar metadatos en la unidad de datos, antes de que los servicios sufran errores de escritura aunque se indique que hay espacio libre.
