@@ -224,6 +224,7 @@ pub struct DeviceInfoMiddleware {
     device_info: Option<DeviceInfo>,
     req: Option<RpcRequest>,
     legacy_signatures: bool,
+    legacy_os_versions: bool,
     inline_icons_for: Option<RpcRequest>,
 }
 impl DeviceInfoMiddleware {
@@ -233,6 +234,7 @@ impl DeviceInfoMiddleware {
             device_info: None,
             req: None,
             legacy_signatures: false,
+            legacy_os_versions: false,
             inline_icons_for: None,
         }
     }
@@ -267,12 +269,14 @@ impl DeviceInfoMiddleware {
                 self.legacy_signatures |= reads_legacy_signatures(&version)?;
             }
         }
+        self.legacy_os_versions =
+            !startwrt && self.legacy_signatures && request.method.as_str() == "os.version.get";
         Ok(())
     }
 }
 
 fn reads_legacy_signatures(version: &Version) -> Result<bool, Error> {
-    Ok(version <= &"0.4.0.3".parse::<Version>()?)
+    Ok(version < &"0.4.0.3".parse::<Version>()?)
 }
 
 /// Whether a StartOS version needs icons inline as data URLs.
@@ -406,7 +410,26 @@ impl Middleware<RegistryContext> for DeviceInfoMiddleware {
         }
         if let (true, Ok(res)) = (self.legacy_signatures, &mut response.result) {
             crate::sign::compat::downgrade_signatures(res);
+            if self.legacy_os_versions {
+                drop_unsigned_os_versions(res);
+            }
         }
+    }
+}
+
+fn drop_unsigned_os_versions(versions: &mut Value) {
+    if let Some(versions) = versions.as_object_mut() {
+        versions.retain(|_, info| {
+            ["iso", "squashfs", "img"].iter().all(|kind| {
+                info[*kind].as_object().map_or(true, |assets| {
+                    assets.values().all(|asset| {
+                        asset["signatures"]
+                            .as_object()
+                            .is_some_and(|sigs| !sigs.is_empty())
+                    })
+                })
+            })
+        });
     }
 }
 
@@ -423,7 +446,7 @@ mod tests {
 
     #[test]
     fn diagnostic_update_signatures_follow_source_version_without_device_info() {
-        for (version, legacy) in [("0.4.0.2", true), ("0.4.0.3", true), ("0.4.0.4", false)] {
+        for (version, legacy) in [("0.4.0.2", true), ("0.4.0.3", false), ("0.4.0.4", false)] {
             let mut middleware = DeviceInfoMiddleware::new();
             middleware
                 .prepare_request(
@@ -435,6 +458,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(middleware.legacy_signatures, legacy, "{version}");
+            assert_eq!(middleware.legacy_os_versions, legacy, "{version}");
         }
     }
 
@@ -458,6 +482,83 @@ mod tests {
                 assert_eq!(middleware.legacy_signatures, startwrt);
             }
         }
+    }
+
+    #[test]
+    fn legacy_os_version_filter_follows_device_version_and_method() {
+        for (header, method, expected) in [
+            (
+                "os.version=0.4.0.2&os.compat=*&os.platform=x86_64",
+                "os.version.get",
+                true,
+            ),
+            (
+                "os.version=0.4.0.3&os.compat=*&os.platform=x86_64",
+                "os.version.get",
+                false,
+            ),
+            (
+                "os.version=0.4.0.2&os.compat=*&os.platform=x86_64",
+                "package.get",
+                false,
+            ),
+        ] {
+            let mut middleware = DeviceInfoMiddleware::new();
+            middleware.device_info_header = Some(HeaderValue::from_static(header));
+            middleware
+                .prepare_request(
+                    false,
+                    Metadata {
+                        get_device_info: false,
+                    },
+                    &mut request(method, json!({})),
+                )
+                .unwrap();
+            assert_eq!(middleware.legacy_os_versions, expected, "{header} {method}");
+        }
+    }
+
+    #[test]
+    fn startwrt_keeps_os_versions_without_signatures() {
+        for header in [
+            None,
+            Some("os.version=0.1.0&os.compat=^0.1.0&os.platform=spacemit,k1-x_muse-pi-pro"),
+        ] {
+            for params in [json!({}), json!({ "sourceVersion": "0.1.0" })] {
+                let mut middleware = DeviceInfoMiddleware::new();
+                middleware.device_info_header = header.map(HeaderValue::from_static);
+                middleware
+                    .prepare_request(
+                        true,
+                        Metadata {
+                            get_device_info: false,
+                        },
+                        &mut request("os.version.get", params),
+                    )
+                    .unwrap();
+                assert!(middleware.legacy_signatures);
+                assert!(!middleware.legacy_os_versions);
+            }
+        }
+    }
+
+    #[test]
+    fn drops_os_versions_with_an_unsigned_asset() {
+        let signed = json!({ "signatures": { "signer": "sig" } });
+        let unsigned = json!({ "signatures": {} });
+        let mut res = json!({
+            "0.4.0.3": { "squashfs": { "x86_64": signed }, "iso": { "x86_64": signed }, "img": {} },
+            "0.4.0.4": { "squashfs": { "x86_64": signed, "aarch64": unsigned }, "iso": {}, "img": {} },
+        });
+        drop_unsigned_os_versions(&mut res);
+        assert_eq!(
+            res.as_object()
+                .unwrap()
+                .keys()
+                .map(|k| &**k)
+                .collect::<Vec<_>>(),
+            ["0.4.0.3"]
+        );
     }
 
     #[test]

@@ -2,6 +2,12 @@
 
 All notable changes to `start-registry` (the Start Registry server) are documented here. This project is versioned **independently** (starting at `1.0.0`); its version lives in `Cargo.toml`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.1]
+
+### Fixed
+
+- StartOS 0.4.0.3 servers now receive pure Ed25519 signatures on OS and package assets. They were previously stripped, which blocked updating to an OS release signed with a gpg-held key.
+
 ## [1.2.0]
 
 ### Added

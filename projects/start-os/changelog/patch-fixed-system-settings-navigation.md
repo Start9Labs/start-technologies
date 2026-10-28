@@ -1,1 +1,0 @@
-- Opening System Settings from the Start menu or the System tab while already in System shows General Settings.

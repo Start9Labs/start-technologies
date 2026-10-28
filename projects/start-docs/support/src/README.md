@@ -14,7 +14,7 @@ It runs in any modern browser and installs as an app on your phone or computer.
 
 - **[Installing the App](installing-the-app.md)** — Adding Start9 Support to your Home Screen or app list.
 
-- **[Chats](chats.md)** — Starting a chat, attaching files, replying and searching, and what happens when a chat closes.
+- **[Chats](chats.md)** — Starting a chat, attaching files, replying and searching, reading other customers' chats, and what happens when a chat closes.
 
 - **[Dux and Helix](dux-and-helix.md)** — Who answers your chat, how to reach a person, and what you can see of the work on your case.
 

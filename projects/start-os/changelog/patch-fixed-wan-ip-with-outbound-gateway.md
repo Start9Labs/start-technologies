@@ -1,1 +1,0 @@
-- A gateway's WAN IP is shown while another gateway is selected for outbound traffic.
