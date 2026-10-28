@@ -451,22 +451,22 @@ The start and end times for the blackout period. WiFi will be disabled between t
 Select which days of the week the blackout window should be active.`,
   '/wifi/passwords': `## Wi-Fi – Passwords
 
-Manage wireless network passwords. Each entry represents a Wi-Fi network with its own password and security profile controlling access permissions.
+Manage wireless network passwords. Every password joins the same Wi-Fi network, named under Wi-Fi › Settings. The password a device connects with decides its security profile.
 
 ### Security Profile
 
 Controls what the connected device can access on the network. Assign a security profile to limit or grant access to specific resources.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Passwords
 
-Each entry represents a Wi-Fi network with its own password and security profile controlling access permissions.
+Every password joins the same Wi-Fi network, named under Wi-Fi › Settings. The password a device connects with decides its security profile.
 
 ### Label
 
-A descriptive name for this Wi-Fi network, such as "Home" or "Guest Network". This is the network name (SSID) that devices will see.
+A descriptive name for this password, such as "Home" or "Guest Network". It appears only in this interface; devices never see it.
 
 ### Password
 
-The password devices will use to connect. Must be at least 8 characters. Use the generate button to create a strong random password.
+The password devices will use to connect. Must be at least 8 characters. Use the generate button to create a strong random password. Changing it disconnects devices using the old password until they reconnect with the new one.
 
 ### Security Profile
 

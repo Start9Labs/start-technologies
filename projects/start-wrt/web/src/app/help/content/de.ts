@@ -453,22 +453,22 @@ Die Start- und Endzeiten für die Sperrzeit. WiFi wird zwischen diesen Zeiten an
 Wählen Sie aus, an welchen Wochentagen die Sperrzeit aktiv sein soll.`,
   '/wifi/passwords': `## Wi-Fi – Passwörter
 
-Verwalten Sie die Passwörter für drahtlose Netzwerke. Jeder Eintrag steht für ein Wi-Fi-Netzwerk mit eigenem Passwort und eigenem Sicherheitsprofil, das die Zugriffsberechtigungen steuert.
+Verwalten Sie die Passwörter für drahtlose Netzwerke. Jedes Passwort verbindet mit demselben Wi-Fi-Netzwerk, dessen Name unter Wi-Fi › Einstellungen festgelegt wird. Das Passwort, mit dem sich ein Gerät verbindet, bestimmt sein Sicherheitsprofil.
 
 ### Sicherheitsprofil
 
 Steuert, worauf das verbundene Gerät im Netzwerk zugreifen kann. Weisen Sie ein Sicherheitsprofil zu, um den Zugriff auf bestimmte Ressourcen einzuschränken oder zu gewähren.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Passwörter
 
-Jeder Eintrag steht für ein Wi-Fi-Netzwerk mit eigenem Passwort und eigenem Sicherheitsprofil, das die Zugriffsberechtigungen steuert.
+Jedes Passwort verbindet mit demselben Wi-Fi-Netzwerk, dessen Name unter Wi-Fi › Einstellungen festgelegt wird. Das Passwort, mit dem sich ein Gerät verbindet, bestimmt sein Sicherheitsprofil.
 
 ### Bezeichnung
 
-Ein aussagekräftiger Name für dieses Wi-Fi-Netzwerk, etwa „Zuhause“ oder „Gastnetzwerk“. Dies ist der Netzwerkname (SSID), den Geräte sehen.
+Ein aussagekräftiger Name für dieses Passwort, etwa „Zuhause“ oder „Gastnetzwerk“. Er erscheint nur in dieser Oberfläche; Geräte sehen ihn nie.
 
 ### Passwort
 
-Das Passwort, das Geräte zum Verbinden verwenden. Muss mindestens 8 Zeichen lang sein. Verwenden Sie die Schaltfläche zum Generieren, um ein starkes, zufälliges Passwort zu erstellen.
+Das Passwort, das Geräte zum Verbinden verwenden. Muss mindestens 8 Zeichen lang sein. Verwenden Sie die Schaltfläche zum Generieren, um ein starkes, zufälliges Passwort zu erstellen. Eine Änderung trennt Geräte, die das alte Passwort verwenden, bis sie sich mit dem neuen erneut verbinden.
 
 ### Sicherheitsprofil
 

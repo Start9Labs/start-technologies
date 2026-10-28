@@ -149,7 +149,7 @@ export default class WifiPasswords {
         this.service.addPassword({
           label: result.label,
           profile: result.profile,
-          password: result.password!,
+          password: result.password,
         })
       })
   }
@@ -176,6 +176,7 @@ export default class WifiPasswords {
           ...passwords[index],
           label: result.label,
           profile: result.profile,
+          password: result.password,
         }
         const newConfig = { ...current, passwords }
 
@@ -195,8 +196,7 @@ export default class WifiPasswords {
         )
           return
 
-        await this.service.store(newConfig)
-        this.service.refresh()
+        this.service.save(newConfig)
       })
   }
 
