@@ -8,6 +8,7 @@ use crate::prelude::*;
 use crate::registry::asset::RegistryAsset;
 use crate::registry::context::RegistryContext;
 use crate::rpc_continuations::Guid;
+use crate::s9pk::manifest::LocaleString;
 use crate::sign::commitment::blake3::Blake3Commitment;
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
@@ -40,7 +41,7 @@ impl Map for OsVersionInfoMap {
 #[model = "Model<Self>"]
 pub struct OsVersionInfo {
     pub headline: String,
-    pub release_notes: String,
+    pub release_notes: LocaleString,
     pub source_version: VersionRange,
     pub authorized: BTreeSet<Guid>,
     pub iso: BTreeMap<InternedString, RegistryAsset<Blake3Commitment>>, // platform (i.e. x86_64-nonfree) -> asset
@@ -53,4 +54,38 @@ rpc_toolkit::ts_export!(OsVersionInfo, namespaces = [""]);
 
 pub async fn get_os_index(ctx: RegistryContext) -> Result<OsIndex, Error> {
     ctx.db.peek().await.into_index().into_os().de()
+}
+
+#[cfg(test)]
+mod tests {
+    use imbl_value::json;
+
+    use super::*;
+    use crate::registry::os::version::AddVersionParams;
+
+    #[test]
+    fn notes_round_trip_and_promote_without_rewriting_legacy_records() {
+        for notes in [
+            json!("English notes"),
+            json!({ "en_US": "English notes", "pl_PL": "Polskie informacje" }),
+        ] {
+            let wire = json!({
+                "headline": "v0.4.0.5",
+                "releaseNotes": notes,
+                "sourceVersion": "*",
+                "authorized": [],
+                "iso": {},
+                "squashfs": {},
+                "img": {},
+            });
+            let info: OsVersionInfo = from_value(wire.clone()).unwrap();
+            assert_eq!(to_value(&info).unwrap(), wire);
+            let promotion = AddVersionParams::from_info("0.4.0.5".parse().unwrap(), &info);
+            assert_eq!(promotion.release_notes, info.release_notes);
+            assert_eq!(
+                to_value(&promotion).unwrap()["releaseNotes"],
+                wire["releaseNotes"]
+            );
+        }
+    }
 }

@@ -1,0 +1,2 @@
+- Odzyskuje nieużywane grupy bloków na dysku danych przez pierwsze równoważenie Btrfs w tle po aktualizacji, a następnie cotygodniową konserwację.
+- Ostrzega, gdy zaczyna brakować miejsca na alokację metadanych dysku danych, zanim usługi napotkają błędy zapisu mimo zgłaszanego wolnego miejsca.
