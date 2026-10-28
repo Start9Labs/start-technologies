@@ -1,18 +1,18 @@
-# i18n Patterns in `core/`
+# i18n Patterns in `start-core`
 
 ## Library & Setup
 
-**Crate:** [`rust-i18n`](https://crates.io/crates/rust-i18n) v3.1.5 (`core/Cargo.toml`)
+**Crate:** [`rust-i18n`](https://crates.io/crates/rust-i18n) v3.1.5 (`shared-libs/crates/start-core/Cargo.toml`)
 
-**Initialization** (`core/src/lib.rs:3`):
+**Initialization** (`src/lib.rs`):
 
 ```rust
 rust_i18n::i18n!("locales", fallback = ["en_US"]);
 ```
 
-This macro scans `core/locales/` at compile time and embeds all translations as constants.
+This macro scans `locales/` YAML and JSON at compile time and embeds all translations as constants.
 
-**Prelude re-export** (`core/src/prelude.rs:4`):
+**Prelude re-export** (`src/prelude.rs`):
 
 ```rust
 pub use rust_i18n::t;
@@ -22,8 +22,13 @@ Most modules import `t!` via the prelude.
 
 ## Translation File
 
-**Location:** `core/locales/i18n.yaml`
-**Format:** YAML v2 (~755 keys)
+**Location:** `locales/i18n.yaml`
+**Format:** YAML v2
+
+`locales/release-notes.json` owns the release-note full-changelog link labels shared
+with `scripts/changelog.mjs`. It uses rust-i18n JSON v2: `_version: 2` beside
+translation keys, each mapping locale names to strings. Keep each key in exactly
+one file; both consumers read the same labels.
 
 **Supported languages:** `en_US`, `de_DE`, `es_ES`, `fr_FR`, `pl_PL`
 
@@ -91,7 +96,7 @@ Examples:
 
 ## Locale Selection
 
-`core/src/bins/mod.rs:15-36` — `set_locale_from_env()`:
+`src/bins/mod.rs` — `set_locale_from_env()`:
 
 1. Reads `LANG` environment variable
 2. Strips `.UTF-8` suffix
@@ -99,7 +104,7 @@ Examples:
 
 ## Adding New Keys
 
-1. Add the key to `core/locales/i18n.yaml` with all 5 language translations
+1. Add the key to `locales/i18n.yaml` with all 5 language translations, or to `locales/release-notes.json` for labels shared with the release-note publisher
 2. Use the `t!("your.key.name")` macro in Rust code
 3. Follow existing namespace conventions — match the module path where the key is used
 4. Use kebab-case for multi-word segments

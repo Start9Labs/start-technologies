@@ -1,0 +1,1 @@
+- Le trafic filaire entre Internet et les appareils atteint le plein débit gigabit. Le routeur répartit le travail de chaque port Ethernet entre ses cœurs de processeur ; les connexions établies évitent les vérifications du pare-feu par paquet déjà effectuées.
