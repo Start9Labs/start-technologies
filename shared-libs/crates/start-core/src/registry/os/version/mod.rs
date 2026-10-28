@@ -69,6 +69,13 @@ pub struct AddVersionParams {
     pub headline: String,
     #[arg(help = "help.arg.release-notes")]
     pub release_notes: String,
+    /// Omitting this clears previously published translations.
+    #[arg(
+        long,
+        help = "help.arg.release-notes-translations",
+        value_parser = |value: &str| serde_json::from_str::<BTreeMap<InternedString, String>>(value)
+    )]
+    pub release_notes_translations: Option<BTreeMap<InternedString, String>>,
     #[arg(help = "help.arg.source-version-range")]
     pub source_version: VersionRange,
     #[arg(skip)]
@@ -80,12 +87,26 @@ pub struct AddVersionParams {
 rpc_toolkit::reflect_ts!(AddVersionParams);
 rpc_toolkit::ts_export!(AddVersionParams, namespaces = [""]);
 
+impl AddVersionParams {
+    pub(super) fn from_info(version: Version, info: &OsVersionInfo) -> Self {
+        Self {
+            version,
+            headline: info.headline.clone(),
+            release_notes: info.release_notes.clone(),
+            release_notes_translations: Some(info.release_notes_translations.clone()),
+            source_version: info.source_version.clone(),
+            signer: None,
+        }
+    }
+}
+
 pub async fn add_version(
     ctx: RegistryContext,
     AddVersionParams {
         version,
         headline,
         release_notes,
+        release_notes_translations,
         source_version,
         signer,
     }: AddVersionParams,
@@ -100,8 +121,8 @@ pub async fn add_version(
                 .as_versions_mut()
                 .upsert(&version, || Ok(OsVersionInfo::default()))?
                 .mutate(|i| {
+                    i.set_release_notes(release_notes, release_notes_translations)?;
                     i.headline = headline;
-                    i.release_notes = release_notes;
                     i.source_version = source_version;
                     i.authorized.extend(signer);
                     Ok(())
@@ -170,8 +191,7 @@ pub async fn get_version(
         platform,
         device_info,
     }: GetOsVersionParams,
-) -> Result<Value, Error> // BTreeMap<Version, OsVersionInfo>
-{
+) -> Result<Value, Error> {
     let source = source.or_else(|| device_info.as_ref().map(|d| d.os.version.clone()));
     let platform = platform.or_else(|| device_info.as_ref().map(|d| d.os.platform.clone()));
     if let (Some(server_id), Some(arch)) = (server_id, &platform) {
@@ -222,10 +242,7 @@ pub async fn get_version(
     Ok(res)
 }
 
-pub fn display_version_info<T>(
-    params: WithIoFormat<T>,
-    info: Value, // BTreeMap<Version, OsVersionInfo>,
-) -> Result<(), Error> {
+pub fn display_version_info<T>(params: WithIoFormat<T>, info: Value) -> Result<(), Error> {
     use prettytable::*;
 
     let info = from_value::<BTreeMap<Version, OsVersionInfo>>(info)?;
@@ -255,4 +272,83 @@ pub fn display_version_info<T>(
     }
     print_table(&table)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use imbl_value::json;
+
+    use super::*;
+
+    #[test]
+    fn add_version_accepts_typed_translation_maps_from_cli_and_rpc() {
+        let cli = AddVersionParams::try_parse_from([
+            "add",
+            "0.4.0.5",
+            "v0.4.0.5",
+            "English notes",
+            "*",
+            "--release-notes-translations",
+            r#"{"de_DE":"Deutsche Hinweise","pl_PL":"Polskie informacje"}"#,
+        ])
+        .unwrap();
+        let rpc: AddVersionParams = from_value(json!({
+            "version": "0.4.0.5",
+            "headline": "v0.4.0.5",
+            "releaseNotes": "English notes",
+            "releaseNotesTranslations": {
+                "de_DE": "Deutsche Hinweise",
+                "pl_PL": "Polskie informacje",
+            },
+            "sourceVersion": "*",
+        }))
+        .unwrap();
+        assert_eq!(to_value(&cli).unwrap(), to_value(&rpc).unwrap());
+        assert_eq!(cli.release_notes, "English notes");
+        assert_eq!(
+            cli.release_notes_translations
+                .unwrap()
+                .get("pl_PL")
+                .unwrap(),
+            "Polskie informacje"
+        );
+    }
+
+    #[test]
+    fn legacy_add_version_keeps_plain_strings_and_omitted_translations() {
+        for english in ["English notes", r#"{"pl_PL":"literal JSON notes"}"#] {
+            let params =
+                AddVersionParams::try_parse_from(["add", "0.4.0.5", "v0.4.0.5", english, "*"])
+                    .unwrap();
+            assert_eq!(params.release_notes, english);
+            assert!(params.release_notes_translations.is_none());
+            let rpc: AddVersionParams = from_value(json!({
+                "version": "0.4.0.5",
+                "headline": "v0.4.0.5",
+                "releaseNotes": english,
+                "sourceVersion": "*",
+            }))
+            .unwrap();
+            assert_eq!(rpc.release_notes, english);
+            assert!(rpc.release_notes_translations.is_none());
+        }
+    }
+
+    #[test]
+    fn cli_rejects_invalid_translation_objects() {
+        for translations in ["not JSON", "[]", r#"{"pl_PL":4}"#] {
+            assert!(
+                AddVersionParams::try_parse_from([
+                    "add",
+                    "0.4.0.5",
+                    "v0.4.0.5",
+                    "English notes",
+                    "*",
+                    "--release-notes-translations",
+                    translations,
+                ])
+                .is_err()
+            );
+        }
+    }
 }

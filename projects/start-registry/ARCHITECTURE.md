@@ -71,6 +71,19 @@ revisions whose JSON Patch paths are relative to the selected subtree.
 
 Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hold versions, dependency `VersionRange`s, and `RegistryAsset`s. Assets carry **Blake3 commitments** (`sign/commitment/blake3`) for content addressing and integrity, and are signed by registered signers.
 
+OS versions retain English Markdown in `releaseNotes` and optionally carry non-English
+Markdown in `releaseNotesTranslations`, keyed by locale. English belongs exclusively in
+`releaseNotes`; the add-version API rejects `en_US` in the translations map. Registries
+store and return every translation without choosing a language. StartOS selects locally
+through its existing `LocalizePipe`, with English fallback. Older clients ignore the
+additional field; newer clients can still consume English-only registries.
+
+`os.version.add` replaces English notes and the complete translation set together.
+`--release-notes-translations` accepts a JSON object; omitting it clears translations.
+Promotion carries both fields unchanged. Publishers need the updated CLI to pass the
+new option. Older registries ignore the additional request field and retain English.
+The additive schema migration leaves existing English-only records untouched.
+
 ## Persistence
 
 `RegistryContext::init` resolves `datadir` (default `/var/lib/startos`) and:

@@ -2489,6 +2489,13 @@ registry.os.asset.remove-not-exist:
   pl_PL: "v%{version} nie ma zasobu zaindeksowanego dla %{platform}, więc nic nie usunięto"
 
 # registry/os/version/signer.rs
+registry.os.version.english-notes-in-translations:
+  en_US: "English release notes belong in releaseNotes, not releaseNotesTranslations"
+  de_DE: "Englische Versionshinweise gehören in releaseNotes, nicht in releaseNotesTranslations"
+  es_ES: "Las notas de lanzamiento en inglés deben estar en releaseNotes, no en releaseNotesTranslations"
+  fr_FR: "Les notes de version en anglais doivent figurer dans releaseNotes, pas dans releaseNotesTranslations"
+  pl_PL: "Angielskie informacje o wydaniu należą do releaseNotes, a nie do releaseNotesTranslations"
+
 registry.os.version.signer-not-authorized:
   en_US: "Signer %{signer} is not authorized to sign for v%{version}"
   de_DE: "Unterzeichner %{signer} ist nicht autorisiert, für v%{version} zu signieren"
@@ -4900,6 +4907,13 @@ help.arg.release-notes:
   es_ES: "Notas de lanzamiento para esta versión"
   fr_FR: "Notes de version pour cette version"
   pl_PL: "Informacje o wydaniu dla tej wersji"
+
+help.arg.release-notes-translations:
+  en_US: "JSON object of non-English release-note translations; replaces previous translations"
+  de_DE: "JSON-Objekt mit nicht-englischen Übersetzungen der Versionshinweise; ersetzt bisherige Übersetzungen"
+  es_ES: "Objeto JSON con traducciones no inglesas de las notas de lanzamiento; reemplaza las traducciones anteriores"
+  fr_FR: "Objet JSON des traductions non anglaises des notes de version ; remplace les traductions précédentes"
+  pl_PL: "Obiekt JSON z tłumaczeniami informacji o wydaniu na języki inne niż angielski; zastępuje poprzednie tłumaczenia"
 
 help.arg.replay-id:
   en_US: "Replay identifier for task"

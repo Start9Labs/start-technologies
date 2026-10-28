@@ -2,5 +2,5 @@
 user-facing: true
 ---
 
-- Show post-update release highlights and the full-changelog footer in the server's language, with English highlights as a fallback when a translation is unavailable.
+- Show release highlights and their full-changelog link in the server's language before and after an update, with English fallback when a translation is unavailable.
 - Point the welcome notification's full-changelog link at the published changelog.
