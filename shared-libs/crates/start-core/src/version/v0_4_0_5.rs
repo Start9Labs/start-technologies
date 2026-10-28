@@ -19,7 +19,7 @@ impl VersionT for Version {
     type PreUpRes = ();
 
     fn migration_revision(self) -> usize {
-        1
+        2
     }
     async fn pre_up(self) -> Result<Self::PreUpRes, Error> {
         Ok(())
@@ -30,7 +30,12 @@ impl VersionT for Version {
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
     }
-    fn up(self, _db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
+    fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
+        db["private"]
+            .as_object_mut()
+            .or_not_found("private")?
+            .entry("osSecurityNotifications".into())
+            .or_insert_with(|| imbl_value::json!({}));
         Ok(Value::Null)
     }
     async fn post_up(self, _ctx: &RpcContext, _input: Value) -> Result<(), Error> {
@@ -59,8 +64,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn initial_balance_advances_the_published_migration_revision() {
-        assert_eq!(Version.migration_revision(), 1);
+    fn security_notification_migration_preserves_delivery_history() {
+        let mut db = imbl_value::json!({ "private": {} });
+        Version.up(&mut db, ()).unwrap();
+        assert_eq!(
+            db["private"]["osSecurityNotifications"],
+            imbl_value::json!({})
+        );
+        db["private"]["osSecurityNotifications"] = imbl_value::json!({
+            "https://registry.test/": { "0.4.0.6:0": "published-build" }
+        });
+        let before = db.clone();
+        Version.up(&mut db, ()).unwrap();
+        assert_eq!(db, before);
+    }
+
+    #[test]
+    fn published_migration_revision_includes_security_notifications() {
+        assert_eq!(Version.migration_revision(), 2);
     }
 
     #[tokio::test]
