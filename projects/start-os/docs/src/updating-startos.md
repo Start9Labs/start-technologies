@@ -23,7 +23,7 @@
 
 1. When your server comes back, a notification welcomes you to the new version. Open it from **Notifications** — the bell in the menu — to read that release's notes again at any time.
 
-A browser page left open during the update shows an **Interface update** notice while the updated interface downloads. You can keep using the page; select **Refresh** when the interface is ready. An installation failure or broken cached interface triggers a recovery reload. If the problem persists, the notice offers **Retry**, **Details**, and **Reset UI cache**. Confirming a cache reset reloads the interface while preserving your login and settings.
+A browser page left open during the update shows **Refresh Needed** when the server returns. Dismiss the dialog to finish your work before refreshing. Select **Refresh** to load the updated interface; the dialog shows checking and download status while waiting. Success or failure completes that requested refresh. Background failures offer **Refresh**, **Retry**, **Details**, and **Reset UI cache** in the dialog. A cache reset requires its own **Refresh** confirmation and preserves your login and settings.
 
 ## Trusted update signers
 

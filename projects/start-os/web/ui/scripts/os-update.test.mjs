@@ -8,7 +8,7 @@ import test from 'node:test'
 import ts from 'typescript'
 import '@angular/compiler'
 import { createEnvironmentInjector, runInInjectionContext } from '@angular/core'
-import { BehaviorSubject, EMPTY, Subject } from 'rxjs'
+import { BehaviorSubject, EMPTY, firstValueFrom, Subject } from 'rxjs'
 
 // Presentation substitutes keep browser-only dependencies out of class-method tests.
 const boundaries = new Map()
@@ -57,7 +57,7 @@ boundary('@taiga-ui/dompurify', ['NgDompurifyPipe'])
 boundary(
   '@ng-web-apis/common',
   [],
-  'export const WA_WINDOW = Symbol("window"); export const WA_SESSION_STORAGE = Symbol("session storage");',
+  'export const WA_WINDOW = Symbol("window");',
 )
 boundary(
   '@taiga-ui/polymorpheus',
@@ -140,7 +140,7 @@ const { ApiService } = await import('src/app/services/api/embassy-api.service')
 const { TaskService, DialogService, i18nPipe, i18nService } =
   await import('@start9labs/shared')
 const { CONTEXT } = await import('@taiga-ui/polymorpheus')
-const { WA_WINDOW, WA_SESSION_STORAGE } = await import('@ng-web-apis/common')
+const { WA_WINDOW } = await import('@ng-web-apis/common')
 const { UiUpdateService } = await import('src/app/services/ui-update.service')
 const { ConfigService } = await import('src/app/services/config.service')
 const { trustedOsUpdateSigners } =
@@ -354,15 +354,7 @@ function fixture(t, cachedVersion, providers = []) {
   }
 }
 
-function uiFixture(
-  t,
-  {
-    enabled = true,
-    controlled = true,
-    storage = new Map(),
-    build = 'build-a',
-  } = {},
-) {
+function uiFixture(t, { enabled = true, controlled = true } = {}) {
   const events = new Subject()
   const unrecoverable = new Subject()
   const checks = []
@@ -423,16 +415,9 @@ function uiFixture(
     },
     {
       provide: ConfigService,
-      useValue: { version: '0.4.0.4', gitHash: build },
+      useValue: { version: '0.4.0.4' },
     },
     { provide: WA_WINDOW, useValue: win },
-    {
-      provide: WA_SESSION_STORAGE,
-      useValue: storage && {
-        getItem: key => storage.get(key) ?? null,
-        setItem: (key, value) => storage.set(key, value),
-      },
-    },
   ])
   const ui = f.get(UiUpdateService)
   return {
@@ -445,7 +430,6 @@ function uiFixture(
     caches,
     registration,
     win,
-    storage,
     get reloads() {
       return reloads
     },
@@ -465,7 +449,7 @@ const failed = {
   error: 'hash mismatch',
 }
 
-test('an OS version mismatch checks and tracks installation without blocking or premature reload', async t => {
+test('an OS version mismatch tracks background installation without reloading the page', async t => {
   const f = uiFixture(t)
   assert.equal(f.ui.state().status, 'idle')
   assert.equal(f.checks.length, 0)
@@ -474,11 +458,10 @@ test('an OS version mismatch checks and tracks installation without blocking or 
   assert.equal(f.checks.length, 1)
   await f.ui.check()
   assert.equal(f.checks.length, 1)
-  f.ui.reload()
+  assert.equal(f.ui.refreshing(), false)
   assert.equal(f.reloads, 0)
   f.events.next(detected)
   assert.equal(f.ui.state().status, 'updating')
-  f.ui.reload()
   assert.equal(f.reloads, 0)
   f.events.next(ready)
   f.checks[0].resolve(true)
@@ -486,7 +469,8 @@ test('an OS version mismatch checks and tracks installation without blocking or 
   assert.equal(f.ui.state().status, 'ready')
   assert.equal(f.reloads, 0)
   assert.deepEqual(f.tasks, [])
-  f.ui.reload()
+  f.ui.refresh()
+  assert.equal(f.ui.state().status, 'reloading')
   assert.equal(f.reloads, 1)
 })
 
@@ -499,7 +483,7 @@ for (const options of [{ enabled: false }, { controlled: false }]) {
     assert.equal(f.ui.state().status, 'ready')
     assert.equal(f.checks.length, 0)
     assert.equal(component.show(), true)
-    f.ui.reload()
+    f.ui.refresh()
     assert.equal(f.reloads, 1)
     assert.deepEqual(f.tasks, [])
   })
@@ -523,7 +507,7 @@ test('an outdated page can refresh an already cached update even when the check 
   f.checks[0].resolve(false)
   await tick()
   assert.equal(f.ui.state().status, 'ready')
-  f.ui.reload()
+  f.ui.refresh()
   assert.equal(f.reloads, 1)
 })
 
@@ -533,8 +517,9 @@ test('a false check without a no-new-version event is retryable, not falsely rea
   f.checks[0].resolve(false)
   await tick()
   assert.deepEqual(f.ui.state(), { status: 'error', error: null })
-  f.ui.reload()
   assert.equal(f.reloads, 0)
+  f.ui.refresh()
+  assert.equal(f.reloads, 1)
 })
 
 test('no-new-version events do not announce an update when the running interface matches the server', t => {
@@ -546,32 +531,62 @@ test('no-new-version events do not announce an update when the running interface
 })
 
 for (const failure of ['installation', 'unrecoverable']) {
-  test(`${failure} automatically reloads once per UI build in the tab, then exposes repeated failures`, async t => {
-    const storage = new Map()
-    const f = uiFixture(t, { storage })
-    f.version('0.4.0.5')
-    const emit = fixture =>
+  test(`${failure} in the background preserves the page until Refresh is clicked`, t => {
+    const f = uiFixture(t)
+    const emit = () =>
       failure === 'installation'
-        ? fixture.events.next(failed)
-        : fixture.unrecoverable.next({
+        ? f.events.next(failed)
+        : f.unrecoverable.next({
             type: 'UNRECOVERABLE_STATE',
             reason: 'missing cached file',
           })
-    emit(f)
-    assert.equal(f.reloads, 1)
+    emit()
+    emit()
     assert.equal(f.ui.state().status, 'error')
-    emit(f)
+    assert.equal(f.ui.refreshing(), false)
+    assert.equal(f.reloads, 0)
+    f.ui.refresh()
     assert.equal(f.reloads, 1)
-    f.checks[0].resolve(false)
+    assert.equal(f.ui.state().status, 'reloading')
+    emit()
+    assert.equal(f.reloads, 1)
+  })
+}
+
+for (const outcome of [
+  'ready',
+  'cached',
+  'installation',
+  'unrecoverable',
+  'offline',
+  'rejected',
+]) {
+  test(`a requested refresh waits for ${outcome}, then reloads exactly once`, async t => {
+    const f = uiFixture(t)
+    f.version('0.4.0.5')
+    f.ui.refresh()
+    assert.equal(f.ui.refreshing(), true)
+    assert.equal(f.checks.length, 1)
+    assert.equal(f.reloads, 0)
+    if (['ready', 'installation', 'unrecoverable'].includes(outcome))
+      f.events.next(detected)
+    if (outcome === 'ready') f.events.next(ready)
+    else if (outcome === 'cached') f.events.next(noUpdate)
+    else if (outcome === 'installation') f.events.next(failed)
+    else if (outcome === 'unrecoverable')
+      f.unrecoverable.next({
+        type: 'UNRECOVERABLE_STATE',
+        reason: 'missing file',
+      })
+    if (outcome === 'rejected') f.checks[0].reject(new Error('check failed'))
+    else f.checks[0].resolve(outcome === 'ready')
     await tick()
-    assert.equal(f.ui.state().status, 'error')
-    const afterReload = uiFixture(t, { storage })
-    emit(afterReload)
-    assert.equal(afterReload.reloads, 0)
-    assert.equal(afterReload.ui.state().status, 'error')
-    const nextBuild = uiFixture(t, { storage, build: 'build-b' })
-    emit(nextBuild)
-    assert.equal(nextBuild.reloads, 1)
+    assert.equal(f.reloads, 1)
+    assert.equal(f.ui.state().status, 'reloading')
+    assert.equal(f.ui.refreshing(), true)
+    f.events.next(failed)
+    f.ui.refresh()
+    assert.equal(f.reloads, 1)
   })
 }
 
@@ -593,18 +608,17 @@ test('a rejected check stays actionable without reloading the working UI, and ca
   assert.equal(f.ui.state().status, 'ready')
 })
 
-test('a silent worker leaves a nonblocking checking state with an explicit cache-reset escape', async t => {
-  const storage = new Map([
-    ['auth', 'device-key'],
-    ['settings', 'preferences'],
-  ])
-  const f = uiFixture(t, { storage })
+test('a requested refresh with a silent worker retains the cache-reset escape', async t => {
+  const f = uiFixture(t)
   const component = f.make(RefreshAlertComponent)
   f.version('0.4.0.5')
   await tick()
   assert.equal(f.ui.state().status, 'checking')
+  f.ui.refresh()
+  assert.equal(f.ui.refreshing(), true)
   assert.deepEqual(f.tasks, [])
   component.resetCache()
+  assert.equal(f.confirmations[0].options.data.yes, 'Refresh')
   f.confirmations[0].response.next(false)
   assert.deepEqual(f.operations, [])
   component.resetCache()
@@ -623,24 +637,10 @@ test('a silent worker leaves a nonblocking checking state with an explicit cache
     [...f.caches.keys()],
     ['ngsw:/other/:db:control', 'other-cache'],
   )
-  assert.deepEqual(
-    [...storage],
-    [
-      ['auth', 'device-key'],
-      ['settings', 'preferences'],
-    ],
-  )
   assert.equal(f.reloads, 1)
   f.checks[0].resolve(false)
   await tick()
-  assert.equal(f.ui.state().status, 'resetting')
-})
-
-test('when session storage is unavailable, failure stays actionable rather than risking a reload loop', t => {
-  const f = uiFixture(t, { storage: null })
-  f.events.next(failed)
-  assert.equal(f.ui.state().status, 'error')
-  assert.equal(f.reloads, 0)
+  assert.equal(f.ui.state().status, 'reloading')
 })
 
 test('cache-reset failure preserves the UI and exposes the error without an automatic reload', async t => {
@@ -651,12 +651,27 @@ test('cache-reset failure preserves the UI and exposes the error without an auto
   }
   await f.ui.resetCache()
   assert.equal(f.ui.state().status, 'error')
+  assert.equal(f.ui.refreshing(), false)
   assert.match(f.ui.state().error, /browser refused reset/)
   assert.equal(f.reloads, 0)
   assert.equal(f.caches.size, 5)
 })
 
-test('dismissing an update notice does not hide the next state', t => {
+test('a requested refresh keeps the dialog open until navigation', async t => {
+  const f = uiFixture(t)
+  const component = f.make(RefreshAlertComponent)
+  f.version('0.4.0.5')
+  assert.equal(await firstValueFrom(component.canClose$), true)
+  component.dismissed.set(true)
+  assert.equal(component.show(), false)
+  f.ui.refresh()
+  assert.equal(await firstValueFrom(component.canClose$), false)
+  assert.equal(component.show(), true)
+  component.dismissed.set(true)
+  assert.equal(component.show(), true)
+})
+
+test('dismissing an update dialog does not hide the next state', t => {
   const f = uiFixture(t)
   const component = f.make(RefreshAlertComponent)
   f.version('0.4.0.5')

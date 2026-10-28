@@ -1,7 +1,7 @@
 import { inject, Service, signal } from '@angular/core'
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop'
 import { SwUpdate } from '@angular/service-worker'
-import { WA_SESSION_STORAGE, WA_WINDOW } from '@ng-web-apis/common'
+import { WA_WINDOW } from '@ng-web-apis/common'
 import { Version } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import { distinctUntilChanged, filter, map, merge, shareReplay } from 'rxjs'
@@ -11,20 +11,21 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
 
 type UiUpdateState =
   | {
-      status: 'idle' | 'checking' | 'updating' | 'ready' | 'resetting'
+      status:
+        | 'idle'
+        | 'checking'
+        | 'updating'
+        | 'ready'
+        | 'resetting'
+        | 'reloading'
     }
   | { status: 'error'; error: string | null }
-
-const RECOVERY_KEY = '_startos/ui-update-recovery'
 
 @Service()
 export class UiUpdateService {
   private readonly updates = inject(SwUpdate)
   private readonly win = inject(WA_WINDOW)
-  private readonly storage = inject(WA_SESSION_STORAGE)
-  private readonly config = inject(ConfigService)
-  private readonly build = this.config.gitHash || this.config.version
-  private readonly version = Version.parse(this.config.version)
+  private readonly version = Version.parse(inject(ConfigService).version)
   private readonly outdated$ = inject<PatchDB<DataModel>>(PatchDB)
     .watch$('serverInfo', 'version')
     .pipe(
@@ -33,8 +34,10 @@ export class UiUpdateService {
       shareReplay({ bufferSize: 1, refCount: true }),
     )
   private readonly current = signal<UiUpdateState>({ status: 'idle' })
+  private readonly requested = signal(false)
 
   readonly state = this.current.asReadonly()
+  readonly refreshing = this.requested.asReadonly()
   readonly outdated = toSignal(this.outdated$, { initialValue: false })
 
   private readonly events = merge(
@@ -46,20 +49,20 @@ export class UiUpdateService {
       if (this.state().status === 'resetting') return
       switch (event.type) {
         case 'VERSION_DETECTED':
-          this.current.set({ status: 'updating' })
+          this.transition({ status: 'updating' })
           break
         case 'VERSION_READY':
-          this.current.set({ status: 'ready' })
+          this.transition({ status: 'ready' })
           break
         case 'NO_NEW_VERSION_DETECTED':
           if (['idle', 'checking'].includes(this.state().status))
-            this.current.set({ status: this.outdated() ? 'ready' : 'idle' })
+            this.transition({ status: this.outdated() ? 'ready' : 'idle' })
           break
         case 'VERSION_INSTALLATION_FAILED':
-          this.recover(event.error)
+          this.fail(event.error)
           break
         case 'UNRECOVERABLE_STATE':
-          this.recover(event.reason)
+          this.fail(event.reason)
           break
       }
     })
@@ -71,20 +74,24 @@ export class UiUpdateService {
     })
 
   async check(): Promise<void> {
-    if (['checking', 'updating', 'resetting'].includes(this.state().status))
+    if (
+      ['checking', 'updating', 'resetting', 'reloading'].includes(
+        this.state().status,
+      )
+    )
       return
     if (
       !this.updates.isEnabled ||
       this.win.navigator.serviceWorker.controller === null
     ) {
-      this.current.set({ status: 'ready' })
+      this.transition({ status: 'ready' })
       return
     }
-    this.current.set({ status: 'checking' })
+    this.transition({ status: 'checking' })
     try {
       const found = await this.updates.checkForUpdate()
       if (this.state().status === 'checking')
-        this.current.set(
+        this.transition(
           found ? { status: 'ready' } : { status: 'error', error: null },
         )
     } catch (error) {
@@ -92,13 +99,16 @@ export class UiUpdateService {
     }
   }
 
-  reload(): void {
-    if (this.state().status === 'ready') this.win.location.reload()
+  refresh(): void {
+    if (['resetting', 'reloading'].includes(this.state().status)) return
+    this.requested.set(true)
+    if (!this.finishRefresh()) void this.check()
   }
 
   async resetCache(): Promise<void> {
-    if (this.state().status === 'resetting') return
-    this.current.set({ status: 'resetting' })
+    if (['resetting', 'reloading'].includes(this.state().status)) return
+    this.requested.set(true)
+    this.transition({ status: 'resetting' })
     try {
       const registration =
         await this.win.navigator.serviceWorker?.getRegistration()
@@ -113,21 +123,34 @@ export class UiUpdateService {
             .map(name => this.win.caches.delete(name)),
         )
       }
-      this.win.location.reload()
+      this.reloadPage()
     } catch (error) {
+      this.requested.set(false)
       this.fail(error)
     }
   }
 
-  private fail(error: unknown): void {
-    this.current.set({ status: 'error', error: String(error) })
+  private transition(state: UiUpdateState): void {
+    if (this.state().status === 'reloading') return
+    this.current.set(state)
+    this.finishRefresh()
   }
 
-  private recover(error: string): void {
-    this.fail(error)
-    if (!this.storage || this.storage.getItem(RECOVERY_KEY) === this.build)
-      return
-    this.storage.setItem(RECOVERY_KEY, this.build)
+  private finishRefresh(): boolean {
+    const { status } = this.state()
+    if (this.refreshing() && (status === 'ready' || status === 'error')) {
+      this.reloadPage()
+      return true
+    }
+    return status === 'reloading'
+  }
+
+  private reloadPage(): void {
+    this.current.set({ status: 'reloading' })
     this.win.location.reload()
+  }
+
+  private fail(error: unknown): void {
+    this.transition({ status: 'error', error: String(error) })
   }
 }
