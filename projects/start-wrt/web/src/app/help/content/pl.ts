@@ -391,7 +391,7 @@ DNS (system nazw domen) tłumaczy nazwy domen na adresy IP.
 
 Włącz DNS over HTTPS (DoH) dla szyfrowanych zapytań DNS. Poprawia to prywatność, zapobiegając podsłuchiwaniu Twojego ruchu DNS.
 
-**Uwaga:** Nie wszystkie serwery DNS obsługują DoH. Powszechne serwery, które to robią, to Cloudflare (1.1.1.1), Google (8.8.8.8) i Quad9 (9.9.9.9).`,
+**Uwaga:** Nie wszystkie serwery DNS obsługują DoH. Powszechne serwery, które to robią, to Cloudflare (1.1.1.1) i Google (8.8.8.8).`,
   '/wan/dynamic-dns': `## WAN – Dynamiczny DNS
 
 ### Dynamiczny DNS
