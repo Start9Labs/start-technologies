@@ -691,6 +691,7 @@ fn sections_to_raw_port(
 fn compute_status(
     port: &RawPort,
     device: Option<&Device>,
+    router_has_gua: bool,
 ) -> (PublishedPortStatus, Option<String>) {
     if !port.enabled {
         return (PublishedPortStatus::Disabled, None);
@@ -706,6 +707,14 @@ fn compute_status(
     }
     let has_ipv4 = device.ipv4.is_some();
     let has_ipv6 = device.ipv6.is_some();
+
+    if port.ipv6 && !router_has_gua {
+        let reason = Some("Router has no global IPv6 address".into());
+        if port.ipv4 && has_ipv4 {
+            return (PublishedPortStatus::Partial, reason);
+        }
+        return (PublishedPortStatus::Error, reason);
+    }
 
     if port.ipv4 && !has_ipv4 {
         if port.ipv6 && has_ipv6 {
@@ -805,6 +814,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<PublishedPort>, Error> {
 
     let raw_ports = ports_result?;
     let devices = devices_result?;
+    let router_has_gua = wan_has_gua().await;
 
     // Index devices by MAC (skip VPN devices which have no MAC)
     let devices_by_mac: HashMap<String, &Device> = devices
@@ -844,7 +854,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<PublishedPort>, Error> {
                 d
             });
             let device = device_owned.as_ref();
-            let (status, status_reason) = compute_status(raw, device);
+            let (status, status_reason) = compute_status(raw, device, router_has_gua);
 
             PublishedPort {
                 id: raw.id.clone(),
@@ -881,6 +891,10 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<PublishedPort>, Error> {
     Ok(ports)
 }
 
+async fn wan_has_gua() -> bool {
+    crate::system::has_global_ipv6(&crate::system::get_wan_ipv6s().await.unwrap_or_default())
+}
+
 #[instrument(skip_all)]
 pub async fn set<C: CtrlContext>(
     ctx: C,
@@ -888,11 +902,8 @@ pub async fn set<C: CtrlContext>(
 ) -> Result<PublishedPortsSetResult, Error> {
     validate_inputs(&req.ports)?;
 
-    // A missed WAN probe rejects every IPv6 port.
-    let router_has_gua = ctx.effectful()
-        && crate::system::has_global_ipv6(
-            &crate::system::get_wan_ipv6s().await.unwrap_or_default(),
-        );
+    // A missed WAN probe rejects every new IPv6 port.
+    let router_has_gua = ctx.effectful() && wan_has_gua().await;
     let port_control = ctx
         .effectful()
         .then(|| crate::port_control::PORT_CONTROL.get())
@@ -1312,7 +1323,8 @@ fn validate_device_addresses(
                 ErrorKind::MissingDeviceAddress,
             ));
         }
-        if !port.ipv6 {
+        // An existing rule keeps the address it holds.
+        if !port.ipv6 || kept_v6_rule(v6_dests, port).is_some() {
             continue;
         }
         if !router_has_gua {
@@ -1320,8 +1332,6 @@ fn validate_device_addresses(
         }
         match ipv6_addr {
             Some(addr) if is_gua(addr) => {}
-            // A device without a GUA keeps the address its existing rule holds.
-            _ if kept_v6_rule(v6_dests, port).is_some() => {}
             Some(addr) => {
                 return Err(Error::new(eyre!("IPv6 port forward '{}' requires a global IPv6 address for device {}, but it only has a local address ({}); ULA/link-local are not reachable from the internet", port.label, port.device_mac, addr), ErrorKind::MissingDeviceAddress));
             }
@@ -2716,7 +2726,7 @@ config rule 'pp_a_v6'
         // Same /64, different suffix → still in the live prefix, not stale.
         let port = raw_v6_port(false, Some("2001:db8:abcd::50"));
         let dev = online_device(None, Some("2001:db8:abcd::99"));
-        let (status, _) = compute_status(&port, Some(&dev));
+        let (status, _) = compute_status(&port, Some(&dev), true);
         assert!(matches!(status, PublishedPortStatus::Active));
     }
 
@@ -2725,7 +2735,7 @@ config rule 'pp_a_v6'
         // Rule on the old /64, device on a new /64 → stranded, v6-only → Error.
         let port = raw_v6_port(false, Some("2001:db8:abcd::50"));
         let dev = online_device(None, Some("2001:db8:9999::50"));
-        let (status, reason) = compute_status(&port, Some(&dev));
+        let (status, reason) = compute_status(&port, Some(&dev), true);
         assert!(matches!(status, PublishedPortStatus::Error));
         assert_eq!(reason.as_deref(), Some("IPv6 address out of date"));
     }
@@ -2735,7 +2745,7 @@ config rule 'pp_a_v6'
         // Dual-stack: v4 still works, only v6 stranded → Partial.
         let port = raw_v6_port(true, Some("2001:db8:abcd::50"));
         let dev = online_device(Some("192.168.1.50"), Some("2001:db8:9999::50"));
-        let (status, reason) = compute_status(&port, Some(&dev));
+        let (status, reason) = compute_status(&port, Some(&dev), true);
         assert!(matches!(status, PublishedPortStatus::Partial));
         assert_eq!(reason.as_deref(), Some("IPv6 address out of date"));
     }
@@ -2746,9 +2756,28 @@ config rule 'pp_a_v6'
         // ULA-availability situation, not a rotated prefix).
         let port = raw_v6_port(false, Some("2001:db8:abcd::50"));
         let dev = online_device(None, Some("fd00:abcd::50"));
-        let (status, _) = compute_status(&port, Some(&dev));
+        let (status, _) = compute_status(&port, Some(&dev), true);
         // has_ipv6 is true (ULA present), GUA stale check skipped → Active.
         assert!(matches!(status, PublishedPortStatus::Active));
+    }
+
+    #[test]
+    fn status_reports_router_without_gua() {
+        let dev = online_device(Some("192.168.1.50"), Some("fd00:abcd::50"));
+        let (status, reason) = compute_status(
+            &raw_v6_port(true, Some("2001:db8:abcd::50")),
+            Some(&dev),
+            false,
+        );
+        assert!(matches!(status, PublishedPortStatus::Partial));
+        assert_eq!(reason.as_deref(), Some("Router has no global IPv6 address"));
+        let (status, reason) = compute_status(
+            &raw_v6_port(false, Some("2001:db8:abcd::50")),
+            Some(&dev),
+            false,
+        );
+        assert!(matches!(status, PublishedPortStatus::Error));
+        assert_eq!(reason.as_deref(), Some("Router has no global IPv6 address"));
     }
 
     // ── extract_ports tests ──
@@ -3490,6 +3519,30 @@ config rule 'pp_v6only_v6'
                     .unwrap_err();
             assert_eq!(err.kind, ErrorKind::MissingDeviceAddress);
         }
+    }
+
+    #[test]
+    fn validate_router_without_gua_rejects_only_new_v6_ports() {
+        let kept = v6_dests_of(KEPT_V6_FW);
+        validate_device_addresses(
+            &[
+                make_port("a", true, true),
+                make_port("v6only", false, true),
+                make_port("new", true, false),
+            ],
+            &offline_device(),
+            false,
+            &kept,
+        )
+        .unwrap();
+        let err = validate_device_addresses(
+            &[make_port("new", true, true)],
+            &offline_device(),
+            false,
+            &kept,
+        )
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::MissingDeviceAddress);
     }
 
     #[test]
