@@ -317,6 +317,40 @@ ${install.run}
   })
 }
 
+test('release-note catalog changes trigger image assembly without rebuilding images for binary-only paths', t => {
+  const { env, write, run } = fixture(t)
+  const filter = workflow('startos-iso.yaml').jobs.changes.steps.find(
+    step => step.id === 'filter',
+  )
+  const shell = filter.run
+    .replaceAll('${{ github.repository }}', 'Start9Labs/start-technologies')
+    .replaceAll('${{ github.event.pull_request.number }}', '1')
+  for (const [path, expected] of [
+    ['shared-libs/crates/start-core/locales/release-notes.json', true],
+    ['shared-libs/crates/start-core/locales/i18n.yaml', false],
+    ['projects/start-os/changelog/patch-security-fix.pl_PL.md', true],
+  ]) {
+    const output = write('output', '')
+    const result = run(
+      'bash',
+      ['-e', '-c', `gh() { printf '%s\\n' "$CHANGED_FILE"; }\n${shell}`],
+      {
+        encoding: 'utf8',
+        env: {
+          ...env,
+          BASE_REF: 'master',
+          HEAD_REF: 'fix/notes',
+          HEAD_REPO: 'Start9Labs/start-technologies',
+          CHANGED_FILE: path,
+          GITHUB_OUTPUT: output,
+        },
+      },
+    )
+    assert.equal(result.status, 0, result.stderr)
+    assert.equal(readFileSync(output, 'utf8'), `image=${expected}\n`)
+  }
+})
+
 test('artifact consumers track shared inputs without CLI-only image rebuilds', () => {
   for (const [file, source] of [
     ['start-cli.yaml', cli],

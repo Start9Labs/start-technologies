@@ -241,7 +241,7 @@ jobs:
           files="$(gh api --paginate \
             "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
             --jq '.[].filename')"
-          matched="$(printf '%s\n' "$files" | grep -E '^(build/|debian/|apt/|projects/start-os/build/|projects/start-os/build\.mk$|projects/start-os/debian/|projects/start-os/(release-notes|changelog)/|scripts/changelog[^/]*\.mjs$|\.prettierrc\.json$|package\.json$|projects/start-os/[^/]+\.(service|slice)$|\.github/workflows/startos-iso\.yaml$|\.github/actions/setup-build/)' || true)"
+          matched="$(printf '%s\n' "$files" | grep -E '^(build/|debian/|apt/|projects/start-os/build/|projects/start-os/build\.mk$|projects/start-os/debian/|projects/start-os/(release-notes|changelog)/|scripts/changelog[^/]*\.mjs$|shared-libs/crates/start-core/locales/release-notes\.json$|\.prettierrc\.json$|package\.json$|projects/start-os/[^/]+\.(service|slice)$|\.github/workflows/startos-iso\.yaml$|\.github/actions/setup-build/)' || true)"
           if [ -n "$matched" ]; then
             echo "Image-affecting files changed:"; printf '  %s\n' "$matched"
             echo "image=true" >> "$GITHUB_OUTPUT"

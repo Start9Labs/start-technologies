@@ -793,6 +793,10 @@ notes-inputs:
   )
   assert.equal(inputs.status, 0, inputs.stderr)
   contains(inputs.stdout, 'scripts/changelog.mjs')
+  contains(
+    inputs.stdout,
+    'shared-libs/crates/start-core/locales/release-notes.json',
+  )
   contains(inputs.stdout, `${version}.md`)
   contains(inputs.stdout, `${version}.pl_PL.md`)
   contains(inputs.stdout, `${version}.de_DE.md`)
@@ -864,7 +868,7 @@ notes-inputs:
   )
   const polish = 'Polska wersja.\n\n## Nowości\n\n- Wygenerowana nowość.\n'
   const german = '## Neuigkeiten\n\n- Generated highlight.\n'
-  const french = '## Highlights\n\n- Nouveauté générée.\n'
+  const french = '## Nouveautés\n\n- Nouveauté générée.\n'
   commit()
   const generated = install()
   assert.equal(generated.status, 0, generated.stderr)
@@ -880,7 +884,10 @@ notes-inputs:
   excludes(registry, 'Internal detail.')
   assert.equal(text(join(stage, 'release-notes/pl_PL.md')), polish)
   assert.equal(text(join(stage, 'release-notes/de_DE.md')), german)
-  assert.equal(text(join(stage, 'release-notes/fr_FR.md')), french)
+  assert.equal(
+    text(join(stage, 'release-notes/fr_FR.md')),
+    'Lede.\n\n## Nouveautés\n\n- Nouveauté générée.\n\n## Important\n\nKeep this notice.\n',
+  )
   assert.deepEqual(renderTemps(), [])
 
   unlinkSync(join(root, `projects/start-os/release-notes/${version}.md`))
@@ -1100,6 +1107,66 @@ test('registry payload composes localized notes, warnings, fallbacks and links',
   )
   delete env.NOTES_REF
   delete env.CHANGELOG_REF
+})
+
+test('registry and GitHub notes include localized Security without summary files', t => {
+  const { root, main, write, script, git, commit } = releaseFixture(t)
+  unlinkSync(main)
+  git('init', '-q')
+  git('remote', 'add', 'origin', root)
+  write(
+    'projects/start-sdk/changelog/patch-added-feature.md',
+    METADATA + '- Feature.\n',
+  )
+  write(
+    'projects/start-sdk/changelog/patch-security-fix.md',
+    METADATA + '- Security fix.\n',
+  )
+  write(
+    'projects/start-sdk/changelog/patch-security-fix.pl_PL.md',
+    '- Poprawka bezpieczeństwa.\n',
+  )
+  write(
+    'projects/start-sdk/changelog/patch-security-internal.md',
+    '---\nuser-facing: false\n---\n\n- Internal security detail.\n',
+  )
+  write(`projects/start-sdk/release-notes/${VERSION}.pre-update.md`, PRE_UPDATE)
+  commit()
+  const notes = JSON.parse(script('registry-notes').stdout).releaseNotes
+  for (const [locale, highlights, security, body] of [
+    ['en_US', 'Highlights', 'Security', 'Security fix.'],
+    ['pl_PL', 'Nowości', 'Bezpieczeństwo', 'Poprawka bezpieczeństwa.'],
+  ]) {
+    contains(notes[locale], `## ${highlights}`)
+    contains(notes[locale], `## ${security}\n\n- ${body}`)
+    contains(notes[locale], PRE_UPDATE)
+    excludes(notes[locale], 'Internal security detail.')
+    assert.ok(
+      notes[locale].indexOf('](https://github.com/') <
+        notes[locale].indexOf(`## ${security}`),
+    )
+  }
+  assert.ok(
+    !existsSync(join(root, `projects/start-sdk/release-notes/${VERSION}.md`)),
+  )
+  assert.ok(
+    !existsSync(
+      join(root, `projects/start-sdk/release-notes/${VERSION}.pl_PL.md`),
+    ),
+  )
+  const github = script('body').stdout
+  contains(github, '## Security\n\n- Security fix.')
+  excludes(github, 'Poprawka bezpieczeństwa.')
+  write(
+    `projects/start-sdk/release-notes/${VERSION}.md`,
+    '## Important\n\nKeep this notice.\n',
+  )
+  const fallback = JSON.parse(script('registry-notes').stdout).releaseNotes
+    .pl_PL
+  contains(fallback, '## Important\n\nKeep this notice.')
+  assert.ok(
+    fallback.indexOf('## Bezpieczeństwo') < fallback.indexOf('## Important'),
+  )
 })
 
 test('older source catalogs fall back to shared pending-fragment labels', t => {

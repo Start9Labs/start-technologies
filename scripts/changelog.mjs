@@ -543,15 +543,50 @@ function hasAudienceMetadata(fragments) {
   return fragments.some(fragment => fragment.userFacing !== null)
 }
 
-function compileNotes(path, notes, fragments, locale = ENGLISH) {
+function localizedNotesSource(path, fallback, ref) {
+  const notes = sourceFile(path, ref)
+  return notes.length || path === fallback
+    ? { path, notes }
+    : { path: fallback, notes: sourceFile(fallback, ref) }
+}
+
+function noteFraming(product, version, locale, ref) {
+  return localizedNotesSource(
+    notesPath(product, version, locale),
+    notesPath(product, version, ENGLISH),
+    ref,
+  )
+}
+
+function compileNotes(path, notes, fragments, locale = ENGLISH, ref) {
   const text = decodeUtf8(notes)
   const parts = text.split(HIGHLIGHTS_MARKER)
-  if (!hasAudienceMetadata(fragments) && parts.length === 1)
-    return notes.length ? notes : Buffer.from('## Highlights\n')
-  const lines = fragmentLines(
-    fragments.filter(fragment => fragment.userFacing),
-    locale,
+  if (!hasAudienceMetadata(fragments) && parts.length === 1 && notes.length)
+    return notes
+  const labels = releaseNoteLabels(ref)
+  const visible = fragments.filter(fragment => fragment.userFacing)
+  const security = visible.filter(fragment => fragment.kind === 'security')
+  const securityHeading = `## ${releaseNoteLabel(labels, 'security-title', locale)}`
+  const englishSecurityHeading = `## ${releaseNoteLabel(labels, 'security-title', ENGLISH)}`
+  if (
+    text
+      .split(/\r?\n/)
+      .some(line =>
+        [securityHeading, englishSecurityHeading].includes(line.trimEnd()),
+      )
   )
+    throw new Error(
+      `${path}: remove ${securityHeading}; it is compiled from fragments`,
+    )
+  const lines = [
+    ...fragmentLines(
+      visible.filter(fragment => fragment.kind !== 'security'),
+      locale,
+    ),
+    ...(security.length
+      ? [securityHeading, '', ...fragmentLines(security, locale)]
+      : []),
+  ]
   let composed
   if (parts.length > 2)
     throw new Error(`${path}: expected one ${HIGHLIGHTS_MARKER}`)
@@ -577,9 +612,13 @@ function compileNotes(path, notes, fragments, locale = ENGLISH) {
       )
     composed = `${before.trimEnd()}\n\n${lines.join('\n')}\n${after.trimStart()}`
   } else {
-    if (locale !== ENGLISH && notes.length)
+    if (translationTarget(path) && notes.length)
       throw new Error(`${path}: localized framing needs ${HIGHLIGHTS_MARKER}`)
-    const highlights = ['## Highlights', '', ...lines].join('\n')
+    const highlights = [
+      `## ${releaseNoteLabel(labels, 'highlights-title', locale)}`,
+      '',
+      ...lines,
+    ].join('\n')
     const important = /^## Important[ \t]*\r?$/m.exec(text)
     const position = important ? important.index : text.length
     composed = `${text.slice(0, position).trimEnd()}\n\n${highlights}\n${text.slice(position)}`
@@ -589,10 +628,9 @@ function compileNotes(path, notes, fragments, locale = ENGLISH) {
 
 function renderNotes(product, version, ref, locale = ENGLISH) {
   parseVersion(basename(product), version)
-  const path = notesPath(product, version, locale)
-  const notes = sourceFile(path, ref)
+  const { path, notes } = noteFraming(product, version, locale, ref)
   const fragments = sourceFragments(product, ref)
-  if (!fragments.size) return compileNotes(path, notes, [], locale)
+  if (!fragments.size) return compileNotes(path, notes, [], locale, ref)
   const commit = decodeUtf8(
     git('rev-parse', '--verify', `${ref || 'HEAD'}^{commit}`),
   ).trim()
@@ -604,6 +642,7 @@ function renderNotes(product, version, ref, locale = ENGLISH) {
     notes,
     ownedFragments({ product, version, commit, fragments }, releases),
     locale,
+    ref,
   )
 }
 
@@ -621,10 +660,11 @@ function preUpdateNotes(product, version, ref, locale = ENGLISH) {
     /\.md$/,
     '.pre-update.md',
   )
-  const notes = decodeUtf8(sourceFile(path, ref))
-  return (
-    notes || (locale === ENGLISH ? '' : preUpdateNotes(product, version, ref))
+  const fallback = notesPath(product, version).replace(
+    /\.md$/,
+    '.pre-update.md',
   )
+  return decodeUtf8(localizedNotesSource(path, fallback, ref).notes)
 }
 
 function composeReleaseNotes(notes, warning) {
@@ -641,10 +681,17 @@ function releaseNotes(product, version, ref) {
 function releaseNoteLabels(ref) {
   const path = 'shared-libs/crates/start-core/locales/release-notes.json'
   const tagged = ref ? decodeUtf8(sourceFile(path, ref)) : ''
+  const packaged = new URL(`../${path}`, import.meta.url)
+  // Tag workflows can stage the compiler alone.
   const defaults = JSON.parse(
-    readFileSync(new URL(`../${path}`, import.meta.url)),
+    readFileSync(existsSync(packaged) ? packaged : path),
   )
   return tagged ? { ...defaults, ...JSON.parse(tagged) } : defaults
+}
+
+function releaseNoteLabel(labels, key, locale) {
+  const translations = labels[`release-notes.${key}`]
+  return translations[locale] ?? translations[ENGLISH]
 }
 
 function changelogLink(product, version, ref, locale, labels) {
@@ -660,13 +707,11 @@ function changelogLink(product, version, ref, locale, labels) {
       ? `${base}/tree/${ref}/${product}/changelog`
       : `${base}/blob/${ref}/${product}/CHANGELOG.md#${anchor}`
   }
-  const translations =
-    labels[
-      pending
-        ? 'release-notes.full-changelog-fragments'
-        : 'release-notes.full-changelog'
-    ]
-  const label = translations[locale] ?? translations[ENGLISH]
+  const label = releaseNoteLabel(
+    labels,
+    pending ? 'full-changelog-fragments' : 'full-changelog',
+    locale,
+  )
   return label.replaceAll('%{version}', version).replaceAll('%{url}', url)
 }
 
@@ -858,7 +903,19 @@ function sync() {
         if (hasSymlink(path))
           throw new Error(`${path}: symlinks are not allowed`)
         const source = taggedFile(path, release.commit)
-        const compiled = compileNotes(path, source, fragments, locale)
+        const framing = noteFraming(
+          product,
+          release.version,
+          locale,
+          release.commit,
+        )
+        const compiled = compileNotes(
+          framing.path,
+          framing.notes,
+          fragments,
+          locale,
+          release.commit,
+        )
         const existing = existsSync(path) ? readFileSync(path) : Buffer.alloc(0)
         if (
           existing.length &&
