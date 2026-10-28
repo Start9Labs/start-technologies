@@ -1,0 +1,1 @@
+- Metadane wydań systemu zapisują commit Git kompilacji i informację o poprawkach bezpieczeństwa oraz zachowują je podczas promocji między rejestrami.

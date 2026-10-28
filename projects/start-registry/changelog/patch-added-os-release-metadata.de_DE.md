@@ -1,0 +1,1 @@
+- Die Metadaten einer OS-Version speichern den Git-Commit des Builds und die Kennzeichnung als Sicherheitsupdate. Beides bleibt bei der Promotion zwischen Registries erhalten.

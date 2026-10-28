@@ -1,0 +1,1 @@
+- Los metadatos de versiones del SO registran el commit Git de la compilación y si incluye actualizaciones de seguridad, y conservan ambos datos al promover versiones entre registros.

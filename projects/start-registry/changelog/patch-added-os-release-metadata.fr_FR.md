@@ -1,0 +1,1 @@
+- Les métadonnées des versions du système enregistrent le commit Git de la construction et la présence de mises à jour de sécurité, puis conservent ces informations lors de la promotion entre registres.
