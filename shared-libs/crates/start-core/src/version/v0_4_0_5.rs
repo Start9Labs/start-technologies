@@ -1,12 +1,15 @@
 use exver::VersionRange;
 use openssl::pkey::{PKey, Private};
+use tokio::process::Command;
 
 use super::v0_3_5::V0_3_0_COMPAT;
 use super::{VersionT, v0_4_0_4};
 use crate::auth::AuthKeys;
+use crate::context::RpcContext;
 use crate::prelude::*;
 use crate::sign::{AnyVerifyingKey, canonicalize_verifying_keys};
 use crate::update::signers::TrustedOsUpdateSigners;
+use crate::util::Invoke;
 use crate::util::serde::{Der64, DerEncoding, Pem, PemEncoding};
 
 lazy_static::lazy_static! {
@@ -30,7 +33,7 @@ impl VersionT for Version {
         &V0_3_0_COMPAT
     }
     fn migration_revision(self) -> usize {
-        1
+        2
     }
     fn up(self, db: &mut Value, _: ()) -> Result<Value, Error> {
         if let Some(keys) = field(db, &["private", "sessionPubkeys"]) {
@@ -42,6 +45,10 @@ impl VersionT for Version {
             >(keys.clone())?)?)?;
         }
         Ok(Value::Null)
+    }
+    async fn post_up(self, _ctx: &RpcContext, _input: Value) -> Result<(), Error> {
+        start_initial_balance(Command::new("systemctl")).await;
+        Ok(())
     }
     fn down(self, db: &mut Value) -> Result<(), Error> {
         for path in [
@@ -107,6 +114,16 @@ impl VersionT for Version {
     }
 }
 
+async fn start_initial_balance(mut systemctl: Command) {
+    if let Err(error) = systemctl
+        .args(["start", "--no-block", "btrfs-balance.service"])
+        .invoke(ErrorKind::DiskManagement)
+        .await
+    {
+        tracing::warn!(?error, "{}", t!("migration.initial-balance-failed"));
+    }
+}
+
 fn field<'a>(value: &'a mut Value, path: &[&str]) -> Option<&'a mut Value> {
     path.iter()
         .try_fold(value, |value, name| value.get_mut(*name))
@@ -122,48 +139,96 @@ fn restore_pem<T: DerEncoding + PemEncoding>(value: Option<&mut Value>) -> Resul
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use imbl_value::json;
 
     use super::*;
     use crate::auth::Session;
 
     #[tokio::test]
-    async fn revision_zero_servers_convert_existing_signer_indexes() {
+    async fn prior_revisions_migrate_keys_and_requeue_post_up_once() {
         use patch_db::json_ptr::ROOT;
         let key = AnyVerifyingKey::Ed25519(
             ed25519_dalek::SigningKey::from_bytes(&[43; 32]).verifying_key(),
         );
+        let canonical = key.interned_der64();
         let account =
             crate::account::AccountInfo::new("password", std::time::SystemTime::now(), None)
                 .unwrap();
-        let mut fixture =
-            to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
-                .unwrap();
-        fixture["public"]["serverInfo"]["latestMigrationRevision"] = json!(0);
-        fixture["public"]["serverInfo"]["trustedOsUpdateSigners"] =
-            json!({ key.to_string(): { "label": "retained signer" } });
-        fixture["private"]["sessionPubkeys"] = json!({ key.to_string(): Session::default() });
-        let db = PatchDb::in_memory();
-        db.put(&ROOT, &fixture).await.unwrap();
-        Version.pre_init(&db).await.unwrap();
-        let migrated = db.dump(&ROOT).await.value;
-        assert_eq!(
-            migrated["public"]["serverInfo"]["latestMigrationRevision"],
-            json!(1)
-        );
-        let canonical = key.interned_der64();
-        assert!(
-            migrated["private"]["sessionPubkeys"]
-                .as_object()
-                .unwrap()
-                .contains_key(&canonical)
-        );
-        assert_eq!(
-            migrated["public"]["serverInfo"]["trustedOsUpdateSigners"][&*canonical]["label"],
-            json!("retained signer")
-        );
-        Version.pre_init(&db).await.unwrap();
-        assert_eq!(db.dump(&ROOT).await.value, migrated);
+        for (revision, key_id) in [
+            (0, key.to_string()),
+            (1, key.to_string()),
+            (1, canonical.to_string()),
+        ] {
+            let mut fixture =
+                to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
+                    .unwrap();
+            fixture["public"]["serverInfo"]["latestMigrationRevision"] = json!(revision);
+            fixture["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
+            fixture["public"]["serverInfo"]["trustedOsUpdateSigners"] =
+                json!({ key_id.clone(): { "label": "retained signer" } });
+            fixture["private"]["sessionPubkeys"] = json!({ key_id: Session::default() });
+            let db = PatchDb::in_memory();
+            db.put(&ROOT, &fixture).await.unwrap();
+            Version.pre_init(&db).await.unwrap();
+            let migrated = db.dump(&ROOT).await.value;
+            assert_eq!(
+                migrated["public"]["serverInfo"]["latestMigrationRevision"],
+                json!(2)
+            );
+            assert_eq!(
+                migrated["public"]["serverInfo"]["postInitMigrationTodos"],
+                json!({ "0.4.0.5": null })
+            );
+            assert!(
+                migrated["private"]["sessionPubkeys"]
+                    .as_object()
+                    .unwrap()
+                    .contains_key(&canonical)
+            );
+            assert_eq!(
+                migrated["public"]["serverInfo"]["trustedOsUpdateSigners"][&*canonical]["label"],
+                json!("retained signer")
+            );
+            Version.pre_init(&db).await.unwrap();
+            assert_eq!(db.dump(&ROOT).await.value, migrated);
+            let mut completed = migrated;
+            completed["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
+            db.put(&ROOT, &completed).await.unwrap();
+            Version.pre_init(&db).await.unwrap();
+            assert_eq!(db.dump(&ROOT).await.value, completed);
+        }
+    }
+
+    #[test]
+    fn combined_migration_advances_the_published_revision() {
+        assert_eq!(Version.migration_revision(), 2);
+    }
+
+    #[tokio::test]
+    async fn initial_balance_queues_the_existing_service_without_failing_startup()
+    -> Result<(), Error> {
+        let temp = tempfile::tempdir()?;
+        let systemctl = temp.path().join("systemctl");
+        let calls = temp.path().join("calls");
+        std::fs::write(
+            &systemctl,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CALL_LOG\"\nexit \"$EXIT_STATUS\"\n",
+        )?;
+        std::fs::set_permissions(&systemctl, std::fs::Permissions::from_mode(0o755))?;
+        for status in [0, 7] {
+            let mut command = Command::new(&systemctl);
+            command
+                .env("CALL_LOG", &calls)
+                .env("EXIT_STATUS", status.to_string());
+            let () = start_initial_balance(command).await;
+            assert_eq!(
+                std::fs::read_to_string(&calls)?,
+                "start\n--no-block\nbtrfs-balance.service\n"
+            );
+        }
+        Ok(())
     }
 
     #[test]

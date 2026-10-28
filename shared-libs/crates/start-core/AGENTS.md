@@ -29,8 +29,8 @@ Install stable Rust and Docker. `rust-analyzer` is recommended.
   over the Rust builder with Node 24 and SquashFS oracle tools, uses the `test` and `ts` features, and
   skips `export_` tests). `RUST_BUILDER_IMAGE` selects a prebuilt test image instead. Or run a single
   test directly: `cargo test -p start-core <name> --features=test` (add `ts` for binding tests).
-  Native SquashFS interoperability tests require `mksquashfs` and `unsquashfs`; manifest tests
-  require Node.
+  Native SquashFS interoperability tests require `mksquashfs` and `unsquashfs`; backup filesystem
+  tests require `btrfs-progs`; manifest tests require Node.
 - `make start-core-format` — format the shared Rust crates with the pinned nightly container (`make start-core-format-check` checks formatting). Set `FMT_NATIVE=1` only when that nightly is installed locally.
 - `cargo build -p start-os --bin startbox` (or the other product crate/bin) to build a binary.
 
