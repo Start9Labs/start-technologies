@@ -853,4 +853,17 @@ export const ENGLISH: Record<string, number> = {
   'Install untrusted software?': 967,
   'This service package is not signed by anyone you trust. Malicious software could steal private keys and passwords, compromise your server, or permanently destroy your data. Only continue if you trust the source and understand these risks.': 968,
   'Install anyway': 969,
+  'Format a drive': 970,
+  'Erases a drive and prepares it as a single Btrfs partition for backups.': 971,
+  'Drive': 972,
+  'Everything on this drive will be permanently erased.': 973,
+  'contains StartOS backups': 974,
+  'No readable partitions': 975,
+  'Label': 976,
+  'I understand this drive will be erased': 977,
+  'Format': 978, // verb
+  'Formatting drive': 979,
+  'Drive formatted. It is listed under Physical Drives.': 980,
+  'Must be 255 bytes or less (accented letters and symbols take more than one)': 981,
+  'Must not contain control characters': 982,
 }
