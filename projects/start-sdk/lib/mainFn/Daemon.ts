@@ -179,15 +179,13 @@ export class Daemon<
         }
         if (signal.aborted) break
         await new Promise<void>(resolve => {
-          const timer = setTimeout(resolve, timeoutCounter)
-          signal.addEventListener(
-            'abort',
-            () => {
-              clearTimeout(timer)
-              resolve()
-            },
-            { once: true },
-          )
+          const wake = () => {
+            clearTimeout(timer)
+            signal.removeEventListener('abort', wake)
+            resolve()
+          }
+          const timer = setTimeout(wake, timeoutCounter)
+          signal.addEventListener('abort', wake)
         })
         timeoutCounter += TIMEOUT_INCREMENT_MS
         timeoutCounter = Math.min(MAX_TIMEOUT_MS, timeoutCounter)
