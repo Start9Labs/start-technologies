@@ -77,7 +77,6 @@ export type RpcSchemaTree<Schema> = {
         ? { [Name in keyof Schema[Key]]: RpcSchemaTree<Schema[Key][Name]> }
         : never
 }
-export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type AnySignature = z.output<typeof schemas.AnySignature>
 export type AnySignatureInput = z.input<typeof schemas.AnySignature>
 export type AnyVerifyingKey = z.output<typeof schemas.AnyVerifyingKey>
@@ -147,6 +146,7 @@ export type AddPackageSignerParamsInput = z.input<
 export type AddPackageToCategoryParamsInput = z.input<
   typeof schemas.AddPackageToCategoryParams
 >
+export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type ApplyWithPathParamsInput = z.input<
   typeof schemas.ApplyWithPathParams
 >

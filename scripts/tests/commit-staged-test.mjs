@@ -193,13 +193,33 @@ test('tag compiler workflow with local commit API', t => {
     '---\nuser-facing: true\n---\n\n- Released fix.\n\n- Second released fix.\n',
   )
   f.write(
+    'projects/start-sdk/changelog/patch-security-released.md',
+    '---\nuser-facing: true\n---\n\n- Released security fix.\n',
+  )
+  f.write(
+    'projects/start-sdk/changelog/patch-security-released.pl_PL.md',
+    '- Poprawka bezpieczeństwa.\n',
+  )
+  f.write(
     'projects/start-sdk/changelog/patch-fixed-second-released.md',
     '---\nuser-facing: false\n---\n\n- Third released fix.\n',
+  )
+  f.write(
+    'projects/start-sdk/changelog/patch-fixed-released.pl_PL.md',
+    '- Poprawka.\n\n- Druga poprawka.\n',
+  )
+  f.write(
+    'projects/start-sdk/release-notes/1.2.3.pl_PL.md',
+    '## Nowości\n\n<!-- highlights -->\n',
   )
   f.write('projects/start-sdk/CHANGELOG.md', '# Changelog\n')
   f.git('add', 'scripts', 'projects', 'package.json', '.prettierrc.json')
   f.git('commit', '-qm', 'release')
   f.git('-c', 'tag.gpgsign=false', 'tag', 'start-sdk/v1.2.3')
+  const catalog = 'shared-libs/crates/start-core/locales/release-notes.json'
+  f.write(catalog, readFileSync(join(REPO, catalog)))
+  f.git('add', 'shared-libs')
+  f.git('commit', '-qm', 'compiler labels')
   const remote = join(f.root, 'origin.git')
   f.git('init', '--bare', '-q', remote)
   f.git('remote', 'add', 'origin', remote)
@@ -290,7 +310,7 @@ console.log(JSON.stringify(race
   const history = f.git('show', 'origin/master:projects/start-sdk/CHANGELOG.md')
   assert.equal(
     history,
-    '# Changelog\n\n## [1.2.3]\n\n### Fixed\n\n- Released fix.\n\n- Second released fix.\n\n- Third released fix.\n',
+    '# Changelog\n\n## [1.2.3]\n\n### Fixed\n\n- Released fix.\n\n- Second released fix.\n\n- Third released fix.\n\n### Security\n\n- Released security fix.\n',
   )
   assert.ok(
     !f
@@ -309,9 +329,35 @@ console.log(JSON.stringify(race
   const notes = f.git('show', `origin/master:${notesPath}`)
   assert.equal(
     notes,
-    '## Highlights\n\n- Released fix.\n\n- Second released fix.\n',
+    '## Highlights\n\n- Released fix.\n\n- Second released fix.\n\n## Security\n\n- Released security fix.\n',
   )
   assert.match(result.stderr, /head moved/)
+  const localizedPath = 'projects/start-sdk/release-notes/1.2.3.pl_PL.md'
+  const localized = f.git('show', `origin/master:${localizedPath}`)
+  assert.equal(
+    localized,
+    '## Nowości\n\n- Poprawka.\n\n- Druga poprawka.\n\n## Bezpieczeństwo\n\n- Poprawka bezpieczeństwa.\n',
+  )
+  assert.ok(existsSync(join(runnerTemp, 'scripts/changelog.mjs')))
+  assert.deepEqual(
+    readFileSync(join(runnerTemp, catalog)),
+    readFileSync(join(REPO, catalog)),
+  )
+  assert.equal(
+    f.git('ls-tree', '-r', '--name-only', 'start-sdk/v1.2.3', '--', catalog),
+    '',
+  )
+  assert.ok(
+    !f
+      .git(
+        'ls-tree',
+        '-r',
+        '--name-only',
+        'origin/master',
+        'projects/start-sdk/changelog',
+      )
+      .includes('.pl_PL.md'),
+  )
   const master = f.git('rev-parse', 'origin/master')
   result = f.run('bash', ['-c', shell], { encoding: 'utf8' })
   assert.equal(result.status, 0, result.stdout + result.stderr)
@@ -321,6 +367,31 @@ console.log(JSON.stringify(race
     history,
   )
   assert.equal(f.git('show', `origin/master:${notesPath}`), notes)
+  const flat = f.write(
+    'legacy-compiler/flat/changelog.mjs',
+    readFileSync(join(REPO, 'scripts/changelog.mjs')),
+  )
+  f.write(
+    'legacy-compiler/flat/changelog-version.mjs',
+    readFileSync(join(REPO, 'scripts/changelog-version.mjs')),
+  )
+  assert.ok(!existsSync(join(f.root, 'legacy-compiler', catalog)))
+  const legacy = f.run(
+    process.execPath,
+    [
+      flat,
+      'notes',
+      'projects/start-sdk',
+      '1.2.3',
+      '--locale',
+      'pl_PL',
+      '--ref',
+      'start-sdk/v1.2.3',
+    ],
+    { encoding: 'utf8' },
+  )
+  assert.equal(legacy.status, 0, legacy.stderr)
+  assert.equal(legacy.stdout, localized)
   f.git('read-tree', '-u', '--reset', 'start-sdk/v1.2.3')
   f.env.PROJECT = 'start-sdk'
   const archive = workflow
@@ -338,6 +409,7 @@ console.log(JSON.stringify(race
   })
   assert.equal(copied.status, 0, copied.stdout + copied.stderr)
   assert.equal(f.git('show', `:${notesPath}`), notes)
+  assert.equal(f.git('show', `:${localizedPath}`), localized)
 })
 
 test('empty index makes no request', t => {

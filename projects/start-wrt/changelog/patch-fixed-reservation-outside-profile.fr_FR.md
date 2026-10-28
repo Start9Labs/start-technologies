@@ -1,0 +1,2 @@
+- Une réservation IPv4 doit appartenir au sous-réseau du profil de sécurité de l’appareil. Le routeur acceptait auparavant des adresses d’autres profils, ignorées silencieusement par DHCP.
+- Si une réservation ne correspond plus au profil, notamment après un changement de profil, la page de l’appareil affiche son adresse réelle avec un avertissement et ses ports publiés signalent également l’écart.

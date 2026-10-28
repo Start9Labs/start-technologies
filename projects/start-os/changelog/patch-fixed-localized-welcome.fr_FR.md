@@ -1,0 +1,2 @@
+- **Les nouveautés dans votre langue.** Les nouveautés et le lien vers le journal complet des modifications utilisent la langue du serveur avant et après une mise à jour. Si aucune traduction n'est disponible, les nouveautés s'affichent en anglais.
+- **Un lien correct vers le journal complet des modifications.** La notification de bienvenue renvoie au journal des modifications publié plutôt qu'à une copie obsolète.

@@ -1,0 +1,2 @@
+- Rezerwacja IPv4 musi należeć do podsieci profilu bezpieczeństwa urządzenia. Wcześniej router przyjmował adresy z innych profili, które DHCP ignorował bez ostrzeżenia.
+- Gdy rezerwacja przestaje pasować do profilu, na przykład po jego zmianie, strona urządzenia pokazuje rzeczywisty adres z ostrzeżeniem, a opublikowane porty również zgłaszają niezgodność.
