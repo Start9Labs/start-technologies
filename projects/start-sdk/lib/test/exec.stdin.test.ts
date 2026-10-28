@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
 import * as cp from 'child_process'
+import * as fs from 'fs/promises'
 import { SubContainerEager } from '../util/SubContainer'
 import { FileMounts } from '../util/fileMounts'
 
@@ -8,10 +9,13 @@ jest.mock('child_process', () => ({
   spawn: jest.fn(),
 }))
 
-// cp.spawn is given no stdio override, so the child always gets a pipe for
-// stdin. A command that reads to EOF therefore blocks until `timeout` fires and
-// SIGKILLs it — the caller sees only a signal that points nowhere near stdin.
-// exec must close stdin on every path, not only when it has something to write.
+jest.mock('fs/promises', () => ({
+  ...jest.requireActual('fs/promises'),
+  readFile: jest.fn(),
+}))
+
+beforeEach(() => jest.mocked(fs.readFile).mockReset().mockResolvedValue('{}'))
+
 function fakeChild() {
   const child = new EventEmitter() as any
   child.pid = 4242
@@ -22,8 +26,7 @@ function fakeChild() {
     write: jest.fn((_data: unknown, cb: (e?: Error) => void) => cb()),
     end: jest.fn((cb?: () => void) => cb?.()),
   })
-  // Exit as soon as exec subscribes, rather than racing the awaits it does
-  // first (waitProc, reading the image metadata, closing stdin).
+  // Subscribe before exiting to avoid racing exec's awaits.
   const on = child.on.bind(child)
   child.on = (event: string, listener: (...a: any[]) => void) => {
     const result = on(event, listener)
@@ -38,9 +41,100 @@ function subContainer() {
   sub.imageId = 'test-image'
   sub.rootfs = '/tmp/does-not-exist'
   sub.waitProc = async () => {}
+  sub.killLeader = async () => {}
   sub.fileMounts = new FileMounts()
   return sub as SubContainerEager<any>
 }
+
+describe('SubContainerEager command environment', () => {
+  beforeEach(() => {
+    ;(cp.spawn as unknown as jest.Mock).mockReset().mockReturnValue(fakeChild())
+    jest.replaceProperty(process, 'env', {
+      ...process.env,
+      JSON_ENV: '{"LEAKED":"parent"}',
+      WRAPPER_ONLY: 'inherited',
+    })
+  })
+
+  afterEach(() => jest.restoreAllMocks())
+
+  test.each(['exec', 'spawn', 'launch'] as const)(
+    '%s transports image defaults and overrides only through JSON_ENV',
+    async method => {
+      jest.mocked(fs.readFile).mockResolvedValue(
+        JSON.stringify({
+          env: {
+            IMAGE: 'first\nsecond=value\n',
+            TOKEN: 'image',
+            REMOVED: 'image',
+          },
+        }),
+      )
+      const overrides = {
+        TOKEN: 'secret\nvalue=',
+        REMOVED: undefined,
+        EMPTY: '',
+      }
+      const commandOptions = { env: overrides, user: '1000', cwd: '/app' }
+      await subContainer()[method](['true'], commandOptions)
+      const [program, args, options] = (cp.spawn as unknown as jest.Mock).mock
+        .calls[0]
+      expect(program).toBe('start-container')
+      expect(args).not.toContain(
+        '--env-file=/media/startos/images/test-image.env',
+      )
+      expect(args.some((arg: string) => arg.startsWith('--env='))).toBe(false)
+      expect(JSON.stringify(args)).not.toContain('secret')
+      expect(JSON.parse(options.env.JSON_ENV)).toEqual({
+        IMAGE: 'first\nsecond=value\n',
+        TOKEN: 'secret\nvalue=',
+        REMOVED: null,
+        EMPTY: '',
+      })
+      expect(options.env.WRAPPER_ONLY).toBe('inherited')
+      expect(options.env.TOKEN).toBeUndefined()
+      expect(args).toEqual(
+        expect.arrayContaining(['--user=1000', '--workdir=/app']),
+      )
+      expect(options.cwd).toBeUndefined()
+      expect(commandOptions).toEqual({
+        env: overrides,
+        user: '1000',
+        cwd: '/app',
+      })
+      expect(overrides).toHaveProperty('REMOVED', undefined)
+    },
+  )
+
+  test.each(['exec', 'spawn', 'launch'] as const)(
+    '%s falls back to the env file for legacy image metadata',
+    async method => {
+      jest.mocked(fs.readFile).mockResolvedValue('{}')
+      await subContainer()[method](['true'], {
+        env: { TOKEN: 'secret', REMOVE: undefined },
+      })
+      const [, args, options] = (cp.spawn as unknown as jest.Mock).mock.calls[0]
+      expect(args).toContain('--env-file=/media/startos/images/test-image.env')
+      expect(JSON.parse(options.env.JSON_ENV)).toEqual({
+        TOKEN: 'secret',
+        REMOVE: null,
+      })
+    },
+  )
+
+  test.each(['exec', 'spawn', 'launch'] as const)(
+    '%s does not inherit the wrapper JSON_ENV when overrides are absent',
+    async method => {
+      jest.mocked(fs.readFile).mockResolvedValue('{"env":{}}')
+      await subContainer()[method](['true'])
+      const [, args, options] = (cp.spawn as unknown as jest.Mock).mock.calls[0]
+      expect(args).not.toContain(
+        '--env-file=/media/startos/images/test-image.env',
+      )
+      expect(options.env.JSON_ENV).toBe('{}')
+    },
+  )
+})
 
 describe('SubContainerEager.exec stdin', () => {
   let child: ReturnType<typeof fakeChild>

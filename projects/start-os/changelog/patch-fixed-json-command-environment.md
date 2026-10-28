@@ -1,0 +1,3 @@
+- Accept subcontainer environment overrides through `JSON_ENV`, including multiline values and variable removal.
+- Preserve multiline image environment defaults in `package attach`.
+- Respect explicit removal of `HOME` without restoring its default.
