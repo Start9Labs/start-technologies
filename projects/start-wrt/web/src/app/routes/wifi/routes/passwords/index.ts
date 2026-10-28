@@ -36,7 +36,7 @@ import {
         </tr>
       </thead>
       <tbody>
-        @for (item of passwords() | tuiTableSort; track $index) {
+        @for (item of passwords() | tuiTableSort; track item.password) {
           <tr>
             <td tuiTd>{{ item.label }}</td>
             <td tuiTd>
@@ -64,7 +64,7 @@ import {
                   <button
                     tuiOption
                     iconStart="@tui.pencil"
-                    (click)="edit(item, $index)"
+                    (click)="edit(item)"
                   >
                     {{ 'Edit' | i18n }}
                   </button>
@@ -72,7 +72,7 @@ import {
                     tuiOption
                     class="g-negative"
                     iconStart="@tui.trash"
-                    (click)="delete($index)"
+                    (click)="delete(item.password)"
                   >
                     {{ 'Delete' | i18n }}
                   </button>
@@ -155,7 +155,7 @@ export default class WifiPasswords {
   }
 
   // @TODO matt review
-  async edit(entry: WifiPasswordEntry, index: number) {
+  async edit(entry: WifiPasswordEntry) {
     const profiles = (await this.api.profilesList()).filter(
       p => p.interface !== 'lan',
     )
@@ -167,6 +167,10 @@ export default class WifiPasswords {
       .subscribe(async result => {
         const current = this.service.data()
         if (!current) return
+        const index = current.passwords.findIndex(
+          p => p.password === entry.password,
+        )
+        if (index < 0) return
         const passwords = [...current.passwords]
         passwords[index] = {
           ...passwords[index],
@@ -175,9 +179,7 @@ export default class WifiPasswords {
         }
         const newConfig = { ...current, passwords }
 
-        // Reassigning this password to a different profile moves its WiFi
-        // devices to a new subnet, breaking any published ports forwarding to
-        // them.
+        // A profile move strands its Wi-Fi devices' published ports.
         let pending
         try {
           pending = await this.service.previewWifi(newConfig)
@@ -198,17 +200,13 @@ export default class WifiPasswords {
       })
   }
 
-  async delete(index: number) {
+  async delete(password: string) {
     const current = this.service.data()
     if (!current) return
-    const passwords = current.passwords.filter((_, i) => i !== index)
+    const passwords = current.passwords.filter(p => p.password !== password)
     const newConfig = { ...current, passwords }
 
-    // Deleting the last password on a profile disconnects its WiFi clients (they
-    // hold no other credential), so any published ports forwarding to them — at an
-    // address those devices can no longer reach — are now broken. Surface them for
-    // confirmation first (Ethernet devices keep their IP, so the backend won't
-    // list them and no dialog appears).
+    // Removing a profile's last password strands its devices' published ports.
     let pending
     try {
       pending = await this.service.previewWifi(newConfig)
@@ -218,6 +216,6 @@ export default class WifiPasswords {
     if (!(await confirmPublishedPortDeletion(this.dialogs, this.i18n, pending)))
       return
 
-    this.service.deletePassword(index)
+    this.service.deletePassword(password)
   }
 }

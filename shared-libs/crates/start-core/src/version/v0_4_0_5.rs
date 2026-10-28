@@ -18,6 +18,9 @@ impl VersionT for Version {
     type Previous = v0_4_0_4::Version;
     type PreUpRes = ();
 
+    fn migration_revision(self) -> usize {
+        1
+    }
     async fn pre_up(self) -> Result<Self::PreUpRes, Error> {
         Ok(())
     }
@@ -54,6 +57,11 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
+
+    #[test]
+    fn initial_balance_advances_the_published_migration_revision() {
+        assert_eq!(Version.migration_revision(), 1);
+    }
 
     #[tokio::test]
     async fn initial_balance_queues_the_existing_service_without_failing_startup()

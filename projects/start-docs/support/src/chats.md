@@ -36,12 +36,11 @@ While Dux works on a reply, or someone at Start9 is typing one, the chat says so
 
 Another customer's chat is read-only. You see its messages and Dux's notes with secrets masked, and how many files its customer attached, never the files themselves or its private thread. To ask about it, choose **New chat** at the bottom, which starts one in the same topic. Start9 can hide a chat from other customers.
 
-## Paused and Closed Chats
+## Open and Closed Chats
 
 A chat's status is in **Chat info**:
 
 - **Open** — the chat is active.
-- **Paused until** a time — Start9 has set the chat aside until then, usually while waiting on something. You can still write in it.
 - **Closed** — the chat is over, and you can't write in it. Continue it in a new chat instead.
 
 ## Closing a Chat
