@@ -10,7 +10,6 @@ import {
   MarketplaceTileComponent,
 } from '@start9labs/marketplace'
 import { i18nPipe } from '@start9labs/shared'
-import { TuiButton, TuiDataList, TuiDropdown, TuiIcon } from '@taiga-ui/core'
 import { tap } from 'rxjs'
 import { ConfigService } from 'src/app/services/config.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
@@ -24,30 +23,17 @@ import { MarketplaceControlsComponent } from './components/controls.component'
   template: `
     <ng-container *title>{{ 'Marketplace' | i18n }}</ng-container>
     <marketplace
+      [footerAction]="{
+        icon: '@tui.key-round',
+        label: 'Manage trusted keyrings',
+      }"
       [registry]="registry()"
       [(category)]="category"
       [(query)]="query"
+      (footerActionClick)="trust.manage()"
     >
       <marketplace-registry-select />
       <a marketplacePackageLink actions></a>
-      <button
-        headerActions
-        tuiIconButton
-        tuiDropdown
-        tuiDropdownAuto
-        tuiDropdownAlign="end"
-        appearance="icon"
-        iconStart="@tui.ellipsis"
-        size="s"
-      >
-        {{ 'More' | i18n }}
-        <tui-data-list *tuiDropdown="let close">
-          <button tuiOption (click)="close(); trust.manage()">
-            <tui-icon icon="@tui.key-round" />
-            {{ 'Manage trusted keyrings' | i18n }}
-          </button>
-        </tui-data-list>
-      </button>
       <ng-template let-pkg>
         <button [marketplaceTile]="pkg">
           <ng-template let-resolved>
@@ -73,10 +59,6 @@ import { MarketplaceControlsComponent } from './components/controls.component'
     FormsModule,
     TitleDirective,
     i18nPipe,
-    TuiButton,
-    TuiDataList,
-    TuiDropdown,
-    TuiIcon,
     MarketplaceComponent,
     MarketplaceControlsComponent,
     MarketplacePackageLinkComponent,

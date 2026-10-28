@@ -1,8 +1,9 @@
-import { KeyValuePipe } from '@angular/common'
+import { KeyValue, KeyValuePipe } from '@angular/common'
 import { Component, inject, signal } from '@angular/core'
 import { FormsModule, NgModel } from '@angular/forms'
 import { TrustContext } from '@start9labs/marketplace'
 import { DialogService, i18nPipe, TaskService } from '@start9labs/shared'
+import { T } from '@start9labs/start-core'
 import {
   TuiButton,
   TuiCell,
@@ -44,7 +45,7 @@ import { ADD_TRUSTED_KEY } from './form'
       }}
     </p>
     @if (trust.keys(); as keys) {
-      @for (entry of keys | keyvalue; track entry.key) {
+      @for (entry of keys | keyvalue: compareKeyrings; track entry.key) {
         <div tuiCell>
           <span tuiTitle>{{ entry.value.name }}</span>
           <input
@@ -96,6 +97,16 @@ export class TrustedKeysDialog {
   protected readonly trust = inject(TrustedKeysService)
   protected readonly saving = signal(false)
 
+  protected compareKeyrings(
+    a: KeyValue<string, T.TrustedKey>,
+    b: KeyValue<string, T.TrustedKey>,
+  ): number {
+    return (
+      Number(a.value.removable) - Number(b.value.removable) ||
+      (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
+    )
+  }
+
   protected add(): void {
     this.dialogs
       .openComponent(ADD_TRUSTED_KEY, { data: this.context.data })
@@ -108,17 +119,19 @@ export class TrustedKeysDialog {
     control: NgModel,
   ): Promise<void> {
     this.saving.set(true)
-    await this.tasks.run(async () => {
+    const saved = await this.tasks.run(async () => {
       await this.api.rpc.server.trustedKeys.toggle({
         id,
         enabled,
         context: this.context.data,
       })
     }, 'Saving')
-    control.control.setValue(
-      this.trust.keys()?.[id]?.[this.context.data] ?? false,
-      { emitEvent: false, emitViewToModelChange: false },
-    )
+    if (!saved) {
+      control.control.setValue(
+        this.trust.keys()?.[id]?.[this.context.data] ?? false,
+        { emitEvent: false, emitViewToModelChange: false },
+      )
+    }
     this.saving.set(false)
   }
 

@@ -138,7 +138,7 @@ import UpdatesComponent from './updates.component'
       <td colspan="5">
         @if (!trusted().length) {
           <div tuiNotification appearance="warning">
-            {{ "this service package isn't signed by anyone you trust" | i18n }}
+            {{ "This service package isn't signed by anyone you trust" | i18n }}
           </div>
         }
         @if (error()) {

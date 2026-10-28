@@ -21,7 +21,7 @@ pub struct TrustedKey {
     pub name: String,
     /// PEM-encoded Ed25519 public keys.
     pub public_keys: Vec<AnyVerifyingKey>,
-    /// False for the protected Start9 keyring.
+    /// False for built-in keyrings.
     pub removable: bool,
     pub marketplace: bool,
     pub os: bool,
@@ -96,7 +96,7 @@ pub fn initial_trusted_keys() -> TrustedKeys {
         }),
         ("start9-alpha".into(), TrustedKey {
             name: "Start9 Alpha".into(),
-            removable: true,
+            removable: false,
             public_keys: vec![
                 "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
                 "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
@@ -405,20 +405,23 @@ mod tests {
         assert_eq!(keys["start9-alpha"].public_keys.len(), 2);
         assert!(keys[START9].marketplace && keys[START9].os);
         assert!(!keys["start9-alpha"].marketplace && !keys["start9-alpha"].os);
-        assert!(remove_group(&mut keys, START9).is_err());
-        toggle_group(
-            &mut keys,
-            ToggleTrustedKeyParams {
-                id: START9.into(),
-                context: TrustContext::Os,
-                enabled: false,
-            },
-        )
-        .unwrap();
-        assert!(keys[START9].marketplace);
-        assert!(os_signers(&keys).is_empty());
-        remove_group(&mut keys, "start9-alpha").unwrap();
-        assert!(!keys.contains_key("start9-alpha"));
+        for id in [START9, "start9-alpha"] {
+            let saved = keys[id].clone();
+            assert!(!saved.removable);
+            assert!(remove_group(&mut keys, id).is_err());
+            assert_eq!(keys[id], saved);
+            toggle_group(
+                &mut keys,
+                ToggleTrustedKeyParams {
+                    id: id.into(),
+                    context: TrustContext::Os,
+                    enabled: !saved.os,
+                },
+            )
+            .unwrap();
+            assert_eq!(keys[id].os, !saved.os);
+            assert_eq!(keys[id].marketplace, saved.marketplace);
+        }
     }
 
     #[test]
@@ -468,6 +471,9 @@ mod tests {
             assert!(keys[id].marketplace);
             assert_eq!(keys[id].os, os);
         }
+        remove_group(&mut keys, "market").unwrap();
+        assert!(!keys.contains_key("market"));
+        assert!(keys.contains_key("os"));
     }
 
     #[test]
@@ -497,10 +503,8 @@ mod tests {
         assert_eq!(keys["start9-alpha"].name, alpha.name);
         assert_eq!(keys.len(), 2);
         legacy_remove(&mut keys, &key).unwrap();
-        assert_eq!(keys["start9-alpha"].public_keys, alpha.public_keys[1..]);
-        let remaining = keys["start9-alpha"].public_keys[0].clone();
-        legacy_remove(&mut keys, &remaining).unwrap();
-        assert!(!keys.contains_key("start9-alpha"));
+        assert_eq!(keys["start9-alpha"], alpha);
+        assert!(legacy_remove(&mut keys, &key).is_err());
     }
 
     #[test]

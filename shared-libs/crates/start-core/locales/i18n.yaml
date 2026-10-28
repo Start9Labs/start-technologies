@@ -7314,11 +7314,11 @@ update.trusted-keys.not-found:
   pl_PL: "Nie znaleziono zaufanego pęku kluczy"
 
 update.trusted-keys.protected:
-  en_US: "Start9 cannot be deleted; disable its trust toggle instead"
-  de_DE: "Start9 kann nicht gelöscht werden; deaktivieren Sie stattdessen den Vertrauensschalter"
-  es_ES: "Start9 no se puede eliminar; desactive su interruptor de confianza"
-  fr_FR: "Start9 ne peut pas être supprimé ; désactivez plutôt son interrupteur de confiance"
-  pl_PL: "Nie można usunąć Start9; zamiast tego wyłącz zaufanie przełącznikiem"
+  en_US: "Built-in keyrings cannot be deleted; disable their trust instead"
+  de_DE: "Integrierte Schlüsselbunde können nicht gelöscht werden; deaktivieren Sie stattdessen deren Vertrauen"
+  es_ES: "Los llaveros integrados no se pueden eliminar; desactive su confianza"
+  fr_FR: "Les trousseaux intégrés ne peuvent pas être supprimés ; désactivez plutôt leur confiance"
+  pl_PL: "Nie można usunąć wbudowanych pęków kluczy; zamiast tego wyłącz zaufanie do nich"
 
 # volume.rs
 volume.restore-conflict:

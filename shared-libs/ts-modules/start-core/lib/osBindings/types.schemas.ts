@@ -3988,7 +3988,7 @@ export const TrustedKey: z.ZodObject<{
    */
   publicKeys: z.ZodArray<typeof AnyVerifyingKey>
   /**
-   * False for the protected Start9 keyring.
+   * False for built-in keyrings.
    */
   removable: z.ZodBoolean
   marketplace: z.ZodBoolean
@@ -4002,10 +4002,10 @@ export const TrustedKey: z.ZodObject<{
     description: 'PEM-encoded Ed25519 public keys.',
   }),
   /**
-   * False for the protected Start9 keyring.
+   * False for built-in keyrings.
    */
   removable: z.boolean().meta({
-    description: 'False for the protected Start9 keyring.',
+    description: 'False for built-in keyrings.',
   }),
   marketplace: z.boolean(),
   os: z.boolean(),

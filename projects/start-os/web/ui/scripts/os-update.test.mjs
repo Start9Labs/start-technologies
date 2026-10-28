@@ -948,6 +948,74 @@ test('marketplace dispatch delegates trust enforcement to the server without an 
 
 const { TrustedKeysDialog } =
   await import('src/app/components/trusted-keys/dialog')
+test('built-in keyrings precede custom entries regardless of labels and input order', () => {
+  const custom = Object.values(trustedSigners)[0]
+  const entries = [
+    { key: '00000000-0000-4000-8000-000000000000', value: custom },
+    {
+      key: 'start9-alpha',
+      value: {
+        ...custom,
+        name: 'A renamed Alpha',
+        removable: false,
+        marketplace: false,
+        os: false,
+      },
+    },
+    { key: 'ffffffff-ffff-4fff-8fff-ffffffffffff', value: custom },
+    {
+      key: 'start9',
+      value: { ...custom, name: 'Z renamed Start9', removable: false },
+    },
+  ]
+  for (const input of [entries, [...entries].reverse()]) {
+    assert.deepEqual(
+      [...input]
+        .sort(TrustedKeysDialog.prototype.compareKeyrings)
+        .map(x => x.key),
+      [
+        'start9',
+        'start9-alpha',
+        '00000000-0000-4000-8000-000000000000',
+        'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      ],
+    )
+  }
+})
+
+test('a successful trust toggle leaves the control to the requested value and PatchDB updates', async () => {
+  const control = new FormControl(true)
+  const viewWrites = []
+  control.registerOnChange(value => viewWrites.push(value))
+  const mutations = []
+  const instance = {
+    context: { data: 'marketplace' },
+    saving: { set() {} },
+    trust: { keys: () => ({ publisher: { marketplace: false } }) },
+    api: {
+      rpc: {
+        server: {
+          trustedKeys: { toggle: async params => mutations.push(params) },
+        },
+      },
+    },
+    tasks: {
+      run: async work => {
+        await work()
+        return true
+      },
+    },
+  }
+  await TrustedKeysDialog.prototype.toggle.call(instance, 'publisher', true, {
+    control,
+  })
+  assert.deepEqual(mutations, [
+    { id: 'publisher', enabled: true, context: 'marketplace' },
+  ])
+  assert.equal(control.value, true)
+  assert.deepEqual(viewWrites, [])
+})
+
 test('a rejected trust toggle restores the persisted value without emitting another mutation', async () => {
   const control = new FormControl(true)
   const viewWrites = []

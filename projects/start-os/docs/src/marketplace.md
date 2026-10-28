@@ -10,7 +10,7 @@ StartOS ships with two [default registries](default-registries.md): the **Start9
 
 ## Package Signers
 
-Package details show **Signed by** above **Version**, listing the enabled keyrings whose keys sign the selected package. The install button is disabled when no trusted signer matches. Open **Manage trusted keyrings** from the overflow menu next to the sort selector to manage [trusted keyrings](trusted-keys.md).
+Package details show **Signed by** above **Version**, listing the enabled keyrings whose keys sign the selected package. The install button is disabled when no trusted signer matches. Open **Manage trusted keyrings** at the bottom of the sidebar to manage [trusted keyrings](trusted-keys.md).
 
 ## Open Ecosystem
 
