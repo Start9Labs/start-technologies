@@ -1,0 +1,2 @@
+- **Novedades en tu idioma.** Las novedades y el enlace al registro completo de cambios usan el idioma del servidor antes y después de una actualización. Si no hay traducción disponible, las novedades se muestran en inglés.
+- **Enlace correcto al registro completo de cambios.** La notificación de bienvenida enlaza al registro de cambios publicado en lugar de a una copia desactualizada.
