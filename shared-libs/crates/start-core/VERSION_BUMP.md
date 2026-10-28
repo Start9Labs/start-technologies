@@ -99,7 +99,7 @@ A pre-release version instead takes prerelease segments: `exver::Version::new([0
 
 ### 5. Release notes
 
-**`projects/start-os/release-notes/X.Y.Z.N.md`** — optional framing: a lede and optional `## Important`. The shared compiler generates `## Highlights` from fragments with `user-facing: true`; follow the root `AGENTS.md` release rules. Put pre-update instructions in an optional sibling **`X.Y.Z.N.pre-update.md`**, headed `## ⚠️ Before You Update`. `manage-release.sh` prefixes the companion to the compiled main notes for the GitHub release and registry entry. The image packages the compiled main notes without the pre-update companion.
+**`projects/start-os/release-notes/X.Y.Z.N.md`** — optional `## Important` notices, not a release summary. Omit the file when no notice is needed. The shared compiler generates `## Highlights` and, when applicable, `## Security` from visible fragments, with localized section titles; follow the root `AGENTS.md` release rules. Put pre-update instructions in an optional sibling **`X.Y.Z.N.pre-update.md`**, headed `## ⚠️ Before You Update`. `manage-release.sh` prefixes the companion to the compiled notes for GitHub and the registry. The image packages the generated sections and post-update notices without the pre-update companion.
 
 ### 6. Release-gated docs
 
@@ -127,7 +127,7 @@ cargo test -p start-core --features test version::   # incl. current_matches_man
 - [ ] Create `shared-libs/crates/start-core/src/version/vX_Y_Z_N.rs`
 - [ ] Update `shared-libs/crates/start-core/src/version/mod.rs` in 5 locations
 - [ ] Add the StartOS changelog fragments
-- [ ] Add optional framing at `projects/start-os/release-notes/X.Y.Z.N.md` and `X.Y.Z.N.pre-update.md` for any pre-update instructions
+- [ ] Add a release-note file only for necessary notices, and `X.Y.Z.N.pre-update.md` for pre-update instructions
 - [ ] Bump the release link in `projects/start-os/docs/src/`
 - [ ] Run `make manpages` and commit the generated version updates
 - [ ] Update `projects/start-sdk/lib/StartSdk.ts` `OSVersion` — **only** on breaking SDK changes

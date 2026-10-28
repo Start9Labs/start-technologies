@@ -1,0 +1,2 @@
+- **Añadir dominios públicos a interfaces con rangos de puertos.** Los servicios cuyas interfaces exponen un rango de puertos permiten añadir dominios públicos desde la interfaz web o la CLI.
+- Los rangos de puertos habilitados conservan la asignación de sus dominios configurados al comprobar si hay duplicados.
