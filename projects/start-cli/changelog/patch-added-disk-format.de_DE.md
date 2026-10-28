@@ -1,0 +1,1 @@
+- `disk format` löscht ein Laufwerk und richtet darauf eine einzelne Btrfs-Partition für StartOS-Sicherungen ein.

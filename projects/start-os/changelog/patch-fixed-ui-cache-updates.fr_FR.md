@@ -1,0 +1,2 @@
+- L’interface propose des actions de récupération lorsque sa copie en cache est corrompue.
+- L’interface prend en compte sa propre mise à jour plus rapidement après une mise à jour de StartOS.

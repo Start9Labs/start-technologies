@@ -1,0 +1,1 @@
+- La interfaz ya no se queda atascada al actualizarse después de una actualización de StartOS. El diálogo de actualización necesaria muestra el estado y ofrece acciones de recuperación; la recarga requiere pulsar Actualizar explícitamente.

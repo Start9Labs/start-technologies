@@ -1,0 +1,1 @@
+- Die Oberfläche bleibt nach einem StartOS-Update nicht mehr beim Aktualisieren hängen. Der Dialog „Aktualisierung erforderlich“ zeigt den Update-Status und Wiederherstellungsaktionen; neu geladen wird erst nach einem ausdrücklichen Klick auf Aktualisieren.

@@ -1,0 +1,1 @@
+- Interfejs nie zawiesza się już podczas odświeżania po aktualizacji StartOS. Okno wymagające odświeżenia pokazuje stan aktualizacji i działania naprawcze; przeładowanie wymaga jawnego kliknięcia Odśwież.
