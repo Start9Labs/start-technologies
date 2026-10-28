@@ -251,19 +251,6 @@ export const ActionResultValue: z.ZodUnion<
   .meta({
     id: 'ActionResultValue',
   })
-export const AddVersionParams: z.ZodObject<{
-  version: z.ZodString
-  headline: z.ZodString
-  releaseNotes: z.ZodString
-  sourceVersion: z.ZodString
-}> = /* @__PURE__ */ object({
-  version: z.string(),
-  headline: z.string(),
-  releaseNotes: z.string(),
-  sourceVersion: z.string(),
-}).meta({
-  id: 'AddVersionParams',
-})
 export const AnySignature: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'AnySignature',
 })
@@ -1537,6 +1524,19 @@ export const AddTunnelParams: z.ZodObject<{
 }).meta({
   id: 'AddTunnelParams',
 })
+export const AddVersionParams: z.ZodObject<{
+  version: z.ZodString
+  headline: z.ZodString
+  releaseNotes: typeof LocaleString
+  sourceVersion: z.ZodString
+}> = /* @__PURE__ */ object({
+  version: z.string(),
+  headline: z.string(),
+  releaseNotes: LocaleString,
+  sourceVersion: z.string(),
+}).meta({
+  id: 'AddVersionParams',
+})
 export const AddressInfo: z.ZodObject<{
   username: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -2414,7 +2414,7 @@ export const OsUpdateSignerKeyParams: z.ZodObject<{
 })
 export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
-  releaseNotes: z.ZodString
+  releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
   authorized: z.ZodArray<typeof Guid>
   iso: z.ZodRecord<
@@ -2431,7 +2431,7 @@ export const OsVersionInfo: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   headline: z.string(),
-  releaseNotes: z.string(),
+  releaseNotes: LocaleString,
   sourceVersion: z.string(),
   authorized: z.array(Guid),
   iso: z.record(z.string(), RegistryAsset(Blake3Commitment)),
