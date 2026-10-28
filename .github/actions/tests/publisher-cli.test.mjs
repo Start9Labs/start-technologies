@@ -317,11 +317,11 @@ ${install.run}
   })
 }
 
-test('all CLI artifact consumers trigger on helper and CLI source changes', () => {
-  for (const source of [
-    cli,
-    workflow('startos-iso.yaml'),
-    workflow('start-wrt.yaml'),
+test('artifact consumers track shared inputs without CLI-only image rebuilds', () => {
+  for (const [file, source] of [
+    ['start-cli.yaml', cli],
+    ['startos-iso.yaml', workflow('startos-iso.yaml')],
+    ['start-wrt.yaml', workflow('start-wrt.yaml')],
   ])
     for (const event of ['push', 'pull_request']) {
       assert.ok(
@@ -329,7 +329,11 @@ test('all CLI artifact consumers trigger on helper and CLI source changes', () =
           '.github/workflows/compile-start-cli.yaml',
         ),
       )
-      assert.ok(source.on[event].paths.includes('projects/start-cli/**'))
+      assert.equal(
+        source.on[event].paths.includes('projects/start-cli/**'),
+        file === 'start-cli.yaml',
+      )
+      assert.ok(source.on[event].paths.includes(`.github/workflows/${file}`))
       assert.ok(
         source.on[event].paths.includes('shared-libs/crates/**') ||
           source.on[event].paths.includes('shared-libs/**'),
