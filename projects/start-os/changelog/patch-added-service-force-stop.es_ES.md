@@ -1,0 +1,1 @@
+- **Fuerza la detención de servicios que se quedan atascados al detenerse.** Una confirmación advierte de la posible pérdida de datos y de un estado inconsistente del servicio. El botón aparece tras 30 segundos por defecto, configurable mediante `force-stop-delay-seconds` en `config.yaml`.

@@ -1,0 +1,1 @@
+- **Dienste zwangsweise stoppen, die beim Beenden hängen bleiben.** Eine Bestätigung warnt vor Datenverlust und einem inkonsistenten Dienstzustand. Die Schaltfläche erscheint standardmäßig nach 30 Sekunden; die Wartezeit ist über `force-stop-delay-seconds` in `config.yaml` einstellbar.

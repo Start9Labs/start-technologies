@@ -1042,17 +1042,394 @@ test('audience-only tag changes cannot rewrite archived highlights', t => {
   assert.deepEqual(readFileSync(path), archived)
 })
 
-test('notes reject authored highlights before release', t => {
-  const { fragment, write, cli } = compilerFixture(t)
+test('security fragments form their own section after Highlights and before notices', t => {
+  const { fragment, write, cli, render } = compilerFixture(t)
+  fragment('minor-added-feature.md', '- Visible feature.\n')
+  fragment('patch-security-a.md', '- Security fix.\n')
+  fragment('patch-security-b.md', '- Security fallback.\n')
+  fragment('patch-security-internal.md', '- Internal security detail.\n', false)
+  write(
+    `${PRODUCT}/changelog/patch-security-a.pl_PL.md`,
+    '- Poprawka bezpieczeństwa.\n',
+  )
   write(
     `${PRODUCT}/release-notes/0.4.0.1.md`,
-    'Lede.\n\n## Highlights\n\n- Hand-written.\n',
+    '## Important\n\nKeep this notice.\n',
   )
-  fragment(undefined, '- Compiled.\n')
+  const english = cli(['notes', PRODUCT, '0.4.0.1']).stdout.toString()
+  assert.equal(
+    english,
+    '## Highlights\n\n- Visible feature.\n\n## Security\n\n- Security fix.\n\n- Security fallback.\n\n## Important\n\nKeep this notice.\n',
+  )
+  const polish = cli(['notes', PRODUCT, '0.4.0.1', '--locale', 'pl_PL']).stdout
+  contains(polish, '## Nowości\n\n- Visible feature.')
+  contains(polish, '## Bezpieczeństwo\n\n- Poprawka bezpieczeństwa.')
+  contains(polish, '- Security fallback.')
+  contains(polish, '## Important\n\nKeep this notice.')
+  excludes(polish, 'Internal security detail.')
+  const history = render()
+  contains(history, '### Security')
+  contains(history, 'Internal security detail.')
+})
+
+test('security-only releases need no framing and use catalog headings in every locale', t => {
+  const { root, fragment, cli } = compilerFixture(t)
+  fragment('patch-security-fix.md', '- Security fix.\n')
+  for (const [locale, highlights, security] of [
+    ['en_US', 'Highlights', 'Security'],
+    ['de_DE', 'Neuerungen', 'Sicherheit'],
+    ['es_ES', 'Novedades', 'Seguridad'],
+    ['fr_FR', 'Nouveautés', 'Sécurité'],
+    ['pl_PL', 'Nowości', 'Bezpieczeństwo'],
+  ]) {
+    assert.equal(
+      cli(['notes', PRODUCT, '0.4.0.1', '--locale', locale]).stdout.toString(),
+      `## ${highlights}\n\n## ${security}\n\n- Security fix.\n`,
+    )
+  }
+  assert.ok(!existsSync(join(root, PRODUCT, 'release-notes')))
+  fragment('patch-security-fix.md', '- Internal.\n', false)
+  assert.equal(
+    cli(['notes', PRODUCT, '0.4.0.1']).stdout.toString(),
+    '## Highlights\n',
+  )
+})
+
+test('security archives preserve translated sections and pinned titles without framing', t => {
+  const { root, fragment, write, cli, commit, tag, git } = compilerFixture(t)
+  fragment('patch-security-fix.md', '- Security fix.\n')
+  write(`${PRODUCT}/changelog/patch-security-fix.pl_PL.md`, '- Bezpieczniej.\n')
+  const catalog = 'shared-libs/crates/start-core/locales/release-notes.json'
+  const labels = JSON.parse(readFileSync(join(REPO, catalog), 'utf8'))
+  labels['release-notes.security-title'].pl_PL = 'Zapisane bezpieczeństwo'
+  write(catalog, JSON.stringify(labels))
+  commit()
+  const release = tag('0.4.0.1')
+  const args = [
+    'notes',
+    PRODUCT,
+    '0.4.0.1',
+    '--locale',
+    'pl_PL',
+    '--ref',
+    release,
+  ]
+  const expected = cli(args).stdout
+  contains(expected, '## Zapisane bezpieczeństwo')
+  cli(['sync'])
+  assert.deepEqual(
+    readFileSync(join(root, PRODUCT, 'release-notes/0.4.0.1.pl_PL.md')),
+    expected,
+  )
+  assert.ok(!existsSync(join(root, PRODUCT, 'changelog/patch-security-fix.md')))
+  commit()
+  cli(['sync'])
+  assert.deepEqual(cli(args).stdout, expected)
+  assert.ok(
+    cli(['archives', PRODUCT]).stdout.toString().includes('0.4.0.1.pl_PL.md'),
+  )
+  assert.equal(
+    git(
+      'ls-tree',
+      '-r',
+      '--name-only',
+      release,
+      '--',
+      `${PRODUCT}/release-notes`,
+    ),
+    '',
+  )
+})
+
+test('authored Security sections are rejected before replacing generated notes', t => {
+  const { fragment, write, cli } = compilerFixture(t)
+  fragment('patch-security-fix.md', '- Security fix.\n')
+  for (const [locale, heading] of [
+    ['en_US', 'Security'],
+    ['pl_PL', 'Bezpieczeństwo'],
+  ]) {
+    const suffix = locale === 'en_US' ? '' : `.${locale}`
+    write(
+      `${PRODUCT}/release-notes/0.4.0.1${suffix}.md`,
+      `## ${heading}\n\n- Hand-written.\n`,
+    )
+    contains(
+      cli(['notes', PRODUCT, '0.4.0.1', '--locale', locale], false).stderr,
+      `remove ## ${heading}`,
+    )
+  }
+})
+
+test('translated Highlights inherit audience, ordering, and English fallback', t => {
+  const { fragment, write, cli, render } = compilerFixture(t)
+  fragment('minor-added-a.md', '- English feature.\n')
+  write(`${PRODUCT}/changelog/minor-added-a.pl_PL.md`, '- Polska funkcja.\n')
+  fragment('patch-fixed-b.md', '- English fallback.\n')
+  fragment('patch-changed-internal.md', '- Internal.\n', false)
+  write(
+    `${PRODUCT}/changelog/patch-changed-internal.pl_PL.md`,
+    '- Wewnętrzne.\n',
+  )
+  write(
+    `${PRODUCT}/release-notes/0.4.0.1.pl_PL.md`,
+    'Wstęp.\n\n## Nowości\n\n<!-- highlights -->\n\n## Ważne\n\nInstrukcje.\n',
+  )
+  const notes = cli(['notes', PRODUCT, '0.4.0.1', '--locale', 'pl_PL']).stdout
+  assert.equal(
+    notes.toString(),
+    'Wstęp.\n\n## Nowości\n\n- Polska funkcja.\n\n- English fallback.\n\n## Ważne\n\nInstrukcje.\n',
+  )
+  excludes(notes, 'Internal.')
+  excludes(notes, 'Wewnętrzne.')
+  excludes(notes, '<!-- highlights -->')
+  const history = render('0.4.1')
+  contains(history, 'English feature.')
+  contains(history, 'Internal.')
+  excludes(history, 'Polska funkcja.')
+  const bundle = JSON.parse(cli(['notes-bundle', PRODUCT, '0.4.0.1']).stdout)
+  assert.deepEqual(Object.keys(bundle), ['en_US', 'pl_PL'])
+  assert.equal(bundle.pl_PL, notes.toString())
+  contains(bundle.en_US, 'English feature.')
+  assert.equal(
+    cli(['locales', PRODUCT, '0.4.0.1']).stdout.toString(),
+    'pl_PL\n',
+  )
+  cli(['notes', PRODUCT, '0.4.0.1', '--locale', '../pl_PL'], false)
+  cli(['notes', PRODUCT, '0.4.0.1', '--locale', 'pl_PL\n'], false)
+})
+
+test('translation companions require canonical bodies and valid bullet Markdown', t => {
+  const { fragment, write, cli } = compilerFixture(t)
+  const path = write(
+    `${PRODUCT}/changelog/patch-fixed-example.pl_PL.md`,
+    '- Polska poprawka.\n',
+  )
   contains(
-    cli(['notes', PRODUCT, '0.4.0.1'], false).stderr,
-    'release-notes/0.4.0.1.md: remove ## Highlights',
+    cli(['validate', PRODUCT], false).stderr,
+    'missing canonical fragment',
   )
+  fragment()
+  cli(['validate', PRODUCT])
+  const malformedName = write(
+    `${PRODUCT}/changelog/patch-fixed-example.pl_PL.md\n`,
+    '- Poprawka.\n',
+  )
+  cli(['validate', PRODUCT], false)
+  unlinkSync(malformedName)
+  writeFileSync(path, '## Nowości\n')
+  contains(cli(['validate', PRODUCT], false).stderr, 'headings are not allowed')
+  writeFileSync(path, '---\nuser-facing: false\n---\n\n- Wewnętrzne.\n')
+  cli(['validate', PRODUCT], false)
+  unlinkSync(path)
+  write(
+    `${PRODUCT}/changelog/patch-fixed-example.en_US.md`,
+    '- English duplicate.\n',
+  )
+  contains(
+    cli(['validate', PRODUCT], false).stderr,
+    'English belongs in the canonical fragment',
+  )
+})
+
+test('locale discovery includes framing and visible companions without a formatter', t => {
+  const { root, fragment, write, cli } = compilerFixture(t)
+  fragment()
+  write(`${PRODUCT}/changelog/patch-fixed-example.pl_PL.md`, '- Poprawka.\n')
+  fragment('patch-changed-internal.md', '- Internal.\n', false)
+  write(`${PRODUCT}/changelog/patch-changed-internal.es_ES.md`, '- Interno.\n')
+  write(
+    `${PRODUCT}/release-notes/0.4.0.1.de_DE.md`,
+    '## Neuigkeiten\n\n<!-- highlights -->\n',
+  )
+  write(`${PRODUCT}/release-notes/0.4.0.2.fr_FR.md`, 'Future.\n')
+  write(`${PRODUCT}/release-notes/0.4.0.1.pre-update.md`, 'Warning.\n')
+  unlinkSync(join(root, '.prettierrc.json'))
+  assert.equal(
+    cli(['locales', PRODUCT, '0.4.0.1']).stdout.toString(),
+    'de_DE pl_PL\n',
+  )
+})
+
+test('localized framing reserves an empty generated section', t => {
+  const { fragment, write, cli } = compilerFixture(t)
+  fragment()
+  const path = `${PRODUCT}/release-notes/0.4.0.1.pl_PL.md`
+  for (const text of [
+    '## Nowości\n\n- Ręcznie.\n',
+    '## Nowości\n\n- Ręcznie.\n\n<!-- highlights -->\n',
+    '## Nowości\n\n<!-- highlights -->\n\n- Ręcznie.\n',
+    '<!-- highlights -->\n',
+    '## Nowości\n\n<!-- highlights -->\n\n<!-- highlights -->\n',
+  ]) {
+    write(path, text)
+    cli(['notes', PRODUCT, '0.4.0.1', '--locale', 'pl_PL'], false)
+    cli(['notes-bundle', PRODUCT, '0.4.0.1'], false)
+  }
+  fragment(undefined, '- Internal.\n', false)
+  write(path, 'Wstęp.\n\n## Nowości\n\n<!-- highlights -->\n')
+  assert.equal(
+    cli(['notes', PRODUCT, '0.4.0.1', '--locale', 'pl_PL']).stdout.toString(),
+    'Wstęp.\n\n## Nowości\n',
+  )
+})
+
+test('sync archives translations from the tag and consumes unchanged bundles', t => {
+  const { root, fragment, write, cli, commit, tag, git } = compilerFixture(t)
+  const canonical = fragment()
+  const translation = write(
+    `${PRODUCT}/changelog/patch-fixed-example.pl_PL.md`,
+    '- Pierwsza poprawka.\n',
+  )
+  const framing = `${PRODUCT}/release-notes/0.4.0.1.pl_PL.md`
+  write(framing, 'Wstęp.\n\n## Nowości\n\n<!-- highlights -->\n')
+  commit()
+  const release = tag('0.4.0.1', true)
+  const expected = cli([
+    'notes',
+    PRODUCT,
+    '0.4.0.1',
+    '--locale',
+    'pl_PL',
+    '--ref',
+    release,
+  ]).stdout
+  writeFileSync(translation, '- Zmieniona poprawka.\n')
+  const added = write(
+    `${PRODUCT}/changelog/patch-fixed-example.de_DE.md`,
+    '- Erste Korrektur.\n',
+  )
+  const unchanged = fragment('patch-fixed-other.md', '- Another English fix.\n')
+  const unchangedTranslation = write(
+    `${PRODUCT}/changelog/patch-fixed-other.pl_PL.md`,
+    '- Inna poprawka.\n',
+  )
+  commit()
+  tag('0.4.0.2')
+  cli(['sync'])
+  assert.deepEqual(readFileSync(join(root, framing)), expected)
+  assert.ok(!existsSync(canonical))
+  assert.ok(!existsSync(translation))
+  assert.ok(!existsSync(added))
+  assert.ok(!existsSync(unchanged))
+  assert.ok(!existsSync(unchangedTranslation))
+  assert.equal(
+    readFileSync(
+      join(root, `${PRODUCT}/release-notes/0.4.0.2.pl_PL.md`),
+      'utf8',
+    ),
+    '## Nowości\n\n- Zmieniona poprawka.\n\n- Inna poprawka.\n',
+  )
+  assert.equal(
+    readFileSync(
+      join(root, `${PRODUCT}/release-notes/0.4.0.2.de_DE.md`),
+      'utf8',
+    ),
+    '## Neuerungen\n\n- Erste Korrektur.\n\n- Another English fix.\n',
+  )
+  commit()
+  cli(['sync'])
+  assert.deepEqual(
+    cli(['notes', PRODUCT, '0.4.0.1', '--locale', 'pl_PL', '--ref', release])
+      .stdout,
+    expected,
+  )
+  assert.deepEqual(readFileSync(join(root, framing)), expected)
+  write(`${PRODUCT}/release-notes/0.4.0.3.fr_FR.md`, 'Unreleased.\n')
+  commit()
+  const archives = cli(['archives', PRODUCT])
+    .stdout.toString()
+    .trim()
+    .split('\n')
+  assert.ok(archives.includes(`${PRODUCT}/release-notes/0.4.0.1.pl_PL.md`))
+  assert.ok(archives.includes(`${PRODUCT}/release-notes/0.4.0.2.de_DE.md`))
+  assert.ok(!archives.includes(`${PRODUCT}/release-notes/0.4.0.3.fr_FR.md`))
+  assert.equal(
+    git('show', `${release}:${framing}`),
+    'Wstęp.\n\n## Nowości\n\n<!-- highlights -->\n',
+  )
+})
+
+test('post-tag translation edits and additions retain the canonical fragment', t => {
+  const { fragment, write, cli, commit, tag } = compilerFixture(t)
+  const canonical = fragment()
+  const translation = write(
+    `${PRODUCT}/changelog/patch-fixed-example.pl_PL.md`,
+    '- Poprawka.\n',
+  )
+  commit()
+  tag('0.4.0.1')
+  writeFileSync(translation, '- Zmieniona.\n')
+  const fresh = write(
+    `${PRODUCT}/changelog/patch-fixed-example.de_DE.md`,
+    '- Korrektur.\n',
+  )
+  commit()
+  cli(['sync'])
+  assert.ok(existsSync(canonical))
+  assert.ok(existsSync(translation))
+  assert.ok(existsSync(fresh))
+  cli(['validate', PRODUCT])
+  cli(['check-version', PRODUCT, '0.4.0.2'])
+  cli(['sync'])
+  assert.ok(existsSync(canonical))
+})
+
+test('deleted and reintroduced translations create new fragment ownership', t => {
+  const { fragment, write, commit, tag, cli, render } = compilerFixture(t)
+  fragment()
+  const translation = write(
+    `${PRODUCT}/changelog/patch-fixed-example.pl_PL.md`,
+    '- Poprawka.\n',
+  )
+  commit()
+  tag('0.4.0.1')
+  unlinkSync(translation)
+  commit()
+  writeFileSync(translation, '- Poprawka.\n')
+  commit()
+  const release = tag('0.4.0.2')
+  assert.equal(count(render('0.4.0.2', release), '- Fixed example.'), 2)
+  cli(['sync'])
+  assert.ok(!existsSync(translation))
+})
+
+test('legacy translated note bytes are preserved', t => {
+  const { root, fragment, write, commit, tag, cli } = compilerFixture(t)
+  const path = `${PRODUCT}/release-notes/0.4.0.1.pl_PL.md`
+  const legacy = 'Wstęp.\r\n\r\n## Nowości\r\n\r\n- Opublikowane.\r\n'
+  write(path, legacy)
+  fragment(undefined, '- Legacy change.\n', null)
+  commit()
+  const release = tag('0.4.0.1')
+  assert.equal(
+    cli([
+      'notes',
+      PRODUCT,
+      '0.4.0.1',
+      '--locale',
+      'pl_PL',
+      '--ref',
+      release,
+    ]).stdout.toString(),
+    legacy,
+  )
+  cli(['sync'])
+  assert.equal(readFileSync(join(root, path), 'utf8'), legacy)
+})
+
+test('notes reject authored highlights before release', t => {
+  const { fragment, write, cli } = compilerFixture(t)
+  fragment(undefined, '- Compiled.\n')
+  for (const framing of [
+    'Lede.\n\n## Highlights\n\n- Hand-written.\n',
+    'Lede.\n\n## Highlights\n\n- Hand-written.\n\n## Important\n\n<!-- highlights -->\n',
+  ]) {
+    write(`${PRODUCT}/release-notes/0.4.0.1.md`, framing)
+    contains(
+      cli(['notes', PRODUCT, '0.4.0.1'], false).stderr,
+      'release-notes/0.4.0.1.md: remove ## Highlights',
+    )
+  }
 })
 
 test('notes and fragment consumption are atomic on framing conflicts', t => {

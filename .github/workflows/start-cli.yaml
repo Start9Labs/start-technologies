@@ -42,6 +42,7 @@ on:
       - 'build/**'
       - 'debian/**'
       - '.github/workflows/start-cli.yaml'
+      - '.github/workflows/compile-start-cli.yaml'
       - '.github/actions/setup-build/**'
       # Doc-only edits shouldn't trigger a build. (start-cli has no docs/ subtree
       # today, but this guards a README or future docs added under the allowlist.)
@@ -67,6 +68,7 @@ on:
       - 'build/**'
       - 'debian/**'
       - '.github/workflows/start-cli.yaml'
+      - '.github/workflows/compile-start-cli.yaml'
       - '.github/actions/setup-build/**'
       # Doc-only edits shouldn't trigger a build. (start-cli has no docs/ subtree
       # today, but this guards a README or future docs added under the allowlist.)
@@ -81,11 +83,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  NODEJS_VERSION: '24.11.0'
+  NODEJS_VERSION: &nodejs-version '24.11.0'
   # Empty (release-equivalent) on master, `dev` everywhere else a build happens
   # without an explicit input — PRs and integration/* branches. Continuous
   # deployment must not ship dev-flavoured artifacts.
-  ENVIRONMENT: >-
+  ENVIRONMENT: &environment >-
     ${{
       fromJson(format('["{0}", ""]', github.event.inputs.environment || 'dev'))[
         github.event.inputs.environment == 'NONE'
@@ -111,28 +113,12 @@ jobs:
               "ALL": ["x86_64-unknown-linux-musl", "x86_64-apple-darwin", "aarch64-unknown-linux-musl", "aarch64-apple-darwin", "riscv64gc-unknown-linux-musl"]
             }')[github.event.inputs.arch || 'ALL']
           }}
-    runs-on: ${{ fromJson('["ubuntu-latest", "ubuntu-24.04-32-cores"]')[github.event.inputs.runner == 'fast'] }}
-    steps:
-      - name: Mount tmpfs
-        if: ${{ github.event.inputs.runner == 'fast' }}
-        run: sudo mount -t tmpfs tmpfs .
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/setup-build
-        with:
-          nodejs-version: ${{ env.NODEJS_VERSION }}
-
-      - name: Make
-        run: TARGET=${{ matrix.triple }} make start-cli
-        env:
-          PLATFORM: ${{ matrix.arch }}
-          SCCACHE_GHA_ENABLED: on
-          SCCACHE_GHA_VERSION: 0
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: start-cli_${{ matrix.triple }}
-          path: target/${{ matrix.triple }}/release/start-cli
-          retention-days: 14
+    uses: ./.github/workflows/compile-start-cli.yaml
+    with:
+      triple: ${{ matrix.triple }}
+      environment: *environment
+      fast: ${{ github.event.inputs.runner == 'fast' }}
+      nodejs-version: *nodejs-version
 
   deb:
     name: Build Debian Package

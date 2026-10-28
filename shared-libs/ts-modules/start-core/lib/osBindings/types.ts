@@ -14,8 +14,6 @@ export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
 export type ActionResultValueInput = z.input<typeof schemas.ActionResultValue>
 export type ActionVisibility = z.output<typeof schemas.ActionVisibility>
 export type ActionVisibilityInput = z.input<typeof schemas.ActionVisibility>
-export type AddVersionParams = z.output<typeof schemas.AddVersionParams>
-export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type Algorithm = z.output<typeof schemas.Algorithm>
 export type AlgorithmInput = z.input<typeof schemas.Algorithm>
 export type AllowedStatuses = z.output<typeof schemas.AllowedStatuses>
@@ -472,6 +470,8 @@ export type AddPublicDomainParamsInput = z.input<
 >
 export type AddTunnelParams = z.output<typeof schemas.AddTunnelParams>
 export type AddTunnelParamsInput = z.input<typeof schemas.AddTunnelParams>
+export type AddVersionParams = z.output<typeof schemas.AddVersionParams>
+export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type AddressInfo = z.output<typeof schemas.AddressInfo>
 export type AddressInfoInput = z.input<typeof schemas.AddressInfo>
 

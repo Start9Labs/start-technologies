@@ -1,0 +1,1 @@
+- **Los comandos con entrada por tubería terminan cuando finaliza su entrada.** Los comandos como `cat` ejecutados mediante `package attach` reciben EOF de la entrada estándar por tubería o redirigida y finalizan con normalidad.
