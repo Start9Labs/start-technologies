@@ -276,11 +276,9 @@ missing_registry_assets() {
     echo "$missing"
 }
 
-# CI registers a build before its notes are written, so set them on the source
-# registry from the working tree before promoting. The compat range is whatever
-# that registration used; `version add` upserts the entry.
 refresh_registry_notes() {
-    local registry=$1 range
+    local registry=$1 range notes
+    notes=$(curated_notes) || return
     load_registry_index "$registry"
     range=$(jq -r --arg v "$VERSION" '.versions[$v].sourceVersion // empty' <<< "$_INDEX_JSON")
     if [ -z "$range" ]; then
@@ -289,7 +287,7 @@ refresh_registry_notes() {
     fi
     echo "Setting ${VERSION} release notes on ${registry}..."
     start-cli --registry="$registry" registry os version add \
-        "$VERSION" "v${VERSION}" "$(curated_notes)" "$range"
+        "$VERSION" "v${VERSION}" "$notes" "$range"
     _INDEX_REGISTRY=""
 }
 
@@ -1481,6 +1479,8 @@ cmd_index() {
 
 cmd_register() {
     require_kind wrt
+    local notes
+    notes=$(curated_notes) || return
     # Register + index a CI build into the source (beta) registry, where beta
     # routers soak it before `release` promotes it into production. Normally
     # the CI deploy job (start-wrt.yaml) does this itself right after the S3
@@ -1491,7 +1491,7 @@ cmd_register() {
     enter_release_dir
     echo "Registering StartWRT ${VERSION} in ${STARTWRT_SOURCE_REGISTRY}..."
     start-cli --registry="$STARTWRT_SOURCE_REGISTRY" registry os version add \
-        "$VERSION" "v$VERSION" "$(curated_notes)" "${STARTWRT_COMPAT_FLOOR} <=$VERSION"
+        "$VERSION" "v$VERSION" "$notes" "${STARTWRT_COMPAT_FLOOR} <=$VERSION"
 
     # start-cli infers the asset slot from the file extension and only accepts
     # iso/img/squashfs. Both images ship gzipped, so present each under a

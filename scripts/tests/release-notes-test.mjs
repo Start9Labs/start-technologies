@@ -335,6 +335,38 @@ test('GitHub body carries the notes and changelog without the link', t => {
   assert.equal(body.split(PRE_UPDATE).length - 1, 1)
 })
 
+test('registry commands reject invalid highlights before writes', t => {
+  const { root, write, run } = releaseFixture(t)
+  write(
+    'projects/start-wrt/changelog/patch-fixed-invalid.md',
+    '---\nuser-facing: invalid\n---\n\n- Invalid.\n',
+  )
+  const marker = join(root, 'registry-write')
+  for (const command of [
+    'refresh_registry_notes fixture-registry',
+    'cmd_register',
+  ]) {
+    const result = run(
+      'bash',
+      [
+        '-c',
+        `
+source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
+REPO_ROOT="$PWD"; PROJECT=start-wrt; KIND=wrt; VERSION=1.2.3
+load_registry_index() { _INDEX_JSON='{"versions":{"1.2.3":{"sourceVersion":">=0.1.0"}}}'; }
+enter_release_dir() { :; }
+start-cli() { touch "${marker}"; }
+${command}
+`,
+      ],
+      { encoding: 'utf8' },
+    )
+    assert.notEqual(result.status, 0)
+    contains(result.stderr, 'user-facing: true or false')
+    assert.equal(existsSync(marker), false)
+  }
+})
+
 test('main framing is optional', t => {
   const { root, main, write, script, git, commit } = releaseFixture(t)
   git('init', '-q')
