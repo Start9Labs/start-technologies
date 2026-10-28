@@ -1,3 +1,7 @@
+---
+user-facing: true
+---
+
 - **A gateway's WAN IP can be set from the command line.** Where inbound and
   outbound traffic take different paths, StartOS could detect an address the
   server is not reachable at, and every public address and port-forwarding rule
