@@ -361,6 +361,14 @@ export class MockApiService extends ApiService {
       await pauseFor(2000)
       return null
     },
+    'disk.list': async () => {
+      await pauseFor(1000)
+      return Mock.Disks
+    },
+    'disk.format': async ({ disk }) => {
+      await pauseFor(3000)
+      return `${disk}1`
+    },
     'server.set-hostname': async params => {
       await pauseFor(1000)
 
