@@ -48,8 +48,11 @@ on:
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-wrt/docs/**) shouldn't trigger a build.
       - '!**/*.md'
-      # Alpha's registry entry reads the notes from this commit.
       - 'projects/start-wrt/release-notes/**'
+      - 'projects/start-wrt/changelog/**'
+      - 'scripts/changelog*.mjs'
+      - 'scripts/manage-release.sh'
+      - '.prettierrc.json'
   pull_request:
     # The jobs below skip drafts, and `ready_for_review` is not a default
     # activity type, so without it a draft marked ready is never checked.
@@ -235,9 +238,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           sparse-checkout: |
+            /package.json
+            /.prettierrc.json
             projects/start-wrt/backend/ctrl/Cargo.toml
             projects/start-wrt/release-notes/*
+            projects/start-wrt/changelog/*
             scripts/
           sparse-checkout-cone-mode: false
 
@@ -251,6 +258,12 @@ jobs:
           VERSION=$(node scripts/changelog.mjs version projects/start-wrt)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION"
+
+      - name: Compile release notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh notes start-wrt > "$RUNNER_TEMP/release-notes.md"
 
       - name: Download image artifact
         uses: actions/download-artifact@v8
@@ -333,8 +346,7 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          NOTES=$(CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh notes start-wrt) \
-            || { echo "::warning::No release notes for v${VERSION}; registering without them."; NOTES=""; }
+          NOTES=$(cat "$RUNNER_TEMP/release-notes.md")
           start-cli --registry="${{ env.REGISTRY }}" registry os version add \
             "$VERSION" "v${VERSION}" "$NOTES" ">=0.1.0-beta.1 <=${VERSION}"
 

@@ -153,39 +153,20 @@ fn root_ca_response(
     }
 }
 
-/// Initialize SSL certificates. Returns true if HTTPS is ready.
-async fn init_ssl() -> bool {
+/// Sets up the CA and the HTTPS certificate store. `None` serves HTTP alone.
+async fn init_tls(ctx: ServerContext) -> Option<crate::tls::RouterTlsHandler> {
     if let Err(e) = ssl::ensure_root_ca().await {
         tracing::error!("Root CA generation failed: {e}");
-        return false;
+        return None;
     }
-
     if let Err(e) = ssl::ensure_intermediate_ca().await {
         tracing::error!("intermediate CA generation failed: {e}");
-        return false;
+        return None;
     }
-
-    let addrs = ssl::read_lan_addresses(std::path::Path::new("/etc/config")).await;
-    if let Err(e) = ssl::ensure_server_cert(&addrs).await {
-        tracing::error!("server cert generation failed: {e}");
-        return false;
-    }
-
-    // Verify the cert files are valid by attempting to load them as TLS
-    // materials. If they're corrupt, force-regenerate once.
-    if ssl::TlsMaterials::load_from_disk().is_err() {
-        tracing::warn!("TLS materials parse failed with existing certs, regenerating");
-        if let Err(e) = ssl::regenerate_server_cert(&addrs).await {
-            tracing::error!("cert regeneration failed: {e}");
-            return false;
-        }
-        if ssl::TlsMaterials::load_from_disk().is_err() {
-            tracing::error!("TLS materials parse still failing after regeneration");
-            return false;
-        }
-    }
-
-    true
+    crate::tls::init(ctx)
+        .await
+        .map_err(|e| tracing::error!("certificate store setup failed: {e}"))
+        .ok()
 }
 
 /// Identifies which logical listener (HTTP or HTTPS) accepted a given
@@ -375,8 +356,7 @@ async fn inner_main() -> Result<(), Error> {
         };
     }
 
-    // Initialize SSL: ensure Root CA and server cert exist
-    let tls_ready = init_ssl().await;
+    let tls = init_tls(ctx.clone()).await;
 
     if !setup_mode {
         // The IGD UUID derives from the initialized root CA.
@@ -510,13 +490,12 @@ async fn inner_main() -> Result<(), Error> {
     let mut listeners: BTreeMap<WebserverListener, DynAccept> = BTreeMap::new();
     listeners.insert(WebserverListener::Http, http_listener.into_dyn());
 
-    if tls_ready {
-        let materials = ssl::init_tls_materials()?;
+    if let Some(tls) = tls {
         let https_addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 443));
         let https_listener = startos::net::utils::bind_tokio_listener_reuse_port(https_addr)
             .with_kind(ErrorKind::Network)?;
         tracing::info!("HTTPS listening on {}", https_addr);
-        let tls = TlsListener::new(https_listener, ssl::StaticTlsHandler::new(materials));
+        let tls = TlsListener::new(https_listener, tls);
         listeners.insert(WebserverListener::Https, tls.into_dyn());
     } else {
         tracing::warn!("HTTPS disabled — TLS setup failed, serving HTTP only");

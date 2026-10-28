@@ -615,6 +615,8 @@ pub(crate) fn rewrite_dns_forwarding(cfgs: &mut Configs, profile: &Profile) -> R
                 interface: vec![profile.id.interface.clone()],
                 localservice: Some("1".to_string()),
                 nonwildcard: Some("1".to_string()),
+                // Answers the router's name with this profile's own IPv4 gateway.
+                localise_queries: Some("1".to_string()),
                 listen_address: vec![profile.gateway_ip.to_string()],
                 notinterface: vec!["loopback".to_string()],
                 rebind_domain: vec![],
@@ -6866,6 +6868,7 @@ config zone
             .unwrap();
         assert_eq!(section.interface, vec!["lan".to_string()]);
         assert_eq!(section.noresolv.as_deref(), Some("1"));
+        assert_eq!(section.localise_queries.as_deref(), Some("1"));
         assert!(section.addnhosts.is_empty(), "no injection, no hosts file");
     }
 
@@ -6960,6 +6963,7 @@ config zone
                 vec![crate::dns_inject::inject_hosts_path(iface)]
             );
             assert_eq!(section.interface, vec![iface.to_string()]);
+            assert_eq!(section.localise_queries.as_deref(), Some("1"));
             assert_eq!(
                 section.server,
                 vec!["/use-application-dns.net/".to_string()],

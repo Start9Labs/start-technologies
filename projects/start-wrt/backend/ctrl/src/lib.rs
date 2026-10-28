@@ -38,6 +38,7 @@ pub mod setup;
 pub mod ssh_keys;
 pub mod ssl;
 pub mod system;
+pub mod tls;
 pub mod uci;
 pub mod update;
 pub mod utils;
