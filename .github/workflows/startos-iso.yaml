@@ -73,6 +73,7 @@ on:
       - 'debian/**'
       - 'apt/**'
       - '.github/workflows/startos-iso.yaml'
+      - '.github/workflows/compile-start-cli.yaml'
       - '.github/actions/setup-build/**'
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-os/docs/**) shouldn't trigger a build.
@@ -103,6 +104,7 @@ on:
       - 'debian/**'
       - 'apt/**'
       - '.github/workflows/startos-iso.yaml'
+      - '.github/workflows/compile-start-cli.yaml'
       - '.github/actions/setup-build/**'
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-os/docs/**) shouldn't trigger a build.
@@ -239,7 +241,7 @@ jobs:
           files="$(gh api --paginate \
             "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
             --jq '.[].filename')"
-          matched="$(printf '%s\n' "$files" | grep -E '^(build/|debian/|apt/|projects/start-os/build/|projects/start-os/build\.mk$|projects/start-os/debian/|projects/start-os/(release-notes|changelog)/|scripts/changelog[^/]*\.mjs$|\.prettierrc\.json$|package\.json$|projects/start-os/[^/]+\.(service|slice)$|\.github/workflows/startos-iso\.yaml$|\.github/actions/setup-build/)' || true)"
+          matched="$(printf '%s\n' "$files" | grep -E '^(build/|debian/|apt/|projects/start-os/build/|projects/start-os/build\.mk$|projects/start-os/debian/|projects/start-os/(release-notes|changelog)/|scripts/changelog[^/]*\.mjs$|shared-libs/crates/start-core/locales/release-notes\.json$|\.prettierrc\.json$|package\.json$|projects/start-os/[^/]+\.(service|slice)$|\.github/workflows/startos-iso\.yaml$|\.github/actions/setup-build/)' || true)"
           if [ -n "$matched" ]; then
             echo "Image-affecting files changed:"; printf '  %s\n' "$matched"
             echo "image=true" >> "$GITHUB_OUTPUT"
@@ -487,8 +489,8 @@ jobs:
           path: results/*.migration.squashfs
           retention-days: 14
 
-  deploy:
-    name: Deploy
+  publisher-cli:
+    name: Build publisher CLI
     needs: [image]
     # Explicit status check so the skipped PR-only `changes` job can't poison
     # the implicit success() through the needs chain (actions/runner#2205).
@@ -507,6 +509,14 @@ jobs:
           && contains(fromJson('["alpha", "beta"]'), github.event.inputs.deploy)
         )
       )
+    uses: ./.github/workflows/compile-start-cli.yaml
+    with:
+      triple: x86_64-unknown-linux-musl
+
+  deploy:
+    name: Deploy
+    needs: [image, publisher-cli]
+    if: ${{ !cancelled() && needs.image.result == 'success' && needs.publisher-cli.result == 'success' }}
     runs-on: ubuntu-latest
     # One lock for every deploy, not one per channel. The workflow-level group is
     # scoped by event, so a dispatch could otherwise run alongside a master-push
@@ -537,6 +547,7 @@ jobs:
             scripts
             projects/start-os/release-notes
             projects/start-os/changelog
+            shared-libs/crates/start-core/locales
 
       - uses: actions/setup-node@v6
         with:
@@ -553,7 +564,7 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh notes start-os > "$RUNNER_TEMP/release-notes.md"
+          CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh registry-notes start-os > "$RUNNER_TEMP/release-notes.json"
 
       - name: Determine platforms
         id: platforms
@@ -590,21 +601,16 @@ jobs:
           path: artifacts/
           merge-multiple: true
 
+      - name: Download publisher CLI
+        uses: actions/download-artifact@v8
+        with:
+          name: start-cli_x86_64-unknown-linux-musl
+          path: ${{ runner.temp }}/publisher-cli
+
       - name: Install start-cli
         run: |
-          ARCH=$(uname -m)
-          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-          ASSET_NAME="start-cli_${ARCH}-${OS}"
-          DOWNLOAD_URL=$(curl -fsS \
-            -H "Authorization: token ${{ github.token }}" \
-            https://api.github.com/repos/Start9Labs/start-technologies/releases \
-            | jq -r '[.[].assets[] | select(.name=="'"$ASSET_NAME"'")] | first | .browser_download_url')
-          curl -fsSL \
-            -H "Authorization: token ${{ github.token }}" \
-            -H "Accept: application/octet-stream" \
-            "$DOWNLOAD_URL" -o /tmp/start-cli
-          sudo install -m 755 /tmp/start-cli /usr/local/bin/start-cli
-          echo "start-cli: $(start-cli --version)"
+          sudo install -m 755 "$RUNNER_TEMP/publisher-cli/start-cli" /usr/local/bin/start-cli
+          ./scripts/manage-release.sh check-registry-notes-cli start-os
 
       - name: Configure S3
         run: |
@@ -677,7 +683,7 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          NOTES=$(cat "$RUNNER_TEMP/release-notes.md")
+          NOTES=$(jq -r '.releaseNotes' "$RUNNER_TEMP/release-notes.json")
           start-cli --registry="${{ env.REGISTRY }}" registry os version add \
             "$VERSION" "v${VERSION}" "$NOTES" ">=0.3.5 <=${VERSION}"
 

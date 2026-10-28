@@ -44,6 +44,7 @@ on:
       - 'tsconfig.lib.json'
       - 'build/**'
       - '.github/workflows/start-wrt.yaml'
+      - '.github/workflows/compile-start-cli.yaml'
       - '.github/actions/setup-build/**'
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-wrt/docs/**) shouldn't trigger a build.
@@ -73,6 +74,7 @@ on:
       - 'tsconfig.lib.json'
       - 'build/**'
       - '.github/workflows/start-wrt.yaml'
+      - '.github/workflows/compile-start-cli.yaml'
       - '.github/actions/setup-build/**'
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-wrt/docs/**) shouldn't trigger a build.
@@ -205,8 +207,8 @@ jobs:
   # registry named by the STARTWRT_ALPHA_REGISTRY repo variable. With that
   # variable unset there is no alpha channel, so master pushes skip both this and
   # the `image` job it needs.
-  deploy:
-    name: Deploy
+  publisher-cli:
+    name: Build publisher CLI
     needs: [image]
     if: >-
       ${{
@@ -216,6 +218,14 @@ jobs:
           || (github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.STARTWRT_ALPHA_REGISTRY != '')
         )
       }}
+    uses: ./.github/workflows/compile-start-cli.yaml
+    with:
+      triple: x86_64-unknown-linux-musl
+
+  deploy:
+    name: Deploy
+    needs: [image, publisher-cli]
+    if: ${{ !cancelled() && needs.image.result == 'success' && needs.publisher-cli.result == 'success' }}
     runs-on: ubuntu-latest
     # One lock for every deploy, not one per channel: the workflow-level group is
     # scoped by event, and the channels are not independent anyway — both write
@@ -246,6 +256,7 @@ jobs:
             projects/start-wrt/release-notes/*
             projects/start-wrt/changelog/*
             scripts/
+            shared-libs/crates/start-core/locales/release-notes.json
           sparse-checkout-cone-mode: false
 
       - uses: actions/setup-node@v6
@@ -263,7 +274,7 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh notes start-wrt > "$RUNNER_TEMP/release-notes.md"
+          CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh registry-notes start-wrt > "$RUNNER_TEMP/release-notes.json"
 
       - name: Download image artifact
         uses: actions/download-artifact@v8
@@ -271,21 +282,16 @@ jobs:
           name: startwrt-openwrt-image
           path: artifacts/
 
+      - name: Download publisher CLI
+        uses: actions/download-artifact@v8
+        with:
+          name: start-cli_x86_64-unknown-linux-musl
+          path: ${{ runner.temp }}/publisher-cli
+
       - name: Install start-cli
         run: |
-          ARCH=$(uname -m)
-          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-          ASSET_NAME="start-cli_${ARCH}-${OS}"
-          DOWNLOAD_URL=$(curl -fsS \
-            -H "Authorization: token ${{ github.token }}" \
-            https://api.github.com/repos/Start9Labs/start-technologies/releases \
-            | jq -r '[.[].assets[] | select(.name=="'"$ASSET_NAME"'")] | first | .browser_download_url')
-          curl -fsSL \
-            -H "Authorization: token ${{ github.token }}" \
-            -H "Accept: application/octet-stream" \
-            "$DOWNLOAD_URL" -o /tmp/start-cli
-          sudo install -m 755 /tmp/start-cli /usr/local/bin/start-cli
-          echo "start-cli: $(start-cli --version)"
+          sudo install -m 755 "$RUNNER_TEMP/publisher-cli/start-cli" /usr/local/bin/start-cli
+          ./scripts/manage-release.sh check-registry-notes-cli start-wrt
 
       - name: Set up developer key
         run: |
@@ -346,7 +352,7 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          NOTES=$(cat "$RUNNER_TEMP/release-notes.md")
+          NOTES=$(jq -r '.releaseNotes' "$RUNNER_TEMP/release-notes.json")
           start-cli --registry="${{ env.REGISTRY }}" registry os version add \
             "$VERSION" "v${VERSION}" "$NOTES" ">=0.1.0-beta.1 <=${VERSION}"
 
