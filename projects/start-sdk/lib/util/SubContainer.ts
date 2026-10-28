@@ -753,7 +753,8 @@ export class SubContainerEager<
       ['subcontainer', 'exec', ...prepared.args, this.rootfs, ...command],
       prepared.options,
     )
-    abort?.signal.addEventListener('abort', () => child.kill('SIGKILL'))
+    const kill = () => child.kill('SIGKILL')
+    abort?.signal.addEventListener('abort', kill)
     if (spawnOptions.input) {
       await new Promise<null>((resolve, reject) => {
         try {
@@ -803,6 +804,7 @@ export class SubContainerEager<
       child.stderr.on('data', appendData(stderr))
       child.on('exit', (code, signal) => {
         clearTimeout(killTimeout)
+        abort?.signal.removeEventListener('abort', kill)
         const result = {
           exitCode: code,
           exitSignal: signal,
