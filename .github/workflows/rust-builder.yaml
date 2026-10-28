@@ -1,0 +1,100 @@
+name: Rust Builder
+
+on:
+  workflow_call:
+  pull_request:
+    paths:
+      - 'build/rust-builder/**'
+      - '.github/workflows/rust-builder.yaml'
+      - '.github/actions/setup-build/**'
+      - 'Makefile'
+  push:
+    branches: [master]
+    paths:
+      - 'build/rust-builder/**'
+      - '.github/workflows/rust-builder.yaml'
+      - '.github/actions/setup-build/**'
+      - 'Makefile'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-builder-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build and verify (${{ matrix.arch }})
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      PUBLISH: ${{ github.ref == 'refs/heads/master' && github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-build
+        with:
+          nodejs-version: '24.11.0'
+          setup-sccache: 'false'
+      - name: Read registry destination
+        run: echo "IMAGE=$(<build/rust-builder/repository)" >> "$GITHUB_ENV"
+      - uses: docker/build-push-action@v7
+        with:
+          context: build/rust-builder
+          load: true
+          tags: start9-rust-builder:local
+          build-args: SOURCE_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=rust-builder-${{ matrix.arch }}
+          cache-to: type=gha,scope=rust-builder-${{ matrix.arch }},mode=max
+      - name: Verify image
+        run: make rust-builder-check
+      - uses: docker/login-action@v4
+        if: env.PUBLISH == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push verified architecture
+        if: env.PUBLISH == 'true'
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          tag="$IMAGE:sha-$GITHUB_SHA-$ARCH"
+          docker tag start9-rust-builder:local "$tag"
+          docker push "$tag"
+
+  publish:
+    name: Publish multi-platform image
+    needs: build
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish verified manifest
+        run: |
+          image=$(<build/rust-builder/repository)
+          docker buildx imagetools create \
+            --tag "$image:sha-$GITHUB_SHA" \
+            --tag "$image:latest" \
+            "$image:sha-$GITHUB_SHA-amd64" \
+            "$image:sha-$GITHUB_SHA-arm64"

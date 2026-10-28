@@ -221,7 +221,7 @@ fn display_all_ssh_keys(
         ];
         table.add_row(row);
     }
-    table.print_tty(false)?;
+    print_table(&table)?;
 
     Ok(())
 }

@@ -29,6 +29,7 @@ import {
   FilterPackagesPipe,
 } from '@start9labs/marketplace'
 import {
+  AUTH_SIGNING_HOST,
   I18N_PROVIDERS,
   I18N_STORAGE,
   i18nService,
@@ -150,6 +151,9 @@ export const APP_CONFIG: ApplicationConfig = {
       provide: RELATIVE_URL,
       useValue: `/${api.url}/${api.version}`,
     },
+    ...(api.signAs
+      ? [{ provide: AUTH_SIGNING_HOST, useValue: api.signAs }]
+      : []),
     {
       provide: TUI_DIALOGS_CLOSE,
       useFactory: () =>

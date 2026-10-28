@@ -322,6 +322,34 @@ pub async fn get_wan_ipv6s() -> Result<Vec<Ipv6Addr>, Error> {
     Ok(addrs)
 }
 
+/// Length of the largest global prefix delegated to `wan6`, read from netifd.
+/// `None` without a global delegation or when ubus is unavailable.
+pub async fn read_wan6_delegated_prefix_len() -> Option<u8> {
+    let stdout = tokio::process::Command::new("ubus")
+        .args(["call", "network.interface.wan6", "status"])
+        .invoke(ErrorKind::Network.into())
+        .await
+        .ok()?;
+    let json = serde_json::from_slice::<serde_json::Value>(&stdout).ok()?;
+    delegated_prefix_len(&json)
+}
+
+fn delegated_prefix_len(status: &serde_json::Value) -> Option<u8> {
+    status
+        .get("ipv6-prefix")?
+        .as_array()?
+        .iter()
+        .filter(|entry| {
+            entry
+                .get("address")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<Ipv6Addr>().ok())
+                .is_some_and(|addr| has_global_ipv6(&[addr]))
+        })
+        .filter_map(|entry| u8::try_from(entry.get("mask")?.as_u64()?).ok())
+        .min()
+}
+
 struct RemoteAccessRuleSpec {
     suffix: Option<&'static str>,
     family: Option<&'static str>,
@@ -770,9 +798,9 @@ async fn restart(_ctx: ServerContext) -> Result<(), Error> {
 
 #[derive(Debug, Deserialize, Serialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-struct SetTimezoneParams {
+pub(crate) struct SetTimezoneParams {
     /// IANA timezone name, e.g. "America/New_York"
-    timezone: String,
+    pub timezone: String,
 }
 rpc_toolkit::reflect_ts!(SetTimezoneParams);
 
@@ -831,7 +859,7 @@ async fn get_timezones(_ctx: ServerContext) -> Result<Vec<String>, Error> {
 /// the correct local time. No `zoneinfo` package needed. crond caches the zone
 /// at launch, so we restart it afterward to pick up the new `/etc/TZ`.
 #[instrument(skip_all)]
-async fn set_timezone<C: CtrlContext>(
+pub(crate) async fn set_timezone<C: CtrlContext>(
     ctx: C,
     DeserializeStdin(params): DeserializeStdin<SetTimezoneParams>,
 ) -> Result<(), Error> {
@@ -924,13 +952,13 @@ pub fn system<C: CtrlContext>() -> ParentHandler<C> {
         .subcommand(
             "info",
             from_fn_async_local(info::<C>)
-                .with_metadata("no_auth", Value::Bool(true))
+                .with_metadata("authenticated", Value::Bool(false))
                 .with_display_serializable(),
         )
         .subcommand(
             "newer-versions",
             from_fn_async(newer_versions)
-                .with_metadata("no_auth", Value::Bool(true))
+                .with_metadata("authenticated", Value::Bool(false))
                 .with_display_serializable()
                 .with_call_remote::<CliContext>(),
         )
@@ -969,7 +997,7 @@ pub fn system<C: CtrlContext>() -> ParentHandler<C> {
         .subcommand(
             "get-timezones",
             from_fn_async(get_timezones)
-                .with_metadata("no_auth", Value::Bool(true))
+                .with_metadata("authenticated", Value::Bool(false))
                 .with_display_serializable()
                 .with_call_remote::<CliContext>(),
         )
@@ -978,6 +1006,12 @@ pub fn system<C: CtrlContext>() -> ParentHandler<C> {
             from_fn_async(crate::logs::get_logs)
                 .with_display_serializable()
                 .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "logs-follow",
+            from_fn_async(crate::logs::follow_logs)
+                .with_metadata("get_signer", Value::Bool(true))
+                .no_cli(),
         )
 }
 
@@ -1513,5 +1547,28 @@ config zone wan
 
         // Should still have exactly 4 rules, not 8
         assert_eq!(count_remote_rules(dir.path()).await, 3);
+    }
+
+    #[test]
+    fn delegated_prefix_len_reads_netifd_mask() {
+        let status = serde_json::json!({
+            "ipv6-prefix": [
+                { "address": "fd12:3456:789a::", "mask": 48 },
+                { "address": "2001:db8:0:100::", "mask": 64 },
+            ]
+        });
+        assert_eq!(delegated_prefix_len(&status), Some(64));
+
+        let status = serde_json::json!({
+            "ipv6-prefix": [
+                { "address": "2001:db8:0:100::", "mask": 60 },
+                { "address": "2001:db8:1::", "mask": 56 },
+            ]
+        });
+        assert_eq!(delegated_prefix_len(&status), Some(56));
+
+        let status = serde_json::json!({ "ipv6-prefix": [] });
+        assert_eq!(delegated_prefix_len(&status), None);
+        assert_eq!(delegated_prefix_len(&serde_json::json!({})), None);
     }
 }

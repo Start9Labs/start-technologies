@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { generateKeyPairSync } from 'node:crypto'
 import { readFileSync, existsSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import { resolve } from 'node:path'
@@ -137,6 +138,8 @@ const { TaskService, DialogService, i18nPipe, i18nService } =
 const { CONTEXT } = await import('@taiga-ui/polymorpheus')
 const { WA_WINDOW } = await import('@ng-web-apis/common')
 const { ConfigService } = await import('src/app/services/config.service')
+const { trustedOsUpdateSigners } =
+  await import('src/app/utils/os-update-signers')
 const { default: General } =
   await import('src/app/routes/portal/routes/system/routes/general/general.component')
 const { SystemUpdateModal, UPDATE } =
@@ -150,18 +153,36 @@ function deferred() {
   })
   return { promise, resolve, reject }
 }
+const makeSigner = () =>
+  generateKeyPairSync('ed25519').publicKey.export({
+    type: 'spki',
+    format: 'pem',
+  })
+const OS_UPDATE_SIGNERS = Array.from({ length: 3 }, makeSigner)
+const untrustedSigner = makeSigner()
+const trustedSigners = Object.fromEntries(
+  OS_UPDATE_SIGNERS.map((key, i) => [key, { label: `Signer ${i}` }]),
+)
+const squashfs = {
+  x86_64: { signatures: { [OS_UPDATE_SIGNERS[0]]: 'signature' } },
+}
 const catalog = {
-  '0.4.0.2': { releaseNotes: 'equal' },
-  '0.4.0.4': { releaseNotes: 'newest' },
-  '0.4.0.1': { releaseNotes: 'older' },
-  '0.4.0.3': { releaseNotes: 'newer' },
+  '0.4.0.2': { releaseNotes: 'equal', squashfs },
+  '0.4.0.4': { releaseNotes: 'newest', squashfs },
+  '0.4.0.1': { releaseNotes: 'older', squashfs },
+  '0.4.0.3': { releaseNotes: 'newer', squashfs },
 }
 const candidates = [
-  { version: '0.4.0.4', notes: 'newest' },
-  { version: '0.4.0.3', notes: 'newer' },
+  { version: '0.4.0.4', notes: 'newest', squashfs },
+  { version: '0.4.0.3', notes: 'newer', squashfs },
 ]
 const state = version => ({
-  serverInfo: { id: 'server-id', version, statusInfo: {} },
+  serverInfo: {
+    id: 'server-id',
+    version,
+    statusInfo: {},
+    trustedOsUpdateSigners: trustedSigners,
+  },
   ui: { startosRegistry: 'https://registry.test', snakeHighScore: 0 },
 })
 const tick = () => new Promise(resolve => setImmediate(resolve))
@@ -179,7 +200,9 @@ function fixture(t, cachedVersion) {
     submissions = [],
     opened = [],
     alerts = [],
-    tasks = []
+    tasks = [],
+    confirmations = [],
+    updateErrors = []
   let completed = 0
   const api = {
     rpc: {
@@ -195,8 +218,13 @@ function fixture(t, cachedVersion) {
         },
       },
       server: {
+        async deviceInfo() {
+          return { os: { platform: 'x86_64' } }
+        },
         async update(params) {
           submissions.push(params)
+          const error = updateErrors.shift()
+          if (error) throw error
         },
       },
     },
@@ -229,6 +257,11 @@ function fixture(t, cachedVersion) {
         openAlert(message) {
           alerts.push(message)
           return EMPTY
+        },
+        openConfirm(options) {
+          const response = new Subject()
+          confirmations.push({ options, response })
+          return response
         },
       },
     },
@@ -264,11 +297,14 @@ function fixture(t, cachedVersion) {
   return {
     os,
     patch,
+    api,
     requests,
     submissions,
     opened,
     alerts,
     tasks,
+    confirmations,
+    updateErrors,
     availability,
     shown,
     get completed() {
@@ -277,6 +313,20 @@ function fixture(t, cachedVersion) {
     make: Class => runInInjectionContext(injector, () => new Class()),
     live(version) {
       source.next([{ id: ++revision, value: state(version) }])
+    },
+    trust(signers) {
+      source.next([
+        {
+          id: ++revision,
+          patch: [
+            {
+              op: 'replace',
+              path: '/serverInfo/trustedOsUpdateSigners',
+              value: signers,
+            },
+          ],
+        },
+      ])
     },
     version(version) {
       source.next([
@@ -365,9 +415,9 @@ test('strictly newer candidates sort descending; refresh failure preserves catal
   f.version('0.4.0.4')
   assert.deepEqual(f.os.updateCandidates(), [])
   assert.equal(f.requests.length, 2)
-  await f.load({ '0.4.0.5': { releaseNotes: 'refreshed' } })
+  await f.load({ '0.4.0.5': { releaseNotes: 'refreshed', squashfs } })
   assert.deepEqual(f.os.updateCandidates(), [
-    { version: '0.4.0.5', notes: 'refreshed' },
+    { version: '0.4.0.5', notes: 'refreshed', squashfs },
   ])
 })
 
@@ -419,11 +469,13 @@ test('General opens the update modal and submission targets exactly the newest c
   assert.equal(f.requests.length, 1)
   await f.make(SystemUpdateModal).update()
   await Promise.all(f.tasks)
+  assert.equal(f.confirmations.length, 0)
   assert.deepEqual(f.submissions, [
     {
       targetVersion: '=0.4.0.4',
       registry: 'https://registry.test',
       progress: false,
+      acceptSigners: { any: [{ signer: OS_UPDATE_SIGNERS[0] }] },
     },
   ])
   assert.equal(f.completed, 1)
@@ -440,6 +492,154 @@ test('a candidate disappearing after the modal opens prevents submission', async
   assert.deepEqual(f.submissions, [])
   assert.equal(f.completed, 0)
   assert.equal(f.tasks.length, 0)
+})
+
+for (const [name, key] of [
+  ['configured signer 1', OS_UPDATE_SIGNERS[0]],
+  ['configured signer 2', OS_UPDATE_SIGNERS[1]],
+  ['configured signer 3', OS_UPDATE_SIGNERS[2]],
+]) {
+  test(`${name} listed as a signer skips the warning without verifying in the UI`, async t => {
+    const f = fixture(t, '0.4.0.2')
+    await f.load({
+      '0.4.0.4': {
+        releaseNotes: '',
+        squashfs: {
+          x86_64: {
+            signatures: {
+              [key]: 'left to downloader',
+              [untrustedSigner]: 'another signature',
+            },
+          },
+        },
+      },
+    })
+    await f.make(SystemUpdateModal).update()
+    await Promise.all(f.tasks)
+    assert.equal(f.confirmations.length, 0)
+    assert.equal(f.submissions.length, 1)
+    assert.deepEqual(f.submissions[0].acceptSigners, { any: [{ signer: key }] })
+    assert.equal(f.completed, 1)
+  })
+}
+
+test('live trust-list changes remove default trust and allow a custom signer', async t => {
+  const f = fixture(t, '0.4.0.2')
+  await f.load()
+  f.trust({})
+  await f.make(SystemUpdateModal).update()
+  await tick()
+  assert.equal(f.alerts.length, 1)
+  assert.equal(f.confirmations.length, 0)
+  assert.deepEqual(f.submissions, [])
+  await Promise.all(f.tasks)
+
+  f.trust({ [untrustedSigner]: { label: 'My custom release signer' } })
+  await f.load({
+    '0.4.0.4': {
+      releaseNotes: '',
+      squashfs: { x86_64: { signatures: { [untrustedSigner]: 'signature' } } },
+    },
+  })
+  await f.make(SystemUpdateModal).update()
+  await Promise.all(f.tasks)
+  assert.equal(f.alerts.length, 1)
+  assert.equal(f.confirmations.length, 0)
+  assert.deepEqual(f.submissions[0].acceptSigners, {
+    any: [{ signer: untrustedSigner }],
+  })
+})
+
+test('trusted signer matching ignores PEM whitespace but rejects unrelated keys and unsigned metadata', () => {
+  const key = OS_UPDATE_SIGNERS[0].replace(/\n/g, '\r\n')
+  assert.deepEqual(trustedOsUpdateSigners([key], trustedSigners), [key])
+  assert.deepEqual(
+    trustedOsUpdateSigners(['unrelated key'], trustedSigners),
+    [],
+  )
+  assert.deepEqual(trustedOsUpdateSigners([], trustedSigners), [])
+  assert.deepEqual(trustedOsUpdateSigners([key], {}), [])
+})
+
+test('an untrusted update is blocked even when another platform or asset lists a trusted signer', async t => {
+  const f = fixture(t, '0.4.0.2')
+  await f.load({
+    '0.4.0.4': {
+      releaseNotes: '',
+      squashfs: {
+        x86_64: { signatures: { [untrustedSigner]: 'signature' } },
+        aarch64: { signatures: { [OS_UPDATE_SIGNERS[0]]: 'signature' } },
+      },
+      iso: squashfs,
+      authorized: ['drbonez'],
+    },
+  })
+  await f.make(SystemUpdateModal).update()
+  await tick()
+  assert.equal(f.alerts.length, 1)
+  assert.equal(f.confirmations.length, 0)
+  assert.deepEqual(f.submissions, [])
+  assert.equal(f.completed, 0)
+  await Promise.all(f.tasks)
+  assert.deepEqual(f.submissions, [])
+})
+
+for (const assets of [{ x86_64: { signatures: {} } }, {}]) {
+  test(`missing signatures or platform metadata blocks submission: ${JSON.stringify(assets)}`, async t => {
+    const f = fixture(t, '0.4.0.2')
+    await f.load({ '0.4.0.4': { releaseNotes: '', squashfs: assets } })
+    await f.make(SystemUpdateModal).update()
+    await tick()
+    assert.equal(f.alerts.length, 1)
+    assert.equal(f.confirmations.length, 0)
+    assert.deepEqual(f.submissions, [])
+    await Promise.all(f.tasks)
+  })
+}
+
+test('trust removed during device lookup blocks submission', async t => {
+  const f = fixture(t, '0.4.0.2')
+  await f.load()
+  const device = deferred()
+  f.api.rpc.server.deviceInfo = () => device.promise
+  await f.make(SystemUpdateModal).update()
+  f.trust({})
+  device.resolve({ os: { platform: 'x86_64' } })
+  await Promise.all(f.tasks)
+  assert.equal(f.alerts.length, 1)
+  assert.deepEqual(f.submissions, [])
+  assert.equal(f.completed, 0)
+})
+
+test('a candidate disappearing during device lookup prevents submission', async t => {
+  const f = fixture(t, '0.4.0.2')
+  await f.load()
+  const device = deferred()
+  f.api.rpc.server.deviceInfo = () => device.promise
+  await f.make(SystemUpdateModal).update()
+  f.version('0.4.0.4')
+  device.resolve({ os: { platform: 'x86_64' } })
+  await Promise.all(f.tasks)
+  assert.deepEqual(f.submissions, [])
+  assert.equal(f.completed, 0)
+})
+
+test('device lookup and downloader failures stay in TaskService and leave the modal open', async t => {
+  const f = fixture(t, '0.4.0.2')
+  await f.load()
+  f.updateErrors.push(new Error('invalid signature'))
+  await f.make(SystemUpdateModal).update()
+  assert.deepEqual(await Promise.all(f.tasks), [false])
+  assert.equal(f.confirmations.length, 0)
+  assert.equal(f.completed, 0)
+
+  f.api.rpc.server.deviceInfo = async () => {
+    throw new Error('unavailable')
+  }
+  await f.make(SystemUpdateModal).update()
+  assert.deepEqual(await Promise.all(f.tasks), [false, false])
+  assert.equal(f.submissions.length, 1)
+  assert.equal(f.completed, 0)
 })
 
 test('a candidate disappearing during the asynchronous UI registry lookup prevents submission', async t => {

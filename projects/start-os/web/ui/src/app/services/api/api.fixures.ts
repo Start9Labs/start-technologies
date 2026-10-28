@@ -11,6 +11,7 @@ import { ActionRes } from './api.types'
 import markdown from './md-sample.md'
 
 const mockMerkleArchiveCommitment: T.MerkleArchiveCommitment = {
+  type: 'merkle-archive',
   rootSighash: 'fakehash',
   rootMaxsize: 0,
 }
@@ -44,6 +45,7 @@ export namespace Mock {
             'https://alpha-registry-x.start9.com/startos/v0.4.0-alpha.17/startos-0.4.0-alpha.17-b8ff331~dev_aarch64.squashfs',
           ],
           commitment: {
+            type: 'blake3',
             hash: 'OUnANnZePtf7rSbj38JESl+iJAV0z0aiZ4opCiwpGbo=',
             size: 1331900416,
           },
@@ -58,6 +60,7 @@ export namespace Mock {
             'https://alpha-registry-x.start9.com/startos/v0.4.0-alpha.17/startos-0.4.0-alpha.17-b8ff331~dev_aarch64-nonfree.squashfs',
           ],
           commitment: {
+            type: 'blake3',
             hash: '6k+0RcyRQV+5A+h06OqpHxd4IT6IlFkfdy9dfHIP90c=',
             size: 1641500672,
           },
@@ -72,6 +75,7 @@ export namespace Mock {
             'https://alpha-registry-x.start9.com/startos/v0.4.0-alpha.17/startos-0.4.0-alpha.17-b8ff331~dev_raspberrypi.squashfs',
           ],
           commitment: {
+            type: 'blake3',
             hash: 'K+XuTZxo1KVsKjNSV8PPOMruCvAEZwerF9mbpFl53Gk=',
             size: 1544417280,
           },
@@ -86,6 +90,7 @@ export namespace Mock {
             'https://alpha-registry-x.start9.com/startos/v0.4.0-alpha.17/startos-0.4.0-alpha.17-b8ff331~dev_x86_64.squashfs',
           ],
           commitment: {
+            type: 'blake3',
             hash: '3UVkx3TQMBPlSU1OnV48Om9vjjA3s+Nk6dX3auYGpBo=',
             size: 1424007168,
           },
@@ -100,6 +105,7 @@ export namespace Mock {
             'https://alpha-registry-x.start9.com/startos/v0.4.0-alpha.17/startos-0.4.0-alpha.17-b8ff331~dev_x86_64-nonfree.squashfs',
           ],
           commitment: {
+            type: 'blake3',
             hash: 'IS1gJ56n/HlQqFbl1upMOAtLxyxB0cY0H89Ha+9h1lE=',
             size: 1743425536,
           },
@@ -124,6 +130,7 @@ export namespace Mock {
             'https://alpha-registry-x.start9.com/startos/v0.4.0-alpha.14/startos-0.4.0-alpha.14-33ae46f~dev_aarch64.squashfs',
           ],
           commitment: {
+            type: 'blake3',
             hash: '4elBFVkd/r8hNadKmKtLIs42CoPltMvKe2z3LRqkphk=',
             size: 1343500288,
           },
@@ -138,6 +145,7 @@ export namespace Mock {
             'https://alpha-registry-x.start9.com/startos/v0.4.0-alpha.14/startos-0.4.0-alpha.14-33ae46f~dev_aarch64-nonfree.squashfs',
           ],
           commitment: {
+            type: 'blake3',
             hash: 'MrCEi4jxbmPS7zAiGk/JSKlMsiuKqQy6RbYOxlGHOIQ=',
             size: 1653075968,
           },
@@ -152,6 +160,7 @@ export namespace Mock {
             'https://alpha-registry-x.start9.com/startos/v0.4.0-alpha.14/startos-0.4.0-alpha.14-33ae46f~dev_raspberrypi.squashfs',
           ],
           commitment: {
+            type: 'blake3',
             hash: '/XTVQRCqY3RK544PgitlKu7UplXjkmzWoXUh2E4HCw0=',
             size: 1490731008,
           },
@@ -166,6 +175,7 @@ export namespace Mock {
             'https://alpha-registry-x.start9.com/startos/v0.4.0-alpha.14/startos-0.4.0-alpha.14-33ae46f~dev_x86_64.squashfs',
           ],
           commitment: {
+            type: 'blake3',
             hash: '/6romKTVQGSaOU7FqSZdw0kFyd7P+NBSYNwM3q7Fe44=',
             size: 1411657728,
           },
@@ -180,6 +190,7 @@ export namespace Mock {
             'https://alpha-registry-x.start9.com/startos/v0.4.0-alpha.14/startos-0.4.0-alpha.14-33ae46f~dev_x86_64-nonfree.squashfs',
           ],
           commitment: {
+            type: 'blake3',
             hash: 'HCRq9sr/0t85pMdrEgNBeM4x11zVKHszGnD1GDyZbSE=',
             size: 1731035136,
           },

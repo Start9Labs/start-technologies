@@ -111,7 +111,7 @@ pub fn dns_api<C: Context>() -> ParentHandler<C> {
                         }
                     }
 
-                    table.print_tty(false)?;
+                    print_table(&table)?;
 
                     Ok(())
                 })
@@ -864,6 +864,13 @@ fn bind_reuse_udp(addr: SocketAddr, dual_stack: bool) -> Result<UdpSocket, Error
             .with_kind(ErrorKind::Network)?;
     }
     socket.set_nonblocking(true).with_kind(ErrorKind::Network)?;
+    // Same as `build_listen_socket`: a GUA still tentative from DAD is not yet bindable.
+    #[cfg(target_os = "linux")]
+    match addr {
+        SocketAddr::V4(_) => socket.set_freebind_v4(true),
+        SocketAddr::V6(_) => socket.set_freebind_v6(true),
+    }
+    .with_kind(ErrorKind::Network)?;
     socket.bind(&addr.into()).with_kind(ErrorKind::Network)?;
     UdpSocket::from_std(socket.into()).with_kind(ErrorKind::Network)
 }

@@ -282,7 +282,7 @@ fn display_disk_info(params: WithIoFormat<Empty>, args: Vec<DiskInfo>) -> Result
             table.add_row(row);
         }
     }
-    table.print_tty(false)?;
+    print_table(&table)?;
     Ok(())
 }
 

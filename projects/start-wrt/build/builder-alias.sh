@@ -1,5 +1,7 @@
 #!/bin/bash
 
+RUST_BUILDER_IMAGE=$(RUST_BUILDER_IMAGE="${RUST_BUILDER_IMAGE:-}" "$(dirname "${BASH_SOURCE[0]}")/../../../build/rust-builder/image.sh")
+
 USE_TTY=
 if tty -s; then
   USE_TTY="-it"
@@ -25,4 +27,4 @@ alias 'rust-zig-builder'='docker run '"$USE_TTY"' --rm \
   -v "$HOME/.cache/cargo-zigbuild:/root/.cache/cargo-zigbuild" \
   -v "$(pwd)":/workdir \
   -w /workdir \
-  start9/cargo-zigbuild'
+  "$RUST_BUILDER_IMAGE"'

@@ -17,7 +17,7 @@ import {
   withPreloading,
   withRouterConfig,
 } from '@angular/router'
-import { RELATIVE_URL } from '@start9labs/shared'
+import { AUTH_KEY_STORAGE_KEY, RELATIVE_URL } from '@start9labs/shared'
 import { tuiSheetDialogOptionsProvider } from '@taiga-ui/addon-mobile'
 import {
   provideTaiga,
@@ -89,6 +89,10 @@ export const appConfig: ApplicationConfig = {
     {
       provide: RELATIVE_URL,
       useValue: `/${api.url}/${api.version}`,
+    },
+    {
+      provide: AUTH_KEY_STORAGE_KEY,
+      useValue: '_startWrt/authKey',
     },
     provideHttpClient(withInterceptorsFromDi(), withFetch()),
     provideAppInitializer(() => inject(AuthService).whenReady()),

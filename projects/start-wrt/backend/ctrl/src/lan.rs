@@ -15,7 +15,6 @@ use crate::utils::{DeserializeStdin, HandlerExtSerde};
 use crate::{profiles, CtrlContext};
 
 pub const LAN_INTERFACE: &str = "lan";
-pub const WAN6_INTERFACE: &str = "wan6";
 pub const LAN_NETMASK: Ipv4Addr = Ipv4Addr::new(255, 255, 255, 0);
 
 /// Reject any LAN IPv4 outside the RFC 1918 ranges the UI offers.
@@ -59,6 +58,42 @@ pub(crate) fn validate_lan_block(addr: Ipv4Addr) -> Result<(), Error> {
     }
 }
 
+/// Bounds netifd accepts for `ip6assign`.
+const IP6ASSIGN_RANGE: std::ops::RangeInclusive<u8> = 48..=64;
+const DEFAULT_IP6ASSIGN: u8 = 64;
+
+fn assignable_delegation(delegated: Option<u8>) -> Option<u8> {
+    delegated.filter(|d| d <= IP6ASSIGN_RANGE.end())
+}
+
+/// The length netifd shrinks a too-short `ip6assign` to.
+fn effective_ip6assign(configured: u8, delegated: Option<u8>) -> u8 {
+    assignable_delegation(delegated).map_or(configured, |d| configured.max(d))
+}
+
+/// Mirrors the LAN IPv6 page's prefix validator.
+fn validate_ip6assign(prefix: u8, delegated: Option<u8>) -> Result<(), Error> {
+    let (min, max) = (*IP6ASSIGN_RANGE.start(), *IP6ASSIGN_RANGE.end());
+    if !IP6ASSIGN_RANGE.contains(&prefix) {
+        return Err(Error::new(
+            eyre!("LAN IPv6 prefix length /{prefix} is outside /{min} to /{max}"),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    if let Some(delegated) = assignable_delegation(delegated) {
+        if prefix < delegated {
+            return Err(Error::new(
+                eyre!(
+                    "the ISP delegated a /{delegated} prefix; LAN IPv6 prefix length \
+                     /{prefix} must be from /{delegated} to /{max}"
+                ),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct LanIpv4Response {
     pub address: String,
@@ -79,12 +114,13 @@ rpc_toolkit::reflect_ts!(LanIpv4SetRequest);
 pub struct LanIpv6Response {
     pub slaac: bool,
     pub dhcpv6: bool,
-    /// Prefix delegation length, e.g. 64
+    /// LAN prefix length in effect: the configured length, lengthened to the
+    /// delegated prefix when shorter.
     pub prefix: u8,
     /// Current IPv6 address (if assigned)
     pub ip6addr: Option<String>,
-    /// WAN prefix length (read-only context for the UI)
-    pub wan_prefix: u8,
+    /// Length of the global prefix the ISP delegated; null without one.
+    pub delegated_prefix: Option<u8>,
 }
 rpc_toolkit::reflect_ts!(LanIpv6Response);
 
@@ -92,7 +128,9 @@ rpc_toolkit::reflect_ts!(LanIpv6Response);
 pub struct LanIpv6SetRequest {
     pub slaac: bool,
     pub dhcpv6: bool,
-    pub prefix: u8,
+    /// Absent keeps the configured prefix length.
+    #[serde(default)]
+    pub prefix: Option<u8>,
 }
 rpc_toolkit::reflect_ts!(LanIpv6SetRequest);
 
@@ -293,19 +331,6 @@ pub async fn ipv4_set<C: CtrlContext>(
                 }
 
                 if ctx.effectful() {
-                    // Regenerate server cert with updated LAN IP as SAN
-                    let ip_changed = old_address.map_or(true, |old| old != address);
-                    if ip_changed {
-                        let addrs = crate::ssl::LanAddresses {
-                            ipv4: address,
-                            // IPv6 hasn't changed, carry it forward from the live system
-                            ipv6: crate::ssl::read_lan_ipv6_from_ubus().await,
-                        };
-                        if let Err(e) = crate::ssl::regenerate_server_cert(&addrs).await {
-                            tracing::error!("failed to regenerate server cert: {e}");
-                        }
-                    }
-
                     let mut ifaces: Vec<String> = vec![LAN_INTERFACE.to_string()];
                     ifaces.extend(
                         profile_interfaces
@@ -340,23 +365,6 @@ pub async fn ipv6_get<C: CtrlContext>(ctx: C) -> Result<LanIpv6Response, Error> 
         }
     }
 
-    // Read WAN6 interface for reqprefix
-    let mut wan_prefix: u8 = 48;
-    for section in &cfgs["network"].sections {
-        if section.name().as_deref() == Some(WAN6_INTERFACE) {
-            if let Some(iface) = section.get_typed::<NetworkInterface>()? {
-                if let Some(rp) = &iface.reqprefix {
-                    if rp != "auto" {
-                        if let Ok(p) = rp.parse::<u8>() {
-                            wan_prefix = p;
-                        }
-                    }
-                }
-                break;
-            }
-        }
-    }
-
     // Read DHCP LAN section for RA/DHCPv6
     let mut slaac = false;
     let mut dhcpv6 = false;
@@ -370,7 +378,9 @@ pub async fn ipv6_get<C: CtrlContext>(ctx: C) -> Result<LanIpv6Response, Error> 
         }
     }
 
-    let prefix = ip6assign.and_then(|s| s.parse::<u8>().ok()).unwrap_or(64);
+    let prefix = ip6assign
+        .and_then(|s| s.parse::<u8>().ok())
+        .unwrap_or(DEFAULT_IP6ASSIGN);
 
     // Drop arena before any .await — Arena is !Send
     drop(cfgs);
@@ -385,13 +395,18 @@ pub async fn ipv6_get<C: CtrlContext>(ctx: C) -> Result<LanIpv6Response, Error> 
             .map(|a| a.to_string()),
     };
 
-    // Runtime delegation status
+    let delegated_prefix = if ctx.effectful() {
+        crate::system::read_wan6_delegated_prefix_len().await
+    } else {
+        None
+    };
+
     Ok(LanIpv6Response {
         slaac,
         dhcpv6,
-        prefix,
+        prefix: effective_ip6assign(prefix, delegated_prefix),
         ip6addr,
-        wan_prefix,
+        delegated_prefix,
     })
 }
 
@@ -405,6 +420,14 @@ pub async fn ipv6_set<C: CtrlContext>(
         dhcpv6: req.slaac && req.dhcpv6,
         ..req
     };
+    if let (true, Some(prefix)) = (req.slaac, req.prefix) {
+        let delegated = if ctx.effectful() {
+            crate::system::read_wan6_delegated_prefix_len().await
+        } else {
+            None
+        };
+        validate_ip6assign(prefix, delegated)?;
+    }
 
     let mut retries = 4;
     loop {
@@ -449,7 +472,11 @@ pub async fn ipv6_set<C: CtrlContext>(
             if section.name().as_deref() == Some(LAN_INTERFACE) {
                 if let Some(mut iface) = section.get_typed::<NetworkInterface>()? {
                     if req.slaac || req.dhcpv6 {
-                        iface.ip6assign = Some(req.prefix.to_string());
+                        if let Some(prefix) = req.prefix {
+                            iface.ip6assign = Some(prefix.to_string());
+                        } else if iface.ip6assign.is_none() {
+                            iface.ip6assign = Some(DEFAULT_IP6ASSIGN.to_string());
+                        }
                     } else {
                         iface.ip6assign = None;
                     }
@@ -587,44 +614,12 @@ pub async fn ipv6_set<C: CtrlContext>(
                     None,
                 );
                 if ctx.effectful() {
-                    let ipv6_enabled = req.slaac || req.dhcpv6;
-
                     // Withdraw the old prefix while it is still on the interface
                     // — see deprecate_odhcpd_prefixes. Without this, disabling
                     // IPv6 leaves clients holding SLAAC addresses until they
                     // expire on their own.
                     crate::deprecate_odhcpd_prefixes().await;
                     crate::wifi::restart_network().await;
-
-                    // Regenerate server cert to include/remove IPv6 SAN.
-                    // When enabling IPv6, poll for the address to appear on
-                    // the LAN interface — network restart is async and odhcpd
-                    // needs time to assign the ULA address.
-                    let ipv6 = if ipv6_enabled {
-                        let mut found = None;
-                        for _ in 0..30 {
-                            if let Some(addr) = crate::ssl::read_lan_ipv6_from_ubus().await {
-                                found = Some(addr);
-                                break;
-                            }
-                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                        }
-                        if found.is_none() {
-                            tracing::warn!(
-                                "IPv6 address not yet available on LAN after network restart"
-                            );
-                        }
-                        found
-                    } else {
-                        None
-                    };
-                    let addrs = crate::ssl::LanAddresses {
-                        ipv4: crate::ssl::read_lan_ip(&ctx.uci_root()).await,
-                        ipv6,
-                    };
-                    if let Err(e) = crate::ssl::regenerate_server_cert(&addrs).await {
-                        tracing::error!("failed to regenerate server cert after IPv6 change: {e}");
-                    }
                 }
                 return Ok(());
             }
@@ -787,13 +782,12 @@ pub fn update_profile_ips_for_block_change(
 /// Cycles only the specified interfaces via ifdown/ifup (instead of
 /// `network reload` which restarts ALL interfaces including WAN, causing
 /// its DHCP client to lose its lease and breaking internet).
-/// Then reloads firewall and restarts dnsmasq once br-lan has the new IP.
+/// Then reloads the firewall and dnsmasq once br-lan has the new IP.
 pub async fn restart_network_services(new_lan_ip: Ipv4Addr, interfaces: Vec<String>) {
-    // Clear DHCP leases — old leases reference the previous subnet and would
-    // cause clients to receive stale IPs. Remove the base file and every
-    // per-profile `/tmp/dhcp.leases.dns_*`.
+    // Truncated, not unlinked: an instance the reload leaves running keeps
+    // writing to the inode it opened.
     for path in crate::devices::dhcp_lease_files().await {
-        let _ = tokio::fs::remove_file(&path).await;
+        let _ = tokio::fs::write(&path, "").await;
     }
     // Cycle only the changed interfaces — `network reload` restarts ALL
     // interfaces including WAN, causing its DHCP client to lose its lease.
@@ -823,10 +817,10 @@ pub async fn restart_network_services(new_lan_ip: Ipv4Addr, interfaces: Vec<Stri
     let _ =
         crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("reload"))
             .await;
-    // Full restart (not reload) so dnsmasq rebinds to new interface IPs.
-    // A reload (SIGHUP) re-reads config but doesn't rebind listeners.
+    // Reload restarts each instance whose generated config changed. A restart
+    // unregisters dnsmasq's interface triggers until every pool is probed.
     let _ =
-        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("restart"))
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("reload"))
             .await;
     // Bounce WiFi so all clients disassociate and reassociate,
     // triggering fresh DHCP on the new subnet. Without this,
@@ -1422,7 +1416,7 @@ config profile guest
             DeserializeStdin(LanIpv6SetRequest {
                 slaac: true,
                 dhcpv6: false,
-                prefix: 60,
+                prefix: Some(60),
             }),
         )
         .await
@@ -1446,7 +1440,7 @@ config profile guest
             DeserializeStdin(LanIpv6SetRequest {
                 slaac: false,
                 dhcpv6: false,
-                prefix: 64,
+                prefix: Some(64),
             }),
         )
         .await
@@ -1515,7 +1509,7 @@ config profile lan
             DeserializeStdin(LanIpv6SetRequest {
                 slaac: true,
                 dhcpv6: false,
-                prefix: 64,
+                prefix: Some(64),
             }),
         )
         .await
@@ -1543,7 +1537,7 @@ config profile lan
             DeserializeStdin(LanIpv6SetRequest {
                 slaac: true,
                 dhcpv6: true,
-                prefix: 60,
+                prefix: Some(60),
             }),
         )
         .await
@@ -1554,6 +1548,105 @@ config profile lan
                 || err.to_string().contains("LAN section not found"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn effective_ip6assign_shrinks_to_delegation() {
+        assert_eq!(effective_ip6assign(60, Some(64)), 64);
+        assert_eq!(effective_ip6assign(60, Some(56)), 60);
+        assert_eq!(effective_ip6assign(64, Some(48)), 64);
+        assert_eq!(effective_ip6assign(60, None), 60);
+        assert_eq!(effective_ip6assign(60, Some(80)), 60);
+        for delegated in [None, Some(48), Some(56), Some(64), Some(80)] {
+            validate_ip6assign(effective_ip6assign(60, delegated), delegated).unwrap();
+        }
+    }
+
+    #[test]
+    fn validate_ip6assign_matches_delegation() {
+        validate_ip6assign(60, Some(64)).unwrap_err();
+        validate_ip6assign(64, Some(64)).unwrap();
+        validate_ip6assign(56, Some(56)).unwrap();
+        validate_ip6assign(60, Some(56)).unwrap();
+        validate_ip6assign(48, Some(56)).unwrap_err();
+        validate_ip6assign(60, None).unwrap();
+        // A delegation narrower than any assignable prefix leaves the range check alone.
+        validate_ip6assign(64, Some(80)).unwrap();
+    }
+
+    #[tokio::test]
+    async fn ipv6_set_rejects_prefix_netifd_ignores() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_fixtures(dir.path());
+        setup_startwrt(dir.path());
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        for prefix in [47, 65, 120] {
+            ipv6_set(
+                ctx.clone(),
+                DeserializeStdin(LanIpv6SetRequest {
+                    slaac: true,
+                    dhcpv6: false,
+                    prefix: Some(prefix),
+                }),
+            )
+            .await
+            .unwrap_err();
+        }
+        assert_eq!(ipv6_get(ctx.clone()).await.unwrap().prefix, 60);
+
+        for prefix in [48, 64] {
+            ipv6_set(
+                ctx.clone(),
+                DeserializeStdin(LanIpv6SetRequest {
+                    slaac: true,
+                    dhcpv6: false,
+                    prefix: Some(prefix),
+                }),
+            )
+            .await
+            .unwrap();
+            assert_eq!(ipv6_get(ctx.clone()).await.unwrap().prefix, prefix);
+        }
+
+        ipv6_set(
+            ctx,
+            DeserializeStdin(LanIpv6SetRequest {
+                slaac: false,
+                dhcpv6: false,
+                prefix: None,
+            }),
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn ipv6_set_without_prefix_keeps_configured() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_fixtures(dir.path());
+        setup_startwrt(dir.path());
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        let set = |slaac, dhcpv6| {
+            ipv6_set(
+                ctx.clone(),
+                DeserializeStdin(LanIpv6SetRequest {
+                    slaac,
+                    dhcpv6,
+                    prefix: None,
+                }),
+            )
+        };
+
+        set(true, false).await.unwrap();
+        let network = std::fs::read_to_string(dir.path().join("network")).unwrap();
+        assert!(network.contains("option ip6assign '60'"), "{network}");
+
+        set(false, false).await.unwrap();
+        set(true, true).await.unwrap();
+        let network = std::fs::read_to_string(dir.path().join("network")).unwrap();
+        assert!(network.contains("option ip6assign '64'"), "{network}");
     }
 
     #[tokio::test]
@@ -1653,7 +1746,7 @@ config profile iot
             DeserializeStdin(LanIpv6SetRequest {
                 slaac: true,
                 dhcpv6: false,
-                prefix: 60,
+                prefix: Some(60),
             }),
         )
         .await

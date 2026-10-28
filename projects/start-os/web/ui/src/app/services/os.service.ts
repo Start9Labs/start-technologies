@@ -34,7 +34,11 @@ export class OSService {
           ([version]) => Version.parse(version).compare(current) === 'greater',
         )
         .sort(([a], [b]) => Version.parse(b).compareForSort(Version.parse(a)))
-        .map(([version, info]) => ({ version, notes: info.releaseNotes }))
+        .map(([version, info]) => ({
+          version,
+          notes: info.releaseNotes,
+          squashfs: info.squashfs,
+        }))
     }),
     shareReplay({ bufferSize: 1, refCount: true }),
   )

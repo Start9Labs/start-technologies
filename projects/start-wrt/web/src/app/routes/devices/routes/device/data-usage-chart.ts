@@ -39,6 +39,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
         size="s"
         appearance="secondary-grayscale"
         tuiDropdown
+        tuiDropdownAlign="end"
         tuiDropdownAuto
         [tuiSkeleton]="loading()"
       >

@@ -15,12 +15,12 @@ StartOS versions carry an optional fourth **revision** segment — `0.4.0.1` —
 
 - **Root `package.json` is the source of truth.** Everything that needs the OS version reads it: `build/env/version.sh` (used by `check-version.sh`, `basename.sh`, `debian/build.sh`), `derive_version` in `scripts/manage-release.sh`, `.github/workflows/startos-iso.yaml`, and `build.rs`, which bakes it in as `STARTOS_VERSION` for `bins::startos_version()`.
 - **`projects/start-os/Cargo.toml` is a label**, spelling `X.Y.Z.N` as `X.Y.Z-rev.N` so the manifest acknowledges the release it belongs to. Nothing reads it for the OS version. Never treat it as a comparand: `0.4.0-rev.1` is a SemVer _prerelease_, so it sorts **below** `0.4.0` in both `semver` and `exver`. `manage-release.sh pre-check start-os` fails if the label doesn't match the version being cut.
-- **`shared-libs/crates/start-core/Cargo.toml` tracks the OS line** (`0.4.0`, `0.4.1`, `0.5.0`), not the revision. Leave it alone for a revision bump — it feeds the generated man pages for all four products, several of which version independently.
+- **`shared-libs/crates/start-core/Cargo.toml` tracks the OS line** (`0.4.0`, `0.4.1`, `0.5.0`), not the revision. Leave it alone for a revision bump.
 - `version::tests::current_matches_manifest` asserts `Current::default().semver()` equals `package.json`, so the two cannot silently drift.
 
 ## Changelog
 
-A version bump pairs with fragments in `projects/start-os/changelog/` and release notes in the same change. Follow the root [`AGENTS.md`](../../../AGENTS.md) fragment rules and freshly query origin tags to establish what has shipped. Set root `package.json` to the fragment-derived version under those rules; it remains the canonical manifest. `CHANGELOG.md` is generated release history.
+A version bump pairs with fragments in `projects/start-os/changelog/`. Follow the root [`AGENTS.md`](../../../AGENTS.md) fragment and release-note rules, and freshly query origin tags to establish what has shipped. Set root `package.json` to the fragment-derived version under those rules; it remains the canonical manifest. `CHANGELOG.md` and release-note Highlights are generated.
 
 ## Files to update
 
@@ -99,13 +99,17 @@ A pre-release version instead takes prerelease segments: `exver::Version::new([0
 
 ### 5. Release notes
 
-**`projects/start-os/release-notes/X.Y.Z.N.md`** — this release's curated notes: a lede, `## Highlights`, an optional `## Important`. Put pre-update instructions in an optional sibling **`X.Y.Z.N.pre-update.md`**, headed `## ⚠️ Before You Update`. `manage-release.sh` prefixes the companion to the main notes for the GitHub release and registry entry. The post-update notification uses the main notes alone. **The image packages the main file by name** (`projects/start-os/build.mk`), so the StartOS image does not build until it exists.
+**`projects/start-os/release-notes/X.Y.Z.N.md`** — optional release framing: a lede and `## Important` notices. Leave Highlights to the fragment compiler under the root [`AGENTS.md`](../../../AGENTS.md) rules. Put pre-update instructions in an optional sibling **`X.Y.Z.N.pre-update.md`**, headed `## ⚠️ Before You Update`. The image packages rendered notes, excluding the pre-update companion; a framing file is not required.
 
 ### 6. Release-gated docs
 
 `projects/start-os/docs/src/installing-startos.md` (and `update-040.md`) pin the GitHub release link to the shipping version. `manage-release.sh pre-check start-os` fails on a stale or `releases/latest` link.
 
-### 7. SDK TypeScript version (only on breaking SDK changes)
+### 7. Generated man pages
+
+Run `make manpages` and commit the generated changes. `projects/start-os/man/start-container.1` includes the OS version in its header and version section, even when the CLI surface is unchanged. CI's `make manpages-check` rejects stale generated pages.
+
+### 8. SDK TypeScript version (only on breaking SDK changes)
 
 **`projects/start-sdk/lib/StartSdk.ts`** — update `OSVersion` **only** when the bump includes breaking changes the SDK relies on. `OSVersion` tracks compatibility for service developers, not the OS release cadence; routine bumps skip it.
 
@@ -123,8 +127,9 @@ cargo test -p start-core --features test version::   # incl. current_matches_man
 - [ ] Create `shared-libs/crates/start-core/src/version/vX_Y_Z_N.rs`
 - [ ] Update `shared-libs/crates/start-core/src/version/mod.rs` in 5 locations
 - [ ] Add the StartOS changelog fragments
-- [ ] Write `projects/start-os/release-notes/X.Y.Z.N.md` (the image won't build without it), plus `X.Y.Z.N.pre-update.md` for any pre-update instructions
+- [ ] Add optional release framing and any `X.Y.Z.N.pre-update.md` instructions
 - [ ] Bump the release link in `projects/start-os/docs/src/`
+- [ ] Run `make manpages` and commit the generated version updates
 - [ ] Update `projects/start-sdk/lib/StartSdk.ts` `OSVersion` — **only** on breaking SDK changes
 - [ ] `cargo test` + `pre-check` pass
 

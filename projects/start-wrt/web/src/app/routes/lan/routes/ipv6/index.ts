@@ -133,7 +133,7 @@ export default class LanIpv6 {
         updateLanIpv6Validators(
           this.form,
           data.strategy.slaac,
-          data.wanPrefix ?? 48,
+          data.delegatedPrefix ?? null,
         )
       }
     })
@@ -143,7 +143,7 @@ export default class LanIpv6 {
       updateLanIpv6Validators(
         this.form,
         this.slaacEnabled(),
-        this.service.data()?.wanPrefix ?? 48,
+        this.service.data()?.delegatedPrefix ?? null,
       )
     })
   }
@@ -164,7 +164,12 @@ export default class LanIpv6 {
   async onSave() {
     if (this.form.invalid) {
       tuiMarkControlAsTouchedAndValidate(this.form)
-    } else if (await this.service.save(this.form.getRawValue())) {
+    } else if (
+      await this.service.save({
+        ...this.form.getRawValue(),
+        prefixEdited: this.form.controls.subnet.controls.prefix.dirty,
+      })
+    ) {
       this.form.markAsPristine()
     }
   }

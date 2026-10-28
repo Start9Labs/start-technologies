@@ -8,7 +8,7 @@ start-core-ts-bindings: shared-libs/crates/start-core/bindings/index.ts
 shared-libs/crates/start-core/bindings/index.ts: $(CORE_SRC) Cargo.toml Cargo.lock $(ENVIRONMENT_FILE)
 	rm -rf shared-libs/crates/start-core/bindings
 	./shared-libs/crates/start-core/build/build-ts.sh
-	npm --prefix shared-libs/ts-modules/start-core exec -- prettier -w './shared-libs/crates/start-core/bindings/**/*.ts'
+	npm --prefix shared-libs/ts-modules/start-core exec -- prettier --config .prettierrc.json -w './shared-libs/crates/start-core/bindings/**/*.ts'
 	touch shared-libs/crates/start-core/bindings/index.ts
 
 # --- generated-artifact freshness (CI gates: regenerate, then fail on any diff) ---

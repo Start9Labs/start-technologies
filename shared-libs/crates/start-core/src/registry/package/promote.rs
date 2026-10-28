@@ -9,8 +9,6 @@ use crate::context::CliContext;
 use crate::prelude::*;
 use crate::registry::package::get::{GetPackageResponseFull, PackageDetailLevel};
 use crate::s9pk::v2::SIG_CONTEXT;
-use crate::sign::ed25519::Ed25519;
-use crate::sign::{AnySignature, SignatureScheme};
 use crate::util::VersionString;
 
 #[derive(Debug, Deserialize, Serialize, Parser)]
@@ -123,7 +121,10 @@ pub async fn cli_promote(
 
     for (_, asset) in &version_info.s9pks {
         let commitment = &asset.commitment;
-        let signature = Ed25519.sign_commitment(ctx.id_key()?, commitment, SIG_CONTEXT)?;
+        let signature = ctx
+            .id_key()?
+            .sign_commitment(commitment, SIG_CONTEXT)
+            .await?;
 
         call_registry(
             &ctx,
@@ -131,7 +132,7 @@ pub async fn cli_promote(
             "package.add",
             imbl_value::json!({
                 "urls": &asset.urls,
-                "signature": AnySignature::Ed25519(signature),
+                "signature": signature,
                 "commitment": commitment,
             }),
         )

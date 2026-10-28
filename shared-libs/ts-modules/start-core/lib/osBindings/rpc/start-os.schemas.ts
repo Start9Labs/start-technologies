@@ -251,146 +251,6 @@ export const ActionResultValue: z.ZodUnion<
   .meta({
     id: 'ActionResultValue',
   })
-export const AddDnsRecordParams: z.ZodObject<{
-  name: z.ZodString
-  type: z.ZodString
-  value: z.ZodString
-  ttl: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
-}> = /* @__PURE__ */ object({
-  name: z.string(),
-  type: z.string(),
-  value: z.string(),
-  ttl: wire(z.int().nullable().optional(), z.int().nullable()),
-}).meta({
-  id: 'AddDnsRecordParams',
-})
-export const AddPinholeParams: z.ZodObject<{
-  /**
-   * The client's global IPv6 (GUA) to expose. Must be an address this tunnel
-   * delegates to a client — its subnet needs an IPv6 prefix.
-   */
-  gua: z.ZodString
-  /**
-   * External port opened on the GUA.
-   */
-  externalPort: z.ZodInt
-  /**
-   * Destination port on the GUA. Omit for a pure pinhole (no NAT, internal ==
-   * external); set a different value for a port remap (e.g. 80 -> 443).
-   */
-  internalPort: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
-   * Number of contiguous ports, counting up from external/internal. Default 1.
-   */
-  count: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
-}> = /* @__PURE__ */ object({
-  /**
-   * The client's global IPv6 (GUA) to expose. Must be an address this tunnel
-   * delegates to a client — its subnet needs an IPv6 prefix.
-   */
-  gua: z.string().meta({
-    description:
-      "The client's global IPv6 (GUA) to expose. Must be an address this tunnel\ndelegates to a client — its subnet needs an IPv6 prefix.",
-  }),
-  /**
-   * External port opened on the GUA.
-   */
-  externalPort: z.int().meta({
-    description: 'External port opened on the GUA.',
-  }),
-  /**
-   * Destination port on the GUA. Omit for a pure pinhole (no NAT, internal ==
-   * external); set a different value for a port remap (e.g. 80 -> 443).
-   */
-  internalPort: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      'Destination port on the GUA. Omit for a pure pinhole (no NAT, internal ==\nexternal); set a different value for a port remap (e.g. 80 -> 443).',
-  }),
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
-  /**
-   * Number of contiguous ports, counting up from external/internal. Default 1.
-   */
-  count: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      'Number of contiguous ports, counting up from external/internal. Default 1.',
-  }),
-}).meta({
-  id: 'AddPinholeParams',
-})
-export const AddPortForwardParams: z.ZodObject<{
-  /**
-   * External (WAN) port to forward. The external IP is fixed to the target's
-   * WAN so return traffic stays symmetric.
-   */
-  externalPort: z.ZodInt
-  target: z.ZodString
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
-   * Hostnames to SNI-demux on the shared external port. Empty = normal DNAT.
-   */
-  sni: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodString>>,
-    z.ZodArray<z.ZodString>
-  >
-  /**
-   * Number of contiguous ports to forward (a PCP PORT_SET range), counting up
-   * from both `external_port` and the target port. Defaults to 1. Not valid
-   * together with SNI demux.
-   */
-  count: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
-}> = /* @__PURE__ */ object({
-  /**
-   * External (WAN) port to forward. The external IP is fixed to the target's
-   * WAN so return traffic stays symmetric.
-   */
-  externalPort: z.int().meta({
-    description:
-      "External (WAN) port to forward. The external IP is fixed to the target's\nWAN so return traffic stays symmetric.",
-  }),
-  target: z.string(),
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
-  /**
-   * Hostnames to SNI-demux on the shared external port. Empty = normal DNAT.
-   */
-  sni: wire(z.array(z.string()).optional(), z.array(z.string())).meta({
-    description:
-      'Hostnames to SNI-demux on the shared external port. Empty = normal DNAT.',
-  }),
-  /**
-   * Number of contiguous ports to forward (a PCP PORT_SET range), counting up
-   * from both `external_port` and the target port. Defaults to 1. Not valid
-   * together with SNI demux.
-   */
-  count: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      'Number of contiguous ports to forward (a PCP PORT_SET range), counting up\nfrom both `external_port` and the target port. Defaults to 1. Not valid\ntogether with SNI demux.',
-  }),
-}).meta({
-  id: 'AddPortForwardParams',
-})
-export const AddSubnetParams: z.ZodObject<{ name: z.ZodString }> =
-  /* @__PURE__ */ object({ name: z.string() }).meta({
-    id: 'AddSubnetParams',
-  })
 export const AddVersionParams: z.ZodObject<{
   version: z.ZodString
   headline: z.ZodString
@@ -435,12 +295,22 @@ export const BasicCredential: z.ZodObject<{
 }).meta({
   id: 'BasicCredential',
 })
-export const Blake3Commitment: z.ZodObject<{
-  hash: typeof literal_0
-  size: z.ZodInt
-}> = /* @__PURE__ */ object({ hash: literal_0, size: z.int() }).meta({
-  id: 'Blake3Commitment',
-})
+export const Blake3Commitment: z.ZodIntersection<
+  z.ZodObject<{
+    type: z.ZodCodec<
+      z.ZodOptional<z.ZodLiteral<'blake3'>>,
+      z.ZodLiteral<'blake3'>
+    >
+  }>,
+  z.ZodObject<{ hash: typeof literal_0; size: z.ZodInt }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({ type: wire(z.literal('blake3').optional(), z.literal('blake3')) }),
+    object({ hash: literal_0, size: z.int() }),
+  )
+  .meta({
+    id: 'Blake3Commitment',
+  })
 export const CapabilityVerdict: z.ZodObject<{
   /**
    * `None` = never probed.
@@ -577,127 +447,6 @@ export const DeviceFilter: z.ZodObject<{
 }).meta({
   id: 'DeviceFilter',
 })
-
-/**
- * Per-subnet DNS proxy configuration. WireGuard clients on a subnet are pointed
- * at the subnet's in-tunnel server address (`.1`) for DNS; the forward-only proxy
- * listening there resolves every query against the upstream(s) selected here.
- */
-export const DnsConfig: z.ZodUnion<
-  readonly [
-    z.ZodObject<{
-      /**
-       * Forward to the VPS's own system resolvers.
-       */
-      type: z.ZodLiteral<'default'>
-    }>,
-    z.ZodIntersection<
-      z.ZodObject<{
-        /**
-         * Forward to a device on this subnet (its WireGuard IP) on port 53.
-         */
-        type: z.ZodLiteral<'device'>
-      }>,
-      z.ZodObject<{ ip: z.ZodString }>
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{
-        /**
-         * Forward to operator-specified upstream servers (1-3, optional `:port`).
-         */
-        type: z.ZodLiteral<'custom'>
-      }>,
-      z.ZodObject<{ servers: z.ZodArray<z.ZodString> }>
-    >,
-  ]
-> = /* @__PURE__ */ z
-  .union([
-    object({
-      /**
-       * Forward to the VPS's own system resolvers.
-       */
-      type: z.literal('default').meta({
-        description: "Forward to the VPS's own system resolvers.",
-      }),
-    }),
-    z.intersection(
-      object({
-        /**
-         * Forward to a device on this subnet (its WireGuard IP) on port 53.
-         */
-        type: z.literal('device').meta({
-          description:
-            'Forward to a device on this subnet (its WireGuard IP) on port 53.',
-        }),
-      }),
-      object({ ip: z.string() }),
-    ),
-    z.intersection(
-      object({
-        /**
-         * Forward to operator-specified upstream servers (1-3, optional `:port`).
-         */
-        type: z.literal('custom').meta({
-          description:
-            'Forward to operator-specified upstream servers (1-3, optional `:port`).',
-        }),
-      }),
-      object({ servers: z.array(z.string()) }),
-    ),
-  ])
-  .meta({
-    id: 'DnsConfig',
-    description:
-      "Per-subnet DNS proxy configuration. WireGuard clients on a subnet are pointed\nat the subnet's in-tunnel server address (`.1`) for DNS; the forward-only proxy\nlistening there resolves every query against the upstream(s) selected here.",
-  })
-
-/**
- * Which upstream a subnet's DNS proxy forwards to. `Device`/`Custom` draw
- * their data from companion fields on [`SetSubnetDnsParams`].
- */
-export const DnsMode: z.ZodEnum<{
-  default: 'default'
-  device: 'device'
-  custom: 'custom'
-}> = /* @__PURE__ */ z.enum(['default', 'device', 'custom']).meta({
-  id: 'DnsMode',
-  description:
-    "Which upstream a subnet's DNS proxy forwards to. `Device`/`Custom` draw\ntheir data from companion fields on [`SetSubnetDnsParams`].",
-})
-
-/**
- * A DNS record served by the tunnel (injected via RFC 2136 or added manually).
- * `value` is the rdata as text: an IP for A/AAAA, a name for CNAME, etc.
- */
-export const DnsRecordEntry: z.ZodObject<{
-  name: z.ZodString
-  type: z.ZodString
-  value: z.ZodString
-  ttl: z.ZodInt
-  /**
-   * The device IP that injected this, or `null` for a manual record.
-   */
-  source: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  name: z.string(),
-  type: z.string(),
-  value: z.string(),
-  ttl: z.int(),
-  /**
-   * The device IP that injected this, or `null` for a manual record.
-   */
-  source: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'The device IP that injected this, or `null` for a manual record.',
-  }),
-}).meta({
-  id: 'DnsRecordEntry',
-  description:
-    'A DNS record served by the tunnel (injected via RFC 2136 or added manually).\n`value` is the rdata as text: an IP for A/AAAA, a name for CNAME, etc.',
-})
 export const DnsSource: z.ZodEnum<{
   gateway: 'gateway'
   static: 'static'
@@ -755,11 +504,6 @@ export const GatewayType: z.ZodEnum<{
   'outbound-only': 'outbound-only'
 }> = /* @__PURE__ */ z.enum(['inbound-outbound', 'outbound-only']).meta({
   id: 'GatewayType',
-})
-export const GenerateCertParams: z.ZodObject<{
-  subject: z.ZodArray<z.ZodString>
-}> = /* @__PURE__ */ object({ subject: z.array(z.string()) }).meta({
-  id: 'GenerateCertParams',
 })
 export const GenerateCertificateParams: z.ZodObject<{
   hostnames: z.ZodArray<z.ZodString>
@@ -927,36 +671,6 @@ export const HealthCheckId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 export const HostId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'HostId',
 })
-export const HttpRedirectStatus: z.ZodObject<{
-  ip: z.ZodString
-  /**
-   * Whether the redirect is on for this IP (default true).
-   */
-  enabled: z.ZodBoolean
-  /**
-   * Whether a port-forward already occupies port 80 on this IP, in which case
-   * the redirect yields and does not bind.
-   */
-  forwarded: z.ZodBoolean
-}> = /* @__PURE__ */ object({
-  ip: z.string(),
-  /**
-   * Whether the redirect is on for this IP (default true).
-   */
-  enabled: z.boolean().meta({
-    description: 'Whether the redirect is on for this IP (default true).',
-  }),
-  /**
-   * Whether a port-forward already occupies port 80 on this IP, in which case
-   * the redirect yields and does not bind.
-   */
-  forwarded: z.boolean().meta({
-    description:
-      'Whether a port-forward already occupies port 80 on this IP, in which case\nthe redirect yields and does not bind.',
-  }),
-}).meta({
-  id: 'HttpRedirectStatus',
-})
 export const ImageId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'ImageId',
 })
@@ -1002,10 +716,6 @@ export const KeyboardOptions: z.ZodObject<{
 export const KillParams: z.ZodObject<{ ids: z.ZodArray<z.ZodString> }> =
   /* @__PURE__ */ object({ ids: z.array(z.string()) }).meta({
     id: 'KillParams',
-  })
-export const ListDevicesParams: z.ZodObject<{ subnet: z.ZodString }> =
-  /* @__PURE__ */ object({ subnet: z.string() }).meta({
-    id: 'ListDevicesParams',
   })
 export const ListNotificationParams: z.ZodObject<{
   before: z.ZodCodec<
@@ -1093,15 +803,27 @@ export const MaybeUtf8String: typeof literal_3 = /* @__PURE__ */ literal_3.meta(
 export const MebiBytes: typeof literal_6 = /* @__PURE__ */ literal_6.meta({
   id: 'MebiBytes',
 })
-export const MerkleArchiveCommitment: z.ZodObject<{
-  rootSighash: typeof literal_0
-  rootMaxsize: z.ZodInt
-}> = /* @__PURE__ */ object({
-  rootSighash: literal_0,
-  rootMaxsize: z.int(),
-}).meta({
-  id: 'MerkleArchiveCommitment',
-})
+export const MerkleArchiveCommitment: z.ZodIntersection<
+  z.ZodObject<{
+    type: z.ZodCodec<
+      z.ZodOptional<z.ZodLiteral<'merkle-archive'>>,
+      z.ZodLiteral<'merkle-archive'>
+    >
+  }>,
+  z.ZodObject<{ rootSighash: typeof literal_0; rootMaxsize: z.ZodInt }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      type: wire(
+        z.literal('merkle-archive').optional(),
+        z.literal('merkle-archive'),
+      ),
+    }),
+    object({ rootSighash: literal_0, rootMaxsize: z.int() }),
+  )
+  .meta({
+    id: 'MerkleArchiveCommitment',
+  })
 export const MetricsFollowParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'MetricsFollowParams',
 })
@@ -1265,24 +987,6 @@ export const RemoveCategoryParams: z.ZodObject<{ id: z.ZodString }> =
   /* @__PURE__ */ object({ id: z.string() }).meta({
     id: 'RemoveCategoryParams',
   })
-export const RemoveDeviceParams: z.ZodObject<{
-  subnet: z.ZodString
-  ip: z.ZodString
-}> = /* @__PURE__ */ object({ subnet: z.string(), ip: z.string() }).meta({
-  id: 'RemoveDeviceParams',
-})
-export const RemoveDnsRecordParams: z.ZodObject<{
-  name: z.ZodString
-  type: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  name: z.string(),
-  type: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'RemoveDnsRecordParams',
-})
 export const RemoveDomainParams: z.ZodObject<{ fqdn: z.ZodString }> =
   /* @__PURE__ */ object({ fqdn: z.string() }).meta({
     id: 'RemoveDomainParams',
@@ -1295,33 +999,6 @@ export const RemovePassthroughParams: z.ZodObject<{
   'listen-port': z.int(),
 }).meta({
   id: 'RemovePassthroughParams',
-})
-export const RemovePinholeParams: z.ZodObject<{
-  gua: z.ZodString
-  externalPort: z.ZodInt
-}> = /* @__PURE__ */ object({ gua: z.string(), externalPort: z.int() }).meta({
-  id: 'RemovePinholeParams',
-})
-export const RemovePortForwardParams: z.ZodObject<{
-  source: z.ZodString
-  /**
-   * Remove a single SNI route on `source`; omit to remove the whole forward.
-   */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  source: z.string(),
-  /**
-   * Remove a single SNI route on `source`; omit to remove the whole forward.
-   */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Remove a single SNI route on `source`; omit to remove the whole forward.',
-  }),
-}).meta({
-  id: 'RemovePortForwardParams',
 })
 export const RemoveVersionParams: z.ZodObject<{ version: z.ZodString }> =
   /* @__PURE__ */ object({ version: z.string() }).meta({
@@ -1381,119 +1058,23 @@ export const Session: z.ZodObject<{
 }).meta({
   id: 'Session',
 })
-export const SetAutoPortForwardParams: z.ZodObject<{
-  subnet: z.ZodString
-  ip: z.ZodString
-  enabled: z.ZodBoolean
-}> = /* @__PURE__ */ object({
-  subnet: z.string(),
-  ip: z.string(),
-  enabled: z.boolean(),
-}).meta({
-  id: 'SetAutoPortForwardParams',
-})
 export const SetCountryParams: z.ZodObject<{ country: z.ZodString }> =
   /* @__PURE__ */ object({ country: z.string() }).meta({
     id: 'SetCountryParams',
   })
-export const SetDeviceWanParams: z.ZodObject<{
-  subnet: z.ZodString
-  ip: z.ZodString
-  wanIp: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  subnet: z.string(),
-  ip: z.string(),
-  wanIp: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'SetDeviceWanParams',
-})
-export const SetDnsInjectionParams: z.ZodObject<{
-  subnet: z.ZodString
-  ip: z.ZodString
-  enabled: z.ZodBoolean
-}> = /* @__PURE__ */ object({
-  subnet: z.string(),
-  ip: z.string(),
-  enabled: z.boolean(),
-}).meta({
-  id: 'SetDnsInjectionParams',
-})
 export const SetEchoipUrlsParams: z.ZodObject<{
   urls: z.ZodArray<z.ZodString>
 }> = /* @__PURE__ */ object({ urls: z.array(z.string()) }).meta({
   id: 'SetEchoipUrlsParams',
 })
-export const SetHttpRedirectEnabledParams: z.ZodObject<{
-  /**
-   * The public IPv4 whose default-on port-80 HTTP→HTTPS redirect to toggle.
-   */
-  ip: z.ZodString
-  enabled: z.ZodBoolean
-}> = /* @__PURE__ */ object({
-  /**
-   * The public IPv4 whose default-on port-80 HTTP→HTTPS redirect to toggle.
-   */
-  ip: z.string().meta({
-    description:
-      'The public IPv4 whose default-on port-80 HTTP→HTTPS redirect to toggle.',
-  }),
-  enabled: z.boolean(),
-}).meta({
-  id: 'SetHttpRedirectEnabledParams',
-})
 export const SetLanguageParams: z.ZodObject<{ language: z.ZodString }> =
   /* @__PURE__ */ object({ language: z.string() }).meta({
     id: 'SetLanguageParams',
-  })
-export const SetListenParams: z.ZodObject<{ listen: z.ZodString }> =
-  /* @__PURE__ */ object({ listen: z.string() }).meta({
-    id: 'SetListenParams',
   })
 export const SetNameParams: z.ZodObject<{ name: z.ZodString }> =
   /* @__PURE__ */ object({ name: z.string() }).meta({
     id: 'SetNameParams',
   })
-export const SetPasswordParams: z.ZodObject<{ password: z.ZodString }> =
-  /* @__PURE__ */ object({ password: z.string() }).meta({
-    id: 'SetPasswordParams',
-  })
-export const SetPinholeEnabledParams: z.ZodObject<{
-  gua: z.ZodString
-  externalPort: z.ZodInt
-  enabled: z.ZodBoolean
-}> = /* @__PURE__ */ object({
-  gua: z.string(),
-  externalPort: z.int(),
-  enabled: z.boolean(),
-}).meta({
-  id: 'SetPinholeEnabledParams',
-})
-export const SetPortForwardEnabledParams: z.ZodObject<{
-  source: z.ZodString
-  enabled: z.ZodBoolean
-  /**
-   * Toggle a single SNI route on `source`; omit for a DNAT forward.
-   */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  source: z.string(),
-  enabled: z.boolean(),
-  /**
-   * Toggle a single SNI route on `source`; omit for a DNAT forward.
-   */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Toggle a single SNI route on `source`; omit for a DNAT forward.',
-  }),
-}).meta({
-  id: 'SetPortForwardEnabledParams',
-})
 export const SetServerHostnameParams: z.ZodObject<{
   /**
    * The server's `.local` hostname: up to 32 lowercase letters, numbers, and
@@ -1512,47 +1093,10 @@ export const SetServerHostnameParams: z.ZodObject<{
 }).meta({
   id: 'SetServerHostnameParams',
 })
-export const SetSubnetIpv6Params: z.ZodObject<{
-  /**
-   * The routed IPv6 prefix delegated to this subnet (e.g. a /64 from Hetzner,
-   * a /56 from Linode). `null` disables IPv6 on the subnet.
-   */
-  prefix: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  /**
-   * The routed IPv6 prefix delegated to this subnet (e.g. a /64 from Hetzner,
-   * a /56 from Linode). `null` disables IPv6 on the subnet.
-   */
-  prefix: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'The routed IPv6 prefix delegated to this subnet (e.g. a /64 from Hetzner,\na /56 from Linode). `null` disables IPv6 on the subnet.',
-  }),
-}).meta({
-  id: 'SetSubnetIpv6Params',
-})
-export const SetSubnetWanParams: z.ZodObject<{
-  wanIp: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  wanIp: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'SetSubnetWanParams',
-})
 export const SetWifiEnabledParams: z.ZodObject<{ enabled: z.ZodBoolean }> =
   /* @__PURE__ */ object({ enabled: z.boolean() }).meta({
     id: 'SetWifiEnabledParams',
   })
-export const ShowConfigParams: z.ZodObject<{
-  subnet: z.ZodString
-  ip: z.ZodString
-}> = /* @__PURE__ */ object({ subnet: z.string(), ip: z.string() }).meta({
-  id: 'ShowConfigParams',
-})
 export const ShutdownParams: z.ZodObject<{
   /**
    * Block until graceful teardown completes (default over the CLI; the
@@ -1632,10 +1176,6 @@ export const Ssid: z.ZodString = /* @__PURE__ */ z.string().meta({
   id: 'Ssid',
   description: 'Ssid are the names of the wifis, usually human readable.',
 })
-export const SubnetParams: z.ZodObject<{ subnet: z.ZodString }> =
-  /* @__PURE__ */ object({ subnet: z.string() }).meta({
-    id: 'SubnetParams',
-  })
 export const SubscribeParams: z.ZodObject<{
   pointer: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1680,110 +1220,15 @@ export const TrustedCa: z.ZodObject<{
 }).meta({
   id: 'TrustedCa',
 })
-export const TunnelCertData: z.ZodObject<{
-  key: typeof literal_0
-  cert: typeof literal_0
-}> = /* @__PURE__ */ object({ key: literal_0, cert: literal_0 }).meta({
-  id: 'TunnelCertData',
-})
-export const TunnelUpdateResult: z.ZodObject<{
-  /**
-   * "up-to-date", "update-available", or "updating"
-   */
-  status: z.ZodString
-  /**
-   * Currently installed version
-   */
-  installed: z.ZodString
-  /**
-   * Available candidate version
-   */
-  candidate: z.ZodString
-}> = /* @__PURE__ */ object({
-  /**
-   * "up-to-date", "update-available", or "updating"
-   */
-  status: z.string().meta({
-    description: '"up-to-date", "update-available", or "updating"',
-  }),
-  /**
-   * Currently installed version
-   */
-  installed: z.string().meta({
-    description: 'Currently installed version',
-  }),
-  /**
-   * Available candidate version
-   */
-  candidate: z.string().meta({
-    description: 'Available candidate version',
-  }),
-}).meta({
-  id: 'TunnelUpdateResult',
-})
-export const TunnelUrlParams: z.ZodObject<{ tunnel: z.ZodString }> =
-  /* @__PURE__ */ object({ tunnel: z.string() }).meta({
-    id: 'TunnelUrlParams',
+export const TrustedOsUpdateSigner: z.ZodObject<{ label: z.ZodString }> =
+  /* @__PURE__ */ object({ label: z.string() }).meta({
+    id: 'TrustedOsUpdateSigner',
   })
 export const UiParams: z.ZodObject<{
   pointer: z.ZodString
   value: z.ZodUnknown
 }> = /* @__PURE__ */ object({ pointer: z.string(), value: z.unknown() }).meta({
   id: 'UiParams',
-})
-export const UpdatePinholeLabelParams: z.ZodObject<{
-  gua: z.ZodString
-  externalPort: z.ZodInt
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  gua: z.string(),
-  externalPort: z.int(),
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'UpdatePinholeLabelParams',
-})
-export const UpdatePortForwardLabelParams: z.ZodObject<{
-  source: z.ZodString
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
-   * Label a single SNI route on `source`; omit to label the DNAT forward.
-   */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  source: z.string(),
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
-  /**
-   * Label a single SNI route on `source`; omit to label the DNAT forward.
-   */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Label a single SNI route on `source`; omit to label the DNAT forward.',
-  }),
-}).meta({
-  id: 'UpdatePortForwardLabelParams',
-})
-export const UpdateSystemParams: z.ZodObject<{
-  registry: z.ZodString
-  targetVersion: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  progress: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-}> = /* @__PURE__ */ object({
-  registry: z.string(),
-  targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
-  progress: wire(z.boolean().optional(), z.boolean()),
-}).meta({
-  id: 'UpdateSystemParams',
 })
 
 /**
@@ -1840,19 +1285,6 @@ export const UsersResponse: z.ZodObject<{
 export const Version: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Version',
 })
-
-/**
- * A WireGuard client's role. A `Server` is a StartOS box that may configure the
- * gateway (DNS injection / auto port-forward); a `Client` is a plain peer with
- * no autoconfig. Stored and sticky — toggling the capability flags never changes
- * it; the migration backfills it from those flags.
- */
-export const WgClientKind: z.ZodEnum<{ client: 'client'; server: 'server' }> =
-  /* @__PURE__ */ z.enum(['client', 'server']).meta({
-    id: 'WgClientKind',
-    description:
-      "A WireGuard client's role. A `Server` is a StartOS box that may configure the\ngateway (DNS injection / auto port-forward); a `Client` is a plain peer with\nno autoconfig. Stored and sticky — toggling the capability flags never changes\nit; the migration backfills it from those flags.",
-  })
 export const WifiAddParams: z.ZodObject<{
   ssid: z.ZodString
   password: z.ZodString
@@ -1866,6 +1298,29 @@ export const WifiSsidParams: z.ZodObject<{ ssid: z.ZodString }> =
 export const ZramParams: z.ZodObject<{ enable: z.ZodBoolean }> =
   /* @__PURE__ */ object({ enable: z.boolean() }).meta({
     id: 'ZramParams',
+  })
+export const AcceptSigners: z.ZodUnion<
+  readonly [
+    z.ZodObject<{ signer: typeof AnyVerifyingKey }>,
+    z.ZodObject<{ any: z.ZodArray<typeof AcceptSigners> }>,
+    z.ZodObject<{ all: z.ZodArray<typeof AcceptSigners> }>,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    object({ signer: AnyVerifyingKey }),
+    object({
+      get any(): z.ZodArray<typeof AcceptSigners> {
+        return z.array(AcceptSigners)
+      },
+    }),
+    object({
+      get all(): z.ZodArray<typeof AcceptSigners> {
+        return z.array(AcceptSigners)
+      },
+    }),
+  ])
+  .meta({
+    id: 'AcceptSigners',
   })
 export const ActionInput: z.ZodObject<{
   eventId: z.ZodCodec<z.ZodOptional<typeof Guid>, typeof Guid>
@@ -1989,37 +1444,6 @@ export const AddCategoryParams: z.ZodObject<{
   name: typeof LocaleString
 }> = /* @__PURE__ */ object({ id: z.string(), name: LocaleString }).meta({
   id: 'AddCategoryParams',
-})
-export const AddDeviceParams: z.ZodObject<{
-  subnet: z.ZodString
-  name: z.ZodString
-  ip: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
-   * Client (no autoconfig) or Server (gateway-autoconfig on by default).
-   */
-  kind: z.ZodCodec<z.ZodOptional<typeof WgClientKind>, typeof WgClientKind>
-}> = /* @__PURE__ */ object({
-  subnet: z.string(),
-  name: z.string(),
-  ip: wire(z.string().nullable().optional(), z.string().nullable()),
-  /**
-   * Client (no autoconfig) or Server (gateway-autoconfig on by default).
-   */
-  kind: wire(WgClientKind.optional(), WgClientKind).meta({
-    description:
-      'Client (no autoconfig) or Server (gateway-autoconfig on by default).',
-  }),
-}).meta({
-  id: 'AddDeviceParams',
-})
-export const AddKeyParams: z.ZodObject<{
-  name: z.ZodString
-  key: typeof AnyVerifyingKey
-}> = /* @__PURE__ */ object({ name: z.string(), key: AnyVerifyingKey }).meta({
-  id: 'AddKeyParams',
 })
 export const AddMirrorParams: z.ZodObject<{
   url: z.ZodString
@@ -2986,6 +2410,11 @@ export const OsInfo: z.ZodObject<{
 }).meta({
   id: 'OsInfo',
 })
+export const OsUpdateSignerKeyParams: z.ZodObject<{
+  key: typeof AnyVerifyingKey
+}> = /* @__PURE__ */ object({ key: AnyVerifyingKey }).meta({
+  id: 'OsUpdateSignerKeyParams',
+})
 export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
   releaseNotes: z.ZodString
@@ -3027,6 +2456,24 @@ export const PackageBackupInfo: z.ZodObject<{
 }).meta({
   id: 'PackageBackupInfo',
 })
+
+/**
+ * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
+ */
+export const PackageIcon: z.ZodUnion<readonly [typeof DataUrl, z.ZodString]> =
+  /* @__PURE__ */ z
+    .union([
+      DataUrl,
+      z.string().meta({
+        description:
+          "A path under the registry's `/icons/`, led by the scheme that names the file.",
+      }),
+    ])
+    .meta({
+      id: 'PackageIcon',
+      description:
+        'Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.',
+    })
 export const PackageIdParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'PackageIdParams',
@@ -3148,10 +2595,6 @@ export const RemoveAcmeParams: z.ZodObject<{ provider: typeof AcmeProvider }> =
 export const RemoveAdminParams: z.ZodObject<{ signer: typeof Guid }> =
   /* @__PURE__ */ object({ signer: Guid }).meta({
     id: 'RemoveAdminParams',
-  })
-export const RemoveKeyParams: z.ZodObject<{ key: typeof AnyVerifyingKey }> =
-  /* @__PURE__ */ object({ key: AnyVerifyingKey }).meta({
-    id: 'RemoveKeyParams',
   })
 export const RemoveMirrorParams: z.ZodObject<{
   id: typeof PackageId
@@ -3286,17 +2729,6 @@ export const SetDescriptionParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ description: LocaleString.nullable() }).meta({
   id: 'SetDescriptionParams',
 })
-export const SetDeviceKindParams: z.ZodObject<{
-  subnet: z.ZodString
-  ip: z.ZodString
-  kind: typeof WgClientKind
-}> = /* @__PURE__ */ object({
-  subnet: z.string(),
-  ip: z.string(),
-  kind: WgClientKind,
-}).meta({
-  id: 'SetDeviceKindParams',
-})
 export const SetGatewaySecureParams: z.ZodObject<{
   gateway: typeof GatewayId
   secure: z.ZodCodec<
@@ -3313,6 +2745,12 @@ export const SetIconParams: z.ZodObject<{
   icon: z.ZodNullable<typeof DataUrl>
 }> = /* @__PURE__ */ object({ icon: DataUrl.nullable() }).meta({
   id: 'SetIconParams',
+})
+export const SetOsUpdateSignerParams: z.ZodObject<{
+  key: typeof AnyVerifyingKey
+  label: z.ZodString
+}> = /* @__PURE__ */ object({ key: AnyVerifyingKey, label: z.string() }).meta({
+  id: 'SetOsUpdateSignerParams',
 })
 export const SetOutboundGatewayParams: z.ZodObject<{
   package: typeof PackageId
@@ -3348,38 +2786,6 @@ export const SetStaticDnsParams: z.ZodObject<{
   ),
 }).meta({
   id: 'SetStaticDnsParams',
-})
-export const SetSubnetDnsParams: z.ZodObject<{
-  mode: typeof DnsMode
-  /**
-   * The selected device's WireGuard IP; required when `mode` is `device`.
-   */
-  deviceIp: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
-   * Up to 3 upstream servers (bare IP or `ip:port`); used when `mode` is `custom`.
-   */
-  servers: z.ZodArray<z.ZodString>
-}> = /* @__PURE__ */ object({
-  mode: DnsMode,
-  /**
-   * The selected device's WireGuard IP; required when `mode` is `device`.
-   */
-  deviceIp: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      "The selected device's WireGuard IP; required when `mode` is `device`.",
-  }),
-  /**
-   * Up to 3 upstream servers (bare IP or `ip:port`); used when `mode` is `custom`.
-   */
-  servers: z.array(z.string()).meta({
-    description:
-      'Up to 3 upstream servers (bare IP or `ip:port`); used when `mode` is `custom`.',
-  }),
-}).meta({
-  id: 'SetSubnetDnsParams',
 })
 export const SideloadResponse: z.ZodObject<{
   upload: typeof Guid
@@ -3575,78 +2981,6 @@ export const VersionSignerParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ version: z.string(), signer: Guid }).meta({
   id: 'VersionSignerParams',
 })
-export const WgConfig: z.ZodObject<{
-  name: z.ZodString
-  key: typeof literal_0
-  psk: typeof literal_0
-  /**
-   * Client (no autoconfig) vs Server (a StartOS box). Sticky; defaulted by the
-   * migration from the capability flags.
-   */
-  kind: z.ZodCodec<z.ZodOptional<typeof WgClientKind>, typeof WgClientKind>
-  /**
-   * Whether this device may inject DNS records via RFC 2136. Off by default
-   * — only enable for devices you trust (it lets the device add records to
-   * the tunnel's DNS for every peer to resolve).
-   */
-  allowDnsInjection: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  /**
-   * Whether this device may auto-create port forwards via PCP/IGD. Off by
-   * default — paired with `allow_dns_injection` under one "Gateway
-   * Autoconfiguration" toggle, but tracked separately so each capability is
-   * gated on its own.
-   */
-  allowAutoPortForward: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  /**
-   * SNAT this device's egress to this WAN IP, overriding the subnet's
-   * `wan_ip` / the default masquerade. `None` falls back to the subnet rule.
-   */
-  wanIp: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  name: z.string(),
-  key: literal_0,
-  psk: literal_0,
-  /**
-   * Client (no autoconfig) vs Server (a StartOS box). Sticky; defaulted by the
-   * migration from the capability flags.
-   */
-  kind: wire(WgClientKind.optional(), WgClientKind).meta({
-    description:
-      'Client (no autoconfig) vs Server (a StartOS box). Sticky; defaulted by the\nmigration from the capability flags.',
-  }),
-  /**
-   * Whether this device may inject DNS records via RFC 2136. Off by default
-   * — only enable for devices you trust (it lets the device add records to
-   * the tunnel's DNS for every peer to resolve).
-   */
-  allowDnsInjection: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      "Whether this device may inject DNS records via RFC 2136. Off by default\n— only enable for devices you trust (it lets the device add records to\nthe tunnel's DNS for every peer to resolve).",
-  }),
-  /**
-   * Whether this device may auto-create port forwards via PCP/IGD. Off by
-   * default — paired with `allow_dns_injection` under one "Gateway
-   * Autoconfiguration" toggle, but tracked separately so each capability is
-   * gated on its own.
-   */
-  allowAutoPortForward: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Whether this device may auto-create port forwards via PCP/IGD. Off by\ndefault — paired with `allow_dns_injection` under one "Gateway\nAutoconfiguration" toggle, but tracked separately so each capability is\ngated on its own.',
-  }),
-  /**
-   * SNAT this device's egress to this WAN IP, overriding the subnet's
-   * `wan_ip` / the default masquerade. `None` falls back to the subnet rule.
-   */
-  wanIp: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      "SNAT this device's egress to this WAN IP, overriding the subnet's\n`wan_ip` / the default masquerade. `None` falls back to the subnet rule.",
-  }),
-}).meta({
-  id: 'WgConfig',
-})
 export const WifiListOut: z.ZodObject<{
   ssid: typeof Ssid
   strength: typeof SignalStrength
@@ -3780,7 +3114,7 @@ export const DependencyMetadata: z.ZodIntersection<
       z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
       z.ZodNullable<typeof LocaleString>
     >
-    icon: z.ZodOptional<z.ZodNullable<typeof DataUrl>>
+    icon: z.ZodOptional<z.ZodNullable<typeof PackageIcon>>
     description: z.ZodCodec<
       z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
       z.ZodNullable<typeof LocaleString>
@@ -3798,7 +3132,7 @@ export const DependencyMetadata: z.ZodIntersection<
   .intersection(
     object({
       title: wire(LocaleString.nullable().optional(), LocaleString.nullable()),
-      icon: DataUrl.nullable().optional(),
+      icon: PackageIcon.nullable().optional(),
       description: wire(
         LocaleString.nullable().optional(),
         LocaleString.nullable(),
@@ -4203,10 +3537,37 @@ export const SessionList: z.ZodObject<{
 }).meta({
   id: 'SessionList',
 })
-export const WgSubnetClients: z.ZodRecord<z.ZodString, typeof WgConfig> =
-  /* @__PURE__ */ z.record(z.string(), WgConfig).meta({
-    id: 'WgSubnetClients',
-  })
+export const UpdateSystemParams: z.ZodObject<{
+  registry: z.ZodString
+  /**
+   * Additional signer requirements checked before starting the update.
+   */
+  acceptSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
+    z.ZodNullable<typeof AcceptSigners>
+  >
+  targetVersion: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  progress: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  registry: z.string(),
+  /**
+   * Additional signer requirements checked before starting the update.
+   */
+  acceptSigners: wire(
+    AcceptSigners.nullable().optional(),
+    AcceptSigners.nullable(),
+  ).meta({
+    description:
+      'Additional signer requirements checked before starting the update.',
+  }),
+  targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
+  progress: wire(z.boolean().optional(), z.boolean()),
+}).meta({
+  id: 'UpdateSystemParams',
+})
 export const WifiListInfo: z.ZodObject<{
   ssids: z.ZodRecord<z.ZodString, typeof SignalStrength>
   connected: z.ZodCodec<
@@ -4588,10 +3949,7 @@ export const OsIndex: z.ZodObject<{ versions: typeof OsVersionInfoMap }> =
   })
 export const PackageVersionInfo: z.ZodIntersection<
   z.ZodObject<{
-    /**
-     * Absent for clients that load icons from the registry's `/icons/` route.
-     */
-    icon: z.ZodOptional<z.ZodNullable<typeof DataUrl>>
+    icon: z.ZodOptional<z.ZodNullable<typeof PackageIcon>>
     dependencyMetadata: z.ZodRecord<z.ZodString, typeof DependencyMetadata>
     sourceVersion: z.ZodCodec<
       z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -4611,13 +3969,7 @@ export const PackageVersionInfo: z.ZodIntersection<
 > = /* @__PURE__ */ z
   .intersection(
     object({
-      /**
-       * Absent for clients that load icons from the registry's `/icons/` route.
-       */
-      icon: DataUrl.nullable().optional().meta({
-        description:
-          "Absent for clients that load icons from the registry's `/icons/` route.",
-      }),
+      icon: PackageIcon.nullable().optional(),
       dependencyMetadata: z.record(z.string(), DependencyMetadata),
       sourceVersion: wire(
         z.string().nullable().optional(),
@@ -4632,51 +3984,6 @@ export const PackageVersionInfo: z.ZodIntersection<
   .meta({
     id: 'PackageVersionInfo',
   })
-export const WgSubnetConfig: z.ZodObject<{
-  name: z.ZodString
-  clients: typeof WgSubnetClients
-  dns: z.ZodCodec<z.ZodOptional<typeof DnsConfig>, typeof DnsConfig>
-  /**
-   * SNAT this subnet's egress to this WAN IP instead of `masquerade`. `None`
-   * keeps the default masquerade; a per-device `wan_ip` overrides this.
-   */
-  wanIp: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
-   * Routed IPv6 prefix delegated to this subnet, if any. Each host on the
-   * subnet (the server and every client) gets one `/128` out of it with its
-   * tunnel IPv4 embedded — see [`crate::tunnel::wg6`].
-   */
-  ipv6: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  name: z.string(),
-  clients: WgSubnetClients,
-  dns: wire(DnsConfig.optional(), DnsConfig),
-  /**
-   * SNAT this subnet's egress to this WAN IP instead of `masquerade`. `None`
-   * keeps the default masquerade; a per-device `wan_ip` overrides this.
-   */
-  wanIp: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      "SNAT this subnet's egress to this WAN IP instead of `masquerade`. `None`\nkeeps the default masquerade; a per-device `wan_ip` overrides this.",
-  }),
-  /**
-   * Routed IPv6 prefix delegated to this subnet, if any. Each host on the
-   * subnet (the server and every client) gets one `/128` out of it with its
-   * tunnel IPv4 embedded — see [`crate::tunnel::wg6`].
-   */
-  ipv6: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Routed IPv6 prefix delegated to this subnet, if any. Each host on the\nsubnet (the server and every client) gets one `/128` out of it with its\ntunnel IPv4 embedded — see [`crate::tunnel::wg6`].',
-  }),
-}).meta({
-  id: 'WgSubnetConfig',
-})
 export const BindOptions: z.ZodObject<{
   preferredExternalPort: z.ZodInt
   addSsl: z.ZodCodec<
@@ -6685,6 +5992,56 @@ export const Api = {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ RequiresReboot,
         },
+        'update-signers': {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            add: {
+              _PARAMS: /* @__PURE__ */ SetOsUpdateSignerParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            get: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                OsUpdateSignerKeyParams,
+              ),
+              _RETURN: /* @__PURE__ */ TrustedOsUpdateSigner,
+            },
+            list: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
+              _RETURN: /* @__PURE__ */ z.record(
+                z.string(),
+                TrustedOsUpdateSigner,
+              ),
+            },
+            remove: {
+              _PARAMS: /* @__PURE__ */ OsUpdateSignerKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            update: {
+              _PARAMS: /* @__PURE__ */ SetOsUpdateSignerParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+          },
+        },
       },
     },
     setup: {
@@ -6725,527 +6082,6 @@ export const Api = {
     state: {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ ApiState,
-    },
-    tunnel: {
-      _PARAMS: /* @__PURE__ */ z.intersection(empty, TunnelUrlParams),
-      _CHILDREN: {
-        auth: {
-          _PARAMS: /* @__PURE__ */ z.intersection(empty, TunnelUrlParams),
-          _CHILDREN: {
-            key: {
-              _PARAMS: /* @__PURE__ */ z.intersection(empty, TunnelUrlParams),
-              _CHILDREN: {
-                add: {
-                  _PARAMS: /* @__PURE__ */ z.intersection(
-                    z.intersection(empty, TunnelUrlParams),
-                    AddKeyParams,
-                  ),
-                  _RETURN: /* @__PURE__ */ z.null(),
-                },
-                list: {
-                  _PARAMS: /* @__PURE__ */ z.intersection(
-                    z.intersection(empty, TunnelUrlParams),
-                    z.intersection(
-                      z.intersection(
-                        object({
-                          format: wire(
-                            IoFormat.nullable().optional(),
-                            IoFormat.nullable(),
-                          ),
-                        }),
-                        empty,
-                      ),
-                      empty,
-                    ),
-                  ),
-                  _RETURN: /* @__PURE__ */ AuthKeys,
-                },
-                remove: {
-                  _PARAMS: /* @__PURE__ */ z.intersection(
-                    z.intersection(empty, TunnelUrlParams),
-                    RemoveKeyParams,
-                  ),
-                  _RETURN: /* @__PURE__ */ z.null(),
-                },
-              },
-            },
-            login: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                LoginParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            logout: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                LogoutParams,
-              ),
-              _RETURN: /* @__PURE__ */ HasUnenrolledKeys.nullable(),
-            },
-            session: {
-              _PARAMS: /* @__PURE__ */ z.intersection(empty, TunnelUrlParams),
-              _CHILDREN: {
-                kill: {
-                  _PARAMS: /* @__PURE__ */ z.intersection(
-                    z.intersection(empty, TunnelUrlParams),
-                    KillParams,
-                  ),
-                  _RETURN: /* @__PURE__ */ z.null(),
-                },
-                list: {
-                  _PARAMS: /* @__PURE__ */ z.intersection(
-                    z.intersection(empty, TunnelUrlParams),
-                    z.intersection(
-                      z.intersection(
-                        object({
-                          format: wire(
-                            IoFormat.nullable().optional(),
-                            IoFormat.nullable(),
-                          ),
-                        }),
-                        empty,
-                      ),
-                      ListParams,
-                    ),
-                  ),
-                  _RETURN: /* @__PURE__ */ SessionList,
-                },
-              },
-            },
-            'set-password': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                SetPasswordParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-          },
-        },
-        db: {
-          _PARAMS: /* @__PURE__ */ z.intersection(empty, TunnelUrlParams),
-          _CHILDREN: {
-            apply: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                ApplyWithPathParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            dump: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                DumpParams,
-              ),
-              _RETURN: /* @__PURE__ */ Dump,
-            },
-            subscribe: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                SubscribeParams,
-              ),
-              _RETURN: /* @__PURE__ */ SubscribeRes,
-            },
-          },
-        },
-        device: {
-          _PARAMS: /* @__PURE__ */ z.intersection(empty, TunnelUrlParams),
-          _CHILDREN: {
-            add: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                AddDeviceParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            list: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                z.intersection(
-                  z.intersection(
-                    object({
-                      format: wire(
-                        IoFormat.nullable().optional(),
-                        IoFormat.nullable(),
-                      ),
-                    }),
-                    empty,
-                  ),
-                  ListDevicesParams,
-                ),
-              ),
-              _RETURN: /* @__PURE__ */ WgSubnetConfig,
-            },
-            remove: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                RemoveDeviceParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'set-auto-port-forward': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                SetAutoPortForwardParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'set-dns-injection': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                SetDnsInjectionParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'set-kind': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                SetDeviceKindParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'set-wan': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                SetDeviceWanParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'show-config': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                ShowConfigParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.string(),
-            },
-          },
-        },
-        dns: {
-          _PARAMS: /* @__PURE__ */ z.intersection(empty, TunnelUrlParams),
-          _CHILDREN: {
-            add: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                AddDnsRecordParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            list: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                z.intersection(
-                  z.intersection(
-                    object({
-                      format: wire(
-                        IoFormat.nullable().optional(),
-                        IoFormat.nullable(),
-                      ),
-                    }),
-                    empty,
-                  ),
-                  empty,
-                ),
-              ),
-              _RETURN: /* @__PURE__ */ z.array(DnsRecordEntry),
-            },
-            remove: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                RemoveDnsRecordParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-          },
-        },
-        'http-redirect': {
-          _PARAMS: /* @__PURE__ */ z.intersection(empty, TunnelUrlParams),
-          _CHILDREN: {
-            list: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                z.intersection(
-                  z.intersection(
-                    object({
-                      format: wire(
-                        IoFormat.nullable().optional(),
-                        IoFormat.nullable(),
-                      ),
-                    }),
-                    empty,
-                  ),
-                  empty,
-                ),
-              ),
-              _RETURN: /* @__PURE__ */ z.array(HttpRedirectStatus),
-            },
-            'set-enabled': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                SetHttpRedirectEnabledParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-          },
-        },
-        pinhole: {
-          _PARAMS: /* @__PURE__ */ z.intersection(empty, TunnelUrlParams),
-          _CHILDREN: {
-            add: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                AddPinholeParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            remove: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                RemovePinholeParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'set-enabled': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                SetPinholeEnabledParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'update-label': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                UpdatePinholeLabelParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-          },
-        },
-        'port-forward': {
-          _PARAMS: /* @__PURE__ */ z.intersection(empty, TunnelUrlParams),
-          _CHILDREN: {
-            add: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                AddPortForwardParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            remove: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                RemovePortForwardParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'set-enabled': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                SetPortForwardEnabledParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'update-label': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                UpdatePortForwardLabelParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-          },
-        },
-        restart: {
-          _PARAMS: /* @__PURE__ */ z.intersection(empty, TunnelUrlParams),
-          _RETURN: /* @__PURE__ */ z.null(),
-        },
-        subnet: {
-          _PARAMS: /* @__PURE__ */ z.intersection(
-            z.intersection(empty, TunnelUrlParams),
-            SubnetParams,
-          ),
-          _CHILDREN: {
-            add: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(
-                  z.intersection(empty, TunnelUrlParams),
-                  SubnetParams,
-                ),
-                AddSubnetParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            remove: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                SubnetParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'set-dns': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(
-                  z.intersection(empty, TunnelUrlParams),
-                  SubnetParams,
-                ),
-                SetSubnetDnsParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'set-ipv6': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(
-                  z.intersection(empty, TunnelUrlParams),
-                  SubnetParams,
-                ),
-                SetSubnetIpv6Params,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'set-wan': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(
-                  z.intersection(empty, TunnelUrlParams),
-                  SubnetParams,
-                ),
-                SetSubnetWanParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-          },
-        },
-        update: {
-          _PARAMS: /* @__PURE__ */ z.intersection(empty, TunnelUrlParams),
-          _CHILDREN: {
-            apply: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                z.intersection(
-                  z.intersection(
-                    object({
-                      format: wire(
-                        IoFormat.nullable().optional(),
-                        IoFormat.nullable(),
-                      ),
-                    }),
-                    empty,
-                  ),
-                  empty,
-                ),
-              ),
-              _RETURN: /* @__PURE__ */ TunnelUpdateResult,
-            },
-            check: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                z.intersection(
-                  z.intersection(
-                    object({
-                      format: wire(
-                        IoFormat.nullable().optional(),
-                        IoFormat.nullable(),
-                      ),
-                    }),
-                    empty,
-                  ),
-                  empty,
-                ),
-              ),
-              _RETURN: /* @__PURE__ */ TunnelUpdateResult,
-            },
-          },
-        },
-        web: {
-          _PARAMS: /* @__PURE__ */ z.intersection(empty, TunnelUrlParams),
-          _CHILDREN: {
-            disable: {
-              _PARAMS: /* @__PURE__ */ z.intersection(empty, TunnelUrlParams),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            enable: {
-              _PARAMS: /* @__PURE__ */ z.intersection(empty, TunnelUrlParams),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'generate-certificate': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                GenerateCertParams,
-              ),
-              _RETURN: /* @__PURE__ */ literal_0,
-            },
-            'get-available-ips': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                z.intersection(
-                  z.intersection(
-                    object({
-                      format: wire(
-                        IoFormat.nullable().optional(),
-                        IoFormat.nullable(),
-                      ),
-                    }),
-                    empty,
-                  ),
-                  empty,
-                ),
-              ),
-              _RETURN: /* @__PURE__ */ z.array(z.string()),
-            },
-            'get-certificate': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                z.intersection(
-                  z.intersection(
-                    object({
-                      format: wire(
-                        IoFormat.nullable().optional(),
-                        IoFormat.nullable(),
-                      ),
-                    }),
-                    empty,
-                  ),
-                  empty,
-                ),
-              ),
-              _RETURN: /* @__PURE__ */ literal_0.nullable(),
-            },
-            'get-listen': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                z.intersection(
-                  z.intersection(
-                    object({
-                      format: wire(
-                        IoFormat.nullable().optional(),
-                        IoFormat.nullable(),
-                      ),
-                    }),
-                    empty,
-                  ),
-                  empty,
-                ),
-              ),
-              _RETURN: /* @__PURE__ */ z.string().nullable(),
-            },
-            'import-certificate': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                TunnelCertData,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            'set-listen': {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(empty, TunnelUrlParams),
-                SetListenParams,
-              ),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            uninit: {
-              _PARAMS: /* @__PURE__ */ z.intersection(empty, TunnelUrlParams),
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-          },
-        },
-      },
     },
     util: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
     wifi: {

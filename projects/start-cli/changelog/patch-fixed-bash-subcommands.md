@@ -1,1 +1,0 @@
-- Bash tab completion works for nested subcommands and their options.

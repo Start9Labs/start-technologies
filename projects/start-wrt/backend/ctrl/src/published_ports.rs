@@ -2211,8 +2211,6 @@ const V6_MAC_BIND_PATH: &str = "/usr/share/nftables.d/ruleset-pre/11-startwrt-pp
 
 /// Renders the bridge table that sends traffic for each enabled IPv6 published
 /// port's address only to the MAC the port was published for.
-///
-/// Raw payloads, for the reason given in `10-startwrt-lan-dhcp-guard.nft`.
 fn v6_mac_bind_ruleset(firewall: &uciedit::Config<'_>) -> String {
     let mut bindings: BTreeMap<Ipv6Addr, BTreeSet<String>> = BTreeMap::new();
     for section in &firewall.sections {
@@ -2264,6 +2262,20 @@ async fn sync_v6_mac_bind_file(
     uci_root: &std::path::Path,
     path: &std::path::Path,
 ) -> Result<bool, Error> {
+    sync_nft_include(uci_root, path, &["firewall"], |cfgs| {
+        v6_mac_bind_ruleset(&cfgs["firewall"])
+    })
+    .await
+}
+
+/// Writes `render`'s output from the named configs on disk to an nft include,
+/// atomically. Returns whether it wrote.
+pub(crate) async fn sync_nft_include(
+    uci_root: &std::path::Path,
+    path: &std::path::Path,
+    configs: &[&str],
+    render: impl FnOnce(&uciedit::Configs<'_>) -> String,
+) -> Result<bool, Error> {
     let dir = path.parent().expect("nft include path has a directory");
     tokio::fs::create_dir_all(dir)
         .await
@@ -2286,11 +2298,11 @@ async fn sync_v6_mac_bind_file(
     })
     .await
     .map_err(|e| Error::new(eyre!("lock task panicked: {e}"), ErrorKind::Incoherent))??;
-    let bytes = uciedit::read_all(uci_root, &["firewall"]).await?;
+    let bytes = uciedit::read_all(uci_root, configs).await?;
     let ruleset = {
         let arena = Arena::new();
         let cfgs = bytes.parse(&arena)?;
-        v6_mac_bind_ruleset(&cfgs["firewall"])
+        render(&cfgs)
     };
     if tokio::fs::read_to_string(path)
         .await
@@ -2396,15 +2408,7 @@ pub(crate) async fn reload_firewall_wait() -> Result<(), Error> {
 }
 
 pub(crate) fn reload_dnsmasq() {
-    tokio::spawn(async {
-        if let Err(e) = crate::run_quiet_async(
-            tokio::process::Command::new("/etc/init.d/dnsmasq").arg("reload"),
-        )
-        .await
-        {
-            tracing::error!("failed to reload dnsmasq: {e}");
-        }
-    });
+    crate::devices::reload_dnsmasq();
 }
 
 pub(crate) fn reload_odhcpd() {
@@ -2700,6 +2704,7 @@ config rule 'pp_a_v6'
             ipv4_static: false,
             allow_auto_port_forward: false,
             allow_dns_injection: false,
+            allow_router_advertisements: false,
             security_profile: None,
             speed: None,
             data_usage: None,

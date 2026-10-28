@@ -1,16 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
-use async_acme::acme::{ACME_TLS_ALPN_NAME, AcmeError, Identifier};
-use async_acme::rustls_helper::OrderError;
 use clap::Parser;
 use clap::builder::ValueParserFactory;
 use futures::future::{BoxFuture, Shared};
 use futures::{FutureExt, StreamExt};
 use imbl_value::InternedString;
+use instant_acme::{Error as AcmeError, LetsEncrypt};
 use itertools::Itertools;
 use openssl::pkey::{PKey, Private};
 use openssl::x509::X509;
@@ -41,6 +39,10 @@ use crate::prelude::*;
 use crate::util::FromStrParser;
 use crate::util::serde::{HandlerExtSerde, Pem, Pkcs8Doc};
 use crate::util::sync::{SyncMutex, Watch};
+
+mod order;
+
+pub const ACME_TLS_ALPN_NAME: &[u8] = b"acme-tls/1";
 
 /// Names with an order in flight. Written only by the order path, which starts
 /// an order only for a name a vhost holds a provider for — so membership here
@@ -75,12 +77,21 @@ const DEFAULT_FAILURE_BACKOFF: Duration = Duration::from_secs(60);
 /// can't indefinitely silence cert issuance.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// `Some(retry_after)` (capped) for a 429, `None` otherwise.
-fn retry_after_from_order_error(err: &OrderError) -> Option<Duration> {
-    let OrderError::Acme(AcmeError::RateLimited { retry_after }) = err else {
-        return None;
-    };
-    retry_after.map(|d| d.min(MAX_RETRY_AFTER))
+fn retry_after_from_order_error(err: &AcmeError) -> Option<Duration> {
+    match err {
+        AcmeError::RateLimited { retry_after, .. } => retry_after.map(|deadline| {
+            deadline
+                .duration_since(SystemTime::now())
+                .unwrap_or_default()
+                .min(MAX_RETRY_AFTER)
+        }),
+        AcmeError::Timeout(Some(deadline)) => Some(
+            deadline
+                .saturating_duration_since(Instant::now())
+                .min(MAX_RETRY_AFTER),
+        ),
+        _ => None,
+    }
 }
 
 pub struct AcmeTlsHandler<M: HasModel, S> {
@@ -119,37 +130,26 @@ where
                 .and_then(|c| should_use_cert(&c.0).log_err())
                 .unwrap_or(false)
             {
-                // Cached cert is healthy; drop any stale order/backoff state.
                 self.in_progress
                     .send_if_modified(|map| map.remove(san_info).is_some());
-                return certified_key(cert, &self.crypto_provider);
+                return certified_key(cert, &self.crypto_provider).log_err();
             }
         }
 
-        // A cert inside its renewal window is still publicly trusted, so it
-        // answers for anything below here that cannot produce a new one.
         let renewing = || {
             certified_key(
                 cached.as_ref().filter(|c| unexpired(c))?,
                 &self.crypto_provider,
             )
+            .log_err()
         };
 
         let Some(contact) = <M as DbAccessByKey<AcmeSettings>>::access_by_key(&peek, &provider)
             .and_then(|settings| settings.as_contact().de().log_err())
         else {
-            // Provider removed from the server while a domain still names it.
             return renewing();
         };
         drop(peek);
-
-        let identifiers: Vec<_> = san_info
-            .iter()
-            .map(|d| match d.parse::<IpAddr>() {
-                Ok(a) => Identifier::Ip(a),
-                _ => Identifier::Dns((&**d).into()),
-            })
-            .collect::<Vec<_>>();
 
         let cache_entries = san_info
             .iter()
@@ -157,8 +157,6 @@ where
             .map(|d| (d, Watch::new(None)))
             .collect::<BTreeMap<_, _>>();
 
-        // Reuse an in-flight order, honour an active backoff, or start a
-        // new order — all under the in_progress lock.
         enum Action {
             Await(Shared<BoxFuture<'static, Option<CertifiedKey>>>),
             Backoff,
@@ -166,8 +164,7 @@ where
         let action = self.in_progress.send_modify(|map| {
             let entry = map.entry(san_info.clone()).or_default();
 
-            // A resolved future's result is either in the DB (cached-cert
-            // path would have hit) or in `backoff_until` — don't await it.
+            // Resolved failures live in `backoff_until`, not `in_flight`.
             if let Some(fut) = &entry.in_flight {
                 if fut.peek().is_some() {
                     entry.in_flight = None;
@@ -191,8 +188,8 @@ where
             let in_progress = self.in_progress.clone();
             let san_info_clone = san_info.clone();
             let cache_entries_clone = cache_entries.clone();
-            let identifiers_clone = identifiers.clone();
             let contact_clone = contact.clone();
+            let crypto_provider = self.crypto_provider.clone();
 
             let fut = async move {
                 acme_cache.mutate(|c| {
@@ -203,22 +200,25 @@ where
                     );
                 });
 
-                let res = tokio::time::timeout(
-                    Duration::from_secs(120),
-                    async_acme::rustls_helper::order(
+                let res = tokio::time::timeout(Duration::from_secs(120), async {
+                    order::order(
                         |identifier, cert| {
-                            let domain = InternedString::from_display(&identifier);
+                            let domain =
+                                InternedString::from_display(&identifier.authorized(false));
                             if let Some(entry) = cache_entries_clone.get(&domain) {
                                 entry.send(Some(Arc::new(cert)));
                             }
                             Ok(())
                         },
                         provider_clone.0.as_str(),
-                        &identifiers_clone,
-                        Some(&AcmeCertCache(&db)),
+                        &san_info_clone,
+                        &AcmeCertCache(&db),
                         &contact_clone,
-                    ),
-                )
+                        &crypto_provider,
+                        Box::new(order::AcmeHttpClient::new()?),
+                    )
+                    .await
+                })
                 .await;
 
                 acme_cache.mutate(|c| c.retain(|c, _| !cache_entries_clone.contains_key(c)));
@@ -249,8 +249,6 @@ where
                     }
                 };
 
-                // Success: leave the entry alone; the next cached-cert
-                // path call removes it. Failure: arm the cooldown.
                 if let Some((d, error)) = failure {
                     let report = in_progress.send_modify(|map| {
                         let Some(entry) = map.get_mut(&san_info_clone) else {
@@ -292,19 +290,24 @@ fn unexpired(cert: &AcmeCert) -> bool {
         .unwrap_or(false)
 }
 
-fn certified_key(cert: &AcmeCert, crypto_provider: &CryptoProvider) -> Option<CertifiedKey> {
-    CertifiedKey::from_der(
+fn certified_key(
+    cert: &AcmeCert,
+    crypto_provider: &CryptoProvider,
+) -> Result<CertifiedKey, ErrorData> {
+    Ok(CertifiedKey::from_der(
         cert.fullchain
             .iter()
             .map(|c| Ok(CertificateDer::from(c.0.to_der()?)))
-            .collect::<Result<_, Error>>()
-            .log_err()?,
+            .collect::<Result<_, Error>>()?,
         PrivateKeyDer::from(PrivatePkcs8KeyDer::from(
-            cert.key.0.private_key_to_pkcs8().log_err()?,
+            cert.key
+                .0
+                .private_key_to_pkcs8()
+                .with_kind(ErrorKind::OpenSsl)?,
         )),
         crypto_provider,
     )
-    .log_err()
+    .with_kind(ErrorKind::TLSInit)?)
 }
 
 pub trait GetAcmeProvider {
@@ -338,7 +341,6 @@ where
             .flatten()
             .any(|a| a == ACME_TLS_ALPN_NAME)
         {
-            // Only a name with an order in flight is answerable.
             let Some(cert) = self.acme_cache.peek(|c| c.get(domain).cloned()) else {
                 tracing::debug!("no ACME challenge in flight for {domain}");
                 return None;
@@ -409,14 +411,11 @@ pub struct AcmeCert {
 }
 
 pub struct AcmeCertCache<'a, M: HasModel>(pub &'a TypedPatchDb<M>);
-#[async_trait::async_trait]
-impl<'a, M> async_acme::cache::AcmeCache for AcmeCertCache<'a, M>
+impl<'a, M> AcmeCertCache<'a, M>
 where
     M: HasModel<Model = Model<M>> + DbAccessMut<AcmeCertStore> + Send + Sync,
 {
-    type Error = ErrorData;
-
-    async fn read_account(&self, contacts: &[&str]) -> Result<Option<Vec<u8>>, Self::Error> {
+    async fn read_account(&self, contacts: &[&str]) -> Result<Option<Vec<u8>>, ErrorData> {
         let contacts = JsonKey::new(contacts.into_iter().map(|s| (*s).to_owned()).collect_vec());
         let peek = self.0.peek().await;
         let Some(account) = M::access(&peek).as_accounts().as_idx(&contacts) else {
@@ -425,7 +424,7 @@ where
         Ok(Some(account.de()?.0.document.into_vec()))
     }
 
-    async fn write_account(&self, contacts: &[&str], contents: &[u8]) -> Result<(), Self::Error> {
+    async fn write_account(&self, contacts: &[&str], contents: &[u8]) -> Result<(), ErrorData> {
         let contacts = JsonKey::new(contacts.into_iter().map(|s| (*s).to_owned()).collect_vec());
         let key = Pkcs8Doc {
             tag: "EC PRIVATE KEY".into(),
@@ -442,96 +441,23 @@ where
         Ok(())
     }
 
-    async fn read_certificate(
-        &self,
-        identifiers: &[Identifier],
-        directory_url: &str,
-    ) -> Result<Option<(String, String)>, Self::Error> {
-        let identifiers = JsonKey::new(
-            identifiers
-                .into_iter()
-                .map(|d| match d {
-                    Identifier::Dns(d) => d.into(),
-                    Identifier::Ip(ip) => InternedString::from_display(ip),
-                })
-                .collect(),
-        );
-        let directory_url = directory_url
-            .parse::<Url>()
-            .with_kind(ErrorKind::ParseUrl)?;
-        let peek = self.0.peek().await;
-        let Some(cert) = M::access(&peek)
-            .as_certs()
-            .as_idx(&directory_url)
-            .and_then(|a| a.as_idx(&identifiers))
-        else {
-            return Ok(None);
-        };
-        let cert = cert.de()?;
-        if !cert
-            .fullchain
-            .get(0)
-            .map(|c| should_use_cert(&c.0))
-            .transpose()
-            .map_err(Error::from)?
-            .unwrap_or(false)
-        {
-            return Ok(None);
-        }
-        Ok(Some((
-            String::from_utf8(
-                cert.key
-                    .0
-                    .private_key_to_pem_pkcs8()
-                    .with_kind(ErrorKind::OpenSsl)?,
-            )
-            .with_kind(ErrorKind::Utf8)?,
-            cert.fullchain
-                .into_iter()
-                .map(|cert| {
-                    String::from_utf8(cert.0.to_pem().with_kind(ErrorKind::OpenSsl)?)
-                        .with_kind(ErrorKind::Utf8)
-                })
-                .collect::<Result<Vec<_>, _>>()?
-                .join("\n"),
-        )))
-    }
-
     async fn write_certificate(
         &self,
-        identifiers: &[Identifier],
+        sans: &BTreeSet<InternedString>,
         directory_url: &str,
-        key_pem: &str,
-        certificate_pem: &str,
-    ) -> Result<(), Self::Error> {
-        tracing::info!("Saving new certificate for {identifiers:?}");
-        let identifiers = JsonKey::new(
-            identifiers
-                .into_iter()
-                .map(|d| match d {
-                    Identifier::Dns(d) => d.into(),
-                    Identifier::Ip(ip) => InternedString::from_display(ip),
-                })
-                .collect(),
-        );
+        cert: &AcmeCert,
+    ) -> Result<(), ErrorData> {
+        tracing::info!("Saving new certificate for {sans:?}");
+        let identifiers = JsonKey::new_ref(sans);
         let directory_url = directory_url
             .parse::<Url>()
             .with_kind(ErrorKind::ParseUrl)?;
-        let cert = AcmeCert {
-            key: Pem(PKey::<Private>::private_key_from_pem(key_pem.as_bytes())
-                .with_kind(ErrorKind::OpenSsl)?),
-            fullchain: X509::stack_from_pem(certificate_pem.as_bytes())
-                .with_kind(ErrorKind::OpenSsl)?
-                .into_iter()
-                .map(Pem)
-                .collect(),
-        };
         self.0
             .mutate(|db| {
                 M::access_mut(db)
                     .as_certs_mut()
                     .upsert(&directory_url, || Ok(BTreeMap::new()))?
-                    .insert(&identifiers, &cert)
+                    .insert(identifiers, cert)
             })
             .await
             .result?;
@@ -656,8 +582,8 @@ impl FromStr for AcmeProvider {
     type Err = <Url as FromStr>::Err;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "letsencrypt" => async_acme::acme::LETS_ENCRYPT_PRODUCTION_DIRECTORY.parse(),
-            "letsencrypt-staging" => async_acme::acme::LETS_ENCRYPT_STAGING_DIRECTORY.parse(),
+            "letsencrypt" => LetsEncrypt::Production.url().parse(),
+            "letsencrypt-staging" => LetsEncrypt::Staging.url().parse(),
             s => s.parse(),
         }
         .map(|mut u: Url| {
@@ -715,8 +641,6 @@ rpc_toolkit::reflect_ts!(InitAcmeParams);
 rpc_toolkit::ts_export!(InitAcmeParams, namespaces = [""]);
 
 lazy_static::lazy_static! {
-    // Pragmatic email match: local@domain, no whitespace, dot in domain.
-    // RFC 5322 is far too permissive for what an ACME server actually accepts.
     static ref EMAIL_REGEX: Regex =
         Regex::new(r"^[^@\s]+@[^@\s]+\.[^@\s]+$").unwrap();
 }
@@ -728,10 +652,7 @@ fn invalid_contact_err(contact: &str) -> Error {
     )
 }
 
-// RFC 8555 §7.3 requires `contact` entries to be URLs, and Let's Encrypt
-// (the only provider start-os ships shorthand for) only supports `mailto:`.
-// Without this gate, a bare email here gets stored verbatim and eventually
-// fails the `newAccount` request with `unsupportedContact`.
+// RFC 8555 §7.3 requires contact URLs; Let's Encrypt accepts `mailto:`.
 fn validate_contact(contact: &str) -> Result<(), Error> {
     let url = contact
         .parse::<Url>()
@@ -745,9 +666,6 @@ fn validate_contact(contact: &str) -> Result<(), Error> {
     Ok(())
 }
 
-// Accept either a full `mailto:` URI or a bare email — for the latter,
-// prepend `mailto:` and re-validate so the stored value is always RFC 8555
-// compliant.
 fn normalize_contact(contact: String) -> Result<String, Error> {
     if validate_contact(&contact).is_ok() {
         return Ok(contact);
@@ -809,51 +727,88 @@ pub async fn remove(
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::time::{Duration, SystemTime};
 
-    use async_acme::acme::{AcmeError, Identifier};
-    use async_acme::rustls_helper::OrderError;
+    use instant_acme::{Error as AcmeError, Problem};
 
     use super::{
         MAX_RETRY_AFTER, normalize_contact, retry_after_from_order_error, validate_contact,
     };
 
+    fn rate_limit(retry_after: Option<SystemTime>) -> AcmeError {
+        AcmeError::RateLimited {
+            retry_after,
+            problem: serde_json::from_value(serde_json::json!({
+                "type": "urn:ietf:params:acme:error:rateLimited",
+                "detail": "Please visit: https://portal.letsencrypt.org/sfe/v1/unpause?jwt=test-token",
+                "status": 429,
+            })).unwrap(),
+        }
+    }
+
     #[test]
     fn rate_limited_with_retry_after_passes_through() {
-        let err = OrderError::Acme(AcmeError::RateLimited {
-            retry_after: Some(Duration::from_secs(120)),
-        });
-        assert_eq!(
-            retry_after_from_order_error(&err),
-            Some(Duration::from_secs(120)),
-        );
+        let err = rate_limit(Some(SystemTime::now() + Duration::from_secs(120)));
+        let duration = retry_after_from_order_error(&err).unwrap();
+        assert!(duration <= Duration::from_secs(120));
+        assert!(duration > Duration::from_secs(115));
     }
 
     #[test]
     fn rate_limited_retry_after_capped_at_max() {
-        // Pathological server: "please come back in a year".
-        let err = OrderError::Acme(AcmeError::RateLimited {
-            retry_after: Some(Duration::from_secs(365 * 24 * 60 * 60)),
-        });
+        let err = rate_limit(Some(
+            SystemTime::now() + Duration::from_secs(365 * 24 * 60 * 60),
+        ));
         assert_eq!(retry_after_from_order_error(&err), Some(MAX_RETRY_AFTER));
     }
 
     #[test]
-    fn rate_limited_without_retry_after_returns_none() {
-        let err = OrderError::Acme(AcmeError::RateLimited { retry_after: None });
-        assert_eq!(retry_after_from_order_error(&err), None);
+    fn rate_limited_past_deadline_returns_zero() {
+        assert_eq!(
+            retry_after_from_order_error(&rate_limit(Some(SystemTime::UNIX_EPOCH))),
+            Some(Duration::ZERO)
+        );
     }
 
     #[test]
-    fn non_429_http_status_returns_none() {
-        let err = OrderError::Acme(AcmeError::HttpStatus(503));
-        assert_eq!(retry_after_from_order_error(&err), None);
+    fn rate_limited_without_retry_after_returns_none() {
+        assert_eq!(retry_after_from_order_error(&rate_limit(None)), None);
+    }
+
+    #[test]
+    fn non_429_problem_returns_none() {
+        let problem: Problem = serde_json::from_value(serde_json::json!({"status":503})).unwrap();
+        assert_eq!(retry_after_from_order_error(&AcmeError::Api(problem)), None);
+    }
+
+    #[test]
+    fn polling_retry_deadline_is_capped_and_past_deadlines_allow_retry() {
+        let err = AcmeError::Timeout(Some(std::time::Instant::now() + MAX_RETRY_AFTER * 2));
+        assert_eq!(retry_after_from_order_error(&err), Some(MAX_RETRY_AFTER));
+        let err = AcmeError::Timeout(Some(std::time::Instant::now() - Duration::from_secs(1)));
+        assert_eq!(retry_after_from_order_error(&err), Some(Duration::ZERO));
+        assert_eq!(
+            retry_after_from_order_error(&AcmeError::Timeout(None)),
+            None
+        );
     }
 
     #[test]
     fn non_http_errors_return_none() {
-        let err = OrderError::TooManyAttemptsAuth(Identifier::Dns("example.test".into()));
-        assert_eq!(retry_after_from_order_error(&err), None);
+        assert_eq!(retry_after_from_order_error(&AcmeError::Crypto), None);
+    }
+
+    #[test]
+    fn notification_preserves_unpause_link_in_every_locale() {
+        let error = rate_limit(None).to_string();
+        for locale in ["en_US", "de_DE", "es_ES", "fr_FR", "pl_PL"] {
+            let message =
+                crate::prelude::t!("acme.order-failed-message", locale = locale, error = error);
+            assert!(
+                message.contains("https://portal.letsencrypt.org/sfe/v1/unpause?jwt=test-token"),
+                "{locale}: {message}"
+            );
+        }
     }
 
     #[test]
@@ -864,8 +819,6 @@ mod tests {
 
     #[test]
     fn validate_contact_rejects_bare_email() {
-        // The validator itself is strict; the fallback in `normalize_contact`
-        // is what auto-prefixes `mailto:`.
         assert!(validate_contact("admin@example.com").is_err());
     }
 

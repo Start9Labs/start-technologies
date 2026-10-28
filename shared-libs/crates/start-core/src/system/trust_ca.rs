@@ -157,10 +157,10 @@ fn render_subject(subject: &X509NameRef) -> String {
                     .short_name()
                     .map_or_else(|_| object.to_string(), str::to_owned),
             };
-            let value = entry.data().as_utf8().map_or_else(
-                |_| format!("#{}", hex::encode_upper(entry.data().as_slice())),
-                |value| value.to_string(),
-            );
+            let value = entry
+                .data()
+                .to_string()
+                .unwrap_or_else(|_| format!("#{}", hex::encode_upper(entry.data().as_slice())));
             format!("{name}={value}")
         })
         .join(", ")

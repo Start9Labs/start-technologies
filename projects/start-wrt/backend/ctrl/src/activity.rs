@@ -10,10 +10,9 @@ use crate::prelude::*;
 use crate::utils::HandlerExtSerde;
 use crate::{CliContext, ServerContext};
 
-const ACTIVITY_DIR: &str = "/etc/startwrt";
-#[cfg(not(test))]
-const ACTIVITY_DB: &str = "/etc/startwrt/activity.db";
-const MAX_ENTRIES: usize = 500;
+const ACTIVITY_DIR: &str = "/var/lib/startwrt";
+pub const ACTIVITY_DB: &str = "/var/lib/startwrt/activity.db";
+pub(crate) const MAX_ENTRIES: usize = 500;
 
 const ACTIVITY_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS activity (
     id INTEGER PRIMARY KEY,
@@ -131,11 +130,8 @@ fn insert_entry(
     Ok(())
 }
 
-/// Log an activity entry into a database at an arbitrary path, creating the
-/// file and schema if needed. The setup flasher uses this to record an entry
-/// straight into the freshly-flashed eMMC DB (`<merged>/etc/startwrt/activity.db`),
-/// because the flash runs from the microSD whose own activity DB is discarded.
-/// Best-effort — never panics or propagates.
+/// Records an entry in the database at an arbitrary path, creating it as
+/// needed. Best-effort.
 pub fn log_to(
     db_path: &str,
     category: &str,
@@ -219,7 +215,7 @@ fn capitalize_action_summary(action: &str, subject: &str) -> String {
 // ── RPC Handlers ────────────────────────────────────────────────
 
 #[instrument(skip_all)]
-async fn list(
+pub(crate) async fn list(
     _ctx: ServerContext,
     params: ActivityListParams,
 ) -> Result<ActivityListResponse, Error> {

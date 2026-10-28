@@ -25,17 +25,34 @@ impl VersionT for Version {
         &V0_3_0_COMPAT
     }
     fn migration_revision(self) -> usize {
-        2
+        3
     }
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
         migrate_gateway_dns(db)?;
         default_outbound_dns(db);
         drop_package_icons(db);
+        seed_update_signers(db)?;
         Ok(Value::Null)
     }
     fn down(self, _db: &mut Value) -> Result<(), Error> {
         Ok(())
     }
+}
+
+fn seed_update_signers(db: &mut Value) -> Result<(), Error> {
+    if let Some(server) = db
+        .get_mut("public")
+        .and_then(|public| public.get_mut("serverInfo"))
+        .and_then(|server| server.as_object_mut())
+    {
+        if !server.contains_key("trustedOsUpdateSigners") {
+            server.insert(
+                "trustedOsUpdateSigners".into(),
+                to_value(&crate::update::signers::initial_signers())?,
+            );
+        }
+    }
+    Ok(())
 }
 
 fn migrate_gateway_dns(db: &mut Value) -> Result<(), Error> {
@@ -140,6 +157,34 @@ mod test {
     use imbl_value::json;
 
     use super::*;
+
+    #[test]
+    fn seeds_update_signers_once_and_preserves_saved_trust() {
+        let mut db = json!({ "public": { "serverInfo": {} } });
+        seed_update_signers(&mut db).unwrap();
+        assert_eq!(
+            db["public"]["serverInfo"]["trustedOsUpdateSigners"],
+            to_value(&crate::update::signers::initial_signers()).unwrap()
+        );
+        let once = db.clone();
+        seed_update_signers(&mut db).unwrap();
+        assert_eq!(db, once);
+
+        let mut saved = crate::update::signers::initial_signers();
+        saved.pop_first();
+        saved.values_mut().next().unwrap().label = "Owner-managed".to_owned();
+        db["public"]["serverInfo"]["trustedOsUpdateSigners"] = to_value(&saved).unwrap();
+        let custom = db.clone();
+        seed_update_signers(&mut db).unwrap();
+        assert_eq!(db, custom);
+        db["public"]["serverInfo"]["trustedOsUpdateSigners"] = json!({});
+        seed_update_signers(&mut db).unwrap();
+        assert_eq!(
+            db["public"]["serverInfo"]["trustedOsUpdateSigners"],
+            json!({})
+        );
+        assert_eq!(Version.migration_revision(), 3);
+    }
 
     #[test]
     fn migrates_global_dns_once_and_preserves_gateway_overrides() {

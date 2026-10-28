@@ -223,22 +223,6 @@ fn reqwest_headers(headers: &HeaderMap) -> reqwest::header::HeaderMap {
         ) {
             continue;
         }
-        // Strip StartWRT's "session" cookie so uhttpd only sees LuCI cookies
-        if name == "cookie" {
-            let filtered: Vec<&str> = value
-                .to_str()
-                .unwrap_or("")
-                .split(';')
-                .map(|c| c.trim())
-                .filter(|c| !c.starts_with("session="))
-                .collect();
-            if !filtered.is_empty() {
-                if let Ok(val) = reqwest::header::HeaderValue::from_str(&filtered.join("; ")) {
-                    out.insert(reqwest::header::COOKIE, val);
-                }
-            }
-            continue;
-        }
         if let Ok(rname) = reqwest::header::HeaderName::from_bytes(key.as_str().as_bytes()) {
             if let Ok(val) = reqwest::header::HeaderValue::from_bytes(value.as_bytes()) {
                 out.insert(rname, val);

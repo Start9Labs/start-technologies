@@ -10,8 +10,6 @@ use crate::registry::os::SIG_CONTEXT;
 use crate::registry::os::index::OsIndex;
 use crate::registry::package::promote::{call_registry, resolve_registry_url};
 use crate::sign::commitment::blake3::Blake3Commitment;
-use crate::sign::ed25519::Ed25519;
-use crate::sign::{AnySignature, SignatureScheme};
 
 #[derive(Debug, Deserialize, Serialize, Parser)]
 #[group(skip)]
@@ -110,11 +108,10 @@ async fn promote_assets(
 ) -> Result<(), Error> {
     for (platform, asset) in assets {
         let commitment = &asset.commitment;
-        let signature = AnySignature::Ed25519(Ed25519.sign_commitment(
-            ctx.id_key()?,
-            commitment,
-            SIG_CONTEXT,
-        )?);
+        let signature = ctx
+            .id_key()?
+            .sign_commitment(commitment, SIG_CONTEXT)
+            .await?;
 
         call_registry(
             ctx,

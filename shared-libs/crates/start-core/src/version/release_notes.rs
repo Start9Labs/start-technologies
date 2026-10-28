@@ -14,7 +14,7 @@ pub async fn welcome(ctx: &RpcContext) -> Result<(), Error> {
     };
     let version = Current::default().semver();
     let body = format!(
-        "{notes}\n\n**[Full changelog for v{version}](https://github.com/Start9Labs/start-technologies/blob/start-os/v{version}/projects/start-os/CHANGELOG.md)** — every change in this release."
+        "{notes}\n\n**[Full changelog for v{version}](https://github.com/Start9Labs/start-technologies/releases/tag/start-os/v{version})** — every change in this release."
     );
     ctx.db
         .mutate(|db| {

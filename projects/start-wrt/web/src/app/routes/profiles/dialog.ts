@@ -456,6 +456,11 @@ class AddProfile {
     { initialValue: this.form.controls.lanAccessType.value },
   )
 
+  private readonly accessToNewProfiles = toSignal(
+    this.form.controls.accessToNewProfiles.valueChanges,
+    { initialValue: this.form.controls.accessToNewProfiles.value },
+  )
+
   protected readonly wanAccessType = toSignal(
     this.form.controls.wanAccessType.valueChanges,
     { initialValue: this.form.controls.wanAccessType.value },
@@ -503,6 +508,7 @@ class AddProfile {
     effect(() => {
       const needsSelection =
         this.lanAccessType() === 'whitelist' &&
+        !this.accessToNewProfiles() &&
         this.context.data.otherProfiles.length > 0
       const group = this.form.controls.lanAccessProfiles
       group.setValidators(needsSelection ? [atLeastOneSelected] : [])

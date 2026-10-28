@@ -8,7 +8,7 @@ use std::time::Duration;
 use clap::Parser;
 use futures::FutureExt;
 use patch_db::json_ptr::ROOT;
-use rpc_toolkit::{CliApp, HandlerExt, from_fn};
+use rpc_toolkit::{CliApp, HandlerExt, from_fn, output};
 use rust_i18n::t;
 use tokio::signal::unix::signal;
 use tracing::instrument;
@@ -221,7 +221,7 @@ fn app() -> CliApp<CliContext, ClientConfig> {
 }
 
 fn completions(_: CliContext, params: CompletionsParams) -> Result<(), Error> {
-    params.generate(app().into_command(), &mut std::io::stdout())
+    params.generate(app().into_command(), &mut output::stdout())
 }
 
 pub fn cli(args: impl IntoIterator<Item = OsString>) {

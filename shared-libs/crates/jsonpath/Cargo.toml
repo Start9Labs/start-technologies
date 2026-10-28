@@ -4,11 +4,11 @@ name = "jsonpath_lib"
 publish = false
 version = "0.3.0"
 
-description = "It is JsonPath engine written in Rust. it provide a similar API interface in Webassembly and Javascript too. - Webassembly Demo: https://freestrings.github.io/jsonpath"
+description = "A JsonPath engine written in Rust."
 readme = "README.md"
 
-categories = ['wasm', "parser-implementations", "api-bindings"]
-keywords = ["jsonpath", "json", "webassembly", "lua", "query"]
+categories = ["parser-implementations", "api-bindings"]
+keywords = ["jsonpath", "json", "lua", "query"]
 
 documentation = "https://docs.rs/jsonpath_lib/0.3.0/jsonpath_lib"
 license = "MIT"

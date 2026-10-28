@@ -44,7 +44,7 @@ chrono = { version = "0.4", optional = true, default-features = false, features 
   "serde",
 ] }
 exver = { path = "../exver", optional = true, features = ["serde"] }
-imbl = { version = "6", optional = true }
+imbl = { version = "7", optional = true }
 imbl-value = { path = "../imbl-value" }
 inventory = { version = "0.3", optional = true }
 ipnet = { version = "2", optional = true, features = ["serde"] }

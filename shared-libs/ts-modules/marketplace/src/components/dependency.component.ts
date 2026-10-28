@@ -4,15 +4,24 @@ import { RouterModule } from '@angular/router'
 import { i18nPipe, i18nService, LocalizePipe } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { TuiCell, TuiTitle } from '@taiga-ui/core'
-import { TuiAvatar } from '@taiga-ui/kit'
+import { TuiAvatar, TuiSkeleton } from '@taiga-ui/kit'
 import { MarketplacePkgBase } from '../types'
 import { MarketplaceIconDirective } from './icon.directive'
 
 @Component({
   selector: '[marketplaceDependency]',
   template: `
-    <span tuiAvatar appearance="action-grayscale" [round]="false">
-      <img [marketplaceIcon]="pkg()" [dependency]="dep().key" />
+    <span
+      tuiAvatar
+      appearance="action-grayscale"
+      [round]="false"
+      [tuiSkeleton]="icon.loading()"
+    >
+      <img
+        #icon="marketplaceIcon"
+        [marketplaceIcon]="pkg()"
+        [dependency]="dep().key"
+      />
     </span>
     <span tuiTitle>
       {{ getTitle(dep().key) }}
@@ -30,6 +39,7 @@ import { MarketplaceIconDirective } from './icon.directive'
   imports: [
     RouterModule,
     TuiAvatar,
+    TuiSkeleton,
     i18nPipe,
     LocalizePipe,
     TuiTitle,

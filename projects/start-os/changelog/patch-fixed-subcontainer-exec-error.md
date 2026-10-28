@@ -1,1 +1,0 @@
-- A command that cannot be started in a service subcontainer, such as through `start-cli package attach`, now reports the command and working directory it tried.

@@ -96,8 +96,8 @@ async fn inner_main(
 
         let mut shutdown_recv = rpc_ctx.shutdown.subscribe();
 
-        let sig_handler_ctx = rpc_ctx.clone();
-        let sig_handler = tokio::spawn(async move {
+        let shutdown_send = rpc_ctx.shutdown.clone();
+        let sig_handler = NonDetachingJoinHandle::from(tokio::spawn(async move {
             use tokio::signal::unix::SignalKind;
             futures::future::select_all(
                 [
@@ -117,12 +117,11 @@ async fn inner_main(
                 }),
             )
             .await;
-            sig_handler_ctx
-                .shutdown
+            shutdown_send
                 .send(None)
                 .map_err(|_| ())
                 .expect("send shutdown signal");
-        });
+        }));
 
         let deferred_power_ctx = rpc_ctx.clone();
         let _deferred_power = NonDetachingJoinHandle::from(tokio::spawn(
@@ -156,7 +155,7 @@ async fn inner_main(
             .await
             .with_kind(crate::ErrorKind::Unknown)?;
 
-        sig_handler.abort();
+        drop(sig_handler);
 
         Ok::<_, Error>((rpc_ctx, shutdown))
     }

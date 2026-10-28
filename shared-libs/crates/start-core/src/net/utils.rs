@@ -7,7 +7,7 @@ use async_stream::try_stream;
 use color_eyre::eyre::eyre;
 use futures::stream::BoxStream;
 use futures::{StreamExt, TryStreamExt};
-use imbl::OrdMap;
+use imbl::{OrdMap, OrdSet};
 use imbl_value::InternedString;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use nix::net::if_::if_nametoindex;
@@ -149,11 +149,23 @@ pub fn ipv6_is_local(addr: Ipv6Addr) -> bool {
     addr.is_loopback() || ipv6_is_ula(addr) || ipv6_is_link_local(addr)
 }
 
+pub(crate) fn is_internal_ip(addr: IpAddr) -> bool {
+    let addr = addr.to_canonical();
+    addr.is_loopback()
+        || addr == IpAddr::V4(crate::HOST_IP.into())
+        || addr == IpAddr::V6(crate::net::forward::START9_BRIDGE_V6_ADDR)
+}
+
 pub fn is_private_ip(addr: IpAddr) -> bool {
     match addr {
         IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
         IpAddr::V6(v6) => ipv6_is_local(v6),
     }
+}
+
+pub(crate) fn is_private_client(addr: IpAddr, subnets: Option<&OrdSet<IpNet>>) -> bool {
+    let addr = addr.to_canonical();
+    is_private_ip(addr) || subnets.is_some_and(|subnets| subnets.iter().any(|s| s.contains(&addr)))
 }
 
 pub fn ipv4_is_cgnat(addr: Ipv4Addr) -> bool {

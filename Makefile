@@ -5,6 +5,7 @@
 .DEFAULT_GOAL := help
 
 include build/common.mk
+include build/rust-builder/build.mk
 include shared-libs/crates/start-core/build.mk
 include shared-libs/crates/rpc-toolkit/build.mk
 include shared-libs/ts-modules/build.mk
@@ -23,7 +24,7 @@ help:
 	@echo "  start-os start-os-deb start-os-squashfs start-os-ui start-os-uis start-os-install   (StartOS)"
 	@echo "  start-cli start-cli-deb start-registry start-tunnel start-wrt start-wrt-image        (other products)"
 	@echo "  test start-core-test start-sdk-test container-runtime-test start-os-scripts-test start-wrt-test release-notes-test (tests)"
-	@echo "  format format-check start-core-ts-bindings clean                                     (tooling)"
+	@echo "  format format-check start-core-ts-bindings rust-builder rust-builder-check clean     (tooling)"
 	@echo "See AGENTS.md for the full list."
 
 touch:

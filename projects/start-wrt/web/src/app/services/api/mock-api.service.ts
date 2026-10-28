@@ -130,10 +130,10 @@ export class MockApiService extends ApiService {
   async login(params: LoginReq): Promise<RpcReturnType<Api, 'auth.login'>> {
     await pauseFor(250)
 
-    return { session: 'mock-session' }
+    return null
   }
 
-  async logout(): Promise<null> {
+  async logout(): Promise<RpcReturnType<Api, 'auth.logout'>> {
     await pauseFor(250)
 
     return null
@@ -837,18 +837,33 @@ export class MockApiService extends ApiService {
       dns_source: this.mockDnsSource(params.outbound, params.dns_override),
     }
 
-    this.mockProfiles = [...this.mockProfiles, newProfile]
+    const newId = {
+      fullname: newProfile.fullname,
+      interface: newProfile.interface,
+      vlan_tag: newProfile.vlan_tag,
+    }
+    this.mockProfiles = [
+      ...this.mockProfiles.map(p =>
+        p.access_to_new_profiles &&
+        typeof p.lan_access === 'object' &&
+        'other_profiles' in p.lan_access
+          ? {
+              ...p,
+              lan_access: {
+                other_profiles: [...p.lan_access.other_profiles, newId],
+              },
+            }
+          : p,
+      ),
+      newProfile,
+    ]
     this.logActivity(
       'profile',
       'created',
       `Created profile '${newProfile.fullname}'`,
     )
 
-    return {
-      fullname: newProfile.fullname,
-      interface: newProfile.interface,
-      vlan_tag: newProfile.vlan_tag,
-    }
+    return newId
   }
 
   private mockDnsSource(
@@ -1021,9 +1036,10 @@ export class MockApiService extends ApiService {
           )
           return {
             ...p,
-            lan_access: filtered.length
-              ? { other_profiles: filtered }
-              : 'SAME_PROFILE',
+            lan_access:
+              filtered.length || p.access_to_new_profiles
+                ? { other_profiles: filtered }
+                : 'SAME_PROFILE',
           }
         }
         return p
@@ -1068,7 +1084,8 @@ export class MockApiService extends ApiService {
   ): Promise<RpcReturnType<Api, 'auth.set-initial-password'>> {
     await pauseFor(250)
     this.mockInitialized = true
-    return { session: 'mock-session' }
+    if (params.timezone) this.mockSystemInfo.timezone = params.timezone
+    return null
   }
 
   async setupStatus(): Promise<SetupStatusRes> {
@@ -1079,6 +1096,11 @@ export class MockApiService extends ApiService {
   async systemFactoryReset(): Promise<null> {
     await pauseFor(2000)
     return null
+  }
+
+  async followLogs(): Promise<RpcReturnType<Api, 'system.logs-follow'>> {
+    await pauseFor(250)
+    return { guid: 'MOCKLOGSFOLLOWGUIDAAAAAAAAAAAAAA' }
   }
 
   async systemLogs(): Promise<LogsResponse> {
@@ -1147,6 +1169,7 @@ export class MockApiService extends ApiService {
         ipv4_static: !!host?.options.ip,
         allow_auto_port_forward: this.autoForwardAllowed.has(mac),
         allow_dns_injection: this.dnsInjectionAllowed.has(mac),
+        allow_router_advertisements: this.raAllowed.has(mac),
         security_profile: profile?.fullname ?? null,
         speed: def.status === 'online' ? def.speed : null,
         data_usage: def.dataUsage,
@@ -1230,6 +1253,27 @@ export class MockApiService extends ApiService {
     return null
   }
 
+  /** MACs whose IPv6 router advertisements reach the rest of the LAN. */
+  private raAllowed = new Set<string>()
+
+  async devicesSetRouterAdvertisements(
+    params: RpcParamType<Api, 'devices.set-router-advertisements'>,
+  ): Promise<RpcReturnType<Api, 'devices.set-router-advertisements'>> {
+    await pauseFor(250)
+    const macUpper = params.mac.toUpperCase()
+    if (params.allow) {
+      this.raAllowed.add(macUpper)
+    } else {
+      this.raAllowed.delete(macUpper)
+    }
+    this.logActivity(
+      'device',
+      'router-advertisements',
+      `${params.allow ? 'Allowed' : 'Blocked'} IPv6 router advertisements from ${macUpper}`,
+    )
+    return null
+  }
+
   async dnsInjectedList(): Promise<InjectedDnsRecordFromApi[]> {
     await pauseFor(250)
     const mac = '00:1A:2B:3C:4D:5E'
@@ -1274,6 +1318,7 @@ export class MockApiService extends ApiService {
       d => d.mac.toUpperCase() !== macUpper,
     )
     this.autoForwardAllowed.delete(macUpper)
+    this.raAllowed.delete(macUpper)
     this.logActivity(
       'device',
       'deleted',
@@ -1325,7 +1370,7 @@ export class MockApiService extends ApiService {
     dhcpv6: true,
     prefix: 64,
     ip6addr: 'fd00::1',
-    wan_prefix: 48,
+    delegated_prefix: 56,
   }
 
   async lanIpv6Get(): Promise<LanIpv6Response> {
@@ -1339,7 +1384,7 @@ export class MockApiService extends ApiService {
       ...this.mockLanIpv6,
       slaac: params.slaac,
       dhcpv6: params.dhcpv6,
-      prefix: params.prefix,
+      prefix: params.prefix ?? this.mockLanIpv6.prefix,
     }
     this.logActivity(
       'lan',
@@ -1782,6 +1827,8 @@ export class MockApiService extends ApiService {
       mtu: null,
       hostname_endpoint: false,
       dns: ['10.2.0.1'],
+      status: 'connected',
+      last_handshake_secs: 42,
     },
     {
       id: 'wg_mullvad',
@@ -1797,6 +1844,8 @@ export class MockApiService extends ApiService {
       mtu: 1280,
       hostname_endpoint: false,
       dns: [],
+      status: 'not-responding',
+      last_handshake_secs: null,
     },
   ]
 
@@ -1805,6 +1854,9 @@ export class MockApiService extends ApiService {
     return structuredClone(
       this.mockVpnClients.map(c => ({
         ...c,
+        ...(c.enabled
+          ? {}
+          : { status: 'disabled' as const, last_handshake_secs: null }),
         used_by: this.mockProfiles
           .filter(p => p.outbound === c.id)
           .map(p => p.fullname),
@@ -1831,6 +1883,8 @@ export class MockApiService extends ApiService {
           Number(/(^|\n)\s*MTU\s*=\s*(\d+)/i.exec(params.config)?.[2]) || null,
         hostname_endpoint: hasHostnameEndpoint(params.config),
         dns: params.dns ?? configDnsServers(params.config),
+        status: 'idle',
+        last_handshake_secs: null,
       },
     ]
     this.logActivity(
@@ -2109,7 +2163,7 @@ export class MockApiService extends ApiService {
     await pauseFor(500)
     return {
       guid: 'mock-diag-guid',
-      filename: 'diagnostics-startwrt-2026-03-19.log',
+      filename: 'diagnostics-startwrt-2026-03-19.log.gz',
     }
   }
 

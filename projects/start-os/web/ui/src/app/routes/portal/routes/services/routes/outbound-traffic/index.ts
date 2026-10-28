@@ -29,8 +29,7 @@ import {
           tuiIconButton
           size="xs"
           docsLink
-          path="/start-os/dns.html"
-          fragment="#os-and-service-dns-overrides"
+          path="/start-os/outbound-traffic.html"
           appearance="icon"
           iconStart="@tui.book-open-text"
         >
@@ -113,7 +112,7 @@ export default class OutboundTraffic {
         const form = await outboundSettingsForm(
           this.i18n,
           settings,
-          'System default',
+          'Use system gateway',
         )
         return {
           ...form,

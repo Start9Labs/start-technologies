@@ -21,6 +21,13 @@ acme.order-failed-title:
   fr_FR: "Impossible d'obtenir un certificat pour %{domain}"
   pl_PL: "Nie udało się uzyskać certyfikatu dla %{domain}"
 
+acme.order-invalid:
+  en_US: "The certificate authority rejected the order"
+  de_DE: "Die Zertifizierungsstelle hat den Auftrag abgelehnt"
+  es_ES: "La autoridad de certificación rechazó la solicitud"
+  fr_FR: "L'autorité de certification a rejeté la demande"
+  pl_PL: "Urząd certyfikacji odrzucił zamówienie"
+
 acme.order-timed-out:
   en_US: "The certificate authority did not answer in time"
   de_DE: "Die Zertifizierungsstelle hat nicht rechtzeitig geantwortet"
@@ -1741,6 +1748,12 @@ backup.restore.package-error:
   es_ES: "Error al restaurar el paquete %{id}: %{error}"
   fr_FR: "Erreur lors de la restauration du paquet %{id} : %{error}"
   pl_PL: "Błąd przywracania pakietu %{id}: %{error}"
+backup.restore.package-installed:
+  en_US: "Cannot restore %{id}: it is already installed. Uninstall it first."
+  de_DE: "%{id} kann nicht wiederhergestellt werden: Es ist bereits installiert. Deinstalliere es zuerst."
+  es_ES: "No se puede restaurar %{id}: ya está instalado. Desinstálalo primero."
+  fr_FR: "Impossible de restaurer %{id} : il est déjà installé. Désinstallez-le d’abord."
+  pl_PL: "Nie można przywrócić %{id}: jest już zainstalowany. Najpierw go odinstaluj."
 
 # backup/target/cifs.rs
 backup.target.cifs.target-not-found:
@@ -2579,6 +2592,13 @@ registry.package.remove-mirror.unauthorized:
   pl_PL: "Brak autoryzacji"
 
 # registry/package/index.rs
+registry.package.icon.invalid-name:
+  en_US: "invalid package icon name: %{name}"
+  de_DE: "Ungültiger Paketsymbolname: %{name}"
+  es_ES: "nombre de icono de paquete no válido: %{name}"
+  fr_FR: "nom d'icône de paquet invalide : %{name}"
+  pl_PL: "nieprawidłowa nazwa ikony pakietu: %{name}"
+
 registry.package.index.metadata-mismatch:
   en_US: "package metadata mismatch: remove the existing version first, then re-add"
   de_DE: "Paketmetadaten stimmen nicht überein: vorhandene Version zuerst entfernen, dann erneut hinzufügen"
@@ -2622,6 +2642,58 @@ registry.package.signer.not-authorized:
   es_ES: "El firmante %{signer} no está autorizado para firmar %{id}"
   fr_FR: "Le signataire %{signer} n'est pas autorisé à signer pour %{id}"
   pl_PL: "Sygnatariusz %{signer} nie jest autoryzowany do podpisywania %{id}"
+
+# sign/commitment/request.rs
+sign.commitment.request.unsupported-type:
+  en_US: "Unsupported request commitment type %{ty}"
+  de_DE: "Nicht unterstützter Anfrage-Commitment-Typ %{ty}"
+  es_ES: "Tipo de compromiso de solicitud no admitido %{ty}"
+  fr_FR: "Type d'engagement de requête non pris en charge %{ty}"
+  pl_PL: "Nieobsługiwany typ zobowiązania żądania %{ty}"
+
+# sign/mod.rs
+sign.context-too-long:
+  en_US: "Signing context is longer than 255 bytes"
+  de_DE: "Signaturkontext ist länger als 255 Bytes"
+  es_ES: "El contexto de firma supera los 255 bytes"
+  fr_FR: "Le contexte de signature dépasse 255 octets"
+  pl_PL: "Kontekst podpisu jest dłuższy niż 255 bajtów"
+
+sign.unknown-signature-algorithm:
+  en_US: "Unknown signature algorithm"
+  de_DE: "Unbekannter Signaturalgorithmus"
+  es_ES: "Algoritmo de firma desconocido"
+  fr_FR: "Algorithme de signature inconnu"
+  pl_PL: "Nieznany algorytm podpisu"
+
+# sign/gpg_agent.rs
+sign.gpg-agent.ambiguous-key:
+  en_US: "Several Ed25519 signing keys match %{key}: %{candidates}. Append ! to a fingerprint to choose one"
+  de_DE: "Mehrere Ed25519-Signaturschlüssel passen zu %{key}: %{candidates}. Hängen Sie ! an einen Fingerabdruck an, um einen auszuwählen"
+  es_ES: "Varias claves de firma Ed25519 coinciden con %{key}: %{candidates}. Añada ! a una huella para elegir una"
+  fr_FR: "Plusieurs clés de signature Ed25519 correspondent à %{key} : %{candidates}. Ajoutez ! à une empreinte pour en choisir une"
+  pl_PL: "Do %{key} pasuje kilka kluczy podpisujących Ed25519: %{candidates}. Dodaj ! do odcisku, aby wybrać jeden"
+
+sign.gpg-agent.command-failed:
+  en_US: "gpg-agent %{command} failed: %{error}"
+  de_DE: "gpg-agent %{command} fehlgeschlagen: %{error}"
+  es_ES: "gpg-agent %{command} falló: %{error}"
+  fr_FR: "gpg-agent %{command} a échoué : %{error}"
+  pl_PL: "gpg-agent %{command} nie powiódł się: %{error}"
+
+sign.gpg-agent.malformed-response:
+  en_US: "Malformed response from gpg-agent"
+  de_DE: "Fehlerhafte Antwort von gpg-agent"
+  es_ES: "Respuesta mal formada de gpg-agent"
+  fr_FR: "Réponse malformée de gpg-agent"
+  pl_PL: "Nieprawidłowa odpowiedź od gpg-agent"
+
+sign.gpg-agent.no-signing-key:
+  en_US: "No Ed25519 signing key with its secret in the GnuPG keyring matches %{key}"
+  de_DE: "Kein Ed25519-Signaturschlüssel mit geheimem Teil im GnuPG-Schlüsselbund passt zu %{key}"
+  es_ES: "Ninguna clave de firma Ed25519 con su parte secreta en el llavero de GnuPG coincide con %{key}"
+  fr_FR: "Aucune clé de signature Ed25519 avec sa partie secrète dans le trousseau GnuPG ne correspond à %{key}"
+  pl_PL: "Żaden klucz podpisujący Ed25519 z częścią tajną w bazie kluczy GnuPG nie pasuje do %{key}"
 
 # service/mod.rs
 service.mod.service-actor-held-after-shutdown:
@@ -3132,6 +3204,13 @@ middleware.auth.enrolled-key-mismatch:
   fr_FR: "La clé enregistrée doit correspondre à la clé avec laquelle la demande de connexion a été signée."
   pl_PL: "Zarejestrowany klucz musi być zgodny z kluczem, którym podpisano żądanie logowania."
 
+middleware.auth.local-login-unnecessary:
+  en_US: "Login is unnecessary when using the local auth cookie."
+  de_DE: "Bei Verwendung des lokalen Authentifizierungs-Cookies ist keine Anmeldung erforderlich."
+  es_ES: "No es necesario iniciar sesión al usar la cookie de autenticación local."
+  fr_FR: "La connexion est inutile lorsque le cookie d'authentification local est utilisé."
+  pl_PL: "Logowanie nie jest potrzebne podczas korzystania z lokalnego pliku cookie uwierzytelniania."
+
 # middleware/auth/signature.rs
 middleware.auth.key-not-authorized:
   en_US: "Key is not authorized"
@@ -3357,6 +3436,13 @@ auth.passwords-do-not-match:
   es_ES: "Las contraseñas no coinciden"
   fr_FR: "Les mots de passe ne correspondent pas"
   pl_PL: "Hasła nie pasują do siebie"
+
+auth.local-logout-unnecessary:
+  en_US: "Logout is unnecessary when using the local auth cookie."
+  de_DE: "Bei Verwendung des lokalen Authentifizierungs-Cookies ist keine Abmeldung erforderlich."
+  es_ES: "No es necesario cerrar sesión al usar la cookie de autenticación local."
+  fr_FR: "La déconnexion est inutile lorsque le cookie d'authentification local est utilisé."
+  pl_PL: "Wylogowanie nie jest potrzebne podczas korzystania z lokalnego pliku cookie uwierzytelniania."
 
 # util/tui.rs
 util.tui.terminal-must-be-interactive:
@@ -3651,6 +3737,13 @@ help.arg.destination-path:
   es_ES: "Ruta de destino para la descarga"
   fr_FR: "Chemin de destination pour le téléchargement"
   pl_PL: "Ścieżka docelowa do pobrania"
+
+help.arg.id-key-gpg:
+  en_US: "GnuPG key (fingerprint, key ID, or user ID) to sign with through gpg-agent instead of the identity key file"
+  de_DE: "GnuPG-Schlüssel (Fingerabdruck, Schlüssel-ID oder Benutzer-ID), mit dem über gpg-agent statt mit der Identitätsschlüsseldatei signiert wird"
+  es_ES: "Clave de GnuPG (huella, ID de clave o ID de usuario) con la que firmar mediante gpg-agent en lugar del archivo de clave de identidad"
+  fr_FR: "Clé GnuPG (empreinte, ID de clé ou ID utilisateur) avec laquelle signer via gpg-agent au lieu du fichier de clé d'identité"
+  pl_PL: "Klucz GnuPG (odcisk, ID klucza lub ID użytkownika) do podpisywania przez gpg-agent zamiast pliku klucza tożsamości"
 
 help.arg.id-key-path:
   en_US: "Path to identity signing key"
@@ -4149,6 +4242,13 @@ help.arg.registry-name:
   es_ES: "Nombre del registro"
   fr_FR: "Nom du registre"
   pl_PL: "Nazwa rejestru"
+
+help.arg.registry-startwrt:
+  en_US: "Serve StartWRT clients"
+  de_DE: "StartWRT-Clients bedienen"
+  es_ES: "Atender a clientes de StartWRT"
+  fr_FR: "Servir les clients StartWRT"
+  pl_PL: "Obsługuj klientów StartWRT"
 
 help.arg.registry-url:
   en_US: "URL of the registry"
@@ -4886,13 +4986,6 @@ help.arg.tunnel-name:
   fr_FR: "Nom du tunnel"
   pl_PL: "Nazwa tunelu"
 
-help.arg.tunnel-url:
-  en_US: "Tunnel server URL"
-  de_DE: "Tunnel-Server-URL"
-  es_ES: "URL del servidor de túnel"
-  fr_FR: "URL du serveur tunnel"
-  pl_PL: "URL serwera tunelu"
-
 help.arg.version-headline:
   en_US: "Short headline for the version"
   de_DE: "Kurze Überschrift für die Version"
@@ -5595,6 +5688,13 @@ about.commands-setup:
   fr_FR: "Commandes liées à la configuration initiale"
   pl_PL: "Polecenia związane z początkową konfiguracją"
 
+about.commands-os-update-signers:
+  en_US: "Manage trusted OS update signers"
+  de_DE: "Vertrauenswürdige Unterzeichner für Betriebssystem-Updates verwalten"
+  es_ES: "Administrar firmantes de confianza para actualizaciones del sistema"
+  fr_FR: "Gérer les signataires de confiance des mises à jour du système"
+  pl_PL: "Zarządzaj zaufanymi sygnatariuszami aktualizacji systemu"
+
 about.commands-ssh-keys:
   en_US: "Commands for interacting with ssh keys i.e. add, delete, list"
   de_DE: "Befehle zur Interaktion mit SSH-Schlüsseln, z.B. hinzufügen, löschen, auflisten"
@@ -5993,6 +6093,13 @@ about.get-device-info:
   es_ES: "Mostrar información del dispositivo"
   fr_FR: "Afficher les informations de l'appareil"
   pl_PL: "Wyświetl informacje o urządzeniu"
+
+about.get-os-update-signer:
+  en_US: "Get a trusted OS update signer's label"
+  de_DE: "Bezeichnung eines vertrauenswürdigen Update-Unterzeichners abrufen"
+  es_ES: "Obtener la etiqueta de un firmante de confianza de actualizaciones del sistema"
+  fr_FR: "Obtenir le libellé d’un signataire de confiance des mises à jour du système"
+  pl_PL: "Pobierz etykietę zaufanego sygnatariusza aktualizacji systemu"
 
 about.get-id-pubkey:
   en_US: "Get the identity public key"
@@ -7185,6 +7292,20 @@ tunnel.web.ui-port-reserved:
   es_ES: "Este rango incluye el puerto de la interfaz de administración habilitada; use nombres SNI para compartirlo, o desactive primero la interfaz o cambie su dirección."
   fr_FR: "Cette plage inclut le port de l'interface d'administration activée ; utilisez des noms SNI pour le partager, ou désactivez d'abord l'interface ou changez son adresse."
   pl_PL: "Ten zakres obejmuje port włączonego panelu administracyjnego; użyj nazw SNI, aby go współdzielić, albo najpierw wyłącz panel lub zmień jego adres."
+
+update.signers.already-exists:
+  en_US: "This public key is already a trusted OS update signer"
+  de_DE: "Dieser öffentliche Schlüssel ist bereits als Update-Unterzeichner vertrauenswürdig"
+  es_ES: "Esta clave pública ya es un firmante de confianza de actualizaciones del sistema"
+  fr_FR: "Cette clé publique est déjà un signataire de confiance des mises à jour du système"
+  pl_PL: "Ten klucz publiczny jest już zaufanym sygnatariuszem aktualizacji systemu"
+
+update.signers.not-found:
+  en_US: "Trusted OS update signer not found"
+  de_DE: "Vertrauenswürdiger Update-Unterzeichner nicht gefunden"
+  es_ES: "No se encontró el firmante de confianza de actualizaciones del sistema"
+  fr_FR: "Signataire de confiance des mises à jour du système introuvable"
+  pl_PL: "Nie znaleziono zaufanego sygnatariusza aktualizacji systemu"
 
 # volume.rs
 volume.restore-conflict:

@@ -53,6 +53,7 @@ export const mockPatchData: DataModel = {
   },
   serverInfo: {
     id: 'abcdefgh',
+    trustedOsUpdateSigners: {},
     version,
     lastBackup: new Date(new Date().valueOf() - 604800001).toISOString(),
     network: {

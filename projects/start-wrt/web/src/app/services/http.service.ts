@@ -26,7 +26,6 @@ export class HttpService {
 
     const req$ = this.http.post<T>(this.url, body, {
       observe: 'response',
-      withCredentials: true,
       params,
       headers,
       responseType: 'json',

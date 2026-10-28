@@ -22,7 +22,10 @@ import { combineLatest, first, switchMap } from 'rxjs'
 import { FormGroupComponent } from 'src/app/routes/portal/components/form/containers/group.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { FormService, trim } from 'src/app/services/form.service'
-import { gatewayName } from 'src/app/services/gateway.service'
+import {
+  gatewayName,
+  isConnectedGateway,
+} from 'src/app/services/gateway.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
 import {
@@ -46,11 +49,6 @@ import {
           (tuiValueChanges)="confirm.markAsDirty()"
           (submit.prevent)="save(d.form)"
         >
-          @if (!gateway.ipInfo) {
-            <p tuiNotification appearance="warning">
-              {{ 'Disconnected' | i18n }}
-            </p>
-          }
           <form-group [spec]="d.spec" />
           @if (gateway.dns.source === 'public-fallback') {
             <p tuiNotification appearance="warning" role="status">
@@ -170,12 +168,19 @@ export default class EditGateway {
             }
           }
         }
-        return { gateway, name, spec, form, warn }
+        return {
+          gateway: isConnectedGateway(gateway) ? gateway : undefined,
+          name,
+          spec,
+          form,
+          warn,
+        }
       }),
     ),
   )
 
   protected async save(form: UntypedFormGroup): Promise<void> {
+    if (!this.data()?.gateway) return
     trim(form)
     tuiMarkControlAsTouchedAndValidate(form)
     if (form.invalid) return

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use axum::body::Body;
 use axum::http::{header, Response};
@@ -30,10 +30,8 @@ pub struct BackupRestoreRes {
 }
 rpc_toolkit::reflect_ts!(BackupRestoreRes);
 
-/// RPC handler: buffer backup, register download continuation, return guid + filename.
 #[instrument(skip_all)]
 async fn create(ctx: ServerContext) -> Result<BackupCreateRes, Error> {
-    // Get hostname for the filename
     let hostname = match Command::new("uci")
         .args(["get", "system.@system[0].hostname"])
         .invoke(ErrorKind::Filesystem.into())
@@ -85,27 +83,28 @@ async fn create(ctx: ServerContext) -> Result<BackupCreateRes, Error> {
     let body = output;
     let fname = filename.clone();
     let guid = Guid::new();
-    ctx.continuations.add(
-        guid.clone(),
-        RpcContinuation::rest(
-            move |_req| async move {
-                Ok(Response::builder()
-                    .header(header::CONTENT_TYPE, "application/gzip")
-                    .header(
-                        header::CONTENT_DISPOSITION,
-                        format!("attachment; filename=\"{fname}\""),
-                    )
-                    .body(Body::from(body))
-                    .unwrap())
-            },
-            continuations::DEFAULT_TTL,
-        ),
-    );
+    ctx.continuations
+        .add(
+            guid.clone(),
+            RpcContinuation::rest(
+                move |_req| async move {
+                    Ok(Response::builder()
+                        .header(header::CONTENT_TYPE, "application/gzip")
+                        .header(
+                            header::CONTENT_DISPOSITION,
+                            format!("attachment; filename=\"{fname}\""),
+                        )
+                        .body(Body::from(body))
+                        .unwrap())
+                },
+                continuations::DEFAULT_TTL,
+            ),
+        )
+        .await;
 
     Ok(BackupCreateRes { guid, filename })
 }
 
-/// CLI handler: call backup.create via RPC, download the file, write to ~/Downloads.
 #[instrument(skip_all)]
 async fn cli_download(
     HandlerArgs {
@@ -146,100 +145,114 @@ async fn cli_download(
     Ok(())
 }
 
-/// RPC handler: register upload continuation for restore, return guid.
 #[instrument(skip_all)]
 async fn restore(ctx: ServerContext) -> Result<BackupRestoreRes, Error> {
     let guid = Guid::new();
-    ctx.continuations.add(
-        guid.clone(),
-        RpcContinuation::rest(
-            move |req| async move {
-                let body_bytes = axum::body::to_bytes(req.into_body(), 10 * 1024 * 1024)
-                    .await
-                    .map_err(|e| {
-                        Error::new(eyre!("Failed to read upload: {e}"), ErrorKind::Network)
-                    })?;
+    ctx.continuations
+        .add(
+            guid.clone(),
+            RpcContinuation::rest(
+                move |req| async move {
+                    let body_bytes =
+                        axum::body::to_bytes(req.into_body(), continuations::MAX_UPLOAD_BYTES)
+                            .await
+                            .map_err(|e| {
+                                Error::new(eyre!("Failed to read upload: {e}"), ErrorKind::Network)
+                            })?;
 
-                // Atomic file write
-                let tmp_path = "/tmp/backup-restore.tar.gz";
-                startos::util::io::write_file_atomic(tmp_path, &body_bytes)
-                    .await
-                    .map_err(Error::from)?;
+                    let tmp_path = "/tmp/backup-restore.tar.gz";
+                    startos::util::io::write_file_atomic(tmp_path, &body_bytes)
+                        .await
+                        .map_err(Error::from)?;
 
-                let Ok(listing) = Command::new("tar")
-                    .args(["-tzf", tmp_path])
-                    .invoke(ErrorKind::Filesystem.into())
-                    .await
-                else {
-                    let _ = tokio::fs::remove_file(tmp_path).await;
-                    crate::activity::log(
-                        "backup",
-                        "restored",
-                        false,
-                        "Failed to restore config backup",
-                        Some("Invalid backup archive"),
-                    );
-                    return Err(Error::new(
-                        eyre!("Invalid backup archive"),
-                        ErrorKind::InvalidRequest,
-                    ));
-                };
-
-                // Apply the backup
-                let apply = Command::new("sysupgrade")
-                    .args(["--restore-backup", tmp_path])
-                    .invoke(ErrorKind::Filesystem.into())
-                    .await;
-
-                let _ = tokio::fs::remove_file(tmp_path).await;
-
-                if let Err(e) = apply {
-                    crate::activity::log(
-                        "backup",
-                        "restored",
-                        false,
-                        "Failed to restore config backup",
-                        Some(&e.to_string()),
-                    );
-                    return Err(e.into());
-                }
-
-                if let Err(e) = crate::migrate::forget_unless_restored(
-                    std::path::Path::new("/"),
-                    &String::from_utf8_lossy(&listing),
-                )
-                .await
-                {
-                    tracing::error!("failed to reset migration record after restore: {e}");
-                }
-
-                crate::activity::log(
-                    "backup",
-                    "restored",
-                    true,
-                    "Restored config backup (rebooting)",
-                    None,
-                );
-
-                // Spawn delayed reboot
-                tokio::spawn(async {
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    if let Err(e) = Command::new("reboot")
+                    let Ok(listing) = Command::new("tar")
+                        .args(["-tzf", tmp_path])
                         .invoke(ErrorKind::Filesystem.into())
                         .await
-                    {
-                        tracing::error!("failed to reboot after restore: {e}");
-                    }
-                });
+                    else {
+                        let _ = tokio::fs::remove_file(tmp_path).await;
+                        crate::activity::log(
+                            "backup",
+                            "restored",
+                            false,
+                            "Failed to restore config backup",
+                            Some("Invalid backup archive"),
+                        );
+                        return Err(Error::new(
+                            eyre!("Invalid backup archive"),
+                            ErrorKind::InvalidRequest,
+                        )
+                        .into());
+                    };
 
-                Ok(Response::builder()
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(r#"{"success":true}"#))
-                    .unwrap())
-            },
-            continuations::DEFAULT_TTL,
-        ),
-    );
+                    let log_history = crate::logs::snapshot_history(Path::new("/")).await;
+
+                    let apply = Command::new("sysupgrade")
+                        .args(["--restore-backup", tmp_path])
+                        .invoke(ErrorKind::Filesystem.into())
+                        .await;
+
+                    let _ = tokio::fs::remove_file(tmp_path).await;
+
+                    if let Err(e) = apply {
+                        crate::activity::log(
+                            "backup",
+                            "restored",
+                            false,
+                            "Failed to restore config backup",
+                            Some(&e.to_string()),
+                        );
+                        return Err(e.into());
+                    }
+
+                    let listing = String::from_utf8_lossy(&listing);
+                    if let Err(e) =
+                        crate::migrate::forget_unless_restored(Path::new("/"), &listing).await
+                    {
+                        tracing::error!("failed to reset migration record after restore: {e}");
+                    }
+                    match log_history {
+                        Ok(before) => {
+                            if let Err(e) = crate::logs::merge_restored_history(
+                                Path::new("/"),
+                                before,
+                                &listing,
+                            )
+                            .await
+                            {
+                                tracing::error!("failed to merge system log after restore: {e}");
+                            }
+                        }
+                        Err(e) => tracing::error!("failed to read system log before restore: {e}"),
+                    }
+
+                    crate::activity::log(
+                        "backup",
+                        "restored",
+                        true,
+                        "Restored config backup (rebooting)",
+                        None,
+                    );
+
+                    tokio::spawn(async {
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        if let Err(e) = Command::new("reboot")
+                            .invoke(ErrorKind::Filesystem.into())
+                            .await
+                        {
+                            tracing::error!("failed to reboot after restore: {e}");
+                        }
+                    });
+
+                    Ok(Response::builder()
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(r#"{"success":true}"#))
+                        .unwrap())
+                },
+                continuations::DEFAULT_TTL,
+            ),
+        )
+        .await;
     Ok(BackupRestoreRes { upload: guid })
 }
 
@@ -250,7 +263,6 @@ struct RestoreParams {
 }
 rpc_toolkit::reflect_ts!(RestoreParams);
 
-/// CLI handler: read local file, call backup.restore via RPC, upload the file.
 #[instrument(skip_all)]
 async fn cli_upload(
     HandlerArgs {

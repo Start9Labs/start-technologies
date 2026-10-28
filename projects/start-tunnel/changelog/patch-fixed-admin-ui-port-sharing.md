@@ -1,2 +1,0 @@
-- Keep the admin UI reachable when SNI forwards share its listen port. Reject conflicting plain forwards while the UI is enabled, and check for enabled plain forwards when enabling the UI or changing its active listen address. Disabled configurations can share the same port.
-- Restore the full port range when re-enabling a port forward.

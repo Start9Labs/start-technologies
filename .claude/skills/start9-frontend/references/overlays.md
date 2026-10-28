@@ -50,7 +50,9 @@ appearance="…">` (host-directive form, not the element form). A banner that as
   is `tuiDropdown tuiDropdownAuto`; an `open = signal(false)` behind `[(tuiDropdownOpen)]`, set
   back to `false` in every handler, is the rewrite target. A menu two triggers share is a
   component, closed once from its host: `<app-menu *tuiDropdown="let close" (click)="close()" />`.
-  Leave `tuiDropdownDirection` unset: its default opens on whichever side has room, and a pinned
+  A trigger at the inline end of its row or bar — row actions, a header menu — sets
+  `tuiDropdownAlign="end"`: an anchored dropdown wraps to the room past its aligned edge rather
+  than flipping. Leave `tuiDropdownDirection` unset: its default opens on whichever side has room, and a pinned
   `top` breaks when there's none. A toolbar shown on hover stays shown while one of its dropdowns
   is open through `:has([aria-expanded='true'])`, which the dropdown host carries.
 - **Hints**: `[tuiHint]` (template content allowed), tuned globally via `tuiHintOptionsProvider`.

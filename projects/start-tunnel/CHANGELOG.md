@@ -5,6 +5,43 @@ All notable changes to StartTunnel are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1]
+
+### Removed
+
+- `start-tunnel auth get-pubkey` is removed; the tunnel server never answered it.
+
+### Fixed
+
+- Action menus near the right edge of the screen size to fit their items.
+
+- Revoking a sign-in immediately closes its idle streams.
+
+- On the StartTunnel host itself, `start-tunnel auth login` and `auth logout` explain that no login is needed there.
+
+## [1.4.0]
+
+### Added
+
+- The Debian package enables Bash tab completion automatically in new shells. `start-tunnel completions <shell>` generates completion scripts for Bash, Zsh, fish, elvish, and PowerShell.
+
+### Fixed
+
+- Fix server selection for manual AAAA DNS records to use the server's IPv6 address and list servers with IPv6 configured.
+- Show server names alongside IPv6 addresses in DNS records.
+
+- Keep the admin UI reachable when SNI forwards share its listen port. Reject conflicting plain forwards while the UI is enabled, and check for enabled plain forwards when enabling the UI or changing its active listen address. Disabled configurations can share the same port.
+- Restore the full port range when re-enabling a port forward.
+
+- The port-mapping server now answers NAT-PMP requests with "unsupported version" instead of ignoring them, so NAT-PMP clients fall back right away rather than retrying for about two minutes.
+
+### Security
+
+- **Update dependencies with security fixes**, including TLS certificate verification and handshake handling, HTTP/2 flow control, and XML parsing.
+
+- Isolate login rate limits by server address and public or private access, and log the client IP and address on the first blocked attempt per throttle window.
+- Reject remote requests using unconfigured loopback signing addresses.
+
 ## [1.3.1]
 
 ### Security

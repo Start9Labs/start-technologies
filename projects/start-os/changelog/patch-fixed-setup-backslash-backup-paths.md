@@ -1,1 +1,0 @@
-- **Setup accepts backslash-separated network backup paths** when verifying or restoring a CIFS share.

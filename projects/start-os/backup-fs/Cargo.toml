@@ -30,7 +30,7 @@ fuser = { git = "https://github.com/Start9Labs/fuser.git", rev = "4ef196b", feat
   "serializable",
 ] }
 generic-array = { version = "1", features = ["serde"] }
-imbl = { version = "3", features = ["serde"] }
+imbl = { version = "7", features = ["serde"] }
 io-uring = "0.7.11"
 itertools = "0.13"
 libc = "0.2"

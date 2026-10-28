@@ -8,6 +8,9 @@
 `MarkdownComponent`/`MARKDOWN` + `PromptModal`/`PROMPT` (ready `PolymorpheusComponent` dialogs),
 `InitializingComponent`/`LogsWindowComponent`, `CaWizard` (+`CA_TRUST_CHECK`),
 `DocsLinkDirective` (+`VERSION`, optional),
+`IconDirective` (abstract base for an async icon `<img>`: subclass supplies `src`, null until
+resolved; it owns the fallback and exposes `loading` until the image loads or fails for the
+avatar's `[tuiSkeleton]`; `FALLBACK_ICON`),
 `SafeLinksDirective`, pipes (`convertBytes`, `empty`, `compareExver`, `leafProgress`,
 `markdown`), `RELATIVE_URL` token, `HttpError`/`RpcError`, disk/RPC/http types,
 utils (`convertAnsi`, `formatProgress`, `getPkgId`, `pauseFor`, `@debounce`, `sameUrl`,

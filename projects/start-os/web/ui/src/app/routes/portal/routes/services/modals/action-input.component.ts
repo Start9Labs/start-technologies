@@ -1,4 +1,3 @@
-import { AsyncPipe } from '@angular/common'
 import { Component, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import {
@@ -23,7 +22,7 @@ import {
   FormComponent,
 } from 'src/app/routes/portal/components/form.component'
 import { InvalidService } from 'src/app/routes/portal/components/form/containers/control.directive'
-import { PkgIconPipe } from 'src/app/routes/portal/pipes/pkg-icon'
+import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
 import { ActionService } from 'src/app/services/action.service'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
@@ -50,7 +49,7 @@ export type PackageActionData = {
 @Component({
   template: `
     <div class="service-title">
-      <img [src]="pkgInfo.id | pkgIcon | async" alt="" />
+      <img [pkgIcon]="pkgInfo.id" />
       <h4>{{ pkgInfo.title }}</h4>
     </div>
     @if (error()) {
@@ -107,8 +106,7 @@ export type PackageActionData = {
     TuiButton,
     FormComponent,
     i18nPipe,
-    AsyncPipe,
-    PkgIconPipe,
+    PkgIconDirective,
   ],
   providers: [InvalidService],
 })

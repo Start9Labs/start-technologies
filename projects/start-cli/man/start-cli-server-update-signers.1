@@ -1,0 +1,29 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-server-update-signers 1  "update-signers "
+.SH NAME
+start\-cli\-server\-update\-signers \- Manage trusted OS update signers
+.SH SYNOPSIS
+\fBstart\-cli server update\-signers\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Manage trusted OS update signers
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+start\-cli\-server\-update\-signers\-add(1)
+Add signer
+.TP
+start\-cli\-server\-update\-signers\-get(1)
+Get a trusted OS update signer\*(Aqs label
+.TP
+start\-cli\-server\-update\-signers\-list(1)
+List signers
+.TP
+start\-cli\-server\-update\-signers\-remove(1)
+Remove signer and all their authorizations
+.TP
+start\-cli\-server\-update\-signers\-update(1)
+Edit signer information

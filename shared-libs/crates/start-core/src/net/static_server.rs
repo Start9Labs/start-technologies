@@ -54,6 +54,7 @@ const NOT_AUTHORIZED: &[u8] = b"Not Authorized";
 const INTERNAL_SERVER_ERROR: &[u8] = b"Internal Server Error";
 const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE_CONTROL: &str = "no-cache";
+const PRIVATE_IMMUTABLE_CACHE_CONTROL: &str = "private, max-age=31536000, immutable";
 const IMMUTABLE_ASSETS_MANIFEST: &str = "immutable-assets.txt";
 
 pub const EMPTY_DIR: Dir<'_> = Dir::new("", &[]);
@@ -356,21 +357,18 @@ fn s9pk_router(ctx: RpcContext) -> Router {
                             .strip_suffix(".s9pk")
                             .unwrap_or(&s9pk)
                             .parse::<PackageId>()?;
+                        let installed = ctx
+                            .db
+                            .peek()
+                            .await
+                            .into_public()
+                            .into_package_data()
+                            .into_idx(&id)
+                            .or_not_found(&id)?
+                            .into_s9pk()
+                            .de()?;
                         let s9pk = S9pk::deserialize(
-                            &MultiCursorFile::from(
-                                open_file(
-                                    ctx.db
-                                        .peek()
-                                        .await
-                                        .into_public()
-                                        .into_package_data()
-                                        .into_idx(&id)
-                                        .or_not_found(&id)?
-                                        .into_s9pk()
-                                        .de()?,
-                                )
-                                .await?,
-                            ),
+                            &MultiCursorFile::from(open_file(&installed).await?),
                             query
                                 .as_deref()
                                 .map(MerkleArchiveCommitment::from_query)
@@ -379,6 +377,35 @@ fn s9pk_router(ctx: RpcContext) -> Router {
                                 .as_ref(),
                         )
                         .await?;
+                        let (parts, _) = request.into_parts();
+                        match FileData::from_s9pk(&parts, &s9pk, &path).await? {
+                            Some(mut file) => {
+                                file.cache_control = Some(installed_file_cache_control(
+                                    &installed,
+                                    query.as_deref(),
+                                ));
+                                file.into_response(&parts)
+                            }
+                            None => Ok(not_found()),
+                        }
+                    })
+                    .await
+                    .unwrap_or_else(server_error)
+                },
+            )
+        })
+        .route("/installing/{s9pk}/{*path}", {
+            let ctx = ctx.clone();
+            get(
+                |x::Path((s9pk, path)): x::Path<(String, PathBuf)>, request: Request| async move {
+                    if_authorized(&ctx, request, |request| async {
+                        let id = s9pk
+                            .strip_suffix(".s9pk")
+                            .unwrap_or(&s9pk)
+                            .parse::<PackageId>()?;
+                        let Some(s9pk) = ctx.installing_s9pks.peek(|s| s.get(&id).cloned()) else {
+                            return Ok(not_found());
+                        };
                         let (parts, _) = request.into_parts();
                         match FileData::from_s9pk(&parts, &s9pk, &path).await? {
                             Some(file) => file.into_response(&parts),
@@ -420,11 +447,27 @@ fn s9pk_router(ctx: RpcContext) -> Router {
         )
 }
 
+/// Immutable only when the `v` query parameter names the installed archive's file.
+fn installed_file_cache_control(installed: &Path, query: Option<&str>) -> &'static str {
+    let name = installed.file_name().and_then(|n| n.to_str());
+    if name.is_some_and(|name| {
+        query.is_some_and(|q| {
+            form_urlencoded::parse(q.as_bytes()).any(|(k, v)| k == "v" && v == name)
+        })
+    }) {
+        PRIVATE_IMMUTABLE_CACHE_CONTROL
+    } else {
+        REVALIDATE_CACHE_CONTROL
+    }
+}
+
 async fn registry_icon_response(client: reqwest::Client, url: Url) -> Result<Response, Error> {
     let upstream = client.get(url).send().await.with_kind(ErrorKind::Network)?;
     let mut response = Response::builder().status(upstream.status());
-    if let Some(content_type) = upstream.headers().get(CONTENT_TYPE) {
-        response = response.header(CONTENT_TYPE, content_type);
+    for name in [CONTENT_TYPE, CACHE_CONTROL] {
+        if let Some(value) = upstream.headers().get(&name) {
+            response = response.header(name, value);
+        }
     }
     response
         .body(Body::from_stream(upstream.bytes_stream()))
@@ -1024,7 +1067,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn registry_icon_proxy_preserves_status_type_and_bytes_without_upstream_headers() {
+    async fn registry_icon_proxy_preserves_status_type_caching_and_bytes_only() {
         use tokio::io::AsyncWriteExt;
         use tokio::net::TcpListener;
 
@@ -1033,9 +1076,14 @@ mod tests {
             .timeout(Duration::from_secs(5))
             .build()
             .unwrap();
-        for (status, content_type, contents) in [
-            ("200 OK", "image/svg+xml", "<svg/>"),
-            ("404 Not Found", "text/plain", "missing icon"),
+        for (status, content_type, cache_control, contents) in [
+            (
+                "200 OK",
+                "image/svg+xml",
+                "public, max-age=604800",
+                "<svg/>",
+            ),
+            ("404 Not Found", "text/plain", "", "missing icon"),
         ] {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let url = Url::parse(&format!(
@@ -1057,10 +1105,15 @@ mod tests {
                     .write_all(
                         format!(
                             "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\n\
-                             Content-Length: {}\r\nSet-Cookie: session=upstream\r\n\
+                             {}Content-Length: {}\r\nSet-Cookie: session=upstream\r\n\
                              Location: https://example.com/\r\n\
                              Content-Security-Policy: default-src *\r\n\
                              Connection: close\r\n\r\n{contents}",
+                            if cache_control.is_empty() {
+                                String::new()
+                            } else {
+                                format!("Cache-Control: {cache_control}\r\n")
+                            },
                             contents.len()
                         )
                         .as_bytes(),
@@ -1071,9 +1124,35 @@ mod tests {
             let response = registry_icon_response(client.clone(), url).await.unwrap();
             assert_eq!(response.status().as_u16().to_string(), &status[..3]);
             assert_eq!(header(&response, CONTENT_TYPE), content_type);
-            assert_eq!(response.headers().len(), 1);
+            assert_eq!(header(&response, CACHE_CONTROL), cache_control);
+            assert_eq!(
+                response.headers().len(),
+                if cache_control.is_empty() { 1 } else { 2 }
+            );
             assert_eq!(body(response).await, contents);
             upstream.await.unwrap();
+        }
+    }
+
+    #[test]
+    fn installed_files_are_immutable_only_when_pinned_to_the_installed_archive() {
+        let installed = Path::new("/media/startos/data/package-data/archive/installed/abc.s9pk");
+        for (query, expected) in [
+            (Some("v=abc.s9pk"), PRIVATE_IMMUTABLE_CACHE_CONTROL),
+            (
+                Some("rootSighash=x&v=abc.s9pk"),
+                PRIVATE_IMMUTABLE_CACHE_CONTROL,
+            ),
+            (Some("v=abcx.s9pk"), REVALIDATE_CACHE_CONTROL),
+            (Some("v="), REVALIDATE_CACHE_CONTROL),
+            (Some("w=abc.s9pk"), REVALIDATE_CACHE_CONTROL),
+            (None, REVALIDATE_CACHE_CONTROL),
+        ] {
+            assert_eq!(
+                installed_file_cache_control(installed, query),
+                expected,
+                "{query:?}"
+            );
         }
     }
 

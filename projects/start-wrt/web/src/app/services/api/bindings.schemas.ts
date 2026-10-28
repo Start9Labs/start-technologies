@@ -4,6 +4,7 @@ const wire = <A extends z.ZodType, B extends z.ZodType>(input: A, output: B) =>
 const object = <Shape extends z.core.$ZodLooseShape>(shape: Shape) =>
   z.object(shape).meta({ additionalProperties: true })
 const empty: z.ZodType<{}, {}> = /* @__PURE__ */ object({})
+const literal_0 = /* @__PURE__ */ z.string()
 export const ActivityDeleteParams: z.ZodObject<{ id: z.ZodInt }> =
   /* @__PURE__ */ object({ id: z.int() }).meta({
     id: 'ActivityDeleteParams',
@@ -68,6 +69,11 @@ export const AffectedPublishedPort: z.ZodObject<{
   description:
     "A published port that will be removed because the device it forwards to can\nno longer be reached at its current address — its security profile is changing\n(ethernet-port or WiFi-password reassignment) or its WiFi password is being\ndeleted (disconnecting it) — so its DNAT rule, bound to the device's old\nsubnet, would otherwise break. Surfaced to the UI to confirm the deletion.",
 })
+export const AnyVerifyingKey: typeof literal_0 = /* @__PURE__ */ literal_0.meta(
+  {
+    id: 'AnyVerifyingKey',
+  },
+)
 export const ApChannel: z.ZodObject<{
   channel: z.ZodInt
   /**
@@ -425,6 +431,9 @@ export const FileType: z.ZodEnum<{
   .meta({
     id: 'FileType',
   })
+export const FollowLogsParams: typeof empty = /* @__PURE__ */ empty.meta({
+  id: 'FollowLogsParams',
+})
 export const GetArgs: z.ZodObject<{ names: z.ZodArray<z.ZodString> }> =
   /* @__PURE__ */ object({ names: z.array(z.string()) }).meta({
     id: 'GetArgs',
@@ -433,15 +442,20 @@ export const GetFileArgs: z.ZodObject<{ path: z.ZodString }> =
   /* @__PURE__ */ object({ path: z.string() }).meta({
     id: 'GetFileArgs',
   })
+export const Guid: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
+  id: 'Guid',
+})
 
 /**
- * Unguessable random token, used as a one-time REST endpoint path segment.
- * Wraps `startos::util::new_guid()` (160-bit, base32-encoded, 32 chars).
+ * Proof that a set of auth keys was unenrolled — removed from the persisted
+ * and ephemeral signer stores with any continuations they opened killed.
+ * Obtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]
+ * from inside a db transaction.
  */
-export const Guid: z.ZodString = /* @__PURE__ */ z.string().meta({
-  id: 'Guid',
+export const HasUnenrolledKeys: z.ZodNull = /* @__PURE__ */ z.null().meta({
+  id: 'HasUnenrolledKeys',
   description:
-    'Unguessable random token, used as a one-time REST endpoint path segment.\nWraps `startos::util::new_guid()` (160-bit, base32-encoded, 32 chars).',
+    'Proof that a set of auth keys was unenrolled — removed from the persisted\nand ephemeral signer stores with any continuations they opened killed.\nObtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]\nfrom inside a db transaction.',
 })
 export const InjectedDnsRecord: z.ZodObject<{
   name: z.ZodString
@@ -542,6 +556,10 @@ export const IoFormat: z.ZodEnum<{
   .meta({
     id: 'IoFormat',
   })
+export const KillParams: z.ZodObject<{ ids: z.ZodArray<z.ZodString> }> =
+  /* @__PURE__ */ object({ ids: z.array(z.string()) }).meta({
+    id: 'KillParams',
+  })
 export const LanIpv4Response: z.ZodObject<{
   address: z.ZodString
   netmask: z.ZodString
@@ -570,7 +588,8 @@ export const LanIpv6Response: z.ZodObject<{
   slaac: z.ZodBoolean
   dhcpv6: z.ZodBoolean
   /**
-   * Prefix delegation length, e.g. 64
+   * LAN prefix length in effect: the configured length, lengthened to the
+   * delegated prefix when shorter.
    */
   prefix: z.ZodInt
   /**
@@ -581,17 +600,22 @@ export const LanIpv6Response: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
   /**
-   * WAN prefix length (read-only context for the UI)
+   * Length of the global prefix the ISP delegated; null without one.
    */
-  wan_prefix: z.ZodInt
+  delegated_prefix: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
 }> = /* @__PURE__ */ object({
   slaac: z.boolean(),
   dhcpv6: z.boolean(),
   /**
-   * Prefix delegation length, e.g. 64
+   * LAN prefix length in effect: the configured length, lengthened to the
+   * delegated prefix when shorter.
    */
   prefix: z.int().meta({
-    description: 'Prefix delegation length, e.g. 64',
+    description:
+      'LAN prefix length in effect: the configured length, lengthened to the\ndelegated prefix when shorter.',
   }),
   /**
    * Current IPv6 address (if assigned)
@@ -600,10 +624,14 @@ export const LanIpv6Response: z.ZodObject<{
     description: 'Current IPv6 address (if assigned)',
   }),
   /**
-   * WAN prefix length (read-only context for the UI)
+   * Length of the global prefix the ISP delegated; null without one.
    */
-  wan_prefix: z.int().meta({
-    description: 'WAN prefix length (read-only context for the UI)',
+  delegated_prefix: wire(
+    z.int().nullable().optional(),
+    z.int().nullable(),
+  ).meta({
+    description:
+      'Length of the global prefix the ISP delegated; null without one.',
   }),
 }).meta({
   id: 'LanIpv6Response',
@@ -611,13 +639,27 @@ export const LanIpv6Response: z.ZodObject<{
 export const LanIpv6SetRequest: z.ZodObject<{
   slaac: z.ZodBoolean
   dhcpv6: z.ZodBoolean
-  prefix: z.ZodInt
+  /**
+   * Absent keeps the configured prefix length.
+   */
+  prefix: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
 }> = /* @__PURE__ */ object({
   slaac: z.boolean(),
   dhcpv6: z.boolean(),
-  prefix: z.int(),
+  /**
+   * Absent keeps the configured prefix length.
+   */
+  prefix: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description: 'Absent keeps the configured prefix length.',
+  }),
 }).meta({
   id: 'LanIpv6SetRequest',
+})
+export const ListParams: typeof empty = /* @__PURE__ */ empty.meta({
+  id: 'ListParams',
 })
 export const LogEntry: z.ZodObject<{
   timestamp: z.ZodString
@@ -628,117 +670,13 @@ export const LogEntry: z.ZodObject<{
 }).meta({
   id: 'LogEntry',
 })
-export const LoginParams: z.ZodObject<{
-  password: z.ZodString
-  userAgent: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  password: z.string(),
-  userAgent: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'LoginParams',
-})
-export const LoginRes: z.ZodObject<{ session: z.ZodString }> =
-  /* @__PURE__ */ object({ session: z.string() }).meta({
-    id: 'LoginRes',
-  })
-export const LogoutParams: z.ZodObject<{
-  /**
-   * Session hash injected by auth middleware
-   */
-  sessionHash: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  /**
-   * Session hash injected by auth middleware
-   */
-  sessionHash: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ).meta({
-    description: 'Session hash injected by auth middleware',
-  }),
-}).meta({
+export const LogoutParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'LogoutParams',
 })
 export const MacStrategy: z.ZodEnum<{ router: 'router'; custom: 'custom' }> =
   /* @__PURE__ */ z.enum(['router', 'custom']).meta({
     id: 'MacStrategy',
   })
-export const OutboundVpn: z.ZodObject<{
-  id: z.ZodString
-  label: z.ZodString
-  target: z.ZodString
-  enabled: z.ZodBoolean
-  used_by: z.ZodArray<z.ZodString>
-  /**
-   * True when the VPN's WireGuard interface has at least one IPv6 address;
-   * false means profiles routed through this VPN will have IPv6 disabled
-   * (per `outbound_supports_ipv6` in profiles.rs).
-   */
-  supports_ipv6: z.ZodBoolean
-  /**
-   * Interface MTU, if explicitly set. `None` means the kernel default
-   * (1420 on a clean path) is in effect. Editable via `update`.
-   */
-  mtu: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
-  /**
-   * The server is named by hostname; only `Internet` is a valid target.
-   */
-  hostname_endpoint: z.ZodBoolean
-  /**
-   * Resolvers reached through the tunnel. Empty leaves profiles routed through
-   * this VPN on the system DNS servers, or on the ISP's outside the tunnel.
-   */
-  dns: z.ZodArray<z.ZodString>
-}> = /* @__PURE__ */ object({
-  id: z.string(),
-  label: z.string(),
-  target: z.string(),
-  enabled: z.boolean(),
-  used_by: z.array(z.string()),
-  /**
-   * True when the VPN's WireGuard interface has at least one IPv6 address;
-   * false means profiles routed through this VPN will have IPv6 disabled
-   * (per `outbound_supports_ipv6` in profiles.rs).
-   */
-  supports_ipv6: z.boolean().meta({
-    description:
-      "True when the VPN's WireGuard interface has at least one IPv6 address;\nfalse means profiles routed through this VPN will have IPv6 disabled\n(per `outbound_supports_ipv6` in profiles.rs).",
-  }),
-  /**
-   * Interface MTU, if explicitly set. `None` means the kernel default
-   * (1420 on a clean path) is in effect. Editable via `update`.
-   */
-  mtu: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      'Interface MTU, if explicitly set. `None` means the kernel default\n(1420 on a clean path) is in effect. Editable via `update`.',
-  }),
-  /**
-   * The server is named by hostname; only `Internet` is a valid target.
-   */
-  hostname_endpoint: z.boolean().meta({
-    description:
-      'The server is named by hostname; only `Internet` is a valid target.',
-  }),
-  /**
-   * Resolvers reached through the tunnel. Empty leaves profiles routed through
-   * this VPN on the system DNS servers, or on the ISP's outside the tunnel.
-   */
-  dns: z.array(z.string()).meta({
-    description:
-      "Resolvers reached through the tunnel. Empty leaves profiles routed through\nthis VPN on the system DNS servers, or on the ISP's outside the tunnel.",
-  }),
-}).meta({
-  id: 'OutboundVpn',
-})
 export const OutboundVpnCreateRequest: z.ZodObject<{
   label: z.ZodString
   target: z.ZodString
@@ -788,6 +726,16 @@ export const OutboundVpnSetEnabledRequest: z.ZodObject<{
 }> = /* @__PURE__ */ object({ id: z.string(), enabled: z.boolean() }).meta({
   id: 'OutboundVpnSetEnabledRequest',
 })
+export const OutboundVpnStatus: z.ZodEnum<{
+  disabled: 'disabled'
+  connected: 'connected'
+  idle: 'idle'
+  'not-responding': 'not-responding'
+}> = /* @__PURE__ */ z
+  .enum(['disabled', 'connected', 'idle', 'not-responding'])
+  .meta({
+    id: 'OutboundVpnStatus',
+  })
 export const OutboundVpnUpdateRequest: z.ZodObject<{
   id: z.ZodString
   label: z.ZodString
@@ -1076,6 +1024,36 @@ export const Section: z.ZodObject<{
 }).meta({
   id: 'Section',
 })
+export const Session: z.ZodObject<{
+  /**
+   * A friendly name for the key, if one was assigned at enrollment (e.g.
+   * tunnel device keys). UI-enrolled keys are unnamed.
+   */
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  loggedIn: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+  lastActive: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+  userAgent: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * A friendly name for the key, if one was assigned at enrollment (e.g.
+   * tunnel device keys). UI-enrolled keys are unnamed.
+   */
+  name: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.',
+  }),
+  loggedIn: wire(z.string().optional(), z.string()),
+  lastActive: wire(z.string().optional(), z.string()),
+  userAgent: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'Session',
+})
 export const SetAutoForwardRequest: z.ZodObject<{
   mac: z.ZodString
   allow: z.ZodBoolean
@@ -1102,10 +1080,27 @@ export const SetFileArgs: z.ZodObject<{
 }).meta({
   id: 'SetFileArgs',
 })
-export const SetInitialPasswordParams: z.ZodObject<{ password: z.ZodString }> =
-  /* @__PURE__ */ object({ password: z.string() }).meta({
-    id: 'SetInitialPasswordParams',
-  })
+export const SetInitialPasswordParams: z.ZodObject<{
+  password: z.ZodString
+  /**
+   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
+   */
+  timezone: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  password: z.string(),
+  /**
+   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
+   */
+  timezone: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'IANA timezone name, e.g. "America/New_York". An unknown name is skipped.',
+  }),
+}).meta({
+  id: 'SetInitialPasswordParams',
+})
 export const SetPreferencesReq: z.ZodObject<{
   language: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1125,6 +1120,12 @@ export const SetPreferencesReq: z.ZodObject<{
   remoteAccess: wire(z.string().nullable().optional(), z.string().nullable()),
 }).meta({
   id: 'SetPreferencesReq',
+})
+export const SetRouterAdvertisementsReq: z.ZodObject<{
+  mac: z.ZodString
+  allow: z.ZodBoolean
+}> = /* @__PURE__ */ object({ mac: z.string(), allow: z.boolean() }).meta({
+  id: 'SetRouterAdvertisementsReq',
 })
 export const SetTimezoneParams: z.ZodObject<{
   /**
@@ -1450,6 +1451,18 @@ export const ActivityListResponse: z.ZodObject<{
 }).meta({
   id: 'ActivityListResponse',
 })
+
+/**
+ * The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled
+ * key is a sign-in: it carries the same metadata a session used to (when it
+ * was created, when it was last used, and the user agent that enrolled it).
+ */
+export const AuthKeys: z.ZodRecord<z.ZodString, typeof Session> =
+  /* @__PURE__ */ z.record(z.string(), Session).meta({
+    id: 'AuthKeys',
+    description:
+      "The server's enrolled auth keys, keyed by their PEM encoding. Each enrolled\nkey is a sign-in: it carries the same metadata a session used to (when it\nwas created, when it was last used, and the user agent that enrolled it).",
+  })
 export const BackupCreateRes: z.ZodObject<{
   guid: typeof Guid
   filename: z.ZodString
@@ -1539,6 +1552,12 @@ export const Device: z.ZodObject<{
    * VPN peer).
    */
   allow_dns_injection: z.ZodBoolean
+  /**
+   * Whether the router forwards this device's IPv6 router advertisements
+   * to the rest of the LAN (`devices set-router-advertisements`). Always
+   * false for a VPN peer.
+   */
+  allow_router_advertisements: z.ZodBoolean
   security_profile: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
@@ -1601,6 +1620,15 @@ export const Device: z.ZodObject<{
   allow_dns_injection: z.boolean().meta({
     description:
       "Whether this device may publish DNS records into the router's resolver\n(`devices set-dns-injection`; `vpn-server peer-set-dns-injection` for a\nVPN peer).",
+  }),
+  /**
+   * Whether the router forwards this device's IPv6 router advertisements
+   * to the rest of the LAN (`devices set-router-advertisements`). Always
+   * false for a VPN peer.
+   */
+  allow_router_advertisements: z.boolean().meta({
+    description:
+      "Whether the router forwards this device's IPv6 router advertisements\nto the rest of the LAN (`devices set-router-advertisements`). Always\nfalse for a VPN peer.",
   }),
   security_profile: wire(
     z.string().nullable().optional(),
@@ -1736,10 +1764,151 @@ export const EthernetSetResult: z.ZodObject<{
 }).meta({
   id: 'EthernetSetResult',
 })
+export const FollowLogsRes: z.ZodObject<{
+  /**
+   * Streams each new [`LogEntry`] as JSON from `/ws/rpc/{guid}`.
+   */
+  guid: typeof Guid
+}> = /* @__PURE__ */ object({
+  /**
+   * Streams each new [`LogEntry`] as JSON from `/ws/rpc/{guid}`.
+   */
+  guid: Guid.meta({
+    description: 'Streams each new [`LogEntry`] as JSON from `/ws/rpc/{guid}`.',
+  }),
+}).meta({
+  id: 'FollowLogsRes',
+})
+export const LoginParams: z.ZodObject<{
+  password: z.ZodString
+  /**
+   * The PEM-encoded public key to enroll on a successful login. The login
+   * request itself is signed with the matching secret key, so enrollment
+   * proves possession.
+   */
+  pubkey: typeof AnyVerifyingKey
+  /**
+   * Enroll in memory only, never persisted (kiosk mode, which re-enrolls
+   * on every browser restart and would otherwise accumulate keys).
+   */
+  ephemeral: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  password: z.string(),
+  /**
+   * The PEM-encoded public key to enroll on a successful login. The login
+   * request itself is signed with the matching secret key, so enrollment
+   * proves possession.
+   */
+  pubkey: AnyVerifyingKey.meta({
+    description:
+      'The PEM-encoded public key to enroll on a successful login. The login\nrequest itself is signed with the matching secret key, so enrollment\nproves possession.',
+  }),
+  /**
+   * Enroll in memory only, never persisted (kiosk mode, which re-enrolls
+   * on every browser restart and would otherwise accumulate keys).
+   */
+  ephemeral: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Enroll in memory only, never persisted (kiosk mode, which re-enrolls\non every browser restart and would otherwise accumulate keys).',
+  }),
+}).meta({
+  id: 'LoginParams',
+})
 export const LogsResponse: z.ZodObject<{
   entries: z.ZodArray<typeof LogEntry>
 }> = /* @__PURE__ */ object({ entries: z.array(LogEntry) }).meta({
   id: 'LogsResponse',
+})
+export const OutboundVpn: z.ZodObject<{
+  id: z.ZodString
+  label: z.ZodString
+  target: z.ZodString
+  enabled: z.ZodBoolean
+  used_by: z.ZodArray<z.ZodString>
+  /**
+   * True when the VPN's WireGuard interface has at least one IPv6 address;
+   * false means profiles routed through this VPN will have IPv6 disabled
+   * (per `outbound_supports_ipv6` in profiles.rs).
+   */
+  supports_ipv6: z.ZodBoolean
+  /**
+   * Interface MTU, if explicitly set. `None` means the kernel default
+   * (1420 on a clean path) is in effect. Editable via `update`.
+   */
+  mtu: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  /**
+   * The server is named by hostname; only `Internet` is a valid target.
+   */
+  hostname_endpoint: z.ZodBoolean
+  /**
+   * Resolvers reached through the tunnel. Empty leaves profiles routed through
+   * this VPN on the system DNS servers, or on the ISP's outside the tunnel.
+   */
+  dns: z.ZodArray<z.ZodString>
+  status: typeof OutboundVpnStatus
+  /**
+   * Seconds since the tunnel's latest handshake, measured on the router.
+   * `None` when it has never completed one.
+   */
+  last_handshake_secs: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+}> = /* @__PURE__ */ object({
+  id: z.string(),
+  label: z.string(),
+  target: z.string(),
+  enabled: z.boolean(),
+  used_by: z.array(z.string()),
+  /**
+   * True when the VPN's WireGuard interface has at least one IPv6 address;
+   * false means profiles routed through this VPN will have IPv6 disabled
+   * (per `outbound_supports_ipv6` in profiles.rs).
+   */
+  supports_ipv6: z.boolean().meta({
+    description:
+      "True when the VPN's WireGuard interface has at least one IPv6 address;\nfalse means profiles routed through this VPN will have IPv6 disabled\n(per `outbound_supports_ipv6` in profiles.rs).",
+  }),
+  /**
+   * Interface MTU, if explicitly set. `None` means the kernel default
+   * (1420 on a clean path) is in effect. Editable via `update`.
+   */
+  mtu: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description:
+      'Interface MTU, if explicitly set. `None` means the kernel default\n(1420 on a clean path) is in effect. Editable via `update`.',
+  }),
+  /**
+   * The server is named by hostname; only `Internet` is a valid target.
+   */
+  hostname_endpoint: z.boolean().meta({
+    description:
+      'The server is named by hostname; only `Internet` is a valid target.',
+  }),
+  /**
+   * Resolvers reached through the tunnel. Empty leaves profiles routed through
+   * this VPN on the system DNS servers, or on the ISP's outside the tunnel.
+   */
+  dns: z.array(z.string()).meta({
+    description:
+      "Resolvers reached through the tunnel. Empty leaves profiles routed through\nthis VPN on the system DNS servers, or on the ISP's outside the tunnel.",
+  }),
+  status: OutboundVpnStatus,
+  /**
+   * Seconds since the tunnel's latest handshake, measured on the router.
+   * `None` when it has never completed one.
+   */
+  last_handshake_secs: wire(
+    z.int().nullable().optional(),
+    z.int().nullable(),
+  ).meta({
+    description:
+      "Seconds since the tunnel's latest handshake, measured on the router.\n`None` when it has never completed one.",
+  }),
+}).meta({
+  id: 'OutboundVpn',
 })
 export const PeerAddArgs: z.ZodObject<{
   /**
@@ -2548,6 +2717,18 @@ export const PublishedPortsSetResult: z.ZodObject<{
   description:
     '[`set`] response. A non-empty collision list means nothing was applied —\nthe caller confirms and re-saves; empty means the request was applied.',
 })
+export const SessionList: z.ZodObject<{
+  current: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  sessions: typeof AuthKeys
+}> = /* @__PURE__ */ object({
+  current: wire(z.string().nullable().optional(), z.string().nullable()),
+  sessions: AuthKeys,
+}).meta({
+  id: 'SessionList',
+})
 
 /**
  * Response containing all VPN servers
@@ -2624,15 +2805,39 @@ export const Api = {
         },
         login: {
           _PARAMS: /* @__PURE__ */ LoginParams,
-          _RETURN: /* @__PURE__ */ LoginRes,
+          _RETURN: /* @__PURE__ */ z.null(),
         },
         logout: {
           _PARAMS: /* @__PURE__ */ LogoutParams,
-          _RETURN: /* @__PURE__ */ z.null(),
+          _RETURN: /* @__PURE__ */ HasUnenrolledKeys.nullable(),
+        },
+        session: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            kill: {
+              _PARAMS: /* @__PURE__ */ KillParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            list: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                ListParams,
+              ),
+              _RETURN: /* @__PURE__ */ SessionList,
+            },
+          },
         },
         'set-initial-password': {
           _PARAMS: /* @__PURE__ */ SetInitialPasswordParams,
-          _RETURN: /* @__PURE__ */ LoginRes,
+          _RETURN: /* @__PURE__ */ z.null(),
         },
         'set-password': {
           _PARAMS: /* @__PURE__ */ ResetPasswordParams,
@@ -2709,6 +2914,13 @@ export const Api = {
         },
         'set-dns-injection': {
           _PARAMS: /* @__PURE__ */ SetDnsInjectionReq.meta({
+            description:
+              'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
+          }),
+          _RETURN: /* @__PURE__ */ z.null(),
+        },
+        'set-router-advertisements': {
+          _PARAMS: /* @__PURE__ */ SetRouterAdvertisementsReq.meta({
             description:
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
@@ -3270,6 +3482,10 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ LogsResponse,
+        },
+        'logs-follow': {
+          _PARAMS: /* @__PURE__ */ FollowLogsParams,
+          _RETURN: /* @__PURE__ */ FollowLogsRes,
         },
         'newer-versions': {
           _PARAMS: /* @__PURE__ */ z.intersection(

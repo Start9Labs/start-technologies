@@ -25,11 +25,12 @@ use crate::context::config::{CONFIG_PATH, ContextConfig};
 use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::DbContext;
 use crate::middleware::auth::local::{LocalAuthContext, dial_addr, is_loopback, local_auth_header};
-use crate::middleware::auth::signature::{NonceCache, SignatureAuthContext};
+use crate::middleware::auth::signature::{NonceCache, SignatureAuthContext, SignatureAuthMetadata};
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::device_info::{DEVICE_INFO_HEADER, DeviceInfo};
 use crate::registry::migrations::run_migrations;
+use crate::registry::package::icon::{icons_dir, referenced_icons, sweep_icons};
 use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
 use crate::sign::AnyVerifyingKey;
@@ -58,6 +59,9 @@ pub struct RegistryConfig {
     pub tor_proxy: Option<Url>,
     #[arg(short = 'd', long = "datadir", help = "help.arg.data-directory")]
     pub datadir: Option<PathBuf>,
+    #[arg(long, help = "help.arg.registry-startwrt")]
+    #[serde(default)]
+    pub startwrt: bool,
 }
 impl ContextConfig for RegistryConfig {
     fn next(&mut self) -> Option<PathBuf> {
@@ -68,6 +72,7 @@ impl ContextConfig for RegistryConfig {
         self.registry_hostname.append(&mut other.registry_hostname);
         self.tor_proxy = self.tor_proxy.take().or(other.tor_proxy);
         self.datadir = self.datadir.take().or(other.datadir);
+        self.startwrt |= other.startwrt;
     }
 }
 
@@ -85,6 +90,7 @@ pub struct RegistryContextSeed {
     pub listen: SocketAddr,
     pub db: TypedPatchDb<RegistryDatabase>,
     pub datadir: PathBuf,
+    pub startwrt: bool,
     pub rpc_continuations: RpcContinuations,
     pub open_authed_continuations: OpenAuthedContinuations<Option<InternedString>>,
     pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
@@ -112,7 +118,12 @@ impl RegistryContext {
         if db.dump(&ROOT).await.value.is_null() {
             db.put(&ROOT, &RegistryDatabase::init()).await?;
         }
-        db.mutate(|db| run_migrations(db)).await.result?;
+        db.mutate(|db| run_migrations(db, &datadir)).await.result?;
+        sweep_icons(
+            &icons_dir(&datadir),
+            &referenced_icons(&db.peek().await.into_index().into_package().de()?),
+        )
+        .await?;
 
         Self::init_auth_cookie().await?;
 
@@ -155,6 +166,7 @@ impl RegistryContext {
             listen: config.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN),
             db,
             datadir,
+            startwrt: config.startwrt,
             rpc_continuations: RpcContinuations::new(),
             open_authed_continuations: OpenAuthedContinuations::new(),
             auth_sig_nonce_cache: SyncMutex::new(Default::default()),
@@ -286,15 +298,13 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
             .push("v0");
 
         method = method.strip_prefix("registry.").unwrap_or(method);
-        let sig_context = registry.host_str().map(InternedString::from);
         let is_onion = registry.host_str().map_or(false, |h| h.ends_with(".onion"));
 
         let mut res = match crate::middleware::auth::signature::call_remote_with_client(
-            self,
+            None,
             self.client.get(),
             registry,
             headers,
-            sig_context.as_deref(),
             method,
             params.clone(),
         )
@@ -339,6 +349,8 @@ pub struct RegistryAuthMetadata {
     #[serde(default)]
     admin: bool,
 }
+
+impl SignatureAuthMetadata for RegistryAuthMetadata {}
 
 #[derive(Serialize, Deserialize, VisitFields)]
 pub struct AdminLogRecord {
@@ -389,6 +401,7 @@ impl SignatureAuthContext for RegistryContext {
     }
     async fn sig_context(
         &self,
+        _extensions: &http::Extensions,
     ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send {
         self.hostnames.iter().map(Ok)
     }

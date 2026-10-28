@@ -394,8 +394,12 @@ export type TaskSeverity = z.output<typeof schemas.TaskSeverity>
 export type TaskSeverityInput = z.input<typeof schemas.TaskSeverity>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TimeInfoInput = z.input<typeof schemas.TimeInfo>
-export type UpdateSystemParams = z.output<typeof schemas.UpdateSystemParams>
-export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
+export type TrustedOsUpdateSigner = z.output<
+  typeof schemas.TrustedOsUpdateSigner
+>
+export type TrustedOsUpdateSignerInput = z.input<
+  typeof schemas.TrustedOsUpdateSigner
+>
 
 /**
  * How the OS reverse proxy validates the container's TLS certificate when it
@@ -778,10 +782,26 @@ export type NamedHealthCheckResultInput = z.input<
 >
 export type Notification = z.output<typeof schemas.Notification>
 export type NotificationInput = z.input<typeof schemas.Notification>
+export type OsUpdateSignerKeyParams = z.output<
+  typeof schemas.OsUpdateSignerKeyParams
+>
+export type OsUpdateSignerKeyParamsInput = z.input<
+  typeof schemas.OsUpdateSignerKeyParams
+>
 export type OsVersionInfo = z.output<typeof schemas.OsVersionInfo>
 export type OsVersionInfoInput = z.input<typeof schemas.OsVersionInfo>
 export type PackageBackupInfo = z.output<typeof schemas.PackageBackupInfo>
 export type PackageBackupInfoInput = z.input<typeof schemas.PackageBackupInfo>
+
+/**
+ * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
+ */
+export type PackageIcon = z.output<typeof schemas.PackageIcon>
+
+/**
+ * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
+ */
+export type PackageIconInput = z.input<typeof schemas.PackageIcon>
 export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PackageInfoShortInput = z.input<typeof schemas.PackageInfoShort>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
@@ -926,6 +946,12 @@ export type SetIconParams = z.output<typeof schemas.SetIconParams>
 export type SetIconParamsInput = z.input<typeof schemas.SetIconParams>
 export type SetMainStatus = z.output<typeof schemas.SetMainStatus>
 export type SetMainStatusInput = z.input<typeof schemas.SetMainStatus>
+export type SetOsUpdateSignerParams = z.output<
+  typeof schemas.SetOsUpdateSignerParams
+>
+export type SetOsUpdateSignerParamsInput = z.input<
+  typeof schemas.SetOsUpdateSignerParams
+>
 export type SetOutboundGatewayParams = z.output<
   typeof schemas.SetOutboundGatewayParams
 >
@@ -1090,6 +1116,8 @@ export type StatusInfo = z.output<typeof schemas.StatusInfo>
 export type StatusInfoInput = z.input<typeof schemas.StatusInfo>
 export type Task = z.output<typeof schemas.Task>
 export type TaskParams = z.input<typeof schemas.Task>
+export type UpdateSystemParams = z.output<typeof schemas.UpdateSystemParams>
+export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type UrlPluginClearUrlsParams = z.output<
   typeof schemas.UrlPluginClearUrlsParams
 >

@@ -442,7 +442,7 @@ fn display_wifi_info(params: WithIoFormat<Empty>, info: WifiListInfo) -> Result<
         info.country.as_ref().map(|c| c.alpha2()).unwrap_or("00"),
         &format!("{}", info.ethernet)
     ]);
-    table_global.print_tty(false).unwrap();
+    print_table(&table_global)?;
 
     let mut table_ssids = Table::new();
     table_ssids.add_row(row![bc => "SSID", "STRENGTH"]);
@@ -460,7 +460,7 @@ fn display_wifi_info(params: WithIoFormat<Empty>, info: WifiListInfo) -> Result<
             .for_each(drop);
         table_ssids.add_row(row);
     }
-    table_ssids.print_tty(false).unwrap();
+    print_table(&table_ssids)?;
 
     let mut table_global = Table::new();
     table_global.add_row(row![bc =>
@@ -476,7 +476,7 @@ fn display_wifi_info(params: WithIoFormat<Empty>, info: WifiListInfo) -> Result<
         ]);
     }
 
-    table_global.print_tty(false)?;
+    print_table(&table_global)?;
     Ok(())
 }
 
@@ -501,7 +501,7 @@ fn display_wifi_list(params: WithIoFormat<Empty>, info: Vec<WifiListOut>) -> Res
         ]);
     }
 
-    table_global.print_tty(false)?;
+    print_table(&table_global)?;
     Ok(())
 }
 

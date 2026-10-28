@@ -750,7 +750,7 @@ pub fn binding<C: Context, Kind: HostApiKind>()
                         ]);
                     }
 
-                    table.print_tty(false)?;
+                    print_table(&table)?;
 
                     Ok(())
                 })

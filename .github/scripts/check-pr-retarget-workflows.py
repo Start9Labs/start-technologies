@@ -6,6 +6,7 @@ WORKFLOWS = Path('.github/workflows')
 RETARGET = WORKFLOWS / 'pr-retarget.yml'
 CONFLICT = WORKFLOWS / 'pr-retarget-conflict.yml'
 TARGETS = {
+    'rust-builder.yaml',
     'start-cli.yaml',
     'start-registry.yaml',
     'start-tunnel.yaml',
@@ -15,6 +16,7 @@ TARGETS = {
 }
 EXPECTED_PULL_REQUEST_WORKFLOWS = {
     'conflict-markers.yml',
+    'rust-builder.yaml',
     'start-cli.yaml',
     'start-registry.yaml',
     'start-tunnel.yaml',
@@ -126,6 +128,7 @@ assert len(set(groups.values())) == len(groups), groups
 
 expected_call_permissions = {
     'test': {('contents', 'read'), ('pull-requests', 'read')},
+    'rust-builder': {('contents', 'read'), ('packages', 'write')},
     'start-cli': {('contents', 'read')},
     'start-registry': {('contents', 'read'), ('packages', 'write')},
     'start-tunnel': {('contents', 'read')},
@@ -141,6 +144,14 @@ assert job_permissions(registry, 'create-image') == {
     ('contents', 'read'),
     ('packages', 'write'),
 }
+
+builder = (WORKFLOWS / 'rust-builder.yaml').read_text()
+for job in ('build', 'publish'):
+    assert job_permissions(builder, job) == {
+        ('contents', 'read'),
+        ('packages', 'write'),
+    }
+assert "github.ref == 'refs/heads/master' && github.event_name != 'pull_request'" in builder
 
 conflict = CONFLICT.read_text()
 conflict_trigger = conflict.split('\npermissions:', 1)[0]

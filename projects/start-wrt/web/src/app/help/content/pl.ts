@@ -164,9 +164,9 @@ IPv6 umożliwia bezpośrednią osiągalność Twoich urządzeń z internetu bez 
 
 ### Długość prefiksu
 
-Długość prefiksu określa rozmiar przestrzeni adresowej IPv6 Twojej sieci LAN. Musi być **większa** (wyższa liczba) niż prefiks WAN, aby utworzyć prawidłową podsieć.
+Długość prefiksu określa rozmiar przestrzeni adresowej IPv6 Twojej sieci LAN. Wybierz wartość od /48 do /64, nie krótszą niż prefiks delegowany przez dostawcę. Podsumowanie pokazuje ten rozmiar jako **Delegowany prefiks** (**Brak**, gdy nie ma delegacji).
 
-Na przykład, jeśli Twój ISP przydziela Ci prefiks /48, możesz użyć /56, /60 lub /64 dla swojej sieci LAN. Dla większości sieci domowych zalecany jest prefiks /64.`,
+Na przykład przy delegacji /56 możesz użyć /56, /60 lub /64 dla swojej sieci LAN; przy delegacji /64 użyj /64. Dla większości sieci domowych zalecany jest prefiks /64.`,
   '/outbound': `## Wychodzące VPN
 
 Wychodzące VPN kierują Twój ruch internetowy przez szyfrowane tunele do zdalnych serwerów, zwiększając prywatność i bezpieczeństwo.

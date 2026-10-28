@@ -190,11 +190,11 @@ test('tag compiler workflow with local commit API', t => {
   )
   f.write(
     'projects/start-sdk/changelog/patch-fixed-released.md',
-    '- Released fix.\n\n- Second released fix.\n',
+    '---\nuser-facing: true\n---\n\n- Released fix.\n\n- Second released fix.\n',
   )
   f.write(
     'projects/start-sdk/changelog/patch-fixed-second-released.md',
-    '- Third released fix.\n',
+    '---\nuser-facing: false\n---\n\n- Third released fix.\n',
   )
   f.write('projects/start-sdk/CHANGELOG.md', '# Changelog\n')
   f.git('add', 'scripts', 'projects', 'package.json', '.prettierrc.json')
@@ -225,7 +225,7 @@ if (race) {
   writeFileSync(marker, '')
   payload.fileChanges = { deletions: [], additions: [{
     path: 'projects/start-sdk/changelog/patch-fixed-after-tag.md',
-    contents: Buffer.from('- New work after the tag.\n').toString('base64'),
+    contents: Buffer.from('---\nuser-facing: false\n---\n\n- New work after the tag.\n').toString('base64'),
   }] }
 }
 function git(args, input) {
@@ -305,6 +305,12 @@ console.log(JSON.stringify(race
     /New work after the tag\./,
   )
   assert.ok(!history.includes('New work after the tag.'))
+  const notesPath = 'projects/start-sdk/release-notes/1.2.3.md'
+  const notes = f.git('show', `origin/master:${notesPath}`)
+  assert.equal(
+    notes,
+    '## Highlights\n\n- Released fix.\n\n- Second released fix.\n',
+  )
   assert.match(result.stderr, /head moved/)
   const master = f.git('rev-parse', 'origin/master')
   result = f.run('bash', ['-c', shell], { encoding: 'utf8' })
@@ -314,6 +320,24 @@ console.log(JSON.stringify(race
     f.git('show', 'origin/master:projects/start-sdk/CHANGELOG.md'),
     history,
   )
+  assert.equal(f.git('show', `origin/master:${notesPath}`), notes)
+  f.git('read-tree', '-u', '--reset', 'start-sdk/v1.2.3')
+  f.env.PROJECT = 'start-sdk'
+  const archive = workflow
+    .slice(
+      workflow.indexOf(
+        '          git ls-tree -r --name-only origin/master -- projects/',
+      ),
+      workflow.indexOf('          git add -A'),
+    )
+    .split('\n')
+    .map(line => line.slice(10))
+    .join('\n')
+  const copied = f.run('bash', ['-euo', 'pipefail', '-c', archive], {
+    encoding: 'utf8',
+  })
+  assert.equal(copied.status, 0, copied.stdout + copied.stderr)
+  assert.equal(f.git('show', `:${notesPath}`), notes)
 })
 
 test('empty index makes no request', t => {

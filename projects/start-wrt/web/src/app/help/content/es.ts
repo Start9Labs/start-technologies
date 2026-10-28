@@ -164,9 +164,9 @@ IPv6 permite que tus dispositivos sean directamente accesibles desde internet si
 
 ### Longitud de prefijo
 
-La longitud de prefijo determina el tamaño del espacio de direcciones IPv6 de tu LAN. Debe ser **mayor** (un número más alto) que tu prefijo WAN para crear una subred válida.
+La longitud de prefijo determina el tamaño del espacio de direcciones IPv6 de tu LAN. Elige un valor de /48 a /64, no más corto que el prefijo delegado por tu proveedor. El resumen muestra ese tamaño como **Prefijo delegado** (**Ninguno** si no hay delegación).
 
-Por ejemplo, si tu ISP te asigna un prefijo /48, puedes usar /56, /60 o /64 para tu LAN. Se recomienda un prefijo /64 para la mayoría de las redes domésticas.`,
+Por ejemplo, con una delegación /56 puedes usar /56, /60 o /64 para tu LAN; con una delegación /64, usa /64. Se recomienda un prefijo /64 para la mayoría de las redes domésticas.`,
   '/outbound': `## VPN salientes
 
 Las VPN salientes enrutan tu tráfico de internet a través de túneles cifrados hacia servidores remotos, mejorando la privacidad y la seguridad.

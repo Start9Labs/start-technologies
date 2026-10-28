@@ -15,15 +15,15 @@ The admin password is user-chosen (minimum 12 characters, any format) and stored
 
 ### Password lifecycle
 
-| Stage                          | WiFi password                                  | Admin password                                   | Other settings                           |
-| ------------------------------ | ---------------------------------------------- | ------------------------------------------------ | ---------------------------------------- |
-| **Manufacturing**              | Vendor programs EEPROM tag 0x2F                | Not set                                          | Default config                           |
-| **End user unboxing**          | Read from EEPROM on first boot, written to UCI | User creates via captive portal                  | User configures                          |
-| **Factory reset** (no microSD) | Re-read from EEPROM on reboot                  | Cleared — user sets via captive portal on reboot | Wiped (overlay gone), firmware unchanged |
-| **Reflash / Update** (microSD) | Re-read from EEPROM after reflash → reboot     | User sets in wizard before reboot                | **Preserved**, firmware replaced         |
-| **Fresh Start** (microSD)      | Re-read from EEPROM after reflash → reboot     | User sets in wizard before reboot                | Wiped, firmware replaced                 |
+| Stage                          | WiFi password                                                                                                            | Admin password                                   | Other settings                           |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ | ---------------------------------------- |
+| **Manufacturing**              | Vendor programs EEPROM tag 0x2F                                                                                          | Not set                                          | Default config                           |
+| **End user unboxing**          | Read from EEPROM on first boot, written to UCI                                                                           | User creates via captive portal                  | User configures                          |
+| **Factory reset** (no microSD) | Re-read from EEPROM on reboot                                                                                            | Cleared — user sets via captive portal on reboot | Wiped (overlay gone), firmware unchanged |
+| **Keep settings** (microSD)    | Carried over in the restored `/etc/config/wireless`; written from EEPROM instead if the old system had no admin password | User sets in wizard before reboot                | **Preserved**, firmware replaced         |
+| **Fresh Start** (microSD)      | Written from EEPROM by the wizard before reboot                                                                          | User sets in wizard before reboot                | Wiped, firmware replaced                 |
 
-If EEPROM tag 0x2F is missing or invalid (DIY install on a board the vendor never programmed, or a corrupt blob), **the AP does not come up**. The operator must connect over ethernet/serial and use `startwrt-cli set-wifi-password` (see "Manual password provisioning" below) to provision one into UCI.
+If EEPROM tag 0x2F is missing or invalid (DIY install on a board the vendor never programmed, or a corrupt blob), **the AP does not come up**. The operator must connect over ethernet (or serial) and either add a Wi-Fi password with the **Admin** profile in the web UI, which also enables the radios, or use `startwrt-cli set-wifi-password` (see "Manual password provisioning" below) to provision one into UCI.
 
 ### Storage Architecture
 
@@ -45,7 +45,7 @@ When EEPROM tag 0x2F is missing or invalid (DIY install, unprogrammed board), th
 - **Default mode** (`startwrt-cli set-wifi-password`) generates a random 12-character password from `PASSWORD_CHARS`, prints it to stdout, writes it to `/etc/config/wireless`, and reloads WiFi. The operator must record the printed password (it's the new sticker copy).
 - **Manual mode** (`startwrt-cli set-wifi-password --manual`) prompts for a password with hidden input + confirmation. Same validation: exactly 12 ASCII characters from `PASSWORD_CHARS`.
 
-**Persistence semantics:** the password set by this utility lives only in the overlay (`/etc/config/wireless`). Factory reset wipes the overlay → `restore_wifi_if_needed` re-reads EEPROM. If the EEPROM still has no tag 0x2F, the AP doesn't come up and the operator must run `set-wifi-password` again. EEPROM is canonical; the overlay is current state.
+**Persistence semantics:** the password set by this utility lives only in the overlay (`/etc/config/wireless`). Factory reset wipes the overlay → `restore_wifi_if_needed` re-reads EEPROM. If the EEPROM still has no tag 0x2F, the AP doesn't come up and the operator must provision a password again. EEPROM is canonical; the overlay is current state.
 
 ---
 
@@ -67,7 +67,7 @@ Manufacturing happens before the device leaves the vendor's facility. The vendor
 1. Returns early if an admin password is set in `/etc/shadow`. A factory reset clears it; a router that has been set up keeps its own Wi-Fi config, including one with no Admin password or with radios disabled.
 2. Reads EEPROM tag 0x2F, validating: ONIE magic, total_length, trailing CRC-32, tag presence, 12-byte length, every byte in `PASSWORD_CHARS`.
 3. On success: writes the password to UCI, runs `wifi reload`, and brings up SSID `StartWRT`.
-4. On any failure (including unprogrammed EEPROM): logs a warning and leaves the AP unconfigured. Recovery is via `startwrt-cli set-wifi-password` (above).
+4. On any failure (including unprogrammed EEPROM): logs a warning and leaves the AP unconfigured. Recovery is via an **Admin** Wi-Fi password added in the web UI, or `startwrt-cli set-wifi-password` (above).
 
 This means a vendor-programmed board "just works" out of the box — no on-device init step is required after firmware flashes.
 
@@ -92,11 +92,12 @@ The same charset is enforced by:
 
 ## Captive Portal Mechanism
 
-Both first-time setup (Part 2) and reflash (Part 3) use the same three-layer mechanism:
+Both first-time setup (Part 2) and reflash (Part 3) use the same mechanism:
 
-1. **DNS hijacking** — `dnsmasq` configured with `address=/#/<router IP>` makes all DNS queries resolve to the router.
-2. **Captive portal detection** — Modern OSes probe known URLs on network join. When DNS hijacking redirects these probes, the OS detects a captive portal and auto-opens a browser pointed at the router's setup page.
-3. **Host gate** — While the portal is active, the web server answers a request for any name other than `router.lan` or an address literal with a redirect to `http://router.lan/`, and declines the TLS handshake for any other SNI rather than presenting the `router.lan` certificate. A website typed into a browser therefore lands on the setup page under the router's own name, and the OS probes receive the redirect that signals a portal.
+1. **DNS hijacking** — `dnsmasq` configured with `address=/#/<router IP>` makes all DNS queries resolve to the router, and DHCP option 114 advertises `http://<router IP>/` as the captive-portal URI.
+2. **Forwarding block** — the nftables table `inet startwrt_captive` rejects forwarded traffic and redirects port 53 to the router, so clients using their own DNS server, Private DNS, or DNS-over-HTTPS stay inside the portal too.
+3. **Captive portal detection** — Modern OSes probe known URLs on network join. When DNS hijacking redirects these probes, the OS detects a captive portal and auto-opens a browser pointed at the router's setup page.
+4. **Host gate** — While the portal is active, the web server answers a request for any name other than `router.lan` or an address literal with a redirect to `http://router.lan/`, and declines the TLS handshake for any other SNI rather than presenting the `router.lan` certificate. A website typed into a browser therefore lands on the setup page under the router's own name, and the OS probes receive the redirect that signals a portal.
 
 Both scenarios use the same `StartWRT` SSID and the same EEPROM-derived WiFi password. They differ only in what the setup page does.
 
@@ -112,12 +113,12 @@ After unboxing or factory reset, WiFi works immediately but no admin password is
 3. User connects to WiFi "StartWRT" using sticker password
 4. No admin password → captive portal active (all DNS queries → router IP)
 5. OS detects captive portal → auto-opens browser with setup page
-6. GUI prompts: "Create your admin password"
+6. GUI prompts: "Create admin password"
 7. User creates password (minimum 12 characters)
 8. User confirms password
 9. SHA-512 crypt → /etc/shadow
 10. DNS hijacking disabled → normal browsing resumes
-11. User is logged in
+11. Page shows "Setup complete" and links to router.lan
 ```
 
 The captive portal ensures the admin password cannot be ignored — all internet access is blocked until setup is complete. If the user dismisses the captive portal popup, native apps and browsing remain broken until they open a browser and reach the setup page.
@@ -150,58 +151,58 @@ The user connects to `StartWRT` using the sticker password. The captive portal r
 
 ### Detection Logic
 
-| EEPROM tag 0x2F | eMMC has firmware | Wizard offers                                                             |
-| :-------------: | :---------------: | ------------------------------------------------------------------------- |
-|       Yes       |        Yes        | **Update** or **Fresh Start**                                             |
-|       Yes       |        No         | **Fresh Start** only                                                      |
-|       No        |        Yes        | Wizard reachable over ethernet only; offers **Update** or **Fresh Start** |
-|       No        |        No         | Wizard reachable over ethernet only; offers **Fresh Start**               |
+| EEPROM tag 0x2F | eMMC has firmware | Wizard offers                                                                    |
+| :-------------: | :---------------: | -------------------------------------------------------------------------------- |
+|       Yes       |        Yes        | **Keep settings** or **Fresh Start**                                             |
+|       Yes       |        No         | **Fresh Start** only                                                             |
+|       No        |        Yes        | Wizard reachable over ethernet only; offers **Keep settings** or **Fresh Start** |
+|       No        |        No         | Wizard reachable over ethernet only; offers **Fresh Start**                      |
 
-In the "No EEPROM password" rows, the post-reflash device boots without WiFi. The end user must run `startwrt-cli set-wifi-password` to recover.
+In the "No EEPROM password" rows, a Fresh Start boots without WiFi; Keep settings keeps the restored Wi-Fi config. Recover by adding an **Admin** Wi-Fi password in the web UI, or with `startwrt-cli set-wifi-password`.
 
-### Path A: Update (keep settings, new admin password)
+### Path A: Keep settings (new admin password)
 
 Physical access (microSD) = sufficient authorization.
 
 ```
  1. Detect onboard disk with config + firmware
- 2. User selects "Update"
+ 2. User selects "Keep settings"
  3. Create admin password (minimum 12 characters)
  4. Confirm admin password
- 5. Backup config files (sysupgrade conffiles list, excluding /etc/shadow)
+ 5. Backup config files (sysupgrade conffiles list, excluding /etc/shadow and /etc/startwrt/auth.db)
  6. Flash new firmware (replace squashfs base, wipe overlay)
  7. Provision eMMC boot partitions (boot0/boot1: bootinfo + FSBL, skipped when already current)
  8. Restore config files
  9. Write admin hash → /etc/shadow on new overlay
 10. Mark overlay FS_STATE_READY so first boot doesn't wipe it
-11. "Update complete. Remove microSD and reboot."
+11. "Setup complete" — "Remove the microSD card and reboot your router."
 ```
 
 On first boot from eMMC: the restored `/etc/config/wireless` brings up the AP. Admin login works immediately. Config files (firewall rules, WiFi profiles, SSH keys, etc.) are preserved via `sysupgrade` conffiles. User-installed package binaries are wiped — users must reinstall packages, though their config files are retained.
 
-`/etc/config/wireless` is preserved across Update so that user-customized VLAN/profile state survives. The wizard writes the admin password, so `restore_wifi_if_needed` never overwrites the restored config.
+`/etc/config/wireless` is preserved across Keep settings so that user-customized VLAN/profile state survives. The wizard writes the admin password, so `restore_wifi_if_needed` never overwrites the restored config.
 
 ### Path B: Fresh Start (full wipe, new admin password)
 
 ```
  1. User selects "Fresh Start"
- 2. Select Language, Country, Drive/Partition
- 3. Create admin password (minimum 12 characters)
- 4. Confirm admin password
- 5. Wipe onboard disk config overlay entirely
- 6. Flash fresh firmware
- 7. Provision eMMC boot partitions (boot0/boot1: bootinfo + FSBL, skipped when already current)
- 8. Write admin hash → /etc/shadow on new overlay
+ 2. Create admin password (minimum 12 characters)
+ 3. Confirm admin password
+ 4. Wipe onboard disk config overlay entirely
+ 5. Flash fresh firmware
+ 6. Provision eMMC boot partitions (boot0/boot1: bootinfo + FSBL, skipped when already current)
+ 7. Write admin hash → /etc/shadow on new overlay
+ 8. Write the browser's timezone → /etc/config/system on new overlay
  9. Write the EEPROM WiFi password → /etc/config/wireless on new overlay
 10. Mark overlay FS_STATE_READY
-11. "Setup complete. Remove microSD and reboot."
+11. "Setup complete" — "Remove the microSD card and reboot your router."
 ```
 
-On first boot from eMMC: the AP comes up with the sticker password. Admin login works immediately. All settings start fresh.
+On first boot from eMMC: the AP comes up with the sticker password. Admin login works immediately. All settings start fresh except the timezone, taken from the browser.
 
 ### Package Management
 
-All packages required by StartWRT are included in the firmware image. Both Update and Fresh Start wipe the overlay, so user-installed package binaries are always removed to avoid conflicts with the new firmware or UCI config files. The Update path preserves config files via `sysupgrade` conffiles — so package configs survive even though binaries are wiped. Users will need to reinstall any additional packages after reflash.
+All packages required by StartWRT are included in the firmware image. Both Keep settings and Fresh Start wipe the overlay, so user-installed package binaries are always removed to avoid conflicts with the new firmware or UCI config files. The Keep settings path preserves config files via `sysupgrade` conffiles — so package configs survive even though binaries are wiped. Users will need to reinstall any additional packages after reflash.
 
 ### Web UI Architecture
 
@@ -211,7 +212,7 @@ All packages required by StartWRT are included in the firmware image. Both Updat
 | **Backend**  | `startwrt-ctrld` in "setup mode"                     |
 | **Access**   | Captive portal (DNS hijack → any URL reaches wizard) |
 
-Setup mode is detected by `setup::is_setup_mode`: if the boot device is _not_ an eMMC, the daemon enters setup mode. The daemon mounts the same RPC surface and HTTP routes in both modes; what the wizard relies on is that `setup.status` requires no authentication and `/api/setup/flash` is reachable, while everything else remains behind session auth.
+Setup mode is detected by `setup::is_setup_mode`: if the boot device is _not_ an eMMC, the daemon enters setup mode. The daemon mounts the same RPC surface and HTTP routes in both modes; what the wizard relies on is that `setup.status` requires no authentication and `/api/setup/flash` sits outside the RPC session middleware. Other RPC methods need a session, except `auth.check-initialized`, `system.info`, `system.newer-versions`, and `system.get-timezones` (no auth) and the login methods `auth.login` and `auth.set-initial-password`.
 
 ### Boot Detection
 
@@ -220,16 +221,14 @@ microSD boot (setup mode)?
 ├── Yes → Read EEPROM tag 0x2F
 │         ├── Found → Start "StartWRT" AP (max_num_sta=1) → captive portal → wizard
 │         └── Missing → Skip AP setup; wizard reachable over ethernet only
-└── No  → Normal boot
-          1. WiFi key present in /etc/config/wireless?
-          │   ├── Yes → skip restore
-          │   └── No  → Read EEPROM tag 0x2F
-          │             ├── Found → Write to UCI, reload WiFi
-          │             └── Missing → Log warning, no AP. Recover via
-          │                            startwrt-cli set-wifi-password
-          2. Admin password set?
-              ├── Yes → Normal operation
-              └── No  → Captive portal active (forces admin setup before normal browsing)
+└── No  → Normal boot: admin password set in /etc/shadow?
+          ├── Yes → Normal operation (Wi-Fi config left as is)
+          └── No  → Captive portal active (forces admin setup before normal browsing),
+                    and read EEPROM tag 0x2F:
+                    ├── Found → Write to UCI, reload WiFi
+                    └── Missing → Log warning, no AP. Recover via an
+                                   Admin Wi-Fi password in the web UI
+                                   or startwrt-cli set-wifi-password
 ```
 
 ---
@@ -253,7 +252,7 @@ The sticker password is physically printed on the device — storing it as plain
 
 ### WiFi Key in UI
 
-The WiFi passphrase is never displayed in the admin interface. The sticker is the source of truth. Users who lose the sticker can read tag 0x2F over ssh (`hexdump /sys/bus/i2c/devices/2-0050/eeprom`) or replace it with a self-chosen password via `startwrt-cli set-wifi-password`. The latter only updates UCI — EEPROM remains the canonical fallback after factory reset.
+Wi-Fi > Passwords lists the AP passphrase as the **Default** password (Admin profile), masked, with show and copy buttons. Users who lose the sticker can read it there or read tag 0x2F over ssh (`hexdump /sys/bus/i2c/devices/2-0050/eeprom`), and can replace it on that page (add an Admin password, delete Default) or with `startwrt-cli set-wifi-password`. Either way only UCI changes — EEPROM remains the canonical fallback after factory reset.
 
 ---
 

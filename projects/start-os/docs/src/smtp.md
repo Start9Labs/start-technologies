@@ -7,7 +7,7 @@ Configure StartOS with third-party SMTP credentials so that services like NextCl
 
 ## Getting SMTP Credentials
 
-We recommend [Forward Email](https://forwardemail.net): it is open source and privacy-focused, and sends from your own domain. The guides below cover Amazon SES, Forward Email, Gmail, and Proton Mail, but you may also use another third party provider of your choice.
+We recommend [Forward Email](https://forwardemail.net): it is open source and privacy-focused, and sends from your own domain. StartOS has presets for Amazon SES, Forward Email, Gmail, Mailgun, Proton Mail, and SendGrid, covered below. To use any other provider, choose **Other** and enter its settings.
 
 {{#tabs global="smtp-provider"}}
 
@@ -97,6 +97,28 @@ To use Forward Email you will need a domain name on a Forward Email paid plan, w
 
 {{#endtab}}
 
+{{#tab name="Mailgun"}}
+
+To use Mailgun you will need a Mailgun account with a sending domain you have verified by adding the DNS records Mailgun gives you.
+
+1. In Mailgun, open your domain's **SMTP credentials** and create a credential, such as `no-reply@mg.yourdomain.com`. Save its password somewhere secure; Mailgun shows it only once. See Mailgun's [SMTP credentials](https://documentation.mailgun.com/docs/mailgun/user-manual/sending-messages/send-smtp) guide.
+
+1. In StartOS, go to **System > SMTP**, select **Mailgun** as the provider, and enter the values below. Choosing Mailgun pre-fills and locks the host and defaults to TLS on port 465.
+
+   | Parameter           | Value                             |
+   | ------------------- | --------------------------------- |
+   | Host                | smtp.mailgun.org                  |
+   | Connection Security | TLS                               |
+   | Port                | 465                               |
+   | From Address        | an address at your sending domain |
+   | Username            | your SMTP credential's login      |
+   | Password            | your SMTP credential's password   |
+
+   > [!NOTE]
+   > A domain in Mailgun's EU region sends through `smtp.eu.mailgun.org`. Choose **Other** as the provider to enter that host.
+
+{{#endtab}}
+
 {{#tab name="Proton Mail"}}
 
 Access to Proton Mail's SMTP settings is currently only made available by Proton to their customers with **Proton for Business**, as well as certain higher tier individual and family plans (**Proton Duo**, **Proton Family** – both with "SMTP Submission" as a listed feature), and then only when you point a custom domain to your account.
@@ -105,6 +127,25 @@ To set up Proton Mail for SMTP you will need:
 
 - To purchase and point a domain name from a domain registrar to Proton's servers by following this guide here: [Custom Domain](https://proton.me/support/custom-domain)
 - To follow the steps in the section **How to set up SMTP** in the guide here: [SMTP Submission](https://proton.me/support/smtp-submission)
+
+{{#endtab}}
+
+{{#tab name="SendGrid"}}
+
+To use SendGrid you will need a SendGrid account with a verified sender: either a single sender address or an authenticated domain.
+
+1. In SendGrid, create an API key with **Mail Send** permission. Save it somewhere secure; SendGrid shows it only once. See SendGrid's [SMTP integration](https://www.twilio.com/docs/sendgrid/for-developers/sending-email/integrating-with-the-smtp-api) guide.
+
+1. In StartOS, go to **System > SMTP**, select **SendGrid** as the provider, and enter the values below. Choosing SendGrid pre-fills and locks the host and defaults to TLS on port 465.
+
+   | Parameter           | Value                        |
+   | ------------------- | ---------------------------- |
+   | Host                | smtp.sendgrid.net            |
+   | Connection Security | TLS                          |
+   | Port                | 465                          |
+   | From Address        | your verified sender address |
+   | Username            | `apikey`, exactly as written |
+   | Password            | your API key (from above)    |
 
 {{#endtab}}
 

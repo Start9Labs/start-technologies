@@ -509,7 +509,7 @@ pub async fn setup_data_drive(
     } else {
         Some(DEFAULT_PASSWORD)
     };
-    let guid = crate::disk::main::create(
+    let guid = crate::disk::main::create::<[&Path; 1], &Path>(
         &[logicalname],
         &pvscan().await?,
         DATA_DIR,

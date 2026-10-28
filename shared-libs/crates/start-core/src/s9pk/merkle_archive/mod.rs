@@ -15,7 +15,7 @@ use crate::s9pk::merkle_archive::source::{ArchiveSource, DynFileSource, FileSour
 use crate::s9pk::merkle_archive::write_queue::WriteQueue;
 use crate::sign::SignatureScheme;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
-use crate::sign::ed25519::Ed25519;
+use crate::sign::ed25519::Ed25519ph;
 use crate::util::serde::Base64;
 
 pub mod directory_contents;
@@ -171,7 +171,7 @@ impl<S: FileSource + Clone> MerkleArchive<S> {
         match &self.signer {
             Signer::Signed(_, s, _, _) => Ok(*s),
             Signer::Signer(k, context) => {
-                Ed25519.sign_commitment(k, &self.commitment().await?, context)
+                Ed25519ph.sign_commitment(k, &self.commitment().await?, context)
             }
         }
     }
@@ -183,9 +183,10 @@ impl<S: FileSource + Clone> MerkleArchive<S> {
 
         let (pubkey, signature) = match &self.signer {
             Signer::Signed(pubkey, signature, _, _) => (*pubkey, *signature),
-            Signer::Signer(s, context) => {
-                (s.into(), Ed25519.sign_commitment(s, &commitment, context)?)
-            }
+            Signer::Signer(s, context) => (
+                s.into(),
+                Ed25519ph.sign_commitment(s, &commitment, context)?,
+            ),
         };
 
         w.write_all(pubkey.as_bytes()).await?;

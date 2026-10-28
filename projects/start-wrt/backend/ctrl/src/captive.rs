@@ -49,43 +49,33 @@ table inet startwrt_captive
 delete table inet startwrt_captive
 ";
 
-/// Find the dnsmasq instance conf-dir from the generated config.
-///
-/// OpenWrt generates per-instance conf-dirs like `/tmp/dnsmasq.cfg01411c.d/`
-/// (named after the UCI section hash) rather than a plain `/tmp/dnsmasq.d/`.
-/// Parse the generated config in `/var/etc/` to discover the actual path.
-fn find_dnsmasq_conf_dir() -> Result<String, Error> {
-    let var_etc = Path::new("/var/etc");
-    for entry in fs::read_dir(var_etc)
-        .map_err(|e| Error::new(eyre!("failed to read /var/etc: {e}"), ErrorKind::Filesystem))?
-    {
-        let entry = entry.map_err(|e| Error::new(eyre!("readdir: {e}"), ErrorKind::Filesystem))?;
-        let name = entry.file_name();
-        if !name.to_string_lossy().starts_with("dnsmasq.conf.") {
-            continue;
-        }
-        let contents = fs::read_to_string(entry.path()).map_err(|e| {
-            Error::new(
-                eyre!("read {}: {e}", entry.path().display()),
-                ErrorKind::Filesystem,
-            )
-        })?;
-        for line in contents.lines() {
-            if let Some(dir) = line.strip_prefix("conf-dir=") {
-                return Ok(dir.to_string());
-            }
-        }
-    }
-    Err(Error::new(
-        eyre!("no dnsmasq conf-dir found in /var/etc/dnsmasq.conf.*"),
-        ErrorKind::NotFound,
-    ))
+/// The dnsmasq instance serving the LAN and its conf-dir. Neither is a fixed
+/// path: OpenWrt names both after the UCI section, e.g.
+/// `/tmp/dnsmasq.cfg01411c.d/`.
+fn find_dnsmasq_conf_dir() -> Result<(String, String), Error> {
+    lan_instance(crate::devices::dnsmasq_instance_option("conf-dir")).ok_or_else(|| {
+        Error::new(
+            eyre!("no dnsmasq conf-dir found in /var/etc/dnsmasq.conf.*"),
+            ErrorKind::NotFound,
+        )
+    })
+}
+
+/// The LAN profile's instance, else OpenWrt's unnamed one, which serves the
+/// LAN while no profile instance exists.
+fn lan_instance(mut instances: Vec<(String, String)>) -> Option<(String, String)> {
+    instances.sort_by_key(|(name, _)| match name.as_str() {
+        "dns_lan" => 0,
+        name if name.starts_with("cfg") => 1,
+        _ => 2,
+    });
+    instances.into_iter().next()
 }
 
 /// Check if the captive portal DNS hijack is currently active.
 pub fn is_captive_portal_active() -> bool {
     find_dnsmasq_conf_dir()
-        .map(|dir| Path::new(&dir).join(CAPTIVE_CONF_NAME).exists())
+        .map(|(_, dir)| Path::new(&dir).join(CAPTIVE_CONF_NAME).exists())
         .unwrap_or(false)
 }
 
@@ -102,7 +92,7 @@ pub async fn disable_captive_portal() -> Result<(), Error> {
 }
 
 async fn enable_dns_hijack() -> Result<(), Error> {
-    let dir = find_dnsmasq_conf_dir()?;
+    let (instance, dir) = find_dnsmasq_conf_dir()?;
     let conf = Path::new(&dir).join(CAPTIVE_CONF_NAME);
 
     if !Path::new(&dir).exists() {
@@ -118,11 +108,11 @@ async fn enable_dns_hijack() -> Result<(), Error> {
     })?;
     ACTIVE.store(true, Ordering::Relaxed);
 
-    restart_dnsmasq().await
+    restart_dnsmasq(&instance).await
 }
 
 async fn disable_dns_hijack() -> Result<(), Error> {
-    let dir = find_dnsmasq_conf_dir()?;
+    let (instance, dir) = find_dnsmasq_conf_dir()?;
     let conf = Path::new(&dir).join(CAPTIVE_CONF_NAME);
 
     if conf.exists() {
@@ -135,7 +125,7 @@ async fn disable_dns_hijack() -> Result<(), Error> {
     }
     ACTIVE.store(false, Ordering::Relaxed);
 
-    restart_dnsmasq().await
+    restart_dnsmasq(&instance).await
 }
 
 /// Check if the admin (root) password has been set in /etc/shadow.
@@ -251,16 +241,24 @@ async fn apply_ruleset(ruleset: &str) -> Result<(), Error> {
     Ok(())
 }
 
-async fn restart_dnsmasq() -> Result<(), Error> {
-    let status =
-        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("restart"))
-            .await
-            .map_err(|e| Error::new(eyre!("failed to restart dnsmasq: {e}"), ErrorKind::Network))?;
+/// Reload ignores the drop-in, which lies outside the generated config. A
+/// restart without an instance unregisters dnsmasq's interface triggers.
+async fn restart_dnsmasq(instance: &str) -> Result<(), Error> {
+    let status = crate::run_quiet_async(
+        tokio::process::Command::new("/etc/init.d/dnsmasq").args(["restart", instance]),
+    )
+    .await
+    .map_err(|e| {
+        Error::new(
+            eyre!("failed to restart dnsmasq instance {instance}: {e}"),
+            ErrorKind::Network,
+        )
+    })?;
 
     if !status.success() {
         return Err(Error::new(
             eyre!(
-                "dnsmasq restart failed (exit {})",
+                "dnsmasq instance {instance} restart failed (exit {})",
                 status.code().unwrap_or(-1)
             ),
             ErrorKind::Network,
@@ -282,6 +280,24 @@ mod tests {
                 .insert(http::header::HOST, host.parse().unwrap());
         }
         req
+    }
+
+    #[test]
+    fn the_hijack_targets_the_lan_instance_whatever_the_listing_order() {
+        let inst = |name: &str| (name.to_string(), format!("/tmp/dnsmasq.{name}.d"));
+        assert_eq!(
+            lan_instance(vec![inst("dns_guest"), inst("cfg01411c"), inst("dns_lan")]),
+            Some(inst("dns_lan"))
+        );
+        assert_eq!(
+            lan_instance(vec![inst("dns_guest"), inst("cfg01411c")]),
+            Some(inst("cfg01411c"))
+        );
+        assert_eq!(
+            lan_instance(vec![inst("cfg01411c")]),
+            Some(inst("cfg01411c"))
+        );
+        assert_eq!(lan_instance(Vec::new()), None);
     }
 
     #[test]

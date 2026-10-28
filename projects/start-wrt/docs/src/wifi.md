@@ -38,7 +38,7 @@ Select "Edit" from a password's actions menu to change its label or move it to a
 
 1. Navigate to `Points of Entry > Wi-Fi > Passwords`.
 
-1. Select the password from the actions menu and click "Delete".
+1. Select "Delete" from the password's actions menu.
 
 > [!WARNING]
 > Removing a Wi-Fi password immediately disconnects all devices using it. Those devices will need a different password to reconnect.

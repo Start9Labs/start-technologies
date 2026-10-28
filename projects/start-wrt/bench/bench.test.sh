@@ -91,24 +91,51 @@ smoke_vlan_client() {
 
 rpc_json_encoding() {
 	python3() { return 127; }
-	wrt() { command cat >"$TEST_DIR/requests"; }
+	BENCH_STATE_DIR=$TEST_DIR/state
+	SNAPSHOT_DIR=$BENCH_STATE_DIR/snapshots
+	UI_KEY=$BENCH_STATE_DIR/ui-key.pem
+	wrt() {
+		if [ "$1" = 'uci -q get network.lan.ipaddr' ]; then echo 192.0.2.1/24; else command cat >"$TEST_DIR/requests"; fi
+	}
 	ui_rpc fixture.method '{"text":"quoted \\\"value\\\"","nested":[1,true]}'
-	node - "$TEST_DIR/requests" "$BENCH_PASSWORD_FILE" <<'JS'
+	[ "$(stat -c %a "$UI_KEY")" = 600 ]
+	node - "$TEST_DIR/requests" "$BENCH_PASSWORD_FILE" "$REPO_ROOT" <<'JS'
+const crypto = require('node:crypto')
 const fs = require('node:fs')
 const assert = require('node:assert/strict')
-const [login, req] = fs.readFileSync(process.argv[2], 'utf8').trim().split('\n').map(JSON.parse)
-assert.deepEqual(login, {
-  jsonrpc: '2.0', id: 0, method: 'auth.login',
-  params: {password: fs.readFileSync(process.argv[3], 'utf8').trimEnd()},
-})
-assert.equal(req.method, 'fixture.method')
-assert.deepEqual(req.params.nested, [1, true])
+const { blake3 } = require(require.resolve('@noble/hashes/blake3', { paths: [process.argv[4]] }))
+const [ip, login, loginSig, req, reqSig, retrySig] = fs.readFileSync(process.argv[2], 'utf8').trim().split('\n')
+assert.equal(ip, '192.0.2.1')
+const loginBody = JSON.parse(login)
+assert.equal(loginBody.method, 'auth.login')
+assert.equal(loginBody.params.password, fs.readFileSync(process.argv[3], 'utf8').trimEnd())
+const pubkey = crypto.createPublicKey(loginBody.params.pubkey)
+assert.equal(JSON.parse(req).method, 'fixture.method')
+assert.deepEqual(JSON.parse(req).params.nested, [1, true])
+const nonces = new Set()
+for (const [body, header] of [[login, loginSig], [req, reqSig], [req, retrySig]]) {
+	const h = new URLSearchParams(header)
+	const bytes = Buffer.from(body)
+	assert.equal(h.get('commitment'), 'request')
+	assert.equal(h.get('size'), String(bytes.length))
+	assert.equal(h.get('blake3'), Buffer.from(blake3(bytes)).toString('base64url'))
+	assert.deepEqual(Buffer.from(h.get('signer'), 'base64url'), pubkey.export({ type: 'spki', format: 'der' }))
+	nonces.add(h.get('nonce'))
+	const commitment = Buffer.alloc(24)
+	commitment.writeBigInt64BE(BigInt(h.get('timestamp')), 0)
+	commitment.writeBigUInt64BE(BigInt(h.get('nonce')), 8)
+	commitment.writeBigUInt64BE(BigInt(bytes.length), 16)
+	const message = Buffer.concat([Buffer.from('Start-Auth-Sig v2\0'), Buffer.from([ip.length]), Buffer.from(ip), Buffer.from([3]), commitment, blake3(bytes)])
+	const signature = Buffer.from(h.get('signature'), 'base64url').subarray(11)
+	assert.ok(crypto.verify(null, message, pubkey, signature))
+}
+assert.equal(nonces.size, 3)
 JS
 	ui_rpc fixture.default
 	node - "$TEST_DIR/requests" <<'JS'
 const fs = require('node:fs')
 const assert = require('node:assert/strict')
-const req = JSON.parse(fs.readFileSync(process.argv[2], 'utf8').trim().split('\n')[1])
+const req = JSON.parse(fs.readFileSync(process.argv[2], 'utf8').trim().split('\n')[3])
 assert.deepEqual(req.params, {})
 JS
 }

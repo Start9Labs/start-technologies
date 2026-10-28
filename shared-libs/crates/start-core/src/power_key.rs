@@ -149,7 +149,10 @@ async fn read_device(path: PathBuf, ctx: RpcContext) {
         .read(true)
         .custom_flags(libc::O_NONBLOCK)
         .open(&path)
-        .and_then(AsyncFd::new);
+        .and_then(|file| {
+            // SAFETY: The owned file's descriptor stays open and unchanged until drop.
+            unsafe { AsyncFd::register(file) }.map_err(std::io::Error::from)
+        });
     let device = match device {
         Ok(device) => device,
         Err(e) => {
