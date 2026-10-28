@@ -1,0 +1,2 @@
+- Récupère les groupes de blocs inutilisés du disque de données grâce à un premier équilibrage Btrfs en arrière-plan après la mise à jour, puis à une maintenance hebdomadaire.
+- Avertit lorsque l'espace disponible pour l'allocation des métadonnées du disque de données devient faible, avant que les services ne rencontrent des erreurs d'écriture malgré l'espace libre annoncé.
