@@ -33,7 +33,7 @@ pub fn initial_signers() -> TrustedOsUpdateSigners {
     .into_iter()
     .map(|(label, key)| {
         (
-            key.parse::<AnyVerifyingKey>().unwrap().interned_pem(),
+            key.parse::<AnyVerifyingKey>().unwrap().interned_der64(),
             TrustedOsUpdateSigner { label: label.to_owned() },
         )
     })
@@ -129,7 +129,7 @@ fn get_signer(
     key: &AnyVerifyingKey,
 ) -> Result<TrustedOsUpdateSigner, Error> {
     signers
-        .get(&key.interned_pem())
+        .get(&key.interned_der64())
         .cloned()
         .ok_or_else(signer_not_found)
 }
@@ -301,7 +301,7 @@ mod tests {
         let parsed =
             SetOsUpdateSignerParams::try_parse_from(["add", key.as_ref(), "--label", "test"])
                 .unwrap();
-        assert_eq!(parsed.key.interned_pem(), key);
+        assert_eq!(parsed.key.interned_der64(), key);
         assert_eq!(parsed.label, "test");
         assert!(SetOsUpdateSignerParams::try_parse_from(["add", key.as_ref()]).is_err());
         assert!(

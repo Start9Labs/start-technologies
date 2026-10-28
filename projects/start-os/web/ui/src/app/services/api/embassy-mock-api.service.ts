@@ -13,6 +13,7 @@ import {
   SetLanguageParams,
 } from '@start9labs/shared'
 import {
+  auth,
   createRpcClient,
   RpcHandlers,
   T,
@@ -287,8 +288,8 @@ export class MockApiService extends ApiService {
       const id = crypto.randomUUID()
       const value: T.TrustedKey = {
         name,
-        publicKeys: parsePublicKeys(publicKeys.join('\n')).map(
-          parsePemPublicKey,
+        publicKeys: parsePublicKeys(publicKeys.join('\n')).map(key =>
+          auth.normalizeDer64(parsePemPublicKey(key)),
         ),
         removable: true,
         marketplace: true,

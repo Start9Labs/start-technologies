@@ -611,6 +611,38 @@ test('trusted signer matching ignores PEM whitespace but rejects unrelated keys 
   assert.deepEqual(trustedOsUpdateSigners([key], {}), [])
 })
 
+test('keyrings match PEM, Der64 and legacy base64url signers in both trust contexts', () => {
+  const pem =
+    '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=\n-----END PUBLIC KEY-----\n'
+  const der64 = 'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI='
+  const base64url =
+    'MCowBQYDK2VwAyEAgpcI3hOExv1njCt-zJoYBartdyk4SKiqSIy3-9tcpOI'
+  for (const [publicKey, signer] of [
+    [der64, pem],
+    [pem, der64],
+    [der64, base64url],
+  ]) {
+    const groups = {
+      publisher: {
+        name: 'Publisher',
+        publicKeys: [publicKey],
+        marketplace: true,
+        os: true,
+      },
+    }
+    assert.deepEqual(trustedOsUpdateSigners([signer], groups), [publicKey])
+    for (const source of [
+      { s9pks: [['x86_64', { signatures: { [signer]: 'signature' } }]] },
+      { s9pks: [], signers: [signer] },
+    ]) {
+      assert.deepEqual(
+        matchingTrustedKeys(packageSigners(source), groups, 'marketplace'),
+        [{ id: 'publisher', name: 'Publisher', publicKeys: [publicKey] }],
+      )
+    }
+  }
+})
+
 test('an untrusted update is blocked even when another platform or asset lists a trusted signer', async t => {
   const f = fixture(t, '0.4.0.2')
   await f.load({

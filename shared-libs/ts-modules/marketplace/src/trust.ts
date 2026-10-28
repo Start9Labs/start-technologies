@@ -1,5 +1,5 @@
 import { Pipe, Signal } from '@angular/core'
-import { RPC, T } from '@start9labs/start-core'
+import { auth, RPC, T } from '@start9labs/start-core'
 import { MarketplacePkgBase } from './types'
 
 export type TrustContext = RPC.RpcParamType<
@@ -22,10 +22,10 @@ export function matchingTrustedKeys(
   groups: Record<string, T.TrustedKey>,
   context: TrustContext,
 ) {
-  const signed = new Set(signers.map(normalizeKey))
+  const signed = new Set(signers.map(auth.normalizeDer64))
   return Object.entries(groups).flatMap(([id, group]) => {
     const publicKeys = group.publicKeys.filter(key =>
-      signed.has(normalizeKey(key)),
+      signed.has(auth.normalizeDer64(key)),
     )
     return group[context] && publicKeys.length
       ? [{ id, name: group.name, publicKeys }]
@@ -41,8 +41,4 @@ export class TrustedPackageSignersPipe {
   ) {
     return matchingTrustedKeys(packageSigners(pkg), groups, 'marketplace')
   }
-}
-
-function normalizeKey(key: string): string {
-  return key.replace(/\s/g, '')
 }

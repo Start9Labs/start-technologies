@@ -15,10 +15,7 @@ export function publicKeyPem(raw: Uint8Array): string {
 }
 
 export function parsePemPublicKey(value: string): string {
-  const body = value
-    .replace('-----BEGIN PUBLIC KEY-----', '')
-    .replace('-----END PUBLIC KEY-----', '')
-    .replace(/\s/g, '')
+  const body = auth.normalizeDer64(value)
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(body))
     throw new Error('Expected a PEM-encoded Ed25519 public key')
   const der = auth.base64ToBytes(body)

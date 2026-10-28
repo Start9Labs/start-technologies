@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::context::RpcContext;
 use crate::prelude::*;
 use crate::registry::signer::AcceptSigners;
-use crate::sign::AnyVerifyingKey;
 use crate::sign::gpg::parse_public_keys;
+use crate::sign::{AnyVerifyingKey, canonicalize_verifying_keys};
 use crate::update::signers::{TrustedOsUpdateSigner, TrustedOsUpdateSigners, initial_signers};
 
 pub type TrustedKeys = BTreeMap<InternedString, TrustedKey>;
@@ -19,7 +19,7 @@ pub const START9: &str = "start9";
 #[model = "Model<Self>"]
 pub struct TrustedKey {
     pub name: String,
-    /// PEM-encoded Ed25519 public keys.
+    /// Ed25519 public keys encoded as padded standard Base64 DER.
     pub public_keys: Vec<AnyVerifyingKey>,
     /// False for built-in keyrings.
     pub removable: bool,
@@ -113,7 +113,7 @@ pub fn os_signers(keys: &TrustedKeys) -> TrustedOsUpdateSigners {
         .flat_map(|group| {
             group.public_keys.iter().map(|key| {
                 (
-                    key.interned_pem(),
+                    key.interned_der64(),
                     TrustedOsUpdateSigner {
                         label: group.name.clone(),
                     },
@@ -124,12 +124,13 @@ pub fn os_signers(keys: &TrustedKeys) -> TrustedOsUpdateSigners {
 }
 
 pub fn migrate_signers(legacy: TrustedOsUpdateSigners) -> Result<TrustedKeys, Error> {
+    let legacy = canonicalize_verifying_keys(legacy)?;
     let mut keys = initial_trusted_keys();
     let start9 = keys.get_mut(START9).unwrap();
     start9.os = start9
         .public_keys
         .iter()
-        .all(|key| legacy.contains_key(&key.interned_pem()));
+        .all(|key| legacy.contains_key(&key.interned_der64()));
     let grouped = if start9.os {
         start9.public_keys.clone()
     } else {
@@ -346,7 +347,13 @@ pub fn legacy_add(
         group.os = true;
         return Ok(());
     }
-    add_group(keys, key.interned_pem(), label, vec![key], TrustContext::Os)
+    add_group(
+        keys,
+        key.interned_der64(),
+        label,
+        vec![key],
+        TrustContext::Os,
+    )
 }
 
 pub fn legacy_update(
@@ -422,6 +429,52 @@ mod tests {
             assert_eq!(keys[id].os, !saved.os);
             assert_eq!(keys[id].marketplace, saved.marketplace);
         }
+    }
+
+    #[test]
+    fn pem_and_gpg_imports_persist_der64_keys() {
+        let key = "MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=";
+        let params: AddTrustedKeyParams = serde_json::from_value(serde_json::json!({
+            "name": "Imported publisher",
+            "context": "marketplace",
+            "publicKeys": [
+                format!("-----BEGIN PUBLIC KEY-----\n{key}\n-----END PUBLIC KEY-----\n"),
+                include_str!("../sign/fixtures/start9-public.asc"),
+            ],
+        }))
+        .unwrap();
+        let imported = parse_public_keys(&params.public_keys).unwrap();
+        let mut keys = TrustedKeys::new();
+        add_group(
+            &mut keys,
+            "imported".into(),
+            params.name,
+            imported,
+            params.context,
+        )
+        .unwrap();
+        let saved = to_value(&keys).unwrap();
+        assert_eq!(saved["imported"]["publicKeys"], imbl_value::json!([key]));
+        assert_eq!(from_value::<TrustedKeys>(saved).unwrap(), keys);
+        assert!(keys["imported"].marketplace);
+        assert!(!keys["imported"].os);
+    }
+
+    #[test]
+    fn legacy_commands_use_der64_identity_for_pem_and_der64_inputs() {
+        let der64 = "MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=";
+        let pem = format!("-----BEGIN PUBLIC KEY-----\n{der64}\n-----END PUBLIC KEY-----\n");
+        let mut keys = TrustedKeys::new();
+        legacy_add(&mut keys, pem.parse().unwrap(), "Publisher".into()).unwrap();
+        assert_eq!(keys.keys().map(|id| &**id).collect::<Vec<_>>(), [der64]);
+        assert_eq!(
+            os_signers(&keys).keys().map(|id| &**id).collect::<Vec<_>>(),
+            [der64]
+        );
+        legacy_update(&mut keys, &der64.parse().unwrap(), "Renamed".into()).unwrap();
+        assert_eq!(keys[der64].name, "Renamed");
+        legacy_remove(&mut keys, &pem.parse().unwrap()).unwrap();
+        assert!(keys.is_empty());
     }
 
     #[test]
@@ -544,25 +597,46 @@ mod tests {
         assert!(keys[START9].marketplace);
         assert!(keys[START9].public_keys.contains(&key));
         assert!(!keys.contains_key("overlap"));
-        assert!(!os_signers(&keys).contains_key(&key.interned_pem()));
+        assert!(!os_signers(&keys).contains_key(&key.interned_der64()));
         assert!(legacy_remove(&mut keys, &key).is_err());
     }
 
     #[test]
-    fn migration_preserves_custom_and_removed_os_trust() {
-        let legacy = initial_signers();
-        let keys = migrate_signers(legacy.clone()).unwrap();
-        assert_eq!(keys.len(), 2);
-        assert_eq!(
-            os_signers(&keys).into_keys().collect::<Vec<_>>(),
-            legacy.into_keys().collect::<Vec<_>>()
-        );
-        let mut legacy = initial_signers();
-        let removed = legacy.pop_first().unwrap().0;
-        let keys = migrate_signers(legacy.clone()).unwrap();
-        assert!(!keys[START9].os);
-        assert!(!os_signers(&keys).contains_key(&removed));
-        assert_eq!(os_signers(&keys), legacy);
+    fn migration_preserves_pem_and_der64_trust_without_enabling_removed_keys() {
+        let canonical = initial_signers();
+        let pem = canonical
+            .iter()
+            .map(|(key, signer)| {
+                (
+                    key.parse::<AnyVerifyingKey>().unwrap().to_string().into(),
+                    signer.clone(),
+                )
+            })
+            .collect::<TrustedOsUpdateSigners>();
+        for mut legacy in [canonical.clone(), pem] {
+            let keys = migrate_signers(legacy.clone()).unwrap();
+            assert_eq!(keys.len(), 2);
+            assert!(keys[START9].os);
+            assert_eq!(
+                os_signers(&keys).into_keys().collect::<Vec<_>>(),
+                canonical.keys().cloned().collect::<Vec<_>>()
+            );
+            let removed = legacy
+                .pop_first()
+                .unwrap()
+                .0
+                .parse::<AnyVerifyingKey>()
+                .unwrap();
+            let keys = migrate_signers(legacy.clone()).unwrap();
+            assert!(!keys[START9].os);
+            assert!(!os_signers(&keys).contains_key(&removed.interned_der64()));
+            let mut remaining = canonical.clone();
+            remaining.remove(&removed.interned_der64());
+            assert_eq!(os_signers(&keys), remaining);
+            for id in remaining.keys() {
+                assert!(keys[id].os);
+            }
+        }
         assert!(os_signers(&migrate_signers(TrustedOsUpdateSigners::new()).unwrap()).is_empty());
     }
 }
