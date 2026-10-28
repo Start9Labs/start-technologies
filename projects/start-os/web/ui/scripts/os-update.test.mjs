@@ -201,8 +201,8 @@ const catalog = {
   '0.4.0.3': { releaseNotes: 'newer', squashfs },
 }
 const candidates = [
-  { version: '0.4.0.4', notes: { en_US: 'newest' }, squashfs },
-  { version: '0.4.0.3', notes: { en_US: 'newer' }, squashfs },
+  { version: '0.4.0.4', notes: 'newest', squashfs },
+  { version: '0.4.0.3', notes: 'newer', squashfs },
 ]
 const state = version => ({
   serverInfo: {
@@ -444,15 +444,15 @@ test('strictly newer candidates sort descending; refresh failure preserves catal
   assert.equal(f.requests.length, 2)
   await f.load({ '0.4.0.5': { releaseNotes: 'refreshed', squashfs } })
   assert.deepEqual(f.os.updateCandidates(), [
-    { version: '0.4.0.5', notes: { en_US: 'refreshed' }, squashfs },
+    { version: '0.4.0.5', notes: 'refreshed', squashfs },
   ])
 })
 
 test('release notes select the live UI language without refetching or changing registry data', async t => {
   const f = fixture(t, '0.4.0.2')
   const info = {
-    releaseNotes: 'English notes',
-    releaseNotesTranslations: {
+    releaseNotes: {
+      en_US: 'English notes',
       pl_PL: 'Polskie informacje',
       de_DE: 'Deutsche Hinweise',
     },

@@ -15,6 +15,7 @@ use crate::prelude::*;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfo;
 use crate::registry::os::index::OsVersionInfo;
+use crate::s9pk::manifest::LocaleString;
 use crate::sign::AnyVerifyingKey;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 
@@ -67,15 +68,8 @@ pub struct AddVersionParams {
     pub version: Version,
     #[arg(help = "help.arg.version-headline")]
     pub headline: String,
-    #[arg(help = "help.arg.release-notes")]
-    pub release_notes: String,
-    /// Omitting this clears previously published translations.
-    #[arg(
-        long,
-        help = "help.arg.release-notes-translations",
-        value_parser = |value: &str| serde_json::from_str::<BTreeMap<InternedString, String>>(value)
-    )]
-    pub release_notes_translations: Option<BTreeMap<InternedString, String>>,
+    #[arg(help = "help.arg.release-notes", value_name = "RELEASE_NOTES_OR_JSON")]
+    pub release_notes: LocaleString,
     #[arg(help = "help.arg.source-version-range")]
     pub source_version: VersionRange,
     #[arg(skip)]
@@ -93,7 +87,6 @@ impl AddVersionParams {
             version,
             headline: info.headline.clone(),
             release_notes: info.release_notes.clone(),
-            release_notes_translations: Some(info.release_notes_translations.clone()),
             source_version: info.source_version.clone(),
             signer: None,
         }
@@ -106,7 +99,6 @@ pub async fn add_version(
         version,
         headline,
         release_notes,
-        release_notes_translations,
         source_version,
         signer,
     }: AddVersionParams,
@@ -121,7 +113,7 @@ pub async fn add_version(
                 .as_versions_mut()
                 .upsert(&version, || Ok(OsVersionInfo::default()))?
                 .mutate(|i| {
-                    i.set_release_notes(release_notes, release_notes_translations)?;
+                    i.release_notes = release_notes;
                     i.headline = headline;
                     i.source_version = source_version;
                     i.authorized.extend(signer);
@@ -264,7 +256,7 @@ pub fn display_version_info<T>(params: WithIoFormat<T>, info: Value) -> Result<(
         table.add_row(row![
             &version.to_string(),
             &info.headline,
-            &info.release_notes,
+            &info.release_notes.clone().localized(),
             &info.iso.keys().into_iter().join(", "),
             &info.img.keys().into_iter().join(", "),
             &info.squashfs.keys().into_iter().join(", "),
@@ -281,74 +273,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn add_version_accepts_typed_translation_maps_from_cli_and_rpc() {
-        let cli = AddVersionParams::try_parse_from([
-            "add",
-            "0.4.0.5",
-            "v0.4.0.5",
-            "English notes",
-            "*",
-            "--release-notes-translations",
-            r#"{"de_DE":"Deutsche Hinweise","pl_PL":"Polskie informacje"}"#,
-        ])
-        .unwrap();
-        let rpc: AddVersionParams = from_value(json!({
-            "version": "0.4.0.5",
-            "headline": "v0.4.0.5",
-            "releaseNotes": "English notes",
-            "releaseNotesTranslations": {
-                "de_DE": "Deutsche Hinweise",
-                "pl_PL": "Polskie informacje",
-            },
-            "sourceVersion": "*",
-        }))
-        .unwrap();
-        assert_eq!(to_value(&cli).unwrap(), to_value(&rpc).unwrap());
-        assert_eq!(cli.release_notes, "English notes");
+    fn add_version_uses_locale_string_for_cli_rpc_and_promotion() {
+        for notes in [
+            json!("English notes"),
+            json!({ "en_US": "English notes", "pl_PL": "Polskie informacje" }),
+        ] {
+            let argument = serde_json::to_string(&notes).unwrap();
+            let cli =
+                AddVersionParams::try_parse_from(["add", "0.4.0.5", "v0.4.0.5", &argument, "*"])
+                    .unwrap();
+            let rpc: AddVersionParams = from_value(json!({
+                "version": "0.4.0.5",
+                "headline": "v0.4.0.5",
+                "releaseNotes": notes,
+                "sourceVersion": "*",
+            }))
+            .unwrap();
+            assert_eq!(to_value(&cli).unwrap(), to_value(&rpc).unwrap());
+            assert_eq!(to_value(&cli).unwrap()["releaseNotes"], notes);
+        }
+        let plain =
+            AddVersionParams::try_parse_from(["add", "0.4.0.5", "v0.4.0.5", "English notes", "*"])
+                .unwrap();
         assert_eq!(
-            cli.release_notes_translations
-                .unwrap()
-                .get("pl_PL")
-                .unwrap(),
-            "Polskie informacje"
+            plain.release_notes,
+            LocaleString::Translated("English notes".into())
         );
     }
 
     #[test]
-    fn legacy_add_version_keeps_plain_strings_and_omitted_translations() {
-        for english in ["English notes", r#"{"pl_PL":"literal JSON notes"}"#] {
-            let params =
-                AddVersionParams::try_parse_from(["add", "0.4.0.5", "v0.4.0.5", english, "*"])
-                    .unwrap();
-            assert_eq!(params.release_notes, english);
-            assert!(params.release_notes_translations.is_none());
-            let rpc: AddVersionParams = from_value(json!({
-                "version": "0.4.0.5",
-                "headline": "v0.4.0.5",
-                "releaseNotes": english,
-                "sourceVersion": "*",
-            }))
-            .unwrap();
-            assert_eq!(rpc.release_notes, english);
-            assert!(rpc.release_notes_translations.is_none());
-        }
-    }
-
-    #[test]
-    fn cli_rejects_invalid_translation_objects() {
-        for translations in ["not JSON", "[]", r#"{"pl_PL":4}"#] {
-            assert!(
-                AddVersionParams::try_parse_from([
-                    "add",
-                    "0.4.0.5",
-                    "v0.4.0.5",
-                    "English notes",
-                    "*",
-                    "--release-notes-translations",
-                    translations,
-                ])
-                .is_err()
-            );
-        }
+    fn translated_notes_capability_is_visible_in_cli_help() {
+        use clap::CommandFactory;
+        let help = AddVersionParams::command().render_long_help().to_string();
+        assert!(help.contains("<RELEASE_NOTES_OR_JSON>"));
     }
 }

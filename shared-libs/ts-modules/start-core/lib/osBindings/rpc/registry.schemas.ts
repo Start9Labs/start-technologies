@@ -10,35 +10,6 @@ const literal_1 = /* @__PURE__ */ z.union([
   z.record(z.string(), z.string()),
 ])
 const literal_2 = /* @__PURE__ */ z.enum(['processor', 'display'])
-export const AddVersionParams: z.ZodObject<{
-  version: z.ZodString
-  headline: z.ZodString
-  releaseNotes: z.ZodString
-  /**
-   * Omitting this clears previously published translations.
-   */
-  releaseNotesTranslations: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>,
-    z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>
-  >
-  sourceVersion: z.ZodString
-}> = /* @__PURE__ */ object({
-  version: z.string(),
-  headline: z.string(),
-  releaseNotes: z.string(),
-  /**
-   * Omitting this clears previously published translations.
-   */
-  releaseNotesTranslations: wire(
-    z.record(z.string(), z.string()).nullable().optional(),
-    z.record(z.string(), z.string()).nullable(),
-  ).meta({
-    description: 'Omitting this clears previously published translations.',
-  }),
-  sourceVersion: z.string(),
-}).meta({
-  id: 'AddVersionParams',
-})
 export const AnySignature: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'AnySignature',
 })
@@ -451,6 +422,19 @@ export const AddPackageToCategoryParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ id: z.string(), package: PackageId }).meta({
   id: 'AddPackageToCategoryParams',
 })
+export const AddVersionParams: z.ZodObject<{
+  version: z.ZodString
+  headline: z.ZodString
+  releaseNotes: typeof LocaleString
+  sourceVersion: z.ZodString
+}> = /* @__PURE__ */ object({
+  version: z.string(),
+  headline: z.string(),
+  releaseNotes: LocaleString,
+  sourceVersion: z.string(),
+}).meta({
+  id: 'AddVersionParams',
+})
 export const ApplyWithPathParams: z.ZodIntersection<
   z.ZodObject<{
     path: z.ZodCodec<
@@ -613,11 +597,7 @@ export const MetricsSummary: z.ZodObject<{
 })
 export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
-  releaseNotes: z.ZodString
-  /**
-   * Locale Markdown excluding `en_US`; missing languages fall back to `release_notes`.
-   */
-  releaseNotesTranslations: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>
+  releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
   authorized: z.ZodArray<typeof Guid>
   iso: z.ZodRecord<
@@ -634,14 +614,7 @@ export const OsVersionInfo: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   headline: z.string(),
-  releaseNotes: z.string(),
-  /**
-   * Locale Markdown excluding `en_US`; missing languages fall back to `release_notes`.
-   */
-  releaseNotesTranslations: z.record(z.string(), z.string()).optional().meta({
-    description:
-      'Locale Markdown excluding `en_US`; missing languages fall back to `release_notes`.',
-  }),
+  releaseNotes: LocaleString,
   sourceVersion: z.string(),
   authorized: z.array(Guid),
   iso: z.record(z.string(), RegistryAsset(Blake3Commitment)),

@@ -71,18 +71,21 @@ revisions whose JSON Patch paths are relative to the selected subtree.
 
 Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hold versions, dependency `VersionRange`s, and `RegistryAsset`s. Assets carry **Blake3 commitments** (`sign/commitment/blake3`) for content addressing and integrity, and are signed by registered signers.
 
-OS versions retain English Markdown in `releaseNotes` and optionally carry non-English
-Markdown in `releaseNotesTranslations`, keyed by locale. English belongs exclusively in
-`releaseNotes`; the add-version API rejects `en_US` in the translations map. Registries
-store and return every translation without choosing a language. StartOS selects locally
-through its existing `LocalizePipe`, with English fallback. Older clients ignore the
-additional field; newer clients can still consume English-only registries.
+OS versions use the shared `LocaleString` for `releaseNotes`, as package metadata does:
+a plain string or a locale-to-Markdown map. The compiler includes `en_US` in translated
+maps. Current clients receive the complete map and select locally with `LocalizePipe`.
+Existing English-only records deserialize unchanged without a migration.
 
-`os.version.add` replaces English notes and the complete translation set together.
-`--release-notes-translations` accepts a JSON object; omitting it clears translations.
-Promotion carries both fields unchanged. Publishers need the updated CLI to pass the
-new option. Older registries ignore the additional request field and retain English.
-Existing English-only records deserialize unchanged with no migration.
+`os.version.add` replaces the entire `LocaleString`; promotion preserves it unchanged.
+The existing third positional CLI argument accepts prose or a JSON locale map. The
+`<RELEASE_NOTES_OR_JSON>` help marker lets publishers reject stale CLIs before writes.
+Registries must be upgraded before publishing maps.
+
+`DeviceInfoMiddleware` projects English notes in responses for StartOS before 0.4.0.5
+and string-only StartWRT clients. It uses the device version, or an explicit update
+source version without a device header. Headerless queries without a source version
+retain the full map. Projection covers OS version queries, the OS index and the full
+index; stored notes remain unchanged.
 
 ## Persistence
 

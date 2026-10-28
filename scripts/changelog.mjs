@@ -761,8 +761,10 @@ function registryNotes(product, version, ref, changelogRef) {
       ]
     }),
   )
-  const { en_US: english, ...translations } = composed
-  return { releaseNotes: english, releaseNotesTranslations: translations }
+  return {
+    releaseNotes:
+      Object.keys(composed).length === 1 ? composed[ENGLISH] : composed,
+  }
 }
 
 function checkManifestVersion(

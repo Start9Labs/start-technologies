@@ -36,10 +36,7 @@ export class OSService {
         .sort(([a], [b]) => Version.parse(b).compareForSort(Version.parse(a)))
         .map(([version, info]) => ({
           version,
-          notes: {
-            ...info.releaseNotesTranslations,
-            en_US: info.releaseNotes,
-          },
+          notes: info.releaseNotes,
           squashfs: info.squashfs,
         }))
     }),

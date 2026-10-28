@@ -255,7 +255,6 @@ test('sparse deploy canonical versions and notes', t => {
     assert.equal(compiled.status, 0, compiled.stderr)
     assert.deepEqual(JSON.parse(text(join(runnerTemp, 'release-notes.json'))), {
       releaseNotes: derived,
-      releaseNotesTranslations: {},
     })
     const fragmentPath = `checkout-${project}/projects/${project}/changelog/patch-fixed-feature.md`
     write(fragmentPath, '---\nuser-facing: invalid\n---\n\n- Invalid.\n')
@@ -994,15 +993,15 @@ test('registry payload composes localized notes, warnings, fallbacks and links',
   const snapshot = git('rev-parse', 'HEAD').trim()
   const payload = () => JSON.parse(script('registry-notes').stdout)
   const notes = payload()
-  const { releaseNotes: english, releaseNotesTranslations: translations } =
-    notes
+  const translations = notes.releaseNotes
+  const english = translations.en_US
   assert.deepEqual(Object.keys(translations).sort(), [
     'de_DE',
+    'en_US',
     'es_ES',
     'fr_FR',
     'pl_PL',
   ])
-  assert.equal(Object.hasOwn(translations, 'en_US'), false)
   assert.equal(script('notes').stdout, english)
   contains(english, PRE_UPDATE)
   contains(english, 'Lede.')
@@ -1056,8 +1055,8 @@ test('registry payload composes localized notes, warnings, fallbacks and links',
 
   env.CHANGELOG_REF = snapshot
   const pending = payload()
-  contains(pending.releaseNotes, 'Full changelog fragments for v1.2.3')
-  contains(pending.releaseNotes, 'changes awaiting release.')
+  contains(pending.releaseNotes.en_US, 'Full changelog fragments for v1.2.3')
+  contains(pending.releaseNotes.en_US, 'changes awaiting release.')
   for (const [locale, label, description] of [
     [
       'de_DE',
@@ -1080,7 +1079,7 @@ test('registry payload composes localized notes, warnings, fallbacks and links',
       'zmiany oczekujące na wydanie.',
     ],
   ]) {
-    const body = pending.releaseNotesTranslations[locale]
+    const body = pending.releaseNotes[locale]
     contains(body, label)
     contains(body, description)
     contains(body, `/tree/${snapshot}/projects/start-sdk/changelog`)
@@ -1127,22 +1126,19 @@ test('older source catalogs fall back to shared pending-fragment labels', t => {
   env.NOTES_REF = snapshot
   env.CHANGELOG_REF = snapshot
   const notes = JSON.parse(script('registry-notes').stdout)
-  contains(notes.releaseNotes, 'Full changelog fragments for v1.2.3')
+  contains(notes.releaseNotes.en_US, 'Full changelog fragments for v1.2.3')
   contains(
-    notes.releaseNotesTranslations.pl_PL,
+    notes.releaseNotes.pl_PL,
     'Fragmenty pełnej listy zmian w wersji 1.2.3',
   )
+  contains(notes.releaseNotes.pl_PL, 'zmiany oczekujące na wydanie.')
   contains(
-    notes.releaseNotesTranslations.pl_PL,
-    'zmiany oczekujące na wydanie.',
-  )
-  contains(
-    notes.releaseNotesTranslations.pl_PL,
+    notes.releaseNotes.pl_PL,
     `/tree/${snapshot}/projects/start-sdk/changelog`,
   )
 })
 
-test('registry publishers pass English prose and a separate non-English JSON flag', t => {
+test('registry publishers pass the complete LocaleString as the release-notes argument', t => {
   const { root, env, write, run, script } = releaseFixture(t)
   write(`projects/start-wrt/release-notes/${VERSION}.md`, MAIN)
   write(
@@ -1158,7 +1154,7 @@ load_registry_index() { _INDEX_JSON='{"versions":{"1.2.3":{"sourceVersion":">=0.
 enter_release_dir() { :; }
 release_files() { :; }
 start-cli() {
-    if [ "$1" = registry ]; then echo --release-notes-translations
+    if [ "$1" = registry ]; then echo '<RELEASE_NOTES_OR_JSON>'
     else printf '%s\\0' "$@" > "${capture}"
     fi
 }
@@ -1178,9 +1174,8 @@ start-cli() {
       VERSION,
       `v${VERSION}`,
     ])
-    assert.equal(args[7], expected.releaseNotes.trimEnd())
-    assert.equal(args[9], '--release-notes-translations')
-    assert.deepEqual(JSON.parse(args[10]), expected.releaseNotesTranslations)
+    assert.deepEqual(JSON.parse(args[7]), expected.releaseNotes)
+    assert.equal(args.length, 9)
   }
   for (const [workflow, name] of [
     ['startos-iso.yaml', 'Register OS version'],
@@ -1209,9 +1204,8 @@ start-cli() {
     )
     assert.equal(result.status, 0, result.stderr)
     const args = text(capture).split('\0').slice(0, -1)
-    assert.equal(args[7], expected.releaseNotes.trimEnd())
-    assert.equal(args[9], '--release-notes-translations')
-    assert.deepEqual(JSON.parse(args[10]), expected.releaseNotesTranslations)
+    assert.deepEqual(JSON.parse(args[7]), expected.releaseNotes)
+    assert.equal(args.length, 9)
   }
 })
 
@@ -1297,7 +1291,7 @@ test('registry source refs pin shared link translations and reject mismatched al
     '**[Zmieniony odsyłacz %{version}](%{url})**'
   write(catalog, JSON.stringify(labels))
   contains(
-    JSON.parse(script('registry-notes').stdout).releaseNotesTranslations.pl_PL,
+    JSON.parse(script('registry-notes').stdout).releaseNotes.pl_PL,
     'Zmieniony odsyłacz',
   )
   const pinned = run(
@@ -1353,11 +1347,11 @@ test('archived localized Highlights retain their link position and source URL', 
   assert.equal(synced.status, 0, synced.stderr)
   commit()
   const archived = JSON.parse(script('registry-notes').stdout)
-  const polish = archived.releaseNotesTranslations.pl_PL
+  const polish = archived.releaseNotes.pl_PL
   contains(polish, '/blob/HEAD/projects/start-sdk/CHANGELOG.md#123')
   assert.ok(polish.indexOf('- Feature.') < polish.indexOf('Pełna lista zmian'))
   assert.ok(polish.indexOf('Pełna lista zmian') < polish.indexOf('## Ważne'))
-  const pendingPolish = pending.releaseNotesTranslations.pl_PL
+  const pendingPolish = pending.releaseNotes.pl_PL
   contains(pendingPolish, 'Fragmenty pełnej listy zmian w wersji 1.2.3')
   contains(pendingPolish, '/tree/HEAD/projects/start-sdk/changelog')
   const withoutLink = body => body.replace(/^\*\*\[.+$/m, '<changelog link>')
@@ -1431,9 +1425,9 @@ enter_release_dir() { touch "${marker}"; }
     )
     const rejected = run('bash', ['-e', '-c', command], { encoding: 'utf8' })
     assert.notEqual(rejected.status, 0)
-    contains(rejected.stderr, 'lacks --release-notes-translations')
+    contains(rejected.stderr, 'lacks LocaleString release notes')
   }
-  env.CLI_HELP = 'Options:\n  --release-notes-translations <JSON>\n'
+  env.CLI_HELP = 'Arguments:\n  <RELEASE_NOTES_OR_JSON>\n'
   script('check-registry-notes-cli', 'start-wrt')
   env.HELP_STATUS = '1'
   script('check-registry-notes-cli', 'start-wrt', false)

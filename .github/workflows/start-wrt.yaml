@@ -353,10 +353,8 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           NOTES=$(jq -r '.releaseNotes' "$RUNNER_TEMP/release-notes.json")
-          TRANSLATIONS=$(jq -c '.releaseNotesTranslations' "$RUNNER_TEMP/release-notes.json")
           start-cli --registry="${{ env.REGISTRY }}" registry os version add \
-            "$VERSION" "v${VERSION}" "$NOTES" ">=0.1.0-beta.1 <=${VERSION}" \
-            --release-notes-translations "$TRANSLATIONS"
+            "$VERSION" "v${VERSION}" "$NOTES" ">=0.1.0-beta.1 <=${VERSION}"
 
       - name: Index assets in the target registry
         run: |

@@ -130,7 +130,7 @@ registry_notes() (
 )
 
 curated_notes() {
-    registry_notes | jq -j '.releaseNotes'
+    registry_notes | jq -j '.releaseNotes | if type == "string" then . else .en_US end'
 }
 
 project_display_name() {
@@ -250,18 +250,17 @@ missing_registry_assets() {
 check_registry_notes_cli() {
     local help
     help=$(start-cli registry os version add --help) || return
-    if ! grep -q -- '--release-notes-translations' <<< "$help"; then
-        >&2 echo "  ✗ start-cli lacks --release-notes-translations; update it before publishing registry notes."
+    if ! grep -Fq -- '<RELEASE_NOTES_OR_JSON>' <<< "$help"; then
+        >&2 echo "  ✗ start-cli lacks LocaleString release notes; update it before publishing registry notes."
         return 1
     fi
 }
 
 refresh_registry_notes() {
-    local registry=$1 range payload notes translations
+    local registry=$1 range payload notes
     payload=$(registry_notes) || return
     check_registry_notes_cli || return
     notes=$(jq -r '.releaseNotes' <<< "$payload")
-    translations=$(jq -c '.releaseNotesTranslations' <<< "$payload")
     load_registry_index "$registry"
     range=$(jq -r --arg v "$VERSION" '.versions[$v].sourceVersion // empty' <<< "$_INDEX_JSON")
     if [ -z "$range" ]; then
@@ -270,8 +269,7 @@ refresh_registry_notes() {
     fi
     echo "Setting ${VERSION} release notes on ${registry}..."
     start-cli --registry="$registry" registry os version add \
-        "$VERSION" "v${VERSION}" "$notes" "$range" \
-        --release-notes-translations "$translations"
+        "$VERSION" "v${VERSION}" "$notes" "$range"
     _INDEX_REGISTRY=""
 }
 
@@ -1477,11 +1475,10 @@ cmd_index() {
 
 cmd_register() {
     require_kind wrt
-    local payload notes translations
+    local payload notes
     payload=$(registry_notes) || return
     check_registry_notes_cli || return
     notes=$(jq -r '.releaseNotes' <<< "$payload")
-    translations=$(jq -c '.releaseNotesTranslations' <<< "$payload")
     # Register + index a CI build into the source (beta) registry, where beta
     # routers soak it before `release` promotes it into production. Normally
     # the CI deploy job (start-wrt.yaml) does this itself right after the S3
@@ -1492,8 +1489,7 @@ cmd_register() {
     enter_release_dir
     echo "Registering StartWRT ${VERSION} in ${STARTWRT_SOURCE_REGISTRY}..."
     start-cli --registry="$STARTWRT_SOURCE_REGISTRY" registry os version add \
-        "$VERSION" "v$VERSION" "$notes" "${STARTWRT_COMPAT_FLOOR} <=$VERSION" \
-        --release-notes-translations "$translations"
+        "$VERSION" "v$VERSION" "$notes" "${STARTWRT_COMPAT_FLOOR} <=$VERSION"
 
     # start-cli infers the asset slot from the file extension and only accepts
     # iso/img/squashfs. Both images ship gzipped, so present each under a
@@ -1796,9 +1792,9 @@ Subcommands:
                      and a full-changelog link. English Markdown. (all projects.)
   check-registry-notes-cli
                      Check the installed CLI supports translated registry notes.
-  registry-notes     Print the registry publishing JSON: English releaseNotes
-                     and non-English releaseNotesTranslations, with localized
-                     warnings and changelog links. (all projects.)
+  registry-notes     Print registry publishing JSON with releaseNotes as a string
+                     or locale map, including localized warnings and changelog
+                     links. (all projects.)
   body               Print the whole GitHub release body: notes, an expandable
                      changelog, downloads and checksums. (all projects.)
   release            Run the full applicable pipeline for the project, skipping
