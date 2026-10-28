@@ -1,1 +1,0 @@
-- Fixed services whose container image has no `/etc`, such as one built `FROM scratch`, failing to start.

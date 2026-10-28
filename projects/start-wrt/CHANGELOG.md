@@ -5,6 +5,160 @@ All notable changes to StartWRT are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0]
+
+### Added
+
+- **DNS record publishing (RFC 2136).** A device with the new **Allow DNS record
+  publishing** permission (off by default, on its device page) can publish DNS
+  names into the router, pointing at any address, and every device on the
+  network resolves them. A StartOS server uses it for its private domains. An
+  inbound VPN client needs the same permission, granted from its VPN's client
+  list. An update from the LAN must arrive over TCP (`nsupdate -v`). Names under
+  `.lan` are refused, and a name is served only to networks whose Security
+  Profile can reach the publishing device. The router drops a record whose
+  device loses the address it published from, and revoking the permission
+  removes the device's names immediately. A read-only table on the device page
+  shows what a device has published. DNS record publishing coexists with DNS
+  servers published on port 53, including access from the WAN and LAN.
+- **Inbound VPN clients can publish DNS records.** A client added on an earlier
+  release must be deleted and re-added before it can publish; its new
+  configuration carries the address the router expects.
+
+- **Firefox's default DNS-over-HTTPS steps aside.** Wherever the router serves
+  published names or DNS overrides, its DNS answers Firefox's DNS-over-HTTPS
+  canary domain, so Firefox's default-enabled DoH steps aside there and those
+  names and overrides resolve. DoH a user turned on explicitly is untouched.
+
+- K1 boards with four LAN ports bring up all of them, each assignable to its own Security Profile on the Ethernet page.
+
+- **DNS servers for outbound VPNs.** Adding an outbound VPN or editing one now takes DNS servers, which replace the config file's `DNS =` line, and the page warns when a VPN has none.
+
+- Wi-Fi settings have a channel width for each band: 20 or 40 MHz on 2.4 GHz, and up to 160 MHz on 5 GHz where the radio supports it. Each channel offers only the widths it can use in the selected country.
+
+### Changed
+
+- **Sign-in uses a key your browser holds.** Logging in creates a key the browser keeps but cannot export, and every request is signed with it, so no reusable credential crosses the network. This update signs everyone out once.
+- **A sign-in lasts 24 hours from when you log in**, even while you keep using it, so expect to log in again each day. It previously lasted until it went a day unused. Logging out or changing the admin password from another device ends it sooner; updates within those 24 hours do not.
+- **Changing the admin password signs out every other device.** The browser or CLI that made the change stays signed in. Before first-time setup sets a password, logging in is refused.
+- **`startwrt-cli auth login` enrolls a key** at `~/.startwrt/id.key.pem` instead of saving a cookie, and `startwrt-cli auth session list` and `auth session kill` show and revoke sign-ins. On the router itself the CLI needs no login, and `auth login` and `auth logout` say so.
+
+- **Support diagnostics include history from before the last reboot.** The
+  download now carries the router's saved system log, which spans reboots and
+  each boot from its first line and holds 32–64 MiB of history, along with
+  the activity log and a short system summary. It downloads as a `.log.gz`
+  file.
+- **System logs are kept across later updates and included in backups.** Restoring a
+  backup keeps the router's own log, preceded by any older history the
+  backup carried.
+- **`/var` persists across reboots.** The system log lives at
+  `/var/log/messages` and the activity log under `/var/lib/startwrt/`, where
+  a standard Linux system keeps them.
+
+- **Only the router hands out addresses across its ports and Wi-Fi.** DHCP, DHCPv6, and IPv6 router advertisements from another device are no longer forwarded from one of the router's ports or Wi-Fi networks to another. A modem or router plugged into a LAN port instead of the WAN port could hand its own addresses to devices on the router's Wi-Fi, which then bypassed the router entirely. A device that needs to send router advertisements, such as a Thread border router, can be allowed to with the new **Allow IPv6 router advertisements** permission on its device page.
+
+- **Higher transmit power on 5 GHz channels 36–48 in the US.** With the country
+  set to United States, these channels now allow up to 30 dBm instead of 23 dBm.
+
+### Removed
+
+- Removed "Switch to all traffic" and "Switch to LAN only" from the inbound VPN client list. To change a client's routing, delete it and add it again with the routing you want.
+
+### Fixed
+
+- `apk upgrade` on the router no longer fails because of an unavailable package repository.
+
+- **First-time setup opens at `router.lan`.** While the router waits for its
+  admin password, a website typed into the browser is sent to
+  `http://router.lan` instead of showing a certificate warning and then the
+  setup page under that website's name.
+
+- Deleting a profile, or returning one to the ISP's DNS, no longer leaves the router's name resolving to that profile's old address until the next restart.
+
+- After the router restarts or updates, devices get an address as soon as the router is back, instead of up to two minutes later on routers with several profiles.
+
+- Moving an Ethernet port to another Security Profile gives a connected Linux client an address on the new profile's subnet without reconnecting it by hand.
+
+- **Saving the Ethernet page keeps WAN IPv6 on the WAN connection.** It no
+  longer moves the IPv6 client from the WAN connection onto the bare WAN port,
+  which on a PPPoE WAN would have run it outside the PPP link.
+
+- Renaming an inbound VPN client now works. Previously every rename failed with an error and the name never changed.
+
+- The inbound VPN client config dialog's visibility toggle and File/QR selector no longer sit under its close button with a long client name or in a narrow window.
+
+- Editing an inbound VPN server no longer lets you change its Security Profile, which created a second, empty server and left the original running. To move a VPN to another profile, delete it and add a new one.
+
+- Inbound VPN clients added with their own WireGuard public key can now connect. Adding one now shows its configuration, including the preshared key, with a placeholder for the device's private key. Clients added this way before this release never connected and must be deleted and added again.
+
+- Keeping settings while flashing from a microSD card now also preserves the configuration files of installed packages outside `/etc/config` that you have edited, such as SmartDNS and dnsmasq configuration. Files still at their package defaults take the new firmware's defaults.
+
+- A profile's LAN Access setting now reads back exactly as it was saved. A profile set to All keeps access to profiles created afterwards, instead of silently becoming a Whitelist of the profiles that existed when it was saved, and a Whitelist that includes every existing profile reads back as a Whitelist instead of All.
+- A profile that was set to All before this fix and has already lost access to newer profiles must be re-saved with LAN Access set to All.
+- A profile with LAN Access set to Same profile stays isolated from profiles created afterwards, even if its Whitelist option to include new profiles had been ticked before it was switched to Same profile.
+- A Whitelist with the option to include new profiles ticked can be saved with no profiles selected, and keeps that option when the last profile in it is deleted.
+- Forwardings between profiles' firewall zones added outside StartWRT, such as through LuCI, no longer show up as LAN Access.
+
+- The LAN IPv6 page shows the prefix size your ISP actually delegated, and checks the LAN prefix length against it rather than assuming a `/48`. A `/64` LAN prefix is now accepted on a `/64` delegation, and a LAN prefix too short for the delegation is shown at the length the router actually uses.
+- LAN IPv6 prefix lengths outside `/48` to `/64`, or shorter than the delegated prefix, are now rejected from the CLI as well as the web interface.
+
+- The port-mapping server now answers NAT-PMP requests with "unsupported version" instead of ignoring them, so NAT-PMP clients fall back right away rather than retrying for about two minutes.
+
+- An outbound VPN's detail page shows its tunnel's real state — **Connected**, **Idle**, **Not responding**, or **Disabled** — with the time of its last handshake, instead of reading **Connected** whenever the VPN is enabled. **Not responding** explains that profiles using the VPN have no internet until its server answers, and how to get them back online.
+
+- PPPoE WAN connections now connect.
+
+- Saving a profile, the LAN address, or a VPN or DNS setting no longer takes DHCP and DNS offline on every network for up to a few minutes, and a network that comes up during the save no longer stays without DHCP until another setting is saved or the router restarts.
+
+- Saving published ports while a device is offline no longer removes that device's IPv6 forwards; they keep the device's last IPv6 address. Adding IPv6 to a port for a device that has no global IPv6 address is now refused with an error instead of being silently left out.
+
+- Changing Remote Access closes WAN-side SSH sessions the new setting disallows, including changes applied from the CLI or after a WAN address change, and preserves sessions it still allows.
+
+- Error messages now name the specific error instead of "General error".
+
+- The serial console offers a login again after one times out. An unused login prompt expires after 60 seconds, and the console then stayed silent until the next reboot.
+
+- **Internet access stays blocked until setup is complete.** Before an admin
+  password was set, devices using their own DNS server, Private DNS, or
+  DNS-over-HTTPS could reach the Internet.
+
+- The first-boot setup page no longer stays blank where the web interface cannot load, such as in a captive-portal window; it says to open http://router.lan in Safari, Chrome or Firefox to finish setup.
+
+- Changing a LAN Network Block or a profile subnet offers to delete the inbound VPN server it would break, instead of showing an error.
+
+- Disabling WAN IPv6 keeps its settings, which return when it is enabled again, and the `wan6` interface stays visible in LuCI and `ubus` as stopped rather than missing.
+
+- The IPv6 prefix length set on the WAN page is now saved in SLAAC and DHCPv6 modes, not only in Static mode.
+
+- The WAN IPv4 summary reads **Not connected** when nothing is plugged into the WAN port or the WAN has no IPv4 address, instead of leaving the row out.
+
+- **Wi-Fi Blackout holds for the whole window.** Saving a Wi-Fi Blackout window
+  that covers the current time turns Wi-Fi off right away, after asking you to
+  confirm, and removing the active window turns Wi-Fi back on. Saving Wi-Fi, WAN,
+  LAN, Ethernet port, or Security Profile settings during a window no longer
+  turns Wi-Fi back on before the window ends.
+
+- The Devices page shows which Wi-Fi band (2.4 GHz, 5 GHz, or 6 GHz) each wireless client is connected on, instead of just "Wi-Fi".
+
+- Choosing a Wi-Fi channel that cannot carry the radio's channel width, such as 5 GHz channel 165 in the United States, no longer leaves that band's network down. A router already saved with such a pair narrows the width when it next starts.
+
+### Security
+
+- **Update the web interface and shared dependencies with security fixes**, including Angular, DOMPurify, TLS certificate verification and handshake handling, and HTTP/2 flow control, and replace the unmaintained YAML parser.
+
+- An IPv6 published port now delivers traffic only to the device it was published for. Previously, another device on the same Security Profile could spoof IPv6 neighbor discovery to have the router send that port's Internet traffic to it.
+
+- **Update the Linux kernel to 6.18.57** with upstream stable security and bug fixes.
+
+- **Update the OpenWrt base to 25.12.6**, including the hostapd fix for security advisory 2026-1 (malformed Wi-Fi 7 multi-link frames could crash the access point) and updated OpenSSL, wolfSSL, mbed TLS, and CA certificates.
+
+- Rebooting no longer brings back the sticker Wi-Fi password or turns disabled radios back on when no Wi-Fi password is assigned to the Admin profile. Previously, after any reboot, the sticker password gave Admin access to the LAN and reset the network name to `StartWRT`.
+- A router that already picked up the sticker password shows it as a **Default** entry on the `Points of Entry > Wi-Fi > Passwords` page. Delete that entry to remove the access it granted.
+
+- A profile routed through an outbound VPN now sends its DNS queries through the tunnel in every case where it has DNS servers to use there. Previously, a profile with custom DNS servers resolved them over the WAN, so the ISP saw every name it looked up, and a VPN whose config had no `DNS =` line left its profiles on the ISP's DNS servers.
+- With custom system DNS, a profile routed through a VPN whose config has no DNS servers resolves again, through the tunnel; previously its DNS stopped working.
+- A profile routed through a VPN with no DNS servers to use through the tunnel shows **System (outside VPN)** in the DNS column, because its DNS still goes to the ISP outside the tunnel.
+
 ## [1.2.1]
 
 ### Fixed

@@ -12,7 +12,7 @@ Dux can also file a feature request with Start9 when you want a product or servi
 
 ## Reaching a Person
 
-Choose **Request a human**, the person icon in the message field, or ask Dux for a person. Dux also brings one in when a case needs it.
+Choose **Request a human** from **Actions**, the **…** in the message field, or ask Dux for a person. Dux also brings one in when a case needs it.
 
 During support hours, someone from the team joins shortly. When Dux hands a case over outside support hours, its reply says when they resume. Add anything that would help while you wait — error messages, logs, what you have already tried — and it will be waiting for whoever picks it up. Dux keeps helping while you wait.
 

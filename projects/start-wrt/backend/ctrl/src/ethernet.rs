@@ -228,7 +228,7 @@ pub async fn set<C: CtrlContext>(
         let macs = crate::devices::get_bridge_fdb()
             .await
             .into_iter()
-            .filter(|(_, port)| changed_ports.contains(port))
+            .filter(|(_, entry)| changed_ports.contains(&entry.port))
             .map(|(mac, _)| mac)
             .collect();
         (macs, changed_ports)
