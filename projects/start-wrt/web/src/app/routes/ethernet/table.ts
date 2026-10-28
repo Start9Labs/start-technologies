@@ -20,6 +20,7 @@ import { firstValueFrom } from 'rxjs'
 import { Placeholder } from 'src/app/components/placeholder'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { fill } from 'src/app/i18n/validation-errors'
+import { publishedPortDeletionMessage } from 'src/app/services/published-port-deletion'
 
 import { EthernetPortView, EthernetService } from './service'
 
@@ -132,13 +133,11 @@ export class EthernetTable {
     item.profile = profile
     const items = [...this.ethernetTable()]
 
-    // Reassigning this port moves its devices to a new subnet, breaking any
-    // published ports forwarding to them. Surface them for confirmation first.
     let pending
     try {
       pending = await this.service.previewPorts(items)
     } catch {
-      this.service.refresh() // nothing applied — restore the dropdown
+      this.service.refresh()
       return
     }
 
@@ -148,14 +147,12 @@ export class EthernetTable {
       ),
       { port: item.name, profile: fullname },
     )
-    const deletion = pending.length
-      ? fill(
-          this.i18n.transform(
-            'This change breaks the following published port(s), so they will be deleted: {list}.',
-          ),
-          { list: pending.map(p => p.label).join(', ') },
-        )
-      : ''
+    const deletion = publishedPortDeletionMessage(
+      this.i18n.transform(
+        'This change breaks the following published port(s), so they will be deleted: {list}.',
+      ),
+      pending,
+    )
     const confirmed = await firstValueFrom(
       this.dialogs.open<boolean>(TUI_CONFIRM, {
         label: this.i18n.transform('Change Security Profile?'),
@@ -170,7 +167,7 @@ export class EthernetTable {
     ).catch(() => false)
 
     if (!confirmed) {
-      this.service.refresh() // revert the dropdown to the applied state
+      this.service.refresh()
       return
     }
 
