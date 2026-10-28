@@ -38,7 +38,7 @@ A microSD reflash boots the router from a StartWRT image and replaces the firmwa
 1. When the wizard completes, power off the router, remove the microSD card, and power it back on.
 
 > [!NOTE]
-> On a DIY or unprogrammed board with no Wi-Fi password in the EEPROM, the wizard is reachable over Ethernet only, and the reflashed router boots with no Wi-Fi until you add a Wi-Fi password in the web interface. See [Installing StartWRT](installing.md#diy-and-unprogrammed-boards).
+> On a DIY or unprogrammed board with no Wi-Fi password in the EEPROM, the wizard is reachable over Ethernet only. After a **Fresh Start**, the reflashed router boots with no Wi-Fi until you add a Wi-Fi password in the web interface; **Keep settings** keeps the Wi-Fi passwords you added. See [Installing StartWRT](installing.md#diy-and-unprogrammed-boards).
 
 ## What Gets Wiped
 

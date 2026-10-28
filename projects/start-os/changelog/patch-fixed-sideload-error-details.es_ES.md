@@ -1,0 +1,1 @@
+- Los clientes CLI actualizados reciben errores completos de instalación de servicios, sin truncarlos en el flujo de progreso.

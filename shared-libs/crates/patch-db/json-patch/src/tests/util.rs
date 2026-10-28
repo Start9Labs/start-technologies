@@ -20,19 +20,17 @@ struct TestCase {
 fn run_case(doc: &Value, patches: &Value, merge_patch: bool) -> Result<Value, String> {
     let mut actual = doc.clone();
     if merge_patch {
-        crate::merge(&mut actual, &patches);
+        crate::merge(&mut actual, patches);
     } else {
         let patches: crate::Patch =
             imbl_value::from_value(patches.clone()).map_err(|e| e.to_string())?;
 
-        // Patch and verify that in case of error document wasn't changed
         crate::patch(&mut actual, &patches)
-            .map_err(|e| {
+            .inspect_err(|_| {
                 assert_eq!(
                     *doc, actual,
                     "no changes should be made to the original document"
                 );
-                e
             })
             .map_err(|e| e.to_string())?;
     }

@@ -1,0 +1,1 @@
+- Aktualne klienty CLI otrzymują pełne błędy instalowania usług zamiast obciętych komunikatów w strumieniu postępu.

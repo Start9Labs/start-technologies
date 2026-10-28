@@ -1,10 +1,7 @@
 # AGENTS.md — start-cli
 
 Agent/dev notes for the `start-cli` crate. `CLAUDE.md` is a one-line `@AGENTS.md` import. See
-[`ARCHITECTURE.md`](./ARCHITECTURE.md) and [`CONTRIBUTING.md`](./CONTRIBUTING.md) for this crate, and the root
-[`AGENTS.md`](../../AGENTS.md) and [`CONTRIBUTING.md`](../../CONTRIBUTING.md) for repo-wide rules.
-
-**Read up the tree first.** These docs are hierarchical: before working here, read the `AGENTS.md` in each enclosing directory up to the repo root (and their `ARCHITECTURE.md` / `CONTRIBUTING.md` where relevant). This file covers only what is specific to this scope and does not repeat rules already stated higher up.
+[`ARCHITECTURE.md`](./ARCHITECTURE.md) for this crate's structure.
 
 ## What this is
 
@@ -48,10 +45,25 @@ generator is `cargo test -p start-core export_manpage_start_cli`.
   none on by default. Keep them in sync with `start-core`'s features when adding new ones.
 - **`STARTOS_USE_PODMAN`** controls the local container backend for `s9pk` packaging. Unset or
   falsey → `PREFER_DOCKER` is set (Docker). Truthy (`1/true/y/yes`) → Podman.
-- **In a StartOS image `start-cli` is a symlink to `startbox`** (see OS `Makefile`), the same
+- **In a StartOS image `start-cli` is a symlink to `startbox`** (see `projects/start-os/build.mk`), the same
   `MultiExecutable` multiplexer. The standalone bin here enables only the `start-cli` sub-bin.
 
 ## Verifying a command
 
 Build the bin, then run it against a StartOS test VM. Remote commands need `-H https://<ip>` and an `auth login`; local
 commands (`s9pk`, `init-key`, `pubkey`, `util`) need no server.
+
+## Formatting
+
+```bash
+make start-cli-format
+make start-cli-format-check
+cargo clippy -p start-cli
+```
+
+## Change ownership
+
+CLI argument/config changes belong in `start-core::context::config` (`ClientConfig`);
+CLI entrypoint behavior belongs in `shared-libs/crates/start-core/src/bins/start_cli.rs`.
+User-facing CLI documentation lives in `projects/start-sdk/docs/` (packaging)
+and `projects/start-os/docs/`.

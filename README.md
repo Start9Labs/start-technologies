@@ -22,20 +22,20 @@
 
 This repository is the **monorepo for all Start9 products**. Its flagship is **StartOS** — an open-source Linux distribution for running a personal server, handling discovery, installation, network configuration, data backup, dependency management, and health monitoring of self-hosted services.
 
-All products share a single Rust backend library (`start-core`) and a single Angular workspace; each product is a thin wrapper under `projects/` that adds only its own entry point and any product-specific frontend or packaging, while shared code lives at the top level under `shared-libs/`.
+Products live under `projects/` and reuse code from `shared-libs/`. The OS, CLI, registry, and tunnel binaries are thin wrappers over the Rust `start-core` library; StartWRT owns its router backend and reuses that library's networking and utility modules. All Angular apps build through one root workspace; the SDK and container runtime have separate Node builds.
 
 | Directory                        | Product          | What it is                                                                                                |
 | -------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------- |
 | `projects/start-os/`             | StartOS          | The server OS — `startbox`/`start-container` bins, web UI + setup wizard, container runtime, OS packaging |
 | `projects/start-cli/`            | start-cli        | CLI for managing servers, registries, and packaging                                                       |
-| `projects/start-registry/`       | start-registry   | Package registry server (`registrybox`); serves the marketplace UI                                        |
+| `projects/start-registry/`       | start-registry   | Package registry API and asset server (`registrybox`)                                                     |
 | `projects/start-tunnel/`         | StartTunnel      | VPN/forwarding server (`tunnelbox`) + its web UI                                                          |
 | `projects/start-wrt/`            | StartWRT         | OpenWrt-based router OS (`startwrt` bin + embedded web UI), flashable image for the SpaceMiT K1           |
 | `projects/start-sdk/`            | Start SDK        | `@start9labs/start-sdk` for building StartOS service packages                                             |
-| `projects/brochure-marketplace/` | Marketplace site | Public marketplace/landing site (marketplace.start9.com)                                                  |
+| `projects/brochure-marketplace/` | Marketplace site | Public marketplace site (marketplace.start9.com)                                                          |
 | `projects/start-docs/`           | Docs site        | The documentation website (docs.start9.com)                                                               |
 | `shared-libs/crates/start-core/` | —                | The entire Rust backend library shared by all bins                                                        |
-| `shared-libs/ts-modules/`        | —                | Shared Angular libraries (the Angular workspace is rooted at the repo root)                               |
+| `shared-libs/ts-modules/`        | —                | Shared TypeScript modules (Angular libraries + non-Angular SDK core)                                      |
 | `shared-libs/crates/patch-db/`   | —                | Diff-based reactive state store (first-party crate)                                                       |
 
 **Tech stack:** Rust backend (Tokio/Axum), Angular frontend (Taiga UI), Node.js container runtime with LXC, and a custom diff-based database ([Patch-DB](https://github.com/Start9Labs/start-technologies/tree/master/shared-libs/crates/patch-db)) for reactive state synchronization. Services run in isolated LXC containers, packaged as S9PKs — a signed, merkle-archived format supporting partial downloads and cryptographic verification.
@@ -69,7 +69,7 @@ git clone https://github.com/Start9Labs/start-technologies.git
 cd start-technologies
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the shared toolchain and development workflow, and [projects/start-os/AGENTS.md](projects/start-os/AGENTS.md#contributor-workflow) to build a StartOS image.
+See [AGENTS.md](AGENTS.md) for the shared toolchain and development workflow, and [projects/start-os/AGENTS.md](projects/start-os/AGENTS.md#contributor-workflow) to build a StartOS image.
 
 ## The rest of the monorepo
 
@@ -86,13 +86,12 @@ StartOS is the flagship, but it shares this repo with the rest of the Start9 sta
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how the monorepo fits together
-- [CONTRIBUTING.md](CONTRIBUTING.md) — environment setup, build, test, and format workflow
-- [AGENTS.md](AGENTS.md) — AI-developer/agent operating rules (`CLAUDE.md` is a one-line `@AGENTS.md` import)
+- [AGENTS.md](AGENTS.md) — environment setup, build, test, and format workflow
 - [SECURITY.md](SECURITY.md) — how to report a vulnerability, and what is in scope
 
 ## Contributing
 
-There are multiple ways to contribute: work directly on a product in this repo, package a service for the marketplace, or help with documentation and guides. See [CONTRIBUTING.md](CONTRIBUTING.md) or visit [start9.com/contribute](https://start9.com/contribute/).
+There are multiple ways to contribute: work directly on a product in this repo, package a service for the marketplace, or help with documentation and guides. See [AGENTS.md](AGENTS.md) or visit [start9.com/contribute](https://start9.com/contribute/).
 
 To report security issues, email [security@start9.com](mailto:security@start9.com). See [SECURITY.md](SECURITY.md) for what is in scope and what happens next.
 

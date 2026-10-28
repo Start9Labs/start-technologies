@@ -46,8 +46,3 @@ button:disabled {
     flex: 1;
   }
 }
-
-// TODO: Remove in Taiga v5.0
-[tuiButton] {
-  min-block-size: var(--t-size);
-}

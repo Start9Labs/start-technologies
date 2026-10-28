@@ -20,7 +20,7 @@ import { promisify } from 'node:util'
 import * as U from './oldEmbassyTypes'
 import { MainLoop } from './MainLoop'
 import { z } from '@start9labs/start-sdk'
-import { AddSslOptions } from '@start9labs/start-core/osBindings'
+import { AddSslOptionsInput as AddSslOptions } from '@start9labs/start-core/osBindings'
 import {
   BindOptionsByProtocol,
   MultiHost,
@@ -157,13 +157,13 @@ const assertNever = (
   Should be changing the type for specific properties, and this is mostly a transformation for the old return types to the newer one.
 */
 function isMatchResult(a: unknown): a is z.infer<typeof matchResult> {
-  return matchResult.safeParse(a).success
+  return matchResult.validate(a)
 }
 function isMatchError(a: unknown): a is z.infer<typeof matchError> {
-  return matchError.safeParse(a).success
+  return matchError.validate(a)
 }
 function isMatchErrorCode(a: unknown): a is z.infer<typeof matchErrorCode> {
-  return matchErrorCode.safeParse(a).success
+  return matchErrorCode.validate(a)
 }
 const fromReturnType = <A>(a: U.ResultType<A>): A => {
   if (isMatchResult(a)) {
@@ -338,6 +338,7 @@ function convertProperties(
       copyable: value.copyable || false,
       masked: value.masked || false,
       qr: value.qr || false,
+      launchable: null,
       value: value.value,
     }
   }
@@ -1208,13 +1209,13 @@ const matchVariants = z.looseObject({
   variants: z.record(z.string(), z.unknown()),
 })
 function isMatchPointer(v: unknown): v is z.infer<typeof matchPointer> {
-  return matchPointer.safeParse(v).success
+  return matchPointer.validate(v)
 }
 function isMatchSpec(v: unknown): v is z.infer<typeof matchSpec> {
-  return matchSpec.safeParse(v).success
+  return matchSpec.validate(v)
 }
 function isMatchVariants(v: unknown): v is z.infer<typeof matchVariants> {
-  return matchVariants.safeParse(v).success
+  return matchVariants.validate(v)
 }
 function cleanSpecOfPointers<T>(mutSpec: T): T {
   if (typeof mutSpec !== 'object' || mutSpec === null) return mutSpec

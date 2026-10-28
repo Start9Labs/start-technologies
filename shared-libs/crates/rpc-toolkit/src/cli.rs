@@ -13,9 +13,15 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader
 use url::Url;
 use yajrc::{Id, RpcError};
 
+use crate::output::handle_broken_pipe;
+#[cfg(feature = "ts")]
+use crate::ts::{
+    intersection_writer, type_writer, ParamsTS, PassthroughChildrenTS, PassthroughReturnTS,
+    TSWriter,
+};
 use crate::util::{internal_error, invalid_params, parse_error, without, Flat, PhantomData};
 use crate::{
-    AnyHandler, CliBindings, CliBindingsAny, Empty, HandleAny, HandleAnyArgs, HandlerArgs,
+    Adapter, AnyHandler, CliBindings, CliBindingsAny, Empty, HandleAny, HandleAnyArgs, HandlerArgs,
     HandlerArgsFor, HandlerFor, HandlerTypes, Name, ParentHandler, PrintCliResult,
 };
 
@@ -71,7 +77,13 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
     }
     pub fn run(mut self, args: impl IntoIterator<Item = OsString>) -> Result<(), RpcError> {
         let cmd = self.command();
-        let matches = cmd.get_matches_from(args);
+        let matches = match cmd.try_get_matches_from(args) {
+            Ok(matches) => matches,
+            Err(error) => {
+                let _ = handle_broken_pipe(error.print());
+                std::process::exit(error.exit_code());
+            }
+        };
         let config = Config::from_arg_matches(&matches)?;
         let ctx = (self.make_ctx)(config)?;
         let root_handler = AnyHandler::new(self.root_handler);
@@ -233,17 +245,24 @@ where
     type Err = RemoteHandler::Err;
 }
 
-#[cfg(feature = "ts-rs")]
-impl<Context, RemoteContext, RemoteHandler, Extra> crate::handler::HandlerTS
+impl<Context, RemoteContext, RemoteHandler, Extra> Adapter
     for CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra>
-where
-    RemoteHandler: crate::handler::HandlerTS,
-    Extra: Send + Sync + 'static,
 {
-    fn type_info(&self) -> Option<String> {
-        self.handler.type_info()
+    type Inner = RemoteHandler;
+    fn as_inner(&self) -> &Self::Inner {
+        &self.handler
     }
 }
+#[cfg(feature = "ts")]
+impl<C, R, H: ParamsTS, E: crate::ts::TS> ParamsTS for CallRemoteHandler<C, R, H, E> {
+    fn params_ts(&self) -> TSWriter<'_> {
+        intersection_writer(self.handler.params_ts(), type_writer::<E>())
+    }
+}
+#[cfg(feature = "ts")]
+impl<C, R, H, E> PassthroughReturnTS for CallRemoteHandler<C, R, H, E> {}
+#[cfg(feature = "ts")]
+impl<C, R, H, E> PassthroughChildrenTS for CallRemoteHandler<C, R, H, E> {}
 
 impl<Context, RemoteContext, RemoteHandler, Extra> HandlerFor<Context>
     for CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra>

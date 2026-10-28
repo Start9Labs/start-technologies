@@ -1,10 +1,78 @@
 {
   "name": "@start9labs/start-sdk",
-  "version": "3.0.0",
+  "version": "3.1.2",
   "description": "Software development kit to facilitate packaging services for StartOS",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
   "sideEffects": true,
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./esm/lib/index.mjs",
+      "default": "./lib/index.js"
+    },
+    "./lib": {
+      "types": "./lib/index.d.ts",
+      "import": "./esm/lib/index.mjs",
+      "default": "./lib/index.js"
+    },
+    "./lib/backup": {
+      "types": "./lib/backup/index.d.ts",
+      "import": "./esm/lib/backup/index.mjs",
+      "default": "./lib/backup/index.js"
+    },
+    "./lib/health/checkFns": {
+      "types": "./lib/health/checkFns/index.d.ts",
+      "import": "./esm/lib/health/checkFns/index.mjs",
+      "default": "./lib/health/checkFns/index.js"
+    },
+    "./lib/health": {
+      "types": "./lib/health/index.d.ts",
+      "import": "./esm/lib/health/index.mjs",
+      "default": "./lib/health/index.js"
+    },
+    "./lib/i18n": {
+      "types": "./lib/i18n/index.d.ts",
+      "import": "./esm/lib/i18n/index.mjs",
+      "default": "./lib/i18n/index.js"
+    },
+    "./lib/mainFn": {
+      "types": "./lib/mainFn/index.d.ts",
+      "import": "./esm/lib/mainFn/index.mjs",
+      "default": "./lib/mainFn/index.js"
+    },
+    "./lib/primaryUrl": {
+      "types": "./lib/primaryUrl/index.d.ts",
+      "import": "./esm/lib/primaryUrl/index.mjs",
+      "default": "./lib/primaryUrl/index.js"
+    },
+    "./lib/trigger": {
+      "types": "./lib/trigger/index.d.ts",
+      "import": "./esm/lib/trigger/index.mjs",
+      "default": "./lib/trigger/index.js"
+    },
+    "./lib/util": {
+      "types": "./lib/util/index.d.ts",
+      "import": "./esm/lib/util/index.mjs",
+      "default": "./lib/util/index.js"
+    },
+    "./lib/version": {
+      "types": "./lib/version/index.d.ts",
+      "import": "./esm/lib/version/index.mjs",
+      "default": "./lib/version/index.js"
+    },
+    "./lib/*.js": {
+      "types": "./lib/*.d.ts",
+      "import": "./esm/lib/*.mjs",
+      "default": "./lib/*.js"
+    },
+    "./lib/*": {
+      "types": "./lib/*.d.ts",
+      "import": "./esm/lib/*.mjs",
+      "default": "./lib/*.js"
+    },
+    "./*": "./*"
+  },
   "typesVersion": {
     ">=3.1": {
       "*": [
@@ -16,7 +84,7 @@
     "test": "jest -c ./jest.config.js --coverage",
     "buildOutput": "ts-node ./lib/test/makeOutput.ts && npx prettier --write \"**/*.ts\"",
     "check": "tsc --noEmit",
-    "tsc": "tsc"
+    "tsc": "tsc && tsc -p tsconfig.esm.json && node ../../shared-libs/ts-modules/scripts/esm-extensions.mjs dist/esm"
   },
   "repository": {
     "type": "git",
@@ -46,8 +114,7 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.61.0",
     "yaml": "^2.8.3",
-    "zod": "4.4.3",
-    "zod-deep-partial": "^1.2.0"
+    "zod": "4.6.7"
   },
   "bundleDependencies": [
     "@start9labs/start-core"

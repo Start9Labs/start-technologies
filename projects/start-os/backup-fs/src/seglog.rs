@@ -883,7 +883,7 @@ mod tests {
 
     #[test]
     fn put_load_roundtrip_and_replay() {
-        let tmp = tempdir::TempDir::new("seglog").unwrap();
+        let tmp = tempfile::TempDir::with_prefix("seglog").unwrap();
         let dir = tmp.path().join("segments");
         {
             let mut log = SegmentLog::open(dir.clone(), key()).unwrap();
@@ -915,7 +915,7 @@ mod tests {
         // OnceLock cached on first use, so setting the env var here would race
         // with any other test that touched the log first.
         const SEG: u64 = 8192;
-        let tmp = tempdir::TempDir::new("seglog").unwrap();
+        let tmp = tempfile::TempDir::with_prefix("seglog").unwrap();
         let dir = tmp.path().join("segments");
         {
             let mut log = SegmentLog::open_sized(dir.clone(), key(), SEG).unwrap();
@@ -936,7 +936,7 @@ mod tests {
     #[test]
     fn checkpoint_roundtrips_without_replay() {
         const SEG: u64 = 8192;
-        let tmp = tempdir::TempDir::new("seglog").unwrap();
+        let tmp = tempfile::TempDir::with_prefix("seglog").unwrap();
         let dir = tmp.path().join("segments");
         {
             let mut log = SegmentLog::open_sized(dir.clone(), key(), SEG).unwrap();
@@ -961,7 +961,7 @@ mod tests {
     #[test]
     fn stale_checkpoint_falls_back_to_replay() {
         const SEG: u64 = 1 << 20;
-        let tmp = tempdir::TempDir::new("seglog").unwrap();
+        let tmp = tempfile::TempDir::with_prefix("seglog").unwrap();
         let dir = tmp.path().join("segments");
         {
             let mut log = SegmentLog::open_sized(dir.clone(), key(), SEG).unwrap();
@@ -985,7 +985,7 @@ mod tests {
 
     #[test]
     fn resync_past_corrupt_frame() {
-        let tmp = tempdir::TempDir::new("seglog").unwrap();
+        let tmp = tempfile::TempDir::with_prefix("seglog").unwrap();
         let dir = tmp.path().join("segments");
         {
             let mut log = SegmentLog::open(dir.clone(), key()).unwrap();

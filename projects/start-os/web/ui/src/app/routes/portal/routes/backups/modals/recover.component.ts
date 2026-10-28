@@ -114,7 +114,7 @@ export class BackupsRecoverModal {
     const { targetId, serverId, password } = this.context.data
 
     this.tasks.run(async () => {
-      await this.api.restorePackages({
+      await this.api.rpc.package.backup.restore({
         ids,
         targetId,
         password,

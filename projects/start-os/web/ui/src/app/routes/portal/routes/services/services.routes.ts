@@ -28,6 +28,10 @@ export const ROUTES: Routes = [
         ],
       },
       {
+        path: 'outbound-traffic',
+        loadComponent: () => import('./routes/outbound-traffic'),
+      },
+      {
         path: 'actions',
         loadComponent: () => import('./routes/actions.component'),
       },

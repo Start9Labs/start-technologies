@@ -1,3 +1,3 @@
 {
-  "*.{ts,js,mjs,cjs,json,html,scss,css,less,yaml,yml,md}": "prettier --write --ignore-unknown"
+  "*.{ts,js,mjs,cjs,json,html,scss,css,less,yaml,yml,md}": "prettier --config .prettierrc.json --write --ignore-unknown"
 }

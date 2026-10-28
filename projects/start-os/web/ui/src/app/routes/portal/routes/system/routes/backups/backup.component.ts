@@ -13,6 +13,7 @@ import { TuiBlock } from '@taiga-ui/kit'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { PatchDB } from 'patch-db-client'
 import { filter, map, switchMap, take } from 'rxjs'
+import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { getManifest } from 'src/app/utils/get-package-data'
@@ -21,7 +22,6 @@ import { BackupContext } from './backup.types'
 interface Package {
   id: string
   title: string
-  icon: string
   disabled: boolean
   checked: boolean
 }
@@ -32,7 +32,7 @@ interface Package {
       @if (pkgs(); as pkgs) {
         @for (pkg of pkgs; track $index) {
           <label tuiBlock="m">
-            <img alt="" [src]="pkg.icon" />
+            <img [pkgIcon]="pkg.id" />
             <span tuiTitle>{{ pkg.title }}</span>
             <input
               type="checkbox"
@@ -82,6 +82,7 @@ interface Package {
     TuiCheckbox,
     TuiTitle,
     i18nPipe,
+    PkgIconDirective,
   ],
 })
 export class BackupsBackupComponent {
@@ -103,7 +104,6 @@ export class BackupsBackupComponent {
             return {
               id,
               title,
-              icon: pkg.icon,
               disabled: pkg.stateInfo.state !== 'installed',
               checked: false,
             }
@@ -181,7 +181,7 @@ export class BackupsBackupComponent {
 
     return this.tasks.run(async () => {
       try {
-        await this.api.createBackup(params)
+        await this.api.rpc.backup.create(params)
       } catch (e: any) {
         if (oldPassword || e.code !== BACKUP_PASSWORD_MISMATCH) throw e
 

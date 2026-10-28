@@ -4,8 +4,9 @@ use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use rust_i18n::t;
 
 use crate::action::{ActionInput, ActionResult, display_action_result};
+use crate::db::model::DatabaseModel;
 use crate::db::model::package::{
-    ActionAccess, ActionMetadata, Task, TaskCondition, TaskEntry, TaskSeverity, TaskTrigger,
+    ActionAccess, ActionMetadata, Task, TaskCondition, TaskEntry, TaskTrigger,
 };
 use crate::service::cli::ContainerCliContext;
 use crate::service::effects::prelude::*;
@@ -43,13 +44,15 @@ pub fn action_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportActionParams {
     id: ActionId,
     metadata: ActionMetadata,
 }
+
+rpc_toolkit::reflect_ts!(ExportActionParams);
+rpc_toolkit::ts_export!(ExportActionParams, namespaces = [""]);
 pub async fn export_action(
     context: EffectContext,
     ExportActionParams { id, metadata }: ExportActionParams,
@@ -77,14 +80,16 @@ pub async fn export_action(
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
 #[group(skip)]
-#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct ClearActionsParams {
     #[arg(long, help = "help.arg.except-actions")]
     pub except: Vec<ActionId>,
 }
+
+rpc_toolkit::reflect_ts!(ClearActionsParams);
+rpc_toolkit::ts_export!(ClearActionsParams, namespaces = [""]);
 
 async fn clear_actions(
     context: EffectContext,
@@ -110,25 +115,26 @@ async fn clear_actions(
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct GetActionInputParams {
-    #[ts(optional)]
     #[arg(short, long, help = "help.arg.package-id")]
     package_id: Option<PackageId>,
     #[serde(flatten)]
-    #[ts(skip)]
+    #[visit(opaque, ts(skip))]
     #[arg(skip)]
     event: EventId,
     #[arg(help = "help.arg.action-id")]
     action_id: ActionId,
-    #[ts(type = "Record<string, unknown> | null")]
+    #[visit(ts(type = "z.record(z.string(), z.unknown()).nullable()"))]
     #[serde(default)]
     #[arg(skip)]
     prefill: Option<Value>,
 }
+
+rpc_toolkit::reflect_ts!(GetActionInputParams);
+rpc_toolkit::ts_export!(GetActionInputParams, namespaces = [""]);
 async fn get_action_input(
     context: EffectContext,
     GetActionInputParams {
@@ -142,6 +148,13 @@ async fn get_action_input(
     let event_id = event.or_new();
     let prefill = prefill.unwrap_or(Value::Null);
     let caller = Some(context.seed.id.clone());
+
+    check_action_access(
+        &context.seed.ctx.db.peek().await,
+        &context.seed.id,
+        package_id.as_ref().unwrap_or(&context.seed.id),
+        &action_id,
+    )?;
 
     if let Some(package_id) = package_id {
         context
@@ -161,24 +174,25 @@ async fn get_action_input(
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, rename = "EffectsRunActionParams")]
+#[visit(ts(rename = "EffectsRunActionParams"))]
 pub struct RunActionParams {
-    #[ts(optional)]
     #[arg(short, long, help = "help.arg.package-id")]
     package_id: Option<PackageId>,
     #[serde(flatten)]
-    #[ts(skip)]
+    #[visit(opaque, ts(skip))]
     #[command(flatten)]
     event: EventId,
     #[arg(help = "help.arg.action-id")]
     action_id: ActionId,
-    #[ts(type = "any")]
     #[arg(help = "help.arg.action-input")]
     input: Value,
 }
+
+rpc_toolkit::reflect_ts!(RunActionParams);
+rpc_toolkit::ts_export!(RunActionParams, namespaces = [""]);
 async fn run_action(
     context: EffectContext,
     RunActionParams {
@@ -194,59 +208,14 @@ async fn run_action(
 
     let package_id = package_id.as_ref().unwrap_or(&context.seed.id);
 
+    check_action_access(
+        &context.seed.ctx.db.peek().await,
+        &context.seed.id,
+        package_id,
+        &action_id,
+    )?;
+
     if package_id != &context.seed.id {
-        let db = context.seed.ctx.db.peek().await;
-        let access = db
-            .as_public()
-            .as_package_data()
-            .as_idx(package_id)
-            .or_not_found(package_id)?
-            .as_actions()
-            .as_idx(&action_id)
-            .or_not_found(&action_id)?
-            .as_access()
-            .de()?
-            .unwrap_or_default();
-        match access {
-            ActionAccess::Public => {}
-            ActionAccess::Dependent => {
-                let caller_depends_on_target = db
-                    .as_public()
-                    .as_package_data()
-                    .as_idx(&context.seed.id)
-                    .or_not_found(&context.seed.id)?
-                    .as_current_dependencies()
-                    .de()?
-                    .0
-                    .contains_key(package_id);
-                if !caller_depends_on_target {
-                    return Err(Error::new(
-                        eyre!(
-                            "{}",
-                            t!(
-                                "service.effects.action.action-only-accessible-to-dependents",
-                                action_id = action_id,
-                                package_id = package_id
-                            )
-                        ),
-                        ErrorKind::InvalidRequest,
-                    ));
-                }
-            }
-            ActionAccess::User => {
-                return Err(Error::new(
-                    eyre!(
-                        "{}",
-                        t!(
-                            "service.effects.action.action-not-accessible",
-                            action_id = action_id,
-                            package_id = package_id
-                        )
-                    ),
-                    ErrorKind::InvalidRequest,
-                ));
-            }
-        }
         context
             .seed
             .ctx
@@ -262,17 +231,82 @@ async fn run_action(
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+fn check_action_access(
+    db: &DatabaseModel,
+    caller_id: &PackageId,
+    package_id: &PackageId,
+    action_id: &ActionId,
+) -> Result<(), Error> {
+    if package_id == caller_id {
+        return Ok(());
+    }
+
+    let access = db
+        .as_public()
+        .as_package_data()
+        .as_idx(package_id)
+        .or_not_found(package_id)?
+        .as_actions()
+        .as_idx(action_id)
+        .or_not_found(action_id)?
+        .as_access()
+        .de()?
+        .unwrap_or_default();
+    match access {
+        ActionAccess::Public => Ok(()),
+        ActionAccess::Dependent => {
+            let caller_depends_on_target = db
+                .as_public()
+                .as_package_data()
+                .as_idx(caller_id)
+                .or_not_found(caller_id)?
+                .as_current_dependencies()
+                .de()?
+                .0
+                .contains_key(package_id);
+            if caller_depends_on_target {
+                Ok(())
+            } else {
+                Err(Error::new(
+                    eyre!(
+                        "{}",
+                        t!(
+                            "service.effects.action.action-only-accessible-to-dependents",
+                            action_id = action_id,
+                            package_id = package_id
+                        )
+                    ),
+                    ErrorKind::InvalidRequest,
+                ))
+            }
+        }
+        ActionAccess::User => Err(Error::new(
+            eyre!(
+                "{}",
+                t!(
+                    "service.effects.action.action-not-accessible",
+                    action_id = action_id,
+                    package_id = package_id
+                )
+            ),
+            ErrorKind::InvalidRequest,
+        )),
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct CreateTaskParams {
     #[serde(flatten)]
-    #[ts(skip)]
+    #[visit(opaque, ts(skip))]
     event: EventId,
     replay_id: ReplayId,
     #[serde(flatten)]
     task: Task,
 }
+
+rpc_toolkit::reflect_ts!(CreateTaskParams);
+rpc_toolkit::ts_export!(CreateTaskParams, namespaces = [""]);
 async fn create_task(
     context: EffectContext,
     CreateTaskParams {
@@ -297,7 +331,7 @@ async fn create_task(
                         ErrorKind::InvalidRequest,
                     ));
                 };
-                // try_get to avoid deadlock during self-calls on install
+                // try_get avoids deadlock during self-calls on install.
                 let guard = context.seed.ctx.services.try_get(&task.package_id);
                 let prev = if let Some(service) = guard
                     .as_deref()
@@ -328,11 +362,7 @@ async fn create_task(
                         Some(true)
                     }
                 } else {
-                    // Action or service not available (e.g. still initializing during
-                    // server boot), so the condition can't be evaluated yet. Resolved
-                    // below from the prior entry for this replay_id; retested when the
-                    // action is exported (export_action) or the service's init
-                    // completes (Service::recheck_tasks).
+                    // Action export and service initialization recheck unresolved conditions.
                     None
                 }
             }
@@ -351,25 +381,11 @@ async fn create_task(
                 .or_not_found(src_id)?;
             let active = match active {
                 Some(active) => active,
-                // Unknown: a replayed task keeps its previous state rather than
-                // force-stopping the service on an assumption (the common case is
-                // server boot, where the target service initializes later and the
-                // recheck then corrects the state). A brand new task is
-                // conservatively active.
                 None => match pde.as_tasks().as_idx(&replay_id) {
                     Some(entry) => entry.as_active().de()?,
                     None => true,
                 },
             };
-            if active
-                && task.severity == TaskSeverity::Critical
-                && pde
-                    .as_current_dependencies()
-                    .de()?
-                    .is_task_target(src_id, &task.package_id)
-            {
-                pde.as_status_info_mut().stop()?;
-            }
             pde.as_tasks_mut()
                 .insert(&replay_id, &TaskEntry { active, task })
         })
@@ -378,16 +394,20 @@ async fn create_task(
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS, Parser)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
 #[group(skip)]
-#[ts(type = "{ only: string[] } | { except: string[] }")]
-#[ts(export)]
+#[visit(ts(
+    type = "z.union([z.object({ only: z.array(z.string()) }), z.object({ except: z.array(z.string()) })])"
+))]
 pub struct ClearTasksParams {
     #[arg(long, conflicts_with = "except", help = "help.arg.only-tasks")]
     pub only: Option<Vec<ReplayId>>,
     #[arg(long, conflicts_with = "only", help = "help.arg.except-tasks")]
     pub except: Option<Vec<ReplayId>>,
 }
+
+rpc_toolkit::reflect_ts!(ClearTasksParams);
+rpc_toolkit::ts_export!(ClearTasksParams, namespaces = [""]);
 
 async fn clear_tasks(
     context: EffectContext,
@@ -425,6 +445,98 @@ mod test {
 
     use super::*;
     use crate::rpc_continuations::Guid;
+
+    fn action_access_db(access: Option<ActionAccess>, dependencies: Value) -> DatabaseModel {
+        DatabaseModel::from(json!({
+            "public": {
+                "packageData": {
+                    "caller": { "currentDependencies": dependencies },
+                    "target": { "actions": { "configure": { "access": access } } },
+                },
+            },
+        }))
+    }
+
+    #[test]
+    fn action_access_checks_current_dependencies_for_cross_package_calls() {
+        let caller: PackageId = "caller".parse().unwrap();
+        let target: PackageId = "target".parse().unwrap();
+        let action: ActionId = "configure".parse().unwrap();
+        for (dependencies, is_dependent) in [
+            (json!({}), false),
+            (
+                json!({ "other": { "kind": "exists", "versionRange": "*" } }),
+                false,
+            ),
+            (
+                json!({ "target": { "kind": "exists", "versionRange": "*" } }),
+                true,
+            ),
+            (
+                json!({ "target": { "kind": "running", "versionRange": "*" } }),
+                true,
+            ),
+        ] {
+            for (access, allowed) in [
+                (Some(ActionAccess::Public), true),
+                (Some(ActionAccess::Dependent), is_dependent),
+                (Some(ActionAccess::User), false),
+                (None, false),
+            ] {
+                let db = action_access_db(access, dependencies.clone());
+                let result = check_action_access(&db, &caller, &target, &action);
+                if allowed {
+                    result.unwrap();
+                } else {
+                    assert_eq!(result.unwrap_err().kind, ErrorKind::InvalidRequest);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn action_access_allows_self_calls_for_every_access_level() {
+        let target: PackageId = "target".parse().unwrap();
+        let action: ActionId = "configure".parse().unwrap();
+        for access in [
+            Some(ActionAccess::Public),
+            Some(ActionAccess::Dependent),
+            Some(ActionAccess::User),
+            None,
+        ] {
+            let db = action_access_db(access, json!({}));
+            check_action_access(&db, &target, &target, &action).unwrap();
+        }
+    }
+
+    #[test]
+    fn action_access_defaults_omitted_access_to_user() {
+        let db = DatabaseModel::from(json!({
+            "public": { "packageData": { "target": { "actions": { "configure": {} } } } },
+        }));
+        let error = check_action_access(
+            &db,
+            &"caller".parse().unwrap(),
+            &"target".parse().unwrap(),
+            &"configure".parse().unwrap(),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
+    }
+
+    #[test]
+    fn action_access_rejects_missing_packages_and_actions() {
+        let caller: PackageId = "caller".parse().unwrap();
+        let action: ActionId = "configure".parse().unwrap();
+        let db = action_access_db(Some(ActionAccess::Public), json!({}));
+        for (target, action) in [
+            ("missing".parse().unwrap(), action),
+            ("target".parse().unwrap(), "missing".parse().unwrap()),
+        ] {
+            let error = check_action_access(&db, &caller, &target, &action).unwrap_err();
+            assert_eq!(error.kind, ErrorKind::NotFound);
+        }
+    }
 
     fn envelope(params: Value) -> (Guid, Value) {
         let event_id = Guid::new();

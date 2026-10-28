@@ -239,14 +239,16 @@ export class GatewayComponent {
     return this.tasks.run(async () => {
       let configured: boolean
       if (this.packageId()) {
-        configured = await this.api.pkgAddPrivateDomain({
-          fqdn,
-          gateway: gatewayId,
-          package: this.packageId(),
-          host: iface?.addressInfo.hostId || '',
-        })
+        configured = await this.api.rpc.package.host.address.domain.private.add(
+          {
+            fqdn,
+            gateway: gatewayId,
+            package: this.packageId(),
+            host: iface?.addressInfo.hostId || '',
+          },
+        )
       } else {
-        configured = await this.api.osUiAddPrivateDomain({
+        configured = await this.api.rpc.server.host.address.domain.private.add({
           fqdn,
           gateway: gatewayId,
         })
@@ -289,13 +291,13 @@ export class GatewayComponent {
       try {
         let res
         if (this.packageId()) {
-          res = await this.api.pkgAddPublicDomain({
+          res = await this.api.rpc.package.host.address.domain.public.add({
             ...params,
             package: this.packageId(),
             host: iface?.addressInfo.hostId || '',
           })
         } else {
-          res = await this.api.osUiAddPublicDomain(params)
+          res = await this.api.rpc.server.host.address.domain.public.add(params)
         }
 
         await this.domainHealth.checkPublicDomain(

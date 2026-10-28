@@ -10,7 +10,16 @@ export class BlackoutService extends FormService<ScheduleWindow[]> {
     return this.api.wifiBlackoutGet()
   }
 
-  async store(data: ScheduleWindow[]) {
-    await this.api.wifiBlackoutSet(data)
+  async store(windows: ScheduleWindow[]) {
+    await this.api.wifiBlackoutSet({ windows, confirmImmediateBlackout: true })
+  }
+
+  /** Whether the router would turn Wi-Fi off on saving. Applies nothing. */
+  async preview(windows: ScheduleWindow[]): Promise<boolean> {
+    const result = await this.api.wifiBlackoutSet({
+      windows,
+      confirmImmediateBlackout: false,
+    })
+    return result.pendingImmediateBlackout
   }
 }

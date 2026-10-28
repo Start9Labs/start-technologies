@@ -25,7 +25,7 @@ export class MetricsService extends Observable<T.Metrics> {
   private readonly api = inject(ApiService)
 
   private readonly metrics$ = defer(() =>
-    this.api.followServerMetrics({}),
+    this.api.rpc.server.metrics.follow({}),
   ).pipe(
     switchMap(({ guid, metrics }) =>
       this.api.openWebsocket$<T.Metrics>(guid).pipe(startWith(metrics)),

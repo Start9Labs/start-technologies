@@ -1,0 +1,11 @@
+--- a/src/zig/wrapper.rs
++++ b/src/zig/wrapper.rs
+@@ -163,7 +163,7 @@
+                         "pentium4"
+                     }
+                 }
+-                "riscv64gc" => "generic_rv64+m+a+f+d+c",
++                "riscv64gc" => "generic_rv64+rva23u64",
+                 "riscv64a23" => "generic_rv64+rva23u64",
+                 "s390x" => "z10-vector",
+                 _ => "",

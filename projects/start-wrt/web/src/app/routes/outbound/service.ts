@@ -2,6 +2,7 @@ import { inject, Injectable } from '@angular/core'
 import { ApiService, OutboundVpn } from 'src/app/services/api/api.service'
 import { FormService } from 'src/app/services/form.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { parseDnsList } from './utils'
 
 @Injectable({ providedIn: 'root' })
 export class OutboundService extends FormService<OutboundVpn[]> {
@@ -18,11 +19,15 @@ export class OutboundService extends FormService<OutboundVpn[]> {
 
   update(
     id: string,
-    data: { label: string; target: string; mtu: number | null },
+    data: { label: string; target: string; mtu: number | null; dns: string },
   ) {
     return this.actions.run(
       async () => {
-        await this.api.vpnClientUpdate({ id, ...data })
+        await this.api.vpnClientUpdate({
+          id,
+          ...data,
+          dns: parseDnsList(data.dns),
+        })
         this.refresh()
       },
       {
@@ -33,7 +38,7 @@ export class OutboundService extends FormService<OutboundVpn[]> {
     )
   }
 
-  create(data: { label: string; target: string; config: File }) {
+  create(data: { label: string; target: string; config: File; dns: string }) {
     return this.actions.run(
       async () => {
         const configText = await data.config.text()
@@ -41,6 +46,7 @@ export class OutboundService extends FormService<OutboundVpn[]> {
           label: data.label,
           target: data.target,
           config: configText,
+          dns: data.dns ? parseDnsList(data.dns) : null,
         })
         this.refresh()
       },

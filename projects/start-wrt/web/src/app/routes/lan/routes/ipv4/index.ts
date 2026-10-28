@@ -17,6 +17,7 @@ import { Form } from 'src/app/components/form'
 import { ApiService } from 'src/app/services/api/api.service'
 import { ConnectionService } from 'src/app/services/connection.service'
 import { provideFormService } from 'src/app/services/form.service'
+import { isVpnPeersWouldBreak } from 'src/app/services/vpn-peers'
 import { LanIpv4Ip } from './form/ip'
 import { LanIpv4Service } from './service'
 import { LanIpv4Summary } from './summary'
@@ -161,7 +162,7 @@ export default class LanIpv4 {
       try {
         await this.service.saveForIpChange(this.form.getRawValue())
       } catch (e: any) {
-        if (!e?.message?.includes('VPN client')) {
+        if (!isVpnPeersWouldBreak(e)) {
           this.alerts
             .open(e?.message || this.i18n.transform('Failed to save'), {
               appearance: 'negative',

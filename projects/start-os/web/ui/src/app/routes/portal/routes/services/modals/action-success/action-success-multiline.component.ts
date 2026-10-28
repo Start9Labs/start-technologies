@@ -26,9 +26,9 @@ import { MultilineResult } from './types'
     <tui-textfield>
       <textarea
         tuiTextarea
-        [max]="16"
-        [min]="3"
-        [readOnly]="true"
+        [maxRows]="16"
+        [minRows]="3"
+        [readonly]="true"
         [style.filter]="masked() ? 'blur(0.5rem)' : null"
         [value]="multiline().value"
       ></textarea>

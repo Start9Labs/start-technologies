@@ -7,7 +7,6 @@ use clap::builder::ValueParserFactory;
 use digest::Digest;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use ts_rs::TS;
 
 use super::FileSystem;
 use crate::disk::mount::filesystem::MountType;
@@ -18,15 +17,17 @@ use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::prelude::*;
 use crate::util::FromStrParser;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Parser, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct IdMap {
     pub from_id: u32,
     pub to_id: u32,
     pub range: u32,
 }
+
+rpc_toolkit::reflect_ts!(IdMap);
+rpc_toolkit::ts_export!(IdMap, namespaces = [""]);
 impl FromStr for IdMap {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {

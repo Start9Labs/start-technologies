@@ -23,6 +23,7 @@ import { HintPipe } from '../pipes/hint.pipe'
       tuiChevron
       [tuiTextfieldCleaner]="false"
       [disabledItemHandler]="disabledItemHandler"
+      [invalid]="control.invalid()"
       (tuiActiveZoneChange)="!$event && control.onTouched()"
     >
       @if (spec.name) {
@@ -32,8 +33,7 @@ import { HintPipe } from '../pipes/hint.pipe'
         <select
           tuiSelect
           [disabled]="disabled"
-          [readOnly]="readOnly"
-          [invalid]="control.invalid()"
+          [readonly]="readOnly"
           [placeholder]="spec.name"
           [items]="items"
           [(ngModel)]="selected"
@@ -43,8 +43,7 @@ import { HintPipe } from '../pipes/hint.pipe'
         <input
           tuiSelect
           [disabled]="disabled"
-          [readOnly]="readOnly"
-          [invalid]="control.invalid()"
+          [readonly]="readOnly"
           [placeholder]="spec.name"
           [(ngModel)]="selected"
         />

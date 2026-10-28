@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use tokio::process::Command;
 use tracing::instrument;
 
@@ -9,6 +11,7 @@ use crate::disk::fsck::RepairStrategy;
 use crate::disk::main::{DEFAULT_PASSWORD, ImportMode};
 use crate::firmware::{check_for_firmware_update, update_firmware};
 use crate::init::{InitPhases, STANDBY_MODE_PATH};
+use crate::net::dns::DnsController;
 use crate::net::gateway::WildcardListener;
 use crate::net::web_server::WebServer;
 use crate::prelude::*;
@@ -20,6 +23,7 @@ use crate::{DATA_DIR, PLATFORM};
 #[instrument(skip_all)]
 async fn setup_or_init(
     server: &mut WebServer<WildcardListener>,
+    dns: Arc<DnsController>,
     config: &ServerConfig,
 ) -> Result<Result<(RpcContext, FullProgressTracker), Shutdown>, Error> {
     if let Some(firmware) = check_for_firmware_update()
@@ -37,7 +41,7 @@ async fn setup_or_init(
         .ok()
         .and_then(|a| a)
     {
-        let init_ctx = InitContext::init(config).await?;
+        let init_ctx = InitContext::init(config, dns.clone()).await?;
         let handle = &init_ctx.progress;
         let mut update_phase =
             handle.add_phase(t!("bins.start-init.updating-firmware").into(), Some(10));
@@ -94,7 +98,7 @@ async fn setup_or_init(
         .await
         .is_err()
     {
-        let ctx = SetupContext::init(server, config.clone())?;
+        let ctx = SetupContext::init(server, config.clone(), dns.clone())?;
 
         server.serve_ui_for(ctx.clone());
 
@@ -130,7 +134,7 @@ async fn setup_or_init(
             }
         }))
     } else {
-        let init_ctx = InitContext::init(config).await?;
+        let init_ctx = InitContext::init(config, dns.clone()).await?;
         let handle = init_ctx.progress.clone();
         let err_channel = init_ctx.error.clone();
 
@@ -182,10 +186,12 @@ async fn setup_or_init(
             }
 
             let init_result =
-                crate::init::init(&server.acceptor_setter(), config, init_phases).await?;
+                crate::init::init(&server.acceptor_setter(), dns.clone(), config, init_phases)
+                    .await?;
 
             let rpc_ctx = RpcContext::init(
                 &server.acceptor_setter(),
+                dns.clone(),
                 config,
                 disk_guid,
                 Some(init_result),
@@ -206,6 +212,7 @@ async fn setup_or_init(
 #[instrument(skip_all)]
 pub async fn main(
     server: &mut WebServer<WildcardListener>,
+    dns: Arc<DnsController>,
     config: &ServerConfig,
 ) -> Result<Result<(RpcContext, FullProgressTracker), Shutdown>, Error> {
     if &*PLATFORM == "raspberrypi" && tokio::fs::metadata(STANDBY_MODE_PATH).await.is_ok() {
@@ -215,7 +222,7 @@ pub async fn main(
         futures::future::pending::<()>().await;
     }
 
-    let res = match setup_or_init(server, config).await {
+    let res = match setup_or_init(server, dns.clone(), config).await {
         Err(e) => {
             async move {
                 tracing::error!("{e}");
@@ -236,6 +243,7 @@ pub async fn main(
                         None
                     },
                     e,
+                    dns,
                 )?;
 
                 server.serve_ui_for(ctx.clone());

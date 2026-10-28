@@ -1,5 +1,8 @@
+import { getEventListeners } from 'node:events'
 import { Daemon } from '../mainFn/Daemon'
 import { EXIT_SUCCESS, HealthDaemon } from '../mainFn/HealthDaemon'
+import { HealthCheckResult } from '../health/checkFns'
+import { onceTrigger } from '../trigger'
 import * as T from '@start9labs/start-core/types'
 
 type Manifest = {
@@ -150,6 +153,35 @@ describe('Daemon.stop vs Daemon.term (subcontainer lifecycle)', () => {
   })
 })
 
+describe('Daemon restart loop', () => {
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => jest.useRealTimers())
+
+  it('holds one abort listener across retries of a failing command', async () => {
+    const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const daemon = Daemon.of<Manifest>()(fakeEffects(), null, {
+      fn: async () => {
+        throw new Error('boom')
+      },
+    })
+    await daemon.start()
+    const signal: AbortSignal = (daemon as any).loop.abort.signal
+
+    const listeners: number[] = []
+    for (let i = 0; i < 4; i++) {
+      await jest.advanceTimersByTimeAsync(30_000)
+      listeners.push(getEventListeners(signal, 'abort').length)
+    }
+    expect(daemon.failedExits).toBeGreaterThan(11)
+    expect(listeners).toEqual([1, 1, 1, 1])
+
+    // Under fake timers the pending backoff only ends through the abort.
+    await daemon.term()
+    expect(getEventListeners(signal, 'abort')).toHaveLength(0)
+    logged.mockRestore()
+  })
+})
+
 describe('HealthDaemon dependency-driven restart cycle', () => {
   // A fake dependency exposing just the surface HealthDaemon.updateStatus reads.
   const fakeDep = () => ({
@@ -283,4 +315,174 @@ describe('HealthDaemon dependency-driven restart cycle', () => {
     expect(daemon.start).toHaveBeenCalledTimes(2)
     expect(daemon.term).not.toHaveBeenCalled()
   })
+})
+
+describe('HealthDaemon.term', () => {
+  it('does not start the daemon from a status update still in flight', async () => {
+    let releaseSetHealth = () => {}
+    const effects = {
+      ...fakeEffects(),
+      setHealth: () =>
+        new Promise<null>(resolve => (releaseSetHealth = () => resolve(null))),
+    } as any
+    const sub = new FakeSub()
+    const releaseSibling = sub.hold()
+    const daemon = Daemon.of<Manifest>()(
+      effects,
+      sub as any,
+      blockUntilAborted as any,
+    )
+    const hd = new HealthDaemon<Manifest>(
+      daemon,
+      [],
+      'db',
+      {
+        display: 'Database',
+        fn: () => ({ result: 'success', message: null }),
+      },
+      effects,
+    )
+
+    const update = hd.updateStatus()
+    await tick()
+    await hd.term()
+    releaseSetHealth()
+    await update
+    await tick()
+
+    expect(sub.holdCount).toBe(1)
+    await releaseSibling()
+    expect(sub.destroyed).toBe(true)
+  })
+})
+
+describe('HealthDaemon ready polling', () => {
+  const fakeDaemon = () => ({
+    start: jest.fn(async () => {}),
+    stop: jest.fn(async () => {}),
+    term: jest.fn(async () => {}),
+    onExit: jest.fn(),
+    isOneshot: () => false,
+  })
+  // Returns each result in turn, then repeats the last.
+  const results = (...rs: HealthCheckResult['result'][]) => {
+    let i = 0
+    return jest.fn(
+      (): HealthCheckResult => ({
+        result: rs[Math.min(i++, rs.length - 1)],
+        message: 'm',
+      }),
+    )
+  }
+  const launch = async (daemon: unknown, fn: jest.Mock) => {
+    const hd = new HealthDaemon<Manifest>(
+      daemon as any,
+      [],
+      'db',
+      { display: 'Database', fn },
+      fakeEffects(),
+    )
+    await hd.updateStatus()
+    return hd
+  }
+
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => jest.useRealTimers())
+
+  // Advances to each elapsed time and checks the cumulative poll count.
+  const expectPolls = async (fn: jest.Mock, schedule: [number, number][]) => {
+    let now = 0
+    for (const [at, polls] of schedule) {
+      await jest.advanceTimersByTimeAsync(at - now)
+      now = at
+      expect([at, fn.mock.calls.length]).toEqual([at, polls])
+    }
+  }
+
+  it.each(['loading', 'waiting'] as const)(
+    'catches a daemon that stops reporting %s within a second, then polls it every 30 seconds',
+    async result => {
+      const fn = results(result, 'success', result)
+      const hd = await launch(fakeDaemon(), fn)
+
+      await expectPolls(fn, [
+        [1_000, 1],
+        [2_000, 2],
+        [31_000, 2],
+        [32_000, 3],
+        [61_000, 3],
+        [62_000, 4],
+      ])
+
+      await hd.term()
+    },
+  )
+
+  it.each(['loading', 'waiting'] as const)(
+    'backs a daemon reporting %s off to 30 seconds before its first success',
+    async result => {
+      const fn = results(result)
+      const hd = await launch(fakeDaemon(), fn)
+
+      await expectPolls(fn, [
+        [1_000, 1],
+        [2_000, 2],
+        [3_000, 2],
+        [4_000, 3],
+        [8_000, 4],
+        [16_000, 5],
+        [31_000, 5],
+        [32_000, 6],
+        [61_000, 6],
+        [62_000, 7],
+        [91_000, 7],
+        [92_000, 8],
+      ])
+
+      await hd.term()
+    },
+  )
+
+  it('runs a check with onceTrigger once and reports its failure', async () => {
+    jest.advanceTimersByTime(1)
+    const setHealth = jest.fn(async () => null)
+    const fn = results('failure')
+    const hd = new HealthDaemon<Manifest>(
+      null,
+      [],
+      'signups',
+      { display: 'Signups', gracePeriod: 0, trigger: onceTrigger, fn },
+      { ...fakeEffects(), setHealth } as any,
+    )
+    await hd.updateStatus()
+
+    await expectPolls(fn, [
+      [0, 1],
+      [60_000, 1],
+    ])
+    expect(setHealth.mock.calls.map(([h]: any) => h.result)).toEqual([
+      'starting',
+      'failure',
+    ])
+
+    await hd.term()
+  })
+
+  it.each(['loading', 'waiting'] as const)(
+    'polls a standalone health check reporting %s every 30 seconds',
+    async result => {
+      const fn = results(result)
+      const hd = await launch(null, fn)
+
+      await expectPolls(fn, [
+        [1_000, 1],
+        [30_000, 1],
+        [31_000, 2],
+        [60_000, 2],
+        [61_000, 3],
+      ])
+
+      await hd.term()
+    },
+  )
 })

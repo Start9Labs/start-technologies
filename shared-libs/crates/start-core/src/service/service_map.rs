@@ -26,13 +26,13 @@ use crate::prelude::*;
 use crate::progress::{FullProgressTracker, PhaseProgressTrackerHandle, ProgressTrackerWriter};
 use crate::s9pk::S9pk;
 use crate::s9pk::manifest::{Manifest, PackageId};
-use crate::s9pk::merkle_archive::source::FileSource;
+use crate::s9pk::merkle_archive::source::{DynFileSource, FileSource};
 use crate::service::rpc::{ExitParams, InitKind};
 use crate::service::{LoadDisposition, Service, ServiceRef, get_data_version};
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::status::StatusInfo;
 use crate::util::future::NonDetachingJoinHandle;
-use crate::util::serde::{Base32, Pem};
+use crate::util::serde::{Base32, Der64};
 use crate::util::sync::SyncMutex;
 
 const SERVICE_INIT_CONCURRENCY: usize = 4;
@@ -227,9 +227,14 @@ impl ServiceMap {
                 ErrorKind::InvalidRequest,
             ));
         }
-        let icon = s9pk.icon_data_url().await?;
         let developer_key = s9pk.as_archive().signer();
         let mut service = self.get_mut(&id).await;
+        if recovery_source.is_some() && service.is_some() {
+            return Err(Error::new(
+                eyre!("{}", t!("backup.restore.package-installed", id = &*id)),
+                ErrorKind::InvalidRequest,
+            ));
+        }
         // Fail before the download and before the service is quiesced.
         if recovery_source.is_none() {
             if let Some(prev) = &*service {
@@ -257,6 +262,8 @@ impl ServiceMap {
         if !restoring {
             crate::volume::InstallBackup::of(&id).begin().await?;
         }
+
+        let installing_s9pk = InstallingS9pkGuard::new(&ctx, &id, s9pk.clone().into_dyn());
 
         let (cancel_send, cancel_recv) = oneshot::channel();
         ctx.cancellable_installs
@@ -307,8 +314,7 @@ impl ServiceMap {
                                         s9pk: installed_path,
                                         status_info: StatusInfo::default(),
                                         registry,
-                                        developer_key: Pem::new(developer_key),
-                                        icon,
+                                        developer_key: Der64::new(developer_key),
                                         last_backup: None,
                                         current_dependencies: Default::default(),
                                         actions: Default::default(),
@@ -316,6 +322,7 @@ impl ServiceMap {
                                         hosts: Default::default(),
                                         store_exposed_dependents: Default::default(),
                                         outbound_gateway: None,
+                                        outbound_dns: None,
                                         plugin: Default::default(),
                                     },
                                 )?;
@@ -389,11 +396,6 @@ impl ServiceMap {
                     let s9pk = S9pk::open(&installed_path, Some(&id)).await?;
                     let mut data_version = get_data_version(&id).await?;
                     let prev = if let Some(service) = service.take() {
-                        ensure_code!(
-                            recovery_source.is_none(),
-                            ErrorKind::InvalidRequest,
-                            "cannot restore over existing package"
-                        );
                         // Snapshot the quiesced tree: the rollback point should be the state
                         // the user had when they pressed update.
                         service.quiesce().await?;
@@ -437,6 +439,7 @@ impl ServiceMap {
                     )
                     .await?;
                     *service = Some(new_service.into());
+                    drop(installing_s9pk);
 
                     if let Some(cleanup) = prev {
                         cleanup.await?;
@@ -534,6 +537,25 @@ impl ServiceMap {
             errors.handle(res);
         }
         errors.into_result()
+    }
+}
+
+struct InstallingS9pkGuard {
+    ctx: RpcContext,
+    id: PackageId,
+}
+impl InstallingS9pkGuard {
+    fn new(ctx: &RpcContext, id: &PackageId, s9pk: S9pk<DynFileSource>) -> Self {
+        ctx.installing_s9pks.mutate(|s| s.insert(id.clone(), s9pk));
+        Self {
+            ctx: ctx.clone(),
+            id: id.clone(),
+        }
+    }
+}
+impl Drop for InstallingS9pkGuard {
+    fn drop(&mut self) {
+        self.ctx.installing_s9pks.mutate(|s| s.remove(&self.id));
     }
 }
 

@@ -118,6 +118,7 @@ CONFIG_PACKAGE_kmod-mt76-core=y
 CONFIG_PACKAGE_kmod-mt7915-firmware=y
 CONFIG_PACKAGE_kmod-mt7915e=y
 CONFIG_PACKAGE_kmod-mt7916-firmware=y
+CONFIG_PACKAGE_kmod-r8169=y
 # CONFIG_PACKAGE_kmod-rtl8852bs is not set
 # CONFIG_PACKAGE_kmod-nf-flow is not set
 # CONFIG_PACKAGE_kmod-nf-ipt is not set
@@ -126,15 +127,19 @@ CONFIG_PACKAGE_kmod-br-netfilter=y
 CONFIG_PACKAGE_kmod-nf-reject6=y
 CONFIG_PACKAGE_kmod-nf-socket=y
 CONFIG_PACKAGE_conntrack=y
+CONFIG_PACKAGE_kmod-nft-bridge=y
 CONFIG_PACKAGE_kmod-nft-core=y
 CONFIG_PACKAGE_kmod-nft-fib=y
 CONFIG_PACKAGE_kmod-nft-nat=y
 CONFIG_PACKAGE_kmod-nft-offload=y
 # Required by `socket transparent` in 12-startwrt-sni-divert.nft.
 CONFIG_PACKAGE_kmod-nft-socket=y
-# CONFIG_PACKAGE_kmod-ppp is not set
+CONFIG_PACKAGE_kmod-ppp=y
+CONFIG_PACKAGE_kmod-pppoe=y
+CONFIG_PACKAGE_kmod-pppox=y
 CONFIG_PACKAGE_kmod-sched-core=y
 CONFIG_PACKAGE_kmod-thermal=y
+CONFIG_PACKAGE_kmod-veth=y
 CONFIG_PACKAGE_kmod-wireguard=y
 # CONFIG_PACKAGE_knot-resolver_dnstap is not set
 CONFIG_PACKAGE_libatomic=y
@@ -187,7 +192,8 @@ CONFIG_PACKAGE_nstat=y
 CONFIG_PACKAGE_odhcp6c=y
 CONFIG_PACKAGE_odhcpd-ipv6only=y
 CONFIG_PACKAGE_partx-utils=y
-# CONFIG_PACKAGE_ppp is not set
+CONFIG_PACKAGE_ppp=y
+CONFIG_PACKAGE_ppp-mod-pppoe=y
 CONFIG_PACKAGE_resize2fs=y
 CONFIG_PACKAGE_rpcd=y
 CONFIG_PACKAGE_rpcd-mod-file=y
@@ -218,6 +224,7 @@ CONFIG_PACKAGE_zlib=y
 # CONFIG_TARGET_IMAGES_GZIP is not set
 CONFIG_TARGET_ROOTFS_SQUASHFS=y
 CONFIG_TARGET_ROOTFS_PARTSIZE=256
+CONFIG_TARGET_ROOTFS_PERSIST_VAR=y
 # CONFIG_USE_FS_ACL_ATTR is not set
 CONFIG_WPA_MBO_SUPPORT=y
 CONFIG_WPA_MSG_MIN_PRIORITY=3

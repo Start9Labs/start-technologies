@@ -153,9 +153,29 @@ images: {
 },
 ```
 
+### Local OCI Layout or Archive
+
+Use a self-contained OCI image-layout directory or tar archive already on the workstation:
+
+```typescript
+images: {
+  main: {
+    source: {
+      ociLayout: {
+        path: './image.oci.tar',
+        reference: 'release',
+      },
+    },
+    arch: ['x86_64', 'aarch64'],
+  },
+},
+```
+
+`reference` selects a top-level image-index entry by `org.opencontainers.image.ref.name` annotation, Docker image name (`io.containerd.image.name`), or manifest/index digest. Image names use Docker's normalization, including Docker Hub/library prefixes and a default `latest` tag. Omit it when platform selection identifies one image configuration. Nested indexes are supported; ambiguous matches fail. All selected blobs must be present locally or embedded in their descriptors. Descriptor sizes/digests and uncompressed layer DiffIDs are verified before packing. This source does not require Docker or Podman.
+
 ### Local Docker Build
 
-Use when building from a Dockerfile in the project:
+Use when building from a Dockerfile in the project. Docker Buildx exports OCI directly and needs an [OCI-capable builder](./environment-setup.md#docker):
 
 ```typescript
 // Dockerfile in project root
@@ -325,7 +345,7 @@ When set, StartOS exposes `/dev/kvm` inside the service's container, so the gues
 > [!IMPORTANT]
 > The granted node belongs to the container's root and carries the permissions the server gives it, which on `/dev/kvm` are `0660`. **Run the process that opens it as root**, as the GPU packages do for `hardwareAcceleration` — that is the only arrangement StartOS guarantees.
 
-The device appears only on a server whose CPU supports virtualization and whose kernel has KVM active for it. Where it does not, the service starts as normal with no `/dev/kvm` — so a service that can fall back to software emulation should test for the device and do so, and one that cannot should declare a health check saying this server does not support KVM. Give that check `gracePeriod: 0`, so it reports the reason instead of `starting`, and a `cooldownTrigger` — the default re-polls a failing check every second for the life of the service. See [Health Checks](./main.md#health-checks).
+The device appears only on a server whose CPU supports virtualization and whose kernel has KVM active for it. Where it does not, the service starts as normal with no `/dev/kvm` — so a service that can fall back to software emulation should test for the device and do so, and one that cannot should declare a health check saying this server does not support KVM. Give that check `gracePeriod: 0`, so it reports the reason instead of `starting`, and `sdk.trigger.onceTrigger` — the default re-polls a failing check every second for the life of the service. See [Health Checks](./main.md#health-checks).
 
 > [!WARNING]
 > `/dev/kvm` is a direct interface to the host kernel's hypervisor, so it widens the kernel attack surface reachable from the service. Enable it only for a service that genuinely runs virtual machines.

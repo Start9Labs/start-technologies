@@ -8,7 +8,7 @@ import {
   startWith,
   switchMap,
 } from 'rxjs/operators'
-import { ApiService } from '../api/api.service'
+import { ApiService, SubscribeRes } from '../api/api.service'
 import { AuthService } from '../auth.service'
 import { TunnelData } from './data-model'
 import { toObservable } from '@angular/core/rxjs-interop'
@@ -29,7 +29,13 @@ export class PatchDbSource extends Observable<Update<TunnelData>[]> {
   private readonly auth = inject(AuthService)
 
   private readonly stream$ = toObservable(this.auth.authenticated).pipe(
-    switchMap(verified => (verified ? this.api.subscribe() : EMPTY)),
+    switchMap(verified =>
+      verified
+        ? this.api.rpc.db
+            .subscribe({})
+            .then(response => response as SubscribeRes)
+        : EMPTY,
+    ),
     switchMap(({ dump, guid }) =>
       this.api.openWebsocket$<Revision>(guid).pipe(
         bufferTime(250),

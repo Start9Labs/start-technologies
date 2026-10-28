@@ -31,15 +31,15 @@ const RANDOM_OPS: usize = 1000;
 /// A filesystem mounted once and torn down on drop. Construction pays the
 /// PBKDF2 + mount cost a single time, keeping it out of the timed loop.
 struct Harness {
-    mnt: tempdir::TempDir,
-    data: tempdir::TempDir,
+    mnt: tempfile::TempDir,
+    data: tempfile::TempDir,
     bg: Option<fuser::BackgroundSession>,
 }
 
 impl Harness {
     fn mount() -> Self {
-        let data = tempdir::TempDir::new("bench_data").unwrap();
-        let mnt = tempdir::TempDir::new("bench_mnt").unwrap();
+        let data = tempfile::TempDir::with_prefix("bench_data").unwrap();
+        let mnt = tempfile::TempDir::with_prefix("bench_mnt").unwrap();
         let fs = BackupFS::new(BackupFSOptions {
             data_dir: data.path().to_owned(),
             setuid_support: false,

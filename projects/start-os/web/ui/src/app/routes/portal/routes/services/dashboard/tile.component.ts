@@ -1,7 +1,8 @@
 import { Component, computed, input } from '@angular/core'
 import { TuiCell, TuiTitle } from '@taiga-ui/core'
-import { TuiAvatar } from '@taiga-ui/kit'
+import { TuiAvatar, TuiSkeleton } from '@taiga-ui/kit'
 import { TuiCardLarge, tuiCardOptionsProvider } from '@taiga-ui/layout'
+import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
 import { ServiceUptimeComponent } from 'src/app/routes/portal/routes/services/components/uptime.component'
 import { PkgDependencyErrors } from 'src/app/services/dep-error.service'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
@@ -12,8 +13,8 @@ import { StatusComponent } from './status.component'
   selector: 'a[appServiceTile]',
   template: `
     <span tuiCell>
-      <span tuiAvatar [round]="false">
-        <img alt="" [src]="pkg().icon" />
+      <span tuiAvatar [round]="false" [tuiSkeleton]="icon.loading()">
+        <img #icon="pkgIcon" [pkgIcon]="pkg()" />
       </span>
       <span tuiTitle>
         <b>{{ manifest().title }}</b>
@@ -55,6 +56,8 @@ import { StatusComponent } from './status.component'
     ServiceUptimeComponent,
     StatusComponent,
     TuiAvatar,
+    TuiSkeleton,
+    PkgIconDirective,
     TuiCell,
     TuiTitle,
   ],

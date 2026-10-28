@@ -1,0 +1,2 @@
+- Affiche les erreurs d’installation complètes lors d’une installation manuelle avec un serveur StartOS mis à jour.
+- Si aucune version correspondant à la demande ne peut être installée, indique l’erreur et nomme la version déjà installée lorsqu’elle bloque l’installation.

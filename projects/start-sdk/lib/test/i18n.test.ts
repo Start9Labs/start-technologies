@@ -64,4 +64,13 @@ describe('setupI18n', () => {
       expect(i18n('keep ${n} of them', { n: 7 })).toBe('keep 7 of them')
     })
   })
+
+  test('inserts a value verbatim, at every occurrence', () => {
+    withLang(undefined, () => {
+      const i18n = setupI18n({ '${a} then ${a}': 0 }, {}, 'en_US')
+      expect(i18n('${a} then ${a}', { a: "$& $` $' $$" })).toBe(
+        "$& $` $' $$ then $& $` $' $$",
+      )
+    })
+  })
 })

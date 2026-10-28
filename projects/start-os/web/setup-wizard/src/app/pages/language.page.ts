@@ -132,7 +132,7 @@ export default class LanguagePage {
       this.saving.set(true)
 
       try {
-        await this.api.setLanguage({ language: this.selected.name })
+        await this.api.rpc.setup.setLanguage({ language: this.selected.name })
 
         if (this.stateService.kiosk) {
           await this.router.navigate(['/keyboard'])

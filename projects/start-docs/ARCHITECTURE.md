@@ -4,7 +4,7 @@ How the documentation site is built, versioned, and deployed.
 
 ## Place in the monorepo
 
-This is the `projects/start-docs/` project in the `start-os` monorepo. It owns the site build infra (`build.sh`, `serve.sh`, `versions.conf`), the shared mdBook `theme/`, the `landing/` page, and the Bitcoin Guides book — and it wires together the per-product books that live in their own product dirs (`../start-os/docs/`, `../start-tunnel/docs/`, `../start-sdk/docs/`, `../start-wrt/docs/`) into one deployed site. CI (`.github/workflows/docs-deploy.yml`) consumes its output to deploy `docs.start9.com`.
+This is the `projects/start-docs/` project in the `start-technologies` monorepo. It owns the site build infra (`build.sh`, `serve.sh`, `versions.conf`), the shared mdBook `theme/`, the `landing/` page, and the Bitcoin Guides book — and it wires together the per-product books that live in their own product dirs (`../start-os/docs/`, `../start-tunnel/docs/`, `../start-sdk/docs/`, `../start-wrt/docs/`) into one deployed site. CI (`.github/workflows/docs-deploy.yml`) consumes its output to deploy `docs.start9.com`.
 
 ## Multi-Book Design
 
@@ -13,22 +13,23 @@ The site is composed of independent mdBook instances — one per product. Each b
 The per-product books live **next to the code they document**, not inside this directory. This `docs/` project owns only the build infra, the shared theme, the landing page, and the Bitcoin Guides book.
 
 ```
-start-os/ (monorepo root)
+start-technologies/ (monorepo root)
 ├── projects/start-os/docs/        ← StartOS book (book.toml, src/, theme -> ../../start-docs/theme)
 ├── projects/start-tunnel/docs/    ← StartTunnel book
 ├── projects/start-sdk/docs/       ← Service Packaging book (book name: "packaging")
 ├── projects/start-wrt/docs/       ← StartWRT book
-└── projects/start-docs/           ← THIS project: site build + landing + bitcoin-guides
+└── projects/start-docs/           ← THIS project: site build + landing + bitcoin-guides + support
     ├── build.sh          ← builds all books into docs/ output
     ├── serve.sh          ← build + local dev server
     ├── versions.conf     ← book → version list (single source of truth)
     ├── theme/            ← shared theme (CSS, JS, favicon); books symlink here
     ├── landing/          ← static landing page at docs.start9.com/
     ├── scripts/          ← build-time tooling (llms.txt generator)
-    └── bitcoin-guides/   ← Bitcoin Guides book
-        ├── book.toml
-        ├── theme -> ../theme
-        └── src/ (SUMMARY.md, README.md, archival-vs-pruned.md, electrum-servers.md, ...)
+    ├── bitcoin-guides/   ← Bitcoin Guides book
+    │   ├── book.toml
+    │   ├── theme -> ../theme
+    │   └── src/ (SUMMARY.md, README.md, archival-vs-pruned.md, electrum-servers.md, ...)
+    └── support/          ← Start9 Support book (support.start9.com's user guide)
 ```
 
 This multi-book design was chosen over a single monolithic book because:
@@ -75,6 +76,8 @@ start-os=0.4.0.x
 start-tunnel=1.0.x
 packaging=0.4.0.x
 bitcoin-guides=1.0.x
+start-wrt=1.2.x
+support=1.0.x
 ```
 
 `versions.conf` is the single source of truth — `build.sh` and the routing it writes into the tree (the redirect stubs and `404.html`) derive from it. Adding a book takes one line here (plus a `book_dir()` mapping if it lives outside this project).
@@ -115,10 +118,9 @@ Run via `cd scripts && npm run generate-llms-txt` (uses `tsx`).
 
 ## Cross-Book Links
 
-mdBook validates links only within a single book. Links between books use unversioned absolute paths (`/start-tunnel/devices.html`) — the stub `build.sh` writes at that path sends the browser to the current version. They are not validated at build time, so keep them few and correct.
+mdBook rewrites intra-book Markdown links but does not reject missing pages or anchors. Links between books use unversioned absolute paths (`/start-tunnel/devices.html`) — the stub `build.sh` writes at that path sends the browser to the current version. They are not validated at build time, so keep them few and correct.
 
 ## Further reading
 
 - [README.md](README.md) — what this project is and where the books live
-- [CONTRIBUTING.md](CONTRIBUTING.md) — local setup and how to submit changes
-- [AGENTS.md](AGENTS.md) — operating rules for AI developers (`CLAUDE.md` is a one-line `@AGENTS.md` import)
+- [AGENTS.md](AGENTS.md) — local setup and how to submit changes

@@ -37,7 +37,7 @@ export const appConfig: ApplicationConfig = {
   providers: [
     provideZonelessChangeDetection(),
     provideBrowserGlobalErrorListeners(),
-    provideRouter(routes /*, withInMemoryScrolling(...) etc. as needed */),
+    provideRouter(routes, withComponentInputBinding() /*, withInMemoryScrolling(...) as needed */),
     provideHttpClient(withXhr()), // withFetch() where SSR or abort-on-unsubscribe is needed
     provideTaiga({ mode: 'dark' }), // or 'light'; omit mode for runtime TUI_DARK_MODE theming
     // Design-system tuning lives HERE, once, as option providers:

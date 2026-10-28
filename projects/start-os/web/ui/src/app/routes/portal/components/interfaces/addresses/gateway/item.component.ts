@@ -351,7 +351,7 @@ export class GatewayItemComponent {
     this.toggling.set(true)
     await this.tasks.run(async () => {
       if (this.packageId()) {
-        await this.api.pkgBindingSetGuaWan({
+        await this.api.rpc.package.host.binding.setGuaWan({
           internalPort: iface.addressInfo.internalPort,
           address: addr.hostnameInfo,
           wan,
@@ -359,7 +359,7 @@ export class GatewayItemComponent {
           host: iface.addressInfo.hostId,
         })
       } else {
-        await this.api.serverBindingSetGuaWan({
+        await this.api.rpc.server.host.binding.setGuaWan({
           internalPort: 80,
           address: addr.hostnameInfo,
           wan,

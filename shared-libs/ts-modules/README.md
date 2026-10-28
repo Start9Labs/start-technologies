@@ -1,13 +1,15 @@
 # StartOS Web
 
-The single [Angular](https://angular.dev/) + TypeScript workspace (Angular 22, [Taiga UI 5](https://taiga-ui.dev/)) shared by every Start9 front-end. This directory (`shared-libs/ts-modules`) contains the two shared libraries and is part of the Angular workspace (whose root config files `angular.json`, `package.json`, `tsconfig.json` are at the repo root). The individual app projects live in their product directories and reference these libs.
+Shared TypeScript modules for the monorepo. This directory (`shared-libs/ts-modules`) contains two [Angular](https://angular.dev/) / [Taiga UI](https://taiga-ui.dev/) libraries and a non-Angular core library. The Angular libraries are part of the shared workspace (whose root config files `angular.json`, `package.json`, `tsconfig.json` are at the repo root). The individual app projects live in their product directories and reference these libs.
 
 ## Libraries (in this directory)
 
 - **`shared/`** — `@start9labs/shared`: API clients, common components, directives, pipes, services, types, and i18n shared by all apps.
 - **`marketplace/`** — `@start9labs/marketplace`: service-discovery / marketplace UI, shared between the StartOS UI and the public marketplace.
 
-## App projects (defined here, rooted elsewhere)
+- **`start-core/`** — `@start9labs/start-core`: core types, ABI, effects, and OS bindings. Built with its own Makefile, consumed directly by web and bundled into the SDK.
+
+## App projects (defined at the repo root)
 
 `angular.json` declares these applications; their `root`/`sourceRoot` point into the product directories:
 
@@ -25,11 +27,11 @@ From the repo root (the Angular workspace is rooted there):
 
 ```sh
 npm ci
-npm run build:deps      # builds start-sdk + patch-db client (file: deps)
+npm run build:deps      # builds @start9labs/start-core + patch-db client (file: deps)
 cp shared-libs/ts-modules/config-sample.json config.json
 npm run start:ui        # mock-backed dev server
 ```
 
 ## Documentation
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for full setup, live-server proxying, and translation guides, [ARCHITECTURE.md](ARCHITECTURE.md) for how the front end is structured, and [AGENTS.md](AGENTS.md) for agent / day-to-day operating rules.
+See [AGENTS.md](AGENTS.md) for setup, live-server proxying, translations, and operating rules; [ARCHITECTURE.md](ARCHITECTURE.md) describes the structure.

@@ -54,6 +54,11 @@ const bookInfo: Record<string, { label: string; description: string }> = {
     description:
       'Guides for running Bitcoin, Lightning and related services on StartOS.',
   },
+  support: {
+    label: 'Start9 Support',
+    description:
+      'How to use Start9 Support: accounts, chats with Dux and the Start9 team, privacy, notifications, email and settings.',
+  },
   'start-wrt': {
     label: 'StartWRT',
     description:

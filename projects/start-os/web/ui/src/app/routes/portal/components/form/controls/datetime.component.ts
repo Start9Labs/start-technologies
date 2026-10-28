@@ -22,7 +22,10 @@ import { HintPipe } from '../pipes/hint.pipe'
 @Component({
   selector: 'form-datetime',
   template: `
-    <tui-textfield (tuiActiveZoneChange)="!$event && control.onTouched()">
+    <tui-textfield
+      [invalid]="control.invalid()"
+      (tuiActiveZoneChange)="!$event && control.onTouched()"
+    >
       @if (spec.name) {
         <label tuiLabel>
           {{ spec.name }}
@@ -42,8 +45,7 @@ import { HintPipe } from '../pipes/hint.pipe'
           <input
             tuiInputTime
             type="time"
-            [invalid]="control.invalid()"
-            [readOnly]="readOnly"
+            [readonly]="readOnly"
             [disabled]="!!spec.disabled"
             [ngModel]="value | tuiMapper: getTime"
             (ngModelChange)="value = $event?.toString() || null"
@@ -54,8 +56,7 @@ import { HintPipe } from '../pipes/hint.pipe'
           <input
             tuiInputDate
             type="date"
-            [invalid]="control.invalid()"
-            [readOnly]="readOnly"
+            [readonly]="readOnly"
             [disabled]="!!spec.disabled"
             [min]="spec.min ? (spec.min | tuiMapper: getLimit)[0] : min"
             [max]="spec.max ? (spec.max | tuiMapper: getLimit)[0] : max"
@@ -67,8 +68,7 @@ import { HintPipe } from '../pipes/hint.pipe'
           <input
             tuiInputDateTime
             type="datetime-local"
-            [invalid]="control.invalid()"
-            [readOnly]="readOnly"
+            [readonly]="readOnly"
             [disabled]="!!spec.disabled"
             [min]="spec.min ? (spec.min | tuiMapper: getLimit)[0] : min"
             [max]="spec.max ? (spec.max | tuiMapper: getLimit)[0] : max"

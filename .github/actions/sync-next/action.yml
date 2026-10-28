@@ -1,0 +1,17 @@
+name: Sync next
+description: Merge a base branch into its paired next branch, opening a pull request on conflict
+inputs:
+  token:
+    description: Repository token with branch and pull request write access
+    required: true
+  base:
+    description: Base branch to carry into next
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        FORGE_TOKEN: ${{ inputs.token }}
+        BASE: ${{ inputs.base }}
+      run: node "$GITHUB_ACTION_PATH/main.mjs"

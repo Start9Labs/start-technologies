@@ -41,7 +41,7 @@ this product's contribution.
 
 ## Web
 
-Two Angular 22 apps live under `web/`:
+Two Angular apps live under `web/`:
 
 - `ui/` — the admin dashboard (Angular project `ui`).
 - `setup-wizard/` — the first-boot setup flow (project `setup-wizard`).
@@ -60,7 +60,7 @@ and are embedded into `startbox`.
 `container-runtime/` is a Node.js program that runs inside every service LXC. It
 loads the service's JavaScript from its `.s9pk`, manages subcontainers, and
 talks to the host daemon over a Unix-socket JSON-RPC channel. It depends on the
-**built** SDK at `../start-sdk/dist`. It has its own
+**built** SDK at `../../start-sdk/dist` (relative to `container-runtime/`). It has its own
 [README](container-runtime/README.md), [ARCHITECTURE](container-runtime/ARCHITECTURE.md),
 and [AGENTS](container-runtime/AGENTS.md) — read those before editing it.
 
@@ -101,7 +101,7 @@ Changes flow in one direction; verify in this order:
 
 ```
 start-core (Rust)
-  → make start-core-ts-bindings   # cargo test exports ts-rs types → shared-libs/crates/start-core/bindings/
+  → make start-core-ts-bindings   # compiled handlers + visit-rs exports → zod schemas + types → shared-libs/crates/start-core/bindings/
     → @start9labs/start-core build  # shared-libs/ts-modules/start-core/dist
       → web apps consume @start9labs/start-core
     → start-sdk build  # projects/start-sdk/dist, bundling @start9labs/start-core
@@ -110,8 +110,8 @@ start-core (Rust)
 
 | Step | Command (from repo root)                                  | What it does                                                                |
 | ---- | --------------------------------------------------------- | --------------------------------------------------------------------------- |
-| 1    | `cargo check -p start-os`                                 | Verify the OS bins compile                                                  |
-| 2    | `make start-core-ts-bindings`                             | Export ts-rs types from `start-core`                                        |
+| 1    | `cargo check -p start-core`                               | Verify the shared backend compiles                                          |
+| 2    | `make start-core-ts-bindings`                             | Generate zod schemas and their type projections from `start-core`           |
 | 3    | `cd projects/start-sdk && make bundle`                    | Build the SDK `dist` (builds `@start9labs/start-core` first and bundles it) |
 | 4    | `npm run check:ui && npm run check:setup`                 | Type-check the apps                                                         |
 | 5    | `cd projects/start-os/container-runtime && npm run check` | Type-check the runtime                                                      |

@@ -15,9 +15,12 @@ use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::instrument;
-use ts_rs::TS;
 
 pub mod diagnostic;
+pub mod signers;
+
+#[cfg(test)]
+mod signature_tests;
 
 use crate::PLATFORM;
 use crate::context::{CliContext, RpcContext};
@@ -31,6 +34,7 @@ use crate::registry::asset::RegistryAsset;
 use crate::registry::context::{RegistryContext, RegistryUrlParams};
 use crate::registry::os::SIG_CONTEXT;
 use crate::registry::os::index::OsVersionInfo;
+use crate::registry::signer::AcceptSigners;
 use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::sign::commitment::Commitment;
@@ -42,16 +46,16 @@ use crate::util::Invoke;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::AtomicFile;
 
-#[derive(Deserialize, Serialize, Parser, TS)]
-#[ts(export)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct UpdateSystemParams {
     #[arg(help = "help.arg.registry-url")]
-    #[ts(type = "string")]
     registry: Url,
-    #[ts(type = "string | null")]
+    /// Additional signer requirements checked before starting the update.
+    #[arg(skip)]
+    pub accept_signers: Option<AcceptSigners>,
     #[arg(
         long = "to",
         value_name = "TARGET",
@@ -63,17 +67,18 @@ pub struct UpdateSystemParams {
     progress: bool,
 }
 
-#[derive(Deserialize, Serialize, TS)]
-#[ts(export)]
+rpc_toolkit::reflect_ts!(UpdateSystemParams);
+rpc_toolkit::ts_export!(UpdateSystemParams, namespaces = [""]);
+
+#[derive(Deserialize, Serialize, VisitFields)]
 pub struct UpdateSystemRes {
-    #[ts(type = "string | null")]
     target: Option<Version>,
-    #[ts(type = "string | null")]
     progress: Option<Guid>,
 }
 
-/// An user/ daemon would call this to update the system to the latest version and do the updates available,
-/// and this will return something if there is an update, and in that case there will need to be a restart.
+rpc_toolkit::reflect_ts!(UpdateSystemRes);
+rpc_toolkit::ts_export!(UpdateSystemRes, namespaces = [""]);
+
 #[instrument(skip_all)]
 pub async fn update_system(
     ctx: RpcContext,
@@ -81,6 +86,7 @@ pub async fn update_system(
         target_version: target,
         registry,
         progress,
+        accept_signers,
     }: UpdateSystemParams,
 ) -> Result<UpdateSystemRes, Error> {
     if ctx
@@ -99,8 +105,13 @@ pub async fn update_system(
             ErrorKind::InvalidRequest,
         ));
     }
-    let target =
-        maybe_do_update(ctx.clone(), registry, target.unwrap_or(VersionRange::Any)).await?;
+    let target = maybe_do_update(
+        ctx.clone(),
+        registry,
+        target.unwrap_or(VersionRange::Any),
+        accept_signers,
+    )
+    .await?;
     let progress = if progress && target.is_some() {
         let guid = Guid::new();
         ctx.clone()
@@ -227,7 +238,6 @@ pub async fn cli_update_system(
     Ok(())
 }
 
-/// What is the status of the updates?
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub enum UpdateResult {
@@ -246,11 +256,23 @@ pub fn display_update_result(_: UpdateSystemParams, status: UpdateResult) {
     }
 }
 
+fn validate_update_signatures(
+    asset: &RegistryAsset<Blake3Commitment>,
+    accept_signers: Option<AcceptSigners>,
+) -> Result<(), Error> {
+    asset.validate(SIG_CONTEXT, asset.all_signers())?;
+    if let Some(accept_signers) = accept_signers {
+        asset.validate(SIG_CONTEXT, accept_signers)?;
+    }
+    Ok(())
+}
+
 #[instrument(skip_all)]
 async fn maybe_do_update(
     ctx: RpcContext,
     registry: Url,
     target: VersionRange,
+    accept_signers: Option<AcceptSigners>,
 ) -> Result<Option<Version>, Error> {
     let peeked = ctx.db.peek().await;
     let current_version = peeked.as_public().as_server_info().as_version().de()?;
@@ -279,7 +301,7 @@ async fn maybe_do_update(
         ));
     }
 
-    asset.validate(SIG_CONTEXT, asset.all_signers())?;
+    validate_update_signatures(&asset, accept_signers)?;
 
     let progress = FullProgressTracker::new();
     let prune_phase = progress.add_phase("Pruning Old OS Images".into(), Some(2));
@@ -382,7 +404,6 @@ async fn maybe_do_update(
                     .await
                     .result
                     .log_err();
-                // TODO: refactor sound lib to make compound tempos easier to deal with
                 UPDATE_FAILED_1.play().await.log_err();
                 UPDATE_FAILED_2.play().await.log_err();
                 UPDATE_FAILED_3.play().await.log_err();

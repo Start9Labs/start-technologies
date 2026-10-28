@@ -1,5 +1,5 @@
 import { T } from '..'
-import { ImageId, ImageSource } from '../types'
+import { ImageId, ImageSourceInput } from '../types'
 
 export type SDKManifest = {
   /**
@@ -119,7 +119,7 @@ export type SDKManifest = {
    * ```
    */
   readonly hardwareRequirements?: {
-    readonly device?: T.DeviceFilter[]
+    readonly device?: T.DeviceFilterInput[]
     readonly ram?: number | null
   }
 
@@ -171,7 +171,7 @@ type ArchOptions = {
 }
 export type SDKImageInputSpec = {
   [A in keyof ArchOptions]: {
-    source: Exclude<ImageSource, 'packed'>
+    source: Exclude<ImageSourceInput, 'packed'>
     arch?: ArchOptions[A]
     /** Run an available image under CPU emulation on other architectures. Defaults to true. */
     emulateMissing?: boolean

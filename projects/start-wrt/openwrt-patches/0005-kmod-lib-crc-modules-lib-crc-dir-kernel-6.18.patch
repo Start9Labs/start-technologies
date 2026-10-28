@@ -1,0 +1,59 @@
+Subject: kmod: lib-crc*: modules moved from lib/ to lib/crc/ in 6.18
+
+Kernel 6.18 moved the CRC library modules (crc-ccitt, crc-itu-t, crc7,
+crc8, crc16) into lib/crc/. kmod-ppp depends on kmod-lib-crc-ccitt, so
+the stale path fails the image build as soon as PPP is selected. NOTE:
+this change is unconditional and would break 6.12-kernel targets; we
+only build the spacemit (6.18) target. A kernel-version conditional
+would make it upstreamable.
+
+Start9 downstream patch (start-technologies projects/start-wrt).
+Applies to: openwrt v25.12.5
+
+--- a/package/kernel/linux/modules/lib.mk
++++ b/package/kernel/linux/modules/lib.mk
+@@ -11,7 +11,7 @@
+   SUBMENU:=$(LIB_MENU)
+   TITLE:=CRC-CCITT support
+   KCONFIG:=CONFIG_CRC_CCITT
+-  FILES:=$(LINUX_DIR)/lib/crc-ccitt.ko
++  FILES:=$(LINUX_DIR)/lib/crc/crc-ccitt.ko
+   AUTOLOAD:=$(call AutoProbe,crc-ccitt)
+ endef
+ 
+@@ -26,7 +26,7 @@
+   SUBMENU:=$(LIB_MENU)
+   TITLE:=CRC ITU-T V.41 support
+   KCONFIG:=CONFIG_CRC_ITU_T
+-  FILES:=$(LINUX_DIR)/lib/crc-itu-t.ko
++  FILES:=$(LINUX_DIR)/lib/crc/crc-itu-t.ko
+   AUTOLOAD:=$(call AutoProbe,crc-itu-t)
+ endef
+ 
+@@ -41,7 +41,7 @@
+   SUBMENU:=$(LIB_MENU)
+   TITLE:=CRC7 support
+   KCONFIG:=CONFIG_CRC7
+-  FILES:=$(LINUX_DIR)/lib/crc7.ko
++  FILES:=$(LINUX_DIR)/lib/crc/crc7.ko
+   AUTOLOAD:=$(call AutoProbe,crc7)
+ endef
+ 
+@@ -56,7 +56,7 @@
+   SUBMENU:=$(LIB_MENU)
+   TITLE:=CRC8 support
+   KCONFIG:=CONFIG_CRC8
+-  FILES:=$(LINUX_DIR)/lib/crc8.ko
++  FILES:=$(LINUX_DIR)/lib/crc/crc8.ko
+   AUTOLOAD:=$(call AutoProbe,crc8)
+ endef
+ 
+@@ -71,7 +71,7 @@
+   SUBMENU:=$(LIB_MENU)
+   TITLE:=CRC16 support
+   KCONFIG:=CONFIG_CRC16
+-  FILES:=$(LINUX_DIR)/lib/crc16.ko
++  FILES:=$(LINUX_DIR)/lib/crc/crc16.ko
+   AUTOLOAD:=$(call AutoLoad,20,crc16,1)
+ endef
+ 

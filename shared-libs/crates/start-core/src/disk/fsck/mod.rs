@@ -11,9 +11,11 @@ use crate::util::Invoke;
 pub mod btrfs;
 pub mod ext4;
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, visit_rs::VisitFields)]
 #[must_use]
 pub struct RequiresReboot(pub bool);
+
+rpc_toolkit::reflect_ts!(RequiresReboot);
 impl std::ops::BitOrAssign for RequiresReboot {
     fn bitor_assign(&mut self, rhs: Self) {
         self.0 |= rhs.0

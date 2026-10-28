@@ -29,19 +29,36 @@ Simple local dialogs may be declarative: `<ng-template [(tuiDialog)]="open">…`
 `data-appearance` token-matching, not `::ng-deep`. Not used: routed dialogs, the `tuiDialog()`
 component-wrapper helper.
 
+A component that is also a page takes its data as inputs, not `injectContext`. The outlet sets
+every input a context key names, so `.open(DETAILS, { appDetails: id })` and
+`*polymorpheusOutlet="details; context: { appDetails: id }"` render one component as dialog and
+page, with no wrapper dialog; the extra key needs the options cast to
+`Partial<TuiResponsiveDialogOptions>`.
+
 - **Toasts — `TuiNotificationService`** (`.open(msg, { appearance: 'positive' | 'negative', …
 }).subscribe()` fire-and-forget; `autoClose: 0` + `closable: false` for sticky states, content
   can be a `PolymorpheusComponent`). **Blocking loaders — `TuiNotificationMiddleService`**: hold
   the subscription open, `unsubscribe()` in `finally` (that's what `TaskService` does).
   `TuiAlertService` is not used anywhere; inline banners are `<div tuiNotification
-appearance="…">` (host-directive form, not the element form).
+appearance="…">` (host-directive form, not the element form). A banner that asks for one of
+  two choices is a `form`: the primary action is its default submit button and the alternative
+  a `type="reset"` button, handled as `(submit.prevent)` and `(reset)` on the form, with no
+  `(click)` or `type="button"` on either.
 - **Dropdowns**: `tuiDropdown` + `tuiDropdownAuto`/`tuiDropdownHover`/`tuiDropdownOpen`, content
   `<tui-data-list *tuiDropdown="let close"><button tuiOption (click)="close()">…` inside the
-  host element — the context-provided `close`. A menu is `tuiDropdown tuiDropdownAuto`; an
-  `open = signal(false)` behind `[(tuiDropdownOpen)]`, set back to `false` in every handler, is
-  the rewrite target. Leave `tuiDropdownDirection` unset: its default opens on whichever side
-  has room, and a pinned `top` breaks when there's none. **Hints**: `[tuiHint]` (template content allowed), tuned globally
-  via `tuiHintOptionsProvider`. **Drawers/sheets**: `<tui-drawer *tuiPopup="open()"
-(click.self)="toggle(false)">` with URL-driven `open` state.
-- All dialogs auto-close on navigation/server-crash in StartOS via a custom `TUI_DIALOGS_CLOSE`
-  factory — app-level policy expressed as one token override.
+  host element — the context-provided `close`; `tuiOption` stamps `type="button"` itself. A menu
+  is `tuiDropdown tuiDropdownAuto`; an `open = signal(false)` behind `[(tuiDropdownOpen)]`, set
+  back to `false` in every handler, is the rewrite target. A menu two triggers share is a
+  component, closed once from its host: `<app-menu *tuiDropdown="let close" (click)="close()" />`.
+  A trigger at the inline end of its row or bar — row actions, a header menu — sets
+  `tuiDropdownAlign="end"`: an anchored dropdown wraps to the room past its aligned edge rather
+  than flipping. Leave `tuiDropdownDirection` unset: its default opens on whichever side has room, and a pinned
+  `top` breaks when there's none. A toolbar shown on hover stays shown while one of its dropdowns
+  is open through `:has([aria-expanded='true'])`, which the dropdown host carries.
+- **Hints**: `[tuiHint]` (template content allowed), tuned globally via `tuiHintOptionsProvider`.
+- **Drawers/sheets**: `<tui-drawer *tuiPopup="open()" (click.self)="toggle(false)">` with
+  URL-driven `open` state.
+- Dialogs close on route activation — `TUI_DIALOGS_CLOSE`'s default — so a dialog doesn't watch
+  the router to close itself. The exception is a mobile sheet opened with `closable: false`,
+  which gates the token through `closable` and stays open. StartOS overrides the token to close
+  on a server crash too: app-level policy expressed as one token override.

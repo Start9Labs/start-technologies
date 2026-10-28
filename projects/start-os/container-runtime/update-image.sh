@@ -15,6 +15,7 @@ mount -o loop debian.${ARCH}.squashfs /tmp/lower
 mount -t overlay -olowerdir=/tmp/lower,upperdir=/tmp/upper,workdir=/tmp/work overlay /tmp/combined
 
 mkdir -p /tmp/combined/usr/lib/startos/
+cp ../build/lib/resolved.conf /tmp/combined/usr/lib/startos/resolved.conf
 rsync -a --copy-unsafe-links --info=progress2 dist/ /tmp/combined/usr/lib/startos/init/
 chown -R 0:0 /tmp/combined/usr/lib/startos/
 cp container-runtime.service /tmp/combined/lib/systemd/system/container-runtime.service

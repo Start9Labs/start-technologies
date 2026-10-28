@@ -155,7 +155,7 @@ export class BackupsJobsModal implements OnInit {
   private readonly api = inject(ApiService)
 
   readonly loading$ = new BehaviorSubject(true)
-  readonly targets = toSignal(from(this.api.getBackupTargets({})))
+  readonly targets = toSignal(from(this.api.rpc.backup.target.list({})))
 
   readonly jobs = signal<BackupJob[] | undefined>(undefined)
 
@@ -202,7 +202,7 @@ export class BackupsJobsModal implements OnInit {
       .pipe(filter(Boolean))
       .subscribe(() =>
         this.tasks.run(async () => {
-          await this.api.removeBackupTarget({ id })
+          await this.api.rpc.backup.target.cifs.remove({ id })
           this.jobs.update(j => j?.filter(a => a.id !== id))
         }, 'Deleting'),
       )

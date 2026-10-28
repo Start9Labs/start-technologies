@@ -195,7 +195,7 @@ export default class SystemWifiComponent {
   async onToggle(enable: boolean) {
     this.tasks.run(
       async () => {
-        await this.api.enableWifi({ enabled: enable })
+        await this.api.rpc.wifi.setEnabled({ enabled: enable })
         if (enable) {
           this.update$.next({ known: [], available: [] })
           this.pollForNetworks()
@@ -229,10 +229,10 @@ export default class SystemWifiComponent {
   async saveAndConnect(ssid: string, password?: string): Promise<boolean> {
     return this.tasks.run(async () => {
       if (password) {
-        await this.api.addWifi({ ssid, password })
-        await this.api.connectWifi({ ssid })
+        await this.api.rpc.wifi.add({ ssid, password })
+        await this.api.rpc.wifi.connect({ ssid })
       } else {
-        await this.api.connectWifi({ ssid })
+        await this.api.rpc.wifi.connect({ ssid })
       }
 
       await this.confirmWifi(ssid)
@@ -265,7 +265,7 @@ export default class SystemWifiComponent {
 
       try {
         const start = new Date().valueOf()
-        const newWifi = await this.api.getWifi({}, 10000)
+        const newWifi = await this.api.rpc.wifi.get({}, { timeout: 10000 })
         const end = new Date().valueOf()
         if (newWifi.connected === ssid) {
           this.update$.next(parseWifi(newWifi))
@@ -287,7 +287,7 @@ export default class SystemWifiComponent {
   }
 
   private getWifi$(): Observable<WifiData> {
-    return defer(() => this.api.getWifi({}, 10000)).pipe(
+    return defer(() => this.api.rpc.wifi.get({}, { timeout: 10000 })).pipe(
       map(res => parseWifi(res)),
       catchError((e: any) => {
         this.errorService.handleError(e)
@@ -302,7 +302,7 @@ export default class SystemWifiComponent {
     wifi: WifiData,
   ): Promise<boolean> {
     return this.tasks.run(async () => {
-      await this.api.addWifi({ ssid, password })
+      await this.api.rpc.wifi.add({ ssid, password })
       wifi.known = wifi.known.concat({
         ssid,
         strength: 0,

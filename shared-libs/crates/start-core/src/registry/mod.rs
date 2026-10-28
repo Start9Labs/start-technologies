@@ -5,7 +5,6 @@ use futures::future::ready;
 use imbl_value::InternedString;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, Server, from_fn_async};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::context::CliContext;
 use crate::middleware::auth::Auth;
@@ -24,6 +23,7 @@ use crate::util::serde::HandlerExtSerde;
 
 pub mod admin;
 pub mod asset;
+mod compat;
 pub mod context;
 pub mod db;
 pub mod device_info;
@@ -56,10 +56,9 @@ impl RegistryDatabase {
     }
 }
 
-#[derive(Debug, Default, Deserialize, Serialize, HasModel, TS)]
+#[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-#[ts(export)]
 pub struct FullIndex {
     pub name: Option<String>,
     pub icon: Option<DataUrl<'static>>,
@@ -68,6 +67,9 @@ pub struct FullIndex {
     pub os: OsIndex,
     pub signers: BTreeMap<Guid, SignerInfo>,
 }
+
+rpc_toolkit::reflect_ts!(FullIndex);
+rpc_toolkit::ts_export!(FullIndex, namespaces = [""]);
 
 pub async fn get_full_index(ctx: RegistryContext) -> Result<FullIndex, Error> {
     ctx.db.peek().await.into_index().de()
@@ -122,6 +124,15 @@ pub fn registry_router(ctx: RegistryContext) -> Router {
                     .middleware(DeviceInfoMiddleware::new()),
             )
         })
+        .route(
+            "/icons/{*path}",
+            get({
+                let ctx = ctx.clone();
+                move |x::Path(path): x::Path<String>| async move {
+                    package::icon::stored_icon(&ctx, &path).await
+                }
+            }),
+        )
         .route(
             "/ws/rpc/{*path}",
             get({

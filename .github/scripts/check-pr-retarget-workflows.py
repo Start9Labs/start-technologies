@@ -6,6 +6,7 @@ WORKFLOWS = Path('.github/workflows')
 RETARGET = WORKFLOWS / 'pr-retarget.yml'
 CONFLICT = WORKFLOWS / 'pr-retarget-conflict.yml'
 TARGETS = {
+    'rust-builder.yaml',
     'start-cli.yaml',
     'start-registry.yaml',
     'start-tunnel.yaml',
@@ -15,7 +16,7 @@ TARGETS = {
 }
 EXPECTED_PULL_REQUEST_WORKFLOWS = {
     'conflict-markers.yml',
-    'live-docs-guard.yml',
+    'rust-builder.yaml',
     'start-cli.yaml',
     'start-registry.yaml',
     'start-tunnel.yaml',
@@ -83,7 +84,9 @@ assert not re.search(r'^  workflow_call:\s*$', marker_trigger, re.MULTILINE)
 
 guard_source = (WORKFLOWS / 'live-docs-guard.yml').read_text()
 guard_trigger = guard_source.split('\npermissions:', 1)[0]
+assert re.search(r'^  pull_request_target:\s*$', guard_trigger, re.MULTILINE)
 assert "branches: ['live-docs']" in guard_trigger
+assert 'actions/checkout' not in guard_source
 assert 'types: [opened, synchronize, reopened, edited]' in guard_trigger
 assert not re.search(r'^  workflow_call:\s*$', guard_trigger, re.MULTILINE)
 
@@ -100,9 +103,13 @@ for filename in TARGETS:
         jobs = source.split('\njobs:', 1)[1]
         changes = block(jobs, 'changes', 2)
         assert "github.base_ref != 'live-docs'" in changes
+        changelog = block(jobs, 'changelog', 2)
+        assert "github.base_ref != 'live-docs'" in changelog
+        assert not re.search(r'^    needs:', changelog, re.MULTILINE)
         for test_job in set(re.findall(r'^  ([\w-]+):$', jobs, re.MULTILINE)) - {
             'prettier',
             'changes',
+            'changelog',
         }:
             test_body = block(jobs, test_job, 2)
             assert re.search(r'^    needs: \[[^]]*\bchanges\b[^]]*\]$', test_body, re.MULTILINE)
@@ -121,6 +128,7 @@ assert len(set(groups.values())) == len(groups), groups
 
 expected_call_permissions = {
     'test': {('contents', 'read'), ('pull-requests', 'read')},
+    'rust-builder': {('contents', 'read'), ('packages', 'write')},
     'start-cli': {('contents', 'read')},
     'start-registry': {('contents', 'read'), ('packages', 'write')},
     'start-tunnel': {('contents', 'read')},
@@ -136,6 +144,14 @@ assert job_permissions(registry, 'create-image') == {
     ('contents', 'read'),
     ('packages', 'write'),
 }
+
+builder = (WORKFLOWS / 'rust-builder.yaml').read_text()
+for job in ('build', 'publish'):
+    assert job_permissions(builder, job) == {
+        ('contents', 'read'),
+        ('packages', 'write'),
+    }
+assert "github.ref == 'refs/heads/master' && github.event_name != 'pull_request'" in builder
 
 conflict = CONFLICT.read_text()
 conflict_trigger = conflict.split('\npermissions:', 1)[0]

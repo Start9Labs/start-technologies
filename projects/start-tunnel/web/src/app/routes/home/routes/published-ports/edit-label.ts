@@ -66,9 +66,9 @@ export class PublishedPortsEditLabel {
     this.tasks.run(async () => {
       if (pinhole) {
         const { gua, externalPort } = pinhole
-        await this.api.updatePinholeLabel({ gua, externalPort, label })
+        await this.api.rpc.pinhole.updateLabel({ gua, externalPort, label })
       } else {
-        await this.api.updateForwardLabel({ source, label, hostname })
+        await this.api.rpc.portForward.updateLabel({ source, label, hostname })
       }
       this.context.$implicit.complete()
     })

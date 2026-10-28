@@ -9,8 +9,6 @@ use crate::context::CliContext;
 use crate::prelude::*;
 use crate::registry::package::get::{GetPackageResponseFull, PackageDetailLevel};
 use crate::s9pk::v2::SIG_CONTEXT;
-use crate::sign::ed25519::Ed25519;
-use crate::sign::{AnySignature, SignatureScheme};
 use crate::util::VersionString;
 
 #[derive(Debug, Deserialize, Serialize, Parser)]
@@ -55,8 +53,9 @@ pub async fn call_registry(
     ctx: &CliContext,
     url: Url,
     method: &str,
-    params: Value,
+    mut params: Value,
 ) -> Result<Value, Error> {
+    crate::registry::compat::pem_wire(&mut params);
     let sig_context = url.host().as_ref().map(InternedString::from_display);
     crate::middleware::auth::signature::call_remote(
         ctx,
@@ -89,7 +88,6 @@ pub async fn cli_promote(
     let from_url = resolve_registry_url(from.as_ref(), &ctx)?;
     let to_url = resolve_registry_url(to.as_ref(), &ctx)?;
 
-    // Fetch package info from source registry
     let res: Value = call_registry(
         &ctx,
         from_url,
@@ -97,13 +95,13 @@ pub async fn cli_promote(
         imbl_value::json!({
             "id": &id,
             "otherVersions": PackageDetailLevel::Full,
+            "allRevisions": true,
         }),
     )
     .await?;
 
     let response: GetPackageResponseFull = from_value(res)?;
 
-    // Find the target version
     let version_info = response
         .best
         .get(&version)
@@ -122,10 +120,12 @@ pub async fn cli_promote(
             )
         })?;
 
-    // Promote each s9pk variant to the target registry
     for (_, asset) in &version_info.s9pks {
         let commitment = &asset.commitment;
-        let signature = Ed25519.sign_commitment(ctx.id_key()?, commitment, SIG_CONTEXT)?;
+        let signature = ctx
+            .id_key()?
+            .sign_commitment(commitment, SIG_CONTEXT)
+            .await?;
 
         call_registry(
             &ctx,
@@ -133,7 +133,7 @@ pub async fn cli_promote(
             "package.add",
             imbl_value::json!({
                 "urls": &asset.urls,
-                "signature": AnySignature::Ed25519(signature),
+                "signature": signature,
                 "commitment": commitment,
             }),
         )

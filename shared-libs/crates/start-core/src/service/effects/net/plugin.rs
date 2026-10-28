@@ -29,12 +29,14 @@ fn require_url_plugin(context: &Arc<Service>) -> Result<(), Error> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct UrlPluginRegisterParams {
     pub table_action: ActionId,
 }
+
+rpc_toolkit::reflect_ts!(UrlPluginRegisterParams);
+rpc_toolkit::ts_export!(UrlPluginRegisterParams, namespaces = [""]);
 
 pub async fn register(
     context: EffectContext,
@@ -66,14 +68,16 @@ pub async fn register(
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct UrlPluginExportUrlParams {
     pub hostname_info: PluginHostnameInfo,
     pub remove_action: Option<ActionId>,
     pub overflow_actions: Vec<ActionId>,
 }
+
+rpc_toolkit::reflect_ts!(UrlPluginExportUrlParams);
+rpc_toolkit::ts_export!(UrlPluginExportUrlParams, namespaces = [""]);
 
 pub async fn export_url(
     context: EffectContext,
@@ -125,12 +129,14 @@ pub async fn export_url(
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct UrlPluginClearUrlsParams {
     pub except: BTreeSet<PluginHostnameInfo>,
 }
+
+rpc_toolkit::reflect_ts!(UrlPluginClearUrlsParams);
+rpc_toolkit::ts_export!(UrlPluginClearUrlsParams, namespaces = [""]);
 
 pub async fn clear_urls(
     context: EffectContext,

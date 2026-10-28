@@ -1,5 +1,5 @@
 use uciedit::openwrt::{WifiDevice, WifiDynamicVlan, WifiInterface, WifiMode};
-use uciedit::{parse_all, Arena};
+use uciedit::Arena;
 
 use crate::prelude::*;
 use crate::PASSWORD_CHARS;
@@ -71,7 +71,9 @@ pub async fn set_wifi_password(manual: bool) -> Result<(), Error> {
     println!("Configuring WiFi and reloading...");
     configure_wifi("/etc/config", &password, None).await?;
 
-    let _ = crate::run_quiet_async(tokio::process::Command::new("wifi").arg("reload")).await;
+    if let Err(e) = crate::wifi::reload_wifi("/etc/config", crate::wifi::WifiReload::Reload).await {
+        tracing::warn!("WiFi reload failed: {e}");
+    }
 
     println!("WiFi AP is now active.");
     Ok(())
@@ -135,24 +137,14 @@ pub async fn configure_wifi(
 
 /// Restore WiFi credentials from EEPROM tag 0x2F at boot time.
 ///
-/// Called by the daemon during startup to bring up the AP after a factory
-/// reset (overlay wipe) or first boot. Returns `Ok(true)` if WiFi was
-/// configured, `Ok(false)` if no restore was needed (already configured) or
-/// no usable password is in EEPROM.
+/// Runs only on a router with no admin password: a factory-fresh or reset
+/// one. Returns `Ok(true)` if WiFi was configured, `Ok(false)` if an admin
+/// password is set or no usable password is in EEPROM.
 pub async fn restore_wifi_if_needed() -> Result<bool, Error> {
-    // 1. Skip if WiFi already has a key configured
-    let arena = Arena::new();
-    let cfgs = parse_all("/etc/config", &arena, &["wireless"]).await?;
-
-    for s in &cfgs["wireless"].sections {
-        if let Some(iface) = s.get_typed::<WifiInterface>()? {
-            if iface.mode == WifiMode::AP && iface.key.is_some() {
-                return Ok(false);
-            }
-        }
+    if crate::captive::is_admin_password_set()? {
+        return Ok(false);
     }
 
-    // 2. Read WiFi password from EEPROM tag 0x2F
     let password = match crate::eeprom::read_wifi_password()? {
         Some(p) => p,
         None => {
@@ -165,11 +157,51 @@ pub async fn restore_wifi_if_needed() -> Result<bool, Error> {
         }
     };
 
-    // 3. Configure WiFi
     configure_wifi("/etc/config", &password, None).await?;
 
-    // 4. Reload WiFi
-    let _ = crate::run_quiet_async(tokio::process::Command::new("wifi").arg("reload")).await;
+    if let Err(e) = crate::wifi::reload_wifi("/etc/config", crate::wifi::WifiReload::Reload).await {
+        tracing::warn!("WiFi reload failed: {e}");
+    }
 
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use uciedit::parse_all;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn configure_wifi_keys_factory_config_under_another_root() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("wireless"),
+            include_str!("../../firstboot_config/wireless"),
+        )
+        .unwrap();
+
+        configure_wifi(dir.path().to_str().unwrap(), "Kf?J%3uZg8dm", None)
+            .await
+            .unwrap();
+
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["wireless"]).await.unwrap();
+        let (mut radios, mut aps) = (0, 0);
+        for s in &cfgs["wireless"].sections {
+            if let Some(device) = s.get_typed::<WifiDevice>().unwrap() {
+                radios += 1;
+                assert!(!device.disabled);
+            }
+            if let Some(iface) = s.get_typed::<WifiInterface>().unwrap() {
+                aps += 1;
+                assert_eq!(iface.ssid, "StartWRT");
+                assert_eq!(iface.encryption, "psk2");
+                assert_eq!(iface.key.as_deref(), Some("Kf?J%3uZg8dm"));
+                assert_eq!(iface.dynamic_vlan, WifiDynamicVlan::ALLOWED);
+                assert_eq!(iface.maxassoc, None);
+            }
+        }
+        assert_eq!((radios, aps), (2, 2));
+    }
 }

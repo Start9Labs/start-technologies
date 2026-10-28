@@ -1,0 +1,1 @@
+- Añade `disk format` para borrar una unidad y prepararla con una única partición Btrfs para las copias de seguridad de StartOS.

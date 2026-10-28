@@ -64,6 +64,5 @@ The s9pk format determines what the runtime loads at startup. Its definition and
 ## Further reading
 
 - [README.md](README.md) — what this is + quickstart
-- [CONTRIBUTING.md](CONTRIBUTING.md) — local build, type-check, and test workflow
-- [AGENTS.md](AGENTS.md) — agent/dev operating rules (`CLAUDE.md` is a one-line `@AGENTS.md` import)
+- [AGENTS.md](AGENTS.md) — local build, type-check, and test workflow
 - [RPCSpec.md](RPCSpec.md) — full JSON-RPC wire protocol

@@ -10,7 +10,7 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
 export class TimeService {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly time$ = defer(() =>
-    inject(ApiService).getSystemTime({}),
+    inject(ApiService).rpc.server.time({}),
   ).pipe(
     switchMap(({ now, uptime }) => {
       const uptimeSecs = Number(uptime)

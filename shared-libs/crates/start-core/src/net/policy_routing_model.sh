@@ -128,6 +128,7 @@ every_state() {
   expect reply-unmarked eth0 2001:db8:99::9 from 2001:db8:1::5
   expect reply-unmarked eth0 fd99::9 from fd12:3456::5
   expect reply-unmarked wg0 2001:db8:99::9 from 2001:db8:59::2
+  expect gateway-probe eth0 203.0.113.9 from 192.168.1.5 mark $T_ETH
 }
 
 state="auto"

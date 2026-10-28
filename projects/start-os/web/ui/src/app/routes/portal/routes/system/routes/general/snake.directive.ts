@@ -4,6 +4,7 @@ import { PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { filter } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { SnakeComponent } from './snake.component'
+import { pathFromArray } from 'patch-db-client'
 
 @Directive({ selector: 'img[snake]' })
 export class SnakeDirective {
@@ -28,7 +29,10 @@ export class SnakeDirective {
       .subscribe(score =>
         this.tasks.run(
           async () =>
-            await this.api.setDbValue<number>(['snakeHighScore'], score),
+            await this.api.rpc.db.put.ui({
+              pointer: pathFromArray(['snakeHighScore']),
+              value: score,
+            }),
           'Saving high score',
         ),
       )

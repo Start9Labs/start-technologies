@@ -61,7 +61,7 @@ StartWRT comes pre-installed on Start9 routers. If you need to reinstall or flas
 
 ## DIY and Unprogrammed Boards
 
-Flashing a bare BananaPi BPI-F3 works with the exact steps above: the setup wizard provisions the board's internal boot firmware (the eMMC boot partitions) as part of the flash, so the router boots from internal storage after the microSD card is removed even if the board arrived with no firmware at all.
+Flashing a bare BananaPi BPI-F3 works with the steps above: the setup wizard provisions the board's internal boot firmware (the eMMC boot partitions) as part of the flash, so the router boots from internal storage after the microSD card is removed even if the board arrived with no firmware at all. A board never programmed with a Wi-Fi password (see below) brings up no `StartWRT` network and no captive portal while it runs from the microSD card: connect a computer to the router's LAN port with an Ethernet cable and navigate to `router.lan` to reach the wizard.
 
 ### Wi-Fi Card
 
@@ -77,9 +77,9 @@ Start9 routers ship with a unique Wi-Fi password programmed into the device's EE
 
 If you are flashing a bare BananaPi BPI-F3 that was never programmed with a Wi-Fi password, the Wi-Fi access point will **not** come up after boot. To bring it online:
 
-1. Connect a computer to one of the router's LAN ports with an Ethernet cable.
+1. Connect a computer to the router's LAN port with an Ethernet cable.
 
-1. Complete [initial setup](initial-setup.md): a captive portal opens automatically (if it does not, navigate to `router.lan`) and prompts you to create your admin password. When it finishes, you are logged in to the web interface.
+1. Complete [initial setup](initial-setup.md): a captive portal opens automatically (if it does not, navigate to `router.lan`) and prompts you to create your admin password. When it finishes, open `router.lan` and log in with that password.
 
 1. Navigate to `Points of Entry > Wi-Fi > Passwords` and click "Add".
 

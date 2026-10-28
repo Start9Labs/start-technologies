@@ -7,6 +7,7 @@ use crate::util::serde::HandlerExtSerde;
 pub mod add;
 pub mod category;
 pub mod get;
+pub mod icon;
 pub mod index;
 pub mod promote;
 pub mod signer;
@@ -30,6 +31,7 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(add::cli_add_package)
+                .no_ts()
                 .no_display()
                 .with_about("about.add-package-registry"),
         )
@@ -42,6 +44,7 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add-mirror",
             from_fn_async(add::cli_add_mirror)
+                .no_ts()
                 .no_display()
                 .with_about("about.add-mirror-s9pk"),
         )
@@ -90,6 +93,7 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
             from_fn_async(get::get_package)
                 .with_metadata("authenticated", Value::Bool(false))
                 .with_metadata("get_device_info", Value::Bool(true))
+                .override_return_ts_as::<get::GetPackageResult>()
                 .with_display_serializable()
                 .with_custom_display_fn(|handle, result| {
                     get::display_package_info(handle.params, result)
@@ -106,6 +110,7 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "promote",
             from_fn_async(promote::cli_promote)
+                .no_ts()
                 .no_display()
                 .with_about("about.promote-package-registry"),
         )

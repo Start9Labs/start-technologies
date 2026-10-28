@@ -5,6 +5,7 @@ import { Mounts } from '../mainFn/Mounts'
 import { setupMain } from '../mainFn'
 import { SubContainer, SubContainerEager } from '../util/SubContainer'
 import * as T from '@start9labs/start-core/types'
+import { FileMounts } from '../util/fileMounts'
 
 type Manifest = {
   id: 'test'
@@ -36,6 +37,7 @@ const bareEager = (destroyFs: () => Promise<null>) =>
     destroyRequested: false,
     holdCount: 0,
     teardown: null,
+    fileMounts: new FileMounts(),
     leaderExited: true,
     guid: 'guid',
     effects: { subcontainer: { destroyFs } },

@@ -127,7 +127,7 @@ export class AuthorityService {
       .pipe(filter(Boolean))
       .subscribe(async () =>
         this.tasks.run(
-          async () => await this.api.removeAcme({ provider: url }),
+          async () => await this.api.rpc.net.acme.remove({ provider: url }),
           'Removing',
         ),
       )
@@ -136,7 +136,7 @@ export class AuthorityService {
   private async save(url: string, contact: readonly string[]) {
     return this.tasks.run(
       async () =>
-        await this.api.initAcme({
+        await this.api.rpc.net.acme.init({
           provider: new URL(url).href,
           contact: contact.map(address => `mailto:${address}`),
         }),

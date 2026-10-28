@@ -108,6 +108,7 @@ type DeviceRow = { name: string; subnet: { name: string }; ip: string }
                   tuiIconButton
                   size="xs"
                   tuiDropdown
+                  tuiDropdownAlign="end"
                   tuiDropdownAuto
                   appearance="flat-grayscale"
                   iconStart="@tui.ellipsis-vertical"
@@ -205,6 +206,7 @@ type DeviceRow = { name: string; subnet: { name: string }; ip: string }
                   tuiIconButton
                   size="xs"
                   tuiDropdown
+                  tuiDropdownAlign="end"
                   tuiDropdownAuto
                   appearance="flat-grayscale"
                   iconStart="@tui.ellipsis-vertical"
@@ -406,7 +408,10 @@ export default class Devices {
 
   async onConfig({ subnet, ip }: MappedDevice) {
     this.tasks.run(async () => {
-      const data = await this.api.showDeviceConfig({ subnet: subnet.range, ip })
+      const data = await this.api.rpc.device.showConfig({
+        subnet: subnet.range,
+        ip,
+      })
 
       this.dialogs
         .open(DEVICES_CONFIG, { data, closable: false, size: 'm' })
@@ -420,7 +425,8 @@ export default class Devices {
       .pipe(filter(Boolean))
       .subscribe(() =>
         this.tasks.run(
-          async () => await this.api.deleteDevice({ subnet: subnet.range, ip }),
+          async () =>
+            await this.api.rpc.device.remove({ subnet: subnet.range, ip }),
         ),
       )
   }
@@ -432,7 +438,7 @@ export default class Devices {
   }: MappedDevice) {
     this.togglingDns.set(ip)
     try {
-      await this.api.setDnsInjection({
+      await this.api.rpc.device.setDnsInjection({
         subnet: subnet.range,
         ip,
         enabled: !allowDnsInjection,
@@ -451,7 +457,7 @@ export default class Devices {
   }: MappedDevice) {
     this.togglingPf.set(ip)
     try {
-      await this.api.setAutoPortForward({
+      await this.api.rpc.device.setAutoPortForward({
         subnet: subnet.range,
         ip,
         enabled: !allowAutoPortForward,
@@ -473,7 +479,11 @@ export default class Devices {
       .subscribe(() =>
         this.tasks.run(
           async () =>
-            await this.api.setDeviceKind({ subnet: subnet.range, ip, kind }),
+            await this.api.rpc.device.setKind({
+              subnet: subnet.range,
+              ip,
+              kind,
+            }),
         ),
       )
   }

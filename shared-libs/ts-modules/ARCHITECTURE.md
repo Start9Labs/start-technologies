@@ -1,6 +1,6 @@
 # Web Architecture
 
-Angular 22 + TypeScript workspace using [Taiga UI 5](https://taiga-ui.dev/) component library.
+Angular + TypeScript workspace using [Taiga UI](https://taiga-ui.dev/) component library.
 
 ## Place in the monorepo
 
@@ -78,7 +78,7 @@ Three WebSocket use cases, all opened via `api.openWebsocket$<T>(guid)`:
 - **Main app** (`ui/src/app/app.routes.ts`) — Route-based configuration with guards (`AuthGuard`, `UnauthGuard`, `stateNot()`), lazy loading via `loadChildren`, `PreloadAllModules`.
 - **Portal routes** (`ui/src/app/routes/portal/portal.routes.ts`) — Modern array-based routes with `loadChildren` and `loadComponent`.
 - **Setup wizard** (`setup-wizard/src/app/app.routes.ts`) — Standalone `loadComponent()` per step.
-- Route config uses `bindToComponentInputs: true` — route params bind directly to component `@Input()`.
+- Route config uses `bindToComponentInputs: true` — route params bind directly to component inputs.
 
 ## Forms
 
@@ -117,18 +117,13 @@ Services often extend `Observable` and expose reactive streams via DI:
 - **`PatchMonitorService`** — Starts/stops PatchDB based on auth state
 - **`PatchDataService`** — Watches entire DB, updates localStorage bootstrap
 
-## Component Conventions
+## Frontend conventions
 
-- **Standalone components** preferred (no NgModule). Use `imports` array in `@Component`.
-- **`export default class`** for route components (enables direct `loadComponent` import).
-- **`inject()`** function for DI (not constructor injection).
-- **`signal()`** and **`computed()`** for local reactive state.
-- **`toSignal()`** to convert Observables (e.g., PatchDB watches) to signals.
-- **OnPush change detection** is the Angular 22 default, so components are OnPush without an explicit decorator. Components that need eager (CheckAlways) detection opt in with **`ChangeDetectionStrategy.Eager`** (the renamed, non-deprecated form of the old `Default`).
-- **`takeUntilDestroyed(inject(DestroyRef))`** for subscription cleanup.
+The root `start9-frontend` skill owns component, state, form, styling, and i18n
+conventions. Read it before frontend work; these architecture notes describe
+project-specific mechanisms, not a parallel style guide.
 
 ## Further reading
 
 - [README.md](README.md) — what this is and how to use it
-- [CONTRIBUTING.md](CONTRIBUTING.md) — setup, build/test/format, translations
-- [AGENTS.md](AGENTS.md) — agent / day-to-day operating rules (`CLAUDE.md` is a one-line `@AGENTS.md` import)
+- [AGENTS.md](AGENTS.md) — setup, build/test/format, translations

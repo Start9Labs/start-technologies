@@ -35,14 +35,14 @@ import { ABOUT } from './about.component'
     >
       <img [style.max-width.%]="60" src="assets/img/icon.png" alt="StartOS" />
     </button>
-    <ng-template #content>
+    <ng-template #content let-close>
       @if (status().status !== 'success') {
         <div class="status">
           <tui-icon [icon]="status().icon" />
           {{ status().message | i18n }}
         </div>
       }
-      <tui-data-list safeLinks [style.width.rem]="13">
+      <tui-data-list safeLinks [style.width.rem]="13" (click)="close()">
         <button tuiOption iconStart="@tui.info" (click)="about()">
           {{ 'About this server' | i18n }}
         </button>
@@ -70,12 +70,7 @@ import { ABOUT } from './about.component'
           {{ 'Donate to Start9' | i18n }}
         </a>
         <hr />
-        <a
-          tuiOption
-          iconStart="@tui.settings"
-          routerLink="/system"
-          (click)="open = false"
-        >
+        <a tuiOption iconStart="@tui.settings" routerLink="/system">
           {{ 'System Settings' | i18n }}
         </a>
         <hr />
@@ -178,16 +173,18 @@ export class HeaderMenuComponent {
       .subscribe(() =>
         this.tasks.run(
           async () =>
-            await this.api[
-              action === 'restart' ? 'restartServer' : 'shutdownServer'
-            ]({}),
+            action === 'restart'
+              ? await this.api.rpc.server.restart({})
+              : await this.api.rpc.server.shutdown({}),
           `Beginning ${action}`,
         ),
       )
   }
 
   logout() {
-    this.api.logout({}).catch(e => console.error('Failed to log out', e))
+    this.api.rpc.auth
+      .logout({})
+      .catch(e => console.error('Failed to log out', e))
     this.auth.logout()
   }
 }

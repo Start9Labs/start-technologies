@@ -20,6 +20,7 @@ import { TuiButtonLoading, TuiPassword } from '@taiga-ui/kit'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { ApiService } from '../services/api.service'
 import { StartOSDiskInfoWithId } from '../types'
+import { normalizeCifsPath } from '../utils/cifs'
 
 export interface CifsResult {
   cifs: T.Cifs
@@ -143,8 +144,9 @@ export class CifsComponent {
     this.connecting.set(true)
 
     try {
-      const diskInfo = await this.api.verifyCifs({
+      const diskInfo = await this.api.rpc.setup.cifs.verify({
         ...this.form.getRawValue(),
+        path: normalizeCifsPath(this.form.getRawValue().path),
         password: this.form.value.password
           ? await this.api.encrypt(String(this.form.value.password))
           : null,

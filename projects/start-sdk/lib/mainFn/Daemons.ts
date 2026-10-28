@@ -55,7 +55,7 @@ const RUN_UNTIL_SUCCESS_ID = '__RUN_UNTIL_SUCCESS'
  * | `loading`   | Operational but still catching up (e.g. syncing)     | Progress / amber |
  * | `disabled`  | Intentionally inactive (excluded by configuration)   | Grey / skipped   |
  * | `starting`  | Not yet ready, still initializing                    | Spinner          |
- * | `waiting`   | Blocked on an external dependency                    | Spinner          |
+ * | `waiting`   | Cannot be ready until something outside it is        | Spinner          |
  * | `failure`   | Unhealthy — something is wrong                       | Red / error      |
  */
 export type Ready = {
@@ -98,11 +98,14 @@ export type Ready = {
    *
    * Use one of the built-in triggers from `sdk.trigger`:
    * - `cooldownTrigger(ms)` — fixed interval between checks
-   * - `statusTrigger({ success, loading, failure, ... })` — per-status
-   *   polling intervals
+   * - `onceTrigger` — one check at start, for a result fixed until `main`
+   *   restarts; pair with `gracePeriod: 0`
+   * - `statusTrigger(defaultMs, { success, loading, failure, ... })` —
+   *   per-status polling intervals
    *
-   * If omitted, uses the default trigger: 1 s before the first non-pending
-   * result, then 30 s afterward.
+   * If omitted, polls every 1 s while `starting` or `failure` and every
+   * 30 s otherwise, except that a daemon's `loading` or `waiting`
+   * before its first `success` backs off from 1 s, doubling to 30 s.
    */
   trigger?: Trigger
 }

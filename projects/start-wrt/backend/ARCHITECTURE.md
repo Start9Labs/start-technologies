@@ -1,19 +1,18 @@
 # Backend Architecture
 
-Rust workspace powering the StartWRT router daemon and CLI. Three crates: `ctrl` (RPC server + CLI), `uciedit` (UCI parser library), `uciedit_macros` (proc macros for typed UCI sections).
+Rust crates powering the StartWRT router daemon and CLI. Three crates: `ctrl` (RPC server + CLI), `uciedit` (UCI parser library), `uciedit_macros` (proc macros for typed UCI sections).
 
 ## Transport
 
-HTTP server on ports 80 (HTTP) and 443 (HTTPS, if TLS setup succeeds). JSON-RPC 2.0 at `POST /rpc/v1` via [rpc-toolkit](../../../shared-libs/crates/rpc-toolkit). Session cookie authentication with rate limiting.
+HTTP server on ports 80 (HTTP) and 443 (HTTPS, if TLS setup succeeds). JSON-RPC 2.0 at `POST /rpc/v1` via [rpc-toolkit](../../../shared-libs/crates/rpc-toolkit). Request-signature and local-token authentication from `start-core` (see [auth.rs](#authrs--authentication)).
 
 Additional routes:
 
 | Route                                     | Purpose                                                           |
 | ----------------------------------------- | ----------------------------------------------------------------- |
-| `GET /api/logs`                           | WebSocket for live log streaming                                  |
 | `POST /api/setup/flash`                   | NDJSON streaming for setup wizard                                 |
 | `GET\|POST /rest/rpc/{guid}`              | Continuation endpoint for backup/restore/diagnostics (10MB limit) |
-| `GET /ws/rpc/{guid}`                      | WebSocket continuation endpoint (progress streaming for updates)  |
+| `GET /ws/rpc/{guid}`                      | WebSocket continuation endpoint (update progress, live logs)      |
 | `GET /luci`                               | Convenience redirect to `/cgi-bin/luci`                           |
 | `GET /static/local-root-ca.crt`           | Root CA certificate download (no auth)                            |
 | `GET /static/local-root-ca.mobileconfig`  | Root CA as an Apple configuration profile (no auth)               |
@@ -32,11 +31,12 @@ Both `startwrt-ctrld` (daemon) and `startwrt-cli` (CLI) share the same handler c
 pub trait CtrlContext: Context + Clone {
     fn uci_root(&self) -> PathBuf;   // /etc/config/ on router, configurable for CLI
     fn effectful(&self) -> bool;      // CLI: --configs-only skips service reloads
+    fn wan_ipv4_addrs(&self) -> Vec<Ipv4Addr>; // provided; empty unless effectful
 }
 ```
 
-- **`ServerContext`**: always reads `/etc/config/`, always reloads services. Holds `RpcContinuations` for long-running operations.
-- **`CliContext`**: configurable root (`--config-root`), cookie persistence in `~/.startwrt/.cookies.json`, calls server via HTTP when needed. Injects the local auth cookie from `/run/startwrt/rpc.authcookie` into requests to loopback hosts only.
+- **`ServerContext`**: always reads `/etc/config/`, always reloads services. Holds `start-core`'s `RpcContinuations` for long-running operations and the auth state (enrolled keys, nonce cache). `ServerContext::default()` carries an in-memory auth state that enrolls nothing; only the daemon opens `/etc/startwrt/auth.db`.
+- **`CliContext`**: configurable root (`--config-root`), calls server via HTTP when needed. Signs each request with the identity key at `~/.startwrt/id.key.pem` once one exists, and sends the local auth token from `/run/startwrt/rpc.authcookie` as `Authorization: Bearer` to loopback hosts only.
 
 The single binary `startwrt` uses `MultiExecutable` to dispatch based on the symlink name (`startwrt-ctrld` or `startwrt-cli`) or the first argument.
 
@@ -62,8 +62,9 @@ All methods assembled in `main_api()` → `ParentHandler<C>`:
 
 ```
 auth
-  ├─ login              # Session creation (rate-limited: 3 per 20s)
-  ├─ logout             # Session destruction
+  ├─ login              # Enroll the signing key (rate-limited: 3 per 20s)
+  ├─ logout             # Revoke the signing key
+  ├─ session list / kill
   ├─ verify-password    # Password check without login
   ├─ set-password        # Change password
   ├─ check-initialized  # Has admin password been set?
@@ -81,12 +82,13 @@ ethernet
 
 wifi
   ├─ get / set / edit   # SSID, passwords, radio settings
-  ├─ blackout-get / blackout-set
-  └─ generate-password
+  ├─ blackout-get / blackout-set / blackout-apply
+  ├─ generate-password
+  └─ regulatory        # Countries + per-band channels
 
 vpn-server              # Inbound WireGuard VPN
   ├─ list / set / delete
-  └─ peer-add / peer-delete
+  └─ peer-add / peer-delete / peer-rename / peer-set-dns-injection
 
 vpn-client              # Outbound WireGuard VPN
   ├─ list / create / update / delete
@@ -99,6 +101,9 @@ system                  # System settings, remote access, restart, factory reset
                         # OTA update (newer-versions / update)
 
 devices                 # Device enumeration, rename, forget, data usage
+
+dns
+  └─ injected-list      # Records devices published via DNS UPDATE
 
 wan                     # WAN IPv4/IPv6, MAC, DNS, DDNS config
 
@@ -131,7 +136,7 @@ exec                    # Shell command execution
 
 ### profiles.rs — Security Profile CRUD
 
-The core module. Each profile creates a VLAN on the LAN bridge, a network interface, a firewall zone with forwarding rules, and a DHCP server. Orchestrates changes across five UCI configs: `startwrt`, `network`, `firewall`, `dhcp`, `wireless`. Uses retry loops (4 attempts) for conflict resolution.
+The core module. Each profile creates a VLAN on the LAN bridge, a network interface, a firewall zone with forwarding rules, and a DHCP server. Orchestrates changes across five UCI configs: `startwrt`, `network`, `firewall`, `dhcp`, `wireless`. Uses retry loops (4 retries) for conflict resolution.
 
 Key types:
 
@@ -143,9 +148,9 @@ Also handles WAN access schedules — time-of-day rules that enable/disable WAN 
 
 ### wifi.rs — WiFi Configuration
 
-Manages SSID, per-radio settings (band, channel, enabled, broadcast), and multi-password config. Each password maps to a profile via dynamic VLAN. The admin password uses `WifiDynamicVlan::ALLOWED`; all others use `REQUIRED`.
+Manages SSID, per-radio settings (band, channel, enabled, broadcast), and multi-password config. Each password maps to a profile via dynamic VLAN. `dynamic_vlan` is set per `wifi-iface`: `WifiDynamicVlan::ALLOWED`, with the first profile-less (admin) password as the interface `key`, when one exists; otherwise `REQUIRED` with no key.
 
-Manages WiFi blackout schedules via crontab (`/etc/crontabs/root`).
+Manages WiFi blackout schedules: every Wi-Fi reload re-applies the state for the current time, and crontab (`/etc/crontabs/root`) lines re-apply it at each window boundary.
 
 Creates `WifiStation` (password entries) and `WifiVlan` (VLAN mapping) sections in the `wireless` UCI config.
 
@@ -158,24 +163,25 @@ Maps physical ports to profiles via bridge VLAN assignments on the LAN bridge (`
 - **vpn_server**: Inbound WireGuard servers. Each server interface bound to a profile. Manages peer key generation, allowed IPs, and warns before deleting servers that would break peer connectivity.
 - **vpn_client**: Outbound WireGuard clients. Supports VPN chaining (client A routes through client B). Detects cycles and warns before deleting clients that are in use by profiles or other VPN clients.
 
-### auth.rs — Session Authentication
+### auth.rs — Authentication
 
-- Sessions stored as JSON in `/etc/startwrt/sessions.json`
+The daemon runs `start-core`'s `Auth` middleware with `LocalAuth` and `SignatureAuth`; `auth.rs` supplies the StartWRT side of their context traits.
+
+- The handler tree is `start-core`'s `auth()` (login, logout, session list/kill) with StartWRT's password handlers chained on, the same shape as StartTunnel's.
+- Enrolled keys live in a patch-db at `/etc/startwrt/auth.db`, listed in sysupgrade's `keep.d`. A key's `lastActive` is written at most hourly (`LAST_ACTIVE_RESOLUTION`), so routine requests never write to flash. `lastActive` is shown by `auth session list` and governs nothing. `check_pubkey` refuses a key 24 hours after its `loggedIn` time (`SIGN_IN_LIFETIME`); until `/var/state/dnsmasqsec` marks the clock trusted it judges age alone, and afterwards a `loggedIn` more than `LOGIN_CLOCK_SKEW` ahead also expires. `start-core`'s `reap_idle_keys`, run hourly once the clock is trusted, unenrolls expired keys through `LoginContext::sign_in_expired`.
+- Signing identities: `router.lan`, every address on the router's interfaces (loopback and link-local IPv6 excluded; start-core accepts a loopback address from a loopback peer), and the enabled DDNS hostname, re-read only when `/etc/config/ddns` changes.
+- Timestamps are enforced once `/var/state/dnsmasqsec` exists (dnsmasq's ntp hotplug writes it when ntpd reports valid time); before that, only the nonce cache stops replays.
 - Password validated against `/etc/shadow` (or `STARTWRT_DEV_PASSWORD` env var in dev)
-- Tokens: random bytes → base32 encoding (sent to client), SHA-256 hash (stored server-side)
-- 1-day session expiry, HTTP-only SameSite=Strict cookie
-- Rate limiting: 3 login attempts per 20 seconds
-- Local auth cookie: generated at daemon startup → `/run/startwrt/rpc.authcookie`, read by CLI to authenticate without a session
+- Rate limiting: 3 login attempts per 20 seconds per signed identity
+- Local auth token: generated at daemon startup → `/run/startwrt/rpc.authcookie` (`root:root`, `0640`)
 
-### middleware/auth.rs — HTTP Session Middleware
+Handler metadata:
 
-`SessionAuth` middleware applied to all RPC endpoints. Uses handler metadata to determine behavior:
+- `authenticated: false` — no credential needed (status endpoints, first-time setup)
+- `login: true` — enroll the signing key by password; reject enrollment when a valid local auth token is supplied
+- `get_signer: true` — inject the signing key as `__Auth_signer`
 
-- `login: true` — rate-limit, inject user agent
-- `no_auth: true` — skip auth (status endpoints)
-- `get_session: true` — inject `sessionHash` into params
-
-Every other call needs a valid session cookie or the local auth cookie; the peer address grants nothing.
+Every other call needs a valid signature or the local token; the peer address grants nothing.
 
 Returns RPC error code 34 on auth failure (frontend auto-logs out).
 
@@ -187,7 +193,7 @@ Low-level UCI, file, and shell access. These are vestigial — all features now 
 
 | Module                            | Purpose                                                                                                                                                                                                                                                      |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `system.rs`                       | System settings, remote access rules, schedules, restart, factory reset                                                                                                                                                                                      |
+| `system.rs`                       | System settings, timezone, remote access rules, logs, OTA entry points, restart, factory reset                                                                                                                                                               |
 | `devices.rs`                      | Device enumeration from ARP/DHCP, rename, forget (flush ARP + lease)                                                                                                                                                                                         |
 | `wan.rs` / `lan.rs`               | WAN/LAN interface configuration                                                                                                                                                                                                                              |
 | `published_ports.rs`              | Port forwarding rules (firewall redirects)                                                                                                                                                                                                                   |
@@ -196,16 +202,18 @@ Low-level UCI, file, and shell access. These are vestigial — all features now 
 | `ssh_keys.rs`                     | SSH public key CRUD (`/etc/dropbear/authorized_keys`)                                                                                                                                                                                                        |
 | `vpn_client.rs` / `vpn_server.rs` | WireGuard VPN management                                                                                                                                                                                                                                     |
 | `dns.rs`                          | DNS server configuration                                                                                                                                                                                                                                     |
+| `dns_inject.rs`                   | RFC 2136 DNS UPDATE ingress: records published by permitted devices and inbound VPN peers, served through per-profile dnsmasq (`dns.injected-list`)                                                                                                          |
 | `activity.rs`                     | Activity logging via SQLite                                                                                                                                                                                                                                  |
 | `backup.rs` / `diagnostics.rs`    | Backup/restore and diagnostic bundles (via continuations)                                                                                                                                                                                                    |
-| `logs.rs`                         | WebSocket log streaming                                                                                                                                                                                                                                      |
-| `ssl.rs`                          | TLS cert generation: Root CA → Intermediate CA → Server cert                                                                                                                                                                                                 |
+| `logs.rs`                         | Log snapshot and `system.logs-follow` streaming                                                                                                                                                                                                              |
+| `ssl.rs`                          | Root CA and intermediate CA, their files under `/etc/ssl`, and the Root CA download                                                                                                                                                                          |
+| `tls.rs`                          | HTTPS certificates: a local-CA leaf per name served (`start-core` `CertStore`)                                                                                                                                                                               |
 | `init.rs`                         | Early boot WiFi config, password generation                                                                                                                                                                                                                  |
 | `setup.rs` / `flash.rs`           | Setup wizard, firmware flashing                                                                                                                                                                                                                              |
 | `captive.rs`                      | Captive portal management                                                                                                                                                                                                                                    |
 | `embedded_web.rs`                 | Serves the Angular SPA from `include_dir`                                                                                                                                                                                                                    |
 | `luci_proxy.rs`                   | Reverse proxy to LuCI on localhost:8080                                                                                                                                                                                                                      |
-| `continuations.rs`                | Long-running operation handling (GUID-based, timeout, kill signals)                                                                                                                                                                                          |
+| `continuations.rs`                | Serves `start-core` RPC continuations at `/rest/rpc/{guid}`                                                                                                                                                                                                  |
 | `update.rs`                       | OTA update engine — download/verify/flash, progress via continuations                                                                                                                                                                                        |
 | `registry/`                       | Registry client (`device_info`, `asset`, `os`, `signer`)                                                                                                                                                                                                     |
 | `sign/`                           | ed25519 signature + commitment verification                                                                                                                                                                                                                  |
@@ -216,6 +224,20 @@ Low-level UCI, file, and shell access. These are vestigial — all features now 
 | `verify.rs`                       | Factory QC checks (firmware integrity, EEPROM password, SSID broadcast)                                                                                                                                                                                      |
 | `templates/`                      | `client.conf.template` — WireGuard peer client-config template                                                                                                                                                                                               |
 | `error.rs`                        | `ErrorKind` enum and `Error` type                                                                                                                                                                                                                            |
+
+## TypeScript bindings
+
+RPC structs derive `visit_rs::VisitFields` and enums derive
+`visit_rs::VisitVariants`, supplying raw facts and static traversal.
+Adjacent `rpc_toolkit::reflect_ts!` bridges normalize serde metadata and render TypeScript while retaining generic
+payload bounds and default generic inlining. RPC interprets raw `visit(ts(...))`
+hints; signing containers use explicit storage opacity and a `string` literal.
+Local `type_attributes` selectors collect compiler-resolved wire/conversion types
+from existing literals. Raw descriptors retain every member; serde skips and
+renames do not affect reflection. Streaming roots register beside their owners
+with `rpc_toolkit::ts_export!`;
+`ctrl/examples/generate_rpc_bindings.rs` collects the `events` namespace and
+traverses `main_api()` for the RPC tree.
 
 ## UCI Library (uciedit)
 
@@ -265,14 +287,14 @@ Macro attributes:
 
 Shared, OpenWrt-native typed sections live in `uciedit/src/openwrt.rs`; feature-owned sections (`UciPreferences`, `UciWifiBlackout`, `UciProfile`, the VPN sections, …) are defined in `ctrl` beside their handlers. The sections in `openwrt.rs`:
 
-| Config       | Structs                                                                                 |
-| ------------ | --------------------------------------------------------------------------------------- |
-| **firewall** | `FirewallZone`, `FirewallRule`, `FirewallRedirect`, `FirewallForwarding`                |
-| **network**  | `NetworkInterface`, `NetworkDevice`, `NetworkBridgeVlan`, `NetworkRoute`, `NetworkRule` |
-| **wireless** | `WifiDevice`, `WifiInterface`, `WifiVlan`, `WifiStation`                                |
-| **dhcp**     | `Dhcp`, `DhcpHost`, `ProfileDnsmasq`                                                    |
-| **startwrt** | `UciSystemDns` (the `system_dns` section)                                               |
-| **ddns**     | `DdnsService`                                                                           |
+| Config       | Structs                                                                                                                                    |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **firewall** | `FirewallZone`, `FirewallRule`, `FirewallRedirect`, `FirewallForwarding`                                                                   |
+| **network**  | `NetworkInterface`, `NetworkDevice`, `NetworkBridgeVlan`, `NetworkRoute`, `NetworkRoute6`, `NetworkRule`, `NetworkRule6`, `NetworkGlobals` |
+| **wireless** | `WifiDevice`, `WifiInterface`, `WifiVlan`, `WifiStation`                                                                                   |
+| **dhcp**     | `Dhcp`, `DhcpHost`, `ProfileDnsmasq`                                                                                                       |
+| **startwrt** | `UciSystemDns` (the `system_dns` section)                                                                                                  |
+| **ddns**     | `DdnsService`                                                                                                                              |
 
 `NetworkVlanPort` (a plain struct) and `NetworkVlanPortTagging` (an enum) are not `TypedSection`s — they are used as fields within `NetworkBridgeVlan`.
 
@@ -284,15 +306,15 @@ Shared, OpenWrt-native typed sections live in `uciedit/src/openwrt.rs`; feature-
 - Profile errors: `MissingProfile`, `CorruptedProfile`, `LanOwnerExists`, `CannotDeleteLanOwner`
 - Infrastructure errors: `MissingLanBridge`, `MissingWanInterface`, `MissingLanInterface`, `MissingFirewallZone`
 - WiFi errors: `CorruptedWifi`, `UnnamedWirelessInterface`, `UnnamedWirelessDevice`
-- VPN errors: `VpnHasDependents`, `VpnChainCycle`, `VpnPeersWouldBreak`, `MissingDeviceAddress`
-- Validation: `InvalidValue`, `WanPortWithProfile`, `DhcpStaticHostsInSubnet`, `SubnetCollision`
-- UCI shell-out: `UciEdit` (failed `uci` CLI invocation)
+- VPN errors: `VpnHasDependents`, `VpnChainCycle`, `VpnPeersWouldBreak`, `VpnDisabled`
+- Validation: `InvalidValue`, `WanPortWithProfile`, `DhcpStaticHostsInSubnet`, `SubnetCollision`, `MissingDeviceAddress`, `PublishedPortsUseIpv6`
+- UCI errors: `UciEdit` (any `uciedit` parse, I/O, or write-conflict failure, and failed `uci` CLI calls)
 
-Auth-specific RPC error codes: 7 (incorrect password), 34 (authorization — triggers frontend logout), 40 (uninitialized).
+An RPC error carries its `ErrorKind` value as `code` and the kind's name as `message`. Code 34 (authorization) triggers frontend logout.
 
 ## Common Pitfalls
 
-- **UCI conflicts.** Concurrent writes to the same config file will fail. Use uciedit's retry mechanism. Profile creation already retries 4 times.
+- **UCI conflicts.** Concurrent writes to the same config file will fail with `uciedit::Error::Conflict`. Re-read, re-apply, and re-write in a bounded loop; profile creation retries 4 times.
 - **Service reloads.** After writing UCI configs, call `/etc/init.d/<service> reload`. The `effectful` flag on `CtrlContext` controls whether reloads happen.
 - **Arena lifetimes.** uciedit uses arena allocation — parsed values borrow from the arena. Don't try to outlive it.
 - **Bridge VLAN filtering.** StartWRT uses UCI `bridge-vlan` configuration for per-port VLAN assignment. OpenWrt maps this to DSA hardware switch tables when available (e.g., DeepComputing 4-port board) or to the kernel's software bridge filter when not (e.g., BPI-F3, which has two independent GMACs and no switch chip). The backend code is the same for both — it writes `NetworkBridgeVlan` / `NetworkVlanPort` sections regardless of the underlying hardware.

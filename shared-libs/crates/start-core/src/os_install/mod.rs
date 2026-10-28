@@ -6,7 +6,6 @@ use color_eyre::eyre::eyre;
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
-use ts_rs::TS;
 
 use crate::Error;
 use crate::context::config::ServerConfig;
@@ -18,7 +17,7 @@ use crate::disk::mount::filesystem::efivarfs::EfiVarFs;
 use crate::disk::mount::filesystem::overlayfs::OverlayFs;
 use crate::disk::mount::filesystem::{MountType, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard, TmpMountGuard};
-use crate::disk::util::{DiskInfo, PartitionTable};
+use crate::disk::util::{DiskInfo, PartitionTable, is_startos_pool_guid};
 use crate::prelude::*;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::setup::SetupInfo;
@@ -27,9 +26,9 @@ use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::{TmpDir, delete_dir, delete_file, open_file, write_file_atomic};
 use crate::util::serde::IoFormat;
 
-mod gpt;
+pub(crate) mod gpt;
 mod mbr;
-mod quiesce;
+pub(crate) mod quiesce;
 
 /// Probe a squashfs image to determine its target architecture
 async fn probe_squashfs_arch(squashfs_path: &Path) -> Result<InternedString, Error> {
@@ -110,7 +109,7 @@ async fn partition(
     }
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
@@ -121,7 +120,9 @@ pub struct InstallOsParams {
     data_drive: Option<DataDrive>,
 }
 
-#[derive(Deserialize, Serialize, Parser, TS)]
+rpc_toolkit::reflect_ts!(InstallOsParams);
+
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
@@ -132,9 +133,7 @@ struct DataDrive {
     wipe: bool,
 }
 
-fn is_startos_pool_guid(guid: &str) -> bool {
-    guid.starts_with("EMBASSY_") || guid.starts_with("STARTOS_")
-}
+rpc_toolkit::reflect_ts!(DataDrive);
 
 /// What install-os will do with the data drive, decided before any disk is
 /// written to.

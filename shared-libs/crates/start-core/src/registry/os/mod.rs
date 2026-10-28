@@ -32,6 +32,7 @@ pub fn os_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "promote",
             from_fn_async(promote::cli_os_promote)
+                .no_ts()
                 .no_display()
                 .with_about("about.promote-os-registry"),
         )

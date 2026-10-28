@@ -8,10 +8,12 @@ use tracing::instrument;
 
 use crate::Error;
 use crate::context::config::ServerConfig;
+use crate::net::dns::DnsController;
 use crate::progress::FullProgressTracker;
 use crate::rpc_continuations::RpcContinuations;
 
 pub struct InitContextSeed {
+    pub(crate) dns: Arc<DnsController>,
     pub config: ServerConfig,
     pub error: watch::Sender<Option<Error>>,
     pub progress: FullProgressTracker,
@@ -23,11 +25,12 @@ pub struct InitContextSeed {
 pub struct InitContext(Arc<InitContextSeed>);
 impl InitContext {
     #[instrument(skip_all)]
-    pub async fn init(cfg: &ServerConfig) -> Result<Self, Error> {
+    pub async fn init(cfg: &ServerConfig, dns: Arc<DnsController>) -> Result<Self, Error> {
         let (shutdown, _) = tokio::sync::broadcast::channel(1);
         let mut progress = FullProgressTracker::new();
         progress.enable_logging(true);
         Ok(Self(Arc::new(InitContextSeed {
+            dns,
             config: cfg.clone(),
             error: watch::channel(None).0,
             progress,

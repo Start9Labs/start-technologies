@@ -28,8 +28,8 @@ export class NotificationService {
   async markSeenAll(latestId: number) {
     this.localUnreadCount$.next(0)
 
-    this.api
-      .markSeenAllNotifications({ before: latestId })
+    this.api.rpc.notification
+      .markSeenBefore({ before: latestId })
       .catch(e => this.errorService.handleError(e))
   }
 

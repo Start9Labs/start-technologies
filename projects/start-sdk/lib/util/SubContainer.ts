@@ -7,6 +7,7 @@ import { once } from '@start9labs/start-core/util/once'
 import { Drop } from '@start9labs/start-core/util/Drop'
 import { logErrorOnce } from '@start9labs/start-core/util/logErrorOnce'
 import { Mounts } from '../mainFn/Mounts'
+import { FileMounts } from './fileMounts'
 
 export const execFile = promisify(cp.execFile)
 const False = () => false
@@ -21,10 +22,7 @@ export type ExecOptions = {
 
 const TIMES_TO_WAIT_FOR_PROC = 100
 
-// Returns whether the bind target was prepared as a file (vs a directory),
-// so callers can pass the matching `--file` flag. For `infer` this resolves
-// against the source, so it must be the single source of truth — `bind()`
-// keys `--file` off this rather than re-deciding.
+/** Returns whether the prepared target is a file. */
 async function prepBind(
   from: string | null,
   to: string,
@@ -57,22 +55,31 @@ async function bind(
   to: string,
   type: 'file' | 'directory' | 'infer',
   idmap: IdMap[],
-) {
+  readonly: boolean,
+): Promise<boolean> {
   const isFile = await prepBind(from, to, type)
+  await attachBind(from, to, isFile, idmap, readonly)
+  return isFile
+}
 
-  // Inside the LXC subcontainer (which is itself idmapped), util-linux's
-  // `mount --bind -oX-mount.idmap=...` can't reliably set up a second,
-  // nested idmap. start-container's `bind-mount` subcommand performs the
-  // bind via direct syscalls (open_tree + mount_setattr + move_mount) so
-  // the SDK's idmap field on volume/asset/dependency mounts works.
+async function attachBind(
+  from: string,
+  to: string,
+  isFile: boolean,
+  idmap: IdMap[],
+  readonly: boolean,
+  beneath = false,
+  signal?: AbortSignal,
+): Promise<void> {
+  // Nested idmaps require start-container's syscall-based bind.
   const args = ['bind-mount', '--source', from, '--target', to, '--recursive']
-  if (isFile) {
-    args.push('--file')
-  }
+  if (isFile) args.push('--file')
+  if (readonly) args.push('--readonly')
+  if (beneath) args.push('--beneath')
   for (const i of idmap) {
     args.push('--idmap', `${i.fromId}:${i.toId}:${i.range}`)
   }
-  await execFile('start-container', args)
+  await execFile('start-container', args, { signal, killSignal: 'SIGKILL' })
 }
 
 /**
@@ -422,6 +429,8 @@ export class SubContainerEager<
   private destroyRequested = false
   private holdCount = 0
   private teardown: Promise<void> | null = null
+  private readonly fileMounts = new FileMounts()
+  private sharedMounts = false
 
   private leader: cp.ChildProcess
   private leaderExited: boolean = false
@@ -472,10 +481,9 @@ export class SubContainerEager<
   }
 
   /**
-   * Internal factory. Accepts an explicit `identity` so a lazy handle can
-   * thread its identity through to the eager it materializes into.
-   * External callers use {@link SubContainer.eager} (which generates its
-   * own identity) or {@link SubContainer.of} (lazy).
+   * Internal factory preserving a lazy handle's identity.
+   * The creation hook runs before mounting, while context ownership can still change.
+   * External callers use {@link SubContainer.eager} or {@link SubContainer.of}.
    */
   static async _of<Manifest extends T.SDKManifest, Effects extends T.Effects>(
     effects: Effects,
@@ -486,12 +494,20 @@ export class SubContainerEager<
     mounts: Mounts<Manifest> | null,
     name: string,
     identity: symbol,
+    onCreate?: (sub: SubContainerEager<Manifest, Effects>) => void,
   ): Promise<SubContainerEager<Manifest, Effects>> {
     const { imageId, sharedRun } = image
     const [rootfs, guid] = await effects.subcontainer.createFs({
       imageId,
       name,
     })
+
+    try {
+      await fs.mkdir(`${rootfs}/proc`, { recursive: true })
+    } catch (e) {
+      await effects.subcontainer.destroyFs({ guid })
+      throw e
+    }
 
     const res = new SubContainerEager<Manifest, Effects>(
       effects,
@@ -500,11 +516,10 @@ export class SubContainerEager<
       guid,
       identity,
     )
-    // Arm context cleanup before mounting — if the try below throws,
-    // _destroyImmediate unregisters as it tears the partial container down.
     registerForContextCleanup(effects, res)
 
     try {
+      onCreate?.(res)
       if (mounts) {
         await res.mount(mounts)
       }
@@ -514,6 +529,7 @@ export class SubContainerEager<
       }
 
       await fs.mkdir(`${rootfs}/etc`, { recursive: true })
+      await fs.rm(`${rootfs}/etc/resolv.conf`, { force: true })
       await fs.copyFile('/etc/resolv.conf', `${rootfs}/etc/resolv.conf`)
 
       for (const dirPart of shared) {
@@ -563,7 +579,40 @@ export class SubContainerEager<
           : '/'
         const from = `/media/startos/volumes/${options.volumeId}${subpath}`
 
-        await bind(from, path, options.filetype, options.idmap)
+        const isFile = await bind(
+          from,
+          path,
+          options.filetype,
+          options.idmap,
+          options.readonly,
+        )
+        if (isFile) {
+          if (!this.sharedMounts) {
+            // Exec namespaces become slaves of this tree and receive its rebinds.
+            await execFile('mount', ['--make-rshared', this.rootfs])
+            this.sharedMounts = true
+          }
+          let staged = false
+          await this.fileMounts.add(from, path, async signal => {
+            if (!staged) {
+              await attachBind(
+                from,
+                path,
+                true,
+                options.idmap,
+                options.readonly,
+                true,
+                signal,
+              )
+              staged = true
+            }
+            await execFile('umount', ['--lazy', path], {
+              signal,
+              killSignal: 'SIGKILL',
+            })
+            staged = false
+          })
+        }
       } else if (options.type === 'assets') {
         const subpath = options.subpath
           ? options.subpath.startsWith('/')
@@ -572,7 +621,7 @@ export class SubContainerEager<
           : '/'
         const from = `/media/startos/assets/${subpath}`
 
-        await bind(from, path, options.filetype, options.idmap)
+        await bind(from, path, options.filetype, options.idmap, true)
       } else if (options.type === 'pointer') {
         await prepBind(null, path, 'directory')
         // The host-side mount effect applies the SDK idmap in startd, which
@@ -640,6 +689,7 @@ export class SubContainerEager<
       this.destroyed = true
       unregisterFromContextCleanup(this.effects, this)
       const guid = this.guid
+      await this.fileMounts.close()
       await this.killLeader()
       await this.effects.subcontainer.destroyFs({ guid })
     })())
@@ -689,6 +739,7 @@ export class SubContainerEager<
     stderr: string | Buffer
   }> {
     await this.waitProc()
+    await this.fileMounts.sync()
     const imageMeta: T.ImageMetadata = await fs
       .readFile(`/media/startos/images/${this.imageId}.json`, {
         encoding: 'utf8',
@@ -724,7 +775,8 @@ export class SubContainerEager<
       ],
       spawnOptions,
     )
-    abort?.signal.addEventListener('abort', () => child.kill('SIGKILL'))
+    const kill = () => child.kill('SIGKILL')
+    abort?.signal.addEventListener('abort', kill)
     if (spawnOptions.input) {
       await new Promise<null>((resolve, reject) => {
         try {
@@ -779,6 +831,7 @@ export class SubContainerEager<
       child.stderr.on('data', appendData(stderr))
       child.on('exit', (code, signal) => {
         clearTimeout(killTimeout)
+        abort?.signal.removeEventListener('abort', kill)
         const result = {
           exitCode: code,
           exitSignal: signal,
@@ -826,6 +879,7 @@ export class SubContainerEager<
     options?: CommandOptions,
   ): Promise<cp.ChildProcessWithoutNullStreams> {
     await this.waitProc()
+    await this.fileMounts.sync()
     const imageMeta: T.ImageMetadata = await fs
       .readFile(`/media/startos/images/${this.imageId}.json`, {
         encoding: 'utf8',
@@ -877,6 +931,7 @@ export class SubContainerEager<
     options: CommandOptions & StdioOptions = { stdio: 'inherit' },
   ): Promise<cp.ChildProcess> {
     await this.waitProc()
+    await this.fileMounts.sync()
     const imageMeta: T.ImageMetadata = await fs
       .readFile(`/media/startos/images/${this.imageId}.json`, {
         encoding: 'utf8',
@@ -963,6 +1018,7 @@ export class SubContainerLazy<
 
   private materialized: Promise<SubContainerEager<Manifest, Effects>> | null =
     null
+  private created: SubContainerEager<Manifest, Effects> | null = null
   private destroyRequested = false
   private detachRequested = false
   private holds = new Set<{
@@ -1000,8 +1056,13 @@ export class SubContainerLazy<
       this.mounts,
       this.name,
       this.identity,
+      eager => {
+        this.created = eager
+        if (this.detachRequested) eager.detach()
+      },
     )
       .catch(e => {
+        this.created = null
         this.materialized = null
         logErrorOnce(e)
         throw e
@@ -1011,7 +1072,6 @@ export class SubContainerLazy<
           if (!hold.release) hold.release = eager.hold()
         }
         if (this.destroyRequested) eager.destroy().catch(logErrorOnce)
-        else if (this.detachRequested) eager.detach()
         return eager
       }))
   }
@@ -1088,13 +1148,13 @@ export class SubContainerLazy<
   }
 
   /**
-   * Detach from the creating context's `onLeaveContext` cleanup. If already
-   * materialized, detaches the underlying eager; otherwise records the intent
-   * so materialization detaches immediately. Idempotent.
+   * Detach from the creating context's `onLeaveContext` cleanup, including
+   * during materialization. The caller owns teardown through {@link destroy}.
+   * Idempotent.
    */
   detach(): void {
     this.detachRequested = true
-    this.materialized?.then(e => e.detach()).catch(logErrorOnce)
+    this.created?.detach()
   }
 
   /**

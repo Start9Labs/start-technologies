@@ -17,7 +17,9 @@ use crate::util::{Apply, PathOrUrl};
 pub fn util<C: Context>() -> ParentHandler<C> {
     ParentHandler::new().subcommand(
         "b3sum",
-        from_fn_async(b3sum).with_about("about.calculate-blake3-hash-for-file"),
+        from_fn_async(b3sum)
+            .no_ts()
+            .with_about("about.calculate-blake3-hash-for-file"),
     )
 }
 

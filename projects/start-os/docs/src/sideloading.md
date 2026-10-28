@@ -8,7 +8,11 @@ Sideloading lets you install a service from a `.s9pk` file without using any reg
 
 1. Click the drop area to select a `.s9pk` file from your file system, or simply drag and drop the file into the drop area.
 
-When you sideload from the command line with `start-cli package install --sideload`, installation errors appear in the command's output. start-cli 2.1.0 and earlier shorten long messages.
+1. Review the package details and click **Install**, **Update**, or **Reinstall**.
+
+Keep the browser tab open while the file uploads. Large files and slow connections can take several minutes; follow progress in **Services**. If the upload fails, StartOS shows an error message.
+
+When you sideload from the command line with `start-cli package install --sideload`, installation errors appear in the command's output. Clients older than start-cli 2.6.0 shorten long messages.
 
 ## Obtaining `.s9pk` Files
 

@@ -1,6 +1,7 @@
 import { inject, Injectable } from '@angular/core'
 import { DialogService, getErrorMessage, i18nKey } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
+import { ActionRes } from './api/api.types'
 import { TuiNotificationMiddleService } from '@taiga-ui/kit'
 import { PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { filter } from 'rxjs'
@@ -55,12 +56,12 @@ export class ActionService {
     const loader = this.loader.open('Loading').subscribe()
 
     try {
-      const res = await this.api.runAction({
+      const res = (await this.api.rpc.package.action.run({
         packageId,
         actionId,
         input: input ?? null,
         eventId,
-      })
+      })) as ActionRes
 
       if (!res) return
 

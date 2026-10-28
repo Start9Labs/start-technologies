@@ -79,6 +79,7 @@ import { SUBNETS_ADD } from './add'
                   tuiIconButton
                   size="xs"
                   tuiDropdown
+                  tuiDropdownAlign="end"
                   tuiDropdownAuto
                   appearance="flat-grayscale"
                   iconStart="@tui.ellipsis-vertical"
@@ -250,7 +251,7 @@ export default class Subnets {
       .pipe(filter(Boolean))
       .subscribe(() =>
         this.tasks.run(
-          async () => await this.api.deleteSubnet({ subnet: range }),
+          async () => await this.api.rpc.subnet.remove({ subnet: range }),
         ),
       )
   }

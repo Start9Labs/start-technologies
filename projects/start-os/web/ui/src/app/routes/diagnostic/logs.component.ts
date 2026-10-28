@@ -104,7 +104,7 @@ export default class LogsPage implements OnInit {
     this.loading.set(true)
 
     try {
-      const response = await this.api.diagnosticGetLogs({
+      const response = await this.api.rpc.diagnostic.logs({
         cursor: this.startCursor ?? undefined,
         before: !!this.startCursor,
         limit: 200,

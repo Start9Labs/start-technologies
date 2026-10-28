@@ -6,6 +6,8 @@ import {
   MarketplacePkg,
   StoreDataWithUrl,
   StoreIdentity,
+  packageResponse,
+  packagesResponse,
 } from '@start9labs/marketplace'
 import {
   defaultRegistries,
@@ -20,6 +22,7 @@ import { T } from '@start9labs/start-core'
 import {
   BehaviorSubject,
   combineLatest,
+  defer,
   firstValueFrom,
   from,
   Observable,
@@ -179,7 +182,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
   }
 
   fetchInfo$(url: string): Observable<T.RegistryInfo> {
-    return from(this.api.getRegistryInfo(url)).pipe(
+    return defer(async () => this.api.registry(url).info({})).pipe(
       map(info => localizeRegistryInfo(info, this.localize)),
       map(info => ({
         ...info,
@@ -200,7 +203,17 @@ export class MarketplaceService extends AbstractMarketplaceService {
   }
 
   private fetchPackages$(url: string): Observable<MarketplacePkg[]> {
-    return from(this.api.getRegistryPackages(url)).pipe(
+    return defer(async () =>
+      this.api
+        .registry(url)
+        .package.get({
+          id: null,
+          targetVersion: null,
+          sourceVersion: null,
+          otherVersions: 'short',
+        })
+        .then(packagesResponse),
+    ).pipe(
       map(packages =>
         Object.entries(packages).flatMap(([id, raw]) => {
           const pkgInfo = localizePackageRes(raw, this.localize)
@@ -224,8 +237,16 @@ export class MarketplaceService extends AbstractMarketplaceService {
     version: string | null,
     flavor: string | null,
   ): Observable<MarketplacePkg | null> {
-    return from(
-      this.api.getRegistryPackage(url, id, version ? `=${version}` : null),
+    return defer(async () =>
+      this.api
+        .registry(url)
+        .package.get({
+          id,
+          targetVersion: version ? `=${version}` : null,
+          sourceVersion: null,
+          otherVersions: 'short',
+        })
+        .then(packageResponse),
     ).pipe(
       map(pkgInfo =>
         this.convertToMarketplacePkg(

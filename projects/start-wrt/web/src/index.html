@@ -19,8 +19,69 @@
       href="/assets/apple-touch-icon.png"
     />
     <meta name="apple-mobile-web-app-title" content="StartWRT" />
+    <style>
+      app-root > section {
+        display: none;
+        position: fixed;
+        inset: 0;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+        padding: 1rem;
+        text-align: center;
+        font:
+          1rem/1.5 'Hanken Grotesk',
+          system-ui,
+          sans-serif;
+        color: #0b0c10;
+        background: #fff;
+      }
+
+      .fallback app-root > section {
+        display: flex;
+      }
+
+      app-root > section img {
+        width: 5rem;
+        height: 5rem;
+      }
+
+      app-root > section h1 {
+        margin: 0;
+        font-size: 1.5rem;
+      }
+
+      app-root > section p {
+        margin: 0;
+        max-width: 20rem;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        app-root > section {
+          color: #f0f0f0;
+          background: #07080c;
+        }
+      }
+    </style>
+    <script>
+      try {
+        new Function('class A { static {} }')
+      } catch (e) {
+        document.documentElement.className += ' fallback'
+      }
+    </script>
   </head>
   <body>
-    <app-root></app-root>
+    <app-root>
+      <section>
+        <img src="assets/favicon.svg" alt="" />
+        <h1>StartWRT</h1>
+        <p>
+          To finish setting up your router, open http://router.lan in Safari,
+          Chrome or Firefox.
+        </p>
+      </section>
+    </app-root>
   </body>
 </html>

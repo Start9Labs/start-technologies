@@ -11,12 +11,20 @@ StartOS uses Extended Versioning (ExVer) to manage package versions, allowing do
 | Component             | Description                          | Example       |
 | --------------------- | ------------------------------------ | ------------- |
 | `flavor`              | Optional variant for diverging forks | `#libre:`     |
-| `upstream`            | Upstream project version (SemVer)    | `26.0.0`      |
+| `upstream`            | Full upstream project version        | `26.0.0`      |
 | `upstream-prerelease` | Upstream prerelease suffix           | `-beta.1`     |
 | `downstream`          | StartOS wrapper revision             | `0`, `1`, `2` |
 
 > [!NOTE]
 > ExVer allows a prerelease suffix on the downstream revision too (e.g. `:0-beta.0`), but Start9 packages don't use it — the downstream revision is always a plain integer. Prerelease suffixes appear only on the upstream side, when wrapping an upstream alpha/beta/rc.
+
+### Preserve the upstream version
+
+ExVer does not require SemVer's three numeric components. Its numeric portion supports any number of dot-separated components, with an optional prerelease suffix. Preserve every upstream component, including build or patch counters beyond the third position. Do not truncate, pad to three components, or reinterpret an upstream version as SemVer.
+
+For example, Collabora's `26.04.4.2.1` becomes `26.4.4.2.1:0`, not `26.4.4:0`. ExVer normalizes numeric leading zeros; that normalization does not discard a component. Keep the exact upstream spelling where an artifact requires it, such as a Docker tag.
+
+Some projects use CalVer, a single build number, or another release scheme rather than SemVer. If an upstream identifier cannot be represented directly in ExVer, document an order-preserving mapping in `UPDATING.md`, retaining the original identifier in the artifact pin and release notes. Distinct upstream releases must remain distinct package versions. Review scope follows [upstream's versioning scheme and release impact](maintaining-a-package.md#scale-scrutiny-to-the-size-of-the-jump), not the number of components.
 
 ### Flavor
 
@@ -27,12 +35,15 @@ Flavors are for diverging forks of a project that maintain separate version hist
 
 ### Examples
 
-| Version String  | Upstream        | Downstream |
-| --------------- | --------------- | ---------- |
-| `26.0.0:0`      | 26.0.0 (stable) | 0          |
-| `26.0.0-rc.1:0` | 26.0.0-rc.1     | 0          |
-| `0.13.5:0`      | 0.13.5 (stable) | 0          |
-| `2.3.2:1`       | 2.3.2 (stable)  | 1          |
+| Version String  | Upstream            | Downstream |
+| --------------- | ------------------- | ---------- |
+| `26.0.0:0`      | 26.0.0 (stable)     | 0          |
+| `26.0.0-rc.1:0` | 26.0.0-rc.1         | 0          |
+| `0.13.5:0`      | 0.13.5 (stable)     | 0          |
+| `2.3.2:1`       | 2.3.2 (stable)      | 1          |
+| `26.4.4.2.1:0`  | 26.4.4.2.1 (stable) | 0          |
+| `2026.9:0`      | 2026.9 (stable)     | 0          |
+| `9982:0`        | 9982 (stable)       | 0          |
 
 ### Version Ordering
 
@@ -62,12 +73,12 @@ When creating a new package:
 
 ### Version Consistency Checklist
 
-Ensure these all match for upstream version `X.Y.Z`:
+Ensure these all identify the same complete upstream release:
 
 - The current version lives in `startos/versions/current.ts`
-- Version string matches: `version: 'X.Y.Z:0'` in VersionInfo
-- Docker tag matches: `dockerTag: 'image:X.Y.Z'` in `manifest/index.ts` (if using pre-built image)
-- Git submodule checked out to `vX.Y.Z` tag (if applicable)
+- `VersionInfo.version` preserves the full upstream version, followed by `:<revision>`
+- `images.*.source.dockerTag` in `manifest/index.ts` resolves to that release (if using a pre-built image); retain artifact-specific padding, prefixes, and suffixes here
+- The git submodule is checked out to that release's exact tag or commit (if applicable)
 
 ## File Structure
 
@@ -105,6 +116,8 @@ export const current = VersionInfo.of({
   },
 })
 ```
+
+Write `version` as a quoted string literal — never a template literal or an expression built from a constant such as an upstream-version pin. The release workflow reads it from the file's text to name the git tag, and fails on anything else.
 
 ### index.ts
 
@@ -189,9 +202,17 @@ When making changes to the StartOS wrapper without upstream changes:
 2. Increment downstream revision
 3. Apply the [migration rule](#when-to-create-a-new-version-file) — edit `current.ts` in place unless the version it currently holds carries a migration
 
+### A version is released once the reference registry serves it
+
+`tagAndRelease` re-releases a version in place on every push until the registry named by `REFERENCE_REGISTRY` serves it ([Project Structure — .github/workflows/](./project-structure.md#githubworkflows)), so only that registry makes a version permanent. A follow-up to a version it does not serve yet ships under that same version, its notes added to the ones already there. Check before you bump: `start-cli -r <reference-registry> registry package get <id> short --format json`. Release notes likewise cover every change since the version the reference registry last served; the notes of a version that never reached it carry forward into the next.
+
+**Before you claim a version, check the package's open pull requests for one that already claims it.** Two branches on one version ship different bytes under the same string. Whether to fold one into the other or move one to the next revision is for the people who own both to decide, not for either branch to settle alone.
+
 ## Release Notes
 
 `releaseNotes` renders as markdown in the StartOS UI. **Describe what changed in the release.** Read the upstream release notes / changelog for the bumped range, pull out the highlights that matter to a user (notable features, important fixes, security patches, breaking changes / required actions), and summarize them. Then link to the complete upstream release notes or changelog so the user can read the full detail. If the upstream release is genuinely trivial (e.g. a dependency-only patch), say that explicitly.
+
+**Release notes are the only home for what an update asks of the user.** A step to take before or after updating, a warning, a credential to rotate, a client to upgrade: each goes here and nowhere else. `instructions.md` and `README.md` describe the service as it is to someone who never ran an older version, so an update adds nothing to them unless it changes that description ([Writing Instructions — What does not belong](./writing-instructions.md#what-does-not-belong-in-instructions)).
 
 **Match the length to the content.** A small release is a sentence or two; a larger one earns bullets, and bold section headers (`**Features**`, `**Fixes**`, `**Internal**`) once it spans more than one category. Localize prose and headers in every locale; don't leave them in English.
 

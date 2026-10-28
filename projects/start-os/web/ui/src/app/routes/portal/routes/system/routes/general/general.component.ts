@@ -18,7 +18,6 @@ import {
   LANGUAGES,
   TaskService,
 } from '@start9labs/shared'
-import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import { TuiAnimated } from '@taiga-ui/cdk'
 import {
   TuiAppearance,
@@ -269,7 +268,6 @@ import { UPDATE } from './update.component'
   ],
 })
 export default class SystemGeneralComponent {
-  private readonly dialogs = inject(TuiResponsiveDialogService)
   private readonly tasks = inject(TaskService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly api = inject(ApiService)
@@ -299,12 +297,8 @@ export default class SystemGeneralComponent {
     this.i18nService.setLang(language.name)
   }
 
-  // Expose shared utilities for template use
   readonly getKeyboardName = getKeyboardName
 
-  /**
-   * Open keyboard selection dialog to change keyboard layout
-   */
   onChangeKeyboard() {
     const server = this.server()
     if (!server) return
@@ -330,7 +324,7 @@ export default class SystemGeneralComponent {
   private async saveKeyboard(keyboard: Keyboard) {
     this.tasks.run(
       async () =>
-        await this.api.setKeyboard({
+        await this.api.rpc.server.setKeyboard({
           layout: keyboard.layout,
           keymap: keyboard.keymap,
           model: null,
@@ -342,7 +336,7 @@ export default class SystemGeneralComponent {
   }
 
   onUpdate() {
-    if (this.os.updateAvailable$.value) {
+    if (this.os.updateCandidates().length) {
       this.update()
     } else {
       this.check()
@@ -389,7 +383,7 @@ export default class SystemGeneralComponent {
 
   private async saveName(hostname: string, wasLocal = false) {
     const success = await this.tasks.run(
-      async () => await this.api.setHostname({ hostname }),
+      async () => await this.api.rpc.server.setHostname({ hostname }),
       'Saving',
     )
 
@@ -423,7 +417,7 @@ export default class SystemGeneralComponent {
       .pipe(filter(Boolean))
       .subscribe(() =>
         this.tasks.run(async () => {
-          await this.api.repairDisk({})
+          await this.api.rpc.disk.repair({})
           this.restart()
         }),
       )
@@ -435,20 +429,16 @@ export default class SystemGeneralComponent {
 
     const kiosk = server.kiosk
 
-    // If disabling kiosk, just disable it
     if (kiosk) {
       await this.disableKiosk()
       return
     }
 
-    // Enabling kiosk - check if keyboard is already set
     if (server.keyboard) {
-      // Keyboard already set, just enable kiosk
       await this.enableKiosk()
       return
     }
 
-    // No keyboard set - prompt user to select from all keyboards
     const keyboards = getAllKeyboardsSorted(LANGUAGE_TO_CODE[server.language])
     this.promptKeyboardSelection(keyboards)
   }
@@ -470,30 +460,33 @@ export default class SystemGeneralComponent {
   }
 
   private async enableKiosk() {
-    this.tasks.run(async () => await this.api.toggleKiosk(true), 'Enabling')
+    this.tasks.run(async () => await this.api.rpc.kiosk.enable({}), 'Enabling')
   }
 
   private async enableKioskWithKeyboard(keyboard: Keyboard) {
     this.tasks.run(async () => {
-      await this.api.setKeyboard({
+      await this.api.rpc.server.setKeyboard({
         layout: keyboard.layout,
         keymap: keyboard.keymap,
         model: null,
         variant: null,
         options: [],
       })
-      await this.api.toggleKiosk(true)
+      await this.api.rpc.kiosk.enable({})
     }, 'Enabling')
   }
 
   private async disableKiosk() {
-    this.tasks.run(async () => await this.api.toggleKiosk(false), 'Disabling')
+    this.tasks.run(
+      async () => await this.api.rpc.kiosk.disable({}),
+      'Disabling',
+    )
   }
 
   private update() {
-    this.dialogs
-      .open(UPDATE, { data: { currentVersion: this.server()?.version } })
-      .subscribe()
+    if (!this.os.updateCandidates().length) return
+
+    this.dialog.openComponent(UPDATE).subscribe()
   }
 
   private async check(): Promise<void> {
@@ -502,7 +495,7 @@ export default class SystemGeneralComponent {
       'Checking for updates',
     )
 
-    if (this.os.updateAvailable$.value) {
+    if (this.os.updateCandidates().length) {
       this.update()
     } else if (success) {
       this.dialog
@@ -515,7 +508,7 @@ export default class SystemGeneralComponent {
 
   private async restart() {
     this.tasks.run(
-      async () => await this.api.restartServer({}),
+      async () => await this.api.rpc.server.restart({}),
       'Beginning restart',
     )
   }

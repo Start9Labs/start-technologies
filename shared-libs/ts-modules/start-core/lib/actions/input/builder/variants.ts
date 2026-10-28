@@ -6,7 +6,7 @@ import {
   ExtractInputSpecType,
   ExtractInputSpecStaticValidatedAs,
 } from './inputSpec'
-import { z } from '../../../zExport'
+import * as z from '../../../z'
 
 /**
  * The runtime result type of a discriminated union form field.

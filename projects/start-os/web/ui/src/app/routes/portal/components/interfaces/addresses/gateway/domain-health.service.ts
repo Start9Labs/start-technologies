@@ -110,12 +110,14 @@ export class DomainHealthService {
           // A range spans >1 port and lives in a separate subtree, so it has its
           // own endpoint; a single-port binding is exactly 1.
           if (addr.count > 1) {
-            await this.api.pkgBindingSetRangeAddressEnabled(params)
+            await this.api.rpc.package.host.binding.setRangeAddressEnabled(
+              params,
+            )
           } else {
-            await this.api.pkgBindingSetAddressEnabled(params)
+            await this.api.rpc.package.host.binding.setAddressEnabled(params)
           }
         } else {
-          await this.api.serverBindingSetAddressEnabled({
+          await this.api.rpc.server.host.binding.setAddressEnabled({
             internalPort: 80,
             address: addr.hostnameInfo,
             enabled,
@@ -177,20 +179,20 @@ export class DomainHealthService {
       if (typeof portOrRes === 'number') {
         port = portOrRes
         const [dnsRes, portRes, portV6Res, challengeRes] = await Promise.all([
-          this.api.queryDns({ fqdn }).catch((): null => null),
+          this.api.rpc.net.dns.query({ fqdn }).catch((): null => null),
           isRange
             ? Promise.resolve(null)
-            : this.api
+            : this.api.rpc.net.gateway
                 .checkPort({ gateway: gatewayId, port: portOrRes })
                 .catch((): null => null),
           isRange || !gua
             ? Promise.resolve(null)
-            : this.api
+            : this.api.rpc.net.gateway
                 .checkPortV6({ gateway: gatewayId, port: portOrRes })
                 .catch((): null => null),
           isRange || !ctx.acme || portOrRes === CHALLENGE_PORT
             ? Promise.resolve(null)
-            : this.api
+            : this.api.rpc.net.acme
                 .checkChallenge({
                   fqdn,
                   gateway: gatewayId,
@@ -268,7 +270,7 @@ export class DomainHealthService {
 
       const configured =
         prefetchedConfigured ??
-        (await this.api
+        (await this.api.rpc.net.gateway
           .checkDns({ gateway: gatewayId, fqdn })
           .catch(() => false))
 
@@ -319,7 +321,7 @@ export class DomainHealthService {
       const gateway = await this.getGatewayData(gatewayId)
       if (!gateway) return
 
-      let portResult = await this.api
+      let portResult = await this.api.rpc.net.gateway
         .checkPort({ gateway: gatewayId, port })
         .catch((): null => null)
 

@@ -2,16 +2,95 @@
   "name": "@start9labs/start-core",
   "main": "./index.js",
   "types": "./index.d.ts",
-  "sideEffects": true,
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./esm/index.mjs",
+      "default": "./index.js"
+    },
+    "./actions": {
+      "types": "./actions/index.d.ts",
+      "import": "./esm/actions/index.mjs",
+      "default": "./actions/index.js"
+    },
+    "./actions/input/builder": {
+      "types": "./actions/input/builder/index.d.ts",
+      "import": "./esm/actions/input/builder/index.mjs",
+      "default": "./actions/input/builder/index.js"
+    },
+    "./actions/input": {
+      "types": "./actions/input/index.d.ts",
+      "import": "./esm/actions/input/index.mjs",
+      "default": "./actions/input/index.js"
+    },
+    "./dependencies": {
+      "types": "./dependencies/index.d.ts",
+      "import": "./esm/dependencies/index.mjs",
+      "default": "./dependencies/index.js"
+    },
+    "./exver": {
+      "types": "./exver/index.d.ts",
+      "import": "./esm/exver/index.mjs",
+      "default": "./exver/index.js"
+    },
+    "./inits": {
+      "types": "./inits/index.d.ts",
+      "import": "./esm/inits/index.mjs",
+      "default": "./inits/index.js"
+    },
+    "./osBindings": {
+      "types": "./osBindings/index.d.ts",
+      "import": "./esm/osBindings/index.mjs",
+      "default": "./osBindings/index.js"
+    },
+    "./osBindings/rpc": {
+      "types": "./osBindings/rpc/index.d.ts",
+      "import": "./esm/osBindings/rpc/index.mjs",
+      "default": "./osBindings/rpc/index.js"
+    },
+    "./osBindings/tunnel": {
+      "types": "./osBindings/tunnel/index.d.ts",
+      "import": "./esm/osBindings/tunnel/index.mjs",
+      "default": "./osBindings/tunnel/index.js"
+    },
+    "./s9pk": {
+      "types": "./s9pk/index.d.ts",
+      "import": "./esm/s9pk/index.mjs",
+      "default": "./s9pk/index.js"
+    },
+    "./s9pk/merkleArchive": {
+      "types": "./s9pk/merkleArchive/index.d.ts",
+      "import": "./esm/s9pk/merkleArchive/index.mjs",
+      "default": "./s9pk/merkleArchive/index.js"
+    },
+    "./util": {
+      "types": "./util/index.d.ts",
+      "import": "./esm/util/index.mjs",
+      "default": "./util/index.js"
+    },
+    "./*.js": {
+      "types": "./*.d.ts",
+      "import": "./esm/*.mjs",
+      "default": "./*.js"
+    },
+    "./*": {
+      "types": "./*.d.ts",
+      "import": "./esm/*.mjs",
+      "default": "./*.js"
+    },
+    "./package.json": "./package.json"
+  },
   "scripts": {
     "peggy": "peggy --allowed-start-rules \"*\" --plugin ./node_modules/ts-pegjs/dist/tspegjs -o lib/exver/exver.ts lib/exver/exver.pegjs",
-    "copy": "cpy \"**/*.js\" \"**/*.d.ts\" ../dist --cwd=lib --parents && node -e \"fs.cpSync('node_modules','dist/node_modules',{recursive:true,verbatimSymlinks:true})\" && cpy package.json README.md LICENSE dist",
+    "copy": "node -e \"fs.cpSync('node_modules','dist/node_modules',{recursive:true,verbatimSymlinks:true})\" && cpy package.json README.md LICENSE dist",
     "clean:dist": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\"",
-    "build": "npm run clean:dist && npm run tsc && npm run copy",
+    "build": "npm run clean:dist && npm run tsc && npm run tsc:esm && npm run copy",
     "test": "jest -c ./jest.config.js --coverage",
     "buildOutput": "npx prettier --write \"**/*.ts\"",
     "check": "tsc --noEmit",
-    "tsc": "tsc"
+    "tsc": "tsc",
+    "tsc:esm": "tsc -p tsconfig.esm.json && node ../scripts/esm-extensions.mjs dist/esm"
   },
   "repository": {
     "type": "git",
@@ -31,8 +110,7 @@
     "isomorphic-fetch": "^3.0.0",
     "mime": "^4.1.0",
     "yaml": "^2.8.3",
-    "zod": "4.4.3",
-    "zod-deep-partial": "^1.4.4"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",

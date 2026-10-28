@@ -332,8 +332,15 @@ impl<S: ArchiveSource> FileSource for Section<S> {
         self.source.fetch(self.position, self.size).await
     }
     async fn slice(&self, position: u64, size: u64) -> Result<Self::SliceReader, Error> {
+        let position = min(position, self.size);
+        let offset = self.position.checked_add(position).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "archive section offset overflow",
+            )
+        })?;
         self.source
-            .fetch(self.position + position, min(size, self.size))
+            .fetch(offset, min(size, self.size - position))
             .await
     }
     async fn copy<W: AsyncWrite + Unpin + Send + ?Sized>(&self, w: &mut W) -> Result<(), Error> {
@@ -427,3 +434,6 @@ impl<S: FileSource> FileSource for TmpSource<S> {
         self.source.to_vec(verify).await
     }
 }
+
+#[cfg(test)]
+mod tests;

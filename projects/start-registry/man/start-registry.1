@@ -4,7 +4,7 @@
 .SH NAME
 start\-registry
 .SH SYNOPSIS
-\fBstart\-registry\fR [\fB\-c\fR|\fB\-\-config\fR] [\fB\-H\fR|\fB\-\-host\fR] [\fB\-r\fR|\fB\-\-registry\fR] [\fB\-\-registry\-hostname\fR] [\fB\-\-s9pk\-s3base\fR] [\fB\-\-s9pk\-s3bucket\fR] [\fB\-t\fR|\fB\-\-tunnel\fR] [\fB\-p\fR|\fB\-\-proxy\fR] [\fB\-\-id\-key\-path\fR] [\fB\-\-root\-ca\fR] [\fB\-\-insecure\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] [\fIsubcommands\fR]
+\fBstart\-registry\fR [\fB\-c\fR|\fB\-\-config\fR] [\fB\-H\fR|\fB\-\-host\fR] [\fB\-r\fR|\fB\-\-registry\fR] [\fB\-\-registry\-hostname\fR] [\fB\-\-s9pk\-s3base\fR] [\fB\-\-s9pk\-s3bucket\fR] [\fB\-t\fR|\fB\-\-tunnel\fR] [\fB\-p\fR|\fB\-\-proxy\fR] [\fB\-\-id\-key\-path\fR] [\fB\-\-id\-key\-gpg\fR] [\fB\-\-root\-ca\fR] [\fB\-\-insecure\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] [\fIsubcommands\fR]
 .SH DESCRIPTION
 .SH OPTIONS
 .TP
@@ -34,6 +34,9 @@ HTTP/SOCKS proxy URL
 .TP
 \fB\-\-id\-key\-path\fR \fI<ID_KEY_PATH>\fR
 Path to identity signing key
+.TP
+\fB\-\-id\-key\-gpg\fR \fI<KEY>\fR
+GnuPG key (fingerprint, key ID, or user ID) to sign with through gpg\-agent instead of the identity key file
 .TP
 \fB\-\-root\-ca\fR \fI<PEM_PATH>\fR
 PEM\-encoded root CA certificate(s) to trust when talking to a StartOS server with a self\-signed cert (e.g. immediately after `setup complete`, before the device\*(Aqs CA has been imported into the local trust store). Repeatable

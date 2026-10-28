@@ -92,7 +92,7 @@ Adres IP lub nazwa domeny, pod którą serwer VPN jest osiągalny dla klientów 
 
 ### Profil bezpieczeństwa
 
-Początkowy zestaw praw dostępu i ograniczeń przypisany klientom, gdy łączą się z serwerem VPN. Wybierz wcześniej utworzony profil lub harmonogram, albo utwórz nowy.
+Początkowy zestaw praw dostępu i ograniczeń przypisany klientom, gdy łączą się z serwerem VPN. Wybierz wcześniej utworzony profil lub harmonogram, albo utwórz nowy. Profil jest ustalony po utworzeniu serwera; aby przenieść VPN do innego profilu, usuń go i dodaj nowy.
 
 ### Port
 
@@ -111,7 +111,7 @@ Przypisany adres IP w sieci lokalnej. Został on skonfigurowany podczas konfigur
 
 ### Routing
 
-Pokazuje tryb routingu ruchu klienta. „Cały ruch” kieruje cały ruch internetowy przez tunel VPN. „Tylko LAN” kieruje przez tunel jedynie ruch sieci lokalnej. Użyj menu akcji, aby przełączać się między trybami.`,
+Pokazuje tryb routingu ruchu klienta. „Cały ruch” kieruje cały ruch internetowy przez tunel VPN. „Tylko LAN” kieruje przez tunel jedynie ruch sieci lokalnej. Aby go zmienić, usuń klienta i dodaj go ponownie z wybranym trybem routingu.`,
   '/inbound/client/dialog-add': `## Przychodzące VPN
 
 ### Etykieta
@@ -139,7 +139,7 @@ Wyświetla konfigurację jako tekst. Użyj przycisku kopiowania, aby skopiować 
 
 ### QR
 
-Wyświetla konfigurację jako kod QR. Zeskanuj go aplikacją mobilną WireGuard, aby skonfigurować urządzenie klienckie bez ręcznego wprowadzania.`,
+Wyświetla konfigurację jako kod QR, gdy router wygenerował klucz prywatny urządzenia. Zeskanuj go aplikacją mobilną WireGuard, aby skonfigurować urządzenie klienckie bez ręcznego wprowadzania.`,
   '/inbound/client/dialog-rename': `## Zmień nazwę klienta
 
 ### Nazwa
@@ -164,9 +164,9 @@ IPv6 umożliwia bezpośrednią osiągalność Twoich urządzeń z internetu bez 
 
 ### Długość prefiksu
 
-Długość prefiksu określa rozmiar przestrzeni adresowej IPv6 Twojej sieci LAN. Musi być **większa** (wyższa liczba) niż prefiks WAN, aby utworzyć prawidłową podsieć.
+Długość prefiksu określa rozmiar przestrzeni adresowej IPv6 Twojej sieci LAN. Wybierz wartość od /48 do /64, nie krótszą niż prefiks delegowany przez dostawcę. Podsumowanie pokazuje ten rozmiar jako **Delegowany prefiks** (**Brak**, gdy nie ma delegacji).
 
-Na przykład, jeśli Twój ISP przydziela Ci prefiks /48, możesz użyć /56, /60 lub /64 dla swojej sieci LAN. Dla większości sieci domowych zalecany jest prefiks /64.`,
+Na przykład przy delegacji /56 możesz użyć /56, /60 lub /64 dla swojej sieci LAN; przy delegacji /64 użyj /64. Dla większości sieci domowych zalecany jest prefiks /64.`,
   '/outbound': `## Wychodzące VPN
 
 Wychodzące VPN kierują Twój ruch internetowy przez szyfrowane tunele do zdalnych serwerów, zwiększając prywatność i bezpieczeństwo.
@@ -187,7 +187,7 @@ Kieruj jeden VPN przez drugi w celu dodatkowej prywatności. Twój ruch wychodzi
 Prześlij plik konfiguracyjny WireGuard od swojego dostawcy VPN (Mullvad, ProtonVPN, IVPN itp.), aby utworzyć nowego klienta VPN.`,
   '/outbound/vpn': `## Wychodzące VPN
 
-<details><summary>Etykieta</summary> Przyjazna nazwa identyfikująca to połączenie VPN. Użyj czegoś opisowego, jak „Mullvad Szwecja” lub „Praca VPN”. </details> <details><summary>Łączy się z</summary> Dokąd powinien być kierowany ruch z tego VPN:<ul><li><b>Internet:</b> Ruch wychodzi bezpośrednio do internetu przez ten VPN.</li><li><b>Inny VPN:</b> Najpierw połącz łańcuchowo przez inny VPN dla dodatkowej prywatności. Twój ruch zostanie zaszyfrowany wielokrotnie i wyjdzie przez wiele serwerów.</li></ul><b>Uwaga:</b> Łańcuchowanie VPN zwiększa opóźnienia i może zmniejszyć prędkości. </details> <details><summary>Ścieżka połączenia</summary> Pokazuje pełną trasę, jaką pokonuje Twój ruch od tego VPN do internetu. Na przykład: Mullvad → Proton → Internet oznacza, że ruch jest szyfrowany przez Mullvad, wysyłany przez Proton, a następnie wychodzi do internetu.</details>`,
+<details><summary>Etykieta</summary> Przyjazna nazwa identyfikująca to połączenie VPN. Użyj czegoś opisowego, jak „Mullvad Szwecja” lub „Praca VPN”. </details> <details><summary>Łączy się z</summary> Dokąd powinien być kierowany ruch z tego VPN:<ul><li><b>Internet:</b> Ruch wychodzi bezpośrednio do internetu przez ten VPN.</li><li><b>Inny VPN:</b> Najpierw połącz łańcuchowo przez inny VPN dla dodatkowej prywatności. Twój ruch zostanie zaszyfrowany wielokrotnie i wyjdzie przez wiele serwerów.</li></ul><b>Uwaga:</b> Łańcuchowanie VPN zwiększa opóźnienia i może zmniejszyć prędkości. </details> <details><summary>Serwery DNS</summary> Serwery, z którymi przez tunel łączą się profile kierowane przez tę sieć VPN, niemające własnych serwerów DNS. Pozostaw puste, aby używać własnych systemowych serwerów DNS przez tunel — lub, gdy system używa DNS dostawcy internetu, jego serwerów poza tunelem. </details> <details><summary>Ścieżka połączenia</summary> Pokazuje pełną trasę, jaką pokonuje Twój ruch od tego VPN do internetu. Na przykład: Mullvad → Proton → Internet oznacza, że ruch jest szyfrowany przez Mullvad, wysyłany przez Proton, a następnie wychodzi do internetu.</details>`,
   '/outbound/dialog': `## Wychodzące VPN
 
 Klienci VPN tworzą wychodzące połączenie z serwerem VPN, umożliwiając urządzeniom wysyłanie i odbieranie danych tak, jakby były bezpośrednio połączone z siecią prywatną. Maskuje Twój adres IP, omija ograniczenia geograficzne i chroni poufne dane w publicznych sieciach Wi-Fi.
@@ -202,7 +202,11 @@ Prześlij plik **.conf** WireGuard od swojego dostawcy VPN. Plik ten zawiera adr
 
 ### Cel
 
-Następny przeskok na ścieżce warstwowego połączenia VPN.`,
+Następny przeskok na ścieżce warstwowego połączenia VPN.
+
+### Serwery DNS
+
+Opcjonalne. Zastępuje serwery DNS z pliku konfiguracyjnego. Profile kierowane przez tę sieć VPN rozwiązują nazwy przez tunel za pomocą tych serwerów, chyba że ustawią własne. Jeśli nie ma ich tutaj, w konfiguracji ani we własnym systemowym DNS, te profile rozwiązują nazwy przez dostawcę internetu, poza tunelem.`,
   '/profiles': `## Profile
 
 Profile bezpieczeństwa definiują segmenty sieci z izolowanymi uprawnieniami. Każdy profil kontroluje dostęp do internetu i komunikację z innymi profilami w Twojej sieci lokalnej.
@@ -213,7 +217,7 @@ Opisowa nazwa profilu bezpieczeństwa, taka jak „Goście” lub „Urządzenia
 
 ### DNS
 
-Których serwerów DNS używają urządzenia w tym profilu — systemowych („System”), własnych niestandardowych serwerów profilu („Niestandardowe”) lub, w przypadku kierowania przez VPN, serwerów VPN („VPN”).
+Których serwerów DNS używają urządzenia w tym profilu — systemowych („System”), własnych niestandardowych serwerów profilu („Niestandardowe”) lub, w przypadku kierowania przez VPN, serwerów VPN („VPN”). „System (poza VPN)” oznacza, że profil kierowany przez VPN nie ma serwerów DNS dostępnych przez tunel i rozwiązuje nazwy przez dostawcę internetu, poza tunelem.
 
 ### Wychodzący
 
@@ -473,7 +477,7 @@ Kontroluje, do czego podłączone urządzenie może mieć dostęp w sieci. Przyp
 
 ### Kraj
 
-Kraj, którego przepisy dotyczące Wi-Fi obowiązują router. Decyduje o tym, jakich kanałów może używać każde pasmo i jaka moc nadawania jest dozwolona. Do czasu wybrania kraju router działa w ostrożnym podzbiorze obowiązującym na całym świecie: kanały 1–11 w paśmie 2,4 GHz i kanały 36–48 w paśmie 5 GHz z obniżoną mocą. Zmiana kraju przywraca wybór kanałów na Auto. Wybierz kraj, w którym router fizycznie się znajduje.
+Kraj, którego przepisy dotyczące Wi-Fi obowiązują router. Decyduje o tym, jakich kanałów może używać każde pasmo i jaka moc nadawania jest dozwolona. Do czasu wybrania kraju router działa w ostrożnym podzbiorze obowiązującym na całym świecie: kanały 1–11 w paśmie 2,4 GHz i kanały 36–48 w paśmie 5 GHz z obniżoną mocą. Zmiana kraju przywraca wybór kanałów na Auto i zmniejsza szerokość kanału powyżej 80 MHz do 80 MHz. Wybierz kraj, w którym router fizycznie się znajduje.
 
 ### Włącz Wi-Fi
 
@@ -497,7 +501,11 @@ Podczas korzystania z obu pasm częstotliwości ta opcja tworzy osobne SSID dla 
 
 ### Kanały
 
-Konkretne kanały w obrębie każdego pasma częstotliwości. Wybierz „Auto”, aby router wybrał najlepszy kanał, lub wybierz konkretny kanał, aby uniknąć zakłóceń od sąsiednich sieci. „Auto” pomija kanały z wykrywaniem radaru (DFS). Możesz wybrać taki kanał ręcznie, ale wtedy sieć 5 GHz pojawia się dopiero po minucie lub dłużej przy każdym uruchomieniu routera, gdy nasłuchuje on radaru.`,
+Konkretne kanały w obrębie każdego pasma częstotliwości. Wybierz „Auto”, aby router wybrał najlepszy kanał, lub wybierz konkretny kanał, aby uniknąć zakłóceń od sąsiednich sieci. „Auto” pomija kanały z wykrywaniem radaru (DFS). Możesz wybrać taki kanał ręcznie, ale wtedy sieć 5 GHz pojawia się dopiero po minucie lub dłużej przy każdym uruchomieniu routera, gdy nasłuchuje on radaru.
+
+### Szerokość kanału
+
+Jaką część pasma zajmuje każda sieć. Szersze kanały są szybsze, ale nakładają się na więcej sąsiednich sieci i mają nieco mniejszy zasięg. Każda lista pokazuje szerokości, których wybrany kanał może używać w wybranym kraju. W paśmie 2,4 GHz sieć 40 MHz startuje zamiast tego z szerokością 20 MHz, jeśli nakłada się na nią sąsiednia sieć.`,
 }
 
 export default HELP_PL

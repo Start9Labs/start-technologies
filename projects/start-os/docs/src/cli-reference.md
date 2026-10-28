@@ -17,6 +17,20 @@ These apply to all subcommands.
 - `-t, --tunnel <URL>` — Tunnel server address
 - `-p, --proxy <URL>` — HTTP/SOCKS proxy
 - `--id-key-path <PATH>` — Identity signing key path (`--developer-key-path` is accepted as an alias)
+- `--id-key-gpg <KEY>` — Sign through gpg-agent with this GnuPG key (fingerprint, key ID, or user ID) instead of the identity key file
+
+## Shell Completion
+
+The Debian package and StartOS image enable Bash tab completion automatically in new shells. For other installations, add `eval "$(start-cli completions bash)"` to `~/.bashrc`. `start-cli completions <shell>` also supports Zsh, fish, elvish, and PowerShell.
+
+## From the Browser Console
+
+The same API is reachable from the StartOS web interface. While logged in, open your browser's developer console and call a command through `rpcClient.rpc`, writing its path in camelCase and passing its arguments as an object:
+
+```js
+await rpcClient.rpc.server.setHostname({ hostname: 'my-server' })
+await rpcClient.rpc.package.start({ id: 'bitcoind' })
+```
 
 ## Authentication
 
@@ -246,9 +260,7 @@ Install a package from the registry or sideload a local `.s9pk` file.
 
 ### `start-cli package start <ID>`
 
-Start a service. Blocked if the service has an unresolved critical task, unless `--force` is passed.
-
-- `--force` — Start even if the service has an unresolved critical task
+Request that a service run. If active critical tasks block execution, the CLI warns and records running intent. The service starts automatically when its blocking tasks clear.
 
 ### `start-cli package stop <ID>`
 
@@ -286,7 +298,7 @@ Open a shell inside a service's subcontainer (within the LXC container), or run 
 
 ### `start-cli package stats`
 
-Display LXC container resource usage for every installed service.
+Display LXC container memory usage and limit for every installed service. It does not report CPU use.
 
 - `--format` — Output format
 
@@ -681,7 +693,7 @@ Disable kiosk mode.
 
 ## Disks
 
-List and repair storage devices.
+List, repair, and format storage devices.
 
 ### `start-cli disk list`
 
@@ -693,6 +705,12 @@ partitions are omitted.
 ### `start-cli disk repair`
 
 Repair filesystem issues on the data partition.
+
+### `start-cli disk format <DISK>`
+
+Erase a whole drive and leave it with a single Btrfs partition ready for backups, then print the new partition. The drive holding StartOS or its data, the live boot medium, anything mounted, and drives smaller than 1 GiB are refused.
+
+- `--label <LABEL>` — Volume label, at most 255 bytes (default `StartOS Backups`)
 
 ## Diagnostics
 
@@ -843,7 +861,7 @@ List registry metadata and all packages.
 
 ### `start-cli registry info`
 
-Display the registry name and icon.
+Display the registry name, icon, and description.
 
 - `--format` — Output format
 
@@ -851,9 +869,21 @@ Display the registry name and icon.
 
 Set the registry's display name.
 
-### `start-cli registry info set-icon <ICON>`
+### `start-cli registry info set-icon [ICON] [--clear]`
 
-Set the registry's icon from a file path.
+Set the registry's icon from a file path, an http(s) URL, or a data URL. Supply either `ICON` or `--clear`, but not both.
+
+- `--clear` — Remove the registry's icon
+
+Over RPC, pass `null` in the setter's `icon` field to clear it; a value sets it.
+
+### `start-cli registry info set-description [DESCRIPTION] [--clear]`
+
+Set the registry's description (markdown), shown above its services in the marketplace. Supply either `DESCRIPTION` or `--clear`, but not both.
+
+- `--clear` — Remove the registry's description
+
+Over RPC, pass `null` in the setter's `description` field to clear it; a value sets it.
 
 ### Registry Admin Management
 

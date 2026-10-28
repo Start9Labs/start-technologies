@@ -13,7 +13,6 @@ use futures::future::BoxFuture;
 use futures::{Future, FutureExt};
 use imbl_value::InternedString;
 use tokio::sync::{Mutex as AsyncMutex, broadcast};
-use ts_rs::TS;
 
 #[allow(unused_imports)]
 use crate::prelude::*;
@@ -22,10 +21,12 @@ use crate::util::net::WebSocket;
 use crate::util::{FromStrParser, new_guid};
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, TS,
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, VisitFields,
 )]
-#[ts(type = "string")]
+#[visit(ts(type = "z.string()"))]
 pub struct Guid(InternedString);
+
+rpc_toolkit::reflect_ts!(Guid);
 impl Guid {
     pub fn new() -> Self {
         Self(new_guid())
@@ -78,13 +79,17 @@ impl std::fmt::Display for Guid {
 }
 
 pub struct RestFuture {
-    kill: Option<broadcast::Receiver<()>>,
+    kill: Option<BoxFuture<'static, ()>>,
     fut: BoxFuture<'static, Result<Response, Error>>,
 }
 impl Future for RestFuture {
     type Output = Result<Response, Error>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.kill.as_ref().map_or(false, |k| !k.is_empty()) {
+        if self
+            .kill
+            .as_mut()
+            .is_some_and(|kill| kill.poll_unpin(cx).is_ready())
+        {
             Poll::Ready(Err(Error::new(
                 eyre!("session killed"),
                 ErrorKind::Authorization,
@@ -97,13 +102,17 @@ impl Future for RestFuture {
 pub type RestHandler = Box<dyn FnOnce(Request) -> RestFuture + Send>;
 
 pub struct WebSocketFuture {
-    kill: Option<broadcast::Receiver<()>>,
+    kill: Option<BoxFuture<'static, ()>>,
     fut: BoxFuture<'static, ()>,
 }
 impl Future for WebSocketFuture {
     type Output = ();
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.kill.as_ref().map_or(false, |k| !k.is_empty()) {
+        if self
+            .kill
+            .as_mut()
+            .is_some_and(|kill| kill.poll_unpin(cx).is_ready())
+        {
             Poll::Ready(())
         } else {
             self.fut.poll_unpin(cx)
@@ -246,14 +255,72 @@ where
             channel.send(()).ok();
         }
     }
-    fn subscribe_to_kill(&self, session: T) -> broadcast::Receiver<()> {
+    fn subscribe_to_kill(&self, session: T) -> BoxFuture<'static, ()> {
         let mut map = self.0.lock().unwrap();
-        if let Some(send) = map.get(&session) {
+        let mut recv = if let Some(send) = map.get(&session) {
             send.subscribe()
         } else {
             let (send, recv) = broadcast::channel(1);
             map.insert(session, send);
             recv
+        };
+        async move {
+            let _ = recv.recv().await;
         }
+        .boxed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use futures::task::{ArcWake, waker};
+
+    use super::*;
+
+    #[derive(Default)]
+    struct WakeFlag(AtomicBool);
+
+    impl ArcWake for WakeFlag {
+        fn wake_by_ref(arc_self: &Arc<Self>) {
+            arc_self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn revoke_pending<F: Future + Unpin>(open: &OpenAuthedContinuations<&str>, future: &mut F) {
+        let flag = Arc::new(WakeFlag::default());
+        let waker = waker(flag.clone());
+        let mut cx = Context::from_waker(&waker);
+        assert!(Pin::new(future).poll(&mut cx).is_pending());
+        open.kill(&"key");
+        assert!(
+            flag.0.load(Ordering::SeqCst),
+            "revocation must wake an idle continuation"
+        );
+    }
+
+    #[test]
+    fn revocation_wakes_idle_websocket() {
+        let open = OpenAuthedContinuations::new();
+        let mut future = WebSocketFuture {
+            kill: Some(open.subscribe_to_kill("key")),
+            fut: futures::future::pending().boxed(),
+        };
+        revoke_pending(&open, &mut future);
+        assert!(future.now_or_never().is_some());
+    }
+
+    #[test]
+    fn revocation_wakes_idle_rest_request() {
+        let open = OpenAuthedContinuations::new();
+        let mut future = RestFuture {
+            kill: Some(open.subscribe_to_kill("key")),
+            fut: futures::future::pending().boxed(),
+        };
+        revoke_pending(&open, &mut future);
+        let error = future.now_or_never().unwrap().unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Authorization);
     }
 }

@@ -48,7 +48,7 @@ Per the published policy, we will:
 
 <https://start9.com/security> carries a safe harbour clause for research done in good faith and reported through this process; read it there for the terms themselves. Good faith means working only against your own devices and accounts, not accessing, modifying, or destroying anyone else's data, not degrading our services for other people, and stopping as soon as you have proved the point.
 
-Fixes are described in the affected product's changelog under a `### Security` heading, for example [`projects/start-os/CHANGELOG.md`](projects/start-os/CHANGELOG.md).
+Pending fixes are described in `security` fragments under the affected product's `changelog/` directory. Releases compile them under `### Security` in the generated history, for example [`projects/start-os/CHANGELOG.md`](projects/start-os/CHANGELOG.md).
 
 ## Scope
 
@@ -85,4 +85,4 @@ A server that will not start, a service that will not connect, a lost password, 
 
 Fixes land on `master` before they are released, and `master` is public — so a fix is readable in the commit history, and testable in the alpha builds of the products that publish there, ahead of the release that carries it. Merging and releasing are separate events, and the first one is public. Tell us if that timing matters to your disclosure plan.
 
-Each product versions and tags independently as `<product>/v<version>`, and the git tags on this repository are the source of truth for what has shipped — a version number in a changelog heading or a manifest is the prospective next release, not a released one. Report against the latest release of the affected product where you can.
+Each product versions and tags independently as `<product>/v<version>`, and the git tags on this repository are the source of truth for what has shipped — a manifest version alone does not establish a release. Report against the latest release of the affected product where you can.

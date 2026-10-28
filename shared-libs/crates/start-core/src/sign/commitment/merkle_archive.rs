@@ -1,25 +1,26 @@
 use digest::Update;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWrite;
-use ts_rs::TS;
 
 use crate::prelude::*;
 use crate::s9pk::S9pk;
 use crate::s9pk::merkle_archive::MerkleArchive;
 use crate::s9pk::merkle_archive::source::FileSource;
-use crate::sign::commitment::{Commitment, Digestable};
+use crate::sign::commitment::{Commitment, Digestable, SignedCommitment};
 use crate::util::io::TrackingIO;
 use crate::util::serde::Base64;
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, HasModel, TS, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, HasModel, VisitFields, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", tag = "type", rename = "merkle-archive")]
 #[model = "Model<Self>"]
-#[ts(export)]
+#[visit(ts(rename = "MerkleArchiveCommitment"))]
 pub struct MerkleArchiveCommitment {
     pub root_sighash: Base64<[u8; 32]>,
-    #[ts(type = "number")]
     pub root_maxsize: u64,
 }
+
+rpc_toolkit::reflect_ts!(MerkleArchiveCommitment);
+rpc_toolkit::ts_export!(MerkleArchiveCommitment, namespaces = [""]);
 impl MerkleArchiveCommitment {
     pub fn from_query(query: &str) -> Result<Option<Self>, Error> {
         let mut root_sighash = None;
@@ -48,6 +49,10 @@ impl MerkleArchiveCommitment {
             Ok(None)
         }
     }
+}
+impl SignedCommitment for MerkleArchiveCommitment {
+    const TYPE_ID: u8 = 2;
+    const TYPE_NAME: &'static str = "merkle-archive";
 }
 impl Digestable for MerkleArchiveCommitment {
     fn update<D: Update>(&self, digest: &mut D) {

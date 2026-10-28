@@ -195,7 +195,7 @@ export class BackupsHistoryModal {
   private readonly errorService = inject(ErrorService)
   private readonly tasks = inject(TaskService)
 
-  readonly targets = toSignal(from(this.api.getBackupTargets({})))
+  readonly targets = toSignal(from(this.api.rpc.backup.target.list({})))
   readonly runs = signal<BackupRun[] | null>(null)
   selected: boolean[] = []
 

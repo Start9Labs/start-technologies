@@ -21,7 +21,9 @@ import { StateService } from 'src/app/services/state.service'
 
 @Component({
   template: '<app-initializing [progress]="progress()" />',
-  providers: [provideSetupLogsService(ApiService)],
+  providers: [
+    provideSetupLogsService(ApiService, api => api.rpc.init.logs.follow({})),
+  ],
   styles: ':host { height: 100%; }',
   imports: [InitializingComponent],
 })
@@ -30,7 +32,7 @@ export default class InitializingPage {
   private readonly state = inject(StateService)
 
   readonly progress = toSignal(
-    defer(() => from(this.api.initFollowProgress())).pipe(
+    defer(() => from(this.api.rpc.init.subscribe({}))).pipe(
       switchMap(({ guid, progress }) =>
         this.api
           .openWebsocket$<T.FullProgress>(guid, {

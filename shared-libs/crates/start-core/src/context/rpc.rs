@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use chrono::{TimeDelta, Utc};
 use imbl::OrdMap;
 use imbl_value::InternedString;
 use josekit::jwk::Jwk;
@@ -33,7 +32,7 @@ use crate::disk::mount::guard::MountGuard;
 use crate::init::{InitResult, check_time_is_synchronized};
 use crate::install::PKG_ARCHIVE_DIR;
 use crate::lxc::LxcManager;
-use crate::middleware::auth::signature::{HasUnenrolledKeys, NonceCache};
+use crate::middleware::auth::signature::NonceCache;
 use crate::net::gateway::WildcardListener;
 use crate::net::net_controller::{NetController, NetService};
 use crate::net::socks::DEFAULT_SOCKS_LISTEN;
@@ -42,6 +41,8 @@ use crate::net::wifi::WpaCli;
 use crate::prelude::*;
 use crate::progress::{FullProgressTracker, PhaseProgressTrackerHandle};
 use crate::rpc_continuations::{Guid, OpenAuthedContinuations, RpcContinuations};
+use crate::s9pk::S9pk;
+use crate::s9pk::merkle_archive::source::DynFileSource;
 use crate::service::ServiceMap;
 use crate::service::effects::callbacks::ServiceCallbacks;
 use crate::service::effects::subcontainer::NVIDIA_OVERLAY_PATH;
@@ -68,6 +69,7 @@ pub struct RpcContextSeed {
     pub s9pk_arch: Option<&'static str>,
     pub services: ServiceMap,
     pub cancellable_installs: SyncMutex<BTreeMap<PackageId, oneshot::Sender<()>>>,
+    pub installing_s9pks: SyncMutex<BTreeMap<PackageId, S9pk<DynFileSource>>>,
     pub metrics_cache: Watch<Option<crate::system::Metrics>>,
     pub shutdown: broadcast::Sender<Option<Shutdown>>,
     pub lxc_manager: Arc<LxcManager>,
@@ -160,8 +162,8 @@ impl ReloadableHttpClient {
     }
 }
 
-/// Drop enrolled keys idle for more than 30 days. No-op until the clock is
-/// NTP-synced, so a wrong boot-time clock can't reap live sessions.
+/// No-op until the clock is NTP-synced, so a wrong boot-time clock can't reap
+/// live sessions.
 fn reap_idle_sessions(
     continuations: &OpenAuthedContinuations<Option<InternedString>>,
     ephemeral: &SyncMutex<AuthKeys>,
@@ -170,26 +172,14 @@ fn reap_idle_sessions(
     if !db.as_public().as_server_info().as_ntp_synced().de()? {
         return Ok(());
     }
-    let now = Utc::now();
-    let expired = db
-        .as_private()
-        .as_session_pubkeys()
-        .as_entries()?
-        .into_iter()
-        .map(|(id, session)| Ok::<_, Error>((id, session.de()?.last_active)))
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .filter(|(_, last_active)| now - *last_active > TimeDelta::days(30))
-        .map(|(id, _)| id)
-        .collect::<Vec<_>>();
-    HasUnenrolledKeys::unenroll::<RpcContext>(continuations, Some(ephemeral), db, expired)?;
-    Ok(())
+    crate::auth::reap_idle_keys_in::<RpcContext>(continuations, Some(ephemeral), db)
 }
 
 impl RpcContext {
     #[instrument(skip_all)]
     pub async fn init(
         webserver: &WebServerAcceptorSetter<WildcardListener>,
+        dns: Arc<crate::net::dns::DnsController>,
         config: &ServerConfig,
         disk_guid: InternedString,
         init_result: Option<InitResult>,
@@ -225,6 +215,8 @@ impl RpcContext {
             let net_ctrl = Arc::new(
                 NetController::init(
                     db.clone(),
+                    dns,
+                    webserver,
                     socks_proxy,
                     config
                         .max_proxy_conns_per_target
@@ -232,7 +224,6 @@ impl RpcContext {
                 )
                 .await?,
             );
-            webserver.send_modify(|wl| wl.set_ip_info(net_ctrl.net_iface.watcher.subscribe()));
             let os_net_service = net_ctrl.os_bindings().await?;
             (net_ctrl, os_net_service)
         };
@@ -420,6 +411,7 @@ impl RpcContext {
             },
             services,
             cancellable_installs: SyncMutex::new(BTreeMap::new()),
+            installing_s9pks: SyncMutex::new(BTreeMap::new()),
             metrics_cache,
             rpc_continuations: RpcContinuations::new(),
             shutdown,
@@ -669,14 +661,14 @@ mod tests {
         let proxy_server = tokio::spawn(async move {
             let (mut stream, _) = proxy.accept().await.unwrap();
             let mut request = [0; 64];
-            stream.read(&mut request).await.unwrap();
+            assert!(stream.read(&mut request).await.unwrap() > 0);
         });
         let target = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let target_url = format!("http://{}", target.local_addr().unwrap());
         let target_server = tokio::spawn(async move {
             let (mut stream, _) = target.accept().await.unwrap();
             let mut request = [0; 4096];
-            stream.read(&mut request).await.unwrap();
+            assert!(stream.read(&mut request).await.unwrap() > 0);
             stream
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
                 .await

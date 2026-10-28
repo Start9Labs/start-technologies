@@ -27,26 +27,29 @@ pub fn uci<C: CtrlContext>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct Section {
     pub ty: String,
     pub name: Option<String>,
     pub options: HashMap<String, String>,
     pub lists: HashMap<String, Vec<String>>,
 }
+rpc_toolkit::reflect_ts!(Section);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct UciFile {
     pub sections: Vec<Section>,
     pub modified: Option<DateTime<Utc>>,
 }
+rpc_toolkit::reflect_ts!(UciFile);
 
 type UciFiles = BTreeMap<String, UciFile>;
 
-#[derive(Parser, Serialize, Deserialize)]
+#[derive(Parser, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct GetArgs {
     names: Vec<String>,
 }
+rpc_toolkit::reflect_ts!(GetArgs);
 
 #[instrument(skip_all)]
 pub async fn get<C: CtrlContext>(ctx: C, GetArgs { names }: GetArgs) -> Result<UciFiles, Error> {

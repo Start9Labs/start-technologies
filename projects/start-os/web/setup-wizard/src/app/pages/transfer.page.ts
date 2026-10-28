@@ -131,7 +131,7 @@ export default class TransferPage implements OnInit {
 
   private async loadDrives() {
     try {
-      const allDrives = await this.api.getDisks()
+      const allDrives = await this.api.rpc.setup.disk.list({})
       // Filter to only drives with StartOS data (guid)
       this.drives.set(allDrives.filter(toGuid))
     } catch (e: any) {

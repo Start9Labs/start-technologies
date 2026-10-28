@@ -76,8 +76,8 @@ export class BackupsRestoreService {
       switchMap(() => {
         const loader = this.loader.open('Decrypting drive').subscribe()
 
-        return this.api
-          .getBackupInfo({ targetId, password })
+        return this.api.rpc.backup.target
+          .info({ targetId, password })
           .finally(() => loader.unsubscribe())
       }),
       catchError(e => {

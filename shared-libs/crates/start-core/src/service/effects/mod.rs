@@ -125,16 +125,23 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
             ParentHandler::<C>::new()
                 .subcommand(
                     "launch",
-                    from_fn_blocking(subcontainer::launch).no_display(),
+                    from_fn_blocking(subcontainer::launch).no_ts().no_display(),
                 )
                 .subcommand(
                     "launch-init",
-                    from_fn_blocking(subcontainer::launch_init).no_display(),
+                    from_fn_blocking(subcontainer::launch_init)
+                        .no_ts()
+                        .no_display(),
                 )
-                .subcommand("exec", from_fn_blocking(subcontainer::exec).no_display())
+                .subcommand(
+                    "exec",
+                    from_fn_blocking(subcontainer::exec).no_ts().no_display(),
+                )
                 .subcommand(
                     "exec-command",
-                    from_fn_blocking(subcontainer::exec_command).no_display(),
+                    from_fn_blocking(subcontainer::exec_command)
+                        .no_ts()
+                        .no_display(),
                 )
                 .subcommand(
                     "create-fs",
@@ -151,7 +158,9 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "pipe-wrap",
-            from_fn_blocking(subcontainer::pipe_wrap).no_display(),
+            from_fn_blocking(subcontainer::pipe_wrap)
+                .no_ts()
+                .no_display(),
         )
         // net
         .subcommand("bind", from_fn_async(net::bind::bind).no_cli())

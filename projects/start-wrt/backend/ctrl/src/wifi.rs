@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use rpc_toolkit::{from_fn, from_fn_async_local, ParentHandler};
+use rpc_toolkit::{from_fn, from_fn_async_local, HandlerExt as _, ParentHandler};
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
     NetworkBridgeVlan, WifiChannel, WifiDevice, WifiDynamicVlan, WifiInterface, WifiMode,
@@ -54,22 +54,28 @@ pub fn find_ap_interface_names(cfgs: &Configs) -> Result<Vec<String>, Error> {
     Ok(names)
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, visit_rs::VisitFields)]
 pub struct Password<Id: Ord> {
     pub label: String,
     pub profile: Option<Id>,
     pub password: String,
 }
+rpc_toolkit::reflect_ts!(impl [Id: Ord] for Password<Id> where [Option<Id>: rpc_toolkit::ts::TS]);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitFields)]
 pub struct WifiRadio {
     pub band: String,
     pub channel: String,
+    /// Channel width in MHz. Null when the radio's mode sets none; null on
+    /// `set` keeps the current width.
+    #[serde(default)]
+    pub width: Option<u32>,
     pub enabled: bool,
     pub broadcast: bool,
 }
+rpc_toolkit::reflect_ts!(WifiRadio);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct Wifi<Id: Ord = ProfileId> {
     pub ssid: String,
@@ -79,6 +85,7 @@ pub struct Wifi<Id: Ord = ProfileId> {
     pub radios: BTreeMap<String, WifiRadio>,
     pub passwords: BTreeSet<Password<Id>>,
 }
+rpc_toolkit::reflect_ts!(impl [Id: Ord] for Wifi<Id> where [BTreeSet<Password<Id>>: rpc_toolkit::ts::TS]);
 
 /// `wifi.set` request: the desired WiFi config plus a confirmation flag.
 /// When a profile loses its last WiFi password its devices can no longer reach
@@ -87,7 +94,7 @@ pub struct Wifi<Id: Ord = ProfileId> {
 /// them. When the flag is false and such ports exist, `set` applies nothing and
 /// returns them in `WifiSetResult` for a confirmation dialog; with the flag true
 /// it deletes those published ports as part of the change.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiSetRequest {
     #[serde(flatten)]
@@ -95,36 +102,82 @@ pub struct WifiSetRequest {
     #[serde(default)]
     pub confirm_published_port_deletion: bool,
 }
+rpc_toolkit::reflect_ts!(WifiSetRequest);
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiSetResult {
     /// Non-empty (and nothing applied) when published ports would be deleted and
     /// the caller hasn't confirmed yet. Empty once the change is applied.
     pub pending_published_port_deletions: Vec<crate::published_ports::AffectedPublishedPort>,
 }
+rpc_toolkit::reflect_ts!(WifiSetResult);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiRegulatory {
     /// ISO 3166-1 alpha-2 codes the regulatory database defines.
     pub countries: Vec<String>,
-    /// Channels an access point may use under the current country, by band.
-    pub channels: BTreeMap<String, Vec<u32>>,
+    /// What an access point may use under the current country, by band.
+    pub bands: BTreeMap<String, BandChannels>,
 }
+rpc_toolkit::reflect_ts!(WifiRegulatory);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Default, PartialEq, Eq, visit_rs::VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct BandChannels {
+    pub channels: Vec<ApChannel>,
+    /// Widths automatic channel selection can serve without radar-detection channels.
+    pub auto_widths: Vec<u32>,
+}
+rpc_toolkit::reflect_ts!(BandChannels);
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, visit_rs::VisitFields)]
+pub struct ApChannel {
+    pub channel: u32,
+    /// Widths in MHz whose every bonded channel is usable.
+    pub widths: Vec<u32>,
+}
+rpc_toolkit::reflect_ts!(ApChannel);
+
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct BlackoutWindow {
     pub start_time: String,
     pub end_time: String,
     pub days: [bool; 7],
 }
+rpc_toolkit::reflect_ts!(BlackoutWindow);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitFields)]
 pub struct BlackoutWindows {
     pub windows: Vec<BlackoutWindow>,
 }
+rpc_toolkit::reflect_ts!(BlackoutWindows);
+
+/// `wifi.blackout-set` request: the blackout windows plus a confirmation flag.
+/// A window covering the router's current time turns Wi-Fi off as soon as it is
+/// saved, for every device on it. When the flag is false, `blackout-set` applies
+/// nothing and reports that in `BlackoutSetResult` for a confirmation dialog;
+/// with the flag true it saves the windows and applies them at once.
+#[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct BlackoutSetRequest {
+    #[serde(flatten)]
+    pub windows: BlackoutWindows,
+    #[serde(default)]
+    pub confirm_immediate_blackout: bool,
+}
+rpc_toolkit::reflect_ts!(BlackoutSetRequest);
+
+#[derive(Debug, Serialize, Deserialize, Default, visit_rs::VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct BlackoutSetResult {
+    /// True (and nothing applied) when a window covers the current time and the
+    /// caller hasn't confirmed yet. False once the change is applied.
+    pub pending_immediate_blackout: bool,
+}
+rpc_toolkit::reflect_ts!(BlackoutSetResult);
 
 /// Canonical UCI store for WiFi blackout windows (singleton section
 /// `config wifi_blackout 'blackout'` in the `startwrt` config). The crontab is a
@@ -161,6 +214,12 @@ pub fn wifi<C: CtrlContext + Clone>() -> ParentHandler<C> {
             from_fn_async_local(blackout_set::<C>).with_display_serializable(),
         )
         .subcommand(
+            "blackout-apply",
+            from_fn_async_local(blackout_apply::<C>)
+                .no_ts()
+                .no_display(),
+        )
+        .subcommand(
             "generate-password",
             from_fn(generate_password::<C>).with_display_serializable(),
         )
@@ -173,18 +232,34 @@ pub fn wifi<C: CtrlContext + Clone>() -> ParentHandler<C> {
 #[instrument(skip_all)]
 pub async fn regulatory<C: CtrlContext>(_ctx: C) -> Result<WifiRegulatory, Error> {
     let db = tokio::fs::read(REGULATORY_DB).await?;
-    let phys = tokio::process::Command::new("iw")
-        .arg("phy")
-        .output()
-        .await?;
     Ok(WifiRegulatory {
         countries: regdb_countries(&db)?,
-        channels: ap_channels(&String::from_utf8_lossy(&phys.stdout)),
+        bands: band_channels(&iw_channels().await?),
     })
 }
 
-/// netifd applies the domain asynchronously.
-async fn await_regdomain(country: &str) {
+/// Concatenated `iw phy <phy> channels` output for every radio.
+async fn iw_channels() -> Result<String, Error> {
+    let mut out = String::new();
+    let mut phys = match tokio::fs::read_dir("/sys/class/ieee80211").await {
+        Ok(phys) => phys,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+        Err(e) => return Err(e.into()),
+    };
+    while let Some(phy) = phys.next_entry().await? {
+        let channels = tokio::process::Command::new("iw")
+            .arg("phy")
+            .arg(phy.file_name())
+            .arg("channels")
+            .output()
+            .await?;
+        out.push_str(&String::from_utf8_lossy(&channels.stdout));
+    }
+    Ok(out)
+}
+
+/// netifd applies the domain asynchronously. False once 5 s pass without it.
+async fn await_regdomain(country: &str) -> bool {
     let wanted = format!("country {country}:");
     for _ in 0..20 {
         if let Ok(out) = tokio::process::Command::new("iw")
@@ -193,12 +268,13 @@ async fn await_regdomain(country: &str) {
             .await
         {
             if String::from_utf8_lossy(&out.stdout).contains(&wanted) {
-                return;
+                return true;
             }
         }
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
     tracing::warn!("regulatory domain {country} not applied within 5 s");
+    false
 }
 
 /// Country records follow the 8-byte header until an all-zero one.
@@ -217,38 +293,343 @@ fn regdb_countries(db: &[u8]) -> Result<Vec<String>, Error> {
         .collect())
 }
 
-/// Reads the `* <MHz> MHz [<channel>] (<flags>)` lines of `iw phy`.
-fn ap_channels(iw_phy: &str) -> BTreeMap<String, Vec<u32>> {
-    let mut bands: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
-    for line in iw_phy.lines() {
-        let Some(rest) = line.trim_start().strip_prefix("* ") else {
-            continue;
-        };
-        let Some((mhz, rest)) = rest.split_once(" MHz [") else {
-            continue;
-        };
-        let Some((channel, flags)) = rest.split_once(']') else {
-            continue;
-        };
-        if flags.contains("disabled") || flags.contains("no IR") {
-            continue;
+const WIDTHS: [u32; 4] = [20, 40, 80, 160];
+
+/// Widest channel width a save that changes the country may carry.
+const COUNTRY_CHANGE_MAX_WIDTH: u32 = 80;
+
+#[derive(Debug, Default)]
+struct IwChannel {
+    usable: bool,
+    radar: bool,
+    widths: Vec<String>,
+}
+
+pub(crate) fn frequency_band(mhz: u64) -> Option<&'static str> {
+    match mhz {
+        2400..=2499 => Some("2g"),
+        5000..=5924 => Some("5g"),
+        5925..=7199 => Some("6g"),
+        _ => None,
+    }
+}
+
+/// Reads the per-channel entries of `iw phy <phy> channels`, keyed by band.
+fn parse_iw_channels(iw: &str) -> BTreeMap<&'static str, BTreeMap<u32, IwChannel>> {
+    let mut bands: BTreeMap<&'static str, BTreeMap<u32, IwChannel>> = BTreeMap::new();
+    let mut current = None;
+    for line in iw.lines().map(str::trim) {
+        if let Some(rest) = line.strip_prefix("* ") {
+            current = None;
+            let Some((mhz, rest)) = rest.split_once(" MHz [") else {
+                continue;
+            };
+            let Some((channel, flags)) = rest.split_once(']') else {
+                continue;
+            };
+            let mhz = mhz.split_once('.').map_or(mhz, |(whole, _)| whole);
+            let (Ok(mhz), Ok(channel)) = (mhz.parse::<u32>(), channel.parse::<u32>()) else {
+                continue;
+            };
+            let Some(band) = frequency_band(u64::from(mhz)) else {
+                continue;
+            };
+            let usable = !flags.contains("disabled");
+            bands.entry(band).or_default().insert(
+                channel,
+                IwChannel {
+                    usable,
+                    ..Default::default()
+                },
+            );
+            current = usable.then_some((band, channel));
+        } else if let Some((band, channel)) = current {
+            let Some(entry) = bands.get_mut(band).and_then(|b| b.get_mut(&channel)) else {
+                continue;
+            };
+            match line {
+                "No IR" | "Passive scan" => entry.usable = false,
+                "Radar detection" => entry.radar = true,
+                _ => {
+                    if let Some(widths) = line.strip_prefix("Channel widths:") {
+                        entry.widths = widths.split_whitespace().map(String::from).collect();
+                    }
+                }
+            }
         }
-        let mhz = mhz.split_once('.').map_or(mhz, |(whole, _)| whole);
-        let (Ok(mhz), Ok(channel)) = (mhz.parse::<u32>(), channel.parse::<u32>()) else {
-            continue;
-        };
-        let band = match mhz {
-            2400..=2499 => "2g",
-            5000..=5924 => "5g",
-            5925..=7199 => "6g",
-            _ => continue,
-        };
-        bands.entry(band.to_string()).or_default().insert(channel);
     }
     bands
+}
+
+/// The 20 MHz channels OpenWrt bonds with a primary channel at a width.
+fn bonded_channels(band: &str, primary: u32, width: u32) -> Option<Vec<u32>> {
+    match (band, width) {
+        (_, 20) => Some(vec![primary]),
+        ("2g", 40) if primary < 7 => Some(vec![primary, primary + 4]),
+        ("2g", 40) => Some(vec![primary.checked_sub(4)?, primary]),
+        ("5g", 40 | 80 | 160) => {
+            let base = if primary >= 149 { 149 } else { 36 };
+            let offset = primary.checked_sub(base)?;
+            if offset % 4 != 0 {
+                return None;
+            }
+            let span = width / 20;
+            let start = base + offset / 4 / span * span * 4;
+            Some((0..span).map(|i| start + i * 4).collect())
+        }
+        _ => None,
+    }
+}
+
+/// The bonded channels when every one of them is usable at the width.
+fn usable_block(
+    channels: &BTreeMap<u32, IwChannel>,
+    band: &str,
+    primary: u32,
+    width: u32,
+) -> Option<Vec<u32>> {
+    let block = bonded_channels(band, primary, width)?;
+    let flag = match width {
+        20 => "20MHz",
+        40 if block[0] == primary => "HT40+",
+        40 => "HT40-",
+        80 => "VHT80",
+        _ => "VHT160",
+    };
+    let primary_ok = channels
+        .get(&primary)
+        .is_some_and(|c| c.widths.iter().any(|w| w == flag));
+    let all_ok = block.iter().all(|ch| {
+        channels
+            .get(ch)
+            .is_some_and(|c| c.usable && (width == 40 || c.widths.iter().any(|w| w == flag)))
+    });
+    (primary_ok && all_ok).then_some(block)
+}
+
+fn band_channels(iw: &str) -> BTreeMap<String, BandChannels> {
+    parse_iw_channels(iw)
         .into_iter()
-        .map(|(band, channels)| (band, channels.into_iter().collect()))
+        .map(|(band, channels)| {
+            let mut result = BandChannels::default();
+            for &channel in channels.keys() {
+                let widths: Vec<u32> = WIDTHS
+                    .into_iter()
+                    .filter(|&w| usable_block(&channels, band, channel, w).is_some())
+                    .collect();
+                if !widths.is_empty() {
+                    result.channels.push(ApChannel { channel, widths });
+                }
+            }
+            result.auto_widths = WIDTHS
+                .into_iter()
+                .filter(|&w| {
+                    channels.keys().any(|&ch| {
+                        usable_block(&channels, band, ch, w)
+                            .is_some_and(|block| block.iter().all(|b| !channels[b].radar))
+                    })
+                })
+                .collect();
+            (band.to_string(), result)
+        })
         .collect()
+}
+
+/// Splits an htmode into its PHY prefix and width: `HT40+` is (`HT`, 40).
+fn split_htmode(htmode: &str) -> Option<(&str, u32)> {
+    let (prefix, width) = htmode.split_at(htmode.find(|c: char| c.is_ascii_digit())?);
+    let width = width.trim_end_matches(['+', '-']).parse().ok()?;
+    matches!(prefix, "HT" | "VHT" | "HE" | "EHT").then_some((prefix, width))
+}
+
+fn device_width(device: &WifiDevice) -> Option<u32> {
+    device
+        .htmode
+        .as_deref()
+        .and_then(split_htmode)
+        .map(|(_, width)| width)
+}
+
+fn max_width(prefix: &str) -> u32 {
+    match prefix {
+        "HT" => 40,
+        "EHT" => 320,
+        _ => 160,
+    }
+}
+
+fn parse_channel(channel: &str) -> WifiChannel {
+    channel
+        .parse::<u32>()
+        .map(WifiChannel::Int)
+        .unwrap_or(WifiChannel::Auto)
+}
+
+/// The htmode carrying a width in the radio's PHY mode. No width keeps the current one.
+fn htmode_for_width(device: &WifiDevice, width: Option<u32>) -> Result<Option<String>, Error> {
+    let Some(width) = width else {
+        return Ok(device.htmode.clone());
+    };
+    match device.htmode.as_deref().and_then(split_htmode) {
+        Some((_, current)) if current == width => Ok(device.htmode.clone()),
+        Some((prefix, _)) if WIDTHS.contains(&width) && width <= max_width(prefix) => {
+            Ok(Some(format!("{prefix}{width}")))
+        }
+        _ => Err(Error::new(
+            eyre!("this radio cannot use a channel width of {width} MHz"),
+            ErrorKind::InvalidValue,
+        )),
+    }
+}
+
+/// Rejects a width the new country may not serve with automatic channel selection.
+fn check_country_change_widths(
+    cfgs: &Configs,
+    radios: &BTreeMap<String, WifiRadio>,
+) -> Result<(), Error> {
+    for (name, _, device) in find_relevant(cfgs)? {
+        let Some(radio) = radios.get(&name).filter(|r| r.enabled) else {
+            continue;
+        };
+        if radio.width.or(device_width(&device)) > Some(COUNTRY_CHANGE_MAX_WIDTH) {
+            return Err(Error::new(
+                eyre!(
+                    "a country change cannot keep a channel width above \
+                     {COUNTRY_CHANGE_MAX_WIDTH} MHz"
+                ),
+                ErrorKind::InvalidValue,
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Widths the band serves on a channel.
+fn usable_widths(band: Option<&BandChannels>, channel: WifiChannel) -> Option<&[u32]> {
+    let band = band?;
+    match channel {
+        WifiChannel::Auto => Some(band.auto_widths.as_slice()),
+        WifiChannel::Int(ch) => band
+            .channels
+            .iter()
+            .find(|c| c.channel == ch)
+            .map(|c| c.widths.as_slice()),
+    }
+}
+
+/// Rejects a changed or newly enabled radio whose channel cannot carry its width.
+fn check_channel_widths(
+    cfgs: &Configs,
+    radios: &BTreeMap<String, WifiRadio>,
+    bands: &BTreeMap<String, BandChannels>,
+) -> Result<(), Error> {
+    for (name, _, device) in find_relevant(cfgs)? {
+        let Some(radio) = radios.get(&name).filter(|r| r.enabled) else {
+            continue;
+        };
+        let current = device_width(&device);
+        let Some(width) = radio.width.or(current) else {
+            continue;
+        };
+        let channel = parse_channel(&radio.channel);
+        if !device.disabled
+            && channel == device.channel
+            && Some(width) == current
+            && radio.band == device.band
+        {
+            continue;
+        }
+        let allowed = usable_widths(bands.get(&radio.band), channel)
+            .is_some_and(|widths| widths.contains(&width));
+        if !allowed {
+            let what = match channel {
+                WifiChannel::Auto => "automatic channel selection".to_string(),
+                WifiChannel::Int(ch) => format!("channel {ch}"),
+            };
+            return Err(Error::new(
+                eyre!("{what} cannot use a channel width of {width} MHz under the current country"),
+                ErrorKind::InvalidValue,
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Narrows an enabled radio's width to the widest its channel carries under
+/// the current country. A no-op, with no reload, when every width is usable.
+pub async fn heal_channel_widths(uci_root: impl AsRef<std::path::Path>) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root.as_ref(), &arena, &["wireless"]).await?;
+    let mut country = None;
+    cfgs["wireless"].try_each(|_, device: WifiDevice| {
+        if !device.disabled {
+            country = Some(device.country.unwrap_or_else(|| "00".into()));
+        }
+        Ok::<_, Error>(())
+    })?;
+    let Some(country) = country else {
+        return Ok(());
+    };
+    if !await_regdomain(&country).await {
+        return Ok(());
+    }
+    let bands = band_channels(&iw_channels().await?);
+    let narrowed = narrow_unusable_widths(&mut cfgs, &bands)?;
+    if narrowed.is_empty() {
+        return Ok(());
+    }
+
+    dump_all(uci_root.as_ref(), cfgs).await?;
+    drop(arena);
+
+    crate::activity::log(
+        "wifi",
+        "width-narrowed",
+        true,
+        &format!(
+            "Narrowed a Wi-Fi channel width the channel cannot carry under the current country: {}",
+            narrowed.join(", ")
+        ),
+        None,
+    );
+    reload_wifi(uci_root, WifiReload::Reload).await
+}
+
+/// The config half of [`heal_channel_widths`]. Returns what it narrowed, as
+/// `<radio> channel <n> from <old> MHz to <new> MHz`.
+fn narrow_unusable_widths(
+    cfgs: &mut Configs,
+    bands: &BTreeMap<String, BandChannels>,
+) -> Result<Vec<String>, Error> {
+    let mut narrowed = Vec::new();
+    for s in &mut cfgs["wireless"].sections {
+        let Some(mut device) = s.get_typed::<WifiDevice>()? else {
+            continue;
+        };
+        if device.disabled {
+            continue;
+        }
+        let Some(width) = device_width(&device) else {
+            continue;
+        };
+        let Some(widths) = usable_widths(bands.get(&device.band), device.channel) else {
+            continue;
+        };
+        if widths.contains(&width) {
+            continue;
+        }
+        let Some(&widest) = widths.iter().max() else {
+            continue;
+        };
+        device.htmode = htmode_for_width(&device, Some(widest))?;
+        narrowed.push(format!(
+            "{} channel {} from {width} MHz to {widest} MHz",
+            s.name().as_deref().unwrap_or("radio"),
+            device.channel
+        ));
+        s.set(&device)?;
+    }
+    Ok(narrowed)
 }
 
 fn generate_password<C: CtrlContext>(_ctx: C) -> Result<String, Error> {
@@ -258,10 +639,7 @@ fn generate_password<C: CtrlContext>(_ctx: C) -> Result<String, Error> {
     ))
 }
 
-fn find_relevant_with_radios(
-    cfgs: &Configs,
-    radios: &BTreeMap<String, WifiRadio>,
-) -> Result<Vec<(String, WifiInterface, WifiDevice, WifiRadio)>, Error> {
+fn wifi_devices(cfgs: &Configs) -> Result<HashMap<String, WifiDevice>, Error> {
     let mut devices = HashMap::new();
     cfgs["wireless"].try_each(|name, device: WifiDevice| {
         devices.insert(
@@ -276,6 +654,14 @@ fn find_relevant_with_radios(
         );
         Ok::<_, Error>(())
     })?;
+    Ok(devices)
+}
+
+fn find_relevant_with_radios(
+    cfgs: &Configs,
+    radios: &BTreeMap<String, WifiRadio>,
+) -> Result<Vec<(String, WifiInterface, WifiDevice, WifiRadio)>, Error> {
+    let devices = wifi_devices(cfgs)?;
     let mut relevant_interfaces = Vec::<(String, WifiInterface, WifiDevice, WifiRadio)>::new();
     cfgs["wireless"].try_each(|name, iface: WifiInterface| {
         if iface.mode != WifiMode::AP {
@@ -303,20 +689,7 @@ fn find_relevant_with_radios(
 }
 
 fn find_relevant(cfgs: &Configs) -> Result<Vec<(String, WifiInterface, WifiDevice)>, Error> {
-    let mut devices = HashMap::new();
-    cfgs["wireless"].try_each(|name, device: WifiDevice| {
-        devices.insert(
-            name.ok_or_else(|| {
-                Error::new(
-                    eyre!("unnamed wireless device"),
-                    ErrorKind::UnnamedWirelessDevice,
-                )
-            })?
-            .to_string(),
-            device,
-        );
-        Ok::<_, Error>(())
-    })?;
+    let devices = wifi_devices(cfgs)?;
     let mut relevant_interfaces = Vec::<(String, WifiInterface, WifiDevice)>::new();
     cfgs["wireless"].try_each(|name, iface: WifiInterface| {
         if iface.mode != WifiMode::AP {
@@ -388,6 +761,7 @@ fn get_config(ctx: impl CtrlContext, cfgs: &Configs) -> Result<Wifi, Error> {
             WifiRadio {
                 band: device.band.clone(),
                 channel: device.channel.to_string(),
+                width: device_width(device),
                 enabled: !device.disabled,
                 broadcast: !device.disabled && !iface.hidden,
             },
@@ -489,15 +863,11 @@ fn set_config(
             for (_, rel_iface, _, rel_radio) in &relevant_interfaces {
                 if rel_iface.device == name {
                     let new_disabled = !rel_radio.enabled;
-                    let new_channel = match rel_radio.channel.as_str() {
-                        "auto" | "Auto" => WifiChannel::Auto,
-                        n => n
-                            .parse::<u32>()
-                            .map(WifiChannel::Int)
-                            .unwrap_or(WifiChannel::Auto),
-                    };
+                    let new_channel = parse_channel(&rel_radio.channel);
+                    let new_htmode = htmode_for_width(&device, rel_radio.width)?;
                     if device.disabled != new_disabled
                         || device.channel != new_channel
+                        || device.htmode != new_htmode
                         || device.band != rel_radio.band
                         || device.country != wifi.country
                         || device.acs_exclude_dfs != Some(true)
@@ -507,6 +877,7 @@ fn set_config(
                     device.disabled = new_disabled;
                     device.band = rel_radio.band.clone();
                     device.channel = new_channel;
+                    device.htmode = new_htmode;
                     device.country = wifi.country.clone();
                     device.acs_exclude_dfs = Some(true);
                     s.set(&device)?;
@@ -766,6 +1137,12 @@ pub async fn set<C: CtrlContext>(
         });
     }
 
+    let bands = if ctx.effectful() {
+        Some(band_channels(&iw_channels().await?))
+    } else {
+        None
+    };
+
     let mut retries = 4;
     loop {
         let arena = Arena::new();
@@ -864,6 +1241,23 @@ pub async fn set<C: CtrlContext>(
                 None,
             );
         }
+        let width_check = if country_changed {
+            check_country_change_widths(&cfgs, &wifi.radios)
+        } else if let Some(bands) = &bands {
+            check_channel_widths(&cfgs, &wifi.radios, bands)
+        } else {
+            Ok(())
+        };
+        if let Err(err) = width_check {
+            crate::activity::log(
+                "wifi",
+                "updated",
+                false,
+                "Failed to update WiFi: channel width unavailable",
+                Some("InvalidValue"),
+            );
+            return Err(err);
+        }
         let restart = match set_config(&ctx, &mut cfgs, &wifi, &lookup) {
             Err(Error {
                 kind: ErrorKind::CorruptedWifi,
@@ -929,26 +1323,14 @@ pub async fn set<C: CtrlContext>(
                         .await
                         .map_err(|e| Error::new(eyre!("iw reg set: {e}"), ErrorKind::Network))?;
                     }
-                    match restart {
-                        WifiRestart::Full => {
-                            // SSID/channel/enabled/hidden changed or new VLANs — full restart
-                            crate::run_quiet_async(&mut tokio::process::Command::new("wifi"))
-                                .await
-                                .map_err(|e| {
-                                    Error::new(eyre!("wifi restart: {e}"), ErrorKind::Network)
-                                })?;
-                        }
-                        WifiRestart::PskOnly => {
-                            // PSK-only change — fast path, no client disconnection
-                            crate::run_quiet_async(
-                                tokio::process::Command::new("wifi").arg("reload"),
-                            )
-                            .await
-                            .map_err(|e| {
-                                Error::new(eyre!("wifi reload: {e}"), ErrorKind::Network)
-                            })?;
-                        }
-                    }
+                    reload_wifi(
+                        ctx.uci_root(),
+                        match restart {
+                            WifiRestart::Full => WifiReload::Restart,
+                            WifiRestart::PskOnly => WifiReload::Reload,
+                        },
+                    )
+                    .await?;
                     if country_changed {
                         await_regdomain(wifi.country.as_deref().unwrap_or("00")).await;
                     }
@@ -957,6 +1339,7 @@ pub async fn set<C: CtrlContext>(
                     // dropping their static DHCP reservations needs a dnsmasq
                     // reload so the device actually releases the pinned IP.
                     if !affected_macs.is_empty() {
+                        crate::published_ports::sync_v6_mac_bind_logged(ctx.uci_root()).await;
                         let _ = crate::run_quiet_async(
                             tokio::process::Command::new("/etc/init.d/firewall").arg("reload"),
                         )
@@ -1267,9 +1650,10 @@ pub(crate) fn windows_to_minutes(
 
 /// Read the raw "start|end|days" entries from the singleton `wifi_blackout`
 /// section in the `startwrt` UCI config (the canonical store).
-async fn read_blackout_windows<C: CtrlContext>(ctx: &C) -> Result<Vec<String>, Error> {
+async fn read_blackout_windows(uci_root: impl AsRef<Path>) -> Result<Vec<String>, Error> {
+    let bytes = uciedit::read_all(uci_root, &["startwrt"]).await?;
     let arena = Arena::new();
-    let cfgs = parse_all(ctx.uci_root(), &arena, &["startwrt"]).await?;
+    let cfgs = bytes.parse(&arena)?;
     let mut raw = Vec::new();
     cfgs["startwrt"].try_each(|name, b: UciWifiBlackout| {
         if name == Some("blackout") {
@@ -1282,7 +1666,7 @@ async fn read_blackout_windows<C: CtrlContext>(ctx: &C) -> Result<Vec<String>, E
 
 #[instrument(skip_all)]
 pub async fn blackout_get<C: CtrlContext>(ctx: C) -> Result<Vec<BlackoutWindow>, Error> {
-    let raw = read_blackout_windows(&ctx).await?;
+    let raw = read_blackout_windows(ctx.uci_root()).await?;
     Ok(parse_windows(&raw)
         .into_iter()
         .map(|(start_time, end_time, days)| BlackoutWindow {
@@ -1293,22 +1677,16 @@ pub async fn blackout_get<C: CtrlContext>(ctx: C) -> Result<Vec<BlackoutWindow>,
         .collect())
 }
 
-// NOTE: WiFi blackout windows are now stored in UCI (`config wifi_blackout
-// 'blackout'`); the crontab is a disposable projection regenerated from UCI by
-// `regenerate_blackout_crontab`. The deconflicted projection means a schedule
-// that tiles the whole week has zero cron edges, which is why `blackout_set`
-// rejects full-week coverage (cron alone can't execute an edgeless schedule).
-// `reconcile_blackout_at_boot` (below) reasserts the in-window state on boot so a
-// reboot mid-blackout doesn't leave the radio up until the next cron edge, and the
-// daemon rebuilds the crontab projection from UCI at boot (see `daemon.rs`), so the
-// schedule survives a sysupgrade that wipes `/etc/crontabs/root`. The remaining gap
-// is the boot-window one (netifd raises radios before the daemon runs), documented
-// at `reconcile_blackout_at_boot`.
 #[instrument(skip_all)]
 pub async fn blackout_set<C: CtrlContext>(
     ctx: C,
-    DeserializeStdin(input): DeserializeStdin<BlackoutWindows>,
-) -> Result<(), Error> {
+    DeserializeStdin(req): DeserializeStdin<BlackoutSetRequest>,
+) -> Result<BlackoutSetResult, Error> {
+    let BlackoutSetRequest {
+        windows: input,
+        confirm_immediate_blackout: confirm,
+    } = req;
+
     // Validate before persisting. Equal start/end denotes a full 24-hour window
     // (not an error); overlapping windows and full-week-no-gap coverage are
     // rejected.
@@ -1342,6 +1720,18 @@ pub async fn blackout_set<C: CtrlContext>(
             .iter()
             .map(|w| (w.start_time.as_str(), w.end_time.as_str(), &w.days)),
     );
+
+    if ctx.effectful() && !confirm {
+        // Dry run: reports whether saving turns Wi-Fi off now and applies nothing.
+        let (day, minute) = crate::profiles::chrono_now().await;
+        let radios_up = wireless_status()
+            .await
+            .map_or(true, |radios| any_radio_on(&radios));
+        return Ok(BlackoutSetResult {
+            pending_immediate_blackout: radios_up
+                && windows_contain_now(&parse_windows(&serialized), day, minute),
+        });
+    }
 
     let mut retries = 4;
     loop {
@@ -1394,6 +1784,7 @@ pub async fn blackout_set<C: CtrlContext>(
         crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/cron").arg("restart"))
             .await
             .map_err(|e| Error::new(eyre!("restarting cron: {e}"), ErrorKind::Filesystem))?;
+        apply_blackout(ctx.uci_root()).await?;
     }
 
     crate::activity::log(
@@ -1403,13 +1794,21 @@ pub async fn blackout_set<C: CtrlContext>(
         "Updated WiFi blackout schedule",
         None,
     );
+    Ok(BlackoutSetResult::default())
+}
+
+/// Cron's entry point at each window boundary.
+#[instrument(skip_all)]
+pub async fn blackout_apply<C: CtrlContext>(ctx: C) -> Result<(), Error> {
+    if ctx.effectful() {
+        apply_blackout(ctx.uci_root()).await?;
+    }
     Ok(())
 }
 
 /// Regenerate the WiFi-blackout crontab lines from the UCI store. Pure projection
-/// (UCI → cron): strips old `BLACKOUT_TAG` lines, then emits deconflicted
-/// `wifi down`/`wifi up` edges so adjacent/consecutive windows never race at a
-/// shared cron tick.
+/// (UCI → cron): strips old `BLACKOUT_TAG` lines, then emits a `blackout-apply`
+/// line at every deconflicted window boundary.
 pub(crate) async fn regenerate_blackout_crontab(ctx: &impl CtrlContext) -> Result<(), Error> {
     let path = crontab_path(ctx);
     let content = tokio::fs::read_to_string(&path).await.unwrap_or_default();
@@ -1423,26 +1822,16 @@ pub(crate) async fn regenerate_blackout_crontab(ctx: &impl CtrlContext) -> Resul
         new_content.push('\n');
     }
 
-    let raw = read_blackout_windows(ctx).await?;
+    let raw = read_blackout_windows(ctx.uci_root()).await?;
     let windows = windows_to_minutes(&parse_windows(&raw));
 
     let (downs, ups) = deconflict_edges(&windows);
-    for (&min, mask) in &downs {
+    for (&min, mask) in downs.iter().chain(&ups) {
         new_content.push_str(&format!(
-            "{} {} * * {} wifi down {}\n",
+            "{} {} * * {} {BLACKOUT_APPLY} {BLACKOUT_TAG}\n",
             min % 60,
             min / 60,
             days_to_cron(mask),
-            BLACKOUT_TAG
-        ));
-    }
-    for (&min, mask) in &ups {
-        new_content.push_str(&format!(
-            "{} {} * * {} wifi up {}\n",
-            min % 60,
-            min / 60,
-            days_to_cron(mask),
-            BLACKOUT_TAG
         ));
     }
 
@@ -1453,56 +1842,226 @@ pub(crate) async fn regenerate_blackout_crontab(ctx: &impl CtrlContext) -> Resul
     Ok(())
 }
 
-/// Boot/reload reconciler for WiFi blackout. Blackout is edge-triggered by cron
-/// (`wifi down`/`wifi up`); a reboot mid-window loses the edge — netifd raises the
-/// radios early in boot per the on-disk `disabled` flag (runtime `wifi down` does
-/// not persist to config), so WiFi comes back up even though we are inside a
-/// blackout. Recompute the current in/out-of-window state (wrap-aware, mirroring
-/// `profiles::evaluate_and_apply_schedules`) and reassert `wifi down` when inside
-/// a window.
-///
-/// The out-of-window case is deliberately a no-op: boot already brings radios up
-/// per their UCI `disabled` flag, and `wifi up` honors that flag, so we never
-/// re-enable a radio the user disabled. Asserting only the "down" side keeps this
-/// idempotent and avoids that footgun. Call this *after* `restore_wifi_if_needed`
-/// (and after any other boot step that touches the radios) so this `wifi down` is
-/// the final word — `restore_wifi_if_needed` restores missing AP config and
-/// applies it with `wifi reload`, which would otherwise re-raise the radio.
-///
-/// TODO: This closes the *steady-state* gap (radio staying up for the rest of the
-/// window after a reboot) but NOT the *boot-window* gap. netifd brings the radios
-/// up at init `START=20`, long before this daemon runs (`START=99`), so there is a
-/// bounded interval early in boot where the radio broadcasts inside a blackout.
-/// Eliminating it entirely would require persisting blackout state into the
-/// wireless config (`option disabled '1'`) behind a dedicated marker distinct from
-/// the user's own per-radio `disabled`, plus a restore step on the window's
-/// closing edge — a larger change deferred for now.
-pub(crate) async fn reconcile_blackout_at_boot(ctx: &impl CtrlContext) -> Result<(), Error> {
-    let raw = read_blackout_windows(ctx).await?;
-    let windows = parse_windows(&raw);
-    let (day, minute) = crate::profiles::chrono_now().await;
-    if !windows_contain_now(&windows, day, minute) {
+const BLACKOUT_APPLY: &str = "/usr/bin/startwrt-cli wifi blackout-apply";
+
+const RADIO_LOCK_PATH: &str = "/var/lock/startwrt-wifi.lock";
+
+/// Serializes radio commands across the daemon and the CLI cron runs. Never
+/// taken while already held.
+async fn lock_radios() -> Result<fd_lock_rs::FdLock<std::fs::File>, Error> {
+    tokio::task::spawn_blocking(|| {
+        if let Some(dir) = Path::new(RADIO_LOCK_PATH).parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(RADIO_LOCK_PATH)?;
+        fd_lock_rs::FdLock::lock(file, fd_lock_rs::LockType::Exclusive, true)
+            .map_err(std::io::Error::from)
+    })
+    .await
+    .map_err(|e| {
+        Error::new(
+            eyre!("radio lock task panicked: {e}"),
+            ErrorKind::Incoherent,
+        )
+    })?
+    .map_err(|e| {
+        Error::new(
+            eyre!("locking {RADIO_LOCK_PATH}: {e}"),
+            ErrorKind::Filesystem,
+        )
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WifiReload {
+    /// `wifi`: rebuilds every interface, so clients reassociate.
+    Restart,
+    /// `wifi reload`.
+    Reload,
+}
+
+/// Applies the wireless config, then the blackout state for the current time.
+/// Every Wi-Fi reload goes through here. Inside a window the reload is skipped:
+/// the `wifi up` at the window end reloads the config.
+pub(crate) async fn reload_wifi(
+    uci_root: impl AsRef<Path>,
+    reload: WifiReload,
+) -> Result<(), Error> {
+    let _lock = lock_radios().await?;
+    if inside_window(uci_root.as_ref()).await? {
+        apply_blackout_locked(uci_root.as_ref()).await?;
         return Ok(());
     }
-    if ctx.effectful() {
-        crate::run_quiet_async(tokio::process::Command::new("wifi").arg("down"))
-            .await
-            .map_err(|e| Error::new(eyre!("wifi down: {e}"), ErrorKind::Network))?;
-        crate::activity::log(
-            "wifi",
-            "blackout-reasserted",
-            true,
-            "Reasserted WiFi blackout after reboot (inside active window)",
-            None,
-        );
+    let mut cmd = tokio::process::Command::new("wifi");
+    if reload == WifiReload::Reload {
+        cmd.arg("reload");
     }
+    crate::run_quiet_async(&mut cmd)
+        .await
+        .map_err(|e| Error::new(eyre!("wifi: {e}"), ErrorKind::Network))?;
+    apply_blackout_locked(uci_root.as_ref()).await?;
     Ok(())
 }
 
-/// Pure decision: true if `(day, minute)` falls inside any blackout window
-/// (wrap-aware via `profiles::window_contains`). Malformed time fields are
-/// skipped. Split out from `reconcile_blackout_at_boot` so it is unit-testable
-/// without reading the system clock or spawning `wifi`.
+/// Restarts netifd, which brings every radio up a few seconds later, then
+/// reapplies the blackout state once that setup has begun.
+pub(crate) async fn restart_network() {
+    let _ =
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/network").arg("restart"))
+            .await;
+    let uci_root = Path::new("/etc/config");
+    let applied = async {
+        let _lock = lock_radios().await?;
+        if inside_window(uci_root).await? {
+            wait_for_radio_setup().await;
+        }
+        apply_blackout_locked(uci_root).await
+    }
+    .await;
+    if let Err(e) = applied {
+        tracing::warn!("blackout apply after network restart failed: {e}");
+    }
+}
+
+/// Waits up to 10 s for netifd to start bringing every enabled radio up.
+async fn wait_for_radio_setup() {
+    for _ in 0..40 {
+        if let Some(radios) = wireless_status().await {
+            if radios.values().all(|r| !r.enabled() || r.up || r.pending) {
+                return;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+}
+
+async fn inside_window(uci_root: &Path) -> Result<bool, Error> {
+    let windows = parse_windows(&read_blackout_windows(uci_root).await?);
+    let (day, minute) = crate::profiles::chrono_now().await;
+    Ok(windows_contain_now(&windows, day, minute))
+}
+
+/// Powers the radios down inside a blackout window and up outside every
+/// window. Returns whether the current time is inside one.
+pub(crate) async fn apply_blackout(uci_root: impl AsRef<Path>) -> Result<bool, Error> {
+    let _lock = lock_radios().await?;
+    apply_blackout_locked(uci_root.as_ref()).await
+}
+
+/// `wifi up` leaves a radio whose own config disables it down.
+async fn apply_blackout_locked(uci_root: &Path) -> Result<bool, Error> {
+    let inside = inside_window(uci_root).await?;
+    let enabled = if inside {
+        BTreeSet::new()
+    } else {
+        read_enabled_radios(uci_root).await?
+    };
+    let action = match settled_wireless_status().await {
+        Some(radios) => radio_action(&radios, inside, &enabled),
+        None => inside.then_some("down"),
+    };
+    if let Some(action) = action {
+        crate::run_quiet_async(tokio::process::Command::new("wifi").arg(action))
+            .await
+            .map_err(|e| Error::new(eyre!("wifi {action}: {e}"), ErrorKind::Network))?;
+    }
+    Ok(inside)
+}
+
+async fn read_enabled_radios(uci_root: &Path) -> Result<BTreeSet<String>, Error> {
+    let bytes = uciedit::read_all(uci_root, &["wireless"]).await?;
+    let arena = Arena::new();
+    let cfgs = bytes.parse(&arena)?;
+    Ok(wifi_devices(&cfgs)?
+        .into_iter()
+        .filter_map(|(name, device)| (!device.disabled).then_some(name))
+        .collect())
+}
+
+/// One radio of `ubus call network.wireless status`.
+#[derive(Debug, Deserialize)]
+struct RadioStatus {
+    #[serde(default)]
+    up: bool,
+    /// Mid setup or teardown.
+    #[serde(default)]
+    pending: bool,
+    /// Not a reliable record of what `wifi up` / `wifi down` last asked for.
+    #[serde(default)]
+    autostart: bool,
+    #[serde(default)]
+    disabled: bool,
+    #[serde(default)]
+    config: RadioStatusConfig,
+}
+
+impl RadioStatus {
+    fn enabled(&self) -> bool {
+        !self.disabled && !self.config.disabled
+    }
+}
+
+/// A disabled radio reports `up` while broadcasting nothing.
+fn any_radio_on(radios: &BTreeMap<String, RadioStatus>) -> bool {
+    radios.values().any(|r| r.enabled() && (r.up || r.pending))
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RadioStatusConfig {
+    #[serde(default)]
+    disabled: bool,
+}
+
+/// `None` when netifd cannot be asked.
+async fn wireless_status() -> Option<BTreeMap<String, RadioStatus>> {
+    let out = tokio::process::Command::new("ubus")
+        .args(["call", "network.wireless", "status"])
+        .output()
+        .await
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    serde_json::from_slice(&out.stdout).ok()
+}
+
+/// Waits up to 5 s for every radio to finish setup or teardown.
+async fn settled_wireless_status() -> Option<BTreeMap<String, RadioStatus>> {
+    for _ in 0..20 {
+        let radios = wireless_status().await?;
+        if !radios.values().any(|r| r.pending) {
+            return Some(radios);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    wireless_status().await
+}
+
+/// Enablement comes from UCI; blackout saves can leave netifd's config stale.
+fn radio_action(
+    radios: &BTreeMap<String, RadioStatus>,
+    inside: bool,
+    enabled: &BTreeSet<String>,
+) -> Option<&'static str> {
+    if inside {
+        radios
+            .values()
+            .any(|r| r.up || r.pending || (r.autostart && r.enabled()))
+            .then_some("down")
+    } else {
+        enabled
+            .iter()
+            .any(|name| radios.get(name).map_or(true, |r| !r.up && !r.pending))
+            .then_some("up")
+    }
+}
+
+/// True if `(day, minute)` falls inside any blackout window. Malformed time
+/// fields never match.
 fn windows_contain_now(windows: &[(String, String, [bool; 7])], day: usize, minute: u32) -> bool {
     windows.iter().any(
         |(start, end, days)| match (parse_hhmm(start), parse_hhmm(end)) {
@@ -1522,6 +2081,20 @@ mod tests {
     use tokio::runtime::Runtime;
 
     use super::*;
+
+    #[test]
+    fn frequency_band_boundaries() {
+        assert_eq!(frequency_band(2399), None);
+        assert_eq!(frequency_band(2400), Some("2g"));
+        assert_eq!(frequency_band(2499), Some("2g"));
+        assert_eq!(frequency_band(2500), None);
+        assert_eq!(frequency_band(4999), None);
+        assert_eq!(frequency_band(5000), Some("5g"));
+        assert_eq!(frequency_band(5924), Some("5g"));
+        assert_eq!(frequency_band(5925), Some("6g"));
+        assert_eq!(frequency_band(7199), Some("6g"));
+        assert_eq!(frequency_band(7200), None);
+    }
 
     /// Test shim: the production `set` now takes a `WifiSetRequest` and returns
     /// `WifiSetResult`; these tests predate that and pass a bare `Wifi`. Wrap it
@@ -1585,6 +2158,250 @@ mod tests {
     #[test]
     fn test_windows_contain_now_empty() {
         assert!(!windows_contain_now(&[], 3, 12 * 60));
+    }
+
+    /// Whether the windows, as stored in UCI, cover the time.
+    fn inside_at(raw: &[&str], day: usize, minute: u32) -> bool {
+        let raw: Vec<String> = raw.iter().map(|s| s.to_string()).collect();
+        windows_contain_now(&parse_windows(&raw), day, minute)
+    }
+
+    #[test]
+    fn test_blackout_action_over_midnight() {
+        // Fri+Sat 22:00-06:00; Sat's tail runs into Sunday morning.
+        let raw = ["22:00|06:00|5,6"];
+        assert!(!inside_at(&raw, 5, 21 * 60 + 59));
+        assert!(inside_at(&raw, 5, 22 * 60));
+        assert!(inside_at(&raw, 6, 3 * 60)); // Fri's tail
+        assert!(inside_at(&raw, 0, 5 * 60 + 59)); // Sat's tail
+        assert!(!inside_at(&raw, 0, 6 * 60));
+        assert!(!inside_at(&raw, 5, 3 * 60)); // Thu has no window
+    }
+
+    #[test]
+    fn test_blackout_action_day_of_week() {
+        let raw = ["09:00|17:00|1,3"];
+        assert!(inside_at(&raw, 1, 12 * 60));
+        assert!(!inside_at(&raw, 2, 12 * 60));
+        assert!(inside_at(&raw, 3, 12 * 60));
+        assert!(!inside_at(&raw, 0, 12 * 60));
+    }
+
+    #[test]
+    fn test_blackout_action_adjacent_windows() {
+        // 09:00-12:00 then 12:00-15:00 on Monday: down throughout the seam.
+        let raw = ["09:00|12:00|1", "12:00|15:00|1"];
+        assert!(inside_at(&raw, 1, 11 * 60 + 59));
+        assert!(inside_at(&raw, 1, 12 * 60));
+        assert!(inside_at(&raw, 1, 14 * 60 + 59));
+        assert!(!inside_at(&raw, 1, 15 * 60));
+    }
+
+    #[test]
+    fn test_blackout_action_after_removing_active_window() {
+        let before = ["09:00|17:00|1", "20:00|22:00|1"];
+        assert!(inside_at(&before, 1, 12 * 60));
+        assert!(!inside_at(&before[1..], 1, 12 * 60));
+        assert!(!inside_at(&[], 1, 12 * 60));
+    }
+
+    /// One radio of `network.wireless status`, shaped like netifd's output.
+    fn radio(up: bool, pending: bool, autostart: bool, disabled: bool) -> String {
+        format!(
+            r#"{{
+                "up": {up}, "pending": {pending}, "autostart": {autostart},
+                "disabled": {disabled}, "retry_setup_failed": false,
+                "config": {{ "band": "2g", "channel": "auto", "disabled": {disabled} }},
+                "interfaces": [{{ "section": "default_radio0", "ifname": "phy0-ap0" }}]
+            }}"#
+        )
+    }
+
+    fn status(radio0: String, radio1: String) -> BTreeMap<String, RadioStatus> {
+        serde_json::from_str(&format!(r#"{{"radio0": {radio0}, "radio1": {radio1}}}"#)).unwrap()
+    }
+
+    fn user_disabled() -> String {
+        radio(false, false, false, true)
+    }
+
+    fn enabled_radios(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|name| name.to_string()).collect()
+    }
+
+    #[test]
+    fn test_radio_action_after_wifi_up() {
+        let radios = status(
+            radio(true, false, true, false),
+            radio(true, false, true, false),
+        );
+        let enabled = enabled_radios(&["radio0", "radio1"]);
+        assert_eq!(radio_action(&radios, true, &enabled), Some("down"));
+        assert_eq!(radio_action(&radios, false, &enabled), None);
+    }
+
+    #[test]
+    fn test_radio_action_up_without_autostart() {
+        let radios = status(
+            radio(true, false, false, false),
+            radio(true, false, false, false),
+        );
+        let enabled = enabled_radios(&["radio0", "radio1"]);
+        assert_eq!(radio_action(&radios, true, &enabled), Some("down"));
+        assert_eq!(radio_action(&radios, false, &enabled), None);
+    }
+
+    #[test]
+    fn test_radio_action_after_wifi_down() {
+        let radios = status(
+            radio(false, false, false, false),
+            radio(false, false, false, false),
+        );
+        let enabled = enabled_radios(&["radio0", "radio1"]);
+        assert_eq!(radio_action(&radios, true, &enabled), None);
+        assert_eq!(radio_action(&radios, false, &enabled), Some("up"));
+    }
+
+    #[test]
+    fn test_radio_action_one_radio_up() {
+        let radios = status(
+            radio(true, false, false, false),
+            radio(false, false, false, false),
+        );
+        let enabled = enabled_radios(&["radio0", "radio1"]);
+        assert_eq!(radio_action(&radios, true, &enabled), Some("down"));
+        assert_eq!(radio_action(&radios, false, &enabled), Some("up"));
+    }
+
+    #[test]
+    fn test_radio_action_mid_bring_up() {
+        let radios = status(
+            radio(false, true, false, false),
+            radio(true, false, false, false),
+        );
+        let enabled = enabled_radios(&["radio0", "radio1"]);
+        assert_eq!(radio_action(&radios, true, &enabled), Some("down"));
+        assert_eq!(radio_action(&radios, false, &enabled), None);
+    }
+
+    #[test]
+    fn test_radio_action_down_with_autostart() {
+        let radios = status(
+            radio(false, false, true, false),
+            radio(false, false, true, false),
+        );
+        let enabled = enabled_radios(&["radio0", "radio1"]);
+        assert_eq!(radio_action(&radios, true, &enabled), Some("down"));
+        assert_eq!(radio_action(&radios, false, &enabled), Some("up"));
+    }
+
+    #[test]
+    fn test_radio_action_user_disabled_radio() {
+        let enabled = enabled_radios(&["radio0"]);
+        let radios = status(radio(true, false, true, false), user_disabled());
+        assert_eq!(radio_action(&radios, false, &enabled), None);
+        let radios = status(radio(false, false, false, false), user_disabled());
+        assert_eq!(radio_action(&radios, true, &enabled), None);
+        assert_eq!(radio_action(&radios, false, &enabled), Some("up"));
+        // `wifi up` marks a disabled radio for autostart without starting it.
+        let disabled_autostart = radio(false, false, true, true);
+        let radios = status(radio(false, false, false, false), disabled_autostart);
+        assert_eq!(radio_action(&radios, true, &enabled), None);
+    }
+
+    #[tokio::test]
+    async fn test_radio_action_uses_saved_enablement() {
+        let dir = tempfile::tempdir().unwrap();
+        let wireless = dir.path().join("wireless");
+        tokio::fs::write(
+            &wireless,
+            "config wifi-device 'radio0'\n option type 'mac80211'\n option band '2g'\n option channel 'auto'\n option disabled '0'\n",
+        )
+        .await
+        .unwrap();
+        let enabled = read_enabled_radios(dir.path()).await.unwrap();
+        assert_eq!(enabled, enabled_radios(&["radio0"]));
+        let radios = status(user_disabled(), user_disabled());
+        assert_eq!(radio_action(&radios, true, &enabled), None);
+        assert_eq!(radio_action(&radios, false, &enabled), Some("up"));
+
+        tokio::fs::write(
+            &wireless,
+            "config wifi-device 'radio0'\n option type 'mac80211'\n option band '2g'\n option channel 'auto'\n option disabled '1'\n",
+        )
+        .await
+        .unwrap();
+        let enabled = read_enabled_radios(dir.path()).await.unwrap();
+        assert!(enabled.is_empty());
+        let radios = status(radio(false, false, false, false), user_disabled());
+        assert_eq!(radio_action(&radios, false, &enabled), None);
+    }
+
+    #[test]
+    fn test_radio_action_new_enabled_radio() {
+        let enabled = enabled_radios(&["radio0"]);
+        assert_eq!(radio_action(&BTreeMap::new(), false, &enabled), Some("up"));
+    }
+
+    #[test]
+    fn test_any_radio_on_ignores_disabled_radios() {
+        let radios = status(
+            radio(true, false, false, true),
+            radio(true, false, false, true),
+        );
+        assert!(!any_radio_on(&radios));
+        let radios = status(radio(true, false, false, false), user_disabled());
+        assert!(any_radio_on(&radios));
+        let radios = status(radio(false, true, false, false), user_disabled());
+        assert!(any_radio_on(&radios));
+        let radios = status(radio(false, false, false, false), user_disabled());
+        assert!(!any_radio_on(&radios));
+    }
+
+    #[tokio::test]
+    async fn test_blackout_crontab_has_no_raw_radio_commands() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        tokio::fs::write(
+            dir.path().join("crontab_root"),
+            "0 22 * * 6 wifi down # start-wrt-wifi-blackout\n0 3 * * * other\n",
+        )
+        .await
+        .unwrap();
+
+        blackout_set(
+            ctx.clone(),
+            blackout_request(BlackoutWindows {
+                windows: vec![BlackoutWindow {
+                    start_time: "09:00".to_string(),
+                    end_time: "17:00".to_string(),
+                    days: mask(&[1]),
+                }],
+            }),
+        )
+        .await
+        .unwrap();
+
+        let content = tokio::fs::read_to_string(dir.path().join("crontab_root"))
+            .await
+            .unwrap();
+        assert!(!content.contains("wifi down"), "got: {content}");
+        assert!(content.contains("0 3 * * * other"), "got: {content}");
+        assert!(
+            content.contains("0 9 * * 1 /usr/bin/startwrt-cli wifi blackout-apply"),
+            "got: {content}"
+        );
+        assert!(
+            content.contains("0 17 * * 1 /usr/bin/startwrt-cli wifi blackout-apply"),
+            "got: {content}"
+        );
+    }
+
+    fn blackout_request(windows: BlackoutWindows) -> DeserializeStdin<BlackoutSetRequest> {
+        DeserializeStdin(BlackoutSetRequest {
+            windows,
+            confirm_immediate_blackout: false,
+        })
     }
 
     #[derive(Clone)]
@@ -1713,6 +2530,7 @@ config wifi-iface 'default_radio0'
             WifiRadio {
                 band: "2g".into(),
                 channel: "1".into(),
+                width: None,
                 enabled: true,
                 broadcast: true,
             },
@@ -1769,6 +2587,7 @@ config wifi-iface 'default_radio1'
             WifiRadio {
                 band: "2g".into(),
                 channel: "1".into(),
+                width: None,
                 enabled: true,
                 broadcast: true,
             },
@@ -1778,6 +2597,7 @@ config wifi-iface 'default_radio1'
             WifiRadio {
                 band: "5g".into(),
                 channel: "36".into(),
+                width: None,
                 enabled: true,
                 broadcast: true,
             },
@@ -2663,7 +3483,7 @@ config wifi-iface 'default_radio1'
         days[6] = true; // Saturday
         blackout_set(
             ctx.clone(),
-            DeserializeStdin(BlackoutWindows {
+            blackout_request(BlackoutWindows {
                 windows: vec![BlackoutWindow {
                     start_time: "22:00".to_string(),
                     end_time: "06:00".to_string(),
@@ -2678,8 +3498,14 @@ config wifi-iface 'default_radio1'
             .await
             .unwrap();
         // down fires Saturday (6); up fires the next day, Sunday (0).
-        assert!(content.contains("0 22 * * 6 wifi down"), "got: {content}");
-        assert!(content.contains("0 6 * * 0 wifi up"), "got: {content}");
+        assert!(
+            content.contains("0 22 * * 6 /usr/bin/startwrt-cli wifi blackout-apply"),
+            "got: {content}"
+        );
+        assert!(
+            content.contains("0 6 * * 0 /usr/bin/startwrt-cli wifi blackout-apply"),
+            "got: {content}"
+        );
     }
 
     #[tokio::test]
@@ -2689,7 +3515,7 @@ config wifi-iface 'default_radio1'
 
         let result = blackout_set(
             ctx.clone(),
-            DeserializeStdin(BlackoutWindows {
+            blackout_request(BlackoutWindows {
                 windows: vec![
                     BlackoutWindow {
                         start_time: "09:00".to_string(),
@@ -2717,7 +3543,7 @@ config wifi-iface 'default_radio1'
         // annihilates, leaving nothing to execute, so it's rejected.
         let result = blackout_set(
             ctx.clone(),
-            DeserializeStdin(BlackoutWindows {
+            blackout_request(BlackoutWindows {
                 windows: vec![BlackoutWindow {
                     start_time: "08:00".to_string(),
                     end_time: "08:00".to_string(),
@@ -2737,7 +3563,7 @@ config wifi-iface 'default_radio1'
         // A full-24h window on Monday only: down Monday, up the next day (Tuesday).
         let result = blackout_set(
             ctx.clone(),
-            DeserializeStdin(BlackoutWindows {
+            blackout_request(BlackoutWindows {
                 windows: vec![BlackoutWindow {
                     start_time: "09:00".to_string(),
                     end_time: "09:00".to_string(),
@@ -2758,8 +3584,14 @@ config wifi-iface 'default_radio1'
         let content = tokio::fs::read_to_string(dir.path().join("crontab_root"))
             .await
             .unwrap();
-        assert!(content.contains("0 9 * * 1 wifi down"), "got: {content}");
-        assert!(content.contains("0 9 * * 2 wifi up"), "got: {content}");
+        assert!(
+            content.contains("0 9 * * 1 /usr/bin/startwrt-cli wifi blackout-apply"),
+            "got: {content}"
+        );
+        assert!(
+            content.contains("0 9 * * 2 /usr/bin/startwrt-cli wifi blackout-apply"),
+            "got: {content}"
+        );
     }
 
     #[tokio::test]
@@ -2771,7 +3603,7 @@ config wifi-iface 'default_radio1'
         // "down") must annihilate, leaving down Mon / up Wed and continuous block.
         blackout_set(
             ctx.clone(),
-            DeserializeStdin(BlackoutWindows {
+            blackout_request(BlackoutWindows {
                 windows: vec![BlackoutWindow {
                     start_time: "09:00".to_string(),
                     end_time: "09:00".to_string(),
@@ -2785,10 +3617,16 @@ config wifi-iface 'default_radio1'
         let content = tokio::fs::read_to_string(dir.path().join("crontab_root"))
             .await
             .unwrap();
-        assert!(content.contains("0 9 * * 1 wifi down"), "got: {content}");
-        assert!(content.contains("0 9 * * 3 wifi up"), "got: {content}");
+        assert!(
+            content.contains("0 9 * * 1 /usr/bin/startwrt-cli wifi blackout-apply"),
+            "got: {content}"
+        );
+        assert!(
+            content.contains("0 9 * * 3 /usr/bin/startwrt-cli wifi blackout-apply"),
+            "got: {content}"
+        );
         // Nothing fires at Tue 09:00 — no edge mentions day 2.
-        assert!(!content.contains("* * 2 wifi"), "got: {content}");
+        assert!(!content.contains("* * 2 /usr"), "got: {content}");
     }
 
     #[test]
@@ -2942,32 +3780,393 @@ config wifi-iface 'default_radio1'
         assert!(regdb_countries(b"not a db").is_err());
     }
 
-    #[test]
-    fn test_ap_channels_drops_disabled_and_no_ir() {
-        let iw = "\
-Wiphy phy0
-\tBand 1:
-\t\tFrequencies:
-\t\t\t* 2412 MHz [1] (20.0 dBm)
-\t\t\t* 2467 MHz [12] (20.0 dBm) (no IR)
-\t\t\t* 2484 MHz [14] (disabled)
-\t\tBitrates (non-HT):
-\t\t\t* 1.0 Mbps
-Wiphy phy1
-\tBand 2:
-\t\tFrequencies:
-\t\t\t* 5180 MHz [36] (20.0 dBm)
-\t\t\t* 5260 MHz [52] (20.0 dBm) (no IR, radar detection)
-\t\t\t* 5500 MHz [100] (24.0 dBm) (radar detection)
-\t\t\t  DFS state: usable (for 1234 sec)
-\t\t\t* 5745 MHz [149] (30.0 dBm)
-\tBand 4:
-\t\tFrequencies:
-\t\t\t* 5955 MHz [1] (20.0 dBm)
+    /// `iw phy <phy> channels` on the K1 bench's MT7916 under US rules, trimmed.
+    const IW_CHANNELS_US: &str = "\
+Band 1:
+\t* 2412 MHz [1] 
+\t  Maximum TX power: 17.0 dBm
+\t  Channel widths: 20MHz HT40+
+\t* 2422 MHz [3] 
+\t  Maximum TX power: 17.0 dBm
+\t  Channel widths: 20MHz HT40- HT40+
+\t* 2432 MHz [5] 
+\t  Maximum TX power: 17.0 dBm
+\t  Channel widths: 20MHz HT40- HT40+
+\t* 2442 MHz [7] 
+\t  Maximum TX power: 17.0 dBm
+\t  Channel widths: 20MHz HT40- HT40+
+\t* 2462 MHz [11] 
+\t  Maximum TX power: 17.0 dBm
+\t  Channel widths: 20MHz HT40-
+\t* 2467 MHz [12] (disabled)
+Band 2:
+\t* 5180 MHz [36] 
+\t  Maximum TX power: 23.0 dBm
+\t  Channel widths: 20MHz HT40+ VHT80 VHT160
+\t* 5200 MHz [40] 
+\t  Maximum TX power: 23.0 dBm
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+\t* 5220 MHz [44] 
+\t  Maximum TX power: 23.0 dBm
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+\t* 5240 MHz [48] 
+\t  Maximum TX power: 23.0 dBm
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+\t* 5260 MHz [52] 
+\t  Maximum TX power: 24.0 dBm
+\t  Radar detection
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+\t  DFS state: usable (for 7304 sec)
+\t  DFS CAC time: 60000 ms
+\t* 5280 MHz [56] 
+\t  Maximum TX power: 24.0 dBm
+\t  Radar detection
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+\t  DFS state: usable (for 7304 sec)
+\t  DFS CAC time: 60000 ms
+\t* 5300 MHz [60] 
+\t  Maximum TX power: 24.0 dBm
+\t  Radar detection
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+\t  DFS state: usable (for 7304 sec)
+\t  DFS CAC time: 60000 ms
+\t* 5320 MHz [64] 
+\t  Maximum TX power: 24.0 dBm
+\t  Radar detection
+\t  Channel widths: 20MHz HT40- VHT80 VHT160
+\t  DFS state: usable (for 7304 sec)
+\t  DFS CAC time: 60000 ms
+\t* 5745 MHz [149] 
+\t  Maximum TX power: 30.0 dBm
+\t  Channel widths: 20MHz HT40+ VHT80 VHT160
+\t* 5765 MHz [153] 
+\t  Maximum TX power: 30.0 dBm
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+\t* 5785 MHz [157] 
+\t  Maximum TX power: 30.0 dBm
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+\t* 5805 MHz [161] 
+\t  Maximum TX power: 30.0 dBm
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+\t* 5825 MHz [165] 
+\t  Maximum TX power: 30.0 dBm
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+\t* 5845 MHz [169] 
+\t  Maximum TX power: 27.0 dBm
+\t  No IR
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
 ";
-        let channels = ap_channels(iw);
-        assert_eq!(channels["2g"], [1]);
-        assert_eq!(channels["5g"], [36, 100, 149]);
-        assert_eq!(channels["6g"], [1]);
+
+    fn widths_of(band: &BandChannels) -> Vec<(u32, Vec<u32>)> {
+        band.channels
+            .iter()
+            .map(|c| (c.channel, c.widths.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn test_band_channels_require_every_bonded_channel() {
+        let bands = band_channels(IW_CHANNELS_US);
+        assert_eq!(
+            widths_of(&bands["2g"]),
+            [
+                (1, vec![20, 40]),
+                (3, vec![20, 40]),
+                (5, vec![20]),
+                (7, vec![20, 40]),
+                (11, vec![20, 40]),
+            ]
+        );
+        assert_eq!(bands["2g"].auto_widths, [20, 40]);
+        let five = widths_of(&bands["5g"]);
+        assert_eq!(five[0], (36, vec![20, 40, 80, 160]));
+        assert_eq!(five[4], (52, vec![20, 40, 80, 160]));
+        assert_eq!(five[8], (149, vec![20, 40, 80]));
+        assert_eq!(five[12], (165, vec![20]));
+        assert_eq!(five.len(), 13);
+        assert_eq!(bands["5g"].auto_widths, [20, 40, 80]);
+    }
+
+    #[test]
+    fn test_bonded_channels_follow_openwrt_blocks() {
+        assert_eq!(bonded_channels("2g", 6, 40), Some(vec![6, 10]));
+        assert_eq!(bonded_channels("2g", 7, 40), Some(vec![3, 7]));
+        assert_eq!(bonded_channels("5g", 40, 40), Some(vec![36, 40]));
+        assert_eq!(bonded_channels("5g", 144, 40), Some(vec![140, 144]));
+        assert_eq!(bonded_channels("5g", 44, 80), Some(vec![36, 40, 44, 48]));
+        assert_eq!(
+            bonded_channels("5g", 157, 80),
+            Some(vec![149, 153, 157, 161])
+        );
+        assert_eq!(
+            bonded_channels("5g", 165, 80),
+            Some(vec![165, 169, 173, 177])
+        );
+        assert_eq!(
+            bonded_channels("5g", 112, 160),
+            Some(vec![100, 104, 108, 112, 116, 120, 124, 128])
+        );
+        assert_eq!(bonded_channels("5g", 34, 40), None);
+        assert_eq!(bonded_channels("2g", 1, 80), None);
+    }
+
+    #[test]
+    fn test_split_htmode() {
+        assert_eq!(split_htmode("HT40+"), Some(("HT", 40)));
+        assert_eq!(split_htmode("HE80"), Some(("HE", 80)));
+        assert_eq!(split_htmode("VHT160"), Some(("VHT", 160)));
+        assert_eq!(split_htmode("NOHT"), None);
+        assert_eq!(split_htmode("NONE"), None);
+    }
+
+    fn write_wireless_config_with_htmode(dir: &std::path::Path, htmode_2g: &str, htmode_5g: &str) {
+        write_wireless_config_dual_radio(dir, "TestNet", "TestNet", "");
+        let path = dir.join("wireless");
+        let config = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace(
+                "\toption channel '1'\n",
+                &format!("\toption channel '1'\n\toption htmode '{htmode_2g}'\n"),
+            )
+            .replace(
+                "\toption channel '36'\n",
+                &format!("\toption channel '36'\n\toption htmode '{htmode_5g}'\n"),
+            );
+        std::fs::write(path, config).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_width_round_trips_through_htmode() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_test_configs(dir.path());
+        write_wireless_config_with_htmode(dir.path(), "HT40+", "HE80");
+
+        let wifi = get(ctx.clone()).await.unwrap();
+        assert_eq!(wifi.radios["default_radio0"].width, Some(40));
+        assert_eq!(wifi.radios["default_radio1"].width, Some(80));
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["wireless", "startwrt", "network", "firewall"],
+        )
+        .await
+        .unwrap();
+        let lookup = profiles::Lookup::parse(ctx.clone(), &cfgs).unwrap();
+        let mut radios = make_dual_radios();
+        radios.get_mut("default_radio0").unwrap().width = Some(40);
+        radios.get_mut("default_radio1").unwrap().width = Some(160);
+        let wifi = Wifi { radios, ..wifi };
+        assert_eq!(
+            set_config(&ctx, &mut cfgs, &wifi, &lookup).unwrap(),
+            WifiRestart::Full
+        );
+        dump_all(ctx.uci_root(), cfgs).await.unwrap();
+
+        let written = std::fs::read_to_string(dir.path().join("wireless")).unwrap();
+        assert!(written.contains("option htmode 'HT40+'"), "{written}");
+        assert!(written.contains("option htmode 'HE160'"), "{written}");
+    }
+
+    #[tokio::test]
+    async fn test_set_config_rejects_width_beyond_phy_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_test_configs(dir.path());
+        write_wireless_config_with_htmode(dir.path(), "HT20", "NOHT");
+
+        let wifi = get(ctx.clone()).await.unwrap();
+        assert_eq!(wifi.radios["default_radio1"].width, None);
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["wireless", "startwrt", "network", "firewall"],
+        )
+        .await
+        .unwrap();
+        let lookup = profiles::Lookup::parse(ctx.clone(), &cfgs).unwrap();
+        for (radio, width) in [("default_radio0", 80), ("default_radio1", 40)] {
+            let mut radios = make_dual_radios();
+            radios.get_mut(radio).unwrap().width = Some(width);
+            let wifi = Wifi {
+                radios,
+                ssid: wifi.ssid.clone(),
+                broadcast_separately: false,
+                country: None,
+                passwords: BTreeSet::new(),
+            };
+            let err = set_config(&ctx, &mut cfgs, &wifi, &lookup).unwrap_err();
+            assert_eq!(err.kind, ErrorKind::InvalidValue);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_check_channel_widths_rejects_unusable_blocks() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_test_configs(dir.path());
+        write_wireless_config_with_htmode(dir.path(), "HE20", "HE80");
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["wireless"]).await.unwrap();
+        let bands = band_channels(IW_CHANNELS_US);
+
+        let with_5g = |channel: &str, width: Option<u32>| {
+            let mut radios = make_dual_radios();
+            let radio = radios.get_mut("default_radio1").unwrap();
+            radio.channel = channel.into();
+            radio.width = width;
+            radios
+        };
+
+        assert!(check_channel_widths(&cfgs, &with_5g("165", None), &bands).is_err());
+        assert!(check_channel_widths(&cfgs, &with_5g("165", Some(20)), &bands).is_ok());
+        assert!(check_channel_widths(&cfgs, &with_5g("149", Some(160)), &bands).is_err());
+        assert!(check_channel_widths(&cfgs, &with_5g("36", Some(160)), &bands).is_ok());
+        assert!(check_channel_widths(&cfgs, &with_5g("auto", Some(160)), &bands).is_err());
+        assert!(check_channel_widths(&cfgs, &with_5g("auto", Some(80)), &bands).is_ok());
+        // An unchanged radio is left alone even when its block is unusable.
+        let empty = BTreeMap::new();
+        assert!(check_channel_widths(&cfgs, &with_5g("36", Some(80)), &empty).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_check_channel_widths_covers_a_radio_being_enabled() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_test_configs(dir.path());
+        write_wireless_config_with_htmode(dir.path(), "HE20", "HE80");
+        let path = dir.path().join("wireless");
+        let config = std::fs::read_to_string(&path).unwrap().replace(
+            "\toption channel '36'\n",
+            "\toption channel '165'\n\toption disabled '1'\n",
+        );
+        std::fs::write(path, config).unwrap();
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["wireless"]).await.unwrap();
+        let bands = band_channels(IW_CHANNELS_US);
+
+        let mut radios = make_dual_radios();
+        radios.get_mut("default_radio1").unwrap().channel = "165".into();
+        let err = check_channel_widths(&cfgs, &radios, &bands).unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidValue);
+        radios.get_mut("default_radio1").unwrap().width = Some(20);
+        check_channel_widths(&cfgs, &radios, &bands).unwrap();
+        let mut radios = make_dual_radios_disabled();
+        radios.get_mut("default_radio1").unwrap().channel = "165".into();
+        check_channel_widths(&cfgs, &radios, &bands).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_narrow_unusable_widths() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_test_configs(dir.path());
+        let bands = band_channels(IW_CHANNELS_US);
+        let (dir, bands) = (&dir, &bands);
+        let narrow = |channel: &str, htmode: &str, disabled: bool| {
+            let path = dir.path().join("wireless");
+            write_wireless_config_with_htmode(dir.path(), "HE20", htmode);
+            let config = std::fs::read_to_string(&path).unwrap().replace(
+                "\toption channel '36'\n",
+                &format!(
+                    "\toption channel '{channel}'\n{}",
+                    if disabled {
+                        "\toption disabled '1'\n"
+                    } else {
+                        ""
+                    }
+                ),
+            );
+            std::fs::write(path, config).unwrap();
+            async move {
+                let arena = Arena::new();
+                let mut cfgs = parse_all(dir.path(), &arena, &["wireless"]).await.unwrap();
+                let narrowed = narrow_unusable_widths(&mut cfgs, bands).unwrap();
+                let htmode = cfgs["wireless"]
+                    .sections
+                    .iter()
+                    .find(|s| s.name().as_deref() == Some("radio1"))
+                    .unwrap()
+                    .get::<WifiDevice>()
+                    .unwrap()
+                    .htmode;
+                (narrowed, htmode)
+            }
+        };
+
+        assert_eq!(
+            narrow("165", "HE80", false).await,
+            (
+                vec!["radio1 channel 165 from 80 MHz to 20 MHz".into()],
+                Some("HE20".into())
+            )
+        );
+        assert_eq!(
+            narrow("auto", "HE160", false).await,
+            (
+                vec!["radio1 channel auto from 160 MHz to 80 MHz".into()],
+                Some("HE80".into())
+            )
+        );
+        assert_eq!(
+            narrow("36", "HE160", false).await,
+            (vec![], Some("HE160".into()))
+        );
+        assert_eq!(
+            narrow("165", "HE80", true).await,
+            (vec![], Some("HE80".into()))
+        );
+        assert_eq!(
+            narrow("165", "NOHT", false).await,
+            (vec![], Some("NOHT".into()))
+        );
+        let no_bands = {
+            let arena = Arena::new();
+            write_wireless_config_with_htmode(dir.path(), "HE20", "HE80");
+            let mut cfgs = parse_all(dir.path(), &arena, &["wireless"]).await.unwrap();
+            narrow_unusable_widths(&mut cfgs, &BTreeMap::new()).unwrap()
+        };
+        assert!(no_bands.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_country_change_caps_width() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_test_configs(dir.path());
+        write_wireless_config_with_htmode(dir.path(), "HE40", "HE160");
+
+        let request = |width_5g: Option<u32>| {
+            let mut radios = make_dual_radios();
+            radios.get_mut("default_radio0").unwrap().width = Some(40);
+            radios.get_mut("default_radio1").unwrap().width = width_5g;
+            let mut passwords = BTreeSet::<Password<ProfileIdOpt>>::new();
+            passwords.insert(Password {
+                label: "Admin".into(),
+                profile: None,
+                password: "adminpass1".into(),
+            });
+            Wifi {
+                ssid: "TestNet".into(),
+                broadcast_separately: false,
+                country: Some("US".into()),
+                radios,
+                passwords,
+            }
+        };
+
+        for width in [None, Some(160)] {
+            let err = set(ctx.clone(), DeserializeStdin(request(width)))
+                .await
+                .unwrap_err();
+            assert_eq!(err.kind, ErrorKind::InvalidValue);
+        }
+        set(ctx.clone(), DeserializeStdin(request(Some(80))))
+            .await
+            .unwrap();
+        let written = std::fs::read_to_string(dir.path().join("wireless")).unwrap();
+        assert!(written.contains("option htmode 'HE40'"), "{written}");
+        assert!(written.contains("option htmode 'HE80'"), "{written}");
+        assert!(written.contains("option country 'US'"), "{written}");
     }
 }

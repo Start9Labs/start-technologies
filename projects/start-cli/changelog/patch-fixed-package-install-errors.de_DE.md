@@ -1,0 +1,2 @@
+- Beim manuellen Installieren mit einem aktualisierten StartOS-Server werden vollständige Installationsfehler ausgegeben.
+- Kann keine zur Anfrage passende Paketversion installiert werden, nennt die Fehlermeldung die bereits installierte Version, wenn diese die Installation verhindert.

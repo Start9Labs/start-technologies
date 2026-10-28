@@ -5,6 +5,7 @@
   "compilerOptions": {
     "module": "Node16",
     "strict": true,
+    "rootDir": "./src",
     "outDir": "dist",
     "preserveConstEnums": true,
     "sourceMap": true,

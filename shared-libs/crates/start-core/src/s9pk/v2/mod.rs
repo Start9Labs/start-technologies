@@ -26,6 +26,7 @@ const MAGIC_AND_VERSION: &[u8] = &[0x3b, 0x3b, 0x02];
 pub const SIG_CONTEXT: &str = "s9pk";
 
 pub mod compat;
+mod image;
 pub mod manifest;
 pub mod pack;
 pub mod recipe;
@@ -273,21 +274,12 @@ impl<S: FileSource + Clone> S9pk<S> {
 
 impl<S: From<TmpSource<PackSource>> + FileSource + Clone> S9pk<S> {
     pub async fn load_images(&mut self, tmp_dir: Arc<TmpDir>) -> Result<(), Error> {
-        let id = &self.manifest.id;
-        let version = &self.manifest.version;
         for (image_id, image_config) in &mut self.manifest.images {
             self.manifest_dirty = true;
             for arch in &image_config.arch {
                 image_config
                     .source
-                    .load(
-                        tmp_dir.clone(),
-                        id,
-                        version,
-                        image_id,
-                        arch,
-                        self.archive.contents_mut(),
-                    )
+                    .load(tmp_dir.clone(), image_id, arch, self.archive.contents_mut())
                     .await?;
             }
             image_config.source = ImageSource::Packed;

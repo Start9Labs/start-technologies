@@ -33,7 +33,7 @@ Each VPN server row has an actions menu:
 
 - **Enable** / **Disable** — Toggle the server without deleting it. While disabled, clients cannot connect.
 - **Manage clients** — Open the client management page (see below).
-- **Edit** — Change the label, endpoint, Security Profile, or port, then click "Save VPN".
+- **Edit** — Change the label, endpoint, or port, then click "Save VPN". A VPN server belongs to its Security Profile, so moving it to another profile means deleting it and adding a new one.
 - **Delete** — Remove the server (see [Removing a VPN Server](#removing-a-vpn-server)).
 
 ## Managing Clients
@@ -42,7 +42,7 @@ Each VPN server has a client management page listing all peers. Navigate to a VP
 
 ### Adding a Client
 
-1. Select the VPN server and click "Add".
+1. Open the VPN server's client list ("Manage clients" in its actions menu) and click "Add".
 
 1. Configure the client:
    - **Label** — A name for the client (e.g. "My iPhone", "Work Laptop").
@@ -57,27 +57,27 @@ Each VPN server has a client management page listing all peers. Navigate to a VP
 
 ### Viewing Client Configuration
 
-Right after a client is created, its full configuration is displayed in two formats:
+Right after a client is created, its full configuration is displayed in two formats. It opens blurred — click the eye icon to reveal it before copying, downloading, or scanning it.
 
 - **File** — Displays the configuration as text. Use the copy button to copy to clipboard, or the download button to save as a `.conf` file that WireGuard apps can import.
 - **QR** — Displays the configuration as a QR code. Scan with the WireGuard mobile app to configure the client without manual entry.
 
+If you entered the device's own public key, the configuration is shown as text only, with a placeholder where the private key belongs. Replace the placeholder with the device's private key, or copy the other values, including the preshared key, into the device's existing WireGuard tunnel.
+
 > [!IMPORTANT]
-> This is the only time the full configuration is available. The auto-generated private key is never stored on the router, so download or copy the configuration (or scan the QR code) before closing the dialog. The "View Config" action on the client list later shows the configuration with a placeholder where the private key belongs. If you lose the configuration, delete the client and create a new one.
+> This is the only time the full configuration is available. The auto-generated private key is never stored on the router, so download or copy the configuration (or scan the QR code) before closing the dialog. The "View Config" action on the client list later shows the configuration without its private key or preshared key. If you lose the configuration, delete the client and create a new one.
 
 ### Changing Client Routing
 
-You can switch between routing modes from the actions menu on the client list:
-
-- **Switch to all traffic** — Full tunnel. All Internet traffic routes through the VPN.
-- **Switch to LAN only** — Split tunnel. Only local network traffic uses the tunnel.
-
-> [!WARNING]
-> Changing the routing mode deletes the existing peer and creates a new one. You will need to reconfigure the device with the new configuration.
+A client's routing is set when it is created. To change it, delete the client and add it again with "Route all traffic through tunnel" set the way you want, then import the new configuration on the device.
 
 ### Renaming a Client
 
 Select "Rename" from the client's actions menu to change its display name.
+
+### Allowing DNS Record Publishing
+
+Select "Allow DNS record publishing" from the client's actions menu to let it publish DNS names into the router, with the same rules as the [device permission](devices.md#device-detail-page). It is off by default, and enabling asks for confirmation; grant it only to a client you trust. "Revoke DNS record publishing" removes the client's published names immediately.
 
 ### Removing a Client
 

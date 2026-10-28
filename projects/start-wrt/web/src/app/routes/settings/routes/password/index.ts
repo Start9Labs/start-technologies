@@ -6,6 +6,7 @@ import {
   ValidationErrors,
   Validators,
 } from '@angular/forms'
+import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import { tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
 import {
   TuiError,
@@ -16,8 +17,9 @@ import {
   TuiTitle,
 } from '@taiga-ui/core'
 import { provideTranslatedValidationErrors } from 'src/app/i18n/validation-errors'
-import { TuiPassword } from '@taiga-ui/kit'
+import { TUI_CONFIRM, TuiPassword } from '@taiga-ui/kit'
 import { TuiHeader } from '@taiga-ui/layout'
+import { filter } from 'rxjs'
 import { Footer } from 'src/app/components/footer'
 import { Form } from 'src/app/components/form'
 import { ActionService } from 'src/app/services/action.service'
@@ -92,6 +94,7 @@ function passwordsMatch(control: AbstractControl): ValidationErrors | null {
 export default class Password {
   private readonly api = inject(ApiService)
   private readonly actions = inject(ActionService)
+  private readonly dialogs = inject(TuiResponsiveDialogService)
   private readonly i18n = inject(i18nPipe)
 
   public readonly form = inject(NonNullableFormBuilder).group(
@@ -103,20 +106,41 @@ export default class Password {
     { validators: passwordsMatch },
   )
 
-  async onSubmit(): Promise<void> {
+  onSubmit(): void {
     if (this.form.invalid) {
       tuiMarkControlAsTouchedAndValidate(this.form)
-    } else if (
-      await this.actions.run(
-        () =>
-          this.api.setPassword({
-            oldPassword: this.form.value.old!,
-            newPassword: this.form.value.password!,
-          }),
-        { success: this.i18n.transform('Password changed successfully') },
-      )
-    ) {
-      this.form.reset()
+      return
     }
+
+    this.dialogs
+      .open(TUI_CONFIRM, {
+        label: this.i18n.transform('Change Password'),
+        data: {
+          content: this.i18n.transform(
+            'Changing the password signs out every other browser and startwrt-cli login. This browser stays signed in.',
+          ),
+          yes: this.i18n.transform('Change Password'),
+          no: this.i18n.transform('Cancel'),
+        },
+      })
+      .pipe(filter(Boolean))
+      .subscribe(async () => {
+        if (
+          await this.actions.run(
+            () =>
+              this.api.setPassword({
+                oldPassword: this.form.value.old!,
+                newPassword: this.form.value.password!,
+              }),
+            {
+              success: this.i18n.transform(
+                'Password changed. Every other browser and startwrt-cli login was signed out.',
+              ),
+            },
+          )
+        ) {
+          this.form.reset()
+        }
+      })
   }
 }

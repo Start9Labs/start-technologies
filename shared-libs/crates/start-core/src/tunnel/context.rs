@@ -19,17 +19,16 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tokio::sync::broadcast::Sender;
 use tracing::instrument;
-use url::Url;
 
 use crate::GatewayId;
+use crate::context::CliContext;
 use crate::context::config::ContextConfig;
-use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::{NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::middleware::auth::Auth;
 use crate::middleware::auth::local::{LocalAuthContext, dial_addr, local_auth_header};
 use crate::middleware::auth::signature::{NonceCache, url_host_str};
 use crate::middleware::cors::Cors;
-use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord};
+use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord, UpdateAuth};
 use crate::net::forward::{PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6};
 use crate::net::static_server::{EMPTY_DIR, UiContext};
 use crate::prelude::*;
@@ -262,9 +261,9 @@ impl TunnelContext {
             &format!("iifname \"{WIREGUARD_INTERFACE_NAME}\" ct state new accept"),
         )
         .await?;
-        // Let clients originate IPv6 out through the tunnel (return traffic is
-        // covered by the v6 base-established rule). Inbound IPv6 to a client is a
-        // firewall pinhole, opened per-port via PCP / the manual pinhole API.
+        // The ct rule loads conntrack before its sysctls are accessed.
+        crate::tunnel::conntrack::configure().await.log_err();
+        // Inbound IPv6 to a client requires a firewall pinhole.
         nft_rule_v6(
             "forward",
             "wg-forward",
@@ -273,9 +272,7 @@ impl TunnelContext {
             &format!("iifname \"{WIREGUARD_INTERFACE_NAME}\" ct state new accept"),
         )
         .await?;
-        // Clamp forwarded-SYN MSS to the WireGuard path MTU, else large TLS
-        // ClientHellos (post-quantum key shares) get dropped after encapsulation.
-        // See start-os#3261.
+        // Large TLS ClientHellos must fit the WireGuard path MTU.
         nft_rule(
             "mangle_forward",
             "wg-mss-clamp",
@@ -308,6 +305,14 @@ impl TunnelContext {
                             .result
                             .log_err();
                     });
+                },
+                // Every tunnel client holds a PSK; an unsigned UPDATE is refused.
+                |_, _, auth: UpdateAuth| async move {
+                    if auth.tsig {
+                        hickory_server::proto::op::ResponseCode::NoError
+                    } else {
+                        hickory_server::proto::op::ResponseCode::Refused
+                    }
                 },
             )
         };
@@ -865,39 +870,6 @@ impl CallRemote<TunnelContext> for CliContext {
             self,
             url,
             headers,
-            sig_ctx.as_deref(),
-            method,
-            params,
-        )
-        .await
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize, Parser)]
-#[group(skip)]
-pub struct TunnelUrlParams {
-    #[arg(help = "help.arg.tunnel-url")]
-    pub tunnel: Url,
-}
-
-impl CallRemote<TunnelContext, TunnelUrlParams> for RpcContext {
-    async fn call_remote(
-        &self,
-        mut method: &str,
-        _: OrdMap<&'static str, Value>,
-        params: Value,
-        TunnelUrlParams { tunnel }: TunnelUrlParams,
-    ) -> Result<Value, RpcError> {
-        let url = tunnel.join("rpc/v0")?;
-        method = method.strip_prefix("tunnel.").unwrap_or(method);
-
-        let sig_ctx = url.host_str().map(InternedString::from_display);
-
-        crate::middleware::auth::signature::call_remote_with_client(
-            self,
-            self.client.get(),
-            url,
-            HeaderMap::new(),
             sig_ctx.as_deref(),
             method,
             params,
