@@ -1,0 +1,3 @@
+- Ustawienie rejestru `product` (`startos` lub `startwrt`) wskazuje system operacyjny, którego wydania udostępnia. `startwrt: true` nadal wybiera StartWRT.
+- Aktualny serwer StartOS lub router StartWRT pytający o aktualizacje rejestr innego produktu otrzymuje błąd wskazujący produkt obsługiwany przez rejestr.
+- Klienci deklarujący obsługę aktualnych etykiet podpisów otrzymują je niezależnie od produktu i wersji.

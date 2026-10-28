@@ -7631,7 +7631,7 @@ dependencies = [
 
 [[package]]
 name = "start-cli"
-version = "2.5.3"
+version = "2.6.0"
 dependencies = [
  "start-core",
  "tracing",

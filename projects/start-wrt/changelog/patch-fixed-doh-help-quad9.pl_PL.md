@@ -1,0 +1,1 @@
+- Pomoc DNS-over-HTTPS nie wymienia już Quad9 (`9.9.9.9`) jako serwera do użycia.

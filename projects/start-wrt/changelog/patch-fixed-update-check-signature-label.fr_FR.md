@@ -1,0 +1,2 @@
+- Le routeur trouve les mises à jour sur les registres exécutant start-registry 1.2.0 ou ultérieur.
+- Si la recherche de mises à jour échoue, **Système > Paramètres > Général** signale cet échec au lieu d’indiquer qu’aucune mise à jour n’est disponible.

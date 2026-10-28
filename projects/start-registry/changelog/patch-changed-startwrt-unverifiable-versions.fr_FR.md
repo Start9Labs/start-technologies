@@ -1,0 +1,1 @@
+- Les routeurs StartWRT antérieurs à 1.3.1 ne se voient plus proposer de versions qu’ils ne peuvent pas vérifier.

@@ -9,11 +9,11 @@ use imbl_value::Value;
 use ipnet::IpNet;
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
-use rpc_toolkit::{from_fn_async, from_fn_async_local, HandlerExt, ParentHandler};
+use rpc_toolkit::{HandlerExt, ParentHandler, from_fn_async, from_fn_async_local};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use uciedit::openwrt::{FirewallRule, FirewallTarget};
-use uciedit::{dump_all, parse_all, Arena, Configs, TypedSection};
+use uciedit::{Arena, Configs, TypedSection, dump_all, parse_all};
 
 use crate::error::{Error, ErrorKind};
 use crate::invoke::Invoke;
@@ -124,20 +124,15 @@ async fn newer_versions(_ctx: ServerContext) -> Result<Vec<VersionInfo>, Error> 
     let mut result: Vec<VersionInfo> = versions
         .into_iter()
         .filter(|(ver, info)| {
-            // Only include versions that have an asset for our platform
-            // and are newer than the current version (semver comparison)
             crate::update::asset_for_platform(&info, &platform).is_some()
                 && is_newer_version(ver, current)
         })
         .map(|(ver, info)| VersionInfo {
             version: ver,
-            release_notes: info.release_notes,
+            release_notes: info.release_notes.localized_for("en_US").into(),
         })
         .collect();
-    // Sort ascending by semver precedence. The map above iterates in
-    // lexicographic key order, which mis-ranks multi-digit pre-releases
-    // (`0.1.0-beta.10` sorts before `0.1.0-beta.9`); the frontend treats the
-    // last element as the newest, so the ordering must be semver-correct.
+    // The frontend treats the last version as newest.
     result.sort_by(|a, b| cmp_versions(&a.version, &b.version));
     Ok(result)
 }
@@ -1072,7 +1067,9 @@ mod tests {
     }
 
     fn proc_table(rows: &[(&str, u16, &str, &str, u64)]) -> String {
-        let mut table = String::from("  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n");
+        let mut table = String::from(
+            "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n",
+        );
         for (i, (local, port, remote, state, inode)) in rows.iter().enumerate() {
             table.push_str(&format!(
                 "{i:4}: {} {} {state} 00000000:00000000 00:00000000 00000000     0        0 {inode} 1 0000000000000000 20 4 30 10 -1\n",
@@ -1362,12 +1359,16 @@ config zone wan
         let src_ips = get_remote_rule_src_ips(dir.path()).await;
         assert!(src_ips.iter().all(|s| s.is_some()));
         assert!(src_ips.iter().any(|s| s.as_deref() == Some("10.0.0.0/8")));
-        assert!(src_ips
-            .iter()
-            .any(|s| s.as_deref() == Some("172.16.0.0/12")));
-        assert!(src_ips
-            .iter()
-            .any(|s| s.as_deref() == Some("192.168.0.0/16")));
+        assert!(
+            src_ips
+                .iter()
+                .any(|s| s.as_deref() == Some("172.16.0.0/12"))
+        );
+        assert!(
+            src_ips
+                .iter()
+                .any(|s| s.as_deref() == Some("192.168.0.0/16"))
+        );
     }
 
     #[tokio::test]
@@ -1412,12 +1413,16 @@ config zone wan
             "default-mode rules must be src_ip-scoped: {src_ips:?}"
         );
         assert!(src_ips.iter().any(|s| s.as_deref() == Some("10.0.0.0/8")));
-        assert!(src_ips
-            .iter()
-            .any(|s| s.as_deref() == Some("172.16.0.0/12")));
-        assert!(src_ips
-            .iter()
-            .any(|s| s.as_deref() == Some("192.168.0.0/16")));
+        assert!(
+            src_ips
+                .iter()
+                .any(|s| s.as_deref() == Some("172.16.0.0/12"))
+        );
+        assert!(
+            src_ips
+                .iter()
+                .any(|s| s.as_deref() == Some("192.168.0.0/16"))
+        );
         assert!(src_ips.iter().any(|s| s.as_deref() == Some("fc00::/7")));
     }
 
@@ -1486,12 +1491,16 @@ config zone wan
         }
         let src_ips = get_remote_rule_src_ips(dir.path()).await;
         assert!(src_ips.iter().any(|s| s.as_deref() == Some("10.0.0.0/8")));
-        assert!(src_ips
-            .iter()
-            .any(|s| s.as_deref() == Some("172.16.0.0/12")));
-        assert!(src_ips
-            .iter()
-            .any(|s| s.as_deref() == Some("192.168.0.0/16")));
+        assert!(
+            src_ips
+                .iter()
+                .any(|s| s.as_deref() == Some("172.16.0.0/12"))
+        );
+        assert!(
+            src_ips
+                .iter()
+                .any(|s| s.as_deref() == Some("192.168.0.0/16"))
+        );
     }
 
     #[tokio::test]
