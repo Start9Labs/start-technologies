@@ -468,7 +468,7 @@ Un nom descriptif pour ce mot de passe, tel que « Maison » ou « Réseau invit
 
 ### Mot de passe
 
-Le mot de passe que les appareils utiliseront pour se connecter. Doit comporter au moins 8 caractères. Utilisez le bouton de génération pour créer un mot de passe aléatoire fort. Le modifier déconnecte les appareils qui utilisent l’ancien mot de passe jusqu’à ce qu’ils se reconnectent avec le nouveau.
+Le mot de passe que les appareils utiliseront pour se connecter. Doit comporter au moins 8 caractères. Utilisez le bouton de génération pour créer un mot de passe aléatoire fort. Modifier un mot de passe peut déconnecter brièvement tous les appareils Wi-Fi. Les appareils qui utilisent l’ancien mot de passe doivent se reconnecter avec le nouveau.
 
 ### Profil de sécurité
 

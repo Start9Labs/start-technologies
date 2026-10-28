@@ -77,7 +77,7 @@ export interface WifiPasswordDialogResult {
       @if (passwordChanged()) {
         <div tuiNotification appearance="info">
           {{
-            'Devices using the old password will be disconnected until they reconnect with the new one.'
+            'Changing this password may briefly disconnect all Wi-Fi devices. Devices using the old password must reconnect with the new one.'
               | i18n
           }}
         </div>
