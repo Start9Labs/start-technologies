@@ -819,8 +819,7 @@ mod tests {
 
     #[tokio::test]
     async fn maintenance_revisions_migrate_and_roll_back_without_changing_service_data() {
-        for (from, to, migration_revision) in [("0.4.0.3", "0.4.0.4", 0), ("0.4.0.4", "0.4.0.5", 1)]
-        {
+        for (from, to, revision) in [("0.4.0.3", "0.4.0.4", 0), ("0.4.0.4", "0.4.0.5", 2)] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()
                 .as_version_t()
@@ -855,10 +854,7 @@ mod tests {
                     .len(),
                 1
             );
-            assert_eq!(
-                applied_migration_revision(&mut db).unwrap(),
-                migration_revision
-            );
+            assert_eq!(applied_migration_revision(&mut db).unwrap(), revision);
             assert_eq!(db["public"]["packageData"], packages);
             rollback_to_unchecked(&current, &previous, &mut db).unwrap();
             assert_eq!(db["public"]["serverInfo"]["version"], json!(from));

@@ -1,0 +1,2 @@
+- **Öffentliche Domains zu Schnittstellen mit Portbereichen hinzufügen.** Für Dienste, deren Schnittstellen einen Portbereich bereitstellen, lassen sich öffentliche Domains über die Weboberfläche oder die CLI hinzufügen.
+- Aktivierte Portbereiche behalten bei der Prüfung auf Duplikate die Zuordnung ihrer konfigurierten Domains.
