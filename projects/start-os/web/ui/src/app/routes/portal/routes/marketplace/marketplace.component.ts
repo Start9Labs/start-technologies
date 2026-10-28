@@ -10,10 +10,12 @@ import {
   MarketplaceTileComponent,
 } from '@start9labs/marketplace'
 import { i18nPipe } from '@start9labs/shared'
+import { TuiButton, TuiDataList, TuiDropdown, TuiIcon } from '@taiga-ui/core'
 import { tap } from 'rxjs'
 import { ConfigService } from 'src/app/services/config.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { StorageService } from 'src/app/services/storage.service'
+import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
 import { TitleDirective } from 'src/app/services/title.service'
 
 import { MarketplaceControlsComponent } from './components/controls.component'
@@ -28,6 +30,24 @@ import { MarketplaceControlsComponent } from './components/controls.component'
     >
       <marketplace-registry-select />
       <a marketplacePackageLink actions></a>
+      <button
+        headerActions
+        tuiIconButton
+        tuiDropdown
+        tuiDropdownAuto
+        tuiDropdownAlign="end"
+        appearance="icon"
+        iconStart="@tui.ellipsis"
+        size="s"
+      >
+        {{ 'More' | i18n }}
+        <tui-data-list *tuiDropdown="let close">
+          <button tuiOption (click)="close(); trust.manage()">
+            <tui-icon icon="@tui.key-round" />
+            {{ 'Manage trusted keyrings' | i18n }}
+          </button>
+        </tui-data-list>
+      </button>
       <ng-template let-pkg>
         <button [marketplaceTile]="pkg">
           <ng-template let-resolved>
@@ -53,6 +73,10 @@ import { MarketplaceControlsComponent } from './components/controls.component'
     FormsModule,
     TitleDirective,
     i18nPipe,
+    TuiButton,
+    TuiDataList,
+    TuiDropdown,
+    TuiIcon,
     MarketplaceComponent,
     MarketplaceControlsComponent,
     MarketplacePackageLinkComponent,
@@ -71,10 +95,7 @@ export default class Marketplace {
       tap(params => {
         const registry = params.get('registry')
 
-        // Only override the query from the URL when `search` is explicitly
-        // present (e.g. a deep link from a dependency tile). Otherwise we'd
-        // wipe out the user's typed search every time another query param
-        // changes (such as `id`/`flavor` when opening a service drawer).
+        // Drawer query changes preserve the typed search.
         if (params.has('search')) {
           this.query.set(params.get('search') || '')
         }
@@ -95,6 +116,7 @@ export default class Marketplace {
     )
     .subscribe()
 
+  protected readonly trust = inject(TrustedKeysService)
   protected readonly category = signal('all')
   protected readonly query = signal('')
   protected readonly registry = toSignal(

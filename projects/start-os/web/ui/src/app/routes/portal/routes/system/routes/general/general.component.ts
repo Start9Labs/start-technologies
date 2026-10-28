@@ -109,7 +109,7 @@ import { UPDATE } from './update.component'
           {{ 'More' | i18n }}
           <tui-data-list *tuiDropdown="let close">
             <button tuiOption (click)="close(); trust.manage('os')">
-              <tui-icon icon="@tui.key" />
+              <tui-icon icon="@tui.key-round" />
               {{ 'Manage trusted keyrings' | i18n }}
             </button>
           </tui-data-list>

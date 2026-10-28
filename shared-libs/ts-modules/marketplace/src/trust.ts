@@ -9,7 +9,6 @@ export type TrustContext = RPC.RpcParamType<
 
 export abstract class MarketplaceTrust {
   abstract readonly keys: Signal<Record<string, T.TrustedKey> | undefined>
-  abstract manage(): void
 }
 
 export function packageSigners(

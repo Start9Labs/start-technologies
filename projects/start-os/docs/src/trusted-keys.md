@@ -6,7 +6,7 @@ Trusted keyrings group the public keys whose signatures your server accepts for 
 
 Open **Manage trusted keyrings** from either location:
 
-- **Marketplace**: open the registry selector and use the key-icon button next to **Add**.
+- **Marketplace**: open the overflow menu next to the sort selector.
 - **System → General Settings**: open the **Software Update** card's overflow menu.
 
 Each named keyring contains one or more public keys. Keyrings are shared between both locations, but their switches are independent: enabling a keyring in the Marketplace does not enable it for OS updates.

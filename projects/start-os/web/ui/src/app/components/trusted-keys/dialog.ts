@@ -22,7 +22,7 @@ import { ADD_TRUSTED_KEY } from './form'
 @Component({
   template: `
     <header tuiHeader>
-      <tui-icon icon="@tui.key" />
+      <tui-icon icon="@tui.key-round" />
       <h2 tuiTitle [id]="context.id">{{ 'Manage trusted keyrings' | i18n }}</h2>
       <aside tuiAccessories>
         <button

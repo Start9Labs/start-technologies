@@ -26,7 +26,6 @@ import {
 
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreIconDirective } from './store-icon.directive'
-import { MarketplaceTrust } from '../trust'
 
 @Component({
   selector: 'marketplace-registry-select',
@@ -50,17 +49,6 @@ import { MarketplaceTrust } from '../trust'
         <tui-data-list *tuiDropdown size="m">
           <div class="g-title">
             <small>{{ 'Saved Registries' | i18n }}</small>
-            @if (trust; as trust) {
-              <button
-                tuiButton
-                size="xs"
-                appearance="flat-grayscale"
-                iconStart="@tui.key"
-                (click)="open = false; trust.manage()"
-              >
-                {{ 'Manage trusted keyrings' | i18n }}
-              </button>
-            }
             <button
               tuiButton
               size="xs"
@@ -143,8 +131,6 @@ import { MarketplaceTrust } from '../trust'
 
     .g-title {
       justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 0.5rem;
       margin: 0.5rem 0.5rem 0.25rem;
     }
   `,
@@ -166,7 +152,6 @@ export class MarketplaceRegistrySelectComponent {
   private readonly marketplace = inject(AbstractMarketplaceService)
   private readonly router = inject(Router)
 
-  protected readonly trust = inject(MarketplaceTrust, { optional: true })
   protected open = false
   protected readonly breakpoint = inject(TUI_BREAKPOINT)
 

@@ -4,13 +4,13 @@ The Marketplace is where you discover services to install on your StartOS server
 
 ## Registry System and Navigation
 
-Each registry in the Marketplace is maintained independently. When you open the Marketplace, you browse one registry at a time. To switch between registries, click the arrows underneath the current registry title. A registry that declares a description shows it above its services.
+Each registry in the Marketplace is maintained independently. When you open the Marketplace, you browse one registry at a time. To switch between registries, open the registry selector above the search field. A registry that declares a description shows it above its services.
 
 StartOS ships with two [default registries](default-registries.md): the **Start9 Registry** and the **Community Registry**. You can also add [alternative registries](alternative-registries.md) or [sideload](sideloading.md) packages directly.
 
 ## Package Signers
 
-Package details show **Signed by** above **Version**, listing the enabled keyrings whose keys sign the selected package. The install button is disabled when no trusted signer matches. Open **Manage trusted keyrings** next to **Add** in the registry selector to manage [trusted keyrings](trusted-keys.md).
+Package details show **Signed by** above **Version**, listing the enabled keyrings whose keys sign the selected package. The install button is disabled when no trusted signer matches. Open **Manage trusted keyrings** from the overflow menu next to the sort selector to manage [trusted keyrings](trusted-keys.md).
 
 ## Open Ecosystem
 
