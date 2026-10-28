@@ -32,7 +32,7 @@ pub fn initial_signers() -> TrustedOsUpdateSigners {
     .into_iter()
     .map(|(label, key)| {
         (
-            key.parse::<AnyVerifyingKey>().unwrap().interned_pem(),
+            key.parse::<AnyVerifyingKey>().unwrap().interned_der64(),
             TrustedOsUpdateSigner { label: label.to_owned() },
         )
     })
@@ -129,7 +129,7 @@ fn add_signer(
 ) -> Result<(), Error> {
     use std::collections::btree_map::Entry;
 
-    match signers.entry(params.key.interned_pem()) {
+    match signers.entry(params.key.interned_der64()) {
         Entry::Vacant(entry) => {
             entry.insert(TrustedOsUpdateSigner {
                 label: params.label,
@@ -148,7 +148,7 @@ fn get_signer(
     key: &AnyVerifyingKey,
 ) -> Result<TrustedOsUpdateSigner, Error> {
     signers
-        .get(&key.interned_pem())
+        .get(&key.interned_der64())
         .cloned()
         .ok_or_else(signer_not_found)
 }
@@ -158,7 +158,7 @@ fn update_signer(
     params: SetOsUpdateSignerParams,
 ) -> Result<(), Error> {
     signers
-        .get_mut(&params.key.interned_pem())
+        .get_mut(&params.key.interned_der64())
         .ok_or_else(signer_not_found)?
         .label = params.label;
     Ok(())
@@ -166,7 +166,7 @@ fn update_signer(
 
 fn remove_signer(signers: &mut TrustedOsUpdateSigners, key: &AnyVerifyingKey) -> Result<(), Error> {
     signers
-        .remove(&key.interned_pem())
+        .remove(&key.interned_der64())
         .ok_or_else(signer_not_found)?;
     Ok(())
 }
@@ -344,7 +344,7 @@ mod tests {
         let parsed =
             SetOsUpdateSignerParams::try_parse_from(["add", key.as_ref(), "--label", "test"])
                 .unwrap();
-        assert_eq!(parsed.key.interned_pem(), key);
+        assert_eq!(parsed.key.interned_der64(), key);
         assert_eq!(parsed.label, "test");
         assert!(SetOsUpdateSignerParams::try_parse_from(["add", key.as_ref()]).is_err());
         assert!(

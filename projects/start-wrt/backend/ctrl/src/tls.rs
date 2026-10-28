@@ -18,7 +18,7 @@ use startos::net::ssl::{cert_is_unexpired, root_ca_config, CertStore};
 use startos::net::tls::{TlsHandler, TlsHandlerAction};
 use startos::net::web_server::{extract, Accept, ExtractVisitor, TcpMetadata};
 use startos::prelude::{HasModel, Model, PatchDb, TypedPatchDb};
-use startos::util::serde::Pem;
+use startos::util::serde::{Der64, Pem};
 use visit_rs::Visit;
 
 use crate::prelude::*;
@@ -57,9 +57,9 @@ impl DbAccessMut<CertStore> for CertDatabase {
 fn local_store() -> Result<CertStore, Error> {
     let ((root_key, root_cert), (int_key, int_cert)) = read_ca_chain()?;
     Ok(CertStore {
-        root_key: Pem::new(root_key),
+        root_key: Der64::new(root_key),
         root_cert: Pem::new(root_cert),
-        int_key: Pem::new(int_key),
+        int_key: Der64::new(int_key),
         int_cert: Pem::new(int_cert),
         leaves: BTreeMap::new(),
     })
@@ -209,9 +209,9 @@ mod tests {
         let int_key = gen_nistp256().unwrap();
         let int_cert = make_int_cert((&root_key, &root_cert), &int_key, &branding).unwrap();
         CertStore {
-            root_key: Pem::new(root_key),
+            root_key: Der64::new(root_key),
             root_cert: Pem::new(root_cert),
-            int_key: Pem::new(int_key),
+            int_key: Der64::new(int_key),
             int_cert: Pem::new(int_cert),
             leaves: BTreeMap::new(),
         }
@@ -223,9 +223,9 @@ mod tests {
             PKey::private_key_from_der(&k.private_key_to_der().unwrap()).unwrap()
         };
         CertStore {
-            root_key: Pem::new(key(&store.root_key.0)),
+            root_key: Der64::new(key(&store.root_key.0)),
             root_cert: Pem::new(store.root_cert.0.clone()),
-            int_key: Pem::new(key(&store.int_key.0)),
+            int_key: Der64::new(key(&store.int_key.0)),
             int_cert: Pem::new(store.int_cert.0.clone()),
             leaves: BTreeMap::new(),
         }

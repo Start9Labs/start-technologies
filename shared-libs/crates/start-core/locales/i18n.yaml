@@ -389,6 +389,27 @@ setup.password-required:
   pl_PL: "Hasło jest wymagane do nowej konfiguracji"
 
 # system.rs
+system.disk-health.check-failed:
+  en_US: "Could not check Btrfs allocation"
+  de_DE: "Btrfs-Speicherzuweisung konnte nicht geprüft werden"
+  es_ES: "No se pudo comprobar la asignación de espacio de Btrfs"
+  fr_FR: "Impossible de vérifier l’allocation de l’espace Btrfs"
+  pl_PL: "Nie udało się sprawdzić przydziału miejsca Btrfs"
+
+system.disk-health.low-unallocated-message:
+  en_US: "The data filesystem at %{path} has little unallocated space left for Btrfs metadata. Services may fail to write even when disk metrics show free space. Weekly maintenance reclaims unused chunks; if this warning persists, free space or expand the data drive."
+  de_DE: "Das Daten-Dateisystem unter %{path} hat nur noch wenig nicht zugewiesenen Speicher für Btrfs-Metadaten. Schreibvorgänge von Diensten können fehlschlagen, obwohl die Speicheranzeige freien Platz meldet. Die wöchentliche Wartung gibt ungenutzte Chunks frei. Wenn diese Warnung bestehen bleibt, geben Sie Speicher frei oder erweitern Sie das Datenlaufwerk."
+  es_ES: "El sistema de archivos de datos en %{path} tiene poco espacio sin asignar para los metadatos de Btrfs. Los servicios pueden fallar al escribir aunque las métricas indiquen espacio libre. El mantenimiento semanal recupera bloques sin usar; si esta advertencia persiste, libere espacio o amplíe la unidad de datos."
+  fr_FR: "Le système de fichiers de données à %{path} dispose de peu d’espace non alloué pour les métadonnées Btrfs. Les écritures des services peuvent échouer même si les indicateurs affichent de l’espace libre. La maintenance hebdomadaire récupère les blocs inutilisés ; si cet avertissement persiste, libérez de l’espace ou agrandissez le disque de données."
+  pl_PL: "System plików danych w %{path} ma mało nieprzydzielonego miejsca na metadane Btrfs. Zapis danych przez usługi może się nie udać, nawet gdy wskaźniki pokazują wolne miejsce. Cotygodniowa konserwacja odzyskuje nieużywane bloki; jeśli ostrzeżenie nie znika, zwolnij miejsce lub powiększ dysk danych."
+
+system.disk-health.low-unallocated-title:
+  en_US: "Data drive metadata space is low"
+  de_DE: "Wenig Speicher für Metadaten auf dem Datenlaufwerk"
+  es_ES: "Poco espacio para metadatos en la unidad de datos"
+  fr_FR: "Espace insuffisant pour les métadonnées du disque de données"
+  pl_PL: "Mało miejsca na metadane na dysku danych"
+
 system.epp-not-available:
   en_US: "Energy performance preference %{epp} not available"
   de_DE: "Energie-Leistungs-Präferenz %{epp} nicht verfügbar"
@@ -1168,7 +1189,20 @@ disk.main.running-e2fsck:
   fr_FR: "Exécution de e2fsck avant la conversion de %{name} d'ext4 vers btrfs"
   pl_PL: "Uruchamianie e2fsck przed konwersją %{name} z ext4 na btrfs"
 
-# disk/util.rs
+disk.mount.filesystem.cifs.hostname-unresolved:
+  en_US: "Failed to resolve hostname %{hostname} using %{resolver}: %{error}"
+  de_DE: "Hostname %{hostname} konnte über %{resolver} nicht aufgelöst werden: %{error}"
+  es_ES: "No se pudo resolver el nombre de host %{hostname} mediante %{resolver}: %{error}"
+  fr_FR: "Impossible de résoudre le nom d'hôte %{hostname} via %{resolver} : %{error}"
+  pl_PL: "Nie udało się rozwiązać nazwy hosta %{hostname} przy użyciu %{resolver}: %{error}"
+
+disk.mount.filesystem.cifs.no-dns-addresses:
+  en_US: "DNS returned no addresses"
+  de_DE: "DNS hat keine Adressen zurückgegeben"
+  es_ES: "DNS no devolvió ninguna dirección"
+  fr_FR: "DNS n'a renvoyé aucune adresse"
+  pl_PL: "DNS nie zwrócił żadnych adresów"
+
 disk.util.not-canonical-block-device:
   en_US: "not a canonical block device"
   de_DE: "kein kanonisches Blockgerät"
@@ -1302,6 +1336,84 @@ disk.fsck.e2fsck-error:
   es_ES: "e2fsck: %{stderr}"
   fr_FR: "e2fsck : %{stderr}"
   pl_PL: "e2fsck: %{stderr}"
+
+# disk/format.rs
+disk.format.formatted:
+  en_US: "Formatted %{partition}"
+  de_DE: "%{partition} formatiert"
+  es_ES: "%{partition} formateada"
+  fr_FR: "%{partition} formatée"
+  pl_PL: "Sformatowano %{partition}"
+
+disk.format.in-use:
+  en_US: "%{disk} is in use by %{by}; unplug and reconnect it, or choose another drive"
+  de_DE: "%{disk} wird von %{by} verwendet; trennen und erneut anschließen oder ein anderes Laufwerk wählen"
+  es_ES: "%{disk} está en uso por %{by}; desconéctela y vuelva a conectarla, o elija otra unidad"
+  fr_FR: "%{disk} est utilisé par %{by} ; débranchez-le et rebranchez-le, ou choisissez un autre disque"
+  pl_PL: "%{disk} jest używany przez %{by}; odłącz i podłącz ponownie lub wybierz inny dysk"
+
+disk.format.label-control-characters:
+  en_US: "The label must not contain control characters"
+  de_DE: "Die Bezeichnung darf keine Steuerzeichen enthalten"
+  es_ES: "La etiqueta no debe contener caracteres de control"
+  fr_FR: "L’étiquette ne doit pas contenir de caractères de contrôle"
+  pl_PL: "Etykieta nie może zawierać znaków sterujących"
+
+disk.format.label-empty:
+  en_US: "The label must not be empty"
+  de_DE: "Die Bezeichnung darf nicht leer sein"
+  es_ES: "La etiqueta no debe estar vacía"
+  fr_FR: "L’étiquette ne doit pas être vide"
+  pl_PL: "Etykieta nie może być pusta"
+
+disk.format.label-too-long:
+  en_US: "The label must be at most %{max} bytes"
+  de_DE: "Die Bezeichnung darf höchstens %{max} Bytes lang sein"
+  es_ES: "La etiqueta debe tener como máximo %{max} bytes"
+  fr_FR: "L’étiquette ne doit pas dépasser %{max} octets"
+  pl_PL: "Etykieta może mieć najwyżej %{max} bajtów"
+
+disk.format.live-medium:
+  en_US: "%{disk} is the medium this system booted from"
+  de_DE: "%{disk} ist das Medium, von dem dieses System gestartet wurde"
+  es_ES: "%{disk} es el medio desde el que arrancó este sistema"
+  fr_FR: "%{disk} est le support depuis lequel ce système a démarré"
+  pl_PL: "%{disk} to nośnik, z którego uruchomiono ten system"
+
+disk.format.not-a-drive:
+  en_US: "%{disk} is not a whole drive"
+  de_DE: "%{disk} ist kein ganzes Laufwerk"
+  es_ES: "%{disk} no es una unidad completa"
+  fr_FR: "%{disk} n’est pas un disque entier"
+  pl_PL: "%{disk} nie jest całym dyskiem"
+
+disk.format.startos-data:
+  en_US: "%{disk} holds StartOS data"
+  de_DE: "%{disk} enthält StartOS-Daten"
+  es_ES: "%{disk} contiene datos de StartOS"
+  fr_FR: "%{disk} contient des données StartOS"
+  pl_PL: "%{disk} zawiera dane StartOS"
+
+disk.format.system-drive:
+  en_US: "%{disk} holds the StartOS system"
+  de_DE: "%{disk} enthält das StartOS-System"
+  es_ES: "%{disk} contiene el sistema StartOS"
+  fr_FR: "%{disk} contient le système StartOS"
+  pl_PL: "%{disk} zawiera system StartOS"
+
+disk.format.too-small:
+  en_US: "%{disk} is too small for backups; choose a drive of at least 1 GiB"
+  de_DE: "%{disk} ist zu klein für Sicherungen; wählen Sie ein Laufwerk mit mindestens 1 GiB"
+  es_ES: "%{disk} es demasiado pequeña para copias de seguridad; elija una unidad de al menos 1 GiB"
+  fr_FR: "%{disk} est trop petit pour les sauvegardes ; choisissez un disque d’au moins 1 Gio"
+  pl_PL: "%{disk} jest za mały na kopie zapasowe; wybierz dysk o pojemności co najmniej 1 GiB"
+
+disk.format.unsupported-sector-size:
+  en_US: "This drive uses an unsupported sector size (%{size} bytes); StartOS can format drives with 512- or 4096-byte sectors"
+  de_DE: "Dieses Laufwerk verwendet eine nicht unterstützte Sektorgröße (%{size} Bytes); StartOS kann Laufwerke mit 512- oder 4096-Byte-Sektoren formatieren"
+  es_ES: "Esta unidad usa un tamaño de sector no compatible (%{size} bytes); StartOS puede formatear unidades con sectores de 512 o 4096 bytes"
+  fr_FR: "Ce disque utilise une taille de secteur non prise en charge (%{size} octets) ; StartOS peut formater des disques à secteurs de 512 ou 4096 octets"
+  pl_PL: "Ten dysk używa nieobsługiwanego rozmiaru sektora (%{size} bajtów); StartOS może formatować dyski o sektorach 512 lub 4096 bajtów"
 
 # disk/mount/util.rs
 disk.mount.binding:
@@ -2356,6 +2468,14 @@ migration.services-failed-message:
   es_ES: "No se pudieron migrar los siguientes servicios desde 0.3.5.1: %{services}\nSUS DATOS ESTÁN SEGUROS. Simplemente reinstale estos servicios desde el marketplace."
   fr_FR: "Échec de la migration des services suivants depuis 0.3.5.1 : %{services}\nVOS DONNÉES SONT EN SÉCURITÉ. Réinstallez simplement ces services depuis le marketplace."
   pl_PL: "Nie udało się zmigrować następujących usług z 0.3.5.1: %{services}\nTWOJE DANE SĄ BEZPIECZNE. Po prostu zainstaluj ponownie te usługi z marketplace."
+
+# version/v0_4_0_5.rs
+migration.initial-balance-failed:
+  en_US: "Could not start the initial Btrfs balance; continuing startup"
+  de_DE: "Der erste Btrfs-Ausgleich konnte nicht gestartet werden; der Systemstart wird fortgesetzt"
+  es_ES: "No se pudo iniciar el balanceo inicial de Btrfs; el arranque continúa"
+  fr_FR: "Impossible de lancer l’équilibrage Btrfs initial ; le démarrage continue"
+  pl_PL: "Nie udało się uruchomić początkowego równoważenia Btrfs; uruchamianie systemu jest kontynuowane"
 
 # registry/admin.rs
 registry.admin.unknown-signer:
@@ -3898,6 +4018,20 @@ help.arg.force-uninstall:
   es_ES: "Ignorar errores en el script de desinicialización del servicio"
   fr_FR: "Ignorer les erreurs dans le script de désinitialisation du service"
   pl_PL: "Ignoruj błędy w skrypcie deinicjalizacji usługi"
+
+help.arg.format-disk:
+  en_US: "Drive to erase, e.g. /dev/sdb"
+  de_DE: "Zu löschendes Laufwerk, z. B. /dev/sdb"
+  es_ES: "Unidad que se borrará, p. ej. /dev/sdb"
+  fr_FR: "Disque à effacer, p. ex. /dev/sdb"
+  pl_PL: "Dysk do wymazania, np. /dev/sdb"
+
+help.arg.format-label:
+  en_US: "Filesystem label of at most 255 bytes (default: StartOS Backups)"
+  de_DE: "Dateisystembezeichnung mit höchstens 255 Bytes (Standard: StartOS Backups)"
+  es_ES: "Etiqueta del sistema de archivos de como máximo 255 bytes (predeterminado: StartOS Backups)"
+  fr_FR: "Étiquette du système de fichiers de 255 octets au plus (par défaut : StartOS Backups)"
+  pl_PL: "Etykieta systemu plików o długości najwyżej 255 bajtów (domyślnie: StartOS Backups)"
 
 help.arg.from-registry-url:
   en_US: "Source registry URL to promote from"
@@ -6051,6 +6185,13 @@ about.forget-disconnected-gateway:
   es_ES: "Olvidar un gateway desconectado"
   fr_FR: "Oublier une passerelle déconnectée"
   pl_PL: "Zapomnij odłączoną bramę"
+
+about.format-disk:
+  en_US: "Erase a drive and format it as one Btrfs partition"
+  de_DE: "Ein Laufwerk löschen und als eine Btrfs-Partition formatieren"
+  es_ES: "Borrar una unidad y formatearla como una única partición Btrfs"
+  fr_FR: "Effacer un disque et le formater en une seule partition Btrfs"
+  pl_PL: "Wymaż dysk i sformatuj go jako jedną partycję Btrfs"
 
 about.generate-certificate-for-webserver:
   en_US: "Generate a certificate for the webserver"
