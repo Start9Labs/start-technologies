@@ -851,4 +851,8 @@ export default {
   966: 'Disque formaté. Il figure sous « Disques physiques ».',
   967: 'Doit faire 255 octets au maximum (les lettres accentuées et les symboles en occupent plusieurs)',
   968: 'Ne doit pas contenir de caractères de contrôle',
+  969: 'Notifications push indisponibles dans ce navigateur',
+  970: 'Activer les notifications push du navigateur',
+  971: 'Désactiver les notifications push du navigateur',
+  972: 'Les notifications sont bloquées. Autorisez-les dans les paramètres du navigateur.',
 } satisfies i18n

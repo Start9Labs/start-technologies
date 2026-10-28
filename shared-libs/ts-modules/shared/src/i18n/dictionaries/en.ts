@@ -852,4 +852,8 @@ export const ENGLISH: Record<string, number> = {
   'Drive formatted. It is listed under Physical Drives.': 966,
   'Must be 255 bytes or less (accented letters and symbols take more than one)': 967,
   'Must not contain control characters': 968,
+  'Browser push unavailable': 969,
+  'Enable browser push': 970,
+  'Disable browser push': 971,
+  'Notifications are blocked. Allow them in your browser settings.': 972,
 }

@@ -476,6 +476,10 @@ export const EncryptedWire: z.ZodObject<{ encrypted: z.ZodUnknown }> =
   /* @__PURE__ */ object({ encrypted: z.unknown() }).meta({
     id: 'EncryptedWire',
   })
+export const EndpointParams: z.ZodObject<{ endpoint: z.ZodString }> =
+  /* @__PURE__ */ object({ endpoint: z.string() }).meta({
+    id: 'EndpointParams',
+  })
 
 /**
  * Selects how aggressively an EPP-capable CPU pursues performance.
@@ -941,6 +945,31 @@ export const PreDownloadAlertWhen: z.ZodObject<{ sourceVersion: z.ZodString }> =
   /* @__PURE__ */ object({ sourceVersion: z.string() }).meta({
     id: 'PreDownloadAlertWhen',
   })
+export const PushKeys: z.ZodObject<{
+  /**
+   * Base64url-encoded uncompressed P-256 public key.
+   */
+  p256dh: z.ZodString
+  /**
+   * Base64url-encoded 16-byte authentication secret.
+   */
+  auth: z.ZodString
+}> = /* @__PURE__ */ object({
+  /**
+   * Base64url-encoded uncompressed P-256 public key.
+   */
+  p256dh: z.string().meta({
+    description: 'Base64url-encoded uncompressed P-256 public key.',
+  }),
+  /**
+   * Base64url-encoded 16-byte authentication secret.
+   */
+  auth: z.string().meta({
+    description: 'Base64url-encoded 16-byte authentication secret.',
+  }),
+}).meta({
+  id: 'PushKeys',
+})
 export const QueryDnsParams: z.ZodObject<{ fqdn: z.ZodString }> =
   /* @__PURE__ */ object({ fqdn: z.string() }).meta({
     id: 'QueryDnsParams',
@@ -2582,6 +2611,24 @@ export const PublicDomainConfig: z.ZodObject<{
   acme: wire(AcmeProvider.nullable().optional(), AcmeProvider.nullable()),
 }).meta({
   id: 'PublicDomainConfig',
+})
+export const PushSubscription: z.ZodObject<{
+  /**
+   * HTTP(S) push resource selected by the browser, including LAN endpoints.
+   */
+  endpoint: z.ZodString
+  keys: typeof PushKeys
+}> = /* @__PURE__ */ object({
+  /**
+   * HTTP(S) push resource selected by the browser, including LAN endpoints.
+   */
+  endpoint: z.string().meta({
+    description:
+      'HTTP(S) push resource selected by the browser, including LAN endpoints.',
+  }),
+  keys: PushKeys,
+}).meta({
+  id: 'PushSubscription',
 })
 export const RebuildParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
@@ -4708,6 +4755,31 @@ export const Api = {
         'mark-unseen': {
           _PARAMS: /* @__PURE__ */ ModifyNotificationParams,
           _RETURN: /* @__PURE__ */ z.null(),
+        },
+        push: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            key: {
+              _PARAMS: /* @__PURE__ */ empty,
+              _RETURN: /* @__PURE__ */ z.string(),
+            },
+            list: {
+              _PARAMS: /* @__PURE__ */ empty,
+              _RETURN: /* @__PURE__ */ z.array(PushSubscription),
+            },
+            subscribe: {
+              _PARAMS: /* @__PURE__ */ PushSubscription,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            test: {
+              _PARAMS: /* @__PURE__ */ EndpointParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            unsubscribe: {
+              _PARAMS: /* @__PURE__ */ EndpointParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+          },
         },
         remove: {
           _PARAMS: /* @__PURE__ */ ModifyNotificationParams,

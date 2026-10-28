@@ -851,4 +851,8 @@ export default {
   966: 'Dysk sformatowany. Znajduje się na liście „Dyski fizyczne”.',
   967: 'Może mieć maksymalnie 255 bajtów (litery ze znakami diakrytycznymi i symbole zajmują więcej niż jeden)',
   968: 'Nie może zawierać znaków sterujących',
+  969: 'Powiadomienia push są niedostępne w tej przeglądarce',
+  970: 'Włącz powiadomienia push przeglądarki',
+  971: 'Wyłącz powiadomienia push przeglądarki',
+  972: 'Powiadomienia są zablokowane. Zezwól na nie w ustawieniach przeglądarki.',
 } satisfies i18n

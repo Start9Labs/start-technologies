@@ -17,10 +17,12 @@ import { BadgeService } from 'src/app/services/badge.service'
 import { NotificationService } from 'src/app/services/notification.service'
 import { TitleDirective } from 'src/app/services/title.service'
 import { NotificationsTableComponent } from './table.component'
+import { BrowserPush } from './push'
 
 @Component({
   template: `
     <ng-container *title>{{ 'Notifications' | i18n }}</ng-container>
+    <p><button browserPush></button></p>
     @if (table()?.selected()?.length) {
       <button
         class="fab"
@@ -52,7 +54,13 @@ import { NotificationsTableComponent } from './table.component'
     }
   `,
   host: { class: 'g-page' },
-  imports: [TuiButton, NotificationsTableComponent, TitleDirective, i18nPipe],
+  imports: [
+    TuiButton,
+    NotificationsTableComponent,
+    TitleDirective,
+    i18nPipe,
+    BrowserPush,
+  ],
 })
 export default class NotificationsComponent implements OnInit {
   private readonly router = inject(Router)

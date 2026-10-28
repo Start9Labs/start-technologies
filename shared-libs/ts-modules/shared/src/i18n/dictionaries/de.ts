@@ -851,4 +851,8 @@ export default {
   966: 'Laufwerk formatiert. Es wird unter „Physische Laufwerke“ aufgeführt.',
   967: 'Darf höchstens 255 Bytes lang sein (Buchstaben mit Akzent und Symbole belegen mehr als eines)',
   968: 'Darf keine Steuerzeichen enthalten',
+  969: 'Browser-Push nicht verfügbar',
+  970: 'Browser-Push aktivieren',
+  971: 'Browser-Push deaktivieren',
+  972: 'Benachrichtigungen sind blockiert. Erlauben Sie sie in den Browsereinstellungen.',
 } satisfies i18n

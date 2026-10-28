@@ -45,10 +45,11 @@ impl Database {
                 // Empty: `os_bindings` claims the admin UI's 80/443 as a privileged bind.
                 available_ports: AvailablePorts::new(),
                 notifications: Notifications::new(),
+                push: Default::default(),
                 cifs: CifsTargets::new(),
                 package_stores: BTreeMap::new(),
                 developer_key: Pem(account.developer_key.clone()),
-            }, // TODO
+            },
         })
     }
 }

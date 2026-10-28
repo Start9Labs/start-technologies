@@ -239,6 +239,7 @@ typed-builder = "0.23.2"
 url = { version = "2.4.1", features = ["serde"] }
 uuid = { version = "1.4.1", features = ["v4"] }
 visit-rs = { path = "../visit-rs" }
+web-push-native = { version = "0.5", default-features = false }
 x25519-dalek = { version = "3.0.0-rc.1", features = ["static_secrets"] }
 xattr = "1.6.1"
 xmltree = "0.10"
