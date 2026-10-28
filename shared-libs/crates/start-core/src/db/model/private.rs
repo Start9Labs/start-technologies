@@ -11,7 +11,7 @@ use crate::net::keys::KeyStore;
 use crate::notifications::Notifications;
 use crate::prelude::*;
 use crate::ssh::SshKeys;
-use crate::util::serde::Pem;
+use crate::util::serde::{Der64, Pem};
 
 #[derive(Debug, Deserialize, Serialize, HasModel)]
 #[serde(rename_all = "camelCase")]
@@ -22,7 +22,7 @@ pub struct Private {
     #[serde(default)]
     pub session_pubkeys: AuthKeys,
     #[serde(default = "generate_developer_key")]
-    pub developer_key: Pem<ed25519_dalek::SigningKey>,
+    pub developer_key: Der64<ed25519_dalek::SigningKey>,
     pub ssh_privkey: Pem<ssh_key::PrivateKey>,
     pub ssh_pubkeys: SshKeys,
     pub available_ports: AvailablePorts,
@@ -32,8 +32,8 @@ pub struct Private {
     pub package_stores: BTreeMap<PackageId, Value>,
 }
 
-pub fn generate_developer_key() -> Pem<ed25519_dalek::SigningKey> {
-    Pem(ed25519_dalek::SigningKey::generate(
+pub fn generate_developer_key() -> Der64<ed25519_dalek::SigningKey> {
+    Der64(ed25519_dalek::SigningKey::generate(
         &mut crate::util::crypto::os_rng(),
     ))
 }

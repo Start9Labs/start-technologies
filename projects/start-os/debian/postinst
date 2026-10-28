@@ -6,10 +6,7 @@ if [ -n "$DPKG_MAINTSCRIPT_PACKAGE" ]; then
 	SYSTEMCTL=deb-systemd-helper
 fi
 
-# Set `KEY=VALUE` in a config file: replace the entry in place if it already
-# exists (bare or commented, any indentation) — preserving its position, which
-# matters for section-scoped configs — or append it if not. VALUE is written
-# verbatim, so the caller supplies any quoting. Usage: set_config FILE KEY VALUE
+# Preserves section placement; the caller supplies quoting.
 set_config() {
 	if grep -qE "^[[:space:]]*#?[[:space:]]*$2[[:space:]]*=" "$1"; then
 		sed -i "/^[[:space:]]*#\\?[[:space:]]*$2[[:space:]]*=/c\\$2=$3" "$1"
@@ -206,6 +203,11 @@ echo 'port=0' > /etc/dnsmasq.conf
 sed -i 's/\[Service\]/[Service]\nEnvironment=SYSTEMD_LOG_LEVEL=debug/' /lib/systemd/system/systemd-timesyncd.service
 sed -i "s/\.debian\./\./g;s/#FallbackNTP=/FallbackNTP=/"  /etc/systemd/timesyncd.conf
 set_config /etc/systemd/timesyncd.conf RootDistanceMaxSec 10
+
+set_config /etc/default/btrfsmaintenance BTRFS_BALANCE_MOUNTPOINTS '"/media/startos/data/main:/media/startos/data/package-data"'
+set_config /etc/default/btrfsmaintenance BTRFS_BALANCE_PERIOD '"weekly"'
+set_config /etc/default/btrfsmaintenance BTRFS_SCRUB_PERIOD '"none"'
+SYSTEMD_OFFLINE=1 /usr/share/btrfsmaintenance/btrfsmaintenance-refresh-cron.sh systemd-timer
 
 # Reserve memory for the host management plane so a burst of resource-hungry
 # service containers can never starve startd / sshd / journald and wedge the

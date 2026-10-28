@@ -48,7 +48,7 @@ use crate::util::io::{
     AsyncReadStream, AtomicFile, TermSize, delete_file, maybe_read_file_to_string,
 };
 use crate::util::net::WebSocket;
-use crate::util::serde::Pem;
+use crate::util::serde::Der64;
 use crate::util::sync::SyncMutex;
 use crate::util::tui::choose;
 use crate::volume::{PKG_VOLUME_DIR, data_dir};
@@ -751,7 +751,9 @@ impl Service {
                     .as_state_info_mut()
                     .ser(&PackageState::Installed(InstalledState { manifest }))?;
                 entry.as_s9pk_mut().ser(s9pk_path)?;
-                entry.as_developer_key_mut().ser(&Pem::new(developer_key))?;
+                entry
+                    .as_developer_key_mut()
+                    .ser(&Der64::new(developer_key))?;
                 entry.as_registry_mut().ser(registry)?;
                 entry.as_status_info_mut().as_error_mut().ser(&None)?;
 

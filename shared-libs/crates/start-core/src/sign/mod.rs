@@ -12,12 +12,20 @@ use crate::sign::commitment::{Digestable, SignedCommitment};
 use crate::sign::ed25519::{ED25519PH_ALGORITHM_ID_DER, Ed25519ph};
 use crate::sign::gpg_agent::GpgAgentKey;
 use crate::util::FromStrParser;
-use crate::util::serde::{deserialize_from_str, serialize_display};
+use crate::util::serde::{Der64, DerEncoding, deserialize_from_str};
 
 pub mod commitment;
 pub mod compat;
 pub mod ed25519;
 pub mod gpg_agent;
+
+pub fn canonicalize_verifying_keys<T>(
+    keys: std::collections::BTreeMap<InternedString, T>,
+) -> Result<std::collections::BTreeMap<InternedString, T>, Error> {
+    keys.into_iter()
+        .map(|(key, value)| Ok((key.parse::<AnyVerifyingKey>()?.interned_der64(), value)))
+        .collect()
+}
 
 /// Protocol tag prefixed to pure-Ed25519 commitment signing messages.
 const COMMITMENT_SIG_TAG: &[u8] = b"Start-Commitment-Sig v1\0";
@@ -44,7 +52,6 @@ pub(crate) fn signing_message<C: SignedCommitment>(
     Ok(msg)
 }
 
-/// Appends the commitment's encoded bytes.
 pub(crate) fn append_commitment(msg: &mut Vec<u8>, commitment: &impl Digestable) {
     struct Sink<'a>(&'a mut Vec<u8>);
     impl digest::Update for Sink<'_> {
@@ -133,11 +140,23 @@ impl pkcs8::EncodePrivateKey for AnySigningKey {
         }
     }
 }
+impl DerEncoding for AnySigningKey {
+    fn from_der<E: serde::de::Error>(der: &[u8]) -> Result<Self, E> {
+        use pkcs8::DecodePrivateKey;
+        Self::from_pkcs8_der(der).map_err(E::custom)
+    }
+    fn to_der<E: serde::ser::Error>(&self) -> Result<Vec<u8>, E> {
+        use pkcs8::EncodePrivateKey;
+        self.to_pkcs8_der()
+            .map(|doc| doc.as_bytes().to_vec())
+            .map_err(E::custom)
+    }
+}
+
 impl FromStr for AnySigningKey {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use pkcs8::DecodePrivateKey;
-        Self::from_pkcs8_pem(s).with_kind(ErrorKind::Deserialization)
+        s.parse::<Der64<Self>>().map(|key| key.0)
     }
 }
 impl Display for AnySigningKey {
@@ -163,7 +182,7 @@ impl Serialize for AnySigningKey {
     where
         S: serde::Serializer,
     {
-        serialize_display(self, serializer)
+        Der64::new_ref(self).serialize(serializer)
     }
 }
 
@@ -196,33 +215,9 @@ impl AnyVerifyingKey {
             }
         }
     }
-    /// The key used to look this verifying key up in an `AuthKeys` map: its
-    /// canonical PEM encoding, interned.
-    pub fn interned_pem(&self) -> InternedString {
-        InternedString::intern(self.to_string())
-    }
-    /// Compact wire form: unpadded base64url of the DER (SPKI) encoding, no
-    /// PEM armor — url-safe so it survives a form-urlencoded container
-    /// without percent-escaping.
-    pub fn to_base64_der(&self) -> Result<String, Error> {
-        use base64::Engine;
-        use pkcs8::EncodePublicKey;
-        Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
-            self.to_public_key_der()
-                .with_kind(ErrorKind::Serialization)?
-                .as_bytes(),
-        ))
-    }
-    /// Parse the compact wire form produced by [`Self::to_base64_der`].
-    pub fn from_base64_der(s: &str) -> Result<Self, Error> {
-        use base64::Engine;
-        use pkcs8::DecodePublicKey;
-        Self::from_public_key_der(
-            &base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .decode(s)
-                .with_kind(ErrorKind::Deserialization)?,
-        )
-        .with_kind(ErrorKind::Deserialization)
+    /// Canonical SPKI map key for persisted signer indexes.
+    pub fn interned_der64(&self) -> InternedString {
+        InternedString::from_display(Der64::new_ref(self))
     }
 }
 impl<'a> TryFrom<SubjectPublicKeyInfo<AnyRef<'a>, BitStringRef<'a>>> for AnyVerifyingKey {
@@ -246,11 +241,23 @@ impl pkcs8::EncodePublicKey for AnyVerifyingKey {
         }
     }
 }
+impl DerEncoding for AnyVerifyingKey {
+    fn from_der<E: serde::de::Error>(der: &[u8]) -> Result<Self, E> {
+        use pkcs8::DecodePublicKey;
+        Self::from_public_key_der(der).map_err(E::custom)
+    }
+    fn to_der<E: serde::ser::Error>(&self) -> Result<Vec<u8>, E> {
+        use pkcs8::EncodePublicKey;
+        self.to_public_key_der()
+            .map(|doc| doc.as_bytes().to_vec())
+            .map_err(E::custom)
+    }
+}
+
 impl FromStr for AnyVerifyingKey {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use pkcs8::DecodePublicKey;
-        Self::from_public_key_pem(s).with_kind(ErrorKind::Deserialization)
+        s.parse::<Der64<Self>>().map(|key| key.0)
     }
 }
 impl Display for AnyVerifyingKey {
@@ -276,7 +283,7 @@ impl Serialize for AnyVerifyingKey {
     where
         S: serde::Serializer,
     {
-        serialize_display(self, serializer)
+        Der64::new_ref(self).serialize(serializer)
     }
 }
 impl ValueParserFactory for AnyVerifyingKey {
@@ -289,16 +296,12 @@ impl ValueParserFactory for AnyVerifyingKey {
 #[derive(Clone, Debug, PartialEq, Eq, VisitVariants)]
 #[visit(opaque, ts(type = "z.string()"))]
 pub enum AnySignature {
-    /// Pure Ed25519.
     Ed25519(ed25519_dalek::Signature),
     Ed25519ph(ed25519_dalek::Signature),
 }
 
 rpc_toolkit::reflect_ts!(AnySignature);
 rpc_toolkit::ts_export!(AnySignature, namespaces = [""]);
-/// The DER document wrapping an [`AnySignature`]: the scheme's algorithm
-/// identifier plus the raw signature bytes. PEM-armored ("SIGNATURE") in the
-/// legacy wire form, bare base64 in the compact one.
 #[derive(der::Sequence)]
 struct AnySignatureDer {
     alg: der::asn1::Any,
@@ -334,31 +337,21 @@ impl TryFrom<AnySignatureDer> for AnySignature {
     }
 }
 
-impl AnySignature {
-    /// Compact wire form: unpadded base64url of the DER encoding, no PEM
-    /// armor — url-safe so it survives a form-urlencoded container without
-    /// percent-escaping.
-    pub fn to_base64_der(&self) -> Result<String, Error> {
-        use base64::Engine;
-        use der::Encode;
-        Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
-            self.to_der_struct()
-                .to_der()
-                .with_kind(ErrorKind::Serialization)?,
-        ))
-    }
-    /// Parse the compact wire form produced by [`Self::to_base64_der`].
-    pub fn from_base64_der(s: &str) -> Result<Self, Error> {
-        use base64::Engine;
+impl DerEncoding for AnySignature {
+    fn from_der<E: serde::de::Error>(der: &[u8]) -> Result<Self, E> {
         use der::Decode;
-        AnySignatureDer::from_der(
-            &base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .decode(s)
-                .with_kind(ErrorKind::Deserialization)?,
-        )
-        .with_kind(ErrorKind::Deserialization)?
-        .try_into()
+        AnySignatureDer::from_der(der)
+            .map_err(E::custom)?
+            .try_into()
+            .map_err(E::custom)
     }
+    fn to_der<E: serde::ser::Error>(&self) -> Result<Vec<u8>, E> {
+        use der::Encode;
+        self.to_der_struct().to_der().map_err(E::custom)
+    }
+}
+
+impl AnySignature {
     fn to_der_struct(&self) -> AnySignatureDer {
         let (alg, sig) = match self {
             Self::Ed25519(s) => (ed25519_algorithm_id(), s),
@@ -375,10 +368,7 @@ impl AnySignature {
 impl FromStr for AnySignature {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use der::DecodePem;
-        AnySignatureDer::from_pem(s.as_bytes())
-            .with_kind(ErrorKind::Deserialization)?
-            .try_into()
+        s.parse::<Der64<Self>>().map(|signature| signature.0)
     }
 }
 impl Display for AnySignature {
@@ -405,7 +395,7 @@ impl Serialize for AnySignature {
     where
         S: serde::Serializer,
     {
-        serialize_display(self, serializer)
+        Der64::new_ref(self).serialize(serializer)
     }
 }
 
@@ -464,7 +454,9 @@ mod tests {
         for sig in [AnySignature::Ed25519(s), AnySignature::Ed25519ph(s)] {
             assert_eq!(sig.to_string().parse::<AnySignature>().unwrap(), sig);
             assert_eq!(
-                AnySignature::from_base64_der(&sig.to_base64_der().unwrap()).unwrap(),
+                Der64::<AnySignature>::from_str(&Der64::new_ref(&sig).to_string())
+                    .unwrap()
+                    .0,
                 sig
             );
         }
