@@ -7,7 +7,7 @@ import {
 } from '@angular/core'
 import { DialogService, i18nPipe } from '@start9labs/shared'
 import { TuiResponsiveDialog } from '@taiga-ui/addon-mobile'
-import { TuiButton } from '@taiga-ui/core'
+import { TuiButton, TuiLoader } from '@taiga-ui/core'
 import { TuiButtonLoading } from '@taiga-ui/kit'
 import { defer, of } from 'rxjs'
 
@@ -44,17 +44,20 @@ import { UiUpdateService } from 'src/app/services/ui-update.service'
           }
         }
       </p>
-      @if (phase === 'ready') {
+      @if (phase !== 'error') {
         <button
           tuiButton
           size="s"
-          [loading]="ui.busy()"
-          [disabled]="ui.busy()"
+          [disabled]="phase !== 'ready' || ui.busy()"
           (click)="ui.refresh()"
         >
-          {{ 'Refresh' | i18n }}
+          @if (phase === 'syncing' || ui.busy()) {
+            <tui-loader size="xs" [inheritColor]="true" />
+          }
+          {{ (phase === 'syncing' ? 'Syncing' : 'Refresh') | i18n }}
         </button>
-      } @else {
+      }
+      @if (phase !== 'ready') {
         @if (phase === 'error') {
           <button tuiButton size="s" (click)="ui.check()">
             {{ 'Retry' | i18n }}
@@ -86,7 +89,13 @@ import { UiUpdateService } from 'src/app/services/ui-update.service'
       }
     </ng-template>
   `,
-  imports: [TuiResponsiveDialog, TuiButton, TuiButtonLoading, i18nPipe],
+  imports: [
+    TuiResponsiveDialog,
+    TuiButton,
+    TuiLoader,
+    TuiButtonLoading,
+    i18nPipe,
+  ],
 })
 export class RefreshAlertComponent {
   private readonly dialogs = inject(DialogService)

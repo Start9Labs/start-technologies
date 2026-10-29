@@ -854,6 +854,7 @@ export default {
   969: 'Benutzeroberfläche synchronisiert. Zum Fortfahren aktualisieren.',
   970: 'Benutzeroberfläche wird mit deinem Server synchronisiert...',
   971: 'Die Benutzeroberfläche konnte nicht synchronisiert werden. Erneut versuchen oder den Cache der Benutzeroberfläche zurücksetzen.',
+  975: 'Synchronisierung',
   973: 'Cache der Benutzeroberfläche zurücksetzen',
   974: 'Die zwischengespeicherte Benutzeroberfläche zurücksetzen und die Seite neu laden? Deine Anmeldung und Einstellungen bleiben erhalten.',
 } satisfies i18n

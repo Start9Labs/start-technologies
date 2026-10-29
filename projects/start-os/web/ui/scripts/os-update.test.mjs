@@ -39,6 +39,7 @@ boundary(
   '@taiga-ui/core',
   [
     'TuiButton',
+    'TuiLoader',
     'TuiScrollbar',
     'TuiAppearance',
     'TuiCell',

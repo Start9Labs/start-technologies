@@ -854,6 +854,7 @@ export default {
   969: 'Interface utilisateur synchronisée. Rafraîchissez la page pour continuer.',
   970: 'Synchronisation de l’interface avec votre serveur...',
   971: 'Impossible de synchroniser l’interface utilisateur. Réessayez ou réinitialisez le cache de l’interface.',
+  975: 'Synchronisation',
   973: 'Réinitialiser le cache de l’interface',
   974: 'Réinitialiser l’interface en cache et recharger la page ? Votre connexion et vos paramètres seront conservés.',
 } satisfies i18n
