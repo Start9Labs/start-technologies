@@ -1,6 +1,6 @@
 # Updating StartOS
 
-StartOS notifies you when your selected OS registry announces a compatible security update for your hardware. Review it under `System -> General -> Software Update`; installation requires your approval.
+StartOS notifies you when your selected OS registry announces a compatible security update for your hardware. These warnings also use [browser push](notifications.md) when enabled. Review the update under `System -> General -> Software Update`; installation requires your approval.
 
 > [!NOTE]
 > There are _no_ automatic updates in StartOS. Updating the operating system and service always requires explicit action. That said, we highly recommend keeping StartOS up to date for the latest security and performance patches, as well as to take advantage of new features.

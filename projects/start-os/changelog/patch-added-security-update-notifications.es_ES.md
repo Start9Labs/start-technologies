@@ -1,2 +1,2 @@
-- Reciba una notificación cuando el registro del SO seleccionado anuncie una actualización de seguridad compatible, incluso con el navegador cerrado.
+- Las actualizaciones de seguridad compatibles anunciadas por el registro del SO seleccionado aparecen en Notificaciones y usan las notificaciones push del navegador cuando están activadas.
 - Las actualizaciones beta pueden reemplazar una compilación anterior con la misma versión del SO.

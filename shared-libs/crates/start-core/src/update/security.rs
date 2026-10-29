@@ -216,8 +216,10 @@ mod tests {
             "public": { "serverInfo": { "version": "0.4.0.5", "unreadNotificationCount": 0 } },
             "private": { "notifications": {}, "osSecurityNotifications": {} }
         }));
-        db.as_private_mut().as_push_mut()
-            .ser(&crate::notifications::push::PushState::default()).unwrap();
+        db.as_private_mut()
+            .as_push_mut()
+            .ser(&crate::notifications::push::PushState::default())
+            .unwrap();
         db
     }
 
@@ -262,6 +264,64 @@ mod tests {
             .unwrap();
         notify_security_updates(&mut db, &registry, &update, "installed-build", "x86_64").unwrap();
         assert_eq!(count(&db), 0);
+    }
+
+    #[test]
+    fn security_notifications_enqueue_browser_push_once() {
+        use base64::Engine;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use web_push_native::p256;
+        use web_push_native::p256::elliptic_curve::sec1::ToEncodedPoint;
+
+        use crate::notifications::push::{PushKeys, PushState, PushSubscription};
+
+        let mut db = database();
+        let key = p256::SecretKey::from_slice(&[19; 32]).unwrap();
+        let subscription = PushSubscription {
+            endpoint: "https://push.example.com/subscription".into(),
+            keys: PushKeys {
+                p256dh: URL_SAFE_NO_PAD.encode(key.public_key().to_encoded_point(false).as_bytes()),
+                auth: URL_SAFE_NO_PAD.encode([29u8; 16]),
+            },
+        };
+        let mut state = to_value(&PushState::default()).unwrap();
+        state["vapidPrivateKey"] =
+            to_value(&josekit::jwk::Jwk::generate_ec_key(josekit::jwk::P_256).unwrap()).unwrap();
+        state["subscriptions"] =
+            json!([{ "id": crate::util::new_guid().to_string(), "subscription": subscription }]);
+        db.as_private_mut()
+            .as_push_mut()
+            .ser(&from_value::<PushState>(state).unwrap())
+            .unwrap();
+        let registry: Url = "https://registry.test/".parse().unwrap();
+        let update = catalog("0.4.0.6", Some("new-build"), "*", "x86_64");
+        notify_security_updates(&mut db, &registry, &update, "installed-build", "x86_64").unwrap();
+        db = Model::from_value(db.as_value().clone());
+        notify_security_updates(&mut db, &registry, &update, "installed-build", "x86_64").unwrap();
+        assert_eq!(count(&db), 1);
+        let pending = db.as_private().as_push().as_value()["pending"]
+            .as_array()
+            .unwrap();
+        assert_eq!(pending.len(), 1);
+        let payload: serde_json::Value =
+            serde_json::from_str(pending[0]["payload"].as_str().unwrap()).unwrap();
+        let notification = db
+            .as_private()
+            .as_notifications()
+            .de()
+            .unwrap()
+            .0
+            .into_values()
+            .next()
+            .unwrap();
+        assert_eq!(
+            payload["notification"]["title"].as_str(),
+            Some(notification.title.as_str())
+        );
+        assert_eq!(
+            payload["notification"]["body"].as_str(),
+            Some(notification.message.as_str())
+        );
     }
 
     #[test]

@@ -1,2 +1,2 @@
-- Otrzymuj powiadomienie, gdy wybrany rejestr systemu ogłosi zgodną aktualizację bezpieczeństwa, nawet gdy przeglądarka jest zamknięta.
+- Zgodne aktualizacje bezpieczeństwa ogłaszane przez wybrany rejestr systemu pojawiają się w Powiadomieniach i korzystają z powiadomień push przeglądarki, jeśli są włączone.
 - Aktualizacje beta mogą zastąpić wcześniejszą kompilację o tym samym numerze wersji systemu.

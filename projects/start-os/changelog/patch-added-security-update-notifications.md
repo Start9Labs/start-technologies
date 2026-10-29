@@ -2,5 +2,5 @@
 user-facing: true
 ---
 
-- Receive a notification when your selected OS registry announces a compatible security update, even when the browser is closed.
+- Compatible security updates announced by your selected OS registry appear in Notifications and use browser push when enabled.
 - Beta updates can replace an earlier build with the same OS version.
