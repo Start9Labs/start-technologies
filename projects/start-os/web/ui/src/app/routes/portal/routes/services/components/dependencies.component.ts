@@ -29,6 +29,7 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
             ? {}
             : {
                 search: d.key,
+                id: manifest ? d.key : null,
                 requirePkg: d.key,
                 requireRange: d.value.versionRange,
                 flavor: manifest && exver.getFlavor(manifest.version),
@@ -60,8 +61,8 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
           } @else {
             <span tuiSubtitle class="g-positive">{{ 'Satisfied' | i18n }}</span>
           }
-          @if (manifest) {
-            <span tuiSubtitle>{{ manifest.version }}</span>
+          @if (services[d.key]?.stateInfo.manifest; as installedManifest) {
+            <span tuiSubtitle>{{ installedManifest.version }}</span>
           }
         </span>
         <tui-icon icon="@tui.arrow-right" />
