@@ -493,6 +493,37 @@ export const CountEntry: z.ZodObject<{ label: z.ZodString; count: z.ZodInt }> =
   /* @__PURE__ */ object({ label: z.string(), count: z.int() }).meta({
     id: 'CountEntry',
   })
+export const CreateTokenParams: z.ZodObject<{ name: z.ZodString }> =
+  /* @__PURE__ */ object({ name: z.string() }).meta({
+    id: 'CreateTokenParams',
+  })
+export const CreatedToken: z.ZodObject<{
+  /**
+   * The session id the token authenticates as, for `auth.session.kill`.
+   */
+  id: z.ZodString
+  /**
+   * The bearer secret. It is not stored and cannot be retrieved again.
+   */
+  token: z.ZodString
+}> = /* @__PURE__ */ object({
+  /**
+   * The session id the token authenticates as, for `auth.session.kill`.
+   */
+  id: z.string().meta({
+    description:
+      'The session id the token authenticates as, for `auth.session.kill`.',
+  }),
+  /**
+   * The bearer secret. It is not stored and cannot be retrieved again.
+   */
+  token: z.string().meta({
+    description:
+      'The bearer secret. It is not stored and cannot be retrieved again.',
+  }),
+}).meta({
+  id: 'CreatedToken',
+})
 export const DataUrl: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'DataUrl',
 })
@@ -2986,8 +3017,18 @@ export const IpInfo: z.ZodObject<{
   id: 'IpInfo',
 })
 export const KillParams: z.ZodObject<{
-  ids: z.ZodArray<typeof AnyVerifyingKey>
-}> = /* @__PURE__ */ object({ ids: z.array(AnyVerifyingKey) }).meta({
+  pubkeys: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof AnyVerifyingKey>>,
+    z.ZodArray<typeof AnyVerifyingKey>
+  >
+  tokens: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodString>>,
+    z.ZodArray<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  pubkeys: wire(z.array(AnyVerifyingKey).optional(), z.array(AnyVerifyingKey)),
+  tokens: wire(z.array(z.string()).optional(), z.array(z.string())),
+}).meta({
   id: 'KillParams',
 })
 export const LegacyAlpnInfo: z.ZodUnion<
@@ -4764,17 +4805,19 @@ export const ServiceInterface: z.ZodObject<{
 }).meta({
   id: 'ServiceInterface',
 })
-export const SessionList: z.ZodObject<{
-  current: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  sessions: typeof AuthKeys
+
+/**
+ * The server's sessions, by credential type.
+ */
+export const Sessions: z.ZodObject<{
+  pubkeys: typeof AuthKeys
+  tokens: z.ZodRecord<z.ZodString, typeof Session>
 }> = /* @__PURE__ */ object({
-  current: wire(z.string().nullable().optional(), z.string().nullable()),
-  sessions: AuthKeys,
+  pubkeys: AuthKeys,
+  tokens: z.record(z.string(), Session),
 }).meta({
-  id: 'SessionList',
+  id: 'Sessions',
+  description: "The server's sessions, by credential type.",
 })
 export const SetDependenciesParams: z.ZodObject<{
   dependencies: z.ZodArray<typeof DependencyRequirement>
@@ -5325,6 +5368,18 @@ export const PackageVersionInfo: z.ZodIntersection<
   .meta({
     id: 'PackageVersionInfo',
   })
+export const SessionList: z.ZodObject<{
+  current: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  sessions: typeof Sessions
+}> = /* @__PURE__ */ object({
+  current: wire(z.string().nullable().optional(), z.string().nullable()),
+  sessions: Sessions,
+}).meta({
+  id: 'SessionList',
+})
 export const SetBackupProgress: z.ZodObject<{ progress: typeof Progress }> =
   /* @__PURE__ */ object({ progress: Progress }).meta({
     id: 'SetBackupProgress',

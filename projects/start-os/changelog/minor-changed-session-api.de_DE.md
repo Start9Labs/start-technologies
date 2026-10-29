@@ -1,0 +1,1 @@
+- **Die Sitzungs-API trennt angemeldete Geräte von Bearer-Token.** `auth.session.list` gibt Sitzungen als `{ pubkeys, tokens }` zurück; `auth.session.kill` verwendet `pubkeys` und `tokens` statt `ids`.

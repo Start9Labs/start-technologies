@@ -1,0 +1,1 @@
+- **`startwrt-cli auth session kill` przyjmuje `--pubkey <key>` dla każdej kończonej sesji**, zamiast pozycyjnych identyfikatorów sesji. RPC `auth.session.kill` przyjmuje `pubkeys` zamiast `ids`, a `auth.session.list` zwraca `{ pubkeys, tokens }`.
