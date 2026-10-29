@@ -192,7 +192,7 @@ impl SubcontainerTarget {
 }
 
 /// Shell convention: 128 plus the signal for a killed process.
-pub(super) fn exit_code(status: ExitStatus) -> i32 {
+pub(crate) fn exit_code(status: ExitStatus) -> i32 {
     status
         .code()
         .unwrap_or_else(|| 128 + status.signal().unwrap_or_default())
@@ -280,7 +280,32 @@ impl OutputTail {
     }
 }
 
-/// Terminates the command at the timeout, killing it after a grace period.
+/// Processes that relay signals to the command.
+fn children(supervisor: Pid) -> Vec<Pid> {
+    let Ok(tasks) = std::fs::read_dir(format!("/proc/{supervisor}/task")) else {
+        return Vec::new();
+    };
+    tasks
+        .flatten()
+        .filter_map(|task| std::fs::read_to_string(task.path().join("children")).ok())
+        .flat_map(|children| {
+            children
+                .split_whitespace()
+                .filter_map(|pid| pid.parse().ok())
+                .map(Pid::from_raw)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn signal_children(supervisor: Pid, signal: Signal) {
+    for child in children(supervisor) {
+        nix::sys::signal::kill(child, signal).ok();
+    }
+}
+
+/// Runs a supervisor that does not forward signals, such as `lxc-attach`.
+/// At the timeout its children are terminated, then killed with it after a grace period.
 async fn run_to_completion(
     mut cmd: Command,
     stdin: Option<String>,
@@ -322,10 +347,11 @@ async fn run_to_completion(
             if let Ok(status) = tokio::time::timeout(timeout, child.wait()).await {
                 return Ok::<_, Error>((status?, false));
             }
-            nix::sys::signal::kill(pid, Signal::SIGTERM).ok();
+            signal_children(pid, Signal::SIGTERM);
             if let Ok(status) = tokio::time::timeout(TERMINATION_GRACE, child.wait()).await {
                 return Ok((status?, true));
             }
+            signal_children(pid, Signal::SIGKILL);
             child.kill().await?;
             Ok((child.wait().await?, true))
         };
@@ -391,7 +417,7 @@ mod test {
     #[tokio::test]
     async fn timeout_terminates_and_keeps_partial_output() {
         let res = run_to_completion(
-            sh("echo started; exec sleep 30"),
+            sh("echo started; sleep 30"),
             None,
             Duration::from_millis(200),
         )
@@ -400,6 +426,54 @@ mod test {
         assert_eq!(res.stdout, "started\n");
         assert!(res.timed_out);
         assert_eq!(res.exit_code, 128 + Signal::SIGTERM as i32);
+    }
+
+    fn is_running(pid: i32) -> bool {
+        std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+            stat.rsplit_once(") ")
+                .is_some_and(|(_, rest)| !rest.starts_with('Z'))
+        })
+    }
+
+    #[tokio::test]
+    async fn timeout_reaches_a_command_behind_a_non_forwarding_supervisor() {
+        let res = run_to_completion(
+            sh("sleep 30 & echo $!; wait"),
+            None,
+            Duration::from_millis(500),
+        )
+        .await
+        .unwrap();
+        let command = res.stdout.trim().parse().unwrap();
+        let running = is_running(command);
+        nix::sys::signal::kill(Pid::from_raw(command), Signal::SIGKILL).ok();
+        assert!(res.timed_out);
+        assert!(!running, "the command survives the timeout");
+    }
+
+    #[tokio::test]
+    async fn timeout_kills_a_command_that_ignores_termination() {
+        let started = std::time::Instant::now();
+        let res = run_to_completion(
+            sh("trap '' TERM; sleep 30 & echo $!; wait"),
+            None,
+            Duration::from_millis(200),
+        )
+        .await
+        .unwrap();
+        let command = res.stdout.trim().parse().unwrap();
+        let running = is_running(command);
+        nix::sys::signal::kill(Pid::from_raw(command), Signal::SIGKILL).ok();
+        assert!(res.timed_out);
+        assert!(!running, "the command survives the timeout");
+        assert!(started.elapsed() < TERMINATION_GRACE + Duration::from_secs(3));
+    }
+
+    #[test]
+    fn signal_status_uses_the_shell_exit_code() {
+        assert_eq!(exit_code(ExitStatus::from_raw(7 << 8)), 7);
+        assert_eq!(exit_code(ExitStatus::from_raw(Signal::SIGTERM as i32)), 143);
+        assert_eq!(exit_code(ExitStatus::from_raw(Signal::SIGKILL as i32)), 137);
     }
 
     #[tokio::test]
