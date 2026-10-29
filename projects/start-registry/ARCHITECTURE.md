@@ -67,6 +67,8 @@ Each entry contains `gitHash`, `sourceVersion`, and the available SquashFS `plat
 marked `security`. `RegistryContext` owns one database watch and caches the serialized catalog;
 subscribers share its bytes and retain only the latest update. The endpoint uses 2 KiB read buffers,
 1 KiB incoming message/frame limits, bounded sends, and the shared WebSocket Ping/Pong heartbeat.
+With `mute-os-security-notifications: true`, the catalog stays empty while release metadata remains
+unchanged. The setting applies at daemon startup and does not affect promotion into another registry.
 
 ## Data model
 

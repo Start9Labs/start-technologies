@@ -64,6 +64,9 @@ pub struct RegistryConfig {
     #[arg(long, help = "help.arg.registry-startwrt")]
     #[serde(default)]
     pub startwrt: bool,
+    #[arg(long, help = "help.arg.registry-mute-os-security-notifications")]
+    #[serde(default)]
+    pub mute_os_security_notifications: bool,
 }
 impl ContextConfig for RegistryConfig {
     fn next(&mut self) -> Option<PathBuf> {
@@ -75,6 +78,7 @@ impl ContextConfig for RegistryConfig {
         self.tor_proxy = self.tor_proxy.take().or(other.tor_proxy);
         self.datadir = self.datadir.take().or(other.datadir);
         self.startwrt |= other.startwrt;
+        self.mute_os_security_notifications |= other.mute_os_security_notifications;
     }
 }
 
@@ -165,7 +169,8 @@ impl RegistryContext {
                 ErrorKind::NotFound,
             ));
         }
-        let (security_catalog, security_catalog_task) = security::init(&db).await?;
+        let (security_catalog, security_catalog_task) =
+            security::init(&db, config.mute_os_security_notifications).await?;
         Ok(Self(Arc::new(RegistryContextSeed {
             hostnames: config.registry_hostname.clone(),
             listen: config.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN),
@@ -454,5 +459,39 @@ impl SignatureAuthContext for RegistryContext {
             .await?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn security_notifications_are_unmuted_by_default_and_configurable() {
+        let default = RegistryConfig::try_parse_from(["registry"]).unwrap();
+        assert!(!default.mute_os_security_notifications);
+        let legacy: RegistryConfig = serde_json::from_value(serde_json::json!({
+            "registry-hostname": ["alpha-registry.test"],
+        }))
+        .unwrap();
+        assert!(!legacy.mute_os_security_notifications);
+        let mut cli =
+            RegistryConfig::try_parse_from(["registry", "--mute-os-security-notifications"])
+                .unwrap();
+        cli.merge_with(legacy);
+        assert!(cli.mute_os_security_notifications);
+        let file: RegistryConfig = serde_json::from_value(serde_json::json!({
+            "registry-hostname": ["alpha-registry.test"],
+            "mute-os-security-notifications": true,
+        }))
+        .unwrap();
+        assert!(file.mute_os_security_notifications);
+        let mut merged = default;
+        merged.merge_with(file);
+        assert!(merged.mute_os_security_notifications);
+        assert_eq!(
+            serde_json::to_value(&merged).unwrap()["mute-os-security-notifications"],
+            true
+        );
     }
 }

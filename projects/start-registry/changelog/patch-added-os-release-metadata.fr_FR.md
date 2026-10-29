@@ -1,1 +1,2 @@
 - Les métadonnées des versions du système enregistrent le commit Git de la construction et la présence de mises à jour de sécurité, puis conservent ces informations lors de la promotion entre registres.
+- Les opérateurs du registre peuvent désactiver les annonces de mises à jour de sécurité du système avec `mute-os-security-notifications: true` sans modifier les métadonnées des versions.

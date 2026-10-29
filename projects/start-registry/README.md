@@ -40,13 +40,23 @@ cargo build -p start-registry --bin registrybox
 
 Configuration is read from CLI flags and a config file (`-c <path>`; default search includes the standard StartOS config path). Key flags:
 
-| Flag                    | Purpose                                         |
-| ----------------------- | ----------------------------------------------- |
-| `-l, --listen <addr>`   | listen address (default `127.0.0.1:5959`)       |
-| `-H, --hostname <host>` | public hostname(s) used in generated asset URLs |
-| `-p, --tor-proxy <url>` | SOCKS proxy for outbound (e.g. Tor) requests    |
-| `-d, --datadir <path>`  | data directory (default `/var/lib/startos`)     |
-| `-c, --config <path>`   | config file                                     |
+| Flag                               | Purpose                                                         |
+| ---------------------------------- | --------------------------------------------------------------- |
+| `-l, --listen <addr>`              | listen address (default `127.0.0.1:5959`)                       |
+| `-H, --hostname <host>`            | public hostname(s) used in generated asset URLs                 |
+| `-p, --tor-proxy <url>`            | SOCKS proxy for outbound (e.g. Tor) requests                    |
+| `-d, --datadir <path>`             | data directory (default `/var/lib/startos`)                     |
+| `-c, --config <path>`              | config file                                                     |
+| `--mute-os-security-notifications` | suppress announcements on the OS security feed (default: false) |
+
+To mute alpha notifications, set this in that registry's config file and restart the daemon:
+
+```yaml
+registry-hostname: [alpha-registry.example.com]
+mute-os-security-notifications: true
+```
+
+The feed remains connected with an empty catalog. Release metadata and promotion retain the security flag; previously issued OS notifications are not deleted.
 
 Server state lives in `<datadir>/registry.db` (PatchDB) plus a SQLite metrics database and hosted asset files.
 

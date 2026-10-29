@@ -31,7 +31,10 @@ pub struct SecurityUpdate {
 
 const SEND_TIMEOUT: Duration = Duration::from_secs(15);
 
-fn catalog(index: OsIndex) -> SecurityCatalog {
+fn catalog(index: OsIndex, mute_notifications: bool) -> SecurityCatalog {
+    if mute_notifications {
+        return SecurityCatalog::new();
+    }
     index
         .versions
         .0
@@ -52,12 +55,13 @@ fn catalog(index: OsIndex) -> SecurityCatalog {
 
 pub(crate) async fn init(
     db: &TypedPatchDb<RegistryDatabase>,
+    mute_notifications: bool,
 ) -> Result<(watch::Receiver<Utf8Bytes>, NonDetachingJoinHandle<()>), Error> {
     let mut db_watch = db
         .watch("/index/os".parse().unwrap())
         .await
         .typed::<OsIndex>();
-    let mut current = catalog(db_watch.peek_and_mark_seen()?.de()?);
+    let mut current = catalog(db_watch.peek_and_mark_seen()?.de()?, mute_notifications);
     let (sender, receiver) = watch::channel(
         serde_json::to_string(&current)
             .with_kind(ErrorKind::Serialization)?
@@ -67,7 +71,7 @@ pub(crate) async fn init(
         let result: Result<(), Error> = async {
             loop {
                 db_watch.changed().await?;
-                let next = catalog(db_watch.peek_and_mark_seen()?.de()?);
+                let next = catalog(db_watch.peek_and_mark_seen()?.de()?, mute_notifications);
                 if next != current {
                     sender.send_replace(
                         serde_json::to_string(&next)
@@ -209,24 +213,55 @@ mod tests {
             platforms: ["x86_64".into()].into(),
         };
         assert_eq!(
-            catalog(index(release())).into_values().next(),
+            catalog(index(release()), false).into_values().next(),
             Some(expected)
         );
         let mut regular = release();
         regular.security = false;
-        assert!(catalog(index(regular)).is_empty());
+        assert!(catalog(index(regular), false).is_empty());
         let mut iso_only = release();
         iso_only.squashfs.clear();
         iso_only.iso.insert("x86_64".into(), asset());
         iso_only.img.insert("aarch64".into(), asset());
-        assert!(catalog(index(iso_only)).is_empty());
+        assert!(catalog(index(iso_only), false).is_empty());
+    }
+
+    #[tokio::test]
+    async fn muted_feed_suppresses_announcements_without_changing_release_metadata() {
+        let (_dir, db) = database().await;
+        put_index(&db, &index(release())).await;
+        let (mut receiver, _task) = init(&db, true).await.unwrap();
+        assert!(
+            serde_json::from_str::<SecurityCatalog>(&receiver.borrow_and_update())
+                .unwrap()
+                .is_empty()
+        );
+        let mut info = release();
+        info.git_hash = Some("replacement-build".parse().unwrap());
+        put_index(&db, &index(info)).await;
+        assert!(
+            timeout(Duration::from_millis(50), receiver.changed())
+                .await
+                .is_err()
+        );
+        let stored = db.peek().await.into_index().into_os().de().unwrap();
+        let published = stored.versions.0.into_values().next().unwrap();
+        assert!(published.security);
+        assert_eq!(published.git_hash.as_deref(), Some("replacement-build"));
+        let (unmuted, _task) = init(&db, false).await.unwrap();
+        assert_eq!(
+            serde_json::from_str::<SecurityCatalog>(&unmuted.borrow())
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
     async fn cache_tracks_metadata_and_availability_without_unrelated_fanout() {
         let (_dir, db) = database().await;
         put_index(&db, &index(release())).await;
-        let (mut receiver, _task) = init(&db).await.unwrap();
+        let (mut receiver, _task) = init(&db, false).await.unwrap();
         let initial = receiver.borrow_and_update().clone();
         assert_eq!(
             serde_json::from_str::<SecurityCatalog>(&initial)
@@ -320,7 +355,7 @@ mod tests {
     #[tokio::test]
     async fn raw_websocket_sends_initial_latest_updates_and_reconnects() {
         let (_dir, db) = database().await;
-        let (receiver, _cache_task) = init(&db).await.unwrap();
+        let (receiver, _cache_task) = init(&db, false).await.unwrap();
         let (url, _server) = serve(receiver).await;
         let (mut first, _) = connect_async(&url).await.unwrap();
         assert_eq!(receive(&mut first).await.into_text().unwrap(), "{}");
@@ -334,7 +369,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::from_str::<SecurityCatalog>(&first_update).unwrap(),
-            catalog(index(release()))
+            catalog(index(release()), false)
         );
         first.close(None).await.unwrap();
         assert!(matches!(receive(&mut first).await, ClientMessage::Close(_)));
