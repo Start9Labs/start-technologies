@@ -18,7 +18,7 @@ Open the service's **Volumes** page. Each system volume has three choices:
 - **Read**: the service can read the volume.
 - **Read/write**: the service can read and modify the volume.
 
-The service must support volumes before these controls become available. Creating a volume grants access to no services automatically. Multiple services can use the same volume with different access modes.
+The **Volumes** tab appears only for services that support volumes. Creating a volume grants access to no services automatically. Multiple services can use the same volume with different access modes.
 
 Revoking access detaches that service's attachments without detaching other consumers. How a service responds to missing storage depends on its package. Prefer volumes for optional media, documents and other shared files rather than operation-critical databases.
 

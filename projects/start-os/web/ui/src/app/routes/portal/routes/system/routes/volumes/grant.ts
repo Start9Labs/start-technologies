@@ -28,13 +28,12 @@ const permission = (grant: T.SharedVolumeGrant | undefined) =>
       @for (option of options; track option.label) {
         <button
           type="button"
-          [attr.aria-label]="option.label | i18n"
           [attr.aria-pressed]="value() === option.label"
-          [title]="option.label | i18n"
           [disabled]="disabled() || pending()"
           (click)="save(option.label)"
         >
           <tui-icon [icon]="option.icon" />
+          {{ option.label | i18n }}
         </button>
       }
     </tui-segmented>

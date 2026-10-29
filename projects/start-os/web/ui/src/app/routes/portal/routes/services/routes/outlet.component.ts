@@ -15,7 +15,7 @@ import { distinctUntilChanged, filter, map, switchMap, tap } from 'rxjs'
 import { PackageIconService } from 'src/app/services/package-icon.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { TitleDirective } from 'src/app/services/title.service'
-import { getManifest } from 'src/app/utils/get-package-data'
+import { getCurrentManifest, getManifest } from 'src/app/utils/get-package-data'
 
 type NavItem = { title: i18nKey; icon: string; link: string; exact: boolean }
 
@@ -52,7 +52,7 @@ type NavItem = { title: i18nKey; icon: string; link: string; exact: boolean }
           </span>
         </header>
         <nav>
-          @for (item of nav; track $index) {
+          @for (item of nav(); track item.link) {
             <a
               tuiCell
               tuiAppearance="action-grayscale"
@@ -194,7 +194,7 @@ export class ServiceOutletComponent {
   private readonly params = inject(ActivatedRoute).paramMap
   private readonly icons = inject(PackageIconService)
 
-  protected readonly nav: NavItem[] = [
+  protected readonly nav = computed<NavItem[]>((pkg = this.service()) => [
     {
       title: 'dashboard',
       icon: '@tui.layout-dashboard',
@@ -221,19 +221,23 @@ export class ServiceOutletComponent {
       link: 'outbound-traffic',
       exact: true,
     },
-    {
-      title: 'Volumes',
-      icon: '@tui.folder',
-      link: 'volumes',
-      exact: true,
-    },
+    ...(pkg && getCurrentManifest(pkg).sharedVolumes
+      ? [
+          {
+            title: 'Volumes',
+            icon: '@tui.folder',
+            link: 'volumes',
+            exact: true,
+          } satisfies NavItem,
+        ]
+      : []),
     {
       title: 'actions & config',
       icon: '@tui.cog',
       link: 'actions',
       exact: true,
     },
-  ]
+  ])
 
   protected readonly service = toSignal(
     this.router.events.pipe(
