@@ -154,6 +154,9 @@ mod tests {
         let db =
             TypedPatchDb::<Database>::load_unchecked(PatchDb::open(temp.path().join("db")).await?);
         db.mutate(|db| {
+            db.as_private_mut()
+                .as_push_mut()
+                .ser(&crate::notifications::push::PushState::default())?;
             db.as_public_mut()
                 .as_server_info_mut()
                 .as_unread_notification_count_mut()

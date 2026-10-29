@@ -27,6 +27,8 @@ pub struct Private {
     pub ssh_pubkeys: SshKeys,
     pub available_ports: AvailablePorts,
     pub notifications: Notifications,
+    #[serde(default)]
+    pub push: crate::notifications::push::PushState,
     pub cifs: CifsTargets,
     #[serde(default)]
     pub package_stores: BTreeMap<PackageId, Value>,

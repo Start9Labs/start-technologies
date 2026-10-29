@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::io::IsTerminal;
 use std::ops::Deref;
-use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Weak};
@@ -43,7 +42,6 @@ use crate::service::uninstall::cleanup;
 use crate::status::StatusInfo;
 use crate::util::Never;
 use crate::util::actor::concurrent::ConcurrentActor;
-use crate::util::env::Environment;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::{
     AsyncReadStream, AtomicFile, TermSize, delete_file, maybe_read_file_to_string,
@@ -60,6 +58,7 @@ mod attach_environment;
 mod attach_input;
 pub mod cli;
 pub mod effects;
+pub mod exec;
 pub mod persistent_container;
 pub mod procedure_name;
 mod rpc;
@@ -957,181 +956,25 @@ pub async fn attach(
         user,
     }: AttachParams,
 ) -> Result<Guid, Error> {
-    let (container_id, subcontainer_id, image_id, image_env, user, workdir, root_command) = {
-        let id = &id;
-
-        let service = ctx.services.get(id).await;
-
-        let service_ref = service.as_ref().or_not_found(id)?;
-
-        let container = &service_ref.seed.persistent_container;
-        let root_dir = container
-            .lxc_container
-            .get()
-            .map(|x| x.rootfs_dir().to_owned())
-            .or_not_found(format!("container for {id}"))?;
-
-        let subcontainer = subcontainer.map(|x| AsRef::<str>::as_ref(&x).to_uppercase());
-        let name = name.map(|x| AsRef::<str>::as_ref(&x).to_uppercase());
-        let image_id = image_id.map(|x| AsRef::<Path>::as_ref(&x).to_string_lossy().to_uppercase());
-
-        let subcontainers = container.subcontainers.lock().await;
-        let subcontainer_ids: Vec<_> = subcontainers
-            .iter()
-            .filter(|(x, wrapper)| {
-                if let Some(subcontainer) = subcontainer.as_ref() {
-                    AsRef::<str>::as_ref(x).contains(AsRef::<str>::as_ref(subcontainer))
-                } else if let Some(name) = name.as_ref() {
-                    AsRef::<str>::as_ref(&wrapper.name)
-                        .to_uppercase()
-                        .contains(AsRef::<str>::as_ref(name))
-                } else if let Some(image_id) = image_id.as_ref() {
-                    let Some(wrapper_image_id) = AsRef::<Path>::as_ref(&wrapper.image_id).to_str()
-                    else {
-                        return false;
-                    };
-                    wrapper_image_id
-                        .to_uppercase()
-                        .contains(AsRef::<str>::as_ref(&image_id))
-                } else {
-                    true
-                }
-            })
-            .collect();
-        let Some((subcontainer_id, image_id)) = subcontainer_ids
-            .first()
-            .map::<(Guid, ImageId), _>(|&x| (x.0.clone(), x.1.image_id.clone()))
-        else {
-            drop(subcontainers);
-            let subcontainers = container
-                .subcontainers
-                .lock()
-                .await
-                .iter()
-                .map(|(g, s)| SubcontainerInfo {
-                    id: g.clone(),
-                    name: s.name.clone(),
-                    image_id: s.image_id.clone(),
-                })
-                .collect::<Vec<_>>();
-            return Err(Error::new(
-                eyre!("{}", t!("service.mod.no-matching-subcontainers", id = id)),
-                ErrorKind::NotFound,
-            )
-            .with_info(to_value(&subcontainers)?));
-        };
-
-        let passwd = root_dir
-            .join("media/startos/subcontainers")
-            .join(subcontainer_id.as_ref())
-            .join("etc")
-            .join("passwd");
-
-        let image_meta = serde_json::from_str::<Value>(
-            &tokio::fs::read_to_string(
-                root_dir
-                    .join("media/startos/images/")
-                    .join(&image_id)
-                    .with_extension("json"),
-            )
-            .await?,
-        )
-        .with_kind(ErrorKind::Deserialization)?;
-
-        let user = user
-            .clone()
-            .or_else(|| image_meta["user"].as_str().map(InternedString::intern))
-            .unwrap_or_else(|| InternedString::intern("root"));
-
-        let root_command = get_passwd_command(passwd, &*user).await;
-
-        let workdir = image_meta["workdir"].as_str().map(|s| s.to_owned());
-        let image_env: Option<Environment> = from_value(image_meta["env"].clone())?;
-
-        if subcontainer_ids.len() > 1 {
-            let subcontainers = subcontainer_ids
-                .into_iter()
-                .map(|(g, s)| SubcontainerInfo {
-                    id: g.clone(),
-                    name: s.name.clone(),
-                    image_id: s.image_id.clone(),
-                })
-                .collect::<Vec<_>>();
-            return Err(Error::new(
-                eyre!(
-                    "{}",
-                    t!("service.mod.multiple-subcontainers-found", id = id,)
-                ),
-                ErrorKind::InvalidRequest,
-            )
-            .with_info(to_value(&subcontainers)?));
-        }
-
-        (
-            service_ref.container_id()?,
-            subcontainer_id,
-            image_id,
-            image_env,
-            user.into(),
-            workdir,
-            root_command,
-        )
-    };
+    let target =
+        exec::SubcontainerTarget::resolve(&ctx, &id, subcontainer, name, image_id, user).await?;
+    let mut options = Vec::new();
+    if tty {
+        options.push("--force-tty".to_owned());
+    }
+    if stderr_tty {
+        options.push("--force-stderr-tty".to_owned());
+    }
+    if let Some(pty_size) = pty_size {
+        options.push(format!("--pty-size={pty_size}"));
+    }
+    let cmd = target.command(&options, &command)?;
 
     let guid = Guid::new();
-    async fn handler(
-        ws: &mut WebSocket,
-        container_id: ContainerId,
-        subcontainer_id: Guid,
-        command: Vec<OsString>,
-        tty: bool,
-        stderr_tty: bool,
-        pty_size: Option<TermSize>,
-        image_id: ImageId,
-        image_env: Option<Environment>,
-        workdir: Option<String>,
-        user: InternedString,
-        root_command: &RootCommand,
-    ) -> Result<(), Error> {
+    async fn handler(ws: &mut WebSocket, mut cmd: Command) -> Result<(), Error> {
         use axum::extract::ws::Message;
 
         let mut ws = ws.fuse();
-
-        let mut cmd = Command::new("lxc-attach");
-        let root_path = Path::new("/media/startos/subcontainers").join(subcontainer_id.as_ref());
-        cmd.kill_on_drop(true);
-
-        cmd.arg(&*container_id)
-            .arg("--")
-            .arg("start-container")
-            .arg("subcontainer")
-            .arg("exec");
-        attach_environment::configure(&mut cmd, &image_id, image_env.as_ref())?;
-        cmd.arg("--user").arg(&*user);
-
-        if let Some(workdir) = workdir {
-            cmd.arg("--workdir").arg(workdir);
-        }
-
-        if tty {
-            cmd.arg("--force-tty");
-        }
-
-        if stderr_tty {
-            cmd.arg("--force-stderr-tty");
-        }
-
-        if let Some(pty_size) = pty_size {
-            cmd.arg(format!("--pty-size={pty_size}"));
-        }
-
-        cmd.arg(&root_path).arg("--");
-
-        if command.is_empty() {
-            cmd.arg(&root_command.0);
-        } else {
-            cmd.args(&command);
-        }
 
         let mut child = cmd
             .stdin(Stdio::piped())
@@ -1208,11 +1051,7 @@ pub async fn attach(
             }
         }
 
-        let exit = child.wait().await?;
-        // The client expects an exit code, not an encoded wait status.
-        let code = exit
-            .code()
-            .unwrap_or_else(|| 128 + exit.signal().unwrap_or_default());
+        let code = exec::exit_code(child.wait().await?);
         ws.send(Message::Text("exit".into()))
             .await
             .with_kind(ErrorKind::Network)?;
@@ -1229,22 +1068,7 @@ pub async fn attach(
                 &ctx,
                 signer,
                 move |mut ws| async move {
-                    if let Err(e) = handler(
-                        &mut ws,
-                        container_id,
-                        subcontainer_id,
-                        command,
-                        tty,
-                        stderr_tty,
-                        pty_size,
-                        image_id,
-                        image_env,
-                        workdir,
-                        user,
-                        &root_command,
-                    )
-                    .await
-                    {
+                    if let Err(e) = handler(&mut ws, cmd).await {
                         if !crate::util::net::is_ws_reset_without_close(&e) {
                             tracing::error!("Error in attach websocket: {e}");
                             tracing::debug!("{e:?}");

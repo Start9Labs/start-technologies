@@ -1049,17 +1049,8 @@ pub fn exec(
             .with_ctx(|_| (ErrorKind::Filesystem, "waiting on child process"))?;
         stdout_thread.join().unwrap();
         stderr_thread.map(|t| t.join().unwrap());
-        if let Some(code) = exit.code() {
-            drop(raw);
-            std::process::exit(code);
-        } else if exit.success() {
-            Ok(())
-        } else {
-            Err(Error::new(
-                color_eyre::eyre::Report::msg(exit),
-                ErrorKind::Unknown,
-            ))
-        }
+        drop(raw);
+        std::process::exit(crate::service::exec::exit_code(exit));
     } else {
         let mut cmd = StdCommand::new("/usr/bin/start-container");
         cmd.arg("subcontainer").arg("exec-command");
@@ -1085,16 +1076,7 @@ pub fn exec(
         let exit = child
             .wait()
             .with_ctx(|_| (ErrorKind::Filesystem, "waiting on child process"))?;
-        if let Some(code) = exit.code() {
-            std::process::exit(code);
-        } else if exit.success() || exit.signal() == Some(15) {
-            Ok(())
-        } else {
-            Err(Error::new(
-                color_eyre::eyre::Report::msg(exit),
-                ErrorKind::Unknown,
-            ))
-        }
+        std::process::exit(crate::service::exec::exit_code(exit));
     }
 }
 

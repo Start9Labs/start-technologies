@@ -871,4 +871,8 @@ export default {
   989: 'Sincronizando',
   987: 'Restablecer la caché de la interfaz',
   988: '¿Restablecer la interfaz almacenada en caché y recargar la página? Se conservarán tu sesión y tus ajustes.',
+  990: 'Notificaciones push no disponibles en el navegador',
+  991: 'Ajustes de notificaciones',
+  992: 'Push',
+  993: 'Las notificaciones están bloqueadas. Permítelas en la configuración del navegador.',
 } satisfies i18n

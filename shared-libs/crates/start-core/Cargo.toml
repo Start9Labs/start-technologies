@@ -199,7 +199,7 @@ reqwest = { version = "0.12.25", features = [
   "stream",
 ] }
 rpassword = "7.2.0"
-rpc-toolkit = { path = "../rpc-toolkit", features = ["cbor"] }
+rpc-toolkit = { path = "../rpc-toolkit", features = ["cbor", "mcp"] }
 rusqlite = { version = "0.34", features = ["bundled"] }
 rust-argon2 = "3.0.0"
 rust-i18n = "3.1.5"
@@ -240,6 +240,7 @@ typed-builder = "0.23.2"
 url = { version = "2.4.1", features = ["serde"] }
 uuid = { version = "1.4.1", features = ["v4"] }
 visit-rs = { path = "../visit-rs" }
+web-push-native = { version = "0.5", default-features = false }
 x25519-dalek = { version = "3.0.0-rc.1", features = ["static_secrets"] }
 xattr = "1.6.1"
 xmltree = "0.10"

@@ -871,4 +871,8 @@ export default {
   989: 'Synchronisierung',
   987: 'Cache der Benutzeroberfläche zurücksetzen',
   988: 'Die zwischengespeicherte Benutzeroberfläche zurücksetzen und die Seite neu laden? Deine Anmeldung und Einstellungen bleiben erhalten.',
+  990: 'Browser-Push nicht verfügbar',
+  991: 'Benachrichtigungseinstellungen',
+  992: 'Push',
+  993: 'Benachrichtigungen sind blockiert. Erlauben Sie sie in den Browsereinstellungen.',
 } satisfies i18n

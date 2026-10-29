@@ -61,6 +61,7 @@ pub fn db<C: Context>() -> ParentHandler<C> {
             "subscribe",
             from_fn_async(subscribe)
                 .with_metadata("get_signer", Value::Bool(true))
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .no_cli(),
         )
         .subcommand(

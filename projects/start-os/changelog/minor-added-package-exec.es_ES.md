@@ -1,0 +1,1 @@
+- Nuevo `package.exec` en la API, también disponible como herramienta MCP: ejecuta un comando en el subcontenedor de un servicio hasta que termina y devuelve su salida y código de salida, con entrada estándar y tiempo límite opcionales.

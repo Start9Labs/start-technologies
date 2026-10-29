@@ -439,6 +439,26 @@ impl RpcContext {
 
         crate::version::post_init(&res, run_migrations).await?;
         tracing::info!("{}", t!("context.rpc.completed-migrations"));
+        let weak = Arc::downgrade(&res.0);
+        let db = res.db.clone();
+        res.add_cron(async move {
+            let mut watch = db.watch("/private/push".parse().unwrap()).await;
+            loop {
+                let Some(seed) = weak.upgrade() else { break };
+                let client = seed.client.get();
+                drop(seed);
+                if crate::notifications::push::drain(&db, &client)
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("{}", t!("notifications.push.queue-failed"));
+                }
+                tokio::select! {
+                    result = watch.changed() => if result.is_err() { break },
+                    _ = tokio::time::sleep(Duration::from_secs(60)) => {}
+                }
+            }
+        });
         Ok(res)
     }
 
