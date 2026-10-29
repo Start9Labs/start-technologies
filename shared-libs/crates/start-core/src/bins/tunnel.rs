@@ -276,10 +276,80 @@ fn export_manpage_start_tunnel() {
         env!("CARGO_MANIFEST_DIR"),
         "/../../../projects/start-tunnel/man"
     );
-    std::fs::create_dir_all(dir).unwrap();
     let command = super::with_manifest_version(
         app().into_command(),
         std::path::Path::new(dir).parent().unwrap(),
     );
-    clap_mangen::generate_to(command, dir).unwrap();
+    super::export_manpages(command, dir);
+}
+
+#[test]
+fn tunnel_wan_endpoint_cli_native() {
+    for command in [
+        vec!["subnet", "10.59.0.1/24", "set-wan", "--wan-ip", "10.0.0.2"],
+        vec![
+            "device",
+            "set-wan",
+            "10.59.0.1/24",
+            "10.59.0.2",
+            "--wan-ip",
+            "10.0.0.2",
+        ],
+        vec!["device", "show-config", "10.59.0.1/24", "10.59.0.2"],
+        vec![
+            "device",
+            "show-config",
+            "10.59.0.1/24",
+            "10.59.0.2",
+            "--endpoint",
+            "8.8.8.8",
+        ],
+        vec![
+            "device",
+            "show-config",
+            "10.59.0.1/24",
+            "10.59.0.2",
+            "--endpoint",
+            "2606:4700:4700::1111",
+        ],
+        vec![
+            "device",
+            "show-config",
+            "10.59.0.1/24",
+            "10.59.0.2",
+            "--endpoint",
+            "10.0.0.3",
+        ],
+        vec![
+            "device",
+            "show-config",
+            "10.59.0.1/24",
+            "10.59.0.2",
+            "--endpoint",
+            "vpn.example.com",
+        ],
+        vec![
+            "device",
+            "show-config",
+            "10.59.0.1/24",
+            "10.59.0.2",
+            "--endpoint",
+            "[2001:db8::1]",
+        ],
+    ] {
+        let args: Vec<_> = ["start-tunnel"].into_iter().chain(command).collect();
+        app().into_command().try_get_matches_from(args).unwrap();
+    }
+    let args: Vec<_> = ["start-tunnel"]
+        .into_iter()
+        .chain([
+            "device",
+            "show-config",
+            "10.59.0.1/24",
+            "10.59.0.2",
+            "--endpoint",
+            "https://vpn.example.com",
+        ])
+        .collect();
+    assert!(app().into_command().try_get_matches_from(args).is_err());
 }
