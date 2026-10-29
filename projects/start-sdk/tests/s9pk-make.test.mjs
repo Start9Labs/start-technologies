@@ -105,6 +105,28 @@ if (args.join(' ') === 's9pk list-ingredients') {
   }
 }
 
+test('parallel capability checks wait for dependency checks and do not run after dependency failure', t => {
+  const f = fixture(t)
+  writeFileSync(
+    join(f.root, 'Makefile'),
+    readFileSync(join(f.root, 'Makefile'), 'utf8') +
+      '\ncheck-deps:\n\t@sleep 0.1; echo "dependency check failed"; exit 1\n',
+  )
+  mkdirSync(join(f.root, 'javascript'))
+  writeFileSync(
+    join(f.root, 'javascript/index.js'),
+    'module.exports={manifest:{sharedVolumes:true}}',
+  )
+  const result = f.make({}, ['-j8', 'check-cli'])
+  assert.notEqual(result.status, 0)
+  assert.match(
+    result.stdout,
+    /dependency check failed/,
+    result.stdout + result.stderr,
+  )
+  assert.ok(!f.calls().some(args => args[0] === '--version'))
+})
+
 function succeeds(result) {
   assert.equal(result.status, 0, result.stdout + result.stderr)
 }

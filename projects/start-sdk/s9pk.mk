@@ -113,7 +113,7 @@ check-deps:
 	@command -v jq >/dev/null || \
 		(echo "Error: jq not found. Install jq. See https://docs.start9.com/packaging/environment-setup.html" && exit 1)
 
-check-cli: javascript/index.js
+check-cli: javascript/index.js | check-deps
 	node $(SDK_DIR)/check-cli.mjs
 
 check-init:
