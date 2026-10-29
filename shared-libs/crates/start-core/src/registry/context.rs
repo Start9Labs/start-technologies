@@ -103,8 +103,8 @@ pub struct RegistryContextSeed {
     pub client: Client,
     pub shutdown: Sender<()>,
     pub metrics_db: SyncMutex<Connection>,
-    pub security_catalog: tokio::sync::watch::Receiver<axum::extract::ws::Utf8Bytes>,
-    pub _security_catalog_task: NonDetachingJoinHandle<()>,
+    pub security_catalog: PatchDb,
+    pub _security_catalog_task: Option<NonDetachingJoinHandle<()>>,
 }
 
 #[derive(Clone)]

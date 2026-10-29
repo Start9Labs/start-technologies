@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use exver::Version;
 use futures::{SinkExt, StreamExt};
+use patch_db::{Dump, Revision};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
@@ -108,6 +109,7 @@ async fn receive_updates<S: AsyncRead + AsyncWrite + Unpin>(
     registry: &Url,
     backoff: &mut u64,
 ) -> Result<(), Error> {
+    let mut state = None;
     loop {
         let message = tokio::time::timeout(Duration::from_secs(120), socket.next())
             .await
@@ -116,8 +118,21 @@ async fn receive_updates<S: AsyncRead + AsyncWrite + Unpin>(
             .with_kind(ErrorKind::Network)?;
         match message {
             Some(Message::Text(text)) => {
-                let catalog: SecurityCatalog =
-                    serde_json::from_str(&text).with_kind(ErrorKind::Deserialization)?;
+                let value = match &mut state {
+                    None => &*state.insert(
+                        serde_json::from_str::<Dump>(&text)
+                            .with_kind(ErrorKind::Deserialization)?
+                            .value,
+                    ),
+                    Some(value) => {
+                        let revision: Revision =
+                            serde_json::from_str(&text).with_kind(ErrorKind::Deserialization)?;
+                        patch_db::json_patch::patch(value, &revision.patch)
+                            .with_kind(ErrorKind::Database)?;
+                        &*value
+                    }
+                };
+                let catalog: SecurityCatalog = from_value(value.clone())?;
                 db.mutate(|db| {
                     notify_security_updates(
                         db,
@@ -279,7 +294,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn subscription_receives_snapshots_answers_heartbeats_and_deduplicates_reconnects() {
+    async fn subscription_applies_revisions_answers_heartbeats_and_deduplicates_reconnects() {
         use patch_db::json_ptr::ROOT;
 
         let temp = tempfile::tempdir().unwrap();
@@ -289,21 +304,38 @@ mod tests {
         let db = TypedPatchDb::<Database>::load_unchecked(raw);
         db.put(&ROOT, database().as_value()).await.unwrap();
         let registry: Url = "https://registry.test/".parse().unwrap();
-        let payload = serde_json::to_string(&catalog(
-            "0.4.0.6",
-            Some("published-build"),
-            "*",
-            &crate::PLATFORM,
-        ))
+        let feed = patch_db::PatchDb::in_memory();
+        feed.put(
+            &ROOT,
+            &catalog("0.4.0.6", Some("published-build"), "*", &crate::PLATFORM),
+        )
+        .await
         .unwrap();
-        for _ in 0..2 {
+        for attempt in 0..2 {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let url = format!("ws://{}", listener.local_addr().unwrap());
-            let payload = payload.clone();
+            let feed = feed.clone();
             let server = tokio::spawn(async move {
                 let (stream, _) = listener.accept().await.unwrap();
                 let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
-                socket.send(Message::Text(payload.into())).await.unwrap();
+                let dump = feed.dump(&ROOT).await;
+                socket
+                    .send(Message::Text(serde_json::to_string(&dump).unwrap().into()))
+                    .await
+                    .unwrap();
+                if attempt == 0 {
+                    let replacement =
+                        catalog("0.4.0.6", Some("replacement-build"), "*", &crate::PLATFORM);
+                    for value in [&replacement, &SecurityCatalog::new(), &replacement] {
+                        let revision = feed.put(&ROOT, value).await.unwrap().unwrap();
+                        socket
+                            .send(Message::Text(
+                                serde_json::to_string(&revision).unwrap().into(),
+                            ))
+                            .await
+                            .unwrap();
+                    }
+                }
                 socket
                     .send(Message::Ping(vec![1, 2, 3].into()))
                     .await
@@ -326,7 +358,7 @@ mod tests {
             assert_eq!(backoff, 30);
             server.await.unwrap();
         }
-        assert_eq!(count(&db.peek().await), 1);
+        assert_eq!(count(&db.peek().await), 2);
     }
 
     #[test]

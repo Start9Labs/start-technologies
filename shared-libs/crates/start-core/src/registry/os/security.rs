@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use axum::extract::ws::{Message, Utf8Bytes, WebSocketUpgrade};
+use axum::extract::ws::{Message, WebSocketUpgrade};
 use axum::response::Response;
 use exver::{Version, VersionRange};
 use futures::SinkExt;
 use imbl_value::InternedString;
+use patch_db::PatchDb;
+use patch_db::json_ptr::ROOT;
 use serde::{Deserialize, Serialize};
-use tokio::sync::watch;
 use tokio::time::timeout;
 
 use crate::prelude::*;
@@ -31,10 +32,7 @@ pub struct SecurityUpdate {
 
 const SEND_TIMEOUT: Duration = Duration::from_secs(15);
 
-fn catalog(index: OsIndex, mute_notifications: bool) -> SecurityCatalog {
-    if mute_notifications {
-        return SecurityCatalog::new();
-    }
+fn catalog(index: OsIndex) -> SecurityCatalog {
     index
         .versions
         .0
@@ -56,30 +54,27 @@ fn catalog(index: OsIndex, mute_notifications: bool) -> SecurityCatalog {
 pub(crate) async fn init(
     db: &TypedPatchDb<RegistryDatabase>,
     mute_notifications: bool,
-) -> Result<(watch::Receiver<Utf8Bytes>, NonDetachingJoinHandle<()>), Error> {
+) -> Result<(PatchDb, Option<NonDetachingJoinHandle<()>>), Error> {
+    let mirror = PatchDb::in_memory();
+    if mute_notifications {
+        mirror.put(&ROOT, &SecurityCatalog::new()).await?;
+        return Ok((mirror, None));
+    }
     let mut db_watch = db
         .watch("/index/os".parse().unwrap())
         .await
         .typed::<OsIndex>();
-    let mut current = catalog(db_watch.peek_and_mark_seen()?.de()?, mute_notifications);
-    let (sender, receiver) = watch::channel(
-        serde_json::to_string(&current)
-            .with_kind(ErrorKind::Serialization)?
-            .into(),
-    );
+    mirror
+        .put(&ROOT, &catalog(db_watch.peek_and_mark_seen()?.de()?))
+        .await?;
+    let updates = mirror.clone();
     let task = tokio::spawn(async move {
         let result: Result<(), Error> = async {
             loop {
                 db_watch.changed().await?;
-                let next = catalog(db_watch.peek_and_mark_seen()?.de()?, mute_notifications);
-                if next != current {
-                    sender.send_replace(
-                        serde_json::to_string(&next)
-                            .with_kind(ErrorKind::Serialization)?
-                            .into(),
-                    );
-                    current = next;
-                }
+                updates
+                    .put(&ROOT, &catalog(db_watch.peek_and_mark_seen()?.de()?))
+                    .await?;
             }
         }
         .await;
@@ -87,33 +82,35 @@ pub(crate) async fn init(
             tracing::error!(%error, "Registry security catalog watch stopped");
         }
     });
-    Ok((receiver, task.into()))
+    Ok((mirror, Some(task.into())))
 }
 
-pub(crate) fn upgrade(ws: WebSocketUpgrade, receiver: watch::Receiver<Utf8Bytes>) -> Response {
+pub(crate) fn upgrade(ws: WebSocketUpgrade, db: PatchDb) -> Response {
     ws.read_buffer_size(2048)
         .write_buffer_size(0)
         .max_message_size(1024)
         .max_frame_size(1024)
-        .on_upgrade(move |socket| subscribe(WebSocket::new(socket), receiver))
+        .on_upgrade(move |socket| subscribe(WebSocket::new(socket), db))
 }
 
-async fn subscribe(mut socket: WebSocket, mut receiver: watch::Receiver<Utf8Bytes>) {
-    let initial = receiver.borrow_and_update().clone();
-    if !matches!(
-        timeout(SEND_TIMEOUT, socket.send(Message::Text(initial))).await,
-        Ok(Ok(()))
-    ) {
+async fn send_json(socket: &mut WebSocket, value: &impl Serialize) -> Result<(), Error> {
+    let text = serde_json::to_string(value).with_kind(ErrorKind::Serialization)?;
+    timeout(SEND_TIMEOUT, socket.send(Message::Text(text.into())))
+        .await
+        .with_kind(ErrorKind::Network)?
+        .with_kind(ErrorKind::Network)
+}
+
+async fn subscribe(mut socket: WebSocket, db: PatchDb) {
+    let (dump, mut revisions) = db.dump_and_sub(ROOT.to_owned()).await;
+    if send_json(&mut socket, &dump).await.is_err() {
         return;
     }
     loop {
         tokio::select! {
-            changed = receiver.changed() => {
-                if changed.is_err() {
-                    break;
-                }
-                let latest = receiver.borrow_and_update().clone();
-                if !matches!(timeout(SEND_TIMEOUT, socket.send(Message::Text(latest))).await, Ok(Ok(()))) {
+            revision = revisions.recv() => {
+                let Some(revision) = revision else { break };
+                if send_json(&mut socket, &revision).await.is_err() {
                     return;
                 }
             }
@@ -197,12 +194,12 @@ mod tests {
         .unwrap();
     }
 
-    async fn changed(receiver: &mut watch::Receiver<Utf8Bytes>) -> SecurityCatalog {
+    async fn changed(receiver: &mut patch_db::DbWatch) -> SecurityCatalog {
         timeout(Duration::from_secs(2), receiver.changed())
             .await
             .unwrap()
             .unwrap();
-        serde_json::from_str(&receiver.borrow_and_update()).unwrap()
+        from_value(receiver.peek_and_mark_seen().unwrap()).unwrap()
     }
 
     #[test]
@@ -213,34 +210,32 @@ mod tests {
             platforms: ["x86_64".into()].into(),
         };
         assert_eq!(
-            catalog(index(release()), false).into_values().next(),
+            catalog(index(release())).into_values().next(),
             Some(expected)
         );
         let mut regular = release();
         regular.security = false;
-        assert!(catalog(index(regular), false).is_empty());
+        assert!(catalog(index(regular)).is_empty());
         let mut iso_only = release();
         iso_only.squashfs.clear();
         iso_only.iso.insert("x86_64".into(), asset());
         iso_only.img.insert("aarch64".into(), asset());
-        assert!(catalog(index(iso_only), false).is_empty());
+        assert!(catalog(index(iso_only)).is_empty());
     }
 
     #[tokio::test]
     async fn muted_feed_suppresses_announcements_without_changing_release_metadata() {
         let (_dir, db) = database().await;
         put_index(&db, &index(release())).await;
-        let (mut receiver, _task) = init(&db, true).await.unwrap();
-        assert!(
-            serde_json::from_str::<SecurityCatalog>(&receiver.borrow_and_update())
-                .unwrap()
-                .is_empty()
-        );
+        let (mirror, task) = init(&db, true).await.unwrap();
+        assert!(task.is_none());
+        let (initial, mut receiver) = mirror.dump_and_sub(ROOT.to_owned()).await;
+        assert_eq!(initial.value, imbl_value::json!({}));
         let mut info = release();
         info.git_hash = Some("replacement-build".parse().unwrap());
         put_index(&db, &index(info)).await;
         assert!(
-            timeout(Duration::from_millis(50), receiver.changed())
+            timeout(Duration::from_millis(50), receiver.recv())
                 .await
                 .is_err()
         );
@@ -250,7 +245,9 @@ mod tests {
         assert_eq!(published.git_hash.as_deref(), Some("replacement-build"));
         let (unmuted, _task) = init(&db, false).await.unwrap();
         assert_eq!(
-            serde_json::from_str::<SecurityCatalog>(&unmuted.borrow())
+            unmuted
+                .get::<SecurityCatalog, _, _>(&ROOT)
+                .await
                 .unwrap()
                 .len(),
             1
@@ -258,13 +255,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cache_tracks_metadata_and_availability_without_unrelated_fanout() {
+    async fn mirror_tracks_metadata_and_availability_without_unrelated_revisions() {
         let (_dir, db) = database().await;
         put_index(&db, &index(release())).await;
-        let (mut receiver, _task) = init(&db, false).await.unwrap();
-        let initial = receiver.borrow_and_update().clone();
+        let (mirror, _task) = init(&db, false).await.unwrap();
+        let mut receiver = mirror.watch(ROOT.to_owned()).await;
+        let initial = receiver.peek_and_mark_seen().unwrap();
         assert_eq!(
-            serde_json::from_str::<SecurityCatalog>(&initial)
+            from_value::<SecurityCatalog>(initial.clone())
                 .unwrap()
                 .len(),
             1
@@ -292,8 +290,8 @@ mod tests {
                 .await
                 .is_err()
         );
-        assert_eq!(receiver.borrow().as_ptr(), initial.as_ptr());
-        assert_eq!(receiver.clone().borrow().as_ptr(), initial.as_ptr());
+        assert_eq!(mirror.sequence().await, 1);
+        assert_eq!(mirror.clone().dump(&ROOT).await.value, initial);
 
         let mut info = release();
         info.git_hash = Some("def456".parse().unwrap());
@@ -330,14 +328,14 @@ mod tests {
 
     type ClientSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-    async fn serve(receiver: watch::Receiver<Utf8Bytes>) -> (String, NonDetachingJoinHandle<()>) {
+    async fn serve(db: PatchDb) -> (String, NonDetachingJoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("ws://{}/os/security", listener.local_addr().unwrap());
         let router = Router::new().route(
             "/os/security",
             get(move |ws: WebSocketUpgrade| {
-                let receiver = receiver.clone();
-                async move { upgrade(ws, receiver) }
+                let db = db.clone();
+                async move { upgrade(ws, db) }
             }),
         );
         let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
@@ -353,59 +351,79 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn raw_websocket_sends_initial_latest_updates_and_reconnects() {
+    async fn raw_websocket_sends_atomic_dump_then_revisions_and_reconnects() {
         let (_dir, db) = database().await;
-        let (receiver, _cache_task) = init(&db, false).await.unwrap();
-        let (url, _server) = serve(receiver).await;
+        let (mirror, _cache_task) = init(&db, false).await.unwrap();
+        let (url, _server) = serve(mirror).await;
         let (mut first, _) = connect_async(&url).await.unwrap();
-        assert_eq!(receive(&mut first).await.into_text().unwrap(), "{}");
+        let mut state: patch_db::Dump =
+            serde_json::from_str(&receive(&mut first).await.into_text().unwrap()).unwrap();
+        assert_eq!(state.value, imbl_value::json!({}));
         let (mut second, _) = connect_async(&url).await.unwrap();
-        assert_eq!(receive(&mut second).await.into_text().unwrap(), "{}");
+        let second_dump: patch_db::Dump =
+            serde_json::from_str(&receive(&mut second).await.into_text().unwrap()).unwrap();
+        assert_eq!(second_dump.id, state.id);
         put_index(&db, &index(release())).await;
         let first_update = receive(&mut first).await.into_text().unwrap();
         assert_eq!(
             first_update,
             receive(&mut second).await.into_text().unwrap()
         );
+        let revision: patch_db::Revision = serde_json::from_str(&first_update).unwrap();
+        assert_eq!(revision.id, state.id + 1);
+        patch_db::json_patch::patch(&mut state.value, &revision.patch).unwrap();
+        assert_eq!(state.value["0.4.1"]["gitHash"], imbl_value::json!("abc123"));
+        let mut info = release();
+        info.git_hash = Some("replacement-build".parse().unwrap());
+        put_index(&db, &index(info)).await;
+        let update = receive(&mut first).await.into_text().unwrap();
+        assert_eq!(update, receive(&mut second).await.into_text().unwrap());
+        let revision: patch_db::Revision = serde_json::from_str(&update).unwrap();
         assert_eq!(
-            serde_json::from_str::<SecurityCatalog>(&first_update).unwrap(),
-            catalog(index(release()), false)
+            serde_json::to_value(&revision.patch).unwrap(),
+            serde_json::json!([
+                { "op": "replace", "path": "/0.4.1/gitHash", "value": "replacement-build" }
+            ])
         );
+        patch_db::json_patch::patch(&mut state.value, &revision.patch).unwrap();
         first.close(None).await.unwrap();
         assert!(matches!(receive(&mut first).await, ClientMessage::Close(_)));
         let (mut reconnected, _) = connect_async(&url).await.unwrap();
-        assert_eq!(
-            receive(&mut reconnected).await.into_text().unwrap(),
-            first_update
-        );
+        let dump: patch_db::Dump =
+            serde_json::from_str(&receive(&mut reconnected).await.into_text().unwrap()).unwrap();
+        assert_eq!(dump.id, revision.id);
+        assert_eq!(dump.value, state.value);
         put_index(&db, &OsIndex::default()).await;
-        assert_eq!(receive(&mut second).await.into_text().unwrap(), "{}");
-        assert_eq!(receive(&mut reconnected).await.into_text().unwrap(), "{}");
+        let removed = receive(&mut second).await.into_text().unwrap();
+        assert_eq!(
+            removed,
+            receive(&mut reconnected).await.into_text().unwrap()
+        );
+        let revision: patch_db::Revision = serde_json::from_str(&removed).unwrap();
+        patch_db::json_patch::patch(&mut state.value, &revision.patch).unwrap();
+        assert_eq!(state.value, imbl_value::json!({}));
     }
 
     #[tokio::test]
-    async fn outbound_snapshot_exceeds_inbound_limit() {
-        let large: Utf8Bytes =
-            serde_json::to_string(&SecurityCatalog::from_iter((0..100).map(|i| {
-                (
-                    format!("0.4.{i}").parse().unwrap(),
-                    SecurityUpdate {
-                        git_hash: None,
-                        source_version: VersionRange::default(),
-                        platforms: ["x86_64".into()].into(),
-                    },
-                )
-            })))
-            .unwrap()
-            .into();
-        assert!(large.len() > 1024);
-        let (_sender, receiver) = watch::channel(large.clone());
-        let (url, _server) = serve(receiver).await;
+    async fn outbound_dump_exceeds_inbound_limit() {
+        let large = SecurityCatalog::from_iter((0..100).map(|i| {
+            (
+                format!("0.4.{i}").parse().unwrap(),
+                SecurityUpdate {
+                    git_hash: None,
+                    source_version: VersionRange::default(),
+                    platforms: ["x86_64".into()].into(),
+                },
+            )
+        }));
+        assert!(serde_json::to_string(&large).unwrap().len() > 1024);
+        let mirror = PatchDb::in_memory();
+        mirror.put(&ROOT, &large).await.unwrap();
+        let (url, _server) = serve(mirror).await;
         let (mut socket, _) = connect_async(&url).await.unwrap();
-        assert_eq!(
-            receive(&mut socket).await.into_text().unwrap().as_str(),
-            large.as_str()
-        );
+        let dump: patch_db::Dump =
+            serde_json::from_str(&receive(&mut socket).await.into_text().unwrap()).unwrap();
+        assert_eq!(dump.value, to_value(&large).unwrap());
         socket
             .send(ClientMessage::Text("x".repeat(2048).into()))
             .await
@@ -418,8 +436,9 @@ mod tests {
 
     #[tokio::test]
     async fn heartbeat_keeps_responsive_clients_and_drops_missing_pongs() {
-        let (_sender, receiver) = watch::channel("{}".into());
-        let (url, _server) = serve(receiver).await;
+        let mirror = PatchDb::in_memory();
+        mirror.put(&ROOT, &SecurityCatalog::new()).await.unwrap();
+        let (url, _server) = serve(mirror).await;
         let (mut socket, _) = connect_async(&url).await.unwrap();
         receive(&mut socket).await;
         for _ in 0..13 {
