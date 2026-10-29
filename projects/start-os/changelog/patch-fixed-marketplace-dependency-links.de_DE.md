@@ -1,0 +1,1 @@
+- Behoben, dass der Marktplatz beim Öffnen über Abhängigkeitslinks dauerhaft lädt.

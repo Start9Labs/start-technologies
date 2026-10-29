@@ -1,15 +1,17 @@
-import { Component, inject } from '@angular/core'
-import { toSignal } from '@angular/core/rxjs-interop'
-import { SwUpdate } from '@angular/service-worker'
-import { WA_WINDOW } from '@ng-web-apis/common'
-import { i18nPipe, TaskService } from '@start9labs/shared'
-import { Version } from '@start9labs/start-core'
+import {
+  Component,
+  computed,
+  inject,
+  linkedSignal,
+  TemplateRef,
+} from '@angular/core'
+import { DialogService, i18nPipe } from '@start9labs/shared'
 import { TuiResponsiveDialog } from '@taiga-ui/addon-mobile'
-import { TuiButton } from '@taiga-ui/core'
-import { PatchDB } from 'patch-db-client'
-import { distinctUntilChanged, map, merge, Subject } from 'rxjs'
-import { ConfigService } from 'src/app/services/config.service'
-import { DataModel } from 'src/app/services/patch-db/data-model'
+import { TuiButton, TuiLoader } from '@taiga-ui/core'
+import { TuiButtonLoading } from '@taiga-ui/kit'
+import { defer, of } from 'rxjs'
+
+import { UiUpdateService } from 'src/app/services/ui-update.service'
 
 @Component({
   selector: 'refresh-alert',
@@ -19,76 +21,116 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
       [tuiResponsiveDialogOptions]="{
         label: i18n.transform('Refresh Needed'),
         size: 's',
+        closable: canClose$,
+        dismissible: canClose$,
       }"
-      (tuiResponsiveDialogChange)="dismiss$.next()"
+      (tuiResponsiveDialogChange)="dismissed.set(!$event)"
     >
-      @if (isPwa) {
-        <p>
-          {{
-            'Your user interface is cached and out of date. Attempt to reload the PWA using the button below. If you continue to see this message, uninstall and reinstall the PWA.'
-              | i18n
-          }}
-        </p>
-      } @else {
-        <p>
-          {{
-            'StartOS has been updated, but this page is still running the previous interface. Refresh the page to get the latest version.'
-              | i18n
-          }}
-        </p>
+      @let state = ui.state();
+      @let phase = ui.phase();
+      <p role="status" aria-live="polite">
+        @switch (phase) {
+          @case ('ready') {
+            {{ 'User interface synced. Refresh to continue.' | i18n }}
+          }
+          @case ('error') {
+            {{
+              'Unable to sync the user interface. Retry or reset the UI cache.'
+                | i18n
+            }}
+          }
+          @case ('syncing') {
+            {{ 'Syncing the interface with your server...' | i18n }}
+          }
+        }
+      </p>
+      @if (phase !== 'error') {
+        <button
+          tuiButton
+          size="s"
+          [disabled]="phase !== 'ready' || ui.busy()"
+          (click)="ui.refresh()"
+        >
+          @if (phase === 'syncing' || ui.busy()) {
+            <tui-loader size="xs" [inheritColor]="true" />
+          }
+          {{ (phase === 'syncing' ? 'Syncing' : 'Refresh') | i18n }}
+        </button>
       }
-      <button
-        tuiButton
-        appearance="secondary"
-        style="float: right"
-        [tuiAppearanceFocus]="false"
-        (click)="reload()"
-      >
-        {{ 'Refresh' | i18n }}
-      </button>
+      @if (phase !== 'ready') {
+        @if (phase === 'error') {
+          <button tuiButton size="s" (click)="ui.check()">
+            {{ 'Retry' | i18n }}
+          </button>
+        }
+        <button
+          tuiButton
+          size="s"
+          appearance="flat"
+          [loading]="ui.busy()"
+          [disabled]="ui.busy()"
+          (click)="resetCache()"
+        >
+          {{ 'Reset UI cache' | i18n }}
+        </button>
+        @if (state.status === 'error' && state.error) {
+          <ng-template #details>
+            <p>{{ state.error }}</p>
+          </ng-template>
+          <button
+            tuiButton
+            size="s"
+            appearance="flat"
+            (click)="openDetails(details)"
+          >
+            {{ 'Details' | i18n }}
+          </button>
+        }
+      }
     </ng-template>
   `,
-  imports: [TuiResponsiveDialog, TuiButton, i18nPipe],
+  imports: [
+    TuiResponsiveDialog,
+    TuiButton,
+    TuiLoader,
+    TuiButtonLoading,
+    i18nPipe,
+  ],
 })
 export class RefreshAlertComponent {
-  private readonly win = inject(WA_WINDOW)
-  private readonly updates = inject(SwUpdate)
-  private readonly tasks = inject(TaskService)
-  private readonly version = Version.parse(inject(ConfigService).version)
+  private readonly dialogs = inject(DialogService)
 
-  readonly i18n = inject(i18nPipe)
-
-  readonly dismiss$ = new Subject<void>()
-  readonly isPwa = this.win.matchMedia('(display-mode: standalone)').matches
-
-  readonly show = toSignal(
-    merge(
-      this.dismiss$.pipe(map(() => false)),
-      inject<PatchDB<DataModel>>(PatchDB)
-        .watch$('serverInfo', 'version')
-        .pipe(
-          distinctUntilChanged(),
-          map(v => this.version.compare(Version.parse(v)) !== 'equal'),
-        ),
-    ),
-    {
-      initialValue: false,
-    },
+  protected readonly ui = inject(UiUpdateService)
+  protected readonly i18n = inject(i18nPipe)
+  protected readonly canClose$ = defer(() => of(!this.ui.busy()))
+  protected readonly dismissed = linkedSignal({
+    source: this.ui.phase,
+    computation: () => false,
+  })
+  protected readonly show = computed(
+    () =>
+      this.ui.busy() ||
+      (!this.dismissed() &&
+        (this.ui.outdated() || this.ui.state().status !== 'idle')),
   )
 
-  protected async reload(): Promise<void> {
-    try {
-      if (
-        this.updates.isEnabled &&
-        this.win.navigator.serviceWorker.controller !== null
-      ) {
-        await this.tasks.run(async () => {
-          await this.updates.checkForUpdate()
-          await this.updates.activateUpdate()
-        }, 'Loading')
-      }
-    } finally {
-      this.win.location.reload()
-    }
+  protected openDetails(content: TemplateRef<unknown>): void {
+    this.dialogs.openComponent(content, { label: 'Error' }).subscribe()
+  }
+
+  protected resetCache(): void {
+    this.dialogs
+      .openConfirm({
+        label: 'Reset UI cache',
+        data: {
+          content:
+            'Reset the cached interface and reload? Your login and settings will be kept.',
+          yes: 'Reset UI cache',
+          no: 'Cancel',
+        },
+      })
+      .subscribe(confirmed => {
+        if (confirmed) void this.ui.resetCache()
+      })
   }
 }

@@ -17,8 +17,20 @@
         "files": [
           "/assets/**",
           "/svg/**",
-          "/*.(svg|cur|jpg|jpeg|png|apng|webp|avif|gif|otf|ttf|woff|woff2)"
+          "/*.(svg|cur|jpg|jpeg|png|apng|webp|avif|gif|otf|ttf|woff|woff2)",
+          "!/assets/taiga-ui/icons/**"
         ]
+      }
+    }
+  ],
+  "dataGroups": [
+    {
+      "name": "icons",
+      "urls": ["/assets/taiga-ui/icons/**"],
+      "cacheConfig": {
+        "strategy": "performance",
+        "maxSize": 5000,
+        "maxAge": "7d"
       }
     }
   ]
