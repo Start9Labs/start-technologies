@@ -16,6 +16,7 @@ use tokio::sync::oneshot;
 use crate::CAP_1_KiB;
 use crate::service::effects::ContainerCliContext;
 use crate::service::effects::prelude::*;
+use crate::util::env::{parse_assignment, parse_json_env};
 use crate::util::io::TermSize;
 
 const FWD_SIGNALS: &[c_int] = &[
@@ -129,8 +130,6 @@ pub struct ExecParams {
 impl ExecParams {
     fn exec(&self) -> Result<(), Error> {
         let ExecParams {
-            env,
-            env_file,
             workdir,
             user,
             chroot,
@@ -145,46 +144,7 @@ impl ExecParams {
         };
 
         let mut cmd = StdCommand::new(command);
-        cmd.env_clear();
-        cmd.env(
-            "PATH",
-            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        );
-
-        let mut needs_home = true;
-
-        let mut update_env = |line: &str| {
-            if let Some((k, v)) = line.split_once("=") {
-                needs_home &= k != "HOME";
-                cmd.env(k, v);
-            } else if !line.is_empty() {
-                cmd.env_remove(line);
-            }
-        };
-        for line in std::fs::read_to_string("/etc/default/locale")
-            .unwrap_or_default()
-            .lines()
-            .filter(|l| {
-                l.split_once('=')
-                    .is_none_or(|(_, v)| locale_available(chroot, v))
-            })
-        {
-            update_env(line);
-        }
-
-        if let Some(f) = env_file {
-            let mut lines = BufReader::new(
-                File::open(&f).with_ctx(|_| (ErrorKind::Filesystem, format!("open r {f:?}")))?,
-            )
-            .lines();
-            while let Some(line) = lines.next().transpose()? {
-                update_env(&line);
-            }
-        }
-
-        for line in env {
-            update_env(&line);
-        }
+        let needs_home = self.configure_env(&mut cmd, std::env::vars_os())?;
 
         let ExecUser {
             uid,
@@ -266,6 +226,140 @@ impl ExecParams {
                 lazy_format!("exec {command:?} in {workdir:?}"),
             )
         })
+    }
+
+    fn configure_env(
+        &self,
+        cmd: &mut StdCommand,
+        variables: impl IntoIterator<Item = (OsString, OsString)>,
+    ) -> Result<bool, Error> {
+        cmd.env_clear();
+        cmd.env(
+            "PATH",
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        );
+
+        let mut needs_home = true;
+
+        let mut update_env = |(key, value): (&str, Option<&str>)| {
+            needs_home &= key != "HOME";
+            if let Some(value) = value {
+                cmd.env(key, value);
+            } else if !key.is_empty() {
+                cmd.env_remove(key);
+            }
+        };
+        for line in std::fs::read_to_string("/etc/default/locale")
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| {
+                l.split_once('=')
+                    .is_none_or(|(_, v)| locale_available(&self.chroot, v))
+            })
+        {
+            update_env(parse_assignment(line));
+        }
+
+        if let Some(f) = &self.env_file {
+            let mut lines = BufReader::new(
+                File::open(&f).with_ctx(|_| (ErrorKind::Filesystem, format!("open r {f:?}")))?,
+            )
+            .lines();
+            while let Some(line) = lines.next().transpose()? {
+                update_env(parse_assignment(&line));
+            }
+        }
+
+        for (key, value) in parse_json_env(variables)? {
+            update_env((&key, value.as_deref()));
+        }
+
+        for line in &self.env {
+            update_env(parse_assignment(line));
+        }
+
+        Ok(needs_home)
+    }
+}
+
+#[cfg(test)]
+mod environment_tests {
+    use super::*;
+
+    #[test]
+    fn json_env_merges_between_file_and_cli_without_losing_multiline_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("image.env");
+        std::fs::write(
+            &file,
+            "KEPT=image\nOVERRIDE=image\nREMOVED=image\nCLI=image\n",
+        )
+        .unwrap();
+        let params = ExecParams::try_parse_from([
+            OsStr::new("exec"),
+            OsStr::new("--env-file"),
+            file.as_os_str(),
+            OsStr::new("--env=CLI=cli"),
+            OsStr::new("--env=UNSET"),
+            dir.path().as_os_str(),
+            OsStr::new("sh"),
+        ])
+        .unwrap();
+        let value = "first\nsecond=\"quoted\"\r\n";
+        let json = serde_json::json!({
+            "OVERRIDE": value,
+            "REMOVED": null,
+            "EMPTY": "",
+            "CLI": "json",
+            "UNSET": "json",
+        })
+        .to_string();
+        let (first, second) = json.split_at(json.len() / 2);
+        let mut cmd = StdCommand::new("/bin/sh");
+        assert!(
+            params
+                .configure_env(
+                    &mut cmd,
+                    [
+                        ("JSON_ENV_1".into(), second.into()),
+                        ("JSON_ENV_0".into(), first.into()),
+                    ]
+                )
+                .unwrap()
+        );
+        let env: std::collections::BTreeMap<_, _> = cmd.get_envs().collect();
+        assert_eq!(
+            env.get(OsStr::new("KEPT")),
+            Some(&Some(OsStr::new("image")))
+        );
+        assert_eq!(env.get(OsStr::new("CLI")), Some(&Some(OsStr::new("cli"))));
+        assert_eq!(env.get(OsStr::new("EMPTY")), Some(&Some(OsStr::new(""))));
+        assert!(!env.contains_key(OsStr::new("REMOVED")));
+        assert!(!env.contains_key(OsStr::new("UNSET")));
+        assert!(!env.contains_key(OsStr::new("JSON_ENV_0")));
+        assert!(!env.contains_key(OsStr::new("JSON_ENV_1")));
+        let output = cmd
+            .args(["-c", "printf '%s' \"$OVERRIDE\""])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, value.as_bytes());
+    }
+
+    #[test]
+    fn home_overrides_include_explicit_removal() {
+        let mut params = ExecParams::try_parse_from(["exec", "/unused", "sh"]).unwrap();
+        let mut cmd = StdCommand::new("sh");
+        assert!(params.configure_env(&mut cmd, []).unwrap());
+        for json in [r#"{"HOME":"/custom"}"#, r#"{"HOME":null}"#] {
+            assert!(
+                !params
+                    .configure_env(&mut cmd, [("JSON_ENV_0".into(), json.into())])
+                    .unwrap()
+            );
+        }
+        params.env.push("HOME".into());
+        assert!(!params.configure_env(&mut cmd, []).unwrap());
     }
 }
 

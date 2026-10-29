@@ -29,6 +29,7 @@ use crate::s9pk::merkle_archive::source::{
 };
 use crate::s9pk::merkle_archive::{Entry, MerkleArchive};
 use crate::s9pk::v2::SIG_CONTEXT;
+use crate::util::env::{Environment, parse_assignment};
 use crate::util::io::{TmpDir, canonicalize, create_file, open_file};
 use crate::util::serde::IoFormat;
 use crate::util::squashfs::{NodeContents, Squashfs};
@@ -531,8 +532,17 @@ pub(super) struct DockerImageConfig {
 
 impl DockerImageConfig {
     pub(super) fn into_parts(self) -> (ImageMetadata, Vec<String>) {
+        let env = self.env.unwrap_or_default();
         (
             ImageMetadata {
+                env: Some(
+                    env.iter()
+                        .map(|line| {
+                            let (key, value) = parse_assignment(line);
+                            (key.to_owned(), value.map(str::to_owned))
+                        })
+                        .collect(),
+                ),
                 workdir: if self.working_dir == Path::new("") {
                     "/".into()
                 } else {
@@ -546,7 +556,7 @@ impl DockerImageConfig {
                 entrypoint: self.entrypoint,
                 cmd: self.cmd,
             },
-            self.env.unwrap_or_default(),
+            env,
         )
     }
 }
@@ -760,6 +770,9 @@ async fn image_from_command(
 #[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageMetadata {
+    /// Image environment defaults. Absent in packages using a legacy `.env` file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<Environment>,
     pub workdir: PathBuf,
     pub user: InternedString,
     pub entrypoint: Option<Vec<String>>,
@@ -1195,7 +1208,7 @@ mod test {
             r#"{
             "Cmd": ["serve", "--foreground"],
             "Entrypoint": ["/app/entrypoint"],
-            "Env": ["MODE=production", "EMPTY="],
+            "Env": ["MODE=old", "MODE=production", "EMPTY=", "MULTILINE=first\nsecond=\"quoted\"\n", "UNSET"],
             "WorkingDir": "/app",
             "User": "1000:1000"
         }"#,
@@ -1206,7 +1219,16 @@ mod test {
         assert_eq!(metadata.entrypoint.unwrap(), ["/app/entrypoint"]);
         assert_eq!(metadata.workdir, Path::new("/app"));
         assert_eq!(&*metadata.user, "1000:1000");
-        assert_eq!(env, ["MODE=production", "EMPTY="]);
+        assert_eq!(
+            serde_json::to_value(&metadata.env).unwrap(),
+            serde_json::json!({
+                "MODE": "production",
+                "EMPTY": "",
+                "MULTILINE": "first\nsecond=\"quoted\"\n",
+                "UNSET": null,
+            })
+        );
+        assert_eq!(env.len(), 5);
     }
 
     #[test]
@@ -1222,7 +1244,12 @@ mod test {
             assert_eq!(metadata.workdir, Path::new("/"));
             assert_eq!(&*metadata.user, "root");
             assert!(env.is_empty());
+            assert_eq!(metadata.env, Some(Environment::new()));
         }
+        let legacy: ImageMetadata =
+            serde_json::from_str(r#"{"workdir":"/","user":"root","entrypoint":null,"cmd":null}"#)
+                .unwrap();
+        assert!(legacy.env.is_none());
     }
 
     #[test]

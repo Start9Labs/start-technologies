@@ -3570,9 +3570,13 @@
             },
             "secure": {
               "anyOf": [{ "$ref": "#/$defs/Security" }, { "type": "null" }]
+            },
+            "proxy": {
+              "anyOf": [{ "$ref": "#/$defs/ProxyOptions" }, { "type": "null" }],
+              "description": "HTTP request policy shared by every exposed leg of this binding."
             }
           },
-          "required": ["preferredExternalPort", "addSsl", "secure"],
+          "required": ["preferredExternalPort", "addSsl", "secure", "proxy"],
           "additionalProperties": true
         },
         "AddSslOptions": {
@@ -3582,10 +3586,6 @@
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
-            },
-            "addXForwardedHeaders": {
-              "type": "boolean",
-              "description": "When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`\nand `X-Forwarded-For: <client-ip>` to incoming HTTP requests before\nforwarding them upstream. Setting this implies HTTP-aware proxying."
             },
             "alpn": {
               "anyOf": [{ "$ref": "#/$defs/AlpnInfo" }, { "type": "null" }],
@@ -3597,18 +3597,12 @@
                 { "type": "null" }
               ],
               "description": "Certificate validation for the OS→container TLS leg when rewrapping.\n`None` (the default) validates against the StartOS root CA."
-            },
-            "auth": {
-              "anyOf": [{ "$ref": "#/$defs/ProxyAuth" }, { "type": "null" }],
-              "description": "Optional reverse-proxy auth gate. When set, the OS reverse proxy\nwill validate the `Authorization` header on incoming HTTP requests\nagainst this configuration before forwarding them upstream.\nUnauthenticated requests get `401 Unauthorized` with an appropriate\n`WWW-Authenticate` challenge. For `Basic`, the authenticated\nusername is forwarded to the upstream service as `X-Forwarded-User`.\nSetting this implies HTTP-aware proxying."
             }
           },
           "required": [
             "preferredExternalPort",
-            "addXForwardedHeaders",
             "alpn",
-            "upstreamCertValidation",
-            "auth"
+            "upstreamCertValidation"
           ],
           "additionalProperties": true
         },
@@ -3645,6 +3639,27 @@
           ],
           "description": "How the OS reverse proxy validates the container's TLS certificate when it\nrewraps SSL (`add_ssl` set AND `secure.ssl == true`, so the OS terminates\nthe client's TLS and initiates a fresh TLS connection to the container).\nAbsent (`None`) means validate against the StartOS root CA — the default."
         },
+        "Security": {
+          "type": "object",
+          "properties": { "ssl": { "type": "boolean" } },
+          "required": ["ssl"],
+          "additionalProperties": true
+        },
+        "ProxyOptions": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "const": "http" },
+            "addXForwardedHeaders": {
+              "description": "Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.",
+              "type": "boolean"
+            },
+            "auth": {
+              "description": "Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.",
+              "anyOf": [{ "$ref": "#/$defs/ProxyAuth" }, { "type": "null" }]
+            }
+          },
+          "required": ["type", "addXForwardedHeaders", "auth"]
+        },
         "ProxyAuth": {
           "anyOf": [
             {
@@ -3678,12 +3693,6 @@
             "password": { "type": "string" }
           },
           "required": ["username", "password"],
-          "additionalProperties": true
-        },
-        "Security": {
-          "type": "object",
-          "properties": { "ssl": { "type": "boolean" } },
-          "required": ["ssl"],
           "additionalProperties": true
         },
         "NetInfo": {
@@ -9048,9 +9057,13 @@
             },
             "secure": {
               "anyOf": [{ "$ref": "#/$defs/Security" }, { "type": "null" }]
+            },
+            "proxy": {
+              "anyOf": [{ "$ref": "#/$defs/ProxyOptions" }, { "type": "null" }],
+              "description": "HTTP request policy shared by every exposed leg of this binding."
             }
           },
-          "required": ["preferredExternalPort", "addSsl", "secure"],
+          "required": ["preferredExternalPort", "addSsl", "secure", "proxy"],
           "additionalProperties": true
         },
         "AddSslOptions": {
@@ -9060,10 +9073,6 @@
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
-            },
-            "addXForwardedHeaders": {
-              "type": "boolean",
-              "description": "When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`\nand `X-Forwarded-For: <client-ip>` to incoming HTTP requests before\nforwarding them upstream. Setting this implies HTTP-aware proxying."
             },
             "alpn": {
               "anyOf": [{ "$ref": "#/$defs/AlpnInfo" }, { "type": "null" }],
@@ -9075,18 +9084,12 @@
                 { "type": "null" }
               ],
               "description": "Certificate validation for the OS→container TLS leg when rewrapping.\n`None` (the default) validates against the StartOS root CA."
-            },
-            "auth": {
-              "anyOf": [{ "$ref": "#/$defs/ProxyAuth" }, { "type": "null" }],
-              "description": "Optional reverse-proxy auth gate. When set, the OS reverse proxy\nwill validate the `Authorization` header on incoming HTTP requests\nagainst this configuration before forwarding them upstream.\nUnauthenticated requests get `401 Unauthorized` with an appropriate\n`WWW-Authenticate` challenge. For `Basic`, the authenticated\nusername is forwarded to the upstream service as `X-Forwarded-User`.\nSetting this implies HTTP-aware proxying."
             }
           },
           "required": [
             "preferredExternalPort",
-            "addXForwardedHeaders",
             "alpn",
-            "upstreamCertValidation",
-            "auth"
+            "upstreamCertValidation"
           ],
           "additionalProperties": true
         },
@@ -9123,6 +9126,27 @@
           ],
           "description": "How the OS reverse proxy validates the container's TLS certificate when it\nrewraps SSL (`add_ssl` set AND `secure.ssl == true`, so the OS terminates\nthe client's TLS and initiates a fresh TLS connection to the container).\nAbsent (`None`) means validate against the StartOS root CA — the default."
         },
+        "Security": {
+          "type": "object",
+          "properties": { "ssl": { "type": "boolean" } },
+          "required": ["ssl"],
+          "additionalProperties": true
+        },
+        "ProxyOptions": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "const": "http" },
+            "addXForwardedHeaders": {
+              "description": "Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.",
+              "type": "boolean"
+            },
+            "auth": {
+              "description": "Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.",
+              "anyOf": [{ "$ref": "#/$defs/ProxyAuth" }, { "type": "null" }]
+            }
+          },
+          "required": ["type", "addXForwardedHeaders", "auth"]
+        },
         "ProxyAuth": {
           "anyOf": [
             {
@@ -9156,12 +9180,6 @@
             "password": { "type": "string" }
           },
           "required": ["username", "password"],
-          "additionalProperties": true
-        },
-        "Security": {
-          "type": "object",
-          "properties": { "ssl": { "type": "boolean" } },
-          "required": ["ssl"],
           "additionalProperties": true
         },
         "NetInfo": {

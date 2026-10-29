@@ -1,0 +1,1 @@
+- Zaktualizowano node-forge do wersji 1.4.2.

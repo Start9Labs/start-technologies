@@ -54,6 +54,7 @@ use crate::volume::{PKG_VOLUME_DIR, data_dir};
 use crate::{ActionId, CAP_1_KiB, DATA_DIR, ImageId, PackageId};
 
 pub mod action;
+mod attach_environment;
 mod attach_input;
 pub mod cli;
 pub mod effects;
@@ -967,7 +968,7 @@ pub async fn attach(
     if let Some(pty_size) = pty_size {
         options.push(format!("--pty-size={pty_size}"));
     }
-    let cmd = target.command(&options, &command);
+    let cmd = target.command(&options, &command)?;
 
     let guid = Guid::new();
     async fn handler(ws: &mut WebSocket, mut cmd: Command) -> Result<(), Error> {

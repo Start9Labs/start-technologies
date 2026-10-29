@@ -17,6 +17,7 @@ use crate::context::RpcContext;
 use crate::lxc::ContainerId;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
+use crate::util::env::Environment;
 use crate::{CAP_1_KiB, ImageId, PackageId};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -29,6 +30,7 @@ pub(super) struct SubcontainerTarget {
     container_id: ContainerId,
     subcontainer_id: Guid,
     image_id: ImageId,
+    image_env: Option<Environment>,
     user: InternedString,
     workdir: Option<String>,
     root_command: RootCommand,
@@ -129,6 +131,7 @@ impl SubcontainerTarget {
         let root_command = get_passwd_command(passwd, &*user).await;
 
         let workdir = image_meta["workdir"].as_str().map(|s| s.to_owned());
+        let image_env: Option<Environment> = from_value(image_meta["env"].clone())?;
 
         if subcontainer_ids.len() > 1 {
             let subcontainers = subcontainer_ids
@@ -153,6 +156,7 @@ impl SubcontainerTarget {
             container_id: service_ref.container_id()?,
             subcontainer_id,
             image_id,
+            image_env,
             user,
             workdir,
             root_command,
@@ -160,22 +164,20 @@ impl SubcontainerTarget {
     }
 
     /// Runs the user's login shell for an empty command.
-    pub(super) fn command(&self, exec_options: &[String], command: &[OsString]) -> Command {
+    pub(super) fn command(
+        &self,
+        exec_options: &[String],
+        command: &[OsString],
+    ) -> Result<Command, Error> {
         let mut cmd = Command::new("lxc-attach");
         cmd.kill_on_drop(true)
             .arg(&*self.container_id)
             .arg("--")
             .arg("start-container")
             .arg("subcontainer")
-            .arg("exec")
-            .arg("--env-file")
-            .arg(
-                Path::new("/media/startos/images")
-                    .join(&self.image_id)
-                    .with_extension("env"),
-            )
-            .arg("--user")
-            .arg(&*self.user);
+            .arg("exec");
+        super::attach_environment::configure(&mut cmd, &self.image_id, self.image_env.as_ref())?;
+        cmd.arg("--user").arg(&*self.user);
         if let Some(workdir) = &self.workdir {
             cmd.arg("--workdir").arg(workdir);
         }
@@ -187,7 +189,7 @@ impl SubcontainerTarget {
         } else {
             cmd.args(command);
         }
-        cmd
+        Ok(cmd)
     }
 }
 
@@ -247,7 +249,7 @@ pub async fn exec(
 ) -> Result<ExecResult, Error> {
     let target = SubcontainerTarget::resolve(&ctx, &id, subcontainer, name, image_id, user).await?;
     run_to_completion(
-        target.command(&[], &command),
+        target.command(&[], &command)?,
         stdin,
         timeout_secs.map_or(DEFAULT_TIMEOUT, Duration::from_secs),
     )

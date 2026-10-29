@@ -1,0 +1,1 @@
+- Préserve les options appartenant à l’appelant lors de leur réutilisation avec `spawn` ou `launch` pour les sous-conteneurs.
