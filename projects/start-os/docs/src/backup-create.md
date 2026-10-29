@@ -43,8 +43,12 @@ Back up your server's data to a physical drive or a network folder.
 
 Opening an existing backup with this release upgrades its encryption authentication and password-protected key wrapping. The folder remains `StartOSBackupsV2`; this is separate from the older `StartOSBackups` folder cleanup described above. The one-time upgrade rewrites the encrypted data and needs free space for one replacement segment or content object. On a large or remote backup, this can take substantially longer than an ordinary incremental backup. Leave the target connected until the operation finishes; an interrupted upgrade resumes on the next writable open.
 
+An unreadable encrypted object or log frame does not block the upgrade of healthy data. Damaged data stays unreadable; filesystem I/O failures leave the upgrade resumable.
+
+Without its saved key metadata, StartOS cannot decrypt a managed store. A retry moves such keyless encrypted data to the target's trash for reclamation before starting over. This includes failed first backups from older releases. Partially populated key metadata is rejected instead.
+
 > [!WARNING]
-> Older StartOS releases cannot read an upgraded backup. An upgrade cannot detect alterations already made to the older unauthenticated format, or revoke previously copied backup data and key-wrapping metadata.
+> Older StartOS releases cannot read an upgraded backup. An upgrade cannot detect alterations already made to the older unauthenticated format, prevent replay or relocation of otherwise valid encrypted blobs, or revoke previously copied backup data and key-wrapping metadata.
 
 ## Command-Line Passwords
 

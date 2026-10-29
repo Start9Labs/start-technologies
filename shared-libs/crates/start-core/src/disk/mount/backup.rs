@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use color_eyre::eyre::eyre;
+use futures::FutureExt;
 use tokio::io::AsyncWriteExt;
 use tracing::instrument;
 use zeroize::Zeroizing;
@@ -17,6 +18,7 @@ use crate::disk::mount::filesystem::backupfs::BackupFS;
 use crate::disk::mount::guard::SubPath;
 use crate::disk::util::BackupUnencryptedMetadata;
 use crate::prelude::*;
+use crate::rpc_continuations::Guid;
 use crate::util::crypto::{unwrap_backup_key, wrap_backup_key};
 use crate::util::io::AtomicFile;
 use crate::util::serde::IoFormat;
@@ -39,6 +41,8 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
         password: &str,
     ) -> Result<(BackupUnencryptedMetadata, String), Error> {
         let backup_dir = backup_disk_path.join(BACKUP_DIR_NAME).join(server_id);
+        let _key_initialization =
+            crate::util::FileLock::new(backup_dir.join(".key.lock"), true).await?;
         let unencrypted_metadata_path = backup_dir.join("unencrypted-metadata.json");
         let crypt_path = backup_dir.join("crypt");
         let mut unencrypted_metadata: BackupUnencryptedMetadata =
@@ -64,10 +68,7 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
             }
             (None, None) => {
                 if tokio::fs::try_exists(&crypt_path).await? {
-                    return Err(Error::new(
-                        eyre!(t!("disk.mount.backup.invalid-key-metadata")),
-                        crate::ErrorKind::Backup,
-                    ));
+                    crate::backup::trash::move_to_trash(backup_disk_path, &crypt_path).await?;
                 }
                 (
                     base32::encode(
@@ -101,6 +102,7 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
         if new_store {
             tokio::fs::create_dir_all(&backup_dir).await?;
             save_unencrypted_metadata(&unencrypted_metadata_path, &unencrypted_metadata).await?;
+            super::util::sync_filesystem(backup_disk_path).await?;
         }
         Ok((unencrypted_metadata, enc_key))
     }
@@ -143,7 +145,9 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
     ) -> Result<Self, Error> {
         let backup_disk_path = backup_disk_mount_guard.path();
         let (unencrypted_metadata, enc_key) =
-            Self::load_metadata(backup_disk_path, server_id, password).await?;
+            Self::load_metadata(backup_disk_path, server_id, password)
+                .boxed()
+                .await?;
         let enc_key = Zeroizing::new(enc_key);
         let backup_dir = backup_disk_path.join(BACKUP_DIR_NAME).join(server_id);
         let unencrypted_metadata_path = backup_dir.join("unencrypted-metadata.json");
@@ -283,7 +287,8 @@ async fn save_unencrypted_metadata(
     path: &Path,
     metadata: &BackupUnencryptedMetadata,
 ) -> Result<(), Error> {
-    let mut file = AtomicFile::new(path, None::<PathBuf>).await?;
+    let temporary = path.with_extension(format!("{}.tmp", Guid::new()));
+    let mut file = AtomicFile::new(path, Some(temporary)).await?;
     file.write_all(&IoFormat::Json.to_vec(metadata)?).await?;
     file.save().await
 }
@@ -382,13 +387,77 @@ mod tests {
                 .await
                 .is_err()
         );
-        tokio::fs::remove_file(&path).await.unwrap();
-        assert!(
-            BackupMountGuard::<Never>::load_metadata(directory.path(), "server", LEGACY_PASSWORD)
-                .await
-                .is_err()
-        );
         assert_eq!(tokio::fs::read(&marker).await.unwrap(), b"retain");
+    }
+
+    #[tokio::test]
+    async fn keyless_store_moves_to_trash() {
+        let directory = tempfile::tempdir().unwrap();
+        let crypt = directory
+            .path()
+            .join(BACKUP_DIR_NAME)
+            .join("server")
+            .join("crypt");
+        tokio::fs::create_dir_all(&crypt).await.unwrap();
+        tokio::fs::write(crypt.join("orphan"), b"unreadable")
+            .await
+            .unwrap();
+        BackupMountGuard::<Never>::load_metadata(directory.path(), "server", "password")
+            .await
+            .unwrap();
+        assert!(!tokio::fs::try_exists(&crypt).await.unwrap());
+        let trash = crate::backup::trash::trash_dir(directory.path());
+        let mut entries = tokio::fs::read_dir(trash).await.unwrap();
+        let orphan = entries.next_entry().await.unwrap().unwrap();
+        assert_eq!(
+            tokio::fs::read(orphan.path().join("orphan")).await.unwrap(),
+            b"unreadable"
+        );
+        assert!(entries.next_entry().await.unwrap().is_none());
+        let (_, persisted) =
+            BackupMountGuard::<Never>::load_metadata(directory.path(), "server", "password")
+                .await
+                .unwrap();
+        assert!(!persisted.is_empty());
+    }
+
+    #[tokio::test]
+    async fn concurrent_initialization_publishes_one_key() {
+        let directory = tempfile::tempdir().unwrap();
+        let (first, second) = tokio::join!(
+            BackupMountGuard::<Never>::load_metadata(directory.path(), "server", "password"),
+            BackupMountGuard::<Never>::load_metadata(directory.path(), "server", "password"),
+        );
+        let (_, first) = first.unwrap();
+        let (_, second) = second.unwrap();
+        assert_eq!(first, second);
+        let (_, saved) =
+            BackupMountGuard::<Never>::load_metadata(directory.path(), "server", "password")
+                .await
+                .unwrap();
+        assert_eq!(saved, first);
+    }
+
+    #[tokio::test]
+    async fn concurrent_metadata_writes_use_independent_temporary_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("unencrypted-metadata.json");
+        let first = BackupUnencryptedMetadata::default();
+        let mut second = first.clone();
+        second.timestamp += chrono::Duration::seconds(1);
+        let (a, b) = tokio::join!(
+            save_unencrypted_metadata(&path, &first),
+            save_unencrypted_metadata(&path, &second),
+        );
+        a.unwrap();
+        b.unwrap();
+        let saved: BackupUnencryptedMetadata = IoFormat::Json
+            .from_slice(&tokio::fs::read(path).await.unwrap())
+            .unwrap();
+        assert!(saved.timestamp == first.timestamp || saved.timestamp == second.timestamp);
+        let mut entries = tokio::fs::read_dir(directory.path()).await.unwrap();
+        assert!(entries.next_entry().await.unwrap().is_some());
+        assert!(entries.next_entry().await.unwrap().is_none());
     }
 
     #[tokio::test]

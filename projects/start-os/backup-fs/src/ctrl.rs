@@ -712,6 +712,8 @@ impl Controller {
                 keep.insert(path);
             }
         }
+        let inventory = crate::objects::Inventory::load(&self.0.config.data_dir)?;
+        let legacy = inventory.legacy_ids().collect();
         let catalog = self.0.catalog.lock().unwrap();
         {
             let mut log = self.0.log.lock().unwrap();
@@ -733,10 +735,10 @@ impl Controller {
                     }
                 }
             }
-            log.retain_storage(&ids, &packed);
+            log.retain_storage(&ids, &legacy, &packed);
             log.persist_roots()?;
         }
-        let removed = crate::objects::collect_garbage(&self.0.config.data_dir, &keep)?;
+        let removed = inventory.collect_garbage(&keep)?;
         self.0.log.lock().unwrap().compact(0.0)?;
         Ok(removed)
     }

@@ -985,8 +985,15 @@ impl SegmentLog {
             .transpose()
     }
 
-    pub(crate) fn retain_storage(&mut self, ids: &HashSet<ObjectId>, packed: &HashSet<u64>) {
-        self.objects.retain(|id, _| ids.contains(id));
+    /// Keeps overrides until legacy-file removal is durable.
+    pub(crate) fn retain_storage(
+        &mut self,
+        ids: &HashSet<ObjectId>,
+        legacy: &HashSet<ObjectId>,
+        packed: &HashSet<u64>,
+    ) {
+        self.objects
+            .retain(|id, _| ids.contains(id) || legacy.contains(id));
         self.content.retain(|id, _| packed.contains(id));
         recompute_live(
             &self.index,

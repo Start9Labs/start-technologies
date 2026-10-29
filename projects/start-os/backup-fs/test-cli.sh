@@ -63,11 +63,12 @@ inventory() {
 }
 
 mount_view "$live" --file-size-padding 0.05
-node - "$live/data.mp4" "$root/original" <<'NODE'
+node - "$live/data.mp4" "$root/original" "$live/holes.mp4" <<'NODE'
 const fs = require('node:fs')
 const bytes = Buffer.alloc(5 * 1024 * 1024)
 for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 31 + Math.floor(i / 251)) % 256
-for (const path of process.argv.slice(2)) fs.writeFileSync(path, bytes)
+for (const path of process.argv.slice(2, 4)) fs.writeFileSync(path, bytes)
+fs.writeFileSync(process.argv[4], Buffer.alloc(4 * 1024 * 1024, 0x6d))
 NODE
 chmod 640 "$live/data.mp4"
 ln "$live/data.mp4" "$live/hardlink"
@@ -81,18 +82,37 @@ cmp "$root/before" "$root/after"
 [[ "$(snapshot list "$store")" = before-update ]]
 
 mount_view "$live" --file-size-padding 0.05
-node - "$live/data.mp4" <<'NODE'
+node - "$live/data.mp4" "$live/holes.mp4" <<'NODE'
 const fs = require('node:fs')
 const fd = fs.openSync(process.argv[2], 'r+')
 fs.writeSync(fd, Buffer.from('changed'), 0, 7, 70000)
 fs.fsyncSync(fd)
 fs.closeSync(fd)
+fs.truncateSync(process.argv[3], 1024 * 1024)
 NODE
 mv "$live/data.mp4" "$live/renamed.mp4"
 rm "$live/link"
 unmount_view
 
+mount_view "$live" --file-size-padding 0.05
+node - "$live/holes.mp4" <<'NODE'
+const fs = require('node:fs')
+const path = process.argv[2]
+fs.truncateSync(path, 4 * 1024 * 1024)
+const bytes = fs.readFileSync(path)
+if (bytes.subarray(1024 * 1024).some(byte => byte !== 0)) throw Error('truncated legacy bytes reappeared after remount')
+const fd = fs.openSync(path, 'r+')
+fs.writeSync(fd, Buffer.from('edit'), 0, 4, 2 * 1024 * 1024 + 9)
+fs.fsyncSync(fd)
+fs.closeSync(fd)
+NODE
+unmount_view
+
 mount_view "$recovery" --snapshot before-update --file-size-padding 0.05
+node - "$recovery/holes.mp4" <<'NODE'
+const fs = require('node:fs')
+if (fs.readFileSync(process.argv[2]).some(byte => byte !== 0x6d)) throw Error('truncate modified snapshot data')
+NODE
 cmp "$root/original" "$recovery/data.mp4"
 [[ "$(stat -c %a "$recovery/data.mp4")" = 640 ]]
 [[ "$(stat -c %h "$recovery/data.mp4")" = 2 ]]
@@ -114,11 +134,15 @@ after=$(find "$store/contents" -type f | wc -l)
 [[ "$after" -lt "$before" ]]
 [[ -z "$(snapshot list "$store")" ]]
 mount_view "$live" --file-size-padding 0.05
-node - "$live/renamed.mp4" "$live/hardlink" <<'NODE'
+node - "$live/renamed.mp4" "$live/hardlink" "$live/holes.mp4" <<'NODE'
 const fs = require('node:fs')
-for (const path of process.argv.slice(2)) {
+for (const path of process.argv.slice(2, 4)) {
   if (fs.readFileSync(path).subarray(70000, 70007).toString() !== 'changed') throw Error('live data changed during snapshot deletion')
 }
+const expected = Buffer.alloc(4 * 1024 * 1024)
+expected.fill(0x6d, 0, 1024 * 1024)
+expected.write('edit', 2 * 1024 * 1024 + 9)
+if (!fs.readFileSync(process.argv[4]).equals(expected)) throw Error('legacy holes changed during snapshot deletion')
 NODE
 unmount_view
-echo 'PASS: helper credential transport, zero-copy snapshot creation, recovery metadata, readonly mounts, and selective reclamation'
+echo 'PASS: helper credentials, zero-copy snapshots, recovery metadata, readonly mounts, legacy truncate/remount/regrow, and selective reclamation'

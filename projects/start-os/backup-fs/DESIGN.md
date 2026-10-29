@@ -37,7 +37,9 @@ sealed file.
 
 Vault version 2 rejects version-1 blobs during normal reads. A writable open upgrades an existing store once: it durably marks every superblock replica as migration-pending, atomically reseals each object and segment, then clears the marker after synchronizing the replacements. An interrupted upgrade resumes from that marker; read-only opens refuse an unfinished upgrade. Migration needs temporary space for one replacement segment or object and rewrites the existing encrypted data. Older binaries cannot read an upgraded store.
 
-Migration cannot establish whether legacy data was altered before the upgrade. Previously copied weak key-wrapping metadata and complete-store rollback remain outside its protection.
+Unreadable objects and frames stay in place and fail normal authentication; they do not block migration of healthy data. Filesystem I/O failures keep the pending marker for retry.
+
+Migration cannot establish whether legacy data was altered before the upgrade. Tags authenticate each blob, not its file path or log position; substitution or replay of valid same-store blobs remains possible. Previously copied weak key-wrapping metadata remains outside its protection.
 
 Authenticated storage uses filesystem format 2. Creating the first snapshot explicitly enables format 3; ordinary writable opens retain format 2 until then. The COW capability remains enabled after snapshots are deleted.
 
@@ -95,7 +97,7 @@ devices (with `rdev` preserved).
 
 `BackupFSOptions::enable_snapshots` enables COW storage during an exclusive writable open. The helper's `snapshot create` command sets this option automatically. `BackupFS::create_snapshot` flushes dirty inodes and open contents, synchronizes the backing filesystem, saves authoritative log roots, and durably publishes a named recovery point. Unchanged file content is shared: creation copies root indices, not file data. Later writes create immutable versions of affected blocks or directory buckets and append pointer records to the existing log.
 
-The authenticated catalog pins inode and packed-content log segments and retains the block/bucket versions each point uses. Existing stable-name objects are pinned without copying. Compaction skips pinned segments and saves an authoritative replay floor before deleting old segments; tombstoned records in retained history cannot resurrect current objects. Deletion removes the catalog entry durably before reclaiming storage unused by the live tree or retained snapshots. A failed catalog publication blocks mutations until reopen.
+The authenticated catalog pins inode and packed-content log segments and retains the block/bucket versions each point uses. Existing stable-name objects are pinned without copying. Compaction skips pinned segments and saves an authoritative replay floor before deleting old segments; tombstoned records in retained history cannot resurrect current objects. Deletion removes the catalog entry durably before reclaiming storage unused by the live tree or retained snapshots. Object overrides survive while their stable-name legacy files remain on disk, including between replay-root publication and unlink. A later synchronized collection can discard those masks once removal is durable. A failed catalog publication blocks mutations until reopen.
 
 Snapshot creation, listing, deletion, and recovery mounts use the existing exclusive store lock. These are offline operations; a writer and a recovery mount do not share the store concurrently. Recovery opens force read-only behavior throughout the filesystem and avoid atime writes. Names contain 1–128 ASCII letters, digits, `-`, `_`, or `.`, excluding `.` and `..`.
 

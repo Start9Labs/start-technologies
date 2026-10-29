@@ -34,10 +34,7 @@ pub use serde::{Deserialize, Serialize};
 use crate::error::{BkfsError, BkfsErrorKind, BkfsResult};
 use crate::vault::{self, EccParams};
 
-/// Decode limit for data structures. Comfortably above the largest legitimate
-/// bincode payload (a packed content extent is ≤ one chunk ≈ 1 MiB; inode
-/// records and directory buckets are far smaller), while still bounding a
-/// pathological length prefix.
+/// Decoder read/allocation budget for persisted structures, including snapshot catalogs.
 const DATA_LIMIT: usize = 64 * 1024 * 1024;
 /// Decode limit for the superblock body — tiny and fixed-shape.
 const SUPERBLOCK_LIMIT: usize = 64 * 1024;

@@ -79,6 +79,13 @@ fn read_file(ctrl: &Controller, inode: Inode) -> Vec<u8> {
     bytes
 }
 
+fn create_legacy_block_file(data: &Path) -> Inode {
+    let mut options = config(data);
+    options.enable_snapshots = false;
+    let fs = BackupFS::new(options).unwrap();
+    create_file(&ctrl(&fs), &vec![0x6d; 4 * CHUNK_SIZE as usize])
+}
+
 fn objects(data: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
     fn walk(path: &Path, result: &mut BTreeMap<PathBuf, Vec<u8>>) {
         if !path.exists() {
@@ -405,6 +412,89 @@ fn snapshot_failure_before_publication_preserves_data_and_blocks_further_writes(
     let fs = BackupFS::new(config(data.path())).unwrap();
     assert_eq!(read_file(&ctrl(&fs), inode), b"safe");
     assert!(fs.list_snapshots().unwrap().is_empty());
+}
+
+#[test]
+fn legacy_snapshot_truncate_remount_regrow_keeps_holes_zeroed() {
+    let data = tempfile::tempdir().unwrap();
+    let inode = create_legacy_block_file(data.path());
+    {
+        let mut fs = BackupFS::new(config(data.path())).unwrap();
+        let c = ctrl(&fs);
+        fs.create_snapshot("original").unwrap();
+        let mut contents = Contents::open(c.clone(), inode).unwrap();
+        contents.resize(CHUNK_SIZE).unwrap();
+        contents.flush().unwrap();
+        drop(contents);
+        c.compact().unwrap();
+    }
+    let mut expected = vec![0; 4 * CHUNK_SIZE as usize];
+    expected[..CHUNK_SIZE as usize].fill(0x6d);
+    {
+        let fs = BackupFS::new(config(data.path())).unwrap();
+        let c = ctrl(&fs);
+        let mut contents = Contents::open(c.clone(), inode).unwrap();
+        contents.resize(4 * CHUNK_SIZE).unwrap();
+        contents.flush().unwrap();
+        assert!(read_file(&c, inode) == expected);
+        contents.write_at(b"edit", 2 * CHUNK_SIZE + 9).unwrap();
+        contents.flush().unwrap();
+        expected[2 * CHUNK_SIZE as usize + 9..2 * CHUNK_SIZE as usize + 13]
+            .copy_from_slice(b"edit");
+        assert_eq!(read_file(&c, inode), expected);
+    }
+    {
+        let fs = BackupFS::open_snapshot(config(data.path()), "original").unwrap();
+        assert_eq!(
+            read_file(&ctrl(&fs), inode),
+            vec![0x6d; 4 * CHUNK_SIZE as usize]
+        );
+    }
+    {
+        let mut fs = BackupFS::new(config(data.path())).unwrap();
+        fs.delete_snapshot("original").unwrap();
+    }
+    let fs = BackupFS::new(config(data.path())).unwrap();
+    assert_eq!(read_file(&ctrl(&fs), inode), expected);
+}
+
+#[test]
+fn legacy_masks_survive_root_publication_before_unlink_without_snapshot_pins() {
+    let data = tempfile::tempdir().unwrap();
+    let inode = create_legacy_block_file(data.path());
+    let (key, ecc) = {
+        let mut fs = BackupFS::new(config(data.path())).unwrap();
+        let c = ctrl(&fs);
+        fs.create_snapshot("original").unwrap();
+        let mut contents = Contents::open(c.clone(), inode).unwrap();
+        contents.resize(CHUNK_SIZE).unwrap();
+        contents.flush().unwrap();
+        drop(contents);
+        c.compact().unwrap();
+        (*c.key(), c.ecc())
+    };
+    let mut catalog = crate::snapshot::Catalog::load(data.path(), &key).unwrap();
+    catalog.entries.clear();
+    catalog.persist(data.path(), &key, ecc).unwrap();
+    let inventory = crate::objects::Inventory::load(data.path()).unwrap();
+    let legacy = inventory.legacy_ids().collect();
+    let mut log = crate::seglog::SegmentLog::open(data.path().join("segments"), key).unwrap();
+    log.retain_storage(&Default::default(), &legacy, &Default::default());
+    log.persist_roots().unwrap();
+    drop(log);
+    drop(inventory);
+    let fs = BackupFS::new(config(data.path())).unwrap();
+    let c = ctrl(&fs);
+    assert!(c.block_path(ContentId(inode.0), 3).exists());
+    let mut contents = Contents::open(c.clone(), inode).unwrap();
+    contents.resize(4 * CHUNK_SIZE).unwrap();
+    contents.flush().unwrap();
+    let bytes = read_file(&c, inode);
+    assert_eq!(
+        &bytes[..CHUNK_SIZE as usize],
+        vec![0x6d; CHUNK_SIZE as usize]
+    );
+    assert!(bytes[CHUNK_SIZE as usize..].iter().all(|&byte| byte == 0));
 }
 
 #[test]

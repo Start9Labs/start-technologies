@@ -10,10 +10,13 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{BkfsError, BkfsResult};
 
+const HASH_BYTES: usize = 16;
+const SHARD_BYTES: usize = 2;
+
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ObjectId {
     directory: bool,
-    hash: [u8; 16],
+    hash: [u8; HASH_BYTES],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,7 +43,7 @@ impl ObjectId {
         }
         Self {
             directory,
-            hash: h.finalize()[..16].try_into().unwrap(),
+            hash: h.finalize()[..HASH_BYTES].try_into().unwrap(),
         }
     }
 
@@ -63,7 +66,7 @@ impl ObjectId {
     }
 
     pub fn path(self, data: &Path, version: Option<ObjectVersion>) -> Option<PathBuf> {
-        let mut name = hex(&self.hash[2..]);
+        let mut name = hex(&self.hash[SHARD_BYTES..]);
         match version {
             Some(ObjectVersion::Deleted) => return None,
             Some(ObjectVersion::Version(bytes)) => {
@@ -73,14 +76,28 @@ impl ObjectId {
             None => {}
         }
         Some(
-            data.join(if self.directory {
-                "dirents"
-            } else {
-                "contents"
-            })
-            .join(hex(&self.hash[..2]))
-            .join(name),
+            Self::root(data, self.directory)
+                .join(hex(&self.hash[..SHARD_BYTES]))
+                .join(name),
         )
+    }
+
+    fn root(data: &Path, directory: bool) -> PathBuf {
+        data.join(if directory { "dirents" } else { "contents" })
+    }
+
+    fn legacy(directory: bool, shard: &std::ffi::OsStr, file: &std::ffi::OsStr) -> Option<Self> {
+        let shard = shard.to_str()?;
+        let file = file.to_str()?;
+        if shard.len() != SHARD_BYTES * 2 || file.len() != (HASH_BYTES - SHARD_BYTES) * 2 {
+            return None;
+        }
+        let hex = format!("{shard}{file}");
+        let mut hash = [0; HASH_BYTES];
+        for (byte, pair) in hash.iter_mut().zip(hex.as_bytes().chunks_exact(2)) {
+            *byte = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
+        }
+        Some(Self { directory, hash })
     }
 }
 
@@ -96,33 +113,60 @@ pub(crate) fn sync_object_path(path: &Path) -> BkfsResult<()> {
     Ok(())
 }
 
-pub(crate) fn collect_garbage(data: &Path, keep: &HashSet<PathBuf>) -> BkfsResult<usize> {
-    let mut removed = 0;
-    for name in ["contents", "dirents"] {
-        let root = data.join(name);
-        let shards = match std::fs::read_dir(&root) {
-            Ok(entries) => entries,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(e) => return Err(e.into()),
+pub(crate) struct Inventory {
+    objects: Vec<(PathBuf, Option<ObjectId>)>,
+    directories: Vec<PathBuf>,
+}
+
+impl Inventory {
+    pub fn load(data: &Path) -> BkfsResult<Self> {
+        let mut inventory = Self {
+            objects: Vec::new(),
+            directories: Vec::new(),
         };
-        for shard in shards {
-            let shard = shard?;
-            if !shard.file_type()?.is_dir() {
-                return Err(BkfsError::unsupported("unexpected object shard"));
-            }
-            for entry in std::fs::read_dir(shard.path())? {
-                let entry = entry?;
-                if !entry.file_type()?.is_file() {
-                    return Err(BkfsError::unsupported("unexpected object file"));
+        for directory in [false, true] {
+            let root = ObjectId::root(data, directory);
+            let shards = match std::fs::read_dir(&root) {
+                Ok(entries) => entries,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(e.into()),
+            };
+            for shard in shards {
+                let shard = shard?;
+                if !shard.file_type()?.is_dir() {
+                    return Err(BkfsError::unsupported("unexpected object shard"));
                 }
-                if !keep.contains(&entry.path()) {
-                    std::fs::remove_file(entry.path())?;
-                    removed += 1;
+                for entry in std::fs::read_dir(shard.path())? {
+                    let entry = entry?;
+                    if !entry.file_type()?.is_file() {
+                        return Err(BkfsError::unsupported("unexpected object file"));
+                    }
+                    let legacy =
+                        ObjectId::legacy(directory, &shard.file_name(), &entry.file_name());
+                    inventory.objects.push((entry.path(), legacy));
                 }
+                inventory.directories.push(shard.path());
             }
-            File::open(shard.path())?.sync_all()?;
+            inventory.directories.push(root);
         }
-        File::open(root)?.sync_all()?;
+        Ok(inventory)
     }
-    Ok(removed)
+
+    pub fn legacy_ids(&self) -> impl Iterator<Item = ObjectId> + '_ {
+        self.objects.iter().filter_map(|(_, id)| *id)
+    }
+
+    pub fn collect_garbage(self, keep: &HashSet<PathBuf>) -> BkfsResult<usize> {
+        let mut removed = 0;
+        for (path, _) in self.objects {
+            if !keep.contains(&path) {
+                std::fs::remove_file(path)?;
+                removed += 1;
+            }
+        }
+        for path in self.directories {
+            File::open(path)?.sync_all()?;
+        }
+        Ok(removed)
+    }
 }

@@ -3,9 +3,10 @@ use std::io::Write;
 use std::path::Path;
 
 use chacha20::Key;
+use log::warn;
 
 use crate::atomic_file::AtomicFile;
-use crate::error::{BkfsError, BkfsResult};
+use crate::error::{BkfsError, BkfsErrorKind, BkfsResult};
 use crate::vault::{self, EccParams};
 
 /// Called while the exclusive store lock and authenticated pending flag are held.
@@ -29,17 +30,25 @@ pub(crate) fn reseal_store(dir: &Path, key: &Key) -> BkfsResult<()> {
     Ok(())
 }
 
+/// Unreadable blobs stay in place and fail later reads, as before the upgrade.
 pub(crate) fn reseal_blob(blob: &[u8], key: &Key) -> BkfsResult<Option<Vec<u8>>> {
-    if vault::is_legacy(blob) {
-        let plain = vault::open_legacy(blob, key)?;
-        let ecc = EccParams {
-            data: blob[5],
-            parity: blob[6],
-        };
-        Ok(Some(vault::seal(&plain, key, ecc)))
+    let opened = if vault::is_legacy(blob) {
+        vault::open_legacy(blob, key).map(|plain| {
+            let ecc = EccParams {
+                data: blob[5],
+                parity: blob[6],
+            };
+            Some(vault::seal(&plain, key, ecc))
+        })
     } else {
-        vault::open(blob, key)?;
-        Ok(None)
+        vault::open(blob, key).map(|_| None)
+    };
+    match opened {
+        Err(e) if matches!(e.kind, BkfsErrorKind::BadChecksum) => {
+            warn!("leaving unreadable blob unmigrated");
+            Ok(None)
+        }
+        res => res,
     }
 }
 
