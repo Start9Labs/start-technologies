@@ -121,6 +121,7 @@ mod test {
         for exposed in [
             "auth.session.list",
             "auth.session.kill",
+            "package.exec",
             "package.list",
             "package.logs",
             "server.time",

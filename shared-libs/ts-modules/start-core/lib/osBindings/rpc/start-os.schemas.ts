@@ -503,6 +503,29 @@ export const Epp: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   description:
     'Selects how aggressively an EPP-capable CPU pursues performance.',
 })
+export const ExecResult: z.ZodObject<{
+  stdout: z.ZodString
+  stderr: z.ZodString
+  exitCode: z.ZodInt
+  timedOut: z.ZodBoolean
+  /**
+   * Whether either output kept only its final 64 KiB.
+   */
+  truncated: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  stdout: z.string(),
+  stderr: z.string(),
+  exitCode: z.int(),
+  timedOut: z.boolean(),
+  /**
+   * Whether either output kept only its final 64 KiB.
+   */
+  truncated: z.boolean().meta({
+    description: 'Whether either output kept only its final 64 KiB.',
+  }),
+}).meta({
+  id: 'ExecResult',
+})
 export const FormatDiskParams: z.ZodObject<{
   disk: z.ZodString
   label: z.ZodCodec<
@@ -1913,6 +1936,105 @@ export const EppParams: z.ZodObject<{
   set: wire(Epp.nullable().optional(), Epp.nullable()),
 }).meta({
   id: 'EppParams',
+})
+export const ExecParams: z.ZodObject<{
+  id: typeof PackageId
+  /**
+   * Program and arguments, run without a shell. Empty runs the user's login shell.
+   */
+  command: z.ZodArray<z.ZodString>
+  /**
+   * Written to the command's standard input, which is otherwise empty.
+   */
+  stdin: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * Seconds before the command is terminated. Defaults to 120.
+   */
+  timeoutSecs: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  /**
+   * Part of the subcontainer's ID. Overrides `name` and `imageId`.
+   */
+  subcontainer: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
+  /**
+   * Part of the subcontainer's name, case-insensitive. Overrides `imageId`.
+   */
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * Part of the subcontainer's image ID, case-insensitive.
+   */
+  imageId: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof ImageId>>,
+    z.ZodNullable<typeof ImageId>
+  >
+  /**
+   * Defaults to the image's user, else root.
+   */
+  user: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  id: PackageId,
+  /**
+   * Program and arguments, run without a shell. Empty runs the user's login shell.
+   */
+  command: z.array(z.string()).meta({
+    description:
+      "Program and arguments, run without a shell. Empty runs the user's login shell.",
+  }),
+  /**
+   * Written to the command's standard input, which is otherwise empty.
+   */
+  stdin: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      "Written to the command's standard input, which is otherwise empty.",
+  }),
+  /**
+   * Seconds before the command is terminated. Defaults to 120.
+   */
+  timeoutSecs: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description: 'Seconds before the command is terminated. Defaults to 120.',
+  }),
+  /**
+   * Part of the subcontainer's ID. Overrides `name` and `imageId`.
+   */
+  subcontainer: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      "Part of the subcontainer's ID. Overrides `name` and `imageId`.",
+  }),
+  /**
+   * Part of the subcontainer's name, case-insensitive. Overrides `imageId`.
+   */
+  name: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      "Part of the subcontainer's name, case-insensitive. Overrides `imageId`.",
+  }),
+  /**
+   * Part of the subcontainer's image ID, case-insensitive.
+   */
+  imageId: wire(ImageId.nullable().optional(), ImageId.nullable()).meta({
+    description: "Part of the subcontainer's image ID, case-insensitive.",
+  }),
+  /**
+   * Defaults to the image's user, else root.
+   */
+  user: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description: "Defaults to the image's user, else root.",
+  }),
+}).meta({
+  id: 'ExecParams',
 })
 export const ForgetGatewayParams: z.ZodObject<{ gateway: typeof GatewayId }> =
   /* @__PURE__ */ object({ gateway: GatewayId }).meta({
@@ -4850,6 +4972,10 @@ export const Api = {
         'cancel-install': {
           _PARAMS: /* @__PURE__ */ CancelInstallParams,
           _RETURN: /* @__PURE__ */ z.null(),
+        },
+        exec: {
+          _PARAMS: /* @__PURE__ */ ExecParams,
+          _RETURN: /* @__PURE__ */ ExecResult,
         },
         host: {
           _PARAMS: /* @__PURE__ */ RequiresPackageId,

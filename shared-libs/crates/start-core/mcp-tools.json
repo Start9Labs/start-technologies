@@ -3058,6 +3058,144 @@
     }
   },
   {
+    "name": "package.exec",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "ExecParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/PackageId" },
+            "command": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Program and arguments, run without a shell. Empty runs the user's login shell."
+            },
+            "stdin": {
+              "description": "Written to the command's standard input, which is otherwise empty.",
+              "type": ["string", "null"]
+            },
+            "timeoutSecs": {
+              "description": "Seconds before the command is terminated. Defaults to 120.",
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "subcontainer": {
+              "description": "Part of the subcontainer's ID. Overrides `name` and `imageId`.",
+              "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
+            },
+            "name": {
+              "description": "Part of the subcontainer's name, case-insensitive. Overrides `imageId`.",
+              "type": ["string", "null"]
+            },
+            "imageId": {
+              "description": "Part of the subcontainer's image ID, case-insensitive.",
+              "anyOf": [{ "$ref": "#/$defs/ImageId" }, { "type": "null" }]
+            },
+            "user": {
+              "description": "Defaults to the image's user, else root.",
+              "type": ["string", "null"]
+            }
+          },
+          "required": ["id", "command"],
+          "additionalProperties": true
+        },
+        "PackageId": { "type": "string" },
+        "Guid": { "type": "string" },
+        "ImageId": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/PackageId" },
+        "command": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Program and arguments, run without a shell. Empty runs the user's login shell."
+        },
+        "stdin": {
+          "description": "Written to the command's standard input, which is otherwise empty.",
+          "type": ["string", "null"]
+        },
+        "timeoutSecs": {
+          "description": "Seconds before the command is terminated. Defaults to 120.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            { "type": "null" }
+          ]
+        },
+        "subcontainer": {
+          "description": "Part of the subcontainer's ID. Overrides `name` and `imageId`.",
+          "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
+        },
+        "name": {
+          "description": "Part of the subcontainer's name, case-insensitive. Overrides `imageId`.",
+          "type": ["string", "null"]
+        },
+        "imageId": {
+          "description": "Part of the subcontainer's image ID, case-insensitive.",
+          "anyOf": [{ "$ref": "#/$defs/ImageId" }, { "type": "null" }]
+        },
+        "user": {
+          "description": "Defaults to the image's user, else root.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["id", "command"],
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "ExecResult": {
+          "type": "object",
+          "properties": {
+            "stdout": { "type": "string" },
+            "stderr": { "type": "string" },
+            "exitCode": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "timedOut": { "type": "boolean" },
+            "truncated": {
+              "type": "boolean",
+              "description": "Whether either output kept only its final 64 KiB."
+            }
+          },
+          "required": ["stdout", "stderr", "exitCode", "timedOut", "truncated"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" },
+        "exitCode": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "timedOut": { "type": "boolean" },
+        "truncated": {
+          "type": "boolean",
+          "description": "Whether either output kept only its final 64 KiB."
+        }
+      },
+      "required": ["stdout", "stderr", "exitCode", "timedOut", "truncated"],
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "package.host.address.domain.private.add",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

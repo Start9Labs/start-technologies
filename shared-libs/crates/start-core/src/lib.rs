@@ -657,6 +657,12 @@ pub fn package<C: Context>() -> ParentHandler<C> {
                 .no_cli(),
         )
         .subcommand(
+            "exec",
+            from_fn_async(service::exec::exec)
+                .with_about("about.execute-commands-container")
+                .no_cli(),
+        )
+        .subcommand(
             "attach",
             from_fn_async_local(service::cli_attach)
                 .no_ts()
