@@ -754,33 +754,6 @@ export class SubContainerEager<
       ['subcontainer', 'exec', ...prepared.args, this.rootfs, ...command],
       prepared.options,
     )
-    const kill = () => child.kill('SIGKILL')
-    abort?.signal.addEventListener('abort', kill)
-    if (spawnOptions.input) {
-      await new Promise<null>((resolve, reject) => {
-        try {
-          child.stdin.on('error', e => reject(e))
-          child.stdin.write(spawnOptions.input, e => {
-            if (e) {
-              reject(e)
-            } else {
-              resolve(null)
-            }
-          })
-        } catch (e) {
-          reject(e)
-        }
-      })
-    }
-    // EOF-reading commands require closed stdin, including empty input.
-    await new Promise<null>((resolve, reject) => {
-      try {
-        if (!child.stdin) return resolve(null)
-        child.stdin.end(() => resolve(null))
-      } catch (e) {
-        reject(e)
-      }
-    })
     const stdout = { data: '' as string }
     const stderr = { data: '' as string }
     const appendData =
@@ -792,20 +765,22 @@ export class SubContainerEager<
         }
       }
     return new Promise((resolve, reject) => {
-      child.on('error', reject)
       let killTimeout: NodeJS.Timeout | undefined
       let timedOut = false
-      if (timeout !== null && child.pid) {
-        killTimeout = setTimeout(() => {
-          timedOut = true
-          child.kill('SIGKILL')
-        }, timeout)
-      }
-      child.stdout.on('data', appendData(stdout))
-      child.stderr.on('data', appendData(stderr))
-      child.on('exit', (code, signal) => {
+      const kill = () => child.kill('SIGKILL')
+      const cleanup = () => {
         clearTimeout(killTimeout)
         abort?.signal.removeEventListener('abort', kill)
+      }
+      const fail = (error: Error) => {
+        cleanup()
+        reject(error)
+      }
+      child.once('error', fail)
+      child.stdout?.on('data', appendData(stdout))
+      child.stderr?.on('data', appendData(stderr))
+      child.once('close', (code, signal) => {
+        cleanup()
         const result = {
           exitCode: code,
           exitSignal: signal,
@@ -824,6 +799,26 @@ export class SubContainerEager<
           ...result,
         })
       })
+      child.stdin?.on('error', error => {
+        kill()
+        fail(error)
+      })
+      if (timeout !== null && child.pid) {
+        killTimeout = setTimeout(() => {
+          timedOut = true
+          kill()
+        }, timeout)
+      }
+      abort?.signal.addEventListener('abort', kill, { once: true })
+      if (abort?.signal.aborted) kill()
+      // EOF-reading commands require closed stdin, including empty input.
+      // Completion is observed before stdin closes, which can end the command.
+      try {
+        child.stdin?.end(spawnOptions.input)
+      } catch (error) {
+        kill()
+        fail(error as Error)
+      }
     })
   }
 
