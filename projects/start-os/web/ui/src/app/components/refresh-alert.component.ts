@@ -40,7 +40,7 @@ import { UiUpdateService } from 'src/app/services/ui-update.service'
             }}
           }
           @case ('syncing') {
-            {{ 'Syncing user interface...' | i18n }}
+            {{ 'Syncing the interface with your server...' | i18n }}
           }
         }
       </p>

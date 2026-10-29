@@ -852,7 +852,7 @@ export default {
   967: 'Może mieć maksymalnie 255 bajtów (litery ze znakami diakrytycznymi i symbole zajmują więcej niż jeden)',
   968: 'Nie może zawierać znaków sterujących',
   969: 'Interfejs użytkownika zsynchronizowany. Odśwież stronę, aby kontynuować.',
-  970: 'Synchronizowanie interfejsu użytkownika...',
+  970: 'Synchronizowanie interfejsu z serwerem...',
   971: 'Nie udało się zsynchronizować interfejsu użytkownika. Spróbuj ponownie lub zresetuj pamięć podręczną interfejsu.',
   973: 'Zresetuj pamięć podręczną interfejsu',
   974: 'Zresetować interfejs w pamięci podręcznej i odświeżyć stronę? Dane logowania i ustawienia zostaną zachowane.',

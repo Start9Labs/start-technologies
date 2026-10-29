@@ -852,7 +852,7 @@ export default {
   967: 'Darf höchstens 255 Bytes lang sein (Buchstaben mit Akzent und Symbole belegen mehr als eines)',
   968: 'Darf keine Steuerzeichen enthalten',
   969: 'Benutzeroberfläche synchronisiert. Zum Fortfahren aktualisieren.',
-  970: 'Benutzeroberfläche wird synchronisiert...',
+  970: 'Benutzeroberfläche wird mit deinem Server synchronisiert...',
   971: 'Die Benutzeroberfläche konnte nicht synchronisiert werden. Erneut versuchen oder den Cache der Benutzeroberfläche zurücksetzen.',
   973: 'Cache der Benutzeroberfläche zurücksetzen',
   974: 'Die zwischengespeicherte Benutzeroberfläche zurücksetzen und die Seite neu laden? Deine Anmeldung und Einstellungen bleiben erhalten.',
