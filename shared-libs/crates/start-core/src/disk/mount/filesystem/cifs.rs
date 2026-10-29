@@ -55,6 +55,35 @@ async fn resolve_hostname(hostname: &str) -> Result<IpAddr, Error> {
     .await
 }
 
+pub(crate) async fn locations_overlap(
+    source: (&str, &Path),
+    destination: (&str, &Path),
+) -> Result<bool, Error> {
+    let components = |path: &Path| {
+        path.components()
+            .filter_map(|part| match part {
+                std::path::Component::Normal(name) => Some(name.to_string_lossy().to_lowercase()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let source_path = components(source.1);
+    let destination_path = components(destination.1);
+    if !source_path.starts_with(&destination_path) && !destination_path.starts_with(&source_path) {
+        return Ok(false);
+    }
+    if source.0.eq_ignore_ascii_case(destination.0) {
+        return Ok(true);
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let (source, destination) =
+            tokio::try_join!(resolve_hostname(source.0), resolve_hostname(destination.0))?;
+        Ok(source.to_canonical() == destination.to_canonical())
+    })
+    .await
+    .map_err(|error| Error::new(error, crate::ErrorKind::Timeout))?
+}
+
 async fn resolve_dns_or_netbios(
     hostname: &str,
     dns: impl Future<Output = Result<IpAddr, Error>>,
@@ -117,6 +146,208 @@ mod tests {
     use std::future::ready;
 
     use super::*;
+
+    #[tokio::test]
+    async fn overlapping_locations_compare_share_components_and_resolved_endpoints() {
+        for (source, destination, expected) in [
+            ("share", "/share", true),
+            ("/share", "/share/StartOSBackupsV2/server/crypt", true),
+            ("/SHARE/backups/old", "/share/backups", true),
+            ("/share/photos", "/share/photos-archive", false),
+            ("/share/photos", "/share/backups", false),
+            ("/share", "/other-share", false),
+        ] {
+            assert_eq!(
+                locations_overlap(("NAS", Path::new(source)), ("nas", Path::new(destination)))
+                    .await
+                    .unwrap(),
+                expected
+            );
+        }
+        assert!(
+            locations_overlap(
+                ("2001:0db8:0:0:0:0:0:10", Path::new("/share")),
+                ("2001:db8::10", Path::new("/share/backups"))
+            )
+            .await
+            .unwrap()
+        );
+        assert!(
+            !locations_overlap(
+                ("192.0.2.1", Path::new("/share")),
+                ("192.0.2.2", Path::new("/share/backups"))
+            )
+            .await
+            .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires the isolated SMB fixture and root in a private mount namespace"]
+    async fn real_cifs_handles_auth_guest_outage_cancellation_and_recovery() {
+        use std::os::unix::fs::MetadataExt;
+        use std::time::{Duration, Instant};
+
+        use crate::disk::mount::filesystem::bind::Bind;
+        use crate::disk::mount::guard::MountGuard;
+        use crate::rpc_continuations::Guid;
+        use crate::shared_volumes::SharedVolumeId;
+        use crate::shared_volumes::mounts::{PreparedSource, SharedVolumeMounts};
+        assert_eq!(std::env::var("VOLUME_CIFS_FIXTURE").as_deref(), Ok("1"));
+        fn definition(hostname: &str, path: &str) -> SharedCifs {
+            SharedCifs(Cifs {
+                hostname: hostname.into(),
+                path: path.into(),
+                username: "start9".into(),
+                password: Some("fixture-only".into()),
+            })
+        }
+        fn rule(ip: &str) -> [&str; 10] {
+            [
+                "OUTPUT", "-d", ip, "-p", "tcp", "--dport", "445", "-j", "DROP", "--wait",
+            ]
+        }
+        struct BlockTraffic(Vec<&'static str>);
+        impl Drop for BlockTraffic {
+            fn drop(&mut self) {
+                for ip in &self.0 {
+                    let _ = std::process::Command::new("iptables")
+                        .arg("-D")
+                        .args(rule(ip))
+                        .output();
+                }
+            }
+        }
+        let source = TmpMountGuard::mount(&definition("127.0.0.1", "/volume"), ReadWrite)
+            .await
+            .unwrap();
+        tokio::fs::write(source.path().join("sentinel"), b"remote contents")
+            .await
+            .unwrap();
+        assert_eq!(
+            tokio::fs::metadata(source.path().join("sentinel"))
+                .await
+                .unwrap()
+                .uid(),
+            100000
+        );
+        let mut guest = definition("127.0.0.1", "/guest");
+        guest.0.username.clear();
+        guest.0.password = None;
+        let guest = TmpMountGuard::mount(&guest, ReadOnly).await.unwrap();
+        assert_eq!(
+            tokio::fs::read(guest.path().join("sentinel"))
+                .await
+                .unwrap(),
+            b"remote contents"
+        );
+        guest.unmount().await.unwrap();
+        let fixture = tempfile::tempdir().unwrap();
+        tokio::fs::create_dir(fixture.path().join("data"))
+            .await
+            .unwrap();
+        let tree = MountGuard::mount(&Bind::new(fixture.path()), fixture.path(), ReadWrite)
+            .await
+            .unwrap();
+        let mut mounts = SharedVolumeMounts::default();
+        let guid = Guid::new();
+        let location = mounts
+            .prepare(&guid, fixture.path(), Path::new("data"))
+            .await
+            .unwrap();
+        mounts
+            .attach(
+                &guid,
+                location,
+                SharedVolumeId::new(),
+                PreparedSource::open(source.clone(), None).await.unwrap(),
+                true,
+            )
+            .unwrap();
+        assert!(
+            tokio::fs::write(fixture.path().join("data/forbidden"), b"no")
+                .await
+                .is_err()
+        );
+        let mount_info = String::from_utf8(
+            Command::new("unshare")
+                .args([
+                    "--user",
+                    "--map-root-user",
+                    "--mount",
+                    "cat",
+                    "/proc/self/mountinfo",
+                ])
+                .invoke(crate::ErrorKind::Filesystem)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(!mount_info.contains("fixture-only"));
+        std::println!(
+            "CIFS username visible in mount metadata: {}",
+            mount_info.contains("username=start9")
+        );
+        let mut blocked = BlockTraffic(Vec::new());
+        for ip in ["127.0.0.1", "127.0.0.2"] {
+            Command::new("iptables")
+                .arg("-I")
+                .args(rule(ip))
+                .invoke(crate::ErrorKind::Network)
+                .await
+                .unwrap();
+            blocked.0.push(ip);
+        }
+        let began = Instant::now();
+        let io = tokio::time::timeout(
+            Duration::from_secs(40),
+            tokio::fs::write(source.path().join("offline-write"), b"offline"),
+        )
+        .await;
+        assert!(io.is_ok(), "soft source I/O did not return within40seconds");
+        assert!(io.unwrap().is_err());
+        std::println!(
+            "Unavailable source I/O returned after {:?}",
+            began.elapsed()
+        );
+        let unavailable = definition("127.0.0.2", "/volume");
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(100),
+                TmpMountGuard::mount(&unavailable, ReadWrite)
+            )
+            .await
+            .is_err()
+        );
+        let began = Instant::now();
+        let error = TmpMountGuard::mount(&unavailable, ReadWrite)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                error.kind,
+                crate::ErrorKind::Timeout | crate::ErrorKind::Filesystem
+            ),
+            "{error}"
+        );
+        assert!(began.elapsed() < Duration::from_secs(33));
+        drop(blocked);
+        let recovered = TmpMountGuard::mount(&unavailable, ReadWrite).await.unwrap();
+        tokio::fs::write(recovered.path().join("recovered"), b"recovered")
+            .await
+            .unwrap();
+        let recovered_path = recovered.path().to_owned();
+        recovered.unmount().await.unwrap();
+        assert!(
+            !crate::disk::mount::util::is_mountpoint(&recovered_path)
+                .await
+                .unwrap(),
+            "cancelled helper left a late mount"
+        );
+        mounts.clear();
+        source.unmount().await.unwrap();
+        tree.unmount(false).await.unwrap();
+    }
 
     #[test]
     fn invalid_sources_are_rejected_before_network_access() {
@@ -373,7 +604,7 @@ impl FileSystem for SharedCifs {
     ) -> Result<(), Error> {
         tokio::time::timeout(std::time::Duration::from_secs(30), self.0.mount_with_options(
             mountpoint.as_ref(),
-            &format!("vers=3,soft,echo_interval=5,noserverino,uid=100000,gid=100000,forceuid,forcegid,file_mode=0666,dir_mode=0777,{}", access_options(mount_type)),
+            &format!("vers=3,soft,echo_interval=5,noserverino,uid={0},gid={0},forceuid,forcegid,file_mode=0666,dir_mode=0777,{1}", crate::lxc::BASE_IDMAP.to_id, access_options(mount_type)),
         )).await.map_err(|error| Error::new(error, crate::ErrorKind::Timeout))?
     }
 

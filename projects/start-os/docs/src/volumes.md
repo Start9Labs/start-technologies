@@ -32,6 +32,8 @@ Uninstalling or rolling back a consuming service leaves volume contents untouche
 
 Select volumes independently alongside services when [creating a backup](backup-create.md). Each selected volume copies its complete backing folder, including network sources. An unavailable source fails that item rather than producing an empty successful copy.
 
+Use a backup destination outside every selected volume, including any server-side aliases of those folders.
+
 A service backup excludes its attached volume contents. Back up the volume itself to protect those files.
 
 [Restoring a volume](backup-restore.md) creates a new local volume with a new identity and no grants, even when the backup came from a network share. Existing local and remote data stays untouched. Grant the restored copy to its consumers and select it again in any service settings that stored the original volume's identity.

@@ -164,7 +164,7 @@ pub async fn create_subcontainer_fs(
         };
 
         Command::new("chown")
-            .arg("100000:100000")
+            .arg(format!("{0}:{0}", crate::lxc::BASE_IDMAP.to_id))
             .arg(&mountpoint)
             .invoke(ErrorKind::Filesystem)
             .await?;
@@ -172,7 +172,7 @@ pub async fn create_subcontainer_fs(
         match tokio::fs::create_dir(&etc).await {
             Ok(()) => {
                 Command::new("chown")
-                    .arg("100000:100000")
+                    .arg(format!("{0}:{0}", crate::lxc::BASE_IDMAP.to_id))
                     .arg(&etc)
                     .invoke(ErrorKind::Filesystem)
                     .await?;
@@ -185,15 +185,15 @@ pub async fn create_subcontainer_fs(
         write_file_owned_atomic(
             mountpoint.join("etc/hostname"),
             format!("{container_guid}\n"),
-            100000,
-            100000,
+            crate::lxc::BASE_IDMAP.to_id,
+            crate::lxc::BASE_IDMAP.to_id,
         )
         .await?;
         write_file_owned_atomic(
             mountpoint.join("etc/hosts"),
             format!("127.0.0.1\tlocalhost\n127.0.1.1\t{container_guid}\n::1\tlocalhost ip6-localhost ip6-loopback\n"),
-            100000,
-            100000,
+            crate::lxc::BASE_IDMAP.to_id,
+            crate::lxc::BASE_IDMAP.to_id,
         )
         .await?;
         tracing::info!("Mounted overlay {guid} for {image_id}");

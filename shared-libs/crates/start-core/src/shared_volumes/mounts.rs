@@ -31,6 +31,24 @@ impl Drop for AttachedMount {
     }
 }
 
+pub struct PreparedSource {
+    directory: OwnedFd,
+    guard: TmpMountGuard,
+}
+
+impl PreparedSource {
+    pub async fn open(guard: TmpMountGuard, subpath: Option<PathBuf>) -> Result<Self, Error> {
+        use crate::disk::mount::guard::GenericMountGuard;
+        tokio::task::spawn_blocking(move || {
+            let relative = confined_relative(subpath.as_deref().unwrap_or(Path::new("")))?;
+            let directory = open_beneath(guard.path(), &relative)?;
+            Ok(Self { directory, guard })
+        })
+        .await
+        .with_kind(ErrorKind::Unknown)?
+    }
+}
+
 struct VolumeAttachment {
     id: SharedVolumeId,
     readonly: bool,
@@ -105,24 +123,20 @@ impl SharedVolumeMounts {
         guid: &Guid,
         location: PathBuf,
         id: SharedVolumeId,
-        source: TmpMountGuard,
-        subpath: Option<&Path>,
+        source: PreparedSource,
         readonly: bool,
     ) -> Result<(), Error> {
-        use crate::disk::mount::guard::GenericMountGuard;
         self.check_allowed()?;
-        let source_path = confined_relative(subpath.unwrap_or(Path::new("")))?;
-        let directory = open_beneath(source.path(), &source_path)?;
         let slot = self
             .slots
             .get_mut(&(guid.clone(), location))
             .or_not_found("volume mountpoint")?;
-        let mount = AttachedMount::bind(&directory, &slot.placeholder.0, readonly)?;
+        let mount = AttachedMount::bind(&source.directory, &slot.placeholder.0, readonly)?;
         slot.attachment = Some(VolumeAttachment {
             id,
             readonly,
             mount,
-            _source: source,
+            _source: source.guard,
         });
         Ok(())
     }
@@ -260,20 +274,37 @@ mod tests {
             .await
             .unwrap();
         mounts
-            .attach(&first, location, id.clone(), source.clone(), None, false)
+            .attach(
+                &first,
+                location,
+                id.clone(),
+                PreparedSource::open(source.clone(), None).await.unwrap(),
+                false,
+            )
             .unwrap();
         let location = other_service
             .prepare(&second, &second_root, Path::new("/data"))
             .await
             .unwrap();
         other_service
-            .attach(&second, location, id.clone(), source.clone(), None, true)
+            .attach(
+                &second,
+                location,
+                id.clone(),
+                PreparedSource::open(source.clone(), None).await.unwrap(),
+                true,
+            )
             .unwrap();
         assert_eq!(
             std::fs::read(first_root.join("data/sentinel")).unwrap(),
             b"shared"
         );
         assert!(std::fs::write(second_root.join("data/forbidden"), b"no").is_err());
+        tokio::process::Command::new("unshare")
+            .args(["--user", "--map-root-user", "--mount", "sh", "-c"])
+            .arg("test -f \"$1/sentinel\" || exit 1; if mount -o remount,bind,rw \"$1\" 2>/dev/null; then exit 1; fi; ! touch \"$1/escalated\" 2>/dev/null")
+            .arg("sh").arg(second_root.join("data"))
+            .invoke(ErrorKind::Filesystem).await.unwrap();
         let mut peer = std::process::Command::new("unshare")
             .args(["--mount", "--propagation", "slave", "sh", "-c"])
             .arg("test -f \"$1/sentinel\" || exit 1; echo ready; read -r signal; test ! -e \"$1/sentinel\" && ! touch \"$1/fallback\" 2>/dev/null")

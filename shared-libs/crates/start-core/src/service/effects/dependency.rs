@@ -16,6 +16,7 @@ use crate::disk::mount::filesystem::bind::{Bind, FileType};
 use crate::disk::mount::filesystem::idmapped::{IdMap, IdMapped};
 use crate::disk::mount::filesystem::{FileSystem, MountType};
 use crate::disk::mount::util::{is_mountpoint, unmount};
+use crate::lxc::BASE_IDMAP;
 use crate::s9pk::S9pk;
 use crate::s9pk::manifest::Manifest;
 use crate::service::effects::callbacks::CallbackHandler;
@@ -42,14 +43,6 @@ pub struct MountTarget {
 
 rpc_toolkit::reflect_ts!(MountTarget);
 rpc_toolkit::ts_export!(MountTarget, namespaces = [""]);
-
-/// The LXC base idmap every subcontainer mount carries: container ids 0..65535
-/// map to host ids 100000..165535.
-const BASE_IDMAP: IdMap = IdMap {
-    from_id: 0,
-    to_id: 100000,
-    range: 65536,
-};
 
 /// The idmap to apply, host-side, for a pointer mount.
 ///
