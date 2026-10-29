@@ -65,6 +65,10 @@ export default class Marketplace {
   private readonly configService = inject(ConfigService)
   private readonly router = inject(Router)
   private readonly storage = inject(StorageService)
+
+  protected readonly category = signal('all')
+  protected readonly query = signal('')
+
   private readonly route = inject(ActivatedRoute)
     .queryParamMap.pipe(
       takeUntilDestroyed(),
@@ -95,8 +99,6 @@ export default class Marketplace {
     )
     .subscribe()
 
-  protected readonly category = signal('all')
-  protected readonly query = signal('')
   protected readonly registry = toSignal(
     this.marketplaceService.currentRegistry$,
   )
