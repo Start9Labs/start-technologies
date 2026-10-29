@@ -1875,6 +1875,27 @@ backup.target.cifs.target-not-found-id:
   fr_FR: "ID de cible de sauvegarde %{id} non trouvé"
   pl_PL: "Nie znaleziono ID celu kopii zapasowej %{id}"
 
+backup.volume.invalid-generation:
+  en_US: "The volume backup has an invalid copy identifier"
+  de_DE: "Die Volume-Sicherung hat eine ungültige Kopiekennung"
+  es_ES: "La copia de seguridad del volumen tiene un identificador de copia no válido"
+  fr_FR: "La sauvegarde du volume contient un identifiant de copie invalide"
+  pl_PL: "Kopia zapasowa woluminu ma nieprawidłowy identyfikator kopii"
+
+backup.volume.restore-error:
+  en_US: "Could not restore volume %{id}: %{error}"
+  de_DE: "Volume %{id} konnte nicht wiederhergestellt werden: %{error}"
+  es_ES: "No se pudo restaurar el volumen %{id}: %{error}"
+  fr_FR: "Impossible de restaurer le volume %{id} : %{error}"
+  pl_PL: "Nie udało się przywrócić woluminu %{id}: %{error}"
+
+backup.volume.volumes:
+  en_US: "Volumes"
+  de_DE: "Volumes"
+  es_ES: "Volúmenes"
+  fr_FR: "Volumes"
+  pl_PL: "Woluminy"
+
 # service/effects/net/plugin.rs
 net.plugin.manifest-missing-plugin:
   en_US: "manifest does not declare the \"%{plugin}\" plugin"
@@ -4691,6 +4712,20 @@ help.arg.version-range:
   fr_FR: "Contrainte de plage de version"
   pl_PL: "Ograniczenie zakresu wersji"
 
+help.arg.volume-ids-to-backup:
+  en_US: "Volume IDs to back up; omitted selects all volumes"
+  de_DE: "Zu sichernde Volume-IDs; ohne Angabe werden alle Volumes ausgewählt"
+  es_ES: "IDs de volúmenes para respaldar; si se omiten, se seleccionan todos"
+  fr_FR: "Identifiants des volumes à sauvegarder ; tous sont sélectionnés si omis"
+  pl_PL: "Identyfikatory woluminów do skopiowania; pominięcie wybiera wszystkie"
+
+help.arg.volume-ids-to-restore:
+  en_US: "Volume backup IDs to restore as new local volumes"
+  de_DE: "IDs der Volume-Sicherungen, die als neue lokale Volumes wiederhergestellt werden"
+  es_ES: "IDs de copias de seguridad para restaurar como nuevos volúmenes locales"
+  fr_FR: "Identifiants des sauvegardes à restaurer comme nouveaux volumes locaux"
+  pl_PL: "Identyfikatory kopii zapasowych do przywrócenia jako nowe woluminy lokalne"
+
 help.arg.wifi-country-code:
   en_US: "ISO 3166-1 alpha-2 WiFi country code"
   de_DE: "ISO 3166-1 Alpha-2 WLAN-Ländercode"
@@ -7032,6 +7067,13 @@ about.restore-packages-from-backup:
   es_ES: "Restaurar paquetes desde copia de seguridad"
   fr_FR: "Restaurer les packages depuis la sauvegarde"
   pl_PL: "Przywróć pakiety z kopii zapasowej"
+
+about.restore-volumes-from-backup:
+  en_US: "Restore volumes as new local copies"
+  de_DE: "Volumes als neue lokale Kopien wiederherstellen"
+  es_ES: "Restaurar volúmenes como nuevas copias locales"
+  fr_FR: "Restaurer les volumes sous forme de nouvelles copies locales"
+  pl_PL: "Przywróć woluminy jako nowe kopie lokalne"
 
 about.run-service-action:
   en_US: "Run a service action"

@@ -503,6 +503,7 @@ export const Api = {
             cifs: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
           },
         },
+        volume: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
       },
     },
     db: {
@@ -773,6 +774,7 @@ export const Api = {
       _RETURN: /* @__PURE__ */ ApiState,
     },
     util: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+    volumes: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
     wifi: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {

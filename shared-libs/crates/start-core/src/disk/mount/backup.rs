@@ -222,6 +222,13 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
         Ok(package_guard)
     }
 
+    pub fn shared_volume_data(&self, id: &crate::shared_volumes::SharedVolumeId) -> PathBuf {
+        self.path()
+            .join(".shared-volumes")
+            .join(id.as_ref())
+            .join("data")
+    }
+
     #[instrument(skip_all)]
     pub async fn save(&self) -> Result<(), Error> {
         let metadata_path = self.path().join("metadata.json");
