@@ -2,32 +2,42 @@ use std::collections::BTreeMap;
 use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 use crate::disk::mount::filesystem::syscall::{
-    DetachedMount, open_beneath, open_tree_clone_fd, unmount_fd,
+    DetachedMount, MountNamespace, open_beneath, open_tree_clone_fd, unmount_fd,
 };
 use crate::disk::mount::guard::TmpMountGuard;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::shared_volumes::{SharedVolumeGrant, SharedVolumeId};
 
-struct AttachedMount(OwnedFd);
+struct AttachedMount {
+    mount: OwnedFd,
+    namespace: Arc<MountNamespace>,
+}
 
 impl AttachedMount {
-    fn bind(source: &OwnedFd, destination: &OwnedFd, readonly: bool) -> Result<Self, Error> {
+    fn bind(
+        source: &OwnedFd,
+        destination: &OwnedFd,
+        readonly: bool,
+        namespace: Arc<MountNamespace>,
+    ) -> Result<Self, Error> {
         let detached = DetachedMount::from_fd(open_tree_clone_fd(source.as_fd())?);
         detached.set_readonly(readonly)?;
-        Ok(Self(detached.attach_to_fd(destination.as_fd())?))
+        let mount = namespace.run(|| detached.attach_to_fd(destination.as_fd()))?;
+        Ok(Self { mount, namespace })
     }
 
     fn detach(&self) -> Result<(), Error> {
-        unmount_fd(self.0.as_fd())
+        self.namespace.run(|| unmount_fd(self.mount.as_fd()))
     }
 }
 
 impl Drop for AttachedMount {
     fn drop(&mut self) {
-        unmount_fd(self.0.as_fd()).log_err();
+        self.detach().log_err();
     }
 }
 
@@ -86,11 +96,12 @@ impl SharedVolumeMounts {
         Ok(())
     }
 
-    pub async fn prepare(
+    pub(crate) async fn prepare(
         &mut self,
         guid: &Guid,
         root: &Path,
         location: &Path,
+        namespace: Arc<MountNamespace>,
     ) -> Result<PathBuf, Error> {
         self.check_allowed()?;
         let location = confined_relative(location)?;
@@ -106,7 +117,7 @@ impl SharedVolumeMounts {
             tokio::fs::create_dir_all(&empty).await?;
             tokio::fs::set_permissions(&empty, std::fs::Permissions::from_mode(0)).await?;
             let source = open_beneath(&empty, Path::new(""))?;
-            let placeholder = AttachedMount::bind(&source, &destination, true)?;
+            let placeholder = AttachedMount::bind(&source, &destination, true, namespace)?;
             self.slots.insert(
                 key,
                 AttachmentSlot {
@@ -131,7 +142,12 @@ impl SharedVolumeMounts {
             .slots
             .get_mut(&(guid.clone(), location))
             .or_not_found("volume mountpoint")?;
-        let mount = AttachedMount::bind(&source.directory, &slot.placeholder.0, readonly)?;
+        let mount = AttachedMount::bind(
+            &source.directory,
+            &slot.placeholder.mount,
+            readonly,
+            slot.placeholder.namespace.clone(),
+        )?;
         slot.attachment = Some(VolumeAttachment {
             id,
             readonly,
@@ -269,8 +285,9 @@ mod tests {
         let second = Guid::new();
         let mut mounts = SharedVolumeMounts::default();
         let mut other_service = SharedVolumeMounts::default();
+        let namespace = Arc::new(MountNamespace::for_process(std::process::id()).unwrap());
         let location = mounts
-            .prepare(&first, &first_root, Path::new("/data"))
+            .prepare(&first, &first_root, Path::new("/data"), namespace.clone())
             .await
             .unwrap();
         mounts
@@ -283,7 +300,7 @@ mod tests {
             )
             .unwrap();
         let location = other_service
-            .prepare(&second, &second_root, Path::new("/data"))
+            .prepare(&second, &second_root, Path::new("/data"), namespace)
             .await
             .unwrap();
         other_service
@@ -329,6 +346,81 @@ mod tests {
         source.unmount().await.unwrap();
         first_tree.unmount(false).await.unwrap();
         second_tree.unmount(false).await.unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "requires root in a private Linux mount namespace"]
+    async fn nested_mounts_use_the_service_namespace_and_outlive_its_process() {
+        use std::io::{BufRead, Write};
+        use std::process::Stdio;
+
+        use crate::disk::mount::filesystem::ReadWrite;
+        use crate::disk::mount::filesystem::bind::Bind;
+        use crate::disk::mount::guard::GenericMountGuard;
+
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("root");
+        let own = fixture.path().join("own");
+        let source_path = fixture.path().join("source");
+        for path in [root.join("data"), own.clone(), source_path.clone()] {
+            std::fs::create_dir_all(path).unwrap();
+        }
+        std::fs::write(source_path.join("sentinel"), b"shared").unwrap();
+        let mut peer = std::process::Command::new("unshare")
+            .args(["--mount", "--pid", "--fork", "--mount-proc", "--kill-child", "--propagation", "private", "sh", "-c"])
+            .arg("mount --bind \"$1\" \"$2/data\" && mkdir \"$2/data/attached\" || exit 1; echo ready; read -r signal || exit 1; test \"$(cat \"$2/data/attached/sentinel\")\" = shared || exit 1; exec 3<\"$2/data/attached/sentinel\"; echo mounted; read -r signal || exit 1; test ! -e \"$2/data/attached/sentinel\" && ! touch \"$2/data/attached/fallback\" 2>/dev/null && test \"$(cat <&3)\" = shared")
+            .arg("sh").arg(&own).arg(&root)
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+        let mut output = std::io::BufReader::new(peer.stdout.take().unwrap());
+        let mut line = String::new();
+        output.read_line(&mut line).unwrap();
+        assert_eq!(line, "ready\n");
+        assert!(!root.join("data/attached").exists());
+        let namespace = Arc::new(MountNamespace::for_process(peer.id()).unwrap());
+        let service_root = PathBuf::from(format!("/proc/{}/root", peer.id()))
+            .join(root.strip_prefix("/").unwrap());
+        let source = TmpMountGuard::mount(&Bind::new(&source_path), ReadWrite)
+            .await
+            .unwrap();
+        let original_namespace = std::fs::read_link("/proc/thread-self/ns/mnt").unwrap();
+        let id = SharedVolumeId::new();
+        let guid = Guid::new();
+        let mut mounts = SharedVolumeMounts::default();
+        let location = mounts
+            .prepare(&guid, &service_root, Path::new("data/attached"), namespace)
+            .await
+            .unwrap();
+        mounts
+            .attach(
+                &guid,
+                location,
+                id.clone(),
+                PreparedSource::open(source.clone(), None).await.unwrap(),
+                false,
+            )
+            .unwrap();
+        peer.stdin
+            .as_mut()
+            .unwrap()
+            .write_all(b"attached\n")
+            .unwrap();
+        line.clear();
+        output.read_line(&mut line).unwrap();
+        assert_eq!(line, "mounted\n");
+        mounts.reconcile_grant(&id, None).unwrap();
+        peer.stdin.take().unwrap().write_all(b"revoked\n").unwrap();
+        assert!(peer.wait().unwrap().success());
+        mounts.clear();
+        assert_eq!(
+            std::fs::read_link("/proc/thread-self/ns/mnt").unwrap(),
+            original_namespace
+        );
+        assert_eq!(
+            std::fs::read(source_path.join("sentinel")).unwrap(),
+            b"shared"
+        );
+        source.unmount().await.unwrap();
     }
 
     #[test]

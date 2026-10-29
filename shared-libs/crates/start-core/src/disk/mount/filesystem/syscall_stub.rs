@@ -17,6 +17,21 @@ fn unsupported<T>() -> Result<T, Error> {
     ))
 }
 
+pub(crate) struct MountNamespace;
+
+impl MountNamespace {
+    pub(crate) fn for_process(_pid: u32) -> Result<Self, Error> {
+        unsupported()
+    }
+
+    pub(crate) fn run<T: Send>(
+        &self,
+        _operation: impl FnOnce() -> Result<T, Error> + Send,
+    ) -> Result<T, Error> {
+        unsupported()
+    }
+}
+
 pub fn open_tree_clone(_path: &Path, _recursive: bool) -> Result<OwnedFd, Error> {
     unsupported()
 }
