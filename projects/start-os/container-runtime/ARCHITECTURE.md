@@ -45,7 +45,9 @@ This runtime lives at `projects/start-os/container-runtime` and is a Node.js pac
 
 ## RPC protocol
 
-The runtime listens on `/media/startos/rpc/service.sock` and exposes a JSON-RPC API for the host (`init`, `exit`, `start`, `stop`, `execute`, `callback`, …). Effects flowing the other way (filesystem, network, store, dependency calls) reach the host over `host.sock`. The full method list and parameter types live in [`RPCSpec.md`](RPCSpec.md).
+The runtime listens on `/media/startos/rpc/service.sock` and exposes a JSON-RPC API for the host (`init`, `init-backup`, `exit`, `start`, `stop`, `execute`, `callback`, …). Effects flowing the other way (filesystem, network, store, dependency calls) reach the host over `host.sock`. The full method list and parameter types live in [`RPCSpec.md`](RPCSpec.md).
+
+Services declaring the shared-volume capability run backup procedures in a separate, fresh runtime. `init-backup` loads the ABI without service initialization hooks; exit skips uninitialization hooks. The host never attaches shared sources to this runtime and rejects shared mount effects. Package-owned volume and backup mounts retain their ordinary behavior. The service's normal runtime remains separate, including its networking and any open shared-volume handles.
 
 ## Image build
 

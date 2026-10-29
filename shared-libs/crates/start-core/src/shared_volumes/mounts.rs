@@ -213,6 +213,93 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    #[ignore = "requires root in a private Linux mount namespace"]
+    async fn real_mounts_enforce_readonly_and_propagate_revocation_without_fallback() {
+        use std::io::{BufRead, Write};
+        use std::process::Stdio;
+
+        use crate::disk::mount::filesystem::ReadWrite;
+        use crate::disk::mount::filesystem::bind::Bind;
+        use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
+        use crate::util::Invoke;
+
+        let fixture = tempfile::tempdir().unwrap();
+        let source_path = fixture.path().join("source");
+        let first_root = fixture.path().join("first");
+        let second_root = fixture.path().join("second");
+        for path in [&source_path, &first_root, &second_root] {
+            std::fs::create_dir(path).unwrap();
+        }
+        for root in [&first_root, &second_root] {
+            std::fs::create_dir(root.join("data")).unwrap();
+        }
+        std::fs::write(source_path.join("sentinel"), b"shared").unwrap();
+        let first_tree = MountGuard::mount(&Bind::new(&first_root), &first_root, ReadWrite)
+            .await
+            .unwrap();
+        let second_tree = MountGuard::mount(&Bind::new(&second_root), &second_root, ReadWrite)
+            .await
+            .unwrap();
+        tokio::process::Command::new("mount")
+            .arg("--make-rshared")
+            .arg(&first_root)
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .unwrap();
+        let source = TmpMountGuard::mount(&Bind::new(&source_path), ReadWrite)
+            .await
+            .unwrap();
+        let id = SharedVolumeId::new();
+        let first = Guid::new();
+        let second = Guid::new();
+        let mut mounts = SharedVolumeMounts::default();
+        let mut other_service = SharedVolumeMounts::default();
+        let location = mounts
+            .prepare(&first, &first_root, Path::new("/data"))
+            .await
+            .unwrap();
+        mounts
+            .attach(&first, location, id.clone(), source.clone(), None, false)
+            .unwrap();
+        let location = other_service
+            .prepare(&second, &second_root, Path::new("/data"))
+            .await
+            .unwrap();
+        other_service
+            .attach(&second, location, id.clone(), source.clone(), None, true)
+            .unwrap();
+        assert_eq!(
+            std::fs::read(first_root.join("data/sentinel")).unwrap(),
+            b"shared"
+        );
+        assert!(std::fs::write(second_root.join("data/forbidden"), b"no").is_err());
+        let mut peer = std::process::Command::new("unshare")
+            .args(["--mount", "--propagation", "slave", "sh", "-c"])
+            .arg("test -f \"$1/sentinel\" || exit 1; echo ready; read -r signal; test ! -e \"$1/sentinel\" && ! touch \"$1/fallback\" 2>/dev/null")
+            .arg("sh").arg(first_root.join("data"))
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+        let mut ready = String::new();
+        std::io::BufReader::new(peer.stdout.take().unwrap())
+            .read_line(&mut ready)
+            .unwrap();
+        assert_eq!(ready, "ready\n");
+        mounts.reconcile_grant(&id, None).unwrap();
+        peer.stdin.take().unwrap().write_all(b"revoked\n").unwrap();
+        assert!(peer.wait().unwrap().success());
+        assert!(!first_root.join("data/sentinel").exists());
+        assert!(std::fs::write(first_root.join("data/fallback"), b"no").is_err());
+        assert_eq!(
+            std::fs::read(second_root.join("data/sentinel")).unwrap(),
+            b"shared"
+        );
+        mounts.clear();
+        other_service.clear();
+        source.unmount().await.unwrap();
+        first_tree.unmount(false).await.unwrap();
+        second_tree.unmount(false).await.unwrap();
+    }
+
     #[test]
     fn backup_restore_scope_blocks_mounts_until_explicitly_reenabled() {
         let mut mounts = SharedVolumeMounts::default();

@@ -121,6 +121,35 @@ pub struct PersistentContainer {
 impl PersistentContainer {
     #[instrument(skip_all)]
     pub async fn new(ctx: &RpcContext, s9pk: S9pk) -> Result<Self, Error> {
+        let mut container = Self::new_filesystem(ctx, s9pk).await?;
+        let lxc_container = container
+            .lxc_container
+            .get()
+            .or_not_found("lxc container")?;
+        let ip = lxc_container.ip().await?;
+        let ipv6 = lxc_container.ipv6().await?;
+        container.net_service = ctx
+            .net_controller
+            .create_service(container.s9pk.as_manifest().id.clone(), ip, ipv6)
+            .await?;
+        if let Some(callbacks) = ctx
+            .callbacks
+            .get_container_ip(&container.s9pk.as_manifest().id)
+        {
+            callbacks
+                .call(vector![Value::String(Arc::new(ip.to_string()))])
+                .await?;
+        }
+        Ok(container)
+    }
+
+    pub async fn new_backup(ctx: &RpcContext, s9pk: S9pk) -> Result<Self, Error> {
+        let container = Self::new_filesystem(ctx, s9pk).await?;
+        container.shared_volumes.lock().await.block();
+        Ok(container)
+    }
+
+    async fn new_filesystem(ctx: &RpcContext, s9pk: S9pk) -> Result<Self, Error> {
         let lxc_container = ctx
             .lxc_manager
             .create(
@@ -300,17 +329,6 @@ impl PersistentContainer {
                     .await?;
             }
         }
-        let ip = lxc_container.ip().await?;
-        let ipv6 = lxc_container.ipv6().await?;
-        let net_service = ctx
-            .net_controller
-            .create_service(s9pk.as_manifest().id.clone(), ip, ipv6)
-            .await?;
-        if let Some(callbacks) = ctx.callbacks.get_container_ip(&s9pk.as_manifest().id) {
-            callbacks
-                .call(vector![Value::String(Arc::new(ip.to_string()))])
-                .await?;
-        }
         Ok(Self {
             s9pk,
             lxc_container: OnceCell::new_with(Some(lxc_container)),
@@ -324,7 +342,7 @@ impl PersistentContainer {
             subcontainers: Arc::new(Mutex::new(BTreeMap::new())),
             shared_volumes: Arc::new(Mutex::new(Default::default())),
             state: Arc::new(watch::channel(ServiceState::new()).0),
-            net_service,
+            net_service: NetService::dummy(),
             destroyed: false,
         })
     }
@@ -365,12 +383,7 @@ impl PersistentContainer {
     }
 
     #[instrument(skip_all)]
-    pub async fn init(
-        &self,
-        seed: Weak<Service>,
-        event_id: Guid,
-        kind: Option<InitKind>,
-    ) -> Result<(), Error> {
+    async fn serve_effects(&self, seed: Weak<Service>) -> Result<(), Error> {
         let socket_server_context = EffectContext::new(seed);
         let server = Server::new(move || ready(Ok(socket_server_context.clone())), handler());
         let path = self
@@ -435,12 +448,27 @@ impl PersistentContainer {
             ));
         }
 
+        Ok(())
+    }
+
+    pub async fn init(
+        &self,
+        seed: Weak<Service>,
+        event_id: Guid,
+        kind: Option<InitKind>,
+    ) -> Result<(), Error> {
+        self.serve_effects(seed).await?;
         self.rpc_client
             .request(rpc::Init, InitParams { id: event_id, kind })
             .await?;
+        Ok(())
+    }
 
-        self.state.send_modify(|s| s.rt_initialized = true);
-
+    pub async fn init_backup(&self, seed: Weak<Service>, event_id: Guid) -> Result<(), Error> {
+        self.serve_effects(seed).await?;
+        self.rpc_client
+            .request(rpc::InitBackup, rpc::BackupInitParams { id: event_id })
+            .await?;
         Ok(())
     }
 

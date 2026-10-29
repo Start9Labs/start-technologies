@@ -23,6 +23,7 @@ const literal_8 = /* @__PURE__ */ z.union([
   z.record(z.string(), z.string()),
 ])
 const literal_9 = /* @__PURE__ */ z.enum(['processor', 'display'])
+const literal_10 = /* @__PURE__ */ z.string().uuid()
 export const AcmeProvider: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'AcmeProvider',
 })
@@ -582,6 +583,23 @@ export const SetMainStatusStatus: z.ZodEnum<{
   stopped: 'stopped'
 }> = /* @__PURE__ */ z.enum(['running', 'stopped']).meta({
   id: 'SetMainStatusStatus',
+})
+export const SharedVolumeAvailability: z.ZodEnum<{
+  unknown: 'unknown'
+  available: 'available'
+  unavailable: 'unavailable'
+}> = /* @__PURE__ */ z.enum(['unknown', 'available', 'unavailable']).meta({
+  id: 'SharedVolumeAvailability',
+})
+export const SharedVolumeId: typeof literal_10 =
+  /* @__PURE__ */ literal_10.meta({
+    id: 'SharedVolumeId',
+  })
+export const SharedVolumeUnavailableReason: z.ZodEnum<{
+  sourceUnavailable: 'sourceUnavailable'
+  timeout: 'timeout'
+}> = /* @__PURE__ */ z.enum(['sourceUnavailable', 'timeout']).meta({
+  id: 'SharedVolumeUnavailableReason',
 })
 export const SmtpSecurity: z.ZodEnum<{ starttls: 'starttls'; tls: 'tls' }> =
   /* @__PURE__ */ z.enum(['starttls', 'tls']).meta({
@@ -1275,6 +1293,16 @@ export const GetServicePortForwardParams: z.ZodObject<{
 }).meta({
   id: 'GetServicePortForwardParams',
 })
+export const GetSharedVolumesParams: z.ZodObject<{
+  callback: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof CallbackId>>,
+    z.ZodNullable<typeof CallbackId>
+  >
+}> = /* @__PURE__ */ object({
+  callback: wire(CallbackId.nullable().optional(), CallbackId.nullable()),
+}).meta({
+  id: 'GetSharedVolumesParams',
+})
 export const GetSslCertificateParams: z.ZodObject<{
   hostnames: z.ZodArray<z.ZodString>
   algorithm: z.ZodCodec<
@@ -1328,6 +1356,19 @@ export const GetSystemSmtpParams: z.ZodObject<{
   callback: wire(CallbackId.nullable().optional(), CallbackId.nullable()),
 }).meta({
   id: 'GetSystemSmtpParams',
+})
+export const GrantedSharedVolume: z.ZodObject<{
+  id: typeof SharedVolumeId
+  name: z.ZodString
+  readonly: z.ZodBoolean
+  availability: typeof SharedVolumeAvailability
+}> = /* @__PURE__ */ object({
+  id: SharedVolumeId,
+  name: z.string(),
+  readonly: z.boolean(),
+  availability: SharedVolumeAvailability,
+}).meta({
+  id: 'GrantedSharedVolume',
 })
 export const HardwareRequirements: z.ZodObject<{
   device: z.ZodCodec<
@@ -1526,6 +1567,24 @@ export const Metadata: z.ZodObject<{
   icon: typeof PathOrUrl
 }> = /* @__PURE__ */ object({ title: LocaleString, icon: PathOrUrl }).meta({
   id: 'Metadata',
+})
+export const MountSharedVolumeParams: z.ZodObject<{
+  id: typeof SharedVolumeId
+  subcontainer: typeof Guid
+  mountpoint: z.ZodString
+  subpath: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  readonly: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  id: SharedVolumeId,
+  subcontainer: Guid,
+  mountpoint: z.string(),
+  subpath: wire(z.string().nullable().optional(), z.string().nullable()),
+  readonly: z.boolean(),
+}).meta({
+  id: 'MountSharedVolumeParams',
 })
 export const MountTarget: z.ZodCodec<
   z.ZodObject<{
@@ -1797,6 +1856,25 @@ export const SetMainStatus: z.ZodObject<{
 }> = /* @__PURE__ */ object({ status: SetMainStatusStatus }).meta({
   id: 'SetMainStatus',
 })
+export const SharedVolumeMountResult: z.ZodUnion<
+  readonly [
+    z.ZodObject<{ kind: z.ZodLiteral<'mounted'> }>,
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'unavailable'> }>,
+      z.ZodObject<{ reason: typeof SharedVolumeUnavailableReason }>
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    object({ kind: z.literal('mounted') }),
+    z.intersection(
+      object({ kind: z.literal('unavailable') }),
+      object({ reason: SharedVolumeUnavailableReason }),
+    ),
+  ])
+  .meta({
+    id: 'SharedVolumeMountResult',
+  })
 export const SmtpValue: z.ZodCodec<
   z.ZodIntersection<
     z.ZodIntersection<
@@ -2726,6 +2804,10 @@ export const Manifest: z.ZodIntersection<
     canMigrateFrom: z.ZodString
     images: z.ZodRecord<z.ZodString, typeof ImageConfig>
     volumes: z.ZodArray<typeof VolumeId>
+    /**
+     * Enables user-managed grants to system volumes; grants default to none.
+     */
+    sharedVolumes: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
     dependencies: z.ZodCodec<
       z.ZodOptional<typeof Dependencies>,
       typeof Dependencies
@@ -2745,6 +2827,13 @@ export const Manifest: z.ZodIntersection<
       canMigrateFrom: z.string(),
       images: z.record(z.string(), ImageConfig),
       volumes: z.array(VolumeId),
+      /**
+       * Enables user-managed grants to system volumes; grants default to none.
+       */
+      sharedVolumes: wire(z.boolean().optional(), z.boolean()).meta({
+        description:
+          'Enables user-managed grants to system volumes; grants default to none.',
+      }),
       dependencies: wire(Dependencies.optional(), Dependencies),
       hardwareRequirements: wire(
         HardwareRequirements.optional(),
@@ -2923,6 +3012,10 @@ export const Api = {
       _PARAMS: /* @__PURE__ */ GetServicePortForwardParams,
       _RETURN: /* @__PURE__ */ NetInfo.nullable(),
     },
+    'get-shared-volumes': {
+      _PARAMS: /* @__PURE__ */ GetSharedVolumesParams,
+      _RETURN: /* @__PURE__ */ z.array(GrantedSharedVolume),
+    },
     'get-ssl-certificate': {
       _PARAMS: /* @__PURE__ */ GetSslCertificateParams,
       _RETURN: /* @__PURE__ */ z.array(z.string()),
@@ -2950,6 +3043,10 @@ export const Api = {
     mount: {
       _PARAMS: /* @__PURE__ */ MountParams,
       _RETURN: /* @__PURE__ */ z.null(),
+    },
+    'mount-shared-volume': {
+      _PARAMS: /* @__PURE__ */ MountSharedVolumeParams,
+      _RETURN: /* @__PURE__ */ SharedVolumeMountResult,
     },
     notification: {
       _PARAMS: /* @__PURE__ */ empty,
