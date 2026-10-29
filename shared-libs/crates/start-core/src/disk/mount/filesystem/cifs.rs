@@ -252,7 +252,17 @@ mod tests {
         let mut mounts = SharedVolumeMounts::default();
         let guid = Guid::new();
         let location = mounts
-            .prepare(&guid, fixture.path(), Path::new("data"))
+            .prepare(
+                &guid,
+                fixture.path(),
+                Path::new("data"),
+                std::sync::Arc::new(
+                    crate::disk::mount::filesystem::syscall::MountNamespace::for_process(
+                        std::process::id(),
+                    )
+                    .unwrap(),
+                ),
+            )
             .await
             .unwrap();
         mounts

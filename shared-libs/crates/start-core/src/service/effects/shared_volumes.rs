@@ -154,10 +154,10 @@ pub async fn mount_shared_volume(
         readonly,
     }: MountSharedVolumeParams,
 ) -> Result<SharedVolumeMountResult, Error> {
+    use crate::disk::mount::filesystem::syscall::MountNamespace;
     use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
     use crate::disk::mount::guard::GenericMountGuard;
     use crate::shared_volumes::mounts::{PreparedSource, confined_relative};
-    use crate::util::Invoke;
     let service = context.deref()?;
     let container = &service.seed.persistent_container;
     container.shared_volumes.lock().await.check_allowed()?;
@@ -182,21 +182,28 @@ pub async fn mount_shared_volume(
         Ok(source) => Ok(PreparedSource::open(source, subpath).await),
         Err(error) => Err(error),
     };
+    let lxc = container
+        .lxc_container
+        .get()
+        .or_not_found("lxc container")?;
+    let pid = lxc.pid().await?;
+    let namespace = std::sync::Arc::new(MountNamespace::for_process(pid)?);
     let mut mounts = container.shared_volumes.lock().await;
     mounts.check_allowed()?;
     authorize_mount(&service, &id, readonly).await?;
     let subcontainers = container.subcontainers.lock().await;
-    let root = subcontainers
-        .get(&subcontainer)
-        .or_not_found("subcontainer")?
-        .overlay
-        .path();
-    tokio::process::Command::new("mount")
-        .arg("--make-rshared")
-        .arg(root)
-        .invoke(ErrorKind::Filesystem)
+    let root = std::path::PathBuf::from(format!("/proc/{pid}/root")).join(
+        subcontainers
+            .get(&subcontainer)
+            .or_not_found("subcontainer")?
+            .overlay
+            .path()
+            .strip_prefix(lxc.rootfs_dir())
+            .with_kind(ErrorKind::Incoherent)?,
+    );
+    let location = mounts
+        .prepare(&subcontainer, &root, &mountpoint, namespace)
         .await?;
-    let location = mounts.prepare(&subcontainer, root, &mountpoint).await?;
     let source = match source {
         Ok(prepared) => prepared?,
         Err(error) => {

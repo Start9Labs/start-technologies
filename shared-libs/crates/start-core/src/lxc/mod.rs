@@ -394,18 +394,29 @@ impl LxcContainer {
         self.rootfs.path()
     }
 
+    async fn info(&self, field: &str) -> Result<String, Error> {
+        Ok(String::from_utf8(
+            Command::new("lxc-info")
+                .arg("--name")
+                .arg(&**self.guid)
+                .arg(field)
+                .invoke(ErrorKind::Lxc)
+                .await?,
+        )?)
+    }
+
+    pub(crate) async fn pid(&self) -> Result<u32, Error> {
+        self.info("-pH")
+            .await?
+            .trim()
+            .parse::<u32>()
+            .with_kind(ErrorKind::Lxc)
+    }
+
     pub async fn ip(&self) -> Result<Ipv4Addr, Error> {
         let start = Instant::now();
-        let guid: &str = &self.guid;
         loop {
-            let output = String::from_utf8(
-                Command::new("lxc-info")
-                    .arg("--name")
-                    .arg(guid)
-                    .arg("-iH")
-                    .invoke(ErrorKind::Docker)
-                    .await?,
-            )?;
+            let output = self.info("-iH").await?;
             for line in output.lines() {
                 if let Ok(ip) = line.trim().parse() {
                     return Ok(ip);
@@ -439,14 +450,7 @@ impl LxcContainer {
         let start = Instant::now();
         let guid: &str = &self.guid;
         loop {
-            let output = String::from_utf8(
-                Command::new("lxc-info")
-                    .arg("--name")
-                    .arg(guid)
-                    .arg("-iH")
-                    .invoke(ErrorKind::Docker)
-                    .await?,
-            )?;
+            let output = self.info("-iH").await?;
             if let Some(ula) = output.lines().find_map(|line| {
                 line.trim()
                     .parse::<Ipv6Addr>()

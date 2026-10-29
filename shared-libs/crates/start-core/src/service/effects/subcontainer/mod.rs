@@ -41,14 +41,14 @@ pub async fn destroy_subcontainer_fs(
     DestroySubcontainerFsParams { guid }: DestroySubcontainerFsParams,
 ) -> Result<(), Error> {
     let context = context.deref()?;
-    if let Some(overlay) = context
+    let overlay = context
         .seed
         .persistent_container
         .subcontainers
         .lock()
         .await
-        .remove(&guid)
-    {
+        .remove(&guid);
+    if let Some(overlay) = overlay {
         #[cfg(target_os = "linux")]
         if tokio::fs::metadata(overlay.overlay.path().join("proc/1"))
             .await
@@ -131,7 +131,6 @@ pub async fn create_subcontainer_fs(
         );
         tracing::info!("Mounting overlay {guid} for {image_id}");
 
-        // Determine which nvidia overlay to use based on distro detection
         let nvidia_overlay: &[&str] = if context
             .seed
             .persistent_container
@@ -141,7 +140,6 @@ pub async fn create_subcontainer_fs(
             .get(&image_id)
             .map_or(false, |i| i.nvidia_container)
         {
-            // Check if image is debian-based by looking for /etc/debian_version
             let is_debian = tokio::fs::metadata(image.path().join("etc/debian_version"))
                 .await
                 .is_ok();

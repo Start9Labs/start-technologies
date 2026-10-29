@@ -201,6 +201,38 @@ pub fn unmount_fd(mount: BorrowedFd) -> Result<(), Error> {
     check(raw as i64, "umount fd")
 }
 
+pub(crate) struct MountNamespace(OwnedFd);
+
+impl MountNamespace {
+    pub(crate) fn for_process(pid: u32) -> Result<Self, Error> {
+        Ok(Self(
+            std::fs::File::open(format!("/proc/{pid}/ns/mnt"))?.into(),
+        ))
+    }
+
+    pub(crate) fn run<T: Send>(
+        &self,
+        operation: impl FnOnce() -> Result<T, Error> + Send,
+    ) -> Result<T, Error> {
+        let root = std::fs::File::open("/")?;
+        std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .spawn_scoped(scope, || {
+                    use nix::sched::{CloneFlags, setns, unshare};
+                    unshare(CloneFlags::CLONE_FS).with_kind(ErrorKind::Filesystem)?;
+                    setns(&self.0, CloneFlags::CLONE_NEWNS).with_kind(ErrorKind::Filesystem)?;
+                    // The service's procfs cannot resolve this host thread's PID.
+                    nix::unistd::fchdir(&root).with_kind(ErrorKind::Filesystem)?;
+                    nix::unistd::chroot(".").with_kind(ErrorKind::Filesystem)?;
+                    operation()
+                })
+                .with_kind(ErrorKind::Filesystem)?
+                .join()
+                .unwrap()
+        })
+    }
+}
+
 fn move_mount(detached: BorrowedFd, to: &Path, flags: libc::c_uint) -> Result<(), Error> {
     move_mount_at(detached, AT_FDCWD, to, flags)
 }
