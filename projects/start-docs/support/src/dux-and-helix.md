@@ -1,6 +1,6 @@
 # Dux and Helix
 
-Every chat starts with Dux, Start9's AI support technician, and a person from Start9 joins when one is needed. This page covers who answers, how to reach a person, and what you can see of the work on your case.
+Every chat starts with Dux, Start9's AI support technician, and a person from Start9 joins when one is needed. This page covers who answers, answering Dux's questions, how to reach a person, and what you can see of the work on your case.
 
 ## Dux
 
@@ -9,6 +9,14 @@ Dux answers first, at any hour. It works from Start9's documentation, every serv
 Under each of Dux's replies, **How Dux worked this out** opens the research behind it: what it searched and read, and what it made of it. **Dux's notes**, in **Chat info**, are its running summary of the case — what is established, what has been ruled out, what is still open — kept up to date as the chat goes on.
 
 Dux can also file a feature request with Start9 when you want a product or service to do something it doesn't do yet, once you ask it to or agree.
+
+## Answering Dux's Questions
+
+When Dux needs something from you, its questions wait on a card above the message field, **Questions from Dux**. On a phone, tap the bar to open them.
+
+Each question has a button along the top, with a checked box once you've answered it. Pick an answer or write one, and move between questions with **Back** and **Next**, or the arrow keys on a keyboard. Choosing an option you already picked clears it. **Review** shows everything you've answered, and sending posts the answers together as one message.
+
+You don't have to answer every question at once. One you skip stays on the card, and Dux won't assume its answer. You can also answer in an ordinary message, and Dux takes a question off the card once it no longer matters.
 
 ## Reaching a Person
 

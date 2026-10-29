@@ -43,6 +43,7 @@ use crate::service::uninstall::cleanup;
 use crate::status::StatusInfo;
 use crate::util::Never;
 use crate::util::actor::concurrent::ConcurrentActor;
+use crate::util::env::Environment;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::{
     AsyncReadStream, AtomicFile, TermSize, delete_file, maybe_read_file_to_string,
@@ -55,6 +56,7 @@ use crate::volume::{PKG_VOLUME_DIR, data_dir};
 use crate::{ActionId, CAP_1_KiB, DATA_DIR, ImageId, PackageId};
 
 pub mod action;
+mod attach_environment;
 mod attach_input;
 pub mod cli;
 pub mod effects;
@@ -955,7 +957,7 @@ pub async fn attach(
         user,
     }: AttachParams,
 ) -> Result<Guid, Error> {
-    let (container_id, subcontainer_id, image_id, user, workdir, root_command) = {
+    let (container_id, subcontainer_id, image_id, image_env, user, workdir, root_command) = {
         let id = &id;
 
         let service = ctx.services.get(id).await;
@@ -1044,6 +1046,7 @@ pub async fn attach(
         let root_command = get_passwd_command(passwd, &*user).await;
 
         let workdir = image_meta["workdir"].as_str().map(|s| s.to_owned());
+        let image_env: Option<Environment> = from_value(image_meta["env"].clone())?;
 
         if subcontainer_ids.len() > 1 {
             let subcontainers = subcontainer_ids
@@ -1068,6 +1071,7 @@ pub async fn attach(
             service_ref.container_id()?,
             subcontainer_id,
             image_id,
+            image_env,
             user.into(),
             workdir,
             root_command,
@@ -1084,6 +1088,7 @@ pub async fn attach(
         stderr_tty: bool,
         pty_size: Option<TermSize>,
         image_id: ImageId,
+        image_env: Option<Environment>,
         workdir: Option<String>,
         user: InternedString,
         root_command: &RootCommand,
@@ -1100,15 +1105,9 @@ pub async fn attach(
             .arg("--")
             .arg("start-container")
             .arg("subcontainer")
-            .arg("exec")
-            .arg("--env-file")
-            .arg(
-                Path::new("/media/startos/images")
-                    .join(image_id)
-                    .with_extension("env"),
-            )
-            .arg("--user")
-            .arg(&*user);
+            .arg("exec");
+        attach_environment::configure(&mut cmd, &image_id, image_env.as_ref())?;
+        cmd.arg("--user").arg(&*user);
 
         if let Some(workdir) = workdir {
             cmd.arg("--workdir").arg(workdir);
@@ -1239,6 +1238,7 @@ pub async fn attach(
                         stderr_tty,
                         pty_size,
                         image_id,
+                        image_env,
                         workdir,
                         user,
                         &root_command,

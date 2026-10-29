@@ -145,6 +145,7 @@ mod tests {
 
     use super::*;
     use crate::auth::Session;
+    use crate::version::Current;
 
     #[tokio::test]
     async fn prior_revisions_migrate_keys_and_requeue_post_up_once() {
@@ -168,21 +169,27 @@ mod tests {
             fixture["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
             fixture["public"]["serverInfo"]["trustedOsUpdateSigners"] =
                 json!({ key_id.clone(): { "label": "retained signer" } });
-            fixture["private"]["sessionPubkeys"] = json!({ key_id: Session::default() });
+            fixture["public"]["serverInfo"]["version"] = to_value(&Version.semver()).unwrap();
+            let private = fixture["private"].as_object_mut().unwrap();
+            private.remove("sessions");
+            private.insert(
+                "sessionPubkeys".into(),
+                json!({ key_id: Session::default() }),
+            );
             let db = PatchDb::in_memory();
             db.put(&ROOT, &fixture).await.unwrap();
-            Version.pre_init(&db).await.unwrap();
+            Current::default().pre_init(&db).await.unwrap();
             let migrated = db.dump(&ROOT).await.value;
             assert_eq!(
                 migrated["public"]["serverInfo"]["latestMigrationRevision"],
-                json!(2)
+                json!(Current::default().migration_revision())
             );
             assert_eq!(
                 migrated["public"]["serverInfo"]["postInitMigrationTodos"],
-                json!({ "0.4.0.5": null })
+                json!({ "0.4.0.5": null, "0.4.1": null })
             );
             assert!(
-                migrated["private"]["sessionPubkeys"]
+                migrated["private"]["sessions"]["pubkeys"]
                     .as_object()
                     .unwrap()
                     .contains_key(&canonical)
@@ -191,12 +198,12 @@ mod tests {
                 migrated["public"]["serverInfo"]["trustedOsUpdateSigners"][&*canonical]["label"],
                 json!("retained signer")
             );
-            Version.pre_init(&db).await.unwrap();
+            Current::default().pre_init(&db).await.unwrap();
             assert_eq!(db.dump(&ROOT).await.value, migrated);
             let mut completed = migrated;
             completed["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
             db.put(&ROOT, &completed).await.unwrap();
-            Version.pre_init(&db).await.unwrap();
+            Current::default().pre_init(&db).await.unwrap();
             assert_eq!(db.dump(&ROOT).await.value, completed);
         }
     }

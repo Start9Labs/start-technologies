@@ -527,11 +527,86 @@ rpc_toolkit::reflect_ts!(Security);
 rpc_toolkit::ts_export!(Security, namespaces = [""]);
 
 #[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", try_from = "CompatibleBindOptions")]
+#[visit(type_attributes(serde::try_from))]
 pub struct BindOptions {
     pub preferred_external_port: u16,
     pub add_ssl: Option<AddSslOptions>,
     pub secure: Option<Security>,
+    /// HTTP request policy shared by every exposed leg of this binding.
+    pub proxy: Option<ProxyOptions>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, VisitVariants)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
+pub enum ProxyOptions {
+    Http {
+        /// Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
+        /// Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+        #[serde(default)]
+        add_x_forwarded_headers: bool,
+        /// Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
+        #[serde(default)]
+        auth: Option<ProxyAuth>,
+    },
+}
+
+rpc_toolkit::reflect_ts!(ProxyOptions);
+rpc_toolkit::ts_export!(ProxyOptions, namespaces = [""]);
+
+#[derive(Deserialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+struct CompatibleBindOptions {
+    preferred_external_port: u16,
+    add_ssl: Option<LegacyProxySslOptions>,
+    secure: Option<Security>,
+    proxy: Option<ProxyOptions>,
+}
+
+rpc_toolkit::reflect_ts!(CompatibleBindOptions);
+
+#[derive(Deserialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+struct LegacyProxySslOptions {
+    #[serde(flatten)]
+    ssl: AddSslOptions,
+    #[serde(default)]
+    add_x_forwarded_headers: bool,
+    #[serde(default)]
+    auth: Option<ProxyAuth>,
+}
+
+rpc_toolkit::reflect_ts!(LegacyProxySslOptions);
+
+impl TryFrom<CompatibleBindOptions> for BindOptions {
+    type Error = &'static str;
+
+    fn try_from(options: CompatibleBindOptions) -> Result<Self, Self::Error> {
+        let mut proxy = options.proxy;
+        let add_ssl = options.add_ssl.map(|legacy| {
+            if proxy.is_none() && (legacy.add_x_forwarded_headers || legacy.auth.is_some()) {
+                proxy = Some(ProxyOptions::Http {
+                    add_x_forwarded_headers: legacy.add_x_forwarded_headers,
+                    auth: legacy.auth,
+                });
+            }
+            legacy.ssl
+        });
+        let options = Self {
+            preferred_external_port: options.preferred_external_port,
+            add_ssl,
+            secure: options.secure,
+            proxy,
+        };
+        if options.serves_own_tls() && options.proxy.is_some() {
+            return Err("HTTP proxying requires TLS termination for a TLS container");
+        }
+        Ok(options)
+    }
 }
 
 rpc_toolkit::reflect_ts!(BindOptions);
@@ -594,11 +669,6 @@ rpc_toolkit::ts_export!(UpstreamCertValidation, namespaces = [""]);
 #[serde(rename_all = "camelCase")]
 pub struct AddSslOptions {
     pub preferred_external_port: u16,
-    /// When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-    /// and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-    /// forwarding them upstream. Setting this implies HTTP-aware proxying.
-    #[serde(default)]
-    pub add_x_forwarded_headers: bool,
     /// The application protocols StartOS answers a client with, from those it
     /// asked for. Unset answers with whatever it asked for.
     #[serde(default, deserialize_with = "legacy_alpn::deserialize")]
@@ -609,15 +679,6 @@ pub struct AddSslOptions {
     /// `None` (the default) validates against the StartOS root CA.
     #[serde(default)]
     pub upstream_cert_validation: Option<UpstreamCertValidation>,
-    /// Optional reverse-proxy auth gate. When set, the OS reverse proxy
-    /// will validate the `Authorization` header on incoming HTTP requests
-    /// against this configuration before forwarding them upstream.
-    /// Unauthenticated requests get `401 Unauthorized` with an appropriate
-    /// `WWW-Authenticate` challenge. For `Basic`, the authenticated
-    /// username is forwarded to the upstream service as `X-Forwarded-User`.
-    /// Setting this implies HTTP-aware proxying.
-    #[serde(default)]
-    pub auth: Option<ProxyAuth>,
 }
 
 rpc_toolkit::reflect_ts!(AddSslOptions);
@@ -1548,12 +1609,11 @@ mod test {
             preferred_external_port: preferred,
             add_ssl: add_ssl.map(|preferred_external_port| AddSslOptions {
                 preferred_external_port,
-                add_x_forwarded_headers: false,
                 alpn: None,
                 upstream_cert_validation: None,
-                auth: None,
             }),
             secure: ssl.map(|ssl| Security { ssl }),
+            proxy: None,
         }
     }
 
@@ -1563,6 +1623,66 @@ mod test {
             "alpn": alpn,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn legacy_ssl_policy_normalizes_into_binding_http_proxy() {
+        for (headers, auth) in [
+            (true, serde_json::Value::Null),
+            (
+                false,
+                serde_json::json!({ "type": "bearer", "tokens": ["secret"] }),
+            ),
+            (
+                true,
+                serde_json::json!({ "type": "basic", "credentials": [{ "username": "alice", "password": "secret" }] }),
+            ),
+        ] {
+            let legacy = serde_json::json!({
+                "preferredExternalPort": 8080,
+                "secure": null,
+                "addSsl": { "preferredExternalPort": 8443, "addXForwardedHeaders": headers, "auth": auth },
+            });
+            let options: BindOptions = serde_json::from_value(legacy).unwrap();
+            let serialized = serde_json::to_value(&options).unwrap();
+            assert_eq!(serialized["proxy"]["type"], "http");
+            assert_eq!(serialized["proxy"]["addXForwardedHeaders"], headers);
+            assert_eq!(serialized["proxy"]["auth"]["type"], auth["type"]);
+            assert!(serialized["addSsl"].get("auth").is_none());
+            assert!(serialized["addSsl"].get("addXForwardedHeaders").is_none());
+            assert_eq!(serialized["addSsl"]["preferredExternalPort"], 8443);
+            let round_trip: BindOptions = serde_json::from_value(serialized.clone()).unwrap();
+            assert_eq!(serde_json::to_value(round_trip).unwrap(), serialized);
+        }
+    }
+
+    #[test]
+    fn http_proxy_is_independent_of_ssl_and_rejects_passthrough() {
+        let plain = serde_json::json!({
+            "preferredExternalPort": 8080,
+            "addSsl": null,
+            "secure": null,
+            "proxy": { "type": "http" },
+        });
+        let options: BindOptions = serde_json::from_value(plain.clone()).unwrap();
+        assert!(matches!(
+            options.proxy,
+            Some(ProxyOptions::Http {
+                add_x_forwarded_headers: false,
+                auth: None
+            })
+        ));
+        let mut passthrough = plain;
+        passthrough["secure"] = serde_json::json!({ "ssl": true });
+        assert!(serde_json::from_value::<BindOptions>(passthrough.clone()).is_err());
+        passthrough["addSsl"] = serde_json::json!({ "preferredExternalPort": 8443 });
+        assert!(serde_json::from_value::<BindOptions>(passthrough).is_ok());
+        let raw: BindOptions = serde_json::from_value(serde_json::json!({
+            "preferredExternalPort": 8333,
+            "addSsl": { "preferredExternalPort": 8443, "addXForwardedHeaders": false },
+        }))
+        .unwrap();
+        assert!(raw.proxy.is_none());
     }
 
     #[test]
