@@ -750,7 +750,7 @@ export class MockApiService extends ApiService {
     'volumes.list-retained': async () =>
       Object.fromEntries(this.retainedVolumes),
     'volumes.create': async ({ name, source }) => {
-      const id = this.crypto.randomUUID()
+      const id = this.guid()
       const volume: T.SharedVolume = {
         name,
         source:
@@ -973,7 +973,7 @@ export class MockApiService extends ApiService {
             Mock.BackupInfo.sharedVolumeBackups[id] = {
               name: volume.name,
               timestamp: new Date().toISOString(),
-              generation: this.crypto.randomUUID(),
+              generation: this.guid(),
             }
           await pauseFor(1000)
           await this.mockRevision<T.Progress>([
@@ -2515,6 +2515,13 @@ export class MockApiService extends ApiService {
         value: this.mockData('/serverInfo/unreadNotificationCount') + 1,
       },
     ])
+  }
+
+  private guid(): string {
+    return Array.from(
+      this.crypto.getRandomValues(new Uint8Array(32)),
+      value => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[value & 31],
+    ).join('')
   }
 
   private mockData(path: string): any {

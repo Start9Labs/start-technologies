@@ -12,18 +12,20 @@ pub mod source;
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::prelude::*;
+use crate::rpc_continuations::Guid;
 
+/// A 32-character uppercase base32 volume identity.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, VisitFields)]
 #[serde(try_from = "String", into = "String")]
-#[visit(ts(type = "z.string().uuid()"))]
-pub struct SharedVolumeId(String);
+#[visit(type_attributes(serde::try_from, serde::into))]
+pub struct SharedVolumeId(Guid);
 
 rpc_toolkit::reflect_ts!(SharedVolumeId);
 rpc_toolkit::ts_export!(SharedVolumeId, namespaces = [""]);
 
 impl SharedVolumeId {
     pub fn new() -> Self {
-        Self(uuid::Uuid::new_v4().to_string())
+        Self(Guid::new())
     }
 }
 
@@ -34,10 +36,10 @@ impl Default for SharedVolumeId {
 }
 
 impl TryFrom<String> for SharedVolumeId {
-    type Error = uuid::Error;
+    type Error = Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        Ok(Self(uuid::Uuid::from_str(&value)?.to_string()))
+        value.parse()
     }
 }
 
@@ -45,13 +47,16 @@ impl FromStr for SharedVolumeId {
     type Err = Error;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Self::try_from(value.to_owned()).with_kind(ErrorKind::InvalidRequest)
+        Guid::from_str(value).map(Self).map_err(|error| Error {
+            kind: ErrorKind::InvalidRequest,
+            ..error
+        })
     }
 }
 
 impl From<SharedVolumeId> for String {
     fn from(value: SharedVolumeId) -> Self {
-        value.0
+        value.0.to_string()
     }
 }
 
@@ -63,7 +68,7 @@ impl std::fmt::Display for SharedVolumeId {
 
 impl AsRef<str> for SharedVolumeId {
     fn as_ref(&self) -> &str {
-        &self.0
+        self.0.as_ref()
     }
 }
 
@@ -476,8 +481,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ids_are_uuid_keys_not_paths_or_names() {
+    fn ids_are_base32_guids_not_paths_or_names() {
         let id = SharedVolumeId::new();
+        assert!(Guid::from(id.as_ref()).is_some());
+        let fixed = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        assert_eq!(fixed.parse::<SharedVolumeId>().unwrap().as_ref(), fixed);
         let encoded = serde_json::to_string(&id).unwrap();
         assert_eq!(
             serde_json::from_str::<SharedVolumeId>(&encoded).unwrap(),
@@ -489,7 +497,14 @@ mod tests {
             "/etc",
             "",
             "00000000-0000-0000-0000-00000000000/",
+            "7cb12a88-783d-4909-9923-d5eb47c7e01f",
+            "abcdefghijklmnopqrstuvwxyz234567",
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ234568",
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ23456",
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567A",
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ23456/",
         ] {
+            assert!(value.parse::<SharedVolumeId>().is_err());
             assert!(serde_json::from_value::<SharedVolumeId>(serde_json::json!(value)).is_err());
         }
         assert_eq!(

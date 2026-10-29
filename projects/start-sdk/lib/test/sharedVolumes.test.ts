@@ -24,7 +24,7 @@ jest.mock('child_process', () => ({
 }))
 
 type Manifest = T.SDKManifest & { sharedVolumes: true }
-const id = 'e680a57e-5066-4dfd-bbab-06361bfceec2'
+const id = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
 const options = {
   id,
   mountpoint: '/media/music',

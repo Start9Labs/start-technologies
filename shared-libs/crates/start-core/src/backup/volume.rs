@@ -17,14 +17,17 @@ use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::disk::mount::util::sync_directory;
 use crate::prelude::*;
+use crate::rpc_continuations::Guid;
 use crate::shared_volumes::{
     SharedVolume, SharedVolumeAvailability, SharedVolumeId, SharedVolumeSource, local_path, source,
 };
 use crate::util::Invoke;
 use crate::util::io::delete_dir;
 
-pub(super) fn parse_id(value: &str) -> Result<SharedVolumeId, uuid::Error> {
-    SharedVolumeId::try_from(value.to_owned())
+pub(super) fn parse_id(value: &str) -> Result<SharedVolumeId, String> {
+    value
+        .parse::<SharedVolumeId>()
+        .map_err(|error| error.to_string())
 }
 
 pub(super) fn selected_ids(
@@ -53,7 +56,7 @@ async fn copy_folder(source: &Path, destination: &Path) -> Result<(), Error> {
 }
 
 async fn stage_copy(data: &Path, source: &Path) -> Result<String, Error> {
-    let generation = uuid::Uuid::new_v4().to_string();
+    let generation = Guid::new().to_string();
     let staging = data.join(format!(".{generation}.staging"));
     tokio::fs::create_dir_all(&staging).await?;
     let result = async {
@@ -71,7 +74,7 @@ async fn stage_copy(data: &Path, source: &Path) -> Result<String, Error> {
 }
 
 fn generation_path(data: &Path, info: &SharedVolumeBackupInfo) -> Result<PathBuf, Error> {
-    let generation = uuid::Uuid::parse_str(&info.generation).map_err(|_| {
+    let generation = info.generation.parse::<Guid>().map_err(|_| {
         Error::new(
             eyre!(t!("backup.volume.invalid-generation")),
             ErrorKind::Backup,
@@ -339,6 +342,13 @@ mod tests {
     }
 
     #[test]
+    fn cli_volume_ids_use_the_guid_contract() {
+        let id = SharedVolumeId::new();
+        assert_eq!(parse_id(id.as_ref()).unwrap(), id);
+        assert!(parse_id("7cb12a88-783d-4909-9923-d5eb47c7e01f").is_err());
+    }
+
+    #[test]
     fn selection_distinguishes_omitted_empty_and_explicit_ids() {
         let first = SharedVolumeId::new();
         let second = SharedVolumeId::new();
@@ -370,7 +380,19 @@ mod tests {
 
     #[test]
     fn backup_generations_cannot_escape_the_volume_namespace() {
-        for generation in ["../other", "/etc", "", "../../shared-volumes"] {
+        let generation = Guid::new().to_string();
+        let data = Path::new("/backup/data");
+        assert_eq!(
+            generation_path(data, &info(generation.clone())).unwrap(),
+            data.join(generation)
+        );
+        for generation in [
+            "../other",
+            "/etc",
+            "",
+            "../../shared-volumes",
+            "7cb12a88-783d-4909-9923-d5eb47c7e01f",
+        ] {
             assert!(generation_path(Path::new("/backup/data"), &info(generation.into())).is_err());
         }
     }
@@ -528,7 +550,7 @@ mod tests {
         assert!(failed.is_none());
         assert_eq!(report.name, "Offline");
         assert!(report.result.error.is_some());
-        let expected = uuid::Uuid::new_v4().to_string();
+        let expected = Guid::new().to_string();
         let (success, report) =
             measure_backup("Photos".into(), async { Ok(info(expected.clone())) }).await;
         assert_eq!(success.unwrap().generation, expected);

@@ -364,7 +364,15 @@ export type SharedVolumeBackupInfoInput = z.input<
 >
 export type SharedVolumeGrant = z.output<typeof schemas.SharedVolumeGrant>
 export type SharedVolumeGrantInput = z.input<typeof schemas.SharedVolumeGrant>
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
 export type SharedVolumeId = z.output<typeof schemas.SharedVolumeId>
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
 export type SharedVolumeIdInput = z.input<typeof schemas.SharedVolumeId>
 export type SharedVolumeSource = z.output<typeof schemas.SharedVolumeSource>
 export type SharedVolumeSourceInput = z.input<typeof schemas.SharedVolumeSource>

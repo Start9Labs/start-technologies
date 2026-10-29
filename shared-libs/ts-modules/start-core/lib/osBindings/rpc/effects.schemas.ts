@@ -23,7 +23,6 @@ const literal_8 = /* @__PURE__ */ z.union([
   z.record(z.string(), z.string()),
 ])
 const literal_9 = /* @__PURE__ */ z.enum(['processor', 'display'])
-const literal_10 = /* @__PURE__ */ z.string().uuid()
 export const AcmeProvider: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'AcmeProvider',
 })
@@ -591,10 +590,14 @@ export const SharedVolumeAvailability: z.ZodEnum<{
 }> = /* @__PURE__ */ z.enum(['unknown', 'available', 'unavailable']).meta({
   id: 'SharedVolumeAvailability',
 })
-export const SharedVolumeId: typeof literal_10 =
-  /* @__PURE__ */ literal_10.meta({
-    id: 'SharedVolumeId',
-  })
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
+export const SharedVolumeId: z.ZodString = /* @__PURE__ */ z.string().meta({
+  id: 'SharedVolumeId',
+  description: 'A 32-character uppercase base32 volume identity.',
+})
 export const SharedVolumeUnavailableReason: z.ZodEnum<{
   sourceUnavailable: 'sourceUnavailable'
   timeout: 'timeout'

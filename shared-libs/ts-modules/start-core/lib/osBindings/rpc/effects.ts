@@ -144,7 +144,15 @@ export type SetMainStatusStatusInput = z.input<
 export type SharedVolumeAvailability = z.output<
   typeof schemas.SharedVolumeAvailability
 >
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
 export type SharedVolumeId = z.output<typeof schemas.SharedVolumeId>
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
 export type SharedVolumeIdInput = z.input<typeof schemas.SharedVolumeId>
 export type SharedVolumeUnavailableReason = z.output<
   typeof schemas.SharedVolumeUnavailableReason

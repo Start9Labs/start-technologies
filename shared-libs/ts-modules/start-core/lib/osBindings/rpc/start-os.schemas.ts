@@ -5,16 +5,15 @@ const object = <Shape extends z.core.$ZodLooseShape>(shape: Shape) =>
   z.object(shape).meta({ additionalProperties: true })
 const empty: z.ZodType<{}, {}> = /* @__PURE__ */ object({})
 const literal_0 = /* @__PURE__ */ z.string()
-const literal_1 = /* @__PURE__ */ z.string().uuid()
-const literal_2 = /* @__PURE__ */ z.record(z.string(), z.unknown()).nullable()
-const literal_3 = /* @__PURE__ */ z.record(z.string(), z.unknown())
-const literal_4 = /* @__PURE__ */ z.union([z.string(), z.array(z.number())])
-const literal_5 = /* @__PURE__ */ z.union([
+const literal_1 = /* @__PURE__ */ z.record(z.string(), z.unknown()).nullable()
+const literal_2 = /* @__PURE__ */ z.record(z.string(), z.unknown())
+const literal_3 = /* @__PURE__ */ z.union([z.string(), z.array(z.number())])
+const literal_4 = /* @__PURE__ */ z.union([
   z.string(),
   z.record(z.string(), z.string()),
 ])
-const literal_6 = /* @__PURE__ */ z.enum(['processor', 'display'])
-const literal_7 = /* @__PURE__ */ z.object({
+const literal_5 = /* @__PURE__ */ z.enum(['processor', 'display'])
+const literal_6 = /* @__PURE__ */ z.object({
   value: z.string(),
   unit: z.string(),
 })
@@ -325,7 +324,7 @@ export const CapabilityVerdict: z.ZodObject<{
 }).meta({
   id: 'CapabilityVerdict',
 })
-export const Celsius: typeof literal_7 = /* @__PURE__ */ literal_7.meta({
+export const Celsius: typeof literal_6 = /* @__PURE__ */ literal_6.meta({
   id: 'Celsius',
 })
 export const CheckPortRes: z.ZodObject<{
@@ -452,7 +451,7 @@ export const DataUrl: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 })
 export const DeviceFilter: z.ZodObject<{
   description: z.ZodString
-  class: typeof literal_6
+  class: typeof literal_5
   product: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
@@ -471,7 +470,7 @@ export const DeviceFilter: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   description: z.string(),
-  class: literal_6,
+  class: literal_5,
   product: wire(z.string().nullable().optional(), z.string().nullable()),
   vendor: wire(z.string().nullable().optional(), z.string().nullable()),
   capabilities: wire(
@@ -715,7 +714,7 @@ export const GetUsersParams: z.ZodObject<{
 }).meta({
   id: 'GetUsersParams',
 })
-export const GigaBytes: typeof literal_7 = /* @__PURE__ */ literal_7.meta({
+export const GigaBytes: typeof literal_6 = /* @__PURE__ */ literal_6.meta({
   id: 'GigaBytes',
 })
 export const GitHash: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
@@ -809,7 +808,7 @@ export const ListVersionSignersParams: z.ZodObject<{ version: z.ZodString }> =
   /* @__PURE__ */ object({ version: z.string() }).meta({
     id: 'ListVersionSignersParams',
   })
-export const LocaleString: typeof literal_5 = /* @__PURE__ */ literal_5.meta({
+export const LocaleString: typeof literal_4 = /* @__PURE__ */ literal_4.meta({
   id: 'LocaleString',
 })
 export const LogEntry: z.ZodObject<{
@@ -865,12 +864,12 @@ export const LshwProcessor: z.ZodObject<{
 }).meta({
   id: 'LshwProcessor',
 })
-export const MaybeUtf8String: typeof literal_4 = /* @__PURE__ */ literal_4.meta(
+export const MaybeUtf8String: typeof literal_3 = /* @__PURE__ */ literal_3.meta(
   {
     id: 'MaybeUtf8String',
   },
 )
-export const MebiBytes: typeof literal_7 = /* @__PURE__ */ literal_7.meta({
+export const MebiBytes: typeof literal_6 = /* @__PURE__ */ literal_6.meta({
   id: 'MebiBytes',
 })
 export const MerkleArchiveCommitment: z.ZodIntersection<
@@ -987,7 +986,7 @@ export const PartitionTable: z.ZodEnum<{ mbr: 'mbr'; gpt: 'gpt' }> =
   /* @__PURE__ */ z.enum(['mbr', 'gpt']).meta({
     id: 'PartitionTable',
   })
-export const Percentage: typeof literal_7 = /* @__PURE__ */ literal_7.meta({
+export const Percentage: typeof literal_6 = /* @__PURE__ */ literal_6.meta({
   id: 'Percentage',
 })
 export const PluginId: z.ZodEnum<{ 'url-v0': 'url-v0' }> = /* @__PURE__ */ z
@@ -1223,8 +1222,13 @@ export const SharedVolumeGrant: z.ZodObject<{ readonly: z.ZodBoolean }> =
   /* @__PURE__ */ object({ readonly: z.boolean() }).meta({
     id: 'SharedVolumeGrant',
   })
-export const SharedVolumeId: typeof literal_1 = /* @__PURE__ */ literal_1.meta({
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
+export const SharedVolumeId: z.ZodString = /* @__PURE__ */ z.string().meta({
   id: 'SharedVolumeId',
+  description: 'A 32-character uppercase base32 volume identity.',
 })
 export const ShutdownParams: z.ZodObject<{
   /**
@@ -1440,12 +1444,12 @@ export const AcceptSigners: z.ZodUnion<
   })
 export const ActionInput: z.ZodObject<{
   eventId: z.ZodCodec<z.ZodOptional<typeof Guid>, typeof Guid>
-  spec: typeof literal_3
-  value: z.ZodCodec<z.ZodOptional<typeof literal_2>, typeof literal_2>
+  spec: typeof literal_2
+  value: z.ZodCodec<z.ZodOptional<typeof literal_1>, typeof literal_1>
 }> = /* @__PURE__ */ object({
   eventId: wire(Guid.optional(), Guid),
-  spec: literal_3,
-  value: wire(literal_2.optional(), literal_2),
+  spec: literal_2,
+  value: wire(literal_1.optional(), literal_1),
 }).meta({
   id: 'ActionInput',
 })
@@ -2174,11 +2178,11 @@ export const GatewayPortMapCapabilities: z.ZodObject<{
 export const GetActionInputParams: z.ZodObject<{
   packageId: typeof PackageId
   actionId: typeof ActionId
-  prefill: z.ZodCodec<z.ZodOptional<typeof literal_2>, typeof literal_2>
+  prefill: z.ZodCodec<z.ZodOptional<typeof literal_1>, typeof literal_1>
 }> = /* @__PURE__ */ object({
   packageId: PackageId,
   actionId: ActionId,
-  prefill: wire(literal_2.optional(), literal_2),
+  prefill: wire(literal_1.optional(), literal_1),
 }).meta({
   id: 'GetActionInputParams',
 })

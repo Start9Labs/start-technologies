@@ -14,17 +14,16 @@ const literal_3 = /* @__PURE__ */ z.union([
 const literal_4 = /* @__PURE__ */ z.union([z.string(), z.array(z.number())])
 const literal_5 = /* @__PURE__ */ z.enum(['processor', 'display'])
 const literal_6 = /* @__PURE__ */ z.array(z.record(z.string(), z.unknown()))
-const literal_7 = /* @__PURE__ */ z.string().uuid()
-const literal_8 = /* @__PURE__ */ z.union([
+const literal_7 = /* @__PURE__ */ z.union([
   z.object({ only: z.array(z.number()) }),
   z.object({ except: z.array(z.number()) }),
 ])
-const literal_9 = /* @__PURE__ */ z.union([
+const literal_8 = /* @__PURE__ */ z.union([
   z.object({ only: z.array(z.string()) }),
   z.object({ except: z.array(z.string()) }),
 ])
-const literal_10 = /* @__PURE__ */ z.number()
-const literal_11 = /* @__PURE__ */ z.object({
+const literal_9 = /* @__PURE__ */ z.number()
+const literal_10 = /* @__PURE__ */ z.object({
   value: z.string(),
   unit: z.string(),
 })
@@ -357,7 +356,7 @@ export const BuildArg: z.ZodUnion<
 > = /* @__PURE__ */ z.union([z.string(), object({ env: z.string() })]).meta({
   id: 'BuildArg',
 })
-export const CallbackId: typeof literal_10 = /* @__PURE__ */ literal_10.meta({
+export const CallbackId: typeof literal_9 = /* @__PURE__ */ literal_9.meta({
   id: 'CallbackId',
 })
 export const CapabilityVerdict: z.ZodObject<{
@@ -386,7 +385,7 @@ export const CapabilityVerdict: z.ZodObject<{
 }).meta({
   id: 'CapabilityVerdict',
 })
-export const Celsius: typeof literal_11 = /* @__PURE__ */ literal_11.meta({
+export const Celsius: typeof literal_10 = /* @__PURE__ */ literal_10.meta({
   id: 'Celsius',
 })
 export const CheckPortRes: z.ZodObject<{
@@ -455,12 +454,12 @@ export const CifsAddParams: z.ZodObject<{
 }).meta({
   id: 'CifsAddParams',
 })
-export const ClearCallbacksParams: typeof literal_8 =
-  /* @__PURE__ */ literal_8.meta({
+export const ClearCallbacksParams: typeof literal_7 =
+  /* @__PURE__ */ literal_7.meta({
     id: 'ClearCallbacksParams',
   })
-export const ClearTasksParams: typeof literal_9 =
-  /* @__PURE__ */ literal_9.meta({
+export const ClearTasksParams: typeof literal_8 =
+  /* @__PURE__ */ literal_8.meta({
     id: 'ClearTasksParams',
   })
 export const CliSetIconParams: z.ZodObject<{
@@ -750,7 +749,7 @@ export const GetUsersParams: z.ZodObject<{
 }).meta({
   id: 'GetUsersParams',
 })
-export const GigaBytes: typeof literal_11 = /* @__PURE__ */ literal_11.meta({
+export const GigaBytes: typeof literal_10 = /* @__PURE__ */ literal_10.meta({
   id: 'GigaBytes',
 })
 export const GitHash: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
@@ -959,7 +958,7 @@ export const MaybeUtf8String: typeof literal_4 = /* @__PURE__ */ literal_4.meta(
     id: 'MaybeUtf8String',
   },
 )
-export const MebiBytes: typeof literal_11 = /* @__PURE__ */ literal_11.meta({
+export const MebiBytes: typeof literal_10 = /* @__PURE__ */ literal_10.meta({
   id: 'MebiBytes',
 })
 export const MerkleArchiveCommitment: z.ZodIntersection<
@@ -1180,7 +1179,7 @@ export const PathOrUrl: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 export const Pem: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Pem',
 })
-export const Percentage: typeof literal_11 = /* @__PURE__ */ literal_11.meta({
+export const Percentage: typeof literal_10 = /* @__PURE__ */ literal_10.meta({
   id: 'Percentage',
 })
 export const PluginId: z.ZodEnum<{ 'url-v0': 'url-v0' }> = /* @__PURE__ */ z
@@ -1506,8 +1505,13 @@ export const SharedVolumeGrant: z.ZodObject<{ readonly: z.ZodBoolean }> =
   /* @__PURE__ */ object({ readonly: z.boolean() }).meta({
     id: 'SharedVolumeGrant',
   })
-export const SharedVolumeId: typeof literal_7 = /* @__PURE__ */ literal_7.meta({
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
+export const SharedVolumeId: z.ZodString = /* @__PURE__ */ z.string().meta({
   id: 'SharedVolumeId',
+  description: 'A 32-character uppercase base32 volume identity.',
 })
 export const SharedVolumeSource: z.ZodUnion<
   readonly [

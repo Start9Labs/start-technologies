@@ -1113,8 +1113,8 @@ const { default: SystemVolumes } =
 const { getManifest, getCurrentManifest } =
   await import('src/app/utils/get-package-data')
 const { Router } = await import('@angular/router')
-const volumeA = '7cb12a88-783d-4909-9923-d5eb47c7e01f'
-const volumeB = '9c6c47e8-1f98-4981-a92a-23fcf4bb7a82'
+const volumeA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+const volumeB = 'BCDEFGHIJKLMNOPQRSTUVWXYZ234567A'
 
 function volumeFixture(t, packageData = {}) {
   const source = new Subject()
@@ -1551,6 +1551,8 @@ test('production mocks support inspection, independent failed backups and new-lo
       password: 'private-password',
     },
   })
+  assert.match(local, /^[A-Z2-7]{32}$/)
+  assert.match(remote, /^[A-Z2-7]{32}$/)
   assert.equal(cache.value.value.sharedVolumes[remote].availability, 'unknown')
   assert.doesNotMatch(
     JSON.stringify(cache.value.value.sharedVolumes),
@@ -1579,6 +1581,10 @@ test('production mocks support inspection, independent failed backups and new-lo
     Mock.BackupInfo.sharedVolumeBackups[local].name,
     'Renamed photos',
   )
+  assert.match(
+    Mock.BackupInfo.sharedVolumeBackups[local].generation,
+    /^[A-Z2-7]{32}$/,
+  )
   assert.equal(
     Mock.BackupInfo.sharedVolumeBackups[remote].generation,
     'previous',
@@ -1594,6 +1600,7 @@ test('production mocks support inspection, independent failed backups and new-lo
     ids: [local],
   })
   assert.notEqual(restored.restored[local], local)
+  assert.match(restored.restored[local], /^[A-Z2-7]{32}$/)
   assert.deepEqual(cache.value.value.sharedVolumes[restored.restored[local]], {
     name: 'Renamed photos',
     source: { kind: 'local' },
