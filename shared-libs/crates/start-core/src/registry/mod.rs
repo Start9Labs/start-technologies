@@ -118,7 +118,7 @@ pub fn registry_router(ctx: RegistryContext) -> Router {
         .route(
             "/os/security",
             get({
-                let db = ctx.security_catalog.clone();
+                let db = ctx.security_feed.as_ref().map(|feed| feed.db.clone());
                 move |ws: axum::extract::ws::WebSocketUpgrade| async move {
                     os::security::upgrade(ws, db.clone())
                 }

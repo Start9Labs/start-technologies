@@ -67,16 +67,18 @@ messages (`id`, `patch`). The dump and subscription are captured atomically. The
 `SecurityCatalog` keyed by OS version; each entry contains `gitHash`, `sourceVersion`, and the available
 SquashFS `platforms` for a release marked `security`.
 
-`RegistryContext` owns one `PatchDb::in_memory()` mirror and one watch of the persistent OS index.
-Native `put` computes differences and suppresses unchanged catalogs. Subscribers receive the mirror's
-ordinary revision queues, serialized per connection, rather than full catalogs on each change.
-The endpoint uses 2 KiB read buffers, 1 KiB incoming message/frame limits, bounded sends, and the shared
-WebSocket Ping/Pong heartbeat. Clients apply revisions to the initial dump and start from a fresh dump
-on reconnect.
+When enabled, `RegistryContext` owns one `PatchDb::in_memory()` mirror and one watch of the persistent OS index.
+Native `put` computes differences and suppresses unchanged catalogs. The bounded JSON subscription API
+serializes each scoped revision once and shares its bytes across listeners. Initial dumps share a
+per-pointer cache until the database changes. A 32-slot broadcast ring bounds pending revisions;
+a subscriber that falls behind closes instead of skipping patches. The endpoint uses 2 KiB read
+buffers, 1 KiB incoming message/frame limits, bounded sends, and the shared WebSocket Ping/Pong
+heartbeat. Clients apply revisions to the initial dump and start from a fresh dump on reconnect.
 
-With `mute-os-security-notifications: true`, the mirror stays empty without a source watch or sync
-task. Release metadata remains unchanged. The setting applies at daemon startup and does not affect
-promotion into another registry.
+Security notifications are opt-in with `security-notifications: true`. Disabled registries create no
+mirror or sync task and refuse upgrades with HTTP 403; clients retry with backoff. Release metadata
+remains unchanged. The setting applies at daemon startup and does not affect promotion into another
+registry.
 
 ## Data model
 

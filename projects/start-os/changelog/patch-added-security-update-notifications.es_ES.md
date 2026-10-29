@@ -1,2 +1,2 @@
-- Reciba una notificación cuando el registro del SO seleccionado publique una actualización de seguridad compatible, incluso con el navegador cerrado.
+- Reciba una notificación cuando el registro del SO seleccionado anuncie una actualización de seguridad compatible, incluso con el navegador cerrado.
 - Las actualizaciones beta pueden reemplazar una compilación anterior con la misma versión del SO.

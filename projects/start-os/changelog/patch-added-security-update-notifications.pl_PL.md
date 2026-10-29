@@ -1,2 +1,2 @@
-- Otrzymuj powiadomienie, gdy wybrany rejestr systemu opublikuje zgodną aktualizację bezpieczeństwa, nawet gdy przeglądarka jest zamknięta.
+- Otrzymuj powiadomienie, gdy wybrany rejestr systemu ogłosi zgodną aktualizację bezpieczeństwa, nawet gdy przeglądarka jest zamknięta.
 - Aktualizacje beta mogą zastąpić wcześniejszą kompilację o tym samym numerze wersji systemu.

@@ -4390,19 +4390,19 @@ help.arg.registry-description:
   fr_FR: "Description du registre, en Markdown"
   pl_PL: "Opis rejestru, w formacie Markdown"
 
-help.arg.registry-mute-os-security-notifications:
-  en_US: "Suppress OS security-update announcements from this registry"
-  de_DE: "Ankündigungen von OS-Sicherheitsupdates dieser Registry unterdrücken"
-  es_ES: "Silenciar los avisos de actualizaciones de seguridad del SO de este registro"
-  fr_FR: "Désactiver les annonces de mises à jour de sécurité du système provenant de ce registre"
-  pl_PL: "Wycisz powiadomienia o aktualizacjach bezpieczeństwa systemu z tego rejestru"
-
 help.arg.registry-name:
   en_US: "Name of the registry"
   de_DE: "Name des Registrys"
   es_ES: "Nombre del registro"
   fr_FR: "Nom du registre"
   pl_PL: "Nazwa rejestru"
+
+help.arg.registry-security-notifications:
+  en_US: "Enable OS security-update announcements from this registry"
+  de_DE: "Ankündigungen von OS-Sicherheitsupdates dieser Registry aktivieren"
+  es_ES: "Activar los avisos de actualizaciones de seguridad del SO de este registro"
+  fr_FR: "Activer les annonces de mises à jour de sécurité du système provenant de ce registre"
+  pl_PL: "Włącz powiadomienia o aktualizacjach bezpieczeństwa systemu z tego rejestru"
 
 help.arg.registry-startwrt:
   en_US: "Serve StartWRT clients"

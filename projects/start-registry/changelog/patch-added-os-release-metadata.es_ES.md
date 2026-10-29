@@ -1,2 +1,2 @@
 - Los metadatos de versiones del SO registran el commit Git de la compilación y si incluye actualizaciones de seguridad, y conservan ambos datos al promover versiones entre registros.
-- Los operadores del registro pueden silenciar los avisos de actualizaciones de seguridad del SO con `mute-os-security-notifications: true` sin cambiar los metadatos de la versión.
+- Los avisos de actualizaciones de seguridad del SO están desactivados por defecto. Los operadores del registro pueden activarlos con `security-notifications: true` sin cambiar los metadatos de la versión.

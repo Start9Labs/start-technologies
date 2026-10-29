@@ -1,2 +1,2 @@
-- Recevez une notification lorsque le registre du système sélectionné publie une mise à jour de sécurité compatible, même lorsque le navigateur est fermé.
+- Recevez une notification lorsque le registre du système sélectionné annonce une mise à jour de sécurité compatible, même lorsque le navigateur est fermé.
 - Les mises à jour bêta peuvent remplacer une compilation antérieure portant le même numéro de version du système.
