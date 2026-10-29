@@ -10,7 +10,6 @@ use super::util::sync_directory;
 use crate::PackageId;
 use crate::auth::check_password;
 use crate::backup::target::BackupInfo;
-use crate::disk::BACKUP_DIR_NAME;
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::filesystem::backupfs::BackupFS;
 use crate::disk::mount::guard::SubPath;
@@ -19,6 +18,8 @@ use crate::prelude::*;
 use crate::util::crypto::{decrypt_slice, encrypt_slice};
 use crate::util::io::AtomicFile;
 use crate::util::serde::IoFormat;
+
+const ENCRYPTED_DATA_DIR: &str = "crypt";
 
 #[derive(Clone, Debug)]
 pub struct BackupMountGuard<G: GenericMountGuard> {
@@ -36,9 +37,12 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
         server_id: &str,
         password: &str,
     ) -> Result<(BackupUnencryptedMetadata, String), Error> {
-        let backup_dir = backup_disk_path.join(BACKUP_DIR_NAME).join(server_id);
-        let unencrypted_metadata_path = backup_dir.join("unencrypted-metadata.json");
-        let crypt_path = backup_dir.join("crypt");
+        let unencrypted_metadata_path =
+            BackupUnencryptedMetadata::path(backup_disk_path, server_id);
+        let crypt_path = unencrypted_metadata_path
+            .parent()
+            .unwrap()
+            .join(ENCRYPTED_DATA_DIR);
         let mut unencrypted_metadata: BackupUnencryptedMetadata =
             if tokio::fs::metadata(&unencrypted_metadata_path)
                 .await
@@ -107,10 +111,8 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
         server_id: &str,
         password: &str,
     ) -> Result<(), Error> {
-        let unencrypted_metadata_path = backup_disk_path
-            .join(BACKUP_DIR_NAME)
-            .join(server_id)
-            .join("unencrypted-metadata.json");
+        let unencrypted_metadata_path =
+            BackupUnencryptedMetadata::path(backup_disk_path, server_id);
         let bytes = match tokio::fs::read(&unencrypted_metadata_path).await {
             Ok(bytes) => bytes,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -139,9 +141,12 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
         let backup_disk_path = backup_disk_mount_guard.path();
         let (unencrypted_metadata, enc_key) =
             Self::load_metadata(backup_disk_path, server_id, password).await?;
-        let backup_dir = backup_disk_path.join(BACKUP_DIR_NAME).join(server_id);
-        let unencrypted_metadata_path = backup_dir.join("unencrypted-metadata.json");
-        let crypt_path = backup_dir.join("crypt");
+        let unencrypted_metadata_path =
+            BackupUnencryptedMetadata::path(backup_disk_path, server_id);
+        let crypt_path = unencrypted_metadata_path
+            .parent()
+            .unwrap()
+            .join(ENCRYPTED_DATA_DIR);
 
         if tokio::fs::metadata(&crypt_path).await.is_err() {
             tokio::fs::create_dir_all(&crypt_path).await.with_ctx(|_| {
@@ -184,6 +189,15 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
             .as_ref()
             .expect("backup disk mount guard present")
             .path()
+    }
+
+    pub fn encrypted_relative_path(&self) -> PathBuf {
+        self.unencrypted_metadata_path
+            .parent()
+            .unwrap()
+            .strip_prefix(self.backup_disk_path())
+            .unwrap()
+            .join(ENCRYPTED_DATA_DIR)
     }
 
     pub fn change_password(&mut self, new_password: &str) -> Result<(), Error> {

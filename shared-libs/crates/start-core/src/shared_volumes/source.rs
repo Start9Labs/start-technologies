@@ -13,7 +13,11 @@ use crate::shared_volumes::{
 
 pub async fn create_local_directory(path: &Path) -> Result<(), Error> {
     tokio::fs::create_dir_all(path).await?;
-    std::os::unix::fs::chown(path, Some(100000), Some(100000))?;
+    std::os::unix::fs::chown(
+        path,
+        Some(crate::lxc::BASE_IDMAP.to_id),
+        Some(crate::lxc::BASE_IDMAP.to_id),
+    )?;
     tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o777)).await?;
     Ok(())
 }

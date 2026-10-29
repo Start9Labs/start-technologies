@@ -156,15 +156,35 @@ pub async fn mount_shared_volume(
 ) -> Result<SharedVolumeMountResult, Error> {
     use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
     use crate::disk::mount::guard::GenericMountGuard;
+    use crate::shared_volumes::mounts::{PreparedSource, confined_relative};
     use crate::util::Invoke;
     let service = context.deref()?;
     let container = &service.seed.persistent_container;
+    container.shared_volumes.lock().await.check_allowed()?;
+    authorize_mount(&service, &id, readonly).await?;
+    confined_relative(&mountpoint)?;
+    if let Some(subpath) = &subpath {
+        confined_relative(subpath)?;
+    }
+    container
+        .subcontainers
+        .lock()
+        .await
+        .get(&subcontainer)
+        .or_not_found("subcontainer")?;
+    let source = match crate::shared_volumes::source::open_source(
+        &service.seed.ctx,
+        &id,
+        if readonly { ReadOnly } else { ReadWrite },
+    )
+    .await
+    {
+        Ok(source) => Ok(PreparedSource::open(source, subpath).await),
+        Err(error) => Err(error),
+    };
     let mut mounts = container.shared_volumes.lock().await;
     mounts.check_allowed()?;
     authorize_mount(&service, &id, readonly).await?;
-    if let Some(subpath) = &subpath {
-        crate::shared_volumes::mounts::confined_relative(subpath)?;
-    }
     let subcontainers = container.subcontainers.lock().await;
     let root = subcontainers
         .get(&subcontainer)
@@ -177,16 +197,9 @@ pub async fn mount_shared_volume(
         .invoke(ErrorKind::Filesystem)
         .await?;
     let location = mounts.prepare(&subcontainer, root, &mountpoint).await?;
-    let source = match crate::shared_volumes::source::open_source(
-        &service.seed.ctx,
-        &id,
-        if readonly { ReadOnly } else { ReadWrite },
-    )
-    .await
-    {
-        Ok(source) => source,
+    let source = match source {
+        Ok(prepared) => prepared?,
         Err(error) => {
-            authorize_mount(&service, &id, readonly).await?;
             if matches!(error.kind, ErrorKind::InvalidRequest) {
                 return Err(error);
             }
@@ -199,15 +212,7 @@ pub async fn mount_shared_volume(
             });
         }
     };
-    authorize_mount(&service, &id, readonly).await?;
-    mounts.attach(
-        &subcontainer,
-        location,
-        id,
-        source,
-        subpath.as_deref(),
-        readonly,
-    )?;
+    mounts.attach(&subcontainer, location, id, source, readonly)?;
     Ok(SharedVolumeMountResult::Mounted)
 }
 

@@ -1889,6 +1889,13 @@ backup.volume.invalid-generation:
   fr_FR: "La sauvegarde du volume contient un identifiant de copie invalide"
   pl_PL: "Kopia zapasowa woluminu ma nieprawidłowy identyfikator kopii"
 
+backup.volume.overlapping-target:
+  en_US: "The backup target overlaps this volume. Choose a target outside the volume."
+  de_DE: "Das Sicherungsziel überschneidet sich mit diesem Volume. Wählen Sie ein Ziel außerhalb des Volumes."
+  es_ES: "El destino de la copia de seguridad se superpone con este volumen. Elija un destino fuera del volumen."
+  fr_FR: "La destination de sauvegarde chevauche ce volume. Choisissez une destination hors du volume."
+  pl_PL: "Cel kopii zapasowej nakłada się na ten wolumin. Wybierz cel poza woluminem."
+
 backup.volume.restore-error:
   en_US: "Could not restore volume %{id}: %{error}"
   de_DE: "Volume %{id} konnte nicht wiederhergestellt werden: %{error}"

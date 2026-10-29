@@ -8,8 +8,8 @@ lxc.arch = linux64
 # Container specific configuration
 lxc.apparmor.profile = generated
 lxc.apparmor.allow_nesting = 1
-lxc.idmap = u 0 100000 65536
-lxc.idmap = g 0 100000 65536
+lxc.idmap = u {id_from} {id_to} {id_count}
+lxc.idmap = g {id_from} {id_to} {id_count}
 
 # Place every service container's cgroup under the `services.slice` systemd
 # slice (see core/services.slice + system::limit_container_memory) instead of

@@ -105,8 +105,9 @@ pub(super) async fn backup_volume(
     ctx: &RpcContext,
     backup: &BackupMountGuard<TmpMountGuard>,
     id: &SharedVolumeId,
+    destination: &super::target::BackupTargetFS,
 ) -> Result<SharedVolumeBackupInfo, Error> {
-    let name = ctx
+    let volume = ctx
         .db
         .peek()
         .await
@@ -114,13 +115,32 @@ pub(super) async fn backup_volume(
         .as_shared_volumes()
         .as_idx(id)
         .or_not_found(id)?
-        .as_name()
         .de()?;
+    if let (
+        SharedVolumeSource::Cifs { hostname, path },
+        super::target::BackupTargetFS::Cifs(target),
+    ) = (&volume.source, destination)
+    {
+        let target_path = Path::new("/")
+            .join(&target.path)
+            .join(backup.encrypted_relative_path());
+        if crate::disk::mount::filesystem::cifs::locations_overlap(
+            (hostname, path),
+            (&target.hostname, &target_path),
+        )
+        .await?
+        {
+            return Err(Error::new(
+                eyre!(t!("backup.volume.overlapping-target")),
+                ErrorKind::Backup,
+            ));
+        }
+    }
     let source = source::open_source(ctx, id, ReadOnly).await?;
     let result = stage_copy(&backup.shared_volume_data(id), source.path()).await;
     source.unmount().await?;
     Ok(SharedVolumeBackupInfo {
-        name,
+        name: volume.name,
         timestamp: Utc::now(),
         generation: result?,
     })

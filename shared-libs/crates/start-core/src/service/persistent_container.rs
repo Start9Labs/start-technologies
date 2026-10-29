@@ -15,12 +15,12 @@ use tracing::instrument;
 
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::bind::Bind;
-use crate::disk::mount::filesystem::idmapped::{IdMap, IdMapped};
+use crate::disk::mount::filesystem::idmapped::IdMapped;
 use crate::disk::mount::filesystem::loop_dev::LoopDev;
 use crate::disk::mount::filesystem::overlayfs::OverlayGuard;
 use crate::disk::mount::filesystem::{MountType, ReadOnly};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
-use crate::lxc::{HOST_RPC_SERVER_SOCKET, LxcConfig, LxcContainer};
+use crate::lxc::{BASE_IDMAP, HOST_RPC_SERVER_SOCKET, LxcConfig, LxcContainer};
 use crate::net::net_controller::NetService;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
@@ -186,7 +186,6 @@ impl PersistentContainer {
 
         let mut volumes = BTreeMap::new();
 
-        // TODO: remove once packages are reconverted
         let added = if is_compat {
             ["embassy".parse().unwrap()].into_iter().collect()
         } else {
@@ -200,11 +199,7 @@ impl PersistentContainer {
             let mount = MountGuard::mount(
                 &IdMapped::new(
                     Bind::new(data_dir(DATA_DIR, &s9pk.as_manifest().id, volume)),
-                    vec![IdMap {
-                        from_id: 0,
-                        to_id: 100000,
-                        range: 65536,
-                    }],
+                    vec![BASE_IDMAP],
                 ),
                 mountpoint,
                 MountType::ReadWrite,
@@ -222,14 +217,7 @@ impl PersistentContainer {
         {
             vec![
                 MountGuard::mount(
-                    &IdMapped::new(
-                        LoopDev::from(&**sqfs),
-                        vec![IdMap {
-                            from_id: 0,
-                            to_id: 100000,
-                            range: 65536,
-                        }],
-                    ),
+                    &IdMapped::new(LoopDev::from(&**sqfs), vec![BASE_IDMAP]),
                     mountpoint,
                     MountType::ReadWrite,
                 )
@@ -241,7 +229,7 @@ impl PersistentContainer {
             .get_path("assets")
             .and_then(|e| e.as_directory())
         {
-            // backwards compatibility for alpha s9pks - remove eventually
+            // Per-asset squashfs archives use the legacy layout.
             let mut assets = Vec::new();
             for (asset, entry) in &**dir {
                 let mountpoint = lxc_container
@@ -253,14 +241,7 @@ impl PersistentContainer {
                 };
                 assets.push(
                     MountGuard::mount(
-                        &IdMapped::new(
-                            LoopDev::from(&**sqfs),
-                            vec![IdMap {
-                                from_id: 0,
-                                to_id: 100000,
-                                range: 65536,
-                            }],
-                        ),
+                        &IdMapped::new(LoopDev::from(&**sqfs), vec![BASE_IDMAP]),
                         mountpoint,
                         MountType::ReadWrite,
                     )
@@ -294,14 +275,7 @@ impl PersistentContainer {
                 image.clone(),
                 Arc::new(
                     MountGuard::mount(
-                        &IdMapped::new(
-                            LoopDev::from(&**sqfs),
-                            vec![IdMap {
-                                from_id: 0,
-                                to_id: 100000,
-                                range: 65536,
-                            }],
-                        ),
+                        &IdMapped::new(LoopDev::from(&**sqfs), vec![BASE_IDMAP]),
                         &mountpoint,
                         ReadOnly,
                     )
@@ -367,18 +341,7 @@ impl PersistentContainer {
             .join("media/startos/backup");
         tokio::fs::create_dir_all(&mountpoint).await?;
         tokio::fs::create_dir_all(backup_path).await?;
-        // Idmap the container's backup bind like a volume (on-disk 0-based
-        // <-> container userns 100000+), so backup-fs stores container-space
-        // ids and the container-root owns its backup tree. Replaces the old
-        // chown-to-100000 + backup-fs's FUSE-internal idmapped-root.
-        let bind = IdMapped::new(
-            Bind::new(backup_path),
-            vec![IdMap {
-                from_id: 0,
-                to_id: 100000,
-                range: 65536,
-            }],
-        );
+        let bind = IdMapped::new(Bind::new(backup_path), vec![BASE_IDMAP]);
         MountGuard::mount(&bind, &mountpoint, mount_type).await
     }
 
@@ -411,7 +374,7 @@ impl PersistentContainer {
                     )
                 })?;
                 Command::new("chown")
-                    .arg("100000:100000")
+                    .arg(format!("{0}:{0}", BASE_IDMAP.to_id))
                     .arg(&path)
                     .invoke(ErrorKind::Filesystem)
                     .await?;

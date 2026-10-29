@@ -281,6 +281,7 @@ pub async fn backup_all(
                     disk_guard,
                     &package_ids,
                     &shared_volume_ids,
+                    &fs,
                 )
                 .await,
             )
@@ -316,6 +317,7 @@ async fn perform_backup(
     disk_guard: TmpMountGuard,
     package_ids: &OrdSet<PackageId>,
     shared_volume_ids: &OrdSet<SharedVolumeId>,
+    destination: &super::target::BackupTargetFS,
 ) -> Result<BackupReport, Error> {
     let db = ctx.db.peek().await;
     let mut backup_report = BTreeMap::new();
@@ -426,8 +428,11 @@ async fn perform_backup(
     for id in shared_volume_ids {
         let (name, mut phase) = volume_phases.remove(id).expect("volume phase exists");
         phase.start();
-        let (info, report) =
-            volume::measure_backup(name, volume::backup_volume(ctx, &backup_guard, id)).await;
+        let (info, report) = volume::measure_backup(
+            name,
+            volume::backup_volume(ctx, &backup_guard, id, destination),
+        )
+        .await;
         if let Some(info) = info {
             shared_backups.insert(id.clone(), info);
         }
