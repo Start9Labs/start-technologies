@@ -75,9 +75,7 @@ async fn shutdown_rpc_server<ExitFuture, ExitError, Shutdown, ServerFuture>(
 
 #[derive(Debug)]
 pub struct ServiceState {
-    // indicates whether the service container runtime has been initialized yet
     pub(super) rt_initialized: bool,
-    // This tracks references to callbacks registered by the running service:
     pub(super) callbacks: BTreeSet<Arc<CallbackId>>,
 }
 
@@ -90,18 +88,13 @@ impl ServiceState {
     }
 }
 
-/// Want to have a wrapper for uses like the inject where we are going to be finding the subcontainer and doing some filtering on it.
-/// As well, the imageName is also used for things like env.
 pub struct Subcontainer {
     pub(super) name: InternedString,
     pub(super) image_id: ImageId,
     pub(super) overlay: OverlayGuard<Arc<MountGuard>>,
 }
 
-// @DRB On top of this we need to also have  the procedures to have the effects and get the results back for them, maybe lock them to the running instance?
-/// This contains the LXC container running the javascript init system
-/// that can be used via a JSON RPC Client connected to a unix domain
-/// socket served by the container
+/// Service filesystem and JavaScript runtime resources.
 pub struct PersistentContainer {
     pub(super) s9pk: S9pk,
     pub(super) lxc_container: OnceCell<LxcContainer>,
@@ -114,7 +107,7 @@ pub struct PersistentContainer {
     pub(super) subcontainers: Arc<Mutex<BTreeMap<Guid, Subcontainer>>>,
     pub(crate) shared_volumes: Arc<Mutex<crate::shared_volumes::mounts::SharedVolumeMounts>>,
     pub(super) state: Arc<watch::Sender<ServiceState>>,
-    pub(super) net_service: NetService,
+    net_service: Option<NetService>,
     destroyed: bool,
 }
 
@@ -128,10 +121,11 @@ impl PersistentContainer {
             .or_not_found("lxc container")?;
         let ip = lxc_container.ip().await?;
         let ipv6 = lxc_container.ipv6().await?;
-        container.net_service = ctx
-            .net_controller
-            .create_service(container.s9pk.as_manifest().id.clone(), ip, ipv6)
-            .await?;
+        container.net_service = Some(
+            ctx.net_controller
+                .create_service(container.s9pk.as_manifest().id.clone(), ip, ipv6)
+                .await?,
+        );
         if let Some(callbacks) = ctx
             .callbacks
             .get_container_ip(&container.s9pk.as_manifest().id)
@@ -316,7 +310,7 @@ impl PersistentContainer {
             subcontainers: Arc::new(Mutex::new(BTreeMap::new())),
             shared_volumes: Arc::new(Mutex::new(Default::default())),
             state: Arc::new(watch::channel(ServiceState::new()).0),
-            net_service: NetService::dummy(),
+            net_service: None,
             destroyed: false,
         })
     }
@@ -454,7 +448,7 @@ impl PersistentContainer {
         let subcontainers = self.subcontainers.clone();
         let shared_volumes = self.shared_volumes.clone();
         let lxc_container = self.lxc_container.take();
-        let net_service = std::mem::replace(&mut self.net_service, NetService::dummy());
+        let net_service = self.net_service.take();
         self.destroyed = true;
         Some(async move {
             let mut errs = ErrorCollection::new();
@@ -472,7 +466,9 @@ impl PersistentContainer {
                 .await;
             }
             shared_volumes.lock().await.clear();
-            net_service.remove_all().await.log_err();
+            if let Some(net_service) = net_service {
+                net_service.remove_all().await.log_err();
+            }
             for (_, volume) in volumes {
                 errs.handle(volume.unmount(true).await);
             }
@@ -507,6 +503,10 @@ impl PersistentContainer {
         );
 
         Ok(())
+    }
+
+    pub(super) fn net_service(&self) -> Result<&NetService, Error> {
+        self.net_service.as_ref().or_not_found("network service")
     }
 
     #[instrument(skip_all)]
