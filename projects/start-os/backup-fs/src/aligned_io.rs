@@ -310,6 +310,17 @@ impl<F: FileExt + AsRawFd> BufferedDirectFile<F> {
         })
     }
 
+    /// Caches the enclosing window without moving the stream position.
+    pub fn prefetch_read(&self, offset: u64) -> io::Result<()> {
+        let base = offset / BUF_CAP as u64 * BUF_CAP as u64;
+        let mut state = self.state.borrow_mut();
+        if state.base != base {
+            Self::flush_dirty(&mut state, self.file())?;
+            Self::load_window(&mut state, self.file(), base)?;
+        }
+        Ok(())
+    }
+
     fn file(&self) -> &F {
         self.file.as_ref().unwrap()
     }

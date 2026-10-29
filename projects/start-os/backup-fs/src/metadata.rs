@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 use crate::atomic_file::AtomicFile;
 use crate::error::BkfsResult;
 use crate::serde::{data_config, decode, encode};
-use crate::vault::{self, Binding, EccParams};
+use crate::vault::{self, AuthenticationTag, Binding, EccParams};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) struct Reference {
-    tag: [u8; 32],
+    tag: AuthenticationTag,
 }
 
 impl Reference {

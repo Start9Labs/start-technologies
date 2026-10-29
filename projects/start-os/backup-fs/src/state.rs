@@ -1,23 +1,26 @@
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::{FileExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 use chacha20::Key;
 use serde::{Deserialize, Serialize};
 
+use crate::aligned_io::BufferedDirectFile;
 use crate::atomic_file::AtomicFile;
 use crate::error::{BkfsError, BkfsResult, BkfsResultExt};
 use crate::metadata::Reference;
 use crate::seglog::{Location, RecordKey, Roots};
 use crate::serde::{data_config, decode, encode};
-use crate::vault::{self, Binding, EccParams};
+use crate::vault::{self, AuthenticationTag, Binding, EccParams};
 
 const VERSION: u32 = 1;
 const ENTRIES_PER_TRANSACTION: usize = 16_384;
+const JOURNAL_SEGMENT_SIZE: u64 = 8 * 1024 * 1024;
+const JOURNAL_SUFFIX: &str = ".idx";
 const ANCHOR: &str = "state";
-
 type Change = (RecordKey, Option<Location>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,18 +29,184 @@ pub(crate) struct Counters {
     pub max_inode: u64,
 }
 
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+enum IndexReference {
+    Checkpoint(Reference),
+    Journal {
+        segment: u64,
+        offset: u64,
+        len: u32,
+        tag: AuthenticationTag,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct View {
+    tip: Option<IndexReference>,
+    pub counters: Counters,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 struct Anchor {
     version: u32,
-    tip: Option<Reference>,
-    counters: Counters,
+    index: View,
     catalog: Option<Reference>,
 }
 
 #[derive(Serialize, Deserialize)]
 struct Transaction {
-    previous: Option<Reference>,
+    previous: Option<IndexReference>,
     changes: Vec<Change>,
+}
+
+fn journal_path(dir: &Path, id: u64) -> PathBuf {
+    dir.join(format!("{id:016x}{JOURNAL_SUFFIX}"))
+}
+
+fn journal_id(name: &std::ffi::OsStr) -> Option<u64> {
+    u64::from_str_radix(name.to_str()?.strip_suffix(JOURNAL_SUFFIX)?, 16).ok()
+}
+
+struct Transactions<'a> {
+    dir: &'a Path,
+    key: &'a Key,
+    pending: Option<IndexReference>,
+    cached: Option<(u64, BufferedDirectFile<File>)>,
+}
+
+impl Iterator for Transactions<'_> {
+    type Item = BkfsResult<(IndexReference, Transaction)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let reference = self.pending.take()?;
+        Some((|| {
+            let transaction: Transaction = match reference {
+                IndexReference::Checkpoint(reference) => {
+                    reference.load(self.dir, self.key, Binding::Transaction)?
+                }
+                IndexReference::Journal {
+                    segment,
+                    offset,
+                    len,
+                    tag,
+                } => {
+                    if self.cached.as_ref().map(|(id, _)| *id) != Some(segment) {
+                        self.cached = Some((
+                            segment,
+                            BufferedDirectFile::new(File::open(journal_path(self.dir, segment))?)?,
+                        ));
+                    }
+                    let file = &self.cached.as_ref().unwrap().1;
+                    file.prefetch_read(offset)?;
+                    let mut blob = vec![0; len as usize];
+                    file.read_exact_at(&mut blob, offset)?;
+                    let plain = vault::open_bound(&blob, self.key, Binding::Transaction)?
+                        .verify_reference(&tag)?;
+                    decode(&plain, data_config())?
+                }
+            };
+            self.pending = transaction.previous;
+            Ok((reference, transaction))
+        })())
+    }
+}
+
+impl View {
+    fn transactions<'a>(self, dir: &'a Path, key: &'a Key) -> Transactions<'a> {
+        Transactions {
+            dir,
+            key,
+            pending: self.tip,
+            cached: None,
+        }
+    }
+
+    pub fn load(self, dir: &Path, key: &Key) -> BkfsResult<Roots> {
+        let mut roots = Roots::default();
+        let mut seen = HashSet::new();
+        for node in self.transactions(dir, key) {
+            for (key, location) in node?.1.changes {
+                if seen.insert(key) {
+                    roots.update(key, location);
+                }
+            }
+        }
+        Ok(roots)
+    }
+
+    /// The root publisher must sync these chunks before making the view authoritative.
+    pub fn write_checkpoint(
+        dir: &Path,
+        key: &Key,
+        ecc: EccParams,
+        roots: &Roots,
+        counters: Counters,
+    ) -> BkfsResult<(Self, Vec<Reference>)> {
+        let mut changes = roots.entries().peekable();
+        let mut tip = None;
+        let mut references = Vec::new();
+        while changes.peek().is_some() {
+            let transaction = Transaction {
+                previous: tip,
+                changes: changes
+                    .by_ref()
+                    .take(ENTRIES_PER_TRANSACTION)
+                    .map(|(key, loc)| (key, Some(loc)))
+                    .collect(),
+            };
+            let reference = Reference::write(dir, key, ecc, Binding::Transaction, &transaction)?;
+            references.push(reference);
+            tip = Some(IndexReference::Checkpoint(reference));
+        }
+        Ok((Self { tip, counters }, references))
+    }
+}
+
+struct Journal {
+    file: File,
+    id: u64,
+    offset: u64,
+}
+
+impl Journal {
+    fn create(dir: &Path) -> BkfsResult<Self> {
+        let mut maximum = None;
+        for entry in std::fs::read_dir(dir)? {
+            if let Some(id) = journal_id(&entry?.file_name()) {
+                maximum = Some(maximum.map_or(id, |old: u64| old.max(id)));
+            }
+        }
+        let id = match maximum {
+            Some(id) => id
+                .checked_add(1)
+                .ok_or_else(|| BkfsError::unsupported("index journal id exhausted"))?,
+            None => 0,
+        };
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(journal_path(dir, id))?;
+        Ok(Self {
+            file,
+            id,
+            offset: 0,
+        })
+    }
+
+    fn append(&mut self, blob: &vault::Sealed) -> BkfsResult<IndexReference> {
+        let len = u32::try_from(blob.bytes.len())
+            .map_err(|_| BkfsError::unsupported("index transaction too large"))?;
+        self.file.write_all_at(&blob.bytes, self.offset)?;
+        let reference = IndexReference::Journal {
+            segment: self.id,
+            offset: self.offset,
+            len,
+            tag: blob.tag,
+        };
+        self.offset += len as u64;
+        Ok(reference)
+    }
 }
 
 pub(crate) struct State {
@@ -45,6 +214,7 @@ pub(crate) struct State {
     path: PathBuf,
     anchor: Anchor,
     pending: HashMap<RecordKey, Option<Location>>,
+    journal: Option<Journal>,
     uncertain: bool,
 }
 
@@ -58,6 +228,7 @@ impl State {
             path,
             anchor,
             pending: HashMap::new(),
+            journal: None,
             uncertain: false,
         })
     }
@@ -70,21 +241,24 @@ impl State {
         counters: Counters,
         catalog: Option<Reference>,
     ) -> BkfsResult<Self> {
+        let (index, _) = View::write_checkpoint(dir, key, ecc, roots, counters)?;
         let mut state = Self::directory(
             dir,
             Anchor {
                 version: VERSION,
-                tip: None,
-                counters,
+                index,
                 catalog,
             },
         )?;
-        state.checkpoint(key, ecc, roots, counters, catalog)?;
+        state.sync_backing()?;
+        state.publish(key, ecc, state.anchor.clone())?;
         Ok(state)
     }
 
     pub fn open(dir: &Path, key: &Key) -> BkfsResult<(Self, Roots)> {
-        let bytes = std::fs::read(dir.join(ANCHOR))?;
+        let directory = File::open(dir)?;
+        let path = PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()));
+        let bytes = std::fs::read(path.join(ANCHOR))?;
         let plain = vault::open_bound(&bytes, key, Binding::State)?;
         let anchor: Anchor = decode(&plain.plaintext, data_config())?;
         if anchor.version != VERSION {
@@ -92,27 +266,26 @@ impl State {
                 "unsupported authenticated index state",
             ));
         }
-        let state = Self::directory(dir, anchor)?;
-        let mut roots = Roots::default();
-        let mut seen = HashSet::new();
-        let mut tip = state.anchor.tip;
-        while let Some(reference) = tip {
-            let transaction: Transaction =
-                reference.load(&state.path, key, Binding::Transaction)?;
-            for (key, location) in transaction.changes {
-                if seen.insert(key) {
-                    roots.update(key, location);
-                }
-            }
-            tip = transaction.previous;
-        }
-        Ok((state, roots))
+        let roots = anchor.index.load(&path, key)?;
+        Ok((
+            Self {
+                directory,
+                path,
+                anchor,
+                pending: HashMap::new(),
+                journal: None,
+                uncertain: false,
+            },
+            roots,
+        ))
     }
 
+    pub fn view(&self) -> View {
+        self.anchor.index
+    }
     pub fn counters(&self) -> Counters {
-        self.anchor.counters
+        self.anchor.index.counters
     }
-
     pub fn catalog(&self) -> Option<Reference> {
         self.anchor.catalog
     }
@@ -124,30 +297,10 @@ impl State {
         Ok(())
     }
 
-    pub fn record(&mut self, key: RecordKey, location: Option<Location>) {
+    pub fn record(&mut self, key: RecordKey, location: Option<Location>) -> BkfsResult<()> {
+        self.check_rw()?;
         self.pending.insert(key, location);
-    }
-
-    fn write_transactions(
-        &self,
-        key: &Key,
-        ecc: EccParams,
-        mut previous: Option<Reference>,
-        changes: impl Iterator<Item = Change>,
-    ) -> BkfsResult<(Option<Reference>, Vec<Reference>)> {
-        let mut references = Vec::new();
-        let mut changes = changes.peekable();
-        while changes.peek().is_some() {
-            let transaction = Transaction {
-                previous,
-                changes: changes.by_ref().take(ENTRIES_PER_TRANSACTION).collect(),
-            };
-            let reference =
-                Reference::write(&self.path, key, ecc, Binding::Transaction, &transaction)?;
-            references.push(reference);
-            previous = Some(reference);
-        }
-        Ok((previous, references))
+        Ok(())
     }
 
     fn publish(&mut self, key: &Key, ecc: EccParams, anchor: Anchor) -> BkfsResult<()> {
@@ -181,21 +334,43 @@ impl State {
         catalog: Option<Reference>,
     ) -> BkfsResult<()> {
         self.check_rw()?;
-        let (tip, _) = self.write_transactions(
-            key,
-            ecc,
-            self.anchor.tip,
-            self.pending.iter().map(|(&key, &loc)| (key, loc)),
-        )?;
+        let mut tip = self.anchor.index.tip;
+        let mut changes = self
+            .pending
+            .iter()
+            .map(|(&key, &loc)| (key, loc))
+            .peekable();
+        while changes.peek().is_some() {
+            let transaction = Transaction {
+                previous: tip,
+                changes: changes.by_ref().take(ENTRIES_PER_TRANSACTION).collect(),
+            };
+            let plain = encode(&transaction, data_config())?;
+            let _: Transaction = decode(&plain, data_config())?;
+            let blob = vault::seal_bound(&plain, key, ecc, Binding::Transaction);
+            if self.journal.as_ref().is_some_and(|journal| {
+                journal.offset > 0
+                    && journal.offset + blob.bytes.len() as u64 > JOURNAL_SEGMENT_SIZE
+            }) {
+                self.journal = None;
+            }
+            if self.journal.is_none() {
+                self.journal = Some(Journal::create(&self.path)?);
+            }
+            tip = Some(self.journal.as_mut().unwrap().append(&blob)?);
+        }
         // Objects, log frames and index transactions must precede their new root.
         self.sync_backing()?;
+        let index = View { tip, counters };
+        if index == self.anchor.index && catalog == self.anchor.catalog {
+            return Ok(());
+        }
         self.publish(
             key,
             ecc,
             Anchor {
                 version: VERSION,
-                tip,
-                counters,
+                index,
                 catalog,
             },
         )
@@ -208,49 +383,80 @@ impl State {
         roots: &Roots,
         counters: Counters,
         catalog: Option<Reference>,
-    ) -> BkfsResult<()> {
+        retained: &[View],
+    ) -> BkfsResult<View> {
         self.check_rw()?;
-        let (tip, references) = self.write_transactions(
-            key,
-            ecc,
-            None,
-            roots.entries().map(|(key, loc)| (key, Some(loc))),
-        )?;
+        let (index, references) = View::write_checkpoint(&self.path, key, ecc, roots, counters)?;
         self.sync_backing()?;
         self.publish(
             key,
             ecc,
             Anchor {
                 version: VERSION,
-                tip,
-                counters,
+                index,
                 catalog,
             },
         )?;
-        self.collect_metadata(references)
+        self.journal = None;
+        self.collect_metadata(key, references, retained)?;
+        Ok(index)
     }
 
-    fn collect_metadata(&self, references: Vec<Reference>) -> BkfsResult<()> {
-        let mut keep: HashSet<_> = references
+    fn collect_metadata(
+        &self,
+        key: &Key,
+        references: Vec<Reference>,
+        retained: &[View],
+    ) -> BkfsResult<()> {
+        let mut seen: HashSet<_> = references
             .into_iter()
-            .map(|reference| reference.path(&self.path))
+            .map(IndexReference::Checkpoint)
             .collect();
+        for view in retained {
+            let mut walker = view.transactions(&self.path, key);
+            while let Some(reference) = walker.pending {
+                if !seen.insert(reference) {
+                    break;
+                }
+                walker.next().unwrap()?;
+            }
+        }
+        let mut keep = HashSet::new();
+        let mut journals = HashSet::new();
+        for reference in seen {
+            match reference {
+                IndexReference::Checkpoint(reference) => {
+                    keep.insert(reference.path(&self.path));
+                }
+                IndexReference::Journal { segment, .. } => {
+                    journals.insert(segment);
+                }
+            }
+        }
         if let Some(reference) = self.anchor.catalog {
             keep.insert(reference.path(&self.path));
         }
         let pool = Reference::directory(&self.path);
-        let entries = match std::fs::read_dir(&pool) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        match std::fs::read_dir(&pool) {
+            Ok(entries) => {
+                for entry in entries {
+                    let entry = entry?;
+                    if entry.file_type()?.is_file() && !keep.contains(&entry.path()) {
+                        std::fs::remove_file(entry.path())?;
+                    }
+                }
+                File::open(pool)?.sync_all()?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
-        };
-        for entry in entries {
+        }
+        for entry in std::fs::read_dir(&self.path)? {
             let entry = entry?;
-            if entry.file_type()?.is_file() && !keep.contains(&entry.path()) {
+            if journal_id(&entry.file_name()).is_some_and(|id| !journals.contains(&id)) {
                 std::fs::remove_file(entry.path())?;
             }
         }
-        File::open(pool)?.sync_all()?;
+        self.directory.sync_all()?;
         Ok(())
     }
 }
@@ -283,39 +489,54 @@ mod tests {
         }
     }
 
+    fn commit(state: &mut State, key: &Key, seq: u64) {
+        state
+            .commit(
+                key,
+                EccParams::default(),
+                Counters {
+                    next_seq: seq,
+                    max_inode: 7,
+                },
+                None,
+            )
+            .unwrap();
+    }
+
+    fn journal(reference: IndexReference) -> (u64, u64, u32) {
+        let IndexReference::Journal {
+            segment,
+            offset,
+            len,
+            ..
+        } = reference
+        else {
+            panic!("not a packed transaction")
+        };
+        (segment, offset, len)
+    }
+
     #[test]
     fn incremental_updates_and_tombstones_survive_reopen() {
         let dir = tempfile::tempdir().unwrap();
         let key = Key::from([0x81; 32]);
         let mut state = initial(dir.path(), &key);
         let object = ObjectId::block(&key, 9, 0);
-        state.record(RecordKey::Inode(7), Some(location(0)));
-        state.record(RecordKey::Content(7), Some(location(128)));
-        state.record(RecordKey::Object(object), Some(location(256)));
         state
-            .commit(
-                &key,
-                EccParams::default(),
-                Counters {
-                    next_seq: 3,
-                    max_inode: 7,
-                },
-                None,
-            )
+            .record(RecordKey::Inode(7), Some(location(0)))
             .unwrap();
-        state.record(RecordKey::Inode(7), Some(location(384)));
-        state.record(RecordKey::Content(7), None);
         state
-            .commit(
-                &key,
-                EccParams::default(),
-                Counters {
-                    next_seq: 5,
-                    max_inode: 7,
-                },
-                None,
-            )
+            .record(RecordKey::Content(7), Some(location(128)))
             .unwrap();
+        state
+            .record(RecordKey::Object(object), Some(location(256)))
+            .unwrap();
+        commit(&mut state, &key, 3);
+        state
+            .record(RecordKey::Inode(7), Some(location(384)))
+            .unwrap();
+        state.record(RecordKey::Content(7), None).unwrap();
+        commit(&mut state, &key, 5);
         let (opened, roots) = State::open(dir.path(), &key).unwrap();
         assert_eq!(
             opened.counters(),
@@ -334,36 +555,28 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let key = Key::from([0x82; 32]);
         let mut state = initial(dir.path(), &key);
-        state.record(RecordKey::Inode(7), Some(location(0)));
         state
-            .commit(
-                &key,
-                EccParams::default(),
-                Counters {
-                    next_seq: 1,
-                    max_inode: 7,
-                },
-                None,
-            )
+            .record(RecordKey::Inode(7), Some(location(0)))
             .unwrap();
-        let old = state.anchor.tip.unwrap();
-        state.record(RecordKey::Inode(7), Some(location(128)));
+        commit(&mut state, &key, 1);
+        let (old_segment, old_offset, old_len) = journal(state.view().tip.unwrap());
         state
-            .commit(
-                &key,
-                EccParams::default(),
-                Counters {
-                    next_seq: 2,
-                    max_inode: 7,
-                },
-                None,
-            )
+            .record(RecordKey::Inode(7), Some(location(128)))
             .unwrap();
-        std::fs::copy(
-            old.path(dir.path()),
-            state.anchor.tip.unwrap().path(dir.path()),
-        )
-        .unwrap();
+        commit(&mut state, &key, 2);
+        let (segment, offset, len) = journal(state.view().tip.unwrap());
+        assert!(old_len <= len);
+        let mut old = vec![0; old_len as usize];
+        File::open(journal_path(dir.path(), old_segment))
+            .unwrap()
+            .read_exact_at(&mut old, old_offset)
+            .unwrap();
+        OpenOptions::new()
+            .write(true)
+            .open(journal_path(dir.path(), segment))
+            .unwrap()
+            .write_all_at(&old, offset)
+            .unwrap();
         assert!(State::open(dir.path(), &key).is_err());
     }
 
@@ -373,19 +586,12 @@ mod tests {
         let key = Key::from([0x83; 32]);
         assert!(State::open(dir.path(), &key).is_err());
         let mut state = initial(dir.path(), &key);
-        state.record(RecordKey::Inode(7), Some(location(0)));
         state
-            .commit(
-                &key,
-                EccParams::default(),
-                Counters {
-                    next_seq: 1,
-                    max_inode: 7,
-                },
-                None,
-            )
+            .record(RecordKey::Inode(7), Some(location(0)))
             .unwrap();
-        std::fs::remove_file(state.anchor.tip.unwrap().path(dir.path())).unwrap();
+        commit(&mut state, &key, 1);
+        let (id, _, _) = journal(state.view().tip.unwrap());
+        std::fs::remove_file(journal_path(dir.path(), id)).unwrap();
         assert!(State::open(dir.path(), &key).is_err());
     }
 
@@ -394,7 +600,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let key = Key::from([0x84; 32]);
         let mut state = initial(dir.path(), &key);
-        state.record(RecordKey::Inode(7), Some(location(0)));
+        state
+            .record(RecordKey::Inode(7), Some(location(0)))
+            .unwrap();
         let blocker = dir.path().join("state.tmp");
         std::fs::create_dir(&blocker).unwrap();
         assert!(state
@@ -410,17 +618,7 @@ mod tests {
             .is_err());
         assert!(State::open(dir.path(), &key).unwrap().1.index.is_empty());
         std::fs::remove_dir(blocker).unwrap();
-        state
-            .commit(
-                &key,
-                EccParams::default(),
-                Counters {
-                    next_seq: 1,
-                    max_inode: 7,
-                },
-                None,
-            )
-            .unwrap();
+        commit(&mut state, &key, 1);
         assert_eq!(
             State::open(dir.path(), &key).unwrap().1.index.get(&7),
             Some(&location(0))
@@ -432,19 +630,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let key = Key::from([0x85; 32]);
         let mut state = initial(dir.path(), &key);
-        state.record(RecordKey::Inode(7), Some(location(0)));
         state
-            .commit(
-                &key,
-                EccParams::default(),
-                Counters {
-                    next_seq: 1,
-                    max_inode: 7,
-                },
-                None,
-            )
+            .record(RecordKey::Inode(7), Some(location(0)))
             .unwrap();
-        let old = state.anchor.tip.unwrap().path(dir.path());
+        commit(&mut state, &key, 1);
+        let old = journal_path(dir.path(), journal(state.view().tip.unwrap()).0);
         let catalog = Reference::write(
             dir.path(),
             &key,
@@ -467,12 +657,13 @@ mod tests {
                     max_inode: ENTRIES_PER_TRANSACTION as u64 + 1,
                 },
                 Some(catalog),
+                &[],
             )
             .unwrap();
         assert!(!old.exists());
         assert!(catalog.path(dir.path()).exists());
         assert_eq!(
-            std::fs::read_dir(dir.path().join("state-objects"))
+            std::fs::read_dir(Reference::directory(dir.path()))
                 .unwrap()
                 .count(),
             3
@@ -480,11 +671,108 @@ mod tests {
         let (opened, restored) = State::open(dir.path(), &key).unwrap();
         assert_eq!(restored, roots);
         assert_eq!(opened.catalog(), Some(catalog));
+        state
+            .record(RecordKey::Inode(7), Some(location(999)))
+            .unwrap();
+        commit(&mut state, &key, 20_001);
         assert_eq!(
-            catalog
-                .load::<String>(dir.path(), &key, Binding::Catalog)
-                .unwrap(),
-            "catalog"
+            State::open(dir.path(), &key).unwrap().1.index.get(&7),
+            Some(&location(999))
+        );
+    }
+
+    #[test]
+    fn retained_views_keep_their_metadata_and_versions_separate() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = Key::from([0x86; 32]);
+        let mut state = initial(dir.path(), &key);
+        let mut original = Roots::default();
+        original.index.insert(7, location(0));
+        let snapshot = state
+            .checkpoint(
+                &key,
+                EccParams::default(),
+                &original,
+                Counters {
+                    next_seq: 1,
+                    max_inode: 7,
+                },
+                None,
+                &[],
+            )
+            .unwrap();
+        state
+            .record(RecordKey::Inode(7), Some(location(128)))
+            .unwrap();
+        commit(&mut state, &key, 2);
+        let mut current = original.clone();
+        current.index.insert(7, location(128));
+        state
+            .checkpoint(
+                &key,
+                EccParams::default(),
+                &current,
+                Counters {
+                    next_seq: 2,
+                    max_inode: 7,
+                },
+                None,
+                &[snapshot],
+            )
+            .unwrap();
+        assert_eq!(snapshot.load(dir.path(), &key).unwrap(), original);
+        assert_eq!(State::open(dir.path(), &key).unwrap().1, current);
+        state
+            .checkpoint(
+                &key,
+                EccParams::default(),
+                &current,
+                Counters {
+                    next_seq: 2,
+                    max_inode: 7,
+                },
+                None,
+                &[],
+            )
+            .unwrap();
+        assert!(snapshot.load(dir.path(), &key).is_err());
+    }
+
+    #[test]
+    fn durable_updates_share_packed_files_and_restart_ignores_uncommitted_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = Key::from([0x87; 32]);
+        let mut state = initial(dir.path(), &key);
+        for step in 1..=40 {
+            state
+                .record(RecordKey::Inode(7), Some(location(step * 128)))
+                .unwrap();
+            commit(&mut state, &key, step);
+        }
+        assert_eq!(
+            std::fs::read_dir(dir.path())
+                .unwrap()
+                .filter(|entry| journal_id(&entry.as_ref().unwrap().file_name()).is_some())
+                .count(),
+            1
+        );
+        let original = state.view();
+        drop(state);
+        let (mut state, _) = State::open(dir.path(), &key).unwrap();
+        state
+            .record(RecordKey::Inode(7), Some(location(9000)))
+            .unwrap();
+        commit(&mut state, &key, 41);
+        let (id, _, _) = journal(state.view().tip.unwrap());
+        assert_ne!(id, journal(original.tip.unwrap()).0);
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(journal_path(dir.path(), id))
+            .unwrap();
+        file.write_all(b"uncommitted torn data").unwrap();
+        assert_eq!(
+            State::open(dir.path(), &key).unwrap().1.index.get(&7),
+            Some(&location(9000))
         );
     }
 
@@ -493,7 +781,6 @@ mod tests {
         use std::io::Read;
         use std::os::fd::FromRawFd;
         use std::os::unix::ffi::OsStrExt;
-
         let dir = tempfile::tempdir().unwrap();
         let key = Key::from([0x8a; 32]);
         let mut state = initial(dir.path(), &key);
@@ -516,6 +803,7 @@ mod tests {
                     max_inode: 7,
                 },
                 None,
+                &[],
             )
             .unwrap();
         let mut bytes = [0u8; 8192];
@@ -543,21 +831,13 @@ mod tests {
         let original = parent.path().join("original");
         let moved = parent.path().join("moved");
         std::fs::create_dir(&original).unwrap();
-        let key = Key::from([0x86; 32]);
+        let key = Key::from([0x8b; 32]);
         let mut state = initial(&original, &key);
         std::fs::rename(&original, &moved).unwrap();
-        state.record(RecordKey::Inode(7), Some(location(0)));
         state
-            .commit(
-                &key,
-                EccParams::default(),
-                Counters {
-                    next_seq: 1,
-                    max_inode: 7,
-                },
-                None,
-            )
+            .record(RecordKey::Inode(7), Some(location(0)))
             .unwrap();
+        commit(&mut state, &key, 1);
         assert!(!original.exists());
         assert_eq!(
             State::open(&moved, &key).unwrap().1.index.get(&7),
@@ -570,23 +850,39 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let key = Key::from([0x88; 32]);
         let mut state = initial(dir.path(), &key);
-        state.record(RecordKey::Inode(7), Some(location(0)));
+        state
+            .record(RecordKey::Inode(7), Some(location(0)))
+            .unwrap();
         let anchor = dir.path().join(ANCHOR);
         let saved = dir.path().join("saved");
         std::fs::rename(&anchor, &saved).unwrap();
         std::fs::create_dir(&anchor).unwrap();
-        let counters = Counters {
-            next_seq: 1,
-            max_inode: 7,
-        };
         assert!(state
-            .commit(&key, EccParams::default(), counters, None)
+            .commit(
+                &key,
+                EccParams::default(),
+                Counters {
+                    next_seq: 1,
+                    max_inode: 7
+                },
+                None
+            )
             .is_err());
         std::fs::remove_dir(&anchor).unwrap();
         std::fs::rename(saved, anchor).unwrap();
-        assert!(state.check_rw().is_err());
         assert!(state
-            .commit(&key, EccParams::default(), counters, None)
+            .record(RecordKey::Inode(8), Some(location(0)))
+            .is_err());
+        assert!(state
+            .commit(
+                &key,
+                EccParams::default(),
+                Counters {
+                    next_seq: 1,
+                    max_inode: 7
+                },
+                None
+            )
             .is_err());
         let (reopened, roots) = State::open(dir.path(), &key).unwrap();
         reopened.check_rw().unwrap();
@@ -598,27 +894,26 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let key = Key::from([0x89; 32]);
         let mut state = initial(dir.path(), &key);
-        state.record(RecordKey::Inode(7), Some(location(0)));
         state
-            .commit(
-                &key,
-                EccParams::default(),
-                Counters {
-                    next_seq: 1,
-                    max_inode: 7,
-                },
-                None,
-            )
+            .record(RecordKey::Inode(7), Some(location(0)))
             .unwrap();
-        for path in [
-            dir.path().join(ANCHOR),
-            state.anchor.tip.unwrap().path(dir.path()),
-        ] {
-            let mut bytes = std::fs::read(&path).unwrap();
-            let middle = bytes.len() / 2;
-            bytes[middle] ^= 1;
-            std::fs::write(path, bytes).unwrap();
-        }
+        commit(&mut state, &key, 1);
+        let anchor = dir.path().join(ANCHOR);
+        let mut bytes = std::fs::read(&anchor).unwrap();
+        let middle = bytes.len() / 2;
+        bytes[middle] ^= 1;
+        std::fs::write(anchor, bytes).unwrap();
+        let (id, offset, len) = journal(state.view().tip.unwrap());
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(journal_path(dir.path(), id))
+            .unwrap();
+        let position = offset + len as u64 / 2;
+        let mut byte = [0];
+        file.read_exact_at(&mut byte, position).unwrap();
+        byte[0] ^= 1;
+        file.write_all_at(&byte, position).unwrap();
         assert_eq!(
             State::open(dir.path(), &key).unwrap().1.index.get(&7),
             Some(&location(0))
@@ -628,21 +923,13 @@ mod tests {
     #[test]
     fn replacing_the_whole_anchor_selects_its_genuine_older_history() {
         let dir = tempfile::tempdir().unwrap();
-        let key = Key::from([0x87; 32]);
+        let key = Key::from([0x8c; 32]);
         let mut state = initial(dir.path(), &key);
         let old_anchor = std::fs::read(dir.path().join(ANCHOR)).unwrap();
-        state.record(RecordKey::Inode(7), Some(location(0)));
         state
-            .commit(
-                &key,
-                EccParams::default(),
-                Counters {
-                    next_seq: 1,
-                    max_inode: 7,
-                },
-                None,
-            )
+            .record(RecordKey::Inode(7), Some(location(0)))
             .unwrap();
+        commit(&mut state, &key, 1);
         std::fs::write(dir.path().join(ANCHOR), old_anchor).unwrap();
         let (opened, roots) = State::open(dir.path(), &key).unwrap();
         assert_eq!(opened.counters().next_seq, 0);

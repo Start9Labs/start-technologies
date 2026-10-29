@@ -32,19 +32,21 @@ pub(crate) enum Binding {
     Catalog,
 }
 
+pub(crate) type AuthenticationTag = [u8; 32];
+
 pub(crate) struct Sealed {
     pub bytes: Vec<u8>,
-    pub tag: [u8; 32],
+    pub tag: AuthenticationTag,
 }
 
 pub(crate) struct Authenticated {
     pub plaintext: Vec<u8>,
-    pub tag: [u8; 32],
+    pub tag: AuthenticationTag,
 }
 
 impl Authenticated {
     /// Requires a tag from an authenticated parent reference.
-    pub fn verify_reference(self, expected: &[u8; 32]) -> BkfsResult<Vec<u8>> {
+    pub fn verify_reference(self, expected: &AuthenticationTag) -> BkfsResult<Vec<u8>> {
         if &self.tag != expected {
             return Err(corrupt());
         }
@@ -58,7 +60,7 @@ const ENCRYPTION_LABEL: &[u8] = b"backup-fs/vault/v2/encryption";
 const AUTHENTICATION_LABEL: &[u8] = b"backup-fs/vault/v2/authentication";
 const HEADER_LEN: usize = 4 + 1 + 1 + 1 + 1 + 4 + 4 + 12; // = 28
 const NONCE_LEN: usize = 12;
-const TAG_LEN: usize = 32;
+const TAG_LEN: usize = std::mem::size_of::<AuthenticationTag>();
 pub const PBKDF2_SALT_LEN: usize = 16;
 /// The PBKDF2 work factor this build writes and accepts. Recorded in the
 /// superblock envelope for forward-compat/diagnostics, but validated for

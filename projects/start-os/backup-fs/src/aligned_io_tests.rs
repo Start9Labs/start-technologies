@@ -80,6 +80,22 @@ fn disk_bytes(file: &RecordingFile) -> Vec<u8> {
 }
 
 #[test]
+fn reverse_reads_reuse_enclosing_windows() {
+    let bytes: Vec<_> = (0..2 * BUF_CAP).map(|i| (i % 251) as u8).collect();
+    let input = buffered(&bytes, None);
+    for offset in (0..bytes.len()).step_by(512).rev() {
+        input.prefetch_read(offset as u64).unwrap();
+        let mut read = [0; 32];
+        input.read_exact_at(&mut read, offset as u64).unwrap();
+        assert_eq!(read, bytes[offset..offset + 32]);
+    }
+    assert_eq!(
+        &*input.file().reads.borrow(),
+        &[(BUF_CAP, BUF_CAP as u64), (BUF_CAP, 0)]
+    );
+}
+
+#[test]
 fn new_output_crosses_windows_without_edge_reads() {
     let mut output = buffered(&[], Some(0));
     let bytes: Vec<_> = (0..BUF_CAP + 173).map(|i| (i % 251) as u8).collect();
