@@ -613,15 +613,7 @@ impl BufferedDirectFile<AtomicFile> {
         Ok(file)
     }
 
-    pub fn save(mut self) -> BkfsResult<()> {
-        self.flush()?;
-        // Take the file so Drop doesn't double-flush
-        self.file.take().unwrap().save()
-    }
-
-    /// Flush the buffered window + rename, but skip sync_all. Paired
-    /// with a batched syncfs at the dispatch layer — see
-    /// `AtomicFile::save_fast` for the trade-off.
+    /// Defers durability to the authenticated root's group commit.
     pub fn save_fast(mut self) -> BkfsResult<()> {
         self.flush()?;
         self.file.take().unwrap().save_fast()

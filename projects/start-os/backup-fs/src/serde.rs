@@ -32,7 +32,7 @@ use serde::de::DeserializeOwned;
 pub use serde::{Deserialize, Serialize};
 
 use crate::error::{BkfsError, BkfsErrorKind, BkfsResult};
-use crate::vault::{self, EccParams};
+use crate::vault;
 
 /// Decoder read/allocation budget for persisted structures, including snapshot catalogs.
 const DATA_LIMIT: usize = 64 * 1024 * 1024;
@@ -71,16 +71,8 @@ pub fn decode<T: DeserializeOwned>(bytes: &[u8], config: impl Config) -> BkfsRes
     Ok(value)
 }
 
-/// Serialize `value` (data config) and seal it into a self-contained
-/// encrypted, error-correcting blob ready to write whole to disk.
-pub fn serialize_sealed<T: Serialize>(value: &T, key: &Key, ecc: EccParams) -> BkfsResult<Vec<u8>> {
-    let plain = encode(value, data_config())?;
-    Ok(vault::seal(&plain, key, ecc))
-}
-
-/// Open a blob produced by [`serialize_sealed`] (error-correcting and
-/// decrypting it) and deserialize the contained value (data config).
-pub fn deserialize_sealed<T: DeserializeOwned>(blob: &[u8], key: &Key) -> BkfsResult<T> {
+/// Accepts unbound metadata during a pending legacy upgrade.
+pub fn deserialize_legacy<T: DeserializeOwned>(blob: &[u8], key: &Key) -> BkfsResult<T> {
     // open()-then-decode order is load-bearing: a wrong key fails the vault
     // integrity tag (BadChecksum) before any decode runs, so a wrong password
     // never surfaces as a confusing decode error.

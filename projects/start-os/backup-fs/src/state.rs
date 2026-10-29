@@ -280,6 +280,10 @@ impl State {
         ))
     }
 
+    pub fn directory_path(&self) -> &Path {
+        &self.path
+    }
+
     pub fn view(&self) -> View {
         self.anchor.index
     }
@@ -288,6 +292,10 @@ impl State {
     }
     pub fn catalog(&self) -> Option<Reference> {
         self.anchor.catalog
+    }
+
+    pub fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
     }
 
     pub fn check_rw(&self) -> BkfsResult<()> {
@@ -486,6 +494,7 @@ mod tests {
             segment: 1,
             offset,
             len: 128,
+            ..Default::default()
         }
     }
 

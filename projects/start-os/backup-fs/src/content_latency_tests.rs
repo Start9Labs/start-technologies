@@ -54,25 +54,32 @@ fn partial_overwrite_of_existing_block_still_preserves_untouched_bytes() {
 }
 
 #[test]
-fn cow_object_writes_preserve_requested_durability() {
+fn cow_object_writes_publish_only_at_the_requested_commit() {
     use std::io::Write;
     let data = tempfile::tempdir().unwrap();
     let ctrl = controller(&data);
     for (idx, durable) in [false, true].into_iter().enumerate() {
         let id = ctrl.block_id(ContentId(2), idx as u64);
-        ctrl.write_object(id, durable, |path, requested| {
-            assert_eq!(requested, durable);
+        ctrl.write_object(id, durable, |path, binding| {
+            let sealed = crate::vault::seal_bound(b"object", ctrl.key(), ctrl.ecc(), binding);
             let mut output = crate::atomic_file::AtomicFile::create_buffered(path)?;
-            output.write_all(b"object")?;
-            if requested {
-                output.save()
-            } else {
-                output.save_fast()
-            }
+            output.write_all(&sealed.bytes)?;
+            output.save_fast()
         })
         .unwrap();
-        let path = ctrl.object_path(id).unwrap().unwrap();
-        assert_eq!(std::fs::read(path).unwrap(), b"object");
+        let (path, binding) = ctrl.resolve_object(id).unwrap().unwrap();
+        assert_eq!(
+            crate::vault::open_bound(&std::fs::read(path).unwrap(), ctrl.key(), binding)
+                .unwrap()
+                .plaintext,
+            b"object"
+        );
+        let (_, roots) =
+            crate::state::State::open(&data.path().join("segments"), ctrl.key()).unwrap();
+        assert_eq!(roots.objects.contains_key(&id), durable);
+        if durable {
+            assert_eq!(roots.objects.len(), 2);
+        }
     }
 }
 
@@ -100,9 +107,13 @@ fn legacy_padded_contents(ctrl: &Controller) -> Contents {
     let mut legacy = b"abc".to_vec();
     legacy.resize(64, 0xaa);
     let stored = crate::compress::compress(&legacy, crate::compress::Codec::None);
-    let path = ctrl.block_path(ContentId(2), 0);
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, crate::vault::seal(&stored, ctrl.key(), ctrl.ecc())).unwrap();
+    ctrl.write_object(ctrl.block_id(ContentId(2), 0), true, |path, binding| {
+        let sealed = crate::vault::seal_bound(&stored, ctrl.key(), ctrl.ecc(), binding);
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        std::fs::write(path, sealed.bytes)?;
+        Ok(())
+    })
+    .unwrap();
     ctrl.save(&attrs).unwrap();
     Contents::open(ctrl.clone(), Inode(2)).unwrap()
 }

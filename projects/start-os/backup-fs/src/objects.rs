@@ -20,17 +20,19 @@ pub(crate) struct ObjectId {
     hash: [u8; HASH_BYTES],
 }
 
+pub(crate) type VersionToken = [u8; 16];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum ObjectVersion {
     Deleted,
-    Version([u8; 16]),
+    Version(VersionToken),
 }
 
 impl ObjectVersion {
-    pub fn new() -> Self {
-        let mut bytes = [0; 16];
+    pub fn new_token() -> VersionToken {
+        let mut bytes = VersionToken::default();
         UnwrapErr(rand::rng()).fill_bytes(&mut bytes);
-        Self::Version(bytes)
+        bytes
     }
 }
 
@@ -100,14 +102,6 @@ impl ObjectId {
         }
         Some(Self { directory, hash })
     }
-}
-
-pub(crate) fn sync_object_path(path: &Path) -> BkfsResult<()> {
-    let parent = path.parent().unwrap();
-    File::open(parent)?.sync_all()?;
-    File::open(parent.parent().unwrap())?.sync_all()?;
-    File::open(parent.parent().unwrap().parent().unwrap())?.sync_all()?;
-    Ok(())
 }
 
 pub(crate) struct Inventory {

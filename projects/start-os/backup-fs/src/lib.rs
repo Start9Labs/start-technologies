@@ -42,6 +42,7 @@ mod ecc;
 pub mod error;
 mod handle;
 mod inode;
+mod legacy;
 mod metadata;
 mod migration;
 #[cfg(test)]
@@ -52,6 +53,8 @@ mod pool;
 mod snapshot;
 mod state;
 pub use snapshot::SnapshotInfo;
+#[cfg(test)]
+mod replay_tests;
 mod seglog;
 mod serde;
 #[cfg(test)]

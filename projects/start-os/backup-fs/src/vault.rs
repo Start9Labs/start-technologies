@@ -19,14 +19,14 @@ use zeroize::Zeroizing;
 
 use crate::ecc;
 use crate::error::{BkfsError, BkfsErrorKind, BkfsResult};
-use crate::objects::ObjectId;
+use crate::objects::{ObjectId, VersionToken};
 
 /// Variant order is part of the on-disk key derivation.
 #[derive(Clone, Copy, serde::Serialize)]
 pub(crate) enum Binding {
     Superblock,
     Record,
-    Object { id: ObjectId, version: [u8; 16] },
+    Object { id: ObjectId, version: VersionToken },
     State,
     Transaction,
     Catalog,
@@ -151,10 +151,7 @@ fn corrupt() -> BkfsError {
     }
 }
 
-/// Encrypt + integrity-tag + erasure-code `plaintext` into a self-contained
-/// blob using the given symmetric key and ECC parameters. `ecc` must have been
-/// validated (it can only be constructed through validated paths), so the
-/// internal `ecc::encode` cannot fail on out-of-range params.
+#[cfg(test)]
 pub fn seal(plaintext: &[u8], key: &Key, ecc: EccParams) -> Vec<u8> {
     seal_with(plaintext, key, ecc.data as usize, ecc.parity as usize).bytes
 }
@@ -181,6 +178,15 @@ pub(crate) fn seal_bound(plaintext: &[u8], key: &Key, ecc: EccParams, binding: B
 pub(crate) fn open_bound(blob: &[u8], key: &Key, binding: Binding) -> BkfsResult<Authenticated> {
     let key = binding_key(key, binding);
     open_version(blob, <&Key>::from(&*key), VERSION)
+}
+
+pub(crate) fn migration_version(key: &Key, id: ObjectId) -> BkfsResult<VersionToken> {
+    let mut label = b"backup-fs/v4/migrated-object\0".to_vec();
+    label.extend(crate::serde::encode(&id, crate::serde::data_config())?);
+    let derived = subkey(key, &label);
+    Ok(derived[..std::mem::size_of::<VersionToken>()]
+        .try_into()
+        .unwrap())
 }
 
 fn subkey(key: &Key, label: &[u8]) -> Zeroizing<[u8; 32]> {

@@ -37,17 +37,13 @@ pub fn locate(offset: u64) -> (u64, usize) {
 /// block) or, with size padding enabled, longer; callers must slice it to
 /// the logically-valid length.
 pub fn read_block(ctrl: &Controller, content: ContentId, idx: u64) -> BkfsResult<Option<Vec<u8>>> {
-    let Some(path) = ctrl.object_path(ctrl.block_id(content, idx))? else {
+    let Some((path, binding)) = ctrl.resolve_object(ctrl.block_id(content, idx))? else {
         return Ok(None);
     };
-    let mut file = match open_direct(&path, false) {
-        Ok(f) => f,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e.into()),
-    };
+    let mut file = open_direct(&path, false)?;
     let mut blob = Vec::new();
     file.read_to_end(&mut blob)?;
-    let stored = vault::open(&blob, ctrl.key())?;
+    let stored = vault::open_bound(&blob, ctrl.key(), binding)?.plaintext;
     let compressed = if stored.first() == Some(&FRAMED_PAYLOAD) {
         let len = stored
             .get(1..5)
@@ -120,15 +116,11 @@ fn store_block(
     durable: bool,
 ) -> BkfsResult<()> {
     ctrl.check_rw()?;
-    let blob = vault::seal(stored, ctrl.key(), ctrl.ecc());
-    ctrl.write_object(ctrl.block_id(content, idx), durable, |path, durable| {
+    ctrl.write_object(ctrl.block_id(content, idx), durable, |path, binding| {
+        let blob = vault::seal_bound(stored, ctrl.key(), ctrl.ecc(), binding);
         let mut file = BufferedDirectFile::create(path)?;
-        file.write_all(&blob)?;
-        if durable {
-            file.save()
-        } else {
-            file.save_fast()
-        }
+        file.write_all(&blob.bytes)?;
+        file.save_fast()
     })
 }
 

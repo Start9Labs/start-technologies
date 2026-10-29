@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -22,12 +22,13 @@ fn config(path: &Path) -> BackupFSOptions {
 }
 
 #[test]
-fn snapshot_storage_activation_is_explicit_and_persistent() {
+fn versioned_storage_persists_without_retained_snapshots() {
     let data = tempfile::tempdir().unwrap();
     let mut options = config(data.path());
     options.enable_snapshots = false;
     let mut fs = BackupFS::new(options).unwrap();
-    assert!(fs.create_snapshot("not-enabled").is_err());
+    fs.create_snapshot("first").unwrap();
+    fs.delete_snapshot("first").unwrap();
     assert!(fs.list_snapshots().unwrap().is_empty());
     let primary = data.path().join("superblock");
     assert_eq!(
@@ -50,7 +51,7 @@ fn snapshot_storage_activation_is_explicit_and_persistent() {
         crate::superblock::Superblock::open_or_create(&primary, "snapshots", true)
             .unwrap()
             .format_version,
-        crate::snapshot::COW_FORMAT_VERSION
+        crate::superblock::FORMAT_VERSION
     );
 }
 
@@ -80,10 +81,8 @@ fn read_file(ctrl: &Controller, inode: Inode) -> Vec<u8> {
 }
 
 fn create_legacy_block_file(data: &Path) -> Inode {
-    let mut options = config(data);
-    options.enable_snapshots = false;
-    let fs = BackupFS::new(options).unwrap();
-    create_file(&ctrl(&fs), &vec![0x6d; 4 * CHUNK_SIZE as usize])
+    crate::legacy::fixture(data, 2);
+    Inode(4)
 }
 
 fn objects(data: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
@@ -402,13 +401,18 @@ fn snapshot_failure_before_publication_preserves_data_and_blocks_further_writes(
     let mut fs = BackupFS::new(config(data.path())).unwrap();
     let c = ctrl(&fs);
     let inode = create_file(&c, b"safe");
-    std::fs::create_dir(data.path().join("snapshots.tmp")).unwrap();
+    c.syncfs().unwrap();
+    let anchor = data.path().join("segments/state");
+    let saved = data.path().join("saved-state");
+    std::fs::rename(&anchor, &saved).unwrap();
+    std::fs::create_dir(&anchor).unwrap();
     assert!(fs.create_snapshot("not-published").is_err());
     assert!(fs.list_snapshots().unwrap().is_empty());
     assert_eq!(c.next_inode().unwrap_err().to_errno(), libc::EIO);
     drop(c);
     drop(fs);
-    std::fs::remove_dir(data.path().join("snapshots.tmp")).unwrap();
+    std::fs::remove_dir(&anchor).unwrap();
+    std::fs::rename(saved, anchor).unwrap();
     let fs = BackupFS::new(config(data.path())).unwrap();
     assert_eq!(read_file(&ctrl(&fs), inode), b"safe");
     assert!(fs.list_snapshots().unwrap().is_empty());
@@ -429,7 +433,7 @@ fn legacy_snapshot_truncate_remount_regrow_keeps_holes_zeroed() {
         c.compact().unwrap();
     }
     let mut expected = vec![0; 4 * CHUNK_SIZE as usize];
-    expected[..CHUNK_SIZE as usize].fill(0x6d);
+    expected[..CHUNK_SIZE as usize].fill(0x31);
     {
         let fs = BackupFS::new(config(data.path())).unwrap();
         let c = ctrl(&fs);
@@ -447,7 +451,7 @@ fn legacy_snapshot_truncate_remount_regrow_keeps_holes_zeroed() {
         let fs = BackupFS::open_snapshot(config(data.path()), "original").unwrap();
         assert_eq!(
             read_file(&ctrl(&fs), inode),
-            vec![0x6d; 4 * CHUNK_SIZE as usize]
+            vec![0x31; 4 * CHUNK_SIZE as usize]
         );
     }
     {
@@ -459,7 +463,7 @@ fn legacy_snapshot_truncate_remount_regrow_keeps_holes_zeroed() {
 }
 
 #[test]
-fn legacy_masks_survive_root_publication_before_unlink_without_snapshot_pins() {
+fn retired_legacy_files_cannot_resurrect_after_catalog_publication() {
     let data = tempfile::tempdir().unwrap();
     let inode = create_legacy_block_file(data.path());
     let (key, ecc) = {
@@ -469,20 +473,19 @@ fn legacy_masks_survive_root_publication_before_unlink_without_snapshot_pins() {
         let mut contents = Contents::open(c.clone(), inode).unwrap();
         contents.resize(CHUNK_SIZE).unwrap();
         contents.flush().unwrap();
-        drop(contents);
-        c.compact().unwrap();
         (*c.key(), c.ecc())
     };
-    let mut catalog = crate::snapshot::Catalog::load(data.path(), &key).unwrap();
-    catalog.entries.clear();
-    catalog.persist(data.path(), &key, ecc).unwrap();
-    let inventory = crate::objects::Inventory::load(data.path()).unwrap();
-    let legacy = inventory.legacy_ids().collect();
     let mut log = crate::seglog::SegmentLog::open(data.path().join("segments"), key).unwrap();
-    log.retain_storage(&Default::default(), &legacy, &Default::default());
-    log.persist_roots().unwrap();
+    let mut catalog =
+        crate::snapshot::Catalog::load(log.directory(), &key, log.catalog_reference()).unwrap();
+    catalog.entries.clear();
+    let reference = catalog.write(log.directory(), &key, ecc).unwrap();
+    log.publish_catalog(reference, catalog.pins()).unwrap();
+    let live = HashSet::from([crate::objects::ObjectId::block(&key, inode.0, 0)]);
+    let packed = log.roots().content.keys().copied().collect();
+    log.retain_storage(&live, &packed).unwrap();
+    log.save_checkpoint(&[]).unwrap();
     drop(log);
-    drop(inventory);
     let fs = BackupFS::new(config(data.path())).unwrap();
     let c = ctrl(&fs);
     assert!(c.block_path(ContentId(inode.0), 3).exists());
@@ -492,25 +495,19 @@ fn legacy_masks_survive_root_publication_before_unlink_without_snapshot_pins() {
     let bytes = read_file(&c, inode);
     assert_eq!(
         &bytes[..CHUNK_SIZE as usize],
-        vec![0x6d; CHUNK_SIZE as usize]
+        vec![0x31; CHUNK_SIZE as usize]
     );
     assert!(bytes[CHUNK_SIZE as usize..].iter().all(|&byte| byte == 0));
 }
 
 #[test]
-fn snapshots_pin_legacy_stable_objects_without_copying() {
+fn snapshots_share_converted_legacy_objects_without_copying() {
     let data = tempfile::tempdir().unwrap();
+    let inode = create_legacy_block_file(data.path());
     let mut fs = BackupFS::new(config(data.path())).unwrap();
     let c = ctrl(&fs);
-    let inode = c.next_inode().unwrap();
-    let mut attrs = InodeAttributes::new(inode, None, FileData::File(ContentId(inode.0)));
-    attrs.attrs.size = 2 * CHUNK_SIZE;
-    c.save(&attrs).unwrap();
     let stable = c.block_path(ContentId(inode.0), 0);
-    std::fs::create_dir_all(stable.parent().unwrap()).unwrap();
-    let stored = crate::compress::compress(b"legacy", crate::compress::Codec::Zstd(2));
-    let blob = crate::vault::seal(&stored, c.key(), c.ecc());
-    std::fs::write(&stable, blob).unwrap();
+    let converted = std::fs::canonicalize(c.resolve_block_path(ContentId(inode.0), 0)).unwrap();
     let before = objects(data.path());
     fs.create_snapshot("legacy").unwrap();
     assert_eq!(objects(data.path()), before);
@@ -525,9 +522,10 @@ fn snapshots_pin_legacy_stable_objects_without_copying() {
     .unwrap();
     fs.create_snapshot("latest").unwrap();
     c.collect_garbage().unwrap();
-    assert!(stable.exists());
+    assert!(!stable.exists());
+    assert!(converted.exists());
     fs.delete_snapshot("latest").unwrap();
-    assert!(stable.exists());
+    assert!(converted.exists());
     drop(c);
     drop(fs);
     let fs = BackupFS::open_snapshot(config(data.path()), "legacy").unwrap();
@@ -536,16 +534,19 @@ fn snapshots_pin_legacy_stable_objects_without_copying() {
         blockstore::read_block(&c, ContentId(inode.0), 0)
             .unwrap()
             .unwrap(),
-        b"legacy"
+        vec![0x31; CHUNK_SIZE as usize]
     );
-    assert!(blockstore::read_block(&c, ContentId(inode.0), 1)
-        .unwrap()
-        .is_none());
+    assert_eq!(
+        blockstore::read_block(&c, ContentId(inode.0), 1)
+            .unwrap()
+            .unwrap(),
+        vec![0x31; CHUNK_SIZE as usize]
+    );
     drop(c);
     drop(fs);
     let mut fs = BackupFS::new(config(data.path())).unwrap();
     fs.delete_snapshot("legacy").unwrap();
-    assert!(!stable.exists());
+    assert!(!converted.exists());
 }
 
 #[test]
@@ -586,12 +587,31 @@ fn durable_replay_floor_prevents_pinned_history_from_resurrecting_a_deleted_inod
     let data = tempfile::tempdir().unwrap();
     let key = chacha20::Key::from([0x29; 32]);
     let dir = data.path().join("segments");
-    let mut log = crate::seglog::SegmentLog::open_sized(dir.clone(), key, 4096).unwrap();
-    log.enable_cow();
+    std::fs::create_dir(&dir).unwrap();
+    crate::state::State::create(
+        &dir,
+        &key,
+        crate::vault::EccParams::default(),
+        &Default::default(),
+        crate::state::Counters {
+            next_seq: 1,
+            max_inode: 0,
+        },
+        None,
+    )
+    .unwrap();
+    let mut log = crate::seglog::SegmentLog::open_sized(
+        dir.clone(),
+        key,
+        4096,
+        crate::vault::EccParams::default(),
+        false,
+    )
+    .unwrap();
     let attrs = InodeAttributes::new(Inode(12), None, FileData::Inline(b"historical".to_vec()));
     log.put(Inode(12), &attrs.attrs).unwrap();
-    let root = log.roots();
-    log.pin(root.segments().collect());
+    let view = log.save_checkpoint(&[]).unwrap();
+    log.pin(log.roots().segments().collect());
     for i in 100..200 {
         log.put(Inode(i), &attrs.attrs).unwrap();
     }
@@ -599,12 +619,19 @@ fn durable_replay_floor_prevents_pinned_history_from_resurrecting_a_deleted_inod
     for i in 200..300 {
         log.put(Inode(i), &attrs.attrs).unwrap();
     }
-    log.compact(0.0).unwrap();
+    log.compact(0.0, &[view]).unwrap();
     log.sync().unwrap();
     drop(log);
-    let mut log = crate::seglog::SegmentLog::open_sized(dir, key, 4096).unwrap();
+    let mut log = crate::seglog::SegmentLog::open_sized(
+        dir,
+        key,
+        4096,
+        crate::vault::EccParams::default(),
+        true,
+    )
+    .unwrap();
     assert!(log.load(Inode(12)).unwrap().is_none());
-    log.adopt_roots(&root);
+    log.adopt_view(view).unwrap();
     let FileData::Inline(bytes) = log.load(Inode(12)).unwrap().unwrap().contents else {
         panic!()
     };
