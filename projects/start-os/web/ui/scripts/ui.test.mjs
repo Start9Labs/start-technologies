@@ -52,6 +52,9 @@ boundary(
     'TuiCheckbox',
     'TuiLoader',
     'TuiError',
+    'TuiHint',
+    'TuiDataList',
+    'TuiDropdown',
   ],
   'export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => [];',
 )
@@ -64,6 +67,7 @@ boundary('@taiga-ui/kit', [
   'TuiBlock',
   'TuiRadioList',
   'TuiPassword',
+  'TuiSegmented',
 ])
 boundary(
   '@taiga-ui/cdk',
@@ -1085,10 +1089,10 @@ test('grant choices map to the backend contract and pending resets after saving'
   const model = f.make(VolumeGrant)
   model.volumeId = () => volumeA
   model.packageId = () => 'service'
-  for (const [choice, expected] of [
-    ['Off', null],
-    ['Read', { readonly: true }],
-    ['Read/write', { readonly: false }],
+  for (const [choice, expected, index] of [
+    ['Off', null, 0],
+    ['Read', { readonly: true }, 1],
+    ['Read/write', { readonly: false }, 2],
   ]) {
     await model.save(choice)
     assert.deepEqual(f.grants.at(-1), {
@@ -1097,6 +1101,7 @@ test('grant choices map to the backend contract and pending resets after saving'
       grant: expected,
     })
     assert.equal(model.pending(), false)
+    assert.equal(model.activeIndex(), index)
   }
 })
 
@@ -1118,6 +1123,7 @@ test('failed optimistic grant uses the latest observed grant rather than a stale
   pending.resolve()
   await saved
   assert.equal(model.value(), 'Read/write')
+  assert.equal(model.activeIndex(), 2)
   assert.equal(model.pending(), false)
 })
 

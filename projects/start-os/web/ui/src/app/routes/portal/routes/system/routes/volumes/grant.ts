@@ -1,8 +1,15 @@
-import { Component, inject, input, linkedSignal, signal } from '@angular/core'
-import { FormsModule } from '@angular/forms'
+import {
+  Component,
+  computed,
+  inject,
+  input,
+  linkedSignal,
+  signal,
+} from '@angular/core'
 import { i18nPipe, TaskService } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
-import { TuiRadioList } from '@taiga-ui/kit'
+import { TuiIcon } from '@taiga-ui/core'
+import { TuiSegmented } from '@taiga-ui/kit'
 
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 
@@ -12,24 +19,42 @@ const permission = (grant: T.SharedVolumeGrant | undefined) =>
 @Component({
   selector: 'volume-grant',
   template: `
-    <tui-radio-list
+    <tui-segmented
       size="s"
-      [items]="options"
-      [itemContent]="content"
+      role="group"
       [attr.aria-label]="label()"
-      [disabled]="disabled() || pending()"
-      [ngModel]="value()"
-      (ngModelChange)="save($event)"
-    />
-    <ng-template #content let-option>{{ option | i18n }}</ng-template>
+      [activeItemIndex]="activeIndex()"
+    >
+      @for (option of options; track option.label) {
+        <button
+          type="button"
+          [attr.aria-label]="option.label | i18n"
+          [attr.aria-pressed]="value() === option.label"
+          [title]="option.label | i18n"
+          [disabled]="disabled() || pending()"
+          (click)="save(option.label)"
+        >
+          <tui-icon [icon]="option.icon" />
+        </button>
+      }
+    </tui-segmented>
   `,
-  imports: [FormsModule, i18nPipe, TuiRadioList],
+  styles: `
+    :host {
+      display: inline-flex;
+    }
+  `,
+  imports: [i18nPipe, TuiIcon, TuiSegmented],
 })
 export class VolumeGrant {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
 
-  protected readonly options = ['Off', 'Read', 'Read/write'] as const
+  protected readonly options = [
+    { label: 'Off', icon: '@tui.x' },
+    { label: 'Read', icon: '@tui.eye' },
+    { label: 'Read/write', icon: '@tui.pencil' },
+  ] as const
   protected readonly pending = signal(false)
   protected readonly value = linkedSignal({
     source: () => ({
@@ -40,13 +65,17 @@ export class VolumeGrant {
     computation: ({ grant }) => permission(grant),
   })
 
+  protected readonly activeIndex = computed(() =>
+    this.options.findIndex(option => option.label === this.value()),
+  )
+
   public readonly volumeId = input.required<string>()
   public readonly packageId = input.required<string>()
   public readonly label = input.required<string>()
   public readonly grant = input<T.SharedVolumeGrant>()
   public readonly disabled = input(false)
 
-  protected async save(value: (typeof this.options)[number]) {
+  protected async save(value: (typeof this.options)[number]['label']) {
     this.value.set(value)
     this.pending.set(true)
     const saved = await this.tasks.run(

@@ -12,7 +12,13 @@ import {
   TaskService,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
-import { TuiButton, TuiTitle } from '@taiga-ui/core'
+import {
+  TuiButton,
+  TuiDataList,
+  TuiDropdown,
+  TuiHint,
+  TuiTitle,
+} from '@taiga-ui/core'
 import { TuiHeader } from '@taiga-ui/layout'
 import { PatchDB } from 'patch-db-client'
 import { firstValueFrom } from 'rxjs'
@@ -77,43 +83,41 @@ import { VOLUME_GRANTS } from './grants'
               &mdash;
             }
           </td>
+          <td>{{ grants.length }}</td>
           <td>
             <button
-              tuiButton
-              size="xs"
-              appearance="secondary"
-              (click)="manage(id)"
+              tuiIconButton
+              tuiDropdown
+              tuiDropdownAuto
+              tuiDropdownAlign="end"
+              size="s"
+              appearance="flat-grayscale"
+              iconStart="@tui.ellipsis-vertical"
             >
-              {{ 'Service access' | i18n }} ({{ grants.length }})
+              {{ 'More' | i18n }}
+              <tui-data-list *tuiDropdown="let close" (click)="close()">
+                <button tuiOption iconStart="@tui.search" (click)="inspect(id)">
+                  {{ 'Inspect' | i18n }}
+                </button>
+                <button tuiOption iconStart="@tui.users" (click)="manage(id)">
+                  {{ 'Service access' | i18n }}
+                </button>
+                <button
+                  tuiOption
+                  iconStart="@tui.pencil"
+                  (click)="rename(id, volume)"
+                >
+                  {{ 'Rename' | i18n }}
+                </button>
+                <button
+                  tuiOption
+                  iconStart="@tui.unlink"
+                  (click)="remove(id, volume)"
+                >
+                  {{ 'Remove definition' | i18n }}
+                </button>
+              </tui-data-list>
             </button>
-          </td>
-          <td>
-            <div class="g-buttons">
-              <button
-                tuiButton
-                size="xs"
-                appearance="secondary"
-                (click)="inspect(id)"
-              >
-                {{ 'Inspect' | i18n }}
-              </button>
-              <button
-                tuiButton
-                size="xs"
-                appearance="secondary"
-                (click)="rename(id, volume)"
-              >
-                {{ 'Rename' | i18n }}
-              </button>
-              <button
-                tuiButton
-                size="xs"
-                appearance="secondary"
-                (click)="remove(id, volume)"
-              >
-                {{ 'Remove definition' | i18n }}
-              </button>
-            </div>
           </td>
         </tr>
       } @empty {
@@ -140,9 +144,11 @@ import { VOLUME_GRANTS } from './grants'
               <td>{{ volume.value }}</td>
               <td>
                 <button
-                  tuiButton
+                  tuiIconButton
                   size="s"
-                  appearance="secondary"
+                  appearance="flat-grayscale"
+                  iconStart="@tui.trash-2"
+                  [tuiHint]="'Delete local data' | i18n"
                   (click)="deleteData(volume.key)"
                 >
                   {{ 'Delete local data' | i18n }}
@@ -159,6 +165,9 @@ import { VOLUME_GRANTS } from './grants'
     i18nPipe,
     ConvertBytesPipe,
     TuiButton,
+    TuiDataList,
+    TuiDropdown,
+    TuiHint,
     KeyValuePipe,
     TuiTitle,
     TuiHeader,
