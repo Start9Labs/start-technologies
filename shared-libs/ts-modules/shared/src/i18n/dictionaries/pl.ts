@@ -208,7 +208,7 @@ export default {
   219: 'Spełnione',
   220: 'Brak zależności',
   221: 'Nie zainstalowano',
-  222: 'Nieprawidłowa wersja',
+  222: 'Niezgodna wersja',
   223: 'Nie uruchomiony',
   224: 'Wymagana akcja',
   225: 'Wymagana kontrola stanu nie powiodła się',
