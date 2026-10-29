@@ -59,6 +59,32 @@ impl PreparedSource {
     }
 }
 
+pub(crate) struct PreparedTarget {
+    location: PathBuf,
+    directory: OwnedFd,
+    namespace: Arc<MountNamespace>,
+}
+
+impl PreparedTarget {
+    pub(crate) async fn open(
+        root: PathBuf,
+        location: PathBuf,
+        namespace: Arc<MountNamespace>,
+    ) -> Result<Self, Error> {
+        tokio::task::spawn_blocking(move || {
+            let location = confined_relative(&location)?;
+            let directory = open_beneath(&root, &location)?;
+            Ok(Self {
+                location,
+                directory,
+                namespace,
+            })
+        })
+        .await
+        .with_kind(ErrorKind::Unknown)?
+    }
+}
+
 struct VolumeAttachment {
     id: SharedVolumeId,
     readonly: bool,
@@ -99,12 +125,14 @@ impl SharedVolumeMounts {
     pub(crate) async fn prepare(
         &mut self,
         guid: &Guid,
-        root: &Path,
-        location: &Path,
-        namespace: Arc<MountNamespace>,
+        target: PreparedTarget,
     ) -> Result<PathBuf, Error> {
         self.check_allowed()?;
-        let location = confined_relative(location)?;
+        let PreparedTarget {
+            location,
+            directory,
+            namespace,
+        } = target;
         let key = (guid.clone(), location.clone());
         if let Some(slot) = self.slots.get_mut(&key) {
             if let Some(attachment) = &slot.attachment {
@@ -112,12 +140,11 @@ impl SharedVolumeMounts {
             }
             slot.attachment = None;
         } else {
-            let destination = open_beneath(root, &location)?;
             let empty = Path::new(crate::DATA_DIR).join("volume-unavailable");
             tokio::fs::create_dir_all(&empty).await?;
             tokio::fs::set_permissions(&empty, std::fs::Permissions::from_mode(0)).await?;
             let source = open_beneath(&empty, Path::new(""))?;
-            let placeholder = AttachedMount::bind(&source, &destination, true, namespace)?;
+            let placeholder = AttachedMount::bind(&source, &directory, true, namespace)?;
             self.slots.insert(
                 key,
                 AttachmentSlot {
@@ -225,6 +252,31 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn prepared_targets_keep_the_pinned_directory_when_renamed() {
+        use std::os::unix::fs::MetadataExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("data");
+        std::fs::create_dir(&directory).unwrap();
+        let inode = std::fs::metadata(&directory).unwrap().ino();
+        let namespace = Arc::new(MountNamespace::for_process(std::process::id()).unwrap());
+        let target = PreparedTarget::open(root.path().to_owned(), "/data".into(), namespace)
+            .await
+            .unwrap();
+        std::fs::rename(&directory, root.path().join("moved")).unwrap();
+        std::fs::create_dir(&directory).unwrap();
+        assert_eq!(target.location, Path::new("data"));
+        assert_eq!(
+            std::fs::File::from(target.directory)
+                .metadata()
+                .unwrap()
+                .ino(),
+            inode
+        );
+    }
+
+    #[cfg(target_os = "linux")]
     #[test]
     fn pinned_paths_reject_symlink_and_absolute_escapes() {
         use std::os::unix::fs::symlink;
@@ -286,23 +338,29 @@ mod tests {
         let mut mounts = SharedVolumeMounts::default();
         let mut other_service = SharedVolumeMounts::default();
         let namespace = Arc::new(MountNamespace::for_process(std::process::id()).unwrap());
-        let location = mounts
-            .prepare(&first, &first_root, Path::new("/data"), namespace.clone())
+        let target = PreparedTarget::open(first_root.clone(), "/data".into(), namespace.clone())
             .await
             .unwrap();
-        mounts
-            .attach(
-                &first,
-                location,
-                id.clone(),
-                PreparedSource::open(source.clone(), None).await.unwrap(),
-                false,
-            )
-            .unwrap();
-        let location = other_service
-            .prepare(&second, &second_root, Path::new("/data"), namespace)
+        let pending_target =
+            PreparedTarget::open(first_root.clone(), "/data".into(), namespace.clone())
+                .await
+                .unwrap();
+        for target in [target, pending_target] {
+            let location = mounts.prepare(&first, target).await.unwrap();
+            mounts
+                .attach(
+                    &first,
+                    location,
+                    id.clone(),
+                    PreparedSource::open(source.clone(), None).await.unwrap(),
+                    false,
+                )
+                .unwrap();
+        }
+        let target = PreparedTarget::open(second_root.clone(), "/data".into(), namespace)
             .await
             .unwrap();
+        let location = other_service.prepare(&second, target).await.unwrap();
         other_service
             .attach(
                 &second,
@@ -387,10 +445,10 @@ mod tests {
         let id = SharedVolumeId::new();
         let guid = Guid::new();
         let mut mounts = SharedVolumeMounts::default();
-        let location = mounts
-            .prepare(&guid, &service_root, Path::new("data/attached"), namespace)
+        let target = PreparedTarget::open(service_root, "data/attached".into(), namespace)
             .await
             .unwrap();
+        let location = mounts.prepare(&guid, target).await.unwrap();
         mounts
             .attach(
                 &guid,

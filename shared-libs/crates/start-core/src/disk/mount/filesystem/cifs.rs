@@ -192,7 +192,7 @@ mod tests {
         use crate::disk::mount::guard::MountGuard;
         use crate::rpc_continuations::Guid;
         use crate::shared_volumes::SharedVolumeId;
-        use crate::shared_volumes::mounts::{PreparedSource, SharedVolumeMounts};
+        use crate::shared_volumes::mounts::{PreparedSource, PreparedTarget, SharedVolumeMounts};
         assert_eq!(std::env::var("VOLUME_CIFS_FIXTURE").as_deref(), Ok("1"));
         fn definition(hostname: &str, path: &str) -> SharedCifs {
             SharedCifs(Cifs {
@@ -251,20 +251,19 @@ mod tests {
             .unwrap();
         let mut mounts = SharedVolumeMounts::default();
         let guid = Guid::new();
-        let location = mounts
-            .prepare(
-                &guid,
-                fixture.path(),
-                Path::new("data"),
-                std::sync::Arc::new(
-                    crate::disk::mount::filesystem::syscall::MountNamespace::for_process(
-                        std::process::id(),
-                    )
-                    .unwrap(),
-                ),
-            )
-            .await
-            .unwrap();
+        let target = PreparedTarget::open(
+            fixture.path().to_owned(),
+            "data".into(),
+            std::sync::Arc::new(
+                crate::disk::mount::filesystem::syscall::MountNamespace::for_process(
+                    std::process::id(),
+                )
+                .unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
+        let location = mounts.prepare(&guid, target).await.unwrap();
         mounts
             .attach(
                 &guid,
