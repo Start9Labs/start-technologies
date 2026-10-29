@@ -17,7 +17,6 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
 import { TitleDirective } from 'src/app/services/title.service'
 import { getManifest } from 'src/app/utils/get-package-data'
 
-// Dashboard matching is exact; interfaces includes its detail routes.
 type NavItem = { title: i18nKey; icon: string; link: string; exact: boolean }
 
 @Component({
@@ -220,6 +219,12 @@ export class ServiceOutletComponent {
       title: 'Outbound Traffic',
       icon: '@tui.globe',
       link: 'outbound-traffic',
+      exact: true,
+    },
+    {
+      title: 'Volumes',
+      icon: '@tui.folder',
+      link: 'volumes',
       exact: true,
     },
     {

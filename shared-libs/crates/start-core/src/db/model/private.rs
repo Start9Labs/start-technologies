@@ -34,6 +34,8 @@ pub struct Private {
         crate::shared_volumes::SharedVolumeCredentials,
     >,
     #[serde(default)]
+    pub retained_shared_volumes: BTreeMap<crate::shared_volumes::SharedVolumeId, String>,
+    #[serde(default)]
     pub package_stores: BTreeMap<PackageId, Value>,
 }
 

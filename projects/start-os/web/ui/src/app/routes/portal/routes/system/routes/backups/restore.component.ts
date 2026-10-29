@@ -1,6 +1,6 @@
 import { DatePipe, KeyValuePipe } from '@angular/common'
 import { Component, inject } from '@angular/core'
-import { DialogService, TaskService } from '@start9labs/shared'
+import { DialogService, i18nPipe, TaskService } from '@start9labs/shared'
 import { TuiButton } from '@taiga-ui/core'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { filter, switchMap, take } from 'rxjs'
@@ -12,14 +12,14 @@ import { RECOVER } from './recover.component'
 @Component({
   template: `
     <table [appTable]="['Hostname', 'StartOS Version', 'Created', null]">
-      @for (server of target.entry.startOs | keyvalue; track $index) {
+      @for (server of target.entry.startOs | keyvalue; track server.key) {
         <tr>
           <td class="name">{{ server.value.hostname }}.local</td>
           <td>{{ server.value.version }}</td>
           <td>{{ server.value.timestamp | date: 'medium' }}</td>
           <td>
             <button tuiButton size="s" (click)="onClick(server.key)">
-              Select
+              {{ 'Select' | i18n }}
             </button>
           </td>
         </tr>
@@ -48,7 +48,7 @@ import { RECOVER } from './recover.component'
       }
     }
   `,
-  imports: [KeyValuePipe, DatePipe, TuiButton, TableComponent],
+  imports: [KeyValuePipe, DatePipe, TuiButton, TableComponent, i18nPipe],
 })
 export class BackupRestoreComponent {
   private readonly dialog = inject(DialogService)
@@ -64,7 +64,7 @@ export class BackupRestoreComponent {
         label: 'Password required',
         data: {
           message:
-            'Enter the master password that was used to encrypt this backup. On the next screen, you will select the individual services you want to restore.',
+            'Enter the master password that was used to encrypt this backup.',
           label: 'Master Password',
           placeholder: 'Enter master password',
           useMask: true,
@@ -87,7 +87,7 @@ export class BackupRestoreComponent {
 
       this.context.$implicit.complete()
       this.dialog
-        .openComponent(RECOVER, { label: 'Select services', data })
+        .openComponent(RECOVER, { label: 'Select backup items', data })
         .subscribe()
     }, 'Decrypting drive')
   }

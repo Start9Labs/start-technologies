@@ -6360,6 +6360,10 @@ export const Api = {
           _PARAMS: /* @__PURE__ */ SharedVolumeParams,
           _RETURN: /* @__PURE__ */ SharedVolumeInspection,
         },
+        'list-retained': {
+          _PARAMS: /* @__PURE__ */ empty,
+          _RETURN: /* @__PURE__ */ z.record(z.string(), z.string()),
+        },
         remove: {
           _PARAMS: /* @__PURE__ */ SharedVolumeParams,
           _RETURN: /* @__PURE__ */ z.null(),

@@ -165,7 +165,7 @@ export default class SystemBackupComponent implements OnInit {
 
       this.dialog
         .openComponent(BACKUP, {
-          label: 'Select services',
+          label: 'Select backup items',
           data: target,
           size: 'm',
         })
