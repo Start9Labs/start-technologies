@@ -865,4 +865,10 @@ export default {
   980: 'Unidad formateada. Aparece en «Unidades físicas».',
   981: 'Debe tener 255 bytes o menos (las letras acentuadas y los símbolos ocupan más de uno)',
   982: 'No debe contener caracteres de control',
+  983: 'Interfaz de usuario sincronizada. Actualiza para continuar.',
+  984: 'Sincronizando la interfaz con tu servidor...',
+  985: 'No se pudo sincronizar la interfaz de usuario. Vuelve a intentarlo o restablece la caché de la interfaz.',
+  989: 'Sincronizando',
+  987: 'Restablecer la caché de la interfaz',
+  988: '¿Restablecer la interfaz almacenada en caché y recargar la página? Se conservarán tu sesión y tus ajustes.',
 } satisfies i18n

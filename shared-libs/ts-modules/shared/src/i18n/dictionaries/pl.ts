@@ -865,4 +865,10 @@ export default {
   980: 'Dysk sformatowany. Znajduje się na liście „Dyski fizyczne”.',
   981: 'Może mieć maksymalnie 255 bajtów (litery ze znakami diakrytycznymi i symbole zajmują więcej niż jeden)',
   982: 'Nie może zawierać znaków sterujących',
+  983: 'Interfejs użytkownika zsynchronizowany. Odśwież stronę, aby kontynuować.',
+  984: 'Synchronizowanie interfejsu z serwerem...',
+  985: 'Nie udało się zsynchronizować interfejsu użytkownika. Spróbuj ponownie lub zresetuj pamięć podręczną interfejsu.',
+  989: 'Synchronizacja',
+  987: 'Zresetuj pamięć podręczną interfejsu',
+  988: 'Zresetować interfejs w pamięci podręcznej i odświeżyć stronę? Dane logowania i ustawienia zostaną zachowane.',
 } satisfies i18n

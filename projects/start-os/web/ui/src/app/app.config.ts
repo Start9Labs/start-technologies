@@ -79,6 +79,7 @@ import { PluginsService } from 'src/app/services/plugins.service'
 import { StateService } from 'src/app/services/state.service'
 import { StorageService } from 'src/app/services/storage.service'
 import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
+import { UiUpdateService } from 'src/app/services/ui-update.service'
 import {
   DatetimeTransformer,
   DateTransformer,
@@ -108,6 +109,9 @@ export const APP_CONFIG: ApplicationConfig = {
     provideServiceWorker('ngsw-worker.js', {
       enabled: environment.useServiceWorker,
       registrationStrategy: 'registerWhenStable:30000',
+    }),
+    provideAppInitializer(() => {
+      inject(UiUpdateService)
     }),
     I18N_PROVIDERS,
     FilterPackagesPipe,

@@ -865,4 +865,10 @@ export default {
   980: 'Laufwerk formatiert. Es wird unter „Physische Laufwerke“ aufgeführt.',
   981: 'Darf höchstens 255 Bytes lang sein (Buchstaben mit Akzent und Symbole belegen mehr als eines)',
   982: 'Darf keine Steuerzeichen enthalten',
+  983: 'Benutzeroberfläche synchronisiert. Zum Fortfahren aktualisieren.',
+  984: 'Benutzeroberfläche wird mit deinem Server synchronisiert...',
+  985: 'Die Benutzeroberfläche konnte nicht synchronisiert werden. Erneut versuchen oder den Cache der Benutzeroberfläche zurücksetzen.',
+  989: 'Synchronisierung',
+  987: 'Cache der Benutzeroberfläche zurücksetzen',
+  988: 'Die zwischengespeicherte Benutzeroberfläche zurücksetzen und die Seite neu laden? Deine Anmeldung und Einstellungen bleiben erhalten.',
 } satisfies i18n
