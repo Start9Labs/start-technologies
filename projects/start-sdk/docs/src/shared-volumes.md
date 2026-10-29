@@ -18,7 +18,7 @@ This enables the service's **Volumes** controls in StartOS; it requests no acces
 const grants = await sdk.getSharedVolumes(effects).const()
 ```
 
-Each grant contains `id`, `name`, `readonly` and `availability`. Store the stable GUID `id` in service configuration and use the editable `name` in user-facing choices. Names are neither identities nor paths. Host paths and network credentials remain private to StartOS.
+Each grant contains `id`, `name`, `readonly` and `availability`. Store the stable GUID `id` in service configuration and use the editable `name` in user-facing choices. Names are neither identities nor paths. The API returns neither host paths nor network credentials. Linux mount metadata can reveal the CIFS account name to a granted service; its password remains private.
 
 The reader supports `.once()`, `.const()`, `.watch()` and the other [reactive reader methods](file-models.md). Grant additions, revocations, access-mode changes and renames invalidate reactive reads. An offline granted volume remains listed; revocation removes it. Availability is the host's last observation, not a mount preflight or a guarantee of continued connectivity.
 
