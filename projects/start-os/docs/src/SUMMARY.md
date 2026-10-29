@@ -72,6 +72,7 @@
 - [Server Name](server-name.md)
 - [SSH](ssh.md)
 - [SMTP](smtp.md)
+- [Volumes](volumes.md)
 - [WiFi](wifi.md)
 - [Internationalization](internationalization.md)
 - [Kiosk Mode](kiosk-mode.md)

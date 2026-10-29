@@ -118,6 +118,39 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn invalid_sources_are_rejected_before_network_access() {
+        for (hostname, path, password) in [
+            ("", "/share", None),
+            ("//nas", "/share", None),
+            ("nas", "/", None),
+            ("nas", "/share/../other", None),
+            ("nas", "/share\0", None),
+            ("nas", "/share", Some("secret\0")),
+        ] {
+            let error = Cifs {
+                hostname: hostname.into(),
+                path: path.into(),
+                username: "guest".into(),
+                password: password.map(str::to_owned),
+            }
+            .validate()
+            .unwrap_err();
+            assert!(matches!(error.kind, crate::ErrorKind::InvalidRequest));
+            assert!(!error.to_string().contains("secret"));
+        }
+        assert!(
+            Cifs {
+                hostname: "nas.lan".into(),
+                path: "/Family Photos/albums".into(),
+                username: "".into(),
+                password: None
+            }
+            .validate()
+            .is_ok()
+        );
+    }
+
     #[tokio::test]
     async fn temporary_mount_identity_includes_credentials_and_runtime_policy() {
         let mut source = Cifs {
@@ -248,13 +281,40 @@ impl std::fmt::Debug for Cifs {
 }
 
 impl Cifs {
+    pub fn validate(&self) -> Result<(), Error> {
+        use std::path::Component;
+        let path = self.path.as_os_str().as_encoded_bytes();
+        if self.hostname.trim().is_empty()
+            || self.hostname.contains(['/', '\\', '\0'])
+            || path.contains(&0)
+            || !self
+                .path
+                .components()
+                .any(|part| matches!(part, Component::Normal(_)))
+            || self
+                .path
+                .components()
+                .any(|part| matches!(part, Component::ParentDir | Component::Prefix(_)))
+            || self.username.contains('\0')
+            || self
+                .password
+                .as_deref()
+                .is_some_and(|password| password.contains('\0'))
+        {
+            return Err(Error::new(
+                eyre!(t!("disk.mount.filesystem.cifs.invalid-source")),
+                crate::ErrorKind::InvalidRequest,
+            ));
+        }
+        Ok(())
+    }
+
     #[instrument(skip_all)]
     async fn mount_with_options(&self, mountpoint: &Path, options: &str) -> Result<(), Error> {
+        self.validate()?;
         tokio::fs::create_dir_all(mountpoint).await?;
         let ip = resolve_hostname(&self.hostname).await?;
-        Command::new("mount")
-            .arg("-t")
-            .arg("cifs")
+        Command::new("mount.cifs")
             .env("USER", &self.username)
             .env("PASSWD", self.password.as_deref().unwrap_or_default())
             .arg(format!(

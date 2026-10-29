@@ -430,6 +430,8 @@ trigger: sdk.trigger.statusTrigger(30_000, {
 
 ## Volume Mounts
 
+User-managed local folders and CIFS shares use a separate [Volumes API](shared-volumes.md), with explicit user grants and optional mount outcomes. The declarations below concern package-owned storage and assets.
+
 Volume mounts declared `readonly: true` and all asset mounts are read-only; writes through them fail with `EROFS`. Copy assets that need modification into a writable volume and mount that copy. `type: 'infer'` detects existing regular files; use `type: 'file'` when the file may need to be created.
 
 ```typescript
@@ -452,7 +454,7 @@ sdk.Mounts.of()
 ```
 
 > [!WARNING]
-> `sdk.Mounts` is an immutable builder. Every `mountVolume` / `mountAssets` / `mountDependency` call returns a **new** `Mounts` instance — the original is unchanged. Discarded return values silently drop the mount.
+> `sdk.Mounts` is an immutable builder. Every `mountVolume` / `mountAssets` / `mountDependency` / `mountSharedVolume` call returns a **new** `Mounts` instance — the original is unchanged. Discarded return values silently drop the mount.
 >
 > ```typescript
 > // BROKEN — conditional mount is lost

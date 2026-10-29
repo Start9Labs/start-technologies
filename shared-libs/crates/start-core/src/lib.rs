@@ -213,7 +213,12 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
                 )
                 .with_about("about.commands-authentication"),
         )
-        .subcommand("volumes", shared_volumes::handler::<C>())
+        .subcommand(
+            "volumes",
+            shared_volumes::handler::<C>()
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_cli(),
+        )
         .subcommand("db", db::db::<C>().with_about("about.commands-db"))
         .subcommand("ssh", ssh::ssh::<C>().with_about("about.commands-ssh-keys"))
         .subcommand(

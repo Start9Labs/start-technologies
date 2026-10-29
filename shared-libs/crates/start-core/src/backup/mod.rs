@@ -76,13 +76,16 @@ pub fn backup<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "volume",
-            ParentHandler::<C>::new().subcommand(
-                "restore",
-                from_fn_async(volume::restore_volumes_rpc)
-                    .with_display_serializable()
-                    .with_about("about.restore-volumes-from-backup")
-                    .with_call_remote::<CliContext>(),
-            ),
+            ParentHandler::<C>::new()
+                .subcommand(
+                    "restore",
+                    from_fn_async(volume::restore_volumes_rpc)
+                        .with_metadata("sync_db", Value::Bool(true))
+                        .with_display_serializable()
+                        .with_about("about.restore-volumes-from-backup")
+                        .with_call_remote::<CliContext>(),
+                )
+                .with_about("about.commands-volume-backups"),
         )
         .subcommand(
             "target",

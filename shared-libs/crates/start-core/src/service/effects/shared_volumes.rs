@@ -187,6 +187,9 @@ pub async fn mount_shared_volume(
         Ok(source) => source,
         Err(error) => {
             authorize_mount(&service, &id, readonly).await?;
+            if matches!(error.kind, ErrorKind::InvalidRequest) {
+                return Err(error);
+            }
             return Ok(SharedVolumeMountResult::Unavailable {
                 reason: if matches!(error.kind, ErrorKind::Timeout) {
                     SharedVolumeUnavailableReason::Timeout

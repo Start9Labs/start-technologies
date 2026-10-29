@@ -187,6 +187,27 @@ test.each(['volume', 'assets', 'dependency', 'shared'] as const)(
   },
 )
 
+test.each([
+  'media/music',
+  '/media//music',
+  '/media/./music',
+  '/media/albums/../music',
+])(
+  'equivalent mount destination %s cannot overmount a declaration',
+  mountpoint => {
+    expect(() =>
+      essential()
+        .mountVolume({
+          volumeId: 'main',
+          mountpoint,
+          subpath: null,
+          readonly: false,
+        })
+        .build(),
+    ).toThrow('cannot mount more than once')
+  },
+)
+
 test.each(['eager', 'lazy'] as const)(
   '%s optional mount prepares its directory and preserves original mountpoint',
   async kind => {
