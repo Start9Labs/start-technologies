@@ -207,7 +207,7 @@ export const ENGLISH: Record<string, number> = {
   'Satisfied': 219,
   'No dependencies': 220,
   'Not installed': 221,
-  'Incorrect version': 222,
+  'Incompatible version': 222,
   'Not running': 223,
   'Action required': 224,
   'Required health check not passing': 225,

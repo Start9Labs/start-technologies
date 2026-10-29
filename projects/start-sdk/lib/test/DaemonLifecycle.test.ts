@@ -1,8 +1,10 @@
 import { getEventListeners } from 'node:events'
+import { setFlagsFromString } from 'node:v8'
+import { runInNewContext } from 'node:vm'
 import { Daemon } from '../mainFn/Daemon'
 import { EXIT_SUCCESS, HealthDaemon } from '../mainFn/HealthDaemon'
 import { HealthCheckResult } from '../health/checkFns'
-import { onceTrigger } from '../trigger'
+import { cooldownTrigger, onceTrigger, Trigger } from '../trigger'
 import * as T from '@start9labs/start-core/types'
 
 type Manifest = {
@@ -485,4 +487,90 @@ describe('HealthDaemon ready polling', () => {
       await hd.term()
     },
   )
+})
+
+describe('HealthDaemon check loop', () => {
+  const check = (trigger: Trigger) => {
+    const fn = jest.fn(
+      (): HealthCheckResult => ({ result: 'success', message: null }),
+    )
+    const hd = new HealthDaemon<Manifest>(
+      null,
+      [],
+      'check',
+      { display: 'Check', trigger, fn },
+      fakeEffects(),
+    )
+    return { hd, fn }
+  }
+  const macrotask = () => new Promise(resolve => setImmediate(resolve))
+
+  it('lets go of each trigger tick once its check has run', async () => {
+    setFlagsFromString('--expose-gc')
+    const gc: () => void = runInNewContext('gc')
+    const ticks: WeakRef<object>[] = []
+    let drained = () => {}
+    const parked = new Promise<void>(resolve => (drained = resolve))
+    const { hd, fn } = check(async function* () {
+      for (let i = 0; i < 100; i++) {
+        const tick = { i }
+        ticks.push(new WeakRef(tick))
+        yield tick
+      }
+      drained()
+      await new Promise(() => {})
+    })
+
+    await hd.updateStatus()
+    await parked
+    await macrotask()
+    gc()
+
+    expect(fn).toHaveBeenCalledTimes(100)
+    // V8's suspended async frame keeps the first tick and the loop the latest.
+    expect(ticks.filter(tick => tick.deref()).length).toBeLessThanOrEqual(2)
+    await hd.term()
+  })
+
+  it('ends a pending wait at once when stopped', async () => {
+    jest.useFakeTimers()
+    try {
+      const { hd, fn } = check(cooldownTrigger(60_000))
+      await hd.updateStatus()
+      await jest.advanceTimersByTimeAsync(60_000)
+      expect(fn).toHaveBeenCalledTimes(1)
+      const signal: AbortSignal = (hd as any).session.abort.signal
+
+      // Under fake timers the pending tick only ends through the abort.
+      await hd.term()
+      await jest.advanceTimersByTimeAsync(120_000)
+
+      expect(fn).toHaveBeenCalledTimes(1)
+      expect(getEventListeners(signal, 'abort')).toHaveLength(0)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('logs a trigger that throws and stops checking', async () => {
+    const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+    let threw = () => {}
+    const thrown = new Promise<void>(resolve => (threw = resolve))
+    const { hd, fn } = check(async function* () {
+      yield
+      threw()
+      throw new Error('broken trigger')
+    })
+
+    await hd.updateStatus()
+    await thrown
+    await macrotask()
+
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(logged).toHaveBeenCalledWith(
+      'Daemon check health check failed: Error: broken trigger',
+    )
+    logged.mockRestore()
+    await hd.term()
+  })
 })

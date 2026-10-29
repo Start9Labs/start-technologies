@@ -1,0 +1,1 @@
+- Naprawiono odnośniki zależności, przez które Sklep pozostawał na ekranie ładowania.
