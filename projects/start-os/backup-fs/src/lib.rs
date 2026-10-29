@@ -50,6 +50,7 @@ mod mount_tests;
 mod objects;
 mod pool;
 mod snapshot;
+mod state;
 pub use snapshot::SnapshotInfo;
 mod seglog;
 mod serde;

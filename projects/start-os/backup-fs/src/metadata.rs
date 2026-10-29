@@ -16,7 +16,8 @@ pub(crate) struct Reference {
 }
 
 impl Reference {
-    pub fn store<T: Serialize + DeserializeOwned>(
+    /// The root publisher must sync the backing filesystem before referencing this blob.
+    pub fn write<T: Serialize + DeserializeOwned>(
         segments: &Path,
         key: &Key,
         ecc: EccParams,
@@ -31,8 +32,7 @@ impl Reference {
         std::fs::create_dir_all(path.parent().unwrap())?;
         let mut file = AtomicFile::create_buffered(path.clone())?;
         file.write_all(&sealed.bytes)?;
-        file.save()?;
-        crate::objects::sync_object_path(&path)?;
+        file.save_fast()?;
         Ok(reference)
     }
 
@@ -47,10 +47,12 @@ impl Reference {
         decode(&plain, data_config())
     }
 
+    pub fn directory(segments: &Path) -> PathBuf {
+        segments.join("state-objects")
+    }
+
     pub fn path(self, segments: &Path) -> PathBuf {
-        segments
-            .join("state-objects")
-            .join(crate::util::hex(&self.tag))
+        Self::directory(segments).join(crate::util::hex(&self.tag))
     }
 }
 
@@ -62,7 +64,7 @@ mod tests {
     fn reference_rejects_a_valid_older_blob_at_the_current_path() {
         let dir = tempfile::tempdir().unwrap();
         let key = Key::from([0x72; 32]);
-        let older = Reference::store(
+        let older = Reference::write(
             dir.path(),
             &key,
             EccParams::default(),
@@ -70,7 +72,7 @@ mod tests {
             &"older".to_owned(),
         )
         .unwrap();
-        let current = Reference::store(
+        let current = Reference::write(
             dir.path(),
             &key,
             EccParams::default(),
@@ -101,7 +103,7 @@ mod tests {
     fn reference_rejects_another_metadata_role() {
         let dir = tempfile::tempdir().unwrap();
         let key = Key::from([0x73; 32]);
-        let reference = Reference::store(
+        let reference = Reference::write(
             dir.path(),
             &key,
             EccParams::default(),
@@ -124,7 +126,7 @@ mod tests {
     fn reference_keeps_its_identity_after_recoverable_corruption() {
         let dir = tempfile::tempdir().unwrap();
         let key = Key::from([0x74; 32]);
-        let reference = Reference::store(
+        let reference = Reference::write(
             dir.path(),
             &key,
             EccParams::default(),
