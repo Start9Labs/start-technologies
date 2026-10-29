@@ -1134,7 +1134,12 @@ export const mockPatchData: DataModel = {
       desired: { main: 'running' },
       error: null,
       health: {
-        web: { name: 'Web Vault', result: 'loading', message: 'Starting up' },
+        web: {
+          name: 'Web Vault',
+          result: 'loading',
+          waiting: false,
+          message: 'Starting up',
+        },
       },
       started: new Date(Date.now() - 30000).toISOString(),
     }),

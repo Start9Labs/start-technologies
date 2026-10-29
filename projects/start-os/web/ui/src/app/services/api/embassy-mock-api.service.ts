@@ -1121,6 +1121,7 @@ export class MockApiService extends ApiService {
                 'chain-state': {
                   name: 'Chain State',
                   result: 'loading',
+                  waiting: false,
                   message:
                     'Bitcoin is syncing from genesis. Downloading block headers and verifying chain integrity, please wait',
                 },
@@ -1175,6 +1176,7 @@ export class MockApiService extends ApiService {
                 'ephemeral-health-check': {
                   name: 'Ephemeral Health Check',
                   result: 'starting',
+                  waiting: false,
                   message: null,
                 },
                 'unnecessary-health-check': {
@@ -1185,6 +1187,7 @@ export class MockApiService extends ApiService {
                 'chain-state': {
                   name: 'Chain State',
                   result: 'loading',
+                  waiting: false,
                   message: 'Bitcoin is syncing from genesis',
                 },
                 'p2p-interface': {

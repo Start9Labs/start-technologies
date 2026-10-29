@@ -49,6 +49,36 @@ describe('HealthCheck finite triggers', () => {
     },
   )
 
+  it.each([
+    { result: 'starting', waiting: true, message: 'Waiting: database <ready>' },
+    { result: 'loading', waiting: true, message: 'Sync paused: no peers' },
+    { result: 'starting', message: 'Starting: custom details' },
+    { result: 'loading', message: 'Syncing: 25%' },
+    { result: 'success', message: '' },
+    { result: 'disabled', message: 'Disabled: custom details' },
+    { result: 'failure', message: 'Failure: custom details' },
+  ] as const)('preserves the $result payload', async health => {
+    const setHealth = jest.fn(async () => null)
+    const check = HealthCheck.of({ setHealth } as any, {
+      id: 'static',
+      name: 'Static',
+      gracePeriod: 0,
+      trigger: onceTrigger,
+      fn: () => health,
+    })
+    try {
+      check.start()
+      await jest.advanceTimersByTimeAsync(0)
+      expect(setHealth).toHaveBeenLastCalledWith({
+        id: 'static',
+        name: 'Static',
+        ...health,
+      })
+    } finally {
+      check.onDrop()
+    }
+  })
+
   it('creates a new trigger after stop/start, including in the same clock tick', async () => {
     jest.advanceTimersByTime(1)
     const fn = jest.fn(() => failure)
