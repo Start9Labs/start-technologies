@@ -50,6 +50,7 @@ mod non_fuse_tests {
             file_size_padding: None,
             readonly: false,
             idmapped: false,
+            enable_snapshots: false,
         })
         .unwrap()
     }
@@ -177,7 +178,9 @@ mod non_fuse_tests {
         let source_bytes = bytes(17 * CHUNK_SIZE as usize);
         let source = create_file(&ctrl, &source_bytes);
         let destination = create_file(&ctrl, &[]);
-        let blocked = ctrl.resolve_block_path(ContentId::from(destination), 0);
+        let blocked = ctrl
+            .block_path(ContentId::from(destination), 0)
+            .with_extension("tmp");
         fs::create_dir_all(&blocked).unwrap();
 
         let mut handler = Handler::new(ctrl.clone());
@@ -210,7 +213,9 @@ mod non_fuse_tests {
         let data = TempDir::with_prefix("backupfs_data").unwrap();
         let ctrl = controller(&data);
         let inode = create_file(&ctrl, &vec![0xab; 200 * 1024]);
-        let blocked = ctrl.resolve_block_path(ContentId::from(inode), 0);
+        let blocked = ctrl
+            .block_path(ContentId::from(inode), 0)
+            .with_extension("tmp");
         fs::create_dir_all(&blocked).unwrap();
         let requested = 17 * CHUNK_SIZE as usize;
         let requested_bytes = bytes(requested);

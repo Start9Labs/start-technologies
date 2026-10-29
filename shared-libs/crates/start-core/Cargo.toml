@@ -243,6 +243,7 @@ x25519-dalek = { version = "3.0.0-rc.1", features = ["static_secrets"] }
 xattr = "1.6.1"
 xmltree = "0.10"
 zbus = "5.1.1"
+zeroize = "1"
 zstd = "0.13.3"
 
 [[example]]

@@ -119,6 +119,14 @@ impl DirectoryContents {
         Self(DirEntries::Inline(OrdMap::new()))
     }
 
+    pub(crate) fn bucket_ids(&self) -> impl Iterator<Item = (u64, u32)> {
+        let (gen, count) = match self.0 {
+            DirEntries::Inline(_) => (0, 0),
+            DirEntries::Spilled { gen, buckets, .. } => (gen, buckets),
+        };
+        (0..count).map(move |idx| (gen, idx))
+    }
+
     pub fn len(&self) -> u64 {
         match &self.0 {
             DirEntries::Inline(m) => m.len() as u64,
@@ -176,6 +184,7 @@ impl DirectoryContents {
         entry: DirectoryEntry,
         durable: bool,
     ) -> BkfsResult<Option<(u64, u32)>> {
+        ctrl.check_rw()?;
         // Spill an inline directory that is about to exceed the threshold.
         // (Spilling never deletes the inline source — it lives in the inode
         // blob until the marker is saved — so a torn spill only orphans the
@@ -237,6 +246,7 @@ impl DirectoryContents {
         name: &OsStr,
         durable: bool,
     ) -> BkfsResult<Option<DirectoryEntry>> {
+        ctrl.check_rw()?;
         match &mut self.0 {
             DirEntries::Inline(m) => Ok(m.remove(name)),
             DirEntries::Spilled {
@@ -419,6 +429,7 @@ mod tests {
             file_size_padding: None,
             readonly: false,
             idmapped: false,
+            enable_snapshots: false,
         })
         .unwrap()
     }

@@ -7643,7 +7643,7 @@ dependencies = [
 
 [[package]]
 name = "start-cli"
-version = "2.6.0"
+version = "3.0.0"
 dependencies = [
  "start-core",
  "tracing",
@@ -7797,6 +7797,7 @@ dependencies = [
  "xmltree",
  "yaml_serde",
  "zbus",
+ "zeroize",
  "zstd 0.13.3",
 ]
 

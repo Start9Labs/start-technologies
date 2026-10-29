@@ -25,7 +25,7 @@ Back up your server's data to a physical drive or a network folder.
 
 1. Wait for the `Backup Complete` notification before unplugging a backup drive. StartOS writes out the last of the backup and unmounts the drive before raising that notification, so the drive is safe to remove once it appears. The `Backup Progress` card reads `Complete` first, while StartOS is still finishing — the notification is the one to wait for.
 
-1. Backups are differential — each new backup to the same target overwrites the previous one. To maintain multiple backup points, use multiple backup targets.
+1. Each backup updates the current state on its target. Keep backups on multiple targets for protection against loss of a drive or network share.
 
 1. The backup targets list shows the free space available on each drive and network folder, so you can confirm your backup will fit before you start.
 
@@ -38,6 +38,37 @@ Back up your server's data to a physical drive or a network folder.
 
    > [!WARNING]
    > Before backing up, check the free space remaining on the target and make sure your selected services will fit. If space is tight, use the **Delete old backup** button to reclaim the space this server's old backup occupies, or choose another drive. A backup started while that space is still being reclaimed in the background waits for the reclamation to finish first, shown as an initial `Reclaiming Space` phase in the backup's progress.
+
+## Backup Format Upgrades
+
+Opening an existing backup with this release upgrades its encryption authentication and password-protected key wrapping. The folder remains `StartOSBackupsV2`; this is separate from the older `StartOSBackups` folder cleanup described above. The one-time upgrade rewrites the encrypted data and needs free space for one replacement segment or content object. On a large or remote backup, this can take substantially longer than an ordinary incremental backup. Leave the target connected until the operation finishes; an interrupted upgrade resumes on the next writable open.
+
+> [!WARNING]
+> Older StartOS releases cannot read an upgraded backup. An upgrade cannot detect alterations already made to the older unauthenticated format, or revoke previously copied backup data and key-wrapping metadata.
+
+## Command-Line Passwords
+
+`start-cli backup target mount`, `start-cli backup target info`, and `start-cli package backup restore` prompt for the backup password instead of accepting it as a positional argument. Automation can supply it through `BACKUP_PASSWORD`. CIFS target add/update commands similarly prompt for the share password or read `CIFS_PASSWORD`; an empty password selects passwordless access. The `PASSWORD` variable used for CLI authentication remains separate.
+
+Avoid typing secret values into shell commands, where shell history can retain them. The standalone `startos-backup-fs` utility reads its filesystem credential from standard input or `--password-file`; password changes read the replacement credential from `--new-password-file`. It does not accept plaintext password arguments. For StartOS-managed backups, this utility uses the filesystem key managed by StartOS, not the master password accepted by `start-cli`.
+
+## Read-only Snapshots
+
+The low-level `startos-backup-fs` utility can retain named recovery points without duplicating unchanged file content. Creation enables copy-on-write storage for the target; later writes record new versions of changed blocks and directory buckets. The current backup continues to update normally. Retention is manual: delete points when they are no longer needed.
+
+Snapshot operations require exclusive offline access. Finish backups and unmount the decrypted filesystem before creating, listing, deleting, or mounting a recovery point. Use the filesystem credential described above, not the StartOS master password:
+
+```sh
+startos-backup-fs snapshot create /path/to/crypt before-update --password-file /protected/filesystem-key
+startos-backup-fs snapshot list /path/to/crypt --password-file /protected/filesystem-key
+startos-backup-fs mount /path/to/crypt /mnt/recovery --snapshot before-update --password-file /protected/filesystem-key
+fusermount3 -u /mnt/recovery
+startos-backup-fs snapshot delete /path/to/crypt before-update --password-file /protected/filesystem-key
+```
+
+The backing directory is `StartOSBackupsV2/<server-id>/crypt` on the mounted target. Protect the credential file with owner-only permissions. A recovery mount is read-only. Snapshot names use letters, digits, `-`, `_`, or `.`, up to 128 characters; `.` and `..` are reserved.
+
+Snapshot metadata grows with the number of indexed objects and retained points, and the catalog has a 64 MiB limit. Snapshot-enabled stores retain their copy-on-write format after points are deleted. Snapshots share the target's hardware and do not replace backups on separate devices.
 
 ## Best Practices
 

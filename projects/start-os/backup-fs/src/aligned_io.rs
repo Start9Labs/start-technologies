@@ -71,8 +71,6 @@ fn flush_chunk_for(fd: RawFd) -> usize {
     }
 }
 
-// ── Aligned buffer ────────────────────────────────────
-
 /// A buffer with guaranteed 4096-byte alignment for O_DIRECT I/O.
 struct AlignedBuf {
     ptr: ptr::NonNull<u8>,
@@ -111,8 +109,6 @@ impl Drop for AlignedBuf {
     }
 }
 
-// ── Low-level aligned I/O ─────────────────────────────
-
 fn align_down(v: u64) -> u64 {
     v & !(BLOCK_SIZE as u64 - 1)
 }
@@ -130,8 +126,6 @@ fn pread_full<F: FileExt>(file: &F, buf: &mut [u8], offset: u64) -> io::Result<u
     }
     Ok(pos)
 }
-
-// ── Flush implementations ─────────────────────────────
 
 /// Plain synchronous pwrite loop. Used as a fallback when io_uring is
 /// disabled or has been poisoned by a timeout.
@@ -257,8 +251,6 @@ fn new_ring() -> io::Result<io_uring::IoUring> {
     io_uring::IoUring::new(RING_ENTRIES)
 }
 
-// ── Buffered direct-I/O file ──────────────────────────
-
 struct BufState {
     buf: AlignedBuf,
     /// File offset that buf[0] maps to (block-aligned). u64::MAX = no window loaded.
@@ -280,6 +272,7 @@ struct BufState {
     ring: Option<io_uring::IoUring>,
     /// Flush chunk size (selected per-filesystem at construction).
     flush_chunk: usize,
+    written_len: Option<u64>,
 }
 
 /// Wraps an O_DIRECT file descriptor with a 1 MiB write-back buffer.
@@ -312,12 +305,28 @@ impl<F: FileExt + AsRawFd> BufferedDirectFile<F> {
                 pos: 0,
                 ring,
                 flush_chunk,
+                written_len: None,
             }),
         })
     }
 
     fn file(&self) -> &F {
         self.file.as_ref().unwrap()
+    }
+
+    fn fill_edge(
+        file: &F,
+        scratch: &mut AlignedBuf,
+        offset: u64,
+        written_len: Option<u64>,
+    ) -> io::Result<()> {
+        let n = if written_len.is_some_and(|len| offset >= len) {
+            0
+        } else {
+            pread_full(file, scratch.as_mut_slice(), offset)?
+        };
+        scratch.as_mut_slice()[n..].fill(0);
+        Ok(())
     }
 
     /// Flush dirty bytes to disk via io_uring pipelined writes.
@@ -360,14 +369,12 @@ impl<F: FileExt + AsRawFd> BufferedDirectFile<F> {
             let mut scratch_block: Option<usize> = None;
 
             if head_needs_read {
-                let n = pread_full(
+                Self::fill_edge(
                     file,
-                    scratch.as_mut_slice(),
+                    &mut scratch,
                     state.base + head_block_start as u64,
+                    state.written_len,
                 )?;
-                if n < BLOCK_SIZE {
-                    scratch.as_mut_slice()[n..].fill(0);
-                }
                 scratch_block = Some(head_block_start);
                 let copy_start = state.loaded.max(start);
                 let copy_end = state.dirty_start;
@@ -382,14 +389,12 @@ impl<F: FileExt + AsRawFd> BufferedDirectFile<F> {
 
             if tail_needs_read {
                 if scratch_block != Some(tail_block_start) {
-                    let n = pread_full(
+                    Self::fill_edge(
                         file,
-                        scratch.as_mut_slice(),
+                        &mut scratch,
                         state.base + tail_block_start as u64,
+                        state.written_len,
                     )?;
-                    if n < BLOCK_SIZE {
-                        scratch.as_mut_slice()[n..].fill(0);
-                    }
                     scratch_block = Some(tail_block_start);
                 }
                 debug_assert_eq!(scratch_block, Some(tail_block_start));
@@ -429,6 +434,9 @@ impl<F: FileExt + AsRawFd> BufferedDirectFile<F> {
             pwrite_all(file, buf, file_offset, chunk)?;
         }
 
+        if let Some(len) = &mut state.written_len {
+            *len = (*len).max(state.base + end as u64);
+        }
         state.dirty_start = usize::MAX;
         state.dirty_end = 0;
         Ok(())
@@ -587,9 +595,13 @@ impl<F: FileExt + AsRawFd> Seek for BufferedDirectFile<F> {
     }
 }
 
-// ── Type-specific methods ─────────────────────────────
-
 impl BufferedDirectFile<AtomicFile> {
+    pub fn create(path: std::path::PathBuf) -> BkfsResult<Self> {
+        let mut file = Self::new(AtomicFile::create(path)?)?;
+        file.state.get_mut().written_len = Some(0);
+        Ok(file)
+    }
+
     pub fn save(mut self) -> BkfsResult<()> {
         self.flush()?;
         // Take the file so Drop doesn't double-flush
@@ -604,3 +616,7 @@ impl BufferedDirectFile<AtomicFile> {
         self.file.take().unwrap().save_fast()
     }
 }
+
+#[cfg(test)]
+#[path = "aligned_io_tests.rs"]
+mod tests;

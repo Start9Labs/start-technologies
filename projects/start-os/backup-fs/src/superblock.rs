@@ -74,11 +74,12 @@ const KDF_PBKDF2_HMAC_SHA256: u8 = 1;
 /// extents in a log-structured store, hash-bucketed directories, per-file
 /// compression, and **bincode v2 (`standard`) encoding**. (The pre-versioning
 /// `cryptinfo`-based dev format is not readable; there is no migration path
-/// from it — it predates any deployment.)
-pub const FORMAT_VERSION: u32 = 1;
+/// from it — it predates any deployment.) V2 requires authenticated vault blobs.
+pub const FORMAT_VERSION: u32 = 2;
 /// Highest DATA format version this build can read. A store recording a higher
 /// version is refused with an actionable "upgrade the software" error.
-pub const SUPPORTED_FORMAT_VERSION: u32 = 1;
+pub const SUPPORTED_FORMAT_VERSION: u32 = crate::snapshot::COW_FORMAT_VERSION;
+const MIGRATION_PENDING: u64 = 1;
 
 // Scheme identifiers for the VALIDATE-EQUALITY constants. Each governs reads,
 // so a build that doesn't recognize the recorded value must refuse to mount.
@@ -280,7 +281,7 @@ struct Body {
     created_unix: u64,
     master_key: Zeroizing<[u8; 32]>,
     constants: Constants,
-    /// Reserved feature bitflags for forward-compat (none defined yet).
+    /// Bit 0 permits mixed vault versions during the authenticated upgrade.
     features: u64,
 }
 
@@ -291,6 +292,8 @@ pub struct Superblock {
     pub constants: Constants,
     pub generation: u64,
     pub created_unix: u64,
+    pub(crate) format_version: u32,
+    pub(crate) migration_pending: bool,
 }
 
 fn now_unix() -> u64 {
@@ -339,7 +342,9 @@ impl Superblock {
         readonly: bool,
     ) -> BkfsResult<Superblock> {
         if any_exists(primary) {
-            Self::load(primary, password, readonly)
+            let mut sb = Self::load(primary, password, readonly)?;
+            sb.upgrade(primary, password, readonly)?;
+            Ok(sb)
         } else if primary.with_file_name("cryptinfo").exists() {
             // A pre-versioning store (master key in `cryptinfo`, bincode-v1
             // data). There is no migration path; refuse with a clear error
@@ -382,6 +387,8 @@ impl Superblock {
             constants,
             generation: 1,
             created_unix: now_unix(),
+            format_version: FORMAT_VERSION,
+            migration_pending: false,
         };
         sb.persist(primary, password)?;
         Ok(sb)
@@ -394,9 +401,10 @@ impl Superblock {
         let paths = replica_paths(primary);
         let mut best: Option<Superblock> = None;
         let mut bad_checksum = 0usize;
-        let mut healthy = 0usize;
+        let mut generations = Vec::new();
         let mut last_err: Option<BkfsError> = None;
 
+        let mut candidates = Vec::new();
         for path in &paths {
             let raw = match std::fs::read(path) {
                 Ok(b) => b,
@@ -406,9 +414,25 @@ impl Superblock {
                     continue;
                 }
             };
-            match parse_one(&raw, password) {
+            candidates.push(raw);
+        }
+        let has_current = candidates.iter().any(|raw| {
+            raw.len() >= ENVELOPE_LEN
+                && raw[..4] == SB_MAGIC
+                && u32::from_le_bytes(raw[OFF_FORMAT_VERSION..OFF_KDF_ALGO].try_into().unwrap())
+                    >= 2
+        });
+        for raw in &candidates {
+            if has_current
+                && raw.len() >= ENVELOPE_LEN
+                && u32::from_le_bytes(raw[OFF_FORMAT_VERSION..OFF_KDF_ALGO].try_into().unwrap())
+                    == 1
+            {
+                continue;
+            }
+            match parse_one(raw, password) {
                 Ok(sb) => {
-                    healthy += 1;
+                    generations.push(sb.generation);
                     best = Some(match best {
                         Some(prev) if prev.generation >= sb.generation => prev,
                         _ => sb,
@@ -425,24 +449,22 @@ impl Superblock {
 
         match best {
             Some(sb) => {
-                if healthy < paths.len() && !readonly {
-                    // Heal damaged/missing replicas from the canonical copy.
-                    // Skipped on a read-only mount (which must never write); a
-                    // near-full store likewise keeps mounting off the good
-                    // replica with reduced redundancy.
+                let needs_heal = generations.len() != paths.len()
+                    || generations.iter().any(|&g| g != sb.generation);
+                if needs_heal
+                    && !readonly
+                    && sb.format_version >= FORMAT_VERSION
+                    && !sb.migration_pending
+                {
                     if let Err(e) = sb.persist(primary, password) {
                         warn!("superblock self-heal failed (reduced redundancy): {e}");
                     }
-                } else if healthy < paths.len() {
-                    warn!("superblock has reduced redundancy; self-heal skipped (read-only mount)");
                 }
                 Ok(sb)
             }
             // No replica decoded, but at least one failed the integrity tag:
             // almost certainly the wrong password rather than independent loss.
-            // (`> 0`, not `== readable`, so a second replica that is also
-            // independently corrupt at the envelope level can't mask the
-            // wrong-password signal — `best` is None here, so `healthy == 0`.)
+            // A corrupt second envelope must not mask the wrong-password signal.
             None if bad_checksum > 0 => Err(BkfsError {
                 kind: BkfsErrorKind::BadChecksum,
                 backtrace: None,
@@ -450,6 +472,34 @@ impl Superblock {
             None => Err(last_err
                 .unwrap_or_else(|| BkfsError::unsupported("no readable superblock replica found"))),
         }
+    }
+
+    fn upgrade(&mut self, primary: &Path, password: &str, readonly: bool) -> BkfsResult<()> {
+        if self.format_version >= FORMAT_VERSION && !self.migration_pending {
+            return Ok(());
+        }
+        if readonly {
+            return Err(BkfsError::unsupported(
+                "authenticated vault upgrade requires a writable open; retry without read-only mode",
+            ));
+        }
+        if self.format_version == 1 {
+            self.format_version = FORMAT_VERSION;
+            self.migration_pending = true;
+            self.generation = self
+                .generation
+                .checked_add(1)
+                .ok_or_else(|| BkfsError::unsupported("superblock generation exhausted"))?;
+        }
+        // All replicas must durably reject old binaries before any data changes.
+        self.persist(primary, password)?;
+        crate::migration::reseal_store(primary.parent().unwrap(), &self.key)?;
+        self.migration_pending = false;
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| BkfsError::unsupported("superblock generation exhausted"))?;
+        self.persist(primary, password)
     }
 
     /// Re-seal and rewrite all replicas (used at creation, for self-heal, and
@@ -463,12 +513,16 @@ impl Superblock {
         let mut master = Zeroizing::new([0u8; 32]);
         master.copy_from_slice(self.key.as_slice());
         let body = Body {
-            format_version: FORMAT_VERSION,
+            format_version: self.format_version,
             generation: self.generation,
             created_unix: self.created_unix,
             master_key: master,
             constants: self.constants,
-            features: 0,
+            features: if self.migration_pending {
+                MIGRATION_PENDING
+            } else {
+                0
+            },
         };
         let mut body_bytes = encode(&body, superblock_config())?;
         let sealed = vault::seal(&body_bytes, <&Key>::from(&*key), self.constants.ecc());
@@ -477,7 +531,7 @@ impl Superblock {
         let mut file = Vec::with_capacity(ENVELOPE_LEN + sealed.len());
         file.extend_from_slice(&SB_MAGIC);
         file.push(ENVELOPE_VER);
-        file.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+        file.extend_from_slice(&self.format_version.to_le_bytes());
         file.push(KDF_PBKDF2_HMAC_SHA256);
         file.extend_from_slice(&PBKDF2_ROUNDS.to_le_bytes());
         file.extend_from_slice(&salt);
@@ -555,7 +609,11 @@ fn parse_one(raw: &[u8], password: &str) -> BkfsResult<Superblock> {
     let key = vault::derive_key(password, salt, kdf_rounds)?;
     // open()-then-decode: a wrong password fails the vault tag (BadChecksum)
     // before any decode runs, so it never surfaces as a decode error.
-    let mut plain = vault::open(sealed, <&Key>::from(&*key))?;
+    let mut plain = if format_version == 1 {
+        vault::open_legacy(sealed, <&Key>::from(&*key))?
+    } else {
+        vault::open(sealed, <&Key>::from(&*key))?
+    };
     let body: Body = decode(&plain, superblock_config())?;
     plain.zeroize();
 
@@ -564,6 +622,9 @@ fn parse_one(raw: &[u8], password: &str) -> BkfsResult<Superblock> {
             "superblock envelope/body version mismatch (corrupt or tampered header)",
         ));
     }
+    if body.features & !MIGRATION_PENDING != 0 || (format_version == 1 && body.features != 0) {
+        return Err(BkfsError::unsupported("unknown superblock features"));
+    }
     body.constants.validate()?;
 
     Ok(Superblock {
@@ -571,6 +632,8 @@ fn parse_one(raw: &[u8], password: &str) -> BkfsResult<Superblock> {
         constants: body.constants,
         generation: body.generation,
         created_unix: body.created_unix,
+        format_version,
+        migration_pending: body.features & MIGRATION_PENDING != 0,
     })
 }
 
@@ -628,5 +691,246 @@ mod tests {
         let mut c = default_constants();
         c.pack_max = c.chunk_size + 1;
         assert!(c.validate().is_err());
+    }
+    fn legacy_bytes(sb: &Superblock, password: &str) -> Vec<u8> {
+        let salt = [0x31; PBKDF2_SALT_LEN];
+        let key = vault::derive_key(password, &salt, PBKDF2_ROUNDS).unwrap();
+        let body = Body {
+            format_version: 1,
+            generation: sb.generation,
+            created_unix: sb.created_unix,
+            master_key: Zeroizing::new(sb.key.as_slice().try_into().unwrap()),
+            constants: sb.constants,
+            features: 0,
+        };
+        let sealed = vault::seal_legacy(
+            &encode(&body, superblock_config()).unwrap(),
+            <&Key>::from(&*key),
+            sb.constants.ecc(),
+        );
+        let mut bytes = Vec::from(SB_MAGIC);
+        bytes.push(ENVELOPE_VER);
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.push(KDF_PBKDF2_HMAC_SHA256);
+        bytes.extend_from_slice(&PBKDF2_ROUNDS.to_le_bytes());
+        bytes.extend_from_slice(&salt);
+        bytes.extend_from_slice(&sealed);
+        bytes
+    }
+
+    fn legacy_store() -> (tempfile::TempDir, Superblock) {
+        use crate::inode::{FileData, Inode, InodeAttributes};
+        use crate::seglog::{encode_frame, Record};
+        use crate::serde::data_config;
+
+        let dir = tempfile::tempdir().unwrap();
+        let sb = Superblock {
+            key: Key::from([5; 32]),
+            constants: default_constants(),
+            generation: 7,
+            created_unix: 123,
+            format_version: 1,
+            migration_pending: false,
+        };
+        let raw = legacy_bytes(&sb, "password");
+        for path in replica_paths(&dir.path().join("superblock")) {
+            std::fs::write(path, &raw).unwrap();
+        }
+        let segments = dir.path().join("segments");
+        std::fs::create_dir(&segments).unwrap();
+        let root = InodeAttributes::new(
+            Inode(crate::FUSE_ROOT_ID),
+            None,
+            FileData::Directory(crate::directory::DirectoryContents::new()),
+        );
+        let records = [
+            Record::Inode {
+                inode: crate::FUSE_ROOT_ID,
+                attrs: root.attrs,
+            },
+            Record::Content {
+                id: 42,
+                bytes: b"packed bytes".to_vec(),
+            },
+        ];
+        let mut bytes = Vec::new();
+        for (i, record) in records.iter().enumerate() {
+            let sealed = vault::seal_legacy(
+                &encode(record, data_config()).unwrap(),
+                &sb.key,
+                sb.constants.ecc(),
+            );
+            bytes.extend_from_slice(&encode_frame(i as u64 + 1, &sealed));
+        }
+        std::fs::write(segments.join("0000000000000000.seg"), bytes).unwrap();
+        std::fs::write(
+            segments.join(crate::seglog::INDEX_CACHE_NAME),
+            b"stale checkpoint",
+        )
+        .unwrap();
+        for name in ["contents", "dirents"] {
+            let bucket = dir.path().join(name).join("abcd");
+            std::fs::create_dir_all(&bucket).unwrap();
+            std::fs::write(
+                bucket.join("0123456789abcdef0123456789ab"),
+                vault::seal_legacy(name.as_bytes(), &sb.key, sb.constants.ecc()),
+            )
+            .unwrap();
+        }
+        (dir, sb)
+    }
+
+    fn options(dir: &Path, readonly: bool) -> crate::BackupFSOptions {
+        crate::BackupFSOptions {
+            data_dir: dir.to_owned(),
+            password: "password".into(),
+            readonly,
+            setuid_support: false,
+            file_size_padding: None,
+            idmapped: false,
+            enable_snapshots: false,
+        }
+    }
+
+    #[test]
+    fn legacy_store_upgrades_and_remounts_without_fuse() {
+        let (dir, legacy) = legacy_store();
+        let primary = dir.path().join("superblock");
+        let old_blob = std::fs::read(
+            dir.path()
+                .join("contents/abcd/0123456789abcdef0123456789ab"),
+        )
+        .unwrap();
+        let mounted = crate::BackupFS::new(options(dir.path(), false)).unwrap();
+        let sb = Superblock::load(&primary, "password", true).unwrap();
+        assert_eq!(sb.format_version, FORMAT_VERSION);
+        assert!(!sb.migration_pending);
+        assert_eq!(sb.generation, legacy.generation + 2);
+        assert_eq!(sb.key, legacy.key);
+        for name in ["contents", "dirents"] {
+            let blob = std::fs::read(
+                dir.path()
+                    .join(name)
+                    .join("abcd/0123456789abcdef0123456789ab"),
+            )
+            .unwrap();
+            assert_eq!(vault::open(&blob, &sb.key).unwrap(), name.as_bytes());
+        }
+        assert!(vault::open(&old_blob, &sb.key).is_err());
+        drop(mounted);
+        let remounted = crate::BackupFS::new(options(dir.path(), true)).unwrap();
+        drop(remounted);
+        let log = crate::seglog::SegmentLog::open(dir.path().join("segments"), sb.key).unwrap();
+        assert!(log.contains(crate::inode::Inode(crate::FUSE_ROOT_ID)));
+        assert_eq!(log.load_content(42).unwrap().unwrap(), b"packed bytes");
+        // Completed stores must not reseal an injected legacy blob on reopen.
+        let block = dir
+            .path()
+            .join("contents/abcd/0123456789abcdef0123456789ab");
+        std::fs::write(&block, &old_blob).unwrap();
+        let reopened = Superblock::open_or_create(&primary, "password", false).unwrap();
+        assert!(!reopened.migration_pending);
+        assert_eq!(std::fs::read(&block).unwrap(), old_blob);
+        assert!(vault::open(&old_blob, &reopened.key).is_err());
+    }
+
+    #[test]
+    fn interrupted_mixed_upgrade_resumes_and_discards_checkpoint() {
+        let (dir, mut sb) = legacy_store();
+        let primary = dir.path().join("superblock");
+        sb.format_version = FORMAT_VERSION;
+        sb.migration_pending = true;
+        sb.generation += 1;
+        sb.persist(&primary, "password").unwrap();
+        let block = dir
+            .path()
+            .join("contents/abcd/0123456789abcdef0123456789ab");
+        let sealed = crate::migration::reseal_blob(&std::fs::read(&block).unwrap(), &sb.key)
+            .unwrap()
+            .unwrap();
+        std::fs::write(&block, &sealed).unwrap();
+        // A leftover atomic-write temp file must not become another source blob.
+        std::fs::write(block.with_extension("tmp"), b"interrupted write").unwrap();
+        crate::seglog::migrate_segments(&dir.path().join("segments"), &sb.key).unwrap();
+        assert!(Superblock::open_or_create(&primary, "password", true).is_err());
+        let resumed = Superblock::open_or_create(&primary, "password", false).unwrap();
+        assert!(!resumed.migration_pending);
+        assert_eq!(resumed.generation, sb.generation + 1);
+        assert_eq!(std::fs::read(&block).unwrap(), sealed);
+        assert!(!dir
+            .path()
+            .join("segments")
+            .join(crate::seglog::INDEX_CACHE_NAME)
+            .exists());
+        let log = crate::seglog::SegmentLog::open(dir.path().join("segments"), sb.key).unwrap();
+        assert_eq!(log.load_content(42).unwrap().unwrap(), b"packed bytes");
+    }
+
+    fn snapshot(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+        let mut files = Vec::new();
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                files.extend(snapshot(&path));
+            } else {
+                files.push((path.clone(), std::fs::read(path).unwrap()));
+            }
+        }
+        files.sort();
+        files
+    }
+
+    #[test]
+    fn readonly_legacy_and_wrong_password_leave_store_untouched() {
+        let (dir, _) = legacy_store();
+        let primary = dir.path().join("superblock");
+        let before = snapshot(dir.path());
+        assert!(Superblock::open_or_create(&primary, "password", true).is_err());
+        assert_eq!(snapshot(dir.path()), before);
+        assert!(Superblock::open_or_create(&primary, "wrong password", false).is_err());
+        assert_eq!(snapshot(dir.path()), before);
+    }
+
+    #[test]
+    fn current_replica_blocks_legacy_fallback_even_with_higher_generation() {
+        let (dir, mut sb) = legacy_store();
+        let primary = dir.path().join("superblock");
+        sb.generation = 999;
+        std::fs::write(&primary, legacy_bytes(&sb, "password")).unwrap();
+        sb.generation = 8;
+        sb.format_version = FORMAT_VERSION;
+        sb.migration_pending = true;
+        // A crash after only the backup replica is upgraded.
+        let saved = std::fs::read(&primary).unwrap();
+        sb.persist(&primary, "password").unwrap();
+        std::fs::write(&primary, saved).unwrap();
+        let chosen = Superblock::load(&primary, "password", true).unwrap();
+        assert_eq!(chosen.generation, 8);
+        assert!(chosen.migration_pending);
+        // A damaged authenticated replica must not revive its legacy sibling.
+        let backup = replica_paths(&primary).remove(1);
+        let mut raw = std::fs::read(&backup).unwrap();
+        raw[ENVELOPE_LEN + 16] ^= 1;
+        std::fs::write(backup, raw).unwrap();
+        assert!(Superblock::load(&primary, "password", true).is_err());
+    }
+
+    #[test]
+    fn failed_migration_retains_pending_flag_and_can_retry() {
+        let (dir, _) = legacy_store();
+        let primary = dir.path().join("superblock");
+        let bucket = dir.path().join("dirents/abcd/0123456789abcdef0123456789ab");
+        let original = std::fs::read(&bucket).unwrap();
+        std::fs::write(&bucket, b"damaged beyond ECC").unwrap();
+        assert!(Superblock::open_or_create(&primary, "password", false).is_err());
+        let sb = Superblock::load(&primary, "password", true).unwrap();
+        assert!(sb.migration_pending);
+        assert_eq!(sb.format_version, FORMAT_VERSION);
+        std::fs::write(&bucket, original).unwrap();
+        assert!(
+            !Superblock::open_or_create(&primary, "password", false)
+                .unwrap()
+                .migration_pending
+        );
     }
 }

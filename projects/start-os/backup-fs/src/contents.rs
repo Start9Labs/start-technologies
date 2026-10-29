@@ -21,9 +21,6 @@ use std::collections::BTreeMap;
 use std::io;
 use std::sync::OnceLock;
 
-use rand::rand_core::UnwrapErr;
-use rand::{rng, Rng};
-
 use crate::blockstore::{self, CHUNK_SIZE};
 use crate::compress::{self, Codec};
 use crate::ctrl::Controller;
@@ -76,6 +73,7 @@ enum Body {
         dirty_bytes: usize,
         /// Blocks believed to exist on disk (for trailing-block prune).
         disk_blocks: u64,
+        disk_size: u64,
         /// The most recently decoded clean block (see [`CachedBlock`]).
         cached: Option<CachedBlock>,
     },
@@ -152,6 +150,7 @@ impl Contents {
                 dirty: BTreeMap::new(),
                 dirty_bytes: 0,
                 disk_blocks: blockstore::block_count(inode.attrs.size),
+                disk_size: inode.attrs.size,
                 cached: None,
             },
             FileData::Directory(_) => return BkfsResult::errno(libc::EISDIR),
@@ -209,8 +208,10 @@ impl Contents {
             }
             Body::Blocks { .. } => self.read_blocks_at(buf, offset)?,
         }
-        self.inode.attrs.atime = time_now();
-        self.changed = true;
+        if !self.ctrl.config().readonly {
+            self.inode.attrs.atime = time_now();
+            self.changed = true;
+        }
         Ok(())
     }
 
@@ -276,6 +277,10 @@ impl Contents {
             return Ok(0);
         }
         let end = offset + buf.len() as u64;
+        let tail = self.size() / CHUNK_SIZE * CHUNK_SIZE;
+        if end > self.size() && offset > tail {
+            self.discard_size_padding()?;
+        }
         self.promote_for(end)?;
 
         if matches!(self.body, Body::Blocks { .. }) {
@@ -313,6 +318,33 @@ impl Contents {
         }
         self.record_write(end);
         Ok(buf.len())
+    }
+
+    fn discard_size_padding(&mut self) -> BkfsResult<()> {
+        let valid = (self.size() % CHUNK_SIZE) as usize;
+        if valid == 0 || !matches!(self.body, Body::Blocks { .. }) {
+            return Ok(());
+        }
+        let idx = self.size() / CHUNK_SIZE;
+        let bytes = self.load_block(idx)?;
+        if bytes.len() <= valid {
+            return Ok(());
+        }
+        let bytes = bytes[..valid].to_vec();
+        if let Body::Blocks {
+            dirty,
+            dirty_bytes,
+            cached,
+            ..
+        } = &mut self.body
+        {
+            if let Some(old) = dirty.insert(idx, bytes) {
+                *dirty_bytes -= old.len();
+            }
+            *dirty_bytes += valid;
+            cached.take_if(|c| c.idx == idx);
+        }
+        Ok(())
     }
 
     fn record_write(&mut self, end: u64) {
@@ -380,6 +412,7 @@ impl Contents {
             dirty,
             dirty_bytes,
             disk_blocks: 0,
+            disk_size: 0,
             cached: None,
         };
         self.inode.attrs.contents = FileData::File(content_id);
@@ -415,7 +448,7 @@ impl Contents {
                     *dirty_bytes -= b.len();
                     b
                 }
-                None if within == 0 && take == CHUNK_SIZE as usize => Vec::new(),
+                None if valid == 0 || (within == 0 && take == CHUNK_SIZE as usize) => Vec::new(),
                 None => {
                     let mut b = match cached.take_if(|c| c.idx == idx) {
                         Some(c) => c.bytes,
@@ -465,6 +498,7 @@ impl Contents {
             dirty,
             dirty_bytes,
             disk_blocks: 0,
+            disk_size: 0,
             cached: None,
         };
         self.inode.attrs.contents = FileData::File(content_id);
@@ -503,7 +537,6 @@ impl Contents {
             let block = dirty.get(&idx).unwrap();
             let stored = &block[..valid.min(block.len())];
             blockstore::write_block(&self.ctrl, content_id, idx, stored, self.codec, false)?;
-            self.ctrl.tick_save()?;
             let removed = dirty.remove(&idx).unwrap();
             *dirty_bytes -= removed.len();
             *disk_blocks = (*disk_blocks).max(idx + 1);
@@ -539,6 +572,7 @@ impl Contents {
         if !keep_size {
             let new_end = offset + length;
             if new_end > self.inode.attrs.size {
+                self.discard_size_padding()?;
                 self.inode.attrs.size = new_end;
             }
             self.inode.attrs.modified();
@@ -547,7 +581,23 @@ impl Contents {
         Ok(())
     }
 
+    pub(crate) fn resize(&mut self, size: u64) -> BkfsResult<()> {
+        self.ctrl.check_rw()?;
+        if size > self.size() {
+            self.discard_size_padding()?;
+        }
+        self.inode.attrs.size = size;
+        self.changed = true;
+        if let Body::Packed { dirty, .. } = &mut self.body {
+            *dirty = true;
+        }
+        self.flush()
+    }
+
     pub fn flush(&mut self) -> BkfsResult<()> {
+        if self.ctrl.config().readonly {
+            return Ok(());
+        }
         self.flush_content_only()?;
         if self.changed {
             self.ctrl.save_fast(&self.inode)?;
@@ -596,7 +646,6 @@ impl Contents {
             } => {
                 buf.resize(size as usize, 0);
                 let bytes = if *dirty { Some(buf.clone()) } else { None };
-                *dirty = false;
                 Plan::Packed(*content_id, bytes)
             }
             Body::Blocks { .. } => Plan::Blocks,
@@ -613,6 +662,9 @@ impl Contents {
                 if let Some(b) = bytes {
                     self.ctrl.cpack_put(cid, &b, self.codec, false)?;
                     self.ctrl.tick_save()?;
+                    if let Body::Packed { dirty, .. } = &mut self.body {
+                        *dirty = false;
+                    }
                 }
                 self.inode.attrs.contents = FileData::Packed(cid);
                 return Ok(());
@@ -621,53 +673,77 @@ impl Contents {
         }
 
         let required = blockstore::block_count(self.inode.attrs.size);
-        let (content_id, dirty, disk_blocks) = match &mut self.body {
+        if matches!(&self.body, Body::Blocks { disk_size, .. } if size < *disk_size)
+            && size % CHUNK_SIZE != 0
+        {
+            let idx = required - 1;
+            let mut bytes = self.load_block(idx)?.to_vec();
+            bytes.truncate((size % CHUNK_SIZE) as usize);
+            if let Body::Blocks {
+                dirty, dirty_bytes, ..
+            } = &mut self.body
+            {
+                if let Some(old) = dirty.insert(idx, bytes.clone()) {
+                    *dirty_bytes -= old.len();
+                }
+                *dirty_bytes += bytes.len();
+            }
+        }
+        let (content_id, pending, disk_blocks) = match &mut self.body {
             Body::Blocks {
                 content_id,
                 dirty,
-                dirty_bytes,
                 disk_blocks,
                 cached,
+                ..
             } => {
-                *dirty_bytes = 0;
-                // The prune below unlinks every block at or past `required`.
-                // Forget a cached one so that growing the file again reads
-                // it back as the hole it has become.
-                cached.take_if(|c| c.idx >= required);
-                (*content_id, std::mem::take(dirty), *disk_blocks)
+                cached.take_if(|c| c.idx >= required || dirty.contains_key(&c.idx));
+                (
+                    *content_id,
+                    dirty.keys().copied().collect::<Vec<_>>(),
+                    *disk_blocks,
+                )
             }
             _ => return Ok(()),
         };
         let last = required.saturating_sub(1);
-        for (idx, mut block) in dirty {
-            if idx >= required {
-                continue; // past EOF; pruned below
+        for idx in pending {
+            if idx < required {
+                let Body::Blocks { dirty, .. } = &self.body else {
+                    unreachable!()
+                };
+                let block = dirty.get(&idx).unwrap();
+                let bytes = &block[..block.len().min(self.valid_len(idx))];
+                if idx == last && self.ctrl.config().file_size_padding.is_some() {
+                    blockstore::write_final_block(
+                        &self.ctrl, content_id, idx, bytes, self.codec, false,
+                    )?;
+                } else {
+                    blockstore::write_block(&self.ctrl, content_id, idx, bytes, self.codec, false)?;
+                }
             }
-            block.truncate(self.valid_len(idx));
-            if idx == last {
-                self.pad_final_inline(&mut block);
+            if let Body::Blocks {
+                dirty, dirty_bytes, ..
+            } = &mut self.body
+            {
+                if let Some(bytes) = dirty.remove(&idx) {
+                    *dirty_bytes -= bytes.len();
+                }
             }
-            blockstore::write_block(&self.ctrl, content_id, idx, &block, self.codec, false)?;
-            self.ctrl.tick_save()?;
         }
         for idx in required..disk_blocks {
             blockstore::remove_block(&self.ctrl, content_id, idx)?;
         }
-        if let Body::Blocks { disk_blocks, .. } = &mut self.body {
+        if let Body::Blocks {
+            disk_blocks,
+            disk_size,
+            ..
+        } = &mut self.body
+        {
             *disk_blocks = required;
+            *disk_size = size;
         }
         Ok(())
-    }
-
-    /// Optionally pad stored bytes with random data to obscure the exact
-    /// size (the `--file-size-padding` knob). Never affects logical reads.
-    fn pad_final_inline(&self, bytes: &mut Vec<u8>) {
-        let padded = self.ctrl.file_pad(bytes.len() as u64) as usize;
-        if padded > bytes.len() {
-            let start = bytes.len();
-            bytes.resize(padded, 0);
-            UnwrapErr(rng()).fill_bytes(&mut bytes[start..]);
-        }
     }
 
     pub fn fsync(&mut self) -> BkfsResult<()> {
@@ -677,6 +753,9 @@ impl Contents {
     }
 
     pub fn close(mut self, handler: &mut Handler) -> BkfsResult<()> {
+        if self.ctrl.config().readonly {
+            return Ok(());
+        }
         self.flush_content_only()?;
         let attrs = self.inode.clone();
         let changed = self.changed;

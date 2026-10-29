@@ -1,10 +1,11 @@
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fs::File;
 use std::io;
 use std::io::Write;
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use chacha20::Key;
@@ -12,13 +13,15 @@ use fuser::FileType;
 use log::error;
 use rand::rand_core::UnwrapErr;
 use rand::RngExt;
-use sha2::{Digest, Sha256};
+use zeroize::Zeroizing;
 
 use crate::atomic_file::AtomicFile;
 use crate::directory::{DirectoryContents, DirectoryEntry};
 use crate::error::{BkfsResult, BkfsResultExt};
 use crate::inode::{Attributes, ContentId, FileData, Inode, InodeAttributes};
+use crate::objects::{ObjectId, ObjectVersion};
 use crate::seglog::{self, SegmentLog};
+use crate::snapshot::{Catalog, Snapshot, SnapshotInfo, COW_FORMAT_VERSION};
 use crate::superblock::{Constants, Superblock};
 use crate::vault::EccParams;
 use crate::{serde, BackupFSOptions, FUSE_ROOT_ID};
@@ -48,8 +51,10 @@ pub struct ControllerSeed {
     /// crash mid-rewrite converges to the newest replica on the next mount.
     sb_generation: AtomicU64,
     key: Key,
-    contents_dir: PathBuf,
-    dirents_dir: PathBuf,
+    format_version: u32,
+    catalog: Mutex<Catalog>,
+    snapshot: Option<Snapshot>,
+    uncertain_catalog: AtomicBool,
     /// Log-structured inode store. Inodes are records here, not per-inode
     /// files. Behind a Mutex because the Controller is shared across the
     /// worker pool; sealing happens outside the lock (see `seglog`).
@@ -84,11 +89,32 @@ fn compact_ratio() -> f64 {
 
 impl Controller {
     pub fn new(config: BackupFSOptions) -> BkfsResult<Self> {
-        // The superblock is the anchor: it yields the master key and the
-        // authoritative format constants (validated/version-gated on open).
+        Self::open(config, None)
+    }
+
+    pub(crate) fn open(mut config: BackupFSOptions, snapshot: Option<&str>) -> BkfsResult<Self> {
+        if let Some(name) = snapshot {
+            crate::snapshot::validate_name(name)?;
+            config.readonly = true;
+        }
+        let password = Zeroizing::new(std::mem::take(&mut config.password));
         let superblock_path = config.data_dir.join("superblock");
         let t = std::time::Instant::now();
-        let sb = Superblock::open_or_create(&superblock_path, &config.password, config.readonly)?;
+        let mut sb = Superblock::open_or_create(&superblock_path, &password, config.readonly)?;
+        if !config.readonly
+            && config.enable_snapshots
+            && sb.format_version == crate::superblock::FORMAT_VERSION
+            && crate::superblock::SUPPORTED_FORMAT_VERSION >= COW_FORMAT_VERSION
+        {
+            sb.format_version = COW_FORMAT_VERSION;
+            sb.generation = sb.generation.checked_add(1).ok_or_else(|| {
+                crate::error::BkfsError::unsupported("superblock generation exhausted")
+            })?;
+        }
+        if !config.readonly && sb.format_version >= COW_FORMAT_VERSION {
+            sb.persist(&superblock_path, &password)?;
+        }
+        drop(password);
         log::info!("superblock opened in {:?}", t.elapsed());
         let key = sb.key;
         let constants = sb.constants;
@@ -96,17 +122,36 @@ impl Controller {
         // index and the max-inode high-water mark. The segment size is pinned
         // by the superblock, not the environment.
         let t = std::time::Instant::now();
-        let log = SegmentLog::open_sized(
+        let mut log = SegmentLog::open_sized(
             config.data_dir.join("segments"),
             key,
             constants.segment_size,
         )?;
         log::info!("segment log opened in {:?}", t.elapsed());
+        if sb.format_version >= COW_FORMAT_VERSION {
+            log.enable_cow();
+        }
         let next_inode = (log.max_inode() + 1).max(FUSE_ROOT_ID + 1);
+        let catalog = Catalog::load(&config.data_dir, &key)?;
+        log.pin(catalog.pins());
+        let snapshot = snapshot
+            .map(|name| {
+                catalog
+                    .entries
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| io::Error::from_raw_os_error(libc::ENOENT))
+            })
+            .transpose()?;
+        if let Some(snapshot) = &snapshot {
+            log.adopt_roots(&snapshot.roots);
+        }
         Ok(Self(Arc::new(ControllerSeed {
             key,
-            contents_dir: config.data_dir.join("contents"),
-            dirents_dir: config.data_dir.join("dirents"),
+            format_version: sb.format_version,
+            catalog: Mutex::new(catalog),
+            snapshot,
+            uncertain_catalog: AtomicBool::new(false),
             log: Mutex::new(log),
             next_inode: AtomicU64::new(next_inode),
             pending_saves: AtomicUsize::new(0),
@@ -148,6 +193,7 @@ impl Controller {
     /// active segment before returning; otherwise durability rides the
     /// batched syncfs. Sealing is done before taking the log lock.
     pub fn log_put(&self, inode: Inode, attrs: &Attributes, durable: bool) -> BkfsResult<()> {
+        self.check_rw()?;
         let rec = seglog::seal_inode(&self.key(), self.ecc(), inode, attrs)?;
         let mut log = self.0.log.lock().unwrap();
         log.append(&rec)?;
@@ -161,6 +207,7 @@ impl Controller {
     /// before removing the inode's content (block files / dir buckets) pass
     /// `durable = true`.
     pub fn log_tombstone(&self, inode: Inode, durable: bool) -> BkfsResult<()> {
+        self.check_rw()?;
         let rec = seglog::seal_tombstone(&self.key(), self.ecc(), inode)?;
         let mut log = self.0.log.lock().unwrap();
         log.append(&rec)?;
@@ -188,6 +235,7 @@ impl Controller {
         codec: crate::compress::Codec,
         durable: bool,
     ) -> BkfsResult<()> {
+        self.check_rw()?;
         // Compress before sealing (ciphertext is incompressible); the
         // extent's stored payload carries the compression tag.
         let stored = crate::compress::compress(bytes, codec);
@@ -213,6 +261,7 @@ impl Controller {
     }
 
     pub fn cpack_tombstone(&self, id: ContentId, durable: bool) -> BkfsResult<()> {
+        self.check_rw()?;
         let rec = seglog::seal_content_tombstone(&self.key(), self.ecc(), id.0)?;
         let mut log = self.0.log.lock().unwrap();
         log.append(&rec)?;
@@ -253,6 +302,9 @@ impl Controller {
         let ratio = compact_ratio();
         if ratio >= 1.0 {
             return Ok(0);
+        }
+        if self.0.format_version >= COW_FORMAT_VERSION {
+            self.collect_garbage()?;
         }
         self.0.log.lock().unwrap().compact(ratio)
     }
@@ -367,68 +419,103 @@ impl Controller {
             constants: self.0.constants,
             generation,
             created_unix: self.0.created_unix,
+            format_version: self.0.format_version,
+            migration_pending: false,
         };
         sb.persist(&self.0.superblock_path, password)
     }
 
     pub fn check_rw(&self) -> BkfsResult<()> {
-        if self.0.config.readonly {
+        if self.0.uncertain_catalog.load(Ordering::Relaxed) {
+            BkfsResult::errno_notrace(libc::EIO)
+        } else if self.0.config.readonly {
             BkfsResult::errno_notrace(libc::EROFS)
         } else {
             Ok(())
         }
     }
 
-    /// Deterministic, key-dependent filename for content block
-    /// `(content, idx)`. The name is a keyed SHA-256 hash, so it leaks no
-    /// information about the inode or offset, yet is stable across runs —
-    /// editing one region of a file rewrites exactly one block file and
-    /// every other block keeps its name (the property that makes
-    /// rsync/rclone incremental copies cheap).
     pub fn block_path(&self, content: ContentId, idx: u64) -> PathBuf {
-        // FROZEN as superblock `path_hash_scheme == 1`: the domain tag, the
-        // little-endian id encoding, and the 16-bit-dir / 112-bit-name split
-        // below all determine where bytes physically live and how reads find
-        // them. Changing any of it makes every existing block file
-        // unresolvable, so it must be gated by a FORMAT_VERSION /
-        // path_hash_scheme bump (validate-equality refuses a foreign scheme).
-        let mut hasher = Sha256::new();
-        hasher.update(self.0.key.as_slice());
-        hasher.update(b"block");
-        hasher.update(content.0.to_le_bytes());
-        hasher.update(idx.to_le_bytes());
-        let tag = hasher.finalize();
-        // 2-level layout: 16-bit bucket (≤65 536 dirs) + 112-bit filename.
-        // The 128-bit digest makes collisions cryptographically negligible.
-        let dir = u16::from_be_bytes([tag[0], tag[1]]);
-        let mut name = String::with_capacity(30);
-        for b in &tag[2..16] {
-            name.push_str(&format!("{b:02x}"));
-        }
-        self.0.contents_dir.join(format!("{dir:04x}/{name}"))
+        self.block_id(content, idx)
+            .path(&self.0.config.data_dir, None)
+            .unwrap()
     }
 
-    /// Blocks have no legacy layout, so resolution is just [`Self::block_path`].
+    pub(crate) fn block_id(&self, content: ContentId, idx: u64) -> ObjectId {
+        ObjectId::block(self.key(), content.0, idx)
+    }
+
     pub fn resolve_block_path(&self, content: ContentId, idx: u64) -> PathBuf {
-        self.block_path(content, idx)
+        self.object_path(self.block_id(content, idx))
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| self.block_path(content, idx))
     }
 
-    /// Path of a spilled-directory bucket file, keyed by `(dir, gen, idx)`.
-    /// Part of FROZEN superblock `path_hash_scheme == 1` (see [`Self::block_path`]).
-    fn dir_bucket_path(&self, dir: Inode, gen: u64, idx: u32) -> PathBuf {
-        let mut hasher = Sha256::new();
-        hasher.update(self.0.key.as_slice());
-        hasher.update(b"dirbucket");
-        hasher.update(dir.0.to_le_bytes());
-        hasher.update(gen.to_le_bytes());
-        hasher.update(idx.to_le_bytes());
-        let tag = hasher.finalize();
-        let bucket = u16::from_be_bytes([tag[0], tag[1]]);
-        let mut name = String::with_capacity(30);
-        for b in &tag[2..16] {
-            name.push_str(&format!("{b:02x}"));
+    fn dir_bucket_id(&self, dir: Inode, gen: u64, idx: u32) -> ObjectId {
+        ObjectId::bucket(self.key(), dir.0, gen, idx)
+    }
+
+    pub(crate) fn object_path(&self, id: ObjectId) -> BkfsResult<Option<PathBuf>> {
+        let version = self.0.log.lock().unwrap().object(id)?;
+        if version.is_none()
+            && self
+                .0
+                .snapshot
+                .as_ref()
+                .is_some_and(|s| !s.legacy.contains(&id))
+        {
+            return Ok(None);
         }
-        self.0.dirents_dir.join(format!("{bucket:04x}/{name}"))
+        Ok(id.path(&self.0.config.data_dir, version))
+    }
+
+    pub(crate) fn write_object(
+        &self,
+        id: ObjectId,
+        durable: bool,
+        write: impl FnOnce(PathBuf, bool) -> BkfsResult<()>,
+    ) -> BkfsResult<()> {
+        self.check_rw()?;
+        if self.0.format_version < COW_FORMAT_VERSION {
+            write(id.path(&self.0.config.data_dir, None).unwrap(), durable)?;
+            if !durable {
+                self.tick_save()?;
+            }
+            return Ok(());
+        }
+        let version = ObjectVersion::new();
+        let path = id.path(&self.0.config.data_dir, Some(version)).unwrap();
+        write(path.clone(), durable)?;
+        if durable {
+            crate::objects::sync_object_path(&path)?;
+        }
+        let rec = seglog::seal_object(self.key(), self.ecc(), id, version)?;
+        let mut log = self.0.log.lock().unwrap();
+        log.append(&rec)?;
+        if durable {
+            log.sync()?;
+        }
+        drop(log);
+        if !durable {
+            self.tick_save()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn remove_object(&self, id: ObjectId) -> BkfsResult<()> {
+        self.check_rw()?;
+        if self.0.format_version < COW_FORMAT_VERSION {
+            return match std::fs::remove_file(id.path(&self.0.config.data_dir, None).unwrap()) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(e.into()),
+            };
+        }
+        let rec = seglog::seal_object(self.key(), self.ecc(), id, ObjectVersion::Deleted)?;
+        self.0.log.lock().unwrap().append(&rec)?;
+        self.tick_save()?;
+        Ok(())
     }
 
     /// Load one directory bucket; a missing file is an empty bucket.
@@ -438,7 +525,10 @@ impl Controller {
         gen: u64,
         idx: u32,
     ) -> BkfsResult<crate::directory::Bucket> {
-        match std::fs::read(self.dir_bucket_path(dir, gen, idx)) {
+        let Some(path) = self.object_path(self.dir_bucket_id(dir, gen, idx))? else {
+            return Ok(Default::default());
+        };
+        match std::fs::read(path) {
             Ok(blob) => serde::deserialize_sealed(&blob, self.key()),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Default::default()),
             Err(e) => Err(e.into()),
@@ -460,24 +550,205 @@ impl Controller {
             return self.remove_dir_bucket(dir, gen, idx);
         }
         let blob = serde::serialize_sealed(bucket, self.key(), self.ecc())?;
-        let mut file = AtomicFile::create_buffered(self.dir_bucket_path(dir, gen, idx))?;
-        file.write_all(&blob)?;
-        if durable {
-            file.save()
-        } else {
-            file.save_fast()?;
-            self.tick_save()?;
-            Ok(())
-        }
+        self.write_object(
+            self.dir_bucket_id(dir, gen, idx),
+            durable,
+            |path, durable| {
+                let mut file = AtomicFile::create_buffered(path)?;
+                file.write_all(&blob)?;
+                if durable {
+                    file.save()
+                } else {
+                    file.save_fast()
+                }
+            },
+        )
     }
 
     /// Remove one directory bucket file, tolerating absence.
     pub fn remove_dir_bucket(&self, dir: Inode, gen: u64, idx: u32) -> BkfsResult<()> {
-        match std::fs::remove_file(self.dir_bucket_path(dir, gen, idx)) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        self.remove_object(self.dir_bucket_id(dir, gen, idx))
+    }
+
+    fn legacy_exists(&self, id: ObjectId) -> BkfsResult<bool> {
+        match std::fs::symlink_metadata(id.path(&self.0.config.data_dir, None).unwrap()) {
+            Ok(metadata) if metadata.is_file() => Ok(true),
+            Ok(_) => Err(crate::error::BkfsError::unsupported(
+                "unexpected legacy object",
+            )),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
             Err(e) => Err(e.into()),
         }
+    }
+
+    fn referenced_storage(
+        &self,
+        roots: &seglog::Roots,
+    ) -> BkfsResult<(HashSet<ObjectId>, HashSet<u64>)> {
+        let mut ids = HashSet::new();
+        let mut packed = HashSet::new();
+        let log = self.0.log.lock().unwrap();
+        for (&inode, &loc) in &roots.index {
+            let seglog::Record::Inode { attrs, .. } = log.read_at(loc)? else {
+                return Err(crate::error::BkfsError::unsupported("invalid inode root"));
+            };
+            match attrs.contents {
+                FileData::File(content) => {
+                    for idx in 0..crate::blockstore::block_count(attrs.size) {
+                        let id = self.block_id(content, idx);
+                        if roots.objects.contains_key(&id) || self.legacy_exists(id)? {
+                            ids.insert(id);
+                        }
+                    }
+                }
+                FileData::Packed(content) => {
+                    packed.insert(content.0);
+                }
+                FileData::Directory(dir) => {
+                    for (gen, idx) in dir.bucket_ids() {
+                        let id = self.dir_bucket_id(Inode(inode), gen, idx);
+                        if roots.objects.contains_key(&id) || self.legacy_exists(id)? {
+                            ids.insert(id);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok((ids, packed))
+    }
+
+    pub(crate) fn list_snapshots(&self) -> Vec<SnapshotInfo> {
+        self.0
+            .catalog
+            .lock()
+            .unwrap()
+            .entries
+            .values()
+            .map(|s| s.info.clone())
+            .collect()
+    }
+
+    pub(crate) fn create_snapshot(&self, name: &str) -> BkfsResult<SnapshotInfo> {
+        self.check_rw()?;
+        crate::snapshot::validate_name(name)?;
+        if self.0.format_version < COW_FORMAT_VERSION {
+            return Err(crate::error::BkfsError::unsupported(
+                "snapshots require the authenticated COW format gate",
+            ));
+        }
+        let mut catalog = self.0.catalog.lock().unwrap();
+        if catalog.entries.contains_key(name) {
+            return Err(io::Error::from_raw_os_error(libc::EEXIST).into());
+        }
+        self.syncfs()?;
+        let mut roots = self.0.log.lock().unwrap().roots();
+        let (ids, packed) = self.referenced_storage(&roots)?;
+        roots.objects.retain(|id, _| ids.contains(id));
+        roots.content.retain(|id, _| packed.contains(id));
+        let mut legacy = HashSet::new();
+        for id in ids {
+            if !roots.objects.contains_key(&id) && self.legacy_exists(id)? {
+                legacy.insert(id);
+            }
+        }
+        self.0.log.lock().unwrap().persist_roots()?;
+        let info = SnapshotInfo {
+            name: name.to_owned(),
+            created_unix: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        };
+        let mut next = catalog.clone();
+        next.entries.insert(
+            name.to_owned(),
+            Snapshot {
+                info: info.clone(),
+                roots,
+                legacy,
+            },
+        );
+        if let Err(e) = next.persist(&self.0.config.data_dir, self.key(), self.ecc()) {
+            self.0.uncertain_catalog.store(true, Ordering::Relaxed);
+            return Err(e);
+        }
+        self.0.log.lock().unwrap().pin(next.pins());
+        *catalog = next;
+        Ok(info)
+    }
+
+    pub(crate) fn delete_snapshot(&self, name: &str) -> BkfsResult<()> {
+        self.check_rw()?;
+        crate::snapshot::validate_name(name)?;
+        {
+            let mut catalog = self.0.catalog.lock().unwrap();
+            let mut next = catalog.clone();
+            if next.entries.remove(name).is_none() {
+                return Err(io::Error::from_raw_os_error(libc::ENOENT).into());
+            }
+            if let Err(e) = next.persist(&self.0.config.data_dir, self.key(), self.ecc()) {
+                self.0.uncertain_catalog.store(true, Ordering::Relaxed);
+                return Err(e);
+            }
+            self.0.log.lock().unwrap().pin(next.pins());
+            *catalog = next;
+        }
+        self.collect_garbage()?;
+        Ok(())
+    }
+
+    pub(crate) fn collect_garbage(&self) -> BkfsResult<usize> {
+        self.check_rw()?;
+        if self.0.format_version < COW_FORMAT_VERSION {
+            return Ok(0);
+        }
+        self.syncfs()?;
+        let roots = self.0.log.lock().unwrap().roots();
+        let (ids, packed) = self.referenced_storage(&roots)?;
+        let mut keep = HashSet::new();
+        for id in &ids {
+            if let Some(path) = self.object_path(*id)? {
+                keep.insert(path);
+            }
+        }
+        let catalog = self.0.catalog.lock().unwrap();
+        {
+            let mut log = self.0.log.lock().unwrap();
+            for snapshot in catalog.entries.values() {
+                for id in self.snapshot_object_ids(snapshot) {
+                    let version = match snapshot.roots.objects.get(&id) {
+                        Some(&loc) => match log.read_at(loc)? {
+                            seglog::Record::Object { version, .. } => Some(version),
+                            _ => {
+                                return Err(crate::error::BkfsError::unsupported(
+                                    "invalid snapshot object root",
+                                ))
+                            }
+                        },
+                        None => None,
+                    };
+                    if let Some(path) = id.path(&self.0.config.data_dir, version) {
+                        keep.insert(path);
+                    }
+                }
+            }
+            log.retain_storage(&ids, &packed);
+            log.persist_roots()?;
+        }
+        let removed = crate::objects::collect_garbage(&self.0.config.data_dir, &keep)?;
+        self.0.log.lock().unwrap().compact(0.0)?;
+        Ok(removed)
+    }
+
+    fn snapshot_object_ids(&self, snapshot: &Snapshot) -> HashSet<ObjectId> {
+        snapshot
+            .roots
+            .objects
+            .keys()
+            .copied()
+            .chain(snapshot.legacy.iter().copied())
+            .collect()
     }
 
     pub fn next_inode(&self) -> BkfsResult<Inode> {

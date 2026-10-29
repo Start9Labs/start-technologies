@@ -36,6 +36,7 @@ monorepo-wide rules and [ARCHITECTURE.md](ARCHITECTURE.md) for how this product 
 - Type-check the runtime: `cd projects/start-os/container-runtime && npm run check`.
 - Build the UI: `make start-os-ui` (or `make start-os-uis` for ui + setup-wizard).
 - Tests: `make test` (Rust + SDK + container-runtime + shell), `make start-core-test`, `make backup-fs-test` for all backup-fs library tests except the mount-based `/dev/fuse` suite, or `make start-os-scripts-test` for the shell suite under `build/tests/`.
+- Backup helper integration: `cargo build -p startos-backup-fs --bin startos-backup-fs`, then `bash projects/start-os/backup-fs/test-cli.sh target/debug/startos-backup-fs`. Requires Linux FUSE mount privileges, `fusermount3`, Node.js, and `attr`. Container fixtures must allow `io_uring` syscalls as well as FUSE mounts.
 - Format: `make start-os-format` / `make start-os-format-check` (Rust only);
   TS/web/container-runtime formatting runs through `make web-format` (root
   prettier config).

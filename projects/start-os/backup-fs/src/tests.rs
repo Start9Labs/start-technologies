@@ -69,15 +69,9 @@ fn with_backupfs(
     // (main.rs) sets default_permissions — its enforcement is covered by the
     // VM backup/restore test, where the mount is kernel-idmapped.
     config.mount_options = vec![MountOption::FSName("backup-fs".to_string())];
-    let fs = BackupFS::new(BackupFSOptions {
-        data_dir: data.to_owned(),
-        setuid_support: false,
-        password,
-        file_size_padding,
-        readonly: false,
-        idmapped: false,
-    })
-    .unwrap();
+    let mut options = opts(data, &password);
+    options.file_size_padding = file_size_padding;
+    let fs = BackupFS::new(options).unwrap();
     // 0.17's spawn() moves the mount into the BackgroundSession, so an
     // unmounter taken from the Session beforehand is dead. Drive the whole
     // lifecycle through the BackgroundSession: run in the background, then
@@ -239,14 +233,7 @@ fn preserves_directory() {
 fn checksum() {
     let data = TempDir::with_prefix("backupfs_data").unwrap();
     with_backupfs(data.path(), "ohea".to_owned(), |_mnt| {}, None);
-    let res = BackupFS::new(BackupFSOptions {
-        data_dir: data.path().to_owned(),
-        setuid_support: false,
-        password: "rtns".to_owned(),
-        file_size_padding: None,
-        readonly: false,
-        idmapped: false,
-    });
+    let res = BackupFS::new(opts(data.path(), "rtns"));
     match res {
         Ok(_) => panic!(),
         Err(err) => assert!(matches!(&err.kind, BkfsErrorKind::BadChecksum)),
@@ -266,15 +253,7 @@ fn change_password() {
     );
 
     {
-        let mut fs = BackupFS::new(BackupFSOptions {
-            data_dir: data.path().to_owned(),
-            setuid_support: false,
-            password: "ohea".to_owned(),
-            file_size_padding: None,
-            readonly: false,
-            idmapped: false,
-        })
-        .unwrap();
+        let mut fs = BackupFS::new(opts(data.path(), "ohea")).unwrap();
         fs.change_password("rtns").unwrap();
     }
 
@@ -1391,6 +1370,7 @@ fn opts(data: &Path, password: &str) -> BackupFSOptions {
         file_size_padding: None,
         readonly: false,
         idmapped: false,
+        enable_snapshots: false,
     }
 }
 
@@ -3006,7 +2986,7 @@ fn a_write_that_fails_after_a_tier_migration_leaves_the_file_readable() {
     let big: Vec<u8> = (0..17 * CHUNK_OFFSET).map(pattern_byte).collect();
     {
         let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
-        let blocked = ctrl.resolve_block_path(ContentId(ino), 0);
+        let blocked = ctrl.block_path(ContentId(ino), 0).with_extension("tmp");
         fs::create_dir_all(&blocked).unwrap();
         let mut handler = crate::handle::Handler::new(ctrl);
         let fh = handler

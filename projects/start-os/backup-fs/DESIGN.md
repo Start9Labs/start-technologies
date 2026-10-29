@@ -10,10 +10,14 @@ copied incrementally with `rsync`/`rclone`.
 
 ```
 $data_dir/
-  cryptinfo            sealed (PBKDF2) master key + IVs
-  inode_pool           sealed free-inode allocator
-  inodes/<bucket>/<id> one sealed file per inode (metadata + dir contents)
-  contents/<bucket>/<name>   sealed content blocks, ≤ 1 MiB of plaintext each
+  superblock           versioned envelope and sealed master key + format constants
+  superblock.bak1      redundant superblock replica
+  segments/*.seg       append-only sealed inode and packed-content records
+  segments/index.cache sealed, rebuildable index checkpoint
+  segments/roots       authoritative replay floor for snapshot-enabled stores
+  snapshots            sealed catalog of named recovery roots
+  contents/<bucket>/<name>[.<version>]   sealed content blocks
+  dirents/<bucket>/<name>[.<version>]    sealed directory buckets
 ```
 
 Every object on disk is a **sealed blob** (see `vault.rs`). A file's data is
@@ -24,20 +28,18 @@ sealed file.
 
 `seal(plaintext)` →
 
-1. `secret = plaintext || SHA-256(plaintext)`
-2. encrypt `secret` with ChaCha20 under a fresh random nonce
-3. split the ciphertext into `data` Reed-Solomon shards and compute
-   `parity` extra shards (default 10 + 2, tunable via `BACKUPFS_ECC_DATA` /
-   `BACKUPFS_ECC_PARITY`); store a CRC-32 with each shard
+1. Derive independent encryption and authentication subkeys with domain-separated HMAC-SHA256.
+2. Encrypt plaintext with ChaCha20 under a fresh random nonce.
+3. Authenticate the vault header and ciphertext with HMAC-SHA256.
+4. Reed-Solomon-encode the ciphertext and authentication tag with `data` and `parity` shards; store a CRC-32 with each shard.
 
-`open(blob)` verifies each shard's CRC, treats any failing shard as an
-erasure, Reed-Solomon-reconstructs the ciphertext if **≤ parity** shards are
-bad, decrypts, and checks the SHA-256 tag. The tag both detects residual
-corruption and rejects a wrong password (`BadChecksum`).
+`open(blob)` treats CRC failures and missing shards as erasures, reconstructs up to `parity` lost shards, verifies the MAC in constant time, and only then decrypts. A wrong key, unauthenticated modification, or corruption beyond recovery returns `BadChecksum`. New stores default to 10 data + 2 parity shards; creation-time overrides are persisted in the superblock.
 
-ECC is computed over **ciphertext**, so on-medium bit rot is repaired before
-decryption. Each block carries its own parity, so corruption in one block
-never spreads to the rest of a file.
+Vault version 2 rejects version-1 blobs during normal reads. A writable open upgrades an existing store once: it durably marks every superblock replica as migration-pending, atomically reseals each object and segment, then clears the marker after synchronizing the replacements. An interrupted upgrade resumes from that marker; read-only opens refuse an unfinished upgrade. Migration needs temporary space for one replacement segment or object and rewrites the existing encrypted data. Older binaries cannot read an upgraded store.
+
+Migration cannot establish whether legacy data was altered before the upgrade. Previously copied weak key-wrapping metadata and complete-store rollback remain outside its protection.
+
+Authenticated storage uses filesystem format 2. Creating the first snapshot explicitly enables format 3; ordinary writable opens retain format 2 until then. The COW capability remains enabled after snapshots are deleted.
 
 ## Block-chunked content (`blockstore.rs`, `contents.rs`)
 
@@ -56,6 +58,7 @@ atomically renamed into place. This is the core of the redesign:
   a huge file is many independent blocks written/verified in parallel.
 - **Sparse files** cost nothing for holes — unwritten blocks have no file on
   disk and read back as zeros.
+- **Padding is separate from logical data.** A block payload records its compressed length before optional random padding. Growth cannot expose padding bytes; legacy final-block padding is clipped before extending the file.
 - **A decoded block is kept for the reads that follow it.** A handle from
   `open` is served `FOPEN_DIRECT_IO` and the backing store is read
   `O_DIRECT`, so a read of that handle reaches us at no more than the
@@ -88,13 +91,21 @@ xattr map — so **POSIX ACLs** (`system.posix_acl_access` /
 regular files, directories, symlinks, FIFOs, sockets, and character/block
 devices (with `rdev` preserved).
 
-## What carried over unchanged
+## Read-only snapshots
 
-The inode/handle/controller layer — directory bookkeeping, the dirty-inode
-coalescing cache, the clean-load LRU, crash-consistent rename/unlink/GC
-ordering, the sharded worker pool, and the `syncfs` group-commit durability
-path — is retained from the previous design; only the content-storage and
-serialization layers were replaced.
+`BackupFSOptions::enable_snapshots` enables COW storage during an exclusive writable open. The helper's `snapshot create` command sets this option automatically. `BackupFS::create_snapshot` flushes dirty inodes and open contents, synchronizes the backing filesystem, saves authoritative log roots, and durably publishes a named recovery point. Unchanged file content is shared: creation copies root indices, not file data. Later writes create immutable versions of affected blocks or directory buckets and append pointer records to the existing log.
+
+The authenticated catalog pins inode and packed-content log segments and retains the block/bucket versions each point uses. Existing stable-name objects are pinned without copying. Compaction skips pinned segments and saves an authoritative replay floor before deleting old segments; tombstoned records in retained history cannot resurrect current objects. Deletion removes the catalog entry durably before reclaiming storage unused by the live tree or retained snapshots. A failed catalog publication blocks mutations until reopen.
+
+Snapshot creation, listing, deletion, and recovery mounts use the existing exclusive store lock. These are offline operations; a writer and a recovery mount do not share the store concurrently. Recovery opens force read-only behavior throughout the filesystem and avoid atime writes. Names contain 1–128 ASCII letters, digits, `-`, `_`, or `.`, excluding `.` and `..`.
+
+The catalog stores flat indices and uses the existing 64 MiB metadata decode bound. Creation is proportional to the indexed namespace, not constant-time; very large or numerous snapshots can reach that bound. Marking scans logical block slots for legacy/sparse files. Pinned segments retain dead neighbors until their final pin is released. Retention is explicit and manual.
+
+Copies of an enabled store must include `snapshots` and `segments/roots`: both are authoritative metadata, unlike `segments/index.cache`.
+
+## Durability and dispatch
+
+The dirty-inode cache, clean-load LRU, per-inode worker ordering, and `syncfs` group commits remain shared with ordinary backups. Fast object saves defer durability to the existing batch checkpoint; explicit durable saves synchronize the object before its pointer record. Snapshot publication and reclamation synchronize the live state before committing authoritative roots.
 
 ## Small-file packing (log-structured metadata)
 

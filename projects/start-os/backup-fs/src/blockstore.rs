@@ -1,37 +1,20 @@
-//! Content storage as fixed-size, independently-sealed blocks.
+//! Fixed-size, independently sealed content objects.
 //!
-//! A regular file's data is split into [`CHUNK_SIZE`] logical chunks. Each
-//! chunk is stored as its own file on the backing store, sealed by
-//! [`crate::vault`] (encryption + integrity + Reed-Solomon ECC). This block
-//! layout is the core of the redesign and buys several properties at once:
-//!
-//! * **No random writes into existing objects.** A block is always written
-//!   whole — buffered, then atomically renamed into place. Backends that
-//!   can only replace an object wholesale (S3/`rclone mount`, and the like)
-//!   never see a sub-object overwrite. A partial write read-modify-writes a
-//!   single ≤1 MiB block, not the whole file.
-//!
-//! * **Cheap incremental backup.** A block's filename is a stable keyed
-//!   hash of `(content_id, block_index)`, so editing one region of a large
-//!   file rewrites exactly one block file and leaves every other block
-//!   byte-for-byte identical. `rsync`/`rclone` copying the data directory
-//!   transfer only the changed blocks.
-//!
-//! * **Small + large files both behave.** A tiny file is a single small
-//!   block file; a huge file is many independent block files that can be
-//!   written and verified in parallel.
-//!
-//! * **Per-block error correction.** Bit rot in one block is recovered from
-//!   that block's parity shards and never spreads to the rest of the file.
+//! COW stores append immutable versions; snapshot roots retain prior versions.
+//! Partial writes replace one logical chunk.
 
 use std::io::{self, Read, Write};
 
+use rand::rand_core::UnwrapErr;
+use rand::{rng, Rng};
+
 use crate::aligned_io::BufferedDirectFile;
-use crate::atomic_file::AtomicFile;
 use crate::ctrl::Controller;
 use crate::error::BkfsResult;
 use crate::inode::ContentId;
 use crate::{open_direct, vault};
+
+const FRAMED_PAYLOAD: u8 = 2;
 
 /// Logical chunk size. Each chunk maps to one sealed block file. 1 MiB
 /// balances per-file overhead (inode/dir-entry cost on the backing store)
@@ -54,7 +37,9 @@ pub fn locate(offset: u64) -> (u64, usize) {
 /// block) or, with size padding enabled, longer; callers must slice it to
 /// the logically-valid length.
 pub fn read_block(ctrl: &Controller, content: ContentId, idx: u64) -> BkfsResult<Option<Vec<u8>>> {
-    let path = ctrl.resolve_block_path(content, idx);
+    let Some(path) = ctrl.object_path(ctrl.block_id(content, idx))? else {
+        return Ok(None);
+    };
     let mut file = match open_direct(&path, false) {
         Ok(f) => f,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -62,13 +47,21 @@ pub fn read_block(ctrl: &Controller, content: ContentId, idx: u64) -> BkfsResult
     };
     let mut blob = Vec::new();
     file.read_to_end(&mut blob)?;
-    // open (decrypt + ECC) → decompress back to the logical block bytes. A
-    // block is at most one chunk, plus any size-padding applied to the final
-    // block; cap the decompressed size accordingly so a malformed frame can't
-    // allocate without bound.
     let stored = vault::open(&blob, ctrl.key())?;
+    let compressed = if stored.first() == Some(&FRAMED_PAYLOAD) {
+        let len = stored
+            .get(1..5)
+            .ok_or_else(|| io::Error::other("truncated block payload"))?;
+        let len = u32::from_le_bytes(len.try_into().unwrap()) as usize;
+        stored
+            .get(5..)
+            .and_then(|bytes| bytes.get(..len))
+            .ok_or_else(|| io::Error::other("invalid block payload length"))?
+    } else {
+        stored.as_slice()
+    };
     Ok(Some(crate::compress::decompress(
-        &stored,
+        compressed,
         max_block_len(ctrl),
     )?))
 }
@@ -92,27 +85,56 @@ pub fn write_block(
     codec: crate::compress::Codec,
     durable: bool,
 ) -> BkfsResult<()> {
+    store_block(ctrl, content, idx, &encode_block(plaintext, codec), durable)
+}
+
+pub fn write_final_block(
+    ctrl: &Controller,
+    content: ContentId,
+    idx: u64,
+    plaintext: &[u8],
+    codec: crate::compress::Codec,
+    durable: bool,
+) -> BkfsResult<()> {
+    let mut stored = encode_block(plaintext, codec);
+    let len = stored.len();
+    stored.resize(ctrl.file_pad(len as u64) as usize, 0);
+    UnwrapErr(rng()).fill_bytes(&mut stored[len..]);
+    store_block(ctrl, content, idx, &stored, durable)
+}
+
+fn encode_block(plaintext: &[u8], codec: crate::compress::Codec) -> Vec<u8> {
+    let compressed = crate::compress::compress(plaintext, codec);
+    let mut stored = Vec::with_capacity(5 + compressed.len());
+    stored.push(FRAMED_PAYLOAD);
+    stored.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+    stored.extend_from_slice(&compressed);
+    stored
+}
+
+fn store_block(
+    ctrl: &Controller,
+    content: ContentId,
+    idx: u64,
+    stored: &[u8],
+    durable: bool,
+) -> BkfsResult<()> {
     ctrl.check_rw()?;
-    // Compress BEFORE sealing — ciphertext is incompressible. Each block is
-    // compressed independently, so a one-block edit recompresses only it.
-    let stored = crate::compress::compress(plaintext, codec);
-    let blob = vault::seal(&stored, ctrl.key(), ctrl.ecc());
-    let mut file = BufferedDirectFile::new(AtomicFile::create(ctrl.block_path(content, idx))?)?;
-    file.write_all(&blob)?;
-    if durable {
-        file.save()
-    } else {
-        file.save_fast()
-    }
+    let blob = vault::seal(stored, ctrl.key(), ctrl.ecc());
+    ctrl.write_object(ctrl.block_id(content, idx), durable, |path, durable| {
+        let mut file = BufferedDirectFile::create(path)?;
+        file.write_all(&blob)?;
+        if durable {
+            file.save()
+        } else {
+            file.save_fast()
+        }
+    })
 }
 
 /// Remove one block file, tolerating an already-absent file.
 pub fn remove_block(ctrl: &Controller, content: ContentId, idx: u64) -> BkfsResult<()> {
-    match std::fs::remove_file(ctrl.resolve_block_path(content, idx)) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.into()),
-    }
+    ctrl.remove_object(ctrl.block_id(content, idx))
 }
 
 /// Remove every block of a file whose logical size is `size`. Used by the

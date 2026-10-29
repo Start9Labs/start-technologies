@@ -1189,6 +1189,13 @@ disk.main.running-e2fsck:
   fr_FR: "Exécution de e2fsck avant la conversion de %{name} d'ext4 vers btrfs"
   pl_PL: "Uruchamianie e2fsck przed konwersją %{name} z ext4 na btrfs"
 
+disk.mount.backup.invalid-key-metadata:
+  en_US: "Backup key metadata is missing or incomplete."
+  de_DE: "Die Schlüsselmetadaten der Sicherung fehlen oder sind unvollständig."
+  es_ES: "Faltan los metadatos de la clave de copia de seguridad o están incompletos."
+  fr_FR: "Les métadonnées de la clé de sauvegarde sont manquantes ou incomplètes."
+  pl_PL: "Metadane klucza kopii zapasowej są nieobecne lub niekompletne."
+
 disk.mount.filesystem.cifs.hostname-unresolved:
   en_US: "Failed to resolve hostname %{hostname} using %{resolver}: %{error}"
   de_DE: "Hostname %{hostname} konnte über %{resolver} nicht aufgelöst werden: %{error}"
@@ -1859,6 +1866,13 @@ backup.restore.package-installed:
   es_ES: "No se puede restaurar %{id}: ya está instalado. Desinstálalo primero."
   fr_FR: "Impossible de restaurer %{id} : il est déjà installé. Désinstallez-le d’abord."
   pl_PL: "Nie można przywrócić %{id}: jest już zainstalowany. Najpierw go odinstaluj."
+
+backup.target.partial-mount:
+  en_US: "The base filesystem mounted successfully at %{path}."
+  de_DE: "Das Basisdateisystem wurde erfolgreich unter %{path} eingehängt."
+  es_ES: "El sistema de archivos base se montó correctamente en %{path}."
+  fr_FR: "Le système de fichiers de base a été monté avec succès sur %{path}."
+  pl_PL: "Bazowy system plików został pomyślnie zamontowany w %{path}."
 
 # backup/target/cifs.rs
 backup.target.cifs.target-not-found:
@@ -3562,6 +3576,13 @@ auth.local-logout-unnecessary:
   es_ES: "No es necesario cerrar sesión al usar la cookie de autenticación local."
   fr_FR: "La déconnexion est inutile lorsque le cookie d'authentification local est utilisé."
   pl_PL: "Wylogowanie nie jest potrzebne podczas korzystania z lokalnego pliku cookie uwierzytelniania."
+
+util.crypto.invalid-backup-key:
+  en_US: "The wrapped backup key is invalid or could not be authenticated."
+  de_DE: "Der verschlüsselte Sicherungsschlüssel ist ungültig oder konnte nicht authentifiziert werden."
+  es_ES: "La clave de copia de seguridad cifrada no es válida o no se pudo autenticar."
+  fr_FR: "La clé de sauvegarde chiffrée est invalide ou n'a pas pu être authentifiée."
+  pl_PL: "Zaszyfrowany klucz kopii zapasowej jest nieprawidłowy lub nie można go uwierzytelnić."
 
 # util/tui.rs
 util.tui.terminal-must-be-interactive:
