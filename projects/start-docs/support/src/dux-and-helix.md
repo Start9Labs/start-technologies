@@ -14,7 +14,7 @@ Dux can also file a feature request with Start9 when you want a product or servi
 
 When Dux needs something from you, its questions wait on a card above the message field, **Questions from Dux**. On a phone, tap the bar to open them.
 
-Each question has a button along the top, with a checked box once you've answered it. Pick an answer or write one, and move between questions with **Back** and **Next**, or the arrow keys on a keyboard. Choosing an option you already picked clears it. **Review** shows everything you've answered, and **Send answers** posts it as one message.
+Each question has a button along the top, with a checked box once you've answered it. Pick an answer or write one, and move between questions with **Back** and **Next**, or the arrow keys on a keyboard. Choosing an option you already picked clears it. **Review** shows everything you've answered, and sending posts the answers together as one message.
 
 You don't have to answer every question at once. One you skip stays on the card, and Dux won't assume its answer. You can also answer in an ordinary message, and Dux takes a question off the card once it no longer matters.
 
