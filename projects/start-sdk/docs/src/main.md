@@ -319,6 +319,8 @@ Pass environment variables to a daemon or oneshot via the `env` option on `exec`
 
 The process also receives the image's environment variables and, unless the image sets one, the server's language as `LANG` when the image includes that locale; these `env` values override both. Set a variable to `undefined` to remove it, e.g. `env: { LANG: undefined }`.
 
+Environment values travel through numbered `JSON_ENV_0`, `JSON_ENV_1`, … variables rather than command-line arguments. The SDK splits large JSON payloads into UTF-8 chunks of at most 64 KiB; Linux's total exec size and individual service-variable limits still apply. Per-command values support embedded newlines; multiline image defaults require packing with start-cli 2.6.0 or later, which stores them in the image's JSON metadata. The SDK also reads legacy image environment files.
+
 ## Health Checks
 
 There are two kinds of health checks:

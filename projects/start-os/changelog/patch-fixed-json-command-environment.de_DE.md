@@ -1,0 +1,3 @@
+- Umgebungsvariablen von Untercontainern lassen sich über `JSON_ENV_*` überschreiben, einschließlich mehrzeiliger Werte und des Entfernens von Variablen.
+- `package attach` erhält mehrzeilige Standardwerte der Image-Umgebung.
+- Ein ausdrücklich entferntes `HOME` wird nicht mit seinem Standardwert wiederhergestellt.

@@ -1,0 +1,1 @@
+- Las conexiones TLS directas de servicios que no requieren proxy HTTP conservan las direcciones IP de origen de los clientes.

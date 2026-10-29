@@ -1,0 +1,4 @@
+- Configurez l’authentification du proxy HTTP et les en-têtes de transfert dans l’option `proxy` de `bindPort`, indépendamment d’`addSsl`. L’authentification couvre la connexion d’origine et celle de l’enveloppe TLS.
+- Les valeurs par défaut dépendent du protocole : proxy activé pour les protocoles HTTP, désactivé pour les autres. Chaque protocole accepte un objet `proxy` explicite ou `proxy: null`.
+- Lors de la reconstruction des paquets, déplacez `addSsl.auth` vers `proxy.auth` et `addSsl.addXForwardedHeaders` vers `proxy.addXForwardedHeaders`. Conservez les paramètres TLS dans `addSsl`.
+- Les paquets construits avec ce SDK nécessitent StartOS 0.4.1 ou ultérieur.

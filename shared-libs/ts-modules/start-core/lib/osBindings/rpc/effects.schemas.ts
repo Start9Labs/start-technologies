@@ -2220,6 +2220,46 @@ export const Progress: z.ZodUnion<
   .meta({
     id: 'Progress',
   })
+export const ProxyOptions: z.ZodIntersection<
+  z.ZodObject<{ type: z.ZodLiteral<'http'> }>,
+  z.ZodObject<{
+    /**
+     * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
+     * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+     */
+    addXForwardedHeaders: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+    /**
+     * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
+     */
+    auth: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>,
+      z.ZodNullable<typeof ProxyAuth>
+    >
+  }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({ type: z.literal('http') }),
+    object({
+      /**
+       * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
+       * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+       */
+      addXForwardedHeaders: wire(z.boolean().optional(), z.boolean()).meta({
+        description:
+          'Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.',
+      }),
+      /**
+       * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
+       */
+      auth: wire(ProxyAuth.nullable().optional(), ProxyAuth.nullable()).meta({
+        description:
+          'Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.',
+      }),
+    }),
+  )
+  .meta({
+    id: 'ProxyOptions',
+  })
 export const ServiceInterface: z.ZodObject<{
   id: typeof ServiceInterfaceId
   name: z.ZodString
@@ -2336,12 +2376,6 @@ export const AddSslOptions: z.ZodCodec<
   z.ZodObject<{
     preferredExternalPort: z.ZodInt
     /**
-     * When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-     * and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-     * forwarding them upstream. Setting this implies HTTP-aware proxying.
-     */
-    addXForwardedHeaders: z.ZodOptional<z.ZodBoolean>
-    /**
      * The application protocols StartOS answers a client with, from those it
      * asked for. Unset answers with whatever it asked for.
      */
@@ -2353,25 +2387,9 @@ export const AddSslOptions: z.ZodCodec<
     upstreamCertValidation: z.ZodOptional<
       z.ZodNullable<typeof UpstreamCertValidation>
     >
-    /**
-     * Optional reverse-proxy auth gate. When set, the OS reverse proxy
-     * will validate the `Authorization` header on incoming HTTP requests
-     * against this configuration before forwarding them upstream.
-     * Unauthenticated requests get `401 Unauthorized` with an appropriate
-     * `WWW-Authenticate` challenge. For `Basic`, the authenticated
-     * username is forwarded to the upstream service as `X-Forwarded-User`.
-     * Setting this implies HTTP-aware proxying.
-     */
-    auth: z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>
   }>,
   z.ZodObject<{
     preferredExternalPort: z.ZodInt
-    /**
-     * When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-     * and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-     * forwarding them upstream. Setting this implies HTTP-aware proxying.
-     */
-    addXForwardedHeaders: z.ZodBoolean
     /**
      * The application protocols StartOS answers a client with, from those it
      * asked for. Unset answers with whatever it asked for.
@@ -2382,29 +2400,10 @@ export const AddSslOptions: z.ZodCodec<
      * `None` (the default) validates against the StartOS root CA.
      */
     upstreamCertValidation: z.ZodNullable<typeof UpstreamCertValidation>
-    /**
-     * Optional reverse-proxy auth gate. When set, the OS reverse proxy
-     * will validate the `Authorization` header on incoming HTTP requests
-     * against this configuration before forwarding them upstream.
-     * Unauthenticated requests get `401 Unauthorized` with an appropriate
-     * `WWW-Authenticate` challenge. For `Basic`, the authenticated
-     * username is forwarded to the upstream service as `X-Forwarded-User`.
-     * Setting this implies HTTP-aware proxying.
-     */
-    auth: z.ZodNullable<typeof ProxyAuth>
   }>
 > = /* @__PURE__ */ wire(
   object({
     preferredExternalPort: z.int(),
-    /**
-     * When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-     * and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-     * forwarding them upstream. Setting this implies HTTP-aware proxying.
-     */
-    addXForwardedHeaders: z.boolean().optional().meta({
-      description:
-        'When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`\nand `X-Forwarded-For: <client-ip>` to incoming HTTP requests before\nforwarding them upstream. Setting this implies HTTP-aware proxying.',
-    }),
     /**
      * The application protocols StartOS answers a client with, from those it
      * asked for. Unset answers with whatever it asked for.
@@ -2421,31 +2420,9 @@ export const AddSslOptions: z.ZodCodec<
       description:
         'Certificate validation for the OS→container TLS leg when rewrapping.\n`None` (the default) validates against the StartOS root CA.',
     }),
-    /**
-     * Optional reverse-proxy auth gate. When set, the OS reverse proxy
-     * will validate the `Authorization` header on incoming HTTP requests
-     * against this configuration before forwarding them upstream.
-     * Unauthenticated requests get `401 Unauthorized` with an appropriate
-     * `WWW-Authenticate` challenge. For `Basic`, the authenticated
-     * username is forwarded to the upstream service as `X-Forwarded-User`.
-     * Setting this implies HTTP-aware proxying.
-     */
-    auth: ProxyAuth.nullable().optional().meta({
-      description:
-        'Optional reverse-proxy auth gate. When set, the OS reverse proxy\nwill validate the `Authorization` header on incoming HTTP requests\nagainst this configuration before forwarding them upstream.\nUnauthenticated requests get `401 Unauthorized` with an appropriate\n`WWW-Authenticate` challenge. For `Basic`, the authenticated\nusername is forwarded to the upstream service as `X-Forwarded-User`.\nSetting this implies HTTP-aware proxying.',
-    }),
   }),
   object({
     preferredExternalPort: z.int(),
-    /**
-     * When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-     * and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-     * forwarding them upstream. Setting this implies HTTP-aware proxying.
-     */
-    addXForwardedHeaders: z.boolean().meta({
-      description:
-        'When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`\nand `X-Forwarded-For: <client-ip>` to incoming HTTP requests before\nforwarding them upstream. Setting this implies HTTP-aware proxying.',
-    }),
     /**
      * The application protocols StartOS answers a client with, from those it
      * asked for. Unset answers with whatever it asked for.
@@ -2461,19 +2438,6 @@ export const AddSslOptions: z.ZodCodec<
     upstreamCertValidation: UpstreamCertValidation.nullable().meta({
       description:
         'Certificate validation for the OS→container TLS leg when rewrapping.\n`None` (the default) validates against the StartOS root CA.',
-    }),
-    /**
-     * Optional reverse-proxy auth gate. When set, the OS reverse proxy
-     * will validate the `Authorization` header on incoming HTTP requests
-     * against this configuration before forwarding them upstream.
-     * Unauthenticated requests get `401 Unauthorized` with an appropriate
-     * `WWW-Authenticate` challenge. For `Basic`, the authenticated
-     * username is forwarded to the upstream service as `X-Forwarded-User`.
-     * Setting this implies HTTP-aware proxying.
-     */
-    auth: ProxyAuth.nullable().meta({
-      description:
-        'Optional reverse-proxy auth gate. When set, the OS reverse proxy\nwill validate the `Authorization` header on incoming HTTP requests\nagainst this configuration before forwarding them upstream.\nUnauthenticated requests get `401 Unauthorized` with an appropriate\n`WWW-Authenticate` challenge. For `Basic`, the authenticated\nusername is forwarded to the upstream service as `X-Forwarded-User`.\nSetting this implies HTTP-aware proxying.',
     }),
   }),
 ).meta({
@@ -2632,23 +2596,6 @@ export const TaskEntry: z.ZodObject<{
 }> = /* @__PURE__ */ object({ task: Task, active: z.boolean() }).meta({
   id: 'TaskEntry',
 })
-export const BindOptions: z.ZodObject<{
-  preferredExternalPort: z.ZodInt
-  addSsl: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof AddSslOptions>>,
-    z.ZodNullable<typeof AddSslOptions>
-  >
-  secure: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Security>>,
-    z.ZodNullable<typeof Security>
-  >
-}> = /* @__PURE__ */ object({
-  preferredExternalPort: z.int(),
-  addSsl: wire(AddSslOptions.nullable().optional(), AddSslOptions.nullable()),
-  secure: wire(Security.nullable().optional(), Security.nullable()),
-}).meta({
-  id: 'BindOptions',
-})
 export const CheckDependenciesResult: z.ZodObject<{
   packageId: typeof PackageId
   title: z.ZodCodec<
@@ -2677,6 +2624,26 @@ export const CheckDependenciesResult: z.ZodObject<{
 export const Dependencies: z.ZodRecord<z.ZodString, typeof DepInfo> =
   /* @__PURE__ */ z.record(z.string(), DepInfo).meta({
     id: 'Dependencies',
+  })
+export const LegacyProxySslOptions: z.ZodIntersection<
+  z.ZodObject<{
+    addXForwardedHeaders: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+    auth: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>,
+      z.ZodNullable<typeof ProxyAuth>
+    >
+  }>,
+  typeof AddSslOptions
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      addXForwardedHeaders: wire(z.boolean().optional(), z.boolean()),
+      auth: wire(ProxyAuth.nullable().optional(), ProxyAuth.nullable()),
+    }),
+    AddSslOptions,
+  )
+  .meta({
+    id: 'LegacyProxySslOptions',
   })
 
 /**
@@ -2743,52 +2710,35 @@ export const RangeBindInfo: z.ZodObject<{
   description:
     'Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).\n\nKeyed by `internal_start_port` in [`BindingRanges`]. The range covers\n`internal_start_port..(internal_start_port + number_of_ports)` and is\nforwarded through a single iptables rule per protocol per gateway,\npreserving the destination port number.',
 })
-export const BindInfo: z.ZodObject<{
-  enabled: z.ZodBoolean
-  options: typeof BindOptions
-  net: typeof NetInfo
-  addresses: typeof DerivedAddressInfo
-  /**
-   * Service interfaces exported from this binding (`Origin.export`). A single
-   * binding (host + internal port) may back several interfaces (e.g. a `ui`
-   * and an `api` on the same port), so this is keyed by interface id.
-   */
-  interfaces: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof ServiceInterface>>,
-    z.ZodRecord<z.ZodString, typeof ServiceInterface>
-  >
-}> = /* @__PURE__ */ object({
-  enabled: z.boolean(),
-  options: BindOptions,
-  net: NetInfo,
-  addresses: DerivedAddressInfo,
-  /**
-   * Service interfaces exported from this binding (`Origin.export`). A single
-   * binding (host + internal port) may back several interfaces (e.g. a `ui`
-   * and an `api` on the same port), so this is keyed by interface id.
-   */
-  interfaces: wire(
-    z.record(z.string(), ServiceInterface).optional(),
-    z.record(z.string(), ServiceInterface),
-  ).meta({
-    description:
-      'Service interfaces exported from this binding (`Origin.export`). A single\nbinding (host + internal port) may back several interfaces (e.g. a `ui`\nand an `api` on the same port), so this is keyed by interface id.',
-  }),
-}).meta({
-  id: 'BindInfo',
-})
-export const BindParams: z.ZodIntersection<
-  z.ZodObject<{ id: typeof HostId; internalPort: z.ZodInt }>,
-  typeof BindOptions
-> = /* @__PURE__ */ z
-  .intersection(object({ id: HostId, internalPort: z.int() }), BindOptions)
-  .meta({
-    id: 'BindParams',
-  })
 export const BindingRanges: z.ZodRecord<z.ZodString, typeof RangeBindInfo> =
   /* @__PURE__ */ z.record(z.string(), RangeBindInfo).meta({
     id: 'BindingRanges',
   })
+export const CompatibleBindOptions: z.ZodObject<{
+  preferredExternalPort: z.ZodInt
+  addSsl: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof LegacyProxySslOptions>>,
+    z.ZodNullable<typeof LegacyProxySslOptions>
+  >
+  secure: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Security>>,
+    z.ZodNullable<typeof Security>
+  >
+  proxy: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof ProxyOptions>>,
+    z.ZodNullable<typeof ProxyOptions>
+  >
+}> = /* @__PURE__ */ object({
+  preferredExternalPort: z.int(),
+  addSsl: wire(
+    LegacyProxySslOptions.nullable().optional(),
+    LegacyProxySslOptions.nullable(),
+  ),
+  secure: wire(Security.nullable().optional(), Security.nullable()),
+  proxy: wire(ProxyOptions.nullable().optional(), ProxyOptions.nullable()),
+}).meta({
+  id: 'CompatibleBindOptions',
+})
 export const Manifest: z.ZodIntersection<
   z.ZodObject<{
     id: typeof PackageId
@@ -2837,6 +2787,76 @@ export const Manifest: z.ZodIntersection<
   )
   .meta({
     id: 'Manifest',
+  })
+export const BindOptions: z.ZodCodec<
+  typeof CompatibleBindOptions,
+  z.ZodObject<{
+    preferredExternalPort: z.ZodInt
+    addSsl: z.ZodNullable<typeof AddSslOptions>
+    secure: z.ZodNullable<typeof Security>
+    /**
+     * HTTP request policy shared by every exposed leg of this binding.
+     */
+    proxy: z.ZodNullable<typeof ProxyOptions>
+  }>
+> = /* @__PURE__ */ wire(
+  CompatibleBindOptions,
+  object({
+    preferredExternalPort: z.int(),
+    addSsl: AddSslOptions.nullable(),
+    secure: Security.nullable(),
+    /**
+     * HTTP request policy shared by every exposed leg of this binding.
+     */
+    proxy: ProxyOptions.nullable().meta({
+      description:
+        'HTTP request policy shared by every exposed leg of this binding.',
+    }),
+  }),
+).meta({
+  id: 'BindOptions',
+})
+export const BindInfo: z.ZodObject<{
+  enabled: z.ZodBoolean
+  options: typeof BindOptions
+  net: typeof NetInfo
+  addresses: typeof DerivedAddressInfo
+  /**
+   * Service interfaces exported from this binding (`Origin.export`). A single
+   * binding (host + internal port) may back several interfaces (e.g. a `ui`
+   * and an `api` on the same port), so this is keyed by interface id.
+   */
+  interfaces: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof ServiceInterface>>,
+    z.ZodRecord<z.ZodString, typeof ServiceInterface>
+  >
+}> = /* @__PURE__ */ object({
+  enabled: z.boolean(),
+  options: BindOptions,
+  net: NetInfo,
+  addresses: DerivedAddressInfo,
+  /**
+   * Service interfaces exported from this binding (`Origin.export`). A single
+   * binding (host + internal port) may back several interfaces (e.g. a `ui`
+   * and an `api` on the same port), so this is keyed by interface id.
+   */
+  interfaces: wire(
+    z.record(z.string(), ServiceInterface).optional(),
+    z.record(z.string(), ServiceInterface),
+  ).meta({
+    description:
+      'Service interfaces exported from this binding (`Origin.export`). A single\nbinding (host + internal port) may back several interfaces (e.g. a `ui`\nand an `api` on the same port), so this is keyed by interface id.',
+  }),
+}).meta({
+  id: 'BindInfo',
+})
+export const BindParams: z.ZodIntersection<
+  z.ZodObject<{ id: typeof HostId; internalPort: z.ZodInt }>,
+  typeof BindOptions
+> = /* @__PURE__ */ z
+  .intersection(object({ id: HostId, internalPort: z.int() }), BindOptions)
+  .meta({
+    id: 'BindParams',
   })
 export const Bindings: z.ZodRecord<z.ZodString, typeof BindInfo> =
   /* @__PURE__ */ z.record(z.string(), BindInfo).meta({

@@ -168,10 +168,9 @@ export const mockPatchData: DataModel = {
                 upstreamCertValidation: null,
                 preferredExternalPort: 443,
                 alpn: ['http/1.1', 'h2'],
-                addXForwardedHeaders: false,
-                auth: null,
               },
               secure: null,
+              proxy: null,
             },
             interfaces: {},
           },
@@ -751,10 +750,9 @@ export const mockPatchData: DataModel = {
                   upstreamCertValidation: null,
                   preferredExternalPort: 42443,
                   alpn: ['http/1.1', 'h2'],
-                  addXForwardedHeaders: false,
-                  auth: null,
                 },
                 secure: null,
+                proxy: null,
               },
               interfaces: {
                 ui: {
@@ -961,6 +959,7 @@ export const mockPatchData: DataModel = {
                 addSsl: null,
                 preferredExternalPort: 48332,
                 secure: { ssl: false },
+                proxy: null,
               },
               interfaces: {
                 rpc: {
@@ -1007,6 +1006,7 @@ export const mockPatchData: DataModel = {
                 addSsl: null,
                 preferredExternalPort: 48333,
                 secure: { ssl: false },
+                proxy: null,
               },
               interfaces: {
                 p2p: {

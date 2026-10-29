@@ -911,11 +911,10 @@ mod tests {
             options: BindOptions {
                 preferred_external_port: 80,
                 secure: None,
+                proxy: None,
                 add_ssl: Some(AddSslOptions {
                     preferred_external_port: 443,
-                    add_x_forwarded_headers: false,
                     alpn: None,
-                    auth: None,
                     upstream_cert_validation: Default::default(),
                 }),
             },
