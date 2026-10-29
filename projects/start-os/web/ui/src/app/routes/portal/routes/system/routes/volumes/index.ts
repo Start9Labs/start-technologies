@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router'
 import {
   ConvertBytesPipe,
   DialogService,
+  ErrorService,
   i18nKey,
   i18nPipe,
   TaskService,
@@ -165,6 +166,7 @@ import { VOLUME_GRANTS } from './grants'
 export default class Volumes {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
+  private readonly errors = inject(ErrorService)
   private readonly dialogs = inject(DialogService)
 
   protected readonly volumes = toSignal(
@@ -185,10 +187,12 @@ export default class Volumes {
     this.refreshRetained()
   }
 
-  private refreshRetained() {
-    return this.tasks.run(async () => {
+  private async refreshRetained() {
+    try {
       this.retained.set(await this.api.rpc.volumes.listRetained({}))
-    }, 'Loading')
+    } catch (e: any) {
+      this.errors.handleError(e)
+    }
   }
 
   protected create() {

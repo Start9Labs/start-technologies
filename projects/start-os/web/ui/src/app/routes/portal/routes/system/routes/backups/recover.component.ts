@@ -203,7 +203,7 @@ export class BackupsRecoverComponent {
           throw volumes
             .filter(option => result.errors[option.id])
             .map(option => `${option.title}: ${result.errors[option.id]}`)
-            .join('\n')
+            .join('<br />')
         }
       }
       this.context.$implicit.complete()

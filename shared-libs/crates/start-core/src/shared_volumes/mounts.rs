@@ -189,18 +189,17 @@ impl SharedVolumeMounts {
         id: &SharedVolumeId,
         grant: Option<&SharedVolumeGrant>,
     ) -> Result<(), Error> {
+        let mut errors = ErrorCollection::new();
         for slot in self.slots.values_mut() {
-            if slot.attachment.as_ref().is_some_and(|attachment| {
+            if let Some(attachment) = slot.attachment.as_ref().filter(|attachment| {
                 &attachment.id == id
                     && !grant.is_some_and(|grant| attachment.readonly || !grant.readonly)
             }) {
-                if let Some(attachment) = &slot.attachment {
-                    attachment.mount.detach()?;
-                }
+                errors.handle(attachment.mount.detach());
                 slot.attachment = None;
             }
         }
-        Ok(())
+        errors.into_result()
     }
 
     pub fn remove_subcontainer(&mut self, guid: &Guid) {
