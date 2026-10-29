@@ -1,0 +1,1 @@
+- **WireGuard-Konfigurationen können hinter NAT einen eigenen Endpunkt verwenden.** Der Konfigurationsdialog übernimmt standardmäßig den Host der Browser-URL und akzeptiert eine geänderte IP-Adresse oder einen DNS-Namen. `device show-config --endpoint` bietet dieselbe Einstellung pro Konfiguration, unabhängig von der für SNAT und Weiterleitungen verwendeten WAN-Adresse.

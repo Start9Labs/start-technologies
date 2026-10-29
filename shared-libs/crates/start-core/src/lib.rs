@@ -206,6 +206,10 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
                         .with_about("about.get-pubkey-from-server")
                         .with_call_remote::<CliContext>(),
                 )
+                .subcommand(
+                    "token",
+                    auth::token::<C, RpcContext>().with_about("about.commands-auth-tokens"),
+                )
                 .with_about("about.commands-authentication"),
         )
         .subcommand("db", db::db::<C>().with_about("about.commands-db"))

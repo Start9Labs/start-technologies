@@ -271,7 +271,7 @@ impl WgConfig {
         addr: Ipv4Addr,
         subnet: Ipv4Net,
         server_pubkey: Base64<PublicKey>,
-        server_addr: SocketAddr,
+        server_addr: String,
         client_v6: Option<Ipv6Net>,
     ) -> ClientConfig {
         ClientConfig {
@@ -326,7 +326,7 @@ pub struct ClientConfig {
     subnet: Ipv4Net,
     #[serde(deserialize_with = "deserialize_verifying_key")]
     server_pubkey: Base64<PublicKey>,
-    server_addr: SocketAddr,
+    server_addr: String,
     #[serde(default)]
     client_v6: Option<Ipv6Net>,
 }

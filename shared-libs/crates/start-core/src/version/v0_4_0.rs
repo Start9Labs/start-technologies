@@ -37,7 +37,11 @@ impl VersionT for Version {
     }
     async fn post_up(self, ctx: &RpcContext, input: Value) -> Result<(), Error> {
         // `input` is `up`'s came-from-a-0.4.0-beta flag.
-        if should_welcome_to_release(self, input.as_bool().unwrap_or(false)) {
+        if should_welcome_to_release(
+            self,
+            &Current::default().semver(),
+            input.as_bool().unwrap_or(false),
+        ) {
             let highlights = include_str!("update_details/v0_4_0_highlights.md").to_string();
             ctx.db
                 .mutate(|db| {
@@ -97,8 +101,11 @@ fn migrated_through_beta_10(db: &Value) -> bool {
 /// A revision release still counts as landing on 0.4.0 — once 0.4.0.1 is `Current`, 0.4.0 is
 /// necessarily an intermediate hop, and these highlights are new to every beta arrival either
 /// way. A prerelease never counts: its digits alias the release it precedes.
-fn should_welcome_to_release(version: impl VersionT, from_0_4_0_beta: bool) -> bool {
-    let landing = Current::default().semver();
+fn should_welcome_to_release(
+    version: impl VersionT,
+    landing: &exver::Version,
+    from_0_4_0_beta: bool,
+) -> bool {
     let version = version.semver();
     version.prerelease().is_empty()
         && landing.number().starts_with(version.number())
@@ -110,6 +117,7 @@ mod test {
     use imbl_value::json;
 
     use super::*;
+    use crate::version::{v0_4_0_3, v0_4_1};
 
     #[test]
     fn welcome_routing() {
@@ -148,9 +156,18 @@ mod test {
         assert!(migrated_from_pre_0_4_0(&from_0_3_x));
 
         // 0.4.0 is the landing release: welcome only for 0.4.0-beta arrivals.
-        assert!(should_welcome_to_release(Version, true));
-        assert!(!should_welcome_to_release(Version, false));
+        let v0_4_0 = Version.semver();
+        let v0_4_0_3 = v0_4_0_3::Version.semver();
+        let v0_4_1 = v0_4_1::Version.semver();
+        assert!(should_welcome_to_release(Version, &v0_4_0, true));
+        assert!(should_welcome_to_release(Version, &v0_4_0_3, true));
+        assert!(!should_welcome_to_release(Version, &v0_4_0, false));
+        assert!(!should_welcome_to_release(Version, &v0_4_1, true));
         // an intermediate (non-landing) release stays silent, even from the 0.4.0 line
-        assert!(!should_welcome_to_release(v0_4_0_beta_10::Version, true));
+        assert!(!should_welcome_to_release(
+            v0_4_0_beta_10::Version,
+            &v0_4_0,
+            true
+        ));
     }
 }
