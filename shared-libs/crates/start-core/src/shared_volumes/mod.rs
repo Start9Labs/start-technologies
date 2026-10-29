@@ -343,17 +343,20 @@ pub async fn remove(
         .mutate(|db| remove_definition(db, &id))
         .await
         .result?;
+    let mut errors = ErrorCollection::new();
     for package_id in &packages {
         let service = ctx.services.get(package_id).await;
         if let Some(service) = service.as_ref() {
-            service
-                .shared_volume_mounts()
-                .lock()
-                .await
-                .reconcile_grant(&id, None)?;
+            errors.handle(
+                service
+                    .shared_volume_mounts()
+                    .lock()
+                    .await
+                    .reconcile_grant(&id, None),
+            );
         }
     }
-    Ok(())
+    errors.into_result()
 }
 
 fn remove_definition(

@@ -15,6 +15,8 @@ use crate::shared_volumes::{SharedVolumeGrant, SharedVolumeId};
 struct AttachedMount {
     mount: OwnedFd,
     namespace: Arc<MountNamespace>,
+    #[cfg(test)]
+    fail_detach: bool,
 }
 
 impl AttachedMount {
@@ -27,10 +29,22 @@ impl AttachedMount {
         let detached = DetachedMount::from_fd(open_tree_clone_fd(source.as_fd())?);
         detached.set_readonly(readonly)?;
         let mount = namespace.run(|| detached.attach_to_fd(destination.as_fd()))?;
-        Ok(Self { mount, namespace })
+        Ok(Self {
+            mount,
+            namespace,
+            #[cfg(test)]
+            fail_detach: false,
+        })
     }
 
     fn detach(&self) -> Result<(), Error> {
+        #[cfg(test)]
+        if self.fail_detach {
+            return Err(Error::new(
+                std::io::Error::from_raw_os_error(libc::EIO),
+                ErrorKind::Filesystem,
+            ));
+        }
         self.namespace.run(|| unmount_fd(self.mount.as_fd()))
     }
 }
@@ -189,18 +203,18 @@ impl SharedVolumeMounts {
         id: &SharedVolumeId,
         grant: Option<&SharedVolumeGrant>,
     ) -> Result<(), Error> {
+        let mut errors = ErrorCollection::new();
         for slot in self.slots.values_mut() {
-            if slot.attachment.as_ref().is_some_and(|attachment| {
+            if let Some(attachment) = slot.attachment.as_ref().filter(|attachment| {
                 &attachment.id == id
                     && !grant.is_some_and(|grant| attachment.readonly || !grant.readonly)
             }) {
-                if let Some(attachment) = &slot.attachment {
-                    attachment.mount.detach()?;
+                if errors.handle(attachment.mount.detach()).is_some() {
+                    slot.attachment = None;
                 }
-                slot.attachment = None;
             }
         }
-        Ok(())
+        errors.into_result()
     }
 
     pub fn remove_subcontainer(&mut self, guid: &Guid) {
@@ -316,6 +330,7 @@ mod tests {
         for root in [&first_root, &second_root] {
             std::fs::create_dir(root.join("data")).unwrap();
         }
+        std::fs::create_dir(first_root.join("data2")).unwrap();
         std::fs::write(source_path.join("sentinel"), b"shared").unwrap();
         let first_tree = MountGuard::mount(&Bind::new(&first_root), &first_root, ReadWrite)
             .await
@@ -357,6 +372,19 @@ mod tests {
                 )
                 .unwrap();
         }
+        let target = PreparedTarget::open(first_root.clone(), "/data2".into(), namespace.clone())
+            .await
+            .unwrap();
+        let location = mounts.prepare(&first, target).await.unwrap();
+        mounts
+            .attach(
+                &first,
+                location,
+                id.clone(),
+                PreparedSource::open(source.clone(), None).await.unwrap(),
+                false,
+            )
+            .unwrap();
         let target = PreparedTarget::open(second_root.clone(), "/data".into(), namespace)
             .await
             .unwrap();
@@ -390,6 +418,28 @@ mod tests {
             .read_line(&mut ready)
             .unwrap();
         assert_eq!(ready, "ready\n");
+        let failing = (first.clone(), PathBuf::from("data"));
+        mounts
+            .slots
+            .get_mut(&failing)
+            .unwrap()
+            .attachment
+            .as_mut()
+            .unwrap()
+            .mount
+            .fail_detach = true;
+        assert!(mounts.reconcile_grant(&id, None).is_err());
+        assert!(first_root.join("data/sentinel").exists());
+        assert!(!first_root.join("data2/sentinel").exists());
+        mounts
+            .slots
+            .get_mut(&failing)
+            .unwrap()
+            .attachment
+            .as_mut()
+            .unwrap()
+            .mount
+            .fail_detach = false;
         mounts.reconcile_grant(&id, None).unwrap();
         peer.stdin.take().unwrap().write_all(b"revoked\n").unwrap();
         assert!(peer.wait().unwrap().success());
