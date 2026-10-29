@@ -1,3 +1,3 @@
 - Wartości środowiska poleceń demonów i podkontenerów nie pojawiają się w wierszach poleceń procesów.
-- Zachowuje wielowierszowe wartości środowiska obrazu w pakietach zbudowanych przez start-cli 2.5.3 lub nowszy.
+- Zachowuje wielowierszowe wartości środowiska obrazu w pakietach zbudowanych przez start-cli 2.6.0 lub nowszy.
 - Pakiety zbudowane z tym SDK wymagają StartOS 0.4.0.5 lub nowszego.
