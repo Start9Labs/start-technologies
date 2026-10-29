@@ -940,6 +940,12 @@ mod tests {
             } else {
                 legacy.clone()
             };
+            let session_key = stored_legacy.keys().next().unwrap();
+            let canonical_session_key = session_key
+                .parse::<crate::sign::AnyVerifyingKey>()
+                .unwrap()
+                .interned_der64();
+            let session = to_value(&crate::auth::Session::default()).unwrap();
             let mut db = json!({ "public": { "serverInfo": {
                 "version": from,
                 "packageVersionCompat": ">=0.3.0 <0.5.0",
@@ -947,11 +953,19 @@ mod tests {
                 "latestMigrationRevision": if from == "0.4.0.4" { 0 } else { 2 },
                 "trustedOsUpdateSigners": stored_legacy,
             }, "packageData": { "service": { "setting": "preserved", "outboundDns": null } } },
-            "private": { "sessionPubkeys": {} } });
+            "private": { "sessionPubkeys": { session_key.to_string(): session.clone() } } });
             let packages = db["public"]["packageData"].clone();
+            let private = db["private"].clone();
             let pre_ups = PreUps::load(&previous, &current).await.unwrap();
             migrate_from_unchecked(&previous, &current, pre_ups, &mut db).unwrap();
             assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.1"));
+            assert_eq!(
+                db["private"]["sessions"],
+                json!({
+                    "pubkeys": { canonical_session_key.to_string(): session }, "tokens": {},
+                })
+            );
+            assert!(db["private"].get("sessionPubkeys").is_none());
             let keys: TrustedKeys =
                 from_value(db["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
             assert_eq!(os_signers(&keys).into_keys().collect::<Vec<_>>(), expected);
@@ -972,6 +986,7 @@ mod tests {
             );
             assert!(db["public"]["serverInfo"].get("trustedKeys").is_none());
             assert_eq!(db["public"]["packageData"], packages);
+            assert_eq!(db["private"], private);
         }
     }
 
