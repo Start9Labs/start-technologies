@@ -44,6 +44,14 @@ Attribuez un nom personnalisé pour identifier facilement cet appareil. Si le ch
 
 Réservez une adresse IP pour attribuer une adresse IPv4 fixe qui ne changera pas entre les redémarrages. Utile pour les serveurs, imprimantes, appareils NAS ou tout ce que vous devez joindre par une adresse IP constante. Les adresses IPv6 ne peuvent pas être réservées : chaque appareil choisit lui-même son adresse IPv6, le routeur n’y a aucune influence.
 
+### Autorisations
+
+**Autoriser la redirection automatique de ports**: Permet à cet appareil d’ouvrir et de renouveler ses propres redirections de ports via UPnP/PCP (utilisé par les serveurs StartOS, les consoles de jeu et autres). Désactivé par défaut ; les redirections actives apparaissent sur la page Ports publiés.
+
+**Autoriser la publication d’enregistrements DNS**: Permet à cet appareil de publier dans le routeur des noms DNS pointant vers lui-même, afin que chaque appareil de votre réseau puisse les résoudre (utilisé par les serveurs StartOS pour les domaines privés). Désactivé par défaut ; les noms publiés apparaissent sous les paramètres.
+
+**Autoriser les annonces de routeur IPv6**: Permet à cet appareil d’annoncer des routes IPv6 à vos autres appareils (nécessaire pour les routeurs de bordure Thread comme une Apple TV, un HomePod ou Home Assistant). Désactivé par défaut.
+
 ### Oublier
 
 Retire un appareil hors ligne de votre liste d’appareils. Tout nom personnalisé ou paramètre d’IP réservée sera perdu. Si l’appareil se reconnecte, il apparaîtra comme un nouvel appareil.`,

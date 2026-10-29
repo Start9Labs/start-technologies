@@ -44,6 +44,14 @@ Vergeben Sie einen benutzerdefinierten Namen, um dieses Gerät einfach zu identi
 
 Reservieren Sie eine IP-Adresse, um eine feste IPv4-Adresse zuzuweisen, die sich zwischen Neustarts nicht ändert. Nützlich für Server, Drucker, NAS-Geräte oder alles, was Sie über eine gleichbleibende IP-Adresse erreichen müssen. IPv6-Adressen können nicht reserviert werden: Jedes Gerät wählt seine IPv6-Adresse selbst, der Router hat darauf keinen Einfluss.
 
+### Berechtigungen
+
+**Automatische Portweiterleitung erlauben**: Erlaubt diesem Gerät, eigene Portweiterleitungen über UPnP/PCP zu öffnen und zu erneuern (genutzt von StartOS-Servern, Spielkonsolen und Ähnlichem). Standardmäßig aus; aktive Weiterleitungen erscheinen auf der Seite „Veröffentlichte Ports“.
+
+**DNS-Einträge veröffentlichen erlauben**: Erlaubt diesem Gerät, DNS-Namen für sich selbst im Router zu veröffentlichen, sodass jedes Gerät in Ihrem Netzwerk sie auflösen kann (von StartOS-Servern für private Domains genutzt). Standardmäßig aus; veröffentlichte Namen erscheinen unterhalb der Einstellungen.
+
+**IPv6-Router-Advertisements erlauben**: Erlaubt diesem Gerät, Ihren anderen Geräten IPv6-Routen anzukündigen (erforderlich für Thread-Border-Router wie Apple TV, HomePod oder Home Assistant). Standardmäßig aus.
+
 ### Entfernen
 
 Entfernt ein Offline-Gerät aus Ihrer Geräteliste. Alle benutzerdefinierten Namen oder reservierten IP-Einstellungen gehen dabei verloren. Verbindet sich das Gerät erneut, erscheint es als neues Gerät.`,
