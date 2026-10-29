@@ -112,12 +112,12 @@ export class MockApiService extends ApiService {
     'device.show-config': async params => {
       await pauseFor(1000)
 
-      const endpoint = params.endpoint ?? 'vpn.example.com'
+      const endpoint = params.endpoint ?? '203.0.113.42'
       const host =
         endpoint.includes(':') && !endpoint.startsWith('[')
           ? `[${endpoint}]`
           : endpoint
-      return MOCK_CONFIG.replace('vpn.example.com:51820', `${host}:51820`)
+      return MOCK_CONFIG.replace('203.0.113.42:51820', `${host}:51820`)
     },
     'device.set-dns-injection': async params => {
       await pauseFor(1000)
@@ -472,16 +472,16 @@ export class MockApiService extends ApiService {
       await pauseFor(1000)
       return {
         status: 'update-available',
-        installed: '0.4.0-alpha.19',
-        candidate: '0.4.0-alpha.20',
+        installed: '1.5.0',
+        candidate: '1.5.1',
       }
     },
     'update.apply': async () => {
       await pauseFor(2000)
       return {
         status: 'updating',
-        installed: '0.4.0-alpha.19',
-        candidate: '0.4.0-alpha.20',
+        installed: '1.5.0',
+        candidate: '1.5.1',
       }
     },
     'subnet.add': async params =>
@@ -615,12 +615,16 @@ function replaceSlashes(val: string) {
   return val.replace(new RegExp('/', 'g'), '~1')
 }
 
-const MOCK_CONFIG = `[Interface]
-Address = 10.20.10.2/24
+const MOCK_CONFIG = `# StartTunnel config for Phone
+
+[Interface]
+Address = 10.59.0.3/24
 PrivateKey = 4K68mdpQWdEz/FpdVuRoZYgWpQgpW63J9GFzn+iOulQ=
+DNS = 10.59.0.1
 
 [Peer]
 PublicKey = MQBiYHxAj7u8paj3L4w4uav3P/9YBPbaN4gkWn90SSs=
-AllowedIPs = 10.20.10.0/24
-Endpoint = vpn.example.com:51820
-`
+PresharedKey = 2JIBoK+Bxe7MJzX9zV+lFjqHxLTvehLp3piEROaNJjw=
+AllowedIPs = 10.59.0.0/24
+Endpoint = 203.0.113.42:51820
+PersistentKeepalive = 25`

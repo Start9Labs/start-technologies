@@ -782,6 +782,12 @@ export const ImageId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'ImageId',
 })
 export const ImageMetadata: z.ZodObject<{
+  /**
+   * Image environment defaults. Absent in packages using a legacy `.env` file.
+   */
+  env: z.ZodOptional<
+    z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodString>>>
+  >
   workdir: z.ZodString
   user: z.ZodString
   entrypoint: z.ZodCodec<
@@ -793,6 +799,13 @@ export const ImageMetadata: z.ZodObject<{
     z.ZodNullable<z.ZodArray<z.ZodString>>
   >
 }> = /* @__PURE__ */ object({
+  /**
+   * Image environment defaults. Absent in packages using a legacy `.env` file.
+   */
+  env: z.record(z.string(), z.string().nullable()).nullable().optional().meta({
+    description:
+      'Image environment defaults. Absent in packages using a legacy `.env` file.',
+  }),
   workdir: z.string(),
   user: z.string(),
   entrypoint: wire(

@@ -3598,6 +3598,13 @@ util.crypto.invalid-backup-key:
   fr_FR: "La clé de sauvegarde chiffrée est invalide ou n'a pas pu être authentifiée."
   pl_PL: "Zaszyfrowany klucz kopii zapasowej jest nieprawidłowy lub nie można go uwierzytelnić."
 
+util.env.invalid-json-env:
+  en_US: "JSON_ENV_* chunks must be contiguous from 0 and form a JSON object with string or null values"
+  de_DE: "JSON_ENV_*-Teile müssen lückenlos bei 0 beginnen und ein JSON-Objekt mit Zeichenfolgen oder null-Werten bilden"
+  es_ES: "Los fragmentos JSON_ENV_* deben ser consecutivos desde 0 y formar un objeto JSON con valores de cadena o null"
+  fr_FR: "Les fragments JSON_ENV_* doivent être consécutifs à partir de 0 et former un objet JSON contenant des chaînes ou des valeurs null"
+  pl_PL: "Fragmenty JSON_ENV_* muszą być ponumerowane kolejno od 0 i tworzyć obiekt JSON z wartościami tekstowymi lub null"
+
 # util/tui.rs
 util.tui.terminal-must-be-interactive:
   en_US: "Terminal must be in interactive mode for this wizard"
