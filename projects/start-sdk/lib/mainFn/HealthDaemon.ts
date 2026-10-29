@@ -175,18 +175,25 @@ export class HealthDaemon<Manifest extends SDKManifest> {
       lastResult: this._health.result,
     }))
 
-    const aborted = new Promise<{ done: true }>(resolve =>
-      signal.addEventListener('abort', () => resolve({ done: true }), {
-        once: true,
-      }),
-    )
+    const next = () =>
+      new Promise<IteratorResult<unknown, unknown>>((resolve, reject) => {
+        const stop = () => resolve({ done: true, value: undefined })
+        if (signal.aborted) return stop()
+        signal.addEventListener('abort', stop, { once: true })
+        trigger.next().then(
+          res => {
+            signal.removeEventListener('abort', stop)
+            resolve(res)
+          },
+          err => {
+            signal.removeEventListener('abort', stop)
+            reject(err)
+          },
+        )
+      })
 
     try {
-      for (
-        let res = await Promise.race([aborted, trigger.next()]);
-        !res.done;
-        res = await Promise.race([aborted, trigger.next()])
-      ) {
+      for (let res = await next(); !res.done; res = await next()) {
         const response: HealthCheckResult = await Promise.resolve(
           this.ready.fn(),
         ).catch(err => {

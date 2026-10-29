@@ -337,11 +337,16 @@ export type PublishedPortsSetRequestInput = z.input<
 export type PublishedPortsSetResult = z.output<
   typeof schemas.PublishedPortsSetResult
 >
-export type SessionList = z.output<typeof schemas.SessionList>
+
+/**
+ * The server's sessions, by credential type.
+ */
+export type Sessions = z.output<typeof schemas.Sessions>
 
 /**
  * Response containing all VPN servers
  */
 export type VpnServers = z.output<typeof schemas.VpnServers>
 export type WifiRegulatory = z.output<typeof schemas.WifiRegulatory>
+export type SessionList = z.output<typeof schemas.SessionList>
 export type Api = RpcSchemaTree<typeof schemas.Api>

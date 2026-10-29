@@ -4,12 +4,33 @@ import { DhcpHostSection } from 'src/app/services/api/types'
 export const mockDhcpHosts: DhcpHostSection[] = [
   {
     type: 'host',
-    name: 'host_humble_weeds',
+    name: 'host_server_one',
     options: {
       mac: '00:1A:2B:3C:4D:5E',
       ip: '192.168.1.100',
       hostid: '1::100',
-      name: 'humble-weeds',
+      name: 'Server One',
+      dns: '1',
+    },
+    lists: {},
+  },
+  {
+    type: 'host',
+    name: 'host_gaming_pc',
+    options: {
+      mac: '00:1A:2B:3C:4D:5F',
+      ip: '192.168.1.101', // IPv4 reservation for published port
+      name: 'Gaming PC',
+      dns: '1',
+    },
+    lists: {},
+  },
+  {
+    type: 'host',
+    name: 'host_ipad',
+    options: {
+      mac: 'DE:AD:BE:EF:CA:FE',
+      name: 'iPad',
       dns: '1',
     },
     lists: {},
@@ -18,29 +39,8 @@ export const mockDhcpHosts: DhcpHostSection[] = [
     type: 'host',
     name: 'host_pixel',
     options: {
-      mac: '00:1A:2B:3C:4D:5F',
-      ip: '192.168.1.101', // IPv4 reservation for published port
-      name: 'Pixel',
-      dns: '1',
-    },
-    lists: {},
-  },
-  {
-    type: 'host',
-    name: 'host_iphone',
-    options: {
-      mac: 'DE:AD:BE:EF:CA:FE',
-      name: 'iPhone 13',
-      dns: '1',
-    },
-    lists: {},
-  },
-  {
-    type: 'host',
-    name: 'host_mariusz',
-    options: {
       mac: 'DE:AD:BE:EF:CA:FF',
-      name: "Mariusz's Phone",
+      name: 'Pixel 9',
       dns: '1',
     },
     lists: {},
@@ -55,6 +55,16 @@ export const mockDhcpHosts: DhcpHostSection[] = [
     },
     lists: {},
   },
+  {
+    type: 'host',
+    name: 'host_living_room_tv',
+    options: {
+      mac: 'AA:BB:CC:DD:EE:04',
+      name: 'Living Room TV',
+      dns: '1',
+    },
+    lists: {},
+  },
 ]
 
 // Mock ARP table output (from `ip neigh show`)
@@ -63,7 +73,7 @@ export const mockDhcpHosts: DhcpHostSection[] = [
 // Base ARP output (IPv4 + link-local IPv6)
 const mockArpBase = `192.168.1.100 dev br-lan lladdr 00:1a:2b:3c:4d:5e REACHABLE
 192.168.1.101 dev br-lan lladdr 00:1a:2b:3c:4d:5f STALE
-192.168.1.102 dev br-lan lladdr de:ad:be:ef:ca:fe STALE
+192.168.4.102 dev br-kids lladdr de:ad:be:ef:ca:fe STALE
 192.168.1.103 dev br-lan lladdr de:ad:be:ef:ca:ff REACHABLE
 fe80::1a:2bff:fe3c:4d5e dev br-lan lladdr 00:1a:2b:3c:4d:5e REACHABLE
 fe80::1a:2bff:fe3c:4d5f dev br-lan lladdr 00:1a:2b:3c:4d:5f STALE`
@@ -105,16 +115,16 @@ ${mockArpGlobalIpv6}`
 
 // Mock DHCP leases file output (from /tmp/dhcp.leases)
 // Format: expiry_timestamp mac_address ip_address hostname client_id
-export const mockDhcpLeasesOutput = `1736899200 00:1a:2b:3c:4d:5e 192.168.1.100 humble-weeds 01:00:1a:2b:3c:4d:5e
-1736899200 00:1a:2b:3c:4d:5f 192.168.1.101 Pixel 01:00:1a:2b:3c:4d:5f
-1736812800 de:ad:be:ef:ca:fe 192.168.1.102 iPhone13 01:de:ad:be:ef:ca:fe
+export const mockDhcpLeasesOutput = `1736899200 00:1a:2b:3c:4d:5e 192.168.1.100 server-one 01:00:1a:2b:3c:4d:5e
+1736899200 00:1a:2b:3c:4d:5f 192.168.1.101 gaming-pc 01:00:1a:2b:3c:4d:5f
+1736812800 de:ad:be:ef:ca:fe 192.168.4.102 iPad 01:de:ad:be:ef:ca:fe
 1736812800 de:ad:be:ef:ca:ff 192.168.1.103 android-abc123 01:de:ad:be:ef:ca:ff`
 
 // Mock IPv6 leases (from /tmp/hosts/odhcpd)
 // Format: # hostname ip duid iaid name
-export const mockDhcp6LeasesOutput = `# humble-weeds fe80::1a:2bff:fe3c:4d5e 00010001 0 humble-weeds
-# Pixel fe80::1a:2bff:fe3c:4d5f 00010002 0 Pixel
-# iPhone13 fe80::dead:beef:cafe:0001 00010003 0 iPhone13
+export const mockDhcp6LeasesOutput = `# server-one fe80::1a:2bff:fe3c:4d5e 00010001 0 server-one
+# gaming-pc fe80::1a:2bff:fe3c:4d5f 00010002 0 gaming-pc
+# iPad fe80::dead:beef:cafe:0001 00010003 0 iPad
 # android-abc123 fe80::dead:beef:cafe:0002 00010004 0 android-abc123`
 
 // Mock device definitions — IPs are computed dynamically from profile gateways
@@ -136,7 +146,7 @@ export interface MockDeviceDef {
 export const MOCK_DEVICE_DEFS: MockDeviceDef[] = [
   {
     mac: '00:1A:2B:3C:4D:5E',
-    hostname: 'humble-weeds',
+    hostname: 'server-one',
     hostOctet: 100,
     profileInterface: 'lan',
     connection: 'Ethernet',
@@ -146,23 +156,63 @@ export const MOCK_DEVICE_DEFS: MockDeviceDef[] = [
   },
   {
     mac: '00:1A:2B:3C:4D:5F',
-    hostname: 'Pixel',
+    hostname: 'gaming-pc',
     hostOctet: 101,
     profileInterface: 'lan',
-    connection: 'Wi-Fi 5GHz',
+    connection: 'Ethernet',
     status: 'online',
     speed: { up: 0.8, down: 12.4 },
     dataUsage: 42.8,
   },
   {
-    mac: 'DE:AD:BE:EF:CA:FE',
-    hostname: 'iPhone13',
-    hostOctet: 102,
+    mac: 'AA:BB:CC:DD:EE:03',
+    hostname: 'MacBook-Air',
+    hostOctet: 104,
     profileInterface: 'lan',
+    connection: 'Wi-Fi 5GHz',
+    status: 'online',
+    speed: { up: 1.2, down: 18.6 },
+    dataUsage: 64.9,
+  },
+  {
+    mac: 'DE:AD:BE:EF:CA:FE',
+    hostname: 'iPad',
+    hostOctet: 102,
+    profileInterface: 'kids',
     connection: 'Wi-Fi 2.4GHz',
     status: 'online',
     speed: null,
     dataUsage: 18.2,
+  },
+  {
+    mac: 'AA:BB:CC:DD:EE:04',
+    hostname: 'tv-4k',
+    hostOctet: 120,
+    profileInterface: 'iot',
+    connection: 'Wi-Fi 5GHz',
+    status: 'online',
+    speed: { up: 0.2, down: 24.3 },
+    dataUsage: 311.7,
+  },
+  {
+    mac: 'AA:BB:CC:DD:EE:05',
+    hostname: 'Thermostat',
+    hostOctet: 121,
+    profileInterface: 'iot',
+    connection: 'Wi-Fi 2.4GHz',
+    status: 'online',
+    speed: { up: 0.1, down: 0.1 },
+    dataUsage: 0.4,
+  },
+  {
+    mac: 'AA:BB:CC:DD:EE:06',
+    hostname: 'Galaxy-S24',
+    hostOctet: 130,
+    profileInterface: 'guest',
+    connection: 'Wi-Fi 5GHz',
+    status: 'online',
+    speed: { up: 0.4, down: 6.8 },
+    dataUsage: 2.1,
   },
   {
     mac: 'DE:AD:BE:EF:CA:FF',
@@ -190,7 +240,7 @@ export const MOCK_DEVICE_DEFS: MockDeviceDef[] = [
     mac: 'AA:BB:CC:DD:EE:02',
     hostname: '*',
     hostOctet: 111,
-    profileInterface: 'lan',
+    profileInterface: 'iot',
     connection: 'Ethernet',
     status: 'online',
     speed: { up: 0.5, down: 5.0 },
@@ -202,7 +252,7 @@ export const MOCK_DEVICE_DEFS: MockDeviceDef[] = [
     mac: '3C:5A:B4:11:22:33',
     hostname: '*',
     hostOctet: 112,
-    profileInterface: 'lan',
+    profileInterface: 'kids',
     connection: 'Ethernet',
     status: 'online',
     speed: { up: 0.3, down: 8.1 },

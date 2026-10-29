@@ -112,7 +112,12 @@ export class MockApiService extends ApiService {
     'device.show-config': async params => {
       await pauseFor(1000)
 
-      return MOCK_CONFIG
+      const endpoint = params.endpoint ?? '203.0.113.42'
+      const host =
+        endpoint.includes(':') && !endpoint.startsWith('[')
+          ? `[${endpoint}]`
+          : endpoint
+      return MOCK_CONFIG.replace('203.0.113.42:51820', `${host}:51820`)
     },
     'device.set-dns-injection': async params => {
       await pauseFor(1000)
@@ -467,16 +472,16 @@ export class MockApiService extends ApiService {
       await pauseFor(1000)
       return {
         status: 'update-available',
-        installed: '0.4.0-alpha.19',
-        candidate: '0.4.0-alpha.20',
+        installed: '1.5.0',
+        candidate: '1.5.1',
       }
     },
     'update.apply': async () => {
       await pauseFor(2000)
       return {
         status: 'updating',
-        installed: '0.4.0-alpha.19',
-        candidate: '0.4.0-alpha.20',
+        installed: '1.5.0',
+        candidate: '1.5.1',
       }
     },
     'subnet.add': async params =>
@@ -610,20 +615,16 @@ function replaceSlashes(val: string) {
   return val.replace(new RegExp('/', 'g'), '~1')
 }
 
-const MOCK_CONFIG = `[Interface]
-# Server's private IP address for the WireGuard VPN subnet
-Address = 10.20.10.1/24
-# UDP port WireGuard listens on
-ListenPort = 33333
-# Server private key (generated)
+const MOCK_CONFIG = `# StartTunnel config for Phone
+
+[Interface]
+Address = 10.59.0.3/24
 PrivateKey = 4K68mdpQWdEz/FpdVuRoZYgWpQgpW63J9GFzn+iOulQ=
+DNS = 10.59.0.1
 
-# Commands to run after starting/stopping WireGuard tunnel to enable forwarding and NAT (example)
-PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
-
-# Add client peers below with their public keys and allowed IPs
 [Peer]
-# Client public key
 PublicKey = MQBiYHxAj7u8paj3L4w4uav3P/9YBPbaN4gkWn90SSs=
-# Allowed client IP address within VPN subnet`
+PresharedKey = 2JIBoK+Bxe7MJzX9zV+lFjqHxLTvehLp3piEROaNJjw=
+AllowedIPs = 10.59.0.0/24
+Endpoint = 203.0.113.42:51820
+PersistentKeepalive = 25`

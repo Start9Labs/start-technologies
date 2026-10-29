@@ -1024,6 +1024,7 @@ mod tests {
             preferred_external_port,
             add_ssl: None,
             secure: Some(crate::net::host::binding::Security { ssl: false }),
+            proxy: None,
         }
     }
 

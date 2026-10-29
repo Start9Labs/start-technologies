@@ -101,6 +101,8 @@ Solo para servidores. Permiten que este servidor gestione los registros DNS del 
 
 La configuración de WireGuard de este dispositivo: úsala para conectarlo al túnel. Se abre automáticamente tras añadir un dispositivo, y en cualquier momento con **Ver configuración**.
 
+**Endpoint de WireGuard** comienza con el host de la URL de tu navegador. Cámbialo por una dirección IP o un nombre DNS accesible desde el dispositivo y pulsa **Generar configuración**. Se conserva el puerto configurado de WireGuard. Si la interfaz usa un proxy inverso HTTPS que no reenvía UDP de WireGuard, usa la dirección accesible del servidor del túnel. Esto solo cambia la configuración generada, no el reenvío ni SNAT.
+
 ### Archivo
 
 La configuración como texto. **Cópiala** al portapapeles o **descárgala** como archivo <code>start-tunnel.conf</code> para importarla en un cliente de WireGuard.
