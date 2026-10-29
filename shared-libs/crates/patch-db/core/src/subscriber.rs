@@ -56,6 +56,15 @@ struct ScopedBroadcast {
     json: BTreeMap<NonZeroUsize, broadcast::Sender<JsonRevision>>,
     dump: Option<Bytes>,
 }
+impl ScopedBroadcast {
+    fn prune_unbounded(&mut self) {
+        self.unbounded.retain(|sender| !sender.is_closed());
+    }
+
+    fn is_empty(&self) -> bool {
+        self.unbounded.is_empty() && self.json.is_empty()
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct Broadcast {
@@ -69,11 +78,11 @@ impl Broadcast {
     pub fn send(&mut self, value: &Revision) {
         self.listeners.retain(|ptr, listeners| {
             listeners.dump = None;
-            listeners.unbounded.retain(|sender| !sender.is_closed());
+            listeners.prune_unbounded();
             listeners
                 .json
                 .retain(|_, sender| sender.receiver_count() != 0);
-            if listeners.unbounded.is_empty() && listeners.json.is_empty() {
+            if listeners.is_empty() {
                 return false;
             }
             let scoped = value.for_path(ptr);
@@ -95,6 +104,10 @@ impl Broadcast {
     }
 
     pub fn subscribe(&mut self, ptr: JsonPointer) -> Subscriber {
+        self.listeners.retain(|_, listeners| {
+            listeners.prune_unbounded();
+            !listeners.is_empty()
+        });
         let (send, recv) = mpsc::unbounded_channel();
         self.listeners.entry(ptr).or_default().unbounded.push(send);
         recv

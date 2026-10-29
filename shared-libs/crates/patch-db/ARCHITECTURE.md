@@ -50,20 +50,20 @@ patch-db/
 
 The main database engine. Key types:
 
-| Type                 | Role                                                                                                                             |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `PatchDb`            | Thread-safe async handle (clone to share). All reads/writes go through this.                                                     |
-| `TypedPatchDb<T>`    | Generic wrapper that enforces a schema type `T` via `HasModel`.                                                                  |
-| `Store`              | Internal state container. Holds the current `Value`, revision counter, `Broadcast`, and optional CBOR file storage.              |
-| `Dump`               | Snapshot: `{ id: u64, value: Value }`                                                                                            |
-| `Revision`           | Incremental change: `{ id: u64, patch: DiffPatch }`                                                                              |
-| `DiffPatch`          | Newtype over `json_patch::Patch` with scoping, rebasing, and key-tracking methods.                                               |
-| `DbWatch`            | Combines a `Dump` + `Subscriber` into a `Stream` of values.                                                                      |
-| `TypedDbWatch<T>`    | Type-safe wrapper around `DbWatch`.                                                                                              |
-| `Subscriber`         | `tokio::sync::mpsc::UnboundedReceiver<Revision>`.                                                                                |
-| `JsonSubscriber`     | Bounded JSON revision receiver. Closes permanently on overflow.                                                                  |
-| `Broadcast`          | Per-pointer fan-out dispatcher with shared JSON serialization and cached dumps.                                                  |
-| `MutateResult<T, E>` | Pairs a `Result<T, E>` with an optional `Revision`, allowing callers to check both the outcome and whether a patch was produced. |
+| Type                 | Role                                                                                                                                |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `PatchDb`            | Thread-safe async handle (clone to share). All reads/writes go through this.                                                        |
+| `TypedPatchDb<T>`    | Generic wrapper that enforces a schema type `T` via `HasModel`.                                                                     |
+| `Store`              | Internal state container. Holds the current `Value`, revision counter, `Broadcast`, and optional CBOR file storage.                 |
+| `Dump`               | Snapshot: `{ id: u64, value: Value }`                                                                                               |
+| `Revision`           | Incremental change: `{ id: u64, patch: DiffPatch }`                                                                                 |
+| `DiffPatch`          | Newtype over `json_patch::Patch` with scoping, rebasing, and key-tracking methods.                                                  |
+| `DbWatch`            | Combines a `Dump` + `Subscriber` into a `Stream` of values.                                                                         |
+| `TypedDbWatch<T>`    | Type-safe wrapper around `DbWatch`.                                                                                                 |
+| `Subscriber`         | `tokio::sync::mpsc::UnboundedReceiver<Revision>`.                                                                                   |
+| `JsonSubscriber`     | Bounded JSON revision receiver. Closes permanently on overflow.                                                                     |
+| `Broadcast`          | Per-pointer fan-out with shared JSON serialization and cached dumps. Reclaims dropped typed senders on send and typed subscription. |
+| `MutateResult<T, E>` | Pairs a `Result<T, E>` with an optional `Revision`, allowing callers to check both the outcome and whether a patch was produced.    |
 
 #### Write path
 

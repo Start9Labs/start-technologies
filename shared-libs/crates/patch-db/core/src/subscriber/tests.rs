@@ -5,6 +5,37 @@ use json_ptr::ROOT;
 
 use crate::{Dump, PatchDb};
 
+#[test]
+fn idle_subscriptions_reclaim_dropped_listeners_without_a_revision() {
+    let mut broadcast = super::Broadcast::new();
+    for i in 0..100 {
+        drop(broadcast.subscribe(format!("/dropped/{i}").parse().unwrap()));
+    }
+    let _live = broadcast.subscribe(ROOT.to_owned());
+    assert_eq!(broadcast.listeners.len(), 1);
+    assert_eq!(broadcast.listeners[&ROOT.to_owned()].unbounded.len(), 1);
+
+    let capacity = NonZeroUsize::new(1).unwrap();
+    let dump = Dump {
+        id: 0,
+        value: json!(null),
+    };
+    for _ in 0..100 {
+        drop(
+            broadcast
+                .subscribe_json(ROOT.to_owned(), dump.clone(), capacity)
+                .unwrap(),
+        );
+    }
+    let (_, _live_json) = broadcast
+        .subscribe_json(ROOT.to_owned(), dump, capacity)
+        .unwrap();
+    let listeners = &broadcast.listeners[&ROOT.to_owned()];
+    assert_eq!(listeners.unbounded.len(), 1);
+    assert_eq!(listeners.json.len(), 1);
+    assert_eq!(listeners.json[&capacity].receiver_count(), 1);
+}
+
 #[tokio::test]
 async fn json_subscribers_share_dumps_and_scoped_revisions_across_capacities() {
     let db = PatchDb::in_memory();
