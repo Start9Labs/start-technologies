@@ -45,6 +45,7 @@ impl Database {
                 // Empty: `os_bindings` claims the admin UI's 80/443 as a privileged bind.
                 available_ports: AvailablePorts::new(),
                 notifications: Notifications::new(),
+                push: Default::default(),
                 cifs: CifsTargets::new(),
                 shared_volume_credentials: BTreeMap::new(),
                 retained_shared_volumes: BTreeMap::new(),

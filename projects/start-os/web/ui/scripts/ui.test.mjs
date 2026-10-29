@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, webcrypto } from 'node:crypto'
-import { readFileSync, existsSync } from 'node:fs'
-import { registerHooks } from 'node:module'
-import { resolve } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
 import test from 'node:test'
-import ts from 'typescript'
+import { loadTypeScript } from './typescript-loader.mjs'
 import '@angular/compiler'
 import {
   createEnvironmentInjector,
@@ -14,7 +10,6 @@ import {
 } from '@angular/core'
 import { BehaviorSubject, EMPTY, firstValueFrom, map, Subject } from 'rxjs'
 
-// Presentation substitutes keep browser-only dependencies out of class-method tests.
 const boundaries = new Map()
 function boundary(specifier, names, extra = '') {
   boundaries.set(
@@ -128,81 +123,18 @@ for (const [file, name] of [
 ]) {
   boundary(`./${file}`, [name])
 }
-const root = fileURLToPath(new URL('../../../../../', import.meta.url))
-const ui = resolve(root, 'projects/start-os/web/ui')
-const options = ts.readConfigFile(
-  resolve(root, 'tsconfig.json'),
-  ts.sys.readFile,
-).config.compilerOptions
-const compilerOptions = ts.convertCompilerOptionsFromJson(options, root).options
-registerHooks({
-  resolve(specifier, context, next) {
-    if (boundaries.has(specifier))
-      return { url: `test-boundary:${specifier}`, shortCircuit: true }
-    let file
-    if (specifier.startsWith('src/')) file = resolve(ui, specifier)
-    else if (specifier.startsWith('.') && context.parentURL?.endsWith('.ts'))
-      file = fileURLToPath(new URL(specifier, context.parentURL))
-    if (file) {
-      for (const candidate of [file, `${file}.ts`, `${file}/index.ts`]) {
-        if (existsSync(candidate))
-          return { url: pathToFileURL(candidate).href, shortCircuit: true }
-      }
-    }
-    return next(
-      specifier,
-      context.parentURL?.startsWith('test-boundary:')
-        ? { ...context, parentURL: import.meta.url }
-        : context,
-    )
-  },
-  load(url, context, next) {
-    if (url.startsWith('test-boundary:'))
-      return {
-        format: 'module',
-        source: boundaries.get(url.slice('test-boundary:'.length)),
-        shortCircuit: true,
-      }
-    if (url.endsWith('.md'))
-      return {
-        format: 'module',
-        source: `export default ${JSON.stringify(readFileSync(new URL(url), 'utf8'))}`,
-        shortCircuit: true,
-      }
-    if (url.endsWith('.ts'))
-      return {
-        format: 'module',
-        source: `import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);\n${
-          ts.transpileModule(readFileSync(new URL(url), 'utf8'), {
-            compilerOptions,
-            fileName: fileURLToPath(url),
-          }).outputText
-        }`,
-        shortCircuit: true,
-      }
-    return next(url, context)
-  },
-})
+loadTypeScript(boundaries)
 const { SwUpdate } = await import('@angular/service-worker')
 const { RefreshAlertComponent } =
   await import('src/app/components/refresh-alert.component')
 const { PatchDB } = await import('patch-db-client')
 const { OSService } = await import('src/app/services/os.service')
-const { i18nService: ProductionI18nService } = await import(
-  pathToFileURL(
-    resolve(root, 'shared-libs/ts-modules/shared/src/i18n/i18n.service.ts'),
-  ).href
-)
-const { LocalizePipe: ProductionLocalizePipe } = await import(
-  pathToFileURL(
-    resolve(root, 'shared-libs/ts-modules/shared/src/i18n/localize.pipe.ts'),
-  ).href
-)
-const { I18N } = await import(
-  pathToFileURL(
-    resolve(root, 'shared-libs/ts-modules/shared/src/i18n/i18n.providers.ts'),
-  ).href
-)
+const { i18nService: ProductionI18nService } =
+  await import('../../../../../shared-libs/ts-modules/shared/src/i18n/i18n.service.ts')
+const { LocalizePipe: ProductionLocalizePipe } =
+  await import('../../../../../shared-libs/ts-modules/shared/src/i18n/localize.pipe.ts')
+const { I18N } =
+  await import('../../../../../shared-libs/ts-modules/shared/src/i18n/i18n.providers.ts')
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
 const { TaskService, DialogService, ErrorService, i18nPipe, i18nService } =
   await import('@start9labs/shared')

@@ -68,6 +68,7 @@
 
 # System
 
+- [Notifications](notifications.md)
 - [Logs](logs.md)
 - [Server Name](server-name.md)
 - [SSH](ssh.md)

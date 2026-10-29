@@ -3432,6 +3432,54 @@ notifications.invalid-level:
   es_ES: "Nivel de notificación inválido: %{level}"
   fr_FR: "Niveau de notification invalide : %{level}"
   pl_PL: "Nieprawidłowy poziom powiadomienia: %{level}"
+notifications.push.crypto-failed:
+  en_US: "Unable to prepare encrypted push notification"
+  de_DE: "Verschlüsselte Push-Benachrichtigung konnte nicht vorbereitet werden"
+  es_ES: "No se pudo preparar la notificación push cifrada"
+  fr_FR: "Impossible de préparer la notification push chiffrée"
+  pl_PL: "Nie można przygotować zaszyfrowanego powiadomienia push"
+notifications.push.delivery-failed:
+  en_US: "Push notification delivery failed"
+  de_DE: "Push-Benachrichtigung konnte nicht zugestellt werden"
+  es_ES: "No se pudo entregar la notificación push"
+  fr_FR: "Échec de la remise de la notification push"
+  pl_PL: "Nie udało się dostarczyć powiadomienia push"
+notifications.push.invalid-endpoint:
+  en_US: "Push endpoint must be an HTTP or HTTPS URL"
+  de_DE: "Push-Endpunkt muss eine HTTP- oder HTTPS-URL sein"
+  es_ES: "El destino push debe ser una URL HTTP o HTTPS"
+  fr_FR: "Le point de terminaison push doit être une URL HTTP ou HTTPS"
+  pl_PL: "Punkt końcowy push musi być adresem URL HTTP lub HTTPS"
+notifications.push.invalid-keys:
+  en_US: "Invalid Web Push encryption keys"
+  de_DE: "Ungültige Web-Push-Verschlüsselungsschlüssel"
+  es_ES: "Claves de cifrado Web Push no válidas"
+  fr_FR: "Clés de chiffrement Web Push invalides"
+  pl_PL: "Nieprawidłowe klucze szyfrowania Web Push"
+notifications.push.not-found:
+  en_US: "Push subscription not found"
+  de_DE: "Push-Abonnement nicht gefunden"
+  es_ES: "No se encontró la suscripción push"
+  fr_FR: "Abonnement push introuvable"
+  pl_PL: "Nie znaleziono subskrypcji push"
+notifications.push.queue-failed:
+  en_US: "Unable to process push notification queue"
+  de_DE: "Warteschlange der Push-Benachrichtigungen konnte nicht verarbeitet werden"
+  es_ES: "No se pudo procesar la cola de notificaciones push"
+  fr_FR: "Impossible de traiter la file des notifications push"
+  pl_PL: "Nie można przetworzyć kolejki powiadomień push"
+notifications.push.test-body:
+  en_US: "Push notifications are working on this browser."
+  de_DE: "Push-Benachrichtigungen funktionieren in diesem Browser."
+  es_ES: "Las notificaciones push funcionan en este navegador."
+  fr_FR: "Les notifications push fonctionnent dans ce navigateur."
+  pl_PL: "Powiadomienia push działają w tej przeglądarce."
+notifications.push.test-title:
+  en_US: "StartOS test notification"
+  de_DE: "StartOS-Testbenachrichtigung"
+  es_ES: "Notificación de prueba de StartOS"
+  fr_FR: "Notification de test StartOS"
+  pl_PL: "Powiadomienie testowe StartOS"
 
 # update/mod.rs
 update.already-updated-restart-required:

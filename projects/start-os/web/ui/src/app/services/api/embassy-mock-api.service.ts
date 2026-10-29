@@ -132,6 +132,10 @@ export class MockApiService extends ApiService {
   private readonly revertTime = 1800
   private readonly crypto = inject(WA_CRYPTO)
   private readonly retainedVolumes = new Map<string, string>()
+  private readonly pushSubscriptions = new Map<
+    string,
+    Params<'notification.push.subscribe'>
+  >()
   sequence = 1
   private readonly handlers: RpcHandlers<Api> = {
     state: async () => {
@@ -494,6 +498,18 @@ export class MockApiService extends ApiService {
       await pauseFor(2000)
       return Mock.RegistryInfo
     },
+    'notification.push.key': async () =>
+      'BMPJ4K-bgv51B65CU1VyQTEkdx1KpAEwNW1yBT1s1L897jXuwArMYD6evcHvlejf27P-ouK7X_LwifLqyBkL6Hs',
+    'notification.push.list': async () => [...this.pushSubscriptions.values()],
+    'notification.push.subscribe': async params => {
+      this.pushSubscriptions.set(params.endpoint, params)
+      return null
+    },
+    'notification.push.unsubscribe': async ({ endpoint }) => {
+      this.pushSubscriptions.delete(endpoint)
+      return null
+    },
+    'notification.push.test': async () => null,
     'notification.list': async params => {
       await pauseFor(2000)
 

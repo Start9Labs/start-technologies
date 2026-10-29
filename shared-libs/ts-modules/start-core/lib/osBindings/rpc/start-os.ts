@@ -119,6 +119,7 @@ export type Dump = z.output<typeof schemas.Dump>
 export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 export type EchoParamsInput = z.input<typeof schemas.EchoParams>
 export type EncryptedWireInput = z.input<typeof schemas.EncryptedWire>
+export type EndpointParamsInput = z.input<typeof schemas.EndpointParams>
 
 /**
  * Selects how aggressively an EPP-capable CPU pursues performance.
@@ -129,6 +130,7 @@ export type Epp = z.output<typeof schemas.Epp>
  * Selects how aggressively an EPP-capable CPU pursues performance.
  */
 export type EppInput = z.input<typeof schemas.Epp>
+export type ExecResult = z.output<typeof schemas.ExecResult>
 export type FormatDiskParamsInput = z.input<typeof schemas.FormatDiskParams>
 export type ForwardTarget = z.output<typeof schemas.ForwardTarget>
 export type GatewayId = z.output<typeof schemas.GatewayId>
@@ -213,6 +215,8 @@ export type PartitionTable = z.output<typeof schemas.PartitionTable>
 export type Percentage = z.output<typeof schemas.Percentage>
 export type PluginId = z.output<typeof schemas.PluginId>
 export type PreDownloadAlertWhen = z.output<typeof schemas.PreDownloadAlertWhen>
+export type PushKeys = z.output<typeof schemas.PushKeys>
+export type PushKeysInput = z.input<typeof schemas.PushKeys>
 export type QueryDnsParamsInput = z.input<typeof schemas.QueryDnsParams>
 
 /**
@@ -390,6 +394,7 @@ export type EditGatewayParamsInput = z.input<typeof schemas.EditGatewayParams>
 export type EditSignerParamsInput = z.input<typeof schemas.EditSignerParams>
 export type EppInfo = z.output<typeof schemas.EppInfo>
 export type EppParamsInput = z.input<typeof schemas.EppParams>
+export type ExecParamsInput = z.input<typeof schemas.ExecParams>
 export type ForgetGatewayParamsInput = z.input<
   typeof schemas.ForgetGatewayParams
 >
@@ -470,6 +475,8 @@ export type PreDownloadAlert = z.output<typeof schemas.PreDownloadAlert>
  */
 export type ProxyAuth = z.output<typeof schemas.ProxyAuth>
 export type PublicDomainConfig = z.output<typeof schemas.PublicDomainConfig>
+export type PushSubscription = z.output<typeof schemas.PushSubscription>
+export type PushSubscriptionInput = z.input<typeof schemas.PushSubscription>
 export type RebuildParamsInput = z.input<typeof schemas.RebuildParams>
 export type RemoveAcmeParamsInput = z.input<typeof schemas.RemoveAcmeParams>
 export type RemoveAdminParamsInput = z.input<typeof schemas.RemoveAdminParams>
