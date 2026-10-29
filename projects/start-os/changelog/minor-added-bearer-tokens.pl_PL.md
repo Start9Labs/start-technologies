@@ -1,0 +1,1 @@
+- Tokeny Bearer obsługują klientów API, którzy nie mogą podpisywać żądań. `start-cli auth token create --name <name>` wyświetla token tylko raz; żądania z `Authorization: Bearer <token>` uwierzytelniają się jako sesja o podanej nazwie, widoczna i możliwa do unieważnienia na liście sesji. Tokeny nieaktywne przez 30 dni są unieważniane tak jak pozostałe sesje.

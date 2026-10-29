@@ -3514,6 +3514,13 @@ auth.malformed-etc-shadow:
   fr_FR: "/etc/shadow mal formé"
   pl_PL: "zniekształcony /etc/shadow"
 
+auth.tokens-unsupported:
+  en_US: "Bearer tokens are not supported here"
+  de_DE: "Bearer-Token werden hier nicht unterstützt"
+  es_ES: "Los tokens de portador no se admiten aquí"
+  fr_FR: "Les jetons d'accès ne sont pas pris en charge ici"
+  pl_PL: "Tokeny okaziciela nie są tutaj obsługiwane"
+
 auth.couldnt-decode-password:
   en_US: "Couldn't decode password"
   de_DE: "Passwort konnte nicht dekodiert werden"
@@ -4565,6 +4572,13 @@ help.arg.to-registry-url:
   fr_FR: "URL du registre de destination pour la promotion"
   pl_PL: "URL rejestru docelowego do promowania"
 
+help.arg.token-name:
+  en_US: "Name shown for the token in the session list"
+  de_DE: "Name des Tokens in der Sitzungsliste"
+  es_ES: "Nombre que se muestra para el token en la lista de sesiones"
+  fr_FR: "Nom affiché pour le jeton dans la liste des sessions"
+  pl_PL: "Nazwa tokenu wyświetlana na liście sesji"
+
 help.arg.tor-proxy-url:
   en_US: "Tor SOCKS proxy URL"
   de_DE: "Tor-SOCKS-Proxy-URL"
@@ -5056,12 +5070,19 @@ help.arg.s9pk-file-paths:
   fr_FR: "Chemins vers les fichiers de paquet s9pk"
   pl_PL: "Ścieżki do plików pakietów s9pk"
 
-help.arg.session-ids:
-  en_US: "Session identifiers"
-  de_DE: "Sitzungskennungen"
-  es_ES: "Identificadores de sesión"
-  fr_FR: "Identifiants de session"
-  pl_PL: "Identyfikatory sesji"
+help.arg.session-pubkeys:
+  en_US: "Enrolled key of a session to terminate"
+  de_DE: "Registrierter Schlüssel einer zu beendenden Sitzung"
+  es_ES: "Clave registrada de una sesión a terminar"
+  fr_FR: "Clé enregistrée d'une session à terminer"
+  pl_PL: "Zarejestrowany klucz sesji do zakończenia"
+
+help.arg.session-tokens:
+  en_US: "ID of a bearer token to revoke"
+  de_DE: "ID eines zu widerrufenden Bearer-Tokens"
+  es_ES: "ID de un token de portador a revocar"
+  fr_FR: "ID d'un jeton d'accès à révoquer"
+  pl_PL: "Identyfikator tokenu okaziciela do unieważnienia"
 
 help.arg.signer-id:
   en_US: "Signer identifier"
@@ -5534,6 +5555,13 @@ about.commands-add-sign-remove-get-assets:
   fr_FR: "Commandes pour ajouter, signer, supprimer ou obtenir des actifs du registre"
   pl_PL: "Polecenia dodania, podpisania, usunięcia lub pobrania zasobów rejestru"
 
+about.commands-auth-tokens:
+  en_US: "Create bearer tokens for API clients"
+  de_DE: "Bearer-Tokens für API-Clients erstellen"
+  es_ES: "Crear tokens de portador para clientes de la API"
+  fr_FR: "Créer des jetons porteurs pour les clients de l'API"
+  pl_PL: "Twórz tokeny okaziciela dla klientów API"
+
 about.commands-authentication:
   en_US: "Commands related to Authentication i.e. login, logout"
   de_DE: "Befehle zur Authentifizierung, z.B. Anmelden, Abmelden"
@@ -5855,6 +5883,13 @@ about.convert-s9pk-v1-to-v2:
   es_ES: "Convertir un s9pk de v1 a v2"
   fr_FR: "Convertir un s9pk de v1 à v2"
   pl_PL: "Konwertuj s9pk z v1 do v2"
+
+about.create-auth-token:
+  en_US: "Create a bearer token that authenticates as a new session"
+  de_DE: "Bearer-Token erstellen, das sich als neue Sitzung authentifiziert"
+  es_ES: "Crear un token de portador que se autentica como una nueva sesión"
+  fr_FR: "Créer un jeton porteur qui s'authentifie comme une nouvelle session"
+  pl_PL: "Utwórz token okaziciela uwierzytelniający jako nowa sesja"
 
 about.create-backup-all-packages:
   en_US: "Create a backup for all packages"

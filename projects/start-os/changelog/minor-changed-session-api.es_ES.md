@@ -1,0 +1,1 @@
+- **La API de sesiones separa los dispositivos conectados de los tokens de portador.** `auth.session.list` devuelve `{ pubkeys, tokens }` y `auth.session.kill` recibe `pubkeys` y `tokens` en lugar de `ids`.
