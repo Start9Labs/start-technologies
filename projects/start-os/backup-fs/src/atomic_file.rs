@@ -36,7 +36,7 @@ impl AtomicFile {
                 .write(true)
                 .truncate(true)
                 .create(true)
-                .custom_flags(libc::O_DIRECT),
+                .custom_flags(libc::O_DIRECT | libc::O_NOFOLLOW),
         )
     }
 
@@ -52,7 +52,8 @@ impl AtomicFile {
                 .read(true)
                 .write(true)
                 .truncate(true)
-                .create(true),
+                .create(true)
+                .custom_flags(libc::O_NOFOLLOW),
         )
     }
 
@@ -116,12 +117,6 @@ impl Read for AtomicFile {
     fn read_vectored(&mut self, bufs: &mut [io::IoSliceMut<'_>]) -> io::Result<usize> {
         self.deref_mut().read_vectored(bufs)
     }
-    // fn read_buf(&mut self, buf: io::BorrowedCursor<'_>) -> IoResult<()> {
-    //     self.deref_mut().read_buf(buf)
-    // }
-    // fn is_read_vectored(&self) -> bool {
-    //     self.deref_mut().is_read_vectored()
-    // }
     fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
         self.deref_mut().read_to_end(buf)
     }
@@ -136,9 +131,6 @@ impl Write for AtomicFile {
     fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
         self.deref_mut().write_vectored(bufs)
     }
-    // fn is_write_vectored(&self) -> bool {
-    //     self.deref_mut().is_write_vectored()
-    // }
     fn flush(&mut self) -> io::Result<()> {
         self.deref_mut().flush()
     }
@@ -148,6 +140,26 @@ impl Seek for AtomicFile {
         self.deref_mut().seek(pos)
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temporary_symlinks_cannot_truncate_their_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target");
+        let destination = dir.path().join("destination");
+        std::fs::write(&target, b"untouched").unwrap();
+        std::os::unix::fs::symlink(&target, destination.with_extension("tmp")).unwrap();
+        let constructors: [fn(PathBuf) -> BkfsResult<AtomicFile>; 2] =
+            [AtomicFile::create, AtomicFile::create_buffered];
+        for create in constructors {
+            assert!(create(destination.clone()).is_err());
+            assert_eq!(std::fs::read(&target).unwrap(), b"untouched");
+        }
+    }
+}
+
 impl AsRawFd for AtomicFile {
     fn as_raw_fd(&self) -> RawFd {
         self.deref().as_raw_fd()
@@ -157,13 +169,7 @@ impl FileExt for AtomicFile {
     fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
         self.deref().read_at(buf, offset)
     }
-    // fn read_vectored_at(&self, bufs: &mut [io::IoSliceMut<'_>], offset: u64) -> io::Result<usize> {
-    //     self.deref_mut().read_vectored_at(bufs, offset)
-    // }
     fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
         self.deref().write_at(buf, offset)
     }
-    // fn write_vectored_at(&self, bufs: &[io::IoSlice<'_>], offset: u64) -> io::Result<usize> {
-    //     self.deref_mut().write_vectored_at(bufs, offset)
-    // }
 }
