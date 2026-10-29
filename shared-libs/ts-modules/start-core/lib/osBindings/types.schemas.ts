@@ -1771,10 +1771,7 @@ export const ActionMetadata: z.ZodObject<{
     typeof ActionVisibility
   >
   /**
-   * One of: "only-stopped", "only-running", "all"
-   *   - "only-stopped" - the action can only be run when the service is stopped
-   *   - "only-running" - the action can only be run when the service is running
-   *   - "any" - the action can only be run regardless of the service's status
+   * Service run states that permit this action.
    */
   allowedStatuses: typeof AllowedStatuses
   hasInput: z.ZodBoolean
@@ -1827,14 +1824,10 @@ export const ActionMetadata: z.ZodObject<{
       'One of: "enabled", "hidden", or { disabled: "" }\n  - "enabled" - the action is available be run\n  - "hidden" - the action cannot be seen or run\n  - { disabled: "example explanation" } means the action is visible but cannot be run. Replace "example explanation" with a reason why the action is disable to prevent user confusion.',
   }),
   /**
-   * One of: "only-stopped", "only-running", "all"
-   *   - "only-stopped" - the action can only be run when the service is stopped
-   *   - "only-running" - the action can only be run when the service is running
-   *   - "any" - the action can only be run regardless of the service's status
+   * Service run states that permit this action.
    */
   allowedStatuses: AllowedStatuses.meta({
-    description:
-      'One of: "only-stopped", "only-running", "all"\n  - "only-stopped" - the action can only be run when the service is stopped\n  - "only-running" - the action can only be run when the service is running\n  - "any" - the action can only be run regardless of the service\'s status',
+    description: 'Service run states that permit this action.',
   }),
   hasInput: z.boolean(),
   /**
