@@ -501,6 +501,35 @@ describe('HealthDaemon ready polling', () => {
     await dependency.term()
   })
 
+  it('hides displayed probe errors during grace without masking readiness failures', async () => {
+    const setHealth = jest.fn(async () => null)
+    const hd = new HealthDaemon<Manifest>(
+      fakeDaemon() as any,
+      [],
+      'db',
+      { display: 'Database', fn: results('failure') },
+      { ...fakeEffects(), setHealth },
+    )
+    await hd.updateStatus()
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(setHealth).toHaveBeenLastCalledWith({
+      id: 'db',
+      name: 'Database',
+      result: 'starting',
+      message: null,
+    })
+    expect(hd.health).toEqual({ result: 'failure', message: 'm' })
+    expect(hd.isReady).toBe(false)
+    await jest.advanceTimersByTimeAsync(9_000)
+    expect(setHealth).toHaveBeenLastCalledWith({
+      id: 'db',
+      name: 'Database',
+      result: 'failure',
+      message: 'm',
+    })
+    await hd.term()
+  })
+
   it('runs a check with onceTrigger once and reports its failure', async () => {
     jest.advanceTimersByTime(1)
     const setHealth = jest.fn(async () => null)

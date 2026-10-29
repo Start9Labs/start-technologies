@@ -11,7 +11,7 @@ Each health check displays one of the following statuses:
 - **Success** — The health check has passed. The service is ready and operational.
 - **Error** — The health check has failed. The message will describe the problem.
 
-Starting and loading checks show a clock when waiting for another condition and a spinner while actively progressing. Every status can display a message supplied by the service as-is.
+Starting and loading checks show a clock when waiting for another condition and a spinner while actively progressing. Every status can display a message supplied by the service as-is. Empty or absent messages use the status label.
 
 ## What Gets Checked
 

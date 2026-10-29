@@ -8,7 +8,7 @@ export function withGracePeriod(
   return health.result === 'failure' &&
     started !== undefined &&
     isInGracePeriod(started, gracePeriod)
-    ? { ...health, result: 'starting' }
+    ? { result: 'starting', message: null }
     : health
 }
 

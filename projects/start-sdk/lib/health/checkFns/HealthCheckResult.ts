@@ -14,6 +14,7 @@ import { T } from '@start9labs/start-core'
  * a spinner while waiting for an external condition. Defaults to `false`.
  *
  * Every status accepts a `message` string, displayed verbatim in the StartOS UI.
+ * Empty or absent messages use the localized status label.
  * Required for `loading` and `failure`; optional for other states.
  */
 export type HealthCheckResult = T.NamedHealthCheckResultKindInput

@@ -1,5 +1,5 @@
 import { HealthCheck } from '../health/HealthCheck'
-import { isInGracePeriod } from '../health/isInGracePeriod'
+import { isInGracePeriod, withGracePeriod } from '../health/isInGracePeriod'
 import { cooldownTrigger, onceTrigger } from '../trigger'
 
 const failure = { result: 'failure' as const, message: 'Unavailable' }
@@ -15,6 +15,28 @@ describe('HealthCheck finite triggers', () => {
     expect(isInGracePeriod(0)).toBe(true)
     jest.advanceTimersByTime(1)
     expect(isInGracePeriod(0)).toBe(false)
+  })
+
+  it('hides probe errors until the grace period ends', () => {
+    expect(withGracePeriod(failure, 0)).toEqual({
+      result: 'starting',
+      message: null,
+    })
+    jest.advanceTimersByTime(9_999)
+    expect(withGracePeriod(failure, 0)).toEqual({
+      result: 'starting',
+      message: null,
+    })
+    jest.advanceTimersByTime(1)
+    expect(withGracePeriod(failure, 0)).toBe(failure)
+  })
+
+  it.each([
+    { result: 'starting', message: 'Preparing database' },
+    { result: 'starting', waiting: true, message: 'Database unavailable' },
+    { result: 'loading', waiting: true, message: 'Peers unavailable' },
+  ] as const)('preserves explicit $result messages during grace', health => {
+    expect(withGracePeriod(health, 0)).toBe(health)
   })
 
   it.each([false, true])(

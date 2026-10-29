@@ -97,7 +97,7 @@ export class ServiceHealthCheckComponent {
 
   protected readonly message = computed(
     ({ result, message } = this.healthCheck()) =>
-      message ??
+      message ||
       this.i18n.transform(
         (
           {

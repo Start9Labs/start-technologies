@@ -403,7 +403,7 @@ Available on `sdk.healthCheck`:
 
 ### Polling Triggers
 
-Every health status accepts a `message` string that the UI displays verbatim. A `starting` or `loading` result can also set `waiting: true` to show a clock instead of a spinner while waiting for an external condition; omitting it defaults to `false`. Readiness still follows `result`, not the waiting flag.
+Every health status accepts a `message` string that the UI displays verbatim. Empty or absent messages use the localized status label. A `starting` or `loading` result can also set `waiting: true` to show a clock instead of a spinner while waiting for an external condition; omitting it defaults to `false`. Readiness still follows `result`, not the waiting flag.
 
 By default, health checks poll every 1 s while `starting` or `failure`, and every 30 s while `success`, `loading`, `disabled`, or `starting` with `waiting: true`. A daemon's `ready` check reporting `loading` or `waiting: true` before its first `success` is the exception: it backs off from 1 s, doubling to 30 s, so a daemon that `requires` it starts soon after it becomes ready. Override this with the `trigger` option on `ready`:
 
