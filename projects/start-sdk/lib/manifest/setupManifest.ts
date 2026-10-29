@@ -34,7 +34,7 @@ type NoExtraKeys<Manifest> = {
 export function setupManifest<
   Id extends string,
   VolumesTypes extends VolumeId,
-  Manifest extends {
+  const Manifest extends {
     id: Id
     volumes: VolumesTypes[]
   } & SDKManifest,
@@ -115,6 +115,7 @@ export function buildManifest<
     userspaceFilesystems: manifest.userspaceFilesystems ?? false,
     virtualNetworking: manifest.virtualNetworking ?? false,
     hardwareVirtualization: manifest.hardwareVirtualization ?? false,
+    sharedVolumes: manifest.sharedVolumes ?? false,
     plugins: manifest.plugins ?? [],
   }
 }

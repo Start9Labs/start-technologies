@@ -1,5 +1,9 @@
 import * as T from '@start9labs/start-core/types'
-import { IdMap, MountOptions } from '../util/SubContainer'
+import {
+  IdMap,
+  MountOptions,
+  SharedVolumeMountOptions,
+} from '../util/SubContainer'
 
 type MountArray = { mountpoint: string; options: MountOptions }[]
 
@@ -65,7 +69,7 @@ type DependencyOpts<Manifest extends T.SDKManifest> = {
 /**
  * Immutable builder for declaring filesystem mounts into a subcontainer.
  *
- * Supports mounting volumes, static assets, and dependency volumes.
+ * Supports mounting volumes, static assets, dependency volumes, and shared volumes.
  * Each `mount*` method returns a new `Mounts` instance (immutable builder pattern).
  *
  * @typeParam Manifest - The service manifest type
@@ -75,6 +79,7 @@ export class Mounts<Manifest extends T.SDKManifest> {
     readonly volumes: VolumeOpts<Manifest>[],
     readonly assets: SharedOptions[],
     readonly dependencies: DependencyOpts<T.SDKManifest>[],
+    readonly sharedVolumes: SharedVolumeMountOptions[],
   ) {}
 
   /**
@@ -82,7 +87,7 @@ export class Mounts<Manifest extends T.SDKManifest> {
    * @returns A new Mounts instance ready for chaining mount declarations
    */
   static of<Manifest extends T.SDKManifest>() {
-    return new Mounts<Manifest>([], [], [])
+    return new Mounts<Manifest>([], [], [], [])
   }
 
   /**
@@ -95,6 +100,7 @@ export class Mounts<Manifest extends T.SDKManifest> {
       [...this.volumes, options],
       [...this.assets],
       [...this.dependencies],
+      [...this.sharedVolumes],
     )
   }
 
@@ -108,6 +114,7 @@ export class Mounts<Manifest extends T.SDKManifest> {
       [...this.volumes],
       [...this.assets, options],
       [...this.dependencies],
+      [...this.sharedVolumes],
     )
   }
 
@@ -127,6 +134,23 @@ export class Mounts<Manifest extends T.SDKManifest> {
       [...this.volumes],
       [...this.assets],
       [...this.dependencies, options],
+      [...this.sharedVolumes],
+    )
+  }
+
+  /**
+   * Declare an essential shared volume. Unavailability rejects subcontainer construction.
+   * Prefer `SubContainer.tryMountSharedVolume` for optional functionality.
+   */
+  mountSharedVolume(
+    this: Manifest extends { sharedVolumes: true } ? Mounts<Manifest> : never,
+    options: SharedVolumeMountOptions,
+  ): Mounts<Manifest> {
+    return new Mounts<Manifest>(
+      [...this.volumes],
+      [...this.assets],
+      [...this.dependencies],
+      [...this.sharedVolumes, options],
     )
   }
 
@@ -140,7 +164,8 @@ export class Mounts<Manifest extends T.SDKManifest> {
     for (let mountpoint of this.volumes
       .map(v => v.mountpoint)
       .concat(this.assets.map(a => a.mountpoint))
-      .concat(this.dependencies.map(d => d.mountpoint))) {
+      .concat(this.dependencies.map(d => d.mountpoint))
+      .concat(this.sharedVolumes.map(v => v.mountpoint))) {
       if (mountpoints.has(mountpoint)) {
         throw new Error(
           `cannot mount more than once to mountpoint ${mountpoint}`,
@@ -170,6 +195,17 @@ export class Mounts<Manifest extends T.SDKManifest> {
             subpath: a.subpath,
             filetype: a.type ?? 'directory',
             idmap: normalizeIdmap(a.idmap),
+          },
+        })),
+      )
+      .concat(
+        this.sharedVolumes.map(v => ({
+          mountpoint: v.mountpoint,
+          options: {
+            type: 'shared',
+            id: v.id,
+            subpath: v.subpath ?? null,
+            readonly: v.readonly,
           },
         })),
       )

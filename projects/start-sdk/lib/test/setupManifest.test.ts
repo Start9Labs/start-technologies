@@ -86,3 +86,13 @@ test('images can require a native architecture', () => {
   expect(built.images.main.emulateMissing).toBe(false)
   expect(built.hardwareRequirements.arch).toEqual(['aarch64'])
 })
+
+test('shared-volume capability defaults to false and preserves explicit opt-in', () => {
+  expect(
+    buildManifest(versions, manifest(), Dependencies.of()).sharedVolumes,
+  ).toBe(false)
+  const optedIn = setupManifest({ ...manifest(), sharedVolumes: true })
+  expect(
+    buildManifest(versions, optedIn, Dependencies.of()).sharedVolumes,
+  ).toBe(true)
+})

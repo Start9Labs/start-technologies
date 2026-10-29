@@ -17,24 +17,32 @@ jest.mock('fs', () => ({
 
 function system(): jest.Mocked<System> {
   return {
-    init: jest.fn(async () => {}),
-    exit: jest.fn(async () => {}),
-    start: jest.fn(async () => {}),
+    init: jest.fn(async (..._args: Parameters<System['init']>) => {}),
+    exit: jest.fn(async (..._args: Parameters<System['exit']>) => {}),
+    start: jest.fn(async (..._args: Parameters<System['start']>) => {}),
     stop: jest.fn(async () => {}),
-    createBackup: jest.fn(async () => {}),
-    runAction: jest.fn(async () => null),
-    getActionInput: jest.fn(async () => null),
+    createBackup: jest.fn(
+      async (..._args: Parameters<System['createBackup']>) => {},
+    ),
+    runAction: jest.fn(
+      async (
+        ..._args: Parameters<System['runAction']>
+      ): ReturnType<System['runAction']> => null,
+    ),
+    getActionInput: jest.fn(
+      async (
+        ..._args: Parameters<System['getActionInput']>
+      ): ReturnType<System['getActionInput']> => null,
+    ),
   }
 }
 
 beforeEach(() => {
-  jest
-    .mocked(net.createServer)
-    .mockReturnValue(
-      Object.assign(new EventEmitter(), {
-        listen: jest.fn(),
-      }) as unknown as net.Server,
-    )
+  jest.mocked(net.createServer).mockReturnValue(
+    Object.assign(new EventEmitter(), {
+      listen: jest.fn(),
+    }) as unknown as net.Server,
+  )
 })
 
 test('a backup-only runtime executes the backup without init, main or exit hooks', async () => {
