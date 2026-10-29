@@ -469,6 +469,80 @@ describe('generated effects RPC boundary', () => {
     )
   })
 
+  test('shared-volume listing preserves grants and registers payload-free invalidation', async () => {
+    const callbacks = new CallbackHolder()
+    const callback = jest.fn()
+    const effects = makeEffects({ eventId: 'event', callbacks })
+    const volumes = [
+      {
+        id: 'e680a57e-5066-4dfd-bbab-06361bfceec2',
+        name: 'Music',
+        readonly: true,
+        availability: 'unknown',
+      },
+    ]
+    reply = { result: volumes }
+    await expect(effects.getSharedVolumes({ callback })).resolves.toEqual(
+      volumes,
+    )
+    expect(requests[0]).toEqual({
+      id: expect.any(Number),
+      method: 'get-shared-volumes',
+      params: { callback: expect.any(Number), eventId: 'event' },
+    })
+    await callbacks.callCallback(requests[0].params.callback as number, [])
+    expect(callback).toHaveBeenCalledWith()
+    await effects.getSharedVolumes({})
+    expect(requests[1].params.callback).toBeNull()
+  })
+
+  test.each([
+    { kind: 'mounted' },
+    { kind: 'unavailable', reason: 'sourceUnavailable' },
+    { kind: 'unavailable', reason: 'timeout' },
+  ])(
+    'preserves shared-volume mount outcome %j and original fields',
+    async outcome => {
+      const effects = makeEffects({ eventId: null })
+      const options = Object.freeze({
+        id: 'e680a57e-5066-4dfd-bbab-06361bfceec2',
+        subcontainer: 'guid',
+        mountpoint: '/music',
+        subpath: 'albums',
+        readonly: true,
+      })
+      reply = { result: outcome }
+      await expect(effects.mountSharedVolume(options)).resolves.toEqual(outcome)
+      expect(requests).toEqual([
+        {
+          id: expect.any(Number),
+          method: 'mount-shared-volume',
+          params: options,
+        },
+      ])
+    },
+  )
+
+  test.each(['Authorization', 'InvalidRequest'])(
+    'shared-volume %s failures reject rather than becoming unavailable',
+    async message => {
+      const error = jest.spyOn(console, 'error').mockImplementation(() => {})
+      reply = { error: { code: 59, message, data: { details: 'denied' } } }
+      try {
+        await expect(
+          makeEffects({ eventId: null }).mountSharedVolume({
+            id: 'e680a57e-5066-4dfd-bbab-06361bfceec2',
+            subcontainer: 'guid',
+            mountpoint: '/music',
+            readonly: false,
+          }),
+        ).rejects.toThrow(`${message}: denied@mount-shared-volume`)
+      } finally {
+        error.mockRestore()
+      }
+    },
+  )
+
   test('retains host error details and method attribution', async () => {
     const error = jest.spyOn(console, 'error').mockImplementation(() => {})
     reply = {
