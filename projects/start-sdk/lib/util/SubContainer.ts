@@ -8,6 +8,7 @@ import { Drop } from '@start9labs/start-core/util/Drop'
 import { logErrorOnce } from '@start9labs/start-core/util/logErrorOnce'
 import { Mounts } from '../mainFn/Mounts'
 import { FileMounts } from './fileMounts'
+import { jsonEnv } from './jsonEnv'
 
 export const execFile = promisify(cp.execFile)
 const False = () => false
@@ -1244,12 +1245,7 @@ function commandOptions<Options extends CommandOptions>(
     ],
     options: {
       ...spawnOptions,
-      env: {
-        ...process.env,
-        JSON_ENV: JSON.stringify({ ...image.env, ...env }, (_key, value) =>
-          value === undefined ? null : value,
-        ),
-      },
+      env: jsonEnv({ ...image.env, ...env }),
     },
   }
 }

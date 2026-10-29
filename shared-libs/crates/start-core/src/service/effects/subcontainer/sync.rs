@@ -16,7 +16,7 @@ use tokio::sync::oneshot;
 use crate::CAP_1_KiB;
 use crate::service::effects::ContainerCliContext;
 use crate::service::effects::prelude::*;
-use crate::util::env::{Environment, parse_assignment};
+use crate::util::env::{parse_assignment, parse_json_env};
 use crate::util::io::TermSize;
 
 const FWD_SIGNALS: &[c_int] = &[
@@ -144,7 +144,7 @@ impl ExecParams {
         };
 
         let mut cmd = StdCommand::new(command);
-        let needs_home = self.configure_env(&mut cmd, std::env::var_os("JSON_ENV").as_deref())?;
+        let needs_home = self.configure_env(&mut cmd, std::env::vars_os())?;
 
         let ExecUser {
             uid,
@@ -228,7 +228,11 @@ impl ExecParams {
         })
     }
 
-    fn configure_env(&self, cmd: &mut StdCommand, json_env: Option<&OsStr>) -> Result<bool, Error> {
+    fn configure_env(
+        &self,
+        cmd: &mut StdCommand,
+        variables: impl IntoIterator<Item = (OsString, OsString)>,
+    ) -> Result<bool, Error> {
         cmd.env_clear();
         cmd.env(
             "PATH",
@@ -266,20 +270,8 @@ impl ExecParams {
             }
         }
 
-        if let Some(json_env) = json_env {
-            let vars: Environment =
-                serde_json::from_slice(json_env.as_encoded_bytes()).map_err(|_| {
-                    Error::new(
-                        eyre!(
-                            "{}",
-                            t!("service.effects.subcontainer.sync.invalid-json-env")
-                        ),
-                        ErrorKind::Deserialization,
-                    )
-                })?;
-            for (key, value) in vars {
-                update_env((&key, value.as_deref()));
-            }
+        for (key, value) in parse_json_env(variables)? {
+            update_env((&key, value.as_deref()));
         }
 
         for line in &self.env {
@@ -322,10 +314,17 @@ mod environment_tests {
             "UNSET": "json",
         })
         .to_string();
+        let (first, second) = json.split_at(json.len() / 2);
         let mut cmd = StdCommand::new("/bin/sh");
         assert!(
             params
-                .configure_env(&mut cmd, Some(OsStr::new(&json)))
+                .configure_env(
+                    &mut cmd,
+                    [
+                        ("JSON_ENV_1".into(), second.into()),
+                        ("JSON_ENV_0".into(), first.into()),
+                    ]
+                )
                 .unwrap()
         );
         let env: std::collections::BTreeMap<_, _> = cmd.get_envs().collect();
@@ -337,7 +336,8 @@ mod environment_tests {
         assert_eq!(env.get(OsStr::new("EMPTY")), Some(&Some(OsStr::new(""))));
         assert!(!env.contains_key(OsStr::new("REMOVED")));
         assert!(!env.contains_key(OsStr::new("UNSET")));
-        assert!(!env.contains_key(OsStr::new("JSON_ENV")));
+        assert!(!env.contains_key(OsStr::new("JSON_ENV_0")));
+        assert!(!env.contains_key(OsStr::new("JSON_ENV_1")));
         let output = cmd
             .args(["-c", "printf '%s' \"$OVERRIDE\""])
             .output()
@@ -350,36 +350,16 @@ mod environment_tests {
     fn home_overrides_include_explicit_removal() {
         let mut params = ExecParams::try_parse_from(["exec", "/unused", "sh"]).unwrap();
         let mut cmd = StdCommand::new("sh");
-        assert!(params.configure_env(&mut cmd, None).unwrap());
+        assert!(params.configure_env(&mut cmd, []).unwrap());
         for json in [r#"{"HOME":"/custom"}"#, r#"{"HOME":null}"#] {
             assert!(
                 !params
-                    .configure_env(&mut cmd, Some(OsStr::new(json)))
+                    .configure_env(&mut cmd, [("JSON_ENV_0".into(), json.into())])
                     .unwrap()
             );
         }
         params.env.push("HOME".into());
-        assert!(!params.configure_env(&mut cmd, None).unwrap());
-    }
-
-    #[test]
-    fn invalid_json_env_does_not_echo_secrets() {
-        let params = ExecParams::try_parse_from(["exec", "/unused", "sh"]).unwrap();
-        for json in [
-            r#""secret-value""#,
-            r#"{"TOKEN":["secret-value"]}"#,
-            "{",
-            "null",
-            "[]",
-            r#"{"PORT":42}"#,
-        ] {
-            let mut cmd = StdCommand::new("sh");
-            let error = params
-                .configure_env(&mut cmd, Some(OsStr::new(json)))
-                .unwrap_err();
-            assert_eq!(error.kind, ErrorKind::Deserialization);
-            assert!(!format!("{error:?}").contains("secret-value"));
-        }
+        assert!(!params.configure_env(&mut cmd, []).unwrap());
     }
 }
 

@@ -2964,13 +2964,6 @@ service.effects.dependency.volume-missing:
   fr_FR: "le volume %{volume} de %{package} n'existe pas — %{package} est-il installé ?"
   pl_PL: "wolumin %{volume} pakietu %{package} nie istnieje — czy %{package} jest zainstalowany?"
 
-service.effects.subcontainer.sync.invalid-json-env:
-  en_US: "JSON_ENV must be a JSON object with string or null values"
-  de_DE: "JSON_ENV muss ein JSON-Objekt mit Zeichenfolgen oder null-Werten sein"
-  es_ES: "JSON_ENV debe ser un objeto JSON con valores de cadena o null"
-  fr_FR: "JSON_ENV doit être un objet JSON contenant des chaînes ou des valeurs null"
-  pl_PL: "JSON_ENV musi być obiektem JSON z wartościami tekstowymi lub null"
-
 service.effects.subcontainer.sync.unknown-group:
   en_US: "unknown group: %{group}"
   de_DE: "unbekannte Gruppe: %{group}"
@@ -3562,6 +3555,13 @@ auth.local-logout-unnecessary:
   es_ES: "No es necesario cerrar sesión al usar la cookie de autenticación local."
   fr_FR: "La déconnexion est inutile lorsque le cookie d'authentification local est utilisé."
   pl_PL: "Wylogowanie nie jest potrzebne podczas korzystania z lokalnego pliku cookie uwierzytelniania."
+
+util.env.invalid-json-env:
+  en_US: "JSON_ENV_* chunks must be contiguous from 0 and form a JSON object with string or null values"
+  de_DE: "JSON_ENV_*-Teile müssen lückenlos bei 0 beginnen und ein JSON-Objekt mit Zeichenfolgen oder null-Werten bilden"
+  es_ES: "Los fragmentos JSON_ENV_* deben ser consecutivos desde 0 y formar un objeto JSON con valores de cadena o null"
+  fr_FR: "Les fragments JSON_ENV_* doivent être consécutifs à partir de 0 et former un objet JSON contenant des chaînes ou des valeurs null"
+  pl_PL: "Fragmenty JSON_ENV_* muszą być ponumerowane kolejno od 0 i tworzyć obiekt JSON z wartościami tekstowymi lub null"
 
 # util/tui.rs
 util.tui.terminal-must-be-interactive:

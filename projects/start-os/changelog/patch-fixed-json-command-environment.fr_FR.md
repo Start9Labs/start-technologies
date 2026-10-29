@@ -1,3 +1,3 @@
-- Accepte les substitutions de variables d’environnement des sous-conteneurs via `JSON_ENV`, y compris les valeurs multilignes et la suppression de variables.
+- Accepte les substitutions de variables d’environnement des sous-conteneurs via `JSON_ENV_*`, y compris les valeurs multilignes et la suppression de variables.
 - Préserve les valeurs multilignes par défaut de l’image dans `package attach`.
 - Respecte la suppression explicite de `HOME` sans rétablir sa valeur par défaut.

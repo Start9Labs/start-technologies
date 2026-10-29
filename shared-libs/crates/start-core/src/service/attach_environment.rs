@@ -4,20 +4,21 @@ use tokio::process::Command;
 
 use crate::ImageId;
 use crate::prelude::*;
-use crate::util::env::Environment;
+use crate::util::env::{Environment, is_json_env_chunk, json_env_chunks};
 
 pub(super) fn configure(
     command: &mut Command,
     image_id: &ImageId,
     environment: Option<&Environment>,
 ) -> Result<(), Error> {
+    for (name, _) in std::env::vars_os().filter(|(name, _)| is_json_env_chunk(name)) {
+        command.env_remove(name);
+    }
     if let Some(environment) = environment {
-        command.env(
-            "JSON_ENV",
-            serde_json::to_string(environment).with_kind(ErrorKind::Serialization)?,
-        );
+        let json = serde_json::to_string(environment).with_kind(ErrorKind::Serialization)?;
+        command.envs(json_env_chunks(&json));
     } else {
-        command.env_remove("JSON_ENV").arg("--env-file").arg(
+        command.arg("--env-file").arg(
             Path::new("/media/startos/images")
                 .join(image_id)
                 .with_extension("env"),
@@ -28,9 +29,8 @@ pub(super) fn configure(
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsStr;
-
     use super::*;
+    use crate::util::env::parse_json_env;
 
     #[test]
     fn image_environment_reaches_attach_without_command_line_values() {
@@ -40,33 +40,43 @@ mod tests {
         let mut command = Command::new("lxc-attach");
         configure(&mut command, &image_id, Some(&environment)).unwrap();
         assert_eq!(command.as_std().get_args().count(), 0);
-        let json = command
-            .as_std()
-            .get_envs()
-            .find(|(key, _)| *key == "JSON_ENV")
-            .unwrap()
-            .1
-            .unwrap();
-        assert_eq!(
-            serde_json::from_slice::<Environment>(json.as_encoded_bytes()).unwrap(),
-            environment
-        );
+        let overrides = parse_json_env(command.as_std().get_envs().filter_map(|(name, value)| {
+            value.map(|value| (name.to_os_string(), value.to_os_string()))
+        }))
+        .unwrap();
+        assert_eq!(overrides, environment);
     }
 
     #[test]
     fn legacy_attach_uses_env_file_without_inheriting_json_env() {
+        const CHILD: &str = "STARTOS_JSON_ENV_ATTACH_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["service::attach_environment::tests::legacy_attach_uses_env_file_without_inheriting_json_env", "--exact"])
+                .env(CHILD, "1")
+                .env("JSON_ENV_0", "{\"LEAKED\":\"parent\"}")
+                .env("JSON_ENV_12", "stale")
+                .output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            return;
+        }
         let mut command = Command::new("lxc-attach");
         configure(&mut command, &"main".parse().unwrap(), None).unwrap();
         assert_eq!(
             command.as_std().get_args().collect::<Vec<_>>(),
             ["--env-file", "/media/startos/images/main.env"]
         );
-        assert_eq!(
-            command
-                .as_std()
-                .get_envs()
-                .find(|(key, _)| *key == OsStr::new("JSON_ENV")),
-            Some((OsStr::new("JSON_ENV"), None))
-        );
+        for name in ["JSON_ENV_0", "JSON_ENV_12"] {
+            assert!(
+                command
+                    .as_std()
+                    .get_envs()
+                    .any(|(key, value)| key == name && value.is_none())
+            );
+        }
     }
 }
