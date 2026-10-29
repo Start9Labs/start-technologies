@@ -1,7 +1,15 @@
-import { Component, inject, OnInit, signal, viewChild } from '@angular/core'
+import {
+  Component,
+  inject,
+  Injector,
+  OnInit,
+  signal,
+  viewChild,
+} from '@angular/core'
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop'
 import { ActivatedRoute, Router } from '@angular/router'
 import {
+  DialogService,
   ErrorService,
   i18nPipe,
   isEmptyObject,
@@ -9,6 +17,8 @@ import {
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { TuiButton } from '@taiga-ui/core'
+import { TuiHeader } from '@taiga-ui/layout'
+import { PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { filter } from 'rxjs'
 import { distinctUntilChanged, skip } from 'rxjs/operators'
 import { ServerNotification } from 'src/app/services/api/api.types'
@@ -16,13 +26,25 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { BadgeService } from 'src/app/services/badge.service'
 import { NotificationService } from 'src/app/services/notification.service'
 import { TitleDirective } from 'src/app/services/title.service'
+import { NotificationSettings } from './settings'
 import { NotificationsTableComponent } from './table.component'
-import { BrowserPush } from './push'
 
 @Component({
   template: `
     <ng-container *title>{{ 'Notifications' | i18n }}</ng-container>
-    <p><button browserPush></button></p>
+    <header tuiHeader="body-l">
+      <aside tuiAccessories [style.margin-inline-start]="'auto'">
+        <button
+          tuiIconButton
+          type="button"
+          appearance="icon"
+          iconStart="@tui.settings"
+          (click)="settings()"
+        >
+          {{ 'Notification settings' | i18n }}
+        </button>
+      </aside>
+    </header>
     @if (table()?.selected()?.length) {
       <button
         class="fab"
@@ -59,13 +81,15 @@ import { BrowserPush } from './push'
     NotificationsTableComponent,
     TitleDirective,
     i18nPipe,
-    BrowserPush,
+    TuiHeader,
   ],
 })
 export default class NotificationsComponent implements OnInit {
   private readonly router = inject(Router)
   private readonly route = inject(ActivatedRoute)
   private readonly tasks = inject(TaskService)
+  private readonly dialogs = inject(DialogService)
+  private readonly injector = inject(Injector)
 
   readonly service = inject(NotificationService)
   readonly api = inject(ApiService)
@@ -94,6 +118,14 @@ export default class NotificationsComponent implements OnInit {
         this.init()
       }
     })
+  }
+
+  protected settings() {
+    this.dialogs
+      .openComponent(
+        new PolymorpheusComponent(NotificationSettings, this.injector),
+      )
+      .subscribe()
   }
 
   async getMore(params: T.ListNotificationParams) {

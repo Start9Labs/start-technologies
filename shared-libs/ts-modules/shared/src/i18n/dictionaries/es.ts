@@ -852,7 +852,7 @@ export default {
   967: 'Debe tener 255 bytes o menos (las letras acentuadas y los símbolos ocupan más de uno)',
   968: 'No debe contener caracteres de control',
   969: 'Notificaciones push no disponibles en el navegador',
-  970: 'Activar notificaciones push del navegador',
-  971: 'Desactivar notificaciones push del navegador',
+  970: 'Ajustes de notificaciones',
+  971: 'Push',
   972: 'Las notificaciones están bloqueadas. Permítelas en la configuración del navegador.',
 } satisfies i18n

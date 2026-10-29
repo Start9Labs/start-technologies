@@ -1,1 +1,1 @@
-- Browser-Push auf der Benachrichtigungsseite aktivieren, um StartOS-Benachrichtigungen auch bei geschlossener Oberfläche zu erhalten, einschließlich selbst gehosteter UnifiedPush-Endpunkte, die der Browser bereitstellt.
+- Push im Einstellungsdialog der Benachrichtigungsseite aktivieren, um StartOS-Benachrichtigungen auch bei geschlossener Oberfläche zu erhalten, einschließlich selbst gehosteter UnifiedPush-Endpunkte, die der Browser bereitstellt.

@@ -853,7 +853,7 @@ export const ENGLISH: Record<string, number> = {
   'Must be 255 bytes or less (accented letters and symbols take more than one)': 967,
   'Must not contain control characters': 968,
   'Browser push unavailable': 969,
-  'Enable browser push': 970,
-  'Disable browser push': 971,
+  'Notification settings': 970,
+  'Push': 971,
   'Notifications are blocked. Allow them in your browser settings.': 972,
 }

@@ -852,7 +852,7 @@ export default {
   967: 'Darf höchstens 255 Bytes lang sein (Buchstaben mit Akzent und Symbole belegen mehr als eines)',
   968: 'Darf keine Steuerzeichen enthalten',
   969: 'Browser-Push nicht verfügbar',
-  970: 'Browser-Push aktivieren',
-  971: 'Browser-Push deaktivieren',
+  970: 'Benachrichtigungseinstellungen',
+  971: 'Push',
   972: 'Benachrichtigungen sind blockiert. Erlauben Sie sie in den Browsereinstellungen.',
 } satisfies i18n

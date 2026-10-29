@@ -1,1 +1,1 @@
-- Activez les notifications push du navigateur sur la page Notifications pour recevoir les notifications StartOS lorsque l’interface est fermée, y compris via les points de terminaison UnifiedPush auto-hébergés fournis par le navigateur.
+- Activez les notifications push depuis la fenêtre des paramètres de Notifications pour recevoir les notifications StartOS lorsque l’interface est fermée, y compris via les points de terminaison UnifiedPush auto-hébergés fournis par le navigateur.
