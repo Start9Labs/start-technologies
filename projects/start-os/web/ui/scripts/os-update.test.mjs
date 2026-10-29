@@ -487,10 +487,12 @@ test('an OS version mismatch tracks background installation without reloading th
   assert.equal(f.checks.length, 1)
   await f.ui.check()
   assert.equal(f.checks.length, 1)
-  assert.equal(f.ui.refreshing(), false)
+  assert.equal(f.ui.busy(), false)
+  assert.equal(f.ui.phase(), 'syncing')
   assert.equal(f.reloads, 0)
   f.events.next(detected)
   assert.equal(f.ui.state().status, 'updating')
+  assert.equal(f.ui.phase(), 'syncing')
   assert.equal(f.reloads, 0)
   f.events.next(ready)
   f.checks[0].resolve(true)
@@ -548,6 +550,13 @@ test('a false check without a no-new-version event is retryable, not falsely rea
   assert.deepEqual(f.ui.state(), { status: 'error', error: null })
   assert.equal(f.reloads, 0)
   f.ui.refresh()
+  assert.equal(f.reloads, 0)
+  const retry = f.ui.check()
+  f.events.next(noUpdate)
+  f.checks[1].resolve(false)
+  await retry
+  assert.equal(f.ui.state().status, 'ready')
+  f.ui.refresh()
   assert.equal(f.reloads, 1)
 })
 
@@ -560,7 +569,7 @@ test('no-new-version events do not announce an update when the running interface
 })
 
 for (const failure of ['installation', 'unrecoverable']) {
-  test(`${failure} in the background preserves the page until Refresh is clicked`, t => {
+  test(`${failure} preserves the page and cannot be bypassed by Refresh`, t => {
     const f = uiFixture(t)
     const emit = () =>
       failure === 'installation'
@@ -572,13 +581,12 @@ for (const failure of ['installation', 'unrecoverable']) {
     emit()
     emit()
     assert.equal(f.ui.state().status, 'error')
-    assert.equal(f.ui.refreshing(), false)
-    assert.equal(f.reloads, 0)
+    assert.equal(f.ui.busy(), false)
+    assert.equal(f.ui.phase(), 'error')
     f.ui.refresh()
-    assert.equal(f.reloads, 1)
-    assert.equal(f.ui.state().status, 'reloading')
     emit()
-    assert.equal(f.reloads, 1)
+    assert.equal(f.reloads, 0)
+    assert.equal(f.ui.state().status, 'error')
   })
 }
 
@@ -590,11 +598,11 @@ for (const outcome of [
   'offline',
   'rejected',
 ]) {
-  test(`a requested refresh waits for ${outcome}, then reloads exactly once`, async t => {
+  test(`sync outcome ${outcome} never consumes an earlier Refresh click`, async t => {
     const f = uiFixture(t)
     f.version('0.4.0.5')
     f.ui.refresh()
-    assert.equal(f.ui.refreshing(), true)
+    assert.equal(f.ui.busy(), false)
     assert.equal(f.checks.length, 1)
     assert.equal(f.reloads, 0)
     if (['ready', 'installation', 'unrecoverable'].includes(outcome))
@@ -610,16 +618,24 @@ for (const outcome of [
     if (outcome === 'rejected') f.checks[0].reject(new Error('check failed'))
     else f.checks[0].resolve(outcome === 'ready')
     await tick()
-    assert.equal(f.reloads, 1)
-    assert.equal(f.ui.state().status, 'reloading')
-    assert.equal(f.ui.refreshing(), true)
-    f.events.next(failed)
-    f.ui.refresh()
-    assert.equal(f.reloads, 1)
+    assert.equal(f.reloads, 0)
+    if (['ready', 'cached'].includes(outcome)) {
+      assert.equal(f.ui.phase(), 'ready')
+      f.ui.refresh()
+      assert.equal(f.ui.state().status, 'reloading')
+      assert.equal(f.ui.busy(), true)
+      f.events.next(failed)
+      f.ui.refresh()
+      assert.equal(f.reloads, 1)
+    } else {
+      assert.equal(f.ui.phase(), 'error')
+      f.ui.refresh()
+      assert.equal(f.reloads, 0)
+    }
   })
 }
 
-test('Refresh during a retry completes when the worker finds no new version and the UI matches the server', async t => {
+test('a retry syncs matching server/UI versions without reloading on no-new-version', async t => {
   const f = uiFixture(t)
   f.events.next(failed)
   assert.equal(f.ui.outdated(), false)
@@ -629,7 +645,26 @@ test('Refresh during a retry completes when the worker finds no new version and 
   f.events.next(noUpdate)
   f.checks[0].resolve(false)
   await tick()
-  assert.equal(f.ui.state().status, 'reloading')
+  assert.equal(f.ui.state().status, 'ready')
+  assert.equal(f.ui.phase(), 'ready')
+  assert.equal(f.reloads, 0)
+  f.ui.refresh()
+  assert.equal(f.reloads, 1)
+})
+
+test('Refresh before sync completion never queues a reload', t => {
+  const f = uiFixture(t)
+  f.ui.refresh()
+  assert.equal(f.checks.length, 0)
+  assert.equal(f.reloads, 0)
+  f.version('0.4.0.5')
+  f.ui.refresh()
+  f.events.next(detected)
+  f.ui.refresh()
+  f.events.next(ready)
+  assert.equal(f.reloads, 0)
+  f.ui.refresh()
+  f.ui.refresh()
   assert.equal(f.reloads, 1)
 })
 
@@ -651,17 +686,18 @@ test('a rejected check stays actionable without reloading the working UI, and ca
   assert.equal(f.ui.state().status, 'ready')
 })
 
-test('a requested refresh with a silent worker retains the cache-reset escape', async t => {
+test('a silent sync retains the cache-reset escape without offering an early refresh', async t => {
   const f = uiFixture(t)
   const component = f.make(RefreshAlertComponent)
   f.version('0.4.0.5')
   await tick()
   assert.equal(f.ui.state().status, 'checking')
   f.ui.refresh()
-  assert.equal(f.ui.refreshing(), true)
+  assert.equal(f.ui.busy(), false)
+  assert.equal(f.reloads, 0)
   assert.deepEqual(f.tasks, [])
   component.resetCache()
-  assert.equal(f.confirmations[0].options.data.yes, 'Refresh')
+  assert.equal(f.confirmations[0].options.data.yes, 'Reset UI cache')
   f.confirmations[0].response.next(false)
   assert.deepEqual(f.operations, [])
   component.resetCache()
@@ -694,13 +730,13 @@ test('cache-reset failure preserves the UI and exposes the error without an auto
   }
   await f.ui.resetCache()
   assert.equal(f.ui.state().status, 'error')
-  assert.equal(f.ui.refreshing(), false)
+  assert.equal(f.ui.busy(), false)
   assert.match(f.ui.state().error, /browser refused reset/)
   assert.equal(f.reloads, 0)
   assert.equal(f.caches.size, 5)
 })
 
-test('a requested refresh keeps the dialog open until navigation', async t => {
+test('syncing remains dismissible; only a completed sync can start non-dismissible navigation', async t => {
   const f = uiFixture(t)
   const component = f.make(RefreshAlertComponent)
   f.version('0.4.0.5')
@@ -708,10 +744,30 @@ test('a requested refresh keeps the dialog open until navigation', async t => {
   component.dismissed.set(true)
   assert.equal(component.show(), false)
   f.ui.refresh()
-  assert.equal(await firstValueFrom(component.canClose$), false)
+  assert.equal(await firstValueFrom(component.canClose$), true)
+  assert.equal(component.show(), false)
+  f.events.next(detected)
+  assert.equal(component.show(), false)
+  f.events.next(ready)
   assert.equal(component.show(), true)
+  f.ui.refresh()
+  assert.equal(await firstValueFrom(component.canClose$), false)
   component.dismissed.set(true)
   assert.equal(component.show(), true)
+})
+
+test('a confirmed cache reset blocks dismissal until navigation', async t => {
+  const f = uiFixture(t)
+  const component = f.make(RefreshAlertComponent)
+  const unregister = deferred()
+  f.registration.unregister = () => unregister.promise
+  const resetting = f.ui.resetCache()
+  assert.equal(f.ui.phase(), 'syncing')
+  assert.equal(f.ui.busy(), true)
+  assert.equal(await firstValueFrom(component.canClose$), false)
+  unregister.resolve()
+  await resetting
+  assert.equal(f.reloads, 1)
 })
 
 test('dismissing an update dialog does not hide the next state', t => {

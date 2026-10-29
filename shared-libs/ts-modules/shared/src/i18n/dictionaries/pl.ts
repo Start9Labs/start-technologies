@@ -851,10 +851,9 @@ export default {
   966: 'Dysk sformatowany. Znajduje się na liście „Dyski fizyczne”.',
   967: 'Może mieć maksymalnie 255 bajtów (litery ze znakami diakrytycznymi i symbole zajmują więcej niż jeden)',
   968: 'Nie może zawierać znaków sterujących',
-  969: 'Zaktualizowany interfejs jest gotowy. Odśwież stronę, aby go użyć.',
-  970: 'Aktualizowanie interfejsu...',
-  971: 'Aktualizacja interfejsu nie powiodła się. Odśwież stronę, spróbuj ponownie lub zresetuj pamięć podręczną interfejsu.',
-  972: 'Resetowanie pamięci podręcznej interfejsu...',
+  969: 'Interfejs użytkownika zsynchronizowany. Odśwież stronę, aby kontynuować.',
+  970: 'Synchronizowanie interfejsu użytkownika...',
+  971: 'Nie udało się zsynchronizować interfejsu użytkownika. Spróbuj ponownie lub zresetuj pamięć podręczną interfejsu.',
   973: 'Zresetuj pamięć podręczną interfejsu',
   974: 'Zresetować interfejs w pamięci podręcznej i odświeżyć stronę? Dane logowania i ustawienia zostaną zachowane.',
 } satisfies i18n

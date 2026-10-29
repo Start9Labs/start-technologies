@@ -851,10 +851,9 @@ export default {
   966: 'Laufwerk formatiert. Es wird unter „Physische Laufwerke“ aufgeführt.',
   967: 'Darf höchstens 255 Bytes lang sein (Buchstaben mit Akzent und Symbole belegen mehr als eines)',
   968: 'Darf keine Steuerzeichen enthalten',
-  969: 'Die aktualisierte Benutzeroberfläche ist bereit. Lade die Seite neu, um sie zu verwenden.',
-  970: 'Benutzeroberfläche wird aktualisiert...',
-  971: 'Die Aktualisierung der Benutzeroberfläche ist fehlgeschlagen. Lade die Seite neu, versuche es erneut oder setze den Cache der Benutzeroberfläche zurück.',
-  972: 'Cache der Benutzeroberfläche wird zurückgesetzt...',
+  969: 'Benutzeroberfläche synchronisiert. Zum Fortfahren aktualisieren.',
+  970: 'Benutzeroberfläche wird synchronisiert...',
+  971: 'Die Benutzeroberfläche konnte nicht synchronisiert werden. Erneut versuchen oder den Cache der Benutzeroberfläche zurücksetzen.',
   973: 'Cache der Benutzeroberfläche zurücksetzen',
   974: 'Die zwischengespeicherte Benutzeroberfläche zurücksetzen und die Seite neu laden? Deine Anmeldung und Einstellungen bleiben erhalten.',
 } satisfies i18n

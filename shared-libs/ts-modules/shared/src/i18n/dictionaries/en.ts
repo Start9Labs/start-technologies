@@ -852,10 +852,9 @@ export const ENGLISH: Record<string, number> = {
   'Drive formatted. It is listed under Physical Drives.': 966,
   'Must be 255 bytes or less (accented letters and symbols take more than one)': 967,
   'Must not contain control characters': 968,
-  'The updated interface is ready. Refresh to use it.': 969,
-  'Updating interface...': 970,
-  'The interface update failed. Refresh the page, retry, or reset the UI cache.': 971,
-  'Resetting UI cache...': 972,
+  'User interface synced. Refresh to continue.': 969,
+  'Syncing user interface...': 970,
+  'Unable to sync the user interface. Retry or reset the UI cache.': 971,
   'Reset UI cache': 973,
   'Reset the cached interface and reload? Your login and settings will be kept.': 974,
 }

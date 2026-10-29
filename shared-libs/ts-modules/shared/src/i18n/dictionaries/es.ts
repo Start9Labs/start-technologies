@@ -851,10 +851,9 @@ export default {
   966: 'Unidad formateada. Aparece en «Unidades físicas».',
   967: 'Debe tener 255 bytes o menos (las letras acentuadas y los símbolos ocupan más de uno)',
   968: 'No debe contener caracteres de control',
-  969: 'La interfaz actualizada está lista. Recarga la página para usarla.',
-  970: 'Actualizando la interfaz...',
-  971: 'La actualización de la interfaz ha fallado. Recarga la página, reinténtalo o restablece la caché de la interfaz.',
-  972: 'Restableciendo la caché de la interfaz...',
+  969: 'Interfaz de usuario sincronizada. Actualiza para continuar.',
+  970: 'Sincronizando la interfaz de usuario...',
+  971: 'No se pudo sincronizar la interfaz de usuario. Vuelve a intentarlo o restablece la caché de la interfaz.',
   973: 'Restablecer la caché de la interfaz',
   974: '¿Restablecer la interfaz almacenada en caché y recargar la página? Se conservarán tu sesión y tus ajustes.',
 } satisfies i18n

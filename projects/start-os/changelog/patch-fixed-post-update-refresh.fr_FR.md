@@ -1,1 +1,1 @@
-- L’interface ne reste plus bloquée pendant son actualisation après une mise à jour de StartOS. Le dialogue « Actualisation nécessaire » affiche l’état de la mise à jour et propose des actions de récupération ; le rechargement nécessite un clic explicite sur Rafraîchir.
+- L’interface ne reste plus bloquée après une mise à jour de StartOS. Le dialogue « Actualisation nécessaire » affiche la progression de la synchronisation de l’interface, propose Rafraîchir une fois celle-ci terminée et offre des actions de récupération si la synchronisation échoue ou reste bloquée.

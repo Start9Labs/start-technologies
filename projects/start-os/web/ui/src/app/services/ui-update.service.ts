@@ -1,4 +1,4 @@
-import { inject, Service, signal } from '@angular/core'
+import { computed, inject, Service, signal } from '@angular/core'
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop'
 import { SwUpdate } from '@angular/service-worker'
 import { WA_WINDOW } from '@ng-web-apis/common'
@@ -34,10 +34,22 @@ export class UiUpdateService {
       shareReplay({ bufferSize: 1, refCount: true }),
     )
   private readonly current = signal<UiUpdateState>({ status: 'idle' })
-  private readonly requested = signal(false)
 
   readonly state = this.current.asReadonly()
-  readonly refreshing = this.requested.asReadonly()
+  readonly busy = computed(() =>
+    ['resetting', 'reloading'].includes(this.state().status),
+  )
+  readonly phase = computed(() => {
+    switch (this.state().status) {
+      case 'ready':
+      case 'reloading':
+        return 'ready'
+      case 'error':
+        return 'error'
+      default:
+        return 'syncing'
+    }
+  })
   readonly outdated = toSignal(this.outdated$, { initialValue: false })
 
   private readonly events = merge(
@@ -57,7 +69,10 @@ export class UiUpdateService {
         case 'NO_NEW_VERSION_DETECTED':
           if (['idle', 'checking'].includes(this.state().status))
             this.transition({
-              status: this.outdated() || this.refreshing() ? 'ready' : 'idle',
+              status:
+                this.outdated() || this.state().status === 'checking'
+                  ? 'ready'
+                  : 'idle',
             })
           break
         case 'VERSION_INSTALLATION_FAILED':
@@ -102,14 +117,11 @@ export class UiUpdateService {
   }
 
   refresh(): void {
-    if (['resetting', 'reloading'].includes(this.state().status)) return
-    this.requested.set(true)
-    if (!this.finishRefresh()) void this.check()
+    if (this.state().status === 'ready') this.reloadPage()
   }
 
   async resetCache(): Promise<void> {
-    if (['resetting', 'reloading'].includes(this.state().status)) return
-    this.requested.set(true)
+    if (this.busy()) return
     this.transition({ status: 'resetting' })
     try {
       const registration =
@@ -127,7 +139,6 @@ export class UiUpdateService {
       }
       this.reloadPage()
     } catch (error) {
-      this.requested.set(false)
       this.fail(error)
     }
   }
@@ -135,16 +146,6 @@ export class UiUpdateService {
   private transition(state: UiUpdateState): void {
     if (this.state().status === 'reloading') return
     this.current.set(state)
-    this.finishRefresh()
-  }
-
-  private finishRefresh(): boolean {
-    const { status } = this.state()
-    if (this.refreshing() && (status === 'ready' || status === 'error')) {
-      this.reloadPage()
-      return true
-    }
-    return status === 'reloading'
   }
 
   private reloadPage(): void {
