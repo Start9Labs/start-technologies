@@ -1,0 +1,1 @@
+- Eine konfigurierte HTTP-Proxy-Authentifizierungsrichtlinie gilt für unverschlüsselte und für TLS-Verbindungen zu Diensten.

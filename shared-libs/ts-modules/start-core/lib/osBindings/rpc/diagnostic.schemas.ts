@@ -447,7 +447,10 @@ export const Api = {
   _CHILDREN: {
     auth: {
       _PARAMS: /* @__PURE__ */ empty,
-      _CHILDREN: { session: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} } },
+      _CHILDREN: {
+        session: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+        token: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+      },
     },
     backup: {
       _PARAMS: /* @__PURE__ */ empty,

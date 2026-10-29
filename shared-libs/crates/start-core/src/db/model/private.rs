@@ -4,7 +4,7 @@ use patch_db::{HasModel, Value};
 use serde::{Deserialize, Serialize};
 
 use crate::PackageId;
-use crate::auth::AuthKeys;
+use crate::auth::Sessions;
 use crate::backup::target::cifs::CifsTargets;
 use crate::net::forward::AvailablePorts;
 use crate::net::keys::KeyStore;
@@ -20,7 +20,7 @@ pub struct Private {
     pub key_store: KeyStore,
     pub password: String, // argon2 hash
     #[serde(default)]
-    pub session_pubkeys: AuthKeys,
+    pub sessions: Sessions,
     #[serde(default = "generate_developer_key")]
     pub developer_key: Der64<ed25519_dalek::SigningKey>,
     pub ssh_privkey: Pem<ssh_key::PrivateKey>,

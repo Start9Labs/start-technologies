@@ -1,0 +1,1 @@
+- Rohe TLS-Verbindungen zu Diensten, die keinen HTTP-Proxy benötigen, behalten die Quell-IP-Adressen der Clients.
