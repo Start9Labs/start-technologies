@@ -8,26 +8,34 @@ jest.mock('child_process', () => ({
   spawn: jest.fn(),
 }))
 
-// cp.spawn is given no stdio override, so the child always gets a pipe for
-// stdin. A command that reads to EOF therefore blocks until `timeout` fires and
-// SIGKILLs it — the caller sees only a signal that points nowhere near stdin.
-// exec must close stdin on every path, not only when it has something to write.
+// Commands that read stdin need EOF even when no input was supplied.
 function fakeChild() {
   const child = new EventEmitter() as any
   child.pid = 4242
   child.kill = jest.fn()
   child.stdout = new EventEmitter()
   child.stderr = new EventEmitter()
+  child.input = ''
   child.stdin = Object.assign(new EventEmitter(), {
-    write: jest.fn((_data: unknown, cb: (e?: Error) => void) => cb()),
-    end: jest.fn((cb?: () => void) => cb?.()),
+    write: jest.fn((data: string, cb: (e?: Error) => void) => {
+      child.input += data
+      cb()
+    }),
+    end: jest.fn((data?: string | (() => void)) => {
+      if (typeof data === 'function') data()
+      else child.input += data ?? ''
+    }),
   })
-  // Exit as soon as exec subscribes, rather than racing the awaits it does
-  // first (waitProc, reading the image metadata, closing stdin).
+  // Complete asynchronously after the command's lifecycle listeners are attached.
   const on = child.on.bind(child)
   child.on = (event: string, listener: (...a: any[]) => void) => {
     const result = on(event, listener)
-    if (event === 'exit') setImmediate(() => child.emit('exit', 0, null))
+    if (event === 'exit' || event === 'close') {
+      setImmediate(() => {
+        child.emit('exit', 0, null)
+        child.emit('close', 0, null)
+      })
+    }
     return result
   }
   return child
@@ -66,10 +74,7 @@ describe('SubContainerEager.exec stdin', () => {
 
   test('writes and then closes stdin when input is given', async () => {
     await run({ input: 'hunter2' })
-    expect(child.stdin.write).toHaveBeenCalledWith(
-      'hunter2',
-      expect.any(Function),
-    )
+    expect(child.input).toBe('hunter2')
     expect(child.stdin.end).toHaveBeenCalled()
   })
 
@@ -95,7 +100,10 @@ describe('SubContainerEager.exec abort', () => {
   test('kills a running command when aborted', async () => {
     const child = fakeChild()
     child.on = EventEmitter.prototype.on
-    child.kill = jest.fn(() => child.emit('exit', null, 'SIGKILL'))
+    child.kill = jest.fn(() => {
+      child.emit('exit', null, 'SIGKILL')
+      return child.emit('close', null, 'SIGKILL')
+    })
     spawned(child)
     const abort = new AbortController()
 
@@ -103,7 +111,7 @@ describe('SubContainerEager.exec abort', () => {
       abort,
       timeout: null,
     })
-    while (!child.listenerCount('exit')) {
+    while (!child.listenerCount('close')) {
       await new Promise(resolve => setImmediate(resolve))
     }
     abort.abort()
