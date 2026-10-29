@@ -15,12 +15,13 @@ use hyper::body::{Body as HyperBody, Incoming};
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
+use tokio::io::AsyncReadExt;
 use tokio::sync::{Mutex, Notify, oneshot};
 use tokio_util::io::InspectReader;
 
 use crate::net::host::binding::ProxyAuth;
 use crate::prelude::*;
-use crate::util::io::{IOHook, ReadWriter};
+use crate::util::io::{BackTrackingIO, IOHook, ReadWriter};
 use crate::util::serde::MaybeUtf8String;
 
 /// Body type returned by the proxy service: either an upstream response body
@@ -199,29 +200,32 @@ impl AuthGate {
     }
 }
 
-/// Apply the OS reverse-proxy header policy to an incoming request.
-///
-/// - Validates the `AuthGate` if present, short-circuiting with a 401 on
-///   failure.
-/// - Strips any client-supplied `X-Forwarded-*` and `X-Forwarded-User`
-///   headers so a downstream service can trust them.
-/// - Optionally adds `X-Forwarded-For` / `X-Forwarded-Proto`.
-/// - On successful Basic auth, sets `X-Forwarded-User` to the authenticated
-///   username.
+/// Headers synthesized from the client connection, independently of authentication.
+#[derive(Clone, Copy)]
+pub enum ForwardedHeaders {
+    /// Adds no connection headers; authenticated Basic users still receive `X-Forwarded-User`.
+    Disabled,
+    /// Adds `X-Forwarded-For` when the client IP is available.
+    Plaintext,
+    /// Adds `X-Forwarded-Proto: https` and the available client IP.
+    Ssl,
+}
+
 fn apply_request_policy<B>(
     req: &mut Request<B>,
     src_ip: Option<IpAddr>,
-    add_forwarded: bool,
+    forwarded_headers: ForwardedHeaders,
     gate: Option<&AuthGate>,
 ) -> Result<(), Response<ProxyBody>> {
-    // Always strip client-supplied forwarded identity. This function is
-    // only ever reached on the HTTP-aware proxy path, which is only
-    // entered when the binding actually owns these headers, so there is
-    // nothing to preserve.
-    let h = req.headers_mut();
-    h.remove("X-Forwarded-User");
-    h.remove("X-Forwarded-For");
-    h.remove("X-Forwarded-Proto");
+    let forwarded: Vec<_> = req
+        .headers()
+        .keys()
+        .filter(|name| name.as_str().starts_with("x-forwarded-"))
+        .cloned()
+        .collect();
+    for name in forwarded {
+        req.headers_mut().remove(name);
+    }
 
     let user = match gate {
         Some(g) => g.check(req.headers())?,
@@ -229,8 +233,10 @@ fn apply_request_policy<B>(
     };
 
     let h = req.headers_mut();
-    if add_forwarded {
+    if matches!(forwarded_headers, ForwardedHeaders::Ssl) {
         h.insert("X-Forwarded-Proto", HeaderValue::from_static("https"));
+    }
+    if !matches!(forwarded_headers, ForwardedHeaders::Disabled) {
         if let Some(src_ip) = src_ip
             .map(|s| s.to_string())
             .as_deref()
@@ -309,12 +315,56 @@ pub async fn handle_http_on_https(stream: impl ReadWriter + Unpin + 'static) -> 
         .map_err(|e| Error::new(color_eyre::eyre::Report::msg(e), ErrorKind::Network))
 }
 
+const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+const HTTP_HEADER_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Proxies HTTP/1 or prior-knowledge HTTP/2 using the client's framing.
+pub async fn run_plain_http_proxy<F, T>(
+    from: F,
+    to: T,
+    src_ip: Option<IpAddr>,
+    forwarded_headers: ForwardedHeaders,
+    gate: Option<AuthGate>,
+) -> Result<(), Error>
+where
+    F: ReadWriter + Unpin + Send + 'static,
+    T: ReadWriter + Unpin + Send + 'static,
+{
+    let mut from = BackTrackingIO::new(from);
+    let http2 = match tokio::time::timeout(HTTP_HEADER_TIMEOUT, async {
+        for expected in H2_PREFACE {
+            if from.read_u8().await? != *expected {
+                return Ok::<_, std::io::Error>(false);
+            }
+        }
+        Ok(true)
+    })
+    .await
+    .with_kind(ErrorKind::Network)?
+    {
+        Ok(http2) => http2,
+        Err(error)
+            if error.kind() == std::io::ErrorKind::UnexpectedEof
+                && from.read_buffer().is_empty() =>
+        {
+            return Ok(());
+        }
+        Err(error) => return Err(Error::new(error, ErrorKind::Network)),
+    };
+    let _ = from.rewind();
+    if http2 {
+        run_http2_proxy(from, to, src_ip, forwarded_headers, gate).await
+    } else {
+        run_http1_proxy(from, to, src_ip, forwarded_headers, gate).await
+    }
+}
+
 pub async fn run_http_proxy<F, T>(
     from: F,
     to: T,
     alpn: Option<MaybeUtf8String>,
     src_ip: Option<IpAddr>,
-    add_forwarded: bool,
+    forwarded_headers: ForwardedHeaders,
     gate: Option<AuthGate>,
 ) -> Result<(), Error>
 where
@@ -326,9 +376,9 @@ where
         .map(|alpn| alpn.0.as_slice() == b"h2")
         .unwrap_or(false)
     {
-        run_http2_proxy(from, to, src_ip, add_forwarded, gate).await
+        run_http2_proxy(from, to, src_ip, forwarded_headers, gate).await
     } else {
-        run_http1_proxy(from, to, src_ip, add_forwarded, gate).await
+        run_http1_proxy(from, to, src_ip, forwarded_headers, gate).await
     }
 }
 
@@ -449,7 +499,7 @@ pub async fn run_http2_proxy<F, T>(
     from: F,
     to: T,
     src_ip: Option<IpAddr>,
-    add_forwarded: bool,
+    forwarded_headers: ForwardedHeaders,
     gate: Option<AuthGate>,
 ) -> Result<(), Error>
 where
@@ -502,7 +552,7 @@ where
                 let gate = gate.clone();
                 async move {
                     if let Err(resp) =
-                        apply_request_policy(&mut req, src_ip, add_forwarded, gate.as_ref())
+                        apply_request_policy(&mut req, src_ip, forwarded_headers, gate.as_ref())
                     {
                         return Ok::<_, hyper::Error>(resp);
                     }
@@ -559,7 +609,7 @@ pub async fn run_http1_proxy<F, T>(
     from: F,
     to: T,
     src_ip: Option<IpAddr>,
-    add_forwarded: bool,
+    forwarded_headers: ForwardedHeaders,
     gate: Option<AuthGate>,
 ) -> Result<(), Error>
 where
@@ -581,7 +631,7 @@ where
     // Hyper disarms `header_read_timeout` during a body or upgrade.
     let from = hyper::server::conn::http1::Builder::new()
         .timer(TokioTimer::new())
-        .header_read_timeout(Duration::from_secs(60))
+        .header_read_timeout(HTTP_HEADER_TIMEOUT)
         .serve_connection(
             TokioIo::new(from),
             service_fn(move |mut req| {
@@ -591,7 +641,7 @@ where
                 let relaying = svc_progress.start();
                 async move {
                     if let Err(resp) =
-                        apply_request_policy(&mut req, src_ip, add_forwarded, gate.as_ref())
+                        apply_request_policy(&mut req, src_ip, forwarded_headers, gate.as_ref())
                     {
                         return Ok::<_, hyper::Error>(resp.map(|body| relaying.hold(body)));
                     }
@@ -626,14 +676,20 @@ where
                         tokio::task::spawn(async move {
                             if let Some((from, to)) = futures::future::try_join(from, to).await.ok()
                             {
-                                if kind.map_or(false, |k| k == "HTTP/2.0") {
-                                    // The outer request already applied authentication and forwarded headers.
+                                if kind
+                                    .as_ref()
+                                    .and_then(|k| k.to_str().ok())
+                                    .is_some_and(|kind| {
+                                        kind.eq_ignore_ascii_case("HTTP/2.0")
+                                            || kind.eq_ignore_ascii_case("h2c")
+                                    })
+                                {
                                     run_http2_proxy(
                                         TokioIo::new(from),
                                         TokioIo::new(to),
                                         src_ip,
-                                        false,
-                                        None,
+                                        forwarded_headers,
+                                        gate,
                                     )
                                     .await
                                     .ok();
@@ -697,24 +753,19 @@ mod tests {
         String::from_utf8_lossy(&head).to_lowercase()
     }
 
-    /// The bytes this proxy writes upstream for one connection whose
-    /// client-facing handshake negotiated `alpn`.
     async fn upstream_framing(alpn: Option<&str>) -> String {
         let (mut client, client_facing) = tokio::io::duplex(4096);
         let (backend_facing, mut backend) = tokio::io::duplex(4096);
 
-        // A target reaches `run_http_proxy` only when it adds forwarded headers
-        // or gates auth.
         tokio::spawn(run_http_proxy(
             client_facing,
             backend_facing,
             alpn.map(|a| MaybeUtf8String(a.as_bytes().to_vec())),
             None,
-            true,
+            ForwardedHeaders::Ssl,
             None,
         ));
         if alpn != Some("h2") {
-            // Only h2 opens with a preface.
             client
                 .write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
                 .await
@@ -750,7 +801,7 @@ mod tests {
             client_facing,
             backend_facing,
             None,
-            false,
+            ForwardedHeaders::Disabled,
             None,
         ));
         tokio::spawn(async move {
@@ -790,7 +841,7 @@ mod tests {
             client_facing,
             backend_facing,
             None,
-            false,
+            ForwardedHeaders::Disabled,
             None,
         ));
         tokio::spawn(async move {
@@ -828,7 +879,7 @@ mod tests {
             client_facing,
             backend_facing,
             None,
-            false,
+            ForwardedHeaders::Disabled,
             None,
         ));
         tokio::spawn(async move {
@@ -860,54 +911,61 @@ mod tests {
         assert!(read_head(&mut client).await.starts_with("http/1.1 101"));
     }
 
-    /// Shutting the client leg down while a 101 is in flight makes hyper
-    /// replace `Connection: Upgrade` with `Connection: close`, which
-    /// conformant WebSocket clients reject (RFC 6455 §4.1). The tunnel still
-    /// carries bytes either way, so assert on the header too.
+    /// RFC 6455 clients reject a 101 rewritten to `Connection: close`.
     #[tokio::test]
-    async fn relayed_101_keeps_its_upgrade_header() {
-        let (mut client, client_facing) = tokio::io::duplex(16);
-        let (backend_facing, mut backend) = tokio::io::duplex(4096);
-
-        tokio::spawn(run_http1_proxy(
-            client_facing,
-            backend_facing,
-            None,
-            false,
-            None,
-        ));
-        tokio::spawn(async move {
-            assert!(read_head(&mut backend).await.contains("upgrade: websocket"));
-            backend
-                .write_all(
-                    b"HTTP/1.1 101 Switching Protocols\r\n\
-                      Connection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
-                )
-                .await
-                .unwrap();
-            let mut framed = [0u8; 4];
-            backend.read_exact(&mut framed).await.unwrap();
-            backend.write_all(&framed).await.unwrap();
-        });
-
-        client
-            .write_all(
-                b"GET /ws HTTP/1.1\r\nHost: x\r\n\
-                  Connection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
-            )
+    async fn relayed_101_keeps_its_upgrade_header_and_authenticated_policy() {
+        for forwarded_headers in [
+            ForwardedHeaders::Disabled,
+            ForwardedHeaders::Plaintext,
+            ForwardedHeaders::Ssl,
+        ] {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                let (mut client, client_facing) = tokio::io::duplex(16);
+                let (backend_facing, mut backend) = tokio::io::duplex(4096);
+                let proxy = tokio::spawn(run_http1_proxy(
+                    client_facing,
+                    backend_facing,
+                    Some(CLIENT_IP.parse().unwrap()),
+                    forwarded_headers,
+                    Some(basic_gate()),
+                ));
+                let backend = tokio::spawn(async move {
+                    let head = read_head(&mut backend).await;
+                    assert!(head.contains("upgrade: websocket"), "{head}");
+                    assert_policy_headers(
+                        &parse_request_headers(&head),
+                        forwarded_headers,
+                        Some("alice"),
+                    );
+                    backend
+                        .write_all(
+                            b"HTTP/1.1 101 Switching Protocols\r\n\
+                              Connection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+                        )
+                        .await
+                        .unwrap();
+                    let mut framed = [0u8; 4];
+                    backend.read_exact(&mut framed).await.unwrap();
+                    backend.write_all(&framed).await.unwrap();
+                });
+                client
+                    .write_all(http1_spoofed_request(Some("websocket")).as_bytes())
+                    .await
+                    .unwrap();
+                let head = read_head(&mut client).await;
+                assert!(head.starts_with("http/1.1 101"), "{head:?}");
+                assert!(head.contains("connection: upgrade"), "{head:?}");
+                assert!(!head.contains("connection: close"), "{head:?}");
+                client.write_all(b"ping").await.unwrap();
+                let mut echoed = [0u8; 4];
+                client.read_exact(&mut echoed).await.unwrap();
+                assert_eq!(&echoed, b"ping");
+                backend.await.unwrap();
+                proxy.abort();
+            })
             .await
-            .unwrap();
-        let head = read_head(&mut client).await;
-        assert!(head.contains("connection: upgrade"), "{head:?}");
-        assert!(!head.contains("connection: close"), "{head:?}");
-
-        client.write_all(b"ping").await.unwrap();
-        let mut echoed = [0u8; 4];
-        tokio::time::timeout(Duration::from_secs(5), client.read_exact(&mut echoed))
-            .await
-            .expect("tunnel stalled")
-            .unwrap();
-        assert_eq!(&echoed, b"ping");
+            .expect("authenticated WebSocket tunnel stalled");
+        }
     }
 
     #[tokio::test]
@@ -921,7 +979,7 @@ mod tests {
                     client_facing,
                     backend_facing,
                     None,
-                    false,
+                    ForwardedHeaders::Disabled,
                     None,
                 ));
                 let expected = body.clone();
@@ -968,7 +1026,7 @@ mod tests {
             let (client, client_facing) = tokio::io::duplex(128);
             let (backend_facing, mut backend) = tokio::io::duplex(512 * 1024);
             let proxy = tokio::spawn(run_http1_proxy(
-                client_facing, backend_facing, None, false, None,
+                client_facing, backend_facing, None, ForwardedHeaders::Disabled, None,
             ));
             let expected = body.clone();
             let backend = tokio::spawn(async move {
@@ -1003,7 +1061,7 @@ mod tests {
                     client_facing,
                     backend_facing,
                     None,
-                    false,
+                    ForwardedHeaders::Disabled,
                     None,
                 ));
                 let backend = tokio::spawn(async move {
@@ -1053,7 +1111,7 @@ mod tests {
                 client_facing,
                 backend_facing,
                 None,
-                false,
+                ForwardedHeaders::Disabled,
                 Some(gate),
             ));
             client
@@ -1149,7 +1207,7 @@ mod tests {
                 },
                 backend_facing,
                 None,
-                false,
+                ForwardedHeaders::Disabled,
                 None,
             ));
             let backend = tokio::spawn(async move {
@@ -1214,15 +1272,19 @@ mod tests {
             let proxy = tokio::spawn(run_http1_proxy(
                 from.unwrap(),
                 backend_facing,
-                None,
-                true,
-                None,
+                Some(CLIENT_IP.parse().unwrap()),
+                ForwardedHeaders::Ssl,
+                Some(basic_gate()),
             ));
             let body = vec![b'x'; 224_476];
             let expected = body.clone();
             let backend = tokio::spawn(async move {
                 let head = read_head(&mut backend).await;
-                assert!(head.contains("x-forwarded-proto: https"));
+                assert_policy_headers(
+                    &parse_request_headers(&head),
+                    ForwardedHeaders::Ssl,
+                    Some("alice"),
+                );
                 backend
                     .write_all(
                         format!(
@@ -1236,9 +1298,10 @@ mod tests {
                 backend.write_all(&body).await.unwrap();
             });
             client
-                .write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+                .write_all(http1_spoofed_request(None).as_bytes())
                 .await
                 .unwrap();
+            client.flush().await.unwrap();
             backend.await.unwrap();
             assert!(read_head(&mut client).await.starts_with("http/1.1 200 ok"));
             let mut received = Vec::new();
@@ -1271,7 +1334,6 @@ mod tests {
     }
 
     use super::{ENABLE_CONNECT_PROTOCOL, H2_SETTINGS_FRAME as SETTINGS_FRAME};
-    const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
     const GOAWAY_FRAME: u8 = 0x7;
 
     async fn write_frame(s: &mut DuplexStream, kind: u8, payload: &[u8]) {
@@ -1358,7 +1420,7 @@ mod tests {
                 client_facing,
                 backend_facing,
                 None,
-                false,
+                ForwardedHeaders::Disabled,
                 None,
             ));
             let backend = tokio::spawn(async move {
@@ -1394,7 +1456,7 @@ mod tests {
             client_facing,
             backend_facing,
             None,
-            false,
+            ForwardedHeaders::Disabled,
             None,
         ));
         let backend = tokio::spawn(async move {
@@ -1430,7 +1492,13 @@ mod tests {
 
         let result = tokio::time::timeout(
             Duration::from_secs(1),
-            run_http2_proxy(client_facing, backend_facing, None, false, None),
+            run_http2_proxy(
+                client_facing,
+                backend_facing,
+                None,
+                ForwardedHeaders::Disabled,
+                None,
+            ),
         )
         .await
         .expect("proxy waited for the client after the backend failed");
@@ -1446,7 +1514,7 @@ mod tests {
             client_facing,
             backend_facing,
             None,
-            false,
+            ForwardedHeaders::Disabled,
             None,
         ));
         let backend = tokio::spawn(async move {
@@ -1475,6 +1543,443 @@ mod tests {
             .unwrap();
     }
 
+    const CLIENT_IP: &str = "192.0.2.42";
+    const BASIC_AUTH: &str = "Basic YWxpY2U6aHVudGVyMg==";
+    const SPOOFED_HEADERS: &[&str] = &[
+        "X-Forwarded-For",
+        "X-Forwarded-Proto",
+        "X-Forwarded-User",
+        "X-Forwarded-Host",
+        "X-Forwarded-Port",
+        "X-Forwarded-Prefix",
+        "X-Forwarded-Custom",
+    ];
+
+    fn basic_gate() -> AuthGate {
+        AuthGate::from_auth(&ProxyAuth::Basic {
+            credentials: vec![BasicCredential {
+                username: "alice".into(),
+                password: "hunter2".into(),
+            }],
+            realm: None,
+        })
+        .unwrap()
+    }
+
+    fn spoofed_request(auth: Option<&str>) -> Request<Full<Bytes>> {
+        let mut req = req_with_auth(auth).map(|()| Full::new(Bytes::new()));
+        *req.uri_mut() = "http://service.test/path?query=value".parse().unwrap();
+        req.headers_mut()
+            .insert("Host", HeaderValue::from_static("service.test"));
+        req.headers_mut()
+            .insert("X-Preserved", HeaderValue::from_static("untouched"));
+        for &name in SPOOFED_HEADERS {
+            req.headers_mut()
+                .append(name, HeaderValue::from_static("forged"));
+            req.headers_mut()
+                .append(name, HeaderValue::from_static("also-forged"));
+        }
+        req
+    }
+
+    fn http1_spoofed_request(upgrade: Option<&str>) -> String {
+        let req = spoofed_request(Some(BASIC_AUTH));
+        let mut head = String::from("GET /path?query=value HTTP/1.1\r\n");
+        for (name, value) in req.headers() {
+            head.push_str(&format!("{name}: {}\r\n", value.to_str().unwrap()));
+        }
+        if let Some(upgrade) = upgrade {
+            head.push_str(&format!("Connection: Upgrade\r\nUpgrade: {upgrade}\r\n"));
+        }
+        head.push_str("\r\n");
+        head
+    }
+
+    fn parse_request_headers(head: &str) -> HeaderMap {
+        head.lines()
+            .skip(1)
+            .filter_map(|line| line.split_once(':'))
+            .map(|(name, value)| {
+                (
+                    http::header::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                    HeaderValue::from_str(value.trim()).unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    fn assert_policy_headers(
+        headers: &HeaderMap,
+        forwarded_headers: ForwardedHeaders,
+        user: Option<&str>,
+    ) {
+        assert_eq!(headers.get("X-Preserved").unwrap(), "untouched");
+        assert_eq!(headers.get("Host").unwrap(), "service.test");
+        assert_eq!(
+            headers.get("X-Forwarded-For").map(|h| h.to_str().unwrap()),
+            match forwarded_headers {
+                ForwardedHeaders::Disabled => None,
+                ForwardedHeaders::Plaintext | ForwardedHeaders::Ssl => Some(CLIENT_IP),
+            },
+        );
+        assert_eq!(
+            headers
+                .get("X-Forwarded-Proto")
+                .map(|h| h.to_str().unwrap()),
+            match forwarded_headers {
+                ForwardedHeaders::Ssl => Some("https"),
+                ForwardedHeaders::Disabled | ForwardedHeaders::Plaintext => None,
+            },
+        );
+        assert_eq!(
+            headers.get("X-Forwarded-User").map(|h| h.to_str().unwrap()),
+            user,
+        );
+        for &name in SPOOFED_HEADERS {
+            let values: Vec<_> = headers.get_all(name).iter().collect();
+            assert!(values.len() <= 1, "duplicate {name}: {values:?}");
+            assert!(
+                values.iter().all(|v| *v != "forged" && *v != "also-forged"),
+                "spoofed {name}: {values:?}",
+            );
+            if !matches!(
+                name,
+                "X-Forwarded-For" | "X-Forwarded-Proto" | "X-Forwarded-User"
+            ) {
+                assert!(values.is_empty(), "unexpected {name}: {values:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn forwarded_headers_are_owned_with_or_without_authentication() {
+        let basic = basic_gate();
+        let bearer = AuthGate::from_auth(&ProxyAuth::Bearer {
+            tokens: vec!["secret".into()],
+            realm: None,
+        })
+        .unwrap();
+        for forwarded_headers in [
+            ForwardedHeaders::Disabled,
+            ForwardedHeaders::Plaintext,
+            ForwardedHeaders::Ssl,
+        ] {
+            for (gate, auth, user) in [
+                (None, None, None),
+                (Some(&basic), Some(BASIC_AUTH), Some("alice")),
+                (Some(&bearer), Some("Bearer secret"), None),
+            ] {
+                let mut req = spoofed_request(auth);
+                apply_request_policy(
+                    &mut req,
+                    Some(CLIENT_IP.parse().unwrap()),
+                    forwarded_headers,
+                    gate,
+                )
+                .unwrap();
+                assert_policy_headers(req.headers(), forwarded_headers, user);
+                assert_eq!(req.uri(), "http://service.test/path?query=value");
+                assert_eq!(
+                    req.headers()
+                        .get(http::header::AUTHORIZATION)
+                        .map(|h| h.to_str().unwrap()),
+                    auth,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn missing_client_ip_does_not_preserve_a_spoofed_address() {
+        for forwarded_headers in [
+            ForwardedHeaders::Disabled,
+            ForwardedHeaders::Plaintext,
+            ForwardedHeaders::Ssl,
+        ] {
+            let mut req = spoofed_request(None);
+            apply_request_policy(&mut req, None, forwarded_headers, None).unwrap();
+            assert!(req.headers().get("X-Forwarded-For").is_none());
+            assert_eq!(
+                req.headers()
+                    .get("X-Forwarded-Proto")
+                    .map(|h| h.to_str().unwrap()),
+                match forwarded_headers {
+                    ForwardedHeaders::Ssl => Some("https"),
+                    ForwardedHeaders::Disabled | ForwardedHeaders::Plaintext => None,
+                },
+            );
+        }
+    }
+
+    async fn echo_request_headers(
+        req: Request<Incoming>,
+    ) -> Result<Response<Full<Bytes>>, Infallible> {
+        let mut response = Response::new(Full::new(Bytes::new()));
+        *response.headers_mut() = req.into_parts().0.headers;
+        Ok(response)
+    }
+
+    enum PolicyClient {
+        Http1(hyper::client::conn::http1::SendRequest<Full<Bytes>>),
+        Http2(hyper::client::conn::http2::SendRequest<Full<Bytes>>),
+    }
+
+    impl PolicyClient {
+        async fn check_auth_and_headers(&mut self, forwarded_headers: ForwardedHeaders) {
+            for auth in [
+                None,
+                Some("Basic invalid"),
+                Some(BASIC_AUTH),
+                None,
+                Some(BASIC_AUTH),
+            ] {
+                let req = spoofed_request(auth);
+                let response = match self {
+                    Self::Http1(client) => client.send_request(req).await.unwrap(),
+                    Self::Http2(client) => client.send_request(req).await.unwrap(),
+                };
+                if auth == Some(BASIC_AUTH) {
+                    assert_eq!(response.status(), http::StatusCode::OK);
+                    assert_policy_headers(response.headers(), forwarded_headers, Some("alice"));
+                    assert_eq!(response.headers()[http::header::AUTHORIZATION], BASIC_AUTH);
+                    assert!(
+                        response
+                            .into_body()
+                            .collect()
+                            .await
+                            .unwrap()
+                            .to_bytes()
+                            .is_empty()
+                    );
+                } else {
+                    assert_eq!(response.status(), http::StatusCode::UNAUTHORIZED);
+                    assert_eq!(
+                        response.headers()[http::header::WWW_AUTHENTICATE],
+                        "Basic realm=\"StartOS\""
+                    );
+                    assert_eq!(
+                        response.into_body().collect().await.unwrap().to_bytes(),
+                        "401 Unauthorized"
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn http1_and_http2_enforce_auth_and_forwarded_headers_on_each_request() {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            for alpn in [None, Some("h2")] {
+                for forwarded_headers in [
+                    ForwardedHeaders::Disabled,
+                    ForwardedHeaders::Plaintext,
+                    ForwardedHeaders::Ssl,
+                ] {
+                    let (client, client_facing) = tokio::io::duplex(4096);
+                    let (backend_facing, backend) = tokio::io::duplex(4096);
+                    let proxy = tokio::spawn(run_http_proxy(
+                        client_facing,
+                        backend_facing,
+                        alpn.map(|a| MaybeUtf8String(a.as_bytes().to_vec())),
+                        Some(CLIENT_IP.parse().unwrap()),
+                        forwarded_headers,
+                        Some(basic_gate()),
+                    ));
+                    let backend = tokio::spawn(async move {
+                        hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                            .serve_connection(
+                                TokioIo::new(backend),
+                                service_fn(echo_request_headers),
+                            )
+                            .await
+                            .unwrap();
+                    });
+                    let (mut client, connection) = if alpn == Some("h2") {
+                        let (sender, connection) = hyper::client::conn::http2::handshake(
+                            TokioExecutor::new(),
+                            TokioIo::new(client),
+                        )
+                        .await
+                        .unwrap();
+                        (
+                            PolicyClient::Http2(sender),
+                            tokio::spawn(async move {
+                                connection.await.unwrap();
+                            }),
+                        )
+                    } else {
+                        let (sender, connection) =
+                            hyper::client::conn::http1::handshake(TokioIo::new(client))
+                                .await
+                                .unwrap();
+                        (
+                            PolicyClient::Http1(sender),
+                            tokio::spawn(async move {
+                                connection.await.unwrap();
+                            }),
+                        )
+                    };
+                    client.check_auth_and_headers(forwarded_headers).await;
+                    connection.abort();
+                    proxy.abort();
+                    backend.abort();
+                }
+            }
+        })
+        .await
+        .expect("HTTP auth/header policy exchange stalled");
+    }
+
+    #[tokio::test]
+    async fn http2_upgrade_keeps_auth_and_header_policy_for_subsequent_requests() {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            for forwarded_headers in [
+                ForwardedHeaders::Disabled,
+                ForwardedHeaders::Plaintext,
+                ForwardedHeaders::Ssl,
+            ] {
+                for upgrade in ["HTTP/2.0", "h2c", "H2C"] {
+                    let (mut client, client_facing) = tokio::io::duplex(4096);
+                    let (backend_facing, mut backend) = tokio::io::duplex(4096);
+                    let proxy = tokio::spawn(run_http1_proxy(
+                        client_facing,
+                        backend_facing,
+                        Some(CLIENT_IP.parse().unwrap()),
+                        forwarded_headers,
+                        Some(basic_gate()),
+                    ));
+                    let backend = tokio::spawn(async move {
+                        let head = read_head(&mut backend).await;
+                        assert_policy_headers(
+                            &parse_request_headers(&head),
+                            forwarded_headers,
+                            Some("alice"),
+                        );
+                        let response = format!(
+                            "HTTP/1.1 101 Switching Protocols\r\n\
+                         Connection: Upgrade\r\nUpgrade: {upgrade}\r\n\r\n"
+                        );
+                        backend.write_all(response.as_bytes()).await.unwrap();
+                        hyper::server::conn::http2::Builder::new(TokioExecutor::new())
+                            .serve_connection(
+                                TokioIo::new(backend),
+                                service_fn(echo_request_headers),
+                            )
+                            .await
+                            .unwrap();
+                    });
+                    client
+                        .write_all(http1_spoofed_request(Some(upgrade)).as_bytes())
+                        .await
+                        .unwrap();
+                    assert!(read_head(&mut client).await.starts_with("http/1.1 101"));
+                    let (sender, connection) = hyper::client::conn::http2::handshake(
+                        TokioExecutor::new(),
+                        TokioIo::new(client),
+                    )
+                    .await
+                    .unwrap();
+                    let connection = tokio::spawn(connection);
+                    PolicyClient::Http2(sender)
+                        .check_auth_and_headers(forwarded_headers)
+                        .await;
+                    connection.abort();
+                    proxy.abort();
+                    backend.abort();
+                }
+            }
+        })
+        .await
+        .expect("HTTP/2 upgrade policy exchange stalled");
+    }
+
+    #[tokio::test]
+    async fn plaintext_detection_accepts_a_short_http1_request() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (mut client, from) = tokio::io::duplex(4096);
+            let (to, mut backend) = tokio::io::duplex(4096);
+            let proxy = tokio::spawn(run_plain_http_proxy(
+                from,
+                to,
+                None,
+                ForwardedHeaders::Disabled,
+                None,
+            ));
+            client.write_all(b"GET / HTTP/1.0\r\n\r\n").await.unwrap();
+            assert!(read_head(&mut backend).await.starts_with("get / http/1.0"));
+            backend
+                .write_all(b"HTTP/1.0 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            drop(backend);
+            assert!(read_head(&mut client).await.starts_with("http/1.0 200"));
+            proxy.await.unwrap().unwrap();
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn plaintext_detection_replays_a_fragmented_http2_preface() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (mut client, from) = tokio::io::duplex(4096);
+            let (to, mut backend) = tokio::io::duplex(4096);
+            let proxy = tokio::spawn(run_plain_http_proxy(
+                from,
+                to,
+                None,
+                ForwardedHeaders::Plaintext,
+                None,
+            ));
+            for byte in H2_PREFACE {
+                client.write_all(&[*byte]).await.unwrap();
+                tokio::task::yield_now().await;
+            }
+            let mut preface = vec![0; H2_PREFACE.len()];
+            backend.read_exact(&mut preface).await.unwrap();
+            assert_eq!(preface, H2_PREFACE);
+            proxy.abort();
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn plaintext_close_is_clean_before_any_bytes_but_rejects_partial_prefaces() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            for prefix in [b"".as_slice(), b"P", b"PRI *"] {
+                let (mut client, from) = tokio::io::duplex(4096);
+                let (to, _backend) = tokio::io::duplex(4096);
+                client.write_all(prefix).await.unwrap();
+                client.shutdown().await.unwrap();
+                let result =
+                    run_plain_http_proxy(from, to, None, ForwardedHeaders::Plaintext, None).await;
+                if prefix.is_empty() {
+                    result.unwrap();
+                } else {
+                    assert_eq!(result.unwrap_err().kind, ErrorKind::Network);
+                }
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn plaintext_detection_times_out_idle_and_incomplete_prefaces() {
+        for prefix in [b"".as_slice(), b"PRI *"] {
+            let (mut client, from) = tokio::io::duplex(4096);
+            let (to, _backend) = tokio::io::duplex(4096);
+            client.write_all(prefix).await.unwrap();
+            let start = tokio::time::Instant::now();
+            let error = run_plain_http_proxy(from, to, None, ForwardedHeaders::Plaintext, None)
+                .await
+                .unwrap_err();
+            assert_eq!(error.kind, ErrorKind::Network);
+            assert_eq!(start.elapsed(), HTTP_HEADER_TIMEOUT);
+        }
+    }
+
     fn req_with_auth(auth: Option<&str>) -> Request<()> {
         let mut b = Request::builder().uri("/");
         if let Some(a) = auth {
@@ -1500,14 +2005,12 @@ mod tests {
         })
         .unwrap();
 
-        // "alice:hunter2" -> base64
         let mut req = req_with_auth(Some("Basic YWxpY2U6aHVudGVyMg=="));
-        apply_request_policy(&mut req, None, false, Some(&gate)).unwrap();
+        apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, Some(&gate)).unwrap();
         assert_eq!(req.headers().get("X-Forwarded-User").unwrap(), "alice");
 
-        // "bob:swordfish"
         let mut req = req_with_auth(Some("Basic Ym9iOnN3b3JkZmlzaA=="));
-        apply_request_policy(&mut req, None, false, Some(&gate)).unwrap();
+        apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, Some(&gate)).unwrap();
         assert_eq!(req.headers().get("X-Forwarded-User").unwrap(), "bob");
     }
 
@@ -1522,18 +2025,18 @@ mod tests {
         })
         .unwrap();
 
-        // wrong password
         let mut req = req_with_auth(Some("Basic YWxpY2U6d3Jvbmc="));
-        let resp = apply_request_policy(&mut req, None, false, Some(&gate)).unwrap_err();
+        let resp = apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, Some(&gate))
+            .unwrap_err();
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
         assert_eq!(
             resp.headers().get(http::header::WWW_AUTHENTICATE).unwrap(),
             "Basic realm=\"My App\""
         );
 
-        // missing header
         let mut req = req_with_auth(None);
-        let resp = apply_request_policy(&mut req, None, false, Some(&gate)).unwrap_err();
+        let resp = apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, Some(&gate))
+            .unwrap_err();
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
     }
 
@@ -1546,11 +2049,12 @@ mod tests {
         .unwrap();
 
         let mut req = req_with_auth(Some("Bearer alpha"));
-        apply_request_policy(&mut req, None, false, Some(&gate)).unwrap();
+        apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, Some(&gate)).unwrap();
         assert!(req.headers().get("X-Forwarded-User").is_none());
 
         let mut req = req_with_auth(Some("Bearer gamma"));
-        let resp = apply_request_policy(&mut req, None, false, Some(&gate)).unwrap_err();
+        let resp = apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, Some(&gate))
+            .unwrap_err();
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
         assert!(
             resp.headers()
@@ -1564,12 +2068,10 @@ mod tests {
 
     #[test]
     fn client_supplied_x_forwarded_user_is_stripped_even_with_no_gate() {
-        // With no gate, we still strip X-Forwarded-User so a malicious
-        // client can't impersonate someone for an unauthenticated upstream.
         let mut req = req_with_auth(None);
         req.headers_mut()
             .insert("X-Forwarded-User", HeaderValue::from_static("root"));
-        apply_request_policy(&mut req, None, false, None).unwrap();
+        apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, None).unwrap();
         assert!(req.headers().get("X-Forwarded-User").is_none());
     }
 
@@ -1587,7 +2089,8 @@ mod tests {
         })
         .unwrap();
         let mut req = req_with_auth(None);
-        let resp = apply_request_policy(&mut req, None, false, Some(&gate)).unwrap_err();
+        let resp = apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, Some(&gate))
+            .unwrap_err();
         assert_eq!(
             resp.headers().get(http::header::WWW_AUTHENTICATE).unwrap(),
             "Basic realm=\"haxor\""
@@ -1607,7 +2110,7 @@ mod tests {
         let mut req = req_with_auth(Some("Basic YWxpY2U6aHVudGVyMg=="));
         req.headers_mut()
             .insert("X-Forwarded-User", HeaderValue::from_static("root"));
-        apply_request_policy(&mut req, None, false, Some(&gate)).unwrap();
+        apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, Some(&gate)).unwrap();
         assert_eq!(req.headers().get("X-Forwarded-User").unwrap(), "alice");
     }
 }

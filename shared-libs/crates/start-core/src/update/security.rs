@@ -212,10 +212,13 @@ mod tests {
     use crate::registry::os::security::SecurityUpdate;
 
     fn database() -> DatabaseModel {
-        Model::from_value(json!({
+        let mut db = Model::from_value(json!({
             "public": { "serverInfo": { "version": "0.4.0.5", "unreadNotificationCount": 0 } },
             "private": { "notifications": {}, "osSecurityNotifications": {} }
-        }))
+        }));
+        db.as_private_mut().as_push_mut()
+            .ser(&crate::notifications::push::PushState::default()).unwrap();
+        db
     }
 
     fn catalog(version: &str, hash: Option<&str>, source: &str, platform: &str) -> SecurityCatalog {

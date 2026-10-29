@@ -66,6 +66,7 @@ pub mod init;
 pub mod install;
 pub mod logs;
 pub mod lxc;
+pub mod mcp;
 pub mod middleware;
 pub mod net;
 pub mod notifications;
@@ -190,7 +191,9 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
             auth::auth::<C, RpcContext, CliContext>()
                 .subcommand(
                     "reset-password",
-                    from_fn_async(auth::reset_password_impl).no_cli(),
+                    from_fn_async(auth::reset_password_impl)
+                        .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                        .no_cli(),
                 )
                 .subcommand(
                     "reset-password",
@@ -202,6 +205,7 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
                     "get-pubkey",
                     from_fn_async(auth::get_pubkey)
                         .with_metadata("authenticated", Value::Bool(false))
+                        .with_metadata(crate::mcp::MCP, Value::Bool(false))
                         .no_display()
                         .with_about("about.get-pubkey-from-server")
                         .with_call_remote::<CliContext>(),
@@ -375,6 +379,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                     "follow",
                     from_fn_async(system::metrics_follow)
                         .with_metadata("get_signer", Value::Bool(true))
+                        .with_metadata(crate::mcp::MCP, Value::Bool(false))
                         .no_cli(),
                 ),
         )
@@ -512,6 +517,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
             "sideload",
             from_fn_async(install::sideload)
                 .with_metadata("get_signer", Value::Bool(true))
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .no_cli(),
         )
         .subcommand(
@@ -646,6 +652,13 @@ pub fn package<C: Context>() -> ParentHandler<C> {
             "attach",
             from_fn_async(service::attach)
                 .with_metadata("get_signer", Value::Bool(true))
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                .with_about("about.execute-commands-container")
+                .no_cli(),
+        )
+        .subcommand(
+            "exec",
+            from_fn_async(service::exec::exec)
                 .with_about("about.execute-commands-container")
                 .no_cli(),
         )

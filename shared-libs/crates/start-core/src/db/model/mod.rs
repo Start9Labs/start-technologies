@@ -45,6 +45,7 @@ impl Database {
                 available_ports: AvailablePorts::new(),
                 notifications: Notifications::new(),
                 os_security_notifications: BTreeMap::new(),
+                push: Default::default(),
                 cifs: CifsTargets::new(),
                 package_stores: BTreeMap::new(),
                 developer_key: Der64(account.developer_key.clone()),

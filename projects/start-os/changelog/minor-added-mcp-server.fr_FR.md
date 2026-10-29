@@ -1,0 +1,1 @@
+- Nouveau serveur MCP sur `/mcp` : les agents d'IA et autres clients MCP peuvent appeler l'API de StartOS comme outils via le transport HTTP diffusable, en s'authentifiant avec un jeton porteur issu de `start-cli auth token create`.

@@ -78,6 +78,12 @@ Patch-DB provides diff-based state synchronization. Changes to `db/model/public.
 
 See [patchdb.md](patchdb.md) for `TypedDbWatch<T>` construction, API, and usage patterns.
 
+## Notification delivery
+
+`notifications::notify` persists notifications and enqueues push deliveries in the same transaction. `notifications::push` owns authenticated browser subscriptions, the server's VAPID identity, encrypted request construction, and the bounded private outbox. Its sender runs under `RpcContext`'s existing cron ownership, outside database mutations, and uses the reloadable SOCKS-aware HTTP client. Push transport failures do not prevent local notification creation.
+
+The StartOS frontend uses Angular `SwPush` and the stock Angular service worker. Browser subscriptions persist consent; authenticated portal startup and subscription-change events synchronize the server's delivery targets. Browser-provided HTTP(S) endpoints are trusted administrator input, including LAN addresses.
+
 ## i18n
 
 See [i18n-patterns.md](i18n-patterns.md) for internationalization key conventions and the `t!()` macro.

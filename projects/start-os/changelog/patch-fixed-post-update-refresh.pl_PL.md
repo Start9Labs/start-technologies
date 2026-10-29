@@ -1,0 +1,1 @@
+- Interfejs nie zawiesza się już po aktualizacji StartOS. Okno wymagające odświeżenia pokazuje postęp synchronizacji interfejsu, udostępnia Odśwież po jej zakończeniu i umożliwia odzyskanie działania, jeśli synchronizacja się nie powiedzie lub zatrzyma.

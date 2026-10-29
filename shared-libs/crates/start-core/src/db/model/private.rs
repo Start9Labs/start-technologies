@@ -30,6 +30,8 @@ pub struct Private {
     pub notifications: Notifications,
     #[serde(default)]
     pub os_security_notifications: SecurityNotifications,
+    #[serde(default)]
+    pub push: crate::notifications::push::PushState,
     pub cifs: CifsTargets,
     #[serde(default)]
     pub package_stores: BTreeMap<PackageId, Value>,

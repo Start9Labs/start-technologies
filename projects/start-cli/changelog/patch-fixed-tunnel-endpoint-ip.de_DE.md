@@ -1,0 +1,1 @@
+- **WireGuard-Konfigurationen können auf StartTunnel-Hosts hinter NAT einen eigenen Endpunkt verwenden.** `tunnel device show-config --endpoint` gibt unabhängig von der lokalen WAN-Zuweisung einen IPv4-, IPv6- oder DNS-Endpunkt vor. Benötigt StartTunnel ab 1.5.0.
