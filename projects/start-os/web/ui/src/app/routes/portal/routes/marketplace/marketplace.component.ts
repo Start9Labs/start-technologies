@@ -71,13 +71,16 @@ export default class Marketplace {
   private readonly configService = inject(ConfigService)
   private readonly router = inject(Router)
   private readonly storage = inject(StorageService)
+
+  protected readonly category = signal('all')
+  protected readonly query = signal('')
+
   private readonly route = inject(ActivatedRoute)
     .queryParamMap.pipe(
       takeUntilDestroyed(),
       tap(params => {
         const registry = params.get('registry')
 
-        // Drawer query changes preserve the typed search.
         if (params.has('search')) {
           this.query.set(params.get('search') || '')
         }
@@ -99,8 +102,6 @@ export default class Marketplace {
     .subscribe()
 
   protected readonly trust = inject(TrustedKeysService)
-  protected readonly category = signal('all')
-  protected readonly query = signal('')
   protected readonly registry = toSignal(
     this.marketplaceService.currentRegistry$,
   )

@@ -208,7 +208,7 @@ export default {
   219: 'Erfüllt',
   220: 'Keine Abhängigkeiten',
   221: 'Nicht installiert',
-  222: 'Falsche Version',
+  222: 'Inkompatible Version',
   223: 'Nicht aktiv',
   224: 'Aktion erforderlich',
   225: 'Erforderlicher Gesundheitscheck fehlgeschlagen',
