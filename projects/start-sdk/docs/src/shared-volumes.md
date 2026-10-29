@@ -10,7 +10,7 @@ Add this property to `setupManifest`:
 sharedVolumes: true,
 ```
 
-This enables the service's **Volumes** controls in StartOS; it requests no access. Users grant each volume independently as read-only or read/write. `buildManifest` requires StartOS 0.4.1 for this capability and rejects an explicit older compatibility override.
+This enables the service's **Volumes** controls in StartOS; it requests no access. Users grant each volume independently as read-only or read/write. `buildManifest` requires StartOS 0.4.1 for this capability and rejects an explicit older compatibility override. Packaging it requires Start CLI 2.6.0 or later; the build wrapper checks before packing.
 
 ## Read grants
 
