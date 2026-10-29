@@ -208,7 +208,7 @@ export default {
   219: 'Satisfaites',
   220: 'Aucune dépendance',
   221: 'Non installé',
-  222: 'Version incorrecte',
+  222: 'Version incompatible',
   223: 'Non démarré',
   224: 'Action requise',
   225: 'Echec de la vérification de bon fonctionnement.',
