@@ -266,6 +266,7 @@ export namespace Mock {
       },
     },
     volumes: ['main'],
+    sharedVolumes: false,
     hardwareRequirements: {
       device: [],
       arch: null,
@@ -322,6 +323,7 @@ export namespace Mock {
       },
     },
     volumes: ['main'],
+    sharedVolumes: false,
     hardwareRequirements: {
       device: [],
       arch: null,
@@ -364,6 +366,7 @@ export namespace Mock {
       },
     },
     volumes: ['main'],
+    sharedVolumes: false,
     hardwareRequirements: {
       device: [],
       arch: null,
@@ -413,6 +416,7 @@ export namespace Mock {
       },
     },
     volumes: ['main'],
+    sharedVolumes: true,
     hardwareRequirements: {
       device: [],
       arch: null,
@@ -1091,13 +1095,15 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       title: 'Backup Complete',
       message: 'StartOS and services have been successfully backed up.',
       data: {
+        sharedVolumes: {},
         server: {
           attempted: false,
           error: null,
         },
         packages: {
           bitcoind: {
-            error: 'An error ocurred while backing up',
+            error: 'An error occurred while backing up',
+            duration_ms: 1000,
           },
         },
       },
@@ -1586,6 +1592,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
   // ]
 
   export const BackupInfo: T.BackupInfo = {
+    sharedVolumeBackups: {},
     version: '0.4.0',
     timestamp: new Date().toISOString(),
     packageBackups: {

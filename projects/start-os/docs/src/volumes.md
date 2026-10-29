@@ -24,7 +24,7 @@ Revoking access detaches that service's attachments without detaching other cons
 
 ## Remove a volume
 
-Removing a volume definition revokes its grants. Local contents are retained unless their deletion is separately confirmed. Removing a network volume never deletes remote contents.
+Removing a volume definition revokes its grants. Local contents are retained unless their deletion is separately confirmed. Removed local volumes remain under **Retained local data** until their data is deleted. Removing a network volume never deletes remote contents.
 
 Uninstalling or rolling back a consuming service leaves volume contents untouched.
 

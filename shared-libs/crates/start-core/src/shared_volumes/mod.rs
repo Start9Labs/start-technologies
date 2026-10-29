@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -156,6 +156,7 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         .subcommand("set-grant", from_fn_async(set_grant).no_cli())
         .subcommand("remove", from_fn_async(remove).no_cli())
         .subcommand("delete-data", from_fn_async(delete_data).no_cli())
+        .subcommand("list-retained", from_fn_async(list_retained).no_cli())
         .subcommand("inspect", from_fn_async(inspect).no_cli())
 }
 
@@ -339,13 +340,7 @@ pub async fn remove(
 ) -> Result<(), Error> {
     let packages = ctx
         .db
-        .mutate(|db| {
-            db.as_public_mut().as_shared_volumes_mut().remove(&id)?;
-            db.as_private_mut()
-                .as_shared_volume_credentials_mut()
-                .remove(&id)?;
-            db.as_public().as_package_data().keys()
-        })
+        .mutate(|db| remove_definition(db, &id))
         .await
         .result?;
     for package_id in &packages {
@@ -359,6 +354,33 @@ pub async fn remove(
         }
     }
     Ok(())
+}
+
+fn remove_definition(
+    db: &mut crate::db::model::DatabaseModel,
+    id: &SharedVolumeId,
+) -> Result<BTreeSet<PackageId>, Error> {
+    if let Some(volume) = db.as_public_mut().as_shared_volumes_mut().remove(id)? {
+        let volume = volume.de()?;
+        if matches!(volume.source, SharedVolumeSource::Local) {
+            db.as_private_mut()
+                .as_retained_shared_volumes_mut()
+                .insert(id, &volume.name)?;
+        }
+    }
+    db.as_private_mut()
+        .as_shared_volume_credentials_mut()
+        .remove(id)?;
+    db.as_public().as_package_data().keys()
+}
+
+pub async fn list_retained(ctx: RpcContext) -> Result<BTreeMap<SharedVolumeId, String>, Error> {
+    ctx.db
+        .peek()
+        .await
+        .as_private()
+        .as_retained_shared_volumes()
+        .de()
 }
 
 pub async fn delete_data(
@@ -378,9 +400,21 @@ pub async fn delete_data(
             ErrorKind::InvalidRequest,
         ));
     }
-    remove(ctx, SharedVolumeParams { id: id.clone() }).await?;
-    tokio::fs::remove_dir_all(local_path(crate::DATA_DIR, &id)).await?;
-    Ok(())
+    remove(ctx.clone(), SharedVolumeParams { id: id.clone() }).await?;
+    match tokio::fs::remove_dir_all(local_path(crate::DATA_DIR, &id)).await {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    ctx.db
+        .mutate(|db| {
+            db.as_private_mut()
+                .as_retained_shared_volumes_mut()
+                .remove(&id)?;
+            Ok(())
+        })
+        .await
+        .result
 }
 
 #[derive(Serialize, Deserialize, VisitFields)]
@@ -458,6 +492,50 @@ mod tests {
         assert_eq!(
             local_path("/data", &id).parent().unwrap(),
             Path::new("/data/shared-volumes")
+        );
+    }
+
+    #[test]
+    fn removed_local_names_survive_reload_and_retries_but_cifs_credentials_do_not() {
+        use crate::db::model::DatabaseModel;
+        let local = SharedVolumeId::new();
+        let cifs = SharedVolumeId::new();
+        let mut db = DatabaseModel::from(to_value(&serde_json::json!({
+            "public": { "sharedVolumes": {
+                local.to_string(): {"name":"Photos", "source":{"kind":"local"}, "grants":{}},
+                cifs.to_string(): {"name":"Remote", "source":{"kind":"cifs","hostname":"nas","path":"/share"}, "grants":{}}
+            }, "packageData": {} },
+            "private": { "sharedVolumeCredentials": {
+                cifs.to_string(): {"username":"private", "password":"secret"}
+            }, "retainedSharedVolumes": {} }
+        })).unwrap());
+        remove_definition(&mut db, &local).unwrap();
+        remove_definition(&mut db, &local).unwrap();
+        remove_definition(&mut db, &cifs).unwrap();
+        let reloaded = DatabaseModel::from(to_value(&db).unwrap());
+        assert_eq!(
+            reloaded
+                .as_private()
+                .as_retained_shared_volumes()
+                .de()
+                .unwrap(),
+            BTreeMap::from([(local, "Photos".to_owned())])
+        );
+        assert!(
+            reloaded
+                .as_private()
+                .as_shared_volume_credentials()
+                .de()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            reloaded
+                .as_public()
+                .as_shared_volumes()
+                .de()
+                .unwrap()
+                .is_empty()
         );
     }
 

@@ -8,6 +8,11 @@ export const SYSTEM_MENU = [
   ],
   [
     {
+      icon: '@tui.folder',
+      item: 'Volumes',
+      link: 'volumes',
+    },
+    {
       icon: '@tui.copy-plus',
       item: 'Create Backup',
       link: 'backup',

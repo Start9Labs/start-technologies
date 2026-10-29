@@ -47,6 +47,7 @@ impl Database {
                 notifications: Notifications::new(),
                 cifs: CifsTargets::new(),
                 shared_volume_credentials: BTreeMap::new(),
+                retained_shared_volumes: BTreeMap::new(),
                 package_stores: BTreeMap::new(),
                 developer_key: Der64(account.developer_key.clone()),
             },
