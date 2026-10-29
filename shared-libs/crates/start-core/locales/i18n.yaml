@@ -3563,6 +3563,20 @@ auth.local-logout-unnecessary:
   fr_FR: "La déconnexion est inutile lorsque le cookie d'authentification local est utilisé."
   pl_PL: "Wylogowanie nie jest potrzebne podczas korzystania z lokalnego pliku cookie uwierzytelniania."
 
+tunnel.api.endpoint-required:
+  en_US: 'WAN IP %{wan_ip} is not public; supply --endpoint <HOST> with the address the device uses to reach this tunnel server'
+  de_DE: 'Die WAN-IP %{wan_ip} ist nicht öffentlich; geben Sie mit --endpoint <HOST> die Adresse an, über die das Gerät diesen Tunnelserver erreicht'
+  es_ES: 'La IP WAN %{wan_ip} no es pública; indique con --endpoint <HOST> la dirección que usa el dispositivo para llegar a este servidor de túnel'
+  fr_FR: 'L’IP WAN %{wan_ip} n’est pas publique ; indiquez avec --endpoint <HOST> l’adresse utilisée par l’appareil pour joindre ce serveur de tunnel'
+  pl_PL: 'Adres IP WAN %{wan_ip} nie jest publiczny; podaj za pomocą --endpoint <HOST> adres, którego urządzenie używa do połączenia z tym serwerem tunelu'
+
+tunnel.api.invalid-endpoint:
+  en_US: 'Enter an IPv4 address, IPv6 address, or DNS name without a scheme, port, or path'
+  de_DE: 'Geben Sie eine IPv4-Adresse, IPv6-Adresse oder einen DNS-Namen ohne Schema, Port oder Pfad ein'
+  es_ES: 'Introduce una dirección IPv4, IPv6 o un nombre DNS sin esquema, puerto ni ruta'
+  fr_FR: 'Saisissez une adresse IPv4, IPv6 ou un nom DNS sans schéma, port ni chemin'
+  pl_PL: 'Wprowadź adres IPv4, IPv6 lub nazwę DNS bez schematu, portu ani ścieżki'
+
 # util/tui.rs
 util.tui.terminal-must-be-interactive:
   en_US: "Terminal must be in interactive mode for this wizard"
@@ -3919,6 +3933,13 @@ help.arg.ed25519:
   es_ES: "Usar Ed25519 en lugar de NIST P-256"
   fr_FR: "Utiliser Ed25519 au lieu de NIST P-256"
   pl_PL: "Użyj Ed25519 zamiast NIST P-256"
+
+help.arg.endpoint:
+  en_US: 'IPv4, IPv6, or DNS endpoint host for this WireGuard config; required when the selected WAN IP is not public'
+  de_DE: 'IPv4-, IPv6- oder DNS-Endpunkt für diese WireGuard-Konfiguration; erforderlich, wenn die gewählte WAN-IP nicht öffentlich ist'
+  es_ES: 'Host IPv4, IPv6 o DNS del endpoint para esta configuración de WireGuard; obligatorio si la IP WAN seleccionada no es pública'
+  fr_FR: 'Hôte IPv4, IPv6 ou DNS du point de terminaison pour cette configuration WireGuard ; requis si l’IP WAN sélectionnée n’est pas publique'
+  pl_PL: 'Host IPv4, IPv6 lub DNS punktu końcowego dla tej konfiguracji WireGuard; wymagany, gdy wybrany adres IP WAN nie jest publiczny'
 
 help.arg.env-file-path:
   en_US: "Path to environment file"

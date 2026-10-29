@@ -112,7 +112,12 @@ export class MockApiService extends ApiService {
     'device.show-config': async params => {
       await pauseFor(1000)
 
-      return MOCK_CONFIG
+      const endpoint = params.endpoint ?? '203.0.113.42'
+      const host =
+        endpoint.includes(':') && !endpoint.startsWith('[')
+          ? `[${endpoint}]`
+          : endpoint
+      return MOCK_CONFIG.replace('203.0.113.42:51820', `${host}:51820`)
     },
     'device.set-dns-injection': async params => {
       await pauseFor(1000)
