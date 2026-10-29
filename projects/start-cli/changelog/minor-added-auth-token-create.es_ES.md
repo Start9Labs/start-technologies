@@ -1,0 +1,1 @@
+- `start-cli auth token create --name <name>` crea un token de portador de StartOS para clientes de la API y lo muestra una sola vez.

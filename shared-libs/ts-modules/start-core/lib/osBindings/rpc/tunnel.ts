@@ -63,9 +63,9 @@ export type RpcReturnType<
     : never
 
 export type RpcSchemaTree<Schema> = {
-  [Key in keyof Schema as Key extends '_OPAQUE'
-    ? never
-    : Key]: Key extends '_PARAMS'
+  [
+    Key in keyof Schema as Key extends '_OPAQUE' ? never : Key
+  ]: Key extends '_PARAMS'
     ? Schema[Key] extends z.ZodType
       ? z.input<Schema[Key]>
       : never
@@ -200,7 +200,12 @@ export type SetDeviceKindParamsInput = z.input<
 export type SetSubnetDnsParamsInput = z.input<typeof schemas.SetSubnetDnsParams>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
 export type WgConfig = z.output<typeof schemas.WgConfig>
-export type SessionList = z.output<typeof schemas.SessionList>
+
+/**
+ * The server's sessions, by credential type.
+ */
+export type Sessions = z.output<typeof schemas.Sessions>
 export type WgSubnetClients = z.output<typeof schemas.WgSubnetClients>
+export type SessionList = z.output<typeof schemas.SessionList>
 export type WgSubnetConfig = z.output<typeof schemas.WgSubnetConfig>
 export type Api = RpcSchemaTree<typeof schemas.Api>

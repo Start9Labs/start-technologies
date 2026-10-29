@@ -145,13 +145,13 @@ mod tests {
 
     use super::*;
     use crate::auth::Session;
+    use crate::version::Current;
 
     #[tokio::test]
     async fn prior_revisions_upgrade_to_keyrings_once() {
         use patch_db::json_ptr::ROOT;
 
         use crate::trusted_keys::{TrustedKeys, os_signers};
-        use crate::version::Current;
         let key = AnyVerifyingKey::Ed25519(
             ed25519_dalek::SigningKey::from_bytes(&[43; 32]).verifying_key(),
         );
@@ -167,7 +167,6 @@ mod tests {
             let mut fixture =
                 to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
                     .unwrap();
-            fixture["public"]["serverInfo"]["version"] = json!("0.4.0.5");
             fixture["public"]["serverInfo"]
                 .as_object_mut()
                 .unwrap()
@@ -176,7 +175,13 @@ mod tests {
             fixture["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
             fixture["public"]["serverInfo"]["trustedOsUpdateSigners"] =
                 json!({ key_id.clone(): { "label": "retained signer" } });
-            fixture["private"]["sessionPubkeys"] = json!({ key_id: Session::default() });
+            fixture["public"]["serverInfo"]["version"] = to_value(&Version.semver()).unwrap();
+            let private = fixture["private"].as_object_mut().unwrap();
+            private.remove("sessions");
+            private.insert(
+                "sessionPubkeys".into(),
+                json!({ key_id: Session::default() }),
+            );
             let db = PatchDb::in_memory();
             db.put(&ROOT, &fixture).await.unwrap();
             Current::default().pre_init(&db).await.unwrap();
@@ -187,10 +192,10 @@ mod tests {
             );
             assert_eq!(
                 migrated["public"]["serverInfo"]["postInitMigrationTodos"],
-                json!({ Current::default().semver().to_string(): null })
+                json!({ "0.4.0.5": null, "0.4.1": null })
             );
             assert!(
-                migrated["private"]["sessionPubkeys"]
+                migrated["private"]["sessions"]["pubkeys"]
                     .as_object()
                     .unwrap()
                     .contains_key(&canonical)

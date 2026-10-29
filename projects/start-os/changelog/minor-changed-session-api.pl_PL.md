@@ -1,0 +1,1 @@
+- **API sesji rozdziela zalogowane urządzenia i tokeny Bearer.** `auth.session.list` zwraca `{ pubkeys, tokens }`, a `auth.session.kill` przyjmuje `pubkeys` i `tokens` zamiast `ids`.

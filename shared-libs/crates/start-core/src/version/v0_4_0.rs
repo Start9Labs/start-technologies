@@ -34,6 +34,7 @@ impl VersionT for Version {
     }
     async fn post_up(self, ctx: &RpcContext, input: Value) -> Result<(), Error> {
         if should_welcome_to_release(
+            self,
             &Current::default().semver(),
             input.as_bool().unwrap_or(false),
         ) {
@@ -82,8 +83,15 @@ fn migrated_through_beta_10(db: &Value) -> bool {
         .any(|v| v == beta_10)
 }
 
-fn should_welcome_to_release(landing: &exver::Version, from_0_4_0_beta: bool) -> bool {
-    landing.number().starts_with(V0_4_0.number()) && from_0_4_0_beta
+fn should_welcome_to_release(
+    version: impl VersionT,
+    landing: &exver::Version,
+    from_0_4_0_beta: bool,
+) -> bool {
+    let version = version.semver();
+    version.prerelease().is_empty()
+        && landing.number().starts_with(version.number())
+        && from_0_4_0_beta
 }
 
 #[cfg(test)]
@@ -127,13 +135,19 @@ mod test {
 
         for (landing, expected) in [
             ("0.4.0", true),
+            ("0.4.0.3", true),
             ("0.4.0.4", true),
             ("0.4.1", false),
             ("0.5.0", false),
         ] {
             let landing = landing.parse().unwrap();
-            assert_eq!(should_welcome_to_release(&landing, true), expected);
-            assert!(!should_welcome_to_release(&landing, false));
+            assert_eq!(should_welcome_to_release(Version, &landing, true), expected);
+            assert!(!should_welcome_to_release(Version, &landing, false));
         }
+        assert!(!should_welcome_to_release(
+            v0_4_0_beta_10::Version,
+            &Version.semver(),
+            true
+        ));
     }
 }

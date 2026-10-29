@@ -1,0 +1,1 @@
+- Los tokens de portador permiten usar clientes de API que no pueden firmar solicitudes. `start-cli auth token create --name <name>` muestra el token una sola vez; las solicitudes con `Authorization: Bearer <token>` se autentican como una sesión con ese nombre, visible y revocable en la lista de sesiones. Los tokens inactivos durante 30 días se revocan como las demás sesiones.

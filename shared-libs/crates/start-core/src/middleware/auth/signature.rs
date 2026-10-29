@@ -218,7 +218,7 @@ impl SignatureAuthContext for RpcContext {
         db: &mut Model<Self::Database>,
         keys: &BTreeSet<InternedString>,
     ) -> Result<(), Error> {
-        let auth_keys = db.as_private_mut().as_session_pubkeys_mut();
+        let auth_keys = db.as_private_mut().as_sessions_mut().as_pubkeys_mut();
         for key in keys {
             auth_keys.remove(key)?;
         }
@@ -258,10 +258,10 @@ impl SignatureAuthContext for RpcContext {
                 .peek(|keys| keys.0.contains_key(&**key))
                 || db
                     .as_private()
-                    .as_session_pubkeys()
-                    .de()?
-                    .0
-                    .contains_key(&**key))
+                    .as_sessions()
+                    .as_pubkeys()
+                    .as_idx(key)
+                    .is_some())
         })
     }
     async fn post_auth_hook(&self, key: Self::CheckPubkeyRes, _: &RpcRequest) -> Result<(), Error> {

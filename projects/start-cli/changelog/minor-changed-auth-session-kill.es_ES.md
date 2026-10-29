@@ -1,0 +1,1 @@
+- **`start-cli auth session kill` usa `--pubkey <key>` y `--token <id>`** para las sesiones que se quieren cerrar, en lugar de identificadores posicionales.
