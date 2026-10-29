@@ -10,7 +10,6 @@ import {
 } from '@angular/core'
 import { BehaviorSubject, EMPTY, Subject } from 'rxjs'
 
-// Presentation substitutes keep browser-only dependencies out of class-method tests.
 const boundaries = new Map()
 function boundary(specifier, names, extra = '') {
   boundaries.set(
@@ -95,21 +94,12 @@ for (const [file, name] of [
 loadTypeScript(boundaries)
 const { PatchDB } = await import('patch-db-client')
 const { OSService } = await import('src/app/services/os.service')
-const { i18nService: ProductionI18nService } = await import(
-  pathToFileURL(
-    resolve(root, 'shared-libs/ts-modules/shared/src/i18n/i18n.service.ts'),
-  ).href
-)
-const { LocalizePipe: ProductionLocalizePipe } = await import(
-  pathToFileURL(
-    resolve(root, 'shared-libs/ts-modules/shared/src/i18n/localize.pipe.ts'),
-  ).href
-)
-const { I18N } = await import(
-  pathToFileURL(
-    resolve(root, 'shared-libs/ts-modules/shared/src/i18n/i18n.providers.ts'),
-  ).href
-)
+const { i18nService: ProductionI18nService } =
+  await import('../../../../../shared-libs/ts-modules/shared/src/i18n/i18n.service.ts')
+const { LocalizePipe: ProductionLocalizePipe } =
+  await import('../../../../../shared-libs/ts-modules/shared/src/i18n/localize.pipe.ts')
+const { I18N } =
+  await import('../../../../../shared-libs/ts-modules/shared/src/i18n/i18n.providers.ts')
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
 const { TaskService, DialogService, i18nPipe, i18nService } =
   await import('@start9labs/shared')
