@@ -63,9 +63,9 @@ export type RpcReturnType<
     : never
 
 export type RpcSchemaTree<Schema> = {
-  [
-    Key in keyof Schema as Key extends '_OPAQUE' ? never : Key
-  ]: Key extends '_PARAMS'
+  [Key in keyof Schema as Key extends '_OPAQUE'
+    ? never
+    : Key]: Key extends '_PARAMS'
     ? Schema[Key] extends z.ZodType
       ? z.input<Schema[Key]>
       : never
