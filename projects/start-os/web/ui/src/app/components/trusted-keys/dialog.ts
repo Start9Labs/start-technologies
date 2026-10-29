@@ -98,8 +98,8 @@ export class TrustedKeysDialog {
   protected readonly saving = signal(false)
 
   protected compareKeyrings(
-    a: KeyValue<string, T.TrustedKey>,
-    b: KeyValue<string, T.TrustedKey>,
+    a: KeyValue<string, T.TrustedKeyring>,
+    b: KeyValue<string, T.TrustedKeyring>,
   ): number {
     return (
       Number(a.value.removable) - Number(b.value.removable) ||

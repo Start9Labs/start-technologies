@@ -1006,12 +1006,12 @@ export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
 /**
  * A named keyring with independent service-package and OS-update trust.
  */
-export type TrustedKey = z.output<typeof schemas.TrustedKey>
+export type TrustedKeyring = z.output<typeof schemas.TrustedKeyring>
 
 /**
  * A named keyring with independent service-package and OS-update trust.
  */
-export type TrustedKeyInput = z.input<typeof schemas.TrustedKey>
+export type TrustedKeyringInput = z.input<typeof schemas.TrustedKeyring>
 export type UmountParams = z.output<typeof schemas.UmountParams>
 export type UmountParamsInput = z.input<typeof schemas.UmountParams>
 export type UninstallParams = z.output<typeof schemas.UninstallParams>

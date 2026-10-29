@@ -286,7 +286,7 @@ export class MockApiService extends ApiService {
     }),
     'server.trusted-keys.add': async ({ name, publicKeys, context }) => {
       const id = crypto.randomUUID()
-      const value: T.TrustedKey = {
+      const value: T.TrustedKeyring = {
         name,
         gpgExports: [],
         publicKeys: parsePublicKeys(publicKeys.join('\n')).map(key =>

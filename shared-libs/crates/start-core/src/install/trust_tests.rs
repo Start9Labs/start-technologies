@@ -7,7 +7,7 @@ use crate::registry::asset::RegistryAsset;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::sign::ed25519::Ed25519ph;
 use crate::sign::{AnySignature, AnyVerifyingKey, SignatureScheme};
-use crate::trusted_keys::{TrustedKey, TrustedKeys, enabled_keys};
+use crate::trusted_keys::{TrustedKeyring, TrustedKeys, enabled_keys};
 use crate::util::serde::Base64;
 
 #[test]
@@ -29,7 +29,7 @@ fn package_commitment_requires_an_enabled_marketplace_signer() {
     };
     let mut keys = TrustedKeys::from([(
         "custom".into(),
-        TrustedKey {
+        TrustedKeyring {
             name: "custom".into(),
             removable: true,
             public_keys: std::collections::BTreeSet::from([public]),

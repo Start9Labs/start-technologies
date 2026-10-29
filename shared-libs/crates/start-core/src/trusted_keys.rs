@@ -11,14 +11,14 @@ use crate::sign::{AnyVerifyingKey, canonicalize_verifying_keys};
 use crate::update::signers::{TrustedOsUpdateSigner, TrustedOsUpdateSigners};
 use crate::util::new_guid;
 
-pub type TrustedKeys = BTreeMap<InternedString, TrustedKey>;
+pub type TrustedKeys = BTreeMap<InternedString, TrustedKeyring>;
 pub const START9: &str = "start9";
 
 /// A named keyring with independent service-package and OS-update trust.
 #[derive(Clone, Debug, Deserialize, Serialize, HasModel, VisitFields, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-pub struct TrustedKey {
+pub struct TrustedKeyring {
     pub name: String,
     /// Ed25519 public keys encoded as padded standard Base64 DER in canonical order.
     pub public_keys: BTreeSet<AnyVerifyingKey>,
@@ -31,14 +31,14 @@ pub struct TrustedKey {
     pub os: bool,
 }
 
-impl TrustedKey {
+impl TrustedKeyring {
     fn trusts_os_key(&self, key: &AnyVerifyingKey) -> bool {
         self.os && self.public_keys.contains(key)
     }
 }
 
-rpc_toolkit::reflect_ts!(TrustedKey);
-rpc_toolkit::ts_export!(TrustedKey, namespaces = [""]);
+rpc_toolkit::reflect_ts!(TrustedKeyring);
+rpc_toolkit::ts_export!(TrustedKeyring, namespaces = [""]);
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, VisitVariants)]
 #[serde(rename_all = "camelCase")]
@@ -124,7 +124,7 @@ pub fn initial_trusted_keys() -> TrustedKeys {
         start9.gpg_exports.extend(imported.gpg_exports);
     }
     BTreeMap::from([
-        (START9.into(), TrustedKey {
+        (START9.into(), TrustedKeyring {
             name: "Start9".into(),
             removable: false,
             public_keys: start9.keys,
@@ -132,7 +132,7 @@ pub fn initial_trusted_keys() -> TrustedKeys {
             marketplace: true,
             os: true,
         }),
-        ("start9-alpha".into(), TrustedKey {
+        ("start9-alpha".into(), TrustedKeyring {
             name: "Start9 Alpha".into(),
             removable: false,
             public_keys: BTreeSet::from([
@@ -180,7 +180,7 @@ pub fn migrate_signers(legacy: TrustedOsUpdateSigners) -> Result<TrustedKeys, Er
         if !grouped.contains(&public_key) {
             keys.insert(
                 key,
-                TrustedKey {
+                TrustedKeyring {
                     name: signer.label,
                     public_keys: BTreeSet::from([public_key]),
                     gpg_exports: BTreeSet::new(),
@@ -282,7 +282,7 @@ pub fn add_group(
     }
     keys.insert(
         id,
-        TrustedKey {
+        TrustedKeyring {
             name,
             public_keys: imported.keys,
             gpg_exports: imported.gpg_exports,
@@ -502,7 +502,7 @@ mod tests {
     #[test]
     fn stored_arrays_deserialize_as_unique_key_sets() {
         let key = "MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=";
-        let group: TrustedKey = from_value(imbl_value::json!({
+        let group: TrustedKeyring = from_value(imbl_value::json!({
             "name": "Publisher", "publicKeys": [key, key],
             "removable": true, "marketplace": true, "os": false,
         }))
@@ -519,7 +519,7 @@ mod tests {
     fn public_key_set_serialization_is_canonical_across_reads() {
         let first = "MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=";
         let second = "MCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=";
-        let group: TrustedKey = from_value(imbl_value::json!({
+        let group: TrustedKeyring = from_value(imbl_value::json!({
             "name": "Publisher", "publicKeys": [second, first, second],
             "removable": true, "marketplace": true, "os": false,
         }))
@@ -528,7 +528,7 @@ mod tests {
         let saved = to_value(&group).unwrap();
         assert_eq!(saved["publicKeys"], imbl_value::json!([first, second]));
         for _ in 0..8 {
-            let reloaded: TrustedKey = from_value(saved.clone()).unwrap();
+            let reloaded: TrustedKeyring = from_value(saved.clone()).unwrap();
             assert_eq!(to_value(&reloaded).unwrap(), saved);
         }
     }

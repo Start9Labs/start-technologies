@@ -4063,7 +4063,7 @@ export const TestSmtpParams: z.ZodObject<{
 /**
  * A named keyring with independent service-package and OS-update trust.
  */
-export const TrustedKey: z.ZodObject<{
+export const TrustedKeyring: z.ZodObject<{
   name: z.ZodString
   /**
    * Ed25519 public keys encoded as padded standard Base64 DER in canonical order.
@@ -4110,7 +4110,7 @@ export const TrustedKey: z.ZodObject<{
   marketplace: z.boolean(),
   os: z.boolean(),
 }).meta({
-  id: 'TrustedKey',
+  id: 'TrustedKeyring',
   description:
     'A named keyring with independent service-package and OS-update trust.',
 })
@@ -6077,8 +6077,8 @@ export const ServerInfo: z.ZodObject<{
   >
   unreadNotificationCount: z.ZodInt
   trustedKeys: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof TrustedKey>>,
-    z.ZodRecord<z.ZodString, typeof TrustedKey>
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof TrustedKeyring>>,
+    z.ZodRecord<z.ZodString, typeof TrustedKeyring>
   >
   pubkey: z.ZodString
   caFingerprint: z.ZodString
@@ -6126,8 +6126,8 @@ export const ServerInfo: z.ZodObject<{
   statusInfo: wire(ServerStatus.optional(), ServerStatus),
   unreadNotificationCount: z.int(),
   trustedKeys: wire(
-    z.record(z.string(), TrustedKey).optional(),
-    z.record(z.string(), TrustedKey),
+    z.record(z.string(), TrustedKeyring).optional(),
+    z.record(z.string(), TrustedKeyring),
   ),
   pubkey: z.string(),
   caFingerprint: z.string(),

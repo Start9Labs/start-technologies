@@ -8,7 +8,7 @@ export type TrustContext = RPC.RpcParamType<
 >['context']
 
 export abstract class MarketplaceTrust {
-  abstract readonly keys: Signal<Record<string, T.TrustedKey> | undefined>
+  abstract readonly keys: Signal<Record<string, T.TrustedKeyring> | undefined>
 }
 
 export function packageSigners(
@@ -19,7 +19,7 @@ export function packageSigners(
 
 export function matchingTrustedKeys(
   signers: string[],
-  groups: Record<string, T.TrustedKey>,
+  groups: Record<string, T.TrustedKeyring>,
   context: TrustContext,
 ) {
   const signed = new Set(signers.map(auth.normalizeDer64))
@@ -37,7 +37,7 @@ export function matchingTrustedKeys(
 export class TrustedPackageSignersPipe {
   transform(
     pkg: Pick<MarketplacePkgBase, 's9pks' | 'signers'>,
-    groups: Record<string, T.TrustedKey>,
+    groups: Record<string, T.TrustedKeyring>,
   ) {
     return matchingTrustedKeys(packageSigners(pkg), groups, 'marketplace')
   }
