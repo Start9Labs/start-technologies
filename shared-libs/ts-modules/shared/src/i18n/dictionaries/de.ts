@@ -858,7 +858,7 @@ export default {
   973: 'Quelle',
   974: 'Lokaler Ordner',
   975: 'CIFS-Freigabe',
-  976: 'Die Quelle kann nach dem Erstellen nicht geändert werden. Zugangsdaten bleiben privat.',
+  976: 'Die Quelle kann nach dem Erstellen nicht geändert werden. Passwörter bleiben privat.',
   977: 'Dienstzugriff',
   978: 'Dieser Dienst kann keine Volumes nutzen',
   979: 'Prüfen',

@@ -859,7 +859,7 @@ export const ENGLISH: Record<string, number> = {
   'Source': 973,
   'Local folder': 974,
   'CIFS share': 975,
-  'The source cannot be changed after creation. Credentials remain private.': 976,
+  'The source cannot be changed after creation. Passwords remain private.': 976,
   'Service access': 977,
   'This service cannot make use of volumes': 978,
   'Inspect': 979,

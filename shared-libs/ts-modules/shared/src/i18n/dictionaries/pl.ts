@@ -858,7 +858,7 @@ export default {
   973: 'Źródło',
   974: 'Folder lokalny',
   975: 'Udział CIFS',
-  976: 'Źródła nie można zmienić po utworzeniu. Dane logowania pozostają prywatne.',
+  976: 'Źródła nie można zmienić po utworzeniu. Hasła pozostają prywatne.',
   977: 'Dostęp usług',
   978: 'Ta usługa nie może korzystać z woluminów',
   979: 'Sprawdź',

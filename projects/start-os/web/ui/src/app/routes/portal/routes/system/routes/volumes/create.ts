@@ -6,9 +6,10 @@ import {
   Validators,
 } from '@angular/forms'
 import { i18nPipe, TaskService } from '@start9labs/shared'
-import { tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
+import { WA_IS_MOBILE } from '@ng-web-apis/platform'
+import { TuiAutoFocus, tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
 import {
-  TUI_VALIDATION_ERRORS,
+  tuiValidationErrorsProvider,
   TuiButton,
   TuiDialogContext,
   TuiError,
@@ -30,7 +31,7 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
       </header>
       <tui-textfield>
         <label tuiLabel>{{ 'Name' | i18n }}</label>
-        <input tuiInput formControlName="name" />
+        <input tuiInput formControlName="name" [tuiAutoFocus]="!isMobile" />
       </tui-textfield>
       <tui-error formControlName="name" />
       <fieldset>
@@ -86,7 +87,7 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
       }
       <p>
         {{
-          'The source cannot be changed after creation. Credentials remain private.'
+          'The source cannot be changed after creation. Passwords remain private.'
             | i18n
         }}
       </p>
@@ -104,19 +105,17 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
     </form>
   `,
   providers: [
-    {
-      provide: TUI_VALIDATION_ERRORS,
-      useFactory: () => {
-        const i18n = inject(i18nPipe)
-        return { required: () => i18n.transform('Required') }
-      },
-    },
+    tuiValidationErrorsProvider(() => {
+      const i18n = inject(i18nPipe)
+      return { required: () => i18n.transform('Required') }
+    }),
   ],
   imports: [
     FormsModule,
     ReactiveFormsModule,
     i18nPipe,
     TuiButton,
+    TuiAutoFocus,
     TuiError,
     TuiIcon,
     TuiInput,
@@ -131,6 +130,7 @@ class CreateVolume {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
 
+  protected readonly isMobile = inject(WA_IS_MOBILE)
   protected readonly context = injectContext<TuiDialogContext<void>>()
   protected readonly sources = ['Local folder', 'CIFS share'] as const
   protected readonly source =

@@ -1,3 +1,4 @@
+import { KeyValuePipe } from '@angular/common'
 import { Component, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { i18nPipe } from '@start9labs/shared'
@@ -18,8 +19,8 @@ import { VolumeGrant } from './grant'
         <p tuiSubtitle>{{ volumes()?.[context.data.id]?.name }}</p>
       </hgroup>
     </header>
-    @for (entry of entries(packages() || {}); track entry[0]) {
-      @let manifest = getCurrentManifest(entry[1]);
+    @for (entry of packages() | keyvalue: null; track entry.key) {
+      @let manifest = getCurrentManifest(entry.value);
       <div tuiCell>
         <span tuiTitle>
           {{ manifest.title }}
@@ -31,9 +32,9 @@ import { VolumeGrant } from './grant'
         </span>
         <volume-grant
           [volumeId]="context.data.id"
-          [packageId]="entry[0]"
+          [packageId]="entry.key"
           [label]="manifest.title"
-          [grant]="volumes()?.[context.data.id]?.grants?.[entry[0]]"
+          [grant]="volumes()?.[context.data.id]?.grants?.[entry.key]"
           [disabled]="!manifest.sharedVolumes"
         />
       </div>
@@ -41,7 +42,7 @@ import { VolumeGrant } from './grant'
       <p>{{ 'No services installed' | i18n }}</p>
     }
   `,
-  imports: [i18nPipe, TuiCell, TuiTitle, TuiHeader, VolumeGrant],
+  imports: [i18nPipe, TuiCell, TuiTitle, TuiHeader, KeyValuePipe, VolumeGrant],
 })
 class VolumeGrants {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
@@ -49,8 +50,9 @@ class VolumeGrants {
   protected readonly context =
     injectContext<TuiDialogContext<void, { id: string }>>()
   protected readonly volumes = toSignal(this.patch.watch$('sharedVolumes'))
-  protected readonly packages = toSignal(this.patch.watch$('packageData'))
-  protected readonly entries = Object.entries
+  protected readonly packages = toSignal(this.patch.watch$('packageData'), {
+    initialValue: {},
+  })
   protected readonly getCurrentManifest = getCurrentManifest
 }
 

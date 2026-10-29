@@ -858,7 +858,7 @@ export default {
   973: 'Source',
   974: 'Dossier local',
   975: 'Partage CIFS',
-  976: 'La source ne peut pas être modifiée après la création. Les identifiants restent privés.',
+  976: 'La source ne peut pas être modifiée après la création. Les mots de passe restent confidentiels.',
   977: 'Accès des services',
   978: 'Ce service ne peut pas utiliser de volumes',
   979: 'Inspecter',

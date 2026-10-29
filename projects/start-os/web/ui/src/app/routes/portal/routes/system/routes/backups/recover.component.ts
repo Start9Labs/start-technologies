@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common'
-import { Component, inject, signal } from '@angular/core'
+import { Component, inject, linkedSignal, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { FormsModule } from '@angular/forms'
 import { Router } from '@angular/router'
@@ -101,36 +101,38 @@ export class BackupsRecoverComponent {
     injectContext<TuiDialogContext<void, RecoverData>>()
 
   protected readonly selected = signal<ReadonlySet<RecoverOption>>(new Set())
-  protected readonly options = toSignal(
-    inject<PatchDB<DataModel>>(PatchDB)
-      .watch$('packageData')
-      .pipe(
-        take(1),
-        map(packageData => {
-          const backups = this.context.data.backupInfo.packageBackups
+  protected readonly options = linkedSignal(
+    toSignal(
+      inject<PatchDB<DataModel>>(PatchDB)
+        .watch$('packageData')
+        .pipe(
+          take(1),
+          map(packageData => {
+            const backups = this.context.data.backupInfo.packageBackups
 
-          return [
-            ...Object.entries(backups).map<RecoverOption>(([id, info]) => ({
-              ...info,
-              kind: 'package',
-              id,
-              installed: !!packageData[id],
-              newerOs:
-                Version.parse(info.osVersion).compare(
-                  Version.parse(this.config.version),
-                ) === 'greater',
-            })),
-            ...Object.entries(
-              this.context.data.backupInfo.sharedVolumeBackups ?? {},
-            ).map<RecoverOption>(([id, info]) => ({
-              kind: 'volume',
-              id,
-              title: info.name,
-              timestamp: info.timestamp,
-            })),
-          ].sort((a, b) => a.title.localeCompare(b.title))
-        }),
-      ),
+            return [
+              ...Object.entries(backups).map<RecoverOption>(([id, info]) => ({
+                ...info,
+                kind: 'package',
+                id,
+                installed: !!packageData[id],
+                newerOs:
+                  Version.parse(info.osVersion).compare(
+                    Version.parse(this.config.version),
+                  ) === 'greater',
+              })),
+              ...Object.entries(
+                this.context.data.backupInfo.sharedVolumeBackups ?? {},
+              ).map<RecoverOption>(([id, info]) => ({
+                kind: 'volume',
+                id,
+                title: info.name,
+                timestamp: info.timestamp,
+              })),
+            ].sort((a, b) => a.title.localeCompare(b.title))
+          }),
+        ),
+    ),
   )
 
   readonly toMessage = (
@@ -187,6 +189,14 @@ export class BackupsRecoverComponent {
           ids: packages.map(option => option.id),
         })
         this.deselect(packages)
+        this.options.update(current =>
+          current?.map(option =>
+            option.kind === 'package' &&
+            packages.some(pkg => pkg.id === option.id)
+              ? { ...option, installed: true }
+              : option,
+          ),
+        )
       }
       if (volumes.length) {
         const result = await this.api.rpc.backup.volume.restore(
@@ -203,7 +213,7 @@ export class BackupsRecoverComponent {
           throw volumes
             .filter(option => result.errors[option.id])
             .map(option => `${option.title}: ${result.errors[option.id]}`)
-            .join('\n')
+            .join('<br />')
         }
       }
       this.context.$implicit.complete()

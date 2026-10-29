@@ -1,3 +1,4 @@
+import { KeyValuePipe } from '@angular/common'
 import { Component, computed, inject, input } from '@angular/core'
 import { toObservable, toSignal } from '@angular/core/rxjs-interop'
 import { RouterLink } from '@angular/router'
@@ -23,15 +24,15 @@ import { VolumeGrant } from '../../../system/routes/volumes/grant'
       </p>
     }
     <table [appTable]="['Name', 'Access']">
-      @for (entry of entries(volumes() || {}); track entry[0]) {
+      @for (entry of volumes() | keyvalue: null; track entry.key) {
         <tr>
-          <td>{{ entry[1].name }}</td>
+          <td>{{ entry.value.name }}</td>
           <td>
             <volume-grant
-              [volumeId]="entry[0]"
+              [volumeId]="entry.key"
               [packageId]="pkgId()"
-              [label]="entry[1].name"
-              [grant]="entry[1].grants[pkgId()]"
+              [label]="entry.value.name"
+              [grant]="entry.value.grants[pkgId()]"
               [disabled]="!enabled()"
             />
           </td>
@@ -53,6 +54,7 @@ import { VolumeGrant } from '../../../system/routes/volumes/grant'
     RouterLink,
     i18nPipe,
     TuiButton,
+    KeyValuePipe,
     TuiNotification,
     TuiTitle,
     TuiHeader,
@@ -65,8 +67,9 @@ export default class ServiceVolumes {
 
   public readonly pkgId = input.required<string>()
 
-  protected readonly entries = Object.entries
-  protected readonly volumes = toSignal(this.patch.watch$('sharedVolumes'))
+  protected readonly volumes = toSignal(this.patch.watch$('sharedVolumes'), {
+    initialValue: {},
+  })
   protected readonly pkg = toSignal(
     toObservable(this.pkgId).pipe(
       switchMap(id => this.patch.watch$('packageData', id)),

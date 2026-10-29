@@ -27,9 +27,11 @@ boundary(
   [
     'TaskService',
     'DialogService',
+    'ErrorService',
     'i18nPipe',
     'i18nService',
     'LocalizePipe',
+    'ConvertBytesPipe',
     'MarkdownPipe',
     'SafeLinksDirective',
     'RPCErrorDetails',
@@ -49,8 +51,9 @@ boundary(
     'TuiGroup',
     'TuiCheckbox',
     'TuiLoader',
+    'TuiError',
   ],
-  'export const tuiCellOptionsProvider = () => [];',
+  'export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => [];',
 )
 boundary('@taiga-ui/kit', [
   'TuiBadge',
@@ -60,11 +63,12 @@ boundary('@taiga-ui/kit', [
   'TuiDataListWrapper',
   'TuiBlock',
   'TuiRadioList',
+  'TuiPassword',
 ])
 boundary(
   '@taiga-ui/cdk',
-  ['TuiAnimated', 'TuiMapperPipe'],
-  'export const tuiProvide = () => [];',
+  ['TuiAnimated', 'TuiMapperPipe', 'TuiAutoFocus'],
+  'export const tuiProvide = () => []; export const tuiMarkControlAsTouchedAndValidate = () => {};',
 )
 boundary(
   '@taiga-ui/i18n',
@@ -72,6 +76,12 @@ boundary(
   'export const tuiLanguageSwitcher = () => [];',
 )
 boundary('@taiga-ui/dompurify', ['NgDompurifyPipe'])
+boundary('@taiga-ui/layout', ['TuiHeader', 'TuiForm'])
+boundary(
+  '@ng-web-apis/platform',
+  [],
+  'export const WA_IS_MOBILE = Symbol("mobile"); export const WA_IS_ANDROID = Symbol("android"); export const WA_IS_IOS = Symbol("ios"); export const WA_REDUCED_MOTION = Symbol("reduced-motion"); export const isApple = () => false; export const isEdge = () => false; export const isFirefox = () => false; export const isSafari = () => false;',
+)
 boundary(
   '@ng-web-apis/common',
   [],
@@ -90,6 +100,7 @@ export class PolymorpheusComponent { constructor(component) { this.component = c
 boundary('src/app/services/api/embassy-api.service', ['ApiService'])
 boundary('./embassy-api.service', ['ApiService'])
 boundary('src/app/routes/portal/components/pkg-icon', ['PkgIconDirective'])
+boundary('src/app/routes/portal/components/table.component', ['TableComponent'])
 boundary('@start9labs/marketplace', [], 'export const FALLBACK_ICON = "";')
 boundary(
   'src/app/services/patch-db/patch-db-source',
@@ -183,7 +194,7 @@ const { I18N } = await import(
   ).href
 )
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
-const { TaskService, DialogService, i18nPipe, i18nService } =
+const { TaskService, DialogService, ErrorService, i18nPipe, i18nService } =
   await import('@start9labs/shared')
 const { CONTEXT } = await import('@taiga-ui/polymorpheus')
 const { WA_WINDOW } = await import('@ng-web-apis/common')
@@ -753,6 +764,8 @@ const { BackupsRecoverComponent } =
   await import('src/app/routes/portal/routes/system/routes/backups/recover.component')
 const { VolumeGrant } =
   await import('src/app/routes/portal/routes/system/routes/volumes/grant')
+const { default: SystemVolumes } =
+  await import('src/app/routes/portal/routes/system/routes/volumes/index')
 const { getManifest, getCurrentManifest } =
   await import('src/app/utils/get-package-data')
 const { Router } = await import('@angular/router')
@@ -787,7 +800,8 @@ function volumeFixture(t, packageData = {}) {
     results = [],
     errors = [],
     routes = [],
-    grants = []
+    grants = [],
+    taskCalls = []
   let completed = 0
   const api = {
     rpc: {
@@ -813,6 +827,7 @@ function volumeFixture(t, packageData = {}) {
         },
       },
       volumes: {
+        listRetained: async () => ({ [volumeA]: 'Retained Photos' }),
         setGrant: async params => {
           grants.push(params)
         },
@@ -826,7 +841,8 @@ function volumeFixture(t, packageData = {}) {
     {
       provide: TaskService,
       useValue: {
-        async run(fn) {
+        async run(fn, message) {
+          taskCalls.push(message)
           try {
             await fn()
             return true
@@ -836,6 +852,10 @@ function volumeFixture(t, packageData = {}) {
           }
         },
       },
+    },
+    {
+      provide: ErrorService,
+      useValue: { handleError: error => errors.push(error) },
     },
     { provide: ConfigService, useValue: { version: '0.4.1' } },
     {
@@ -896,12 +916,35 @@ function volumeFixture(t, packageData = {}) {
     errors,
     routes,
     grants,
+    taskCalls,
     get completed() {
       return completed
     },
     make: Class => runInInjectionContext(injector, () => new Class()),
   }
 }
+
+test('retained-volume page loading never starts a global task', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(SystemVolumes)
+  await Promise.resolve()
+  assert.deepEqual(model.retained(), { [volumeA]: 'Retained Photos' })
+  assert.deepEqual(f.taskCalls, [])
+  assert.deepEqual(f.errors, [])
+})
+
+test('retained-volume page failures reach ErrorService without a global task', async t => {
+  const f = volumeFixture(t)
+  const error = { code: 0, message: 'unavailable' }
+  f.api.rpc.volumes.listRetained = async () => {
+    throw error
+  }
+  const model = f.make(SystemVolumes)
+  await Promise.resolve()
+  assert.deepEqual(model.retained(), {})
+  assert.deepEqual(f.errors, [error])
+  assert.deepEqual(f.taskCalls, [])
+})
 
 test('volume-only backup selection includes unavailable sources and sends an explicit empty service selection', async t => {
   const f = volumeFixture(t)
@@ -965,6 +1008,18 @@ test('partial restore retry excludes submitted services and successful new volum
     [volumeB],
   )
   assert.match(String(f.errors[0]), /Music: offline backup target/)
+  assert.equal(
+    model.options().find(option => option.kind === 'package').installed,
+    true,
+  )
+  assert.equal(
+    model.toMessage(model.options().find(option => option.kind === 'package'))
+      .text,
+    'Unavailable. Service is already installed.',
+  )
+  assert.ok(
+    model.selected().has(model.options().find(option => option.id === volumeB)),
+  )
   assert.equal(f.completed, 0)
   f.results.push({ restored: { [volumeB]: 'new-b' }, errors: {} })
   await model.restore()
@@ -983,6 +1038,21 @@ test('partial restore retry excludes submitted services and successful new volum
   assert.equal(model.selected().size, 0)
   assert.equal(f.completed, 1)
   assert.deepEqual(f.routes, [['/system/volumes']])
+})
+
+test('multiple volume restore errors have HTML line breaks', async t => {
+  const f = volumeFixture(t)
+  const model = f.make(BackupsRecoverComponent)
+  model.selected.set(
+    new Set(model.options().filter(option => option.kind === 'volume')),
+  )
+  f.results.push({
+    restored: {},
+    errors: { [volumeA]: 'first failure', [volumeB]: 'second failure' },
+  })
+  await model.restore()
+  assert.equal(f.errors[0], 'Music: second failure<br />Photos: first failure')
+  assert.equal(model.selected().size, 2)
 })
 
 test('restore transport failure retains volume selection and keeps the dialog open', async t => {

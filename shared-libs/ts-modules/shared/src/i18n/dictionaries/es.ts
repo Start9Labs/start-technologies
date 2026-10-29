@@ -858,7 +858,7 @@ export default {
   973: 'Origen',
   974: 'Carpeta local',
   975: 'Recurso compartido CIFS',
-  976: 'El origen no se puede cambiar después de la creación. Las credenciales permanecen privadas.',
+  976: 'El origen no se puede cambiar después de la creación. Las contraseñas permanecen privadas.',
   977: 'Acceso de servicios',
   978: 'Este servicio no puede utilizar volúmenes',
   979: 'Inspeccionar',

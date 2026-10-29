@@ -1,9 +1,12 @@
+import { KeyValuePipe } from '@angular/common'
 import { Component, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { RouterLink } from '@angular/router'
 import {
   ConvertBytesPipe,
   DialogService,
+  ErrorService,
+  HttpError,
   i18nKey,
   i18nPipe,
   TaskService,
@@ -41,9 +44,10 @@ import { VOLUME_GRANTS } from './grants'
     <table
       [appTable]="['Name', 'Source', 'Status', 'Free', 'Service access', null]"
     >
-      @for (entry of entries(volumes() || {}); track entry[0]) {
-        @let id = entry[0];
-        @let volume = entry[1];
+      @for (entry of volumes() | keyvalue: null; track entry.key) {
+        @let id = entry.key;
+        @let volume = entry.value;
+        @let grants = volume.grants | keyvalue: null;
         <tr>
           <td>{{ volume.name }}</td>
           <td>
@@ -80,9 +84,7 @@ import { VOLUME_GRANTS } from './grants'
               appearance="secondary"
               (click)="manage(id)"
             >
-              {{ 'Service access' | i18n }} ({{
-                entries(volume.grants).length
-              }})
+              {{ 'Service access' | i18n }} ({{ grants.length }})
             </button>
           </td>
           <td>
@@ -120,7 +122,8 @@ import { VOLUME_GRANTS } from './grants'
         </tr>
       }
     </table>
-    @if (entries(retained()).length) {
+    @let retainedItems = retained() | keyvalue: null;
+    @if (retainedItems.length) {
       <section>
         <header tuiHeader>
           <h3 tuiTitle>{{ 'Retained local data' | i18n }}</h3>
@@ -132,15 +135,15 @@ import { VOLUME_GRANTS } from './grants'
           }}
         </p>
         <table [appTable]="['Name', null]">
-          @for (volume of entries(retained()); track volume[0]) {
+          @for (volume of retainedItems; track volume.key) {
             <tr>
-              <td>{{ volume[1] }}</td>
+              <td>{{ volume.value }}</td>
               <td>
                 <button
                   tuiButton
                   size="s"
                   appearance="secondary"
-                  (click)="deleteData(volume[0])"
+                  (click)="deleteData(volume.key)"
                 >
                   {{ 'Delete local data' | i18n }}
                 </button>
@@ -156,6 +159,7 @@ import { VOLUME_GRANTS } from './grants'
     i18nPipe,
     ConvertBytesPipe,
     TuiButton,
+    KeyValuePipe,
     TuiTitle,
     TuiHeader,
     TableComponent,
@@ -165,12 +169,13 @@ import { VOLUME_GRANTS } from './grants'
 export default class Volumes {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
+  private readonly errors = inject(ErrorService)
   private readonly dialogs = inject(DialogService)
 
   protected readonly volumes = toSignal(
     inject<PatchDB<DataModel>>(PatchDB).watch$('sharedVolumes'),
+    { initialValue: {} },
   )
-  protected readonly entries = Object.entries
   protected readonly inspections = signal<
     Record<string, Result<'volumes.inspect'>>
   >({})
@@ -185,10 +190,12 @@ export default class Volumes {
     this.refreshRetained()
   }
 
-  private refreshRetained() {
-    return this.tasks.run(async () => {
+  private async refreshRetained() {
+    try {
       this.retained.set(await this.api.rpc.volumes.listRetained({}))
-    }, 'Loading')
+    } catch (error) {
+      this.errors.handleError(error as HttpError)
+    }
   }
 
   protected create() {
