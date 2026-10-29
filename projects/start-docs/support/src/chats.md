@@ -15,6 +15,7 @@ Keep chats on Start9's products and the technologies around them. The [Terms of 
 ## In a Chat
 
 - **Attach files** with the paperclip in the message field: screenshots and other images, audio recordings, text files and logs (StartOS's log exports included), and PDFs, up to 10 MB each.
+- **Answer Dux's questions** from the card above the message field. See [Dux and Helix](dux-and-helix.md#answering-duxs-questions).
 - **Request a human** from **Actions**, the **…** in the message field. See [Dux and Helix](dux-and-helix.md#reaching-a-person).
 - **Close the chat** from **Actions**, once you have what you came for. See [Closing a Chat](#closing-a-chat).
 - **Reply to, react to or copy** a message from the toolbar that appears when you hover over it, or by long-pressing it on a phone. The same menu lets you **Edit** your own messages, or **Hide from others** to keep one from other customers.

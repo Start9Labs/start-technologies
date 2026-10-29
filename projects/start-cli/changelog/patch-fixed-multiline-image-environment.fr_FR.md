@@ -1,0 +1,1 @@
+- Préserve les valeurs multilignes de l’environnement des images dans les métadonnées JSON des paquets utilisant Start SDK 3.1.2 ou ultérieur.

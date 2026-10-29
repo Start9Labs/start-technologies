@@ -218,7 +218,7 @@ impl SignatureAuthContext for RpcContext {
         db: &mut Model<Self::Database>,
         keys: &BTreeSet<InternedString>,
     ) -> Result<(), Error> {
-        let auth_keys = db.as_private_mut().as_session_pubkeys_mut();
+        let auth_keys = db.as_private_mut().as_sessions_mut().as_pubkeys_mut();
         for key in keys {
             auth_keys.remove(key)?;
         }
@@ -258,10 +258,10 @@ impl SignatureAuthContext for RpcContext {
                 .peek(|keys| keys.0.contains_key(&**key))
                 || db
                     .as_private()
-                    .as_session_pubkeys()
-                    .de()?
-                    .0
-                    .contains_key(&**key))
+                    .as_sessions()
+                    .as_pubkeys()
+                    .as_idx(key)
+                    .is_some())
         })
     }
     async fn post_auth_hook(&self, key: Self::CheckPubkeyRes, _: &RpcRequest) -> Result<(), Error> {
@@ -329,6 +329,25 @@ fn loopback_identity(request: &Request) -> Option<InternedString> {
         .parse()
         .ok()?;
     ip.is_loopback().then(|| url_host_str(ip))
+}
+
+/// Names the server answers to on the request's ingress.
+pub(crate) fn request_identities<'a, C: SignatureAuthContext>(
+    context: &'a C,
+    request: &'a Request,
+) -> impl Future<Output = Result<Vec<InternedString>, Error>> + Send + 'a {
+    let loopback = loopback_identity(request);
+    let extensions = request.extensions();
+    async move {
+        let mut identities = context
+            .sig_context(extensions)
+            .await
+            .into_iter()
+            .map(|identity| identity.map(|identity| InternedString::intern(identity.as_ref())))
+            .collect::<Result<Vec<_>, _>>()?;
+        identities.extend(loopback);
+        Ok(identities)
+    }
 }
 
 pub trait SigningContext {
@@ -436,23 +455,12 @@ async fn verify_request_signature_with_address<C: SignatureAuthContext>(
     )?;
 
     let address = {
-        let sig_contexts = context
-            .sig_context(request.extensions())
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?;
-        let loopback = loopback_identity(request);
-        let address = verified_address(
-            &header,
-            sig_contexts
-                .iter()
-                .map(|c| c.as_ref())
-                .chain(loopback.as_deref()),
-        );
+        let identities = request_identities(context, request).await?;
+        let address = verified_address(&header, identities.iter().map(|c| &**c));
         let Some(address) = address else {
             tracing::debug!(
                 signer = ?header.signer,
-                contexts = ?sig_contexts.iter().map(|c| c.as_ref()).collect::<Vec<_>>(),
+                contexts = ?identities,
                 "request signature failed verification for every known server identity"
             );
             return Err(Error::new(
@@ -911,11 +919,10 @@ mod tests {
             options: BindOptions {
                 preferred_external_port: 80,
                 secure: None,
+                proxy: None,
                 add_ssl: Some(AddSslOptions {
                     preferred_external_port: 443,
-                    add_x_forwarded_headers: false,
                     alpn: None,
-                    auth: None,
                     upstream_cert_validation: Default::default(),
                 }),
             },

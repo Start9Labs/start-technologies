@@ -1,0 +1,1 @@
+- **Konfiguracje WireGuard mogą używać osobnego punktu końcowego na hostach StartTunnel za NAT-em.** `tunnel device show-config --endpoint` ustawia punkt końcowy IPv4, IPv6 lub DNS niezależnie od lokalnego przypisania WAN. Wymaga StartTunnel 1.5.0 lub nowszego.

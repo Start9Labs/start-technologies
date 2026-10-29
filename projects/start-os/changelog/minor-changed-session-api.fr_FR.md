@@ -1,0 +1,1 @@
+- **L’API des sessions distingue les appareils connectés des jetons bearer.** `auth.session.list` renvoie `{ pubkeys, tokens }` et `auth.session.kill` reçoit `pubkeys` et `tokens` à la place d’`ids`.

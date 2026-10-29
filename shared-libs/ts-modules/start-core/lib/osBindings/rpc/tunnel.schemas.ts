@@ -566,7 +566,24 @@ export const SetSubnetWanParams: z.ZodObject<{
 export const ShowConfigParams: z.ZodObject<{
   subnet: z.ZodString
   ip: z.ZodString
-}> = /* @__PURE__ */ object({ subnet: z.string(), ip: z.string() }).meta({
+  /**
+   * Overrides the generated WireGuard endpoint without changing the WAN assignment.
+   */
+  endpoint: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  subnet: z.string(),
+  ip: z.string(),
+  /**
+   * Overrides the generated WireGuard endpoint without changing the WAN assignment.
+   */
+  endpoint: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'Overrides the generated WireGuard endpoint without changing the WAN assignment.',
+  }),
+}).meta({
   id: 'ShowConfigParams',
 })
 export const SubnetParams: z.ZodObject<{ subnet: z.ZodString }> =
@@ -742,8 +759,18 @@ export const AuthKeys: z.ZodRecord<z.ZodString, typeof Session> =
     description: 'Enrolled sign-ins indexed by canonical DER64 SPKI.',
   })
 export const KillParams: z.ZodObject<{
-  ids: z.ZodArray<typeof AnyVerifyingKey>
-}> = /* @__PURE__ */ object({ ids: z.array(AnyVerifyingKey) }).meta({
+  pubkeys: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof AnyVerifyingKey>>,
+    z.ZodArray<typeof AnyVerifyingKey>
+  >
+  tokens: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodString>>,
+    z.ZodArray<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  pubkeys: wire(z.array(AnyVerifyingKey).optional(), z.array(AnyVerifyingKey)),
+  tokens: wire(z.array(z.string()).optional(), z.array(z.string())),
+}).meta({
   id: 'KillParams',
 })
 export const LoginParams: z.ZodObject<{
@@ -906,22 +933,36 @@ export const WgConfig: z.ZodObject<{
 }).meta({
   id: 'WgConfig',
 })
-export const SessionList: z.ZodObject<{
-  current: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  sessions: typeof AuthKeys
+
+/**
+ * The server's sessions, by credential type.
+ */
+export const Sessions: z.ZodObject<{
+  pubkeys: typeof AuthKeys
+  tokens: z.ZodRecord<z.ZodString, typeof Session>
 }> = /* @__PURE__ */ object({
-  current: wire(z.string().nullable().optional(), z.string().nullable()),
-  sessions: AuthKeys,
+  pubkeys: AuthKeys,
+  tokens: z.record(z.string(), Session),
 }).meta({
-  id: 'SessionList',
+  id: 'Sessions',
+  description: "The server's sessions, by credential type.",
 })
 export const WgSubnetClients: z.ZodRecord<z.ZodString, typeof WgConfig> =
   /* @__PURE__ */ z.record(z.string(), WgConfig).meta({
     id: 'WgSubnetClients',
   })
+export const SessionList: z.ZodObject<{
+  current: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  sessions: typeof Sessions
+}> = /* @__PURE__ */ object({
+  current: wire(z.string().nullable().optional(), z.string().nullable()),
+  sessions: Sessions,
+}).meta({
+  id: 'SessionList',
+})
 export const WgSubnetConfig: z.ZodObject<{
   name: z.ZodString
   clients: typeof WgSubnetClients
@@ -1349,4 +1390,62 @@ export const Api = {
       },
     },
   },
+}
+/**
+ * MCP tool descriptions of a schema tree's callable methods, the catalog
+ * `rpc_toolkit::mcp::McpServer` serves. Methods without bindings are omitted;
+ * an `outputSchema` describes object results only, as MCP requires.
+ */
+export function toolCatalog(tree: unknown): object[] {
+  type JsonSchema = {
+    type?: unknown
+    allOf?: unknown
+    $ref?: unknown
+    $defs?: { [name: string]: JsonSchema }
+    [keyword: string]: unknown
+  }
+  type Node = {
+    _PARAMS: z.ZodType
+    _RETURN?: z.ZodType
+    _CHILDREN?: { [name: string]: Node }
+    _OPAQUE?: true
+  }
+  const render = (schema: z.ZodType, io: 'input' | 'output'): JsonSchema => {
+    const rendered = z.toJSONSchema(schema, {
+      io,
+      unrepresentable: 'any',
+    }) as JsonSchema
+    const ref = rendered.$ref
+    const root =
+      typeof ref === 'string' && ref.startsWith('#/$defs/')
+        ? rendered.$defs?.[ref.slice('#/$defs/'.length)]
+        : undefined
+    if (!root) return rendered
+    const { $ref, ...rest } = rendered
+    return { ...rest, ...root }
+  }
+  const isObject = (schema: JsonSchema) =>
+    schema.type === 'object' ||
+    (schema.type === undefined && Array.isArray(schema.allOf))
+  const tools: object[] = []
+  const walk = (node: Node, path: string[]) => {
+    if (path.length && node._RETURN && !node._OPAQUE) {
+      const input = render(node._PARAMS, 'input')
+      if (input.type === undefined || input.type === 'object') {
+        const output = render(node._RETURN, 'output')
+        tools.push({
+          name: path.join('.'),
+          inputSchema: { ...input, type: 'object' },
+          ...(isObject(output)
+            ? { outputSchema: { ...output, type: 'object' } }
+            : {}),
+        })
+      }
+    }
+    for (const [name, child] of Object.entries(node._CHILDREN ?? {})) {
+      walk(child, [...path, name])
+    }
+  }
+  walk(tree as Node, [])
+  return tools
 }

@@ -6,7 +6,12 @@ const host = (fingerprint: string): Host => ({
   bindings: {
     5223: {
       enabled: true,
-      options: { preferredExternalPort: 5223, addSsl: null, secure: null },
+      options: {
+        preferredExternalPort: 5223,
+        addSsl: null,
+        secure: null,
+        proxy: null,
+      },
       net: { assignedPort: null, assignedSslPort: 5223 },
       addresses: {
         enabled: [],

@@ -1,0 +1,4 @@
+- Configura la autenticación del proxy HTTP y las cabeceras reenviadas en la opción `proxy` de `bindPort`, independientemente de `addSsl`. La autenticación cubre tanto la conexión original como la del envoltorio TLS.
+- Los valores predeterminados dependen del protocolo: proxy habilitado para protocolos HTTP y deshabilitado para los demás. Todos aceptan un objeto `proxy` explícito o `proxy: null`.
+- Al reconstruir paquetes, mueve `addSsl.auth` a `proxy.auth` y `addSsl.addXForwardedHeaders` a `proxy.addXForwardedHeaders`. Mantén la configuración TLS en `addSsl`.
+- Los paquetes construidos con este SDK requieren StartOS 0.4.1 o posterior.

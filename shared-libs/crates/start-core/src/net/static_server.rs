@@ -66,6 +66,11 @@ pub trait UiContext: Context + AsRef<RpcContinuations> + Clone + Sized {
     fn extend_router(self, router: Router) -> Router {
         router
     }
+    /// Routes served by the context's RPC server.
+    #[allow(unused_variables)]
+    fn rpc_server_routes(self, server: HttpServer<Self>) -> Router {
+        Router::new()
+    }
     /// Applies layers after the UI fallback is installed.
     fn apply_outer_layers(self, router: Router) -> Router {
         router
@@ -84,8 +89,20 @@ impl UiContext for RpcContext {
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
         server
             .middleware(Cors::new())
-            .middleware(Auth::new().with_local_auth().with_signature_auth())
+            .middleware(
+                Auth::new()
+                    .with_local_auth()
+                    .with_bearer_auth()
+                    .with_signature_auth(),
+            )
             .middleware(SyncDb::new())
+    }
+    fn rpc_server_routes(self, server: HttpServer<Self>) -> Router {
+        crate::mcp::router(self, server).unwrap_or_else(|e| {
+            tracing::error!("MCP endpoint unavailable: {e}");
+            tracing::debug!("{e:?}");
+            Router::new()
+        })
     }
     fn extend_router(self, router: Router) -> Router {
         router
@@ -284,7 +301,8 @@ pub fn ui_router<C: UiContext>(ctx: C) -> Router {
     ));
     let router = ctx
         .clone()
-        .extend_router(rpc_router(ctx.clone(), server))
+        .extend_router(rpc_router(ctx.clone(), server.clone()))
+        .merge(ctx.clone().rpc_server_routes(server))
         .fallback(any(|request: Request| async move {
             serve_ui(request, C::ui_dir()).unwrap_or_else(server_error)
         }));
@@ -494,10 +512,10 @@ async fn if_authorized<
                 .peek()
                 .await
                 .as_private()
-                .as_session_pubkeys()
-                .de()?
-                .0
-                .contains_key(&*key);
+                .as_sessions()
+                .as_pubkeys()
+                .as_idx(&key)
+                .is_some();
         if !enrolled {
             return Err(Error::new(
                 eyre!("{}", t!("middleware.auth.unauthorized")),

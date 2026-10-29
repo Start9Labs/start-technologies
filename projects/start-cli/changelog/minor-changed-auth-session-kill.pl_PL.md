@@ -1,0 +1,1 @@
+- **`start-cli auth session kill` przyjmuje `--pubkey <key>` i `--token <id>`** dla kończonych sesji, zamiast identyfikatorów sesji jako argumentów pozycyjnych.

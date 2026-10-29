@@ -139,6 +139,9 @@ export const ENGLISH: Record<string, number> = {
   'Hostname (optional)': 124,
   'Default (VPS provider)': 125,
   'Custom': 126,
+  'WireGuard endpoint': 127,
+  'Defaults to this page’s host. Use an IP address or DNS name reachable by the device; the WireGuard port is unchanged.': 128,
+  'Generate config': 129,
 }
 
 export default ENGLISH

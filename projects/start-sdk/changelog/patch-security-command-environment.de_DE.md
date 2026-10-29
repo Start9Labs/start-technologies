@@ -1,0 +1,3 @@
+- Umgebungswerte für Daemon- und Untercontainer-Befehle erscheinen nicht in Prozess-Kommandozeilen; große Umgebungen werden in Teile begrenzter Größe aufgeteilt.
+- Mehrzeilige Umgebungswerte von Images bleiben in Paketen erhalten, die mit start-cli ab 2.6.0 gebaut wurden.
+- Pakete, die mit diesem SDK gebaut wurden, benötigen StartOS ab 0.4.1.
