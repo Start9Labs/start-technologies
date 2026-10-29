@@ -1773,8 +1773,18 @@ export const FollowLogsRes: z.ZodObject<{
   id: 'FollowLogsRes',
 })
 export const KillParams: z.ZodObject<{
-  ids: z.ZodArray<typeof AnyVerifyingKey>
-}> = /* @__PURE__ */ object({ ids: z.array(AnyVerifyingKey) }).meta({
+  pubkeys: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof AnyVerifyingKey>>,
+    z.ZodArray<typeof AnyVerifyingKey>
+  >
+  tokens: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodString>>,
+    z.ZodArray<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  pubkeys: wire(z.array(AnyVerifyingKey).optional(), z.array(AnyVerifyingKey)),
+  tokens: wire(z.array(z.string()).optional(), z.array(z.string())),
+}).meta({
   id: 'KillParams',
 })
 export const LoginParams: z.ZodObject<{
@@ -2715,17 +2725,19 @@ export const PublishedPortsSetResult: z.ZodObject<{
   description:
     '[`set`] response. A non-empty collision list means nothing was applied —\nthe caller confirms and re-saves; empty means the request was applied.',
 })
-export const SessionList: z.ZodObject<{
-  current: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  sessions: typeof AuthKeys
+
+/**
+ * The server's sessions, by credential type.
+ */
+export const Sessions: z.ZodObject<{
+  pubkeys: typeof AuthKeys
+  tokens: z.ZodRecord<z.ZodString, typeof Session>
 }> = /* @__PURE__ */ object({
-  current: wire(z.string().nullable().optional(), z.string().nullable()),
-  sessions: AuthKeys,
+  pubkeys: AuthKeys,
+  tokens: z.record(z.string(), Session),
 }).meta({
-  id: 'SessionList',
+  id: 'Sessions',
+  description: "The server's sessions, by credential type.",
 })
 
 /**
@@ -2762,6 +2774,18 @@ export const WifiRegulatory: z.ZodObject<{
   }),
 }).meta({
   id: 'WifiRegulatory',
+})
+export const SessionList: z.ZodObject<{
+  current: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  sessions: typeof Sessions
+}> = /* @__PURE__ */ object({
+  current: wire(z.string().nullable().optional(), z.string().nullable()),
+  sessions: Sessions,
+}).meta({
+  id: 'SessionList',
 })
 export const Api = {
   _PARAMS: /* @__PURE__ */ empty,

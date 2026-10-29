@@ -47,7 +47,7 @@ List enrolled device keys.
 
 - `--format` — Output format
 
-### `start-tunnel auth session kill [IDS...]`
+### `start-tunnel auth session kill [--pubkey <KEY>]...`
 
 Remove enrolled device keys.
 

@@ -76,6 +76,10 @@ export type ContactInfo = z.output<typeof schemas.ContactInfo>
 export type ContactInfoInput = z.input<typeof schemas.ContactInfo>
 export type CountEntry = z.output<typeof schemas.CountEntry>
 export type CountEntryInput = z.input<typeof schemas.CountEntry>
+export type CreateTokenParams = z.output<typeof schemas.CreateTokenParams>
+export type CreateTokenParamsInput = z.input<typeof schemas.CreateTokenParams>
+export type CreatedToken = z.output<typeof schemas.CreatedToken>
+export type CreatedTokenInput = z.input<typeof schemas.CreatedToken>
 export type DataUrl = z.output<typeof schemas.DataUrl>
 export type DataUrlInput = z.input<typeof schemas.DataUrl>
 export type DeviceFilter = z.output<typeof schemas.DeviceFilter>
@@ -1094,8 +1098,16 @@ export type ServerStatus = z.output<typeof schemas.ServerStatus>
 export type ServerStatusInput = z.input<typeof schemas.ServerStatus>
 export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
 export type ServiceInterfaceInput = z.input<typeof schemas.ServiceInterface>
-export type SessionList = z.output<typeof schemas.SessionList>
-export type SessionListInput = z.input<typeof schemas.SessionList>
+
+/**
+ * The server's sessions, by credential type.
+ */
+export type Sessions = z.output<typeof schemas.Sessions>
+
+/**
+ * The server's sessions, by credential type.
+ */
+export type SessionsInput = z.input<typeof schemas.Sessions>
 export type SetDependenciesParams = z.output<
   typeof schemas.SetDependenciesParams
 >
@@ -1166,6 +1178,8 @@ export type OsIndex = z.output<typeof schemas.OsIndex>
 export type OsIndexInput = z.input<typeof schemas.OsIndex>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
 export type PackageVersionInfoInput = z.input<typeof schemas.PackageVersionInfo>
+export type SessionList = z.output<typeof schemas.SessionList>
+export type SessionListInput = z.input<typeof schemas.SessionList>
 export type SetBackupProgress = z.output<typeof schemas.SetBackupProgress>
 export type SetBackupProgressInput = z.input<typeof schemas.SetBackupProgress>
 export type SetInitProgress = z.output<typeof schemas.SetInitProgress>
