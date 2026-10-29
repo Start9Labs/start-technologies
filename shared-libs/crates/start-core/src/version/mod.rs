@@ -55,7 +55,6 @@ mod v0_4_0_alpha_6;
 mod v0_4_0_alpha_7;
 mod v0_4_0_alpha_8;
 mod v0_4_0_alpha_9;
-mod v0_4_1;
 
 mod v0_4_0_alpha_10;
 mod v0_4_0_alpha_11;
@@ -82,6 +81,7 @@ mod v0_4_0_beta_6;
 mod v0_4_0_beta_7;
 mod v0_4_0_beta_8;
 mod v0_4_0_beta_9;
+mod v0_4_1;
 
 pub type Current = v0_4_1::Version; // VERSION_BUMP
 
@@ -104,32 +104,16 @@ impl Current {
                 .await
                 .result?;
             }
-            Ordering::Less => {
-                let pre_ups = PreUps::load(&from, &self).await?;
+            Ordering::Less | Ordering::Equal => {
+                let upgrade =
+                    Upgrade::load(&from, &self, applied_migration_revision(&mut dump.value)?)
+                        .await?;
                 db.apply_function(|mut db| {
-                    migrate_from_unchecked(&from, &self, pre_ups, &mut db)?;
+                    upgrade.apply(&from, &self, &mut db)?;
                     Ok::<_, Error>((to_value(&from_value::<Database>(db.clone())?)?, ()))
                 })
                 .await
                 .result?;
-            }
-            Ordering::Equal => {
-                if applied_migration_revision(&mut dump.value)? == self.migration_revision() {
-                    db.apply_function(|db| {
-                        Ok::<_, Error>((to_value(&from_value::<Database>(db.clone())?)?, ()))
-                    })
-                    .await
-                    .result?;
-                } else {
-                    let pre_up = self.pre_up().await?;
-                    db.apply_function(|mut db| {
-                        let res = self.up(&mut db, pre_up)?;
-                        self.commit(&mut db, res)?;
-                        Ok::<_, Error>((to_value(&from_value::<Database>(db.clone())?)?, ()))
-                    })
-                    .await
-                    .result?;
-                }
             }
         }
         Ok(())
@@ -517,6 +501,59 @@ impl PreUps {
     }
 }
 
+/// Pre-migration state for bringing a db at one version up to the same or a later one.
+struct Upgrade {
+    /// Re-runs the source version's migration when the db recorded an older revision of it.
+    rerun_from: Option<Box<dyn Any + UnwindSafe + Send>>,
+    /// `None` when the db is already at the target version.
+    pre_ups: Option<PreUps>,
+}
+impl Upgrade {
+    async fn load<VFrom: DynVersionT + ?Sized, VTo: DynVersionT + ?Sized>(
+        from: &VFrom,
+        to: &VTo,
+        applied_revision: usize,
+    ) -> Result<Self, Error> {
+        let rerun_from = if applied_revision == from.migration_revision() {
+            None
+        } else {
+            Some(from.pre_up().await?)
+        };
+        let pre_ups = if from.semver() < to.semver() {
+            Some(PreUps::load(from, to).await?)
+        } else {
+            None
+        };
+        Ok(Self {
+            rerun_from,
+            pre_ups,
+        })
+    }
+    fn apply<VFrom: DynVersionT + ?Sized, VTo: DynVersionT + ?Sized>(
+        self,
+        from: &VFrom,
+        to: &VTo,
+        db: &mut Value,
+    ) -> Result<(), Error> {
+        if let Some(pre_up) = self.rerun_from {
+            apply_migration(from, pre_up, db)?;
+        }
+        if let Some(pre_ups) = self.pre_ups {
+            migrate_from_unchecked(from, to, pre_ups, db)?;
+        }
+        Ok(())
+    }
+}
+
+fn apply_migration<V: DynVersionT + ?Sized>(
+    version: &V,
+    pre_up: Box<dyn Any + UnwindSafe + Send>,
+    db: &mut Value,
+) -> Result<(), Error> {
+    let res = version.up(db, pre_up)?;
+    version.commit(db, res)
+}
+
 fn migrate_from_unchecked<VFrom: DynVersionT + ?Sized, VTo: DynVersionT + ?Sized>(
     from: &VFrom,
     to: &VTo,
@@ -539,9 +576,7 @@ fn migrate_from_unchecked<VFrom: DynVersionT + ?Sized, VTo: DynVersionT + ?Sized
         }
         _ => (),
     };
-    let res = to.up(db, pre_ups.value)?;
-    to.commit(db, res)?;
-    Ok(())
+    apply_migration(to, pre_ups.value, db)
 }
 
 fn rollback_to_unchecked<VFrom: DynVersionT + ?Sized, VTo: DynVersionT + ?Sized>(
@@ -635,6 +670,7 @@ unsafe impl Send for DynVersion {}
 trait DynVersionT: RefUnwindSafe + Send + Sync {
     fn previous(&self) -> DynVersion;
     fn semver(&self) -> exver::Version;
+    fn migration_revision(&self) -> usize;
     // part of the DynVersionT surface; kept intentionally though not dynamically dispatched
     #[allow(dead_code)]
     fn compat(&self) -> &'static exver::VersionRange;
@@ -653,6 +689,9 @@ where
     }
     fn semver(&self) -> exver::Version {
         VersionT::semver(*self)
+    }
+    fn migration_revision(&self) -> usize {
+        VersionT::migration_revision(*self)
     }
     fn compat(&self) -> &'static exver::VersionRange {
         VersionT::compat(*self)
@@ -690,6 +729,9 @@ impl DynVersionT for DynVersion {
     }
     fn semver(&self) -> exver::Version {
         self.0.semver()
+    }
+    fn migration_revision(&self) -> usize {
+        self.0.migration_revision()
     }
     fn compat(&self) -> &'static exver::VersionRange {
         self.0.compat()
@@ -836,7 +878,7 @@ mod tests {
         assert!(matches!(resolved, Version::V0_4_1(_)));
         let target = resolved.as_version_t().unwrap();
         assert_eq!(target.previous().semver(), previous.semver());
-        let mut db = json!({ "public": { "serverInfo": {
+        let mut db = json!({ "private": { "sessionPubkeys": {} }, "public": { "serverInfo": {
             "version": "0.4.0.5",
             "packageVersionCompat": ">=0.3.0 <0.5.0",
             "postInitMigrationTodos": {},

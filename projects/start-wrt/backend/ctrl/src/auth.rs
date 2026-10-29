@@ -916,7 +916,7 @@ mod tests {
             .parse::<AnyVerifyingKey>()
             .unwrap()
             .to_string();
-        let params = imbl_value::from_value(json!({ "ids": [pem, key_id("der64")] })).unwrap();
+        let params = imbl_value::from_value(json!({ "pubkeys": [pem, key_id("der64")] })).unwrap();
         startos::auth::kill(ctx.clone(), params).await.unwrap();
         assert!(enrolled(&ctx).await.is_empty());
     }

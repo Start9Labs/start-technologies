@@ -1,0 +1,1 @@
+- Bearer-Token unterstützen API-Clients, die keine Anfragen signieren können. `start-cli auth token create --name <name>` gibt ein Token einmalig aus; Anfragen mit `Authorization: Bearer <token>` authentifizieren sich als Sitzung dieses Namens, die in der Sitzungsliste angezeigt und widerrufen werden kann. Wie andere Sitzungen werden Token nach 30 Tagen Inaktivität widerrufen.
