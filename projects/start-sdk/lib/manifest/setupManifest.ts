@@ -1,3 +1,4 @@
+import { Version as StartOsVersion } from '@start9labs/start-core/exver'
 import * as T from '@start9labs/start-core/types'
 import { ImageConfig, ImageId, VolumeId } from '@start9labs/start-core/types'
 import {
@@ -42,6 +43,21 @@ export function setupManifest<
   return manifest
 }
 
+const sharedVolumeOsVersion = '0.4.1'
+
+function manifestOsVersion(manifest: SDKManifest): string {
+  const required = manifest.sharedVolumes ? sharedVolumeOsVersion : OSVersion
+  const requested = manifest.osVersion ?? required
+  if (
+    manifest.sharedVolumes &&
+    StartOsVersion.parse(requested).compare(StartOsVersion.parse(required)) ===
+      'less'
+  ) {
+    throw new Error(`Shared volumes require StartOS ${required} or later`)
+  }
+  return requested
+}
+
 /**
  * Build the final publishable manifest by combining the SDK manifest definition
  * with version graph metadata, OS version, SDK version, and computed fields
@@ -81,7 +97,7 @@ export function buildManifest<
     ...manifest,
     dependencies: dependencies.manifestDependencies(),
     gitHash: null,
-    osVersion: manifest.osVersion ?? OSVersion,
+    osVersion: manifestOsVersion(manifest),
     sdkVersion: sdkPackage.version,
     version: versions.current.options.version,
     releaseNotes: versions.current.options.releaseNotes,

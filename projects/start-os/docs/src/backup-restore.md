@@ -1,15 +1,17 @@
 # Restoring Backups
 
-Restore previously created backups to recover individual services or your entire server. This is for disaster recovery when a service is accidentally uninstalled or when your data drive is lost or corrupted.
+Restore previously created backups to recover individual services, volumes or your entire server. This is for disaster recovery when a service is accidentally uninstalled or when your data drive is lost or corrupted.
 
-## Restoring Individual Services
+## Restoring Individual Services or Volumes
 
-This option should only be necessary if you accidentally uninstall a service.
+Services must be uninstalled before they can be restored. A volume is restored as a new local copy.
 
 1.  Go to `System -> Restore from Backup`
 1.  Select your backup drive.
 1.  Decrypt the backup drive by entering the password that was used to create it.
-1.  Select the service(s) you want to restore and click "Restore Selected".
+1.  Select the services and volumes you want to restore and click "Restore selected".
+
+Each restored volume receives a new identity and starts with no service grants, even if its backup came from CIFS. Existing local and remote data is untouched. Grant the new local copy from [Volumes](volumes.md) and update consumers' saved selections.
 
 > [!TIP]
 > If the backup came from a different system architecture (x86, ARM, or RISC-V), StartOS runs its service images under emulation. After the restore, _reinstall_ or update each service from the marketplace so StartOS can select its package for the new server architecture. Do not uninstall it, since uninstalling deletes its data.

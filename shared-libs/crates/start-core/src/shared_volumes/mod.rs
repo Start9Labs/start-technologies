@@ -198,18 +198,22 @@ pub async fn create(
             source::create_local_directory(&local_path(crate::DATA_DIR, &id)).await?;
             (SharedVolumeSource::Local, None)
         }
-        CreateSharedVolumeSource::Cifs(Cifs {
-            hostname,
-            path,
-            username,
-            password,
-        }) => (
-            SharedVolumeSource::Cifs {
+        CreateSharedVolumeSource::Cifs(cifs) => {
+            cifs.validate()?;
+            let Cifs {
                 hostname,
-                path: Path::new("/").join(path),
-            },
-            Some(SharedVolumeCredentials { username, password }),
-        ),
+                path,
+                username,
+                password,
+            } = cifs;
+            (
+                SharedVolumeSource::Cifs {
+                    hostname,
+                    path: Path::new("/").join(path),
+                },
+                Some(SharedVolumeCredentials { username, password }),
+            )
+        }
     };
     ctx.db
         .mutate(|db| {
@@ -224,7 +228,7 @@ pub async fn create(
                     name,
                     source,
                     grants: BTreeMap::new(),
-                    availability: SharedVolumeAvailability::Unknown,
+                    availability: SharedVolumeAvailability::default(),
                 },
             )?;
             Ok(())
@@ -397,13 +401,30 @@ pub async fn inspect(
     use crate::disk::mount::guard::GenericMountGuard;
     match source::open_source(&ctx, &id, ReadOnly).await {
         Ok(guard) => {
-            let available = crate::disk::util::get_available(guard.path()).await.ok();
+            let available = tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                crate::disk::util::get_available(guard.path()),
+            )
+            .await
+            .with_kind(ErrorKind::Timeout)
+            .and_then(|result| result);
             guard.unmount().await?;
-            Ok(SharedVolumeInspection {
-                availability: SharedVolumeAvailability::Available,
-                available,
-                error: None,
-            })
+            match available {
+                Ok(available) => Ok(SharedVolumeInspection {
+                    availability: SharedVolumeAvailability::Available,
+                    available: Some(available),
+                    error: None,
+                }),
+                Err(_) => {
+                    source::record_availability(&ctx, &id, SharedVolumeAvailability::Unavailable)
+                        .await?;
+                    Ok(SharedVolumeInspection {
+                        availability: SharedVolumeAvailability::Unavailable,
+                        available: None,
+                        error: Some(t!("shared-volumes.source-unavailable").to_string()),
+                    })
+                }
+            }
         }
         Err(error) => Ok(SharedVolumeInspection {
             availability: SharedVolumeAvailability::Unavailable,

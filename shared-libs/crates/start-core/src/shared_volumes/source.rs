@@ -60,6 +60,15 @@ pub async fn open_source(
     } else {
         SharedVolumeAvailability::Unavailable
     };
+    record_availability(ctx, id, availability).await?;
+    result.map_err(|error| Error::new(eyre!(t!("shared-volumes.source-unavailable")), error.kind))
+}
+
+pub(crate) async fn record_availability(
+    ctx: &RpcContext,
+    id: &SharedVolumeId,
+    availability: SharedVolumeAvailability,
+) -> Result<(), Error> {
     ctx.db
         .mutate(|db| {
             if let Some(volume) = db.as_public_mut().as_shared_volumes_mut().as_idx_mut(id) {
@@ -68,8 +77,7 @@ pub async fn open_source(
             Ok(())
         })
         .await
-        .result?;
-    result.map_err(|error| Error::new(eyre!(t!("shared-volumes.source-unavailable")), error.kind))
+        .result
 }
 
 async fn open_local(path: &Path, mount_type: MountType) -> Result<TmpMountGuard, Error> {

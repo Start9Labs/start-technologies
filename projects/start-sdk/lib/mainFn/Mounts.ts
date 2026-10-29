@@ -1,9 +1,6 @@
 import * as T from '@start9labs/start-core/types'
-import {
-  IdMap,
-  MountOptions,
-  SharedVolumeMountOptions,
-} from '../util/SubContainer'
+import { posix } from 'path'
+import { MountOptions, SharedVolumeMountOptions } from '../util/SubContainer'
 
 type MountArray = { mountpoint: string; options: MountOptions }[]
 
@@ -160,18 +157,19 @@ export class Mounts<Manifest extends T.SDKManifest> {
    * @returns An array of `{ mountpoint, options }` objects
    */
   build(): MountArray {
-    const mountpoints = new Set()
-    for (let mountpoint of this.volumes
+    const mountpoints = new Set<string>()
+    for (const mountpoint of this.volumes
       .map(v => v.mountpoint)
       .concat(this.assets.map(a => a.mountpoint))
       .concat(this.dependencies.map(d => d.mountpoint))
       .concat(this.sharedVolumes.map(v => v.mountpoint))) {
-      if (mountpoints.has(mountpoint)) {
+      const key = posix.resolve('/', mountpoint)
+      if (mountpoints.has(key)) {
         throw new Error(
           `cannot mount more than once to mountpoint ${mountpoint}`,
         )
       }
-      mountpoints.add(mountpoint)
+      mountpoints.add(key)
     }
     return ([] as MountArray)
       .concat(

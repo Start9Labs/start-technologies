@@ -199,6 +199,20 @@ impl RpcContext {
         } else {
             TypedPatchDb::<Database>::load(config.db().await?).await?
         };
+        db.mutate(|db| {
+            for (_, volume) in db
+                .as_public_mut()
+                .as_shared_volumes_mut()
+                .as_entries_mut()?
+            {
+                volume
+                    .as_availability_mut()
+                    .ser(&crate::shared_volumes::SharedVolumeAvailability::default())?;
+            }
+            Ok(())
+        })
+        .await
+        .result?;
         let peek = db.peek().await;
         let account = AccountInfo::load(&peek)?;
         load_db.complete();

@@ -1196,6 +1196,13 @@ disk.mount.filesystem.cifs.hostname-unresolved:
   fr_FR: "Impossible de résoudre le nom d'hôte %{hostname} via %{resolver} : %{error}"
   pl_PL: "Nie udało się rozwiązać nazwy hosta %{hostname} przy użyciu %{resolver}: %{error}"
 
+disk.mount.filesystem.cifs.invalid-source:
+  en_US: "Enter a valid CIFS host, share path and credentials"
+  de_DE: "Einen gültigen CIFS-Host, Freigabepfad und Zugangsdaten eingeben"
+  es_ES: "Introduce un host CIFS, una ruta compartida y credenciales válidos"
+  fr_FR: "Saisissez un hôte CIFS, un chemin de partage et des identifiants valides"
+  pl_PL: "Podaj prawidłowy host CIFS, ścieżkę udziału i dane uwierzytelniające"
+
 disk.mount.filesystem.cifs.no-dns-addresses:
   en_US: "DNS returned no addresses"
   de_DE: "DNS hat keine Adressen zurückgegeben"
@@ -5960,6 +5967,13 @@ about.commands-tunnel-web:
   es_ES: "Comandos para gestionar la interfaz web del túnel"
   fr_FR: "Commandes pour gérer l'interface web du tunnel"
   pl_PL: "Polecenia do zarządzania interfejsem webowym tunelu"
+
+about.commands-volume-backups:
+  en_US: "Commands related to volume backups"
+  de_DE: "Befehle für Volume-Sicherungen"
+  es_ES: "Comandos relacionados con las copias de seguridad de volúmenes"
+  fr_FR: "Commandes relatives aux sauvegardes de volumes"
+  pl_PL: "Polecenia dotyczące kopii zapasowych woluminów"
 
 about.commands-wifi:
   en_US: "Commands related to wifi networks i.e. add, connect, delete"
