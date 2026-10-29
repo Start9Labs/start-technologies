@@ -42,6 +42,7 @@ mod ecc;
 pub mod error;
 mod handle;
 mod inode;
+mod metadata;
 mod migration;
 #[cfg(test)]
 #[path = "tests.rs"]

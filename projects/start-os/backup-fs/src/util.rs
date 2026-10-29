@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 use sha2::digest::Output;
 use sha2::Digest;
 
+pub(crate) fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 pub struct RandReader<R: Rng>(R);
 impl<R: Rng> RandReader<R> {
     pub fn new(rng: R) -> Self {

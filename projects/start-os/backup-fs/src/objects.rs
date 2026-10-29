@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::{BkfsError, BkfsResult};
+use crate::util::hex;
 
 const HASH_BYTES: usize = 16;
 const SHARD_BYTES: usize = 2;
@@ -99,10 +100,6 @@ impl ObjectId {
         }
         Some(Self { directory, hash })
     }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 pub(crate) fn sync_object_path(path: &Path) -> BkfsResult<()> {

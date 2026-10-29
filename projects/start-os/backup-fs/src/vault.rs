@@ -19,6 +19,38 @@ use zeroize::Zeroizing;
 
 use crate::ecc;
 use crate::error::{BkfsError, BkfsErrorKind, BkfsResult};
+use crate::objects::ObjectId;
+
+/// Variant order is part of the on-disk key derivation.
+#[derive(Clone, Copy, serde::Serialize)]
+pub(crate) enum Binding {
+    Superblock,
+    Record,
+    Object { id: ObjectId, version: [u8; 16] },
+    State,
+    Transaction,
+    Catalog,
+}
+
+pub(crate) struct Sealed {
+    pub bytes: Vec<u8>,
+    pub tag: [u8; 32],
+}
+
+pub(crate) struct Authenticated {
+    pub plaintext: Vec<u8>,
+    pub tag: [u8; 32],
+}
+
+impl Authenticated {
+    /// Requires a tag from an authenticated parent reference.
+    pub fn verify_reference(self, expected: &[u8; 32]) -> BkfsResult<Vec<u8>> {
+        if &self.tag != expected {
+            return Err(corrupt());
+        }
+        Ok(self.plaintext)
+    }
+}
 
 const MAGIC: [u8; 4] = *b"BKV1";
 const VERSION: u8 = 2;
@@ -122,7 +154,31 @@ fn corrupt() -> BkfsError {
 /// validated (it can only be constructed through validated paths), so the
 /// internal `ecc::encode` cannot fail on out-of-range params.
 pub fn seal(plaintext: &[u8], key: &Key, ecc: EccParams) -> Vec<u8> {
-    seal_with(plaintext, key, ecc.data as usize, ecc.parity as usize)
+    seal_with(plaintext, key, ecc.data as usize, ecc.parity as usize).bytes
+}
+
+fn binding_key(key: &Key, binding: Binding) -> Zeroizing<[u8; 32]> {
+    let context = crate::serde::encode(&binding, crate::serde::data_config())
+        .expect("fixed-size vault binding");
+    subkey(
+        key,
+        &[b"backup-fs/v4/binding/".as_slice(), &context].concat(),
+    )
+}
+
+pub(crate) fn seal_bound(plaintext: &[u8], key: &Key, ecc: EccParams, binding: Binding) -> Sealed {
+    let key = binding_key(key, binding);
+    seal_with(
+        plaintext,
+        <&Key>::from(&*key),
+        ecc.data as usize,
+        ecc.parity as usize,
+    )
+}
+
+pub(crate) fn open_bound(blob: &[u8], key: &Key, binding: Binding) -> BkfsResult<Authenticated> {
+    let key = binding_key(key, binding);
+    open_version(blob, <&Key>::from(&*key), VERSION)
 }
 
 fn subkey(key: &Key, label: &[u8]) -> Zeroizing<[u8; 32]> {
@@ -131,7 +187,7 @@ fn subkey(key: &Key, label: &[u8]) -> Zeroizing<[u8; 32]> {
     Zeroizing::new(mac.finalize().into_bytes().into())
 }
 
-fn seal_with(plaintext: &[u8], key: &Key, data: usize, parity: usize) -> Vec<u8> {
+fn seal_with(plaintext: &[u8], key: &Key, data: usize, parity: usize) -> Sealed {
     let enc = subkey(key, ENCRYPTION_LABEL);
     let auth = subkey(key, AUTHENTICATION_LABEL);
     let mut nonce = [0u8; NONCE_LEN];
@@ -153,13 +209,14 @@ fn seal_with(plaintext: &[u8], key: &Key, data: usize, parity: usize) -> Vec<u8>
     let mut mac = <Hmac<Sha256> as pbkdf2::hmac::KeyInit>::new_from_slice(&*auth).unwrap();
     mac.update(&out);
     mac.update(&payload);
-    payload.extend_from_slice(&mac.finalize().into_bytes());
+    let tag: [u8; 32] = mac.finalize().into_bytes().into();
+    payload.extend_from_slice(&tag);
     let shards = ecc::encode(&payload, data, parity).expect("validated ecc params");
     for shard in &shards {
         out.extend_from_slice(&crc32fast::hash(shard).to_le_bytes());
         out.extend_from_slice(shard);
     }
-    out
+    Sealed { bytes: out, tag }
 }
 
 fn read_u32(b: &[u8]) -> u32 {
@@ -170,19 +227,19 @@ fn read_u32(b: &[u8]) -> u32 {
 /// [`seal`]. Returns `BadChecksum` if the key is wrong or the data is
 /// corrupt beyond what ECC can repair.
 pub fn open(blob: &[u8], key: &Key) -> BkfsResult<Vec<u8>> {
-    open_version(blob, key, VERSION)
+    open_version(blob, key, VERSION).map(|opened| opened.plaintext)
 }
 
 /// Restricted to the superblock bootstrap and the pending migration.
 pub(crate) fn open_legacy(blob: &[u8], key: &Key) -> BkfsResult<Vec<u8>> {
-    open_version(blob, key, 1)
+    open_version(blob, key, 1).map(|opened| opened.plaintext)
 }
 
 pub(crate) fn is_legacy(blob: &[u8]) -> bool {
     blob.len() >= HEADER_LEN && blob[..4] == MAGIC && blob[4] == 1
 }
 
-fn open_version(blob: &[u8], key: &Key, version: u8) -> BkfsResult<Vec<u8>> {
+fn open_version(blob: &[u8], key: &Key, version: u8) -> BkfsResult<Authenticated> {
     if blob.len() < HEADER_LEN || blob[..4] != MAGIC || blob[4] != version {
         return Err(corrupt());
     }
@@ -229,8 +286,12 @@ fn open_version(blob: &[u8], key: &Key, version: u8) -> BkfsResult<Vec<u8>> {
         let enc = subkey(key, ENCRYPTION_LABEL);
         ChaCha20::new(<&Key>::from(&*enc), &nonce).apply_keystream(&mut payload[..tag_start]);
     }
+    let tag = payload[tag_start..].try_into().unwrap();
     payload.truncate(tag_start);
-    Ok(payload)
+    Ok(Authenticated {
+        plaintext: payload,
+        tag,
+    })
 }
 
 /// Derive a 32-byte key from `password` and `salt` via PBKDF2-HMAC-SHA256 with
@@ -294,6 +355,48 @@ mod tests {
     }
 
     #[test]
+    fn binding_rejects_other_objects_versions_and_metadata_roles() {
+        let key = test_key();
+        let id = ObjectId::block(&key, 12, 0);
+        let binding = Binding::Object {
+            id,
+            version: [1; 16],
+        };
+        let sealed = seal_bound(b"immutable contents", &key, EccParams::default(), binding);
+        let opened = open_bound(&sealed.bytes, &key, binding).unwrap();
+        assert_eq!(opened.plaintext, b"immutable contents");
+        assert_eq!(opened.tag, sealed.tag);
+        for wrong in [
+            Binding::Object {
+                id,
+                version: [2; 16],
+            },
+            Binding::Object {
+                id: ObjectId::block(&key, 12, 1),
+                version: [1; 16],
+            },
+            Binding::Superblock,
+            Binding::Record,
+            Binding::State,
+            Binding::Transaction,
+            Binding::Catalog,
+        ] {
+            assert!(open_bound(&sealed.bytes, &key, wrong).is_err());
+        }
+        assert!(open(&sealed.bytes, &key).is_err());
+    }
+
+    #[test]
+    fn authenticated_reference_tag_survives_ecc_repair() {
+        let key = test_key();
+        let mut sealed = seal_bound(b"recoverable", &key, EccParams::default(), Binding::Record);
+        sealed.bytes[HEADER_LEN + 4] ^= 1;
+        let opened = open_bound(&sealed.bytes, &key, Binding::Record).unwrap();
+        assert_eq!(opened.plaintext, b"recoverable");
+        assert_eq!(opened.tag, sealed.tag);
+    }
+
+    #[test]
     fn roundtrip() {
         let key = test_key();
         for len in [0usize, 1, 31, 32, 33, 4096, 100_000] {
@@ -319,7 +422,7 @@ mod tests {
         // open() reads the params back out of the header (self-describing).
         let key = test_key();
         let pt: Vec<u8> = (0..50_000u32).map(|i| (i % 257) as u8).collect();
-        let mut blob = seal_with(&pt, &key, 8, 3);
+        let mut blob = seal_with(&pt, &key, 8, 3).bytes;
 
         // Each shard is ceil((50000+32)/8) ≈ 6.25 KB; the per-shard stride
         // is that plus a 4-byte CRC. Flipping a contiguous ~12 KB run from
