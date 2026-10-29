@@ -134,22 +134,20 @@ impl State {
         ecc: EccParams,
         mut previous: Option<Reference>,
         changes: impl Iterator<Item = Change>,
-    ) -> BkfsResult<Option<Reference>> {
+    ) -> BkfsResult<(Option<Reference>, Vec<Reference>)> {
+        let mut references = Vec::new();
         let mut changes = changes.peekable();
         while changes.peek().is_some() {
             let transaction = Transaction {
                 previous,
                 changes: changes.by_ref().take(ENTRIES_PER_TRANSACTION).collect(),
             };
-            previous = Some(Reference::write(
-                &self.path,
-                key,
-                ecc,
-                Binding::Transaction,
-                &transaction,
-            )?);
+            let reference =
+                Reference::write(&self.path, key, ecc, Binding::Transaction, &transaction)?;
+            references.push(reference);
+            previous = Some(reference);
         }
-        Ok(previous)
+        Ok((previous, references))
     }
 
     fn publish(&mut self, key: &Key, ecc: EccParams, anchor: Anchor) -> BkfsResult<()> {
@@ -183,7 +181,7 @@ impl State {
         catalog: Option<Reference>,
     ) -> BkfsResult<()> {
         self.check_rw()?;
-        let tip = self.write_transactions(
+        let (tip, _) = self.write_transactions(
             key,
             ecc,
             self.anchor.tip,
@@ -212,7 +210,7 @@ impl State {
         catalog: Option<Reference>,
     ) -> BkfsResult<()> {
         self.check_rw()?;
-        let tip = self.write_transactions(
+        let (tip, references) = self.write_transactions(
             key,
             ecc,
             None,
@@ -229,19 +227,16 @@ impl State {
                 catalog,
             },
         )?;
-        self.collect_metadata(key)
+        self.collect_metadata(references)
     }
 
-    fn collect_metadata(&self, key: &Key) -> BkfsResult<()> {
-        let mut keep = HashSet::new();
+    fn collect_metadata(&self, references: Vec<Reference>) -> BkfsResult<()> {
+        let mut keep: HashSet<_> = references
+            .into_iter()
+            .map(|reference| reference.path(&self.path))
+            .collect();
         if let Some(reference) = self.anchor.catalog {
             keep.insert(reference.path(&self.path));
-        }
-        let mut tip = self.anchor.tip;
-        while let Some(reference) = tip {
-            keep.insert(reference.path(&self.path));
-            let transaction: Transaction = reference.load(&self.path, key, Binding::Transaction)?;
-            tip = transaction.previous;
         }
         let pool = Reference::directory(&self.path);
         let entries = match std::fs::read_dir(&pool) {
@@ -491,6 +486,55 @@ mod tests {
                 .unwrap(),
             "catalog"
         );
+    }
+
+    #[test]
+    fn checkpoint_does_not_read_its_new_transactions_back() {
+        use std::io::Read;
+        use std::os::fd::FromRawFd;
+        use std::os::unix::ffi::OsStrExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let key = Key::from([0x8a; 32]);
+        let mut state = initial(dir.path(), &key);
+        let pool = Reference::directory(dir.path());
+        std::fs::create_dir(&pool).unwrap();
+        let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
+        assert!(fd >= 0);
+        let mut events = unsafe { File::from_raw_fd(fd) };
+        let pool = std::ffi::CString::new(pool.as_os_str().as_bytes()).unwrap();
+        assert!(unsafe { libc::inotify_add_watch(fd, pool.as_ptr(), libc::IN_ACCESS) } >= 0);
+        let mut roots = Roots::default();
+        roots.index.insert(7, location(0));
+        state
+            .checkpoint(
+                &key,
+                EccParams::default(),
+                &roots,
+                Counters {
+                    next_seq: 1,
+                    max_inode: 7,
+                },
+                None,
+            )
+            .unwrap();
+        let mut bytes = [0u8; 8192];
+        let len = match events.read(&mut bytes) {
+            Ok(len) => len,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return,
+            Err(error) => panic!("{error}"),
+        };
+        let mut offset = 0;
+        while offset < len {
+            let event = unsafe {
+                std::ptr::read_unaligned(bytes[offset..].as_ptr().cast::<libc::inotify_event>())
+            };
+            assert!(
+                event.len == 0 || event.mask & libc::IN_ISDIR != 0,
+                "checkpoint read a metadata blob back"
+            );
+            offset += std::mem::size_of::<libc::inotify_event>() + event.len as usize;
+        }
     }
 
     #[test]
