@@ -1,0 +1,3 @@
+- Acepta cambios del entorno de subcontenedores mediante `JSON_ENV_*`, incluidos valores multilínea y eliminación de variables.
+- Conserva valores multilínea predeterminados de la imagen en `package attach`.
+- Respeta la eliminación explícita de `HOME` sin restaurar su valor predeterminado.

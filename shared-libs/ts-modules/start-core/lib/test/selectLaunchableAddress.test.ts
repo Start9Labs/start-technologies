@@ -51,6 +51,7 @@ function hostWith(
       preferredExternalPort: 80,
       addSsl: null,
       secure: null,
+      proxy: null,
     },
     net: { assignedPort: 80, assignedSslPort: 443 },
     addresses: binding,

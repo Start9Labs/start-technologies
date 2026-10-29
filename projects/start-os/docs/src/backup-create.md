@@ -92,6 +92,9 @@ A network folder backup sends your encrypted backup over the LAN to a shared fol
 
 1. Check the box next to the user who owns the folder, then click "Done".
 
+> [!WARNING]
+> If the user you want to share the folder with is tied to an Apple ID, StartOS cannot log in as that user. Create a separate user for the share instead: open `System Settings > Users & Groups` and click "Add User". Set "New Account" to `Sharing Only`, then give it a short name such as `start9` and a simple local password. Back in the sharing window, give that user "Read & Write" access to your backups folder, and check the box next to it under "Options".
+
 > [!TIP]
 > You can find the hostname at the top of the sharing window. The hostname will be an address beginning with `smb://`. To use as hostname, disregard the `smb://` and simply enter the IP address that follows it. Alternatively, you can use the computer hostname (open Terminal and type `hostname`). Either method will work.
 
@@ -375,8 +378,11 @@ The **Hostname** field accepts an IP address, a DNS name containing a dot (such 
 
 1. **Hostname**: The hostname or IP address of your Mac (see the tip in the section above).
 1. **Path**: The _name_ of your shared folder, _not_ the full directory path.
-1. **Username**: Your Mac user who owns the shared folder.
+1. **Username**: The Mac user you gave access to the shared folder.
 1. **Password**: Your password for the above user.
+
+> [!WARNING]
+> If you receive `Filesystem I/O Error mount error(13): Permission denied` and the username belongs to an account tied to an Apple ID, go back to [Step 1](#step-1-create-a-shared-folder) and create a `Sharing Only` user for the share.
 
 {{#endtab}}
 
@@ -449,7 +455,7 @@ The **Hostname** field accepts an IP address, a DNS name containing a dot (such 
 {{#endtabs}}
 
 > [!WARNING]
-> If you receive `Filesystem I/O Error mount error(13): Permission denied`, ensure you have entered the correct values. The hostname can be particularly tricky.
+> If you receive `Filesystem I/O Error mount error(13): Permission denied`, ensure you have entered the correct values in the Username and Password fields.
 
 ### Step 3. Back Up
 

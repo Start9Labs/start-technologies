@@ -410,6 +410,12 @@ esac
             .unwrap(),
     )
     .unwrap();
+    assert_eq!(
+        serde_json::to_value(&metadata.env).unwrap(),
+        serde_json::json!({
+            "ARCH": "arm64", "EMPTY": "", "MULTILINE": "first\nsecond=value\n",
+        })
+    );
     assert_eq!(metadata.cmd.unwrap(), ["serve", "--arm64"]);
     assert_eq!(metadata.entrypoint.unwrap(), ["/app/start"]);
     assert_eq!(metadata.workdir, Path::new("/arm64"));
@@ -423,7 +429,7 @@ esac
             .to_vec(None)
             .await
             .unwrap(),
-        b"ARCH=arm64\nEMPTY="
+        b"ARCH=arm64\nEMPTY=\nMULTILINE=first\nsecond=value\n"
     );
     let source = files
         .get_path("images/aarch64/main.squashfs")

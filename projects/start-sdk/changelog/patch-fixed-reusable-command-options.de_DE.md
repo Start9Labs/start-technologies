@@ -1,0 +1,1 @@
+- Wiederverwendete Optionen für `spawn` oder `launch` von Untercontainern bleiben im Besitz des Aufrufers unverändert.
