@@ -65,6 +65,7 @@ boundary('@taiga-ui/kit', [
   'TuiButtonSelect',
   'TuiDataListWrapper',
   'TuiBlock',
+  'TuiAvatar',
   'TuiRadioList',
   'TuiPassword',
   'TuiSegmented',

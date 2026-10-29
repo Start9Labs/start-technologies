@@ -7,11 +7,10 @@ import {
   TuiButton,
   TuiCheckbox,
   TuiGroup,
-  TuiIcon,
   TuiLoader,
   TuiTitle,
 } from '@taiga-ui/core'
-import { TuiBlock } from '@taiga-ui/kit'
+import { TuiAvatar, TuiBlock } from '@taiga-ui/kit'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { PatchDB } from 'patch-db-client'
 import { filter, map, switchMap, take } from 'rxjs'
@@ -37,11 +36,15 @@ type BackupItem = {
       @if (items(); as items) {
         @for (item of items; track item.kind + ':' + item.id) {
           <label tuiBlock="m">
-            @if (item.kind === 'package') {
-              <img [pkgIcon]="item.id" />
-            } @else {
-              <tui-icon icon="@tui.folder" />
-            }
+            <span
+              size="m"
+              aria-hidden="true"
+              [tuiAvatar]="item.kind === 'volume' ? '@tui.folder' : ''"
+            >
+              @if (item.kind === 'package') {
+                <img [pkgIcon]="item.id" />
+              }
+            </span>
             <span tuiTitle>
               <b>{{ item.title }}</b>
               @if (item.kind === 'volume') {
@@ -86,17 +89,12 @@ type BackupItem = {
     [tuiBlock] {
       align-items: center;
     }
-
-    img {
-      width: 2.5rem;
-      border-radius: 100%;
-    }
   `,
   imports: [
     FormsModule,
     TuiButton,
     TuiGroup,
-    TuiIcon,
+    TuiAvatar,
     TuiLoader,
     TuiBlock,
     TuiCheckbox,
