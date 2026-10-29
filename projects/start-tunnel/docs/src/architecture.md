@@ -32,7 +32,7 @@ StartTunnel occupies a unique position between Cloudflare Tunnel and Tailscale. 
 
 This is the most important difference. It comes down to: **who can see your traffic?**
 
-**StartTunnel**: Nobody but you. Published ports operate at Layer 3/4 (iptables DNAT), meaning the VPS rewrites IP headers and forwards packets without inspecting payloads. If a service uses HTTPS, TLS terminates at the service itself — the VPS never sees plaintext. For VPN traffic between devices, WireGuard provides end-to-end encryption. Since you own the VPS, there is no third party with access to your traffic or metadata.
+**StartTunnel**: Nobody but you. Published ports operate at Layer 3/4 (iptables DNAT), meaning the VPS rewrites IP headers and forwards packets without inspecting payloads. If a service uses HTTPS, TLS terminates at the service itself — the VPS never sees plaintext. For VPN traffic between devices, each device's WireGuard tunnel ends at the VPS, which passes the traffic from one tunnel into the other; whatever an app encrypts itself, such as HTTPS, stays encrypted end to end. Since you own the VPS, there is no third party with access to your traffic or metadata.
 
 **Cloudflare Tunnel**: Cloudflare terminates TLS at their edge and re-encrypts to your origin. This means Cloudflare can — and does — see plaintext traffic. They offer "TLS inspection" as a feature and can scan request bodies, filter content, and inject responses. Using Cloudflare Tunnel requires trusting a publicly traded company not to misuse its position as a man-in-the-middle on all your traffic.
 
