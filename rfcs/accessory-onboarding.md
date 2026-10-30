@@ -1,11 +1,13 @@
 # Start9 Accessory Onboarding
 
-Status: draft for review. Owner: unassigned. Target: StartOS 0.4.1 (SDK 3.1.0).
+Status: draft for review. Owner: unassigned. Target: a StartOS minor release
+after 0.4.1, unscheduled.
 
-StartOS adopts Start9's own IoT products: it brings one onto the LAN, pairs
-with it, and grants it to the services the user chooses. The Start9 Camera (a
-Seeed reCamera on Start9 firmware) is the first; the design carries future
-Start9 products without new OS or package code per product.
+StartOS adopts Start9's own IoT products: with the Start9 app carrying the
+onboarding over Bluetooth, it brings one onto the LAN, pairs with it, and grants
+it to the services the user chooses. The Start9 Camera (a Seeed reCamera on
+Start9 firmware) is the first; the design carries future Start9 products without
+new OS or package code per product.
 
 This document calls such a product an **accessory**. In start-core, "device"
 already names the server's own hardware (`server_info.devices`, `server
@@ -46,8 +48,8 @@ migrating from it. Its problems:
 - **No authentication in either direction.** Any LAN host can claim an unpaired
   camera during its boot window, and the camera cannot tell which server it
   paired with. Wi-Fi credentials cross BLE in plaintext.
-- **Discovery depends on a per-service LAN grant.** mDNS does not cross
-  `lxcbr0` (see `rfcs/lan-discovery-relay.md` on `os/lan-discovery-rfc`).
+- **Discovery does not reach the consumer.** mDNS does not cross `lxcbr0`, so a
+  package cannot see the camera's advertisement.
 
 ### What StartOS has today
 
@@ -68,32 +70,21 @@ migrating from it. Its problems:
   never sent to the UI. `Database.public` has three members, `server_info`,
   `package_data` and `ui`, and is pushed live to every UI session
   (`db/mod.rs`, `subscribe`). Per-package host policy lives on the package's
-  entry: `PackageDataEntry.outbound_gateway`, and `lan_discovery` on
-  `os/lan-discovery-relay`, a set the user edits and an empty set revokes.
-- **Wi-Fi for the server only.** `net/wifi.rs` adds the server's own networks
-  through `nmcli`; the keyfiles live on the data drive, bind-mounted over
-  `/etc/NetworkManager/system-connections` (`net/wifi.rs:1079`).
-  `public.server_info.network.wifi` holds SSIDs only. The PSK is written and
-  never read back. Nothing stores Wi-Fi credentials for other hosts.
+  entry: `PackageDataEntry.outbound_gateway`, a value the user edits.
 - **At rest.** The data drive is LUKS with the fixed key `DEFAULT_PASSWORD`
-  (`disk/main.rs:21`), so `private` and the NetworkManager keyfiles are
-  effectively plaintext to anyone holding the disk.
+  (`disk/main.rs:21`), so `private` is effectively plaintext to anyone holding
+  the disk.
 - **mDNS.** The host runs avahi, which publishes the server's `.local` name.
   startd's only contact with it is shelling out to `avahi-resolve-host-name`
   (`net/mdns.rs`). zbus is a dependency, used for NetworkManager proxies in
-  `net/gateway.rs`; there is no avahi proxy. The LAN discovery relay on
-  `os/lan-discovery-relay` carries containers' discovery packets through raw
-  sockets and neither browses nor resolves.
+  `net/gateway.rs`; there is no avahi proxy.
 - **Effects.** A package reads host state through an effect whose handler
   watches a patch-db pointer and registers the package's callback in
   `DbWatchedCallbacks` (`service/callbacks.rs`); the SDK wraps it in a
-  `Watchable` with `once()`, `watch()` and `const()`. `get-lan-discovery` on
-  the relay branch is the newest instance.
-- **UI.** A top-level Angular PWA. `add_security_headers`
-  (`net/static_server.rs:259`) sets a CSP whose stated purpose is protecting
-  the enrolled browser signing key, with `frame-ancestors 'none'`, and no
-  `Permissions-Policy`. Nothing in the UI uses `navigator.bluetooth` or
-  `getUserMedia`.
+  `Watchable` with `once()`, `watch()` and `const()`.
+- **RPC clients.** A client enrolls an Ed25519 key with `auth.login` (the
+  StartOS password, once) and signs each request with it, as `start-cli` does.
+  An enrolled key has full admin rights, and one idle for 30 days is unenrolled.
 - **Backup.** `OsBackup` (`backup/os.rs`) is version 2: `server_id`,
   `hostname`, `root_ca_key`, `root_ca_cert`, `ssh_key`, `compat_s9pk_key`,
   `ui`. Restore feeds `account` to `Database::init` and writes nothing else
@@ -110,13 +101,13 @@ migrating from it. Its problems:
 
 ## Goals
 
-- A user adds a Start9 accessory from the StartOS UI by scanning its QR code.
+- A user adds a Start9 accessory from the Start9 app by scanning its QR code.
   The accessory joins the LAN and pairs with the server in one flow.
-- The server needs no radio. Wi-Fi credentials reach the accessory through the
-  user's phone or laptop (Web Bluetooth), optically, or not at all (Ethernet).
+- The server needs no radio and never receives Wi-Fi credentials. They go from
+  the user's phone to the accessory, over Bluetooth LE.
 - Pairing is mutually authenticated: the accessory proves it holds the key on
   its QR code, and the server proves it is the server the QR code was scanned
-  into. Credentials are confidential end to end on every route.
+  into.
 - A paired accessory is granted to services by the user, any number at once,
   and revoked the same way. Packages read connection details for granted
   accessories through the SDK and speak the accessory's own protocols (RTSP,
@@ -132,8 +123,9 @@ migrating from it. Its problems:
 - Matter, Thread, Zigbee and Z-Wave.
 - Bluetooth on the server, and device passthrough.
 - Remote (off-LAN) access to accessories.
-- Firmware updates for accessories. The pairing defined here is what a later
-  update channel would authenticate with.
+- Firmware updates for accessories. The Start9 app manages them, without
+  StartOS.
+- Wi-Fi management. StartOS changes no paired accessory's network.
 - Encrypted media (RTSPS). See Open questions.
 
 ## Alternatives considered
@@ -176,11 +168,23 @@ Requires hardware most servers lack, device passthrough StartOS does not have,
 and range: the server is often far from the accessory, while the user's phone
 is next to it.
 
-### Improv over Web Bluetooth
+### Improv
 
-Works today from a browser, but sends the Wi-Fi password in the clear, cannot
-authenticate either side, and has no field for the server's identity. This
-design adds a Start9 GATT service beside Improv instead.
+Sends the Wi-Fi password in the clear, cannot authenticate either side, and has
+no field for the server's identity. This design uses a Start9 GATT service
+instead.
+
+### Adding accessories from the StartOS UI
+
+Carrying the bundle through the web UI needs Web Bluetooth, which Safari and iOS
+home-screen apps lack. The native app reaches both platforms. A second route,
+such as a QR code shown to the accessory's camera or delivery over the LAN to a
+wired accessory, adds firmware and UI that the Wi-Fi camera does not use.
+
+### Sealing the bundle in StartOS
+
+Spares the iOS and Android apps HPKE, but passes the Wi-Fi password and the setup
+secret through startd, which has no other use for either.
 
 ### A PAKE instead of HPKE
 
@@ -222,13 +226,14 @@ Rejected in favour of deriving them. Storing them would put every login in
 ### Overview
 
 ```
-  phone/laptop browser            StartOS                        accessory
-  (StartOS UI)                    (startd)
+  Start9 app (phone)              StartOS                        accessory
+                                  (startd)
   ───────────────────────────────────────────────────────────────────────
-  scan QR ───────────────────────► begin session
-                                  seal bundle to factory key ──┐
-  carry bundle (BLE / screen) ◄───┘                            │ (or LAN RPC)
-  write bundle ─────────────────────────────────────────────► open, join Wi-Fi
+  scan QR, send public key ──────► begin session
+  session, token, server key ◄────┘
+  ask for Wi-Fi password
+  seal bundle to factory key
+  write bundle over BLE ────────────────────────────────────► open, join Wi-Fi
                                   browse mDNS ◄────────────── advertise
                                   mutual TLS, pin both ways ─► paired
                                   registry entry
@@ -238,7 +243,8 @@ Five parts:
 
 1. **Accessory identity.** A factory key pair and a setup secret, both on the
    accessory's QR code.
-2. **Onboarding.** StartOS seals a bundle to the accessory; a route carries it.
+2. **Onboarding.** The app seals a bundle to the accessory and carries it over
+   BLE.
 3. **Pairing.** On the LAN, the two sides authenticate each other and pin each
    other's keys.
 4. **Credentials.** Logins on the accessory, derived by StartOS on demand.
@@ -265,9 +271,9 @@ DPP:V:2;K:<base64 DER SubjectPublicKeyInfo of the factory key>;I:S9/camera/recam
 `K:` is the factory public key, which is also the accessory's DPP
 bootstrapping key, so a future DPP route reads the same sticker. `I:` is the
 DPP information field, carrying the Start9 marker, the accessory class, the
-model and the setup secret. The class selects the routes the UI offers. Accessory keys are P-256
-because DPP bootstrapping keys are NIST-curve keys, and P-256 is the one every
-DPP implementation supports.
+model and the setup secret. Accessory keys are P-256 because DPP bootstrapping
+keys are NIST-curve keys, and P-256 is the one every DPP implementation
+supports.
 
 Encodings: `K:` is standard base64 with padding, as DPP has it, of the same
 SubjectPublicKeyInfo bytes the accessory presents in TLS (an uncompressed
@@ -290,8 +296,7 @@ the AGCP wire form (unpadded base64url of the digest).
 
 Its **accessory ID** is the lowercase, unpadded base32 of the first 10 octets
 of the fingerprint digest (16 characters). It is derived from the factory
-key, so StartOS computes it from the QR code before it has spoken to the
-accessory.
+key, so StartOS computes it before it has spoken to the accessory.
 
 ### Server identity
 
@@ -309,17 +314,20 @@ lose.
 
 ### Onboarding
 
-The UI scans the QR code with `getUserMedia` (or accepts a pasted URI) and
-calls:
+The app scans the QR code and calls, with its enrolled key:
 
 ```
-accessory.onboard.begin { uri, route, wifi?: { ssid, psk } }
-  → { session, bundle }
+accessory.onboard.begin { key, class, model }
+  → { session, token, server, serverId, expires, id, wireFingerprint }
 ```
 
-startd parses the URI, opens an onboarding session in memory (one-hour
-expiry, so the user can scan the sticker and then unbox, mount and power the
-accessory), and seals a **bundle** with HPKE (RFC 9180; the `hpke` crate):
+`key` is the QR code's `K:` value; the setup secret stays on the phone. startd
+opens an onboarding session in memory (one-hour expiry, so the user can scan the
+sticker and then unbox, mount and power the accessory). The app trusts `server`
+because it arrived over TLS from a server whose root the phone already trusts.
+
+The app then asks the user for the Wi-Fi network and password, which it sends
+nowhere but the accessory, and seals a **bundle** with HPKE (RFC 9180):
 
 - Mode `mode_psk`, KEM `DHKEM(P-256, HKDF-SHA256)`, KDF `HKDF-SHA256`, AEAD
   `AES-128-GCM`.
@@ -332,32 +340,28 @@ accessory), and seals a **bundle** with HPKE (RFC 9180; the `hpke` crate):
 - `session` and `token` are each 16 random bytes, base64url.
 - Plaintext, JSON:
   `{ "v": 1, "session", "token", "server": <server fingerprint>, "serverId",
-"wifi"?: { "ssid", "psk", "security" }, "expires": <Unix seconds> }`, with
+"wifi": { "ssid", "psk", "security" }, "expires": <Unix seconds> }`, with
   `security` one of `wpa2-psk`, `wpa3-sae` or `open` (`psk` empty).
 
 The bundle's text form, wherever it travels, is
 `<session>.<base64url(enc || ciphertext)>`: the accessory needs the session ID
 as AAD before it can open the bundle, so it travels in clear in front. The
 session ID is not secret, and the AEAD rejects a bundle whose prefix was
-changed; the accessory also checks it against the `session` inside. Without
-Wi-Fi the text form is about 400 characters; with Wi-Fi, about 500, and up to
-about 730 with a 32-byte SSID and a 63-character passphrase.
+changed; the accessory also checks it against the `session` inside. The text
+form is about 500 characters, and up to about 730 with a 32-byte SSID and a
+63-character passphrase.
 
 `mode_psk` is the point: a sender must hold both the accessory's public key
 and the setup secret. The public key is visible to anyone the accessory talks
 to; the setup secret is only on the QR code. So only someone who scanned the
 QR code can produce a bundle the accessory opens.
 
-### Routes
+### Carrying the bundle
 
-A route carries the bundle to the accessory. Which routes the UI offers
-depends on the accessory class and on the browser.
-
-**Web Bluetooth.** Offered when `'bluetooth' in navigator` and
-`navigator.bluetooth.getAvailability()` resolves true. The accessory
-advertises the **Start9 onboarding GATT service**
-`faa69064-50ae-4ce3-bbad-6e284048ad5b` while unpaired and without a working
-network, beside Improv where it has Improv:
+The app carries the bundle over native Bluetooth LE. The accessory advertises
+the **Start9 onboarding GATT service**
+`faa69064-50ae-4ce3-bbad-6e284048ad5b` for as long as it is unpaired, whether or
+not it already has a network, so a released accessory can be added again:
 
 | Characteristic | UUID                                   | Properties   | Value                                       |
 | -------------- | -------------------------------------- | ------------ | ------------------------------------------- |
@@ -366,7 +370,7 @@ network, beside Improv where it has Improv:
 | `status`       | `55cb7a10-cdc5-44c7-8376-061abbc0192d` | read, notify | JSON `{ state, error?, ipv4?, ipv6? }`      |
 
 A GATT attribute value is at most 512 bytes, and a bundle with Wi-Fi can be
-longer, so the UI writes it in chunks of at most 512 bytes, each at offset 0.
+longer, so the app writes it in chunks of at most 512 bytes, each at offset 0.
 The first chunk starts with the session and its dot; the later chunks contain
 no dot and continue the bundle. A write that starts with a session and a dot
 starts a new bundle. The framing needs no integrity of its own: the AEAD
@@ -375,35 +379,22 @@ rejects any bundle that was spliced or cut.
 `status.state` is one of `idle`, `received`, `joining`, `connected` and
 `error`, and `error` is `BUNDLE_REJECTED`, `ALREADY_PAIRED` or `WIFI_FAILED`.
 
-The UI filters `requestDevice` by the service UUID, checks that
-`info.fingerprint` matches the scanned key, writes `bundle`, and follows
-`status` until the accessory reports an address or an error. iOS users use a
-Web Bluetooth browser such as Bluefy; Safari and iOS home-screen apps have no
-Web Bluetooth.
-
-**Shown QR code.** For accessories with a camera. The UI renders `S9B1:`
-followed by the bundle's text form as a QR code (byte mode), and the
-accessory reads it (the reCamera's `feat/wifi-qr` pipeline). The prefix lets
-the same reader tell a bundle from a plain Wi-Fi QR code. Anyone
-photographing the screen gets ciphertext.
-
-**LAN.** For accessories already on the LAN (Ethernet, or Wi-Fi set up some
-other way). startd finds the accessory by mDNS (see Discovery), opens TLS,
-checks that the key it presents is the key on the QR code, and calls
-`onboard.deliver { bundle }`. The bundle carries no `wifi`.
+The app scans for the service UUID, checks that `info.fingerprint` matches the
+scanned key, writes `bundle`, and follows `status` until the accessory reports
+an address or an error. It then polls `accessory.onboard.status` until pairing
+finishes.
 
 **Future routes** (not in this RFC): DPP from a server Wi-Fi radio or through a
 StartWRT relay; Thread joining.
 
 ### Accessory behaviour on a bundle
 
-1. Open the bundle. Failure (wrong key, wrong setup secret, tampering) is an
-   error on `status` or a `BUNDLE_REJECTED` reply, and nothing else changes.
+1. Open the bundle. Failure (wrong key, wrong setup secret, tampering) is
+   `BUNDLE_REJECTED` on `status`, and nothing else changes.
 2. Reject it if `expires` has passed or the accessory is already paired.
 3. Store `{ session, token, server }` as a pending pairing. A later valid
    bundle replaces it.
-4. If `wifi` is present, add the network and join. Report the address on
-   `status`, or the failure.
+4. Add the network and join. Report the address on `status`, or the failure.
 5. Advertise on mDNS (see Discovery) with `state=pending`.
 
 An accessory that is not paired within the bundle's expiry discards the
@@ -423,14 +414,16 @@ SRV record is authoritative), with TXT:
 
 startd browses `_start9._tcp` through avahi, the host's mDNS responder, over
 D-Bus with the zbus proxies it already uses for NetworkManager. The host is on
-the LAN, so no LAN discovery grant is involved, and the relay's raw-socket
-path is not involved either: it carries containers' packets and has no
-browser or resolver to extend. Browsing feeds:
+the LAN, so packages need no LAN access of their own. Browsing feeds:
 
 - onboarding sessions waiting for their accessory;
 - the address and online state of each paired accessory, written to its
-  registry entry (see Persisted state) so grants and the UI react to it;
-- an optional notification when an unpaired Start9 accessory appears.
+  registry entry (see Persisted state) so grants and the UI react to it.
+
+An advertisement is unauthenticated and its `id` is public, so a sighting is
+only a candidate address. startd writes a paired accessory's `address` and
+`online` only after `accessory.info` over pinned TLS succeeds at that address. A
+candidate that fails is dropped and leaves the recorded address in place.
 
 ### Pairing
 
@@ -443,8 +436,8 @@ When startd sees its pending accessory (`state=pending`, matching `id`):
 2. startd calls `pair.adopt { session, token }`. The accessory checks both
    against its pending pairing.
 3. The accessory stores the server fingerprint durably, marks itself paired,
-   stops onboarding (BLE service, Improv, its own access point, QR scanning),
-   and disables its setup secret.
+   stops onboarding (BLE service, its own access point), and disables its
+   setup secret.
 4. startd writes the registry entry with the accessory's fingerprint and
    pushes the owner logins (see Credentials).
 
@@ -514,8 +507,7 @@ A grant gives a service access to one capability of one accessory.
 `start9.video.rtsp` and `start9.detections.http`. An accessory reports its own
 in `accessory.info`, and startd records them on the registry entry.
 
-**The grant is user state on the grantee**, following `outbound_gateway` and
-`lan_discovery`:
+**The grant is user state on the grantee**, following `outbound_gateway`:
 
 ```
 package_data.<package-id>.accessories: { <accessory-id>: [<capability>, ...] }
@@ -523,15 +515,14 @@ package_data.<package-id>.accessories: { <accessory-id>: [<capability>, ...] }
 
 An empty list, or a missing accessory, is revocation. The field defaults to
 empty, so existing data needs no migration. There is no manifest field: any
-package can be granted any capability, exactly as any package can be granted
-LAN discovery, and a package ignores a capability it does not use. The RPC is
+package can be granted any capability, and a package ignores a capability it
+does not use. The RPC is
 `package.set-accessories { id, accessories }`, replacing the whole map; the UI
 reads it from patch-db.
 
 **Granting** is a user action, never a package action, and a package cannot
-request one. That follows the decision for the LAN discovery grant. The
-accessory page's **Used by** list and the service page's **Accessories**
-section both edit the same map.
+request one. The app, the accessory page's **Used by** list and the service page's **Accessories** section
+all edit the same map.
 
 **Effect.** `get-accessories { capability?, callback? }` returns, for the
 calling package, only accessories granted to it:
@@ -560,8 +551,7 @@ const cameras = await sdk.accessories.getAll(effects, { capability: 'start9.vide
 ```
 
 **Packages** turn that into their application's configuration. Frigate's
-package writes its `cameras:` section through a file model. Home Assistant's
-integration creates entities from the list instead of discovering and pairing.
+package writes its `cameras:` section through a file model.
 
 **Actions** remain the place for application-specific configuration of a
 granted accessory: Frigate's zones and retention per camera. They take a `dynamicSelect` over `sdk.accessories.getAll`, as
@@ -631,14 +621,6 @@ The field defaults to empty, so an existing server needs no migration.
 
 Not persisted:
 
-- **Wi-Fi credentials.** They are needed only during onboarding. The user
-  enters them, or picks the server's own network when the server is on Wi-Fi,
-  in which case startd reads the PSK back with
-  `nmcli --show-secrets -g 802-11-wireless-security.psk connection show
-<ssid>`, the one read of a stored PSK in start-core. Changing the Wi-Fi
-  password is an explicit **Update Wi-Fi on accessories** flow that pushes
-  the new credentials to every online paired accessory, best effort, and
-  reports which ones it could not reach. Nothing is remembered between flows.
 - **Logins.** Derived on demand.
 - **Onboarding sessions.** In memory.
 
@@ -660,23 +642,20 @@ every request carries an `id`, parameters are named, member names are
 lowerCamelCase and enumerated values lowercase with hyphens, and errors carry
 `data.kind`. The accessory's key is P-256; StartOS accepts P-256 and Ed25519.
 
-| Method               | Callable by                            | Purpose                                                                                                                            |
-| -------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `accessory.info`     | anyone                                 | `{ v, id, class, model, name, swVersion, state, fingerprint, capabilities, credentialKinds }`, below                               |
-| `onboard.deliver`    | anyone, while unpaired                 | `{ bundle }`; the LAN route                                                                                                        |
-| `pair.adopt`         | the server named in the pending bundle | `{ session, token }`                                                                                                               |
-| `credential.set`     | the pinned server                      | `{ kind, username, password }`                                                                                                     |
-| `wifi.set`           | the pinned server                      | `{ ssid, psk, security }`                                                                                                          |
-| `pair.release`       | the pinned server                      | no parameters                                                                                                                      |
-| capability endpoints | per capability                         | e.g. the camera's `/start9-camera/state`                                                                                           |
+| Method               | Callable by                            | Purpose                                                                                              |
+| -------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `accessory.info`     | anyone                                 | `{ v, id, class, model, name, swVersion, state, fingerprint, capabilities, credentialKinds }`, below |
+| `pair.adopt`         | the server named in the pending bundle | `{ session, token }`                                                                                 |
+| `credential.set`     | the pinned server                      | `{ kind, username, password }`                                                                       |
+| `pair.release`       | the pinned server                      | no parameters                                                                                        |
+| capability endpoints | per capability                         | e.g. the camera's `/start9-camera/state`                                                             |
 
-| Code | Kind            | Meaning                                                                |
-| ---- | --------------- | ---------------------------------------------------------------------- |
-| 1001 | NOT_AUTHORIZED  | The client's key is not the pinned server.                             |
-| 1002 | ALREADY_PAIRED  | The accessory is paired and the method needs it unpaired.              |
-| 1003 | NOT_PENDING     | No pending pairing, or the session or token does not match it.         |
-| 1004 | BUNDLE_REJECTED | The bundle did not open, has expired, or is malformed.                 |
-| 1005 | UNSUPPORTED     | The credential kind or Wi-Fi security is not one the accessory offers. |
+| Code | Kind           | Meaning                                                        |
+| ---- | -------------- | -------------------------------------------------------------- |
+| 1001 | NOT_AUTHORIZED | The client's key is not the pinned server.                     |
+| 1002 | ALREADY_PAIRED | The accessory is paired and the method needs it unpaired.      |
+| 1003 | NOT_PENDING    | No pending pairing, or the session or token does not match it. |
+| 1005 | UNSUPPORTED    | The credential kind is not one the accessory offers.           |
 
 Malformed parameters are JSON-RPC's own -32602, and a mechanism that fails
 while applying a request is -32603; neither carries `data.kind`.
@@ -685,17 +664,22 @@ while applying a request is -32603; neither carries `data.kind`.
 
 ```json
 {
-  "v": 1, "id": "<accessory ID>", "class": "camera", "model": "recamera",
-  "name": "reCamera", "swVersion": "…", "state": "paired",
+  "v": 1,
+  "id": "<accessory ID>",
+  "class": "camera",
+  "model": "recamera",
+  "name": "reCamera",
+  "swVersion": "…",
+  "state": "paired",
   "fingerprint": "<wire fingerprint>",
   "capabilities": [
     { "id": "start9.video.rtsp", "scheme": "rtsp", "port": 8554, "path": "/live", "credentialKind": "rtsp" },
     { "id": "start9.detections.http", "scheme": "http", "port": 8555, "path": "/start9-camera/state" }
   ],
   "credentialKinds": {
-    "system":   { "scope": "owner", "username": "recamera" },
+    "system": { "scope": "owner", "username": "recamera" },
     "node-red": { "scope": "owner", "username": "admin" },
-    "rtsp":     { "scope": "shared" }
+    "rtsp": { "scope": "shared" }
   }
 }
 ```
@@ -713,23 +697,23 @@ Repeating a request with the same values is harmless, so startd retries freely.
 
 ### UI
 
-- **Accessories page:** paired accessories with status, name, fingerprint,
-  **Used by**, owner logins and **Remove**; **Add accessory**; **Update Wi-Fi
-  on accessories**.
-- **Add accessory:** scan or paste the QR code → choose a route (only those
-  available) → choose a network (or none, for Ethernet) → progress → name →
-  offer grants to installed services.
-- **Service page:** an Accessories section listing grants and offering paired
-  accessories.
-- **Headers.** `add_security_headers` adds
-  `Permissions-Policy: bluetooth=(self), camera=(self)` with every other
-  powerful feature `()`. The CSP that header joins exists to protect the
-  enrolled browser signing key, and this does not loosen it: with no
-  `Permissions-Policy` the browser already allows Bluetooth and camera to the
-  top-level origin, so naming them changes nothing for the UI and denies
-  everything else. Script injection is still bounded by `script-src 'self'`,
-  and neither feature is reachable without a user gesture and the browser's
-  own chooser or permission prompt.
+The Start9 app adds accessories. It signs in as any RPC client does, and the
+phone must already trust the server's root CA. It needs its key only to add an
+accessory, so one unenrolled after 30 idle days is replaced by signing in again.
+
+**Finding the server.** StartOS advertises `_startos._tcp` on port 443 with a
+static avahi service file, named for the server's hostname, beside its `.local`
+name. The app browses for it and lists what it finds, usually one server, so the
+user picks instead of typing an address; typing remains for a server it cannot
+see. An advertisement is unauthenticated, and that costs nothing here: the app
+sends the password only over TLS to a root the phone trusts.
+
+- **Add accessory (app):** scan the QR code → enter the Wi-Fi network and
+  password → write the bundle over BLE → progress → name → grant to services.
+- **Accessories page (StartOS):** paired accessories with status, name,
+  fingerprint, **Used by**, owner logins and **Remove**.
+- **Service page (StartOS):** an Accessories section listing grants and offering
+  paired accessories.
 
 ## Security considerations
 
@@ -737,17 +721,18 @@ Repeating a request with the same values is harmless, so startd retries freely.
   reads it can onboard the accessory to their server. The setup secret is
   disabled once paired, so a QR code read afterwards is useless until the
   accessory is released or reset.
-- **Confidentiality.** Wi-Fi credentials cross every route inside the HPKE
-  bundle. Logins cross the LAN inside mutual TLS. Neither depends on BLE link
-  security.
+- **Confidentiality.** Wi-Fi credentials go from the phone to the accessory
+  inside the HPKE bundle and never reach StartOS. Logins cross the LAN inside
+  mutual TLS. Neither depends on BLE link security.
 - **Replay.** A bundle is bound to a session, a token and an expiry; the
   accessory takes at most one pending pairing and refuses bundles once paired.
-- **Spoofing on the LAN.** Before pairing, the LAN route checks the key the
-  accessory presents against the QR code, so a host diverting the accessory's
-  address by ARP or Neighbor Discovery spoofing receives a bundle it cannot
-  open. After pairing, each side accepts only the key it pinned, so a diverted
-  connection fails the handshake. Unlike AGCP, no step trusts a first
-  identity: both pins come from the QR code and the bundle.
+- **Spoofing on the LAN.** Each side accepts only the key it pinned, so a
+  diverted control connection fails the handshake. Unlike AGCP, no step trusts a
+  first identity: both pins come from the QR code and the bundle. A forged mDNS
+  advertisement cannot move a paired accessory's address (see Discovery), so it
+  cannot point a grantee's stream login at another host. A host that diverts the
+  address itself, by ARP or Neighbor Discovery spoofing, still receives the
+  grantee's plain RTSP connection and can ask for the login in the clear.
 - **Root key in TLS.** The root key already signs every certificate StartOS
   issues; signing CertificateVerify is the same operation. A compromised root
   key could already impersonate the server to every client, and can now
@@ -762,16 +747,21 @@ Repeating a request with the same values is harmless, so startd retries freely.
   else.
 - **Revocation** is the registry. A removed accessory's key is refused
   because its fingerprint is no longer listed.
-- **Web Bluetooth.** Each connection needs a user gesture and a device chosen
-  in the browser's picker. An XSS in the UI could open the picker but not
-  choose the device.
+- **The app's key** has full admin rights over the server, since StartOS has no
+  scoped keys.
 - **Wi-Fi password exposure.** On a WPA2/WPA3-Personal network the accessory
   receives the shared password, as any client does.
 
 ## Limitations and tradeoffs
 
-- **iOS** needs a third-party Web Bluetooth browser, or a route that does not
-  use Bluetooth.
+- **Same network.** Discovery is mDNS, so the server and the accessory must share
+  a broadcast domain. An accessory on another VLAN or an isolated Wi-Fi network
+  never pairs, and its session expires. User documentation covers this.
+- **Changed Wi-Fi.** Nothing pushes a new password to a paired accessory. A
+  paired reCamera off the LAN for five minutes turns its access point back on,
+  where its own web UI can change the network with the owner login; failing that,
+  the user factory resets it, forgets it in StartOS and adds it again. User
+  documentation covers this.
 - **Shared logins.** Accessories without per-grant logins (the reCamera's
   stream) give every grantee the same login; revoking one grantee rotates it
   for the rest.
@@ -787,22 +777,20 @@ here:
 
 - The page's name and placement ("Accessories" under the server's settings,
   or a top-level entry).
-- Whether finishing onboarding offers grants to installed services, and how
-  the list is ordered with no manifest signal.
-- Whether a notification is raised when an unpaired Start9 accessory appears
-  on the LAN.
+- Whether finishing onboarding in the app offers grants to installed services,
+  and how the list is ordered with no manifest signal.
 - The wording of **Forget** versus waiting for an offline accessory to be
   released, and of the "locked to this server" consequence.
-- Whether **Update Wi-Fi on accessories** is a page action or part of the
-  server's own Wi-Fi flow.
 
 ## Assumptions to validate
 
-- Chrome on Android and Bluefy on iOS can `requestDevice` by a 128-bit service
-  UUID and write a bundle of up to about 730 bytes, in chunks of up to 512
-  (long writes), to the reCamera's BlueZ 5.58 GATT server.
-- The reCamera's `qr` pipeline decodes a QR code of about 740 characters from
-  a phone screen at a usable distance.
+- The iOS and Android Bluetooth APIs can scan by a 128-bit service UUID and write
+  a bundle of up to about 730 bytes, in chunks of up to 512 (long writes), to the
+  reCamera's BlueZ 5.58 GATT server.
+- Both apps can seal HPKE `mode_psk` with this suite, through a platform or
+  third-party library, or on their own HKDF, P-256 and AES-GCM.
+- A static avahi service file publishes on the same interfaces as the server's
+  `.local` name, including when mDNS is turned off for a gateway.
 - HPKE `mode_psk` with P-256 can be implemented on the camera's Node 22.8
   `crypto` (ECDH, HKDF, AES-GCM), or a small pure-JS HPKE library runs
   acceptably there without a JIT.
@@ -812,25 +800,25 @@ here:
   and verify a self-signed server certificate by SPKI alone.
 - startd can browse through avahi's D-Bus API on every gateway without
   affecting its own `.local` publication.
-- `nmcli --show-secrets` returns the PSK for a profile NetworkManager holds in
-  a keyfile on the bind-mounted data drive.
 - Somewhere on the reCamera's eMMC can hold the factory key and setup secret
   across a flash and a factory reset.
 
 ## Testing
 
 - Unit tests for the bundle (seal/open, wrong PSK, wrong key, tampered AAD,
-  expiry) against RFC 9180 test vectors, in Rust and in the firmware.
+  expiry) against RFC 9180 test vectors, in both apps and in the firmware.
 - Unit tests for login derivation (purpose and generation separation, a fixed
   vector per kind) in Rust and the firmware simulator.
 - An accessory simulator (Node, using the firmware's code) on a network
   namespace, for discovery, pairing, pinned-key rejection in both directions,
   credentials, release and offline retries.
-- UI flows with the simulator behind a mocked Web Bluetooth.
+- A forged advertisement carrying a paired accessory's ID leaves its registry
+  address and grantee URLs unchanged.
+- The app's add flow against the simulator.
 - A version 2 backup restored onto this code, and a version 3 backup restored
   onto a fresh install with a paired simulator.
-- On hardware: each route on a reCamera, a backup and restore with a paired
-  camera, and a Frigate grant end to end.
+- On hardware: the app's Bluetooth flow on iOS and Android with a reCamera, a
+  backup and restore with a paired camera, and a Frigate grant end to end.
 
 ## Rollout
 
@@ -838,10 +826,9 @@ here:
    `reCamera-OS`, replacing the prototype pairing on
    `feat/start9-camera-mdns` before it merges.
 2. Registry, onboarding, pairing, credentials and discovery in startd; the
-   Accessories page; backup version 3.
+   `_startos._tcp` advertisement; the Accessories page; backup version 3.
 3. `get-accessories`, the package grant map and the SDK; grants in the UI.
-4. Home Assistant consumes grants; its integration drops pairing, replacing
-   the prototype on `feat/camera-zeroconf-discovery` before it merges.
+4. The Start9 app's add flow.
 5. A Frigate package that consumes grants.
 
 ## Action items
@@ -882,8 +869,7 @@ here:
    Start9's flashing station, or a page on the accessory's own access point).
    Where they are stored is action item 1.
 2. **Manual entry.** The URI is about 150 characters. A short typed code needs
-   a PAKE (as Matter's SPAKE2+) to be safe; v1 accepts only a scanned or
-   pasted URI.
+   a PAKE (as Matter's SPAKE2+) to be safe; v1 accepts only a scanned URI.
 3. **Accessory-declared settings.** May an accessory describe its settings in
    `InputSpec`, so StartOS renders them with the action form engine?
 4. **RTSPS.** Containers would need to trust the StartOS root CA, and every
