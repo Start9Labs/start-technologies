@@ -1,0 +1,1 @@
+- Correction des liens de dépendances qui laissaient la Bibliothèque de services bloquée sur le chargement.

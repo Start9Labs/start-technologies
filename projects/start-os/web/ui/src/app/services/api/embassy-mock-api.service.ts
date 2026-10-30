@@ -129,6 +129,10 @@ export class MockApiService extends ApiService {
   private readonly storage = inject(WA_SESSION_STORAGE)
   private readonly cache = inject(PATCH_CACHE)
   private readonly revertTime = 1800
+  private readonly pushSubscriptions = new Map<
+    string,
+    Params<'notification.push.subscribe'>
+  >()
   sequence = 1
   private readonly handlers: RpcHandlers<Api> = {
     state: async () => {
@@ -491,6 +495,18 @@ export class MockApiService extends ApiService {
       await pauseFor(2000)
       return Mock.RegistryInfo
     },
+    'notification.push.key': async () =>
+      'BMPJ4K-bgv51B65CU1VyQTEkdx1KpAEwNW1yBT1s1L897jXuwArMYD6evcHvlejf27P-ouK7X_LwifLqyBkL6Hs',
+    'notification.push.list': async () => [...this.pushSubscriptions.values()],
+    'notification.push.subscribe': async params => {
+      this.pushSubscriptions.set(params.endpoint, params)
+      return null
+    },
+    'notification.push.unsubscribe': async ({ endpoint }) => {
+      this.pushSubscriptions.delete(endpoint)
+      return null
+    },
+    'notification.push.test': async () => null,
     'notification.list': async params => {
       await pauseFor(2000)
 
@@ -1121,6 +1137,7 @@ export class MockApiService extends ApiService {
                 'chain-state': {
                   name: 'Chain State',
                   result: 'loading',
+                  waiting: false,
                   message:
                     'Bitcoin is syncing from genesis. Downloading block headers and verifying chain integrity, please wait',
                 },
@@ -1175,6 +1192,7 @@ export class MockApiService extends ApiService {
                 'ephemeral-health-check': {
                   name: 'Ephemeral Health Check',
                   result: 'starting',
+                  waiting: false,
                   message: null,
                 },
                 'unnecessary-health-check': {
@@ -1185,6 +1203,7 @@ export class MockApiService extends ApiService {
                 'chain-state': {
                   name: 'Chain State',
                   result: 'loading',
+                  waiting: false,
                   message: 'Bitcoin is syncing from genesis',
                 },
                 'p2p-interface': {

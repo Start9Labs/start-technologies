@@ -11,11 +11,17 @@ shared-libs/crates/start-core/bindings/index.ts: $(CORE_SRC) Cargo.toml Cargo.lo
 	npm --prefix shared-libs/ts-modules/start-core exec -- prettier --config .prettierrc.json -w './shared-libs/crates/start-core/bindings/**/*.ts'
 	touch shared-libs/crates/start-core/bindings/index.ts
 
+# StartOS's MCP tool catalog, embedded by `start_core::mcp`.
+start-core-mcp-tools: start-core-ts-bindings
+	npm --prefix shared-libs/ts-modules/start-core exec -- tsx shared-libs/crates/start-core/build/mcp-tools.ts shared-libs/crates/start-core/mcp-tools.json
+	npm --prefix shared-libs/ts-modules/start-core exec -- prettier --config .prettierrc.json -w shared-libs/crates/start-core/mcp-tools.json
+
 # --- generated-artifact freshness (CI gates: regenerate, then fail on any diff) ---
 MAN_DIRS := projects/start-cli/man projects/start-registry/man projects/start-tunnel/man projects/start-os/man
 OSBINDINGS_DIR := shared-libs/ts-modules/start-core/lib/osBindings
+MCP_TOOLS := shared-libs/crates/start-core/mcp-tools.json
 
-.PHONY: manpages manpages-check start-core-ts-bindings-check
+.PHONY: manpages manpages-check start-core-ts-bindings-check start-core-mcp-tools start-core-mcp-tools-check
 # Regenerate the committed clap man pages (roff) for every product binary.
 manpages:
 	./shared-libs/crates/start-core/build/build-manpage.sh
@@ -33,6 +39,14 @@ start-core-ts-bindings-check: start-core-ts-bindings
 	@if [ -n "$$(git status --porcelain -- $(OSBINDINGS_DIR))" ]; then \
 		echo "TS bindings are out of date — run 'make start-core-ts-bindings' and commit the result:"; \
 		git --no-pager diff --stat -- $(OSBINDINGS_DIR); git status --porcelain -- $(OSBINDINGS_DIR); \
+		exit 1; \
+	fi
+
+# Fail if the committed MCP tool catalog doesn't match the current TS bindings.
+start-core-mcp-tools-check: start-core-mcp-tools
+	@if [ -n "$$(git status --porcelain -- $(MCP_TOOLS))" ]; then \
+		echo "MCP tool catalog is out of date — run 'make start-core-mcp-tools' and commit the result:"; \
+		git --no-pager diff --stat -- $(MCP_TOOLS); git status --porcelain -- $(MCP_TOOLS); \
 		exit 1; \
 	fi
 

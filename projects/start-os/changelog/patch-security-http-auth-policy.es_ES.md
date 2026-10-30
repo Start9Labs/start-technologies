@@ -1,0 +1,1 @@
+- La política de autenticación del proxy HTTP, cuando está configurada, se aplica tanto a conexiones de servicios sin cifrar como a conexiones TLS.

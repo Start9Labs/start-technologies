@@ -1,0 +1,1 @@
+- Włącz powiadomienia push w oknie ustawień strony Powiadomienia, aby otrzymywać powiadomienia StartOS przy zamkniętym interfejsie, również przez udostępniane przez przeglądarkę samodzielnie hostowane punkty końcowe UnifiedPush.

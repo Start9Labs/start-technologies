@@ -1,7 +1,7 @@
 # Updating StartOS
 
 > [!NOTE]
-> There are _no_ automatic updates in StartOS. Updating the operating system and service always requires explicit action. That said, we highly recommended keeping StartOS up to date for the latest security and performance patches, as well as to take advantage of new features.
+> There are _no_ automatic updates in StartOS. Updating the operating system and service always requires explicit action. That said, we highly recommend keeping StartOS up to date for the latest security and performance patches, as well as to take advantage of new features.
 
 ## Update through the UI
 
@@ -23,7 +23,7 @@
 
 1. When your server comes back, a notification welcomes you to the new version. Open it from **Notifications** — the bell in the menu — to read that release's notes again at any time.
 
-A browser page left open during the update displays **Refresh Needed** when the server returns. Select **Refresh** to open the updated interface. If an installed StartOS app still shows the previous interface afterwards, remove and reinstall the app.
+A browser page left open during the update shows **Refresh Needed** while its user interface syncs with the updated server. You can dismiss the dialog and finish your work while syncing continues. When syncing is complete, select **Refresh** to load the synced interface. A sync error offers **Retry**, **Details**, and **Reset UI cache**. If syncing stalls, **Reset UI cache** remains available; confirming it resets the cached interface and reloads the page while preserving your login and settings.
 
 ## Trusted update signers
 
