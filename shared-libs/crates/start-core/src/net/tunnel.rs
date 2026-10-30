@@ -124,7 +124,23 @@ pub async fn add_tunnel(
         return Err(error);
     }
 
-    ip_info.wait_for(|ip_info| ip_info.is_some()).await?;
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        ip_info.wait_for(|ip_info| ip_info.is_some()),
+    )
+    .await
+    .map_err(|_| {
+        Error::new(
+            eyre!(
+                "{}",
+                t!(
+                    "net.tunnel.timeout-waiting-for-interface",
+                    gateway = iface.as_str()
+                )
+            ),
+            ErrorKind::Network,
+        )
+    })??;
 
     if set_as_default_outbound {
         ctx.db

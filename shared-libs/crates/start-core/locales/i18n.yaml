@@ -2077,6 +2077,13 @@ net.tunnel.timeout-waiting-for-add:
   fr_FR: "délai d'attente dépassé pour l'apparition de la passerelle %{gateway} dans la base de données"
   pl_PL: "upłynął limit czasu oczekiwania na pojawienie się bramy %{gateway} w bazie danych"
 
+net.tunnel.timeout-waiting-for-interface:
+  en_US: "gateway %{gateway} was added, but StartOS timed out reading its network interface. Restart the server to finish setting it up"
+  de_DE: "Gateway %{gateway} wurde hinzugefügt, aber StartOS hat beim Lesen seiner Netzwerkschnittstelle eine Zeitüberschreitung erreicht. Starten Sie den Server neu, um die Einrichtung abzuschließen"
+  es_ES: "se añadió la puerta de enlace %{gateway}, pero StartOS agotó el tiempo al leer su interfaz de red. Reinicie el servidor para terminar de configurarla"
+  fr_FR: "la passerelle %{gateway} a été ajoutée, mais StartOS a dépassé le délai en lisant son interface réseau. Redémarrez le serveur pour terminer sa configuration"
+  pl_PL: "brama %{gateway} została dodana, ale StartOS przekroczył limit czasu podczas odczytu jej interfejsu sieciowego. Uruchom ponownie serwer, aby dokończyć jej konfigurację"
+
 net.tunnel.timeout-waiting-for-remove:
   en_US: "timed out waiting for gateway %{gateway} to be removed from database"
   de_DE: "Zeitüberschreitung beim Warten auf das Entfernen von Gateway %{gateway} aus der Datenbank"
