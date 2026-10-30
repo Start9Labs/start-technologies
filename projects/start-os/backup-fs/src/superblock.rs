@@ -756,7 +756,6 @@ mod tests {
             setuid_support: false,
             file_size_padding: None,
             idmapped: false,
-            enable_snapshots: false,
         }
     }
 

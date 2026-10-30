@@ -2,6 +2,8 @@
 
 `legacy-795d8a265.tar.gz` contains real format-1, format-2 and format-3 stores generated from the production source at `795d8a265`, before caller-bound authentication was introduced. Migration tests must consume these bytes rather than serialize historical structures using the current definitions.
 
+Formats 2 and 3 include authentic index checkpoints with matching segment inventories.
+
 These are synthetic backups with deliberately public test passwords:
 
 - `v1`: password `password`; root inode 1, raw packed record 42 and legacy blobs.

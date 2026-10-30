@@ -47,7 +47,6 @@ impl Harness {
             file_size_padding: None,
             readonly: false,
             idmapped: false,
-            enable_snapshots: false,
         })
         .unwrap();
         let mut config = Config::default();

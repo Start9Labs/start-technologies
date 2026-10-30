@@ -15,7 +15,6 @@ fn options(data: &Path) -> BackupFSOptions {
         setuid_support: false,
         idmapped: false,
         file_size_padding: None,
-        enable_snapshots: false,
     }
 }
 
@@ -39,6 +38,18 @@ fn same_bytes(actual: &[u8], expected: &[u8]) {
             .position(|(actual, expected)| actual != expected),
         None
     );
+}
+
+#[test]
+fn store_lock_rejects_symlinks_without_truncating_their_targets() {
+    let parent = tempfile::tempdir().unwrap();
+    let data = parent.path().join("store");
+    std::fs::create_dir(&data).unwrap();
+    let target = parent.path().join("target");
+    std::fs::write(&target, b"untouched").unwrap();
+    std::os::unix::fs::symlink(&target, data.join(".lock")).unwrap();
+    assert!(BackupFS::new(options(&data)).is_err());
+    assert_eq!(std::fs::read(target).unwrap(), b"untouched");
 }
 
 #[test]
@@ -136,6 +147,33 @@ fn replaying_only_the_snapshot_catalog_cannot_remove_a_newer_name() {
     drop(fs);
     std::fs::write(current, older).unwrap();
     assert!(BackupFS::new(options(data.path())).is_err());
+}
+
+#[test]
+fn frozen_legacy_index_cache_is_used_only_for_its_matching_segment_inventory() {
+    use std::io::Write;
+    let data = tempfile::tempdir().unwrap();
+    crate::legacy::fixture(data.path(), 2);
+    let sb =
+        crate::superblock::Superblock::load(&data.path().join("superblock"), "snapshots", true)
+            .unwrap();
+    let source = crate::legacy::Source::load(data.path(), &sb.key).unwrap();
+    assert!(source.roots.index.contains_key(&2));
+    assert!(source.roots.index.contains_key(&3));
+    assert!(source.roots.index.contains_key(&4));
+    assert!(source.next_seq > 1);
+    let mut segment = std::fs::OpenOptions::new()
+        .append(true)
+        .open(data.path().join("segments/0000000000000000.seg"))
+        .unwrap();
+    segment.write_all(b"incomplete tail").unwrap();
+    assert!(crate::legacy::Source::load(data.path(), &sb.key)
+        .unwrap()
+        .roots
+        .index
+        .is_empty());
+    let fs = BackupFS::new(options(data.path())).unwrap();
+    assert_eq!(read_inode(&fs, 2), b"frozen-inline");
 }
 
 #[test]

@@ -15,7 +15,6 @@ fn padded_controller(data: &tempfile::TempDir, padding: Option<f64>) -> Controll
         file_size_padding: padding,
         readonly: false,
         idmapped: false,
-        enable_snapshots: true,
     })
     .unwrap()
 }

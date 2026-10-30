@@ -17,16 +17,13 @@ fn config(path: &Path) -> BackupFSOptions {
         setuid_support: false,
         file_size_padding: None,
         idmapped: false,
-        enable_snapshots: true,
     }
 }
 
 #[test]
 fn versioned_storage_persists_without_retained_snapshots() {
     let data = tempfile::tempdir().unwrap();
-    let mut options = config(data.path());
-    options.enable_snapshots = false;
-    let mut fs = BackupFS::new(options).unwrap();
+    let mut fs = BackupFS::new(config(data.path())).unwrap();
     fs.create_snapshot("first").unwrap();
     fs.delete_snapshot("first").unwrap();
     assert!(fs.list_snapshots().unwrap().is_empty());
@@ -42,9 +39,7 @@ fn versioned_storage_persists_without_retained_snapshots() {
     let mut fs = BackupFS::new(config(data.path())).unwrap();
     fs.create_snapshot("enabled").unwrap();
     drop(fs);
-    let mut options = config(data.path());
-    options.enable_snapshots = false;
-    let mut fs = BackupFS::new(options).unwrap();
+    let mut fs = BackupFS::new(config(data.path())).unwrap();
     fs.create_snapshot("still-enabled").unwrap();
     assert_eq!(fs.list_snapshots().unwrap().len(), 2);
     assert_eq!(
@@ -619,7 +614,7 @@ fn durable_replay_floor_prevents_pinned_history_from_resurrecting_a_deleted_inod
     for i in 200..300 {
         log.put(Inode(i), &attrs.attrs).unwrap();
     }
-    log.compact(0.0, &[view]).unwrap();
+    log.compact(0.0).unwrap();
     log.sync().unwrap();
     drop(log);
     let mut log = crate::seglog::SegmentLog::open_sized(

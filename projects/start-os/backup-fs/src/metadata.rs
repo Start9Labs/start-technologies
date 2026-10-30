@@ -6,7 +6,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::atomic_file::AtomicFile;
-use crate::error::BkfsResult;
+use crate::error::{BkfsError, BkfsResult};
 use crate::serde::{data_config, decode, encode};
 use crate::vault::{self, AuthenticationTag, Binding, EccParams};
 
@@ -42,7 +42,7 @@ impl Reference {
         key: &Key,
         binding: Binding,
     ) -> BkfsResult<T> {
-        let blob = std::fs::read(self.path(segments))?;
+        let blob = std::fs::read(self.path(segments)).map_err(BkfsError::referenced_io)?;
         let plain = vault::open_bound(&blob, key, binding)?.verify_reference(&self.tag)?;
         decode(&plain, data_config())
     }

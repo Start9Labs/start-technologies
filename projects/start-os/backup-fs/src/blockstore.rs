@@ -10,7 +10,7 @@ use rand::{rng, Rng};
 
 use crate::aligned_io::BufferedDirectFile;
 use crate::ctrl::Controller;
-use crate::error::BkfsResult;
+use crate::error::{BkfsError, BkfsResult};
 use crate::inode::ContentId;
 use crate::{open_direct, vault};
 
@@ -40,9 +40,10 @@ pub fn read_block(ctrl: &Controller, content: ContentId, idx: u64) -> BkfsResult
     let Some((path, binding)) = ctrl.resolve_object(ctrl.block_id(content, idx))? else {
         return Ok(None);
     };
-    let mut file = open_direct(&path, false)?;
+    let mut file = open_direct(&path, false).map_err(BkfsError::referenced_io)?;
     let mut blob = Vec::new();
-    file.read_to_end(&mut blob)?;
+    file.read_to_end(&mut blob)
+        .map_err(BkfsError::referenced_io)?;
     let stored = vault::open_bound(&blob, ctrl.key(), binding)?.plaintext;
     let compressed = if stored.first() == Some(&FRAMED_PAYLOAD) {
         let len = stored

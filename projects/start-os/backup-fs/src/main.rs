@@ -296,11 +296,7 @@ fn change_password(
 
 fn snapshots(options: SnapshotOptions) {
     match options.command {
-        SnapshotCommand::Create(NamedSnapshotOptions {
-            mut filesystem,
-            name,
-        }) => {
-            filesystem.backup_opts.enable_snapshots = true;
+        SnapshotCommand::Create(NamedSnapshotOptions { filesystem, name }) => {
             new_fs(filesystem).create_snapshot(&name).unwrap();
         }
         SnapshotCommand::List(mut filesystem) => {

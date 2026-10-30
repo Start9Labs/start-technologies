@@ -295,7 +295,7 @@ impl<'a> Iterator for Frames<'a> {
 
 pub(crate) struct SegmentWriter {
     dir: PathBuf,
-    file: File,
+    file: Option<File>,
     id: u64,
     offset: u64,
     limit: u64,
@@ -308,10 +308,9 @@ impl SegmentWriter {
                 .ok_or_else(|| BkfsError::unsupported("data segment id exhausted"))?,
             None => 0,
         };
-        let file = Self::create(dir, id)?;
         Ok(Self {
             dir: dir.to_owned(),
-            file,
+            file: None,
             id,
             offset: 0,
             limit,
@@ -330,11 +329,14 @@ impl SegmentWriter {
                 .id
                 .checked_add(1)
                 .ok_or_else(|| BkfsError::unsupported("data segment id exhausted"))?;
-            self.file = Self::create(&self.dir, self.id)?;
+            self.file = None;
             self.offset = 0;
         }
+        if self.file.is_none() {
+            self.file = Some(Self::create(&self.dir, self.id)?);
+        }
         let offset = self.offset;
-        self.file.write_all_at(bytes, offset)?;
+        self.file.as_ref().unwrap().write_all_at(bytes, offset)?;
         self.offset += bytes.len() as u64;
         Ok((self.id, offset))
     }
@@ -488,8 +490,10 @@ impl SegmentLog {
     }
     fn read_raw_frame(&self, loc: Location) -> BkfsResult<Vec<u8>> {
         let mut bytes = vec![0; loc.len as usize];
-        File::open(segment_path(self.directory(), loc.segment))?
-            .read_exact_at(&mut bytes, loc.offset)?;
+        File::open(segment_path(self.directory(), loc.segment))
+            .map_err(BkfsError::referenced_io)?
+            .read_exact_at(&mut bytes, loc.offset)
+            .map_err(BkfsError::referenced_io)?;
         Ok(bytes)
     }
     pub fn load(&self, inode: Inode) -> BkfsResult<Option<Attributes>> {
@@ -634,7 +638,7 @@ impl SegmentLog {
             }
         }
     }
-    pub fn compact(&mut self, threshold: f64, retained: &[View]) -> BkfsResult<usize> {
+    pub fn compact(&mut self, threshold: f64) -> BkfsResult<usize> {
         self.check_rw()?;
         let active = self.writer.as_ref().unwrap().id;
         let candidates: HashSet<_> = self
@@ -659,7 +663,7 @@ impl SegmentLog {
             self.seg_meta.entry(new.segment).or_default().total += new.len as u64;
             self.update(key, Some(new))?;
         }
-        self.save_checkpoint(retained)?;
+        self.sync()?;
         for id in &candidates {
             std::fs::remove_file(segment_path(self.directory(), *id))?;
             self.seg_meta.remove(id);

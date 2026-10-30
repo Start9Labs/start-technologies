@@ -15,7 +15,7 @@ use zeroize::Zeroizing;
 
 use crate::atomic_file::AtomicFile;
 use crate::directory::{DirectoryContents, DirectoryEntry};
-use crate::error::{BkfsResult, BkfsResultExt};
+use crate::error::{BkfsError, BkfsResult, BkfsResultExt};
 use crate::inode::{Attributes, ContentId, FileData, Inode, InodeAttributes};
 use crate::objects::{ObjectId, ObjectVersion};
 use crate::seglog::{self, SegmentLog};
@@ -56,9 +56,7 @@ pub struct ControllerSeed {
     /// files. Behind a Mutex because the Controller is shared across the
     /// worker pool; sealing happens outside the lock (see `seglog`).
     log: Mutex<SegmentLog>,
-    /// Monotonic inode-number allocator. Seeded past the highest number ever
-    /// seen in the log at mount (ids are never reused), so a recovered
-    /// allocator can't collide with a surviving inode.
+    /// Seeded above the committed inode high-water mark.
     next_inode: AtomicU64,
     /// Counts fast (non-durable) saves since the last syncfs. Both
     /// dispatch-thread eviction and worker-thread content saves bump
@@ -259,12 +257,6 @@ impl Controller {
         self.0.log.lock().unwrap().content_count()
     }
 
-    /// No-op kept for the mount path: the log's replay (in `new`) already
-    /// rebuilt the index and the inode-number high-water mark.
-    pub fn load_inode_pool(&self) -> BkfsResult<()> {
-        Ok(())
-    }
-
     /// Reclaim dead space in the log by compacting heavily-dead sealed
     /// segments (live frames relocated verbatim, then the segment deleted).
     /// Gated on `BACKUPFS_COMPACT_RATIO` (default 0.6; ≥1.0 disables): only a
@@ -280,8 +272,7 @@ impl Controller {
             return Ok(0);
         }
         self.collect_garbage()?;
-        let catalog = self.0.catalog.lock().unwrap();
-        self.0.log.lock().unwrap().compact(ratio, &catalog.views())
+        self.0.log.lock().unwrap().compact(ratio)
     }
 
     /// Bounds replay work; the committed journal remains authoritative on failure.
@@ -414,9 +405,9 @@ impl Controller {
     }
 
     pub fn resolve_block_path(&self, content: ContentId, idx: u64) -> PathBuf {
-        self.object_path(self.block_id(content, idx))
-            .ok()
-            .flatten()
+        let id = self.block_id(content, idx);
+        let version = self.0.log.lock().unwrap().object(id).ok().flatten();
+        id.path(&self.0.config.data_dir, version)
             .unwrap_or_else(|| self.block_path(content, idx))
     }
 
@@ -441,10 +432,6 @@ impl Controller {
             Some(ObjectVersion::Version(token)) => Some(self.object_reference(id, token)),
             Some(ObjectVersion::Deleted) | None => None,
         })
-    }
-
-    pub(crate) fn object_path(&self, id: ObjectId) -> BkfsResult<Option<PathBuf>> {
-        Ok(self.resolve_object(id)?.map(|(path, _)| path))
     }
 
     pub(crate) fn write_object(
@@ -488,7 +475,7 @@ impl Controller {
         let Some((path, binding)) = self.resolve_object(self.dir_bucket_id(dir, gen, idx))? else {
             return Ok(Default::default());
         };
-        let blob = std::fs::read(path)?;
+        let blob = std::fs::read(path).map_err(BkfsError::referenced_io)?;
         let plain = crate::vault::open_bound(&blob, self.key(), binding)?.plaintext;
         serde::decode(&plain, serde::data_config())
     }
@@ -663,9 +650,6 @@ impl Controller {
 
     pub fn next_inode(&self) -> BkfsResult<Inode> {
         self.check_rw()?;
-        // Monotonic, never-reused. Needs no separate persistence: replay
-        // reseeds it past the highest inode ever recorded in the log, so a
-        // crash can never re-hand a number a surviving inode still uses.
         let id = self.0.next_inode.fetch_add(1, Ordering::Relaxed);
         if id == 0 || id == u64::MAX {
             return BkfsResult::errno(libc::EMFILE);

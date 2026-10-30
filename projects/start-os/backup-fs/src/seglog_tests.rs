@@ -35,6 +35,16 @@ fn inline(log: &SegmentLog, id: u64) -> Vec<u8> {
 }
 
 #[test]
+fn idle_writable_opens_do_not_create_data_segments() {
+    let data = tempfile::tempdir().unwrap();
+    let log = initial(data.path());
+    assert!(list_segments(log.directory()).unwrap().is_empty());
+    drop(log);
+    let log = SegmentLog::open(data.path().join("segments"), key()).unwrap();
+    assert!(list_segments(log.directory()).unwrap().is_empty());
+}
+
+#[test]
 fn committed_records_and_tombstones_survive_checkpoint_and_reopen() {
     let data = tempfile::tempdir().unwrap();
     let mut log = initial(data.path());
@@ -122,6 +132,8 @@ fn unindexed_authenticated_tail_is_ignored() {
     let writer = log.writer.as_ref().unwrap();
     writer
         .file
+        .as_ref()
+        .unwrap()
         .write_all_at(
             &encode_frame(log.next_seq, &later.sealed.bytes),
             writer.offset,

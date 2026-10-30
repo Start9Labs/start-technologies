@@ -93,13 +93,18 @@ impl Iterator for Transactions<'_> {
                     if self.cached.as_ref().map(|(id, _)| *id) != Some(segment) {
                         self.cached = Some((
                             segment,
-                            BufferedDirectFile::new(File::open(journal_path(self.dir, segment))?)?,
+                            BufferedDirectFile::new(
+                                File::open(journal_path(self.dir, segment))
+                                    .map_err(BkfsError::referenced_io)?,
+                            )?,
                         ));
                     }
                     let file = &self.cached.as_ref().unwrap().1;
-                    file.prefetch_read(offset)?;
+                    file.prefetch_read(offset)
+                        .map_err(BkfsError::referenced_io)?;
                     let mut blob = vec![0; len as usize];
-                    file.read_exact_at(&mut blob, offset)?;
+                    file.read_exact_at(&mut blob, offset)
+                        .map_err(BkfsError::referenced_io)?;
                     let plain = vault::open_bound(&blob, self.key, Binding::Transaction)?
                         .verify_reference(&tag)?;
                     decode(&plain, data_config())?
@@ -109,6 +114,11 @@ impl Iterator for Transactions<'_> {
             Ok((reference, transaction))
         })())
     }
+}
+
+struct LoadedIndex {
+    roots: Roots,
+    checkpoint_refs: Option<Vec<Reference>>,
 }
 
 impl View {
@@ -122,16 +132,33 @@ impl View {
     }
 
     pub fn load(self, dir: &Path, key: &Key) -> BkfsResult<Roots> {
+        Ok(self.materialize(dir, key)?.roots)
+    }
+
+    fn materialize(self, dir: &Path, key: &Key) -> BkfsResult<LoadedIndex> {
         let mut roots = Roots::default();
         let mut seen = HashSet::new();
+        let mut checkpoint_refs = Some(Vec::new());
         for node in self.transactions(dir, key) {
-            for (key, location) in node?.1.changes {
+            let (reference, transaction) = node?;
+            match reference {
+                IndexReference::Checkpoint(reference) => {
+                    if let Some(references) = &mut checkpoint_refs {
+                        references.push(reference);
+                    }
+                }
+                IndexReference::Journal { .. } => checkpoint_refs = None,
+            }
+            for (key, location) in transaction.changes {
                 if seen.insert(key) {
                     roots.update(key, location);
                 }
             }
         }
-        Ok(roots)
+        Ok(LoadedIndex {
+            roots,
+            checkpoint_refs,
+        })
     }
 
     /// The root publisher must sync these chunks before making the view authoritative.
@@ -215,6 +242,7 @@ pub(crate) struct State {
     anchor: Anchor,
     pending: HashMap<RecordKey, Option<Location>>,
     journal: Option<Journal>,
+    checkpoint_refs: Option<Vec<Reference>>,
     uncertain: bool,
 }
 
@@ -229,6 +257,7 @@ impl State {
             anchor,
             pending: HashMap::new(),
             journal: None,
+            checkpoint_refs: None,
             uncertain: false,
         })
     }
@@ -241,7 +270,7 @@ impl State {
         counters: Counters,
         catalog: Option<Reference>,
     ) -> BkfsResult<Self> {
-        let (index, _) = View::write_checkpoint(dir, key, ecc, roots, counters)?;
+        let (index, references) = View::write_checkpoint(dir, key, ecc, roots, counters)?;
         let mut state = Self::directory(
             dir,
             Anchor {
@@ -252,13 +281,14 @@ impl State {
         )?;
         state.sync_backing()?;
         state.publish(key, ecc, state.anchor.clone())?;
+        state.checkpoint_refs = Some(references);
         Ok(state)
     }
 
     pub fn open(dir: &Path, key: &Key) -> BkfsResult<(Self, Roots)> {
         let directory = File::open(dir)?;
         let path = PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()));
-        let bytes = std::fs::read(path.join(ANCHOR))?;
+        let bytes = std::fs::read(path.join(ANCHOR)).map_err(BkfsError::referenced_io)?;
         let plain = vault::open_bound(&bytes, key, Binding::State)?;
         let anchor: Anchor = decode(&plain.plaintext, data_config())?;
         if anchor.version != VERSION {
@@ -266,7 +296,7 @@ impl State {
                 "unsupported authenticated index state",
             ));
         }
-        let roots = anchor.index.load(&path, key)?;
+        let loaded = anchor.index.materialize(&path, key)?;
         Ok((
             Self {
                 directory,
@@ -274,9 +304,10 @@ impl State {
                 anchor,
                 pending: HashMap::new(),
                 journal: None,
+                checkpoint_refs: loaded.checkpoint_refs,
                 uncertain: false,
             },
-            roots,
+            loaded.roots,
         ))
     }
 
@@ -284,6 +315,7 @@ impl State {
         &self.path
     }
 
+    #[cfg(test)]
     pub fn view(&self) -> View {
         self.anchor.index
     }
@@ -308,6 +340,7 @@ impl State {
     pub fn record(&mut self, key: RecordKey, location: Option<Location>) -> BkfsResult<()> {
         self.check_rw()?;
         self.pending.insert(key, location);
+        self.checkpoint_refs = None;
         Ok(())
     }
 
@@ -384,6 +417,7 @@ impl State {
         )
     }
 
+    /// The caller must record every change to the supplied roots.
     pub fn checkpoint(
         &mut self,
         key: &Key,
@@ -394,6 +428,11 @@ impl State {
         retained: &[View],
     ) -> BkfsResult<View> {
         self.check_rw()?;
+        if self.checkpoint_refs.is_some() {
+            self.commit(key, ecc, counters, catalog)?;
+            self.collect_metadata(key, self.checkpoint_refs.as_deref().unwrap(), retained)?;
+            return Ok(self.anchor.index);
+        }
         let (index, references) = View::write_checkpoint(&self.path, key, ecc, roots, counters)?;
         self.sync_backing()?;
         self.publish(
@@ -406,18 +445,20 @@ impl State {
             },
         )?;
         self.journal = None;
-        self.collect_metadata(key, references, retained)?;
+        self.checkpoint_refs = Some(references);
+        self.collect_metadata(key, self.checkpoint_refs.as_deref().unwrap(), retained)?;
         Ok(index)
     }
 
     fn collect_metadata(
         &self,
         key: &Key,
-        references: Vec<Reference>,
+        references: &[Reference],
         retained: &[View],
     ) -> BkfsResult<()> {
         let mut seen: HashSet<_> = references
-            .into_iter()
+            .iter()
+            .copied()
             .map(IndexReference::Checkpoint)
             .collect();
         for view in retained {
@@ -655,6 +696,9 @@ mod tests {
         let mut roots = Roots::default();
         for id in 1..=ENTRIES_PER_TRANSACTION as u64 + 1 {
             roots.index.insert(id, location(id * 128));
+            state
+                .record(RecordKey::Inode(id), Some(location(id * 128)))
+                .unwrap();
         }
         state
             .checkpoint(
@@ -697,6 +741,9 @@ mod tests {
         let mut state = initial(dir.path(), &key);
         let mut original = Roots::default();
         original.index.insert(7, location(0));
+        state
+            .record(RecordKey::Inode(7), Some(location(0)))
+            .unwrap();
         let snapshot = state
             .checkpoint(
                 &key,
@@ -803,6 +850,9 @@ mod tests {
         let mut roots = Roots::default();
         roots.index.insert(7, location(0));
         state
+            .record(RecordKey::Inode(7), Some(location(0)))
+            .unwrap();
+        let view = state
             .checkpoint(
                 &key,
                 EccParams::default(),
@@ -815,6 +865,19 @@ mod tests {
                 &[],
             )
             .unwrap();
+        assert_eq!(
+            state
+                .checkpoint(
+                    &key,
+                    EccParams::default(),
+                    &roots,
+                    view.counters,
+                    None,
+                    &[view]
+                )
+                .unwrap(),
+            view
+        );
         let mut bytes = [0u8; 8192];
         let len = match events.read(&mut bytes) {
             Ok(len) => len,

@@ -2,10 +2,11 @@
 #![allow(clippy::unnecessary_cast)] // libc::S_* are u16 or u32 depending on the platform
 
 use std::ffi::OsStr;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader};
 use std::os::raw::c_int;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
@@ -101,9 +102,6 @@ pub struct BackupFSOptions {
     pub password: String,
     #[cfg_attr(feature = "cli", arg(long))]
     pub file_size_padding: Option<f64>,
-    /// Activates copy-on-write storage for named snapshots on a writable open.
-    #[cfg_attr(feature = "cli", arg(long))]
-    pub enable_snapshots: bool,
     #[cfg_attr(feature = "cli", arg(short, long))]
     pub readonly: bool,
     /// True for the production mount, which start-core wraps in a kernel
@@ -115,7 +113,7 @@ pub struct BackupFSOptions {
 }
 
 pub struct BackupFS {
-    lock: FdLock<File>,
+    _lock: FdLock<File>,
     handler: Mutex<Handler>,
 }
 
@@ -134,7 +132,13 @@ impl BackupFS {
     fn open(config: BackupFSOptions, snapshot: Option<&str>) -> BkfsResult<Self> {
         let BackupFSOptions { data_dir, .. } = &config;
         let lock = fd_lock_rs::FdLock::lock(
-            File::create(data_dir.join(".lock"))?,
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(data_dir.join(".lock"))?,
             LockType::Exclusive,
             false,
         )
@@ -143,7 +147,6 @@ impl BackupFS {
         let ctrl = Controller::open(config, snapshot)?;
 
         if !ctrl.exists::<InodeAttributes>(Inode(FUSE_ROOT_ID)) {
-            // Initialize with empty filesystem
             let root = InodeAttributes::new(
                 Inode(FUSE_ROOT_ID),
                 None,
@@ -154,16 +157,13 @@ impl BackupFS {
             ctrl.load::<InodeAttributes>(Inode(FUSE_ROOT_ID))?;
         }
 
-        ctrl.load_inode_pool()?;
-
         Ok(BackupFS {
-            lock,
+            _lock: lock,
             handler: Mutex::new(Handler::new(ctrl)),
         })
     }
 
     /// Flushes dirty state and durably publishes a manually retained recovery point.
-    /// Requires an exclusive open with `enable_snapshots` or an already-enabled store.
     pub fn create_snapshot(&mut self, name: &str) -> BkfsResult<SnapshotInfo> {
         let handler = self.handler.get_mut().unwrap();
         handler.ctrl().check_rw()?;
@@ -217,20 +217,6 @@ impl Filesystem for BackupFS {
         if let Err(e) = self.handler.get_mut().unwrap().close_all() {
             error!("error closing FS: {e}");
         }
-        // Every individual AtomicFile::save already calls sync_all
-        // before its rename, so data itself is durable. syncfs here is
-        // a belt-and-braces flush of the whole backing filesystem —
-        // ensures any last journal commits, CIFS writeback, etc. drain
-        // before we release the data_dir lock and exit.
-        use std::os::fd::AsRawFd;
-        let fd = self.lock.as_raw_fd();
-        // SAFETY: fd is a valid fd we own (held by the FdLock).
-        if unsafe { libc::syncfs(fd) } != 0 {
-            error!("syncfs on unmount failed: {}", io::Error::last_os_error());
-        }
-        // Persist the index checkpoint so the next mount skips the log replay.
-        // After compaction (in close_all) + syncfs above, the on-disk segments
-        // are final and durable, so the checkpoint matches them. Best-effort.
         self.handler.get_mut().unwrap().ctrl().save_checkpoint();
     }
 

@@ -1370,7 +1370,6 @@ fn opts(data: &Path, password: &str) -> BackupFSOptions {
         file_size_padding: None,
         readonly: false,
         idmapped: false,
-        enable_snapshots: false,
     }
 }
 
@@ -1538,7 +1537,15 @@ fn incremental_overwrite_touches_one_block() {
         None,
     );
 
-    let after: Vec<_> = paths.iter().map(|p| sha256_file(p)).collect();
+    let ctrl = Controller::new(opts(data.path(), "ohea")).unwrap();
+    let updated: Vec<_> = (0..3)
+        .map(|i| ctrl.resolve_block_path(ContentId(ino), i))
+        .collect();
+    drop(ctrl);
+    assert_eq!(paths[0], updated[0]);
+    assert_ne!(paths[1], updated[1]);
+    assert_eq!(paths[2], updated[2]);
+    let after: Vec<_> = updated.iter().map(|p| sha256_file(p)).collect();
     assert_eq!(before[0], after[0], "block 0 was rewritten unnecessarily");
     assert_ne!(before[1], after[1], "block 1 should have changed");
     assert_eq!(before[2], after[2], "block 2 was rewritten unnecessarily");
@@ -1615,10 +1622,7 @@ fn sparse_file_omits_hole_blocks() {
     );
 }
 
-/// A run of reads inside one block decodes that block once. Deleting both
-/// block files partway through is what makes the cache visible: the reads
-/// that follow keep working only if they are served from the decoded copy,
-/// while the block that was never read comes back as the hole it now is.
+/// Cached authenticated bytes survive removal; an unread indexed block reports EIO.
 #[test_log::test]
 fn repeated_reads_in_one_block_decode_it_once() {
     let data = TempDir::with_prefix("backupfs_data").unwrap();
@@ -1653,10 +1657,9 @@ fn repeated_reads_in_one_block_decode_it_once() {
             pattern_check(4096, &rest);
 
             let mut second = vec![0u8; chunk];
-            f.read_exact(&mut second).unwrap();
-            assert!(
-                second.iter().all(|&b| b == 0),
-                "block 1 was never read, so its deleted file must read back as a hole"
+            assert_eq!(
+                f.read_exact(&mut second).unwrap_err().raw_os_error(),
+                Some(libc::EIO)
             );
         },
         None,
@@ -2309,17 +2312,8 @@ fn compaction_reclaims_dead_space() {
     );
 }
 
-/// Sorted list of segment file names.
-fn segment_names(data: &Path) -> Vec<String> {
-    let mut v: Vec<String> = fs::read_dir(data.join("segments"))
-        .map(|rd| {
-            rd.flatten()
-                .map(|e| e.file_name().to_string_lossy().into_owned())
-                .collect()
-        })
-        .unwrap_or_default();
-    v.sort();
-    v
+fn data_segment_inventory(data: &Path) -> Vec<(u64, u64)> {
+    crate::seglog::list_segments(&data.join("segments")).unwrap()
 }
 
 /// Regression for the recompute_live bug: a fully-live set of packed files
@@ -2343,13 +2337,13 @@ fn idle_remount_does_not_recompact_live_packed() {
         },
         None,
     );
-    let segs_before = segment_names(data.path());
+    let segs_before = data_segment_inventory(data.path());
     assert!(segs_before.len() > 1, "expected multiple segments");
 
     // Idle cycle: mount, touch nothing, unmount → compaction runs.
     with_backupfs(data.path(), "ohea".to_owned(), |_mnt| {}, None);
 
-    let segs_after = segment_names(data.path());
+    let segs_after = data_segment_inventory(data.path());
     assert_eq!(
         segs_before, segs_after,
         "idle remount recompacted live packed segments (recompute_live regression)"

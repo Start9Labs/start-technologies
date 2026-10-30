@@ -48,6 +48,7 @@ fn export_frozen_fixture_two_and_three() {
     attrs.attrs.xattrs.insert(b"user.fixture".to_vec(), b"original".to_vec());
     c.save(&attrs).unwrap();
     c.syncfs().unwrap();
+    c.save_checkpoint();
     drop(c);
     drop(fs);
     let target = root.join("v2");
@@ -64,6 +65,7 @@ fn export_frozen_fixture_two_and_three() {
     contents.flush().unwrap();
     drop(contents);
     c.syncfs().unwrap();
+    c.save_checkpoint();
     drop(c);
     drop(fs);
     let target = root.join("v3");

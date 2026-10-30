@@ -50,7 +50,6 @@ mod non_fuse_tests {
             file_size_padding: None,
             readonly: false,
             idmapped: false,
-            enable_snapshots: false,
         })
         .unwrap()
     }
