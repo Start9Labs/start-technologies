@@ -79,7 +79,7 @@ This guide covers building and contributing to the **StartOS OS product** in `pr
 
 Start from the root [AGENTS.md](../../AGENTS.md) for the shared toolchain (Rust, Node 24, Docker, Make, git), branch policy, and the repo-wide commit/PR conventions; this section adds the StartOS-specific setup on top.
 
-If you want to **package a service** for StartOS instead, see the [packaging guide](https://docs.start9.com/packaging). For other ways to help, see [start9.com/contribute](https://start9.com/contribute).
+If you want to **package a service** for StartOS instead, see the [packaging guide](https://docs.start9.com/packaging).
 
 ### Documentation
 
