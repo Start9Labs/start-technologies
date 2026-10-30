@@ -1,5 +1,23 @@
 use super::*;
 
+#[test]
+fn range_reader_reuses_its_open_file_and_switches_to_other_segments() {
+    let data = tempfile::tempdir().unwrap();
+    let first = data.path().join("first");
+    let second = data.path().join("second");
+    std::fs::write(&first, vec![0x31; 8192]).unwrap();
+    std::fs::write(&second, vec![0x42; 8192]).unwrap();
+    let mut reader = RangeReader::default();
+    let mut bytes = [0; 16];
+    reader.read_exact(&first, 0, &mut bytes).unwrap();
+    assert_eq!(bytes, [0x31; 16]);
+    std::fs::remove_file(&first).unwrap();
+    reader.read_exact(&first, 4096, &mut bytes).unwrap();
+    assert_eq!(bytes, [0x31; 16]);
+    reader.read_exact(&second, 0, &mut bytes).unwrap();
+    assert_eq!(bytes, [0x42; 16]);
+}
+
 struct RecordingFile {
     file: std::fs::File,
     reads: RefCell<Vec<(usize, u64)>>,

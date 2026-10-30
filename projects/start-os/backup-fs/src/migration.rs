@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chacha20::Key;
 use log::warn;
@@ -117,6 +117,18 @@ fn migrate_object(
     file.save_fast()
 }
 
+fn retire_sources(backing: &File, sources: &mut Vec<PathBuf>) -> BkfsResult<()> {
+    if sources.is_empty() {
+        return Ok(());
+    }
+    crate::util::sync_filesystem(backing)?;
+    for source in sources.drain(..) {
+        fs::remove_file(source)?;
+    }
+    crate::util::sync_filesystem(backing)?;
+    Ok(())
+}
+
 /// Requires the exclusive store lock and authenticated pending marker.
 pub(crate) fn reseal_store(data: &Path, key: &Key, constants: Constants) -> BkfsResult<()> {
     let dir = data.join("segments");
@@ -230,28 +242,52 @@ pub(crate) fn reseal_store(data: &Path, key: &Key, constants: Constants) -> Bkfs
     let mut roots = convert_roots(&source.roots, &locations);
     let inventory = Inventory::load(data)?;
     let mut writer = None;
+    let backing = File::open(data)?;
+    let mut retired = Vec::new();
     for id in inventory.legacy_ids() {
         let token = vault::migration_version(key, id)?;
         let version = ObjectVersion::Version(token);
-        migrate_object(
-            &id.path(data, None).unwrap(),
-            &id.path(data, Some(version)).unwrap(),
-            key,
-            Binding::Object { id, version: token },
-        )?;
-        if !stable.contains_key(&id) {
-            let record = seglog::seal_object(key, constants.ecc(), id, version)?;
-            if writer.is_none() {
-                writer = Some(SegmentWriter::new(&dir, constants.segment_size)?);
+        let original = id.path(data, None).unwrap();
+        let mut stage = || -> BkfsResult<()> {
+            migrate_object(
+                &original,
+                &id.path(data, Some(version)).unwrap(),
+                key,
+                Binding::Object { id, version: token },
+            )?;
+            if !stable.contains_key(&id) {
+                let record = seglog::seal_object(key, constants.ecc(), id, version)?;
+                if writer.is_none() {
+                    writer = Some(SegmentWriter::new(&dir, constants.segment_size)?);
+                }
+                let seq = source.next_seq;
+                source.advance_sequence(seq)?;
+                let location = writer.as_mut().unwrap().append(seq, &record)?;
+                stable.insert(id, location);
             }
-            let seq = source.next_seq;
-            source.advance_sequence(seq)?;
-            let location = writer.as_mut().unwrap().append(seq, &record)?;
-            stable.insert(id, location);
+            Ok(())
+        };
+        if let Err(error) = stage() {
+            if !matches!(&error.kind, BkfsErrorKind::Io(io) if io.raw_os_error() == Some(libc::ENOSPC))
+                || retired.is_empty()
+            {
+                return Err(error);
+            }
+            retire_sources(&backing, &mut retired)?;
+            stage()?;
+        }
+        retired.push(original);
+        if retired.len() >= crate::util::sync_batch() {
+            retire_sources(&backing, &mut retired)?;
         }
     }
-    for (&id, &location) in &stable {
-        roots.objects.entry(id).or_insert(location);
+    retire_sources(&backing, &mut retired)?;
+    for references in source.storage.values() {
+        references.visit_objects(key, |id| {
+            if let Some(&location) = stable.get(&id) {
+                roots.objects.entry(id).or_insert(location);
+            }
+        });
     }
     let counters = Counters {
         next_seq: source.next_seq,

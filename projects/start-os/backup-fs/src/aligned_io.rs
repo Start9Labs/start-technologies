@@ -1,14 +1,35 @@
 use std::alloc::{self, Layout};
 use std::cell::RefCell;
+use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::fs::FileExt;
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::atomic_file::AtomicFile;
 use crate::error::BkfsResult;
+
+#[derive(Default)]
+pub(crate) struct RangeReader {
+    cached: Option<(PathBuf, BufferedDirectFile<File>)>,
+}
+
+impl RangeReader {
+    pub fn read_exact(&mut self, path: &Path, offset: u64, bytes: &mut [u8]) -> io::Result<()> {
+        if self.cached.as_ref().map(|(cached, _)| cached.as_path()) != Some(path) {
+            self.cached = Some((
+                path.to_owned(),
+                BufferedDirectFile::read_only(File::open(path)?),
+            ));
+        }
+        let file = &self.cached.as_ref().unwrap().1;
+        file.prefetch_read(offset)?;
+        file.read_exact_at(bytes, offset)
+    }
+}
 
 const BLOCK_SIZE: usize = 4096;
 const ALIGN_MASK: usize = BLOCK_SIZE - 1;
@@ -287,13 +308,21 @@ pub struct BufferedDirectFile<F: FileExt + AsRawFd> {
 
 impl<F: FileExt + AsRawFd> BufferedDirectFile<F> {
     pub fn new(file: F) -> io::Result<Self> {
-        let flush_chunk = flush_chunk_for(file.as_raw_fd());
         let ring = if uring_disabled() {
             None
         } else {
             Some(new_ring()?)
         };
-        Ok(Self {
+        Ok(Self::with_ring(file, ring))
+    }
+
+    pub(crate) fn read_only(file: F) -> Self {
+        Self::with_ring(file, None)
+    }
+
+    fn with_ring(file: F, ring: Option<io_uring::IoUring>) -> Self {
+        let flush_chunk = flush_chunk_for(file.as_raw_fd());
+        Self {
             file: Some(file),
             state: RefCell::new(BufState {
                 buf: AlignedBuf::new(BUF_CAP),
@@ -307,7 +336,7 @@ impl<F: FileExt + AsRawFd> BufferedDirectFile<F> {
                 flush_chunk,
                 written_len: None,
             }),
-        })
+        }
     }
 
     /// Caches the enclosing window without moving the stream position.

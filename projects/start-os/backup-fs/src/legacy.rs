@@ -5,7 +5,7 @@ use chacha20::Key;
 use serde::{Deserialize, Serialize};
 
 use crate::error::BkfsResult;
-use crate::objects::ObjectId;
+use crate::objects::{ObjectId, StorageReferences};
 use crate::seglog::{self, Record, RecordKey, SegMeta};
 use crate::snapshot::SnapshotInfo;
 
@@ -48,6 +48,7 @@ pub(crate) struct Source {
     pub snapshots: BTreeMap<String, Snapshot>,
     pub next_seq: u64,
     pub max_inode: u64,
+    pub storage: HashMap<u64, StorageReferences>,
     floor: u64,
     winning: HashMap<RecordKey, u64>,
 }
@@ -118,6 +119,7 @@ impl Source {
             max_inode: durable.max_inode,
             floor: durable.next_seq,
             winning: HashMap::new(),
+            storage: HashMap::new(),
         })
     }
 
@@ -127,20 +129,32 @@ impl Source {
     }
 
     pub fn observe(&mut self, record: &Record, seq: u64, location: Location) -> BkfsResult<()> {
-        if seq < self.floor {
-            return Ok(());
+        if seq >= self.floor {
+            self.advance_sequence(seq)?;
+            let key = record.key();
+            if let RecordKey::Inode(id) = key {
+                self.max_inode = self.max_inode.max(id);
+            }
+            if !self.winning.get(&key).is_some_and(|&winning| winning > seq) {
+                self.winning.insert(key, seq);
+                self.roots
+                    .update(key, (!record.is_tombstone()).then_some(location));
+            }
         }
-        self.advance_sequence(seq)?;
-        let key = record.key();
-        if let RecordKey::Inode(id) = key {
-            self.max_inode = self.max_inode.max(id);
+        match record {
+            Record::Inode { inode, attrs }
+                if self.roots.index.get(inode).is_some_and(|selected| {
+                    selected.segment == location.segment && selected.offset == location.offset
+                }) =>
+            {
+                self.storage
+                    .insert(*inode, StorageReferences::for_inode(*inode, attrs));
+            }
+            Record::Tombstone { inode } if !self.roots.index.contains_key(inode) => {
+                self.storage.remove(inode);
+            }
+            _ => {}
         }
-        if self.winning.get(&key).is_some_and(|&winning| winning > seq) {
-            return Ok(());
-        }
-        self.winning.insert(key, seq);
-        self.roots
-            .update(key, (!record.is_tombstone()).then_some(location));
         Ok(())
     }
 }

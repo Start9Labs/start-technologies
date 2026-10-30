@@ -35,6 +35,42 @@ fn inline(log: &SegmentLog, id: u64) -> Vec<u8> {
 }
 
 #[test]
+fn bulk_reads_use_physical_order_and_validate_each_expected_key() {
+    let data = tempfile::tempdir().unwrap();
+    let mut log = initial(data.path());
+    for id in [3, 1, 2] {
+        log.put(Inode(id), &attrs(b"value")).unwrap();
+    }
+    log.sync().unwrap();
+    let mut observed = Vec::new();
+    log.visit_records(
+        [1, 2, 3]
+            .into_iter()
+            .map(|id| (RecordKey::Inode(id), log.roots().index.get(&id).unwrap())),
+        |record| {
+            observed.push(record.key());
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        observed,
+        vec![
+            RecordKey::Inode(3),
+            RecordKey::Inode(1),
+            RecordKey::Inode(2)
+        ]
+    );
+    let reference = log.roots().index.get(&1).unwrap();
+    assert!(log
+        .visit_records(
+            std::iter::once((RecordKey::Inode(99), reference)),
+            |_| panic!("wrong identity reached caller")
+        )
+        .is_err());
+}
+
+#[test]
 fn idle_writable_opens_do_not_create_data_segments() {
     let data = tempfile::tempdir().unwrap();
     let log = initial(data.path());

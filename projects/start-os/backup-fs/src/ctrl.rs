@@ -4,7 +4,7 @@ use std::io;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use chacha20::Key;
 use fuser::FileType;
@@ -519,35 +519,27 @@ impl Controller {
     ) -> BkfsResult<(HashSet<ObjectId>, HashSet<u64>)> {
         let mut ids = HashSet::new();
         let mut packed = HashSet::new();
-        for (&inode, &loc) in &roots.index {
-            let seglog::Record::Inode { attrs, .. } =
-                log.read_indexed(seglog::RecordKey::Inode(inode), loc)?
-            else {
-                return Err(crate::error::BkfsError::unsupported("invalid inode root"));
-            };
-            match attrs.contents {
-                FileData::File(content) => {
-                    for idx in 0..crate::blockstore::block_count(attrs.size) {
-                        let id = self.block_id(content, idx);
-                        if roots.objects.contains_key(&id) {
-                            ids.insert(id);
-                        }
+        log.visit_records(
+            roots
+                .index
+                .iter()
+                .map(|(&inode, loc)| (seglog::RecordKey::Inode(inode), loc)),
+            |record| {
+                let seglog::Record::Inode { inode, attrs } = record else {
+                    return Err(crate::error::BkfsError::unsupported("invalid inode root"));
+                };
+                let references = crate::objects::StorageReferences::for_inode(inode, &attrs);
+                if let Some(content) = references.packed() {
+                    packed.insert(content);
+                }
+                references.visit_objects(self.key(), |id| {
+                    if roots.objects.contains_key(&id) {
+                        ids.insert(id);
                     }
-                }
-                FileData::Packed(content) => {
-                    packed.insert(content.0);
-                }
-                FileData::Directory(dir) => {
-                    for (gen, idx) in dir.bucket_ids() {
-                        let id = self.dir_bucket_id(Inode(inode), gen, idx);
-                        if roots.objects.contains_key(&id) {
-                            ids.insert(id);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
+                });
+                Ok(())
+            },
+        )?;
         Ok((ids, packed))
     }
 
@@ -622,12 +614,23 @@ impl Controller {
         ids: impl Iterator<Item = ObjectId>,
         keep: &mut HashSet<PathBuf>,
     ) -> BkfsResult<()> {
-        for id in ids {
-            if let Some(ObjectVersion::Version(token)) = log.object_in(roots, id)? {
-                keep.insert(self.object_reference(id, token).0);
-            }
-        }
-        Ok(())
+        log.visit_records(
+            ids.filter_map(|id| {
+                roots
+                    .objects
+                    .get(&id)
+                    .map(|loc| (seglog::RecordKey::Object(id), loc))
+            }),
+            |record| {
+                let seglog::Record::Object { id, version } = record else {
+                    return Err(BkfsError::unsupported("invalid object root"));
+                };
+                if let ObjectVersion::Version(token) = version {
+                    keep.insert(self.object_reference(id, token).0);
+                }
+                Ok(())
+            },
+        )
     }
 
     pub(crate) fn collect_garbage(&self) -> BkfsResult<usize> {
@@ -707,25 +710,11 @@ impl Controller {
             .map_err(|error| io::Error::from_raw_os_error(error.to_errno_log()))
     }
 
-    /// Batch threshold for group-commit. Overridden via
-    /// `BACKUPFS_SYNC_BATCH`. Larger batches amortize more per-fsync
-    /// cost but widen the durability window.
-    fn sync_batch() -> usize {
-        static BATCH: OnceLock<usize> = OnceLock::new();
-        *BATCH.get_or_init(|| {
-            std::env::var("BACKUPFS_SYNC_BATCH")
-                .ok()
-                .and_then(|s| s.parse::<usize>().ok())
-                .filter(|&n| n > 0)
-                .unwrap_or(256)
-        })
-    }
-
     /// Account for one fast save. When the batch threshold is reached,
     /// issue a syncfs that flushes everything accumulated.
     pub fn tick_save(&self) -> io::Result<()> {
         let n = self.0.pending_saves.fetch_add(1, Ordering::Relaxed) + 1;
-        if n >= Self::sync_batch() {
+        if n >= crate::util::sync_batch() {
             self.syncfs()?;
         }
         Ok(())

@@ -177,6 +177,32 @@ fn frozen_legacy_index_cache_is_used_only_for_its_matching_segment_inventory() {
 }
 
 #[test]
+fn legacy_orphans_beyond_eof_do_not_become_visible_on_growth() {
+    let data = tempfile::tempdir().unwrap();
+    crate::legacy::fixture(data.path(), 2);
+    let sb =
+        crate::superblock::Superblock::load(&data.path().join("superblock"), "snapshots", true)
+            .unwrap();
+    let original = crate::objects::ObjectId::block(&sb.key, 4, 0)
+        .path(data.path(), None)
+        .unwrap();
+    let orphan = crate::objects::ObjectId::block(&sb.key, 4, 4)
+        .path(data.path(), None)
+        .unwrap();
+    std::fs::create_dir_all(orphan.parent().unwrap()).unwrap();
+    std::fs::copy(original, &orphan).unwrap();
+    let fs = BackupFS::new(options(data.path())).unwrap();
+    assert!(!orphan.exists());
+    let mut contents = Contents::open(ctrl(&fs), Inode(4)).unwrap();
+    contents.resize(5 * CHUNK_SIZE).unwrap();
+    contents.flush().unwrap();
+    let bytes = read_inode(&fs, 4);
+    assert!(bytes[4 * CHUNK_SIZE as usize..]
+        .iter()
+        .all(|&byte| byte == 0));
+}
+
+#[test]
 fn frozen_format_two_upgrades_without_losing_inline_packed_block_or_attribute_data() {
     let data = tempfile::tempdir().unwrap();
     crate::legacy::fixture(data.path(), 2);
@@ -238,6 +264,13 @@ fn interrupted_upgrade_does_not_replay_migration_pointers_over_live_deletions() 
     let blocker = data.path().join("segments/state.tmp");
     std::fs::create_dir(&blocker).unwrap();
     assert!(BackupFS::new(options(data.path())).is_err());
+    assert_eq!(
+        crate::objects::Inventory::load(data.path())
+            .unwrap()
+            .legacy_ids()
+            .count(),
+        0
+    );
     let mut readonly = options(data.path());
     readonly.readonly = true;
     assert!(BackupFS::new(readonly).is_err());

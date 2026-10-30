@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use chacha20::Key;
 use serde::{Deserialize, Serialize};
 
-use crate::aligned_io::BufferedDirectFile;
+use crate::aligned_io::RangeReader;
 use crate::atomic_file::AtomicFile;
 use crate::error::{BkfsError, BkfsResult, BkfsResultExt};
 use crate::metadata::Reference;
@@ -71,7 +71,7 @@ struct Transactions<'a> {
     dir: &'a Path,
     key: &'a Key,
     pending: Option<IndexReference>,
-    cached: Option<(u64, BufferedDirectFile<File>)>,
+    reader: RangeReader,
 }
 
 impl Iterator for Transactions<'_> {
@@ -90,20 +90,9 @@ impl Iterator for Transactions<'_> {
                     len,
                     tag,
                 } => {
-                    if self.cached.as_ref().map(|(id, _)| *id) != Some(segment) {
-                        self.cached = Some((
-                            segment,
-                            BufferedDirectFile::new(
-                                File::open(journal_path(self.dir, segment))
-                                    .map_err(BkfsError::referenced_io)?,
-                            )?,
-                        ));
-                    }
-                    let file = &self.cached.as_ref().unwrap().1;
-                    file.prefetch_read(offset)
-                        .map_err(BkfsError::referenced_io)?;
                     let mut blob = vec![0; len as usize];
-                    file.read_exact_at(&mut blob, offset)
+                    self.reader
+                        .read_exact(&journal_path(self.dir, segment), offset, &mut blob)
                         .map_err(BkfsError::referenced_io)?;
                     let plain = vault::open_bound(&blob, self.key, Binding::Transaction)?
                         .verify_reference(&tag)?;
@@ -127,7 +116,7 @@ impl View {
             dir,
             key,
             pending: self.tip,
-            cached: None,
+            reader: RangeReader::default(),
         }
     }
 
@@ -361,10 +350,7 @@ impl State {
     }
 
     fn sync_backing(&self) -> BkfsResult<()> {
-        if unsafe { libc::syncfs(self.directory.as_raw_fd()) } < 0 {
-            return Err(std::io::Error::last_os_error().into());
-        }
-        Ok(())
+        Ok(crate::util::sync_filesystem(&self.directory)?)
     }
 
     pub fn commit(

@@ -461,6 +461,13 @@ fn legacy_snapshot_truncate_remount_regrow_keeps_holes_zeroed() {
 fn retired_legacy_files_cannot_resurrect_after_catalog_publication() {
     let data = tempfile::tempdir().unwrap();
     let inode = create_legacy_block_file(data.path());
+    let old =
+        crate::superblock::Superblock::load(&data.path().join("superblock"), "snapshots", true)
+            .unwrap();
+    let original = crate::objects::ObjectId::block(&old.key, inode.0, 3)
+        .path(data.path(), None)
+        .unwrap();
+    let raw = std::fs::read(&original).unwrap();
     let (key, ecc) = {
         let mut fs = BackupFS::new(config(data.path())).unwrap();
         let c = ctrl(&fs);
@@ -481,6 +488,8 @@ fn retired_legacy_files_cannot_resurrect_after_catalog_publication() {
     log.retain_storage(&live, &packed).unwrap();
     log.save_checkpoint(&[]).unwrap();
     drop(log);
+    assert!(!original.exists());
+    std::fs::write(&original, raw).unwrap();
     let fs = BackupFS::new(config(data.path())).unwrap();
     let c = ctrl(&fs);
     assert!(c.block_path(ContentId(inode.0), 3).exists());

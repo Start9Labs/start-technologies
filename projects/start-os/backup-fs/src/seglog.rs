@@ -14,6 +14,22 @@ use crate::serde::{data_config, decode, encode};
 use crate::state::{Counters, State, View};
 use crate::vault::{self, AuthenticationTag, Binding, EccParams};
 
+fn decode_frame(key: &Key, loc: Location, bytes: &[u8]) -> BkfsResult<Record> {
+    let (seq, payload_len) =
+        parse_header(bytes).ok_or_else(|| BkfsError::unsupported("invalid log header"))?;
+    if seq != loc.seq
+        || payload_len != loc.payload_len as usize
+        || frame_size(payload_len) != loc.len as u64
+    {
+        return Err(BkfsError::unsupported("log reference mismatch"));
+    }
+    let payload = bytes
+        .get(HEADER_LEN..HEADER_LEN + payload_len)
+        .ok_or_else(|| BkfsError::unsupported("truncated log frame"))?;
+    let plain = vault::open_bound(payload, key, Binding::Record)?.verify_reference(&loc.tag)?;
+    decode(&plain, data_config())
+}
+
 const MAGIC: [u8; 4] = *b"BKL1";
 const HEADER_LEN: usize = 24;
 const ALIGN: u64 = 8;
@@ -54,6 +70,13 @@ impl Record {
             Self::Content { id, .. } | Self::ContentTombstone { id } => RecordKey::Content(*id),
             Self::Object { id, .. } => RecordKey::Object(*id),
         }
+    }
+
+    fn verify_key(self, key: RecordKey) -> BkfsResult<Self> {
+        if self.key() != key {
+            return Err(BkfsError::unsupported("log record identity mismatch"));
+        }
+        Ok(self)
     }
 
     pub(crate) fn is_tombstone(&self) -> bool {
@@ -465,28 +488,32 @@ impl SegmentLog {
     }
 
     pub fn read_at(&self, loc: Location) -> BkfsResult<Record> {
-        let bytes = self.read_raw_frame(loc)?;
-        let (seq, payload_len) =
-            parse_header(&bytes).ok_or_else(|| BkfsError::unsupported("invalid log header"))?;
-        if seq != loc.seq
-            || payload_len != loc.payload_len as usize
-            || frame_size(payload_len) != loc.len as u64
-        {
-            return Err(BkfsError::unsupported("log reference mismatch"));
-        }
-        let payload = bytes
-            .get(HEADER_LEN..HEADER_LEN + payload_len)
-            .ok_or_else(|| BkfsError::unsupported("truncated log frame"))?;
-        let plain =
-            vault::open_bound(payload, &self.key, Binding::Record)?.verify_reference(&loc.tag)?;
-        decode(&plain, data_config())
+        decode_frame(&self.key, loc, &self.read_raw_frame(loc)?)
     }
     pub(crate) fn read_indexed(&self, key: RecordKey, loc: Location) -> BkfsResult<Record> {
-        let record = self.read_at(loc)?;
-        if record.key() != key {
-            return Err(BkfsError::unsupported("log record identity mismatch"));
+        self.read_at(loc)?.verify_key(key)
+    }
+
+    pub(crate) fn visit_records<'a>(
+        &self,
+        references: impl Iterator<Item = (RecordKey, &'a Location)>,
+        mut visit: impl FnMut(Record) -> BkfsResult<()>,
+    ) -> BkfsResult<()> {
+        let mut references: Vec<_> = references.collect();
+        references.sort_unstable_by_key(|(_, loc)| (loc.segment, loc.offset));
+        let mut reader = crate::aligned_io::RangeReader::default();
+        for (key, &loc) in references {
+            let mut bytes = vec![0; loc.len as usize];
+            reader
+                .read_exact(
+                    &segment_path(self.directory(), loc.segment),
+                    loc.offset,
+                    &mut bytes,
+                )
+                .map_err(BkfsError::referenced_io)?;
+            visit(decode_frame(&self.key, loc, &bytes)?.verify_key(key)?)?;
         }
-        Ok(record)
+        Ok(())
     }
     fn read_raw_frame(&self, loc: Location) -> BkfsResult<Vec<u8>> {
         let mut bytes = vec![0; loc.len as usize];

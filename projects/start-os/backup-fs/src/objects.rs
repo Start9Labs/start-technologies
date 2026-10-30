@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::{BkfsError, BkfsResult};
+use crate::inode::{Attributes, FileData};
 use crate::util::hex;
 
 const HASH_BYTES: usize = 16;
@@ -18,6 +19,69 @@ const SHARD_BYTES: usize = 2;
 pub(crate) struct ObjectId {
     directory: bool,
     hash: [u8; HASH_BYTES],
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum StorageReferences {
+    None,
+    Blocks {
+        content: u64,
+        count: u64,
+    },
+    Packed(u64),
+    Buckets {
+        inode: u64,
+        generation: u64,
+        count: u32,
+    },
+}
+
+impl StorageReferences {
+    pub fn for_inode(inode: u64, attrs: &Attributes) -> Self {
+        match &attrs.contents {
+            FileData::File(content) => Self::Blocks {
+                content: content.0,
+                count: crate::blockstore::block_count(attrs.size),
+            },
+            FileData::Packed(content) => Self::Packed(content.0),
+            FileData::Directory(directory) => {
+                let (generation, count) = directory.bucket_geometry();
+                Self::Buckets {
+                    inode,
+                    generation,
+                    count,
+                }
+            }
+            _ => Self::None,
+        }
+    }
+
+    pub fn packed(self) -> Option<u64> {
+        match self {
+            Self::Packed(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub fn visit_objects(self, key: &Key, mut visit: impl FnMut(ObjectId)) {
+        match self {
+            Self::Blocks { content, count } => {
+                for idx in 0..count {
+                    visit(ObjectId::block(key, content, idx));
+                }
+            }
+            Self::Buckets {
+                inode,
+                generation,
+                count,
+            } => {
+                for idx in 0..count {
+                    visit(ObjectId::bucket(key, inode, generation, idx));
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 pub(crate) type VersionToken = [u8; 16];
@@ -89,7 +153,11 @@ impl ObjectId {
         data.join(if directory { "dirents" } else { "contents" })
     }
 
-    fn legacy(directory: bool, shard: &std::ffi::OsStr, file: &std::ffi::OsStr) -> Option<Self> {
+    pub(crate) fn legacy(
+        directory: bool,
+        shard: &std::ffi::OsStr,
+        file: &std::ffi::OsStr,
+    ) -> Option<Self> {
         let shard = shard.to_str()?;
         let file = file.to_str()?;
         if shard.len() != SHARD_BYTES * 2 || file.len() != (HASH_BYTES - SHARD_BYTES) * 2 {

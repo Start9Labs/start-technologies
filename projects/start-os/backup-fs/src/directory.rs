@@ -119,12 +119,11 @@ impl DirectoryContents {
         Self(DirEntries::Inline(OrdMap::new()))
     }
 
-    pub(crate) fn bucket_ids(&self) -> impl Iterator<Item = (u64, u32)> {
-        let (gen, count) = match self.0 {
+    pub(crate) fn bucket_geometry(&self) -> (u64, u32) {
+        match self.0 {
             DirEntries::Inline(_) => (0, 0),
             DirEntries::Spilled { gen, buckets, .. } => (gen, buckets),
-        };
-        (0..count).map(move |idx| (gen, idx))
+        }
     }
 
     pub fn len(&self) -> u64 {

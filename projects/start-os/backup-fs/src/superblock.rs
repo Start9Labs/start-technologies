@@ -759,14 +759,24 @@ mod tests {
         }
     }
 
+    fn migrated_object(data: &Path, original: &Path, key: &Key) -> (PathBuf, vault::Binding) {
+        let id = crate::objects::ObjectId::legacy(
+            original.starts_with(data.join("dirents")),
+            original.parent().unwrap().file_name().unwrap(),
+            original.file_name().unwrap(),
+        )
+        .unwrap();
+        let version = vault::migration_version(key, id).unwrap();
+        (
+            id.path(data, Some(crate::objects::ObjectVersion::Version(version)))
+                .unwrap(),
+            vault::Binding::Object { id, version },
+        )
+    }
+
     fn migrated_plain(data: &Path, original: &Path) -> Vec<u8> {
-        let inventory = crate::objects::Inventory::load(data).unwrap();
-        let id = inventory
-            .legacy_ids()
-            .find(|id| id.path(data, None).as_deref() == Some(original))
-            .unwrap();
         let ctrl = crate::ctrl::Controller::new(options(data, true)).unwrap();
-        let (path, binding) = ctrl.resolve_object(id).unwrap().unwrap();
+        let (path, binding) = migrated_object(data, original, ctrl.key());
         vault::open_bound(&std::fs::read(path).unwrap(), ctrl.key(), binding)
             .unwrap()
             .plaintext
@@ -927,7 +937,11 @@ mod tests {
         let sb = Superblock::open_or_create(&primary, "password", false).unwrap();
         assert!(!sb.migration_pending);
         assert_eq!(sb.format_version, FORMAT_VERSION);
-        assert_eq!(std::fs::read(&bucket).unwrap(), damaged);
+        assert!(!bucket.exists());
+        assert_eq!(
+            std::fs::read(migrated_object(dir.path(), &bucket, &sb.key).0).unwrap(),
+            damaged
+        );
         assert_eq!(
             vault::open(&damaged, &sb.key).unwrap_err().to_errno(),
             libc::EIO
