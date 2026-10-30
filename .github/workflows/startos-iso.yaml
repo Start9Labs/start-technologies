@@ -346,6 +346,13 @@ jobs:
       - name: Set up docker QEMU
         uses: docker/setup-qemu-action@v4
 
+      # The RISE riscv64 runner ships no Node, and nodejs.org publishes no riscv64 builds.
+      - uses: actions/setup-node@v6
+        if: ${{ env.ARCH == 'riscv64' && github.event.inputs.runner != 'fast' }}
+        with:
+          node-version: ${{ env.NODEJS_VERSION }}
+          mirror: https://unofficial-builds.nodejs.org/download/release
+
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
