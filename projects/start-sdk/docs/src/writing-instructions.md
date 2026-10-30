@@ -65,6 +65,19 @@ Append `/*` to a site URL — `https://example.org/docs/*` — to confine the cr
 
 One good link beats three that muddy the index.
 
+### Connections the service starts itself
+
+A user can publish a service through a tunnel such as StartTunnel to keep their home IP private. Replies to connections that arrive on the tunnel leave through it, but connections the service starts itself — to peers, to federated servers, to pages or files it fetches — follow the service's outbound gateway, which is usually the home router. So when the parties a service connects to would learn the server's address that way, add a short paragraph near where the instructions cover that interface or feature:
+
+- **What to do:** if they publish the service through a tunnel to keep their home IP private, send its outbound traffic through that tunnel too.
+- **Who would see the home IP otherwise:** its channel peers, the other homeservers it federates with, the sites whose icons it fetches.
+- **Any setting of the package's own that already avoids it,** such as all peer traffic over Tor.
+- **That someone using the tunnel for another reason** — a port their router can't forward, for instance — has nothing to change.
+
+Say what to do, not where to do it. The outbound gateway is a StartOS setting, and its place in the UI moves between releases.
+
+Leave it out when the service starts no connections of its own (a web client whose browser does the talking), and when it has no interface a user would publish through a tunnel.
+
 ## What does not belong in instructions
 
 - **A restatement of the marketplace description.** The reader saw the short and long description before installing — opening with "Foo is a self-hosted bar" wastes their time. Start from "now what."
@@ -152,5 +165,6 @@ Use the sections that apply — a trivial service might be two paragraphs and a 
 - [ ] Every sentence is something the user could act on — no "this is typically triggered automatically by …" plumbing notes.
 - [ ] No hard-coded version numbers, image tags, or secrets.
 - [ ] Limitations section is omitted unless there is a specific, consequential surprise to flag.
+- [ ] If the service starts its own connections to parties who would learn the server's address, the instructions suggest sending its outbound traffic through the tunnel it is published on — see [Connections the service starts itself](#connections-the-service-starts-itself).
 - [ ] A `## Documentation` section lists the upstream documentation URLs, each with a few words of context, one `- [Title](URL) — context` bullet per line, each URL checked against [Choosing documentation URLs](#choosing-documentation-urls). No added marketing / donation / project-home / support links.
 - [ ] Renders cleanly in the StartOS Instructions tab on a real install.
