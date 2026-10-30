@@ -131,6 +131,7 @@ export class MockApiService extends ApiService {
   private readonly storage = inject(WA_SESSION_STORAGE)
   private readonly cache = inject(PATCH_CACHE)
   private readonly revertTime = 1800
+  private readonly conversionJobs: T.ServerStatus['backupConversions'] = {}
   private readonly pushSubscriptions = new Map<
     string,
     Params<'notification.push.subscribe'>
@@ -797,7 +798,24 @@ export class MockApiService extends ApiService {
     },
     'backup.target.list': async params => {
       await pauseFor(2000)
-      return Mock.BackupTargets
+      return structuredClone(Mock.BackupTargets)
+    },
+    'backup.target.convert': async params => {
+      const backup =
+        Mock.BackupTargets[params.targetId]?.startOs[params.serverId]
+      if (!backup) throw new Error('Backup not found')
+      const jobs = (this.conversionJobs[params.targetId] ??= {})
+      if (jobs[params.serverId]?.state === 'running')
+        throw new Error('Conversion already running')
+      jobs[params.serverId] = {
+        state: 'running',
+        progress: { overall: false, phases: [] },
+        error: null,
+      }
+      backup.formatStatus = 'interrupted'
+      await this.publishConversions()
+      void this.simulateConversion(params, backup)
+      return null
     },
     'backup.target.cifs.add': async params => {
       await pauseFor(2000)
@@ -2376,6 +2394,54 @@ export class MockApiService extends ApiService {
           ? 'gateway'
           : 'public-fallback',
     }
+  }
+
+  private async publishConversions(): Promise<void> {
+    await this.mockRevision<T.ServerStatus['backupConversions']>([
+      {
+        op: PatchOp.REPLACE,
+        path: '/serverInfo/statusInfo/backupConversions',
+        value: structuredClone(this.conversionJobs),
+      },
+    ])
+  }
+
+  private async simulateConversion(
+    params: Params<'backup.target.convert'>,
+    backup: T.StartOsRecoveryInfo,
+  ): Promise<void> {
+    const job = this.conversionJobs[params.targetId]![params.serverId]!
+    for (const [name, units] of [
+      ['Inspecting backup', 'steps'],
+      ['Converting metadata', 'bytes'],
+      ['Scanning backup objects', 'steps'],
+      ['Converting data objects', 'steps'],
+      ['Finalizing conversion', 'steps'],
+    ] as const) {
+      const phase: T.NamedProgress = { name, progress: false }
+      job.progress.phases.push(phase)
+      for (const done of [0, 25, 50, 75, 100]) {
+        phase.progress = { done, total: 100, units }
+        if (
+          name === 'Converting data objects' &&
+          done === 25 &&
+          params.password === 'interrupt'
+        ) {
+          job.state = 'failed'
+          job.error =
+            'Conversion interrupted. Resume it when the target is available.'
+          await this.publishConversions()
+          return
+        }
+        await this.publishConversions()
+        await pauseFor(700)
+      }
+      phase.progress = true
+    }
+    backup.formatStatus = 'current'
+    job.state = 'complete'
+    job.progress.overall = true
+    await this.publishConversions()
   }
 
   private mockData(path: string): any {

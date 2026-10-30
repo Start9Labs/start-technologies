@@ -1,21 +1,24 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use patch_db::HasModel;
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
 use tokio::task;
 use tracing::instrument;
 use zeroize::Zeroizing;
 
 use super::BackupTargetId;
 use crate::context::RpcContext;
-use crate::db::model::DatabaseModel;
+use crate::db::model::{Database, DatabaseModel};
 use crate::disk::mount::backup::BackupMountGuard;
 use crate::disk::mount::filesystem::{ReadWrite, backupfs};
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker};
+use crate::shutdown::Shutdown;
 use crate::util::future::NonDetachingJoinHandle;
 
 /// Lifecycle of a daemon-owned conversion attempt.
@@ -114,7 +117,7 @@ pub async fn start(
         password,
     }: ConvertParams,
 ) -> Result<(), Error> {
-    let mut shutdown = ctx.shutdown.subscribe();
+    let shutdown = ctx.shutdown.subscribe();
     let password = Zeroizing::new(password.decrypt(&ctx)?);
     let fs = target_id.clone().load(&ctx.db.peek().await)?;
     let guard = TmpMountGuard::mount(&fs, ReadWrite).await?;
@@ -161,24 +164,57 @@ pub async fn start(
         guard.unmount().await.log_err();
         return Err(error);
     }
-    let target_for_progress = target_id.to_string();
-    let server_for_progress = server_id.clone();
-    let progress_sync = NonDetachingJoinHandle::from(task::spawn(progress.clone().sync_to_db(
-        ctx.db.clone(),
-        move |db| {
-            Some(
-                db.as_public_mut()
-                    .as_server_info_mut()
-                    .as_status_info_mut()
-                    .as_backup_conversions_mut()
-                    .as_idx_mut(&target_for_progress)?
-                    .as_idx_mut(&server_for_progress)?
-                    .as_progress_mut(),
-            )
-        },
-        Some(Duration::from_millis(300)),
-    )));
-    task::spawn(async move {
+    let conversion = PreparedConversion {
+        target_id,
+        server_id,
+        guard,
+        data,
+        key,
+    };
+    let db = ctx.db.clone();
+    task::spawn(async move { conversion.run(db, progress, shutdown).await.log_err() });
+    Ok(())
+}
+
+struct PreparedConversion<G> {
+    target_id: BackupTargetId,
+    server_id: String,
+    guard: G,
+    data: PathBuf,
+    key: Zeroizing<String>,
+}
+
+impl<G: GenericMountGuard> PreparedConversion<G> {
+    async fn run(
+        self,
+        db: TypedPatchDb<Database>,
+        progress: FullProgressTracker,
+        mut shutdown: broadcast::Receiver<Option<Shutdown>>,
+    ) -> Result<(), Error> {
+        let Self {
+            target_id,
+            server_id,
+            guard,
+            data,
+            key,
+        } = self;
+        let target_for_progress = target_id.to_string();
+        let server_for_progress = server_id.clone();
+        let progress_sync = NonDetachingJoinHandle::from(task::spawn(progress.clone().sync_to_db(
+            db.clone(),
+            move |db| {
+                Some(
+                    db.as_public_mut()
+                        .as_server_info_mut()
+                        .as_status_info_mut()
+                        .as_backup_conversions_mut()
+                        .as_idx_mut(&target_for_progress)?
+                        .as_idx_mut(&server_for_progress)?
+                        .as_progress_mut(),
+                )
+            },
+            Some(Duration::from_millis(300)),
+        )));
         let result = tokio::select! {
             result = backupfs::convert(&data, &key, &progress) => result,
             _ = shutdown.recv() => Err(Error::new(eyre!("{}", t!("backup.conversion.interrupted")), ErrorKind::Backup)),
@@ -207,23 +243,20 @@ pub async fn start(
             server = server_id
         )
         .to_string();
-        ctx.db
-            .mutate(|db| {
-                let mut active = jobs(db)?;
-                active
-                    .entry(target_id.to_string())
-                    .or_default()
-                    .insert(server_id.clone(), status.clone());
-                db.as_public_mut()
-                    .as_server_info_mut()
-                    .as_status_info_mut()
-                    .as_backup_conversions_mut()
-                    .ser(&active)?;
-                notify(db, None, level, title, message, ())
-            })
-            .await
-            .result
-            .log_err();
-    });
-    Ok(())
+        db.mutate(|db| {
+            let mut active = jobs(db)?;
+            active
+                .entry(target_id.to_string())
+                .or_default()
+                .insert(server_id.clone(), status.clone());
+            db.as_public_mut()
+                .as_server_info_mut()
+                .as_status_info_mut()
+                .as_backup_conversions_mut()
+                .ser(&active)?;
+            notify(db, None, level, title, message, ())
+        })
+        .await
+        .result
+    }
 }
