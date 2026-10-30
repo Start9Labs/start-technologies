@@ -40,20 +40,30 @@ cargo build -p start-registry --bin registrybox
 
 Configuration is read from CLI flags and a config file (`-c <path>`; default search includes the standard StartOS config path). Key flags:
 
-| Flag                    | Purpose                                         |
-| ----------------------- | ----------------------------------------------- |
-| `-l, --listen <addr>`   | listen address (default `127.0.0.1:5959`)       |
-| `-H, --hostname <host>` | public hostname(s) used in generated asset URLs |
-| `-p, --tor-proxy <url>` | SOCKS proxy for outbound (e.g. Tor) requests    |
-| `-d, --datadir <path>`  | data directory (default `/var/lib/startos`)     |
-| `-c, --config <path>`   | config file                                     |
+| Flag                       | Purpose                                         |
+| -------------------------- | ----------------------------------------------- |
+| `-l, --listen <addr>`      | listen address (default `127.0.0.1:5959`)       |
+| `-H, --hostname <host>`    | public hostname(s) used in generated asset URLs |
+| `-p, --tor-proxy <url>`    | SOCKS proxy for outbound (e.g. Tor) requests    |
+| `-d, --datadir <path>`     | data directory (default `/var/lib/startos`)     |
+| `-c, --config <path>`      | config file                                     |
+| `--security-notifications` | enable the OS security feed (default: false)    |
+
+Security notifications are disabled by default. To opt in, set this in that registry's config file and restart the daemon:
+
+```yaml
+registry-hostname: [registry.example.com]
+security-notifications: true
+```
+
+Disabled registries refuse `/os/security` upgrades with HTTP 403 and create no security mirror or subscription task. Clients retry with backoff. Leave alpha at the default to suppress its announcements. Release metadata and promotion retain the security flag; previously issued OS notifications are not deleted.
 
 Server state lives in `<datadir>/registry.db` (PatchDB) plus a SQLite metrics database and hosted asset files.
 
 > [!NOTE]
 > **Non-StartOS deployments only:** A separately managed reverse proxy must forward `/rpc/`,
-> `/ws/rpc/`, `/rest/rpc/`, and `/icons/`. The WebSocket route also needs HTTP/1.1 upgrade forwarding and a
-> long-lived idle timeout. StartOS-hosted registries expose all four routes through their exported
+> `/ws/rpc/`, `/rest/rpc/`, `/icons/`, and `/os/security`. The WebSocket routes also need HTTP/1.1 upgrade forwarding and a
+> long-lived idle timeout. StartOS-hosted registries expose these routes through their exported
 > `protocol: 'http'` interface automatically.
 
 ## Where things are

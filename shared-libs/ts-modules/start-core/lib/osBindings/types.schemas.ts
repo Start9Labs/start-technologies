@@ -758,6 +758,49 @@ export const GitHash: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 export const Governor: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Governor',
 })
+
+/**
+ * An original public-key export and its self-certified identity claims.
+ */
+export const GpgPublicKeyExport: z.ZodObject<{
+  /**
+   * Original armor, preserving all certificate packets and headers.
+   */
+  armored: z.ZodString
+  /**
+   * Primary-key fingerprints of the certificates in this export.
+   */
+  fingerprints: z.ZodArray<z.ZodString>
+  /**
+   * Self-certified user IDs containing names, comments, and email addresses.
+   */
+  userIds: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({
+  /**
+   * Original armor, preserving all certificate packets and headers.
+   */
+  armored: z.string().meta({
+    description:
+      'Original armor, preserving all certificate packets and headers.',
+  }),
+  /**
+   * Primary-key fingerprints of the certificates in this export.
+   */
+  fingerprints: z.array(z.string()).meta({
+    description: 'Primary-key fingerprints of the certificates in this export.',
+  }),
+  /**
+   * Self-certified user IDs containing names, comments, and email addresses.
+   */
+  userIds: z.array(z.string()).meta({
+    description:
+      'Self-certified user IDs containing names, comments, and email addresses.',
+  }),
+}).meta({
+  id: 'GpgPublicKeyExport',
+  description:
+    'An original public-key export and its self-certified identity claims.',
+})
 export const Guid: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Guid',
 })
@@ -1134,6 +1177,32 @@ export const NotificationLevel: z.ZodEnum<{
 })
 
 /**
+ * An OS update available for review.
+ */
+export const OsUpdateAvailable: z.ZodIntersection<
+  z.ZodObject<{
+    kind: z.ZodCodec<
+      z.ZodOptional<z.ZodLiteral<'os-update-available'>>,
+      z.ZodLiteral<'os-update-available'>
+    >
+  }>,
+  typeof empty
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      kind: wire(
+        z.literal('os-update-available').optional(),
+        z.literal('os-update-available'),
+      ),
+    }),
+    empty,
+  )
+  .meta({
+    id: 'OsUpdateAvailable',
+    description: 'An OS update available for review.',
+  })
+
+/**
  * An absent update preserves DNS intent; null servers select gateway DNS.
  */
 export const OutboundDnsUpdate: z.ZodObject<{
@@ -1507,7 +1576,20 @@ export const ShutdownParams: z.ZodObject<{
 }).meta({
   id: 'ShutdownParams',
 })
-export const SideloadParams: typeof empty = /* @__PURE__ */ empty.meta({
+export const SideloadParams: z.ZodObject<{
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
+}).meta({
   id: 'SideloadParams',
 })
 
@@ -2024,11 +2106,23 @@ export const AddVersionParams: z.ZodObject<{
   headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
+  gitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  expectedGitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   version: z.string(),
   headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
+  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  expectedGitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  security: wire(z.boolean().optional(), z.boolean()),
 }).meta({
   id: 'AddVersionParams',
 })
@@ -2987,10 +3081,21 @@ export const InstallParams: z.ZodObject<{
   registry: z.ZodString
   id: typeof PackageId
   version: typeof Version
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   registry: z.string(),
   id: PackageId,
   version: Version,
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
 }).meta({
   id: 'InstallParams',
 })
@@ -3330,6 +3435,17 @@ export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
+  /**
+   * Commit that produced the OS image, if recorded at publication.
+   */
+  gitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  /**
+   * Whether the release includes security fixes.
+   */
+  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   authorized: z.ZodArray<typeof Guid>
   iso: z.ZodRecord<
     z.ZodString,
@@ -3347,6 +3463,19 @@ export const OsVersionInfo: z.ZodObject<{
   headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
+  /**
+   * Commit that produced the OS image, if recorded at publication.
+   */
+  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()).meta({
+    description:
+      'Commit that produced the OS image, if recorded at publication.',
+  }),
+  /**
+   * Whether the release includes security fixes.
+   */
+  security: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Whether the release includes security fixes.',
+  }),
   authorized: z.array(Guid),
   iso: z.record(z.string(), RegistryAsset(Blake3Commitment)),
   squashfs: z.record(z.string(), RegistryAsset(Blake3Commitment)),
@@ -4023,6 +4152,61 @@ export const TestSmtpParams: z.ZodObject<{
   security: wire(SmtpSecurity.optional(), SmtpSecurity),
 }).meta({
   id: 'TestSmtpParams',
+})
+
+/**
+ * A named keyring with independent service-package and OS-update trust.
+ */
+export const TrustedKeyring: z.ZodObject<{
+  name: z.ZodString
+  /**
+   * Ed25519 public keys encoded as padded standard Base64 DER in canonical order.
+   */
+  publicKeys: z.ZodArray<typeof AnyVerifyingKey>
+  /**
+   * Original GPG exports; signing trust is determined by `public_keys`.
+   */
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
+  /**
+   * False for built-in keyrings.
+   */
+  removable: z.ZodBoolean
+  marketplace: z.ZodBoolean
+  os: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  /**
+   * Ed25519 public keys encoded as padded standard Base64 DER in canonical order.
+   */
+  publicKeys: z.array(AnyVerifyingKey).meta({
+    description:
+      'Ed25519 public keys encoded as padded standard Base64 DER in canonical order.',
+  }),
+  /**
+   * Original GPG exports; signing trust is determined by `public_keys`.
+   */
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ).meta({
+    description:
+      'Original GPG exports; signing trust is determined by `public_keys`.',
+  }),
+  /**
+   * False for built-in keyrings.
+   */
+  removable: z.boolean().meta({
+    description: 'False for built-in keyrings.',
+  }),
+  marketplace: z.boolean(),
+  os: z.boolean(),
+}).meta({
+  id: 'TrustedKeyring',
+  description:
+    'A named keyring with independent service-package and OS-update trust.',
 })
 export const UmountParams: z.ZodObject<{
   targetId: z.ZodCodec<
@@ -4954,6 +5138,10 @@ export const UpdateSystemParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
     z.ZodNullable<typeof AcceptSigners>
   >
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   targetVersion: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
@@ -4970,6 +5158,13 @@ export const UpdateSystemParams: z.ZodObject<{
   ).meta({
     description:
       'Additional signer requirements checked before starting the update.',
+  }),
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
   }),
   targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
   progress: wire(z.boolean().optional(), z.boolean()),
@@ -6015,9 +6210,9 @@ export const ServerInfo: z.ZodObject<{
     typeof ServerStatus
   >
   unreadNotificationCount: z.ZodInt
-  trustedOsUpdateSigners: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof TrustedOsUpdateSigner>>,
-    z.ZodRecord<z.ZodString, typeof TrustedOsUpdateSigner>
+  trustedKeys: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof TrustedKeyring>>,
+    z.ZodRecord<z.ZodString, typeof TrustedKeyring>
   >
   pubkey: z.ZodString
   caFingerprint: z.ZodString
@@ -6064,9 +6259,9 @@ export const ServerInfo: z.ZodObject<{
   network: NetworkInfo,
   statusInfo: wire(ServerStatus.optional(), ServerStatus),
   unreadNotificationCount: z.int(),
-  trustedOsUpdateSigners: wire(
-    z.record(z.string(), TrustedOsUpdateSigner).optional(),
-    z.record(z.string(), TrustedOsUpdateSigner),
+  trustedKeys: wire(
+    z.record(z.string(), TrustedKeyring).optional(),
+    z.record(z.string(), TrustedKeyring),
   ),
   pubkey: z.string(),
   caFingerprint: z.string(),

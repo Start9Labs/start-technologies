@@ -1,0 +1,2 @@
+- Les mises à jour de sécurité compatibles annoncées par le registre du système sélectionné apparaissent dans Notifications et utilisent les notifications push du navigateur lorsqu’elles sont activées. Leur lien de mise à jour du logiciel ouvre Système → Général.
+- Les mises à jour bêta peuvent remplacer une compilation antérieure portant le même numéro de version du système.

@@ -1,0 +1,2 @@
+- Las actualizaciones de seguridad compatibles anunciadas por el registro del SO seleccionado aparecen en Notificaciones y usan las notificaciones push del navegador cuando están activadas. Su enlace de actualización de software abre Sistema → General.
+- Las actualizaciones beta pueden reemplazar una compilación anterior con la misma versión del SO.

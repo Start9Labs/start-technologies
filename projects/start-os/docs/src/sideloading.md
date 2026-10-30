@@ -8,11 +8,11 @@ Sideloading lets you install a service from a `.s9pk` file without using any reg
 
 1. Click the drop area to select a `.s9pk` file from your file system, or simply drag and drop the file into the drop area.
 
-1. Review the package details and click **Install**, **Update**, or **Reinstall**.
+1. Review the package details and click **Install**, **Update**, or **Reinstall**. If no key from an enabled [trusted keyring](trusted-keys.md) signs the package, a warning appears and you must confirm the risks before installation starts.
 
 Keep the browser tab open while the file uploads. Large files and slow connections can take several minutes; follow progress in **Services**. If the upload fails, StartOS shows an error message.
 
-When you sideload from the command line with `start-cli package install --sideload`, installation errors appear in the command's progress output. Very long messages are shortened safely to fit the progress stream.
+When you sideload from the command line with `start-cli package install --sideload`, installation errors appear in the command's progress output. Very long messages are shortened safely to fit the progress stream. CLI sideloads require a signer from an enabled Marketplace keyring unless you explicitly supply `--trust`; signatures and file integrity are verified in either case.
 
 ## Obtaining `.s9pk` Files
 

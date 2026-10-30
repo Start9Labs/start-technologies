@@ -404,6 +404,15 @@ pub struct NotificationWithId {
 rpc_toolkit::reflect_ts!(NotificationWithId);
 rpc_toolkit::ts_export!(NotificationWithId, namespaces = [""]);
 
+/// An OS update available for review.
+#[derive(Debug, Serialize, Deserialize, VisitFields)]
+#[serde(tag = "kind", rename = "os-update-available")]
+#[visit(ts(rename = "OsUpdateAvailable"))]
+pub struct OsUpdateAvailable {}
+
+rpc_toolkit::reflect_ts!(OsUpdateAvailable);
+rpc_toolkit::ts_export!(OsUpdateAvailable, namespaces = [""]);
+
 pub trait NotificationType:
     serde::Serialize + for<'de> serde::Deserialize<'de> + std::fmt::Debug
 {
@@ -418,6 +427,9 @@ impl NotificationType for BackupReport {
 }
 impl NotificationType for String {
     const CODE: u32 = 2;
+}
+impl NotificationType for OsUpdateAvailable {
+    const CODE: u32 = 3;
 }
 
 #[instrument(skip(subtype, db))]

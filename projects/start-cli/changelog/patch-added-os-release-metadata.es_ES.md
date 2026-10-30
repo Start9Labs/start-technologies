@@ -1,0 +1,1 @@
+- La publicación de versiones del SO en el registro acepta el hash Git de la compilación y una marca de actualización de seguridad; ambos se conservan al promoverla. Las operaciones de lanzamiento pueden rechazar una imagen de origen que haya cambiado durante la preparación.

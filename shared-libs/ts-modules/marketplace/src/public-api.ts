@@ -1,6 +1,3 @@
-/*
- * Public API Surface of @start9labs/marketplace
- */
 export * from './components/links.component'
 export * from './components/dependencies.component'
 export * from './components/dependency.component'
@@ -19,4 +16,5 @@ export * from './components/registry.component'
 export * from './pipes/filter-packages.pipe'
 export * from './services/abstract-marketplace.service'
 export * from './types'
+export * from './trust'
 export * from './util/icon'

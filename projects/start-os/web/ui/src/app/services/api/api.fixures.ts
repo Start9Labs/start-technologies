@@ -32,6 +32,8 @@ export namespace Mock {
 
   export const RegistryOSUpdate: T.OsVersionInfoMap = {
     '0.4.1': {
+      gitHash: null,
+      security: false,
       headline: 'v0.4.1',
       releaseNotes: 'Testing some release notes',
       sourceVersion: '>=0.3.5:0 <=0.4.0-alpha.17:0',
@@ -117,6 +119,8 @@ export namespace Mock {
       img: {},
     },
     '0.4.1-alpha.5': {
+      gitHash: null,
+      security: false,
       headline: 'v0.4.1-alpha.5',
       releaseNotes: 'Some more release notes',
       sourceVersion: '>=0.3.5:0 <=0.4.0-alpha.5:0',

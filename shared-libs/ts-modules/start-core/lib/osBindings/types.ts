@@ -136,6 +136,16 @@ export type GitHash = z.output<typeof schemas.GitHash>
 export type GitHashInput = z.input<typeof schemas.GitHash>
 export type Governor = z.output<typeof schemas.Governor>
 export type GovernorInput = z.input<typeof schemas.Governor>
+
+/**
+ * An original public-key export and its self-certified identity claims.
+ */
+export type GpgPublicKeyExport = z.output<typeof schemas.GpgPublicKeyExport>
+
+/**
+ * An original public-key export and its self-certified identity claims.
+ */
+export type GpgPublicKeyExportInput = z.input<typeof schemas.GpgPublicKeyExport>
 export type Guid = z.output<typeof schemas.Guid>
 export type GuidInput = z.input<typeof schemas.Guid>
 export type HealthCheckId = z.output<typeof schemas.HealthCheckId>
@@ -216,6 +226,16 @@ export type NetworkInterfaceTypeInput = z.input<
 >
 export type NotificationLevel = z.output<typeof schemas.NotificationLevel>
 export type NotificationLevelInput = z.input<typeof schemas.NotificationLevel>
+
+/**
+ * An OS update available for review.
+ */
+export type OsUpdateAvailable = z.output<typeof schemas.OsUpdateAvailable>
+
+/**
+ * An OS update available for review.
+ */
+export type OsUpdateAvailableInput = z.input<typeof schemas.OsUpdateAvailable>
 
 /**
  * An absent update preserves DNS intent; null servers select gateway DNS.
@@ -1000,6 +1020,16 @@ export type TaskTrigger = z.output<typeof schemas.TaskTrigger>
 export type TaskTriggerInput = z.input<typeof schemas.TaskTrigger>
 export type TestSmtpParams = z.output<typeof schemas.TestSmtpParams>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
+
+/**
+ * A named keyring with independent service-package and OS-update trust.
+ */
+export type TrustedKeyring = z.output<typeof schemas.TrustedKeyring>
+
+/**
+ * A named keyring with independent service-package and OS-update trust.
+ */
+export type TrustedKeyringInput = z.input<typeof schemas.TrustedKeyring>
 export type UmountParams = z.output<typeof schemas.UmountParams>
 export type UmountParamsInput = z.input<typeof schemas.UmountParams>
 export type UninstallParams = z.output<typeof schemas.UninstallParams>
