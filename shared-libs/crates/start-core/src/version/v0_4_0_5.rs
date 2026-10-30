@@ -44,11 +44,7 @@ impl VersionT for Version {
                 TrustedOsUpdateSigners,
             >(keys.clone())?)?)?;
         }
-        db["private"]
-            .as_object_mut()
-            .or_not_found("private")?
-            .entry("osSecurityNotifications".into())
-            .or_insert_with(|| imbl_value::json!({}));
+        initialize_security_notifications(db)?;
         Ok(Value::Null)
     }
     async fn post_up(self, _ctx: &RpcContext, _input: Value) -> Result<(), Error> {
@@ -123,6 +119,15 @@ impl VersionT for Version {
     }
 }
 
+pub(super) fn initialize_security_notifications(db: &mut Value) -> Result<(), Error> {
+    db["private"]
+        .as_object_mut()
+        .or_not_found("private")?
+        .entry("osSecurityNotifications".into())
+        .or_insert_with(|| imbl_value::json!({}));
+    Ok(())
+}
+
 async fn start_initial_balance(mut systemctl: Command) {
     if let Err(error) = systemctl
         .args(["start", "--no-block", "btrfs-balance.service"])
@@ -157,8 +162,10 @@ mod tests {
     use crate::version::Current;
 
     #[tokio::test]
-    async fn prior_revisions_migrate_keys_and_requeue_post_up_once() {
+    async fn prior_revisions_upgrade_to_keyrings_once() {
         use patch_db::json_ptr::ROOT;
+
+        use crate::trusted_keys::{TrustedKeys, os_signers};
         let key = AnyVerifyingKey::Ed25519(
             ed25519_dalek::SigningKey::from_bytes(&[43; 32]).verifying_key(),
         );
@@ -175,6 +182,10 @@ mod tests {
             let mut fixture =
                 to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
                     .unwrap();
+            fixture["public"]["serverInfo"]
+                .as_object_mut()
+                .unwrap()
+                .remove("trustedKeys");
             fixture["private"]
                 .as_object_mut()
                 .unwrap()
@@ -209,9 +220,13 @@ mod tests {
                     .unwrap()
                     .contains_key(&canonical)
             );
-            assert_eq!(
-                migrated["public"]["serverInfo"]["trustedOsUpdateSigners"][&*canonical]["label"],
-                json!("retained signer")
+            let keys: TrustedKeys =
+                from_value(migrated["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
+            assert_eq!(os_signers(&keys)[&canonical].label, "retained signer");
+            assert!(
+                migrated["public"]["serverInfo"]
+                    .get("trustedOsUpdateSigners")
+                    .is_none()
             );
             Current::default().pre_init(&db).await.unwrap();
             assert_eq!(db.dump(&ROOT).await.value, migrated);

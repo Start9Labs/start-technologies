@@ -75,7 +75,6 @@ export default class Marketplace {
       tap(params => {
         const registry = params.get('registry')
 
-        // Preserves typed searches when unrelated query parameters change.
         if (params.has('search')) {
           this.query.set(params.get('search') || '')
         }

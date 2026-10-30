@@ -155,6 +155,34 @@ async fn pack_legacy(
 }
 
 #[tokio::test]
+async fn legacy_sideload_checks_original_signer_before_resigning() {
+    use crate::sign::AnyVerifyingKey;
+
+    let source = Arc::<[u8]>::from(legacy_package(&asset_tar(), Some(SCRIPT)).await);
+    let original = ed25519_dalek::SigningKey::from_bytes(&[19; 32]);
+    let host = ed25519_dalek::SigningKey::from_bytes(&[23; 32]);
+    assert!(
+        crate::s9pk::load_with_signers(
+            source.clone(),
+            || panic!("untrusted legacy archive must not reach conversion"),
+            None,
+            Some(&[AnyVerifyingKey::Ed25519(host.verifying_key())]),
+        )
+        .await
+        .is_err()
+    );
+    let converted = crate::s9pk::load_with_signers(
+        source,
+        || Ok(host.clone()),
+        None,
+        Some(&[AnyVerifyingKey::Ed25519(original.verifying_key())]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(converted.as_archive().signer(), host.verifying_key());
+}
+
+#[tokio::test]
 async fn assets_reader_ends_at_section_eof_before_scripts() {
     let assets = asset_tar();
     let bytes = legacy_package(&assets, Some(SCRIPT)).await;

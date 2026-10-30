@@ -155,11 +155,8 @@ export class MarketplaceRegistrySelectComponent {
   protected open = false
   protected readonly breakpoint = inject(TUI_BREAKPOINT)
 
-  // The resolved current registry — used to label an arbitrary (deep-linked)
-  // registry that isn't in the saved list yet.
   protected readonly fetched = toSignal(this.marketplace.currentRegistry$)
 
-  // 0 and 1 are the standard registries (start9, community); 2+ are custom.
   protected readonly data = toSignal(
     combineLatest([
       this.marketplace.registries$,
@@ -177,7 +174,6 @@ export class MarketplaceRegistrySelectComponent {
           current,
           standard: withSelected.slice(0, 2),
           custom: withSelected.slice(2),
-          // an arbitrary (deep-linked) registry not in the saved list
           unsaved: current ? null : currentUrl,
         }
       }),
@@ -187,7 +183,6 @@ export class MarketplaceRegistrySelectComponent {
   async connect(url: string): Promise<void> {
     this.open = false
 
-    // Already on this registry: just close the dropdown
     if (sameUrl(url, this.data()?.current?.url)) return
 
     this.tasks.run(async () => {

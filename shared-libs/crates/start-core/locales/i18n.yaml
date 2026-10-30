@@ -2814,7 +2814,13 @@ sign.gpg-agent.no-signing-key:
   fr_FR: "Aucune clé de signature Ed25519 avec sa partie secrète dans le trousseau GnuPG ne correspond à %{key}"
   pl_PL: "Żaden klucz podpisujący Ed25519 z częścią tajną w bazie kluczy GnuPG nie pasuje do %{key}"
 
-# service/mod.rs
+sign.gpg.invalid-public-key:
+  en_US: "Use an Ed25519 public signing key in PEM or GPG format"
+  de_DE: "Verwenden Sie einen öffentlichen Ed25519-Signaturschlüssel im PEM- oder GPG-Format"
+  es_ES: "Use una clave pública de firma Ed25519 en formato PEM o GPG"
+  fr_FR: "Utilisez une clé publique de signature Ed25519 au format PEM ou GPG"
+  pl_PL: "Użyj publicznego klucza podpisującego Ed25519 w formacie PEM lub GPG"
+
 service.mod.service-actor-held-after-shutdown:
   en_US: "ServiceActor held somewhere after actor shutdown"
   de_DE: "ServiceActor wird nach dem Herunterfahren des Actors noch irgendwo gehalten"
@@ -4697,6 +4703,13 @@ help.arg.tor-proxy-url:
   fr_FR: "URL du proxy SOCKS Tor"
   pl_PL: "URL proxy SOCKS Tor"
 
+help.arg.trust:
+  en_US: "Install without requiring a trusted signer; signature and integrity checks remain mandatory"
+  de_DE: "Ohne vertrauenswürdigen Unterzeichner installieren; Signatur- und Integritätsprüfungen bleiben erforderlich"
+  es_ES: "Instalar sin exigir un firmante de confianza; las comprobaciones de firma e integridad siguen siendo obligatorias"
+  fr_FR: "Installer sans exiger un signataire de confiance ; les contrôles de signature et d'intégrité restent obligatoires"
+  pl_PL: "Instaluj bez wymogu zaufanego sygnatariusza; kontrole podpisu i integralności pozostają obowiązkowe"
+
 help.arg.tunnel-address:
   en_US: "Tunnel server address"
   de_DE: "Tunnel-Server-Adresse"
@@ -5576,11 +5589,11 @@ about.check-port-v6-reachability:
   pl_PL: "Sprawdź, czy port jest osiągalny przez IPv6 (zapora GUA)"
 
 about.check-update-startos:
-  en_US: "Check a given registry for StartOS updates and update if available"
-  de_DE: "Ein bestimmtes Registry auf StartOS-Updates prüfen und bei Verfügbarkeit aktualisieren"
-  es_ES: "Verificar un registro dado para actualizaciones de StartOS y actualizar si está disponible"
-  fr_FR: "Vérifier un registre donné pour les mises à jour StartOS et mettre à jour si disponible"
-  pl_PL: "Sprawdź dany rejestr pod kątem aktualizacji StartOS i zaktualizuj, jeśli dostępne"
+  en_US: "Check for StartOS updates and update if available"
+  de_DE: "Nach StartOS-Updates suchen und bei Verfügbarkeit aktualisieren"
+  es_ES: "Buscar actualizaciones de StartOS y actualizar si están disponibles"
+  fr_FR: "Rechercher les mises à jour StartOS et mettre à jour si disponible"
+  pl_PL: "Sprawdź dostępność aktualizacji StartOS i zaktualizuj, jeśli są dostępne"
 
 about.clear-service-task:
   en_US: "Clear a service task"
@@ -7592,6 +7605,27 @@ update.signers.not-found:
   es_ES: "No se encontró el firmante de confianza de actualizaciones del sistema"
   fr_FR: "Signataire de confiance des mises à jour du système introuvable"
   pl_PL: "Nie znaleziono zaufanego sygnatariusza aktualizacji systemu"
+
+trusted-keys.invalid:
+  en_US: "Enter a name and at least one Ed25519 public key"
+  de_DE: "Geben Sie einen Namen und mindestens einen öffentlichen Ed25519-Schlüssel ein"
+  es_ES: "Introduzca un nombre y al menos una clave pública Ed25519"
+  fr_FR: "Saisissez un nom et au moins une clé publique Ed25519"
+  pl_PL: "Podaj nazwę i co najmniej jeden klucz publiczny Ed25519"
+
+trusted-keys.not-found:
+  en_US: "Trusted keyring not found"
+  de_DE: "Vertrauenswürdiger Schlüsselbund nicht gefunden"
+  es_ES: "No se encontró el llavero de confianza"
+  fr_FR: "Trousseau de confiance introuvable"
+  pl_PL: "Nie znaleziono zaufanego pęku kluczy"
+
+trusted-keys.protected:
+  en_US: "Built-in keyrings cannot be deleted; disable their trust instead"
+  de_DE: "Integrierte Schlüsselbunde können nicht gelöscht werden; deaktivieren Sie stattdessen deren Vertrauen"
+  es_ES: "Los llaveros integrados no se pueden eliminar; desactive su confianza"
+  fr_FR: "Les trousseaux intégrés ne peuvent pas être supprimés ; désactivez plutôt leur confiance"
+  pl_PL: "Nie można usunąć wbudowanych pęków kluczy; zamiast tego wyłącz zaufanie do nich"
 
 version.http-auth-downgrade-requires-tls:
   en_US: "Cannot downgrade: an HTTP authentication policy has no TLS wrapper. Add TLS to this binding before downgrading."

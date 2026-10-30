@@ -38,6 +38,13 @@ SIL Open Font License 1.1. Copyright 2021 The Hanken Grotesk Project Authors
 (<https://github.com/marcologous/hanken-grotesk>). Full text: `OFL.txt` beside
 the font files in each directory.
 
+### `shared-libs/ts-modules/shared/assets/icons/key-chain.svg`
+
+[Material Design Icons](https://github.com/Templarian/MaterialDesign/blob/master/svg/key-chain.svg),
+by Mateo Silguero, distributed by Pictogrammers under Apache License 2.0.
+Full text: [`key-chain.LICENSE.txt`](shared-libs/ts-modules/shared/assets/icons/key-chain.LICENSE.txt)
+beside the icon.
+
 ### `.github/actions/upload-each/dist/index.js`
 
 A committed `ncc` bundle inlining this action's npm dependencies under their
