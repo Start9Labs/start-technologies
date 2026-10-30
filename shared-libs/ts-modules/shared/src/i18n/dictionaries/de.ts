@@ -896,6 +896,8 @@ export default {
   1015: 'Sicherung konvertieren',
   1016: 'Sie können diesen Dialog schließen. Die Konvertierung läuft im Hintergrund weiter.',
   1017: 'Objekte',
+  1021: 'Altes Format',
+  1022: 'Diese Sicherung verwendet ein altes Format. Sie bleibt für Wiederherstellungen nutzbar. Für eine stärkere Manipulationserkennung und schreibgeschützte Snapshots aktualisieren Sie sie auf der Seite Sicherung erstellen des Servers, zu dem diese Sicherung gehört. Die Konvertierung kann lange dauern, und diese Sicherung ist bis zum Abschluss nicht verfügbar.',
   1018: 'Gesamtfortschritt',
   1019: 'Sicherungsformat aktualisieren?',
   1020: 'Die Sicherung dieses Servers verwendet ein altes Format. Aktualisieren Sie es für eine stärkere Manipulationserkennung und schreibgeschützte Snapshots, oder überspringen Sie diesen Schritt, um eine Sicherung im bestehenden Format zu erstellen. Die Konvertierung kann lange dauern, und diese Sicherung ist bis zum Abschluss nicht verfügbar.',

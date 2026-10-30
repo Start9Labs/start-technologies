@@ -3,19 +3,17 @@ import type { T } from '@start9labs/start-core'
 
 export function serverBackups<T>(
   backups: Record<string, T>,
-  serverId?: string,
+  serverId: string,
 ): Record<string, T> {
-  return serverId === undefined
-    ? backups
-    : Object.fromEntries(
-        Object.entries(backups).filter(([id]) => id === serverId),
-      )
+  return Object.fromEntries(
+    Object.entries(backups).filter(([id]) => id === serverId),
+  )
 }
 
 export function conversionLabel(
   backups: Record<string, T.StartOsRecoveryInfo>,
   jobs: Record<string, T.ConversionJob> = {},
-  serverId?: string,
+  serverId: string,
 ): i18nKey | null {
   backups = serverBackups(backups, serverId)
   const visibleJobs = Object.keys(backups).map(id => jobs[id])

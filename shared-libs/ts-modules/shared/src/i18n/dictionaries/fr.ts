@@ -896,6 +896,8 @@ export default {
   1015: 'Convertir la sauvegarde',
   1016: 'Vous pouvez fermer cette boîte de dialogue. La conversion continue en arrière-plan.',
   1017: 'objets',
+  1021: 'Ancien format',
+  1022: 'Cette sauvegarde utilise un ancien format. Elle reste utilisable pour les restaurations. Pour activer une meilleure détection des altérations et des instantanés en lecture seule, mettez-la à jour sur la page Créer une sauvegarde du serveur auquel elle appartient. La conversion peut prendre beaucoup de temps et cette sauvegarde reste indisponible jusqu’à la fin.',
   1018: 'Progression globale',
   1019: 'Mettre à jour le format de sauvegarde ?',
   1020: 'La sauvegarde de ce serveur utilise un ancien format. Mettez-le à jour pour une meilleure détection des altérations et des instantanés en lecture seule, ou ignorez cette étape pour créer une sauvegarde au format existant. La conversion peut prendre beaucoup de temps et cette sauvegarde reste indisponible jusqu’à la fin.',

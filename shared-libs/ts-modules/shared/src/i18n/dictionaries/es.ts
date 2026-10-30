@@ -896,6 +896,8 @@ export default {
   1015: 'Convertir copia',
   1016: 'Puede cerrar este diálogo. La conversión continúa en segundo plano.',
   1017: 'objetos',
+  1021: 'Formato antiguo',
+  1022: 'Esta copia utiliza un formato antiguo. Sigue disponible para restaurar datos. Para habilitar una detección de alteraciones más sólida e instantáneas de solo lectura, actualícela en la página Crear copia del servidor al que pertenece. La conversión puede tardar mucho tiempo y esta copia no estará disponible hasta que termine.',
   1018: 'Progreso general',
   1019: '¿Actualizar el formato de la copia?',
   1020: 'La copia de este servidor utiliza un formato antiguo. Actualícelo para una detección de alteraciones más sólida e instantáneas de solo lectura, u omita este paso para crear una copia con el formato existente. La conversión puede tardar mucho tiempo y esta copia no estará disponible hasta que termine.',

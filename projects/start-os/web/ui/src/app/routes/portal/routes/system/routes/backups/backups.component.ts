@@ -172,7 +172,7 @@ export default class SystemBackupComponent {
         this.dialog
           .openComponent(CONVERSIONS, {
             size: 'l',
-            data: { targetId: target.id, serverId: this.service.serverId() },
+            data: { targetId: target.id },
           })
           .subscribe()
         return

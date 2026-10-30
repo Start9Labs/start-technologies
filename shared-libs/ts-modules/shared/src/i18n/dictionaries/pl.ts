@@ -896,6 +896,8 @@ export default {
   1015: 'Konwertuj kopię',
   1016: 'Możesz zamknąć to okno. Konwersja będzie kontynuowana w tle.',
   1017: 'obiektów',
+  1021: 'Stary format',
+  1022: 'Ta kopia używa starego formatu. Nadal można z niej przywracać dane. Aby włączyć skuteczniejsze wykrywanie modyfikacji i migawki tylko do odczytu, zaktualizuj ją na stronie tworzenia kopii zapasowych serwera, do którego należy. Konwersja może potrwać długo, a kopia jest niedostępna do jej zakończenia.',
   1018: 'Łączny postęp',
   1019: 'Zaktualizować format kopii zapasowej?',
   1020: 'Kopia tego serwera używa starego formatu. Zaktualizuj go, aby uzyskać skuteczniejsze wykrywanie modyfikacji i migawki tylko do odczytu, lub pomiń ten krok, aby utworzyć kopię w istniejącym formacie. Konwersja może potrwać długo, a kopia jest niedostępna do jej zakończenia.',

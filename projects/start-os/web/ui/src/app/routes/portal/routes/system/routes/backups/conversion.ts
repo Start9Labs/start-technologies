@@ -1,6 +1,5 @@
 import { KeyValuePipe } from '@angular/common'
 import { Component, computed, inject, input, Pipe } from '@angular/core'
-import { ActivatedRoute } from '@angular/router'
 import { DialogService, i18nPipe } from '@start9labs/shared'
 import {
   TuiButton,
@@ -19,7 +18,6 @@ import { conversionLabel, serverBackups } from './conversion-state'
 
 interface ConversionContext {
   targetId: string
-  serverId?: string
 }
 
 @Pipe({ name: 'backupConversionLabel' })
@@ -47,8 +45,6 @@ export class BackupConversion {
   private readonly i18n = inject(i18nPipe)
   private readonly icon = tuiIconStart(computed(() => '@tui.shield-alert'))
 
-  private readonly service = inject(BackupService)
-  private readonly type = inject(ActivatedRoute).snapshot.data['type']
   protected readonly localized = computed(() =>
     this.i18n.transform(this.label()),
   )
@@ -61,11 +57,7 @@ export class BackupConversion {
     this.dialogs
       .openComponent(CONVERSIONS, {
         size: 'l',
-        data: {
-          targetId: this.targetId(),
-          serverId:
-            this.type === 'create' ? this.service.serverId() : undefined,
-        },
+        data: { targetId: this.targetId() },
       })
       .subscribe()
   }
@@ -189,7 +181,7 @@ class Conversions {
           .drives()
           .find(({ id }) => id === this.context.data.targetId)?.entry.startOs ??
         {},
-      this.context.data.serverId,
+      this.service.serverId(),
     ),
   )
 }

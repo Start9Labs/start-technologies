@@ -125,56 +125,53 @@ function fixture(t, { confirm = of(true), password = of('secret') } = {}) {
   }
 }
 
-test('format indicator distinguishes interruption, failure and active work across server backups', () => {
-  assert.equal(
-    conversionLabel({ a: backup('current'), b: backup('unknown') }),
-    null,
-  )
-  assert.equal(conversionLabel({ a: backup('legacy') }), 'Update format')
-  assert.equal(
-    conversionLabel({ a: backup('legacy'), b: backup('interrupted') }),
-    'Resume conversion',
-  )
-  assert.equal(
-    conversionLabel({ a: backup('legacy') }, { a: job('failed') }),
-    'Retry conversion',
-  )
-  assert.equal(
-    conversionLabel(
-      { a: backup('interrupted'), b: backup('current') },
-      { b: job('running') },
-    ),
-    'Conversion in progress',
-  )
-  assert.equal(
-    conversionLabel({ a: backup('current') }, { a: job('complete') }),
-    null,
-  )
+test('format indicator distinguishes interruption, failure and active work for this server', () => {
+  for (const [format, state, expected] of [
+    ['current', 'complete', null],
+    ['unknown', 'complete', null],
+    ['legacy', 'complete', 'Update format'],
+    ['interrupted', 'failed', 'Resume conversion'],
+    ['legacy', 'failed', 'Retry conversion'],
+    ['interrupted', 'running', 'Conversion in progress'],
+  ]) {
+    assert.equal(
+      conversionLabel({ own: backup(format) }, { own: job(state) }, 'own'),
+      expected,
+    )
+  }
 })
 
 test('format indicator ignores jobs for backups removed from the target', () => {
   assert.equal(
-    conversionLabel({ a: backup('current') }, { removed: job('running') }),
+    conversionLabel(
+      { own: backup('current') },
+      { removed: job('running') },
+      'own',
+    ),
     null,
   )
   assert.equal(
-    conversionLabel({ a: backup('legacy') }, { removed: job('failed') }),
+    conversionLabel(
+      { own: backup('legacy') },
+      { removed: job('failed') },
+      'own',
+    ),
     'Update format',
   )
 })
 
-test('create scopes both indicators and dialog entries to this server; restore retains all servers', () => {
+test('conversion indicators and dialog entries never include another server', () => {
   const backups = { own: backup('current'), other: backup('legacy') }
-  const jobs = { other: job('running') }
-  assert.equal(conversionLabel(backups, jobs, 'own'), null)
-  assert.equal(conversionLabel(backups, jobs), 'Conversion in progress')
+  for (const state of ['running', 'failed']) {
+    const jobs = { other: job(state) }
+    assert.equal(conversionLabel(backups, jobs, 'own'), null)
+    assert.equal(
+      conversionLabel({ own: backup('legacy') }, jobs, 'own'),
+      'Update format',
+    )
+  }
   assert.deepEqual(serverBackups(backups, 'own'), { own: backups.own })
   assert.deepEqual(serverBackups(backups, 'absent'), {})
-  assert.deepEqual(serverBackups(backups), backups)
-  assert.equal(
-    conversionLabel({ own: backup('legacy') }, jobs, 'own'),
-    'Update format',
-  )
 })
 
 test('legacy discovery preserves backup/restore eligibility and never starts conversion', async t => {
@@ -234,7 +231,11 @@ test('failure refreshes discovery once and exposes the interrupted format', asyn
   const refreshed = f.service.cifs()[0]
   assert.equal(refreshed.entry.startOs.own.formatStatus, 'interrupted')
   assert.equal(
-    conversionLabel(refreshed.entry.startOs, f.service.conversions().target),
+    conversionLabel(
+      refreshed.entry.startOs,
+      f.service.conversions().target,
+      'own',
+    ),
     'Resume conversion',
   )
 })

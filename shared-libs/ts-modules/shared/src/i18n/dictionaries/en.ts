@@ -897,6 +897,8 @@ export const ENGLISH: Record<string, number> = {
   'Convert backup': 1015,
   'You can close this dialog. Conversion continues in the background.': 1016,
   'objects': 1017,
+  'Old format': 1021,
+  'This backup uses an old format. It remains usable for restores. To enable stronger tamper detection and read-only snapshots, update it on the Create Backup page of the server this backup belongs to. Conversion may take a long time, and this backup is unavailable until it finishes.': 1022,
   'Overall progress': 1018,
   'Update backup format?': 1019,
   'This server’s backup uses an old format. Update it for stronger tamper detection and read-only snapshots, or skip to create a backup using the existing format. Conversion may take a long time, and this backup is unavailable until it finishes.': 1020,
