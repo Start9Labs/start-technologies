@@ -114,7 +114,11 @@ fn migrate_object(
     }
     let mut file = AtomicFile::create_buffered(destination.to_owned())?;
     file.write_all(upgraded.as_deref().unwrap_or(&bytes))?;
-    file.save_fast()
+    if source == destination {
+        file.save_durable()
+    } else {
+        file.save_fast()
+    }
 }
 
 fn retire_sources(backing: &File, sources: &mut Vec<PathBuf>) -> BkfsResult<()> {
@@ -232,7 +236,7 @@ pub(crate) fn reseal_store(data: &Path, key: &Key, constants: Constants) -> Bkfs
         if changed {
             let mut file = AtomicFile::create_buffered(path)?;
             file.write_all(&rewritten)?;
-            file.save_fast()?;
+            file.save_durable()?;
         }
     }
     for (id, token) in versions {

@@ -339,7 +339,7 @@ impl State {
         let sealed = vault::seal_bound(&plain, key, ecc, Binding::State);
         let mut file = AtomicFile::create_buffered(self.path.join(ANCHOR))?;
         file.write_all(&sealed.bytes)?;
-        let publication = file.save().and_then(|()| Ok(self.directory.sync_all()?));
+        let publication = file.save_with_directory_sync(&self.directory);
         if let Err(error) = publication {
             self.uncertain = true;
             return Err(error);
@@ -349,8 +349,12 @@ impl State {
         Ok(())
     }
 
-    fn sync_backing(&self) -> BkfsResult<()> {
-        Ok(crate::util::sync_filesystem(&self.directory)?)
+    fn sync_backing(&mut self) -> BkfsResult<()> {
+        let result = crate::util::sync_filesystem(&self.directory);
+        if result.is_err() {
+            self.uncertain = true;
+        }
+        Ok(result?)
     }
 
     pub fn commit(
@@ -550,6 +554,114 @@ mod tests {
             panic!("not a packed transaction")
         };
         (segment, offset, len)
+    }
+
+    // The filter remains installed until this thread exits.
+    fn inject_syncfs_eio(fd: std::os::fd::RawFd) {
+        let mut filter = [
+            libc::sock_filter {
+                code: (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
+                jt: 0,
+                jf: 0,
+                k: 0,
+            },
+            libc::sock_filter {
+                code: (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
+                jt: 0,
+                jf: 3,
+                k: libc::SYS_syncfs as u32,
+            },
+            libc::sock_filter {
+                code: (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
+                jt: 0,
+                jf: 0,
+                k: 16,
+            },
+            libc::sock_filter {
+                code: (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
+                jt: 0,
+                jf: 1,
+                k: fd as u32,
+            },
+            libc::sock_filter {
+                code: (libc::BPF_RET | libc::BPF_K) as u16,
+                jt: 0,
+                jf: 0,
+                k: libc::SECCOMP_RET_ERRNO | libc::EIO as u32,
+            },
+            libc::sock_filter {
+                code: (libc::BPF_RET | libc::BPF_K) as u16,
+                jt: 0,
+                jf: 0,
+                k: libc::SECCOMP_RET_ALLOW,
+            },
+        ];
+        let program = libc::sock_fprog {
+            len: filter.len() as u16,
+            filter: filter.as_mut_ptr(),
+        };
+        assert_eq!(
+            unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) },
+            0
+        );
+        assert_eq!(
+            unsafe { libc::prctl(libc::PR_SET_SECCOMP, libc::SECCOMP_MODE_FILTER, &program) },
+            0
+        );
+    }
+
+    #[test]
+    fn backing_sync_failure_blocks_publication_even_after_a_successful_barrier() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = Key::from([0x81; 32]);
+        let mut state = initial(dir.path(), &key);
+        let before = std::fs::read(dir.path().join(ANCHOR)).unwrap();
+        state
+            .record(RecordKey::Inode(7), Some(location(0)))
+            .unwrap();
+        let recovered = state.directory.try_clone().unwrap();
+        inject_syncfs_eio(state.directory.as_raw_fd());
+        let result = state.commit(
+            &key,
+            EccParams::default(),
+            Counters {
+                next_seq: 1,
+                max_inode: 7,
+            },
+            None,
+        );
+        let _failed_handle = std::mem::replace(&mut state.directory, recovered);
+        assert_eq!(result.unwrap_err().to_errno(), libc::EIO);
+        state.sync_backing().unwrap();
+        assert_eq!(state.check_rw().unwrap_err().to_errno(), libc::EIO);
+        assert!(state
+            .record(RecordKey::Inode(8), Some(location(128)))
+            .is_err());
+        assert!(state
+            .commit(
+                &key,
+                EccParams::default(),
+                Counters {
+                    next_seq: 2,
+                    max_inode: 8
+                },
+                None
+            )
+            .is_err());
+        assert!(state
+            .checkpoint(
+                &key,
+                EccParams::default(),
+                &Roots::default(),
+                state.counters(),
+                None,
+                &[]
+            )
+            .is_err());
+        assert_eq!(std::fs::read(dir.path().join(ANCHOR)).unwrap(), before);
+        let (reopened, roots) = State::open(dir.path(), &key).unwrap();
+        assert!(reopened.check_rw().is_ok());
+        assert!(roots.index.is_empty());
     }
 
     #[test]

@@ -74,6 +74,19 @@ impl AtomicFile {
         Ok(())
     }
 
+    /// Synchronizes file content and the containing directory.
+    pub fn save_durable(self) -> BkfsResult<()> {
+        let directory = File::open(self.path.parent().unwrap())?;
+        self.save_with_directory_sync(&directory)
+    }
+
+    /// The directory must contain the destination.
+    pub(crate) fn save_with_directory_sync(self, directory: &File) -> BkfsResult<()> {
+        self.save()?;
+        directory.sync_all()?;
+        Ok(())
+    }
+
     /// Rename without sync_all. Data lives in the page cache (or was
     /// pushed to the block layer via O_DIRECT) and is not guaranteed
     /// durable until the caller issues a syncfs. Use this when a batch
