@@ -1,1 +1,0 @@
-- Les dialogues d’ajout d’appareil ne s’ouvrent plus avant le chargement des données des sous-réseaux.

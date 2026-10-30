@@ -1,1 +1,0 @@
-- **Las configuraciones WireGuard pueden usar un endpoint independiente cuando StartTunnel está detrás de NAT.** El diálogo usa por defecto el host de la URL del navegador y acepta una IP o un nombre DNS editados. `device show-config --endpoint` ofrece el mismo ajuste por configuración, independientemente de la dirección WAN usada para SNAT y reenvíos.
