@@ -403,6 +403,24 @@ export const IoFormat: z.ZodEnum<{
   .meta({
     id: 'IoFormat',
   })
+export const LegacyHealthCheckResultKind: z.ZodIntersection<
+  z.ZodObject<{ result: z.ZodLiteral<'waiting'> }>,
+  z.ZodObject<{
+    message: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+  }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({ result: z.literal('waiting') }),
+    object({
+      message: wire(z.string().nullable().optional(), z.string().nullable()),
+    }),
+  )
+  .meta({
+    id: 'LegacyHealthCheckResultKind',
+  })
 export const LocaleString: typeof literal_8 = /* @__PURE__ */ literal_8.meta({
   id: 'LocaleString',
 })
@@ -438,20 +456,15 @@ export const NamedHealthCheckResultKind: z.ZodUnion<
           z.ZodOptional<z.ZodNullable<z.ZodString>>,
           z.ZodNullable<z.ZodString>
         >
-      }>
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ result: z.ZodLiteral<'waiting'> }>,
-      z.ZodObject<{
-        message: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodString>>,
-          z.ZodNullable<z.ZodString>
-        >
+        waiting: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
       }>
     >,
     z.ZodIntersection<
       z.ZodObject<{ result: z.ZodLiteral<'loading'> }>,
-      z.ZodObject<{ message: z.ZodString }>
+      z.ZodObject<{
+        message: z.ZodString
+        waiting: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+      }>
     >,
     z.ZodIntersection<
       z.ZodObject<{ result: z.ZodLiteral<'failure'> }>,
@@ -476,17 +489,15 @@ export const NamedHealthCheckResultKind: z.ZodUnion<
       object({ result: z.literal('starting') }),
       object({
         message: wire(z.string().nullable().optional(), z.string().nullable()),
-      }),
-    ),
-    z.intersection(
-      object({ result: z.literal('waiting') }),
-      object({
-        message: wire(z.string().nullable().optional(), z.string().nullable()),
+        waiting: wire(z.boolean().optional(), z.boolean()),
       }),
     ),
     z.intersection(
       object({ result: z.literal('loading') }),
-      object({ message: z.string() }),
+      object({
+        message: z.string(),
+        waiting: wire(z.boolean().optional(), z.boolean()),
+      }),
     ),
     z.intersection(
       object({ result: z.literal('failure') }),
@@ -977,6 +988,16 @@ export const ClearServiceInterfacesParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ except: z.array(ServiceInterfaceId) }).meta({
   id: 'ClearServiceInterfacesParams',
 })
+export const CompatibleHealthCheckResultKind: z.ZodUnion<
+  readonly [
+    typeof NamedHealthCheckResultKind,
+    typeof LegacyHealthCheckResultKind,
+  ]
+> = /* @__PURE__ */ z
+  .union([NamedHealthCheckResultKind, LegacyHealthCheckResultKind])
+  .meta({
+    id: 'CompatibleHealthCheckResultKind',
+  })
 export const CreateNotificationParams: z.ZodObject<{
   level: typeof NotificationLevel
   title: z.ZodString
@@ -1560,14 +1581,6 @@ export const MountTarget: z.ZodCodec<
 ).meta({
   id: 'MountTarget',
 })
-export const NamedHealthCheckResult: z.ZodIntersection<
-  z.ZodObject<{ name: z.ZodString }>,
-  typeof NamedHealthCheckResultKind
-> = /* @__PURE__ */ z
-  .intersection(object({ name: z.string() }), NamedHealthCheckResultKind)
-  .meta({
-    id: 'NamedHealthCheckResult',
-  })
 export const PluginHostnameInfo: z.ZodCodec<
   z.ZodObject<{
     /**
@@ -2028,6 +2041,21 @@ export const MountParams: z.ZodObject<{
     id: 'MountParams',
   },
 )
+export const NamedHealthCheckResult: z.ZodCodec<
+  z.ZodIntersection<
+    z.ZodObject<{ name: z.ZodString }>,
+    typeof CompatibleHealthCheckResultKind
+  >,
+  z.ZodIntersection<
+    z.ZodObject<{ name: z.ZodString }>,
+    typeof NamedHealthCheckResultKind
+  >
+> = /* @__PURE__ */ wire(
+  z.intersection(object({ name: z.string() }), CompatibleHealthCheckResultKind),
+  z.intersection(object({ name: z.string() }), NamedHealthCheckResultKind),
+).meta({
+  id: 'NamedHealthCheckResult',
+})
 export const PackageMetadata: z.ZodObject<{
   title: z.ZodString
   description: typeof Description
@@ -2228,33 +2256,6 @@ export const SetDependenciesParams: z.ZodObject<{
   dependencies: z.array(DependencyRequirement),
 }).meta({
   id: 'SetDependenciesParams',
-})
-export const SetHealth: z.ZodIntersection<
-  z.ZodObject<{ id: typeof HealthCheckId }>,
-  typeof NamedHealthCheckResult
-> = /* @__PURE__ */ z
-  .intersection(object({ id: HealthCheckId }), NamedHealthCheckResult)
-  .meta({
-    id: 'SetHealth',
-  })
-export const StatusInfo: z.ZodObject<{
-  health: z.ZodRecord<z.ZodString, typeof NamedHealthCheckResult>
-  error: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof ErrorData>>,
-    z.ZodNullable<typeof ErrorData>
-  >
-  started: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  desired: typeof DesiredStatus
-}> = /* @__PURE__ */ object({
-  health: z.record(z.string(), NamedHealthCheckResult),
-  error: wire(ErrorData.nullable().optional(), ErrorData.nullable()),
-  started: wire(z.string().nullable().optional(), z.string().nullable()),
-  desired: DesiredStatus,
-}).meta({
-  id: 'StatusInfo',
 })
 export const Task: z.ZodObject<{
   packageId: typeof PackageId
@@ -2515,10 +2516,37 @@ export const SetBackupProgress: z.ZodObject<{ progress: typeof Progress }> =
   /* @__PURE__ */ object({ progress: Progress }).meta({
     id: 'SetBackupProgress',
   })
+export const SetHealth: z.ZodIntersection<
+  z.ZodObject<{ id: typeof HealthCheckId }>,
+  typeof NamedHealthCheckResult
+> = /* @__PURE__ */ z
+  .intersection(object({ id: HealthCheckId }), NamedHealthCheckResult)
+  .meta({
+    id: 'SetHealth',
+  })
 export const SetInitProgress: z.ZodObject<{ progress: typeof Progress }> =
   /* @__PURE__ */ object({ progress: Progress }).meta({
     id: 'SetInitProgress',
   })
+export const StatusInfo: z.ZodObject<{
+  health: z.ZodRecord<z.ZodString, typeof NamedHealthCheckResult>
+  error: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof ErrorData>>,
+    z.ZodNullable<typeof ErrorData>
+  >
+  started: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  desired: typeof DesiredStatus
+}> = /* @__PURE__ */ object({
+  health: z.record(z.string(), NamedHealthCheckResult),
+  error: wire(ErrorData.nullable().optional(), ErrorData.nullable()),
+  started: wire(z.string().nullable().optional(), z.string().nullable()),
+  desired: DesiredStatus,
+}).meta({
+  id: 'StatusInfo',
+})
 export const TaskEntry: z.ZodObject<{
   task: typeof Task
   active: z.ZodBoolean
@@ -3060,4 +3088,62 @@ export const Api = {
       },
     },
   },
+}
+/**
+ * MCP tool descriptions of a schema tree's callable methods, the catalog
+ * `rpc_toolkit::mcp::McpServer` serves. Methods without bindings are omitted;
+ * an `outputSchema` describes object results only, as MCP requires.
+ */
+export function toolCatalog(tree: unknown): object[] {
+  type JsonSchema = {
+    type?: unknown
+    allOf?: unknown
+    $ref?: unknown
+    $defs?: { [name: string]: JsonSchema }
+    [keyword: string]: unknown
+  }
+  type Node = {
+    _PARAMS: z.ZodType
+    _RETURN?: z.ZodType
+    _CHILDREN?: { [name: string]: Node }
+    _OPAQUE?: true
+  }
+  const render = (schema: z.ZodType, io: 'input' | 'output'): JsonSchema => {
+    const rendered = z.toJSONSchema(schema, {
+      io,
+      unrepresentable: 'any',
+    }) as JsonSchema
+    const ref = rendered.$ref
+    const root =
+      typeof ref === 'string' && ref.startsWith('#/$defs/')
+        ? rendered.$defs?.[ref.slice('#/$defs/'.length)]
+        : undefined
+    if (!root) return rendered
+    const { $ref, ...rest } = rendered
+    return { ...rest, ...root }
+  }
+  const isObject = (schema: JsonSchema) =>
+    schema.type === 'object' ||
+    (schema.type === undefined && Array.isArray(schema.allOf))
+  const tools: object[] = []
+  const walk = (node: Node, path: string[]) => {
+    if (path.length && node._RETURN && !node._OPAQUE) {
+      const input = render(node._PARAMS, 'input')
+      if (input.type === undefined || input.type === 'object') {
+        const output = render(node._RETURN, 'output')
+        tools.push({
+          name: path.join('.'),
+          inputSchema: { ...input, type: 'object' },
+          ...(isObject(output)
+            ? { outputSchema: { ...output, type: 'object' } }
+            : {}),
+        })
+      }
+    }
+    for (const [name, child] of Object.entries(node._CHILDREN ?? {})) {
+      walk(child, [...path, name])
+    }
+  }
+  walk(tree as Node, [])
+  return tools
 }

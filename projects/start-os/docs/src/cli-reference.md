@@ -66,6 +66,8 @@ End one or more sessions. `--pubkey` removes an enrolled device key; `--token` r
 
 Create a bearer token for an API client that cannot sign requests. The token is printed once and is not stored; the client sends it as `Authorization: Bearer <token>`. It appears in `auth session list` under its name and is revoked with `auth session kill --token` or after 30 days unused.
 
+An MCP client authenticates with the same token to use the server's API as tools at `https://<server-address>/mcp`, over the streamable HTTP transport.
+
 ## Server
 
 Restart, shut down, update, and configure the server.

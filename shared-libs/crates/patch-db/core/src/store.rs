@@ -2,10 +2,12 @@ use std::collections::{BTreeSet, HashMap};
 use std::fs::OpenOptions;
 use std::io::{SeekFrom, Write};
 use std::marker::PhantomData;
+use std::num::NonZeroUsize;
 use std::panic::UnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use bytes::Bytes;
 use fd_lock_rs::FdLock;
 use futures::{Future, FutureExt};
 use imbl::Vector;
@@ -21,7 +23,7 @@ use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 
 use crate::patch::{diff, DiffPatch, Dump, Revision};
 use crate::subscriber::Broadcast;
-use crate::{DbWatch, Error, HasModel, Subscriber};
+use crate::{DbWatch, Error, HasModel, JsonSubscriber, Subscriber};
 
 lazy_static! {
     static ref OPEN_STORES: std::sync::Mutex<HashMap<PathBuf, Arc<Mutex<()>>>> =
@@ -404,6 +406,24 @@ impl PatchDb {
     pub async fn dump_and_sub(&self, ptr: JsonPointer) -> (Dump, Subscriber) {
         let mut store = self.store.write().await;
         (store.dump(&ptr), store.broadcast.subscribe(ptr))
+    }
+    /// Atomically captures a shared JSON dump and a bounded JSON revision stream.
+    ///
+    /// Dumps and scoped revisions serialize once per pointer, shared across
+    /// subscribers. Capacity counts revisions and may be rounded up by Tokio.
+    /// Overflow closes the subscription; recovery requires a fresh call.
+    ///
+    /// # Panics
+    ///
+    /// Panics if capacity exceeds `usize::MAX / 2`, matching Tokio.
+    pub async fn dump_and_sub_json(
+        &self,
+        ptr: JsonPointer,
+        capacity: NonZeroUsize,
+    ) -> Result<(Bytes, JsonSubscriber), Error> {
+        let mut store = self.store.write().await;
+        let dump = store.dump(&ptr);
+        store.broadcast.subscribe_json(ptr, dump, capacity)
     }
     pub async fn watch(&self, ptr: JsonPointer) -> DbWatch {
         let (dump, sub) = self.dump_and_sub(ptr).await;

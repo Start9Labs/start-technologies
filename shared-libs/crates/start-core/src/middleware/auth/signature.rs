@@ -331,6 +331,25 @@ fn loopback_identity(request: &Request) -> Option<InternedString> {
     ip.is_loopback().then(|| url_host_str(ip))
 }
 
+/// Names the server answers to on the request's ingress.
+pub(crate) fn request_identities<'a, C: SignatureAuthContext>(
+    context: &'a C,
+    request: &'a Request,
+) -> impl Future<Output = Result<Vec<InternedString>, Error>> + Send + 'a {
+    let loopback = loopback_identity(request);
+    let extensions = request.extensions();
+    async move {
+        let mut identities = context
+            .sig_context(extensions)
+            .await
+            .into_iter()
+            .map(|identity| identity.map(|identity| InternedString::intern(identity.as_ref())))
+            .collect::<Result<Vec<_>, _>>()?;
+        identities.extend(loopback);
+        Ok(identities)
+    }
+}
+
 pub trait SigningContext {
     fn signing_key(&self) -> Result<Signer, Error>;
 }
@@ -436,23 +455,12 @@ async fn verify_request_signature_with_address<C: SignatureAuthContext>(
     )?;
 
     let address = {
-        let sig_contexts = context
-            .sig_context(request.extensions())
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?;
-        let loopback = loopback_identity(request);
-        let address = verified_address(
-            &header,
-            sig_contexts
-                .iter()
-                .map(|c| c.as_ref())
-                .chain(loopback.as_deref()),
-        );
+        let identities = request_identities(context, request).await?;
+        let address = verified_address(&header, identities.iter().map(|c| &**c));
         let Some(address) = address else {
             tracing::debug!(
                 signer = ?header.signer,
-                contexts = ?sig_contexts.iter().map(|c| c.as_ref()).collect::<Vec<_>>(),
+                contexts = ?identities,
                 "request signature failed verification for every known server identity"
             );
             return Err(Error::new(

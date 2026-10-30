@@ -7,14 +7,10 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const root = join(__dirname, '..')
 
-// Extract dictionary keys from en.ts
 const enPath = join(root, 'shared/src/i18n/dictionaries/en.ts')
 const enSource = readFileSync(enPath, 'utf-8')
-const validKeys = new Set()
-
-for (const match of enSource.matchAll(/^\s+'(.+?)':\s*\d+/gm)) {
-  validKeys.add(match[1])
-}
+const englishEntries = [...enSource.matchAll(/^\s+(['"])(.+?)\1:\s*(\d+)/gm)]
+const validKeys = new Set(englishEntries.map(match => match[2]))
 
 if (validKeys.size === 0) {
   console.error('ERROR: Could not parse any keys from en.ts')
@@ -23,7 +19,6 @@ if (validKeys.size === 0) {
 
 console.log(`Loaded ${validKeys.size} i18n keys from en.ts`)
 
-// Collect all .ts and .html files under projects/
 function walk(dir, files = []) {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry)
@@ -38,11 +33,7 @@ function walk(dir, files = []) {
   return files
 }
 
-// Projects are scattered across the monorepo: shared libs live here under
-// shared-libs/ts-modules, app projects live in their product dirs.
-// start-tunnel and start-wrt keep their OWN local dictionaries and are checked
-// by their own check-i18n scripts (check:i18n:tunnel / check:i18n:wrt), so they
-// are deliberately excluded here.
+// StartTunnel and StartWRT use their own dictionaries and validation.
 const scanDirs = [
   'shared',
   'marketplace',
@@ -55,7 +46,6 @@ const files = scanDirs.flatMap(d => walk(d))
 const errors = []
 
 for (const file of files) {
-  // Skip the dictionary files themselves
   if (file.includes('/i18n/dictionaries/')) continue
 
   const source = readFileSync(file, 'utf-8')
@@ -64,7 +54,6 @@ for (const file of files) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
 
-    // Pattern 1: i18n.transform('Key') or i18n.transform("Key")
     for (const m of line.matchAll(/i18n\.transform\(\s*'([^']+)'\s*\)/g)) {
       if (!validKeys.has(m[1])) {
         errors.push({ file, line: i + 1, key: m[1] })
@@ -76,7 +65,6 @@ for (const file of files) {
       }
     }
 
-    // Pattern 2: 'Key' | i18n or "Key" | i18n (Angular templates)
     for (const m of line.matchAll(/'([^']+)'\s*\|\s*i18n/g)) {
       if (!validKeys.has(m[1])) {
         errors.push({ file, line: i + 1, key: m[1] })
@@ -99,11 +87,7 @@ if (errors.length > 0) {
   console.error()
 }
 
-// Check that all numeric keys in en.ts exist in every non-English dictionary
-const enNumericKeys = new Set()
-for (const match of enSource.matchAll(/^\s+'[^']+?':\s*(\d+)/gm)) {
-  enNumericKeys.add(Number(match[1]))
-}
+const enNumericKeys = new Set(englishEntries.map(match => Number(match[3])))
 
 const dictDir = join(root, 'shared/src/i18n/dictionaries')
 const otherLangs = ['de', 'es', 'fr', 'pl']
