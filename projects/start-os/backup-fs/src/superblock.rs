@@ -1023,6 +1023,30 @@ mod tests {
     }
 
     #[test]
+    fn an_unreadable_indexed_inode_does_not_block_healthy_data_conversion() {
+        let (dir, legacy) = legacy_store();
+        let source = crate::legacy::Source::load(dir.path(), &legacy.key).unwrap();
+        let location = source.references[&crate::seglog::RecordKey::Inode(2)];
+        let path = crate::seglog::segment_path(&dir.path().join("segments"), location.segment);
+        let mut bytes = std::fs::read(&path).unwrap();
+        let start = location.offset as usize;
+        bytes[start..start + location.len as usize].fill(0);
+        std::fs::write(path, bytes).unwrap();
+
+        let sb = Superblock::convert(&dir.path().join("superblock"), "password").unwrap();
+        assert!(!sb.migration_pending);
+        assert!(read_range(dir.path(), 2, 0, 13).is_err());
+        assert_eq!(
+            read_range(dir.path(), 3, 0, 12000).unwrap(),
+            vec![0x42; 12000]
+        );
+        assert_eq!(
+            read_range(dir.path(), 4, 0, 4 * CHUNK).unwrap(),
+            vec![0x31; 4 * CHUNK]
+        );
+    }
+
+    #[test]
     fn full_backing_store_retries_object_moves_in_smaller_batches() {
         let (dir, _) = legacy_store();
         let primary = dir.path().join("superblock");

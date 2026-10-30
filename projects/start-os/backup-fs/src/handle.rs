@@ -951,19 +951,11 @@ impl Handler {
         self.dirty.remove(&inode.inode);
         self.read_cache.borrow_mut().remove(inode.inode);
 
-        // A packed extent's tombstone is appended (non-durable) BEFORE the
-        // inode tombstone, so the inode tombstone's fsync below makes both
-        // durable together — no window where the inode is gone but its extent
-        // lingers as an unreferenced orphan.
         if let FileData::Packed(content) = &inode.attrs.contents {
             self.ctrl().cpack_tombstone(*content)?;
         }
-        // Tombstone the inode in the log durably BEFORE removing its block /
-        // bucket content: a crash with the content gone but the tombstone not
-        // yet durable would leave the inode "live" on replay pointing at
-        // deleted content. (An inode that only ever lived in the dirty cache
-        // and was never appended still gets a harmless tombstone.)
         self.ctrl().log_tombstone(inode.inode)?;
+        self.ctrl().sync_legacy()?;
         match &inode.attrs.contents {
             FileData::File(contents) => {
                 crate::blockstore::remove_all_blocks(self.ctrl(), *contents, inode.attrs.size)?;

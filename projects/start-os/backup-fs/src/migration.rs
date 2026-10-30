@@ -296,10 +296,10 @@ fn migrate_objects(
     let scan_total = Some(inodes.len() as u64);
     let mut scanned = 0;
     progress(report, ConversionPhase::ScanningObjects, 0, scan_total)?;
-    log.visit_records(
+    log.visit_record_results(
         inodes.iter().map(|(id, loc)| (RecordKey::Inode(*id), loc)),
         |record| {
-            if let Record::Inode { inode, attrs } = record {
+            if let Ok(Record::Inode { inode, attrs }) = record {
                 StorageReferences::for_inode(inode, &attrs).visit(|object| {
                     if log.roots().get(object).is_some() {
                         retired.push(object);
@@ -359,6 +359,7 @@ fn migrate_objects(
                 }
             });
         }
+        drop(job_queue);
         drop(results);
         let retired_paths: Vec<_> = retired
             .iter()

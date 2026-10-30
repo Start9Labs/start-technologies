@@ -649,6 +649,15 @@ impl SegmentLog {
         references: impl Iterator<Item = (RecordKey, &'a Location)>,
         mut visit: impl FnMut(Record) -> BkfsResult<()>,
     ) -> BkfsResult<()> {
+        self.visit_record_results(references, |record| visit(record?))
+    }
+
+    /// Backing I/O errors stop traversal without reaching the visitor.
+    pub(crate) fn visit_record_results<'a>(
+        &self,
+        references: impl Iterator<Item = (RecordKey, &'a Location)>,
+        mut visit: impl FnMut(BkfsResult<Record>) -> BkfsResult<()>,
+    ) -> BkfsResult<()> {
         let mut references: Vec<_> = references.collect();
         references.sort_unstable_by_key(|(_, loc)| (loc.segment, loc.offset));
         let mut reader = crate::aligned_io::RangeReader::default();
@@ -667,7 +676,10 @@ impl SegmentLog {
                     bytes
                 }
             };
-            visit(decode_frame(&self.key, loc, &bytes, self.state.binding())?.verify_key(key)?)?;
+            visit(
+                decode_frame(&self.key, loc, &bytes, self.state.binding())
+                    .and_then(|record| record.verify_key(key)),
+            )?;
         }
         Ok(())
     }

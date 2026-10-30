@@ -165,9 +165,8 @@ impl DirectoryContents {
 
     /// Insert/replace one entry.
     ///
-    /// Returns `Some((gen, buckets))` of a now-superseded bucket generation
-    /// that a reshard produced. The caller must log the new-generation inode
-    /// marker before reaping that generation (see [`Self::reap_generation`]).
+    /// Returns the superseded `(gen, buckets)` after a reshard. The caller
+    /// must log the new-generation inode before [`Self::reap_generation`].
     pub fn insert(
         &mut self,
         ctrl: &Controller,
@@ -215,14 +214,14 @@ impl DirectoryContents {
         }
     }
 
-    /// Reap a superseded bucket generation. Call only after logging the
-    /// new-generation marker (see [`Self::insert`]).
+    /// Requires the new-generation inode to be logged.
     pub fn reap_generation(
         ctrl: &Controller,
         dir: Inode,
         gen: u64,
         buckets: u32,
     ) -> BkfsResult<()> {
+        ctrl.sync_legacy()?;
         for idx in 0..buckets {
             ctrl.remove_dir_bucket(dir, gen, idx)?;
         }
@@ -341,12 +340,7 @@ impl DirectoryContents {
         Ok(())
     }
 
-    /// Grow a spilled directory's bucket count (rare). Writes a new
-    /// generation durably and switches the in-memory marker to it; returns
-    /// the OLD `(gen, buckets)` so the caller can reap it *after* making the
-    /// new marker durable. Does NOT delete the old generation itself —
-    /// deleting it before the new marker is on stable storage would lose the
-    /// whole directory on crash.
+    /// Returns the superseded generation for reclamation after logging the inode.
     fn reshard(&mut self, ctrl: &Controller, dir: Inode) -> BkfsResult<Option<(u64, u32)>> {
         let DirEntries::Spilled {
             gen, buckets, len, ..
@@ -400,7 +394,7 @@ impl DirectoryContents {
         for (idx, bucket) in sharded.iter().enumerate() {
             ctrl.save_dir_bucket(dir, gen, idx as u32, bucket)?;
         }
-        Ok(())
+        ctrl.sync_legacy()
     }
 }
 
@@ -547,8 +541,58 @@ mod tests {
         }
     }
 
-    /// Removing entries keeps counts non-negative and exact, and recompute
-    /// repairs a deliberately corrupted cached count.
+    #[test]
+    fn legacy_reaping_publishes_the_replacement_marker_first() {
+        use crate::handle::Handler;
+        use crate::inode::{FileData, InodeAttributes};
+
+        let tmp = tempfile::tempdir().unwrap();
+        crate::legacy::fixture(tmp.path());
+        let options = |readonly| BackupFSOptions {
+            data_dir: tmp.path().to_owned(),
+            setuid_support: false,
+            password: "password".to_owned(),
+            file_size_padding: None,
+            readonly,
+            idmapped: false,
+        };
+        let c = Controller::new(options(false)).unwrap();
+        assert!(c.is_legacy());
+        let dir = Inode(90_000);
+        let entries: Bucket = [(OsString::from("retained"), entry(1))]
+            .into_iter()
+            .collect();
+        let mut dc = DirectoryContents(DirEntries::Spilled {
+            gen: 1,
+            buckets: MIN_BUCKETS,
+            len: 1,
+            subdirs: 0,
+        });
+        dc.write_generation(&c, dir, 1, MIN_BUCKETS, &entries)
+            .unwrap();
+        let mut attrs = InodeAttributes::new(dir, None, FileData::Directory(dc.clone()));
+        c.save(&attrs).unwrap();
+        c.syncfs().unwrap();
+
+        let (generation, buckets) = dc.reshard(&c, dir).unwrap().unwrap();
+        attrs.attrs.contents = FileData::Directory(dc);
+        Handler::new(c.clone()).save_inode_logged(&attrs).unwrap();
+        DirectoryContents::reap_generation(&c, dir, generation, buckets).unwrap();
+
+        // Reopen before dropping the writer, whose Drop would flush pending markers.
+        let reopened = Controller::new(options(true)).unwrap();
+        let restored = reopened.load::<InodeAttributes>(dir).unwrap();
+        let FileData::Directory(restored) = restored.attrs.contents else {
+            panic!("expected a directory");
+        };
+        let restored = restored.snapshot(&reopened, dir).unwrap();
+        assert_eq!(restored.len(), 1);
+        assert_eq!(
+            restored.get(OsStr::new("retained")).unwrap().inode,
+            Inode(1001)
+        );
+    }
+
     #[test]
     fn counts_saturate_and_recompute() {
         let tmp = tempfile::TempDir::with_prefix("dirtest").unwrap();

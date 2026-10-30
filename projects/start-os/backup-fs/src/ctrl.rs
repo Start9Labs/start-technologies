@@ -792,6 +792,14 @@ impl Controller {
             .map_err(|error| io::Error::from_raw_os_error(error.to_errno_log()))
     }
 
+    /// Commits a format-1 store. Format-1 object removals take effect immediately.
+    pub(crate) fn sync_legacy(&self) -> BkfsResult<()> {
+        if self.is_legacy() {
+            self.syncfs()?;
+        }
+        Ok(())
+    }
+
     /// Counts one save toward the commit batch threshold.
     pub fn tick_save(&self) -> io::Result<()> {
         if self.is_legacy() {

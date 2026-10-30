@@ -73,6 +73,49 @@ fn bulk_reads_use_physical_order_and_validate_each_expected_key() {
 }
 
 #[test]
+fn bulk_results_separate_corrupt_records_from_backing_io_failures() {
+    let data = tempfile::tempdir().unwrap();
+    let mut log = initial(data.path());
+    log.put(Inode(7), &attrs(b"damaged")).unwrap();
+    log.put(Inode(8), &attrs(b"healthy")).unwrap();
+    log.sync().unwrap();
+    let location = log.roots().index[&7];
+    let path = segment_path(log.directory(), location.segment);
+    OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .write_all_at(&vec![0; location.len as usize], location.offset)
+        .unwrap();
+    let mut corrupt = 0;
+    let mut healthy = Vec::new();
+    log.visit_record_results(
+        log.roots()
+            .index
+            .iter()
+            .map(|(&id, loc)| (RecordKey::Inode(id), loc)),
+        |record| {
+            match record {
+                Ok(record) => healthy.push(record.key()),
+                Err(_) => corrupt += 1,
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(corrupt, 1);
+    assert_eq!(healthy, [RecordKey::Inode(8)]);
+
+    std::fs::remove_file(path).unwrap();
+    assert!(log
+        .visit_record_results(
+            std::iter::once((RecordKey::Inode(7), &location)),
+            |_| panic!("backing I/O failure reached visitor"),
+        )
+        .is_err());
+}
+
+#[test]
 fn idle_writable_opens_do_not_create_data_segments() {
     let data = tempfile::tempdir().unwrap();
     let log = initial(data.path());

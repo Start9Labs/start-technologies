@@ -101,6 +101,19 @@ fn legacy_writes_restore_after_reopen_and_survive_explicit_conversion() {
 }
 
 #[test]
+fn legacy_deletion_tombstones_the_inode_before_removing_its_blocks() {
+    let data = tempfile::tempdir().unwrap();
+    super::fixture(data.path());
+    let fs = BackupFS::new(options(data.path(), false)).unwrap();
+    let mut handler = fs.handler.lock().unwrap();
+    let mut file: InodeAttributes = handler.ctrl().load(Inode(4)).unwrap();
+    file.attrs.parents.clear();
+    assert!(handler.gc_inode(&file).unwrap());
+    let durable = Controller::new(options(data.path(), true)).unwrap();
+    assert!(durable.load::<InodeAttributes>(Inode(4)).is_err());
+}
+
+#[test]
 fn legacy_password_changes_preserve_format_one() {
     let data = tempfile::tempdir().unwrap();
     super::fixture(data.path());

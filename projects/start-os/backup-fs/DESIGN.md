@@ -93,7 +93,9 @@ then atomically replaces `segments/state` and synchronizes its directory. These
 per-file barriers send server flushes on network filesystems, where `syncfs`
 sends none. A failed backing write or barrier, or an uncertain publication,
 blocks mutations until reopen, even if a later barrier succeeds; uncommitted
-tails do not override the previous root.
+tails do not override the previous root. Format 1 deletes object files
+immediately, so it commits the records that stop referencing them before
+reaping directory buckets or removing a deleted file's content.
 
 Index deltas share append-only 8 MiB journal files rather than a file per
 mutation. Coarse checkpoints shard maps into chunks of at most 16,384 entries and
