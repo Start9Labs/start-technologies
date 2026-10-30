@@ -13,9 +13,11 @@ name: Sync a release onto live-docs
 # The shared site tree (projects/start-docs) rides along only with a product
 # that ships a book: a bookless release (start-cli, start-registry) has nothing
 # to redeploy, and docs-deploy.yml's paths filter is what keeps it from firing.
-# projects/start-docs/versions.conf rides along with the rest of that tree, so
-# the version each book is published under is whatever the tagged tree said. It
-# is a deliberate, hand-maintained file: set it in master before you tag.
+# projects/start-docs/versions.conf rides along with the rest of that tree, but
+# a tag speaks only for its own book's line: scripts/docs-versions.mjs holds
+# other products' lines at what live-docs publishes, and derives the StartOS and
+# StartWRT labels from the tag. The other books' lines are set by hand in master
+# before tagging.
 #
 # Two guards protect live-docs: the tagged commit must be an ancestor of master,
 # and nothing moves backwards. A product's own tree is judged against that
@@ -74,7 +76,7 @@ jobs:
             git checkout --detach origin/master
             BASE=$(git rev-parse HEAD)
             mkdir -p "$RUNNER_TEMP/scripts" "$RUNNER_TEMP/shared-libs/crates/start-core/locales"
-            for script in changelog.mjs changelog-version.mjs commit-staged.mjs; do
+            for script in changelog.mjs changelog-version.mjs commit-staged.mjs docs-versions.mjs; do
               git show "origin/master:scripts/$script" > "$RUNNER_TEMP/scripts/$script"
             done
             git show origin/master:shared-libs/crates/start-core/locales/release-notes.json > "$RUNNER_TEMP/shared-libs/crates/start-core/locales/release-notes.json"
@@ -190,6 +192,11 @@ jobs:
                 esac
               done
             done
+            if [ "$HAS_BOOK" = 1 ]; then
+              git show HEAD:projects/start-docs/versions.conf > "$RUNNER_TEMP/published-versions.conf"
+              node "$RUNNER_TEMP/scripts/docs-versions.mjs" "$PROJECT" "${TAG#*/v}" \
+                "$RUNNER_TEMP/published-versions.conf" projects/start-docs/versions.conf
+            fi
           fi
 
           git ls-tree -r --name-only origin/master -- projects/ \
