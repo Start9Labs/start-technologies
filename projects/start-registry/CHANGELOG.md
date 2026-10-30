@@ -2,6 +2,23 @@
 
 All notable changes to `start-registry` (the Start Registry server) are documented here. This project is versioned **independently** (starting at `1.0.0`); its version lives in `Cargo.toml`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.0]
+
+### Added
+
+- Store and serve non-English OS release-note translations for clients to select locally, retaining English notes for older clients.
+
+- OS release metadata records the build's Git commit and whether it includes security updates, and preserves both when promoting between registries.
+- OS security-update announcements are disabled by default. Registry operators can opt in with `security-notifications: true` without changing release metadata.
+
+### Changed
+
+- Use compact key and signature encodings in the index, with PEM-compatible responses for older clients.
+
+### Fixed
+
+- StartOS servers older than 0.4.0.3 are no longer offered an OS release they cannot verify, so they update to the newest release they can install.
+
 ## [1.2.1]
 
 ### Fixed
