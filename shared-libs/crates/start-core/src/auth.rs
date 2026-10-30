@@ -520,11 +520,7 @@ pub fn login<'a, AC: LoginContext, CC: IdKeyContext + CallRemote<AC>>(
 /// Prompts for the password and returns `auth.login` params enrolling the
 /// identity key, generating it first when it cannot be loaded.
 pub async fn login_params<C: IdKeyContext>(ctx: &C) -> Result<Value, Error> {
-    let password = if let Ok(password) = std::env::var("PASSWORD") {
-        password
-    } else {
-        rpassword::prompt_password("Password: ")?
-    };
+    let password = crate::util::tui::read_password("PASSWORD", "Password: ")?;
 
     if ctx.id_key().is_err() {
         let secret = ed25519_dalek::SigningKey::generate(&mut crate::util::crypto::os_rng());

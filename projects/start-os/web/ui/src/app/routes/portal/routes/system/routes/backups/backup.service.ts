@@ -1,8 +1,32 @@
-import { inject, Injectable, signal } from '@angular/core'
-import { ErrorService, getErrorMessage } from '@start9labs/shared'
+import {
+  computed,
+  inject,
+  Injectable,
+  linkedSignal,
+  signal,
+} from '@angular/core'
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop'
+import {
+  DialogService,
+  ErrorService,
+  getErrorMessage,
+  TaskService,
+} from '@start9labs/shared'
 import { T, Version } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
-import { firstValueFrom } from 'rxjs'
+import {
+  catchError,
+  defer,
+  EMPTY,
+  filter,
+  finalize,
+  firstValueFrom,
+  from,
+  pairwise,
+  Subject,
+  switchMap,
+} from 'rxjs'
+
 import {
   CifsBackupTarget,
   DiskBackupTarget,
@@ -10,68 +34,86 @@ import {
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 
-export interface MappedBackupTarget<T> {
+export interface MappedBackupTarget<E> {
   id: string
   hasAnyBackup: boolean
   hasCurrentBackup: boolean
-  entry: T
+  entry: E
 }
 
-@Injectable({
-  providedIn: 'root',
-})
+@Injectable({ providedIn: 'root' })
 export class BackupService {
   private readonly api = inject(ApiService)
+  private readonly dialogs = inject(DialogService)
   private readonly errorService = inject(ErrorService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
-
-  private serverId = ''
-
-  readonly cifs = signal<MappedBackupTarget<CifsBackupTarget>[]>([])
-  readonly drives = signal<MappedBackupTarget<DiskBackupTarget>[]>([])
-  readonly loading = signal(true)
-
-  async getBackupTargets(): Promise<void> {
-    this.loading.set(true)
-
-    try {
-      this.serverId = await firstValueFrom(
-        this.patch.watch$('serverInfo', 'id'),
-      )
-      const targets = await this.api.rpc.backup.target.list({})
-
-      this.cifs.set(
-        Object.entries(targets)
-          .filter(([_, target]) => target.type === 'cifs')
-          .map(([id, cifs]) => {
-            return {
-              id,
-              hasAnyBackup: this.hasAnyBackup(cifs),
-              hasCurrentBackup: this.hasCurrentBackup(cifs),
-              entry: cifs as CifsBackupTarget,
-            }
-          }),
-      )
-
-      this.drives.set(
-        Object.entries(targets)
-          .filter(
-            ([_, target]) => target.type === 'disk' && target.capacity > 0,
+  private readonly tasks = inject(TaskService)
+  private readonly reload = new Subject<void>()
+  private readonly serverId = toSignal(this.patch.watch$('serverInfo', 'id'), {
+    initialValue: '',
+  })
+  private readonly targets = toSignal(
+    this.reload.pipe(
+      switchMap(() =>
+        defer(() => {
+          this.loading.set(true)
+          return from(this.api.rpc.backup.target.list({})).pipe(
+            catchError(error => {
+              this.errorService.handleError(getErrorMessage(error))
+              return EMPTY
+            }),
+            finalize(() => this.loading.set(false)),
           )
-          .map(([id, drive]) => {
-            return {
-              id,
-              hasAnyBackup: this.hasAnyBackup(drive),
-              hasCurrentBackup: this.hasCurrentBackup(drive),
-              entry: drive as DiskBackupTarget,
-            }
-          }),
-      )
-    } catch (e: any) {
-      this.errorService.handleError(getErrorMessage(e))
-    } finally {
-      this.loading.set(false)
-    }
+        }),
+      ),
+    ),
+    { initialValue: {} as Record<string, T.BackupTarget> },
+  )
+  private readonly mapped = computed(() =>
+    Object.entries(this.targets()).map(([id, entry]) => ({
+      id,
+      entry,
+      hasAnyBackup: this.hasAnyBackup(entry),
+      hasCurrentBackup: this.hasCurrentBackup(entry),
+    })),
+  )
+  private readonly settled = this.patch
+    .watch$('serverInfo', 'statusInfo', 'backupConversions')
+    .pipe(
+      pairwise(),
+      filter(([previous, current]) =>
+        Object.entries(current).some(([id, jobs]) =>
+          Object.entries(jobs).some(
+            ([server, job]) =>
+              job.state !== 'running' &&
+              previous[id]?.[server]?.state !== job.state,
+          ),
+        ),
+      ),
+      takeUntilDestroyed(),
+    )
+    .subscribe(() => this.getBackupTargets())
+
+  public readonly conversions = toSignal(
+    this.patch.watch$('serverInfo', 'statusInfo', 'backupConversions'),
+    { initialValue: {} as T.ServerStatus['backupConversions'] },
+  )
+  public readonly cifs = linkedSignal(() =>
+    this.mapped().filter(
+      (target): target is MappedBackupTarget<CifsBackupTarget> =>
+        target.entry.type === 'cifs',
+    ),
+  )
+  public readonly drives = linkedSignal(() =>
+    this.mapped().filter(
+      (target): target is MappedBackupTarget<DiskBackupTarget> =>
+        target.entry.type === 'disk' && target.entry.capacity > 0,
+    ),
+  )
+  public readonly loading = signal(true)
+
+  getBackupTargets(): void {
+    this.reload.next()
   }
 
   hasAnyBackup({ startOs }: T.BackupTarget): boolean {
@@ -82,31 +124,61 @@ export class BackupService {
 
   hasThisBackup({ startOs }: T.BackupTarget, id: string): boolean {
     const item = startOs[id]
-
     return (
       !!item &&
       Version.parse(item.version).compare(Version.parse('0.3.6')) !== 'less'
     )
   }
 
-  // Whether *this* server has a current (V2) backup on the target — the signal
-  // that decides if deleting the legacy backup needs an extra confirmation.
   hasCurrentBackup(target: T.BackupTarget): boolean {
-    return this.hasThisBackup(target, this.serverId)
+    return this.hasThisBackup(target, this.serverId())
   }
 
-  // Drop the now-deleted legacy (V1) backup from the cached target so the
-  // warning + delete button disappear without re-listing every drive.
   clearLegacy(id: string): void {
-    this.drives.update(drives =>
-      drives.map(t =>
-        t.id === id ? { ...t, entry: { ...t.entry, legacyBackup: false } } : t,
-      ),
+    const clear = <E extends T.BackupTarget>(
+      targets: MappedBackupTarget<E>[],
+    ) =>
+      targets.map(target =>
+        target.id === id
+          ? { ...target, entry: { ...target.entry, legacyBackup: false } }
+          : target,
+      )
+    this.drives.update(clear)
+    this.cifs.update(clear)
+  }
+
+  async convert(targetId: string, serverId: string): Promise<void> {
+    const confirmed = await firstValueFrom(
+      this.dialogs.openConfirm({
+        label: 'Convert backup format?',
+        data: {
+          content:
+            'Conversion rewrites this backup and may take hours or days. Keep the target connected. This backup is unavailable until conversion finishes, and older StartOS releases cannot read it afterward. An interrupted conversion can be resumed.',
+          yes: 'Continue',
+          no: 'Cancel',
+        },
+      }),
+      { defaultValue: false },
     )
-    this.cifs.update(cifs =>
-      cifs.map(t =>
-        t.id === id ? { ...t, entry: { ...t.entry, legacyBackup: false } } : t,
-      ),
+    if (!confirmed) return
+    const password = await firstValueFrom(
+      this.dialogs.openPrompt<string>({
+        label: 'Password required',
+        data: {
+          message:
+            'Enter the password used to encrypt this backup. Conversion continues in the background after this dialog closes.',
+          label: 'Master Password',
+          placeholder: 'Enter master password',
+          useMask: true,
+        },
+      }),
+      { defaultValue: undefined },
+    )
+    if (password === undefined) return
+    await this.tasks.run(
+      () =>
+        this.api.rpc.backup.target.convert({ targetId, serverId, password }),
+      'Starting backup conversion',
     )
   }
 }

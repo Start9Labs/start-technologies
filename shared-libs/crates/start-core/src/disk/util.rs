@@ -110,6 +110,7 @@ impl From<BackupUnencryptedMetadata> for StartOsRecoveryInfo {
             hostname: meta.hostname,
             version: meta.version,
             timestamp: meta.timestamp,
+            format_status: Default::default(),
         }
     }
 }
@@ -122,6 +123,8 @@ pub struct StartOsRecoveryInfo {
     pub hostname: ServerHostname,
     pub version: exver::Version,
     pub timestamp: DateTime<Utc>,
+    #[serde(default)]
+    pub format_status: backup_fs_protocol::FormatStatus,
 }
 
 rpc_toolkit::reflect_ts!(StartOsRecoveryInfo);
@@ -369,21 +372,29 @@ pub async fn recovery_info(
                 .await
                 .is_ok()
             {
-                res.insert(
-                    server_id,
-                    IoFormat::Json
-                        .from_slice::<BackupUnencryptedMetadata>(
-                            &tokio::fs::read(&backup_unencrypted_metadata_path)
-                                .await
-                                .with_ctx(|_| {
-                                    (
-                                        crate::ErrorKind::Filesystem,
-                                        backup_unencrypted_metadata_path.display().to_string(),
-                                    )
-                                })?,
-                        )?
-                        .into(),
-                );
+                let mut info: StartOsRecoveryInfo = IoFormat::Json
+                    .from_slice::<BackupUnencryptedMetadata>(
+                        &tokio::fs::read(&backup_unencrypted_metadata_path)
+                            .await
+                            .with_ctx(|_| {
+                                (
+                                    crate::ErrorKind::Filesystem,
+                                    backup_unencrypted_metadata_path.display().to_string(),
+                                )
+                            })?,
+                    )?
+                    .into();
+                info.format_status =
+                    match super::mount::filesystem::backupfs::inspect(&entry.path().join("crypt"))
+                        .await
+                    {
+                        Ok(status) => status,
+                        Err(error) => {
+                            tracing::debug!(?error, "backup format inspection failed");
+                            backup_fs_protocol::FormatStatus::Unknown
+                        }
+                    };
+                res.insert(server_id, info);
             }
         }
     }

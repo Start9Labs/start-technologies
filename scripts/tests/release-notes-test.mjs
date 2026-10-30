@@ -1521,6 +1521,38 @@ enter_release_dir() { touch "${marker}"; }
     ])
 })
 
+for (const [project, kind] of [
+  ['start-os', 'os'],
+  ['start-wrt', 'wrt'],
+]) {
+  for (const [name, indexCommand] of [
+    ['unavailable index', 'return 42'],
+    ['missing version', `printf '%s\\n' '{"versions":{}}'`],
+  ]) {
+    test(`cosign-registry rejects ${name} for ${project}`, t => {
+      const { root, env, run } = releaseFixture(t)
+      env.HOME = join(root, 'home')
+      const result = run(
+        'bash',
+        [
+          '-c',
+          `
+source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
+REPO_ROOT="$PWD"; PROJECT=${project}; KIND=${kind}; VERSION=${VERSION}; TAG=${project}/v${VERSION}
+mkdir -p "$(release_dir)"
+start-cli() { ${indexCommand}; }
+cmd_cosign_registry
+`,
+        ],
+        { encoding: 'utf8' },
+      )
+      assert.notEqual(result.status, 0)
+      contains(result.stderr, `has no ${VERSION} entry`)
+      excludes(result.stdout, 'Done. Developer signatures added')
+    })
+  }
+}
+
 test('historical CRLF English notes keep the changelog link last', t => {
   const { write, script } = releaseFixture(t)
   write(

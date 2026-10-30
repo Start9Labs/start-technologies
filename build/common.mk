@@ -20,7 +20,8 @@ CLI_BASENAME := $(shell PROJECT=start-cli PLATFORM=$(ARCH) ./build/env/basename.
 RUST_BUILDER_INPUTS := build/rust-builder/image.sh build/rust-builder/repository build/rust-builder/reference
 
 # Every Rust binary tracks its transitive path dependencies.
-CORE_SRC := $(call ls-files, shared-libs/crates/start-core) \
+BACKUP_PROTOCOL_SRC := $(call ls-files, shared-libs/crates/backup-fs-protocol)
+CORE_SRC := $(call ls-files, shared-libs/crates/start-core) $(BACKUP_PROTOCOL_SRC) \
 	$(call ls-files, shared-libs/crates/exver) \
 	$(call ls-files, shared-libs/crates/imbl-value) \
 	$(call ls-files, shared-libs/crates/jsonpath) \

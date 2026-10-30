@@ -29,6 +29,7 @@ default = []
 dev = []
 test = []
 ts = [
+  "backup-fs-protocol/ts",
   "rpc-toolkit/ts",
   "rpc-toolkit/chrono",
   "rpc-toolkit/ipnet",
@@ -53,6 +54,9 @@ async-stream = "0.3.5"
 async-trait = "0.1.74"
 axum = { version = "0.8.4", features = ["http2", "ws"] }
 backtrace-on-stack-overflow = { version = "0.3.0", optional = true }
+backup-fs-protocol = { path = "../backup-fs-protocol", features = [
+  "reflection",
+] }
 base32 = "0.5.0"
 base64 = "0.22.1"
 base64ct = "1.6.0"
@@ -245,6 +249,7 @@ x25519-dalek = { version = "3.0.0-rc.1", features = ["static_secrets"] }
 xattr = "1.6.1"
 xmltree = "0.10"
 zbus = "5.1.1"
+zeroize = "1"
 zstd = "0.13.3"
 
 [[example]]

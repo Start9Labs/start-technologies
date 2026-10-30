@@ -23,6 +23,7 @@ const mockDescription = {
 
 export namespace Mock {
   export const ServerUpdated: T.ServerStatus = {
+    backupConversions: {},
     backupProgress: null,
     updateProgress: null,
     restarting: false,
@@ -1387,6 +1388,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
               hostname: 'server-name',
               timestamp: new Date().toISOString(),
               version: '0.4.0',
+              formatStatus: 'legacy',
             },
           },
           legacyBackup: false,
@@ -1413,6 +1415,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
           hostname: 'server-name',
           timestamp: new Date().toISOString(),
           version: '0.4.0',
+          formatStatus: 'unknown',
         },
       },
       legacyBackup: false,
@@ -1439,6 +1442,13 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
           hostname: 'server-name',
           timestamp: new Date().toISOString(),
           version: '0.4.0',
+          formatStatus: 'legacy',
+        },
+        'archive-server': {
+          hostname: 'archive-server',
+          timestamp: new Date().toISOString(),
+          version: '0.4.0',
+          formatStatus: 'legacy',
         },
       },
       legacyBackup: false,
@@ -1460,6 +1470,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
           hostname: 'server-name',
           timestamp: new Date().toISOString(),
           version: '0.4.0',
+          formatStatus: 'interrupted',
         },
       },
       legacyBackup: true,
