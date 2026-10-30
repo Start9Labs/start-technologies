@@ -881,7 +881,7 @@ export default {
   1000: 'Tak',
   1001: 'Nie',
   1002: 'Przekonwertować format kopii zapasowej?',
-  1003: 'Konwersja zapisuje tę kopię od nowa i może potrwać godziny lub dni. Pozostaw cel podłączony. Kopia jest niedostępna do zakończenia konwersji, a starsze wersje StartOS nie będą mogły jej później odczytać. Przerwaną konwersję można wznowić.',
+  1003: 'Konwersja zapisuje tę kopię od nowa i może potrwać długo. Pozostaw cel podłączony. Kopia jest niedostępna do zakończenia konwersji, a starsze wersje StartOS nie będą mogły jej później odczytać. Przerwaną konwersję można wznowić.',
   1004: 'Wprowadź hasło użyte do zaszyfrowania tej kopii. Konwersja będzie kontynuowana w tle po zamknięciu tego okna.',
   1005: 'Rozpoczynanie konwersji kopii zapasowej',
   1006: 'Konwersja trwa',
@@ -898,5 +898,5 @@ export default {
   1017: 'obiektów',
   1018: 'Łączny postęp',
   1019: 'Zaktualizować format kopii zapasowej?',
-  1020: 'Kopia tego serwera używa starego formatu. Zaktualizuj go, aby uzyskać skuteczniejsze wykrywanie modyfikacji i migawki tylko do odczytu, lub pomiń ten krok, aby utworzyć kopię w istniejącym formacie. Konwersja może potrwać godziny lub dni, a kopia jest niedostępna do jej zakończenia.',
+  1020: 'Kopia tego serwera używa starego formatu. Zaktualizuj go, aby uzyskać skuteczniejsze wykrywanie modyfikacji i migawki tylko do odczytu, lub pomiń ten krok, aby utworzyć kopię w istniejącym formacie. Konwersja może potrwać długo, a kopia jest niedostępna do jej zakończenia.',
 } satisfies i18n

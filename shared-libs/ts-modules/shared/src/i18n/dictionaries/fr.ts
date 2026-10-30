@@ -881,7 +881,7 @@ export default {
   1000: 'Oui',
   1001: 'Non',
   1002: 'Convertir le format de la sauvegarde ?',
-  1003: 'La conversion réécrit cette sauvegarde et peut prendre des heures ou des jours. Laissez la cible connectée. Cette sauvegarde reste indisponible pendant la conversion et les anciennes versions de StartOS ne pourront plus la lire. Une conversion interrompue peut être reprise.',
+  1003: 'La conversion réécrit cette sauvegarde et peut prendre beaucoup de temps. Laissez la cible connectée. Cette sauvegarde reste indisponible pendant la conversion et les anciennes versions de StartOS ne pourront plus la lire. Une conversion interrompue peut être reprise.',
   1004: 'Saisissez le mot de passe utilisé pour chiffrer cette sauvegarde. La conversion continue en arrière-plan après la fermeture de cette boîte de dialogue.',
   1005: 'Démarrage de la conversion de la sauvegarde',
   1006: 'Conversion en cours',
@@ -898,5 +898,5 @@ export default {
   1017: 'objets',
   1018: 'Progression globale',
   1019: 'Mettre à jour le format de sauvegarde ?',
-  1020: 'La sauvegarde de ce serveur utilise un ancien format. Mettez-le à jour pour une meilleure détection des altérations et des instantanés en lecture seule, ou ignorez cette étape pour créer une sauvegarde au format existant. La conversion peut prendre des heures ou des jours et cette sauvegarde reste indisponible jusqu’à la fin.',
+  1020: 'La sauvegarde de ce serveur utilise un ancien format. Mettez-le à jour pour une meilleure détection des altérations et des instantanés en lecture seule, ou ignorez cette étape pour créer une sauvegarde au format existant. La conversion peut prendre beaucoup de temps et cette sauvegarde reste indisponible jusqu’à la fin.',
 } satisfies i18n

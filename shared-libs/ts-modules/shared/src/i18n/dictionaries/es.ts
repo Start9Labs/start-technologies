@@ -881,7 +881,7 @@ export default {
   1000: 'Sí',
   1001: 'No',
   1002: '¿Convertir el formato de la copia?',
-  1003: 'La conversión reescribe esta copia y puede tardar horas o días. Mantenga el destino conectado. Esta copia no estará disponible hasta que termine y las versiones anteriores de StartOS no podrán leerla después. Una conversión interrumpida se puede reanudar.',
+  1003: 'La conversión reescribe esta copia y puede tardar mucho tiempo. Mantenga el destino conectado. Esta copia no estará disponible hasta que termine y las versiones anteriores de StartOS no podrán leerla después. Una conversión interrumpida se puede reanudar.',
   1004: 'Introduzca la contraseña utilizada para cifrar esta copia. La conversión continúa en segundo plano después de cerrar este diálogo.',
   1005: 'Iniciando la conversión de la copia',
   1006: 'Conversión en curso',
@@ -898,5 +898,5 @@ export default {
   1017: 'objetos',
   1018: 'Progreso general',
   1019: '¿Actualizar el formato de la copia?',
-  1020: 'La copia de este servidor utiliza un formato antiguo. Actualícelo para una detección de alteraciones más sólida e instantáneas de solo lectura, u omita este paso para crear una copia con el formato existente. La conversión puede tardar horas o días y esta copia no estará disponible hasta que termine.',
+  1020: 'La copia de este servidor utiliza un formato antiguo. Actualícelo para una detección de alteraciones más sólida e instantáneas de solo lectura, u omita este paso para crear una copia con el formato existente. La conversión puede tardar mucho tiempo y esta copia no estará disponible hasta que termine.',
 } satisfies i18n

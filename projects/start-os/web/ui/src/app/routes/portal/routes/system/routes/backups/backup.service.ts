@@ -162,7 +162,7 @@ export class BackupService {
         label: 'Update backup format?',
         data: {
           content:
-            'This server’s backup uses an old format. Update it for stronger tamper detection and read-only snapshots, or skip to create a backup using the existing format. Conversion may take hours or days, and this backup is unavailable until it finishes.',
+            'This server’s backup uses an old format. Update it for stronger tamper detection and read-only snapshots, or skip to create a backup using the existing format. Conversion may take a long time, and this backup is unavailable until it finishes.',
           yes: 'Update format',
           no: 'Skip',
         },
@@ -182,7 +182,7 @@ export class BackupService {
         label: 'Convert backup format?',
         data: {
           content:
-            'Conversion rewrites this backup and may take hours or days. Keep the target connected. This backup is unavailable until conversion finishes, and older StartOS releases cannot read it afterward. An interrupted conversion can be resumed.',
+            'Conversion rewrites this backup and may take a long time. Keep the target connected. This backup is unavailable until conversion finishes, and older StartOS releases cannot read it afterward. An interrupted conversion can be resumed.',
           yes: 'Continue',
           no: 'Cancel',
         },

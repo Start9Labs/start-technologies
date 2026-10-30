@@ -882,7 +882,7 @@ export const ENGLISH: Record<string, number> = {
   'Yes': 1000,
   'No': 1001,
   'Convert backup format?': 1002,
-  'Conversion rewrites this backup and may take hours or days. Keep the target connected. This backup is unavailable until conversion finishes, and older StartOS releases cannot read it afterward. An interrupted conversion can be resumed.': 1003,
+  'Conversion rewrites this backup and may take a long time. Keep the target connected. This backup is unavailable until conversion finishes, and older StartOS releases cannot read it afterward. An interrupted conversion can be resumed.': 1003,
   'Enter the password used to encrypt this backup. Conversion continues in the background after this dialog closes.': 1004,
   'Starting backup conversion': 1005,
   'Conversion in progress': 1006,
@@ -899,5 +899,5 @@ export const ENGLISH: Record<string, number> = {
   'objects': 1017,
   'Overall progress': 1018,
   'Update backup format?': 1019,
-  'This server’s backup uses an old format. Update it for stronger tamper detection and read-only snapshots, or skip to create a backup using the existing format. Conversion may take hours or days, and this backup is unavailable until it finishes.': 1020,
+  'This server’s backup uses an old format. Update it for stronger tamper detection and read-only snapshots, or skip to create a backup using the existing format. Conversion may take a long time, and this backup is unavailable until it finishes.': 1020,
 }

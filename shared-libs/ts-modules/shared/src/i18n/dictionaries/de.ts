@@ -881,7 +881,7 @@ export default {
   1000: 'Ja',
   1001: 'Nein',
   1002: 'Sicherungsformat konvertieren?',
-  1003: 'Die Konvertierung schreibt diese Sicherung neu und kann Stunden oder Tage dauern. Lassen Sie das Ziel angeschlossen. Diese Sicherung ist bis zum Abschluss nicht verfügbar und kann danach von älteren StartOS-Versionen nicht gelesen werden. Eine unterbrochene Konvertierung kann fortgesetzt werden.',
+  1003: 'Die Konvertierung schreibt diese Sicherung neu und kann lange dauern. Lassen Sie das Ziel angeschlossen. Diese Sicherung ist bis zum Abschluss nicht verfügbar und kann danach von älteren StartOS-Versionen nicht gelesen werden. Eine unterbrochene Konvertierung kann fortgesetzt werden.',
   1004: 'Geben Sie das Passwort ein, mit dem diese Sicherung verschlüsselt wurde. Die Konvertierung läuft nach dem Schließen dieses Dialogs im Hintergrund weiter.',
   1005: 'Sicherungskonvertierung wird gestartet',
   1006: 'Konvertierung läuft',
@@ -898,5 +898,5 @@ export default {
   1017: 'Objekte',
   1018: 'Gesamtfortschritt',
   1019: 'Sicherungsformat aktualisieren?',
-  1020: 'Die Sicherung dieses Servers verwendet ein altes Format. Aktualisieren Sie es für eine stärkere Manipulationserkennung und schreibgeschützte Snapshots, oder überspringen Sie diesen Schritt, um eine Sicherung im bestehenden Format zu erstellen. Die Konvertierung kann Stunden oder Tage dauern, und diese Sicherung ist bis zum Abschluss nicht verfügbar.',
+  1020: 'Die Sicherung dieses Servers verwendet ein altes Format. Aktualisieren Sie es für eine stärkere Manipulationserkennung und schreibgeschützte Snapshots, oder überspringen Sie diesen Schritt, um eine Sicherung im bestehenden Format zu erstellen. Die Konvertierung kann lange dauern, und diese Sicherung ist bis zum Abschluss nicht verfügbar.',
 } satisfies i18n
