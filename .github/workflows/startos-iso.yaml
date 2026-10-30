@@ -199,7 +199,7 @@ jobs:
           path: compiled-${{ matrix.arch }}.tar
           retention-days: 1
 
-  # On pull requests, only build the (expensive, ~2h with emulated riscv) image
+  # On pull requests, only build the (expensive) image
   # matrix when the change actually affects image assembly — packaging, image
   # recipe, systemd units, apt, or shared build infra. Pure code/web/docs PRs are
   # already covered by `compile` (the binaries) and the Automated Tests workflow,
@@ -285,8 +285,8 @@ jobs:
               "aarch64-nonfree": "ubuntu-24.04-arm",
               "aarch64-nvidia": "ubuntu-24.04-arm",
               "raspberrypi": "ubuntu-24.04-arm",
-              "riscv64": "ubuntu-24.04-arm",
-              "riscv64-nonfree": "ubuntu-24.04-arm",
+              "riscv64": "ubuntu-24.04-riscv",
+              "riscv64-nonfree": "ubuntu-24.04-riscv",
             }')[matrix.platform],
             fromJson('{
               "x86_64": "amd64-fast",
