@@ -64,6 +64,20 @@ test('a retained site tree still takes the released book label from its tag', ()
   )
 })
 
+test('a retained site tree keeps a book line its tag does not state', () => {
+  const { 'start-tunnel': _, ...withoutTunnel } = MASTER
+  assert.equal(
+    reconcile(
+      conf(withoutTunnel),
+      conf(PUBLISHED),
+      'start-tunnel',
+      '1.5.0',
+      conf(PUBLISHED),
+    ),
+    conf(PUBLISHED),
+  )
+})
+
 test('an unpublished product stays off the site', () => {
   const { 'start-tunnel': _, ...unpublished } = PUBLISHED
   assert.equal(

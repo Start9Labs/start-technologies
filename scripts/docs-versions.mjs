@@ -44,7 +44,7 @@ export function reconcile(tagged, published, project, version, site = tagged) {
     .split('\n')
     .flatMap(line => {
       const book = bookOf(line)
-      if (book === own) return [ownLine]
+      if (book === own) return [ownLine ?? line]
       if (others.includes(book)) return held.has(book) ? [held.get(book)] : []
       return [line]
     })
