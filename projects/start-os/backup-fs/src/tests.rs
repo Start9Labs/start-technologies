@@ -2157,6 +2157,21 @@ fn every_commit_records_the_namespace_between_requests() {
         crash("unlink");
         fs::remove_dir(mnt.join("b")).unwrap();
         crash("rmdir");
+        handler.lock().unwrap().ctrl().set_sync_batch(64);
+        fs::create_dir(mnt.join("big")).unwrap();
+        for i in 0..1_100 {
+            fs::write(mnt.join(format!("big/{i:05}")), i.to_string()).unwrap();
+        }
+        handler.lock().unwrap().ctrl().set_sync_batch(1);
+        crash("spill into chunks");
+        fs::rename(mnt.join("big/00007"), mnt.join("big/renamed")).unwrap();
+        crash("rename within chunks");
+        fs::rename(mnt.join("big/00008"), mnt.join("a/moved")).unwrap();
+        crash("rename out of chunks");
+        for i in 100..200 {
+            fs::remove_file(mnt.join(format!("big/{i:05}"))).unwrap();
+        }
+        crash("unlink from chunks");
     });
 }
 

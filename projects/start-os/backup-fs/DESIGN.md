@@ -83,9 +83,15 @@ windows of committed segment bytes; larger records are read exactly.
 State owns publication durability. Every record write is appended and published
 by the next commit; ordering between related writes needs no earlier commit
 because a commit publishes all of them atomically and storage is reclaimed only
-by compaction after publication. Commits happen after the fast-save batch
-threshold (4,096 saves; `BACKUPFS_SYNC_BATCH` overrides it), on FUSE fsync and
-syncfs, around snapshot operations, and at unmount.
+by compaction after publication. Losing power or the process reverts the store
+to its last commit.
+
+Each commit records the whole filesystem at one moment between requests. Once
+4,096 saves accumulate (`BACKUPFS_SYNC_BATCH` overrides it), the request that
+finishes next commits: it locks every open file, logs their buffered content and
+attributes, the dirty inode cache, and changed directory chunks, then publishes.
+A file being written is recorded as it was at that moment. FUSE fsync, fsyncdir
+and syncfs commit the same way; so do snapshot operations and unmount.
 
 A commit waits for its segment writes, synchronizes every segment and index
 journal written since the previous commit, synchronizes the index directories,
@@ -98,7 +104,12 @@ immediately, so it commits the records that stop referencing them before
 reaping directory buckets or removing a deleted file's content.
 
 Index deltas share append-only 8 MiB journal files rather than a file per
-mutation. Coarse checkpoints shard maps into chunks of at most 16,384 entries and
+mutation. Each commit's transactions start on a fresh 4 KiB block, and segment
+writes are padded to 4 KiB at every commit, so a torn write during power loss
+reaches only uncommitted bytes. On a network share, directory renames and
+deletions are durable when the server's filesystem commits its metadata, in
+order; a lost rename reverts to the previous commit together with every later
+deletion. Coarse checkpoints shard maps into chunks of at most 16,384 entries and
 enforce decoder budgets before publication. Unmount writes a checkpoint only once
 the journal holds more than 65,536 entries and more than a quarter of the
 checkpoint's own entries; snapshot operations always checkpoint. Unchanged
@@ -172,7 +183,14 @@ existing reference before use; absent slots generate no index change. Each open
 inode retains one decoded clean block, shared by its handles and released on last
 close; writes and trailing-block pruning invalidate the affected cache entry.
 
-Large directories spill into keyed hash buckets. Inodes preserve mode, uid/gid,
+A directory with more than 1,024 entries leaves its inode. In format 2 its
+entries are appended to chunks — directory-bucket records of about 56 KiB — so
+adding names rewrites only the last chunk; removals rewrite the chunk holding the
+name, and a directory whose chunks fall below a quarter full is repacked. Each
+mounted directory's names are indexed in memory on first use, up to 262,144
+entries across directories. Format 1 hashes large directories into buckets;
+format 2 moves such a directory into chunks on its first change. Inodes preserve
+mode, uid/gid,
 all four timestamps, hardlinks, symlinks, device numbers, and xattrs, including
 POSIX ACLs.
 
