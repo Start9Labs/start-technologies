@@ -1,0 +1,2 @@
+- Wyświetla pełne błędy instalacji przy ręcznym instalowaniu pakietów z aktualnym serwerem StartOS.
+- Gdy nie można zainstalować żadnej wersji pasującej do żądania, zgłasza błąd i wskazuje zainstalowaną wersję, jeśli to ona blokuje instalację.

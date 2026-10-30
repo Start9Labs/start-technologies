@@ -1,0 +1,1 @@
+- Aktualisierte CLI-Clients erhalten vollständige Fehler bei der Dienstinstallation statt abgeschnittener Meldungen im Fortschrittsstrom.
