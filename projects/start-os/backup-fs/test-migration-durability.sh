@@ -2,14 +2,14 @@
 set -euo pipefail
 
 bin=$(realpath "$1")
-fixture=$(realpath "$(dirname "$0")/testdata/legacy-795d8a265.tar.gz")
+fixture=$(realpath "$(dirname "$0")/testdata/legacy-format1.tar.gz")
 docker run --rm --cap-add SYS_PTRACE --security-opt seccomp=unconfined \
     --tmpfs /store:rw,size=32m \
     -v "$fixture:/tmp/legacy.tar.gz:ro" -v "$bin:/tmp/startos-backup-fs:ro" \
     -e DEBIAN_FRONTEND=noninteractive start9/start-core-testenv:latest bash -euc '
     apt-get update -qq
     apt-get install -y -qq --no-install-recommends strace
-    tar -xzf /tmp/legacy.tar.gz -C /store --strip-components=2 ./v3
+    tar -xzf /tmp/legacy.tar.gz -C /store
     chown -R "$(id -u):$(id -g)" /store
     chmod 755 /store
     node <<"NODE"
@@ -17,11 +17,11 @@ const fs = require("node:fs")
 function files(dir) {
   return fs.readdirSync(dir, {withFileTypes: true}).flatMap(e => e.isDirectory() ? files(`${dir}/${e.name}`) : [`${dir}/${e.name}`])
 }
-const replaced = files("/store").filter(p => p.endsWith(".seg") || /\/contents\/[^/]+\/[^/]+\.[0-9a-f]+$/.test(p))
-if (!replaced.some(p => p.endsWith(".seg")) || !replaced.some(p => p.includes("/contents/"))) throw Error("fixture lacks in-place replacements")
+const replaced = files("/store").filter(p => p.endsWith(".seg"))
+if (!replaced.length) throw Error("fixture lacks legacy segments")
 fs.writeFileSync("/tmp/replaced.json", JSON.stringify(replaced))
 NODE
-    printf snapshots | strace -f -yy -o /tmp/trace -e trace=fsync,rename,syncfs /tmp/startos-backup-fs snapshot create /store durability-check
+    printf password | strace -f -yy -o /tmp/trace -e trace=fsync,rename,syncfs /tmp/startos-backup-fs snapshot create /store durability-check
     node <<"NODE"
 const fs = require("node:fs")
 const path = require("node:path")

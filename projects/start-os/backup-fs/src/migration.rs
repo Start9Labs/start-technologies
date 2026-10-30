@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -12,8 +12,7 @@ use crate::legacy;
 use crate::objects::{Inventory, ObjectVersion};
 use crate::seglog::{self, Frames, Location, Record, Roots, SegmentWriter};
 use crate::serde::{data_config, decode};
-use crate::snapshot::{Catalog, Snapshot};
-use crate::state::{Counters, State, View};
+use crate::state::{Counters, State};
 use crate::superblock::Constants;
 use crate::vault::{self, AuthenticationTag, Binding, EccParams};
 
@@ -38,11 +37,7 @@ pub(crate) fn open_for_upgrade(
         Err(error) if matches!(error.kind, BkfsErrorKind::BadChecksum) => {}
         Err(error) => return Err(error),
     }
-    let plaintext = if vault::is_legacy(blob) {
-        vault::open_legacy(blob, key)?
-    } else {
-        vault::open(blob, key)?
-    };
+    let plaintext = vault::open_legacy(blob, key)?;
     Ok(UpgradePlain {
         plaintext,
         current_tag: None,
@@ -72,9 +67,12 @@ fn upgraded_blob(blob: &[u8], key: &Key, binding: Binding) -> BkfsResult<Option<
     }
 }
 
-fn convert_roots(roots: &legacy::Roots, locations: &HashMap<(u64, u64), Location>) -> Roots {
+fn convert_roots(
+    references: &HashMap<seglog::RecordKey, legacy::Location>,
+    locations: &HashMap<(u64, u64), Location>,
+) -> Roots {
     let mut converted = Roots::default();
-    for (key, old) in roots.entries() {
+    for (&key, old) in references {
         let location = locations
             .get(&(old.segment, old.offset))
             .copied()
@@ -95,13 +93,11 @@ fn migrate_object(
     key: &Key,
     binding: Binding,
 ) -> BkfsResult<()> {
-    if source != destination {
-        match fs::read(destination) {
-            Ok(bytes) if vault::open_bound(&bytes, key, binding).is_ok() => return Ok(()),
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
-        }
+    match fs::read(destination) {
+        Ok(bytes) if vault::open_bound(&bytes, key, binding).is_ok() => return Ok(()),
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
     }
     let bytes = match fs::read(source) {
         Ok(bytes) => bytes,
@@ -109,16 +105,9 @@ fn migrate_object(
         Err(error) => return Err(error.into()),
     };
     let upgraded = upgraded_blob(&bytes, key, binding)?;
-    if upgraded.is_none() && source == destination {
-        return Ok(());
-    }
     let mut file = AtomicFile::create_buffered(destination.to_owned())?;
     file.write_all(upgraded.as_deref().unwrap_or(&bytes))?;
-    if source == destination {
-        file.save_durable()
-    } else {
-        file.save_fast()
-    }
+    file.save_fast()
 }
 
 fn retire_sources(backing: &File, sources: &mut Vec<PathBuf>) -> BkfsResult<()> {
@@ -143,7 +132,6 @@ pub(crate) fn reseal_store(data: &Path, key: &Key, constants: Constants) -> Bkfs
     }
     let mut source = legacy::Source::load(data, key)?;
     let mut locations = HashMap::new();
-    let mut versions = HashSet::new();
     let mut stable = HashMap::new();
     for (segment, _) in seglog::list_segments(&dir)? {
         let path = seglog::segment_path(&dir, segment);
@@ -173,13 +161,15 @@ pub(crate) fn reseal_store(data: &Path, key: &Key, constants: Constants) -> Bkfs
                         Record::Object {
                             id,
                             version: ObjectVersion::Version(token),
-                        } => {
-                            versions.insert((id, token));
-                            (token == vault::migration_version(key, id)?).then_some(id)
+                        } if token == vault::migration_version(key, id)? => Some(id),
+                        Record::Object { .. } => {
+                            return Err(crate::error::BkfsError::unsupported(
+                                "unexpected object record during format-1 migration",
+                            ))
                         }
                         _ => None,
                     };
-                    // Migration pointers must not override the legacy source on retry.
+                    // Migration pointers belong to the resumed output, not the source namespace.
                     if migrated.is_some() {
                         source.advance_sequence(frame.seq)?;
                     } else {
@@ -209,7 +199,7 @@ pub(crate) fn reseal_store(data: &Path, key: &Key, constants: Constants) -> Bkfs
                                 Binding::Record,
                             );
                             location.tag = sealed.tag;
-                            // Preserve legacy snapshot offsets, including recoverable parity truncation.
+                            // Preserves cached locations across interrupted migration.
                             sealed.bytes.resize(frame.payload.len(), 0);
                             changed = true;
                             sealed.bytes
@@ -239,11 +229,7 @@ pub(crate) fn reseal_store(data: &Path, key: &Key, constants: Constants) -> Bkfs
             file.save_durable()?;
         }
     }
-    for (id, token) in versions {
-        let path = id.path(data, Some(ObjectVersion::Version(token))).unwrap();
-        migrate_object(&path, &path, key, Binding::Object { id, version: token })?;
-    }
-    let mut roots = convert_roots(&source.roots, &locations);
+    let mut roots = convert_roots(&source.references, &locations);
     let inventory = Inventory::load(data)?;
     let mut writer = None;
     let backing = File::open(data)?;
@@ -297,25 +283,7 @@ pub(crate) fn reseal_store(data: &Path, key: &Key, constants: Constants) -> Bkfs
         next_seq: source.next_seq,
         max_inode: source.max_inode,
     };
-    let mut catalog = Catalog::default();
-    for (name, old) in source.snapshots {
-        let mut snapshot = convert_roots(&old.roots, &locations);
-        for id in old.legacy {
-            if let Some(&location) = stable.get(&id) {
-                snapshot.objects.entry(id).or_insert(location);
-            }
-        }
-        let (view, _) = View::write_checkpoint(&dir, key, constants.ecc(), &snapshot, counters)?;
-        catalog
-            .entries
-            .insert(name, Snapshot::new(old.info, view, &snapshot));
-    }
-    let catalog = if catalog.entries.is_empty() {
-        None
-    } else {
-        Some(catalog.write(&dir, key, constants.ecc())?)
-    };
-    State::create(&dir, key, constants.ecc(), &roots, counters, catalog)?;
+    State::create(&dir, key, constants.ecc(), &roots, counters, None)?;
     File::open(data)?.sync_all()?;
     Ok(())
 }

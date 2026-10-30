@@ -20,11 +20,11 @@ $data_dir/
   dirents/<shard>/<id>.<version>   immutable sealed directory buckets
 ```
 
-Filesystem format 4 uses versioned objects for every store. Named snapshots retain
+Filesystem format 2 uses versioned objects for every store. Named snapshots retain
 historical views; they do not activate a separate storage mode. Copy the complete
 backing directory while it is offline: the index, catalog, and their referenced
-files are authoritative. Legacy `index.cache`, `roots`, and `snapshots` files may
-remain after migration but are not consulted by normal format-4 opens.
+files are authoritative. The legacy `index.cache` may remain after migration
+but is not consulted by normal format-2 opens.
 
 ## Encryption, references, and ECC
 
@@ -58,24 +58,23 @@ encrypted `metadata.json` authenticates the date of the selected backup view.
 
 ## Legacy migration
 
-A writable open upgrades filesystem formats 1–3. Every superblock replica first
-receives an authenticated pending marker. Read-only opens refuse old or pending
-stores. Migration reseals objects and log frames with their required bindings,
-preserves existing frame offsets, converts retained snapshots, and publishes the
-new State before clearing the marker. Older binaries reject the upgraded format.
+A writable open upgrades pre-existing filesystem format 1 to format 2. Every
+superblock replica first receives an authenticated pending marker. Read-only
+opens refuse old or pending stores. Migration reseals objects and log frames
+with their required bindings, preserves cached frame locations, and publishes
+the new State before clearing the marker. Older binaries reject the upgraded
+format. Format 1 has stable-name objects and no named snapshots.
 
-In-place segment and versioned-object replacements sync their temporary data
-before rename, then sync the containing directory. Copies to new names retain
-batched durability.
+In-place segment replacements sync their temporary data before rename, then sync
+the containing directory. Object copies to new names retain batched durability.
 
 Stable-name objects receive deterministic secret-derived migration versions and
 pointer records. Completed destinations and their pointers become durable before
 the original files are removed. Retirement uses the existing group-commit batch
 threshold; space exhaustion retires a completed smaller batch before retrying the
-next object. Retry recognizes these pointers without replaying them over legacy
-live deletions or version overrides. Objects outside current logical inode slots
-are not adopted into the live view; retained legacy snapshots keep their own
-references.
+next object. Retry recognizes these pointers as completed migration output.
+Objects outside current logical inode slots are not adopted into the live view.
+Snapshot retention begins after upgrading.
 
 Temporary space includes a replacement segment or object, a staged object batch,
 and new index/catalog metadata. The batch normally contains at most 256 objects

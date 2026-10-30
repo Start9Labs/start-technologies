@@ -43,7 +43,7 @@ pub(crate) struct Catalog {
 impl Default for Catalog {
     fn default() -> Self {
         Self {
-            version: 2,
+            version: 1,
             entries: BTreeMap::new(),
         }
     }
@@ -55,7 +55,7 @@ impl Catalog {
             return Ok(Self::default());
         };
         let catalog: Self = reference.load(segments, key, Binding::Catalog)?;
-        if catalog.version != 2 {
+        if catalog.version != 1 {
             return Err(BkfsError::unsupported("unsupported snapshot catalog"));
         }
         Ok(catalog)

@@ -12,7 +12,7 @@ use crate::{BackupFS, BackupFSOptions, FUSE_ROOT_ID};
 fn config(path: &Path) -> BackupFSOptions {
     BackupFSOptions {
         data_dir: path.to_owned(),
-        password: "snapshots".to_owned(),
+        password: "password".to_owned(),
         readonly: false,
         setuid_support: false,
         file_size_padding: None,
@@ -28,22 +28,13 @@ fn versioned_storage_persists_without_retained_snapshots() {
     fs.delete_snapshot("first").unwrap();
     assert!(fs.list_snapshots().unwrap().is_empty());
     let primary = data.path().join("superblock");
-    assert_eq!(
-        crate::superblock::Superblock::open_or_create(&primary, "snapshots", true)
-            .unwrap()
-            .format_version,
-        crate::superblock::FORMAT_VERSION
-    );
-    drop(fs);
-
-    let mut fs = BackupFS::new(config(data.path())).unwrap();
-    fs.create_snapshot("enabled").unwrap();
     drop(fs);
     let mut fs = BackupFS::new(config(data.path())).unwrap();
-    fs.create_snapshot("still-enabled").unwrap();
-    assert_eq!(fs.list_snapshots().unwrap().len(), 2);
+    assert!(fs.list_snapshots().unwrap().is_empty());
+    fs.create_snapshot("second").unwrap();
+    assert_eq!(fs.list_snapshots().unwrap().len(), 1);
     assert_eq!(
-        crate::superblock::Superblock::open_or_create(&primary, "snapshots", true)
+        crate::superblock::Superblock::open_or_create(&primary, "password", true)
             .unwrap()
             .format_version,
         crate::superblock::FORMAT_VERSION
@@ -76,7 +67,7 @@ fn read_file(ctrl: &Controller, inode: Inode) -> Vec<u8> {
 }
 
 fn create_legacy_block_file(data: &Path) -> Inode {
-    crate::legacy::fixture(data, 2);
+    crate::legacy::fixture(data);
     Inode(4)
 }
 
@@ -462,7 +453,7 @@ fn retired_legacy_files_cannot_resurrect_after_catalog_publication() {
     let data = tempfile::tempdir().unwrap();
     let inode = create_legacy_block_file(data.path());
     let old =
-        crate::superblock::Superblock::load(&data.path().join("superblock"), "snapshots", true)
+        crate::superblock::Superblock::load(&data.path().join("superblock"), "password", true)
             .unwrap();
     let original = crate::objects::ObjectId::block(&old.key, inode.0, 3)
         .path(data.path(), None)

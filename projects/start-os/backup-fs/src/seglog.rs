@@ -146,15 +146,14 @@ pub fn seal_object(
     seal_record(key, ecc, Record::Object { id, version })
 }
 
-/// Field order is shared with legacy format-2/3 indexes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct Roots<L = Location> {
-    pub index: HashMap<u64, L>,
-    pub content: HashMap<u64, L>,
-    pub objects: HashMap<ObjectId, L>,
+pub(crate) struct Roots {
+    pub index: HashMap<u64, Location>,
+    pub content: HashMap<u64, Location>,
+    pub objects: HashMap<ObjectId, Location>,
 }
 
-impl<L> Default for Roots<L> {
+impl Default for Roots {
     fn default() -> Self {
         Self {
             index: HashMap::new(),
@@ -164,13 +163,17 @@ impl<L> Default for Roots<L> {
     }
 }
 
-impl<L: Copy> Roots<L> {
-    pub(crate) fn update(&mut self, key: RecordKey, location: Option<L>) -> Option<L> {
-        fn replace<K: std::hash::Hash + Eq, L>(
-            index: &mut HashMap<K, L>,
+impl Roots {
+    pub(crate) fn update(
+        &mut self,
+        key: RecordKey,
+        location: Option<Location>,
+    ) -> Option<Location> {
+        fn replace<K: std::hash::Hash + Eq>(
+            index: &mut HashMap<K, Location>,
             key: K,
-            location: Option<L>,
-        ) -> Option<L> {
+            location: Option<Location>,
+        ) -> Option<Location> {
             match location {
                 Some(location) => index.insert(key, location),
                 None => index.remove(&key),
@@ -182,7 +185,7 @@ impl<L: Copy> Roots<L> {
             RecordKey::Object(id) => replace(&mut self.objects, id, location),
         }
     }
-    pub(crate) fn entries(&self) -> impl Iterator<Item = (RecordKey, L)> + '_ {
+    pub(crate) fn entries(&self) -> impl Iterator<Item = (RecordKey, Location)> + '_ {
         self.index
             .iter()
             .map(|(&id, &loc)| (RecordKey::Inode(id), loc))

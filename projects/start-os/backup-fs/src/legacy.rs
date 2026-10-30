@@ -1,51 +1,33 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 
 use chacha20::Key;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::error::BkfsResult;
-use crate::objects::{ObjectId, StorageReferences};
+use crate::objects::StorageReferences;
 use crate::seglog::{self, Record, RecordKey, SegMeta};
-use crate::snapshot::SnapshotInfo;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 pub(crate) struct Location {
     pub segment: u64,
     pub offset: u64,
     pub len: u32,
 }
-pub(crate) type Roots = seglog::Roots<Location>;
 
-#[derive(Serialize, Deserialize)]
-struct DurableRoots {
-    roots: Roots,
-    next_seq: u64,
-    max_inode: u64,
-}
 #[derive(Deserialize)]
 struct Checkpoint {
     version: u32,
-    state: DurableRoots,
+    next_seq: u64,
+    max_inode: u64,
+    index: HashMap<u64, Location>,
+    content: HashMap<u64, Location>,
     _seg_meta: HashMap<u64, SegMeta>,
     segments: Vec<(u64, u64)>,
 }
 
-#[derive(Deserialize)]
-pub(crate) struct Snapshot {
-    pub info: SnapshotInfo,
-    pub roots: Roots,
-    pub legacy: HashSet<ObjectId>,
-}
-#[derive(Deserialize)]
-struct Catalog {
-    version: u32,
-    entries: BTreeMap<String, Snapshot>,
-}
-
 pub(crate) struct Source {
-    pub roots: Roots,
-    pub snapshots: BTreeMap<String, Snapshot>,
+    pub references: HashMap<RecordKey, Location>,
     pub next_seq: u64,
     pub max_inode: u64,
     pub storage: HashMap<u64, StorageReferences>,
@@ -53,25 +35,15 @@ pub(crate) struct Source {
     winning: HashMap<RecordKey, u64>,
 }
 
-fn optional(path: &Path) -> BkfsResult<Option<Vec<u8>>> {
-    match std::fs::read(path) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error.into()),
-    }
-}
-
 #[cfg(test)]
-pub(crate) fn fixture(destination: &Path, version: u32) {
-    let archive = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/legacy-795d8a265.tar.gz");
+pub(crate) fn fixture(destination: &Path) {
+    let archive = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/legacy-format1.tar.gz");
     std::fs::create_dir_all(destination).unwrap();
     assert!(std::process::Command::new("tar")
         .arg("-xzf")
         .arg(archive)
         .arg("-C")
         .arg(destination)
-        .arg("--strip-components=2")
-        .arg(format!("./v{version}"))
         .status()
         .unwrap()
         .success());
@@ -80,47 +52,43 @@ pub(crate) fn fixture(destination: &Path, version: u32) {
 impl Source {
     pub fn load(data: &Path, key: &Key) -> BkfsResult<Self> {
         let dir = data.join("segments");
-        let mut durable = optional(&dir.join("roots"))?
-            .map(|bytes| crate::serde::deserialize_legacy::<DurableRoots>(&bytes, key))
-            .transpose()?;
-        if durable.is_none() {
-            if let Some(bytes) = optional(&dir.join(seglog::INDEX_CACHE_NAME))? {
-                if let Ok(checkpoint) = crate::serde::deserialize_legacy::<Checkpoint>(&bytes, key)
-                {
-                    if checkpoint.version == 2
-                        && checkpoint.segments == seglog::list_segments(&dir)?
-                    {
-                        durable = Some(checkpoint.state);
-                    }
-                }
-            }
-        }
-        let snapshots = match optional(&data.join("snapshots"))? {
-            Some(bytes) => {
-                let catalog: Catalog = crate::serde::deserialize_legacy(&bytes, key)?;
-                if catalog.version != 1 {
-                    return Err(crate::error::BkfsError::unsupported(
-                        "unsupported legacy snapshot catalog",
-                    ));
-                }
-                catalog.entries
-            }
-            None => BTreeMap::new(),
+        let checkpoint = match std::fs::read(dir.join(seglog::INDEX_CACHE_NAME)) {
+            Ok(bytes) => crate::vault::open_legacy(&bytes, key)
+                .and_then(|plain| {
+                    crate::serde::decode::<Checkpoint>(&plain, crate::serde::data_config())
+                })
+                .ok(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
         };
-        let durable = durable.unwrap_or(DurableRoots {
-            roots: Roots::default(),
+        let mut source = Self {
+            references: HashMap::new(),
             next_seq: 1,
             max_inode: 0,
-        });
-        Ok(Self {
-            roots: durable.roots,
-            snapshots,
-            next_seq: durable.next_seq.max(1),
-            max_inode: durable.max_inode,
-            floor: durable.next_seq,
-            winning: HashMap::new(),
             storage: HashMap::new(),
-        })
+            floor: 1,
+            winning: HashMap::new(),
+        };
+        if let Some(checkpoint) = checkpoint {
+            if checkpoint.version == 1 && checkpoint.segments == seglog::list_segments(&dir)? {
+                source.references.extend(
+                    checkpoint
+                        .index
+                        .into_iter()
+                        .map(|(id, loc)| (RecordKey::Inode(id), loc)),
+                );
+                source.references.extend(
+                    checkpoint
+                        .content
+                        .into_iter()
+                        .map(|(id, loc)| (RecordKey::Content(id), loc)),
+                );
+                source.next_seq = checkpoint.next_seq.max(1);
+                source.floor = source.next_seq;
+                source.max_inode = checkpoint.max_inode;
+            }
+        }
+        Ok(source)
     }
 
     pub fn advance_sequence(&mut self, seq: u64) -> BkfsResult<()> {
@@ -137,20 +105,28 @@ impl Source {
             }
             if !self.winning.get(&key).is_some_and(|&winning| winning > seq) {
                 self.winning.insert(key, seq);
-                self.roots
-                    .update(key, (!record.is_tombstone()).then_some(location));
+                if record.is_tombstone() {
+                    self.references.remove(&key);
+                } else {
+                    self.references.insert(key, location);
+                }
             }
         }
         match record {
             Record::Inode { inode, attrs }
-                if self.roots.index.get(inode).is_some_and(|selected| {
-                    selected.segment == location.segment && selected.offset == location.offset
-                }) =>
+                if self
+                    .references
+                    .get(&RecordKey::Inode(*inode))
+                    .is_some_and(|selected| {
+                        selected.segment == location.segment && selected.offset == location.offset
+                    }) =>
             {
                 self.storage
                     .insert(*inode, StorageReferences::for_inode(*inode, attrs));
             }
-            Record::Tombstone { inode } if !self.roots.index.contains_key(inode) => {
+            Record::Tombstone { inode }
+                if !self.references.contains_key(&RecordKey::Inode(*inode)) =>
+            {
                 self.storage.remove(inode);
             }
             _ => {}

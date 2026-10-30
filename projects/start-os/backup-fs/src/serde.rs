@@ -27,12 +27,10 @@
 //! skew or corruption, never legitimate data.
 
 use bincode::config::Config;
-use chacha20::Key;
 use serde::de::DeserializeOwned;
 pub use serde::{Deserialize, Serialize};
 
 use crate::error::{BkfsError, BkfsErrorKind, BkfsResult};
-use crate::vault;
 
 /// Decoder read/allocation budget for persisted structures, including snapshot catalogs.
 const DATA_LIMIT: usize = 64 * 1024 * 1024;
@@ -69,13 +67,4 @@ pub fn decode<T: DeserializeOwned>(bytes: &[u8], config: impl Config) -> BkfsRes
         });
     }
     Ok(value)
-}
-
-/// Accepts unbound metadata during a pending legacy upgrade.
-pub fn deserialize_legacy<T: DeserializeOwned>(blob: &[u8], key: &Key) -> BkfsResult<T> {
-    // open()-then-decode order is load-bearing: a wrong key fails the vault
-    // integrity tag (BadChecksum) before any decode runs, so a wrong password
-    // never surfaces as a confusing decode error.
-    let plain = vault::open(blob, key)?;
-    decode(&plain, data_config())
 }

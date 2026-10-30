@@ -161,7 +161,7 @@ fn binding_key(key: &Key, binding: Binding) -> Zeroizing<[u8; 32]> {
         .expect("fixed-size vault binding");
     subkey(
         key,
-        &[b"backup-fs/v4/binding/".as_slice(), &context].concat(),
+        &[b"backup-fs/v2/binding/".as_slice(), &context].concat(),
     )
 }
 
@@ -181,7 +181,7 @@ pub(crate) fn open_bound(blob: &[u8], key: &Key, binding: Binding) -> BkfsResult
 }
 
 pub(crate) fn migration_version(key: &Key, id: ObjectId) -> BkfsResult<VersionToken> {
-    let mut label = b"backup-fs/v4/migrated-object\0".to_vec();
+    let mut label = b"backup-fs/v2/migrated-object\0".to_vec();
     label.extend(crate::serde::encode(&id, crate::serde::data_config())?);
     let derived = subkey(key, &label);
     Ok(derived[..std::mem::size_of::<VersionToken>()]
@@ -234,6 +234,7 @@ fn read_u32(b: &[u8]) -> u32 {
 /// Decode, error-correct, decrypt, and integrity-verify a blob produced by
 /// [`seal`]. Returns `BadChecksum` if the key is wrong or the data is
 /// corrupt beyond what ECC can repair.
+#[cfg(test)]
 pub fn open(blob: &[u8], key: &Key) -> BkfsResult<Vec<u8>> {
     open_version(blob, key, VERSION).map(|opened| opened.plaintext)
 }
@@ -392,6 +393,8 @@ mod tests {
             assert!(open_bound(&sealed.bytes, &key, wrong).is_err());
         }
         assert!(open(&sealed.bytes, &key).is_err());
+        let unbound = seal(b"immutable contents", &key, EccParams::default());
+        assert!(open_bound(&unbound, &key, binding).is_err());
     }
 
     #[test]

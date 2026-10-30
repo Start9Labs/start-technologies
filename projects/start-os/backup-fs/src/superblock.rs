@@ -75,7 +75,7 @@ const KDF_PBKDF2_HMAC_SHA256: u8 = 1;
 /// compression, and **bincode v2 (`standard`) encoding**. (The pre-versioning
 /// `cryptinfo`-based dev format is not readable; there is no migration path
 /// from it — it predates any deployment.) V2 requires authenticated vault blobs.
-pub const FORMAT_VERSION: u32 = 4;
+pub const FORMAT_VERSION: u32 = 2;
 /// Highest DATA format version this build can read. A store recording a higher
 /// version is refused with an actionable "upgrade the software" error.
 pub const SUPPORTED_FORMAT_VERSION: u32 = FORMAT_VERSION;
@@ -418,8 +418,9 @@ impl Superblock {
             candidates.push(raw);
         }
         let has_current = candidates.iter().any(|raw| {
-            envelope_format(raw)
-                .is_ok_and(|version| version >= 2 && !vault::is_legacy(&raw[ENVELOPE_LEN..]))
+            envelope_format(raw).is_ok_and(|version| {
+                version == FORMAT_VERSION && !vault::is_legacy(&raw[ENVELOPE_LEN..])
+            })
         });
         for raw in &candidates {
             if has_current && envelope_format(raw).is_ok_and(|version| version == 1) {
@@ -632,8 +633,6 @@ fn parse_one(raw: &[u8], password: &str) -> BkfsResult<Superblock> {
     // before any decode runs, so it never surfaces as a decode error.
     let mut plain = if format_version == 1 {
         vault::open_legacy(sealed, <&Key>::from(&*key))?
-    } else if format_version < FORMAT_VERSION {
-        vault::open(sealed, <&Key>::from(&*key))?
     } else {
         vault::open_bound(sealed, <&Key>::from(&*key), vault::Binding::Superblock)?.plaintext
     };
@@ -743,7 +742,7 @@ mod tests {
 
     fn legacy_store() -> (tempfile::TempDir, Superblock) {
         let dir = tempfile::tempdir().unwrap();
-        crate::legacy::fixture(dir.path(), 1);
+        crate::legacy::fixture(dir.path());
         let sb = Superblock::load(&dir.path().join("superblock"), "password", true).unwrap();
         (dir, sb)
     }
@@ -868,6 +867,22 @@ mod tests {
     }
 
     #[test]
+    fn unsupported_format_numbers_leave_the_store_untouched() {
+        for version in [0u32, 3, 4] {
+            let (dir, _) = legacy_store();
+            let primary = dir.path().join("superblock");
+            for replica in replica_paths(&primary) {
+                let mut bytes = std::fs::read(&replica).unwrap();
+                bytes[OFF_FORMAT_VERSION..OFF_KDF_ALGO].copy_from_slice(&version.to_le_bytes());
+                std::fs::write(replica, bytes).unwrap();
+            }
+            let before = snapshot(dir.path());
+            assert!(Superblock::open_or_create(&primary, "password", false).is_err());
+            assert_eq!(snapshot(dir.path()), before);
+        }
+    }
+
+    #[test]
     fn readonly_legacy_and_wrong_password_leave_store_untouched() {
         let (dir, _) = legacy_store();
         let primary = dir.path().join("superblock");
@@ -928,7 +943,7 @@ mod tests {
         damaged.truncate(damaged.len() / 2);
         assert!(vault::is_legacy(&damaged));
         std::fs::write(&bucket, &damaged).unwrap();
-        let mut frame = vault::seal(b"damaged frame", &legacy.key, legacy.constants.ecc());
+        let mut frame = vault::seal_legacy(b"damaged frame", &legacy.key, legacy.constants.ecc());
         frame.truncate(frame.len() / 2);
         let segment = dir.path().join("segments/0000000000000000.seg");
         let mut bytes = std::fs::read(&segment).unwrap();
