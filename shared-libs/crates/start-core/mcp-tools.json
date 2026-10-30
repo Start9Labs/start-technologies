@@ -300,6 +300,15 @@
                 { "type": "null" }
               ]
             },
+            "sharedVolumeIds": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/SharedVolumeId" }
+                },
+                { "type": "null" }
+              ]
+            },
             "password": { "$ref": "#/$defs/PasswordType" }
           },
           "required": ["targetId", "password"],
@@ -315,7 +324,11 @@
           "required": ["encrypted"],
           "additionalProperties": true
         },
-        "PackageId": { "type": "string" }
+        "PackageId": { "type": "string" },
+        "SharedVolumeId": {
+          "type": "string",
+          "description": "A 32-character uppercase base32 volume identity."
+        }
       },
       "type": "object",
       "properties": {
@@ -326,6 +339,12 @@
         "packageIds": {
           "anyOf": [
             { "type": "array", "items": { "$ref": "#/$defs/PackageId" } },
+            { "type": "null" }
+          ]
+        },
+        "sharedVolumeIds": {
+          "anyOf": [
+            { "type": "array", "items": { "$ref": "#/$defs/SharedVolumeId" } },
             { "type": "null" }
           ]
         },
@@ -776,9 +795,21 @@
               "type": "object",
               "propertyNames": { "type": "string" },
               "additionalProperties": { "$ref": "#/$defs/PackageBackupInfo" }
+            },
+            "sharedVolumeBackups": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "$ref": "#/$defs/SharedVolumeBackupInfo"
+              }
             }
           },
-          "required": ["version", "timestamp", "packageBackups"],
+          "required": [
+            "version",
+            "timestamp",
+            "packageBackups",
+            "sharedVolumeBackups"
+          ],
           "additionalProperties": true
         },
         "PackageBackupInfo": {
@@ -792,7 +823,20 @@
           "required": ["title", "version", "osVersion", "timestamp"],
           "additionalProperties": true
         },
-        "Version": { "type": "string" }
+        "Version": { "type": "string" },
+        "SharedVolumeBackupInfo": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "timestamp": { "type": "string" },
+            "generation": {
+              "type": "string",
+              "description": "Identifies the completed copy beneath the volume's encrypted `data` directory."
+            }
+          },
+          "required": ["name", "timestamp", "generation"],
+          "additionalProperties": true
+        }
       },
       "type": "object",
       "properties": {
@@ -802,9 +846,19 @@
           "type": "object",
           "propertyNames": { "type": "string" },
           "additionalProperties": { "$ref": "#/$defs/PackageBackupInfo" }
+        },
+        "sharedVolumeBackups": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/SharedVolumeBackupInfo" }
         }
       },
-      "required": ["version", "timestamp", "packageBackups"],
+      "required": [
+        "version",
+        "timestamp",
+        "packageBackups",
+        "sharedVolumeBackups"
+      ],
       "additionalProperties": true
     }
   },
@@ -1028,6 +1082,92 @@
           "anyOf": [{ "$ref": "#/$defs/BackupTargetId" }, { "type": "null" }]
         }
       },
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.volume.restore",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/RestoreVolumeParams" }
+      ],
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "RestoreVolumeParams": {
+          "type": "object",
+          "properties": {
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "password": { "type": "string" },
+            "ids": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/SharedVolumeId" }
+            },
+            "serverId": { "type": ["string", "null"] }
+          },
+          "required": ["targetId", "password", "ids"],
+          "additionalProperties": true
+        },
+        "BackupTargetId": { "type": "string" },
+        "SharedVolumeId": {
+          "type": "string",
+          "description": "A 32-character uppercase base32 volume identity."
+        }
+      },
+      "type": "object"
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RestoreVolumeResult": {
+          "type": "object",
+          "properties": {
+            "restored": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/SharedVolumeId" }
+            },
+            "errors": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "type": "string" }
+            }
+          },
+          "required": ["restored", "errors"],
+          "additionalProperties": true
+        },
+        "SharedVolumeId": {
+          "type": "string",
+          "description": "A 32-character uppercase base32 volume identity."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "restored": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/SharedVolumeId" }
+        },
+        "errors": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "required": ["restored", "errors"],
       "additionalProperties": true
     }
   },
@@ -2726,6 +2866,105 @@
         }
       },
       "required": ["ids"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "notification.push.key",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "notification.push.list",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "notification.push.subscribe",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "PushSubscription": {
+          "type": "object",
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "description": "HTTP(S) push resource selected by the browser, including LAN endpoints."
+            },
+            "keys": { "$ref": "#/$defs/PushKeys" }
+          },
+          "required": ["endpoint", "keys"],
+          "additionalProperties": true
+        },
+        "PushKeys": {
+          "type": "object",
+          "properties": {
+            "p256dh": {
+              "type": "string",
+              "description": "Base64url-encoded uncompressed P-256 public key."
+            },
+            "auth": {
+              "type": "string",
+              "description": "Base64url-encoded 16-byte authentication secret."
+            }
+          },
+          "required": ["p256dh", "auth"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "description": "HTTP(S) push resource selected by the browser, including LAN endpoints."
+        },
+        "keys": { "$ref": "#/$defs/PushKeys" }
+      },
+      "required": ["endpoint", "keys"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "notification.push.test",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "EndpointParams": {
+          "type": "object",
+          "properties": { "endpoint": { "type": "string" } },
+          "required": ["endpoint"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": { "endpoint": { "type": "string" } },
+      "required": ["endpoint"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "notification.push.unsubscribe",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "EndpointParams": {
+          "type": "object",
+          "properties": { "endpoint": { "type": "string" } },
+          "required": ["endpoint"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": { "endpoint": { "type": "string" } },
+      "required": ["endpoint"],
       "additionalProperties": true
     }
   },
@@ -11084,6 +11323,262 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "volumes.create",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "CreateSharedVolumeParams": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "source": { "$ref": "#/$defs/CreateSharedVolumeSource" }
+          },
+          "required": ["name", "source"],
+          "additionalProperties": true
+        },
+        "CreateSharedVolumeSource": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "kind": { "type": "string", "const": "local" } },
+              "required": ["kind"],
+              "additionalProperties": true
+            },
+            {
+              "allOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": { "type": "string", "const": "cifs" }
+                  },
+                  "required": ["kind"],
+                  "additionalProperties": true
+                },
+                { "$ref": "#/$defs/Cifs" }
+              ]
+            }
+          ]
+        },
+        "Cifs": {
+          "type": "object",
+          "properties": {
+            "hostname": { "type": "string" },
+            "path": { "type": "string" },
+            "username": { "type": "string" },
+            "password": { "type": ["string", "null"] }
+          },
+          "required": ["hostname", "path", "username"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "source": { "$ref": "#/$defs/CreateSharedVolumeSource" }
+      },
+      "required": ["name", "source"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "volumes.delete-data",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SharedVolumeParams": {
+          "type": "object",
+          "properties": { "id": { "$ref": "#/$defs/SharedVolumeId" } },
+          "required": ["id"],
+          "additionalProperties": true
+        },
+        "SharedVolumeId": {
+          "type": "string",
+          "description": "A 32-character uppercase base32 volume identity."
+        }
+      },
+      "type": "object",
+      "properties": { "id": { "$ref": "#/$defs/SharedVolumeId" } },
+      "required": ["id"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "volumes.inspect",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SharedVolumeParams": {
+          "type": "object",
+          "properties": { "id": { "$ref": "#/$defs/SharedVolumeId" } },
+          "required": ["id"],
+          "additionalProperties": true
+        },
+        "SharedVolumeId": {
+          "type": "string",
+          "description": "A 32-character uppercase base32 volume identity."
+        }
+      },
+      "type": "object",
+      "properties": { "id": { "$ref": "#/$defs/SharedVolumeId" } },
+      "required": ["id"],
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SharedVolumeInspection": {
+          "type": "object",
+          "properties": {
+            "availability": { "$ref": "#/$defs/SharedVolumeAvailability" },
+            "available": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "error": { "type": ["string", "null"] }
+          },
+          "required": ["availability", "available", "error"],
+          "additionalProperties": true
+        },
+        "SharedVolumeAvailability": {
+          "type": "string",
+          "enum": ["unknown", "available", "unavailable"]
+        }
+      },
+      "type": "object",
+      "properties": {
+        "availability": { "$ref": "#/$defs/SharedVolumeAvailability" },
+        "available": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            { "type": "null" }
+          ]
+        },
+        "error": { "type": ["string", "null"] }
+      },
+      "required": ["availability", "available", "error"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "volumes.list-retained",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "propertyNames": { "type": "string" },
+      "additionalProperties": { "type": "string" }
+    }
+  },
+  {
+    "name": "volumes.remove",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SharedVolumeParams": {
+          "type": "object",
+          "properties": { "id": { "$ref": "#/$defs/SharedVolumeId" } },
+          "required": ["id"],
+          "additionalProperties": true
+        },
+        "SharedVolumeId": {
+          "type": "string",
+          "description": "A 32-character uppercase base32 volume identity."
+        }
+      },
+      "type": "object",
+      "properties": { "id": { "$ref": "#/$defs/SharedVolumeId" } },
+      "required": ["id"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "volumes.rename",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RenameSharedVolumeParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/SharedVolumeId" },
+            "name": { "type": "string" }
+          },
+          "required": ["id", "name"],
+          "additionalProperties": true
+        },
+        "SharedVolumeId": {
+          "type": "string",
+          "description": "A 32-character uppercase base32 volume identity."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/SharedVolumeId" },
+        "name": { "type": "string" }
+      },
+      "required": ["id", "name"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "volumes.set-grant",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SetSharedVolumeGrantParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/SharedVolumeId" },
+            "packageId": { "$ref": "#/$defs/PackageId" },
+            "grant": {
+              "anyOf": [
+                { "$ref": "#/$defs/SharedVolumeGrant" },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": ["id", "packageId"],
+          "additionalProperties": true
+        },
+        "SharedVolumeId": {
+          "type": "string",
+          "description": "A 32-character uppercase base32 volume identity."
+        },
+        "PackageId": { "type": "string" },
+        "SharedVolumeGrant": {
+          "type": "object",
+          "properties": { "readonly": { "type": "boolean" } },
+          "required": ["readonly"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/SharedVolumeId" },
+        "packageId": { "$ref": "#/$defs/PackageId" },
+        "grant": {
+          "anyOf": [{ "$ref": "#/$defs/SharedVolumeGrant" }, { "type": "null" }]
+        }
+      },
+      "required": ["id", "packageId"],
       "additionalProperties": true
     }
   },
