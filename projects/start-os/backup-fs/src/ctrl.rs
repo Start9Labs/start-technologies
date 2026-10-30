@@ -95,15 +95,21 @@ impl Controller {
         let sb = Superblock::open_or_create(&superblock_path, &password, config.readonly)?;
         drop(password);
         log::info!("superblock opened in {:?}", t.elapsed());
+        if snapshot.is_some() && sb.format_version == 1 {
+            return Err(BkfsError::unsupported(
+                "convert this backup before using snapshots",
+            ));
+        }
         let key = sb.key;
         let constants = sb.constants;
         let t = std::time::Instant::now();
-        let mut log = SegmentLog::open_sized(
+        let mut log = SegmentLog::open_format(
             config.data_dir.join("segments"),
             key,
             constants.segment_size,
             constants.ecc(),
             config.readonly,
+            sb.format_version,
         )?;
         log::info!("segment log opened in {:?}", t.elapsed());
         let data_dir = log.directory().join("..");
@@ -138,6 +144,32 @@ impl Controller {
         })))
     }
 
+    pub(crate) fn is_legacy(&self) -> bool {
+        self.0.format_version == 1
+    }
+
+    fn seal_record(&self, record: seglog::Record) -> BkfsResult<seglog::SealedRecord> {
+        seglog::seal_record(
+            self.key(),
+            self.ecc(),
+            record,
+            if self.is_legacy() {
+                Binding::Legacy
+            } else {
+                Binding::Record
+            },
+        )
+    }
+
+    fn require_snapshots(&self) -> BkfsResult<()> {
+        if self.is_legacy() {
+            return Err(BkfsError::unsupported(
+                "convert this backup before using snapshots",
+            ));
+        }
+        Ok(())
+    }
+
     /// ECC parameters for new writes, adopted from the superblock.
     pub fn ecc(&self) -> EccParams {
         self.0.constants.ecc()
@@ -168,7 +200,10 @@ impl Controller {
     /// batched syncfs. Sealing is done before taking the log lock.
     pub fn log_put(&self, inode: Inode, attrs: &Attributes, durable: bool) -> BkfsResult<()> {
         self.check_rw()?;
-        let rec = seglog::seal_inode(&self.key(), self.ecc(), inode, attrs)?;
+        let rec = self.seal_record(seglog::Record::Inode {
+            inode: inode.0,
+            attrs: attrs.clone(),
+        })?;
         let mut log = self.0.log.lock().unwrap();
         log.append(&rec)?;
         if durable {
@@ -182,7 +217,7 @@ impl Controller {
     /// `durable = true`.
     pub fn log_tombstone(&self, inode: Inode, durable: bool) -> BkfsResult<()> {
         self.check_rw()?;
-        let rec = seglog::seal_tombstone(&self.key(), self.ecc(), inode)?;
+        let rec = self.seal_record(seglog::Record::Tombstone { inode: inode.0 })?;
         let mut log = self.0.log.lock().unwrap();
         log.append(&rec)?;
         if durable {
@@ -213,7 +248,10 @@ impl Controller {
         // Compress before sealing (ciphertext is incompressible); the
         // extent's stored payload carries the compression tag.
         let stored = crate::compress::compress(bytes, codec);
-        let rec = seglog::seal_content(&self.key(), self.ecc(), id.0, &stored)?;
+        let rec = self.seal_record(seglog::Record::Content {
+            id: id.0,
+            bytes: stored,
+        })?;
         let mut log = self.0.log.lock().unwrap();
         log.append(&rec)?;
         if durable {
@@ -236,7 +274,7 @@ impl Controller {
 
     pub fn cpack_tombstone(&self, id: ContentId, durable: bool) -> BkfsResult<()> {
         self.check_rw()?;
-        let rec = seglog::seal_content_tombstone(&self.key(), self.ecc(), id.0)?;
+        let rec = self.seal_record(seglog::Record::ContentTombstone { id: id.0 })?;
         let mut log = self.0.log.lock().unwrap();
         log.append(&rec)?;
         if durable {
@@ -428,6 +466,10 @@ impl Controller {
     }
 
     pub(crate) fn resolve_object(&self, id: ObjectId) -> BkfsResult<Option<(PathBuf, Binding)>> {
+        if self.is_legacy() {
+            let path = id.path(&self.0.data_dir, None).unwrap();
+            return Ok(path.try_exists()?.then_some((path, Binding::Legacy)));
+        }
         Ok(match self.0.log.lock().unwrap().object(id)? {
             Some(ObjectVersion::Version(token)) => Some(self.object_reference(id, token)),
             Some(ObjectVersion::Deleted) | None => None,
@@ -441,6 +483,15 @@ impl Controller {
         write: impl FnOnce(PathBuf, Binding) -> BkfsResult<()>,
     ) -> BkfsResult<()> {
         self.check_rw()?;
+        if self.is_legacy() {
+            write(id.path(&self.0.data_dir, None).unwrap(), Binding::Legacy)?;
+            if durable {
+                self.syncfs()?;
+            } else {
+                self.tick_save()?;
+            }
+            return Ok(());
+        }
         let token = ObjectVersion::new_token();
         let (path, binding) = self.object_reference(id, token);
         write(path, binding)?;
@@ -458,6 +509,15 @@ impl Controller {
     }
 
     pub(crate) fn remove_object(&self, id: ObjectId) -> BkfsResult<()> {
+        if self.is_legacy() {
+            self.check_rw()?;
+            match std::fs::remove_file(id.path(&self.0.data_dir, None).unwrap()) {
+                Ok(()) => self.tick_save()?,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+            return Ok(());
+        }
         let mut log = self.0.log.lock().unwrap();
         log.check_rw()?;
         if !log.roots().objects.contains_key(&id) {
@@ -538,7 +598,7 @@ impl Controller {
                     packed.insert(content);
                 }
                 references.visit_objects(self.key(), |id| {
-                    if roots.objects.contains_key(&id) {
+                    if self.is_legacy() || roots.objects.contains_key(&id) {
                         ids.insert(id);
                     }
                 });
@@ -560,6 +620,7 @@ impl Controller {
     }
 
     pub(crate) fn create_snapshot(&self, name: &str) -> BkfsResult<SnapshotInfo> {
+        self.require_snapshots()?;
         self.check_rw()?;
         crate::snapshot::validate_name(name)?;
         let mut catalog = self.0.catalog.lock().unwrap();
@@ -569,7 +630,9 @@ impl Controller {
         let mut log = self.0.log.lock().unwrap();
         let (ids, packed) = self.referenced_storage(&log, log.roots())?;
         log.retain_storage(&ids, &packed)?;
-        let view = log.save_checkpoint(&catalog.views())?;
+        let view = log
+            .save_checkpoint(&catalog.views())?
+            .ok_or_else(|| BkfsError::unsupported("snapshots require a converted backup"))?;
         let info = SnapshotInfo {
             name: name.to_owned(),
             created_unix: std::time::SystemTime::now()
@@ -589,6 +652,7 @@ impl Controller {
     }
 
     pub(crate) fn delete_snapshot(&self, name: &str) -> BkfsResult<()> {
+        self.require_snapshots()?;
         self.check_rw()?;
         crate::snapshot::validate_name(name)?;
         {
@@ -619,6 +683,10 @@ impl Controller {
         ids: impl Iterator<Item = ObjectId>,
         keep: &mut HashSet<PathBuf>,
     ) -> BkfsResult<()> {
+        if self.is_legacy() {
+            keep.extend(ids.filter_map(|id| id.path(&self.0.data_dir, None)));
+            return Ok(());
+        }
         log.visit_records(
             ids.filter_map(|id| {
                 roots
@@ -718,6 +786,9 @@ impl Controller {
     /// Account for one fast save. When the batch threshold is reached,
     /// issue a syncfs that flushes everything accumulated.
     pub fn tick_save(&self) -> io::Result<()> {
+        if self.is_legacy() {
+            self.0.log.lock().unwrap().note_data_write();
+        }
         let n = self.0.pending_saves.fetch_add(1, Ordering::Relaxed) + 1;
         if n >= crate::util::sync_batch() {
             self.syncfs()?;

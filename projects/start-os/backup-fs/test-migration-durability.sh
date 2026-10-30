@@ -21,7 +21,7 @@ const replaced = files("/store").filter(p => p.endsWith(".seg"))
 if (!replaced.length) throw Error("fixture lacks legacy segments")
 fs.writeFileSync("/tmp/replaced.json", JSON.stringify(replaced))
 NODE
-    printf password | strace -f -yy -o /tmp/trace -e trace=fsync,rename,syncfs /tmp/startos-backup-fs snapshot create /store durability-check
+    printf password | strace -f -yy -o /tmp/trace -e trace=fsync,rename,syncfs /tmp/startos-backup-fs convert /store
     node <<"NODE"
 const fs = require("node:fs")
 const path = require("node:path")

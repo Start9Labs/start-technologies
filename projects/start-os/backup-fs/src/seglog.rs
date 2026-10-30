@@ -14,7 +14,7 @@ use crate::serde::{data_config, decode, encode};
 use crate::state::{Counters, State, View};
 use crate::vault::{self, AuthenticationTag, Binding, EccParams};
 
-fn decode_frame(key: &Key, loc: Location, bytes: &[u8]) -> BkfsResult<Record> {
+fn decode_frame(key: &Key, loc: Location, bytes: &[u8], binding: Binding) -> BkfsResult<Record> {
     let (seq, payload_len) =
         parse_header(bytes).ok_or_else(|| BkfsError::unsupported("invalid log header"))?;
     if seq != loc.seq
@@ -26,7 +26,7 @@ fn decode_frame(key: &Key, loc: Location, bytes: &[u8]) -> BkfsResult<Record> {
     let payload = bytes
         .get(HEADER_LEN..HEADER_LEN + payload_len)
         .ok_or_else(|| BkfsError::unsupported("truncated log frame"))?;
-    let plain = vault::open_bound(payload, key, Binding::Record)?.verify_reference(&loc.tag)?;
+    let plain = vault::open_bound(payload, key, binding)?.verify_reference(&loc.tag)?;
     decode(&plain, data_config())
 }
 
@@ -97,8 +97,13 @@ pub struct SealedRecord {
     tombstone: bool,
 }
 
-fn seal_record(key: &Key, ecc: EccParams, record: Record) -> BkfsResult<SealedRecord> {
-    let sealed = vault::seal_bound(&encode(&record, data_config())?, key, ecc, Binding::Record);
+pub(crate) fn seal_record(
+    key: &Key,
+    ecc: EccParams,
+    record: Record,
+    binding: Binding,
+) -> BkfsResult<SealedRecord> {
+    let sealed = vault::seal_bound(&encode(&record, data_config())?, key, ecc, binding);
     Ok(SealedRecord {
         key: record.key(),
         sealed,
@@ -106,6 +111,7 @@ fn seal_record(key: &Key, ecc: EccParams, record: Record) -> BkfsResult<SealedRe
     })
 }
 
+#[cfg(test)]
 pub fn seal_inode(
     key: &Key,
     ecc: EccParams,
@@ -119,23 +125,17 @@ pub fn seal_inode(
             inode: inode.0,
             attrs: attrs.clone(),
         },
+        Binding::Record,
     )
 }
+#[cfg(test)]
 pub fn seal_tombstone(key: &Key, ecc: EccParams, inode: Inode) -> BkfsResult<SealedRecord> {
-    seal_record(key, ecc, Record::Tombstone { inode: inode.0 })
-}
-pub fn seal_content(key: &Key, ecc: EccParams, id: u64, bytes: &[u8]) -> BkfsResult<SealedRecord> {
     seal_record(
         key,
         ecc,
-        Record::Content {
-            id,
-            bytes: bytes.to_vec(),
-        },
+        Record::Tombstone { inode: inode.0 },
+        Binding::Record,
     )
-}
-pub fn seal_content_tombstone(key: &Key, ecc: EccParams, id: u64) -> BkfsResult<SealedRecord> {
-    seal_record(key, ecc, Record::ContentTombstone { id })
 }
 pub fn seal_object(
     key: &Key,
@@ -143,7 +143,7 @@ pub fn seal_object(
     id: ObjectId,
     version: ObjectVersion,
 ) -> BkfsResult<SealedRecord> {
-    seal_record(key, ecc, Record::Object { id, version })
+    seal_record(key, ecc, Record::Object { id, version }, Binding::Record)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -388,10 +388,57 @@ impl SegmentWriter {
     }
 }
 
+enum Persistence {
+    Current(State),
+    Legacy(crate::legacy::Log),
+}
+
+impl Persistence {
+    fn directory(&self) -> &Path {
+        match self {
+            Self::Current(state) => state.directory_path(),
+            Self::Legacy(log) => &log.path,
+        }
+    }
+    fn binding(&self) -> Binding {
+        match self {
+            Self::Current(_) => Binding::Record,
+            Self::Legacy(_) => Binding::Legacy,
+        }
+    }
+    fn check_rw(&self) -> BkfsResult<()> {
+        match self {
+            Self::Current(state) => state.check_rw(),
+            Self::Legacy(log) => log.check_rw(),
+        }
+    }
+    fn catalog(&self) -> Option<Reference> {
+        match self {
+            Self::Current(state) => state.catalog(),
+            Self::Legacy(_) => None,
+        }
+    }
+    fn has_pending(&self) -> bool {
+        match self {
+            Self::Current(state) => state.has_pending(),
+            Self::Legacy(log) => log.dirty,
+        }
+    }
+    fn record(&mut self, key: RecordKey, location: Option<Location>) -> BkfsResult<()> {
+        match self {
+            Self::Current(state) => state.record(key, location),
+            Self::Legacy(log) => {
+                log.dirty = true;
+                Ok(())
+            }
+        }
+    }
+}
+
 pub struct SegmentLog {
     key: Key,
     ecc: EccParams,
-    state: State,
+    state: Persistence,
     roots: Roots,
     writer: Option<SegmentWriter>,
     next_seq: u64,
@@ -420,6 +467,7 @@ impl SegmentLog {
         Self::open_sized(dir, key, 8 * 1024 * 1024, EccParams::default(), false)
     }
 
+    #[cfg(test)]
     pub(crate) fn open_sized(
         dir: PathBuf,
         key: Key,
@@ -427,12 +475,36 @@ impl SegmentLog {
         ecc: EccParams,
         readonly: bool,
     ) -> BkfsResult<Self> {
-        let (state, roots) = State::open(&dir, &key)?;
-        let counters = state.counters();
+        Self::open_format(
+            dir,
+            key,
+            segment_size,
+            ecc,
+            readonly,
+            crate::superblock::FORMAT_VERSION,
+        )
+    }
+
+    pub(crate) fn open_format(
+        dir: PathBuf,
+        key: Key,
+        segment_size: u64,
+        ecc: EccParams,
+        readonly: bool,
+        format: u32,
+    ) -> BkfsResult<Self> {
+        let (state, roots, counters) = if format == 1 {
+            let (log, roots, counters) = crate::legacy::Log::open(&dir, &key)?;
+            (Persistence::Legacy(log), roots, counters)
+        } else {
+            let (state, roots) = State::open(&dir, &key)?;
+            let counters = state.counters();
+            (Persistence::Current(state), roots, counters)
+        };
         let writer = if readonly {
             None
         } else {
-            Some(SegmentWriter::new(state.directory_path(), segment_size)?)
+            Some(SegmentWriter::new(state.directory(), segment_size)?)
         };
         let mut log = Self {
             key,
@@ -452,7 +524,7 @@ impl SegmentLog {
         Ok(log)
     }
     pub(crate) fn directory(&self) -> &Path {
-        self.state.directory_path()
+        self.state.directory()
     }
     pub(crate) fn check_rw(&self) -> BkfsResult<()> {
         if self.writer.is_none() {
@@ -460,6 +532,12 @@ impl SegmentLog {
         }
         self.state.check_rw()
     }
+    pub(crate) fn note_data_write(&mut self) {
+        if let Persistence::Legacy(log) = &mut self.state {
+            log.dirty = true;
+        }
+    }
+
     pub(crate) fn catalog_reference(&self) -> Option<Reference> {
         self.state.catalog()
     }
@@ -491,7 +569,12 @@ impl SegmentLog {
     }
 
     pub fn read_at(&self, loc: Location) -> BkfsResult<Record> {
-        decode_frame(&self.key, loc, &self.read_raw_frame(loc)?)
+        decode_frame(
+            &self.key,
+            loc,
+            &self.read_raw_frame(loc)?,
+            self.state.binding(),
+        )
     }
     pub(crate) fn read_indexed(&self, key: RecordKey, loc: Location) -> BkfsResult<Record> {
         self.read_at(loc)?.verify_key(key)
@@ -514,7 +597,7 @@ impl SegmentLog {
                     &mut bytes,
                 )
                 .map_err(BkfsError::referenced_io)?;
-            visit(decode_frame(&self.key, loc, &bytes)?.verify_key(key)?)?;
+            visit(decode_frame(&self.key, loc, &bytes, self.state.binding())?.verify_key(key)?)?;
         }
         Ok(())
     }
@@ -600,8 +683,13 @@ impl SegmentLog {
         if self.writer.is_none() {
             return Ok(());
         }
-        self.state
-            .commit(&self.key, self.ecc, self.counters(), self.state.catalog())
+        let counters = self.counters();
+        match &mut self.state {
+            Persistence::Current(state) => {
+                state.commit(&self.key, self.ecc, counters, state.catalog())
+            }
+            Persistence::Legacy(log) => log.sync(),
+        }
     }
     fn counters(&self) -> Counters {
         Counters {
@@ -615,21 +703,35 @@ impl SegmentLog {
         pins: HashSet<u64>,
     ) -> BkfsResult<()> {
         self.check_rw()?;
-        self.state
-            .commit(&self.key, self.ecc, self.counters(), Some(reference))?;
+        let counters = self.counters();
+        let Persistence::Current(state) = &mut self.state else {
+            return Err(BkfsError::unsupported(
+                "convert this backup before creating snapshots",
+            ));
+        };
+        state.commit(&self.key, self.ecc, counters, Some(reference))?;
         self.pin(pins);
         Ok(())
     }
-    pub fn save_checkpoint(&mut self, retained: &[View]) -> BkfsResult<View> {
+    pub fn save_checkpoint(&mut self, retained: &[View]) -> BkfsResult<Option<View>> {
         self.check_rw()?;
-        self.state.checkpoint(
-            &self.key,
-            self.ecc,
-            &self.roots,
-            self.counters(),
-            self.state.catalog(),
-            retained,
-        )
+        let counters = self.counters();
+        match &mut self.state {
+            Persistence::Current(state) => state
+                .checkpoint(
+                    &self.key,
+                    self.ecc,
+                    &self.roots,
+                    counters,
+                    state.catalog(),
+                    retained,
+                )
+                .map(Some),
+            Persistence::Legacy(log) => {
+                log.checkpoint(&self.key, self.ecc, &self.roots, counters, &self.seg_meta)?;
+                Ok(None)
+            }
+        }
     }
     pub(crate) fn retain_storage(
         &mut self,

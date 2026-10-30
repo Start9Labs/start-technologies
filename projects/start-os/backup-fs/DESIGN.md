@@ -28,6 +28,9 @@ but is not consulted by normal format-2 opens.
 
 ## Encryption, references, and ECC
 
+Format 1 retains its original encryption/checksum protocol and stable-name writes
+until explicit conversion. The authenticated references below apply to format 2.
+
 `vault::seal_bound` derives context-specific keys for superblocks, records,
 transactions, catalogs, and object identities/versions. Independent encryption
 and MAC subkeys protect ChaCha20 ciphertext and its vault header with
@@ -58,9 +61,11 @@ encrypted `metadata.json` authenticates the date of the selected backup view.
 
 ## Legacy migration
 
-A writable open upgrades pre-existing filesystem format 1 to format 2. Every
-superblock replica first receives an authenticated pending marker. Read-only
-opens refuse old or pending stores. Migration reseals objects and log frames
+Ordinary opens keep pre-existing filesystem format 1 readable and writable without
+conversion. `startos-backup-fs convert` explicitly converts a closed store to format 2
+under the same exclusive lock used by mounts. Every superblock replica first receives
+an authenticated pending marker. Ordinary opens refuse pending stores until conversion
+is explicitly resumed. Migration reseals objects and log frames
 with their required bindings, preserves cached frame locations, and publishes
 the new State before clearing the marker. Older binaries reject the upgraded
 format. Format 1 has stable-name objects and no named snapshots.

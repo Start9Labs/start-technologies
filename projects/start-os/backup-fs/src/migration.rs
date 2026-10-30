@@ -10,7 +10,7 @@ use crate::atomic_file::AtomicFile;
 use crate::error::{BkfsErrorKind, BkfsResult};
 use crate::legacy;
 use crate::objects::{Inventory, ObjectVersion};
-use crate::seglog::{self, Frames, Location, Record, Roots, SegmentWriter};
+use crate::seglog::{self, Frames, Location, Record, SegmentWriter};
 use crate::serde::{data_config, decode};
 use crate::state::{Counters, State};
 use crate::superblock::Constants;
@@ -65,26 +65,6 @@ fn upgraded_blob(blob: &[u8], key: &Key, binding: Binding) -> BkfsResult<Option<
         }
         Err(error) => Err(error),
     }
-}
-
-fn convert_roots(
-    references: &HashMap<seglog::RecordKey, legacy::Location>,
-    locations: &HashMap<(u64, u64), Location>,
-) -> Roots {
-    let mut converted = Roots::default();
-    for (&key, old) in references {
-        let location = locations
-            .get(&(old.segment, old.offset))
-            .copied()
-            .unwrap_or(Location {
-                segment: old.segment,
-                offset: old.offset,
-                len: old.len,
-                ..Default::default()
-            });
-        converted.update(key, Some(location));
-    }
-    converted
 }
 
 fn migrate_object(
@@ -229,7 +209,7 @@ pub(crate) fn reseal_store(data: &Path, key: &Key, constants: Constants) -> Bkfs
             file.save_durable()?;
         }
     }
-    let mut roots = convert_roots(&source.references, &locations);
+    let mut roots = source.roots(&locations);
     let inventory = Inventory::load(data)?;
     let mut writer = None;
     let backing = File::open(data)?;

@@ -19,6 +19,7 @@ const stats = fs.statfsSync("/store")
 if (stats.bavail * stats.bsize >= 2 * 1024 * 1024) throw Error("fixture must not fit a full copy")
 console.log(`Legacy objects exceed available staging space: ${stats.bavail * stats.bsize} bytes free`)
 NODE
+    printf password | /tmp/startos-backup-fs convert /store
     printf password | /tmp/startos-backup-fs snapshot create /store space-check
     printf password | /tmp/startos-backup-fs snapshot list /store | grep -Fx space-check
     test -f /store/segments/state

@@ -137,12 +137,16 @@ fn main() {
     let mut app = clap::command!()
         .subcommand(MountOptions::command().name("mount"))
         .subcommand(FilesystemOptions::command().name("fsck"))
+        .subcommand(FilesystemOptions::command().name("convert"))
         .subcommand(ChangePasswordOptions::command().name("change-password"))
         .subcommand(SnapshotOptions::command().name("snapshot"));
     let matches = app.clone().get_matches();
     match matches.subcommand() {
         Some(("mount", sub_m)) => mount(MountOptions::from_arg_matches(sub_m).unwrap()),
         Some(("fsck", sub_m)) => fsck(FilesystemOptions::from_arg_matches(sub_m).unwrap()),
+        Some(("convert", sub_m)) => checked(BackupFS::convert(read_options(
+            FilesystemOptions::from_arg_matches(sub_m).unwrap(),
+        ))),
         Some(("change-password", sub_m)) => {
             change_password(ChangePasswordOptions::from_arg_matches(sub_m).unwrap())
         }
@@ -187,14 +191,14 @@ fn read_options(
 }
 
 fn new_fs(options: FilesystemOptions) -> BackupFS {
-    opened_fs(BackupFS::new(read_options(options)))
+    checked(BackupFS::new(read_options(options)))
 }
 
 fn snapshot_fs(options: FilesystemOptions, name: &str) -> BackupFS {
-    opened_fs(BackupFS::open_snapshot(read_options(options), name))
+    checked(BackupFS::open_snapshot(read_options(options), name))
 }
 
-fn opened_fs(res: backupfs::error::BkfsResult<BackupFS>) -> BackupFS {
+fn checked<T>(res: backupfs::error::BkfsResult<T>) -> T {
     let err = match res {
         Ok(fs) => return fs,
         Err(err) => err,

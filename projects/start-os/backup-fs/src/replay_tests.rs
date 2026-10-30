@@ -241,6 +241,7 @@ fn legacy_orphans_beyond_eof_do_not_become_visible_on_growth() {
     let data = tempfile::tempdir().unwrap();
     crate::legacy::fixture(data.path());
     let orphan = add_legacy_orphan(data.path());
+    BackupFS::convert(options(data.path())).unwrap();
     let fs = BackupFS::new(options(data.path())).unwrap();
     assert!(!orphan.exists());
     let c = ctrl(&fs);
@@ -260,6 +261,7 @@ fn legacy_orphans_beyond_eof_do_not_become_visible_on_growth() {
 fn released_format_one_upgrades_without_losing_inline_packed_block_or_attribute_data() {
     let data = tempfile::tempdir().unwrap();
     crate::legacy::fixture(data.path());
+    BackupFS::convert(options(data.path())).unwrap();
     let mut fs = BackupFS::new(options(data.path())).unwrap();
     assert_eq!(read_inode(&fs, 2), b"frozen-inline");
     same_bytes(&read_inode(&fs, 3), &vec![0x42; 12000]);
@@ -287,7 +289,7 @@ fn interrupted_upgrade_recovers_retired_sources_without_adopting_orphans() {
     add_legacy_orphan(data.path());
     let blocker = data.path().join("segments/state.tmp");
     std::fs::create_dir(&blocker).unwrap();
-    assert!(BackupFS::new(options(data.path())).is_err());
+    assert!(BackupFS::convert(options(data.path())).is_err());
     assert_eq!(
         crate::objects::Inventory::load(data.path())
             .unwrap()
@@ -299,6 +301,7 @@ fn interrupted_upgrade_recovers_retired_sources_without_adopting_orphans() {
     readonly.readonly = true;
     assert!(BackupFS::new(readonly).is_err());
     std::fs::remove_dir(blocker).unwrap();
+    BackupFS::convert(options(data.path())).unwrap();
     let fs = BackupFS::new(options(data.path())).unwrap();
     same_bytes(&read_inode(&fs, 4), &vec![0x31; 4 * CHUNK_SIZE as usize]);
     let mut contents = Contents::open(ctrl(&fs), Inode(4)).unwrap();
@@ -315,7 +318,7 @@ fn pending_marker_resume_uses_published_state_instead_of_rebuilding_legacy_sourc
     crate::legacy::fixture(data.path());
     let blocker = data.path().join("segments/state.tmp");
     std::fs::create_dir(&blocker).unwrap();
-    assert!(BackupFS::new(options(data.path())).is_err());
+    assert!(BackupFS::convert(options(data.path())).is_err());
     let primary = data.path().join("superblock");
     let replicas = crate::superblock::replica_paths(&primary);
     let pending: Vec<_> = replicas
@@ -323,6 +326,7 @@ fn pending_marker_resume_uses_published_state_instead_of_rebuilding_legacy_sourc
         .map(|path| std::fs::read(path).unwrap())
         .collect();
     std::fs::remove_dir(blocker).unwrap();
+    BackupFS::convert(options(data.path())).unwrap();
     let fs = BackupFS::new(options(data.path())).unwrap();
     let c = ctrl(&fs);
     let mut contents = Contents::open(c.clone(), Inode(4)).unwrap();
@@ -336,7 +340,7 @@ fn pending_marker_resume_uses_published_state_instead_of_rebuilding_legacy_sourc
     for (path, bytes) in replicas.iter().zip(pending) {
         std::fs::write(path, bytes).unwrap();
     }
-    crate::superblock::Superblock::open_or_create(&primary, "password", false).unwrap();
+    BackupFS::convert(options(data.path())).unwrap();
     assert_eq!(std::fs::read(anchor).unwrap(), before);
     let fs = BackupFS::new(options(data.path())).unwrap();
     assert_eq!(&read_inode(&fs, 4)[..5], b"newer");

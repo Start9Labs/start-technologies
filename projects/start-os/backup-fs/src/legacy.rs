@@ -2,20 +2,26 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use chacha20::Key;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::BkfsResult;
 use crate::objects::StorageReferences;
 use crate::seglog::{self, Record, RecordKey, SegMeta};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+mod log;
+pub(crate) use log::Log;
+
+#[cfg(test)]
+mod tests;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub(crate) struct Location {
     pub segment: u64,
     pub offset: u64,
     pub len: u32,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct Checkpoint {
     version: u32,
     next_seq: u64,
@@ -89,6 +95,23 @@ impl Source {
             }
         }
         Ok(source)
+    }
+
+    pub fn roots(&self, locations: &HashMap<(u64, u64), seglog::Location>) -> seglog::Roots {
+        let mut roots = seglog::Roots::default();
+        for (&key, old) in &self.references {
+            let location = locations
+                .get(&(old.segment, old.offset))
+                .copied()
+                .unwrap_or(seglog::Location {
+                    segment: old.segment,
+                    offset: old.offset,
+                    len: old.len,
+                    ..Default::default()
+                });
+            roots.update(key, Some(location));
+        }
+        roots
     }
 
     pub fn advance_sequence(&mut self, seq: u64) -> BkfsResult<()> {

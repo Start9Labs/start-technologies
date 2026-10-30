@@ -82,7 +82,13 @@ pub fn write_block(
     codec: crate::compress::Codec,
     durable: bool,
 ) -> BkfsResult<()> {
-    store_block(ctrl, content, idx, &encode_block(plaintext, codec), durable)
+    store_block(
+        ctrl,
+        content,
+        idx,
+        &encode_block(ctrl, plaintext, codec),
+        durable,
+    )
 }
 
 pub fn write_final_block(
@@ -93,15 +99,25 @@ pub fn write_final_block(
     codec: crate::compress::Codec,
     durable: bool,
 ) -> BkfsResult<()> {
-    let mut stored = encode_block(plaintext, codec);
+    if ctrl.is_legacy() {
+        let mut padded = plaintext.to_vec();
+        let len = padded.len();
+        padded.resize(ctrl.file_pad(len as u64) as usize, 0);
+        UnwrapErr(rng()).fill_bytes(&mut padded[len..]);
+        return write_block(ctrl, content, idx, &padded, codec, durable);
+    }
+    let mut stored = encode_block(ctrl, plaintext, codec);
     let len = stored.len();
     stored.resize(ctrl.file_pad(len as u64) as usize, 0);
     UnwrapErr(rng()).fill_bytes(&mut stored[len..]);
     store_block(ctrl, content, idx, &stored, durable)
 }
 
-fn encode_block(plaintext: &[u8], codec: crate::compress::Codec) -> Vec<u8> {
+fn encode_block(ctrl: &Controller, plaintext: &[u8], codec: crate::compress::Codec) -> Vec<u8> {
     let compressed = crate::compress::compress(plaintext, codec);
+    if ctrl.is_legacy() {
+        return compressed;
+    }
     let mut stored = Vec::with_capacity(5 + compressed.len());
     stored.push(FRAMED_PAYLOAD);
     stored.extend_from_slice(&(compressed.len() as u32).to_le_bytes());

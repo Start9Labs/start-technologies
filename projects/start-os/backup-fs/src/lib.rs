@@ -26,7 +26,7 @@ fn errno(e: c_int) -> Errno {
 
 use crate::ctrl::{Controller, StatFs};
 use crate::directory::DirectoryContents;
-use crate::error::BkfsResult;
+use crate::error::{BkfsResult, BkfsResultExt};
 use crate::handle::{FileHandleId, Handler};
 use crate::inode::{FileData, Inode, InodeAttributes, BLOCK_SIZE};
 
@@ -117,7 +117,33 @@ pub struct BackupFS {
     handler: Mutex<Handler>,
 }
 
+fn lock_store(data_dir: &Path) -> BkfsResult<FdLock<File>> {
+    fd_lock_rs::FdLock::lock(
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(data_dir.join(".lock"))?,
+        LockType::Exclusive,
+        false,
+    )
+    .map_err(io::Error::from)
+    .map_err(Into::into)
+}
+
 impl BackupFS {
+    /// Converts a closed store while retaining its exclusive lock.
+    pub fn convert(mut config: BackupFSOptions) -> BkfsResult<()> {
+        let password = zeroize::Zeroizing::new(std::mem::take(&mut config.password));
+        if config.readonly {
+            return BkfsResult::errno_notrace(libc::EROFS);
+        }
+        let _lock = lock_store(&config.data_dir)?;
+        superblock::Superblock::convert(&config.data_dir.join("superblock"), &password).map(|_| ())
+    }
+
     pub fn new(config: BackupFSOptions) -> BkfsResult<BackupFS> {
         Self::open(config, None)
     }
@@ -130,19 +156,7 @@ impl BackupFS {
     }
 
     fn open(config: BackupFSOptions, snapshot: Option<&str>) -> BkfsResult<Self> {
-        let BackupFSOptions { data_dir, .. } = &config;
-        let lock = fd_lock_rs::FdLock::lock(
-            OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .custom_flags(libc::O_NOFOLLOW)
-                .open(data_dir.join(".lock"))?,
-            LockType::Exclusive,
-            false,
-        )
-        .map_err(io::Error::from)?;
+        let lock = lock_store(&config.data_dir)?;
 
         let ctrl = Controller::open(config, snapshot)?;
 

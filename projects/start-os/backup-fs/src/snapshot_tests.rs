@@ -68,6 +68,7 @@ fn read_file(ctrl: &Controller, inode: Inode) -> Vec<u8> {
 
 fn create_legacy_block_file(data: &Path) -> Inode {
     crate::legacy::fixture(data);
+    BackupFS::convert(config(data)).unwrap();
     Inode(4)
 }
 
@@ -451,7 +452,8 @@ fn legacy_snapshot_truncate_remount_regrow_keeps_holes_zeroed() {
 #[test]
 fn retired_legacy_files_cannot_resurrect_after_catalog_publication() {
     let data = tempfile::tempdir().unwrap();
-    let inode = create_legacy_block_file(data.path());
+    crate::legacy::fixture(data.path());
+    let inode = Inode(4);
     let old =
         crate::superblock::Superblock::load(&data.path().join("superblock"), "password", true)
             .unwrap();
@@ -459,6 +461,7 @@ fn retired_legacy_files_cannot_resurrect_after_catalog_publication() {
         .path(data.path(), None)
         .unwrap();
     let raw = std::fs::read(&original).unwrap();
+    BackupFS::convert(config(data.path())).unwrap();
     let (key, ecc) = {
         let mut fs = BackupFS::new(config(data.path())).unwrap();
         let c = ctrl(&fs);
@@ -605,7 +608,7 @@ fn durable_replay_floor_prevents_pinned_history_from_resurrecting_a_deleted_inod
     .unwrap();
     let attrs = InodeAttributes::new(Inode(12), None, FileData::Inline(b"historical".to_vec()));
     log.put(Inode(12), &attrs.attrs).unwrap();
-    let view = log.save_checkpoint(&[]).unwrap();
+    let view = log.save_checkpoint(&[]).unwrap().unwrap();
     log.pin(log.roots().segments().collect());
     for i in 100..200 {
         log.put(Inode(i), &attrs.attrs).unwrap();

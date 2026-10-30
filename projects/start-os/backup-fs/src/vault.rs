@@ -30,6 +30,7 @@ pub(crate) enum Binding {
     State,
     Transaction,
     Catalog,
+    Legacy,
 }
 
 pub(crate) type AuthenticationTag = [u8; 32];
@@ -166,6 +167,12 @@ fn binding_key(key: &Key, binding: Binding) -> Zeroizing<[u8; 32]> {
 }
 
 pub(crate) fn seal_bound(plaintext: &[u8], key: &Key, ecc: EccParams, binding: Binding) -> Sealed {
+    if matches!(binding, Binding::Legacy) {
+        return Sealed {
+            bytes: seal_legacy(plaintext, key, ecc),
+            tag: Sha256::digest(plaintext).into(),
+        };
+    }
     let key = binding_key(key, binding);
     seal_with(
         plaintext,
@@ -176,6 +183,9 @@ pub(crate) fn seal_bound(plaintext: &[u8], key: &Key, ecc: EccParams, binding: B
 }
 
 pub(crate) fn open_bound(blob: &[u8], key: &Key, binding: Binding) -> BkfsResult<Authenticated> {
+    if matches!(binding, Binding::Legacy) {
+        return open_version(blob, key, 1);
+    }
     let key = binding_key(key, binding);
     open_version(blob, <&Key>::from(&*key), VERSION)
 }
@@ -239,7 +249,7 @@ pub fn open(blob: &[u8], key: &Key) -> BkfsResult<Vec<u8>> {
     open_version(blob, key, VERSION).map(|opened| opened.plaintext)
 }
 
-/// Restricted to the superblock bootstrap and the pending migration.
+/// Reads the pre-authentication filesystem format.
 pub(crate) fn open_legacy(blob: &[u8], key: &Key) -> BkfsResult<Vec<u8>> {
     open_version(blob, key, 1).map(|opened| opened.plaintext)
 }
@@ -322,7 +332,6 @@ pub(crate) fn derive_key(
     Ok(key)
 }
 
-#[cfg(test)]
 pub(crate) fn seal_legacy(plaintext: &[u8], key: &Key, ecc: EccParams) -> Vec<u8> {
     let data = ecc.data as usize;
     let parity = ecc.parity as usize;

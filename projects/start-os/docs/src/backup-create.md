@@ -41,7 +41,9 @@ Back up your server's data to a physical drive or a network folder.
 
 ## Backup Format Upgrades
 
-Opening an existing backup for writing with this release upgrades its encryption authentication, current-version references, and password-protected key wrapping. The folder remains `StartOSBackupsV2`; this is separate from the older `StartOSBackups` folder cleanup described above. The one-time upgrade rewrites encrypted data. It stages and retires content objects in batches rather than keeping a second complete copy; free space is still needed for replacement objects or segments and new index/snapshot metadata. On a large or remote backup, this can take substantially longer than an ordinary incremental backup. Leave the target connected until the operation finishes; an interrupted upgrade resumes on the next writable open.
+Existing backups remain usable for backups and restores with their original filesystem encryption/checksum format until explicitly converted. Normal mounts do not start conversion. The folder remains `StartOSBackupsV2`; this is separate from the older `StartOSBackups` folder cleanup described above.
+
+Conversion upgrades encryption authentication and current-version references by rewriting encrypted data. It stages and retires content objects in batches rather than keeping a second complete copy; free space is still needed for replacement objects or segments and new index/snapshot metadata. On a large or remote backup, this can take substantially longer than an ordinary incremental backup. Conversion requires exclusive offline access. Leave the target connected until it finishes; after interruption, explicitly resume conversion before using that store again.
 
 An unreadable encrypted object or log frame does not block the upgrade of healthy data. Damaged data stays unreadable; filesystem I/O failures leave the upgrade resumable.
 
@@ -50,7 +52,7 @@ Without its saved key metadata, StartOS cannot decrypt a managed store. A retry 
 > [!WARNING]
 > Older StartOS releases cannot read an upgraded backup. Upgraded backups reject individual object/version and log substitutions against their authenticated current references. An upgrade cannot establish the provenance of older data, prevent rollback to an entire genuine older backup view, or revoke previously copied backup data and key-wrapping metadata.
 
-The discovery date shown before unlocking a backup is editable plaintext. After unlocking, the date inside encrypted backup metadata belongs to the authenticated backup view. A genuine older view retains its older protected date; that date does not establish that no newer backup exists.
+The discovery date shown before unlocking a backup is editable plaintext. After unlocking a converted backup, the date inside encrypted backup metadata belongs to the authenticated backup view. A genuine older view retains its older protected date; that date does not establish that no newer backup exists.
 
 ## Command-Line Passwords
 
@@ -61,6 +63,8 @@ Avoid typing secret values into shell commands, where shell history can retain t
 ## Read-only Snapshots
 
 The low-level `startos-backup-fs` utility can retain named recovery points without duplicating unchanged file content. All upgraded stores use immutable versions of changed blocks and directory buckets; a snapshot retains a selected view while the current backup continues to update normally. Retention is manual: delete points when they are no longer needed.
+
+Snapshots require a new-format or explicitly converted store. The low-level conversion command is `startos-backup-fs convert /path/to/crypt --password-file /protected/filesystem-key`.
 
 Snapshot operations require exclusive offline access. Finish backups and unmount the decrypted filesystem before creating, listing, deleting, or mounting a recovery point. Use the filesystem credential described above, not the StartOS master password:
 

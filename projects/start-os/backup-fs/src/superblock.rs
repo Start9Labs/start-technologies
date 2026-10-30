@@ -342,8 +342,23 @@ impl Superblock {
         readonly: bool,
     ) -> BkfsResult<Superblock> {
         if any_exists(primary) {
-            let mut sb = Self::load(primary, password, readonly)?;
-            sb.upgrade(primary, password, readonly)?;
+            let sb = Self::load(primary, password, readonly)?;
+            if sb.migration_pending {
+                return Err(BkfsError::unsupported(
+                    "backup conversion was interrupted; resume conversion before mounting",
+                ));
+            }
+            if sb.format_version == 1
+                && primary
+                    .parent()
+                    .unwrap()
+                    .join("segments/state")
+                    .try_exists()?
+            {
+                return Err(BkfsError::unsupported(
+                    "authenticated state exists with a legacy superblock",
+                ));
+            }
             Ok(sb)
         } else if primary.with_file_name("cryptinfo").exists() {
             // A pre-versioning store (master key in `cryptinfo`, bincode-v1
@@ -454,11 +469,7 @@ impl Superblock {
                     || generations
                         .iter()
                         .any(|&pair| pair != (sb.format_version, sb.generation));
-                if needs_heal
-                    && !readonly
-                    && sb.format_version >= FORMAT_VERSION
-                    && !sb.migration_pending
-                {
+                if needs_heal && !readonly && !sb.migration_pending {
                     if let Err(e) = sb.persist(primary, password) {
                         warn!("superblock self-heal failed (reduced redundancy): {e}");
                     }
@@ -475,6 +486,12 @@ impl Superblock {
             None => Err(last_err
                 .unwrap_or_else(|| BkfsError::unsupported("no readable superblock replica found"))),
         }
+    }
+
+    pub(crate) fn convert(primary: &Path, password: &str) -> BkfsResult<Self> {
+        let mut sb = Self::load(primary, password, false)?;
+        sb.upgrade(primary, password, false)?;
+        Ok(sb)
     }
 
     fn upgrade(&mut self, primary: &Path, password: &str, readonly: bool) -> BkfsResult<()> {
@@ -543,7 +560,11 @@ impl Superblock {
             &body_bytes,
             <&Key>::from(&*key),
             self.constants.ecc(),
-            vault::Binding::Superblock,
+            if self.format_version == 1 {
+                vault::Binding::Legacy
+            } else {
+                vault::Binding::Superblock
+            },
         )
         .bytes;
         body_bytes.zeroize();
@@ -790,6 +811,7 @@ mod tests {
                 .join("contents/abcd/0123456789abcdef0123456789ab"),
         )
         .unwrap();
+        crate::BackupFS::convert(options(dir.path(), false)).unwrap();
         let mounted = crate::BackupFS::new(options(dir.path(), false)).unwrap();
         let sb = Superblock::load(&primary, "password", true).unwrap();
         assert_eq!(sb.format_version, FORMAT_VERSION);
@@ -827,13 +849,13 @@ mod tests {
         let primary = dir.path().join("superblock");
         let blocker = dir.path().join("segments/state.tmp");
         std::fs::create_dir(&blocker).unwrap();
-        assert!(Superblock::open_or_create(&primary, "password", false).is_err());
+        assert!(Superblock::convert(&primary, "password").is_err());
         let pending = Superblock::load(&primary, "password", true).unwrap();
         assert!(pending.migration_pending);
         assert_eq!(pending.format_version, FORMAT_VERSION);
         assert!(Superblock::open_or_create(&primary, "password", true).is_err());
         std::fs::remove_dir(blocker).unwrap();
-        let resumed = Superblock::open_or_create(&primary, "password", false).unwrap();
+        let resumed = Superblock::convert(&primary, "password").unwrap();
         assert!(!resumed.migration_pending);
         assert_eq!(resumed.generation, legacy.generation + 2);
         let block = dir
@@ -887,7 +909,12 @@ mod tests {
         let (dir, _) = legacy_store();
         let primary = dir.path().join("superblock");
         let before = snapshot(dir.path());
-        assert!(Superblock::open_or_create(&primary, "password", true).is_err());
+        assert_eq!(
+            Superblock::open_or_create(&primary, "password", true)
+                .unwrap()
+                .format_version,
+            1
+        );
         assert_eq!(snapshot(dir.path()), before);
         assert!(Superblock::open_or_create(&primary, "wrong password", false).is_err());
         assert_eq!(snapshot(dir.path()), before);
@@ -949,7 +976,7 @@ mod tests {
         let mut bytes = std::fs::read(&segment).unwrap();
         bytes.extend_from_slice(&crate::seglog::encode_frame(3, &frame));
         std::fs::write(segment, bytes).unwrap();
-        let sb = Superblock::open_or_create(&primary, "password", false).unwrap();
+        let sb = Superblock::convert(&primary, "password").unwrap();
         assert!(!sb.migration_pending);
         assert_eq!(sb.format_version, FORMAT_VERSION);
         assert!(!bucket.exists());
@@ -985,13 +1012,13 @@ mod tests {
             .join("contents/abcd/0123456789abcdef0123456789ab");
         let original = std::fs::read(&block).unwrap();
         std::fs::create_dir(block.with_extension("tmp")).unwrap();
-        assert!(Superblock::open_or_create(&primary, "password", false).is_err());
+        assert!(Superblock::convert(&primary, "password").is_err());
         let sb = Superblock::load(&primary, "password", true).unwrap();
         assert!(sb.migration_pending);
         assert_eq!(std::fs::read(&block).unwrap(), original);
         assert!(Superblock::open_or_create(&primary, "password", true).is_err());
         std::fs::remove_dir(block.with_extension("tmp")).unwrap();
-        let sb = Superblock::open_or_create(&primary, "password", false).unwrap();
+        let sb = Superblock::convert(&primary, "password").unwrap();
         assert!(!sb.migration_pending);
         assert_eq!(migrated_plain(dir.path(), &block), b"contents");
     }
