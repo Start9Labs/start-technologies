@@ -31,6 +31,9 @@ use crate::util::io::{AtomicFile, dir_copy};
 use crate::util::serde::IoFormat;
 use crate::version::VersionT;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
@@ -196,26 +199,21 @@ pub async fn backup_all(
         .decrypt(&ctx)?;
     let password = password.decrypt(&ctx)?;
 
-    // Progress is shown from the moment the request is accepted. The
-    // "Initializing" phase covers mounting the target and opening its encrypted
-    // store — work that runs before perform_backup adds the per-package phases —
-    // so the UI shows a labeled phase instead of a bare 0% during that window.
+    // Initializing covers target mounting before per-package phases exist.
     let progress = FullProgressTracker::new();
     let mut init_phase = progress.add_phase(
         InternedString::intern(&*t!("backup.bulk.initializing")),
         None,
     );
     init_phase.start();
-    // The mutate closure runs under catch_unwind, so it can't capture the
-    // tracker (its watch channels aren't unwind-safe); seed the db with a plain
-    // snapshot instead.
+    // Watch channels cannot cross Patch-DB's catch_unwind boundary.
     let init_progress = progress.snapshot();
 
     let ((fs, package_ids, server_id), status_guard) = (
         ctx.db
             .mutate(|db| {
                 <RpcContext as LoginContext>::check_password(db, &password)?;
-                let fs = target_id.load(db)?;
+                let fs = target_id.clone().load(db)?;
                 let package_ids = if let Some(ids) = package_ids {
                     ids.into_iter().collect()
                 } else {
@@ -227,12 +225,9 @@ pub async fn backup_all(
                         .map(|(id, _)| id)
                         .collect()
                 };
-                assure_backing_up(db, &init_progress)?;
-                Ok((
-                    fs,
-                    package_ids,
-                    db.as_public().as_server_info().as_id().de()?,
-                ))
+                let server_id = db.as_public().as_server_info().as_id().de()?;
+                assure_backing_up(db, &init_progress, &target_id, &server_id)?;
+                Ok((fs, package_ids, server_id))
             })
             .await
             .result?,
@@ -315,22 +310,35 @@ pub async fn backup_all(
 }
 
 #[instrument(skip(db, initial))]
-fn assure_backing_up(db: &mut DatabaseModel, initial: &FullProgress) -> Result<(), Error> {
-    let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
+fn assure_backing_up(
+    db: &mut DatabaseModel,
+    initial: &FullProgress,
+    target: &BackupTargetId,
+    server: &str,
+) -> Result<(), Error> {
+    let status = db.as_public().as_server_info().as_status_info();
     if status.as_shutting_down().de()? || status.as_restarting().de()? {
         return Err(Error::new(
             eyre!("{}", t!("backup.bulk.powering-down")),
             ErrorKind::InvalidRequest,
         ));
     }
-    let backing_up = status.as_backup_progress_mut();
-    if backing_up.transpose_ref().is_some() {
+    if status.as_backup_progress().transpose_ref().is_some() {
         return Err(Error::new(
             eyre!("{}", t!("backup.bulk.already-backing-up")),
             ErrorKind::InvalidRequest,
         ));
     }
-    backing_up.ser(&Some(initial.clone()))?;
+    super::target::conversion::ensure_available(
+        &super::target::conversion::jobs(db)?,
+        target,
+        server,
+    )?;
+    db.as_public_mut()
+        .as_server_info_mut()
+        .as_status_info_mut()
+        .as_backup_progress_mut()
+        .ser(&Some(initial.clone()))?;
     Ok(())
 }
 
@@ -504,124 +512,4 @@ async fn perform_backup(
         .result?;
 
     Ok(backup_report)
-}
-
-#[cfg(test)]
-mod test {
-    use imbl_value::json;
-    use patch_db::ModelExt;
-
-    use super::*;
-    use crate::db::model::public::PowerAction;
-
-    fn db_with(shutting_down: bool, restarting: bool) -> DatabaseModel {
-        DatabaseModel::from_value(json!({
-            "public": { "serverInfo": { "statusInfo": {
-                "backupProgress": null,
-                "updateProgress": null,
-                "shuttingDown": shutting_down,
-                "restarting": restarting,
-                "restart": null,
-                "deferredPowerAction": null,
-            } } }
-        }))
-    }
-
-    fn initial_progress() -> FullProgress {
-        let progress = FullProgressTracker::new();
-        progress.add_phase("Initializing".into(), None).start();
-        progress.snapshot()
-    }
-
-    #[test]
-    fn starts_a_backup_on_an_idle_server() {
-        let mut db = db_with(false, false);
-        let initial = initial_progress();
-        let mut expected = db.clone();
-        expected
-            .as_public_mut()
-            .as_server_info_mut()
-            .as_status_info_mut()
-            .as_backup_progress_mut()
-            .ser(&Some(initial.clone()))
-            .unwrap();
-
-        assure_backing_up(&mut db, &initial).unwrap();
-
-        assert_eq!(db.as_value(), expected.as_value());
-    }
-
-    #[test]
-    fn refuses_an_existing_backup_without_mutating_the_database() {
-        let mut db = db_with(false, false);
-        assure_backing_up(&mut db, &initial_progress()).unwrap();
-        let before = db.as_value().clone();
-
-        let error = assure_backing_up(&mut db, &FullProgress::new()).unwrap_err();
-
-        assert_eq!(error.kind, ErrorKind::InvalidRequest);
-        assert_eq!(
-            error.display_src().to_string(),
-            t!("backup.bulk.already-backing-up")
-        );
-        assert_eq!(db.as_value(), &before);
-    }
-
-    #[test]
-    fn refuses_a_backup_once_a_power_action_has_begun() {
-        for (shutting_down, restarting) in [(true, false), (false, true)] {
-            for existing_backup in [None, Some(initial_progress())] {
-                let mut db = db_with(shutting_down, restarting);
-                db.as_public_mut()
-                    .as_server_info_mut()
-                    .as_status_info_mut()
-                    .as_backup_progress_mut()
-                    .ser(&existing_backup)
-                    .unwrap();
-                let before = db.as_value().clone();
-
-                let error = assure_backing_up(&mut db, &initial_progress()).unwrap_err();
-
-                assert_eq!(error.kind, ErrorKind::InvalidRequest);
-                assert_eq!(
-                    error.display_src().to_string(),
-                    t!("backup.bulk.powering-down")
-                );
-                assert_eq!(db.as_value(), &before);
-            }
-        }
-    }
-
-    #[test]
-    fn admits_a_backup_while_a_power_action_is_only_deferred() {
-        for action in [PowerAction::Shutdown, PowerAction::Restart] {
-            let mut db = db_with(false, false);
-            db.as_public_mut()
-                .as_server_info_mut()
-                .as_status_info_mut()
-                .as_deferred_power_action_mut()
-                .ser(&Some(action))
-                .unwrap();
-            let initial = initial_progress();
-
-            assure_backing_up(&mut db, &initial).unwrap();
-
-            let status = db.as_public().as_server_info().as_status_info();
-            assert_eq!(
-                status.as_deferred_power_action().de().unwrap(),
-                Some(action)
-            );
-            assert!(status.as_backup_progress().de().unwrap().is_some());
-            assert!(!status.as_shutting_down().de().unwrap());
-            assert!(!status.as_restarting().de().unwrap());
-            let before = db.as_value().clone();
-            let error = assure_backing_up(&mut db, &initial).unwrap_err();
-            assert_eq!(error.kind, ErrorKind::InvalidRequest);
-            assert_eq!(
-                error.display_src().to_string(),
-                t!("backup.bulk.already-backing-up")
-            );
-            assert_eq!(db.as_value(), &before);
-        }
-    }
 }

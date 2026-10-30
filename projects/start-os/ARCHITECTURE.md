@@ -69,7 +69,7 @@ and [AGENTS](container-runtime/AGENTS.md) — read those before editing it.
 `backup-fs/` is the `startos-backup-fs` crate (a workspace member): an encrypted,
 erasure-coded FUSE filesystem used for StartOS backups. It builds to the
 `startos-backup-fs` binary (installed as `/usr/bin/startos-backup-fs` and
-`mount.backup-fs`).
+`mount.backup-fs`). Start-core invokes the helper directly and supplies its credential through standard input. Format 2 keeps inode, directory, and file-block records in append-only segments bound to authenticated current references. Existing format-1 stores remain readable and writable until explicit conversion; interrupted conversions require explicit resumption. Optional named read-only snapshots require format 2 and retain shared index views and pinned segments. See [the storage design](backup-fs/DESIGN.md) for format upgrades, snapshot metadata, and reclamation.
 
 ## Systemd units and cgroups
 

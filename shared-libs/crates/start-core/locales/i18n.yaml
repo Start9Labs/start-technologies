@@ -1189,6 +1189,20 @@ disk.main.running-e2fsck:
   fr_FR: "Exécution de e2fsck avant la conversion de %{name} d'ext4 vers btrfs"
   pl_PL: "Uruchamianie e2fsck przed konwersją %{name} z ext4 na btrfs"
 
+disk.mount.backup.invalid-key-metadata:
+  en_US: "Backup key metadata is missing or incomplete."
+  de_DE: "Die Schlüsselmetadaten der Sicherung fehlen oder sind unvollständig."
+  es_ES: "Faltan los metadatos de la clave de copia de seguridad o están incompletos."
+  fr_FR: "Les métadonnées de la clé de sauvegarde sont manquantes ou incomplètes."
+  pl_PL: "Metadane klucza kopii zapasowej są nieobecne lub niekompletne."
+
+disk.mount.backup.invalid-server-id:
+  en_US: "The backup server identifier must be a single directory name."
+  de_DE: "Die Kennung des Sicherungsservers muss ein einzelner Verzeichnisname sein."
+  es_ES: "El identificador del servidor de copia debe ser un único nombre de directorio."
+  fr_FR: "L'identifiant du serveur de sauvegarde doit être un seul nom de répertoire."
+  pl_PL: "Identyfikator serwera kopii zapasowej musi być pojedynczą nazwą katalogu."
+
 disk.mount.filesystem.cifs.hostname-unresolved:
   en_US: "Failed to resolve hostname %{hostname} using %{resolver}: %{error}"
   de_DE: "Hostname %{hostname} konnte über %{resolver} nicht aufgelöst werden: %{error}"
@@ -1824,7 +1838,104 @@ backup.bulk.reclaiming-space:
   fr_FR: "Récupération de l'espace"
   pl_PL: "Odzyskiwanie miejsca"
 
-# backup/trash.rs
+backup.conversion.already-running:
+  en_US: "A conversion is already running for this backup."
+  de_DE: "Für diese Sicherung läuft bereits eine Konvertierung."
+  es_ES: "Ya hay una conversión en curso para esta copia de seguridad."
+  fr_FR: "Une conversion est déjà en cours pour cette sauvegarde."
+  pl_PL: "Konwersja tej kopii zapasowej już trwa."
+
+backup.conversion.complete-title:
+  en_US: "Backup conversion completed"
+  de_DE: "Sicherungskonvertierung abgeschlossen"
+  es_ES: "Conversión de la copia de seguridad completada"
+  fr_FR: "Conversion de la sauvegarde terminée"
+  pl_PL: "Konwersja kopii zapasowej zakończona"
+
+backup.conversion.failed-title:
+  en_US: "Backup conversion did not finish"
+  de_DE: "Sicherungskonvertierung nicht abgeschlossen"
+  es_ES: "La conversión de la copia de seguridad no terminó"
+  fr_FR: "La conversion de la sauvegarde ne s'est pas terminée"
+  pl_PL: "Konwersja kopii zapasowej nie została ukończona"
+
+backup.conversion.incomplete-progress:
+  en_US: "The conversion helper stopped without confirming completion."
+  de_DE: "Das Konvertierungsprogramm wurde ohne Abschlussbestätigung beendet."
+  es_ES: "El programa de conversión se detuvo sin confirmar la finalización."
+  fr_FR: "Le programme de conversion s'est arrêté sans confirmer la fin."
+  pl_PL: "Program konwersji zatrzymał się bez potwierdzenia zakończenia."
+
+backup.conversion.inspecting:
+  en_US: "Inspecting backup"
+  de_DE: "Sicherung wird geprüft"
+  es_ES: "Comprobando la copia de seguridad"
+  fr_FR: "Vérification de la sauvegarde"
+  pl_PL: "Sprawdzanie kopii zapasowej"
+
+backup.conversion.interrupted:
+  en_US: "Conversion interrupted by server shutdown. Resume it when the target is available."
+  de_DE: "Die Konvertierung wurde beim Herunterfahren unterbrochen. Setzen Sie sie fort, sobald das Ziel verfügbar ist."
+  es_ES: "El apagado del servidor interrumpió la conversión. Reanúdela cuando el destino esté disponible."
+  fr_FR: "La conversion a été interrompue par l'arrêt du serveur. Reprenez-la lorsque la cible sera disponible."
+  pl_PL: "Wyłączenie serwera przerwało konwersję. Wznów ją, gdy cel będzie dostępny."
+
+backup.conversion.invalid-progress:
+  en_US: "The conversion helper returned invalid progress data."
+  de_DE: "Das Konvertierungsprogramm hat ungültige Fortschrittsdaten zurückgegeben."
+  es_ES: "El programa de conversión devolvió datos de progreso no válidos."
+  fr_FR: "Le programme de conversion a renvoyé des données de progression invalides."
+  pl_PL: "Program konwersji zwrócił nieprawidłowe dane postępu."
+
+backup.conversion.no-store:
+  en_US: "This server backup has no encrypted store to convert."
+  de_DE: "Diese Serversicherung enthält keinen verschlüsselten Speicher zur Konvertierung."
+  es_ES: "Esta copia del servidor no tiene un almacén cifrado que convertir."
+  fr_FR: "Cette sauvegarde du serveur ne contient aucun stockage chiffré à convertir."
+  pl_PL: "Ta kopia serwera nie zawiera zaszyfrowanego magazynu do konwersji."
+
+backup.conversion.objects:
+  en_US: "Converting data objects"
+  de_DE: "Datenobjekte werden konvertiert"
+  es_ES: "Convirtiendo objetos de datos"
+  fr_FR: "Conversion des objets de données"
+  pl_PL: "Konwertowanie obiektów danych"
+
+backup.conversion.progress-limit:
+  en_US: "The conversion helper exceeded the progress message limit."
+  de_DE: "Das Konvertierungsprogramm hat die Größenbegrenzung für Fortschrittsmeldungen überschritten."
+  es_ES: "El programa de conversión superó el límite de los mensajes de progreso."
+  fr_FR: "Le programme de conversion a dépassé la limite des messages de progression."
+  pl_PL: "Program konwersji przekroczył limit rozmiaru komunikatu postępu."
+
+backup.conversion.publishing:
+  en_US: "Finalizing conversion"
+  de_DE: "Konvertierung wird abgeschlossen"
+  es_ES: "Finalizando la conversión"
+  fr_FR: "Finalisation de la conversion"
+  pl_PL: "Finalizowanie konwersji"
+
+backup.conversion.records:
+  en_US: "Converting metadata"
+  de_DE: "Metadaten werden konvertiert"
+  es_ES: "Convirtiendo metadatos"
+  fr_FR: "Conversion des métadonnées"
+  pl_PL: "Konwertowanie metadanych"
+
+backup.conversion.result:
+  en_US: "Server backup %{server} on %{target}. Check Backup Targets for conversion status and retry or resume if needed."
+  de_DE: "Serversicherung %{server} auf %{target}. Prüfen Sie den Konvertierungsstatus unter Sicherungsziele und starten oder setzen Sie die Konvertierung bei Bedarf erneut fort."
+  es_ES: "Copia del servidor %{server} en %{target}. Consulte el estado de conversión en los destinos de copia y reintente o reanude si es necesario."
+  fr_FR: "Sauvegarde du serveur %{server} sur %{target}. Consultez son état dans les cibles de sauvegarde et réessayez ou reprenez si nécessaire."
+  pl_PL: "Kopia serwera %{server} na %{target}. Sprawdź stan w celach kopii zapasowych i w razie potrzeby ponów lub wznów konwersję."
+
+backup.conversion.scanning-objects:
+  en_US: "Scanning backup objects"
+  de_DE: "Sicherungsobjekte werden erfasst"
+  es_ES: "Examinando objetos de la copia de seguridad"
+  fr_FR: "Analyse des objets de sauvegarde"
+  pl_PL: "Skanowanie obiektów kopii zapasowej"
+
 backup.trash.reclaim-failed-message:
   en_US: "Deleting the old backup on %{target} did not finish: %{error}. The remaining space will be reclaimed automatically the next time this target is used for a backup."
   de_DE: "Das Löschen der alten Sicherung auf %{target} wurde nicht abgeschlossen: %{error}. Der verbleibende Speicherplatz wird automatisch freigegeben, wenn dieses Ziel das nächste Mal für eine Sicherung verwendet wird."
@@ -1866,6 +1977,13 @@ backup.restore.package-installed:
   es_ES: "No se puede restaurar %{id}: ya está instalado. Desinstálalo primero."
   fr_FR: "Impossible de restaurer %{id} : il est déjà installé. Désinstallez-le d’abord."
   pl_PL: "Nie można przywrócić %{id}: jest już zainstalowany. Najpierw go odinstaluj."
+
+backup.target.partial-mount:
+  en_US: "The base filesystem mounted successfully at %{path}."
+  de_DE: "Das Basisdateisystem wurde erfolgreich unter %{path} eingehängt."
+  es_ES: "El sistema de archivos base se montó correctamente en %{path}."
+  fr_FR: "Le système de fichiers de base a été monté avec succès sur %{path}."
+  pl_PL: "Bazowy system plików został pomyślnie zamontowany w %{path}."
 
 # backup/target/cifs.rs
 backup.target.cifs.target-not-found:
@@ -1998,6 +2116,14 @@ net.ssl.unreachable:
   fr_FR: "inaccessible"
   pl_PL: "nieosiągalny"
 
+# net/static_server.rs
+net.static-server.unrecognized-host:
+  en_US: "Open this server at its .local address or IP address."
+  de_DE: "Öffnen Sie diesen Server über seine .local-Adresse oder IP-Adresse."
+  es_ES: "Abra este servidor mediante su dirección .local o su dirección IP."
+  fr_FR: "Ouvrez ce serveur via son adresse .local ou son adresse IP."
+  pl_PL: "Otwórz ten serwer pod jego adresem .local lub adresem IP."
+
 # net/tor/arti.rs
 net.tor.invalid-ed25519-key:
   en_US: "invalid ed25519 expanded secret key"
@@ -2077,12 +2203,33 @@ net.tor.client-error:
   pl_PL: "Błąd klienta Tor: %{error}"
 
 # net/tunnel.rs
+net.tunnel.selected-default-outbound:
+  en_US: "Cannot remove gateway %{gateway}: it is the default outbound gateway. Clear or change that selection first."
+  de_DE: "Gateway %{gateway} kann nicht entfernt werden: Es ist das Standard-Gateway für ausgehenden Verkehr. Heben Sie diese Auswahl zuerst auf oder ändern Sie sie."
+  es_ES: "No se puede eliminar la puerta de enlace %{gateway}: es la puerta de enlace de salida predeterminada. Primero borre o cambie esa selección."
+  fr_FR: "Impossible de supprimer la passerelle %{gateway} : c'est la passerelle de sortie par défaut. Effacez ou modifiez d'abord cette sélection."
+  pl_PL: "Nie można usunąć bramy %{gateway}: jest domyślną bramą ruchu wychodzącego. Najpierw wyczyść lub zmień ten wybór."
+
+net.tunnel.selected-package-outbound:
+  en_US: "Cannot remove gateway %{gateway}: service %{package} uses it as its outbound gateway. Clear or change that selection first."
+  de_DE: "Gateway %{gateway} kann nicht entfernt werden: Dienst %{package} verwendet es als Gateway für ausgehenden Verkehr. Heben Sie diese Auswahl zuerst auf oder ändern Sie sie."
+  es_ES: "No se puede eliminar la puerta de enlace %{gateway}: el servicio %{package} la usa como puerta de enlace de salida. Primero borre o cambie esa selección."
+  fr_FR: "Impossible de supprimer la passerelle %{gateway} : le service %{package} l'utilise comme passerelle de sortie. Effacez ou modifiez d'abord cette sélection."
+  pl_PL: "Nie można usunąć bramy %{gateway}: usługa %{package} używa jej jako bramy ruchu wychodzącego. Najpierw wyczyść lub zmień ten wybór."
+
 net.tunnel.timeout-waiting-for-add:
   en_US: "timed out waiting for gateway %{gateway} to appear in database"
   de_DE: "Zeitüberschreitung beim Warten auf das Erscheinen von Gateway %{gateway} in der Datenbank"
   es_ES: "se agotó el tiempo esperando que la puerta de enlace %{gateway} aparezca en la base de datos"
   fr_FR: "délai d'attente dépassé pour l'apparition de la passerelle %{gateway} dans la base de données"
   pl_PL: "upłynął limit czasu oczekiwania na pojawienie się bramy %{gateway} w bazie danych"
+
+net.tunnel.timeout-waiting-for-interface:
+  en_US: "gateway %{gateway} was added, but StartOS timed out reading its network interface. Restart the server to finish setting it up"
+  de_DE: "Gateway %{gateway} wurde hinzugefügt, aber StartOS hat beim Lesen seiner Netzwerkschnittstelle eine Zeitüberschreitung erreicht. Starten Sie den Server neu, um die Einrichtung abzuschließen"
+  es_ES: "se añadió la puerta de enlace %{gateway}, pero StartOS agotó el tiempo al leer su interfaz de red. Reinicie el servidor para terminar de configurarla"
+  fr_FR: "la passerelle %{gateway} a été ajoutée, mais StartOS a dépassé le délai en lisant son interface réseau. Redémarrez le serveur pour terminer sa configuration"
+  pl_PL: "brama %{gateway} została dodana, ale StartOS przekroczył limit czasu podczas odczytu jej interfejsu sieciowego. Uruchom ponownie serwer, aby dokończyć jej konfigurację"
 
 net.tunnel.timeout-waiting-for-remove:
   en_US: "timed out waiting for gateway %{gateway} to be removed from database"
@@ -3644,6 +3791,13 @@ tunnel.api.invalid-endpoint:
   es_ES: 'Introduce una dirección IPv4, IPv6 o un nombre DNS sin esquema, puerto ni ruta'
   fr_FR: 'Saisissez une adresse IPv4, IPv6 ou un nom DNS sans schéma, port ni chemin'
   pl_PL: 'Wprowadź adres IPv4, IPv6 lub nazwę DNS bez schematu, portu ani ścieżki'
+
+util.crypto.invalid-backup-key:
+  en_US: "The wrapped backup key is invalid or could not be authenticated."
+  de_DE: "Der verschlüsselte Sicherungsschlüssel ist ungültig oder konnte nicht authentifiziert werden."
+  es_ES: "La clave de copia de seguridad cifrada no es válida o no se pudo autenticar."
+  fr_FR: "La clé de sauvegarde chiffrée est invalide ou n'a pas pu être authentifiée."
+  pl_PL: "Zaszyfrowany klucz kopii zapasowej jest nieprawidłowy lub nie można go uwierzytelnić."
 
 util.env.invalid-json-env:
   en_US: "JSON_ENV_* chunks must be contiguous from 0 and form a JSON object with string or null values"

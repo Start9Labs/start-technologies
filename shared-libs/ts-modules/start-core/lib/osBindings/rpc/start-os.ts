@@ -131,6 +131,11 @@ export type Epp = z.output<typeof schemas.Epp>
 export type EppInput = z.input<typeof schemas.Epp>
 export type ExecResult = z.output<typeof schemas.ExecResult>
 export type FormatDiskParamsInput = z.input<typeof schemas.FormatDiskParams>
+
+/**
+ * Unauthenticated discovery hints; opening the store validates its actual state.
+ */
+export type FormatStatus = z.output<typeof schemas.FormatStatus>
 export type ForwardTarget = z.output<typeof schemas.ForwardTarget>
 export type GatewayId = z.output<typeof schemas.GatewayId>
 export type GatewayIdInput = z.input<typeof schemas.GatewayId>
@@ -552,6 +557,11 @@ export type BackupInfo = z.output<typeof schemas.BackupInfo>
 export type BackupParamsInput = z.input<typeof schemas.BackupParams>
 export type CifsBackupTarget = z.output<typeof schemas.CifsBackupTarget>
 export type CompatibleAlpnInfo = z.output<typeof schemas.CompatibleAlpnInfo>
+
+/**
+ * Selects an existing server backup and its unlocking credential.
+ */
+export type ConvertParamsInput = z.input<typeof schemas.ConvertParams>
 export type DependencyMetadata = z.output<typeof schemas.DependencyMetadata>
 export type HardwareInfo = z.output<typeof schemas.HardwareInfo>
 export type HostAddress = z.output<typeof schemas.HostAddress>

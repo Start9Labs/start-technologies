@@ -66,6 +66,22 @@ export const EncryptedWire: z.ZodObject<{ encrypted: z.ZodUnknown }> =
   /* @__PURE__ */ object({ encrypted: z.unknown() }).meta({
     id: 'EncryptedWire',
   })
+
+/**
+ * Unauthenticated discovery hints; opening the store validates its actual state.
+ */
+export const FormatStatus: z.ZodEnum<{
+  legacy: 'legacy'
+  current: 'current'
+  interrupted: 'interrupted'
+  unknown: 'unknown'
+}> = /* @__PURE__ */ z
+  .enum(['legacy', 'current', 'interrupted', 'unknown'])
+  .meta({
+    id: 'FormatStatus',
+    description:
+      'Unauthenticated discovery hints; opening the store validates its actual state.',
+  })
 export const GatewayId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'GatewayId',
 })
@@ -517,10 +533,15 @@ export const StartOsRecoveryInfo: z.ZodObject<{
   hostname: typeof ServerHostname
   version: z.ZodString
   timestamp: z.ZodString
+  formatStatus: z.ZodCodec<
+    z.ZodOptional<typeof FormatStatus>,
+    typeof FormatStatus
+  >
 }> = /* @__PURE__ */ object({
   hostname: ServerHostname,
   version: z.string(),
   timestamp: z.string(),
+  formatStatus: wire(FormatStatus.optional(), FormatStatus),
 }).meta({
   id: 'StartOsRecoveryInfo',
   description:

@@ -1,0 +1,24 @@
+#!/usr/bin/env node
+const fs = require('node:fs')
+const path = require('node:path')
+const [, , operation, directory] = process.argv
+if (operation !== 'convert' || fs.readFileSync(0, 'utf8') !== 'test-key') {
+  throw new Error('unexpected conversion invocation')
+}
+const mode = fs.readFileSync(path.join(directory, 'mode'), 'utf8')
+const emit = phase => process.stdout.write(JSON.stringify(phase) + '\n')
+const complete = () => emit({ phase: 'complete', done: 0, total: null })
+if (mode === 'hold') {
+  const keepAlive = setInterval(() => {}, 60000)
+  process.on('SIGUSR2', () => {
+    complete()
+    clearInterval(keepAlive)
+  })
+}
+fs.writeFileSync(path.join(directory, 'pid'), String(process.pid))
+emit({ phase: 'records', done: 1, total: 2 })
+if (mode === 'complete') complete()
+if (mode === 'fail') {
+  process.stderr.write('injected conversion failure')
+  process.exitCode = 11
+}

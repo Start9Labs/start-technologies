@@ -15,7 +15,5 @@ _fuser_mount()
 	    suid="--setuid-support"
 	fi
 
-    RUST_BACKTRACE=1 RUST_LOG=debug /code/backupfs/target/release/startos-backup-fs mount "${data_dir}" "${mnt}" ${suid} --password "$PASSWORD"
-
-	return 0
+    printf %s "$PASSWORD" | RUST_BACKTRACE=1 RUST_LOG=debug /code/backupfs/target/release/startos-backup-fs mount "${data_dir}" "${mnt}" ${suid}
 }

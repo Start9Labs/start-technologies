@@ -7,6 +7,7 @@ import { PlaceholderComponent } from 'src/app/routes/portal/components/placehold
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { DiskBackupTarget } from 'src/app/services/api/api.types'
 import { BackupService, MappedBackupTarget } from './backup.service'
+import { BackupConversion, ConversionLabel } from './conversion'
 import { FORMAT_DRIVE } from './format'
 import { BackupLegacyWarningComponent } from './legacy-warning.component'
 import { BackupStatusComponent } from './status.component'
@@ -32,7 +33,7 @@ import { BackupStatusComponent } from './status.component'
     <table
       [appTable]="['Status', 'Logicalname', 'Name', 'Capacity', 'Free', null]"
     >
-      @for (target of service.drives(); track $index) {
+      @for (target of service.drives(); track target.id) {
         <tr
           tabindex="0"
           (click)="select(target)"
@@ -52,12 +53,25 @@ import { BackupStatusComponent } from './status.component'
             }
           </td>
           <td class="actions">
-            @if (type === 'create' && target.entry.legacyBackup) {
-              <backup-legacy-warning
-                [id]="target.id"
-                [hasCurrentBackup]="target.hasCurrentBackup"
-              />
-            }
+            <div class="controls">
+              @if (
+                target.entry.startOs
+                  | backupConversionLabel: service.conversions()[target.id];
+                as label
+              ) {
+                <button
+                  backupConversion
+                  [targetId]="target.id"
+                  [label]="label"
+                ></button>
+              }
+              @if (type === 'create' && target.entry.legacyBackup) {
+                <backup-legacy-warning
+                  [id]="target.id"
+                  [hasCurrentBackup]="target.hasCurrentBackup"
+                />
+              }
+            </div>
           </td>
         </tr>
       } @empty {
@@ -92,6 +106,12 @@ import { BackupStatusComponent } from './status.component'
       }
     }
 
+    .controls {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
     td.actions {
       text-align: right;
       white-space: nowrap;
@@ -99,7 +119,7 @@ import { BackupStatusComponent } from './status.component'
 
     :host-context(tui-root._mobile) {
       tr {
-        grid-template-columns: min-content 1fr 4rem;
+        grid-template-columns: min-content 1fr 7rem;
         white-space: nowrap;
       }
 
@@ -136,6 +156,8 @@ import { BackupStatusComponent } from './status.component'
     PlaceholderComponent,
     BackupStatusComponent,
     BackupLegacyWarningComponent,
+    BackupConversion,
+    ConversionLabel,
     TableComponent,
     ConvertBytesPipe,
     i18nPipe,

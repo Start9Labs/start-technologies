@@ -369,8 +369,8 @@ export const mockPatchData: DataModel = {
     postInitMigrationTodos: {},
     latestMigrationRevision: 0,
     statusInfo: {
-      // currentBackup: null,
       updateProgress: null,
+      backupConversions: {},
       restarting: false,
       shuttingDown: false,
       backupProgress: null,

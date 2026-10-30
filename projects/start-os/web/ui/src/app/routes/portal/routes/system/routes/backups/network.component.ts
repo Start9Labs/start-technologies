@@ -17,6 +17,7 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { FormDialogService } from 'src/app/services/form-dialog.service'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
 import { BackupService, MappedBackupTarget } from './backup.service'
+import { BackupConversion, ConversionLabel } from './conversion'
 import { BackupLegacyWarningComponent } from './legacy-warning.component'
 import { BackupStatusComponent } from './status.component'
 
@@ -40,7 +41,7 @@ const ERROR =
     </header>
 
     <table [appTable]="['Status', 'Name', 'Hostname', 'Path', 'Free', null]">
-      @for (target of service.cifs(); track $index) {
+      @for (target of service.cifs(); track target.id) {
         <tr
           tabindex="0"
           (click)="select(target)"
@@ -73,6 +74,17 @@ const ERROR =
           <td>
             <div class="actions">
               @if (
+                target.entry.startOs
+                  | backupConversionLabel: service.conversions()[target.id];
+                as label
+              ) {
+                <button
+                  backupConversion
+                  [targetId]="target.id"
+                  [label]="label"
+                ></button>
+              }
+              @if (
                 type === 'create' &&
                 target.entry.mountable &&
                 target.entry.legacyBackup
@@ -91,6 +103,7 @@ const ERROR =
                 iconStart="@tui.ellipsis-vertical"
                 tuiDropdownAuto
                 (click)="$event.stopPropagation()"
+                (keydown.enter)="$event.stopPropagation()"
               >
                 {{ 'More' | i18n }}
                 <tui-data-list *tuiDropdown="let close" (click)="close()">
@@ -157,7 +170,7 @@ const ERROR =
 
     :host-context(tui-root._mobile) {
       tr {
-        grid-template-columns: min-content 1fr 4rem;
+        grid-template-columns: min-content 1fr 7rem;
         white-space: nowrap;
       }
 
@@ -202,6 +215,8 @@ const ERROR =
     PlaceholderComponent,
     BackupStatusComponent,
     BackupLegacyWarningComponent,
+    BackupConversion,
+    ConversionLabel,
     TableComponent,
     ConvertBytesPipe,
     i18nPipe,
