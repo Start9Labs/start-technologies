@@ -1,1 +1,0 @@
-- La publication des versions du système dans le registre accepte l’empreinte Git de la construction et un indicateur de mise à jour de sécurité ; la promotion conserve les deux. Les opérations de publication peuvent refuser une image source modifiée pendant la préparation de la version.

@@ -1,1 +1,0 @@
-- **`start-cli auth session kill` verwendet `--pubkey <key>` und `--token <id>`** für die zu beendenden Sitzungen statt positionsgebundener Sitzungs-IDs.

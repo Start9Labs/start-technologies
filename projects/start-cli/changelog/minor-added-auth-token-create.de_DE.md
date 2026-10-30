@@ -1,1 +1,0 @@
-- `start-cli auth token create --name <name>` erstellt ein StartOS-Bearer-Token für API-Clients und gibt es einmalig aus.
