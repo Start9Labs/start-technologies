@@ -534,6 +534,7 @@ fn logs_follow<
             }
         },
     )
+    .with_metadata(crate::mcp::MCP, Value::Bool(false))
 }
 
 async fn get_package_id(

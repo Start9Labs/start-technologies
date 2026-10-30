@@ -11,11 +11,17 @@ shared-libs/crates/start-core/bindings/index.ts: $(CORE_SRC) Cargo.toml Cargo.lo
 	npm --prefix shared-libs/ts-modules/start-core exec -- prettier --config .prettierrc.json -w './shared-libs/crates/start-core/bindings/**/*.ts'
 	touch shared-libs/crates/start-core/bindings/index.ts
 
+# StartOS's MCP tool catalog, embedded by `start_core::mcp`.
+start-core-mcp-tools: start-core-ts-bindings
+	npm --prefix shared-libs/ts-modules/start-core exec -- tsx shared-libs/crates/start-core/build/mcp-tools.ts shared-libs/crates/start-core/mcp-tools.json
+	npm --prefix shared-libs/ts-modules/start-core exec -- prettier --config .prettierrc.json -w shared-libs/crates/start-core/mcp-tools.json
+
 # --- generated-artifact freshness (CI gates: regenerate, then fail on any diff) ---
 MAN_DIRS := projects/start-cli/man projects/start-registry/man projects/start-tunnel/man projects/start-os/man
 OSBINDINGS_DIR := shared-libs/ts-modules/start-core/lib/osBindings
+MCP_TOOLS := shared-libs/crates/start-core/mcp-tools.json
 
-.PHONY: manpages manpages-check start-core-ts-bindings-check
+.PHONY: manpages manpages-check start-core-ts-bindings-check start-core-mcp-tools start-core-mcp-tools-check
 # Regenerate the committed clap man pages (roff) for every product binary.
 manpages:
 	./shared-libs/crates/start-core/build/build-manpage.sh
@@ -36,6 +42,14 @@ start-core-ts-bindings-check: start-core-ts-bindings
 		exit 1; \
 	fi
 
+# Fail if the committed MCP tool catalog doesn't match the current TS bindings.
+start-core-mcp-tools-check: start-core-mcp-tools
+	@if [ -n "$$(git status --porcelain -- $(MCP_TOOLS))" ]; then \
+		echo "MCP tool catalog is out of date — run 'make start-core-mcp-tools' and commit the result:"; \
+		git --no-pager diff --stat -- $(MCP_TOOLS); git status --porcelain -- $(MCP_TOOLS); \
+		exit 1; \
+	fi
+
 .PHONY: start-core-clean
 # Owns the shared Rust build root, generated bindings, and global build metadata.
 start-core-clean:
@@ -43,7 +57,7 @@ start-core-clean:
 	rm -f build/env/*.txt
 
 # Formats every Rust crate under shared-libs/crates/ (the product crates have their own format targets).
-SHARED_CRATE_PKGS := -p start-core -p exver -p imbl-value -p yasi -p rpc-toolkit -p visit-rs -p visit-rs-derive -p jsonpath_lib -p pi-beep -p patch-db -p patch-db-macro -p patch-db-macro-internals -p patch-db-util -p json-patch -p json-ptr
+SHARED_CRATE_PKGS := -p start-core -p backup-fs-protocol -p exver -p imbl-value -p yasi -p rpc-toolkit -p visit-rs -p visit-rs-derive -p jsonpath_lib -p pi-beep -p patch-db -p patch-db-macro -p patch-db-macro-internals -p patch-db-util -p json-patch -p json-ptr
 
 .PHONY: start-core-format start-core-format-check
 start-core-format:

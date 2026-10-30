@@ -50,21 +50,50 @@ pub struct CifsBackupTarget {
 rpc_toolkit::reflect_ts!(CifsBackupTarget);
 rpc_toolkit::ts_export!(CifsBackupTarget, namespaces = [""]);
 
+#[cfg(test)]
+mod password_cli_tests {
+    use super::*;
+
+    #[test]
+    fn cifs_password_is_not_a_cli_argument_but_remains_in_rpc_params() {
+        let mut add = CifsAddParams::try_parse_from(["add", "nas", "share", "user"]).unwrap();
+        assert!(add.password.is_none());
+        assert!(CifsAddParams::try_parse_from(["add", "nas", "share", "user", "secret"]).is_err());
+        add.password = Some("provided out of band".into());
+        assert_eq!(
+            serde_json::to_value(&add).unwrap()["password"],
+            "provided out of band"
+        );
+
+        let update =
+            CifsUpdateParams::try_parse_from(["update", "cifs-0", "nas", "share", "user"]).unwrap();
+        assert!(update.password.is_none());
+        assert!(
+            CifsUpdateParams::try_parse_from([
+                "update", "cifs-0", "nas", "share", "user", "secret"
+            ])
+            .is_err()
+        );
+    }
+}
+
 pub fn cifs<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
+        .subcommand("add", from_fn_async(add).no_cli())
         .subcommand(
             "add",
-            from_fn_async(add)
+            from_fn_async(cli_add)
+                .no_ts()
                 .no_display()
-                .with_about("about.add-new-backup-target")
-                .with_call_remote::<CliContext>(),
+                .with_about("about.add-new-backup-target"),
         )
+        .subcommand("update", from_fn_async(update).no_cli())
         .subcommand(
             "update",
-            from_fn_async(update)
+            from_fn_async(cli_update)
+                .no_ts()
                 .no_display()
-                .with_about("about.update-existing-backup-target")
-                .with_call_remote::<CliContext>(),
+                .with_about("about.update-existing-backup-target"),
         )
         .subcommand(
             "remove",
@@ -86,12 +115,26 @@ pub struct CifsAddParams {
     pub path: PathBuf,
     #[arg(help = "help.arg.cifs-username")]
     pub username: String,
-    #[arg(help = "help.arg.cifs-password")]
+    #[arg(skip)]
     pub password: Option<String>,
 }
 
 rpc_toolkit::reflect_ts!(CifsAddParams);
 rpc_toolkit::ts_export!(CifsAddParams, namespaces = [""]);
+
+fn read_password() -> Result<Option<String>, Error> {
+    let password = crate::util::tui::read_password("CIFS_PASSWORD", &t!("help.arg.cifs-password"))?;
+    Ok((!password.is_empty()).then_some(password))
+}
+
+#[tracing::instrument(skip_all)]
+async fn cli_add(
+    mut args: rpc_toolkit::HandlerArgs<CliContext, CifsAddParams>,
+) -> Result<(), Error> {
+    args.params.password = read_password()?;
+    crate::backup::call_remote(args).await?;
+    Ok(())
+}
 
 pub async fn add(
     ctx: RpcContext,
@@ -163,12 +206,21 @@ pub struct CifsUpdateParams {
     pub path: PathBuf,
     #[arg(help = "help.arg.cifs-username")]
     pub username: String,
-    #[arg(help = "help.arg.cifs-password")]
+    #[arg(skip)]
     pub password: Option<String>,
 }
 
 rpc_toolkit::reflect_ts!(CifsUpdateParams);
 rpc_toolkit::ts_export!(CifsUpdateParams, namespaces = [""]);
+
+#[tracing::instrument(skip_all)]
+async fn cli_update(
+    mut args: rpc_toolkit::HandlerArgs<CliContext, CifsUpdateParams>,
+) -> Result<(), Error> {
+    args.params.password = read_password()?;
+    crate::backup::call_remote(args).await?;
+    Ok(())
+}
 
 pub async fn update(
     ctx: RpcContext,

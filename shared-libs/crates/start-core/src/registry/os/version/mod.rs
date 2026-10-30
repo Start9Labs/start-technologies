@@ -15,6 +15,8 @@ use crate::prelude::*;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfo;
 use crate::registry::os::index::OsVersionInfo;
+use crate::s9pk::git_hash::GitHash;
+use crate::s9pk::manifest::LocaleString;
 use crate::sign::AnyVerifyingKey;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 
@@ -67,10 +69,17 @@ pub struct AddVersionParams {
     pub version: Version,
     #[arg(help = "help.arg.version-headline")]
     pub headline: String,
-    #[arg(help = "help.arg.release-notes")]
-    pub release_notes: String,
+    #[arg(help = "help.arg.release-notes", value_name = "RELEASE_NOTES_OR_JSON")]
+    pub release_notes: LocaleString,
     #[arg(help = "help.arg.source-version-range")]
     pub source_version: VersionRange,
+    #[arg(long, help = "help.arg.os-git-hash")]
+    pub git_hash: Option<GitHash>,
+    #[arg(long, help = "help.arg.expected-os-git-hash")]
+    pub expected_git_hash: Option<GitHash>,
+    #[arg(long, help = "help.arg.os-security")]
+    #[serde(default)]
+    pub security: bool,
     #[arg(skip)]
     #[visit(ts(skip))]
     #[serde(rename = "__Auth_signer")]
@@ -80,6 +89,21 @@ pub struct AddVersionParams {
 rpc_toolkit::reflect_ts!(AddVersionParams);
 rpc_toolkit::ts_export!(AddVersionParams, namespaces = [""]);
 
+impl AddVersionParams {
+    pub(super) fn from_info(version: Version, info: &OsVersionInfo) -> Self {
+        Self {
+            version,
+            headline: info.headline.clone(),
+            release_notes: info.release_notes.clone(),
+            source_version: info.source_version.clone(),
+            git_hash: info.git_hash.clone(),
+            expected_git_hash: None,
+            security: info.security,
+            signer: None,
+        }
+    }
+}
+
 pub async fn add_version(
     ctx: RegistryContext,
     AddVersionParams {
@@ -87,6 +111,9 @@ pub async fn add_version(
         headline,
         release_notes,
         source_version,
+        git_hash,
+        expected_git_hash,
+        security,
         signer,
     }: AddVersionParams,
 ) -> Result<(), Error> {
@@ -100,9 +127,14 @@ pub async fn add_version(
                 .as_versions_mut()
                 .upsert(&version, || Ok(OsVersionInfo::default()))?
                 .mutate(|i| {
+                    if let Some(expected) = expected_git_hash {
+                        i.require_git_hash(&expected)?;
+                    }
                     i.headline = headline;
                     i.release_notes = release_notes;
                     i.source_version = source_version;
+                    i.git_hash = git_hash;
+                    i.security = security;
                     i.authorized.extend(signer);
                     Ok(())
                 })
@@ -170,8 +202,7 @@ pub async fn get_version(
         platform,
         device_info,
     }: GetOsVersionParams,
-) -> Result<Value, Error> // BTreeMap<Version, OsVersionInfo>
-{
+) -> Result<Value, Error> {
     let source = source.or_else(|| device_info.as_ref().map(|d| d.os.version.clone()));
     let platform = platform.or_else(|| device_info.as_ref().map(|d| d.os.platform.clone()));
     if let (Some(server_id), Some(arch)) = (server_id, &platform) {
@@ -222,10 +253,7 @@ pub async fn get_version(
     Ok(res)
 }
 
-pub fn display_version_info<T>(
-    params: WithIoFormat<T>,
-    info: Value, // BTreeMap<Version, OsVersionInfo>,
-) -> Result<(), Error> {
+pub fn display_version_info<T>(params: WithIoFormat<T>, info: Value) -> Result<(), Error> {
     use prettytable::*;
 
     let info = from_value::<BTreeMap<Version, OsVersionInfo>>(info)?;
@@ -239,6 +267,8 @@ pub fn display_version_info<T>(
         "VERSION",
         "HEADLINE",
         "RELEASE NOTES",
+        "GIT HASH",
+        "SECURITY",
         "ISO PLATFORMS",
         "IMG PLATFORMS",
         "SQUASHFS PLATFORMS",
@@ -247,7 +277,9 @@ pub fn display_version_info<T>(
         table.add_row(row![
             &version.to_string(),
             &info.headline,
-            &info.release_notes,
+            &info.release_notes.clone().localized(),
+            info.git_hash.as_deref().unwrap_or("N/A"),
+            info.security,
             &info.iso.keys().into_iter().join(", "),
             &info.img.keys().into_iter().join(", "),
             &info.squashfs.keys().into_iter().join(", "),
@@ -255,4 +287,77 @@ pub fn display_version_info<T>(
     }
     print_table(&table)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use imbl_value::json;
+
+    use super::*;
+
+    #[test]
+    fn publication_accepts_release_metadata_from_cli_and_rpc() {
+        let params = AddVersionParams::try_parse_from([
+            "add",
+            "0.4.0.5",
+            "Update",
+            "Notes",
+            ">=0.4.0",
+            "--git-hash",
+            "0123456789abcdef",
+            "--security",
+        ])
+        .unwrap();
+        let value = to_value(&params).unwrap();
+        assert_eq!(value["gitHash"].as_str(), Some("0123456789abcdef"));
+        assert_eq!(value["security"].as_bool(), Some(true));
+        let params: AddVersionParams = from_value(value).unwrap();
+        assert_eq!(params.git_hash.as_deref(), Some("0123456789abcdef"));
+        assert!(params.security);
+    }
+
+    #[test]
+    fn legacy_publication_defaults_to_no_security_metadata() {
+        let params: AddVersionParams = from_value(json!({
+            "version": "0.4.0.5", "headline": "Update", "releaseNotes": "Notes", "sourceVersion": ">=0.4.0",
+        })).unwrap();
+        assert!(params.git_hash.is_none());
+        assert!(!params.security);
+    }
+
+    #[test]
+    fn add_version_uses_locale_string_for_cli_rpc_and_promotion() {
+        for notes in [
+            json!("English notes"),
+            json!({ "en_US": "English notes", "pl_PL": "Polskie informacje" }),
+        ] {
+            let argument = serde_json::to_string(&notes).unwrap();
+            let cli =
+                AddVersionParams::try_parse_from(["add", "0.4.0.5", "v0.4.0.5", &argument, "*"])
+                    .unwrap();
+            let rpc: AddVersionParams = from_value(json!({
+                "version": "0.4.0.5",
+                "headline": "v0.4.0.5",
+                "releaseNotes": notes,
+                "sourceVersion": "*",
+            }))
+            .unwrap();
+            assert_eq!(to_value(&cli).unwrap(), to_value(&rpc).unwrap());
+            assert_eq!(to_value(&cli).unwrap()["releaseNotes"], notes);
+        }
+        let plain =
+            AddVersionParams::try_parse_from(["add", "0.4.0.5", "v0.4.0.5", "English notes", "*"])
+                .unwrap();
+        assert_eq!(
+            plain.release_notes,
+            LocaleString::Translated("English notes".into())
+        );
+    }
+
+    #[test]
+    fn translated_notes_capability_is_visible_in_cli_help() {
+        use clap::CommandFactory;
+        let help = AddVersionParams::command().render_long_help().to_string();
+        assert!(help.contains("<RELEASE_NOTES_OR_JSON>"));
+    }
 }

@@ -26,7 +26,7 @@ use crate::net::vhost::{AlpnInfo, PassthroughInfo};
 use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::system::{KeyboardOptions, SmtpValue};
-use crate::update::signers::{TrustedOsUpdateSigners, initial_signers};
+use crate::trusted_keys::{TrustedKeys, initial_trusted_keys};
 use crate::util::cpupower::{Epp, Governor};
 use crate::util::lshw::LshwDevice;
 use crate::util::serde::MaybeUtf8String;
@@ -73,15 +73,14 @@ impl Public {
                                         preferred_external_port: 80,
                                         add_ssl: Some(AddSslOptions {
                                             preferred_external_port: 443,
-                                            add_x_forwarded_headers: false,
                                             alpn: Some(AlpnInfo(vec![
                                                 MaybeUtf8String("h2".into()),
                                                 MaybeUtf8String("http/1.1".into()),
                                             ])),
-                                            auth: None,
                                             upstream_cert_validation: Default::default(),
                                         }),
                                         secure: None,
+                                        proxy: None,
                                     },
                                     net: NetInfo {
                                         assigned_port: None,
@@ -127,12 +126,13 @@ impl Public {
                 },
                 status_info: ServerStatus {
                     backup_progress: None,
+                    backup_conversions: Default::default(),
                     update_progress: None,
                     shutting_down: false,
                     restarting: false,
                     restart: None,
                 },
-                trusted_os_update_signers: initial_signers(),
+                trusted_keys: initial_trusted_keys(),
                 unread_notification_count: 0,
                 pubkey: ssh_key::PublicKey::from(&account.ssh_key)
                     .to_openssh()
@@ -181,8 +181,8 @@ pub struct ServerInfo {
     #[serde(default)]
     pub status_info: ServerStatus,
     pub unread_notification_count: u64,
-    #[serde(default)]
-    pub trusted_os_update_signers: TrustedOsUpdateSigners,
+    #[serde(default = "initial_trusted_keys")]
+    pub trusted_keys: TrustedKeys,
     pub pubkey: String,
     pub ca_fingerprint: String,
     #[serde(default)]
@@ -484,6 +484,8 @@ rpc_toolkit::ts_export!(DomainSettings, namespaces = [""]);
 #[model = "Model<Self>"]
 pub struct ServerStatus {
     pub backup_progress: Option<FullProgress>,
+    #[serde(default)]
+    pub backup_conversions: crate::backup::target::conversion::ConversionJobs,
     pub update_progress: Option<FullProgress>,
     #[serde(default)]
     pub shutting_down: bool,

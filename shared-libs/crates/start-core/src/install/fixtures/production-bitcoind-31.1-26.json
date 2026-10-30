@@ -1,0 +1,16 @@
+{
+  "publishedAt": "2026-10-21T22:28:05.441516880Z",
+  "urls": [
+    "https://s9pks.nyc3.digitaloceanspaces.com/bitcoind/31.1:26/bitcoind_x86_64.s9pk",
+    "https://github.com/Start9Labs/bitcoin-core-startos/releases/download/v31.1_26/bitcoind_x86_64.s9pk"
+  ],
+  "commitment": {
+    "type": "merkle-archive",
+    "rootSighash": "g3tuK7t6K+KWFqKJGFML3pefNETVEpZGjRGNJSz4HEM",
+    "rootMaxsize": 574
+  },
+  "signatures": {
+    "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEASv7fB+rs6FRL+pk7KXaoXONNn26dRkwMB9LXUqmXXLM=\n-----END PUBLIC KEY-----\n": "-----BEGIN SIGNATURE-----\nMFkwFQYTaa719bHniYqFyZya47uF+/KJWwRAjPnhKStqXLTocBEITaMKFwbVHZLV\ns2U/UrI0Wzthud5QratJF9CttB6dG5uZ2Ae9iTe7Oxpnauh7+y0jkwyUBQ==\n-----END SIGNATURE-----\n",
+    "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PUBLIC KEY-----\n": "-----BEGIN SIGNATURE-----\nMFkwFQYTaa719bHniYqFyZya47uF+/KJWwRANVXbuNEbNZLImK4OUCeVL4fZgyye\n4VFi662XGGmWkW5s7dmGiALAm2Be75xDZMpmaan2NVM0CMoFMyMXnBYHDA==\n-----END SIGNATURE-----\n"
+  }
+}

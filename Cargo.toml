@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "shared-libs/crates/start-core",
+  "shared-libs/crates/backup-fs-protocol",
   "shared-libs/crates/exver",
   "shared-libs/crates/imbl-value",
   "shared-libs/crates/yasi",
