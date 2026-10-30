@@ -43,6 +43,48 @@ fn failed_and_completed_attempts_allow_an_explicit_retry() {
     }
 }
 
+#[test]
+fn daemon_restart_interrupts_running_jobs_without_losing_finished_history() {
+    let progress = FullProgressTracker::new();
+    progress.add_phase("Converting".into(), Some(2)).start();
+    let mut jobs = ConversionJobs::new();
+    for server in ["running", "complete", "failed"] {
+        reserve(&mut jobs, target(1), server.into(), progress.snapshot()).unwrap();
+    }
+    let entries = jobs.get_mut("cifs-1").unwrap();
+    entries.insert(
+        "complete".into(),
+        ConversionJob::finished(progress.snapshot(), &Ok(())),
+    );
+    entries.insert(
+        "failed".into(),
+        ConversionJob::finished(
+            progress.snapshot(),
+            &Err(Error::new(eyre!("previous failure"), ErrorKind::Backup)),
+        ),
+    );
+    let before = to_value(&jobs).unwrap();
+    assert!(ensure_available(&jobs, &target(1), "running").is_err());
+
+    interrupt_running(&mut jobs);
+
+    assert!(ensure_available(&jobs, &target(1), "running").is_ok());
+    let running = &jobs["cifs-1"]["running"];
+    assert_eq!(running.state, ConversionState::Failed);
+    assert_eq!(running.error, Some(interrupted().to_string()));
+    let after = to_value(&jobs).unwrap();
+    assert_eq!(
+        after["cifs-1"]["running"]["progress"],
+        before["cifs-1"]["running"]["progress"]
+    );
+    for server in ["complete", "failed"] {
+        assert_eq!(after["cifs-1"][server], before["cifs-1"][server]);
+    }
+    interrupt_running(&mut jobs);
+    assert_eq!(to_value(&jobs).unwrap(), after);
+    reserve(&mut jobs, target(1), "running".into(), progress.snapshot()).unwrap();
+}
+
 #[derive(Debug)]
 struct TestMount {
     path: PathBuf,

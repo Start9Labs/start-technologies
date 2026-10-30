@@ -68,11 +68,7 @@ async fn inner_main(
         )
         .await?;
 
-        // Every status here is written by a task that died with the previous
-        // process, and only `init` — which this branch skips — would otherwise
-        // clear them. `restart` is deliberately left: it is a reboot-needed
-        // marker meant to outlive one. Before the RPC surface goes live, so
-        // nothing races the reset.
+        // The reboot-needed marker survives daemon restart.
         ctx.db
             .mutate(|db| {
                 let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
@@ -80,7 +76,10 @@ async fn inner_main(
                 status.as_update_progress_mut().ser(&None)?;
                 status.as_deferred_power_action_mut().ser(&None)?;
                 status.as_shutting_down_mut().ser(&false)?;
-                status.as_restarting_mut().ser(&false)
+                status.as_restarting_mut().ser(&false)?;
+                let mut conversions = status.de()?.backup_conversions;
+                crate::backup::target::conversion::interrupt_running(&mut conversions);
+                status.as_backup_conversions_mut().ser(&conversions)
             })
             .await
             .result?;
