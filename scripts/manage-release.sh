@@ -1600,6 +1600,10 @@ cmd_cosign_registry() {
         wrt) registry=$STARTWRT_TARGET_REGISTRY ;;
     esac
     load_registry_index "$registry"
+    if ! jq -e --arg v "$VERSION" '.versions[$v] != null' <<< "$_INDEX_JSON" >/dev/null; then
+        >&2 echo "  ✗ ${registry} has no ${VERSION} entry or its index could not be loaded"
+        return 1
+    fi
     while read -r slot platform; do
         url=$(asset_url "$registry" "$slot" "$platform")
         if [ -z "$url" ]; then
