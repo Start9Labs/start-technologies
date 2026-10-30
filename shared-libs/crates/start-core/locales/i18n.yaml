@@ -1991,6 +1991,14 @@ net.ssl.unreachable:
   fr_FR: "inaccessible"
   pl_PL: "nieosiągalny"
 
+# net/static_server.rs
+net.static-server.unrecognized-host:
+  en_US: "Open this server at its .local address or IP address."
+  de_DE: "Öffnen Sie diesen Server über seine .local-Adresse oder IP-Adresse."
+  es_ES: "Abra este servidor mediante su dirección .local o su dirección IP."
+  fr_FR: "Ouvrez ce serveur via son adresse .local ou son adresse IP."
+  pl_PL: "Otwórz ten serwer pod jego adresem .local lub adresem IP."
+
 # net/tor/arti.rs
 net.tor.invalid-ed25519-key:
   en_US: "invalid ed25519 expanded secret key"
