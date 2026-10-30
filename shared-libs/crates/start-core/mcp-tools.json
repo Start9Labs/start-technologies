@@ -2730,6 +2730,105 @@
     }
   },
   {
+    "name": "notification.push.key",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "notification.push.list",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "notification.push.subscribe",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "PushSubscription": {
+          "type": "object",
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "description": "HTTP(S) push resource selected by the browser, including LAN endpoints."
+            },
+            "keys": { "$ref": "#/$defs/PushKeys" }
+          },
+          "required": ["endpoint", "keys"],
+          "additionalProperties": true
+        },
+        "PushKeys": {
+          "type": "object",
+          "properties": {
+            "p256dh": {
+              "type": "string",
+              "description": "Base64url-encoded uncompressed P-256 public key."
+            },
+            "auth": {
+              "type": "string",
+              "description": "Base64url-encoded 16-byte authentication secret."
+            }
+          },
+          "required": ["p256dh", "auth"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "description": "HTTP(S) push resource selected by the browser, including LAN endpoints."
+        },
+        "keys": { "$ref": "#/$defs/PushKeys" }
+      },
+      "required": ["endpoint", "keys"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "notification.push.test",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "EndpointParams": {
+          "type": "object",
+          "properties": { "endpoint": { "type": "string" } },
+          "required": ["endpoint"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": { "endpoint": { "type": "string" } },
+      "required": ["endpoint"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "notification.push.unsubscribe",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "EndpointParams": {
+          "type": "object",
+          "properties": { "endpoint": { "type": "string" } },
+          "required": ["endpoint"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": { "endpoint": { "type": "string" } },
+      "required": ["endpoint"],
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "notification.remove",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -8497,6 +8596,15 @@
     }
   },
   {
+    "name": "server.cancel-deferred-power",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "server.clear-smtp",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -10345,7 +10453,11 @@
           "type": "object",
           "properties": {
             "wait": {
-              "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.",
+              "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.\nA deferred action replies immediately, before teardown begins.",
+              "type": "boolean"
+            },
+            "force": {
+              "description": "Interrupt a running backup instead of waiting for it to finish.",
               "type": "boolean"
             }
           },
@@ -10355,7 +10467,11 @@
       "type": "object",
       "properties": {
         "wait": {
-          "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.",
+          "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.\nA deferred action replies immediately, before teardown begins.",
+          "type": "boolean"
+        },
+        "force": {
+          "description": "Interrupt a running backup instead of waiting for it to finish.",
           "type": "boolean"
         }
       },
@@ -10587,7 +10703,11 @@
           "type": "object",
           "properties": {
             "wait": {
-              "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.",
+              "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.\nA deferred action replies immediately, before teardown begins.",
+              "type": "boolean"
+            },
+            "force": {
+              "description": "Interrupt a running backup instead of waiting for it to finish.",
               "type": "boolean"
             }
           },
@@ -10597,7 +10717,11 @@
       "type": "object",
       "properties": {
         "wait": {
-          "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.",
+          "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.\nA deferred action replies immediately, before teardown begins.",
+          "type": "boolean"
+        },
+        "force": {
+          "description": "Interrupt a running backup instead of waiting for it to finish.",
           "type": "boolean"
         }
       },
