@@ -14,7 +14,7 @@ use crate::context::RpcContext;
 use crate::db::model::{Database, DatabaseModel};
 use crate::notifications::{NotificationLevel, OsUpdateAvailable, notify};
 use crate::prelude::*;
-use crate::registry::os::security::SecurityCatalog;
+use crate::registry::os::security::SecurityFeedState;
 use crate::s9pk::git_hash::GitHash;
 
 pub type SecurityNotifications = BTreeMap<Url, BTreeMap<Version, Option<GitHash>>>;
@@ -132,12 +132,12 @@ async fn receive_updates<S: AsyncRead + AsyncWrite + Unpin>(
                         &*value
                     }
                 };
-                let catalog: SecurityCatalog = from_value(value.clone())?;
+                let feed: SecurityFeedState = from_value(value.clone())?;
                 db.mutate(|db| {
                     notify_security_updates(
                         db,
                         registry,
-                        &catalog,
+                        &feed,
                         crate::version::COMMIT_HASH.trim(),
                         &crate::PLATFORM,
                     )
@@ -161,14 +161,19 @@ async fn receive_updates<S: AsyncRead + AsyncWrite + Unpin>(
 fn notify_security_updates(
     db: &mut DatabaseModel,
     registry: &Url,
-    catalog: &SecurityCatalog,
+    feed: &SecurityFeedState,
     installed_hash: &str,
     platform: &str,
 ) -> Result<(), Error> {
     let installed = db.as_public().as_server_info().as_version().de()?;
     let mut notified = db.as_private().as_os_security_notifications().de()?;
     let releases = notified.entry(registry.clone()).or_default();
-    for (version, update) in catalog {
+    let registry_name = feed
+        .name
+        .clone()
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| t!("update.security.selected-registry").to_string());
+    for (version, update) in &feed.updates {
         if !update.platforms.contains(platform)
             || !installed.satisfies(&update.source_version)
             || !super::is_os_update(
@@ -189,7 +194,7 @@ fn notify_security_updates(
             t!(
                 "update.security.available-message",
                 version = version.to_string(),
-                registry = registry.as_str()
+                registry = registry_name.as_str()
             )
             .to_string(),
             OsUpdateAvailable {},
@@ -223,21 +228,77 @@ mod tests {
         db
     }
 
-    fn catalog(version: &str, hash: Option<&str>, source: &str, platform: &str) -> SecurityCatalog {
-        [(
-            version.parse().unwrap(),
-            SecurityUpdate {
-                git_hash: hash.map(|h| h.parse().unwrap()),
-                source_version: source.parse().unwrap(),
-                platforms: BTreeSet::from([platform.into()]),
-            },
-        )]
-        .into_iter()
-        .collect()
+    fn catalog(
+        version: &str,
+        hash: Option<&str>,
+        source: &str,
+        platform: &str,
+    ) -> SecurityFeedState {
+        SecurityFeedState {
+            name: Some("Test Registry".into()),
+            updates: [(
+                version.parse().unwrap(),
+                SecurityUpdate {
+                    git_hash: hash.map(|h| h.parse().unwrap()),
+                    source_version: source.parse().unwrap(),
+                    platforms: BTreeSet::from([platform.into()]),
+                },
+            )]
+            .into_iter()
+            .collect(),
+        }
     }
 
     fn count(db: &DatabaseModel) -> usize {
         db.as_private().as_notifications().de().unwrap().0.len()
+    }
+
+    #[test]
+    fn registry_names_are_display_only_and_renames_do_not_repeat_notifications() {
+        let mut db = database();
+        let registry: Url = "https://registry.test/".parse().unwrap();
+        let other: Url = "https://other-registry.test/".parse().unwrap();
+        let mut feed = catalog("0.4.0.6", Some("new-build"), "*", "x86_64");
+        notify_security_updates(&mut db, &registry, &feed, "installed-build", "x86_64").unwrap();
+        let notifications = db.as_private().as_notifications().de().unwrap();
+        let message = &notifications.0.values().next().unwrap().message;
+        assert!(message.contains("Test Registry"));
+        assert!(!message.contains(registry.as_str()));
+        notify_security_updates(&mut db, &other, &feed, "installed-build", "x86_64").unwrap();
+        assert_eq!(count(&db), 2);
+        feed.name = Some("Renamed Registry".into());
+        notify_security_updates(&mut db, &registry, &feed, "installed-build", "x86_64").unwrap();
+        assert_eq!(count(&db), 2);
+        feed.updates.values_mut().next().unwrap().git_hash =
+            Some("replacement-build".parse().unwrap());
+        notify_security_updates(&mut db, &registry, &feed, "installed-build", "x86_64").unwrap();
+        let notifications = db.as_private().as_notifications().de().unwrap();
+        assert_eq!(notifications.0.len(), 3);
+        assert!(
+            notifications
+                .0
+                .values()
+                .last()
+                .unwrap()
+                .message
+                .contains("Renamed Registry")
+        );
+    }
+
+    #[test]
+    fn unnamed_registries_use_a_localized_label_without_exposing_the_url() {
+        let registry: Url = "https://registry.test/".parse().unwrap();
+        for name in [None, Some(String::new())] {
+            let mut db = database();
+            let mut feed = catalog("0.4.0.6", Some("new-build"), "*", "x86_64");
+            feed.name = name;
+            notify_security_updates(&mut db, &registry, &feed, "installed-build", "x86_64")
+                .unwrap();
+            let notifications = db.as_private().as_notifications().de().unwrap();
+            let message = &notifications.0.values().next().unwrap().message;
+            assert!(message.contains(&t!("update.security.selected-registry").to_string()));
+            assert!(!message.contains(registry.as_str()));
+        }
     }
 
     #[test]
@@ -396,7 +457,7 @@ mod tests {
                 if attempt == 0 {
                     let replacement =
                         catalog("0.4.0.6", Some("replacement-build"), "*", &crate::PLATFORM);
-                    for value in [&replacement, &SecurityCatalog::new(), &replacement] {
+                    for value in [&replacement, &SecurityFeedState::default(), &replacement] {
                         let revision = feed.put(&ROOT, value).await.unwrap().unwrap();
                         socket
                             .send(Message::Text(

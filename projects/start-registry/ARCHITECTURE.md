@@ -64,11 +64,15 @@ revisions whose JSON Patch paths are relative to the selected subtree.
 
 The `/os/security` WebSocket sends a JSON PatchDB `Dump` (`id`, `value`) followed by `Revision`
 messages (`id`, `patch`). The dump and subscription are captured atomically. The root is a
-`SecurityCatalog` keyed by OS version; each entry contains `gitHash`, `sourceVersion`, and the available
-SquashFS `platforms` for a release marked `security`.
+`SecurityFeedState` with the registry's optional `name` and an `updates` catalog keyed by OS version.
+Each update contains `gitHash`, `sourceVersion`, and the available SquashFS `platforms` for a release
+marked `security`. The name comes from the same index field as `registry.info`; clients use a localized
+label for unnamed registries and retain the registry URL as their delivery-history key.
 
-When enabled, `RegistryContext` owns one `PatchDb::in_memory()` mirror and one watch of the persistent OS index.
-Native `put` computes differences and suppresses unchanged catalogs. The bounded JSON subscription API
+When enabled, `RegistryContext` owns one `PatchDb::in_memory()` mirror and one task watching the
+persistent name and OS subtrees. Both subscriptions precede the initial atomic index snapshot; later
+events also rebuild from one snapshot. Unrelated package changes do not wake the task. Native `put`
+suppresses unchanged feed state. The bounded JSON subscription API
 serializes each scoped revision once and shares its bytes across listeners. Initial dumps share a
 per-pointer cache until the database changes. A 32-slot broadcast ring bounds pending revisions;
 a subscriber that falls behind closes instead of skipping patches. The endpoint uses 2 KiB read

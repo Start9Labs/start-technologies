@@ -7572,6 +7572,13 @@ update.security.available-title:
   fr_FR: "Mise à jour de sécurité de StartOS disponible"
   pl_PL: "Dostępna aktualizacja bezpieczeństwa StartOS"
 
+update.security.selected-registry:
+  en_US: "your selected OS registry"
+  de_DE: "Ihrer ausgewählten OS-Registry"
+  es_ES: "el registro del SO seleccionado"
+  fr_FR: "le registre du système sélectionné"
+  pl_PL: "wybranym rejestrze systemu"
+
 update.signers.already-exists:
   en_US: "This public key is already a trusted OS update signer"
   de_DE: "Dieser öffentliche Schlüssel ist bereits als Update-Unterzeichner vertrauenswürdig"
