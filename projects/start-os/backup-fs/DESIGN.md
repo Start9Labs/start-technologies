@@ -64,6 +64,10 @@ stores. Migration reseals objects and log frames with their required bindings,
 preserves existing frame offsets, converts retained snapshots, and publishes the
 new State before clearing the marker. Older binaries reject the upgraded format.
 
+In-place segment and versioned-object replacements sync their temporary data
+before rename, then sync the containing directory. Copies to new names retain
+batched durability.
+
 Stable-name objects receive deterministic secret-derived migration versions and
 pointer records. Completed destinations and their pointers become durable before
 the original files are removed. Retirement uses the existing group-commit batch
@@ -96,7 +100,9 @@ block; unaffected block versions keep their names and bytes. Writes beyond EOF
 and new-output alignment tails avoid backing reads. Sparse holes have no object.
 
 Block payloads record compressed length separately from optional random padding.
-Growth cannot expose padding or truncated tails. Each open inode retains one
+Growth cannot expose padding, truncated tails, or block references committed
+before their extending inode size. Newly visible whole-block slots discard any
+existing reference before use; absent slots generate no deletion record. Each open inode retains one
 decoded clean block, shared by its handles and released on last close; writes and
 trailing-block pruning invalidate the affected cache entry.
 
@@ -111,8 +117,8 @@ State owns publication durability. Objects, data records, and packed index delta
 are written first; one backing-filesystem `syncfs` precedes atomic root replacement
 and directory synchronization. Explicit durable operations commit immediately;
 fast saves use the existing batch threshold. A clean library close commits
-pending successful fast updates. Uncertain publication blocks mutations until
-reopen; uncommitted tails do not override the previous root.
+pending successful fast updates. A failed backing writeback barrier or uncertain publication blocks mutations until
+reopen, even if a later barrier succeeds; uncommitted tails do not override the previous root.
 
 Index deltas share append-only 8 MiB target segments, rather than creating a file
 per mutation. Coarse checkpoints shard maps into chunks of at most 16,384 entries

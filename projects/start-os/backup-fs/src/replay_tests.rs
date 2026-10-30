@@ -53,6 +53,52 @@ fn store_lock_rejects_symlinks_without_truncating_their_targets() {
 }
 
 #[test]
+fn committed_spills_beyond_the_persisted_size_remain_holes_on_growth() {
+    for growth in ["resize", "fallocate", "write"] {
+        let data = tempfile::tempdir().unwrap();
+        let inode = {
+            let fs = BackupFS::new(options(data.path())).unwrap();
+            let c = ctrl(&fs);
+            let inode = c.next_inode().unwrap();
+            let mut attrs = InodeAttributes::new(inode, None, FileData::File(ContentId(inode.0)));
+            attrs.attrs.size = CHUNK_SIZE;
+            c.save(&attrs).unwrap();
+            for (idx, bytes) in [(0, b"prefix".as_slice()), (1, b"spill before inode size")] {
+                blockstore::write_block(
+                    &c,
+                    ContentId(inode.0),
+                    idx,
+                    bytes,
+                    crate::compress::Codec::None,
+                    true,
+                )
+                .unwrap();
+            }
+            inode
+        };
+        let fs = BackupFS::new(options(data.path())).unwrap();
+        let mut contents = Contents::open(ctrl(&fs), inode).unwrap();
+        assert_eq!(contents.inode.attrs.size, CHUNK_SIZE);
+        match growth {
+            "resize" => contents.resize(3 * CHUNK_SIZE).unwrap(),
+            "fallocate" => contents.fallocate(0, 3 * CHUNK_SIZE, 0, false).unwrap(),
+            "write" => {
+                contents.write_at(b"latest", 2 * CHUNK_SIZE + 17).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        contents.fsync().unwrap();
+        let bytes = read_inode(&fs, inode.0);
+        let mut expected = vec![0; contents.inode.attrs.size as usize];
+        expected[..6].copy_from_slice(b"prefix");
+        if growth == "write" {
+            expected[2 * CHUNK_SIZE as usize + 17..].copy_from_slice(b"latest");
+        }
+        same_bytes(&bytes, &expected);
+    }
+}
+
+#[test]
 fn object_reads_reject_older_versions_other_objects_and_missing_current_files() {
     let data = tempfile::tempdir().unwrap();
     let fs = BackupFS::new(options(data.path())).unwrap();

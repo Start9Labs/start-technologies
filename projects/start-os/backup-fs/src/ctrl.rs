@@ -458,9 +458,14 @@ impl Controller {
     }
 
     pub(crate) fn remove_object(&self, id: ObjectId) -> BkfsResult<()> {
-        self.check_rw()?;
+        let mut log = self.0.log.lock().unwrap();
+        log.check_rw()?;
+        if !log.roots().objects.contains_key(&id) {
+            return Ok(());
+        }
         let rec = seglog::seal_object(self.key(), self.ecc(), id, ObjectVersion::Deleted)?;
-        self.0.log.lock().unwrap().append(&rec)?;
+        log.append(&rec)?;
+        drop(log);
         self.tick_save()?;
         Ok(())
     }

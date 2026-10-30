@@ -28,14 +28,6 @@ use crate::error::{BkfsError, BkfsResult, BkfsResultExt};
 use crate::handle::Handler;
 use crate::inode::{time_now, ContentId, FileData, Inode, InodeAttributes};
 
-// The inline-tier and packed-tier size thresholds are recorded in the
-// superblock at filesystem creation and adopted on every mount, so they stay
-// consistent regardless of environment drift. They are read at runtime via
-// `Controller::inline_threshold` / `Controller::pack_max`. (Files in
-// `(inline_threshold, pack_max]` are packed as a single shared-log extent;
-// larger files use per-file block storage. Setting `BACKUPFS_PACK_MAX` to the
-// inline threshold at creation disables packing — useful for A/B.)
-
 /// Soft cap on per-file in-memory dirty *block* data. With `FOPEN_DIRECT_IO`
 /// the kernel streams writes straight to us and never triggers a writeback,
 /// so without a cap a large sequential write would buffer the entire file in
@@ -282,6 +274,7 @@ impl Contents {
             self.discard_size_padding()?;
         }
         self.promote_for(end)?;
+        self.discard_new_block_references(end)?;
 
         if matches!(self.body, Body::Blocks { .. }) {
             let (written, error) = self.write_blocks_at(buf, offset);
@@ -318,6 +311,15 @@ impl Contents {
         }
         self.record_write(end);
         Ok(buf.len())
+    }
+
+    fn discard_new_block_references(&self, size: u64) -> BkfsResult<()> {
+        if let Body::Blocks { content_id, .. } = self.body {
+            for idx in blockstore::block_count(self.size())..blockstore::block_count(size) {
+                blockstore::remove_block(&self.ctrl, content_id, idx)?;
+            }
+        }
+        Ok(())
     }
 
     fn discard_size_padding(&mut self) -> BkfsResult<()> {
@@ -573,6 +575,8 @@ impl Contents {
             let new_end = offset + length;
             if new_end > self.inode.attrs.size {
                 self.discard_size_padding()?;
+                self.promote_for(new_end)?;
+                self.discard_new_block_references(new_end)?;
                 self.inode.attrs.size = new_end;
             }
             self.inode.attrs.modified();
@@ -585,6 +589,8 @@ impl Contents {
         self.ctrl.check_rw()?;
         if size > self.size() {
             self.discard_size_padding()?;
+            self.promote_for(size)?;
+            self.discard_new_block_references(size)?;
         }
         self.inode.attrs.size = size;
         self.changed = true;
