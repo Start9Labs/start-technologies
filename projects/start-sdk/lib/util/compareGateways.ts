@@ -54,8 +54,12 @@ export async function compareGateways(
   ])
   const published = host
     ? [
-        ...Object.values(host.bindings).map(b => b.addresses),
-        ...Object.values(host.bindingRanges).map(r => r.addresses),
+        ...Object.values(host.bindings)
+          .filter(b => b.enabled && Object.keys(b.interfaces).length > 0)
+          .map(b => b.addresses),
+        ...Object.values(host.bindingRanges)
+          .filter(r => r.enabled && r.interface !== null)
+          .map(r => r.addresses),
       ].flatMap(addrs =>
         addrs.available.filter(
           (h): h is Published =>

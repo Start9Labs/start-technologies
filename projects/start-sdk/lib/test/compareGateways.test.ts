@@ -46,7 +46,24 @@ const host = (
       },
       net: { assignedPort: 3478, assignedSslPort: null },
       addresses: binding,
-      interfaces: {},
+      interfaces: {
+        turn: {
+          id: 'turn',
+          name: 'TURN',
+          description: '',
+          masked: false,
+          type: 'api',
+          preferredLauncherAddress: null,
+          addressInfo: {
+            hostId: 'turn',
+            internalPort: 3478,
+            username: null,
+            scheme: null,
+            sslScheme: null,
+            suffix: '',
+          },
+        },
+      },
     },
   },
   bindingRanges: range
@@ -56,7 +73,12 @@ const host = (
           externalStartPort: 42000,
           numberOfPorts: 500,
           addresses: range,
-          interface: null,
+          interface: {
+            id: 'relay',
+            name: 'Relay',
+            description: '',
+            scheme: null,
+          },
         },
       }
     : {},
@@ -131,6 +153,35 @@ describe('compareGateways', () => {
         .addresses,
     ).toEqual([{ address: '73.34.87.9', gateway: 'eno0' }])
   })
+
+  it.each(['disabled', 'internal-only'] as const)(
+    'ignores a %s single-port binding',
+    async state => {
+      const h = host(addresses([tunnelV4], ['134.199.220.102:3478']))
+      if (state === 'disabled') h.bindings[3478].enabled = false
+      else h.bindings[3478].interfaces = {}
+      expect(
+        (await compareGateways(effects('wg1', h), 'turn', ['134.199.220.102']))
+          .addresses,
+      ).toEqual([{ address: '134.199.220.102', gateway: null }])
+    },
+  )
+
+  it.each(['disabled', 'internal-only'] as const)(
+    'ignores a %s port-range binding',
+    async state => {
+      const h = host(
+        addresses([], []),
+        addresses([{ ...routerV4, port: 42000 }], ['73.34.87.9:42000']),
+      )
+      if (state === 'disabled') h.bindingRanges[42000].enabled = false
+      else h.bindingRanges[42000].interface = null
+      expect(
+        (await compareGateways(effects('eno0', h), 'turn', ['73.34.87.9']))
+          .addresses,
+      ).toEqual([{ address: '73.34.87.9', gateway: null }])
+    },
+  )
 
   it('treats a missing host as publishing nothing', async () => {
     expect(
