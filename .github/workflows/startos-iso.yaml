@@ -440,6 +440,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: ./.github/actions/free-disk-space
+
       - name: Fetch the 0.4.0 base squashfs (this run's image build)
         id: base
         continue-on-error: true
