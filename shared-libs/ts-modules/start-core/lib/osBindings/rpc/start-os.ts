@@ -293,6 +293,13 @@ export type TrustedOsUpdateSigner = z.output<
 export type UiParamsInput = z.input<typeof schemas.UiParams>
 
 /**
+ * Changes a keyring's name and both trust selections atomically.
+ */
+export type UpdateTrustedKeyParamsInput = z.input<
+  typeof schemas.UpdateTrustedKeyParams
+>
+
+/**
  * How the OS reverse proxy validates the container's TLS certificate when it
  * rewraps SSL (`add_ssl` set AND `secure.ssl == true`, so the OS terminates
  * the client's TLS and initiates a fresh TLS connection to the container).

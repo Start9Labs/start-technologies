@@ -5,7 +5,6 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms'
-import { TrustContext } from '@start9labs/marketplace'
 import { i18nPipe, TaskService } from '@start9labs/shared'
 import { tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
 import {
@@ -92,8 +91,7 @@ export class AddTrustedKeyDialog {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
 
-  protected readonly context =
-    injectContext<TuiDialogContext<void, TrustContext>>()
+  protected readonly context = injectContext<TuiDialogContext<void>>()
   protected readonly saving = signal(false)
   protected readonly form = inject(NonNullableFormBuilder).group({
     name: ['', [Validators.required, Validators.pattern(/\S/)]],
@@ -119,7 +117,7 @@ export class AddTrustedKeyDialog {
       await this.api.rpc.server.trustedKeys.add({
         name,
         publicKeys: parsePublicKeys(publicKeys),
-        context: this.context.data,
+        context: 'marketplace',
       })
     }, 'Saving')
     this.saving.set(false)

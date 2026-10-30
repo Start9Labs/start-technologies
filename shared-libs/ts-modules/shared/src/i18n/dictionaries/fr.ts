@@ -875,4 +875,9 @@ export default {
   991: 'Paramètres des notifications',
   992: 'Push',
   993: 'Les notifications sont bloquées. Autorisez-les dans les paramètres du navigateur.',
+  994: 'Trousseaux de confiance',
+  995: 'Accès SSH',
+  996: 'Modifier le trousseau de confiance',
+  997: 'Paquets',
+  998: 'Système d’exploitation',
 } satisfies i18n

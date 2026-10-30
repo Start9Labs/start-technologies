@@ -875,4 +875,9 @@ export default {
   991: 'Ajustes de notificaciones',
   992: 'Push',
   993: 'Las notificaciones están bloqueadas. Permítelas en la configuración del navegador.',
+  994: 'Llaveros de confianza',
+  995: 'Acceso SSH',
+  996: 'Editar llavero de confianza',
+  997: 'Paquetes',
+  998: 'Sistema operativo',
 } satisfies i18n

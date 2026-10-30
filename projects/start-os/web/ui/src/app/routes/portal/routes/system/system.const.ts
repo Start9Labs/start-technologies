@@ -55,8 +55,13 @@ export const SYSTEM_MENU = [
     },
     {
       icon: '@tui.terminal',
-      item: 'SSH Keys',
+      item: 'SSH Access',
       link: 'ssh',
+    },
+    {
+      icon: '@tui.key-round',
+      item: 'Trusted keyrings',
+      link: 'trusted-keys',
     },
     {
       icon: '@tui.key',

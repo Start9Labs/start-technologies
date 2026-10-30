@@ -310,6 +310,20 @@ export class MockApiService extends ApiService {
       ])
       return null
     },
+    'server.trusted-keys.update': async ({ id, name, marketplace, os }) => {
+      const keyring = mockPatchData.serverInfo.trustedKeys[id]
+      if (!keyring) throw new Error('Keyring not found')
+      const value = { ...keyring, name, marketplace, os }
+      mockPatchData.serverInfo.trustedKeys[id] = value
+      await this.mockRevision([
+        {
+          op: PatchOp.REPLACE,
+          path: pathFromArray(['serverInfo', 'trustedKeys', id]),
+          value,
+        },
+      ])
+      return null
+    },
     'server.trusted-keys.toggle': async ({ id, context, enabled }) => {
       mockPatchData.serverInfo.trustedKeys[id]![context] = enabled
       await this.mockRevision([

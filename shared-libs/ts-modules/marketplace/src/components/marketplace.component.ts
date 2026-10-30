@@ -6,7 +6,6 @@ import {
   inject,
   input,
   model,
-  output,
   signal,
   TemplateRef,
 } from '@angular/core'
@@ -93,16 +92,6 @@ const ICONS: Record<string, string> = {
         <ng-content select="[actions]" />
       </div>
       <footer>
-        @if (footerAction(); as action) {
-          <button
-            tuiAsideItem
-            type="button"
-            [iconStart]="action.icon"
-            (click)="footerActionClick.emit()"
-          >
-            {{ action.label | i18n }}
-          </button>
-        }
         <button
           tuiAsideItem
           type="button"
@@ -287,8 +276,6 @@ export class MarketplaceComponent {
   readonly registry = input<StoreDataWithUrl>()
   readonly query = model('')
   readonly category = model('')
-  public readonly footerAction = input<{ icon: string; label: i18nKey }>()
-  public readonly footerActionClick = output<void>()
 
   protected readonly template = contentChild(TemplateRef)
   protected readonly sort = signal('a')

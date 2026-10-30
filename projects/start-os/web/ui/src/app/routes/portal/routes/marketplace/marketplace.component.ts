@@ -14,7 +14,6 @@ import { tap } from 'rxjs'
 import { ConfigService } from 'src/app/services/config.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { StorageService } from 'src/app/services/storage.service'
-import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
 import { TitleDirective } from 'src/app/services/title.service'
 
 import { MarketplaceControlsComponent } from './components/controls.component'
@@ -23,14 +22,9 @@ import { MarketplaceControlsComponent } from './components/controls.component'
   template: `
     <ng-container *title>{{ 'Marketplace' | i18n }}</ng-container>
     <marketplace
-      [footerAction]="{
-        icon: '@tui.key-round',
-        label: 'Manage trusted keyrings',
-      }"
       [registry]="registry()"
       [(category)]="category"
       [(query)]="query"
-      (footerActionClick)="trust.manage()"
     >
       <marketplace-registry-select />
       <a marketplacePackageLink actions></a>
@@ -101,7 +95,6 @@ export default class Marketplace {
     )
     .subscribe()
 
-  protected readonly trust = inject(TrustedKeysService)
   protected readonly registry = toSignal(
     this.marketplaceService.currentRegistry$,
   )

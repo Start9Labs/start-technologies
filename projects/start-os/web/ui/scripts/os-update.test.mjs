@@ -9,7 +9,7 @@ import {
   runInInjectionContext,
   signal,
 } from '@angular/core'
-import { FormControl } from '@angular/forms'
+import { FormBuilder, NonNullableFormBuilder } from '@angular/forms'
 import { BehaviorSubject, EMPTY, firstValueFrom, of, Subject } from 'rxjs'
 
 const boundaries = new Map()
@@ -24,6 +24,7 @@ boundary(
   [
     'TaskService',
     'DialogService',
+    'DocsLinkDirective',
     'i18nPipe',
     'i18nService',
     'LocalizePipe',
@@ -68,6 +69,7 @@ boundary(
   'export const tuiMarkControlAsTouchedAndValidate = () => {}; export const tuiProvide = () => [];',
 )
 boundary('@taiga-ui/layout', ['TuiHeader', 'TuiForm'])
+boundary('@taiga-ui/addon-table', ['TuiTable'])
 boundary('@taiga-ui/addon-mobile', ['TuiResponsiveDialog'])
 boundary(
   '@taiga-ui/i18n',
@@ -1392,8 +1394,12 @@ test('marketplace dispatch delegates trust enforcement to the server without an 
   ])
 })
 
-const { TrustedKeysDialog } =
-  await import('src/app/components/trusted-keys/dialog')
+const { default: TrustedKeyrings } =
+  await import('src/app/routes/portal/routes/system/routes/trusted-keys')
+const { EditTrustedKeyDialog } =
+  await import('src/app/components/trusted-keys/edit')
+const { AddTrustedKeyDialog } =
+  await import('src/app/components/trusted-keys/form')
 test('built-in keyrings precede custom entries regardless of labels and input order', () => {
   const custom = Object.values(trustedSigners)[0]
   const entries = [
@@ -1417,7 +1423,7 @@ test('built-in keyrings precede custom entries regardless of labels and input or
   for (const input of [entries, [...entries].reverse()]) {
     assert.deepEqual(
       [...input]
-        .sort(TrustedKeysDialog.prototype.compareKeyrings)
+        .sort(TrustedKeyrings.prototype.compareKeyrings)
         .map(x => x.key),
       [
         'start9',
@@ -1429,76 +1435,122 @@ test('built-in keyrings precede custom entries regardless of labels and input or
   }
 })
 
-test('a successful trust toggle leaves the control to the requested value and PatchDB updates', async () => {
-  const control = new FormControl(true)
-  const viewWrites = []
-  control.registerOnChange(value => viewWrites.push(value))
+function keyringDialogFixture(t, component, keyring, reject = false) {
   const mutations = []
-  const instance = {
-    context: { data: 'marketplace' },
-    saving: { set() {} },
-    trust: { keys: () => ({ publisher: { marketplace: false } }) },
-    api: {
-      rpc: {
-        server: {
-          trustedKeys: { toggle: async params => mutations.push(params) },
+  const closed = []
+  const context = {
+    data: { id: 'publisher', keyring },
+    $implicit: { complete: () => closed.push(true) },
+  }
+  const mutate = async params => {
+    mutations.push(params)
+    if (reject) throw new Error('offline')
+  }
+  const injector = createEnvironmentInjector(
+    [
+      {
+        provide: NonNullableFormBuilder,
+        useValue: new FormBuilder().nonNullable,
+      },
+      { provide: CONTEXT, useValue: context },
+      {
+        provide: ApiService,
+        useValue: {
+          rpc: { server: { trustedKeys: { update: mutate, add: mutate } } },
         },
       },
-    },
-    tasks: {
-      run: async work => {
-        await work()
-        return true
-      },
-    },
-  }
-  await TrustedKeysDialog.prototype.toggle.call(instance, 'publisher', true, {
-    control,
-  })
-  assert.deepEqual(mutations, [
-    { id: 'publisher', enabled: true, context: 'marketplace' },
-  ])
-  assert.equal(control.value, true)
-  assert.deepEqual(viewWrites, [])
-})
-
-test('a rejected trust toggle restores the persisted value without emitting another mutation', async () => {
-  const control = new FormControl(true)
-  const viewWrites = []
-  control.registerOnChange((value, emitModelEvent) =>
-    viewWrites.push({ value, emitModelEvent }),
-  )
-  const saving = []
-  const instance = {
-    context: { data: 'marketplace' },
-    saving: { set: value => saving.push(value) },
-    trust: { keys: () => ({ publisher: { marketplace: false } }) },
-    api: {
-      rpc: {
-        server: {
-          trustedKeys: {
-            toggle: async () => {
-              throw new Error('offline')
-            },
+      {
+        provide: TaskService,
+        useValue: {
+          run: async work => {
+            try {
+              await work()
+              return true
+            } catch {
+              return false
+            }
           },
         },
       },
-    },
-    tasks: {
-      run: async work => {
-        try {
-          await work()
-          return true
-        } catch {
-          return false
-        }
-      },
-    },
+    ],
+    null,
+  )
+  t.after(() => injector.destroy())
+  return {
+    instance: runInInjectionContext(injector, () => new component()),
+    mutations,
+    closed,
   }
-  await TrustedKeysDialog.prototype.toggle.call(instance, 'publisher', true, {
-    control,
+}
+
+test('keyring editing disables built-in names without disabling either trust selection', t => {
+  for (const name of ['Start9', 'Start9 Alpha']) {
+    const { instance } = keyringDialogFixture(t, EditTrustedKeyDialog, {
+      name,
+      removable: false,
+      marketplace: true,
+      os: false,
+    })
+    assert.equal(instance.form.controls.name.disabled, true)
+    assert.equal(instance.form.controls.marketplace.enabled, true)
+    assert.equal(instance.form.controls.os.enabled, true)
+  }
+  const { instance } = keyringDialogFixture(t, EditTrustedKeyDialog, {
+    name: 'Publisher',
+    removable: true,
+    marketplace: true,
+    os: false,
   })
-  assert.equal(control.value, false)
-  assert.deepEqual(viewWrites, [{ value: false, emitModelEvent: false }])
-  assert.deepEqual(saving, [true, false])
+  assert.equal(instance.form.controls.name.enabled, true)
+})
+
+test('keyring edit submits name and both trust selections in one operation', async t => {
+  const f = keyringDialogFixture(t, EditTrustedKeyDialog, {
+    name: 'Publisher',
+    removable: true,
+    marketplace: true,
+    os: false,
+  })
+  f.instance.form.setValue({ name: 'Renamed', marketplace: false, os: true })
+  await f.instance.save()
+  assert.deepEqual(f.mutations, [
+    { id: 'publisher', name: 'Renamed', marketplace: false, os: true },
+  ])
+  assert.deepEqual(f.closed, [true])
+  assert.equal(f.instance.saving(), false)
+})
+
+test('failed keyring edits keep their form values and dialog open', async t => {
+  const f = keyringDialogFixture(
+    t,
+    EditTrustedKeyDialog,
+    { name: 'Publisher', removable: true, marketplace: true, os: false },
+    true,
+  )
+  f.instance.form.setValue({ name: 'Renamed', marketplace: false, os: true })
+  await f.instance.save()
+  assert.deepEqual(f.instance.form.getRawValue(), {
+    name: 'Renamed',
+    marketplace: false,
+    os: true,
+  })
+  assert.deepEqual(f.closed, [])
+  assert.equal(f.instance.saving(), false)
+})
+
+test('new System keyrings default to package trust only', async t => {
+  const f = keyringDialogFixture(t, AddTrustedKeyDialog)
+  f.instance.form.setValue({
+    name: 'Publisher',
+    publicKeys: OS_UPDATE_SIGNERS[0],
+  })
+  await f.instance.save()
+  assert.deepEqual(f.mutations, [
+    {
+      name: 'Publisher',
+      publicKeys: [OS_UPDATE_SIGNERS[0]],
+      context: 'marketplace',
+    },
+  ])
+  assert.deepEqual(f.closed, [true])
 })

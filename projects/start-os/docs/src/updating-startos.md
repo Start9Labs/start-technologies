@@ -27,7 +27,7 @@ A browser page left open during the update shows **Refresh Needed** while its us
 
 ## Trusted Update Signers
 
-Open **Manage trusted keyrings** from the **Software Update** card's overflow menu to choose which publishers can sign OS updates. These keyrings are shared with the Marketplace, but the OS-update switches are independent. See [Trusted Keyrings](trusted-keys.md) for defaults, adding keys, migration behavior, and CLI management.
+Open **System → Trusted keyrings** and choose **Edit** from a row's overflow menu to select publishers for OS updates. Package and OS-update trust switches are independent. See [Trusted Keyrings](trusted-keys.md) for defaults, adding keys, migration behavior, and CLI management.
 
 CLI OS updates enforce the saved OS-update trust policy unless explicitly overridden with `--trust`. Signature and integrity verification remain mandatory.
 

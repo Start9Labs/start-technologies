@@ -10951,6 +10951,36 @@
     }
   },
   {
+    "name": "server.trusted-keys.update",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "UpdateTrustedKeyParams": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string" },
+            "marketplace": { "type": "boolean" },
+            "os": { "type": "boolean" }
+          },
+          "required": ["id", "name", "marketplace", "os"],
+          "additionalProperties": true,
+          "description": "Changes a keyring's name and both trust selections atomically."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "marketplace": { "type": "boolean" },
+        "os": { "type": "boolean" }
+      },
+      "required": ["id", "name", "marketplace", "os"],
+      "additionalProperties": true,
+      "description": "Changes a keyring's name and both trust selections atomically."
+    }
+  },
+  {
     "name": "server.update",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

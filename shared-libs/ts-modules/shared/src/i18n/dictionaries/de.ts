@@ -875,4 +875,9 @@ export default {
   991: 'Benachrichtigungseinstellungen',
   992: 'Push',
   993: 'Benachrichtigungen sind blockiert. Erlauben Sie sie in den Browsereinstellungen.',
+  994: 'Vertrauenswürdige Schlüsselbunde',
+  995: 'SSH-Zugriff',
+  996: 'Vertrauenswürdigen Schlüsselbund bearbeiten',
+  997: 'Pakete',
+  998: 'Betriebssystem',
 } satisfies i18n

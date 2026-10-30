@@ -1318,6 +1318,24 @@ export const UiParams: z.ZodObject<{
 })
 
 /**
+ * Changes a keyring's name and both trust selections atomically.
+ */
+export const UpdateTrustedKeyParams: z.ZodObject<{
+  id: z.ZodString
+  name: z.ZodString
+  marketplace: z.ZodBoolean
+  os: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  id: z.string(),
+  name: z.string(),
+  marketplace: z.boolean(),
+  os: z.boolean(),
+}).meta({
+  id: 'UpdateTrustedKeyParams',
+  description: "Changes a keyring's name and both trust selections atomically.",
+})
+
+/**
  * How the OS reverse proxy validates the container's TLS certificate when it
  * rewraps SSL (`add_ssl` set AND `secure.ssl == true`, so the OS terminates
  * the client's TLS and initiates a fresh TLS connection to the container).
@@ -6380,6 +6398,10 @@ export const Api = {
             },
             toggle: {
               _PARAMS: /* @__PURE__ */ ToggleTrustedKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            update: {
+              _PARAMS: /* @__PURE__ */ UpdateTrustedKeyParams,
               _RETURN: /* @__PURE__ */ z.null(),
             },
           },

@@ -875,4 +875,9 @@ export default {
   991: 'Ustawienia powiadomień',
   992: 'Push',
   993: 'Powiadomienia są zablokowane. Zezwól na nie w ustawieniach przeglądarki.',
+  994: 'Zaufane pęki kluczy',
+  995: 'Dostęp SSH',
+  996: 'Edytuj zaufany pęk kluczy',
+  997: 'Pakiety',
+  998: 'System operacyjny',
 } satisfies i18n

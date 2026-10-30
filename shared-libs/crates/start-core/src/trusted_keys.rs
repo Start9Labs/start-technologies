@@ -203,6 +203,12 @@ pub fn api<C: Context>() -> ParentHandler<C> {
                 .no_cli(),
         )
         .subcommand(
+            "update",
+            from_fn_async(update)
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_cli(),
+        )
+        .subcommand(
             "toggle",
             from_fn_async(toggle)
                 .with_metadata("sync_db", Value::Bool(true))
@@ -227,6 +233,18 @@ pub struct AddTrustedKeyParams {
 }
 
 rpc_toolkit::reflect_ts!(AddTrustedKeyParams);
+
+/// Changes a keyring's name and both trust selections atomically.
+#[derive(Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTrustedKeyParams {
+    pub id: InternedString,
+    pub name: String,
+    pub marketplace: bool,
+    pub os: bool,
+}
+
+rpc_toolkit::reflect_ts!(UpdateTrustedKeyParams);
 
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -294,6 +312,15 @@ pub fn add_group(
     Ok(())
 }
 
+fn update_group(keys: &mut TrustedKeys, params: UpdateTrustedKeyParams) -> Result<(), Error> {
+    let name = group_name(params.name)?;
+    let group = keys.get_mut(&params.id).ok_or_else(not_found)?;
+    group.name = name;
+    group.marketplace = params.marketplace;
+    group.os = params.os;
+    Ok(())
+}
+
 fn toggle_group(keys: &mut TrustedKeys, params: ToggleTrustedKeyParams) -> Result<(), Error> {
     let group = keys.get_mut(&params.id).ok_or_else(not_found)?;
     match params.context {
@@ -324,6 +351,18 @@ async fn add(ctx: RpcContext, params: AddTrustedKeyParams) -> Result<(), Error> 
                 .mutate(|keys| {
                     add_group(keys, new_guid(), params.name, public_keys, params.context)
                 })
+        })
+        .await
+        .result
+}
+
+async fn update(ctx: RpcContext, params: UpdateTrustedKeyParams) -> Result<(), Error> {
+    ctx.db
+        .mutate(|db| {
+            db.as_public_mut()
+                .as_server_info_mut()
+                .as_trusted_keys_mut()
+                .mutate(|keys| update_group(keys, params))
         })
         .await
         .result
@@ -432,6 +471,82 @@ mod tests {
         for context in [TrustContext::Os, TrustContext::Marketplace] {
             let policy = signer_policy(required_keys(&keys, context, false)).unwrap();
             assert!(policy.try_accept().is_err());
+        }
+    }
+
+    #[test]
+    fn editing_changes_name_and_both_contexts_without_changing_key_material() {
+        let mut keys = initial_trusted_keys();
+        let saved = keys[START9].clone();
+        update_group(
+            &mut keys,
+            UpdateTrustedKeyParams {
+                id: START9.into(),
+                name: saved.name.clone(),
+                marketplace: false,
+                os: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            keys[START9],
+            TrustedKeyring {
+                marketplace: false,
+                os: true,
+                ..saved
+            }
+        );
+
+        let public_key = keys[START9].public_keys.iter().next().unwrap().clone();
+        add_group(
+            &mut keys,
+            "custom".into(),
+            "Publisher".into(),
+            vec![public_key],
+            TrustContext::Marketplace,
+        )
+        .unwrap();
+        let saved = keys["custom"].clone();
+        assert!(saved.marketplace && !saved.os);
+        update_group(
+            &mut keys,
+            UpdateTrustedKeyParams {
+                id: "custom".into(),
+                name: "  Renamed  ".into(),
+                marketplace: false,
+                os: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            keys["custom"],
+            TrustedKeyring {
+                name: "Renamed".into(),
+                marketplace: false,
+                os: true,
+                ..saved
+            }
+        );
+    }
+
+    #[test]
+    fn rejected_edits_leave_both_trust_selections_and_name_unchanged() {
+        let mut keys = initial_trusted_keys();
+        let saved = keys.clone();
+        for (id, name) in [(START9, "  "), ("missing", "Publisher")] {
+            assert!(
+                update_group(
+                    &mut keys,
+                    UpdateTrustedKeyParams {
+                        id: id.into(),
+                        name: name.into(),
+                        marketplace: false,
+                        os: false
+                    }
+                )
+                .is_err()
+            );
+            assert_eq!(keys, saved);
         }
     }
 

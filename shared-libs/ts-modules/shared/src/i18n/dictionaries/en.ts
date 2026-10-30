@@ -876,4 +876,9 @@ export const ENGLISH: Record<string, number> = {
   'Notification settings': 991,
   'Push': 992,
   'Notifications are blocked. Allow them in your browser settings.': 993,
+  'Trusted keyrings': 994,
+  'SSH Access': 995,
+  'Edit trusted keyring': 996,
+  'Packages': 997,
+  'OS': 998,
 }
