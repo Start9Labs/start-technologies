@@ -43,6 +43,10 @@ Back up your server's data to a physical drive or a network folder.
 
 Existing backups remain usable for backups and restores with their original filesystem encryption/checksum format until explicitly converted. Normal mounts do not start conversion. The folder remains `StartOSBackupsV2`; this is separate from the older `StartOSBackups` folder cleanup described above.
 
+In **System → Create Backup** or **Restore Backup**, select the amber **Old format** control beside a target. Select the server backup to convert, review the downtime and compatibility warning, and enter that backup's master password. A target can contain backups from several servers; conversion applies only to the selected server backup. On narrow screens, the amber shield icon opens the same controls.
+
+Conversion runs in the background. Reopen the target's conversion control to view phase progress and byte/object counts; no overall duration estimate is provided. After a failure, choose **Retry conversion**. After a server restart or an interrupted attempt, **Resume conversion** revalidates the password and continues from durable migration state. Closing the dialog does not cancel the operation. This control is separate from **Delete old backup**, which removes the pre-V2 backup folder.
+
 Conversion upgrades encryption authentication and current-version references by rewriting encrypted data. It stages and retires content objects in batches rather than keeping a second complete copy; free space is still needed for replacement objects or segments and new index/snapshot metadata. On a large or remote backup, this can take substantially longer than an ordinary incremental backup. Conversion requires exclusive offline access. Leave the target connected until it finishes; after interruption, explicitly resume conversion before using that store again.
 
 An unreadable encrypted object or log frame does not block the upgrade of healthy data. Damaged data stays unreadable; filesystem I/O failures leave the upgrade resumable.
