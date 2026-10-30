@@ -113,6 +113,8 @@ Servers only. Let this server manage the tunnel's DNS records, and publish its o
 
 The WireGuard configuration for this device — use it to connect the device to the tunnel. Opens automatically after adding a device, and any time via **View Config**.
 
+**WireGuard endpoint** starts with the host in your browser’s URL. Edit it to an IP address or DNS name reachable by the device, then select **Generate config**. The configured WireGuard port is retained. If the web UI uses an HTTPS reverse proxy that does not forward WireGuard UDP, use the tunnel host’s reachable address instead. This changes the generated config only, not forwarding or SNAT.
+
 ### File
 
 The configuration as text. **Copy** it to the clipboard, or **Download** it as a <code>start-tunnel.conf</code> file to import into a WireGuard client.
