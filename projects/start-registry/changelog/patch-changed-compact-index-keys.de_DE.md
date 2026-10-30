@@ -1,1 +1,0 @@
-- Der Index verwendet kompakte Kodierungen für Schlüssel und Signaturen; ältere Clients erhalten weiterhin PEM-kompatible Antworten.
