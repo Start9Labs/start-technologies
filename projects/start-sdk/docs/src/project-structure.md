@@ -348,7 +348,7 @@ It has two sections:
 - **Determining the upstream version** — for each upstream this package pulls, the canonical place to find the latest version (e.g. `gh release view -R <org>/<repo> --json tagName -q .tagName`, a Docker Hub tags listing, etc.) and the manifest field where the current pin lives (typically `images.<name>.source.dockerTag` in `startos/manifest/index.ts`).
 - **Applying the bump** — the exact file and field to edit, including any tag-format quirks (e.g. drop the leading `v`, append `-alpine`, keep the major version aligned with a sibling image).
 
-Packages with multiple upstream sources (e.g. a service plus its database sidecar) get one subsection per source under each heading. The cross-cutting rule about renaming the file in `startos/versions/` versus creating a new one lives in [Versions](./versions.md).
+Packages with multiple upstream sources (e.g. a service plus its database sidecar) get one subsection per source under each heading. Bumping the package version itself — editing `current.ts` or spinning off a version file, migrations, release notes — lives in [Versions](./versions.md) and is not restated here.
 
 ## assets/
 
