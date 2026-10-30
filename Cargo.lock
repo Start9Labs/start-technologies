@@ -660,6 +660,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "backup-fs-protocol"
+version = "0.1.0"
+dependencies = [
+ "rpc-toolkit",
+ "serde",
+ "visit-rs",
+]
+
+[[package]]
 name = "base16ct"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4220,17 +4229,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6928282826c822ad91bf1c9a1cb90a30ba1c26770749929b4656cd6be829cd7c"
 dependencies = [
  "rustversion",
-]
-
-[[package]]
-name = "io-uring"
-version = "0.7.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed3bd0ecfbb87805f538bb7b32e5239ca0763890c623e349860ecba69469f2bb"
-dependencies = [
- "bitflags 2.13.2",
- "cfg-if",
- "libc",
 ]
 
 [[package]]
@@ -8355,6 +8353,7 @@ dependencies = [
  "async-trait",
  "axum",
  "backtrace-on-stack-overflow",
+ "backup-fs-protocol",
  "base32",
  "base64 0.22.1",
  "base64ct",
@@ -8494,6 +8493,7 @@ dependencies = [
  "xmltree",
  "yaml_serde",
  "zbus",
+ "zeroize",
  "zstd 0.13.3",
 ]
 
@@ -8524,6 +8524,7 @@ dependencies = [
 name = "startos-backup-fs"
 version = "1.0.0"
 dependencies = [
+ "backup-fs-protocol",
  "bincode 2.0.1",
  "chacha20",
  "clap",
@@ -8536,7 +8537,6 @@ dependencies = [
  "fuser",
  "generic-array 1.4.5",
  "imbl",
- "io-uring",
  "itertools 0.13.0",
  "libc",
  "log",
@@ -8547,6 +8547,7 @@ dependencies = [
  "rand 0.10.3",
  "reed-solomon-erasure",
  "serde",
+ "serde_json",
  "sha2 0.11.1",
  "smallvec",
  "tempfile",

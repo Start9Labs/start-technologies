@@ -121,6 +121,11 @@ mod test {
         for exposed in [
             "auth.session.list",
             "auth.session.kill",
+            "notification.push.key",
+            "notification.push.list",
+            "notification.push.subscribe",
+            "notification.push.test",
+            "notification.push.unsubscribe",
             "package.exec",
             "package.list",
             "package.logs",

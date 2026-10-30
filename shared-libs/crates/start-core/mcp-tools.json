@@ -466,13 +466,19 @@
           "properties": {
             "hostname": { "$ref": "#/$defs/ServerHostname" },
             "version": { "type": "string" },
-            "timestamp": { "type": "string" }
+            "timestamp": { "type": "string" },
+            "formatStatus": { "$ref": "#/$defs/FormatStatus" }
           },
-          "required": ["hostname", "version", "timestamp"],
+          "required": ["hostname", "version", "timestamp", "formatStatus"],
           "additionalProperties": true,
           "description": "The public view of a backup found on a target: enough to identify it, and none of\n[`BackupUnencryptedMetadata`]'s key material."
         },
         "ServerHostname": { "type": "string" },
+        "FormatStatus": {
+          "type": "string",
+          "enum": ["legacy", "current", "interrupted", "unknown"],
+          "description": "Unauthenticated discovery hints; opening the store validates its actual state."
+        },
         "CifsBackupTarget": {
           "type": "object",
           "properties": {
@@ -664,13 +670,19 @@
           "properties": {
             "hostname": { "$ref": "#/$defs/ServerHostname" },
             "version": { "type": "string" },
-            "timestamp": { "type": "string" }
+            "timestamp": { "type": "string" },
+            "formatStatus": { "$ref": "#/$defs/FormatStatus" }
           },
-          "required": ["hostname", "version", "timestamp"],
+          "required": ["hostname", "version", "timestamp", "formatStatus"],
           "additionalProperties": true,
           "description": "The public view of a backup found on a target: enough to identify it, and none of\n[`BackupUnencryptedMetadata`]'s key material."
         },
         "ServerHostname": { "type": "string" },
+        "FormatStatus": {
+          "type": "string",
+          "enum": ["legacy", "current", "interrupted", "unknown"],
+          "description": "Unauthenticated discovery hints; opening the store validates its actual state."
+        },
         "CifsBackupTarget": {
           "type": "object",
           "properties": {
@@ -707,6 +719,44 @@
           "additionalProperties": true
         }
       }
+    }
+  },
+  {
+    "name": "backup.target.convert",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "ConvertParams": {
+          "type": "object",
+          "properties": {
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "serverId": { "type": "string" },
+            "password": { "$ref": "#/$defs/PasswordType" }
+          },
+          "required": ["targetId", "serverId", "password"],
+          "additionalProperties": true,
+          "description": "Selects an existing server backup and its unlocking credential."
+        },
+        "BackupTargetId": { "type": "string" },
+        "PasswordType": {
+          "anyOf": [{ "$ref": "#/$defs/EncryptedWire" }, { "type": "string" }]
+        },
+        "EncryptedWire": {
+          "type": "object",
+          "properties": { "encrypted": {} },
+          "required": ["encrypted"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "serverId": { "type": "string" },
+        "password": { "$ref": "#/$defs/PasswordType" }
+      },
+      "required": ["targetId", "serverId", "password"],
+      "additionalProperties": true,
+      "description": "Selects an existing server backup and its unlocking credential."
     }
   },
   {
@@ -929,13 +979,19 @@
           "properties": {
             "hostname": { "$ref": "#/$defs/ServerHostname" },
             "version": { "type": "string" },
-            "timestamp": { "type": "string" }
+            "timestamp": { "type": "string" },
+            "formatStatus": { "$ref": "#/$defs/FormatStatus" }
           },
-          "required": ["hostname", "version", "timestamp"],
+          "required": ["hostname", "version", "timestamp", "formatStatus"],
           "additionalProperties": true,
           "description": "The public view of a backup found on a target: enough to identify it, and none of\n[`BackupUnencryptedMetadata`]'s key material."
         },
         "ServerHostname": { "type": "string" },
+        "FormatStatus": {
+          "type": "string",
+          "enum": ["legacy", "current", "interrupted", "unknown"],
+          "description": "Unauthenticated discovery hints; opening the store validates its actual state."
+        },
         "CifsBackupTarget": {
           "type": "object",
           "properties": {

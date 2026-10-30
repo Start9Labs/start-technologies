@@ -82,6 +82,11 @@ export type CifsInput = z.input<typeof schemas.Cifs>
 export type DataDriveInput = z.input<typeof schemas.DataDrive>
 export type DnsSource = z.output<typeof schemas.DnsSource>
 export type EncryptedWireInput = z.input<typeof schemas.EncryptedWire>
+
+/**
+ * Unauthenticated discovery hints; opening the store validates its actual state.
+ */
+export type FormatStatus = z.output<typeof schemas.FormatStatus>
 export type GatewayId = z.output<typeof schemas.GatewayId>
 export type GatewayType = z.output<typeof schemas.GatewayType>
 export type Guid = z.output<typeof schemas.Guid>

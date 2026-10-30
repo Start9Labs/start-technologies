@@ -126,6 +126,7 @@ impl Public {
                 },
                 status_info: ServerStatus {
                     backup_progress: None,
+                    backup_conversions: Default::default(),
                     update_progress: None,
                     shutting_down: false,
                     restarting: false,
@@ -483,6 +484,8 @@ rpc_toolkit::ts_export!(DomainSettings, namespaces = [""]);
 #[model = "Model<Self>"]
 pub struct ServerStatus {
     pub backup_progress: Option<FullProgress>,
+    #[serde(default)]
+    pub backup_conversions: crate::backup::target::conversion::ConversionJobs,
     pub update_progress: Option<FullProgress>,
     #[serde(default)]
     pub shutting_down: bool,

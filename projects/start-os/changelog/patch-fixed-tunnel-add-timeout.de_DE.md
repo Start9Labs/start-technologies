@@ -1,0 +1,1 @@
+- Das Hinzufügen eines Tunnels meldet nach 30 Sekunden einen Fehler, wenn seine Netzwerkschnittstelle nicht verfügbar wird, statt unbegrenzt zu warten.

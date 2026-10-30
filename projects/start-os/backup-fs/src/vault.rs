@@ -1,43 +1,16 @@
-//! Self-contained encrypted, integrity-checked, error-corrected blobs.
+//! Versioned ChaCha20 / HMAC-SHA256 Encrypt-then-MAC blobs with Reed-Solomon recovery.
 //!
-//! Every persistent object in the filesystem — inode metadata, the inode
-//! pool, content blocks, and the crypt header itself — is stored as a
-//! *sealed* blob produced by [`seal`] and read back by [`open`]. A sealed
-//! blob is the unit of durability and of corruption recovery.
-//!
-//! Layout (all integers little-endian):
-//!
-//! ```text
-//!   magic        "BKV1"   (4 bytes)
-//!   version      u8       (= 1)
-//!   data_shards  u8
-//!   parity_shards u8
-//!   _reserved    u8
-//!   payload_len  u32      ciphertext length (plaintext + 32-byte tag)
-//!   shard_len    u32
-//!   nonce        [u8; 12] ChaCha20 nonce
-//!   shards       (data+parity) repetitions of:
-//!                  crc32  u32      CRC of the shard bytes
-//!                  bytes  [u8; shard_len]
-//! ```
-//!
-//! **Pipeline.** `plaintext` is concatenated with its own SHA-256 tag, the
-//! pair is encrypted with ChaCha20 under a per-blob random nonce, and the
-//! resulting ciphertext is split into Reed-Solomon shards (see
-//! [`crate::ecc`]). ECC is computed over the *ciphertext* so corruption on
-//! the medium can be repaired before decryption.
-//!
-//! **Recovery.** On open, every shard's CRC is checked; failing shards are
-//! treated as erasures and reconstructed by Reed-Solomon as long as no more
-//! than `parity_shards` are bad. The decrypted plaintext is then verified
-//! against its SHA-256 tag — this both detects residual corruption and
-//! rejects a wrong key/password (surfaced as [`BkfsErrorKind::BadChecksum`]).
+//! The 28-byte header contains `BKV1`, version, data/parity counts, a reserved
+//! byte, payload and shard lengths (u32 LE), and a 12-byte random nonce.
+//! HMAC authenticates the entire header and ciphertext; ECC protects ciphertext
+//! and the 32-byte tag together. Independent encryption and MAC subkeys are
+//! derived from the master key by HMAC-SHA256 with distinct fixed labels.
 
 use std::backtrace::Backtrace;
 
 use chacha20::cipher::{KeyIvInit, StreamCipher};
 use chacha20::{ChaCha20, Key, Nonce};
-use pbkdf2::hmac::Hmac;
+use pbkdf2::hmac::{Hmac, Mac};
 use pbkdf2::pbkdf2;
 use rand::rand_core::UnwrapErr;
 use rand::{rng, Rng};
@@ -47,16 +20,46 @@ use zeroize::Zeroizing;
 use crate::ecc;
 use crate::error::{BkfsError, BkfsErrorKind, BkfsResult};
 
-// The vault blob framing ("BKV1" + self-describing ECC params) is frozen and
-// self-contained — it is NOT recorded in the superblock because every blob
-// header carries its own version/ecc/lengths and reads never depend on
-// external state. The bincode encoding of a blob's *plaintext* (for the data
-// structures) is governed by the superblock's `bincode_encoding` constant.
+/// Variant order is part of the on-disk key derivation.
+#[derive(Clone, Copy, serde::Serialize)]
+pub(crate) enum Binding {
+    Superblock,
+    Record,
+    State,
+    Transaction,
+    Catalog,
+    Legacy,
+}
+
+pub(crate) type AuthenticationTag = [u8; 32];
+
+pub(crate) struct Sealed {
+    pub bytes: Vec<u8>,
+    pub tag: AuthenticationTag,
+}
+
+pub(crate) struct Authenticated {
+    pub plaintext: Vec<u8>,
+    pub tag: AuthenticationTag,
+}
+
+impl Authenticated {
+    /// Requires a tag from an authenticated parent reference.
+    pub fn verify_reference(self, expected: &AuthenticationTag) -> BkfsResult<Vec<u8>> {
+        if &self.tag != expected {
+            return Err(corrupt());
+        }
+        Ok(self.plaintext)
+    }
+}
+
 const MAGIC: [u8; 4] = *b"BKV1";
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
+const ENCRYPTION_LABEL: &[u8] = b"backup-fs/vault/v2/encryption";
+const AUTHENTICATION_LABEL: &[u8] = b"backup-fs/vault/v2/authentication";
 const HEADER_LEN: usize = 4 + 1 + 1 + 1 + 1 + 4 + 4 + 12; // = 28
 const NONCE_LEN: usize = 12;
-const TAG_LEN: usize = 32; // SHA-256
+const TAG_LEN: usize = std::mem::size_of::<AuthenticationTag>();
 pub const PBKDF2_SALT_LEN: usize = 16;
 /// The PBKDF2 work factor this build writes and accepts. Recorded in the
 /// superblock envelope for forward-compat/diagnostics, but validated for
@@ -133,11 +136,6 @@ impl EccParams {
     }
 }
 
-// Both report `BadChecksum`, differing only in backtrace capture:
-//   bad_checksum() — the genuine post-decrypt SHA-256 tag mismatch; usually a
-//     wrong key/password, so capture a backtrace for diagnosis.
-//   corrupt()      — cheap, attacker-reachable rejections of a malformed
-//     header/blob (untrusted backing store); skip the backtrace.
 fn bad_checksum() -> BkfsError {
     BkfsError {
         kind: BkfsErrorKind::BadChecksum,
@@ -152,44 +150,80 @@ fn corrupt() -> BkfsError {
     }
 }
 
-/// Encrypt + integrity-tag + erasure-code `plaintext` into a self-contained
-/// blob using the given symmetric key and ECC parameters. `ecc` must have been
-/// validated (it can only be constructed through validated paths), so the
-/// internal `ecc::encode` cannot fail on out-of-range params.
+#[cfg(test)]
 pub fn seal(plaintext: &[u8], key: &Key, ecc: EccParams) -> Vec<u8> {
-    seal_with(plaintext, key, ecc.data as usize, ecc.parity as usize)
+    seal_with(plaintext, key, ecc.data as usize, ecc.parity as usize).bytes
 }
 
-fn seal_with(plaintext: &[u8], key: &Key, data: usize, parity: usize) -> Vec<u8> {
-    // secret = plaintext || SHA-256(plaintext)
-    let mut secret = Vec::with_capacity(plaintext.len() + TAG_LEN);
-    secret.extend_from_slice(plaintext);
-    secret.extend_from_slice(&Sha256::digest(plaintext));
+fn binding_key(key: &Key, binding: Binding) -> Zeroizing<[u8; 32]> {
+    let context = crate::serde::encode(&binding, crate::serde::data_config())
+        .expect("fixed-size vault binding");
+    subkey(
+        key,
+        &[b"backup-fs/v2/binding/".as_slice(), &context].concat(),
+    )
+}
 
-    // Encrypt in place under a fresh random nonce.
+pub(crate) fn seal_bound(plaintext: &[u8], key: &Key, ecc: EccParams, binding: Binding) -> Sealed {
+    if matches!(binding, Binding::Legacy) {
+        return Sealed {
+            bytes: seal_legacy(plaintext, key, ecc),
+            tag: Sha256::digest(plaintext).into(),
+        };
+    }
+    let key = binding_key(key, binding);
+    seal_with(
+        plaintext,
+        <&Key>::from(&*key),
+        ecc.data as usize,
+        ecc.parity as usize,
+    )
+}
+
+pub(crate) fn open_bound(blob: &[u8], key: &Key, binding: Binding) -> BkfsResult<Authenticated> {
+    if matches!(binding, Binding::Legacy) {
+        return open_version(blob, key, 1);
+    }
+    let key = binding_key(key, binding);
+    open_version(blob, <&Key>::from(&*key), VERSION)
+}
+
+fn subkey(key: &Key, label: &[u8]) -> Zeroizing<[u8; 32]> {
+    let mut mac = <Hmac<Sha256> as pbkdf2::hmac::KeyInit>::new_from_slice(key.as_slice()).unwrap();
+    mac.update(label);
+    Zeroizing::new(mac.finalize().into_bytes().into())
+}
+
+fn seal_with(plaintext: &[u8], key: &Key, data: usize, parity: usize) -> Sealed {
+    let enc = subkey(key, ENCRYPTION_LABEL);
+    let auth = subkey(key, AUTHENTICATION_LABEL);
     let mut nonce = [0u8; NONCE_LEN];
     UnwrapErr(rng()).fill_bytes(&mut nonce);
-    let mut cipher = ChaCha20::new(key, &Nonce::try_from(&nonce[..]).unwrap());
-    cipher.apply_keystream(&mut secret);
-    let payload_len = secret.len();
-
-    let shards = ecc::encode(&secret, data, parity).expect("validated ecc params");
-    let shard_len = shards.first().map_or(0, Vec::len);
-
-    let mut out = Vec::with_capacity(HEADER_LEN + shards.len() * (4 + shard_len));
+    let payload_len = plaintext.len() + TAG_LEN;
+    let shard_len = ecc::shard_len(payload_len, data);
+    let mut out = Vec::new();
     out.extend_from_slice(&MAGIC);
     out.push(VERSION);
     out.push(data as u8);
     out.push(parity as u8);
-    out.push(0); // reserved
+    out.push(0);
     out.extend_from_slice(&(payload_len as u32).to_le_bytes());
     out.extend_from_slice(&(shard_len as u32).to_le_bytes());
     out.extend_from_slice(&nonce);
+
+    let mut payload = plaintext.to_vec();
+    ChaCha20::new(<&Key>::from(&*enc), &Nonce::from(nonce)).apply_keystream(&mut payload);
+    let mut mac = <Hmac<Sha256> as pbkdf2::hmac::KeyInit>::new_from_slice(&*auth).unwrap();
+    mac.update(&out);
+    mac.update(&payload);
+    let tag: [u8; 32] = mac.finalize().into_bytes().into();
+    payload.extend_from_slice(&tag);
+    let shards = ecc::encode(&payload, data, parity).expect("validated ecc params");
     for shard in &shards {
         out.extend_from_slice(&crc32fast::hash(shard).to_le_bytes());
         out.extend_from_slice(shard);
     }
-    out
+    Sealed { bytes: out, tag }
 }
 
 fn read_u32(b: &[u8]) -> u32 {
@@ -199,35 +233,37 @@ fn read_u32(b: &[u8]) -> u32 {
 /// Decode, error-correct, decrypt, and integrity-verify a blob produced by
 /// [`seal`]. Returns `BadChecksum` if the key is wrong or the data is
 /// corrupt beyond what ECC can repair.
+#[cfg(test)]
 pub fn open(blob: &[u8], key: &Key) -> BkfsResult<Vec<u8>> {
-    if blob.len() < HEADER_LEN || blob[..4] != MAGIC || blob[4] != VERSION {
+    open_version(blob, key, VERSION).map(|opened| opened.plaintext)
+}
+
+/// Reads the pre-authentication filesystem format.
+pub(crate) fn open_legacy(blob: &[u8], key: &Key) -> BkfsResult<Vec<u8>> {
+    open_version(blob, key, 1).map(|opened| opened.plaintext)
+}
+
+pub(crate) fn is_legacy(blob: &[u8]) -> bool {
+    blob.len() >= HEADER_LEN && blob[..4] == MAGIC && blob[4] == 1
+}
+
+fn open_version(blob: &[u8], key: &Key, version: u8) -> BkfsResult<Authenticated> {
+    if blob.len() < HEADER_LEN || blob[..4] != MAGIC || blob[4] != version {
         return Err(corrupt());
     }
     let data = blob[5] as usize;
     let parity = blob[6] as usize;
     let payload_len = read_u32(&blob[8..12]) as usize;
     let shard_len = read_u32(&blob[12..16]) as usize;
-    let nonce = &blob[16..28];
     let total = data + parity;
-    if data == 0 || parity == 0 || total > ecc::MAX_SHARDS {
+    if data == 0 || parity == 0 || total > ecc::MAX_SHARDS || payload_len < TAG_LEN {
         return Err(corrupt());
     }
-    // Bound the claimed payload length BEFORE it reaches `ecc::decode`, which
-    // does `Vec::with_capacity(payload_len)`. `payload_len` comes from the
-    // unauthenticated header (the SHA-256 tag is only verified *after* decode),
-    // so on an untrusted backing store a forged-but-header-coherent blob could
-    // otherwise reserve up to ~4 GiB and OOM the host on the very first sealed
-    // read (including the superblock at mount). A legitimate payload is the
-    // concatenation of `data` equal shards and is physically contained in the
-    // blob, so both bounds below hold for any real blob and neither can
-    // false-reject.
+    // Bound allocations before authenticating the untrusted header.
     if payload_len > data.saturating_mul(shard_len) || payload_len > blob.len() {
         return Err(corrupt());
     }
-
-    // Collect shards, treating any whose CRC fails (or which is truncated
-    // off the end of the blob) as an erasure.
-    let mut shards: Vec<Option<Vec<u8>>> = Vec::with_capacity(total);
+    let mut shards = Vec::with_capacity(total);
     let mut cursor = HEADER_LEN;
     let stride = 4 + shard_len;
     for _ in 0..total {
@@ -237,29 +273,33 @@ pub fn open(blob: &[u8], key: &Key) -> BkfsResult<Vec<u8>> {
         }
         let crc = read_u32(&blob[cursor..cursor + 4]);
         let bytes = &blob[cursor + 4..cursor + stride];
-        if crc32fast::hash(bytes) == crc {
-            shards.push(Some(bytes.to_vec()));
-        } else {
-            shards.push(None);
-        }
+        shards.push((crc32fast::hash(bytes) == crc).then(|| bytes.to_vec()));
         cursor += stride;
     }
-
-    let mut secret = ecc::decode(shards, data, parity, payload_len).map_err(|_| corrupt())?;
-    if secret.len() < TAG_LEN {
-        return Err(corrupt());
+    let mut payload = ecc::decode(shards, data, parity, payload_len).map_err(|_| corrupt())?;
+    let tag_start = payload.len() - TAG_LEN;
+    let nonce = Nonce::try_from(&blob[16..28]).unwrap();
+    if version == 1 {
+        ChaCha20::new(key, &nonce).apply_keystream(&mut payload);
+        if Sha256::digest(&payload[..tag_start]).as_slice() != &payload[tag_start..] {
+            return Err(bad_checksum());
+        }
+    } else {
+        let auth = subkey(key, AUTHENTICATION_LABEL);
+        let mut mac = <Hmac<Sha256> as pbkdf2::hmac::KeyInit>::new_from_slice(&*auth).unwrap();
+        mac.update(&blob[..HEADER_LEN]);
+        mac.update(&payload[..tag_start]);
+        mac.verify_slice(&payload[tag_start..])
+            .map_err(|_| bad_checksum())?;
+        let enc = subkey(key, ENCRYPTION_LABEL);
+        ChaCha20::new(<&Key>::from(&*enc), &nonce).apply_keystream(&mut payload[..tag_start]);
     }
-
-    let mut cipher = ChaCha20::new(key, &Nonce::try_from(nonce).unwrap());
-    cipher.apply_keystream(&mut secret);
-
-    let tag_start = secret.len() - TAG_LEN;
-    let expected = Sha256::digest(&secret[..tag_start]);
-    if expected.as_slice() != &secret[tag_start..] {
-        return Err(bad_checksum());
-    }
-    secret.truncate(tag_start);
-    Ok(secret)
+    let tag = payload[tag_start..].try_into().unwrap();
+    payload.truncate(tag_start);
+    Ok(Authenticated {
+        plaintext: payload,
+        tag,
+    })
 }
 
 /// Derive a 32-byte key from `password` and `salt` via PBKDF2-HMAC-SHA256 with
@@ -281,12 +321,79 @@ pub(crate) fn derive_key(
     Ok(key)
 }
 
+pub(crate) fn seal_legacy(plaintext: &[u8], key: &Key, ecc: EccParams) -> Vec<u8> {
+    let data = ecc.data as usize;
+    let parity = ecc.parity as usize;
+    let mut secret = Vec::with_capacity(plaintext.len() + TAG_LEN);
+    secret.extend_from_slice(plaintext);
+    secret.extend_from_slice(&Sha256::digest(plaintext));
+
+    let mut nonce = [0u8; NONCE_LEN];
+    UnwrapErr(rng()).fill_bytes(&mut nonce);
+    let mut cipher = ChaCha20::new(key, &Nonce::try_from(&nonce[..]).unwrap());
+    cipher.apply_keystream(&mut secret);
+    let payload_len = secret.len();
+
+    let shards = ecc::encode(&secret, data, parity).expect("validated ecc params");
+    let shard_len = shards.first().map_or(0, Vec::len);
+
+    let mut out = Vec::with_capacity(HEADER_LEN + shards.len() * (4 + shard_len));
+    out.extend_from_slice(&MAGIC);
+    out.push(1);
+    out.push(data as u8);
+    out.push(parity as u8);
+    out.push(0);
+    out.extend_from_slice(&(payload_len as u32).to_le_bytes());
+    out.extend_from_slice(&(shard_len as u32).to_le_bytes());
+    out.extend_from_slice(&nonce);
+    for shard in &shards {
+        out.extend_from_slice(&crc32fast::hash(shard).to_le_bytes());
+        out.extend_from_slice(shard);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn test_key() -> Key {
         Key::from([7u8; 32])
+    }
+
+    #[test]
+    fn binding_rejects_other_metadata_roles() {
+        let key = test_key();
+        let sealed = seal_bound(
+            b"immutable contents",
+            &key,
+            EccParams::default(),
+            Binding::Record,
+        );
+        let opened = open_bound(&sealed.bytes, &key, Binding::Record).unwrap();
+        assert_eq!(opened.plaintext, b"immutable contents");
+        assert_eq!(opened.tag, sealed.tag);
+        for wrong in [
+            Binding::Superblock,
+            Binding::State,
+            Binding::Transaction,
+            Binding::Catalog,
+        ] {
+            assert!(open_bound(&sealed.bytes, &key, wrong).is_err());
+        }
+        assert!(open(&sealed.bytes, &key).is_err());
+        let unbound = seal(b"immutable contents", &key, EccParams::default());
+        assert!(open_bound(&unbound, &key, Binding::Record).is_err());
+    }
+
+    #[test]
+    fn authenticated_reference_tag_survives_ecc_repair() {
+        let key = test_key();
+        let mut sealed = seal_bound(b"recoverable", &key, EccParams::default(), Binding::Record);
+        sealed.bytes[HEADER_LEN + 4] ^= 1;
+        let opened = open_bound(&sealed.bytes, &key, Binding::Record).unwrap();
+        assert_eq!(opened.plaintext, b"recoverable");
+        assert_eq!(opened.tag, sealed.tag);
     }
 
     #[test]
@@ -315,7 +422,7 @@ mod tests {
         // open() reads the params back out of the header (self-describing).
         let key = test_key();
         let pt: Vec<u8> = (0..50_000u32).map(|i| (i % 257) as u8).collect();
-        let mut blob = seal_with(&pt, &key, 8, 3);
+        let mut blob = seal_with(&pt, &key, 8, 3).bytes;
 
         // Each shard is ceil((50000+32)/8) ≈ 6.25 KB; the per-shard stride
         // is that plus a 4-byte CRC. Flipping a contiguous ~12 KB run from
@@ -379,5 +486,78 @@ mod tests {
         }
         .validate()
         .is_err()); // sum > 255
+    }
+    fn payload(blob: &[u8]) -> Vec<u8> {
+        let data = blob[5] as usize;
+        let parity = blob[6] as usize;
+        let shard_len = read_u32(&blob[12..16]) as usize;
+        let shards = blob[HEADER_LEN..]
+            .chunks_exact(4 + shard_len)
+            .map(|s| Some(s[4..].to_vec()))
+            .collect();
+        ecc::decode(shards, data, parity, read_u32(&blob[8..12]) as usize).unwrap()
+    }
+
+    fn replace_payload(blob: &mut Vec<u8>, payload: &[u8]) {
+        let shards = ecc::encode(payload, blob[5] as usize, blob[6] as usize).unwrap();
+        blob.truncate(HEADER_LEN);
+        for shard in shards {
+            blob.extend_from_slice(&crc32fast::hash(&shard).to_le_bytes());
+            blob.extend_from_slice(&shard);
+        }
+    }
+
+    fn known_plaintext_forgery(blob: &mut Vec<u8>, known: &[u8], replacement: &[u8]) {
+        let mut encrypted = payload(blob);
+        let a = [known, Sha256::digest(known).as_slice()].concat();
+        let b = [replacement, Sha256::digest(replacement).as_slice()].concat();
+        for ((c, a), b) in encrypted.iter_mut().zip(a).zip(b) {
+            *c ^= a ^ b;
+        }
+        replace_payload(blob, &encrypted);
+    }
+
+    #[test]
+    fn known_plaintext_forgery_and_legacy_downgrade_are_rejected() {
+        let key = test_key();
+        let known = b"known original plaintext";
+        let replacement = b"evil! modified plaintext";
+        assert_eq!(known.len(), replacement.len());
+        let mut legacy = seal_legacy(known, &key, EccParams::default());
+        known_plaintext_forgery(&mut legacy, known, replacement);
+        assert_eq!(open_legacy(&legacy, &key).unwrap(), replacement);
+        assert!(open(&legacy, &key).is_err());
+        let mut current = seal(known, &key, EccParams::default());
+        known_plaintext_forgery(&mut current, known, replacement);
+        assert!(open(&current, &key).is_err());
+        current[4] = 1;
+        assert!(open(&current, &key).is_err());
+    }
+
+    #[test]
+    fn authenticates_every_header_byte_and_reencoded_payload() {
+        let key = test_key();
+        let original = seal(b"authenticated message", &key, EccParams::default());
+        for i in 0..HEADER_LEN {
+            let mut corrupt = original.clone();
+            corrupt[i] ^= 1;
+            assert!(open(&corrupt, &key).is_err(), "header byte {i}");
+        }
+        for i in [0, payload(&original).len() - 1] {
+            let mut corrupt = original.clone();
+            let mut bytes = payload(&corrupt);
+            bytes[i] ^= 1;
+            replace_payload(&mut corrupt, &bytes);
+            assert!(open(&corrupt, &key).is_err());
+        }
+    }
+
+    #[test]
+    fn truncated_parity_shards_are_recovered() {
+        let key = test_key();
+        let mut blob = seal(b"recover ciphertext and MAC", &key, EccParams::default());
+        let stride = 4 + read_u32(&blob[12..16]) as usize;
+        blob.truncate(blob.len() - 2 * stride);
+        assert_eq!(open(&blob, &key).unwrap(), b"recover ciphertext and MAC");
     }
 }
