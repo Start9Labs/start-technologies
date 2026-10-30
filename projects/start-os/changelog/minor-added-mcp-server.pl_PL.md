@@ -1,0 +1,1 @@
+- Nowy serwer MCP pod `/mcp`: agenci AI i inni klienci MCP mogą wywoływać API StartOS jako narzędzia przez transport strumieniowego HTTP, uwierzytelniając się tokenem okaziciela z `start-cli auth token create`.

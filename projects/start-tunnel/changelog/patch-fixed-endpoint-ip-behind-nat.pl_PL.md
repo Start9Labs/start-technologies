@@ -1,0 +1,1 @@
+- **Konfiguracje WireGuard mogą używać osobnego punktu końcowego, gdy StartTunnel działa za NAT-em.** Okno konfiguracji domyślnie używa hosta z adresu URL przeglądarki i przyjmuje zmieniony adres IP lub nazwę DNS. `device show-config --endpoint` zapewnia to samo nadpisanie dla danej konfiguracji, niezależnie od adresu WAN używanego do SNAT i przekierowań.

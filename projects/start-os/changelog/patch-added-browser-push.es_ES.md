@@ -1,0 +1,1 @@
+- Activa las notificaciones push desde el diálogo de ajustes de Notificaciones para recibir avisos de StartOS con la interfaz cerrada, incluidos los endpoints UnifiedPush autoalojados que proporcione el navegador.

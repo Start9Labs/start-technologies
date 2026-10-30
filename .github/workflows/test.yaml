@@ -217,6 +217,9 @@ jobs:
       - name: Check TS bindings up to date
         if: '!cancelled()'
         run: make start-core-ts-bindings-check
+      - name: Check MCP tool catalog up to date
+        if: '!cancelled()'
+        run: make start-core-mcp-tools-check
       # A failed gate leaves its regenerated files in the working tree.
       - name: Upload regenerated artifacts
         if: failure()
@@ -225,6 +228,7 @@ jobs:
           name: generated-artifacts
           path: |
             shared-libs/ts-modules/start-core/lib/osBindings
+            shared-libs/crates/start-core/mcp-tools.json
             projects/start-cli/man
             projects/start-registry/man
             projects/start-tunnel/man

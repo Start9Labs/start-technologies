@@ -18,11 +18,11 @@ import { OSService } from 'src/app/services/os.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { PluginsService } from 'src/app/services/plugins.service'
 import { PowerService } from 'src/app/services/power.service'
+import { BrowserPushSync, PushService } from 'src/app/services/push.service'
 import { HeaderComponent } from './components/header/header.component'
 
 @Component({
   template: `
-    <!-- <header appHeader><app-plugins /></header> -->
     <header appHeader></header>
     <main>
       <tui-scrollbar [style.max-height.%]="100">
@@ -146,7 +146,6 @@ import { HeaderComponent } from './components/header/header.component'
 
       &::after {
         z-index: -1;
-        // @TODO Theme
         background: url(/assets/img/background_dark.jpeg) fixed center/cover;
       }
     }
@@ -170,6 +169,8 @@ import { HeaderComponent } from './components/header/header.component'
       text-wrap: balance;
     }
   `,
+  providers: [PushService],
+  hostDirectives: [BrowserPushSync],
   host: {
     '[class._plugins]': '!mobile && plugins.enabled()',
     '[style.--plugins]': 'plugins.size() / 100',

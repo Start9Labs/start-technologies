@@ -1,0 +1,1 @@
+- Unverschlüsselte Dienstverbindungen werden bei aktiviertem HTTP-Proxy über StartOS geleitet. Anwendungen sehen StartOS als TCP-Gegenstelle; bei aktivierter Erzeugung weitergeleiteter Header stehen Client-IP-Adressen in `X-Forwarded-For` bereit.

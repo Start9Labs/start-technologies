@@ -1,0 +1,1 @@
+- La carte « Dépendances » d’un service affiche la version installée de chaque dépendance. Une dépendance dont la version est incompatible ouvre la Bibliothèque de services sur une version compatible.

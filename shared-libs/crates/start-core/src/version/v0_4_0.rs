@@ -117,7 +117,10 @@ mod test {
                 "caFingerprint": "AB:CD",
                 "postInitMigrationTodos": todos,
                 "unreadNotificationCount": 0,
-            } }, "private": { "notifications": {} } });
+            } }, "private": {
+                "notifications": {},
+                "push": crate::notifications::push::PushState::default(),
+            } });
             let pre_ups = PreUps::load(&previous, &current).await.unwrap();
             migrate_from_unchecked(&previous, &current, pre_ups, &mut db).unwrap();
             assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.1"));

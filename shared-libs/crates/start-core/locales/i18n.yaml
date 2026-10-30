@@ -3404,6 +3404,54 @@ notifications.invalid-level:
   es_ES: "Nivel de notificación inválido: %{level}"
   fr_FR: "Niveau de notification invalide : %{level}"
   pl_PL: "Nieprawidłowy poziom powiadomienia: %{level}"
+notifications.push.crypto-failed:
+  en_US: "Unable to prepare encrypted push notification"
+  de_DE: "Verschlüsselte Push-Benachrichtigung konnte nicht vorbereitet werden"
+  es_ES: "No se pudo preparar la notificación push cifrada"
+  fr_FR: "Impossible de préparer la notification push chiffrée"
+  pl_PL: "Nie można przygotować zaszyfrowanego powiadomienia push"
+notifications.push.delivery-failed:
+  en_US: "Push notification delivery failed"
+  de_DE: "Push-Benachrichtigung konnte nicht zugestellt werden"
+  es_ES: "No se pudo entregar la notificación push"
+  fr_FR: "Échec de la remise de la notification push"
+  pl_PL: "Nie udało się dostarczyć powiadomienia push"
+notifications.push.invalid-endpoint:
+  en_US: "Push endpoint must be an HTTP or HTTPS URL"
+  de_DE: "Push-Endpunkt muss eine HTTP- oder HTTPS-URL sein"
+  es_ES: "El destino push debe ser una URL HTTP o HTTPS"
+  fr_FR: "Le point de terminaison push doit être une URL HTTP ou HTTPS"
+  pl_PL: "Punkt końcowy push musi być adresem URL HTTP lub HTTPS"
+notifications.push.invalid-keys:
+  en_US: "Invalid Web Push encryption keys"
+  de_DE: "Ungültige Web-Push-Verschlüsselungsschlüssel"
+  es_ES: "Claves de cifrado Web Push no válidas"
+  fr_FR: "Clés de chiffrement Web Push invalides"
+  pl_PL: "Nieprawidłowe klucze szyfrowania Web Push"
+notifications.push.not-found:
+  en_US: "Push subscription not found"
+  de_DE: "Push-Abonnement nicht gefunden"
+  es_ES: "No se encontró la suscripción push"
+  fr_FR: "Abonnement push introuvable"
+  pl_PL: "Nie znaleziono subskrypcji push"
+notifications.push.queue-failed:
+  en_US: "Unable to process push notification queue"
+  de_DE: "Warteschlange der Push-Benachrichtigungen konnte nicht verarbeitet werden"
+  es_ES: "No se pudo procesar la cola de notificaciones push"
+  fr_FR: "Impossible de traiter la file des notifications push"
+  pl_PL: "Nie można przetworzyć kolejki powiadomień push"
+notifications.push.test-body:
+  en_US: "Push notifications are working on this browser."
+  de_DE: "Push-Benachrichtigungen funktionieren in diesem Browser."
+  es_ES: "Las notificaciones push funcionan en este navegador."
+  fr_FR: "Les notifications push fonctionnent dans ce navigateur."
+  pl_PL: "Powiadomienia push działają w tej przeglądarce."
+notifications.push.test-title:
+  en_US: "StartOS test notification"
+  de_DE: "StartOS-Testbenachrichtigung"
+  es_ES: "Notificación de prueba de StartOS"
+  fr_FR: "Notification de test StartOS"
+  pl_PL: "Powiadomienie testowe StartOS"
 
 # update/mod.rs
 update.already-updated-restart-required:
@@ -3569,6 +3617,27 @@ auth.local-logout-unnecessary:
   es_ES: "No es necesario cerrar sesión al usar la cookie de autenticación local."
   fr_FR: "La déconnexion est inutile lorsque le cookie d'authentification local est utilisé."
   pl_PL: "Wylogowanie nie jest potrzebne podczas korzystania z lokalnego pliku cookie uwierzytelniania."
+
+tunnel.api.endpoint-required:
+  en_US: 'WAN IP %{wan_ip} is not public; supply --endpoint <HOST> with the address the device uses to reach this tunnel server'
+  de_DE: 'Die WAN-IP %{wan_ip} ist nicht öffentlich; geben Sie mit --endpoint <HOST> die Adresse an, über die das Gerät diesen Tunnelserver erreicht'
+  es_ES: 'La IP WAN %{wan_ip} no es pública; indique con --endpoint <HOST> la dirección que usa el dispositivo para llegar a este servidor de túnel'
+  fr_FR: 'L’IP WAN %{wan_ip} n’est pas publique ; indiquez avec --endpoint <HOST> l’adresse utilisée par l’appareil pour joindre ce serveur de tunnel'
+  pl_PL: 'Adres IP WAN %{wan_ip} nie jest publiczny; podaj za pomocą --endpoint <HOST> adres, którego urządzenie używa do połączenia z tym serwerem tunelu'
+
+tunnel.api.invalid-endpoint:
+  en_US: 'Enter an IPv4 address, IPv6 address, or DNS name without a scheme, port, or path'
+  de_DE: 'Geben Sie eine IPv4-Adresse, IPv6-Adresse oder einen DNS-Namen ohne Schema, Port oder Pfad ein'
+  es_ES: 'Introduce una dirección IPv4, IPv6 o un nombre DNS sin esquema, puerto ni ruta'
+  fr_FR: 'Saisissez une adresse IPv4, IPv6 ou un nom DNS sans schéma, port ni chemin'
+  pl_PL: 'Wprowadź adres IPv4, IPv6 lub nazwę DNS bez schematu, portu ani ścieżki'
+
+util.env.invalid-json-env:
+  en_US: "JSON_ENV_* chunks must be contiguous from 0 and form a JSON object with string or null values"
+  de_DE: "JSON_ENV_*-Teile müssen lückenlos bei 0 beginnen und ein JSON-Objekt mit Zeichenfolgen oder null-Werten bilden"
+  es_ES: "Los fragmentos JSON_ENV_* deben ser consecutivos desde 0 y formar un objeto JSON con valores de cadena o null"
+  fr_FR: "Les fragments JSON_ENV_* doivent être consécutifs à partir de 0 et former un objet JSON contenant des chaînes ou des valeurs null"
+  pl_PL: "Fragmenty JSON_ENV_* muszą być ponumerowane kolejno od 0 i tworzyć obiekt JSON z wartościami tekstowymi lub null"
 
 # util/tui.rs
 util.tui.terminal-must-be-interactive:
@@ -3926,6 +3995,13 @@ help.arg.ed25519:
   es_ES: "Usar Ed25519 en lugar de NIST P-256"
   fr_FR: "Utiliser Ed25519 au lieu de NIST P-256"
   pl_PL: "Użyj Ed25519 zamiast NIST P-256"
+
+help.arg.endpoint:
+  en_US: 'IPv4, IPv6, or DNS endpoint host for this WireGuard config; required when the selected WAN IP is not public'
+  de_DE: 'IPv4-, IPv6- oder DNS-Endpunkt für diese WireGuard-Konfiguration; erforderlich, wenn die gewählte WAN-IP nicht öffentlich ist'
+  es_ES: 'Host IPv4, IPv6 o DNS del endpoint para esta configuración de WireGuard; obligatorio si la IP WAN seleccionada no es pública'
+  fr_FR: 'Hôte IPv4, IPv6 ou DNS du point de terminaison pour cette configuration WireGuard ; requis si l’IP WAN sélectionnée n’est pas publique'
+  pl_PL: 'Host IPv4, IPv6 lub DNS punktu końcowego dla tej konfiguracji WireGuard; wymagany, gdy wybrany adres IP WAN nie jest publiczny'
 
 help.arg.env-file-path:
   en_US: "Path to environment file"
@@ -7481,6 +7557,13 @@ update.signers.not-found:
   es_ES: "No se encontró el firmante de confianza de actualizaciones del sistema"
   fr_FR: "Signataire de confiance des mises à jour du système introuvable"
   pl_PL: "Nie znaleziono zaufanego sygnatariusza aktualizacji systemu"
+
+version.http-auth-downgrade-requires-tls:
+  en_US: "Cannot downgrade: an HTTP authentication policy has no TLS wrapper. Add TLS to this binding before downgrading."
+  de_DE: "Downgrade nicht möglich: Eine HTTP-Authentifizierungsrichtlinie hat keine TLS-Ummantelung. Aktivieren Sie vor dem Downgrade TLS für diese Bindung."
+  es_ES: "No se puede volver a una versión anterior: una política de autenticación HTTP no tiene una envoltura TLS. Añada TLS a este enlace antes de continuar."
+  fr_FR: "Rétrogradation impossible : une politique d'authentification HTTP ne dispose pas d'enveloppe TLS. Ajoutez TLS à cette liaison avant de rétrograder."
+  pl_PL: "Nie można obniżyć wersji: zasada uwierzytelniania HTTP nie ma osłony TLS. Dodaj TLS do tego powiązania przed obniżeniem wersji."
 
 # volume.rs
 volume.restore-conflict:

@@ -250,6 +250,7 @@ pub fn auth<C: Context, AC: LoginContext, CC: IdKeyContext + CallRemote<AC>>() -
             "login",
             from_fn_async(login_impl::<AC>)
                 .with_metadata("login", Value::Bool(true))
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .with_metadata("get_signer", Value::Bool(true))
                 .with_metadata("get_user_agent", Value::Bool(true))
                 .no_cli(),
@@ -264,6 +265,7 @@ pub fn auth<C: Context, AC: LoginContext, CC: IdKeyContext + CallRemote<AC>>() -
             "logout",
             from_fn_async(logout::<AC>)
                 .with_metadata("get_signer", Value::Bool(true))
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .no_display()
                 .with_about("about.logout-current-auth-session")
                 .with_call_remote::<CC>(),
@@ -282,6 +284,7 @@ where
     ParentHandler::new().subcommand(
         "create",
         from_fn_async(create_token::<AC>)
+            .with_metadata(crate::mcp::MCP, Value::Bool(false))
             .with_display_serializable()
             .with_custom_display_fn(|handle, result| {
                 if let Some(format) = handle.params.format {

@@ -346,6 +346,8 @@ export type MetadataSrc = z.output<typeof schemas.MetadataSrc>
 export type MountParamsInput = z.input<typeof schemas.MountParams>
 export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
 export type ProgressInput = z.input<typeof schemas.Progress>
+export type ProxyOptions = z.output<typeof schemas.ProxyOptions>
+export type ProxyOptionsInput = z.input<typeof schemas.ProxyOptions>
 export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
 export type SetDependenciesParamsInput = z.input<
   typeof schemas.SetDependenciesParams
@@ -369,12 +371,16 @@ export type ImageConfig = z.output<typeof schemas.ImageConfig>
 export type SetBackupProgressInput = z.input<typeof schemas.SetBackupProgress>
 export type SetInitProgressInput = z.input<typeof schemas.SetInitProgress>
 export type TaskEntry = z.output<typeof schemas.TaskEntry>
-export type BindOptions = z.output<typeof schemas.BindOptions>
-export type BindOptionsInput = z.input<typeof schemas.BindOptions>
 export type CheckDependenciesResult = z.output<
   typeof schemas.CheckDependenciesResult
 >
 export type Dependencies = z.output<typeof schemas.Dependencies>
+export type LegacyProxySslOptions = z.output<
+  typeof schemas.LegacyProxySslOptions
+>
+export type LegacyProxySslOptionsInput = z.input<
+  typeof schemas.LegacyProxySslOptions
+>
 
 /**
  * Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).
@@ -385,10 +391,18 @@ export type Dependencies = z.output<typeof schemas.Dependencies>
  * preserving the destination port number.
  */
 export type RangeBindInfo = z.output<typeof schemas.RangeBindInfo>
+export type BindingRanges = z.output<typeof schemas.BindingRanges>
+export type CompatibleBindOptions = z.output<
+  typeof schemas.CompatibleBindOptions
+>
+export type CompatibleBindOptionsInput = z.input<
+  typeof schemas.CompatibleBindOptions
+>
+export type Manifest = z.output<typeof schemas.Manifest>
+export type BindOptions = z.output<typeof schemas.BindOptions>
+export type BindOptionsInput = z.input<typeof schemas.BindOptions>
 export type BindInfo = z.output<typeof schemas.BindInfo>
 export type BindParamsInput = z.input<typeof schemas.BindParams>
-export type BindingRanges = z.output<typeof schemas.BindingRanges>
-export type Manifest = z.output<typeof schemas.Manifest>
 export type Bindings = z.output<typeof schemas.Bindings>
 export type Host = z.output<typeof schemas.Host>
 export type Api = RpcSchemaTree<typeof schemas.Api>

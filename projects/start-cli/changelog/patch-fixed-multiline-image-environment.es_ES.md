@@ -1,0 +1,1 @@
+- Conserva valores multilínea del entorno de la imagen en los metadatos JSON de paquetes que usan Start SDK 3.1.2 o posterior.

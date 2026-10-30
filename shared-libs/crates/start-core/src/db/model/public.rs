@@ -73,15 +73,14 @@ impl Public {
                                         preferred_external_port: 80,
                                         add_ssl: Some(AddSslOptions {
                                             preferred_external_port: 443,
-                                            add_x_forwarded_headers: false,
                                             alpn: Some(AlpnInfo(vec![
                                                 MaybeUtf8String("h2".into()),
                                                 MaybeUtf8String("http/1.1".into()),
                                             ])),
-                                            auth: None,
                                             upstream_cert_validation: Default::default(),
                                         }),
                                         secure: None,
+                                        proxy: None,
                                     },
                                     net: NetInfo {
                                         assigned_port: None,
