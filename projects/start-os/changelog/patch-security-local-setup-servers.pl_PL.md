@@ -1,1 +1,1 @@
-- Odwiedzane strony internetowe nie mogą już używać Twojej przeglądarki do sterowania serwerem, który jest konfigurowany lub działa w trybie diagnostycznym. Podczas konfiguracji i diagnostyki otwieraj serwer pod jego adresem `.local` lub adresem IP.
+- Odwiedzane strony internetowe nie mogą już używać Twojej przeglądarki do sterowania serwerem, który jest konfigurowany lub działa w trybie diagnostycznym. Podczas konfiguracji i diagnostyki otwieraj serwer pod jego adresem `.local` lub adresem IP. Dziękujemy dritzps za zgłoszenie.
