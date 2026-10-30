@@ -81,7 +81,7 @@ See [patchdb.md](patchdb.md) for `TypedDbWatch<T>` construction, API, and usage 
 
 ## Backup conversion
 
-`backup.target.convert` authenticates the selected target/server backup's existing credential and starts a background conversion. The target mount stays owned by that task; the filesystem helper takes its existing exclusive store lock. Server shutdown cancels the helper before releasing the mount. Conversion reuses the authenticated pending marker and durable migration pointers on the backup, rather than trusting progress counters.
+`backup.target.convert` authenticates the selected target/server backup's existing credential and starts a background conversion. `PreparedConversion` owns the mount, data path and zeroizing credential; the worker retains only the database and shutdown receiver, not the full RPC context. The filesystem helper takes its existing exclusive store lock. Server shutdown cancels the helper before releasing the mount. Conversion reuses the authenticated pending marker and durable migration pointers on the backup, rather than trusting progress counters.
 
 `ServerStatus.backupConversions` holds observed jobs keyed by the target's canonical string and server ID. `FullProgressTracker` streams phase/count updates through Patch-DB; the existing initialization reset clears these transient observations on restart. The helper's `conversion.pending` discovery hint lets another session or server offer explicit resumption. That hint and `StartOsRecoveryInfo.formatStatus` are unauthenticated observations, not permission to mutate a store.
 

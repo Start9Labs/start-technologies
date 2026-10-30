@@ -6,6 +6,7 @@ fixtures=$(mktemp -d)
 tar -cf "$saved/current.tar" "$source_dir"
 cleanup() {
   tar -xf "$saved/current.tar"
+  find "$source_dir" -name '*.rs' -exec touch {} +
   rm -rf "$saved" "$fixtures"
 }
 trap cleanup EXIT
