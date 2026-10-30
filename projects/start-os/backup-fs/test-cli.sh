@@ -100,7 +100,7 @@ const fs = require('node:fs')
 const path = process.argv[2]
 fs.truncateSync(path, 4 * 1024 * 1024)
 const bytes = fs.readFileSync(path)
-if (bytes.subarray(1024 * 1024).some(byte => byte !== 0)) throw Error('truncated legacy bytes reappeared after remount')
+if (bytes.subarray(1024 * 1024).some(byte => byte !== 0)) throw Error('truncated bytes reappeared after remount')
 const fd = fs.openSync(path, 'r+')
 fs.writeSync(fd, Buffer.from('edit'), 0, 4, 2 * 1024 * 1024 + 9)
 fs.fsyncSync(fd)
@@ -142,7 +142,7 @@ for (const path of process.argv.slice(2, 4)) {
 const expected = Buffer.alloc(4 * 1024 * 1024)
 expected.fill(0x6d, 0, 1024 * 1024)
 expected.write('edit', 2 * 1024 * 1024 + 9)
-if (!fs.readFileSync(process.argv[4]).equals(expected)) throw Error('legacy holes changed during snapshot deletion')
+if (!fs.readFileSync(process.argv[4]).equals(expected)) throw Error('holes changed during snapshot deletion')
 NODE
 unmount_view
-echo 'PASS: helper credentials, zero-copy snapshots, recovery metadata, readonly mounts, legacy truncate/remount/regrow, and selective reclamation'
+echo 'PASS: helper credentials, zero-copy snapshots, recovery metadata, readonly mounts, truncate/remount/regrow, and selective reclamation'

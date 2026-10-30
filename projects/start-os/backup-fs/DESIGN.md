@@ -1,152 +1,152 @@
 # backup-fs storage design
 
-`startos-backup-fs` is a FUSE filesystem whose backing store is an
-encrypted, error-corrected, block-chunked directory tree. It is built to be
-written through to physically-attached USB drives of any filesystem, to
-CIFS shares, and to `rclone mount` backends (S3, SFTP, SSHFS, …), and to be
-copied incrementally with `rsync`/`rclone`.
+`startos-backup-fs` is an encrypted, error-corrected FUSE filesystem for StartOS
+backups on physical drives and network filesystems. Its chunked data and packed
+metadata support incremental copies with `rsync` or `rclone`. A backing filesystem
+must support the file, rename, and durability operations used here; an object
+transport alone does not supply those semantics.
 
 ## On-disk layout
 
-```
+```text
 $data_dir/
-  superblock           versioned envelope and sealed master key + format constants
-  superblock.bak1      redundant superblock replica
-  segments/*.seg       append-only sealed inode and packed-content records
-  segments/index.cache sealed, rebuildable index checkpoint
-  segments/roots       authoritative replay floor for snapshot-enabled stores
-  snapshots            sealed catalog of named recovery roots
-  contents/<bucket>/<name>[.<version>]   sealed content blocks
-  dirents/<bucket>/<name>[.<version>]    sealed directory buckets
+  superblock                  password-protected master key and format constants
+  superblock.bak1             redundant superblock replica
+  segments/state              authenticated current index, counters, catalog reference
+  segments/*.idx              packed authenticated index transactions
+  segments/state-objects/*    immutable index checkpoints and snapshot catalogs
+  segments/*.seg              sealed inode, packed-content, and object-pointer records
+  contents/<shard>/<id>.<version>  immutable sealed content blocks
+  dirents/<shard>/<id>.<version>   immutable sealed directory buckets
 ```
 
-Every object on disk is a **sealed blob** (see `vault.rs`). A file's data is
-split into fixed-size **blocks** (see `blockstore.rs`); each block is its own
-sealed file.
+Filesystem format 4 uses versioned objects for every store. Named snapshots retain
+historical views; they do not activate a separate storage mode. Copy the complete
+backing directory while it is offline: the index, catalog, and their referenced
+files are authoritative. Legacy `index.cache`, `roots`, and `snapshots` files may
+remain after migration but are not consulted by normal format-4 opens.
 
-## Sealed blobs: encryption + integrity + ECC (`vault.rs`, `ecc.rs`)
+## Encryption, references, and ECC
 
-`seal(plaintext)` →
+`vault::seal_bound` derives context-specific keys for superblocks, records,
+transactions, catalogs, and object identities/versions. Independent encryption
+and MAC subkeys protect ChaCha20 ciphertext and its vault header with
+HMAC-SHA256. Fresh random nonces protect repeated plaintext. Reed-Solomon coding
+covers the ciphertext and authentication tag; each shard carries a CRC-32.
+Stores default to ten data and two parity shards, with creation-time overrides
+persisted in the superblock.
 
-1. Derive independent encryption and authentication subkeys with domain-separated HMAC-SHA256.
-2. Encrypt plaintext with ChaCha20 under a fresh random nonce.
-3. Authenticate the vault header and ciphertext with HMAC-SHA256.
-4. Reed-Solomon-encode the ciphertext and authentication tag with `data` and `parity` shards; store a CRC-32 with each shard.
+Reads repair recoverable erasures, verify the MAC in constant time, then decrypt.
+An immutable object's caller supplies its expected identity and version from the
+current authenticated index. A log reference supplies the physical location,
+sequence, framed and payload lengths, and expected authentication tag. The
+record's decoded key must also match its caller. Rewriting an unkeyed frame CRC
+or sequence does not authorize replacement ciphertext.
 
-`open(blob)` treats CRC failures and missing shards as erasures, reconstructs up to `parity` lost shards, verifies the MAC in constant time, and only then decrypts. A wrong key, unauthenticated modification, or corruption beyond recovery returns `BadChecksum`. New stores default to 10 data + 2 parity shards; creation-time overrides are persisted in the superblock.
+Index transactions authenticate their parent references. The small `segments/state`
+anchor selects the current graph and catalog; ordinary opens never recover intent
+from uncommitted data-log tails or an optional cache. Expected tags identify
+corrected authenticated content, not raw ECC bytes. Missing or mistyped referenced
+files report EIO; an absent data reference or deletion denotes a hole. Corruption
+in an individual data object remains localized, while missing or corrupt
+namespace/index metadata blocks access to the affected view.
 
-Vault version 2 rejects version-1 blobs during normal reads. A writable open upgrades an existing store once: it durably marks every superblock replica as migration-pending, atomically reseals each object and segment, then clears the marker after synchronizing the replacements. An interrupted upgrade resumes from that marker; read-only opens refuse an unfinished upgrade. Migration needs temporary space for one replacement segment or object and rewrites the existing encrypted data. Older binaries cannot read an upgraded store.
+A genuine older authenticated root can select a genuine older backup view. There
+is no external freshness authority or whole-backup rollback prevention. The
+pre-unlock discovery timestamp is editable plaintext; `BackupInfo.timestamp` in
+encrypted `metadata.json` authenticates the date of the selected backup view.
 
-Unreadable objects and frames stay in place and fail normal authentication; they do not block migration of healthy data. Filesystem I/O failures keep the pending marker for retry.
+## Legacy migration
 
-Migration cannot establish whether legacy data was altered before the upgrade. Tags authenticate each blob, not its file path or log position; substitution or replay of valid same-store blobs remains possible. Previously copied weak key-wrapping metadata remains outside its protection.
+A writable open upgrades filesystem formats 1–3. Every superblock replica first
+receives an authenticated pending marker. Read-only opens refuse old or pending
+stores. Migration reseals objects and log frames with their required bindings,
+preserves existing frame offsets, converts retained snapshots, and publishes the
+new State before clearing the marker. Older binaries reject the upgraded format.
 
-Authenticated storage uses filesystem format 2. Creating the first snapshot explicitly enables format 3; ordinary writable opens retain format 2 until then. The COW capability remains enabled after snapshots are deleted.
+Stable-name objects receive deterministic secret-derived migration versions and
+pointer records. Completed destinations and their pointers become durable before
+the original files are removed. Retirement uses the existing group-commit batch
+threshold; space exhaustion retires a completed smaller batch before retrying the
+next object. Retry recognizes these pointers without replaying them over legacy
+live deletions or version overrides. Objects outside current logical inode slots
+are not adopted into the live view; retained legacy snapshots keep their own
+references.
 
-## Block-chunked content (`blockstore.rs`, `contents.rs`)
+Temporary space includes a replacement segment or object, a staged object batch,
+and new index/catalog metadata. The batch normally contains at most 256 objects
+(`BACKUPFS_SYNC_BATCH` overrides this). Space-pressure retries avoid requiring a
+second complete object store, but enough space for the next replacement and
+metadata is still necessary. Migration rewrites encrypted data and may be slow
+on a large or remote target.
 
-A regular file is `ceil(size / 1 MiB)` blocks. Writes do read-modify-write at
-block granularity and a block is always written **whole** — buffered, then
-atomically renamed into place. This is the core of the redesign:
+Unreadable blobs remain unreadable, including when moved to versioned names;
+known references to unreadable frames remain failing references. Healthy data can still migrate.
+Filesystem I/O failures retain the pending marker. Migration cannot prove the
+provenance of legacy data or revoke previously captured weak key wraps and the
+unchanged credentials they protect.
 
-- **No random writes into existing objects.** Backends that can only replace
-  an object wholesale (S3/`rclone`) never see a sub-object overwrite; a small
-  edit rewrites one ≤ 1 MiB block, not the whole file.
-- **Cheap incremental backup.** A block's filename is a stable keyed
-  SHA-256 of `(content_id, block_index)`. Editing one region rewrites exactly
-  one block file and leaves every other block byte-for-byte identical, so
-  `rsync`/`rclone` of `$data_dir` transfer only the changed blocks.
-- **Small and large files both behave.** A tiny file is one small block file;
-  a huge file is many independent blocks written/verified in parallel.
-- **Sparse files** cost nothing for holes — unwritten blocks have no file on
-  disk and read back as zeros.
-- **Padding is separate from logical data.** A block payload records its compressed length before optional random padding. Growth cannot expose padding bytes; legacy final-block padding is clipped before extending the file.
-- **A decoded block is kept for the reads that follow it.** A handle from
-  `open` is served `FOPEN_DIRECT_IO` and the backing store is read
-  `O_DIRECT`, so a read of that handle reaches us at no more than the
-  caller's own size, with no page cache and no readahead behind it. (The
-  transport caps one request at just under a chunk, so a 1 MiB read arrives
-  as two.) Reading 8 KiB at a time would otherwise fetch and decode the whole
-  enclosing block once per read — 154× the file's own bytes off the backing
-  store, since each fetch carries the block's parity shards too. One block is
-  held per open inode, shared by
-  every handle on it, and freed when the last one closes; a file being read
-  therefore costs one block of memory. A write moves the block into the dirty
-  map and takes it out of the cache, and a flush drops a cached block its
-  trailing-block prune is about to unlink, so no cached copy outlives the
-  version on disk.
+## Blocks, packing, and inode metadata
 
-## Cache-deadlock avoidance
+Regular content uses three tiers: up to 4 KiB inline in its inode record, up to
+`BACKUPFS_PACK_MAX` (default 1 MiB) packed in shared content-log extents, then
+1 MiB block objects. Growth moves through these tiers one way. A partial block
+write preserves existing edges and creates one immutable replacement for that
+block; unaffected block versions keep their names and bytes. Writes beyond EOF
+and new-output alignment tails avoid backing reads. Sparse holes have no object.
 
-Content blocks are read and written with `O_DIRECT` (via the aligned-I/O
-buffer in `aligned_io.rs`, with an io_uring fast path, network-FS-aware flush
-chunking, and a flush timeout). This keeps file data out of the kernel page
-cache, avoiding the CIFS writeback deadlock where freeing memory needs a
-flush and the flush needs memory. Small metadata goes through the page cache
-and is made durable by the batched `syncfs` group-commit.
+Block payloads record compressed length separately from optional random padding.
+Growth cannot expose padding or truncated tails. Each open inode retains one
+decoded clean block, shared by its handles and released on last close; writes and
+trailing-block pruning invalidate the affected cache entry.
 
-## Preserved Linux inode attributes
+Large directories spill into keyed hash buckets. Inodes preserve mode, uid/gid,
+all four timestamps, hardlinks, symlinks, device numbers, and xattrs, including
+POSIX ACLs. Packed contents and inode records share append-only data segments.
+An active writer creates a new segment only on its first write.
 
-Inode metadata stores mode, uid/gid, atime/mtime/ctime/crtime, and the full
-xattr map — so **POSIX ACLs** (`system.posix_acl_access` /
-`system.posix_acl_default`) round-trip like any other xattr. `mknod` supports
-regular files, directories, symlinks, FIFOs, sockets, and character/block
-devices (with `rdev` preserved).
+## Durability and incremental indices
 
-## Read-only snapshots
+State owns publication durability. Objects, data records, and packed index deltas
+are written first; one backing-filesystem `syncfs` precedes atomic root replacement
+and directory synchronization. Explicit durable operations commit immediately;
+fast saves use the existing batch threshold. A clean library close commits
+pending successful fast updates. Uncertain publication blocks mutations until
+reopen; uncommitted tails do not override the previous root.
 
-`BackupFSOptions::enable_snapshots` enables COW storage during an exclusive writable open. The helper's `snapshot create` command sets this option automatically. `BackupFS::create_snapshot` flushes dirty inodes and open contents, synchronizes the backing filesystem, saves authoritative log roots, and durably publishes a named recovery point. Unchanged file content is shared: creation copies root indices, not file data. Later writes create immutable versions of affected blocks or directory buckets and append pointer records to the existing log.
+Index deltas share append-only 8 MiB target segments, rather than creating a file
+per mutation. Coarse checkpoints shard maps into chunks of at most 16,384 entries
+and enforce decoder budgets before publication. Unchanged checkpoints reuse their
+existing references without rereading newly written chunks. Bulk reference scans
+sort borrowed locations and reuse enclosing buffered windows and open segment
+files; index walks use the same range reader in reverse order. Read-only range
+buffers allocate no write-submission ring.
 
-The authenticated catalog pins inode and packed-content log segments and retains the block/bucket versions each point uses. Existing stable-name objects are pinned without copying. Compaction skips pinned segments and saves an authoritative replay floor before deleting old segments; tombstoned records in retained history cannot resurrect current objects. Deletion removes the catalog entry durably before reclaiming storage unused by the live tree or retained snapshots. Object overrides survive while their stable-name legacy files remain on disk, including between replay-root publication and unlink. A later synchronized collection can discard those masks once removal is durable. A failed catalog publication blocks mutations until reopen.
+Data objects retain `O_DIRECT`, aligned buffering, io_uring write batching,
+network-filesystem-aware write sizes, and flush timeouts. Small metadata uses the
+page cache and group commit. Version pointers, authenticated index publication,
+and reclamation add metadata work to ordinary backups; these changes are not a
+WAN/CIFS throughput result.
 
-Snapshot creation, listing, deletion, and recovery mounts use the existing exclusive store lock. These are offline operations; a writer and a recovery mount do not share the store concurrently. Recovery opens force read-only behavior throughout the filesystem and avoid atime writes. Names contain 1–128 ASCII letters, digits, `-`, `_`, or `.`, excluding `.` and `..`.
+## Read-only snapshots and reclamation
 
-The catalog stores flat indices and uses the existing 64 MiB metadata decode bound. Creation is proportional to the indexed namespace, not constant-time; very large or numerous snapshots can reach that bound. Marking scans logical block slots for legacy/sparse files. Pinned segments retain dead neighbors until their final pin is released. Retention is explicit and manual.
+`BackupFS::create_snapshot` flushes dirty inode/content state, freezes an immutable
+checkpoint view, and publishes a named descriptor in the authenticated catalog.
+Unchanged data and index chunks are shared. Later writes produce new object
+versions and index deltas. Recovery mounts enforce read-only behavior, including
+atime handling. Names contain 1–128 ASCII letters, digits, `-`, `_`, or `.`,
+excluding `.` and `..`.
 
-Copies of an enabled store must include `snapshots` and `segments/roots`: both are authoritative metadata, unlike `segments/index.cache`.
+Creation, listing, deletion, and recovery mounts hold the existing exclusive store
+lock. A writer and recovery mount cannot share the store concurrently. Retention
+is manual. Index sharding removes the full-namespace-per-snapshot catalog entry;
+the descriptor catalog still has the metadata decoder's 64 MiB budget. Creation
+can checkpoint an indexed namespace, and marking visits its logical block slots.
 
-## Durability and dispatch
-
-The dirty-inode cache, clean-load LRU, per-inode worker ordering, and `syncfs` group commits remain shared with ordinary backups. Fast object saves defer durability to the existing batch checkpoint; explicit durable saves synchronize the object before its pointer record. Snapshot publication and reclamation synchronize the live state before committing authoritative roots.
-
-## Small-file packing (log-structured metadata)
-
-Layered on top of the block design to cut the per-file backing-store object
-count, which dominates many-small-files backups to CIFS/rclone:
-
-- **Hash-bucketed directories (Stage 1, shipped).** A directory's entries no
-  longer live inline in its inode once it grows large; they spill into
-  hash-bucketed sealed files, so a create touches one bucket (O(1)) instead
-  of rewriting the whole listing (O(n) → O(n²) to build a directory).
-
-- **Inodes in a log (Stage 3, shipped).** Inodes are append-only records in
-  shared segment files (`segments/`, see `seglog.rs`), not one file per
-  inode. A monotonic allocator + replay-rebuilt index; tombstone-on-delete
-  durable before content removal.
-
-- **Inline tiny content (Stage 5, shipped).** A file ≤ 4 KiB stores its bytes
-  directly in its inode record — zero extra content objects. Larger files
-  migrate to per-file 1 MiB block files.
-
-- **Shared content packing + compaction (shipped).** A file in
-  `(4 KiB, pack_max=1 MiB]` is stored as a single extent in the shared
-  content log (`Record::Content` in `seglog`, a separate content index;
-  the inode holds `FileData::Packed(content_id)`) rather than its own block
-  file. Tiers: ≤ 4 KiB inline → ≤ 1 MiB packed → > 1 MiB blocks; growth
-  migrates inline→packed→blocks one-way. `BACKUPFS_PACK_MAX` tunes/disables
-  packing. **Compaction** (`seglog::compact`, on unmount, gated by
-  `BACKUPFS_COMPACT_RATIO`, default 0.6) reclaims dead extents: live frames
-  are relocated **verbatim** (no re-seal — keeps bytes stable for rsync,
-  preserves `seq` for replay) into the active segment, durable before the
-  old segment is unlinked. Local A/B (500 × 64 KiB files): ~27% faster than
-  one-block-per-file; larger on CIFS.
-
-### Deferred items (space/robustness, not correctness)
-
-- Compaction of the inode/content log **mid-mount** (currently only on
-  unmount) and streamed multi-generation checkpoints for fast remount on
-  huge stores (replay currently decrypts every frame).
-- A `find_orphans` sweep to reclaim directory bucket / content files orphaned
-  by a crash mid-reshard or mid-GC.
-- `fsync` of parent directories in `AtomicFile` (durability currently rides
-  the trailing `syncfs`).
+Compaction copies live frames verbatim, authenticates relocated references, and
+commits before unlinking old segments. Snapshot views pin their data segments and
+index graphs. Deletion publishes the reduced catalog before collecting files
+unused by both current and retained views. Shared metadata graphs are traversed
+once during collection. Pinned segments can retain dead neighbors until their
+last snapshot is deleted. Snapshots share the target's hardware and do not replace
+backups on independent devices.

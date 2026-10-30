@@ -41,14 +41,16 @@ Back up your server's data to a physical drive or a network folder.
 
 ## Backup Format Upgrades
 
-Opening an existing backup with this release upgrades its encryption authentication and password-protected key wrapping. The folder remains `StartOSBackupsV2`; this is separate from the older `StartOSBackups` folder cleanup described above. The one-time upgrade rewrites the encrypted data and needs free space for one replacement segment or content object. On a large or remote backup, this can take substantially longer than an ordinary incremental backup. Leave the target connected until the operation finishes; an interrupted upgrade resumes on the next writable open.
+Opening an existing backup for writing with this release upgrades its encryption authentication, current-version references, and password-protected key wrapping. The folder remains `StartOSBackupsV2`; this is separate from the older `StartOSBackups` folder cleanup described above. The one-time upgrade rewrites encrypted data. It stages and retires content objects in batches rather than keeping a second complete copy; free space is still needed for replacement objects or segments and new index/snapshot metadata. On a large or remote backup, this can take substantially longer than an ordinary incremental backup. Leave the target connected until the operation finishes; an interrupted upgrade resumes on the next writable open.
 
 An unreadable encrypted object or log frame does not block the upgrade of healthy data. Damaged data stays unreadable; filesystem I/O failures leave the upgrade resumable.
 
 Without its saved key metadata, StartOS cannot decrypt a managed store. A retry moves such keyless encrypted data to the target's trash for reclamation before starting over. This includes failed first backups from older releases. Partially populated key metadata is rejected instead.
 
 > [!WARNING]
-> Older StartOS releases cannot read an upgraded backup. An upgrade cannot detect alterations already made to the older unauthenticated format, prevent replay or relocation of otherwise valid encrypted blobs, or revoke previously copied backup data and key-wrapping metadata.
+> Older StartOS releases cannot read an upgraded backup. Upgraded backups reject individual object/version and log substitutions against their authenticated current references. An upgrade cannot establish the provenance of older data, prevent rollback to an entire genuine older backup view, or revoke previously copied backup data and key-wrapping metadata.
+
+The discovery date shown before unlocking a backup is editable plaintext. After unlocking, the date inside encrypted backup metadata belongs to the authenticated backup view. A genuine older view retains its older protected date; that date does not establish that no newer backup exists.
 
 ## Command-Line Passwords
 
@@ -58,7 +60,7 @@ Avoid typing secret values into shell commands, where shell history can retain t
 
 ## Read-only Snapshots
 
-The low-level `startos-backup-fs` utility can retain named recovery points without duplicating unchanged file content. Creation enables copy-on-write storage for the target; later writes record new versions of changed blocks and directory buckets. The current backup continues to update normally. Retention is manual: delete points when they are no longer needed.
+The low-level `startos-backup-fs` utility can retain named recovery points without duplicating unchanged file content. All upgraded stores use immutable versions of changed blocks and directory buckets; a snapshot retains a selected view while the current backup continues to update normally. Retention is manual: delete points when they are no longer needed.
 
 Snapshot operations require exclusive offline access. Finish backups and unmount the decrypted filesystem before creating, listing, deleting, or mounting a recovery point. Use the filesystem credential described above, not the StartOS master password:
 
@@ -72,7 +74,7 @@ startos-backup-fs snapshot delete /path/to/crypt before-update --password-file /
 
 The backing directory is `StartOSBackupsV2/<server-id>/crypt` on the mounted target. Protect the credential file with owner-only permissions. A recovery mount is read-only. Snapshot names use letters, digits, `-`, `_`, or `.`, up to 128 characters; `.` and `..` are reserved.
 
-Snapshot metadata grows with the number of indexed objects and retained points, and the catalog has a 64 MiB limit. Snapshot-enabled stores retain their copy-on-write format after points are deleted. Snapshots share the target's hardware and do not replace backups on separate devices.
+Snapshot indices are stored in bounded, shared chunks. Metadata and retained changed data require space; the catalog of snapshot descriptors has a 64 MiB limit. Deleting a point reclaims storage unused by the current backup or other retained points. Snapshots share the target's hardware and do not replace backups on separate devices.
 
 ## Best Practices
 
