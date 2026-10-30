@@ -9,11 +9,11 @@ use imbl_value::Value;
 use ipnet::IpNet;
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
-use rpc_toolkit::{HandlerExt, ParentHandler, from_fn_async, from_fn_async_local};
+use rpc_toolkit::{from_fn_async, from_fn_async_local, HandlerExt, ParentHandler};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use uciedit::openwrt::{FirewallRule, FirewallTarget};
-use uciedit::{Arena, Configs, TypedSection, dump_all, parse_all};
+use uciedit::{dump_all, parse_all, Arena, Configs, TypedSection};
 
 use crate::error::{Error, ErrorKind};
 use crate::invoke::Invoke;
@@ -1359,16 +1359,12 @@ config zone wan
         let src_ips = get_remote_rule_src_ips(dir.path()).await;
         assert!(src_ips.iter().all(|s| s.is_some()));
         assert!(src_ips.iter().any(|s| s.as_deref() == Some("10.0.0.0/8")));
-        assert!(
-            src_ips
-                .iter()
-                .any(|s| s.as_deref() == Some("172.16.0.0/12"))
-        );
-        assert!(
-            src_ips
-                .iter()
-                .any(|s| s.as_deref() == Some("192.168.0.0/16"))
-        );
+        assert!(src_ips
+            .iter()
+            .any(|s| s.as_deref() == Some("172.16.0.0/12")));
+        assert!(src_ips
+            .iter()
+            .any(|s| s.as_deref() == Some("192.168.0.0/16")));
     }
 
     #[tokio::test]
@@ -1413,16 +1409,12 @@ config zone wan
             "default-mode rules must be src_ip-scoped: {src_ips:?}"
         );
         assert!(src_ips.iter().any(|s| s.as_deref() == Some("10.0.0.0/8")));
-        assert!(
-            src_ips
-                .iter()
-                .any(|s| s.as_deref() == Some("172.16.0.0/12"))
-        );
-        assert!(
-            src_ips
-                .iter()
-                .any(|s| s.as_deref() == Some("192.168.0.0/16"))
-        );
+        assert!(src_ips
+            .iter()
+            .any(|s| s.as_deref() == Some("172.16.0.0/12")));
+        assert!(src_ips
+            .iter()
+            .any(|s| s.as_deref() == Some("192.168.0.0/16")));
         assert!(src_ips.iter().any(|s| s.as_deref() == Some("fc00::/7")));
     }
 
@@ -1491,16 +1483,12 @@ config zone wan
         }
         let src_ips = get_remote_rule_src_ips(dir.path()).await;
         assert!(src_ips.iter().any(|s| s.as_deref() == Some("10.0.0.0/8")));
-        assert!(
-            src_ips
-                .iter()
-                .any(|s| s.as_deref() == Some("172.16.0.0/12"))
-        );
-        assert!(
-            src_ips
-                .iter()
-                .any(|s| s.as_deref() == Some("192.168.0.0/16"))
-        );
+        assert!(src_ips
+            .iter()
+            .any(|s| s.as_deref() == Some("172.16.0.0/12")));
+        assert!(src_ips
+            .iter()
+            .any(|s| s.as_deref() == Some("192.168.0.0/16")));
     }
 
     #[tokio::test]
