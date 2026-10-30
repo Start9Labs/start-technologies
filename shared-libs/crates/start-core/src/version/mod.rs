@@ -900,13 +900,13 @@ mod tests {
         assert_eq!(db["public"]["packageData"], packages);
         rollback_to_unchecked(&target, &previous, &mut db).unwrap();
         assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.0.5"));
-        assert_eq!(applied_migration_revision(&mut db).unwrap(), 2);
+        assert_eq!(applied_migration_revision(&mut db).unwrap(), 3);
         assert_eq!(db["public"]["packageData"], packages);
     }
 
     #[tokio::test]
     async fn maintenance_revisions_migrate_and_roll_back_without_changing_service_data() {
-        for (from, to, revision) in [("0.4.0.3", "0.4.0.4", 0), ("0.4.0.4", "0.4.0.5", 2)] {
+        for (from, to, revision) in [("0.4.0.3", "0.4.0.4", 0), ("0.4.0.4", "0.4.0.5", 3)] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()
                 .as_version_t()
@@ -916,7 +916,7 @@ mod tests {
                 .as_version_t()
                 .unwrap();
             assert_eq!(current.previous().semver(), previous.semver());
-            let mut db = json!({ "public": { "serverInfo": {
+            let mut db = json!({ "private": {}, "public": { "serverInfo": {
                 "version": from,
                 "packageVersionCompat": ">=0.3.0 <0.5.0",
                 "postInitMigrationTodos": {},

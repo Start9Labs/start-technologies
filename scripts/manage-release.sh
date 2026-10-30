@@ -27,10 +27,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 REPO="Start9Labs/start-technologies"
-# Registries are scoped per project (<PROJECT>_SOURCE/TARGET_REGISTRY); the OS
-# and StartWRT promote source -> target. The OS chain: CI indexes images into
-# alpha; alpha -> beta is promoted manually, out of band; the full `release`
-# promotes the source (beta) -> target (production). Override either per run.
+STARTOS_ALPHA_REGISTRY="${STARTOS_ALPHA_REGISTRY:-https://alpha-registry-x.start9.com}"
 STARTOS_SOURCE_REGISTRY="${STARTOS_SOURCE_REGISTRY:-https://beta-registry.start9.com}"
 STARTOS_TARGET_REGISTRY="${STARTOS_TARGET_REGISTRY:-https://registry.start9.com}"
 S3_BUCKET="s3://startos-images"
@@ -247,6 +244,22 @@ missing_registry_assets() {
     echo "$missing"
 }
 
+resolve_os_commit() {
+    local hash
+    load_registry_index "$STARTOS_SOURCE_REGISTRY"
+    hash=$(jq -r --arg v "$VERSION" '.versions[$v].gitHash // empty' <<< "$_INDEX_JSON")
+    if [ -z "$hash" ]; then
+        >&2 echo "  ✗ ${STARTOS_SOURCE_REGISTRY} has no gitHash for OS ${VERSION}; publish its image metadata first."
+        return 1
+    fi
+    resolve_artifact_commit "$hash" "$STARTOS_SOURCE_REGISTRY" || return
+    COMMIT=$hash
+}
+
+release_security() {
+    (cd "$REPO_ROOT" && node scripts/changelog.mjs security "projects/$PROJECT" "$VERSION" ${1:+--ref "$1"})
+}
+
 check_registry_notes_cli() {
     local help
     help=$(start-cli registry os version add --help) || return
@@ -257,7 +270,7 @@ check_registry_notes_cli() {
 }
 
 refresh_registry_notes() {
-    local registry=$1 range payload notes
+    local registry=$1 range payload notes hash security metadata_args=()
     payload=$(registry_notes) || return
     check_registry_notes_cli || return
     notes=$(jq -r '.releaseNotes' <<< "$payload")
@@ -267,8 +280,15 @@ refresh_registry_notes() {
         >&2 echo "  ✗ ${registry} has no ${VERSION} entry to carry release notes"
         return 1
     fi
+    if [ "$KIND" = os ]; then
+        hash=$(jq -r --arg v "$VERSION" '.versions[$v].gitHash // empty' <<< "$_INDEX_JSON")
+        security=$(release_security "${hash:-${NOTES_REF:-}}") || return
+        if [ -n "$hash" ]; then metadata_args+=(--git-hash "$hash" --expected-git-hash "$hash"); fi
+        if [ "$security" = true ]; then metadata_args+=(--security); fi
+    fi
     echo "Setting ${VERSION} release notes on ${registry}..."
     start-cli --registry="$registry" registry os version add \
+        "${metadata_args[@]}" \
         "$VERSION" "v${VERSION}" "$notes" "$range"
     _INDEX_REGISTRY=""
 }
@@ -301,8 +321,7 @@ parse_run_id() {
 # The commit the tag will point at ($COMMIT, default HEAD), as a full sha.
 tag_commit_sha() { (cd "$REPO_ROOT" && git rev-parse --verify "${COMMIT:-HEAD}^{commit}"); }
 
-# Local staging dir: keeps the flat _v separator (the tag's / would nest dirs).
-release_dir() { echo "$HOME/Downloads/${PROJECT}_v${VERSION}"; }
+release_dir() { echo "$HOME/Downloads/${TAG//\//_}"; }
 
 # Marker recording which commit the release dir's GHA artifacts were built from.
 gha_commit_file() { echo "$(release_dir)/.gha-commit"; }
@@ -442,7 +461,7 @@ verify_alpha_release() {
     # authenticity and not recency, so replaying older signed metadata is
     # possible for anyone who can write the bucket — but the defence against
     # promoting the wrong build is that the operator is told which commit is
-    # being tagged (resolve_alpha_commit prints it, and a replay shows up as an
+    # being tagged (resolve_artifact_commit prints it, and a replay shows up as an
     # unexpectedly old hash), not metadata that expires on a timer unrelated to
     # this project's release cadence.
 }
@@ -539,46 +558,35 @@ alpha_collect() {
     done
 }
 
-# Download the collected debs, each verified against the hash the signed index
-# commits to, and stage them only once every one has passed.
-# Decide which commit the tag points at. The tag is a claim that a commit
-# produced the artifact, so when we are promoting, alpha's build is what decides
-# it — this adopts that commit rather than making the operator notice a mismatch
-# and re-run by hand.
-#
-# Each product's workflow is path-filtered, so master routinely advances without
-# producing a new build of that product: insisting on HEAD would demand a build
-# that will never exist. Adoption is confined to a commit already in this
-# branch's history, and an explicit COMMIT is never second-guessed.
-resolve_alpha_commit() {
-    local alpha_hash="$1" tag_sha behind
+resolve_artifact_commit() {
+    local build_hash="$1" source="$2" tag_sha behind
     tag_sha=$(tag_commit_sha)
-    [ "$alpha_hash" != "$tag_sha" ] || return 0
+    [ "$build_hash" != "$tag_sha" ] || return 0
 
     if [ -n "${COMMIT:-}" ]; then
-        >&2 echo "  ✗ ${APT_ALPHA_SUITE} holds a build of ${alpha_hash}, but COMMIT=${COMMIT} is ${tag_sha}."
+        >&2 echo "  ✗ ${source} holds a build of ${build_hash}, but COMMIT=${COMMIT} is ${tag_sha}."
         >&2 echo "    The tag has to point at the commit that produced the artifacts. Drop COMMIT"
-        >&2 echo "    to take alpha's, or use 'pull-gha' with the run that built ${tag_sha}."
+        >&2 echo "    to take that build's, or use 'pull-gha' with the run that built ${tag_sha}."
         return 1
     fi
 
-    if ! (cd "$REPO_ROOT" && git rev-parse --verify --quiet "${alpha_hash}^{commit}" > /dev/null); then
-        >&2 echo "  ✗ ${APT_ALPHA_SUITE} holds a build of ${alpha_hash}, which is not in this repository."
+    if ! (cd "$REPO_ROOT" && git rev-parse --verify --quiet "${build_hash}^{commit}" > /dev/null); then
+        >&2 echo "  ✗ ${source} holds a build of ${build_hash}, which is not in this repository."
         >&2 echo "    git fetch origin, then re-run."
         return 1
     fi
-    if ! (cd "$REPO_ROOT" && git merge-base --is-ancestor "$alpha_hash" HEAD); then
-        >&2 echo "  ✗ ${APT_ALPHA_SUITE} holds a build of ${alpha_hash}, which is not an ancestor of HEAD."
+    if ! (cd "$REPO_ROOT" && git merge-base --is-ancestor "$build_hash" HEAD); then
+        >&2 echo "  ✗ ${source} holds a build of ${build_hash}, which is not an ancestor of HEAD."
         >&2 echo "    That build did not come from the branch you are releasing. Check out the"
         >&2 echo "    branch that contains it, or use 'pull-gha'."
         return 1
     fi
 
-    behind=$(cd "$REPO_ROOT" && git rev-list --count "${alpha_hash}..HEAD")
-    COMMIT="$alpha_hash"
-    echo "  Tagging ${alpha_hash}, the commit alpha built — HEAD is ${behind} commit(s) further on."
+    behind=$(cd "$REPO_ROOT" && git rev-list --count "${build_hash}..HEAD")
+    COMMIT="$build_hash"
+    echo "  Tagging ${build_hash}, the commit ${source} built — HEAD is ${behind} commit(s) further on."
     echo "  (${PROJECT}'s workflow is path-filtered, so master advances without rebuilding it.)"
-    echo "  To work from that tree: git checkout ${alpha_hash}"
+    echo "  To work from that tree: git checkout ${build_hash}"
 }
 
 compiled_metadata_matches() {
@@ -711,12 +719,6 @@ publish_debs() {
 # The `release` steps for this kind, in order.
 release_steps() {
     case "$KIND" in
-        # CI already uploaded the images to the shared S3 bucket and indexed
-        # them into alpha (and alpha->beta was promoted manually), so there's
-        # no push here. Pull the promoted images to build the release notes +
-        # sign them, and `index` promotes them from source into production.
-        # push-gz is the one upload left: the compressed .img the notes link,
-        # which has to be on S3 before the notes reference it.
         os) echo pre-check pull push-gz tag create-gh-release index sign ;;
         # Promote the debs CI published to alpha rather than rebuilding
         # trust from a CI run: what testers have been running is what ships.
@@ -756,10 +758,11 @@ detect_progress() {
     REMOTE_TAG_SHA=$(git -C "$REPO_ROOT" ls-remote --tags origin "refs/tags/${TAG}" "refs/tags/${TAG}^{}" | awk 'END { print $1 }')
     [ -z "$REMOTE_TAG_SHA" ] || DONE[tag]=1
 
-    if release=$(gh release view -R "$REPO" "$TAG" --json assets,isDraft,body 2>/dev/null); then
+    if release=$(gh release view -R "$REPO" "$TAG" --json assets,isDraft,isPrerelease,body 2>/dev/null); then
         assets=$(jq -r '.assets[].name' <<< "$release")
-        if jq -e --arg summary "$CHANGELOG_SUMMARY" '
+        if jq -e --arg summary "$CHANGELOG_SUMMARY" --argjson prerelease "${PRERELEASE:-0}" '
             .isDraft == false and
+            ($prerelease != 1 or .isPrerelease == true) and
             any(.assets[]; .name == "CHANGELOG.md") and
             (.body | contains($summary))
         ' <<< "$release" >/dev/null; then
@@ -778,7 +781,12 @@ detect_progress() {
                 fi
             done
             [ -z "$published" ] || DONE[push-gz]=1
-            [ -n "$(missing_registry_assets "$STARTOS_TARGET_REGISTRY")" ] || DONE[index]=1
+            if [ "${PRERELEASE:-}" != 1 ] && [ -z "$(missing_registry_assets "$STARTOS_TARGET_REGISTRY")" ]; then
+                load_registry_index "$STARTOS_TARGET_REGISTRY"
+                if [ "$(jq -r --arg v "$VERSION" '.versions[$v].gitHash // empty' <<< "$_INDEX_JSON")" = "$(tag_commit_sha)" ]; then
+                    DONE[index]=1
+                fi
+            fi
             ;;
         wrt)
             [ -n "$(missing_registry_assets "$STARTWRT_TARGET_REGISTRY")" ] || DONE[index]=1
@@ -838,25 +846,25 @@ cmd_pre_check() {
 
     # releases/latest can resolve to another product's release.
     if [ "$KIND" = os ]; then
-        local docs_src total good
+        local docs_tag="${PROJECT}/v${VERSION}" docs_src total good
         docs_src="$REPO_ROOT/projects/start-os/docs/src"
         if grep -rqF "releases/latest" "$docs_src" 2>/dev/null; then
-            >&2 echo "  ✗ start-os docs still link to releases/latest — pin to https://github.com/${REPO}/releases/tag/${TAG}"
+            >&2 echo "  ✗ start-os docs still link to releases/latest — pin to https://github.com/${REPO}/releases/tag/${docs_tag}"
             errors=1
         fi
         # `|| true`: zero grep matches must reach the ✗ report below, not trip
         # errexit via pipefail on the assignment.
         total=$(grep -rohF "${REPO}/releases/tag/" "$docs_src" 2>/dev/null | wc -l | tr -d ' ' || true)
-        good=$(grep -rohF "${REPO}/releases/tag/${TAG}" "$docs_src" 2>/dev/null | wc -l | tr -d ' ' || true)
+        good=$(grep -rohF "${REPO}/releases/tag/${docs_tag}" "$docs_src" 2>/dev/null | wc -l | tr -d ' ' || true)
         if [ "$good" -eq 0 ]; then
-            >&2 echo "  ✗ start-os docs link to no ${TAG} release — pin to https://github.com/${REPO}/releases/tag/${TAG}"
+            >&2 echo "  ✗ start-os docs link to no ${docs_tag} release — pin to https://github.com/${REPO}/releases/tag/${docs_tag}"
             errors=1
         elif [ "$total" -ne "$good" ]; then
-            >&2 echo "  ✗ start-os docs pin a stale release link (expected releases/tag/${TAG}):"
-            grep -rnF "${REPO}/releases/tag/" "$docs_src" 2>/dev/null | grep -vF "releases/tag/${TAG}" | sed 's/^/      /' >&2
+            >&2 echo "  ✗ start-os docs pin a stale release link (expected releases/tag/${docs_tag}):"
+            grep -rnF "${REPO}/releases/tag/" "$docs_src" 2>/dev/null | grep -vF "releases/tag/${docs_tag}" | sed 's/^/      /' >&2
             errors=1
         else
-            echo "  ✓ start-os docs pin the release link to ${TAG}"
+            echo "  ✓ start-os docs pin the release link to ${docs_tag}"
         fi
 
         # The crate manifest can't hold the OS version, so it carries a label
@@ -1159,7 +1167,7 @@ cmd_pull_alpha() {
     # while the debs (and the tag) ended up on alpha's older commit — binaries
     # from one commit, debs and tag from another, with the marker agreeing.
     alpha_collect || { rm -rf "${ALPHA_TMP:-}"; exit 1; }
-    resolve_alpha_commit "$ALPHA_COMMIT" || { rm -rf "$ALPHA_TMP"; exit 1; }
+    resolve_artifact_commit "$ALPHA_COMMIT" "$APT_ALPHA_SUITE" || { rm -rf "$ALPHA_TMP"; exit 1; }
     assert_metadata_matches_adopted || { rm -rf "$ALPHA_TMP"; exit 1; }
 
     # Marker and clear before either half is fetched, so a failure anywhere
@@ -1293,6 +1301,7 @@ cmd_pull() {
 }
 
 cmd_tag() {
+    if [ "$KIND" = os ]; then resolve_os_commit; fi
     assert_metadata_matches_adopted
     check_changelog_version
     local commit="${COMMIT:-HEAD}" tag_sha pulled_sha
@@ -1323,7 +1332,11 @@ cmd_create_gh_release() (
         enter_release_dir
         ensure_img_gz
     fi
-    local changelog_dir draft notes_ref="$TAG"
+    local changelog_dir draft notes_ref="$TAG" prerelease_args=() title_version="$VERSION"
+    if [ "${PRERELEASE:-}" = 1 ]; then
+        prerelease_args+=(--prerelease --latest=false)
+        title_version="${TAG#"${PROJECT}/v"}"
+    fi
     if [ -n "${UNCOMMITTED_NOTES:-}" ]; then notes_ref=; fi
     changelog_dir=$(mktemp -d)
     trap 'rm -rf "$changelog_dir"' EXIT
@@ -1331,10 +1344,10 @@ cmd_create_gh_release() (
     NOTES_REF="$notes_ref" release_body "$(cat "$changelog_dir/CHANGELOG.md")" > "$changelog_dir/notes.md"
     echo "Creating GitHub release ${TAG}..."
     if draft=$(gh release view -R "$REPO" "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
-        gh release edit -R "$REPO" "$TAG" --title "$(project_display_name "$PROJECT") v${VERSION}" --notes-file "$changelog_dir/notes.md"
+        gh release edit -R "$REPO" "$TAG" "${prerelease_args[@]}" --title "$(project_display_name "$PROJECT") v${title_version}" --notes-file "$changelog_dir/notes.md"
     else
         draft=true
-        gh release create -R "$REPO" "$TAG" --draft --verify-tag --title "$(project_display_name "$PROJECT") v${VERSION}" --notes-file "$changelog_dir/notes.md"
+        gh release create -R "$REPO" "$TAG" --draft --verify-tag "${prerelease_args[@]}" --title "$(project_display_name "$PROJECT") v${title_version}" --notes-file "$changelog_dir/notes.md"
     fi
     gh release upload -R "$REPO" "$TAG" "$changelog_dir/CHANGELOG.md" --clobber
     if [ "$draft" = true ]; then
@@ -1453,13 +1466,17 @@ cmd_index() {
     require_kind os wrt
     case "$KIND" in
         os)
-            # Promote the version (+ every iso/squashfs/img asset) from the source
-            # registry into production. This copies the index entries and re-signs
-            # the commitments with the developer key — the images stay on the
-            # shared S3 bucket, so nothing is re-uploaded.
+            _INDEX_REGISTRY=""
+            resolve_os_commit
+            local NOTES_REF="$(tag_commit_sha)"
             refresh_registry_notes "$STARTOS_SOURCE_REGISTRY"
+            load_registry_index "$STARTOS_TARGET_REGISTRY"
+            if [ "${PRERELEASE:-}" = 1 ] \
+                && jq -e --arg v "$VERSION" '.versions[$v]' <<< "$_INDEX_JSON" >/dev/null; then
+                start-cli --registry="$STARTOS_TARGET_REGISTRY" registry os version remove "$VERSION"
+            fi
             echo "Promoting OS ${VERSION}: ${STARTOS_SOURCE_REGISTRY} -> ${STARTOS_TARGET_REGISTRY} ..."
-            start-cli registry os promote --from "$STARTOS_SOURCE_REGISTRY" --to "$STARTOS_TARGET_REGISTRY" "$VERSION"
+            start-cli registry os promote --from "$STARTOS_SOURCE_REGISTRY" --to "$STARTOS_TARGET_REGISTRY" --expected-git-hash "$NOTES_REF" "$VERSION"
             ;;
         wrt)
             # Promote the version (+ its img/squashfs assets) from the source
@@ -1702,8 +1719,31 @@ cmd_body() {
     release_body "$changelog"
 }
 
-# Runs every step not already published. pre-check, its first step, finds them.
+select_prerelease_tag() {
+    local name number highest=0
+    git -C "$REPO_ROOT" fetch --tags origin
+    while read -r name; do
+        number="${name#"${PROJECT}/v${VERSION}-rc."}"
+        [[ "$number" =~ ^[1-9][0-9]*$ ]] || continue
+        if [ "$number" -gt "$highest" ]; then highest=$number; fi
+    done < <(git -C "$REPO_ROOT" for-each-ref --sort=-version:refname --format='%(refname:short)' "refs/tags/${PROJECT}/v${VERSION}-rc.*")
+    TAG="${PROJECT}/v${VERSION}-rc.$((highest + 1))"
+}
+
+cmd_pre_release() {
+    require_kind os
+    local PRERELEASE=1
+    local STARTOS_TARGET_REGISTRY="$STARTOS_SOURCE_REGISTRY"
+    local STARTOS_SOURCE_REGISTRY="$STARTOS_ALPHA_REGISTRY"
+    local TAG
+    resolve_os_commit
+    assert_metadata_matches_adopted
+    select_prerelease_tag
+    cmd_release
+}
+
 cmd_release() {
+    if [ "$KIND" = os ]; then resolve_os_commit; fi
     local step
     for step in $(release_steps); do
         if [ -n "${DONE[$step]:-}" ] && [ -z "${FORCE:-}" ]; then
@@ -1738,6 +1778,10 @@ crate's — or package.json for start-sdk); the git tag / GitHub release is
 <project>/v<version>.
 
 Subcommands:
+  pre-release        start-os only: promote alpha -> beta and publish a GitHub
+                     prerelease tagged start-os/v<VERSION>-rc.N. N increments
+                     on every invocation; the beta listing is replaced.
+                     The image's internal version stays unchanged.
   pre-check          Verify changelog fragments and their version severity,
                      and report which release steps are already published
                      (tag, GitHub release, uploads, registry, signatures).
@@ -1776,8 +1820,8 @@ Subcommands:
                      image; only the release-notes download link uses the .gz.
                      Run 'pull' (or 'pull-gha') first.
   index              Promote the version from the source (beta) registry into
-                     the production registry. (os: CI indexes alpha; alpha->beta
-                     is promoted manually. wrt: CI indexes into beta.)
+                     the production registry. (os: pre-release promotes alpha
+                     into beta. wrt: CI indexes into beta.)
   register           wrt only: register + index a CI build's images into the
                      source (beta) registry, pointing at their S3/CDN URLs.
                      Manual fallback — the CI deploy normally does this. Run
@@ -1820,7 +1864,9 @@ Environment variables:
                            (prompted for at publish time if unset)
 
 Registries are scoped per project (the OS and StartWRT promote source -> target):
-  STARTOS_SOURCE_REGISTRY   registry the OS release pulls/promotes from (default: beta)
+  STARTOS_ALPHA_REGISTRY    registry pre-release pulls/promotes from (default: alpha)
+  STARTOS_SOURCE_REGISTRY   registry release promotes from, and pre-release
+                            promotes into (default: beta)
   STARTOS_TARGET_REGISTRY   registry the OS release promotes into (default: production)
   STARTWRT_SOURCE_REGISTRY  registry CI (or `register`) indexes into and the
                             StartWRT release pulls/promotes from (default: beta)
@@ -1854,6 +1900,7 @@ fi
 TAG="${PROJECT}/v${VERSION}"
 
 case "$SUBCOMMAND" in
+    pre-release) cmd_pre_release ;;
     pre-check) cmd_pre_check ;;
     pull-gha) cmd_pull_gha ;;
     pull-alpha) cmd_pull_alpha ;;

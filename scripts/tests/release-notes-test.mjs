@@ -178,6 +178,10 @@ test('sparse deploy canonical versions and notes', t => {
       `projects/${project}/release-notes/${version}.pre-update.md`,
       PRE_UPDATE,
     )
+    write(
+      `projects/${project}/changelog/patch-security-internal.md`,
+      '---\nuser-facing: false\n---\n\n- Security correction.\n',
+    )
   }
   git('init', '-q')
   commit()
@@ -257,6 +261,10 @@ test('sparse deploy canonical versions and notes', t => {
     assert.deepEqual(JSON.parse(text(join(runnerTemp, 'release-notes.json'))), {
       releaseNotes: derived,
     })
+    if (project === 'start-os') {
+      assert.equal(text(join(runnerTemp, 'release-security')), 'true\n')
+      contains(deploy, '--git-hash "${{ github.sha }}" "${SECURITY_ARGS[@]}"')
+    }
     const fragmentPath = `checkout-${project}/projects/${project}/changelog/patch-fixed-feature.md`
     write(fragmentPath, '---\nuser-facing: invalid\n---\n\n- Invalid.\n')
     const invalid = compile()
@@ -1250,8 +1258,10 @@ start-cli() {
       .map(line => line.slice(10))
       .join('\n')
       .replaceAll('${{ env.REGISTRY }}', 'fixture-registry')
+      .replaceAll('${{ github.sha }}', 'fixture-sha')
     const runnerTemp = join(root, 'runner')
     write('runner/release-notes.json', JSON.stringify(expected))
+    write('runner/release-security', 'true\n')
     const result = run(
       'bash',
       [
@@ -1263,8 +1273,19 @@ start-cli() {
     )
     assert.equal(result.status, 0, result.stderr)
     const args = text(capture).split('\0').slice(0, -1)
-    assert.deepEqual(JSON.parse(args[7]), expected.releaseNotes)
-    assert.equal(args.length, 9)
+    const notesIndex = workflow === 'startos-iso.yaml' ? 10 : 7
+    assert.deepEqual(JSON.parse(args[notesIndex]), expected.releaseNotes)
+    assert.equal(args.length, notesIndex + 2)
+    if (workflow === 'startos-iso.yaml')
+      assert.deepEqual(args.slice(5, 8), [
+        '--git-hash',
+        'fixture-sha',
+        '--security',
+      ])
+    else {
+      excludes(args.join(' '), '--git-hash')
+      excludes(args.join(' '), '--security')
+    }
   }
 })
 

@@ -88,8 +88,6 @@ export const ENGLISH: Record<string, number> = {
   'Installed services': 91, // as in, software services installed on this computer
   'Diagnostics for the Tor daemon on this server': 92,
   'Copy fingerprint': 93, // as in the fingerprint of a root certificate authority
-  'Waiting': 94,
-  'Waiting on': 95, // as in "awaiting"
   'Add public domain': 96,
   'Removing': 97,
   'Unsaved changes': 100,
@@ -220,7 +218,6 @@ export const ENGLISH: Record<string, number> = {
   'Soft uninstall': 232, // as in, uninstall the service but preserve its data
   'View full message': 233,
   'Service error': 234,
-  'Awaiting result': 235,
   'Starting': 236,
   'Success': 237,
   'Health Checks': 238,

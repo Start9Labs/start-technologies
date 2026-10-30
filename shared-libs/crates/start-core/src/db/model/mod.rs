@@ -42,9 +42,9 @@ impl Database {
                 sessions: Sessions::default(),
                 ssh_privkey: Pem(account.ssh_key.clone()),
                 ssh_pubkeys: SshKeys::new(),
-                // Empty: `os_bindings` claims the admin UI's 80/443 as a privileged bind.
                 available_ports: AvailablePorts::new(),
                 notifications: Notifications::new(),
+                os_security_notifications: BTreeMap::new(),
                 push: Default::default(),
                 cifs: CifsTargets::new(),
                 package_stores: BTreeMap::new(),

@@ -5477,6 +5477,7 @@ name = "patch-db"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "fd-lock-rs",
  "futures",
  "imbl",
@@ -5490,6 +5491,7 @@ dependencies = [
  "rand 0.9.5",
  "serde",
  "serde_cbor_2",
+ "serde_json",
  "thiserror 2.0.21",
  "tokio",
  "tracing",

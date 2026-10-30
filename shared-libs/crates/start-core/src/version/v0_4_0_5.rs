@@ -33,7 +33,7 @@ impl VersionT for Version {
         &V0_3_0_COMPAT
     }
     fn migration_revision(self) -> usize {
-        2
+        3
     }
     fn up(self, db: &mut Value, _: ()) -> Result<Value, Error> {
         if let Some(keys) = field(db, &["private", "sessionPubkeys"]) {
@@ -44,6 +44,11 @@ impl VersionT for Version {
                 TrustedOsUpdateSigners,
             >(keys.clone())?)?)?;
         }
+        db["private"]
+            .as_object_mut()
+            .or_not_found("private")?
+            .entry("osSecurityNotifications".into())
+            .or_insert_with(|| imbl_value::json!({}));
         Ok(Value::Null)
     }
     async fn post_up(self, _ctx: &RpcContext, _input: Value) -> Result<(), Error> {
@@ -51,6 +56,10 @@ impl VersionT for Version {
         Ok(())
     }
     fn down(self, db: &mut Value) -> Result<(), Error> {
+        db["private"]
+            .as_object_mut()
+            .or_not_found("private")?
+            .remove("osSecurityNotifications");
         for path in [
             &["private", "sessionPubkeys"][..],
             &["public", "serverInfo", "trustedOsUpdateSigners"][..],
@@ -161,12 +170,19 @@ mod tests {
         for (revision, key_id, expected_todos) in [
             (0, key.to_string(), catch_up_todos.clone()),
             (1, key.to_string(), catch_up_todos.clone()),
-            (1, canonical.to_string(), catch_up_todos),
-            (2, canonical.to_string(), json!({ "0.4.1": null })),
+            (1, canonical.to_string(), catch_up_todos.clone()),
+            (2, canonical.to_string(), catch_up_todos),
+            (3, canonical.to_string(), json!({ "0.4.1": null })),
         ] {
             let mut fixture =
                 to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
                     .unwrap();
+            if revision < 3 {
+                fixture["private"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("osSecurityNotifications");
+            }
             fixture["public"]["serverInfo"]["latestMigrationRevision"] = json!(revision);
             fixture["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
             fixture["public"]["serverInfo"]["trustedOsUpdateSigners"] =
@@ -186,6 +202,7 @@ mod tests {
                 migrated["public"]["serverInfo"]["latestMigrationRevision"],
                 json!(Current::default().migration_revision())
             );
+            assert_eq!(migrated["private"]["osSecurityNotifications"], json!({}));
             assert_eq!(
                 migrated["public"]["serverInfo"]["postInitMigrationTodos"],
                 expected_todos
@@ -222,8 +239,24 @@ mod tests {
     }
 
     #[test]
+    fn security_notification_migration_preserves_delivery_history() {
+        let mut db = imbl_value::json!({ "private": {} });
+        Version.up(&mut db, ()).unwrap();
+        assert_eq!(
+            db["private"]["osSecurityNotifications"],
+            imbl_value::json!({})
+        );
+        db["private"]["osSecurityNotifications"] = imbl_value::json!({
+            "https://registry.test/": { "0.4.0.6:0": "published-build" }
+        });
+        let before = db.clone();
+        Version.up(&mut db, ()).unwrap();
+        assert_eq!(db, before);
+    }
+
+    #[test]
     fn combined_migration_advances_the_published_revision() {
-        assert_eq!(Version.migration_revision(), 2);
+        assert_eq!(Version.migration_revision(), 3);
     }
 
     #[tokio::test]
