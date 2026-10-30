@@ -5885,6 +5885,14 @@
             "headline": { "type": "string" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
             "sourceVersion": { "type": "string" },
+            "gitHash": {
+              "description": "Commit that produced the OS image, if recorded at publication.",
+              "anyOf": [{ "$ref": "#/$defs/GitHash" }, { "type": "null" }]
+            },
+            "security": {
+              "description": "Whether the release includes security fixes.",
+              "type": "boolean"
+            },
             "authorized": {
               "type": "array",
               "items": { "$ref": "#/$defs/Guid" }
@@ -5951,6 +5959,8 @@
             "headline",
             "releaseNotes",
             "sourceVersion",
+            "gitHash",
+            "security",
             "authorized",
             "iso",
             "squashfs",
@@ -7152,6 +7162,14 @@
             "headline": { "type": "string" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
             "sourceVersion": { "type": "string" },
+            "gitHash": {
+              "description": "Commit that produced the OS image, if recorded at publication.",
+              "anyOf": [{ "$ref": "#/$defs/GitHash" }, { "type": "null" }]
+            },
+            "security": {
+              "description": "Whether the release includes security fixes.",
+              "type": "boolean"
+            },
             "authorized": {
               "type": "array",
               "items": { "$ref": "#/$defs/Guid" }
@@ -7218,6 +7236,8 @@
             "headline",
             "releaseNotes",
             "sourceVersion",
+            "gitHash",
+            "security",
             "authorized",
             "iso",
             "squashfs",
@@ -7235,6 +7255,7 @@
             }
           ]
         },
+        "GitHash": { "type": "string" },
         "Guid": { "type": "string" },
         "Blake3Commitment": {
           "type": "object",
@@ -7279,7 +7300,14 @@
             "version": { "type": "string" },
             "headline": { "type": "string" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
-            "sourceVersion": { "type": "string" }
+            "sourceVersion": { "type": "string" },
+            "gitHash": {
+              "anyOf": [{ "$ref": "#/$defs/GitHash" }, { "type": "null" }]
+            },
+            "expectedGitHash": {
+              "anyOf": [{ "$ref": "#/$defs/GitHash" }, { "type": "null" }]
+            },
+            "security": { "type": "boolean" }
           },
           "required": ["version", "headline", "releaseNotes", "sourceVersion"],
           "additionalProperties": true
@@ -7293,7 +7321,8 @@
               "additionalProperties": { "type": "string" }
             }
           ]
-        }
+        },
+        "GitHash": { "type": "string" }
       },
       "type": "object"
     }
@@ -7355,6 +7384,14 @@
             "headline": { "type": "string" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
             "sourceVersion": { "type": "string" },
+            "gitHash": {
+              "description": "Commit that produced the OS image, if recorded at publication.",
+              "anyOf": [{ "$ref": "#/$defs/GitHash" }, { "type": "null" }]
+            },
+            "security": {
+              "description": "Whether the release includes security fixes.",
+              "type": "boolean"
+            },
             "authorized": {
               "type": "array",
               "items": { "$ref": "#/$defs/Guid" }
@@ -7421,6 +7458,8 @@
             "headline",
             "releaseNotes",
             "sourceVersion",
+            "gitHash",
+            "security",
             "authorized",
             "iso",
             "squashfs",
@@ -7438,6 +7477,7 @@
             }
           ]
         },
+        "GitHash": { "type": "string" },
         "Guid": { "type": "string" },
         "Blake3Commitment": {
           "type": "object",
