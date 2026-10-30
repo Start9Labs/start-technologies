@@ -542,6 +542,22 @@ export const FormatDiskParams: z.ZodObject<{
 }).meta({
   id: 'FormatDiskParams',
 })
+
+/**
+ * Unauthenticated discovery hints; opening the store validates its actual state.
+ */
+export const FormatStatus: z.ZodEnum<{
+  legacy: 'legacy'
+  current: 'current'
+  interrupted: 'interrupted'
+  unknown: 'unknown'
+}> = /* @__PURE__ */ z
+  .enum(['legacy', 'current', 'interrupted', 'unknown'])
+  .meta({
+    id: 'FormatStatus',
+    description:
+      'Unauthenticated discovery hints; opening the store validates its actual state.',
+  })
 export const ForwardTarget: z.ZodObject<{
   target: z.ZodString
   target_prefix: z.ZodInt
@@ -3212,10 +3228,15 @@ export const StartOsRecoveryInfo: z.ZodObject<{
   hostname: typeof ServerHostname
   version: z.ZodString
   timestamp: z.ZodString
+  formatStatus: z.ZodCodec<
+    z.ZodOptional<typeof FormatStatus>,
+    typeof FormatStatus
+  >
 }> = /* @__PURE__ */ object({
   hostname: ServerHostname,
   version: z.string(),
   timestamp: z.string(),
+  formatStatus: wire(FormatStatus.optional(), FormatStatus),
 }).meta({
   id: 'StartOsRecoveryInfo',
   description:
@@ -3428,6 +3449,23 @@ export const CompatibleAlpnInfo: z.ZodUnion<
   readonly [z.ZodArray<typeof MaybeUtf8String>, typeof LegacyAlpnInfo]
 > = /* @__PURE__ */ z.union([z.array(MaybeUtf8String), LegacyAlpnInfo]).meta({
   id: 'CompatibleAlpnInfo',
+})
+
+/**
+ * Selects an existing server backup and its unlocking credential.
+ */
+export const ConvertParams: z.ZodObject<{
+  targetId: typeof BackupTargetId
+  serverId: z.ZodString
+  password: typeof PasswordType
+}> = /* @__PURE__ */ object({
+  targetId: BackupTargetId,
+  serverId: z.string(),
+  password: PasswordType,
+}).meta({
+  id: 'ConvertParams',
+  description:
+    'Selects an existing server backup and its unlocking credential.',
 })
 export const DependencyMetadata: z.ZodIntersection<
   z.ZodObject<{
@@ -4625,6 +4663,10 @@ export const Api = {
                   _RETURN: /* @__PURE__ */ z.record(z.string(), BackupTarget),
                 },
               },
+            },
+            convert: {
+              _PARAMS: /* @__PURE__ */ ConvertParams,
+              _RETURN: /* @__PURE__ */ z.null(),
             },
             'delete-legacy': {
               _PARAMS: /* @__PURE__ */ DeleteLegacyParams,

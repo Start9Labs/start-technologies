@@ -8,13 +8,13 @@ use log::warn;
 
 use crate::atomic_file::AtomicFile;
 use crate::error::{BkfsErrorKind, BkfsResult};
-use crate::legacy;
 use crate::objects::{Inventory, ObjectVersion};
 use crate::seglog::{self, Frames, Location, Record, SegmentWriter};
 use crate::serde::{data_config, decode};
 use crate::state::{Counters, State};
 use crate::superblock::Constants;
 use crate::vault::{self, AuthenticationTag, Binding, EccParams};
+use crate::{legacy, ConversionPhase, ConversionProgress};
 
 pub(crate) struct UpgradePlain {
     pub plaintext: Vec<u8>,
@@ -44,7 +44,29 @@ pub(crate) fn open_for_upgrade(
     })
 }
 
-fn upgraded_blob(blob: &[u8], key: &Key, binding: Binding) -> BkfsResult<Option<Vec<u8>>> {
+#[derive(Default)]
+struct Unreadable {
+    objects: u64,
+    records: u64,
+}
+
+impl Drop for Unreadable {
+    fn drop(&mut self) {
+        if self.objects > 0 || self.records > 0 {
+            warn!(
+                "conversion encountered {} unreadable objects and {} unreadable records",
+                self.objects, self.records
+            );
+        }
+    }
+}
+
+fn upgraded_blob(
+    blob: &[u8],
+    key: &Key,
+    binding: Binding,
+    unreadable: &mut Unreadable,
+) -> BkfsResult<Option<Vec<u8>>> {
     match open_for_upgrade(blob, key, binding) {
         Ok(opened) if opened.current_tag.is_some() => Ok(None),
         Ok(opened) => Ok(Some(
@@ -60,7 +82,7 @@ fn upgraded_blob(blob: &[u8], key: &Key, binding: Binding) -> BkfsResult<Option<
             .bytes,
         )),
         Err(error) if matches!(error.kind, BkfsErrorKind::BadChecksum) => {
-            warn!("leaving unreadable blob unmigrated");
+            unreadable.objects += 1;
             Ok(None)
         }
         Err(error) => Err(error),
@@ -72,6 +94,7 @@ fn migrate_object(
     destination: &Path,
     key: &Key,
     binding: Binding,
+    unreadable: &mut Unreadable,
 ) -> BkfsResult<()> {
     match fs::read(destination) {
         Ok(bytes) if vault::open_bound(&bytes, key, binding).is_ok() => return Ok(()),
@@ -84,7 +107,7 @@ fn migrate_object(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error.into()),
     };
-    let upgraded = upgraded_blob(&bytes, key, binding)?;
+    let upgraded = upgraded_blob(&bytes, key, binding, unreadable)?;
     let mut file = AtomicFile::create_buffered(destination.to_owned())?;
     file.write_all(upgraded.as_deref().unwrap_or(&bytes))?;
     file.save_fast()
@@ -103,17 +126,38 @@ fn retire_sources(backing: &File, sources: &mut Vec<PathBuf>) -> BkfsResult<()> 
 }
 
 /// Requires the exclusive store lock and authenticated pending marker.
-pub(crate) fn reseal_store(data: &Path, key: &Key, constants: Constants) -> BkfsResult<()> {
+pub(crate) fn reseal_store(
+    data: &Path,
+    key: &Key,
+    constants: Constants,
+    report: &mut dyn FnMut(ConversionProgress) -> BkfsResult<()>,
+) -> BkfsResult<()> {
     let dir = data.join("segments");
     fs::create_dir_all(&dir)?;
     if dir.join("state").try_exists()? {
+        report(ConversionProgress {
+            phase: ConversionPhase::Publishing,
+            done: 0,
+            total: None,
+        })?;
         State::open(&dir, key)?;
         return Ok(());
     }
     let mut source = legacy::Source::load(data, key)?;
+    let mut unreadable = Unreadable::default();
     let mut locations = HashMap::new();
     let mut stable = HashMap::new();
-    for (segment, _) in seglog::list_segments(&dir)? {
+    let segments = seglog::list_segments(&dir)?;
+    let total = segments
+        .iter()
+        .fold(0u64, |total, (_, size)| total.saturating_add(*size));
+    let mut done = 0;
+    report(ConversionProgress {
+        phase: ConversionPhase::Records,
+        done,
+        total: Some(total),
+    })?;
+    for (segment, size) in segments {
         let path = seglog::segment_path(&dir, segment);
         let bytes = fs::read(&path)?;
         let mut rewritten = bytes.clone();
@@ -132,7 +176,7 @@ pub(crate) fn reseal_store(data: &Path, key: &Key, constants: Constants) -> Bkfs
                     let record: Record = match decode(&opened.plaintext, data_config()) {
                         Ok(record) => record,
                         Err(_) => {
-                            warn!("leaving undecodable log record unmigrated");
+                            unreadable.records += 1;
                             locations.insert((segment, frame.offset as u64), location);
                             continue;
                         }
@@ -197,7 +241,7 @@ pub(crate) fn reseal_store(data: &Path, key: &Key, constants: Constants) -> Bkfs
                     }
                 }
                 Err(error) if matches!(error.kind, BkfsErrorKind::BadChecksum) => {
-                    warn!("leaving unreadable log record unmigrated")
+                    unreadable.records += 1;
                 }
                 Err(error) => return Err(error),
             }
@@ -208,13 +252,36 @@ pub(crate) fn reseal_store(data: &Path, key: &Key, constants: Constants) -> Bkfs
             file.write_all(&rewritten)?;
             file.save_durable()?;
         }
+        done = done.saturating_add(size);
+        report(ConversionProgress {
+            phase: ConversionPhase::Records,
+            done,
+            total: Some(total),
+        })?;
     }
     let mut roots = source.roots(&locations);
-    let inventory = Inventory::load(data)?;
+    report(ConversionProgress {
+        phase: ConversionPhase::ScanningObjects,
+        done: 0,
+        total: None,
+    })?;
+    let inventory = Inventory::load_with_progress(data, |done| {
+        report(ConversionProgress {
+            phase: ConversionPhase::ScanningObjects,
+            done,
+            total: None,
+        })
+    })?;
+    let total = inventory.legacy_ids().count() as u64;
+    report(ConversionProgress {
+        phase: ConversionPhase::Objects,
+        done: 0,
+        total: Some(total),
+    })?;
     let mut writer = None;
     let backing = File::open(data)?;
     let mut retired = Vec::new();
-    for id in inventory.legacy_ids() {
+    for (index, id) in inventory.legacy_ids().enumerate() {
         let token = vault::migration_version(key, id)?;
         let version = ObjectVersion::Version(token);
         let original = id.path(data, None).unwrap();
@@ -224,6 +291,7 @@ pub(crate) fn reseal_store(data: &Path, key: &Key, constants: Constants) -> Bkfs
                 &id.path(data, Some(version)).unwrap(),
                 key,
                 Binding::Object { id, version: token },
+                &mut unreadable,
             )?;
             if !stable.contains_key(&id) {
                 let record = seglog::seal_object(key, constants.ecc(), id, version)?;
@@ -250,8 +318,18 @@ pub(crate) fn reseal_store(data: &Path, key: &Key, constants: Constants) -> Bkfs
         if retired.len() >= crate::util::sync_batch() {
             retire_sources(&backing, &mut retired)?;
         }
+        report(ConversionProgress {
+            phase: ConversionPhase::Objects,
+            done: index as u64 + 1,
+            total: Some(total),
+        })?;
     }
     retire_sources(&backing, &mut retired)?;
+    report(ConversionProgress {
+        phase: ConversionPhase::Publishing,
+        done: 0,
+        total: None,
+    })?;
     for references in source.storage.values() {
         references.visit_objects(key, |id| {
             if let Some(&location) = stable.get(&id) {

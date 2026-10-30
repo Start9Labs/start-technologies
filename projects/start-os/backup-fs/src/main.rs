@@ -1,9 +1,11 @@
 use std::ffi::OsString;
-use std::io::{self, ErrorKind, Read};
+use std::io::{self, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
+use backup_fs_protocol::{CONVERT_COMMAND, INSPECT_COMMAND, MOUNT_COMMAND};
 use backupfs::error::BkfsErrorKind;
-use backupfs::{BackupFS, BackupFSOptions};
+use backupfs::{BackupFS, BackupFSOptions, ConversionPhase};
 use clap::{CommandFactory, FromArgMatches, Parser};
 use fuser::{Config, MountOption, SessionACL};
 use log::{error, info};
@@ -15,6 +17,11 @@ struct FilesystemOptions {
     backup_opts: BackupFSOptions,
     #[arg(long, help = "Read the password from a file instead of standard input")]
     password_file: Option<PathBuf>,
+}
+
+#[derive(clap::Parser)]
+struct InspectOptions {
+    data_dir: PathBuf,
 }
 
 #[derive(clap::Parser)]
@@ -135,24 +142,56 @@ fn main() {
         });
     }
     let mut app = clap::command!()
-        .subcommand(MountOptions::command().name("mount"))
+        .subcommand(MountOptions::command().name(MOUNT_COMMAND))
         .subcommand(FilesystemOptions::command().name("fsck"))
-        .subcommand(FilesystemOptions::command().name("convert"))
+        .subcommand(FilesystemOptions::command().name(CONVERT_COMMAND))
+        .subcommand(InspectOptions::command().name(INSPECT_COMMAND))
         .subcommand(ChangePasswordOptions::command().name("change-password"))
         .subcommand(SnapshotOptions::command().name("snapshot"));
     let matches = app.clone().get_matches();
     match matches.subcommand() {
-        Some(("mount", sub_m)) => mount(MountOptions::from_arg_matches(sub_m).unwrap()),
+        Some((MOUNT_COMMAND, sub_m)) => mount(MountOptions::from_arg_matches(sub_m).unwrap()),
         Some(("fsck", sub_m)) => fsck(FilesystemOptions::from_arg_matches(sub_m).unwrap()),
-        Some(("convert", sub_m)) => checked(BackupFS::convert(read_options(
-            FilesystemOptions::from_arg_matches(sub_m).unwrap(),
-        ))),
+        Some((CONVERT_COMMAND, sub_m)) => {
+            convert(FilesystemOptions::from_arg_matches(sub_m).unwrap())
+        }
+        Some((INSPECT_COMMAND, sub_m)) => {
+            let options = InspectOptions::from_arg_matches(sub_m).unwrap();
+            let status = checked(backupfs::inspect(&options.data_dir));
+            serde_json::to_writer(io::stdout().lock(), &status).unwrap();
+            println!();
+        }
         Some(("change-password", sub_m)) => {
             change_password(ChangePasswordOptions::from_arg_matches(sub_m).unwrap())
         }
         Some(("snapshot", sub_m)) => snapshots(SnapshotOptions::from_arg_matches(sub_m).unwrap()),
         _ => app.print_long_help().unwrap(),
     }
+}
+
+fn convert(options: FilesystemOptions) {
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    let mut last = None;
+    checked(BackupFS::convert_with_progress(
+        read_options(options),
+        |event| {
+            let now = Instant::now();
+            let boundary =
+                event.phase == ConversionPhase::Complete || event.total == Some(event.done);
+            if boundary
+                || last.is_none_or(|(phase, time): (ConversionPhase, Instant)| {
+                    phase != event.phase || now.duration_since(time) >= Duration::from_millis(250)
+                })
+            {
+                serde_json::to_writer(&mut output, &event).map_err(io::Error::other)?;
+                writeln!(&mut output)?;
+                output.flush()?;
+                last = Some((event.phase, now));
+            }
+            Ok(())
+        },
+    ));
 }
 
 fn read_password(mut input: impl Read) -> io::Result<Zeroizing<String>> {

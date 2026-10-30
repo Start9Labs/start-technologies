@@ -108,7 +108,7 @@ const OFF_FORMAT_VERSION: usize = 5;
 const OFF_KDF_ALGO: usize = 9;
 const OFF_KDF_ROUNDS: usize = 10;
 const OFF_SALT: usize = 14;
-const ENVELOPE_LEN: usize = OFF_SALT + PBKDF2_SALT_LEN;
+pub(crate) const ENVELOPE_LEN: usize = OFF_SALT + PBKDF2_SALT_LEN;
 
 // ── creation-time defaults / env snapshot ─────────────────────────────
 // Defaults for the policy constants, read from the environment ONCE at
@@ -406,7 +406,7 @@ impl Superblock {
             migration_pending: true,
         };
         let mut sb = sb;
-        sb.upgrade(primary, password, false)?;
+        sb.upgrade_with_progress(primary, password, &mut |_| Ok(()))?;
         Ok(sb)
     }
 
@@ -488,13 +488,52 @@ impl Superblock {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn convert(primary: &Path, password: &str) -> BkfsResult<Self> {
+        Self::convert_with_progress(primary, password, &mut |_| Ok(()))
+    }
+
+    pub(crate) fn convert_with_progress(
+        primary: &Path,
+        password: &str,
+        report: &mut dyn FnMut(crate::ConversionProgress) -> BkfsResult<()>,
+    ) -> BkfsResult<Self> {
+        use std::io::Write;
+
+        use crate::{ConversionPhase, ConversionProgress};
+        report(ConversionProgress {
+            phase: ConversionPhase::Inspecting,
+            done: 0,
+            total: None,
+        })?;
         let mut sb = Self::load(primary, password, false)?;
-        sb.upgrade(primary, password, false)?;
+        let data = primary.parent().unwrap();
+        let hint = data.join(crate::conversion::PENDING_HINT);
+        if sb.format_version < FORMAT_VERSION || sb.migration_pending {
+            let mut file = AtomicFile::create_buffered(hint.clone())?;
+            file.write_all(b"conversion requested\n")?;
+            file.save_durable()?;
+            sb.upgrade_with_progress(primary, password, report)?;
+        }
+        match std::fs::remove_file(hint) {
+            Ok(()) => File::open(data)?.sync_all()?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        report(ConversionProgress {
+            phase: ConversionPhase::Complete,
+            done: 0,
+            total: None,
+        })?;
         Ok(sb)
     }
 
-    fn upgrade(&mut self, primary: &Path, password: &str, readonly: bool) -> BkfsResult<()> {
+    fn upgrade_with_progress(
+        &mut self,
+        primary: &Path,
+        password: &str,
+        report: &mut dyn FnMut(crate::ConversionProgress) -> BkfsResult<()>,
+    ) -> BkfsResult<()> {
         if self.format_version >= FORMAT_VERSION && !self.migration_pending {
             return Ok(());
         }
@@ -509,11 +548,6 @@ impl Superblock {
                 "authenticated current-version state exists with an older superblock",
             ));
         }
-        if readonly {
-            return Err(BkfsError::unsupported(
-                "authenticated vault upgrade requires a writable open; retry without read-only mode",
-            ));
-        }
         if self.format_version < FORMAT_VERSION {
             self.format_version = FORMAT_VERSION;
             self.migration_pending = true;
@@ -524,7 +558,12 @@ impl Superblock {
         }
         // All replicas must durably reject old binaries before any data changes.
         self.persist(primary, password)?;
-        crate::migration::reseal_store(primary.parent().unwrap(), &self.key, self.constants)?;
+        crate::migration::reseal_store(
+            primary.parent().unwrap(),
+            &self.key,
+            self.constants,
+            report,
+        )?;
         self.migration_pending = false;
         self.generation = self
             .generation
@@ -600,7 +639,7 @@ impl Superblock {
     }
 }
 
-fn envelope_format(raw: &[u8]) -> BkfsResult<u32> {
+pub(crate) fn envelope_format(raw: &[u8]) -> BkfsResult<u32> {
     if raw.len() < ENVELOPE_LEN || raw[..4] != SB_MAGIC {
         return Err(BkfsError::unsupported(
             "not a backup-fs superblock (an older unversioned store, or a corrupt/truncated header)",

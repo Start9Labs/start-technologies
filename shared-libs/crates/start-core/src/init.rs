@@ -433,6 +433,7 @@ pub async fn init(
     let status_info = ServerStatus {
         update_progress: None,
         backup_progress: None,
+        backup_conversions: Default::default(),
         shutting_down: false,
         restarting: false,
         restart: None,

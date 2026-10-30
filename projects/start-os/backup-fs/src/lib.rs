@@ -34,6 +34,10 @@ mod aligned_io;
 mod atomic_file;
 mod blockstore;
 mod compress;
+mod conversion;
+
+pub use backup_fs_protocol::{ConversionPhase, ConversionProgress, FormatStatus};
+pub use conversion::inspect;
 #[cfg(test)]
 mod content_latency_tests;
 mod contents;
@@ -135,13 +139,26 @@ fn lock_store(data_dir: &Path) -> BkfsResult<FdLock<File>> {
 
 impl BackupFS {
     /// Converts a closed store while retaining its exclusive lock.
-    pub fn convert(mut config: BackupFSOptions) -> BkfsResult<()> {
+    pub fn convert(config: BackupFSOptions) -> BkfsResult<()> {
+        Self::convert_with_progress(config, |_| Ok(()))
+    }
+
+    /// Reports attempt-local conversion work while retaining exclusive access.
+    pub fn convert_with_progress(
+        mut config: BackupFSOptions,
+        mut report: impl FnMut(ConversionProgress) -> BkfsResult<()>,
+    ) -> BkfsResult<()> {
         let password = zeroize::Zeroizing::new(std::mem::take(&mut config.password));
         if config.readonly {
             return BkfsResult::errno_notrace(libc::EROFS);
         }
         let _lock = lock_store(&config.data_dir)?;
-        superblock::Superblock::convert(&config.data_dir.join("superblock"), &password).map(|_| ())
+        superblock::Superblock::convert_with_progress(
+            &config.data_dir.join("superblock"),
+            &password,
+            &mut report,
+        )
+        .map(|_| ())
     }
 
     pub fn new(config: BackupFSOptions) -> BkfsResult<BackupFS> {

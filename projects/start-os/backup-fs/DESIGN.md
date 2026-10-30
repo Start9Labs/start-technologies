@@ -94,6 +94,24 @@ Filesystem I/O failures retain the pending marker. Migration cannot prove the
 provenance of legacy data or revoke previously captured weak key wraps and the
 unchanged credentials they protect.
 
+## Conversion discovery and progress
+
+`startos-backup-fs inspect` reads bounded superblock prefixes and the plaintext
+`conversion.pending` hint without a password or mutation. These observations are
+not authenticated. Explicit conversion creates the hint after validating the
+credential, then removes it after publishing the completed superblock. A stale
+hint does not block a valid store or authorize conversion; only the authenticated
+pending marker governs whether an ordinary mount can open it.
+
+The `backup-fs-protocol` crate owns discovery and newline-delimited JSON progress
+messages for the helper and core. Phases cover inspection, record conversion,
+object inventory, object conversion and final publication. Record progress counts
+bytes; object progress counts steps. A resumed attempt inventories its remaining
+objects rather than reusing an old percentage. `Complete` follows durable
+publication and hint cleanup. CLI progress output is limited to four updates per
+second plus phase/completion boundaries; core rejects progress lines over 4 KiB.
+Corruption warnings are aggregated once per attempt instead of once per object.
+
 ## Blocks, packing, and inode metadata
 
 Regular content uses three tiers: up to 4 KiB inline in its inode record, up to

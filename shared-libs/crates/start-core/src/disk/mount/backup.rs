@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use color_eyre::eyre::eyre;
@@ -23,6 +23,33 @@ use crate::util::crypto::{unwrap_backup_key, wrap_backup_key};
 use crate::util::io::AtomicFile;
 use crate::util::serde::IoFormat;
 
+fn backup_directory(root: &Path, server_id: &str) -> Result<PathBuf, Error> {
+    let mut components = Path::new(server_id).components();
+    if !matches!(components.next(), Some(Component::Normal(name)) if name == Path::new(server_id).as_os_str())
+        || components.next().is_some()
+    {
+        return Err(Error::new(
+            eyre!("{}", t!("disk.mount.backup.invalid-server-id")),
+            crate::ErrorKind::InvalidRequest,
+        ));
+    }
+    Ok(root.join(BACKUP_DIR_NAME).join(server_id))
+}
+
+fn existing_key(
+    metadata: &BackupUnencryptedMetadata,
+    password: &str,
+) -> Result<(String, bool), Error> {
+    let (Some(hash), Some(wrapped)) = (&metadata.password_hash, &metadata.wrapped_key) else {
+        return Err(Error::new(
+            eyre!("{}", t!("disk.mount.backup.invalid-key-metadata")),
+            crate::ErrorKind::Backup,
+        ));
+    };
+    check_password(hash, password)?;
+    unwrap_backup_key(wrapped, password)
+}
+
 #[derive(Clone)]
 pub struct BackupMountGuard<G: GenericMountGuard> {
     backup_disk_mount_guard: Option<G>,
@@ -40,7 +67,7 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
         server_id: &str,
         password: &str,
     ) -> Result<(BackupUnencryptedMetadata, String), Error> {
-        let backup_dir = backup_disk_path.join(BACKUP_DIR_NAME).join(server_id);
+        let backup_dir = backup_directory(backup_disk_path, server_id)?;
         let _key_initialization =
             crate::util::FileLock::new(backup_dir.join(".key.lock"), true).await?;
         let unencrypted_metadata_path = backup_dir.join("unencrypted-metadata.json");
@@ -62,10 +89,7 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
             unencrypted_metadata.password_hash.as_ref(),
             unencrypted_metadata.wrapped_key.as_ref(),
         ) {
-            (Some(hash), Some(wrapped_key)) => {
-                check_password(hash, password)?;
-                unwrap_backup_key(wrapped_key, password)?
-            }
+            (Some(_), Some(_)) => existing_key(&unencrypted_metadata, password)?,
             (None, None) => {
                 if tokio::fs::try_exists(&crypt_path).await? {
                     crate::backup::trash::move_to_trash(backup_disk_path, &crypt_path).await?;
@@ -78,12 +102,7 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
                     true,
                 )
             }
-            _ => {
-                return Err(Error::new(
-                    eyre!(t!("disk.mount.backup.invalid-key-metadata")),
-                    crate::ErrorKind::Backup,
-                ));
-            }
+            _ => existing_key(&unencrypted_metadata, password)?,
         };
         let new_store = unencrypted_metadata.password_hash.is_none();
         if new_store {
@@ -114,10 +133,8 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
         server_id: &str,
         password: &str,
     ) -> Result<(), Error> {
-        let unencrypted_metadata_path = backup_disk_path
-            .join(BACKUP_DIR_NAME)
-            .join(server_id)
-            .join("unencrypted-metadata.json");
+        let unencrypted_metadata_path =
+            backup_directory(backup_disk_path, server_id)?.join("unencrypted-metadata.json");
         let bytes = match tokio::fs::read(&unencrypted_metadata_path).await {
             Ok(bytes) => bytes,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -138,6 +155,33 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
     }
 
     #[instrument(skip_all)]
+    pub async fn prepare_conversion(
+        backup_disk_path: &Path,
+        server_id: &str,
+        password: &str,
+    ) -> Result<(PathBuf, Zeroizing<String>), Error> {
+        let directory = backup_directory(backup_disk_path, server_id)?;
+        let data = directory.join("crypt");
+        if !tokio::fs::try_exists(&data).await? {
+            return Err(Error::new(
+                eyre!("{}", t!("backup.conversion.no-store")),
+                crate::ErrorKind::NotFound,
+            ));
+        }
+        let _key_lock = crate::util::FileLock::new(directory.join(".key.lock"), true).await?;
+        let path = directory.join("unencrypted-metadata.json");
+        let mut metadata: BackupUnencryptedMetadata =
+            IoFormat::Json.from_slice(&tokio::fs::read(&path).await?)?;
+        let (key, needs_wrap) = existing_key(&metadata, password)?;
+        let key = Zeroizing::new(key);
+        if needs_wrap {
+            metadata.wrapped_key = Some(wrap_backup_key(&key, password)?);
+            save_unencrypted_metadata(&path, &metadata).await?;
+        }
+        Ok((data, key))
+    }
+
+    #[instrument(skip_all)]
     pub async fn mount(
         backup_disk_mount_guard: G,
         server_id: &str,
@@ -149,7 +193,7 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
                 .boxed()
                 .await?;
         let enc_key = Zeroizing::new(enc_key);
-        let backup_dir = backup_disk_path.join(BACKUP_DIR_NAME).join(server_id);
+        let backup_dir = backup_directory(backup_disk_path, server_id)?;
         let unencrypted_metadata_path = backup_dir.join("unencrypted-metadata.json");
         let crypt_path = backup_dir.join("crypt");
 
@@ -326,6 +370,70 @@ mod tests {
         };
         save_unencrypted_metadata(path, &metadata).await.unwrap();
         metadata
+    }
+
+    #[test]
+    fn server_backup_paths_reject_traversal_and_aliases() {
+        for invalid in ["", ".", "..", "../other", "/absolute", "a/b", "server/"] {
+            assert!(backup_directory(Path::new("/target"), invalid).is_err());
+        }
+        assert_eq!(
+            backup_directory(Path::new("/target"), "server-id").unwrap(),
+            Path::new("/target").join(BACKUP_DIR_NAME).join("server-id")
+        );
+    }
+
+    #[tokio::test]
+    async fn conversion_preparation_never_initializes_or_trashes_an_existing_store() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join(BACKUP_DIR_NAME).join("server");
+        let crypt = root.join("crypt");
+        tokio::fs::create_dir_all(&crypt).await.unwrap();
+        let marker = crypt.join("existing-backup");
+        tokio::fs::write(&marker, b"retain").await.unwrap();
+        assert!(
+            BackupMountGuard::<Never>::prepare_conversion(directory.path(), "server", "password")
+                .await
+                .is_err()
+        );
+        assert_eq!(tokio::fs::read(&marker).await.unwrap(), b"retain");
+        assert!(!root.join("unencrypted-metadata.json").exists());
+        assert!(
+            !directory
+                .path()
+                .join(crate::backup::trash::TRASH_DIR_NAME)
+                .exists()
+        );
+    }
+
+    #[tokio::test]
+    async fn conversion_preparation_reuses_existing_keys_and_preserves_invalid_credentials() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join(BACKUP_DIR_NAME).join("server");
+        let metadata = root.join("unencrypted-metadata.json");
+        legacy_metadata(&metadata).await;
+        tokio::fs::create_dir(root.join("crypt")).await.unwrap();
+        let before = tokio::fs::read(&metadata).await.unwrap();
+        assert!(
+            BackupMountGuard::<Never>::prepare_conversion(
+                directory.path(),
+                "server",
+                "wrong password"
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(tokio::fs::read(&metadata).await.unwrap(), before);
+        let (path, key) = BackupMountGuard::<Never>::prepare_conversion(
+            directory.path(),
+            "server",
+            LEGACY_PASSWORD,
+        )
+        .await
+        .unwrap();
+        assert_eq!(path, root.join("crypt"));
+        assert_eq!(key.as_str(), KEY);
+        assert_ne!(tokio::fs::read(&metadata).await.unwrap(), before);
     }
 
     #[tokio::test]

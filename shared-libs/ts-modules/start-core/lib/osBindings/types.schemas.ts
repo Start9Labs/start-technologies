@@ -489,6 +489,18 @@ export const ContactInfo: z.ZodUnion<
   .meta({
     id: 'ContactInfo',
   })
+
+/**
+ * Lifecycle of a daemon-owned conversion attempt.
+ */
+export const ConversionState: z.ZodEnum<{
+  running: 'running'
+  complete: 'complete'
+  failed: 'failed'
+}> = /* @__PURE__ */ z.enum(['running', 'complete', 'failed']).meta({
+  id: 'ConversionState',
+  description: 'Lifecycle of a daemon-owned conversion attempt.',
+})
 export const CountEntry: z.ZodObject<{ label: z.ZodString; count: z.ZodInt }> =
   /* @__PURE__ */ object({ label: z.string(), count: z.int() }).meta({
     id: 'CountEntry',
@@ -604,6 +616,22 @@ export const FileType: z.ZodEnum<{
 }> = /* @__PURE__ */ z.enum(['file', 'directory', 'infer']).meta({
   id: 'FileType',
 })
+
+/**
+ * Unauthenticated discovery hints; opening the store validates its actual state.
+ */
+export const FormatStatus: z.ZodEnum<{
+  legacy: 'legacy'
+  current: 'current'
+  interrupted: 'interrupted'
+  unknown: 'unknown'
+}> = /* @__PURE__ */ z
+  .enum(['legacy', 'current', 'interrupted', 'unknown'])
+  .meta({
+    id: 'FormatStatus',
+    description:
+      'Unauthenticated discovery hints; opening the store validates its actual state.',
+  })
 export const GatewayId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'GatewayId',
 })
@@ -4095,10 +4123,15 @@ export const StartOsRecoveryInfo: z.ZodObject<{
   hostname: typeof ServerHostname
   version: z.ZodString
   timestamp: z.ZodString
+  formatStatus: z.ZodCodec<
+    z.ZodOptional<typeof FormatStatus>,
+    typeof FormatStatus
+  >
 }> = /* @__PURE__ */ object({
   hostname: ServerHostname,
   version: z.string(),
   timestamp: z.string(),
+  formatStatus: wire(FormatStatus.optional(), FormatStatus),
 }).meta({
   id: 'StartOsRecoveryInfo',
   description:
@@ -4444,6 +4477,26 @@ export const CompatibleAlpnInfo: z.ZodUnion<
   readonly [z.ZodArray<typeof MaybeUtf8String>, typeof LegacyAlpnInfo]
 > = /* @__PURE__ */ z.union([z.array(MaybeUtf8String), LegacyAlpnInfo]).meta({
   id: 'CompatibleAlpnInfo',
+})
+
+/**
+ * Latest observed conversion attempt for one target/server backup.
+ */
+export const ConversionJob: z.ZodObject<{
+  state: typeof ConversionState
+  progress: typeof FullProgress
+  error: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  state: ConversionState,
+  progress: FullProgress,
+  error: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'ConversionJob',
+  description:
+    'Latest observed conversion attempt for one target/server backup.',
 })
 export const CurrentDependencyInfo: z.ZodIntersection<
   z.ZodObject<{
@@ -5007,36 +5060,6 @@ export const ResetPasswordParams: z.ZodObject<{
 }).meta({
   id: 'ResetPasswordParams',
 })
-export const ServerStatus: z.ZodObject<{
-  backupProgress: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof FullProgress>>,
-    z.ZodNullable<typeof FullProgress>
-  >
-  updateProgress: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof FullProgress>>,
-    z.ZodNullable<typeof FullProgress>
-  >
-  shuttingDown: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  restarting: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  restart: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof RestartReason>>,
-    z.ZodNullable<typeof RestartReason>
-  >
-}> = /* @__PURE__ */ object({
-  backupProgress: wire(
-    FullProgress.nullable().optional(),
-    FullProgress.nullable(),
-  ),
-  updateProgress: wire(
-    FullProgress.nullable().optional(),
-    FullProgress.nullable(),
-  ),
-  shuttingDown: wire(z.boolean().optional(), z.boolean()),
-  restarting: wire(z.boolean().optional(), z.boolean()),
-  restart: wire(RestartReason.nullable().optional(), RestartReason.nullable()),
-}).meta({
-  id: 'ServerStatus',
-})
 export const ServiceInterface: z.ZodObject<{
   id: typeof ServiceInterfaceId
   name: z.ZodString
@@ -5541,6 +5564,46 @@ export const PackageVersionInfo: z.ZodIntersection<
   .meta({
     id: 'PackageVersionInfo',
   })
+export const ServerStatus: z.ZodObject<{
+  backupProgress: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof FullProgress>>,
+    z.ZodNullable<typeof FullProgress>
+  >
+  backupConversions: z.ZodCodec<
+    z.ZodOptional<
+      z.ZodRecord<z.ZodString, z.ZodRecord<z.ZodString, typeof ConversionJob>>
+    >,
+    z.ZodRecord<z.ZodString, z.ZodRecord<z.ZodString, typeof ConversionJob>>
+  >
+  updateProgress: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof FullProgress>>,
+    z.ZodNullable<typeof FullProgress>
+  >
+  shuttingDown: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  restarting: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  restart: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof RestartReason>>,
+    z.ZodNullable<typeof RestartReason>
+  >
+}> = /* @__PURE__ */ object({
+  backupProgress: wire(
+    FullProgress.nullable().optional(),
+    FullProgress.nullable(),
+  ),
+  backupConversions: wire(
+    z.record(z.string(), z.record(z.string(), ConversionJob)).optional(),
+    z.record(z.string(), z.record(z.string(), ConversionJob)),
+  ),
+  updateProgress: wire(
+    FullProgress.nullable().optional(),
+    FullProgress.nullable(),
+  ),
+  shuttingDown: wire(z.boolean().optional(), z.boolean()),
+  restarting: wire(z.boolean().optional(), z.boolean()),
+  restart: wire(RestartReason.nullable().optional(), RestartReason.nullable()),
+}).meta({
+  id: 'ServerStatus',
+})
 export const SessionList: z.ZodObject<{
   current: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,

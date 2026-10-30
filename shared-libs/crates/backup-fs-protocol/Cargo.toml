@@ -1,0 +1,14 @@
+[package]
+edition = "2024"
+license = "MIT"
+name = "backup-fs-protocol"
+version = "0.1.0"
+
+[features]
+reflection = ["dep:visit-rs"]
+ts = ["reflection", "dep:rpc-toolkit", "rpc-toolkit/ts"]
+
+[dependencies]
+rpc-toolkit = { path = "../rpc-toolkit", optional = true }
+serde = { version = "1", features = ["derive"] }
+visit-rs = { path = "../visit-rs", optional = true }

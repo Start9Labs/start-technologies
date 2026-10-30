@@ -660,6 +660,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "backup-fs-protocol"
+version = "0.1.0"
+dependencies = [
+ "rpc-toolkit",
+ "serde",
+ "visit-rs",
+]
+
+[[package]]
 name = "base16ct"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8355,6 +8364,7 @@ dependencies = [
  "async-trait",
  "axum",
  "backtrace-on-stack-overflow",
+ "backup-fs-protocol",
  "base32",
  "base64 0.22.1",
  "base64ct",
@@ -8525,6 +8535,7 @@ dependencies = [
 name = "startos-backup-fs"
 version = "1.0.0"
 dependencies = [
+ "backup-fs-protocol",
  "bincode 2.0.1",
  "chacha20",
  "clap",
@@ -8548,6 +8559,7 @@ dependencies = [
  "rand 0.10.3",
  "reed-solomon-erasure",
  "serde",
+ "serde_json",
  "sha2 0.11.1",
  "smallvec",
  "tempfile",

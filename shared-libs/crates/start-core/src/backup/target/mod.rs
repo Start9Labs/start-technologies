@@ -32,6 +32,7 @@ use crate::util::serde::{
 use crate::util::{FromStrParser, VersionString};
 
 pub mod cifs;
+pub mod conversion;
 
 #[cfg(test)]
 mod password_cli_tests {
@@ -193,6 +194,7 @@ pub fn target<C: Context>() -> ParentHandler<C> {
                 })
                 .with_about("about.display-package-backup-information"),
         )
+        .subcommand("convert", from_fn_async(conversion::start).no_cli())
         .subcommand("mount", from_fn_async(mount).no_cli())
         .subcommand(
             "mount",

@@ -179,6 +179,13 @@ pub(crate) struct Inventory {
 
 impl Inventory {
     pub fn load(data: &Path) -> BkfsResult<Self> {
+        Self::load_with_progress(data, |_| Ok(()))
+    }
+
+    pub fn load_with_progress(
+        data: &Path,
+        mut report: impl FnMut(u64) -> BkfsResult<()>,
+    ) -> BkfsResult<Self> {
         let mut inventory = Self {
             objects: Vec::new(),
             directories: Vec::new(),
@@ -203,6 +210,7 @@ impl Inventory {
                     let legacy =
                         ObjectId::legacy(directory, &shard.file_name(), &entry.file_name());
                     inventory.objects.push((entry.path(), legacy));
+                    report(inventory.objects.len() as u64)?;
                 }
                 inventory.directories.push(shard.path());
             }

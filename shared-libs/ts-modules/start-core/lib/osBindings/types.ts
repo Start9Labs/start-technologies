@@ -74,6 +74,16 @@ export type CliSetIconParams = z.output<typeof schemas.CliSetIconParams>
 export type CliSetIconParamsInput = z.input<typeof schemas.CliSetIconParams>
 export type ContactInfo = z.output<typeof schemas.ContactInfo>
 export type ContactInfoInput = z.input<typeof schemas.ContactInfo>
+
+/**
+ * Lifecycle of a daemon-owned conversion attempt.
+ */
+export type ConversionState = z.output<typeof schemas.ConversionState>
+
+/**
+ * Lifecycle of a daemon-owned conversion attempt.
+ */
+export type ConversionStateInput = z.input<typeof schemas.ConversionState>
 export type CountEntry = z.output<typeof schemas.CountEntry>
 export type CountEntryInput = z.input<typeof schemas.CountEntry>
 export type CreateTokenParams = z.output<typeof schemas.CreateTokenParams>
@@ -106,6 +116,16 @@ export type ErrorData = z.output<typeof schemas.ErrorData>
 export type ErrorDataInput = z.input<typeof schemas.ErrorData>
 export type FileType = z.output<typeof schemas.FileType>
 export type FileTypeInput = z.input<typeof schemas.FileType>
+
+/**
+ * Unauthenticated discovery hints; opening the store validates its actual state.
+ */
+export type FormatStatus = z.output<typeof schemas.FormatStatus>
+
+/**
+ * Unauthenticated discovery hints; opening the store validates its actual state.
+ */
+export type FormatStatusInput = z.input<typeof schemas.FormatStatus>
 export type GatewayId = z.output<typeof schemas.GatewayId>
 export type GatewayIdInput = z.input<typeof schemas.GatewayId>
 export type GatewayType = z.output<typeof schemas.GatewayType>
@@ -1080,6 +1100,16 @@ export type ClearBindingsParamsInput = z.input<
 >
 export type CompatibleAlpnInfo = z.output<typeof schemas.CompatibleAlpnInfo>
 export type CompatibleAlpnInfoInput = z.input<typeof schemas.CompatibleAlpnInfo>
+
+/**
+ * Latest observed conversion attempt for one target/server backup.
+ */
+export type ConversionJob = z.output<typeof schemas.ConversionJob>
+
+/**
+ * Latest observed conversion attempt for one target/server backup.
+ */
+export type ConversionJobInput = z.input<typeof schemas.ConversionJob>
 export type CurrentDependencyInfo = z.output<
   typeof schemas.CurrentDependencyInfo
 >
@@ -1138,8 +1168,6 @@ export type ResetPasswordParams = z.output<typeof schemas.ResetPasswordParams>
 export type ResetPasswordParamsInput = z.input<
   typeof schemas.ResetPasswordParams
 >
-export type ServerStatus = z.output<typeof schemas.ServerStatus>
-export type ServerStatusInput = z.input<typeof schemas.ServerStatus>
 export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
 export type ServiceInterfaceInput = z.input<typeof schemas.ServiceInterface>
 
@@ -1218,6 +1246,8 @@ export type OsIndex = z.output<typeof schemas.OsIndex>
 export type OsIndexInput = z.input<typeof schemas.OsIndex>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
 export type PackageVersionInfoInput = z.input<typeof schemas.PackageVersionInfo>
+export type ServerStatus = z.output<typeof schemas.ServerStatus>
+export type ServerStatusInput = z.input<typeof schemas.ServerStatus>
 export type SessionList = z.output<typeof schemas.SessionList>
 export type SessionListInput = z.input<typeof schemas.SessionList>
 export type SetBackupProgress = z.output<typeof schemas.SetBackupProgress>
