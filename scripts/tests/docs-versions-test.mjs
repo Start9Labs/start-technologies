@@ -51,6 +51,19 @@ test('a book without a release label takes the tagged line', () => {
   )
 })
 
+test('a retained site tree still takes the released book label from its tag', () => {
+  assert.equal(
+    reconcile(
+      conf(MASTER),
+      conf(PUBLISHED),
+      'start-tunnel',
+      '1.5.0',
+      conf(PUBLISHED),
+    ),
+    conf({ ...PUBLISHED, 'start-tunnel': '1.1.x' }),
+  )
+})
+
 test('an unpublished product stays off the site', () => {
   const { 'start-tunnel': _, ...unpublished } = PUBLISHED
   assert.equal(
@@ -143,6 +156,38 @@ function syncFixture(t) {
   }
   return { commit, publish, sync }
 }
+
+test('an older SDK tag updates its label without rolling back the site tree', t => {
+  const { commit, publish, sync } = syncFixture(t)
+  commit('sdk 3.1.1', {
+    'projects/start-sdk/docs/page.md': '3.1.1\n',
+    'projects/start-docs/versions.conf': conf(MASTER),
+  })
+  publish('start-sdk/v3.1.1')
+  commit('wrt 1.3.0', {
+    'projects/start-wrt/docs/page.md': '1.3.0\n',
+    'projects/start-docs/versions.conf': conf({
+      ...MASTER,
+      packaging: '0.4.2.x',
+      support: '3.0.x',
+    }),
+  })
+  publish('start-wrt/v1.3.0')
+
+  assert.equal(
+    sync('start-wrt/v1.3.0'),
+    conf({ ...PUBLISHED, 'start-wrt': '1.3.x', support: '3.0.x' }),
+  )
+  assert.equal(
+    sync('start-sdk/v3.1.1'),
+    conf({
+      ...PUBLISHED,
+      packaging: '0.4.1.x',
+      'start-wrt': '1.3.x',
+      support: '3.0.x',
+    }),
+  )
+})
 
 test('the sync step writes each release onto the published labels', t => {
   const { commit, publish, sync } = syncFixture(t)

@@ -31,15 +31,15 @@ export function releaseLabel(project, version) {
     : `${major}.${minor}.x`
 }
 
-// Comments and books outside PRODUCT_BOOKS follow the tagged tree.
-export function reconcile(tagged, published, project, version) {
+// Comments and books outside PRODUCT_BOOKS follow the selected site tree.
+export function reconcile(tagged, published, project, version, site = tagged) {
   const own = PRODUCT_BOOKS[project]
   const ownLine = LABELLED_BY_RELEASE.has(project)
     ? `${own}=${releaseLabel(project, version)}`
     : bookLines(tagged).get(own)
   const others = Object.values(PRODUCT_BOOKS).filter(book => book !== own)
   const held = bookLines(published)
-  const lines = tagged
+  const lines = site
     .trimEnd()
     .split('\n')
     .flatMap(line => {
@@ -57,14 +57,16 @@ export function reconcile(tagged, published, project, version) {
 }
 
 if (process.argv[1]?.endsWith('docs-versions.mjs')) {
-  const [project, version, publishedPath, taggedPath] = process.argv.slice(2)
+  const [project, version, publishedPath, taggedPath, sitePath = taggedPath] =
+    process.argv.slice(2)
   writeFileSync(
-    taggedPath,
+    sitePath,
     reconcile(
       readFileSync(taggedPath, 'utf8'),
       readFileSync(publishedPath, 'utf8'),
       project,
       version,
+      readFileSync(sitePath, 'utf8'),
     ),
   )
 }
