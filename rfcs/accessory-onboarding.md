@@ -156,6 +156,19 @@ Wi-Fi radio on the server or a DPP relay in the access point, and most routers
 have none. It is kept as a future onboarding route, and the QR code is a DPP
 URI so that route needs no second sticker (see Accessory identity).
 
+### Listing servers with DNS-SD
+
+A `_startos._tcp` record would let the app list servers, but it is unauthenticated,
+so it cannot tell the app which root to trust. A phone without the root would still
+need the server code or the installation below, and either one already names the
+server.
+
+### Installing the root on the phone
+
+Android 11 and later refuse to let an app start the installation, and iOS requires
+a profile and a trust setting that the user changes by hand. The app needs the root
+only for its own connections, so it holds its own anchor (see Server code).
+
 ### Bluetooth on the server
 
 Requires hardware most servers lack, device passthrough StartOS does not have,
@@ -302,56 +315,42 @@ neither signature can stand for the other. Its compromise already compromises
 every certificate StartOS issues; this adds impersonating the server to
 accessories, and no new key to lose.
 
-### Server advertisement
+### Server code
 
-StartOS advertises itself with DNS-SD so a client on the LAN can list servers
-without knowing a name. mDNS alone answers a lookup of a name the client already
-has.
+The Start9 app learns which server to trust by scanning a QR code on the StartOS
+Accessories page, or by opening the same URI as a link when the page is on the
+phone itself. The code carries no secret:
 
-| Field         | Value                                                |
-| ------------- | ---------------------------------------------------- |
-| Service type  | `_startos._tcp`, domain `local`                      |
-| Instance name | the server's hostname                                |
-| SRV target    | `<hostname>.local`, the name avahi already publishes |
-| Port          | 443                                                  |
-| TXT           | `v=1`, the version of this record                    |
-
-A static file in the image, `/etc/avahi/services/startos.service`, publishes it:
-
-```xml
-<?xml version="1.0" standalone='no'?>
-<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
-<service-group>
-  <name replace-wildcards="yes">%h</name>
-  <service>
-    <type>_startos._tcp</type>
-    <port>443</port>
-    <txt-record>v=1</txt-record>
-  </service>
-</service-group>
+```
+start9-server://connect?v=1&fp=<fingerprint>&addr=<host>&addr=<host>
 ```
 
-avahi publishes it on every interface it runs on, as it does the `.local` name.
-It follows no per-gateway `.local` address setting, so a listed server can refuse
-the connection. The record carries no secret, server ID or version, and exposes
-only that a StartOS server has this hostname.
+| Parameter | Value                                                                                   |
+| --------- | --------------------------------------------------------------------------------------- |
+| `v`       | `1`, the version of this URI                                                            |
+| `fp`      | the SHA-256 of the root key's DER SubjectPublicKeyInfo, in the AGCP wire form           |
+| `addr`    | a host the page knows the server by on the LAN, repeated: its `.local` name and its IPs |
 
-A client:
+The fingerprint is the `server` value that accessories pin, so the app and every
+accessory identify the server by the same key.
 
-1. Browses for `_startos._tcp` and lists one row per instance, usually one
-   server. iOS requires the service type in `NSBonjourServices` and the local
-   network permission.
-2. Connects to `https://<SRV target>` and verifies the chain against the phone's
-   trust store, exactly as it does for a typed address. An advertisement is
-   unauthenticated, so it is only a candidate.
-3. On a failed verification, sends no password, and never fetches or installs a
-   certificate from that server, since a forged record would then become a
-   trusted root. It points the user to the documentation for installing the root
-   certificate.
-4. Identifies a server by its root key once connected. A hostname can change, and
-   avahi renames an instance on a conflict.
-5. Ignores unknown TXT keys, and treats a different `v` as a server it cannot use.
-6. Offers a typed address whenever the server it wants is not listed.
+The app:
+
+1. Fetches `/static/local-root-ca.crt` from each `addr` until one answers, without
+   verifying that connection and sending nothing over it.
+2. Discards the certificate unless its key matches `fp`, and then sends no password.
+3. Stores the certificate as the anchor for this server's connections, verifying
+   each chain and host name against it. A domain with a public certificate verifies
+   against the platform's roots.
+4. Signs in with the StartOS password.
+
+The anchor belongs to the Start9 app. The phone's trust store, its browser and its
+other apps are unchanged. A server with a new root key fails verification, and the
+user scans its new code.
+
+A typed address needs no code when the phone's trust store already holds the root.
+Otherwise the app sends no password and asks for the code. It never trusts a
+certificate on the strength of having fetched it.
 
 ### Onboarding
 
@@ -365,10 +364,12 @@ accessory.onboard.begin { key, class, model }
 `key` is the QR code's `K:` value; the setup secret stays on the phone. startd
 opens an onboarding session in memory (one-hour expiry, so the user can scan the
 sticker and then unbox, mount and power the accessory). The app trusts `server`
-because it arrived over TLS from a server whose root the phone already trusts.
+because it arrived over TLS verified against the root the app holds for this
+server.
 
-The app then asks the user for the Wi-Fi network and password, which it sends
-nowhere but the accessory, and seals a **bundle** with HPKE (RFC 9180):
+The app then lists the networks the accessory reports (see Carrying the bundle),
+asks the user to pick one and enter its password, which it sends nowhere but the
+accessory, and seals a **bundle** with HPKE (RFC 9180):
 
 - Mode `mode_psk`, KEM `DHKEM(P-256, HKDF-SHA256)`, KDF `HKDF-SHA256`, AEAD
   `AES-128-GCM`.
@@ -409,6 +410,7 @@ not it already has a network, so a released accessory can be added again:
 | `info`         | `9edb1604-db34-4de1-9c62-c445b44b5893` | read         | JSON `{ v, id, class, model, fingerprint }` |
 | `bundle`       | `9592ec0b-f1d6-4c16-be7c-a444069a6999` | write (long) | the bundle's text form, UTF-8, in chunks    |
 | `status`       | `55cb7a10-cdc5-44c7-8376-061abbc0192d` | read, notify | JSON `{ state, error?, ipv4?, ipv6? }`      |
+| `networks`     | `850944c7-d4cd-4a4c-bb5a-5317770ac0c0` | read         | JSON `[{ ssid, security, signal }, ...]`    |
 
 A GATT attribute value is at most 512 bytes, and a bundle with Wi-Fi can be
 longer, so the app writes it in chunks of at most 512 bytes, each at offset 0.
@@ -417,11 +419,18 @@ no dot and continue the bundle. A write that starts with a session and a dot
 starts a new bundle. The framing needs no integrity of its own: the AEAD
 rejects any bundle that was spliced or cut.
 
+`networks` holds the accessory's latest Wi-Fi scan, strongest first and as many as
+fit in one attribute value, with `security` as in the bundle and `signal` in dBm. It
+scans when the service starts and after each read. Anyone in radio range can see the
+same networks. A forged list can mislead the user but cannot obtain the password,
+which only the accessory on the QR code can open. A list that is empty or missing
+the user's network leaves a typed name and security type.
+
 `status.state` is one of `idle`, `received`, `joining`, `connected` and
 `error`, and `error` is `BUNDLE_REJECTED`, `ALREADY_PAIRED` or `WIFI_FAILED`.
 
 The app scans for the service UUID, checks that `info.fingerprint` matches the
-scanned key, writes `bundle`, and follows `status` until the accessory reports
+scanned key, reads `networks`, writes `bundle`, and follows `status` until the accessory reports
 an address or an error. It then polls `accessory.onboard.status` until pairing
 finishes.
 
@@ -554,7 +563,8 @@ reads it from patch-db.
 
 **Granting** is a user action, never a package action, and a package cannot
 request one. The app, the accessory page's **Used by** list and the service page's **Accessories** section
-all edit the same map.
+all edit the same map. The app's add flow asks on its name screen, with a toggle that is
+on by default for the service the app set up, and grants only if the user leaves it on.
 
 **Effect.** `get-accessories { capability?, callback? }` returns, for the
 calling package, only accessories granted to it:
@@ -598,6 +608,12 @@ granted accessory: Frigate's zones and retention per camera. They take a `dynami
 
 Settings that belong to the accessory, not to a service (name, owner logins,
 release) live on the StartOS Accessories page.
+
+**Names** are unique on a server. At pairing, startd names the entry after
+`accessory.info` `name`, adding the first free suffix: `Start9 Camera`,
+`Start9 Camera (1)`, `Start9 Camera (2)`. `accessory.rename { id, name }` refuses a
+name another entry holds. A name is for display, so a package must key its own
+configuration by accessory ID, and a rename leaves that key and its data in place.
 
 ### Removal
 
@@ -699,7 +715,7 @@ while applying a request is -32603; neither carries `data.kind`.
   "id": "<accessory ID>",
   "class": "camera",
   "model": "recamera",
-  "name": "reCamera",
+  "name": "Start9 Camera",
   "swVersion": "…",
   "state": "paired",
   "fingerprint": "<wire fingerprint>",
@@ -729,18 +745,17 @@ Repeating a request with the same values is harmless, so startd retries freely.
 
 ### UI
 
-The Start9 app adds accessories. It signs in as any RPC client does, and the
-phone must already trust the server's root CA. It needs its key only to add an
-accessory, so one unenrolled after 30 idle days is replaced by signing in again.
+The Start9 app adds accessories. It scans the server code (see Server code) and
+signs in as any RPC client does. Any signed request keeps its key enrolled, so the
+app makes one each time it opens. One unenrolled after 30 idle days is replaced by
+signing in again.
 
-The app finds the server through its advertisement (see Server advertisement), so
-the user picks from a list and enters only the password.
-
-- **Add accessory (app):** scan the QR code → enter the Wi-Fi network and
-  password → write the bundle over BLE → progress → name → grant to services.
+- **Add accessory (app):** scan the QR code → pick the Wi-Fi network and enter its
+  password → write the bundle over BLE → progress → one screen to confirm or change the name and
+  to leave on or turn off the grant to Frigate.
 - **Accessories page (StartOS):** paired accessories with status, name,
-  fingerprint, **Used by**, owner logins and **Remove**, and a pointer to the
-  Start9 app for adding one.
+  fingerprint, **Used by**, owner logins and **Remove**, and the server code with a
+  pointer to the Start9 app for adding one.
 - **Service page (StartOS):** an Accessories section listing grants and offering
   paired accessories.
 
@@ -750,6 +765,11 @@ the user picks from a list and enters only the password.
   reads it can onboard the accessory to their server. The setup secret is
   disabled once paired, so a QR code read afterwards is useless until the
   accessory is released or reset.
+- **The server code is as trustworthy as the page showing it.** A user whose browser
+  does not trust the root could be shown a forged code, which would earn the forger
+  the password, as a forged login page would. An unverified fetch reveals only that
+  the app holds the code's addresses, and a certificate that does not match is
+  discarded before anything is sent.
 - **Confidentiality.** Wi-Fi credentials go from the phone to the accessory
   inside the HPKE bundle and never reach StartOS. Logins cross the LAN inside
   mutual TLS. Neither depends on BLE link security.
@@ -814,10 +834,10 @@ here:
 
 - The page's name and placement ("Accessories" under the server's settings,
   or a top-level entry).
-- Whether finishing onboarding in the app offers grants to installed services,
-  and how the list is ordered with no manifest signal.
+- The add flow's grant toggle on the name screen, on by default, and offering only
+  the service the app set up, with other services granted from the StartOS pages.
 - Adding accessories only from the Start9 app, with the Accessories page
-  pointing to it.
+  showing the server code and pointing to it.
 - The wording of **Forget** versus waiting for an offline accessory to be
   released, and of the "locked to this server" consequence.
 
@@ -828,9 +848,10 @@ here:
   reCamera's BlueZ 5.58 GATT server.
 - Both apps can seal HPKE `mode_psk` with this suite, through a platform or
   third-party library, or on their own HKDF, P-256 and AES-GCM.
-- iOS and Android list and resolve the `_startos._tcp` record from a static avahi
-  service file, and the instance name follows a hostname change once avahi
-  restarts.
+- The reCamera can scan for Wi-Fi networks while serving BLE on its combined radio.
+- The iOS and Android apps can anchor their API, WebRTC signaling and HLS connections
+  on a root the app holds. iOS's `AVPlayer` is the doubt: it reportedly ignores the
+  app's own trust settings for HLS.
 - HPKE `mode_psk` with P-256 can be implemented on the camera's Node 22.8
   `crypto` (ECDH, HKDF, AES-GCM), or a small pure-JS HPKE library runs
   acceptably there without a JIT.
@@ -861,8 +882,10 @@ here:
 - A forged advertisement carrying a paired accessory's ID leaves its registry
   address and grantee URLs unchanged.
 - The app's add flow against the simulator.
-- The app given a forged `_startos._tcp` record, whose server fails verification:
-  it sends no password and fetches no certificate.
+- The app given a server code whose fingerprint does not match the certificate the
+  address serves: it sends no password.
+- Two accessories paired with the same `name`, and a rename to a name in use: names
+  stay unique, and a renamed accessory keeps its grants and its package keys.
 - A version 2 backup restored onto this code, and a version 3 backup restored
   onto a fresh install with a paired simulator: grants return, and a login
   rotated after the backup is pushed back to the backup's value.
@@ -875,7 +898,7 @@ here:
    `reCamera-OS`, replacing the prototype pairing on
    `feat/start9-camera-mdns` before it merges.
 2. Registry, onboarding, pairing, credentials and discovery in startd; the
-   `_startos._tcp` advertisement; the Accessories page; backup version 3.
+   Accessories page with the server code; backup version 3.
 3. `get-accessories`, the package grant map and the SDK; grants in the UI.
 4. The Start9 app's add flow.
 5. A Frigate package that consumes grants.
