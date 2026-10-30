@@ -4,11 +4,11 @@
 use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader};
+use std::ops::{Deref, DerefMut};
 use std::os::raw::c_int;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
 
@@ -34,6 +34,7 @@ use crate::inode::{FileData, Inode, InodeAttributes, BLOCK_SIZE};
 mod aligned_io;
 mod atomic_file;
 mod blockstore;
+mod chunks;
 mod compress;
 mod conversion;
 
@@ -233,7 +234,11 @@ impl BackupFS {
     }
 
     pub fn change_password(&mut self, password: &str) -> BkfsResult<()> {
-        self.handler.lock().unwrap().ctrl().change_password(password)
+        self.handler
+            .lock()
+            .unwrap()
+            .ctrl()
+            .change_password(password)
     }
 }
 

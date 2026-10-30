@@ -437,7 +437,10 @@ impl Handler {
     pub fn flush_all_dirty(&mut self) -> BkfsResult<()> {
         let mut errs = Vec::new();
         let open: Vec<_> = self.inodes.values().filter_map(Weak::upgrade).collect();
-        let mut locked: Vec<_> = open.iter().map(|contents| contents.lock().unwrap()).collect();
+        let mut locked: Vec<_> = open
+            .iter()
+            .map(|contents| contents.lock().unwrap())
+            .collect();
         for contents in &mut locked {
             if let Err(e) = contents.flush() {
                 errs.push(e);

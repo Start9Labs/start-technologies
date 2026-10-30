@@ -64,6 +64,7 @@ pub struct ControllerSeed {
     sync_batch: AtomicUsize,
     /// Set once the batch threshold is reached; cleared by the next commit.
     commit_due: AtomicBool,
+    chunks: Mutex<crate::chunks::ChunkCache>,
 }
 
 /// Dead-byte ratio above which a sealed segment is compacted on the next
@@ -151,6 +152,7 @@ impl Controller {
             pending_saves: AtomicUsize::new(0),
             sync_batch: AtomicUsize::new(crate::util::sync_batch()),
             commit_due: AtomicBool::new(false),
+            chunks: Mutex::default(),
             #[cfg(test)]
             fail_block_puts: AtomicU64::new(u64::MAX),
             config,
@@ -791,6 +793,9 @@ impl Controller {
     /// barriers must log a consistent filesystem first; see
     /// [`crate::handle::Handler::flush_all_dirty`].
     pub fn syncfs(&self) -> io::Result<()> {
+        self.chunk_cache()
+            .stage(self)
+            .map_err(|error| io::Error::from_raw_os_error(error.to_errno_log()))?;
         self.0.pending_saves.store(0, Ordering::Relaxed);
         self.0.commit_due.store(false, Ordering::Relaxed);
         self.0
@@ -818,6 +823,10 @@ impl Controller {
         if n >= self.0.sync_batch.load(Ordering::Relaxed) {
             self.0.commit_due.store(true, Ordering::Relaxed);
         }
+    }
+
+    pub(crate) fn chunk_cache(&self) -> std::sync::MutexGuard<'_, crate::chunks::ChunkCache> {
+        self.0.chunks.lock().unwrap()
     }
 
     /// Whether enough saves have accumulated for the next request boundary to commit.

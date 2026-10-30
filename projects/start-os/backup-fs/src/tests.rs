@@ -1961,10 +1961,10 @@ fn large_directory_spills_and_stays_consistent() {
         None,
     );
 
-    // The listing must actually have spilled to buckets.
+    // The listing must actually have spilled out of the inode.
     assert!(
-        indexed(data.path(), "Bucket") > 1,
-        "expected multiple directory buckets for a spilled directory"
+        indexed(data.path(), "Bucket") >= 1,
+        "expected directory chunks for a spilled directory"
     );
 
     // Remount: everything is still there; unlink half; remainder intact.
