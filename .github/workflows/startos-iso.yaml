@@ -347,11 +347,17 @@ jobs:
         uses: docker/setup-qemu-action@v4
 
       # The RISE riscv64 runner ships no Node, and nodejs.org publishes no riscv64 builds.
-      - uses: actions/setup-node@v6
+      # setup-node's mirror input requires a nodejs.org `/dist` layout, which unofficial-builds lacks.
+      - name: Install Node from unofficial-builds
         if: ${{ env.ARCH == 'riscv64' && github.event.inputs.runner != 'fast' }}
-        with:
-          node-version: ${{ env.NODEJS_VERSION }}
-          mirror: https://unofficial-builds.nodejs.org/download/release
+        run: |
+          base="https://unofficial-builds.nodejs.org/download/release/v${NODEJS_VERSION}"
+          tarball="node-v${NODEJS_VERSION}-linux-riscv64.tar.xz"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/$tarball"
+          curl -fsSL "$base/SHASUMS256.txt" | grep " $tarball\$" | sha256sum -c -
+          tar -xJf "$tarball"
+          echo "$RUNNER_TEMP/${tarball%.tar.xz}/bin" >> "$GITHUB_PATH"
 
       - uses: actions/checkout@v6
         with:
