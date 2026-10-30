@@ -228,9 +228,8 @@ pub async fn run() {
                 _ = prod.tick() => {
                     crate::devices::prod_ipv6_neighbors().await;
                     // Unicast-verify the addresses rules depend on: the
-                    // multicast prod only elicits link-local replies, so
-                    // without this a present-but-idle device's GUA entries
-                    // sit STALE forever and would age out of the live window.
+                    // multicast prod leaves a known address's entry STALE,
+                    // and it would age out of the live window.
                     verify_relevant_addrs().await;
                     let mut changed = record_neigh_dump().await;
                     // Catch live-set changes no single sighting reports: an
@@ -434,8 +433,7 @@ fn live_sets_changed(now: i64) -> bool {
 
 /// Unicast-ping every live address of every rule-relevant MAC so the kernel
 /// re-verifies (REACHABLE) the entries the next dump reads. The multicast prod
-/// elicits replies from link-local sources only, so on its own it never
-/// freshens a GUA entry for an idle device.
+/// leaves a known address's entry STALE.
 async fn verify_relevant_addrs() {
     let addrs: Vec<String> = {
         let Ok(store) = STORE.lock() else {
