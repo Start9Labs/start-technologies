@@ -2,6 +2,7 @@ import { DatePipe, KeyValuePipe } from '@angular/common'
 import { Component, inject } from '@angular/core'
 import { DialogService, i18nPipe, TaskService } from '@start9labs/shared'
 import { TuiButton } from '@taiga-ui/core'
+import { TuiBadge } from '@taiga-ui/kit'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { filter, switchMap, take } from 'rxjs'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
@@ -14,7 +15,20 @@ import { RECOVER } from './recover.component'
     <table [appTable]="['Hostname', 'StartOS Version', 'Created', null]">
       @for (server of target.entry.startOs | keyvalue; track server.key) {
         <tr>
-          <td class="name">{{ server.value.hostname }}.local</td>
+          <td class="name">
+            {{ server.value.hostname }}.local
+            @if (server.value.formatStatus === 'legacy') {
+              <button
+                tuiBadge
+                type="button"
+                appearance="warning"
+                size="m"
+                (click)="explainOldFormat()"
+              >
+                {{ 'Old format' | i18n }}
+              </button>
+            }
+          </td>
           <td>{{ server.value.version }}</td>
           <td>{{ server.value.timestamp | date: 'medium' }}</td>
           <td>
@@ -48,7 +62,14 @@ import { RECOVER } from './recover.component'
       }
     }
   `,
-  imports: [KeyValuePipe, DatePipe, TuiButton, TableComponent, i18nPipe],
+  imports: [
+    KeyValuePipe,
+    DatePipe,
+    TuiButton,
+    TuiBadge,
+    TableComponent,
+    i18nPipe,
+  ],
 })
 export class BackupRestoreComponent {
   private readonly dialog = inject(DialogService)
@@ -57,6 +78,15 @@ export class BackupRestoreComponent {
   private readonly context = injectContext<BackupContext>()
 
   readonly target = this.context.data
+
+  protected explainOldFormat(): void {
+    this.dialog
+      .openAlert(
+        'This backup uses an old format. It remains usable for restores. To enable stronger tamper detection and read-only snapshots, update it on the Create Backup page of the server this backup belongs to. Conversion may take a long time, and this backup is unavailable until it finishes.',
+        { label: 'Old format' },
+      )
+      .subscribe()
+  }
 
   onClick(serverId: string) {
     this.dialog

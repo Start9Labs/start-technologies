@@ -11,21 +11,58 @@ use crate::progress::{FullProgressTracker, PhaseProgressTrackerHandle, Progress,
 #[cfg(test)]
 mod tests;
 
-pub(super) struct ProgressSink {
+pub struct ProgressSink {
     buffer: Vec<u8>,
     tracker: FullProgressTracker,
-    current: Option<(ConversionPhase, PhaseProgressTrackerHandle)>,
+    phases: Vec<(ConversionPhase, PhaseProgressTrackerHandle)>,
+    current: Option<usize>,
     complete: bool,
 }
 
 impl ProgressSink {
-    pub fn new(tracker: &FullProgressTracker) -> Self {
+    pub fn new() -> Self {
+        let tracker = FullProgressTracker::new();
+        let phases = [
+            (
+                ConversionPhase::Inspecting,
+                t!("backup.conversion.inspecting"),
+                5,
+            ),
+            (
+                ConversionPhase::Records,
+                t!("backup.conversion.records"),
+                20,
+            ),
+            (
+                ConversionPhase::ScanningObjects,
+                t!("backup.conversion.scanning-objects"),
+                10,
+            ),
+            (
+                ConversionPhase::Objects,
+                t!("backup.conversion.objects"),
+                60,
+            ),
+            (
+                ConversionPhase::Publishing,
+                t!("backup.conversion.publishing"),
+                5,
+            ),
+        ]
+        .into_iter()
+        .map(|(phase, name, weight)| (phase, tracker.add_phase(name.as_ref().into(), Some(weight))))
+        .collect();
         Self {
             buffer: Vec::new(),
-            tracker: tracker.clone(),
+            tracker,
+            phases,
             current: None,
             complete: false,
         }
+    }
+
+    pub fn tracker(&self) -> &FullProgressTracker {
+        &self.tracker
     }
 
     fn update(&mut self, event: ConversionProgress) -> io::Result<()> {
@@ -35,42 +72,34 @@ impl ProgressSink {
             ));
         }
         if event.phase == ConversionPhase::Complete {
-            if let Some((_, phase)) = &mut self.current {
+            for (_, phase) in &mut self.phases {
                 phase.complete();
             }
             self.tracker.complete();
             self.complete = true;
             return Ok(());
         }
-        if self.current.as_ref().map(|(phase, _)| *phase) != Some(event.phase) {
-            if let Some((_, phase)) = &mut self.current {
+        let index = self
+            .phases
+            .iter()
+            .position(|(phase, _)| *phase == event.phase)
+            .unwrap();
+        if self.current != Some(index) {
+            for (_, phase) in &mut self.phases[..index] {
                 phase.complete();
             }
-            let name = match event.phase {
-                ConversionPhase::Inspecting => t!("backup.conversion.inspecting"),
-                ConversionPhase::Records => t!("backup.conversion.records"),
-                ConversionPhase::ScanningObjects => t!("backup.conversion.scanning-objects"),
-                ConversionPhase::Objects => t!("backup.conversion.objects"),
-                ConversionPhase::Publishing => t!("backup.conversion.publishing"),
-                ConversionPhase::Complete => unreachable!(),
-            };
-            let mut phase = self.tracker.add_phase(name.as_ref().into(), None);
-            phase.start();
-            self.current = Some((event.phase, phase));
+            self.phases[index].1.start();
+            self.current = Some(index);
         }
-        self.current
-            .as_mut()
-            .unwrap()
-            .1
-            .set_phase_value(Progress::Progress {
-                done: event.done,
-                total: event.total,
-                units: Some(if event.phase == ConversionPhase::Records {
-                    ProgressUnits::Bytes
-                } else {
-                    ProgressUnits::Steps
-                }),
-            });
+        self.phases[index].1.set_phase_value(Progress::Progress {
+            done: event.done,
+            total: event.total,
+            units: Some(if event.phase == ConversionPhase::Records {
+                ProgressUnits::Bytes
+            } else {
+                ProgressUnits::Steps
+            }),
+        });
         Ok(())
     }
 

@@ -9,15 +9,15 @@ use tokio::task;
 use tracing::instrument;
 use zeroize::Zeroizing;
 
-use super::BackupTargetId;
+use super::{BackupTargetFS, BackupTargetId};
 use crate::context::RpcContext;
 use crate::db::model::{Database, DatabaseModel};
 use crate::disk::mount::backup::BackupMountGuard;
-use crate::disk::mount::filesystem::{ReadWrite, backupfs};
+use crate::disk::mount::filesystem::{FileSystem, ReadWrite, backupfs};
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
-use crate::progress::{FullProgress, FullProgressTracker};
+use crate::progress::FullProgress;
 use crate::shutdown::Shutdown;
 use crate::util::future::NonDetachingJoinHandle;
 
@@ -55,6 +55,26 @@ impl ConversionJob {
             },
             progress,
             error: result.as_ref().err().map(ToString::to_string),
+        }
+    }
+
+    fn notification(&self, label: &str) -> (NotificationLevel, String, String) {
+        match &self.error {
+            None => (
+                NotificationLevel::Success,
+                t!("backup.conversion.complete-title").to_string(),
+                t!("backup.conversion.complete-message", label = label).to_string(),
+            ),
+            Some(error) => (
+                NotificationLevel::Error,
+                t!("backup.conversion.failed-title").to_string(),
+                t!(
+                    "backup.conversion.failed-message",
+                    label = label,
+                    error = error
+                )
+                .to_string(),
+            ),
         }
     }
 }
@@ -129,6 +149,15 @@ pub async fn start(
     let shutdown = ctx.shutdown.subscribe();
     let password = Zeroizing::new(password.decrypt(&ctx)?);
     let fs = target_id.clone().load(&ctx.db.peek().await)?;
+    let label = match &fs {
+        BackupTargetFS::Disk(disk) => {
+            let source = disk.source().await?.unwrap();
+            crate::disk::util::get_label(&source)
+                .await?
+                .unwrap_or_else(|| source.as_ref().display().to_string())
+        }
+        BackupTargetFS::Cifs(cifs) => format!("{}:{}", cifs.hostname, cifs.path.display()),
+    };
     let guard = TmpMountGuard::mount(&fs, ReadWrite).await?;
     let prepared =
         BackupMountGuard::<TmpMountGuard>::prepare_conversion(guard.path(), &server_id, &password)
@@ -141,8 +170,8 @@ pub async fn start(
         }
     };
     drop(password);
-    let progress = FullProgressTracker::new();
-    let initial = progress.snapshot();
+    let progress = backupfs::ConversionProgressSink::new();
+    let initial = progress.tracker().snapshot();
     let reservation = ctx
         .db
         .mutate(|db| {
@@ -176,6 +205,7 @@ pub async fn start(
     let conversion = PreparedConversion {
         target_id,
         server_id,
+        label,
         guard,
         data,
         key,
@@ -188,6 +218,7 @@ pub async fn start(
 struct PreparedConversion<G> {
     target_id: BackupTargetId,
     server_id: String,
+    label: String,
     guard: G,
     data: PathBuf,
     key: Zeroizing<String>,
@@ -197,35 +228,37 @@ impl<G: GenericMountGuard> PreparedConversion<G> {
     async fn run(
         self,
         db: TypedPatchDb<Database>,
-        progress: FullProgressTracker,
+        mut progress: backupfs::ConversionProgressSink,
         mut shutdown: broadcast::Receiver<Option<Shutdown>>,
     ) -> Result<(), Error> {
         let Self {
             target_id,
             server_id,
+            label,
             guard,
             data,
             key,
         } = self;
         let target_for_progress = target_id.to_string();
         let server_for_progress = server_id.clone();
-        let progress_sync = NonDetachingJoinHandle::from(task::spawn(progress.clone().sync_to_db(
-            db.clone(),
-            move |db| {
-                Some(
-                    db.as_public_mut()
-                        .as_server_info_mut()
-                        .as_status_info_mut()
-                        .as_backup_conversions_mut()
-                        .as_idx_mut(&target_for_progress)?
-                        .as_idx_mut(&server_for_progress)?
-                        .as_progress_mut(),
-                )
-            },
-            Some(Duration::from_millis(300)),
-        )));
+        let progress_sync =
+            NonDetachingJoinHandle::from(task::spawn(progress.tracker().sync_to_db(
+                db.clone(),
+                move |db| {
+                    Some(
+                        db.as_public_mut()
+                            .as_server_info_mut()
+                            .as_status_info_mut()
+                            .as_backup_conversions_mut()
+                            .as_idx_mut(&target_for_progress)?
+                            .as_idx_mut(&server_for_progress)?
+                            .as_progress_mut(),
+                    )
+                },
+                Some(Duration::from_millis(300)),
+            )));
         let result = tokio::select! {
-            result = backupfs::convert(&data, &key, &progress) => result,
+            result = backupfs::convert(&data, &key, &mut progress) => result,
             _ = shutdown.recv() => Err(Error::new(eyre!("{}", t!("backup.conversion.interrupted")), ErrorKind::Backup)),
         };
         drop(key);
@@ -234,24 +267,8 @@ impl<G: GenericMountGuard> PreparedConversion<G> {
             Ok(()) => result,
             Err(error) => result.and(Err(error)),
         };
-        let status = ConversionJob::finished(progress.snapshot(), &result);
-        let (level, title) = if result.is_ok() {
-            (
-                NotificationLevel::Success,
-                t!("backup.conversion.complete-title").to_string(),
-            )
-        } else {
-            (
-                NotificationLevel::Warning,
-                t!("backup.conversion.failed-title").to_string(),
-            )
-        };
-        let message = t!(
-            "backup.conversion.result",
-            target = target_id.to_string(),
-            server = server_id
-        )
-        .to_string();
+        let status = ConversionJob::finished(progress.tracker().snapshot(), &result);
+        let (level, title, message) = status.notification(&label);
         db.mutate(|db| {
             let mut active = jobs(db)?;
             active
