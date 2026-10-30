@@ -1,39 +1,74 @@
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
+use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::task::{ready, Poll};
 
+use bytes::Bytes;
 use futures::Stream;
 use imbl_value::Value;
 use json_patch::patch;
 use json_ptr::JsonPointer;
 use serde::de::DeserializeOwned;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 use crate::{Dump, Error, HasModel, ModelExt, Revision};
 
+#[cfg(test)]
+mod tests;
+
 pub type Subscriber = mpsc::UnboundedReceiver<Revision>;
 
+type JsonRevision = Result<Bytes, Arc<serde_json::Error>>;
+
+/// A bounded JSON revision stream. Overflow permanently closes the subscription.
+///
+/// Capacity is measured in revisions and may be rounded up by Tokio. After
+/// `recv` returns `None`, consumers must obtain a fresh dump and subscription.
 #[derive(Debug)]
-struct ScopedSender(JsonPointer, mpsc::UnboundedSender<Revision>);
-impl ScopedSender {
-    fn send(&self, revision: &Revision) -> Result<(), mpsc::error::SendError<Revision>> {
-        let scoped = revision.for_path(&self.0);
-        if scoped.patch.is_empty() {
-            return Ok(());
+pub struct JsonSubscriber {
+    receiver: Option<broadcast::Receiver<JsonRevision>>,
+}
+impl JsonSubscriber {
+    /// Returns shared JSON bytes, or `None` after closure or overflow.
+    /// An encoding error also terminates the subscription.
+    pub async fn recv(&mut self) -> Result<Option<Bytes>, Error> {
+        let Some(receiver) = &mut self.receiver else {
+            return Ok(None);
+        };
+        match receiver.recv().await {
+            Ok(Ok(json)) => Ok(Some(json)),
+            Ok(Err(error)) => {
+                self.receiver = None;
+                Err(error.into())
+            }
+            Err(_) => {
+                self.receiver = None;
+                Ok(None)
+            }
         }
-        self.1.send(scoped)
     }
 }
 
-#[derive(Debug)]
-pub struct Broadcast {
-    listeners: Vec<ScopedSender>,
+#[derive(Debug, Default)]
+struct ScopedBroadcast {
+    unbounded: Vec<mpsc::UnboundedSender<Revision>>,
+    json: BTreeMap<NonZeroUsize, broadcast::Sender<JsonRevision>>,
+    dump: Option<Bytes>,
 }
-impl Default for Broadcast {
-    fn default() -> Self {
-        Self {
-            listeners: Vec::new(),
-        }
+impl ScopedBroadcast {
+    fn prune_unbounded(&mut self) {
+        self.unbounded.retain(|sender| !sender.is_closed());
     }
+
+    fn is_empty(&self) -> bool {
+        self.unbounded.is_empty() && self.json.is_empty()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Broadcast {
+    listeners: BTreeMap<JsonPointer, ScopedBroadcast>,
 }
 impl Broadcast {
     pub fn new() -> Self {
@@ -41,20 +76,69 @@ impl Broadcast {
     }
 
     pub fn send(&mut self, value: &Revision) {
-        let mut i = 0;
-        while i < self.listeners.len() {
-            if self.listeners[i].send(value).is_err() {
-                self.listeners.swap_remove(i);
-            } else {
-                i += 1;
+        self.listeners.retain(|ptr, listeners| {
+            listeners.dump = None;
+            listeners.prune_unbounded();
+            listeners
+                .json
+                .retain(|_, sender| sender.receiver_count() != 0);
+            if listeners.is_empty() {
+                return false;
             }
-        }
+            let scoped = value.for_path(ptr);
+            if !scoped.patch.is_empty() {
+                listeners
+                    .unbounded
+                    .retain(|sender| sender.send(scoped.clone()).is_ok());
+                if !listeners.json.is_empty() {
+                    let json = serde_json::to_vec(&scoped)
+                        .map(Bytes::from)
+                        .map_err(Arc::new);
+                    for sender in listeners.json.values() {
+                        let _ = sender.send(json.clone());
+                    }
+                }
+            }
+            true
+        });
     }
 
     pub fn subscribe(&mut self, ptr: JsonPointer) -> Subscriber {
+        self.listeners.retain(|_, listeners| {
+            listeners.prune_unbounded();
+            !listeners.is_empty()
+        });
         let (send, recv) = mpsc::unbounded_channel();
-        self.listeners.push(ScopedSender(ptr, send));
+        self.listeners.entry(ptr).or_default().unbounded.push(send);
         recv
+    }
+
+    pub fn subscribe_json(
+        &mut self,
+        ptr: JsonPointer,
+        dump: Dump,
+        capacity: NonZeroUsize,
+    ) -> Result<(Bytes, JsonSubscriber), Error> {
+        let listeners = self.listeners.entry(ptr).or_default();
+        let json = match &listeners.dump {
+            Some(json) => json.clone(),
+            None => {
+                let json = Bytes::from(serde_json::to_vec(&dump).map_err(Arc::new)?);
+                listeners.dump = Some(json.clone());
+                json
+            }
+        };
+        let receiver = listeners
+            .json
+            .entry(capacity)
+            .or_insert_with(|| broadcast::channel(capacity.get()).0)
+            .subscribe();
+        Ok((
+            json,
+            JsonSubscriber {
+                receiver: Some(receiver),
+            },
+        ))
     }
 }
 

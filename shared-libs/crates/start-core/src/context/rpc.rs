@@ -7,16 +7,21 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use fast_socks5::client::{Config as SocksConfig, Socks5Stream};
 use imbl::OrdMap;
 use imbl_value::InternedString;
 use josekit::jwk::Jwk;
 use reqwest::{Client, Proxy};
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{CallRemote, Context, Empty};
+use tokio::net::TcpStream;
 use tokio::process::Command;
 use tokio::sync::{RwLock, broadcast, oneshot, watch};
 use tokio::time::Instant;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::instrument;
+use url::Url;
 
 use super::setup::CURRENT_SECRET;
 use crate::account::AccountInfo;
@@ -153,6 +158,30 @@ impl ReloadableHttpClient {
 
     pub fn get(&self) -> Client {
         self.client.read()
+    }
+
+    pub async fn websocket(
+        &self,
+        url: Url,
+        config: WebSocketConfig,
+    ) -> Result<WebSocketStream<MaybeTlsStream<Socks5Stream<TcpStream>>>, Error> {
+        let proxy: Url = self.socks_proxy_url.parse()?;
+        let stream = Socks5Stream::connect(
+            (
+                proxy.host_str().or_not_found("SOCKS proxy host")?,
+                proxy.port().or_not_found("SOCKS proxy port")?,
+            ),
+            url.host_str().or_not_found("WebSocket host")?.to_owned(),
+            url.port_or_known_default().or_not_found("WebSocket port")?,
+            SocksConfig::default(),
+        )
+        .await
+        .with_kind(ErrorKind::Network)?;
+        let (socket, _) =
+            tokio_tungstenite::client_async_tls_with_config(url, stream, Some(config), None)
+                .await
+                .with_kind(ErrorKind::Network)?;
+        Ok(socket)
     }
 
     pub fn reload(&self) -> Result<(), Error> {
@@ -438,6 +467,11 @@ impl RpcContext {
         tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));
 
         crate::version::post_init(&res, run_migrations).await?;
+        let weak = Arc::downgrade(&seed);
+        let db = res.db.clone();
+        res.add_cron(crate::update::security::watch_updates(db, move || {
+            weak.upgrade().map(Self)
+        }));
         tracing::info!("{}", t!("context.rpc.completed-migrations"));
         let weak = Arc::downgrade(&res.0);
         let db = res.db.clone();
@@ -713,6 +747,51 @@ mod tests {
         );
         proxy_server.await.unwrap();
         target_server.abort();
+    }
+
+    #[tokio::test]
+    async fn websocket_uses_the_os_socks_proxy_and_remote_dns() {
+        use fast_socks5::server::Socks5ServerProtocol;
+        use fast_socks5::util::target_addr::TargetAddr;
+        use futures::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+
+        let proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client =
+            ReloadableHttpClient::new(format!("socks5h://{}", proxy.local_addr().unwrap()))
+                .unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = proxy.accept().await.unwrap();
+            let (protocol, _, target) = Socks5ServerProtocol::accept_no_auth(stream)
+                .await
+                .unwrap()
+                .read_command()
+                .await
+                .unwrap();
+            assert_eq!(target, TargetAddr::Domain("registry.invalid".into(), 5959));
+            let stream = protocol
+                .reply_success("127.0.0.1:0".parse().unwrap())
+                .await
+                .unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            socket.send(Message::Text("{}".into())).await.unwrap();
+        });
+        let mut socket = tokio::time::timeout(
+            Duration::from_secs(5),
+            client.websocket(
+                "ws://registry.invalid:5959/os/security".parse().unwrap(),
+                WebSocketConfig::default().read_buffer_size(4096),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            socket.next().await.unwrap().unwrap(),
+            Message::Text("{}".into())
+        );
+        assert_eq!(socket.get_config().read_buffer_size, 4096);
+        server.await.unwrap();
     }
 
     #[tokio::test]

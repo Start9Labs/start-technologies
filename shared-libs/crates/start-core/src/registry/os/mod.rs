@@ -9,6 +9,7 @@ pub const SIG_CONTEXT: &str = "startos";
 pub mod asset;
 pub mod index;
 pub mod promote;
+pub mod security;
 pub mod version;
 
 pub fn os_api<C: Context>() -> ParentHandler<C> {

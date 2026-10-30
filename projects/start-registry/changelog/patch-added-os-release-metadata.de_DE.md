@@ -1,0 +1,2 @@
+- Die Metadaten einer OS-Version speichern den Git-Commit des Builds und die Kennzeichnung als Sicherheitsupdate. Beides bleibt bei der Promotion zwischen Registries erhalten.
+- Ankündigungen von OS-Sicherheitsupdates sind standardmäßig deaktiviert. Registry-Betreiber können sie mit `security-notifications: true` aktivieren, ohne die Release-Metadaten zu ändern.

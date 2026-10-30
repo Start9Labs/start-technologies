@@ -115,6 +115,15 @@ pub fn registry_router(ctx: RegistryContext) -> Router {
     use axum::extract as x;
     use axum::routing::{any, get};
     Router::new()
+        .route(
+            "/os/security",
+            get({
+                let db = ctx.security_feed.as_ref().map(|feed| feed.db.clone());
+                move |ws: axum::extract::ws::WebSocketUpgrade| async move {
+                    os::security::upgrade(ws, db.clone())
+                }
+            }),
+        )
         .route("/rpc/{*path}", {
             let ctx = ctx.clone();
             any(

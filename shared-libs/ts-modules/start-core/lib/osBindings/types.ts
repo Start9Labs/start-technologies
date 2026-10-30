@@ -160,6 +160,12 @@ export type ImageMetadata = z.output<typeof schemas.ImageMetadata>
 export type ImageMetadataInput = z.input<typeof schemas.ImageMetadata>
 export type KeyboardOptions = z.output<typeof schemas.KeyboardOptions>
 export type KeyboardOptionsInput = z.input<typeof schemas.KeyboardOptions>
+export type LegacyHealthCheckResultKind = z.output<
+  typeof schemas.LegacyHealthCheckResultKind
+>
+export type LegacyHealthCheckResultKindInput = z.input<
+  typeof schemas.LegacyHealthCheckResultKind
+>
 export type ListNotificationParams = z.output<
   typeof schemas.ListNotificationParams
 >
@@ -220,6 +226,16 @@ export type NetworkInterfaceTypeInput = z.input<
 >
 export type NotificationLevel = z.output<typeof schemas.NotificationLevel>
 export type NotificationLevelInput = z.input<typeof schemas.NotificationLevel>
+
+/**
+ * An OS update available for review.
+ */
+export type OsUpdateAvailable = z.output<typeof schemas.OsUpdateAvailable>
+
+/**
+ * An OS update available for review.
+ */
+export type OsUpdateAvailableInput = z.input<typeof schemas.OsUpdateAvailable>
 
 /**
  * An absent update preserves DNS intent; null servers select gateway DNS.
@@ -570,6 +586,12 @@ export type CliSetDescriptionParams = z.output<
 export type CliSetDescriptionParamsInput = z.input<
   typeof schemas.CliSetDescriptionParams
 >
+export type CompatibleHealthCheckResultKind = z.output<
+  typeof schemas.CompatibleHealthCheckResultKind
+>
+export type CompatibleHealthCheckResultKindInput = z.input<
+  typeof schemas.CompatibleHealthCheckResultKind
+>
 export type ControlParams = z.output<typeof schemas.ControlParams>
 export type ControlParamsInput = z.input<typeof schemas.ControlParams>
 export type CreateNotificationParams = z.output<
@@ -782,12 +804,6 @@ export type MetricsSummary = z.output<typeof schemas.MetricsSummary>
 export type MetricsSummaryInput = z.input<typeof schemas.MetricsSummary>
 export type MountTarget = z.output<typeof schemas.MountTarget>
 export type MountTargetInput = z.input<typeof schemas.MountTarget>
-export type NamedHealthCheckResult = z.output<
-  typeof schemas.NamedHealthCheckResult
->
-export type NamedHealthCheckResultInput = z.input<
-  typeof schemas.NamedHealthCheckResult
->
 export type Notification = z.output<typeof schemas.Notification>
 export type NotificationInput = z.input<typeof schemas.Notification>
 export type OsUpdateSignerKeyParams = z.output<
@@ -1092,6 +1108,12 @@ export type Metrics = z.output<typeof schemas.Metrics>
 export type MetricsInput = z.input<typeof schemas.Metrics>
 export type MountParams = z.output<typeof schemas.MountParams>
 export type MountParamsInput = z.input<typeof schemas.MountParams>
+export type NamedHealthCheckResult = z.output<
+  typeof schemas.NamedHealthCheckResult
+>
+export type NamedHealthCheckResultInput = z.input<
+  typeof schemas.NamedHealthCheckResult
+>
 export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
 export type NetworkInterfaceInfoInput = z.input<
   typeof schemas.NetworkInterfaceInfo
@@ -1136,12 +1158,8 @@ export type SetDependenciesParams = z.output<
 export type SetDependenciesParamsInput = z.input<
   typeof schemas.SetDependenciesParams
 >
-export type SetHealth = z.output<typeof schemas.SetHealth>
-export type SetHealthInput = z.input<typeof schemas.SetHealth>
 export type SetupProgress = z.output<typeof schemas.SetupProgress>
 export type SetupProgressInput = z.input<typeof schemas.SetupProgress>
-export type StatusInfo = z.output<typeof schemas.StatusInfo>
-export type StatusInfoInput = z.input<typeof schemas.StatusInfo>
 export type Task = z.output<typeof schemas.Task>
 export type TaskParams = z.input<typeof schemas.Task>
 export type UpdateSystemParams = z.output<typeof schemas.UpdateSystemParams>
@@ -1204,10 +1222,14 @@ export type SessionList = z.output<typeof schemas.SessionList>
 export type SessionListInput = z.input<typeof schemas.SessionList>
 export type SetBackupProgress = z.output<typeof schemas.SetBackupProgress>
 export type SetBackupProgressInput = z.input<typeof schemas.SetBackupProgress>
+export type SetHealth = z.output<typeof schemas.SetHealth>
+export type SetHealthInput = z.input<typeof schemas.SetHealth>
 export type SetInitProgress = z.output<typeof schemas.SetInitProgress>
 export type SetInitProgressInput = z.input<typeof schemas.SetInitProgress>
 export type SetupStatusRes = z.output<typeof schemas.SetupStatusRes>
 export type SetupStatusResInput = z.input<typeof schemas.SetupStatusRes>
+export type StatusInfo = z.output<typeof schemas.StatusInfo>
+export type StatusInfoInput = z.input<typeof schemas.StatusInfo>
 export type TaskEntry = z.output<typeof schemas.TaskEntry>
 export type TaskEntryInput = z.input<typeof schemas.TaskEntry>
 export type CheckDependenciesResult = z.output<

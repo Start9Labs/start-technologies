@@ -54,6 +54,18 @@ same reads, mutations, subscriptions, and `TypedPatchDb` wrappers. Cloned handle
 share state; separate calls create independent databases. State is discarded when
 the last handle drops, without creating or accessing files.
 
+### Bounded JSON subscriptions
+
+`dump_and_sub_json(pointer, capacity)` atomically returns an encoded JSON dump and a bounded revision
+stream. Pass a `NonZeroUsize` capacity measured in revisions; Tokio may round it up. The returned
+`bytes::Bytes` buffers are shared: dumps are cached per pointer until any database revision, and each
+scoped revision serializes once across all JSON subscribers at that pointer, including different
+capacities. Send these buffers directly rather than serializing them again.
+
+`JsonSubscriber::recv()` returns `Ok(None)` on closure or overflow. Overflow is terminal: obtain a
+fresh dump and subscription rather than continuing with missing patches. Ordinary typed subscribers
+and watches keep their existing unbounded behavior.
+
 ### TypeScript
 
 ```typescript

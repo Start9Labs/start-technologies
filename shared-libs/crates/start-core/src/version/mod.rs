@@ -865,7 +865,7 @@ mod tests {
 
     #[tokio::test]
     async fn maintenance_revisions_migrate_and_roll_back_without_changing_service_data() {
-        for (from, to, revision) in [("0.4.0.3", "0.4.0.4", 0), ("0.4.0.4", "0.4.0.5", 2)] {
+        for (from, to, revision) in [("0.4.0.3", "0.4.0.4", 0), ("0.4.0.4", "0.4.0.5", 3)] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()
                 .as_version_t()
@@ -875,7 +875,7 @@ mod tests {
                 .as_version_t()
                 .unwrap();
             assert_eq!(current.previous().semver(), previous.semver());
-            let mut db = json!({ "public": { "serverInfo": {
+            let mut db = json!({ "private": {}, "public": { "serverInfo": {
                 "version": from,
                 "packageVersionCompat": ">=0.3.0 <0.5.0",
                 "postInitMigrationTodos": {},
@@ -955,7 +955,10 @@ mod tests {
             }, "packageData": { "service": { "setting": "preserved", "outboundDns": null } } },
             "private": { "sessionPubkeys": { session_key.to_string(): session.clone() } } });
             let packages = db["public"]["packageData"].clone();
-            let private = db["private"].clone();
+            let mut expected_private = db["private"].clone();
+            if from == "0.4.0.5" {
+                expected_private["osSecurityNotifications"] = json!({});
+            }
             let pre_ups = PreUps::load(&previous, &current).await.unwrap();
             migrate_from_unchecked(&previous, &current, pre_ups, &mut db).unwrap();
             assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.1"));
@@ -986,7 +989,7 @@ mod tests {
             );
             assert!(db["public"]["serverInfo"].get("trustedKeys").is_none());
             assert_eq!(db["public"]["packageData"], packages);
-            assert_eq!(db["private"], private);
+            assert_eq!(db["private"], expected_private);
         }
     }
 

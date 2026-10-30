@@ -179,6 +179,8 @@ const trustedSigners = Object.fromEntries(
 const squashfs = {
   x86_64: { signatures: { [OS_UPDATE_SIGNERS[0]]: 'signature' } },
 }
+const runningGitHash = 'a'.repeat(40)
+const nextGitHash = 'b'.repeat(40)
 const catalog = {
   '0.4.0.2': { releaseNotes: 'equal', squashfs },
   '0.4.0.4': { releaseNotes: 'newest', squashfs },
@@ -219,6 +221,10 @@ function fixture(t, cachedVersion, providers = []) {
   let completed = 0
   const api = {
     rpc: {
+      async gitInfo(params) {
+        assert.deepEqual(params, {})
+        return `${runningGitHash}\n`
+      },
       registry: {
         os: {
           version: {
@@ -833,6 +839,90 @@ test('strictly newer candidates sort descending; refresh failure preserves catal
   assert.deepEqual(f.os.updateCandidates(), [
     { version: '0.4.0.5', notes: 'refreshed', squashfs },
   ])
+})
+
+test('a different image at the installed version is offered and submitted', async t => {
+  const f = fixture(t, '0.4.0.2')
+  await f.load({
+    ...catalog,
+    '0.4.0.2': { releaseNotes: 'next image', squashfs, gitHash: nextGitHash },
+    '0.4.0.1': { releaseNotes: 'older image', squashfs, gitHash: nextGitHash },
+  })
+  assert.deepEqual(f.os.updateCandidates(), [
+    ...candidates,
+    { version: '0.4.0.2', notes: 'next image', squashfs },
+  ])
+
+  await f.load({
+    '0.4.0.2': { releaseNotes: 'next image', squashfs, gitHash: nextGitHash },
+  })
+  assert.equal(f.availability.at(-1), true)
+  assert.equal(f.shown.at(-1), true)
+  f.make(General).update()
+  assert.deepEqual(f.opened, [UPDATE])
+  await f.make(SystemUpdateModal).update()
+  assert.deepEqual(await Promise.all(f.tasks), [true])
+  assert.equal(f.submissions[0].targetVersion, '=0.4.0.2')
+  assert.equal(f.completed, 1)
+})
+
+for (const gitHash of [runningGitHash, null, undefined]) {
+  test(`the installed version is excluded with matching or unknown registry hash: ${gitHash}`, async t => {
+    const f = fixture(t, '0.4.0.2')
+    await f.load({
+      '0.4.0.2': { releaseNotes: 'installed', squashfs, gitHash },
+    })
+    assert.deepEqual(f.os.updateCandidates(), [])
+    assert.equal(f.availability.at(-1), false)
+    assert.equal(f.shown.at(-1), false)
+  })
+}
+
+test('a refreshed same-version listing clears availability when its image matches the running build', async t => {
+  const f = fixture(t, '0.4.0.2')
+  await f.load({
+    '0.4.0.2': { releaseNotes: 'next image', squashfs, gitHash: nextGitHash },
+  })
+  assert.equal(f.availability.at(-1), true)
+  const modal = f.make(SystemUpdateModal)
+  await f.load({
+    '0.4.0.2': { releaseNotes: 'installed', squashfs, gitHash: runningGitHash },
+  })
+  assert.deepEqual(f.os.updateCandidates(), [])
+  assert.equal(f.availability.at(-1), false)
+  await modal.update()
+  assert.deepEqual(f.submissions, [])
+})
+
+test('catalog publication waits for the running build hash', async t => {
+  const f = fixture(t, '0.4.0.2')
+  const hash = deferred()
+  f.api.rpc.gitInfo = () => hash.promise
+  const loading = f.os.loadOS()
+  await tick()
+  f.requests[0].resolve({
+    '0.4.0.2': { releaseNotes: 'installed', squashfs, gitHash: runningGitHash },
+  })
+  await tick()
+  assert.deepEqual(f.os.updateCandidates(), [])
+  hash.resolve(`${runningGitHash}\n`)
+  await loading
+  assert.deepEqual(f.os.updateCandidates(), [])
+  assert.deepEqual(f.availability, [false])
+})
+
+test('git-info failure preserves the last successful catalog', async t => {
+  const f = fixture(t, '0.4.0.2')
+  await f.load()
+  f.api.rpc.gitInfo = async () => {
+    throw new Error('git-info unavailable')
+  }
+  const refresh = f.os.loadOS()
+  const rejected = assert.rejects(refresh, /git-info unavailable/)
+  await tick()
+  f.requests.at(-1).resolve({})
+  await rejected
+  assert.deepEqual(f.os.updateCandidates(), candidates)
 })
 
 test('release notes select the live UI language without refetching or changing registry data', async t => {

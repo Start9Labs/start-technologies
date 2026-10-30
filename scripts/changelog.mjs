@@ -260,7 +260,9 @@ function releaseTags(output) {
     name = name.replace(/\^\{\}$/, '')
     const match = /^([a-z0-9]+(?:-[a-z0-9]+)*)\/v(.+)$/.exec(name)
     if (!match || !Object.hasOwn(MANIFESTS, match[1])) continue
-    parseVersion(match[1], match[2])
+    const [, prerelease] = parseVersion(match[1], match[2])
+    if (match[1] === 'start-os' && prerelease?.match(/^rc\.[1-9][0-9]*$/))
+      continue
     if (!tags.has(name) || peeled) tags.set(name, sha)
   }
   return tags
@@ -647,21 +649,26 @@ function compileNotes(path, notes, fragments, locale = ENGLISH, ref) {
 function renderNotes(product, version, ref, locale = ENGLISH) {
   parseVersion(basename(product), version)
   const { path, notes } = noteFraming(product, version, locale, ref)
+  return compileNotes(
+    path,
+    notes,
+    releaseFragments(product, version, ref),
+    locale,
+    ref,
+  )
+}
+
+function releaseFragments(product, version, ref) {
+  parseVersion(basename(product), version)
   const fragments = sourceFragments(product, ref)
-  if (!fragments.size) return compileNotes(path, notes, [], locale, ref)
+  if (!fragments.size) return []
   const commit = decodeUtf8(
     git('rev-parse', '--verify', `${ref || 'HEAD'}^{commit}`),
   ).trim()
   const releases = originReleases(commit, product, localTags()).filter(
     release => release.version !== version,
   )
-  return compileNotes(
-    path,
-    notes,
-    ownedFragments({ product, version, commit, fragments }, releases),
-    locale,
-    ref,
-  )
+  return ownedFragments({ product, version, commit, fragments }, releases)
 }
 
 function renderNotesBundle(product, version, ref) {
@@ -921,7 +928,7 @@ function sync() {
 }
 
 const USAGE =
-  'usage: changelog.mjs projects | changed BASE | validate PRODUCT | version PRODUCT | check-version PRODUCT [VERSION] | render PRODUCT VERSION [--ref REF] | notes PRODUCT VERSION [--ref REF] [--locale LOCALE] | notes-bundle PRODUCT VERSION [--ref REF] | release-notes PRODUCT VERSION [--ref REF] | registry-notes PRODUCT VERSION [--ref REF] [--changelog-ref REF] | locales PRODUCT VERSION [--ref REF] | archives PRODUCT [--ref REF] | section VERSION | sync'
+  'usage: changelog.mjs projects | changed BASE | validate PRODUCT | version PRODUCT | check-version PRODUCT [VERSION] | render PRODUCT VERSION [--ref REF] | notes PRODUCT VERSION [--ref REF] [--locale LOCALE] | security PRODUCT VERSION [--ref REF] | notes-bundle PRODUCT VERSION [--ref REF] | release-notes PRODUCT VERSION [--ref REF] | registry-notes PRODUCT VERSION [--ref REF] [--changelog-ref REF] | locales PRODUCT VERSION [--ref REF] | archives PRODUCT [--ref REF] | section VERSION | sync'
 
 try {
   const { values, positionals } = parseArgs({
@@ -942,6 +949,7 @@ try {
     'check-version': [1, 2],
     render: [2],
     notes: [2],
+    security: [2],
     'notes-bundle': [2],
     'release-notes': [2],
     'registry-notes': [2],
@@ -957,6 +965,7 @@ try {
         ![
           'render',
           'notes',
+          'security',
           'notes-bundle',
           'release-notes',
           'registry-notes',
@@ -983,6 +992,12 @@ try {
   else if (command === 'notes')
     process.stdout.write(
       renderNotes(productPath(args[0]), args[1], values.ref, values.locale),
+    )
+  else if (command === 'security')
+    console.log(
+      releaseFragments(productPath(args[0]), args[1], values.ref).some(
+        fragment => fragment.kind === 'security',
+      ),
     )
   else if (command === 'notes-bundle')
     console.log(

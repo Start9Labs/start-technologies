@@ -25,7 +25,7 @@ impl VersionT for Version {
         V0_4_1.clone()
     }
     fn migration_revision(self) -> usize {
-        1
+        2
     }
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
@@ -56,6 +56,7 @@ impl VersionT for Version {
                 json!({ "pubkeys": pubkeys, "tokens": {} }),
             );
         }
+        v0_4_0_5::initialize_security_notifications(db)?;
         Ok(Value::Null)
     }
     fn down(self, db: &mut Value) -> Result<(), Error> {
@@ -293,7 +294,10 @@ mod tests {
         );
         assert_eq!(
             previous["private"],
-            json!({ "sessionPubkeys": { canonical.clone(): session.clone() } })
+            json!({
+                "sessionPubkeys": { canonical.clone(): session.clone() },
+                "osSecurityNotifications": {},
+            })
         );
         assert_eq!(
             previous["public"]["serverInfo"]["trustedOsUpdateSigners"],
@@ -433,7 +437,10 @@ mod tests {
         } });
         let original = json!({
             "public": { "serverInfo": { "trustedOsUpdateSigners": {} } },
-            "private": { "password": "hash", "sessionPubkeys": pubkeys.clone() },
+            "private": {
+                "password": "hash", "sessionPubkeys": pubkeys.clone(),
+                "osSecurityNotifications": {},
+            },
         });
         let mut db = original.clone();
         Version.up(&mut db, ()).unwrap();
@@ -441,6 +448,7 @@ mod tests {
             db["private"],
             json!({
                 "password": "hash", "sessions": { "pubkeys": pubkeys, "tokens": {} },
+                "osSecurityNotifications": {},
             })
         );
         db["private"]["sessions"]["tokens"] = json!({ "hash": {} });
@@ -449,6 +457,42 @@ mod tests {
         assert_eq!(db, migrated);
         Version.down(&mut db).unwrap();
         assert_eq!(db, original);
+    }
+
+    #[tokio::test]
+    async fn published_keyrings_gain_notification_state_without_losing_trust_or_sessions() {
+        use patch_db::json_ptr::ROOT;
+
+        let account =
+            crate::account::AccountInfo::new("password", std::time::SystemTime::now(), None)
+                .unwrap();
+        let mut fixture =
+            to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
+                .unwrap();
+        fixture["public"]["serverInfo"]["trustedKeys"]["start9"]["os"] = json!(false);
+        fixture["public"]["serverInfo"]["latestMigrationRevision"] = json!(1);
+        fixture["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
+        fixture["private"]["sessions"]["tokens"] =
+            json!({ "a".repeat(64): crate::auth::Session::default() });
+        fixture["private"]
+            .as_object_mut()
+            .unwrap()
+            .remove("osSecurityNotifications");
+        let saved_trust = fixture["public"]["serverInfo"]["trustedKeys"].clone();
+        let saved_sessions = fixture["private"]["sessions"].clone();
+        let db = PatchDb::in_memory();
+        db.put(&ROOT, &fixture).await.unwrap();
+        Current::default().pre_init(&db).await.unwrap();
+        let migrated = db.dump(&ROOT).await.value;
+        assert_eq!(migrated["private"]["osSecurityNotifications"], json!({}));
+        assert_eq!(migrated["private"]["sessions"], saved_sessions);
+        assert_eq!(migrated["public"]["serverInfo"]["trustedKeys"], saved_trust);
+        assert_eq!(
+            migrated["public"]["serverInfo"]["latestMigrationRevision"],
+            json!(2)
+        );
+        Current::default().pre_init(&db).await.unwrap();
+        assert_eq!(db.dump(&ROOT).await.value, migrated);
     }
 
     #[tokio::test]
@@ -484,7 +528,7 @@ mod tests {
             assert_eq!(migrated["private"]["sessions"], sessions);
             assert_eq!(
                 migrated["public"]["serverInfo"]["latestMigrationRevision"],
-                json!(1)
+                json!(Version.migration_revision())
             );
             assert_eq!(
                 migrated["public"]["serverInfo"]["postInitMigrationTodos"],
