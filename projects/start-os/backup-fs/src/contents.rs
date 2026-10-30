@@ -607,7 +607,7 @@ impl Contents {
         self.flush_content_only()?;
         if self.changed {
             self.ctrl.save(&self.inode)?;
-            self.ctrl.tick_save()?;
+            self.ctrl.tick_save();
             self.changed = false;
         }
         // Only now (blocks written, File inode record appended after them) is
@@ -616,7 +616,7 @@ impl Contents {
         // record is too — the inode can't end up Packed pointing at a hole.
         if let Some(cid) = self.pending_content_tombstone.take() {
             self.ctrl.cpack_tombstone(cid)?;
-            self.ctrl.tick_save()?;
+            self.ctrl.tick_save();
         }
         Ok(())
     }
@@ -667,7 +667,7 @@ impl Contents {
             Plan::Packed(cid, bytes) => {
                 if let Some(b) = bytes {
                     self.ctrl.cpack_put(cid, &b, self.codec)?;
-                    self.ctrl.tick_save()?;
+                    self.ctrl.tick_save();
                     if let Body::Packed { dirty, .. } = &mut self.body {
                         *dirty = false;
                     }
@@ -750,6 +750,7 @@ impl Contents {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn fsync(&mut self) -> BkfsResult<()> {
         self.flush()?;
         self.ctrl.syncfs()?;

@@ -563,20 +563,23 @@ fn snapshot_flushes_dirty_handler_metadata_and_open_content() {
     let c = ctrl(&fs);
     let inode = create_file(&c, b"old");
     let metadata_inode = create_file(&c, b"metadata");
-    let h = fs.handler.get_mut().unwrap();
-    let fh = h.fopen(inode, true, true, |_, _| Ok(())).unwrap();
-    let contents = h.handle(fh).unwrap().contents.clone();
-    contents.lock().unwrap().write_at(b"new", 0).unwrap();
-    let mut attrs = h.load_inode(metadata_inode).unwrap();
-    attrs
-        .attrs
-        .xattrs
-        .insert(b"user.pending".to_vec(), b"saved".to_vec());
-    h.save_inode(&attrs).unwrap();
+    let (fh, contents) = {
+        let mut h = fs.handler.lock().unwrap();
+        let fh = h.fopen(inode, true, true, |_, _| Ok(())).unwrap();
+        let contents = h.handle(fh).unwrap().contents.clone();
+        contents.lock().unwrap().write_at(b"new", 0).unwrap();
+        let mut attrs = h.load_inode(metadata_inode).unwrap();
+        attrs
+            .attrs
+            .xattrs
+            .insert(b"user.pending".to_vec(), b"saved".to_vec());
+        h.save_inode(&attrs).unwrap();
+        (fh, contents)
+    };
     fs.create_snapshot("flushed").unwrap();
     contents.lock().unwrap().write_at(b"later", 0).unwrap();
     drop(contents);
-    fs.handler.get_mut().unwrap().fclose(fh).unwrap();
+    fs.handler.lock().unwrap().fclose(fh).unwrap();
     drop(c);
     drop(fs);
     let fs = BackupFS::open_snapshot(config(data.path()), "flushed").unwrap();
@@ -670,9 +673,12 @@ fn failed_snapshot_flush_retains_dirty_blocks_for_retry() {
     let mut fs = BackupFS::new(config(data.path())).unwrap();
     let c = ctrl(&fs);
     let inode = create_file(&c, b"");
-    let h = fs.handler.get_mut().unwrap();
-    let fh = h.fopen(inode, true, true, |_, _| Ok(())).unwrap();
-    let contents = h.handle(fh).unwrap().contents.clone();
+    let (fh, contents) = {
+        let mut h = fs.handler.lock().unwrap();
+        let fh = h.fopen(inode, true, true, |_, _| Ok(())).unwrap();
+        let contents = h.handle(fh).unwrap().contents.clone();
+        (fh, contents)
+    };
     let expected = vec![0x87; 2 * CHUNK_SIZE as usize];
     contents.lock().unwrap().write_at(&expected, 0).unwrap();
     c.fail_block_puts(Some(ContentId(inode.0)));
@@ -681,7 +687,7 @@ fn failed_snapshot_flush_retains_dirty_blocks_for_retry() {
     c.fail_block_puts(None);
     fs.create_snapshot("retried").unwrap();
     drop(contents);
-    fs.handler.get_mut().unwrap().fclose(fh).unwrap();
+    fs.handler.lock().unwrap().fclose(fh).unwrap();
     drop(c);
     drop(fs);
     let fs = BackupFS::open_snapshot(config(data.path()), "retried").unwrap();

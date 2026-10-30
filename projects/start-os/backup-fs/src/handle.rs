@@ -402,7 +402,7 @@ impl Handler {
         // A stale dirty clone would overwrite this record at the next flush.
         self.dirty.remove(&attrs.inode);
         self.ctrl.save(attrs)?;
-        self.ctrl.tick_save()?;
+        self.ctrl.tick_save();
         Ok(())
     }
 
@@ -425,27 +425,20 @@ impl Handler {
                 break;
             };
             self.ctrl.save(&attrs)?;
-            self.ctrl.tick_save()?;
+            self.ctrl.tick_save();
         }
         Ok(())
     }
 
     /// Logs all pending state and commits it.
+    ///
+    /// Open files stay locked until the commit completes, so it records
+    /// every file as of one moment between requests.
     pub fn flush_all_dirty(&mut self) -> BkfsResult<()> {
         let mut errs = Vec::new();
-
-        // Flush open Contents first — their in-memory state is
-        // authoritative for the inode, and its post-rename parents
-        // may differ from whatever save_fast last wrote to disk.
-        // Taking a snapshot of the inode set avoids holding a borrow
-        // across the save, since each save may mutate caches.
-        let open: Vec<_> = self
-            .inodes
-            .iter()
-            .filter_map(|(ino, weak)| weak.upgrade().map(|arc| (*ino, arc)))
-            .collect();
-        for (_, contents) in open {
-            let mut contents = contents.lock().unwrap();
+        let open: Vec<_> = self.inodes.values().filter_map(Weak::upgrade).collect();
+        let mut locked: Vec<_> = open.iter().map(|contents| contents.lock().unwrap()).collect();
+        for contents in &mut locked {
             if let Err(e) = contents.flush() {
                 errs.push(e);
             }
@@ -453,20 +446,26 @@ impl Handler {
                 errs.push(e);
             }
         }
-
         for attrs in std::mem::take(&mut self.dirty).into_values() {
             if let Err(e) = self.ctrl.save(&attrs) {
                 errs.push(e);
             }
         }
-        // Dirty-cache entries that shared an inode number with an open
-        // file were cleared into `dirty` before this call or handled
-        // via the open path above.
         self.read_cache.borrow_mut().clear();
         if let Err(e) = self.ctrl.syncfs() {
             errs.push(e.into());
         }
+        drop(locked);
         BkfsResult::multiple((), errs)
+    }
+
+    /// Commits once enough saves have accumulated. Call only between requests.
+    pub fn commit_if_due(&mut self) {
+        if self.ctrl.commit_due() {
+            if let Err(error) = self.flush_all_dirty() {
+                warn!("backup commit failed: {error}");
+            }
+        }
     }
 
     /// Cache-or-disk read. Populates the cache on miss. Used by paths
@@ -1303,15 +1302,6 @@ impl Handler {
         }
 
         Ok(written)
-    }
-
-    pub fn fsync(&mut self, _req: &Request, _inode: Inode, fh: FileHandleId) -> BkfsResult<()> {
-        let fh = self
-            .handle(fh)
-            .ok_or(libc::EBADF)
-            .map_err(io::Error::from_raw_os_error)?;
-        fh.contents.lock().unwrap().fsync()?;
-        Ok(())
     }
 
     pub fn opendir(

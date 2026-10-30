@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 use std::io;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chacha20::Key;
@@ -58,9 +58,12 @@ pub struct ControllerSeed {
     /// Content id whose block writes fail, for fault-injection tests.
     #[cfg(test)]
     fail_block_puts: AtomicU64,
-    /// Counts saves since the last commit; reaching the batch threshold
-    /// commits everything accumulated.
+    /// Counts saves since the last commit.
     pending_saves: AtomicUsize,
+    /// Saves after which a commit is due.
+    sync_batch: AtomicUsize,
+    /// Set once the batch threshold is reached; cleared by the next commit.
+    commit_due: AtomicBool,
 }
 
 /// Dead-byte ratio above which a sealed segment is compacted on the next
@@ -146,6 +149,8 @@ impl Controller {
             log: Mutex::new(log),
             next_inode: AtomicU64::new(next_inode),
             pending_saves: AtomicUsize::new(0),
+            sync_batch: AtomicUsize::new(crate::util::sync_batch()),
+            commit_due: AtomicBool::new(false),
             #[cfg(test)]
             fail_block_puts: AtomicU64::new(u64::MAX),
             config,
@@ -203,14 +208,14 @@ impl Controller {
         let mut file = crate::atomic_file::AtomicFile::create_buffered(self.legacy_object(object))?;
         file.write_all(&sealed.bytes)?;
         file.save_fast()?;
-        self.tick_save()?;
+        self.tick_save();
         Ok(())
     }
 
     fn remove_legacy_object(&self, object: RecordKey) -> BkfsResult<()> {
         self.check_rw()?;
         match std::fs::remove_file(self.legacy_object(object)) {
-            Ok(()) => self.tick_save()?,
+            Ok(()) => self.tick_save(),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
@@ -480,7 +485,7 @@ impl Controller {
         }
         let rec = seglog::seal_block(self.key(), self.ecc(), content.0, idx, stored)?;
         self.0.log.lock().unwrap().append(&rec)?;
-        self.tick_save()?;
+        self.tick_save();
         Ok(())
     }
 
@@ -495,7 +500,7 @@ impl Controller {
             .unwrap()
             .remove(RecordKey::Block(content.0, idx))?
         {
-            self.tick_save()?;
+            self.tick_save();
         }
         Ok(())
     }
@@ -609,7 +614,7 @@ impl Controller {
             .lock()
             .unwrap()
             .stage_bucket(dir.0, gen, idx, plain)?;
-        self.tick_save()?;
+        self.tick_save();
         Ok(())
     }
 
@@ -625,7 +630,7 @@ impl Controller {
             .unwrap()
             .remove(RecordKey::Bucket(dir.0, gen, idx))?
         {
-            self.tick_save()?;
+            self.tick_save();
         }
         Ok(())
     }
@@ -782,8 +787,12 @@ impl Controller {
         T::exists(self, args)
     }
 
+    /// Publishes everything logged so far. Callers outside the format-1
+    /// barriers must log a consistent filesystem first; see
+    /// [`crate::handle::Handler::flush_all_dirty`].
     pub fn syncfs(&self) -> io::Result<()> {
         self.0.pending_saves.store(0, Ordering::Relaxed);
+        self.0.commit_due.store(false, Ordering::Relaxed);
         self.0
             .log
             .lock()
@@ -801,15 +810,24 @@ impl Controller {
     }
 
     /// Counts one save toward the commit batch threshold.
-    pub fn tick_save(&self) -> io::Result<()> {
+    pub fn tick_save(&self) {
         if self.is_legacy() {
             self.0.log.lock().unwrap().note_data_write();
         }
         let n = self.0.pending_saves.fetch_add(1, Ordering::Relaxed) + 1;
-        if n >= crate::util::sync_batch() {
-            self.syncfs()?;
+        if n >= self.0.sync_batch.load(Ordering::Relaxed) {
+            self.0.commit_due.store(true, Ordering::Relaxed);
         }
-        Ok(())
+    }
+
+    /// Whether enough saves have accumulated for the next request boundary to commit.
+    pub fn commit_due(&self) -> bool {
+        self.0.commit_due.load(Ordering::Relaxed)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_sync_batch(&self, saves: usize) {
+        self.0.sync_batch.store(saves, Ordering::Relaxed);
     }
 }
 

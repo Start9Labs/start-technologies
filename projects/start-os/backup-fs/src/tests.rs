@@ -57,6 +57,12 @@ fn with_backupfs(
     func: impl FnOnce(&Path),
     file_size_padding: Option<f64>,
 ) {
+    let mut options = opts(data, &password);
+    options.file_size_padding = file_size_padding;
+    with_mounted(BackupFS::new(options).unwrap(), func);
+}
+
+fn with_mounted(fs: BackupFS, func: impl FnOnce(&Path)) {
     let mnt = TempDir::with_prefix("backupfs_mnt").unwrap();
     let mut config = Config::default();
     // No AutoUnmount: with 0.17's spawn(), the auto-unmount helper deadlocks
@@ -69,9 +75,6 @@ fn with_backupfs(
     // (main.rs) sets default_permissions — its enforcement is covered by the
     // VM backup/restore test, where the mount is kernel-idmapped.
     config.mount_options = vec![MountOption::FSName("backup-fs".to_string())];
-    let mut options = opts(data, &password);
-    options.file_size_padding = file_size_padding;
-    let fs = BackupFS::new(options).unwrap();
     // 0.17's spawn() moves the mount into the BackgroundSession, so an
     // unmounter taken from the Session beforehand is dead. Drive the whole
     // lifecycle through the BackgroundSession: run in the background, then
@@ -2068,6 +2071,93 @@ fn legacy_stores_keep_new_blocks_and_spilled_directories_through_conversion() {
             None,
         );
     }
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+/// Every directory entry resolves to a readable inode that lists the entry.
+fn assert_namespace_consistent(data: &Path, step: &str) {
+    let fs = BackupFS::new(opts(data, "ohea")).unwrap();
+    let ctrl = fs.handler.lock().unwrap().ctrl().clone();
+    let mut directories = vec![Inode(crate::FUSE_ROOT_ID)];
+    while let Some(directory) = directories.pop() {
+        let attrs: crate::inode::InodeAttributes = ctrl.load(directory).unwrap();
+        let crate::inode::FileData::Directory(entries) = &attrs.attrs.contents else {
+            panic!("{step}: {directory:?} is not a directory");
+        };
+        for (name, entry) in entries.snapshot(&ctrl, directory).unwrap().iter() {
+            let child: crate::inode::InodeAttributes = ctrl
+                .load(entry.inode)
+                .unwrap_or_else(|e| panic!("{step}: {name:?} names a missing inode: {e}"));
+            assert!(
+                child.attrs.parents.contains(&(directory, name.clone())),
+                "{step}: {name:?} is not among its inode's parents"
+            );
+            match &child.attrs.contents {
+                crate::inode::FileData::Directory(_) => directories.push(entry.inode),
+                crate::inode::FileData::File(_) | crate::inode::FileData::Packed(_) => {
+                    let mut contents =
+                        crate::contents::Contents::open(ctrl.clone(), entry.inode).unwrap();
+                    let mut bytes = vec![0; contents.inode.attrs.size as usize];
+                    contents
+                        .read_exact_at(&mut bytes, 0)
+                        .unwrap_or_else(|e| panic!("{step}: {name:?} is unreadable: {e}"));
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+#[test_log::test]
+fn every_commit_records_the_namespace_between_requests() {
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
+    let images = TempDir::with_prefix("backupfs_images").unwrap();
+    let fs = BackupFS::new(opts(data.path(), "ohea")).unwrap();
+    let handler = fs.handler.clone();
+    handler.lock().unwrap().ctrl().set_sync_batch(1);
+    let mut image = 0;
+    let mut crash = |step: &str| {
+        let idle = handler.lock().unwrap();
+        let copy = images.path().join(image.to_string());
+        copy_tree(data.path(), &copy);
+        drop(idle);
+        image += 1;
+        assert_namespace_consistent(&copy, step);
+    };
+    let mut payload = vec![0u8; 3 * 1024 * 1024 + 11];
+    pattern_fill(0, &mut payload);
+    with_mounted(fs, |mnt| {
+        fs::create_dir(mnt.join("a")).unwrap();
+        crash("mkdir");
+        fs::write(mnt.join("a/f"), &payload).unwrap();
+        crash("write");
+        fs::write(mnt.join("a/small"), b"small").unwrap();
+        crash("small write");
+        fs::create_dir(mnt.join("b")).unwrap();
+        crash("second mkdir");
+        fs::rename(mnt.join("a/f"), mnt.join("b/g")).unwrap();
+        crash("rename across directories");
+        fs::hard_link(mnt.join("b/g"), mnt.join("a/h")).unwrap();
+        crash("link");
+        fs::rename(mnt.join("a/small"), mnt.join("a/h")).unwrap();
+        crash("rename over a link");
+        fs::remove_file(mnt.join("b/g")).unwrap();
+        crash("unlink");
+        fs::remove_dir(mnt.join("b")).unwrap();
+        crash("rmdir");
+    });
 }
 
 /// rename within a spilled directory, across into another directory, and
