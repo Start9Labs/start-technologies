@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import { resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -25,7 +25,7 @@ export function loadTypeScript(boundaries) {
         file = fileURLToPath(new URL(specifier, context.parentURL))
       if (file) {
         for (const candidate of [file, `${file}.ts`, `${file}/index.ts`]) {
-          if (existsSync(candidate))
+          if (existsSync(candidate) && statSync(candidate).isFile())
             return { url: pathToFileURL(candidate).href, shortCircuit: true }
         }
       }

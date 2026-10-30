@@ -1,0 +1,2 @@
+- `--trust` pour l’installation de paquets et les mises à jour du système permet d’outrepasser explicitement la confiance accordée au signataire. À partir de StartOS 0.4.1, un signataire de confiance activé est requis par défaut ; les vérifications de signature et d’intégrité restent obligatoires avec cette option.
+- Les mises à jour de diagnostic ne nécessitent plus d’argument de registre sans effet.

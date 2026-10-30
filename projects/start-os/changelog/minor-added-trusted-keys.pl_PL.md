@@ -1,0 +1,4 @@
+- Zarządzaj nazwanymi zaufanymi zestawami kluczy w responsywnej tabeli System z menu edycji i usuwania w każdym wierszu oraz niezależnym zaufaniem dla pakietów i systemu. Nowe zestawy domyślnie ufają tylko pakietom. Importuj publiczne klucze Ed25519 w formacie PEM lub tekstowym GPG, uwzględniając unieważnienia zapisane w eksportach GPG i zachowując pełne certyfikaty z imionami, nazwiskami i adresami e-mail. Wbudowane zestawy pozostają na początku, mają nazwy tylko do odczytu i nie mają opcji usuwania; oba przełączniki zaufania pozostają dostępne.
+- Zmienia nazwę Klucze SSH na Dostęp SSH.
+- Pokazuje zaufanych podpisujących pakiety, blokuje niezaufane instalacje Marketplace i wymaga jawnego potwierdzenia przy ręcznym instalowaniu niezaufanego oprogramowania.
+- Instalacje pakietów i aktualizacje systemu przez CLI domyślnie wymagają zaufanych podpisujących; `--trust` jawnie pomija ten wymóg, zachowując sprawdzanie podpisu i integralności.
