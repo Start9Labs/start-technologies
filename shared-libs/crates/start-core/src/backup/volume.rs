@@ -11,7 +11,7 @@ use tokio::process::Command;
 
 use super::target::{BackupTargetId, SharedVolumeBackupInfo};
 use super::{PackageBackupReport, VolumeBackupReport};
-use crate::context::RpcContext;
+use crate::context::{CliContext, RpcContext};
 use crate::disk::mount::backup::BackupMountGuard;
 use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
@@ -168,7 +168,7 @@ pub(super) async fn prune_copies(data: &Path, info: &SharedVolumeBackupInfo) -> 
 pub struct RestoreVolumeParams {
     #[arg(help = "help.arg.backup-target-id")]
     pub target_id: BackupTargetId,
-    #[arg(help = "help.arg.backup-password")]
+    #[arg(skip)]
     pub password: String,
     #[arg(help = "help.arg.volume-ids-to-restore", value_parser = parse_id)]
     pub ids: Vec<SharedVolumeId>,
@@ -188,6 +188,14 @@ pub struct RestoreVolumeResult {
 
 rpc_toolkit::reflect_ts!(RestoreVolumeResult);
 rpc_toolkit::ts_export!(RestoreVolumeResult, namespaces = [""]);
+
+#[tracing::instrument(skip_all)]
+pub(super) async fn cli_restore_volumes(
+    mut args: rpc_toolkit::HandlerArgs<CliContext, RestoreVolumeParams>,
+) -> Result<Value, Error> {
+    args.params.password = super::read_password()?;
+    super::call_remote(args).await
+}
 
 #[tracing::instrument(skip_all)]
 pub async fn restore_volumes_rpc(
@@ -346,6 +354,36 @@ mod tests {
         let id = SharedVolumeId::new();
         assert_eq!(parse_id(id.as_ref()).unwrap(), id);
         assert!(parse_id("7cb12a88-783d-4909-9923-d5eb47c7e01f").is_err());
+    }
+
+    #[test]
+    fn restore_cli_omits_password_but_keeps_it_in_rpc_params() {
+        let id = SharedVolumeId::new();
+        let mut params = RestoreVolumeParams::try_parse_from([
+            "restore",
+            "disk-/dev/test",
+            id.as_ref(),
+            "--server-id",
+            "old-server",
+        ])
+        .unwrap();
+        assert!(params.password.is_empty());
+        assert_eq!(params.ids, vec![id.clone()]);
+        assert_eq!(params.server_id.as_deref(), Some("old-server"));
+        assert!(
+            RestoreVolumeParams::try_parse_from([
+                "restore",
+                "disk-/dev/test",
+                "plaintext-password",
+                id.as_ref(),
+            ])
+            .is_err()
+        );
+        params.password = "provided out of band".into();
+        assert_eq!(
+            serde_json::to_value(params).unwrap()["password"],
+            "provided out of band"
+        );
     }
 
     #[test]

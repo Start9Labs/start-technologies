@@ -62,7 +62,7 @@ The discovery date shown before unlocking a backup is editable plaintext. After 
 
 ## Command-Line Passwords
 
-`start-cli backup target mount`, `start-cli backup target info`, and `start-cli package backup restore` prompt for the backup password instead of accepting it as a positional argument. Automation can supply it through `BACKUP_PASSWORD`. CIFS target add/update commands similarly prompt for the share password or read `CIFS_PASSWORD`; an empty password selects passwordless access. The `PASSWORD` variable used for CLI authentication remains separate.
+`start-cli backup target mount`, `start-cli backup target info`, `start-cli package backup restore`, and `start-cli backup volume restore` prompt for the backup password instead of accepting it as a positional argument. Automation can supply it through `BACKUP_PASSWORD`. CIFS target add/update commands similarly prompt for the share password or read `CIFS_PASSWORD`; an empty password selects passwordless access. The `PASSWORD` variable used for CLI authentication remains separate.
 
 Avoid typing secret values into shell commands, where shell history can retain them. The standalone `startos-backup-fs` utility reads its filesystem credential from standard input or `--password-file`; password changes read the replacement credential from `--new-password-file`. It does not accept plaintext password arguments. For StartOS-managed backups, this utility uses the filesystem key managed by StartOS, not the master password accepted by `start-cli`.
 

@@ -95,9 +95,15 @@ pub fn backup<C: Context>() -> ParentHandler<C> {
                     "restore",
                     from_fn_async(volume::restore_volumes_rpc)
                         .with_metadata("sync_db", Value::Bool(true))
-                        .with_display_serializable()
                         .with_about("about.restore-volumes-from-backup")
-                        .with_call_remote::<CliContext>(),
+                        .no_cli(),
+                )
+                .subcommand(
+                    "restore",
+                    from_fn_async(volume::cli_restore_volumes)
+                        .no_ts()
+                        .with_display_serializable()
+                        .with_about("about.restore-volumes-from-backup"),
                 )
                 .with_about("about.commands-volume-backups"),
         )
