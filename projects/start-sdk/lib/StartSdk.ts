@@ -48,6 +48,7 @@ import {
 } from './primaryUrl/setupPrimaryUrl'
 import { checkWebUrl, runHealthScript } from './health/checkFns'
 import { checkPortListening } from './health/checkFns/checkPortListening'
+import { compareGateways } from './util/compareGateways'
 import { setupMain } from './mainFn'
 import { Daemon, Daemons } from './mainFn/Daemons'
 import { Mounts } from './mainFn/Mounts'
@@ -312,6 +313,16 @@ export class StartSdk<Manifest extends T.SDKManifest> {
          * @param eq - optional equality for the mapped value (default deep-equal)
          */
         get: getHost,
+        /**
+         * Resolve the gateways publishing the addresses a service advertises,
+         * beside its outbound gateway. Reads once per call, for use in a
+         * health check.
+         *
+         * @param effects - The effects context
+         * @param hostId - The host whose bindings publish the addresses
+         * @param addresses - IP literals or domains read from the service's rendered configuration
+         */
+        compareGateways,
         /**
          * Resolve the bridge address (`10.0.3.1:<port>`) a dependency's binding
          * is reachable at from this container, with the same reactive read
