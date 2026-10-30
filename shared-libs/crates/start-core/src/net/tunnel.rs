@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
+use crate::db::model::Database;
 use crate::db::model::public::{
     GatewayType, IpInfo, NetworkInfo, NetworkInterfaceInfo, NetworkInterfaceType,
 };
@@ -139,8 +140,6 @@ pub async fn add_tunnel(
             .result?;
     }
 
-    // Wait for the sync loop to fully commit gateway state (addresses, hosts)
-    // to the database, with a 15-second timeout.
     if tokio::time::timeout(Duration::from_secs(15), async {
         let mut watch = ctx
             .db
@@ -197,10 +196,9 @@ pub async fn remove_tunnel(
     ctx: RpcContext,
     RemoveTunnelParams { id }: RemoveTunnelParams,
 ) -> Result<(), Error> {
-    let Some(existing) = ctx
-        .db
-        .peek()
-        .await
+    let db = ctx.db.peek().await;
+    ensure_tunnel_not_selected(&db, &id)?;
+    let Some(existing) = db
         .into_public()
         .into_server_info()
         .into_network()
@@ -269,8 +267,6 @@ pub async fn remove_tunnel(
         .await
         .result?;
 
-    // Wait for the sync loop to fully commit gateway removal to the database,
-    // with a 15-second timeout.
     if tokio::time::timeout(Duration::from_secs(15), async {
         let mut watch = ctx
             .db
@@ -294,6 +290,42 @@ pub async fn remove_tunnel(
         );
     }
 
+    Ok(())
+}
+
+fn ensure_tunnel_not_selected(db: &Model<Database>, id: &GatewayId) -> Result<(), Error> {
+    let public = db.as_public();
+    if public
+        .as_server_info()
+        .as_network()
+        .as_default_outbound()
+        .de()?
+        .as_ref()
+        == Some(id)
+    {
+        return Err(Error::new(
+            eyre!(
+                "{}",
+                t!("net.tunnel.selected-default-outbound", gateway = id)
+            ),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    for (package, data) in public.as_package_data().as_entries()? {
+        if data.as_outbound_gateway().de()?.as_ref() == Some(id) {
+            return Err(Error::new(
+                eyre!(
+                    "{}",
+                    t!(
+                        "net.tunnel.selected-package-outbound",
+                        gateway = id,
+                        package = package
+                    )
+                ),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -349,6 +381,65 @@ pub async fn update_tunnel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn outbound_selections(default: Option<&str>, package: Option<&str>) -> Model<Database> {
+        imbl_value::json!({"public": {
+            "serverInfo": {"network": {"defaultOutbound": default}},
+            "packageData": {
+                "inheriting": {"outboundGateway": null},
+                "selected": {"outboundGateway": package}
+            }
+        }})
+        .into()
+    }
+
+    #[test]
+    fn removal_refuses_default_outbound_gateway() {
+        let db = outbound_selections(Some("wg0"), None);
+        let error = ensure_tunnel_not_selected(&db, &"wg0".parse().unwrap()).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
+        assert!(error.to_string().contains("default outbound gateway"));
+    }
+
+    #[test]
+    fn removal_refuses_service_outbound_gateway() {
+        let db = outbound_selections(None, Some("wg0"));
+        let error = ensure_tunnel_not_selected(&db, &"wg0".parse().unwrap()).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
+        assert!(error.to_string().contains("service selected"));
+    }
+
+    #[test]
+    fn removal_allows_unselected_gateways() {
+        for db in [
+            outbound_selections(None, None),
+            outbound_selections(Some("eth0"), Some("wg1")),
+        ] {
+            ensure_tunnel_not_selected(&db, &"wg0".parse().unwrap()).unwrap();
+        }
+    }
+
+    #[test]
+    fn removal_requires_clearing_both_default_and_service_selections() {
+        let mut db = outbound_selections(Some("wg0"), Some("wg0"));
+        let gateway = "wg0".parse().unwrap();
+        assert!(ensure_tunnel_not_selected(&db, &gateway).is_err());
+        db.as_public_mut()
+            .as_server_info_mut()
+            .as_network_mut()
+            .as_default_outbound_mut()
+            .ser(&None)
+            .unwrap();
+        assert!(ensure_tunnel_not_selected(&db, &gateway).is_err());
+        db.as_public_mut()
+            .as_package_data_mut()
+            .as_idx_mut(&"selected".parse().unwrap())
+            .unwrap()
+            .as_outbound_gateway_mut()
+            .ser(&None)
+            .unwrap();
+        ensure_tunnel_not_selected(&db, &gateway).unwrap();
+    }
 
     #[test]
     fn inbound_marker_selects_inbound_outbound() {

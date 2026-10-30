@@ -2070,6 +2070,20 @@ net.tor.client-error:
   pl_PL: "Błąd klienta Tor: %{error}"
 
 # net/tunnel.rs
+net.tunnel.selected-default-outbound:
+  en_US: "Cannot remove gateway %{gateway}: it is the default outbound gateway. Clear or change that selection first."
+  de_DE: "Gateway %{gateway} kann nicht entfernt werden: Es ist das Standard-Gateway für ausgehenden Verkehr. Heben Sie diese Auswahl zuerst auf oder ändern Sie sie."
+  es_ES: "No se puede eliminar la puerta de enlace %{gateway}: es la puerta de enlace de salida predeterminada. Primero borre o cambie esa selección."
+  fr_FR: "Impossible de supprimer la passerelle %{gateway} : c'est la passerelle de sortie par défaut. Effacez ou modifiez d'abord cette sélection."
+  pl_PL: "Nie można usunąć bramy %{gateway}: jest domyślną bramą ruchu wychodzącego. Najpierw wyczyść lub zmień ten wybór."
+
+net.tunnel.selected-package-outbound:
+  en_US: "Cannot remove gateway %{gateway}: service %{package} uses it as its outbound gateway. Clear or change that selection first."
+  de_DE: "Gateway %{gateway} kann nicht entfernt werden: Dienst %{package} verwendet es als Gateway für ausgehenden Verkehr. Heben Sie diese Auswahl zuerst auf oder ändern Sie sie."
+  es_ES: "No se puede eliminar la puerta de enlace %{gateway}: el servicio %{package} la usa como puerta de enlace de salida. Primero borre o cambie esa selección."
+  fr_FR: "Impossible de supprimer la passerelle %{gateway} : le service %{package} l'utilise comme passerelle de sortie. Effacez ou modifiez d'abord cette sélection."
+  pl_PL: "Nie można usunąć bramy %{gateway}: usługa %{package} używa jej jako bramy ruchu wychodzącego. Najpierw wyczyść lub zmień ten wybór."
+
 net.tunnel.timeout-waiting-for-add:
   en_US: "timed out waiting for gateway %{gateway} to appear in database"
   de_DE: "Zeitüberschreitung beim Warten auf das Erscheinen von Gateway %{gateway} in der Datenbank"
