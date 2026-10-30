@@ -241,6 +241,9 @@ export type RemoveDomainParamsInput = z.input<typeof schemas.RemoveDomainParams>
 export type RemovePassthroughParamsInput = z.input<
   typeof schemas.RemovePassthroughParams
 >
+export type RemoveTrustedKeyParamsInput = z.input<
+  typeof schemas.RemoveTrustedKeyParams
+>
 export type RemoveVersionParamsInput = z.input<
   typeof schemas.RemoveVersionParams
 >
@@ -283,11 +286,19 @@ export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type TermSizeInput = z.input<typeof schemas.TermSize>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TrustCaParamsInput = z.input<typeof schemas.TrustCaParams>
+export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedCa = z.output<typeof schemas.TrustedCa>
 export type TrustedOsUpdateSigner = z.output<
   typeof schemas.TrustedOsUpdateSigner
 >
 export type UiParamsInput = z.input<typeof schemas.UiParams>
+
+/**
+ * Changes a keyring's name and both trust selections atomically.
+ */
+export type UpdateTrustedKeyParamsInput = z.input<
+  typeof schemas.UpdateTrustedKeyParams
+>
 
 /**
  * How the OS reverse proxy validates the container's TLS certificate when it
@@ -327,6 +338,9 @@ export type AddPrivateDomainParamsInput = z.input<
 >
 export type AddPublicDomainParamsInput = z.input<
   typeof schemas.AddPublicDomainParams
+>
+export type AddTrustedKeyParamsInput = z.input<
+  typeof schemas.AddTrustedKeyParams
 >
 export type AddTunnelParamsInput = z.input<typeof schemas.AddTunnelParams>
 export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>

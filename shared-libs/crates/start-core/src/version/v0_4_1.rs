@@ -5,6 +5,7 @@ use super::v0_3_5::V0_3_0_COMPAT;
 use super::v0_4_0_2::for_each_host;
 use super::{VersionT, v0_4_0_5};
 use crate::prelude::*;
+use crate::trusted_keys::{migrate_signers, os_signers};
 
 lazy_static::lazy_static! {
     static ref V0_4_1: exver::Version = exver::Version::new([0, 4, 1], []);
@@ -23,22 +24,53 @@ impl VersionT for Version {
     fn semver(self) -> exver::Version {
         V0_4_1.clone()
     }
+    fn migration_revision(self) -> usize {
+        2
+    }
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
     }
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
+        let server = db
+            .get_mut("public")
+            .and_then(|public| public.get_mut("serverInfo"))
+            .and_then(Value::as_object_mut)
+            .or_not_found("serverInfo")?;
+        if !server.contains_key("trustedKeys") {
+            let legacy = server
+                .get("trustedOsUpdateSigners")
+                .cloned()
+                .map(from_value)
+                .transpose()?
+                .unwrap_or_default();
+            server.insert("trustedKeys".into(), to_value(&migrate_signers(legacy)?)?);
+        }
+        server.remove("trustedOsUpdateSigners");
         let private = db["private"].as_object_mut().or_not_found("private")?;
-        let pubkeys = private
-            .remove("sessionPubkeys")
-            .unwrap_or_else(|| json!({}));
-        private.insert(
-            "sessions".into(),
-            json!({ "pubkeys": pubkeys, "tokens": {} }),
-        );
+        if !private.contains_key("sessions") {
+            let pubkeys = private
+                .remove("sessionPubkeys")
+                .unwrap_or_else(|| json!({}));
+            private.insert(
+                "sessions".into(),
+                json!({ "pubkeys": pubkeys, "tokens": {} }),
+            );
+        }
+        v0_4_0_5::initialize_security_notifications(db)?;
         Ok(Value::Null)
     }
     fn down(self, db: &mut Value) -> Result<(), Error> {
         restore_legacy_http_bindings(db)?;
+        let server = db
+            .get_mut("public")
+            .and_then(|public| public.get_mut("serverInfo"))
+            .and_then(Value::as_object_mut)
+            .or_not_found("serverInfo")?;
+        if let Some(keys) = server.get("trustedKeys") {
+            let signers = to_value(&os_signers(&from_value(keys.clone())?))?;
+            server.remove("trustedKeys");
+            server.insert("trustedOsUpdateSigners".into(), signers);
+        }
         let private = db["private"].as_object_mut().or_not_found("private")?;
         let pubkeys = private
             .remove("sessions")
@@ -100,14 +132,13 @@ fn restore_legacy_http_options(
 }
 
 #[cfg(test)]
-mod test {
-    use imbl_value::json;
-
+mod tests {
     use super::*;
     use crate::auth::Session;
     use crate::sign::AnyVerifyingKey;
-    use crate::update::signers::initial_signers;
-    use crate::version::{Upgrade, rollback_to_unchecked, v0_4_0_3, v0_4_0_4};
+    use crate::trusted_keys::TrustedKeys;
+    use crate::update::signers::{TrustedOsUpdateSigners, initial_signers};
+    use crate::version::{Current, Upgrade, rollback_to_unchecked, v0_4_0_3, v0_4_0_4};
 
     fn database(options: Value) -> Value {
         json!({
@@ -247,6 +278,13 @@ mod test {
         info["postInitMigrationTodos"] = json!({});
         info["trustedOsUpdateSigners"] =
             json!({ canonical.clone(): { "label": "retained signer" } });
+        Version.up(&mut db, ()).unwrap();
+        assert!(db["public"]["serverInfo"].get("trustedKeys").is_some());
+        assert!(
+            db["public"]["serverInfo"]
+                .get("trustedOsUpdateSigners")
+                .is_none()
+        );
 
         let mut previous = db.clone();
         rollback_to_unchecked(&Version, &v0_4_0_5::Version, &mut previous).unwrap();
@@ -256,11 +294,19 @@ mod test {
         );
         assert_eq!(
             previous["private"],
-            json!({ "sessionPubkeys": { canonical.clone(): session.clone() } })
+            json!({
+                "sessionPubkeys": { canonical.clone(): session.clone() },
+                "osSecurityNotifications": {},
+            })
         );
         assert_eq!(
             previous["public"]["serverInfo"]["trustedOsUpdateSigners"],
             json!({ canonical: { "label": "retained signer" } })
+        );
+        assert!(
+            previous["public"]["serverInfo"]
+                .get("trustedKeys")
+                .is_none()
         );
         for_each_host(&mut previous, |host| {
             for (_, binding) in host["bindings"].as_object_mut().unwrap().iter_mut() {
@@ -288,6 +334,44 @@ mod test {
         assert_eq!(
             db["public"]["packageData"],
             previous["public"]["packageData"]
+        );
+    }
+
+    #[test]
+    fn malformed_legacy_keys_fail_without_changing_saved_trust() {
+        let mut db = json!({
+            "private": { "sessionPubkeys": {} },
+            "public": { "serverInfo": { "trustedOsUpdateSigners": {
+                "not a public key": { "label": "custom" },
+            } } },
+        });
+        let saved = db.clone();
+        assert!(Version.up(&mut db, ()).is_err());
+        assert_eq!(db, saved);
+    }
+
+    #[test]
+    fn migration_is_idempotent_and_downgrade_preserves_os_policy() {
+        let legacy = initial_signers();
+        let mut db = json!({
+            "private": { "sessionPubkeys": {} },
+            "public": { "serverInfo": { "trustedOsUpdateSigners": legacy } },
+        });
+        Version.up(&mut db, ()).unwrap();
+        let migrated = db.clone();
+        Version.up(&mut db, ()).unwrap();
+        assert_eq!(db, migrated);
+        assert!(
+            db["public"]["serverInfo"]
+                .get("trustedOsUpdateSigners")
+                .is_none()
+        );
+        Version.down(&mut db).unwrap();
+        let restored: TrustedOsUpdateSigners =
+            from_value(db["public"]["serverInfo"]["trustedOsUpdateSigners"].clone()).unwrap();
+        assert_eq!(
+            restored.into_keys().collect::<Vec<_>>(),
+            legacy.into_keys().collect::<Vec<_>>()
         );
     }
 
@@ -321,9 +405,23 @@ mod test {
                 .unwrap()
                 .apply(&previous, &Version, &mut db)
                 .unwrap();
+            let keyrings: TrustedKeys =
+                from_value(db["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
+            let actual = os_signers(&keyrings);
+            let expected: TrustedOsUpdateSigners = from_value(expected).unwrap();
             assert_eq!(
-                db["public"]["serverInfo"]["trustedOsUpdateSigners"],
-                expected,
+                actual.keys().collect::<Vec<_>>(),
+                expected.keys().collect::<Vec<_>>()
+            );
+            for (key, signer) in expected {
+                if signer.label == "Owner-managed" {
+                    assert_eq!(actual[&key].label, signer.label);
+                }
+            }
+            assert!(
+                db["public"]["serverInfo"]
+                    .get("trustedOsUpdateSigners")
+                    .is_none()
             );
             assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.1"));
         }
@@ -337,19 +435,107 @@ mod test {
             "lastActive": "2026-01-02T00:00:00Z",
             "userAgent": "agent",
         } });
-        let original =
-            json!({ "private": { "password": "hash", "sessionPubkeys": pubkeys.clone() } });
+        let original = json!({
+            "public": { "serverInfo": { "trustedOsUpdateSigners": {} } },
+            "private": {
+                "password": "hash", "sessionPubkeys": pubkeys.clone(),
+                "osSecurityNotifications": {},
+            },
+        });
         let mut db = original.clone();
         Version.up(&mut db, ()).unwrap();
         assert_eq!(
-            db,
-            json!({ "private": {
-                "password": "hash",
-                "sessions": { "pubkeys": pubkeys, "tokens": {} },
-            } })
+            db["private"],
+            json!({
+                "password": "hash", "sessions": { "pubkeys": pubkeys, "tokens": {} },
+                "osSecurityNotifications": {},
+            })
         );
         db["private"]["sessions"]["tokens"] = json!({ "hash": {} });
+        let migrated = db.clone();
+        Version.up(&mut db, ()).unwrap();
+        assert_eq!(db, migrated);
         Version.down(&mut db).unwrap();
         assert_eq!(db, original);
+    }
+
+    #[tokio::test]
+    async fn published_keyrings_gain_notification_state_without_losing_trust_or_sessions() {
+        use patch_db::json_ptr::ROOT;
+
+        let account =
+            crate::account::AccountInfo::new("password", std::time::SystemTime::now(), None)
+                .unwrap();
+        let mut fixture =
+            to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
+                .unwrap();
+        fixture["public"]["serverInfo"]["trustedKeys"]["start9"]["os"] = json!(false);
+        fixture["public"]["serverInfo"]["latestMigrationRevision"] = json!(1);
+        fixture["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
+        fixture["private"]["sessions"]["tokens"] =
+            json!({ "a".repeat(64): crate::auth::Session::default() });
+        fixture["private"]
+            .as_object_mut()
+            .unwrap()
+            .remove("osSecurityNotifications");
+        let saved_trust = fixture["public"]["serverInfo"]["trustedKeys"].clone();
+        let saved_sessions = fixture["private"]["sessions"].clone();
+        let db = PatchDb::in_memory();
+        db.put(&ROOT, &fixture).await.unwrap();
+        Current::default().pre_init(&db).await.unwrap();
+        let migrated = db.dump(&ROOT).await.value;
+        assert_eq!(migrated["private"]["osSecurityNotifications"], json!({}));
+        assert_eq!(migrated["private"]["sessions"], saved_sessions);
+        assert_eq!(migrated["public"]["serverInfo"]["trustedKeys"], saved_trust);
+        assert_eq!(
+            migrated["public"]["serverInfo"]["latestMigrationRevision"],
+            json!(2)
+        );
+        Current::default().pre_init(&db).await.unwrap();
+        assert_eq!(db.dump(&ROOT).await.value, migrated);
+    }
+
+    #[tokio::test]
+    async fn existing_0_4_1_tokens_and_custom_os_trust_survive_the_new_revision() {
+        use patch_db::json_ptr::ROOT;
+
+        let account =
+            crate::account::AccountInfo::new("password", std::time::SystemTime::now(), None)
+                .unwrap();
+        let key = "MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=";
+        for legacy in [
+            TrustedOsUpdateSigners::new(),
+            from_value(json!({ key: { "label": "Owner-managed" } })).unwrap(),
+        ] {
+            let mut fixture =
+                to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
+                    .unwrap();
+            let server = fixture["public"]["serverInfo"].as_object_mut().unwrap();
+            server.remove("trustedKeys");
+            server.insert("trustedOsUpdateSigners".into(), to_value(&legacy).unwrap());
+            server.insert("latestMigrationRevision".into(), json!(0));
+            server.insert("postInitMigrationTodos".into(), json!({}));
+            fixture["private"]["sessions"]["tokens"] =
+                json!({ "a".repeat(64): crate::auth::Session::default() });
+            let sessions = fixture["private"]["sessions"].clone();
+            let db = PatchDb::in_memory();
+            db.put(&ROOT, &fixture).await.unwrap();
+            Current::default().pre_init(&db).await.unwrap();
+            let migrated = db.dump(&ROOT).await.value;
+            let keyrings: TrustedKeys =
+                from_value(migrated["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
+            assert_eq!(os_signers(&keyrings), legacy);
+            assert_eq!(migrated["private"]["sessions"], sessions);
+            assert_eq!(
+                migrated["public"]["serverInfo"]["latestMigrationRevision"],
+                json!(Version.migration_revision())
+            );
+            assert_eq!(
+                migrated["public"]["serverInfo"]["postInitMigrationTodos"],
+                json!({ "0.4.1": null })
+            );
+            Current::default().pre_init(&db).await.unwrap();
+            assert_eq!(db.dump(&ROOT).await.value, migrated);
+        }
     }
 }

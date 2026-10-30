@@ -1,0 +1,2 @@
+- `--trust` bei Paketinstallation und OS-Updates überschreibt die Vertrauensprüfung für Signierer ausdrücklich. Unter StartOS ab 0.4.1 erfordern diese Vorgänge standardmäßig einen aktivierten vertrauenswürdigen Signierer; Signatur- und Integritätsprüfung bleiben auch mit der Option verpflichtend.
+- Diagnose-Updates benötigen kein wirkungsloses Registry-Argument mehr.

@@ -17,6 +17,7 @@ use crate::util::serde::{Der64, DerEncoding, deserialize_from_str};
 pub mod commitment;
 pub mod compat;
 pub mod ed25519;
+pub(crate) mod gpg;
 pub mod gpg_agent;
 
 pub fn canonicalize_verifying_keys<T>(
@@ -191,6 +192,20 @@ impl Serialize for AnySigningKey {
 #[non_exhaustive]
 pub enum AnyVerifyingKey {
     Ed25519(<Ed25519ph as SignatureScheme>::VerifyingKey),
+}
+
+impl Ord for AnyVerifyingKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (Self::Ed25519(a), Self::Ed25519(b)) => a.as_bytes().cmp(b.as_bytes()),
+        }
+    }
+}
+
+impl PartialOrd for AnyVerifyingKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 rpc_toolkit::reflect_ts!(AnyVerifyingKey);
@@ -447,6 +462,31 @@ impl Signer {
 mod tests {
     use super::*;
     use crate::sign::commitment::blake3::Blake3Commitment;
+
+    #[test]
+    fn verifying_key_order_is_total_and_matches_identity() {
+        use std::cmp::Ordering::{Equal, Less};
+        use std::collections::BTreeSet;
+
+        let a: AnyVerifyingKey = "MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y="
+            .parse()
+            .unwrap();
+        let b: AnyVerifyingKey = "MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg="
+            .parse()
+            .unwrap();
+        let c: AnyVerifyingKey = "MCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU="
+            .parse()
+            .unwrap();
+        assert!(a < b && b < c && a < c);
+        assert!(c > b && b > a && c > a);
+        assert_eq!(a.partial_cmp(&c), Some(Less));
+        let alias: AnyVerifyingKey = a.to_string().parse().unwrap();
+        assert_eq!(a, alias);
+        assert_eq!(a.cmp(&alias), Equal);
+        assert_eq!(a.partial_cmp(&alias), Some(Equal));
+        let keys = BTreeSet::from([c.clone(), alias, b.clone(), a.clone()]);
+        assert_eq!(keys.into_iter().collect::<Vec<_>>(), [a, b, c]);
+    }
 
     #[test]
     fn signature_labels_round_trip() {

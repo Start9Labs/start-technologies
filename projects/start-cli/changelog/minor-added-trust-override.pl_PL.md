@@ -1,0 +1,2 @@
+- `--trust` przy instalowaniu pakietów i aktualizowaniu systemu pozwala jawnie pominąć ocenę zaufania do podpisującego. Od StartOS 0.4.1 operacje te domyślnie wymagają włączonego zaufanego podpisującego; sprawdzanie podpisu i integralności pozostaje obowiązkowe także z tą opcją.
+- Aktualizacje diagnostyczne nie wymagają już argumentu rejestru, który nie miał żadnego wpływu.

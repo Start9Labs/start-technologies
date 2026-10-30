@@ -23,7 +23,7 @@ use crate::registry::client::Product;
 use crate::registry::os::index::OsVersionInfo;
 use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::sign::commitment::blake3::Blake3Commitment;
-use crate::update::{UpdateProgressHandles, UpdateSystemParams, UpdateSystemRes, do_update};
+use crate::update::{UpdateProgressHandles, UpdateSystemRes, do_update};
 use crate::version::{Current, VersionT};
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
@@ -31,6 +31,10 @@ use crate::version::{Current, VersionT};
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct DiagnosticUpdateSystemParams {
+    /// Accepts an untrusted signer without skipping signature or integrity verification.
+    #[arg(long, help = "help.arg.trust")]
+    #[serde(default)]
+    trust: bool,
     #[arg(
         long = "to",
         value_name = "TARGET",
@@ -49,6 +53,7 @@ pub async fn update_system(
     DiagnosticUpdateSystemParams {
         target_version: target,
         progress: report_progress,
+        trust,
     }: DiagnosticUpdateSystemParams,
 ) -> Result<UpdateSystemRes, Error> {
     let guard = ctx.update_in_progress.mutate(|slot| {
@@ -70,7 +75,7 @@ pub async fn update_system(
     #[cfg(feature = "beta")]
     let registry = "https://beta-registry.start9.com".parse()?;
 
-    run_update(ctx, target, registry, report_progress, guard).await
+    run_update(ctx, target, registry, report_progress, guard, trust).await
 }
 
 async fn run_update(
@@ -79,6 +84,7 @@ async fn run_update(
     registry: Url,
     report_progress: bool,
     guard: Arc<()>,
+    trust: bool,
 ) -> Result<UpdateSystemRes, Error> {
     let target_range = target.unwrap_or(VersionRange::Any);
     let client = Client::new();
@@ -100,7 +106,7 @@ async fn run_update(
             ErrorKind::Registry,
         ));
     }
-    validate_signatures(&asset)?;
+    validate_signatures(&asset, trust)?;
 
     let tracker = FullProgressTracker::new();
     let prune_phase = tracker.add_phase("Pruning Old OS Images".into(), Some(2));
@@ -163,8 +169,11 @@ async fn run_update(
     })
 }
 
-pub(super) fn validate_signatures(asset: &RegistryAsset<Blake3Commitment>) -> Result<(), Error> {
-    super::validate_update_signatures(asset, Some(super::signers::initial_signer_policy()))
+pub(super) fn validate_signatures(
+    asset: &RegistryAsset<Blake3Commitment>,
+    trust: bool,
+) -> Result<(), Error> {
+    super::validate_update_signatures(asset, (!trust).then(super::signers::initial_signer_policy))
 }
 
 async fn stream_progress(
@@ -251,7 +260,7 @@ pub async fn cli_update_system(
         method,
         raw_params,
         ..
-    }: HandlerArgs<CliContext, UpdateSystemParams>,
+    }: HandlerArgs<CliContext, DiagnosticUpdateSystemParams>,
 ) -> Result<(), Error> {
     let res = from_value::<UpdateSystemRes>(
         context
