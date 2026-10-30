@@ -1073,7 +1073,11 @@ impl State {
                 }
             }
         }
-        Ok(&self.upnp_cache.get(&local_ip).expect("discovered gateway").0)
+        Ok(&self
+            .upnp_cache
+            .get(&local_ip)
+            .expect("discovered gateway")
+            .0)
     }
 }
 
