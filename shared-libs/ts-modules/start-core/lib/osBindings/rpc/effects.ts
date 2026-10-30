@@ -108,6 +108,12 @@ export type HostIdInput = z.input<typeof schemas.HostId>
 export type IdMapInput = z.input<typeof schemas.IdMap>
 export type ImageIdInput = z.input<typeof schemas.ImageId>
 export type IoFormatInput = z.input<typeof schemas.IoFormat>
+export type LegacyHealthCheckResultKind = z.output<
+  typeof schemas.LegacyHealthCheckResultKind
+>
+export type LegacyHealthCheckResultKindInput = z.input<
+  typeof schemas.LegacyHealthCheckResultKind
+>
 export type LocaleString = z.output<typeof schemas.LocaleString>
 export type MaybeUtf8String = z.output<typeof schemas.MaybeUtf8String>
 export type MaybeUtf8StringInput = z.input<typeof schemas.MaybeUtf8String>
@@ -197,6 +203,12 @@ export type ClearActionsParamsInput = z.input<typeof schemas.ClearActionsParams>
 export type ClearServiceInterfacesParamsInput = z.input<
   typeof schemas.ClearServiceInterfacesParams
 >
+export type CompatibleHealthCheckResultKind = z.output<
+  typeof schemas.CompatibleHealthCheckResultKind
+>
+export type CompatibleHealthCheckResultKindInput = z.input<
+  typeof schemas.CompatibleHealthCheckResultKind
+>
 export type CreateNotificationParamsInput = z.input<
   typeof schemas.CreateNotificationParams
 >
@@ -261,12 +273,6 @@ export type ListServiceInterfacesParamsInput = z.input<
 >
 export type Metadata = z.output<typeof schemas.Metadata>
 export type MountTargetInput = z.input<typeof schemas.MountTarget>
-export type NamedHealthCheckResult = z.output<
-  typeof schemas.NamedHealthCheckResult
->
-export type NamedHealthCheckResultInput = z.input<
-  typeof schemas.NamedHealthCheckResult
->
 export type PluginHostnameInfoInput = z.input<typeof schemas.PluginHostnameInfo>
 export type PortForward = z.output<typeof schemas.PortForward>
 export type PreDownloadAlert = z.output<typeof schemas.PreDownloadAlert>
@@ -344,6 +350,12 @@ export type HostnameInfo = z.output<typeof schemas.HostnameInfo>
 export type ImageConfigRepr = z.output<typeof schemas.ImageConfigRepr>
 export type MetadataSrc = z.output<typeof schemas.MetadataSrc>
 export type MountParamsInput = z.input<typeof schemas.MountParams>
+export type NamedHealthCheckResult = z.output<
+  typeof schemas.NamedHealthCheckResult
+>
+export type NamedHealthCheckResultInput = z.input<
+  typeof schemas.NamedHealthCheckResult
+>
 export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
 export type ProgressInput = z.input<typeof schemas.Progress>
 export type ProxyOptions = z.output<typeof schemas.ProxyOptions>
@@ -352,8 +364,6 @@ export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
 export type SetDependenciesParamsInput = z.input<
   typeof schemas.SetDependenciesParams
 >
-export type SetHealthInput = z.input<typeof schemas.SetHealth>
-export type StatusInfo = z.output<typeof schemas.StatusInfo>
 export type Task = z.output<typeof schemas.Task>
 export type TaskParams = z.input<typeof schemas.Task>
 export type UrlPluginClearUrlsParamsInput = z.input<
@@ -369,7 +379,9 @@ export type DepInfo = z.output<typeof schemas.DepInfo>
 export type DerivedAddressInfo = z.output<typeof schemas.DerivedAddressInfo>
 export type ImageConfig = z.output<typeof schemas.ImageConfig>
 export type SetBackupProgressInput = z.input<typeof schemas.SetBackupProgress>
+export type SetHealthInput = z.input<typeof schemas.SetHealth>
 export type SetInitProgressInput = z.input<typeof schemas.SetInitProgress>
+export type StatusInfo = z.output<typeof schemas.StatusInfo>
 export type TaskEntry = z.output<typeof schemas.TaskEntry>
 export type CheckDependenciesResult = z.output<
   typeof schemas.CheckDependenciesResult

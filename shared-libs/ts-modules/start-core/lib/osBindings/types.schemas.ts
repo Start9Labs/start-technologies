@@ -846,6 +846,24 @@ export const KeyboardOptions: z.ZodObject<{
 }).meta({
   id: 'KeyboardOptions',
 })
+export const LegacyHealthCheckResultKind: z.ZodIntersection<
+  z.ZodObject<{ result: z.ZodLiteral<'waiting'> }>,
+  z.ZodObject<{
+    message: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+  }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({ result: z.literal('waiting') }),
+    object({
+      message: wire(z.string().nullable().optional(), z.string().nullable()),
+    }),
+  )
+  .meta({
+    id: 'LegacyHealthCheckResultKind',
+  })
 export const ListNotificationParams: z.ZodObject<{
   before: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodInt>>,
@@ -1018,20 +1036,15 @@ export const NamedHealthCheckResultKind: z.ZodUnion<
           z.ZodOptional<z.ZodNullable<z.ZodString>>,
           z.ZodNullable<z.ZodString>
         >
-      }>
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ result: z.ZodLiteral<'waiting'> }>,
-      z.ZodObject<{
-        message: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodString>>,
-          z.ZodNullable<z.ZodString>
-        >
+        waiting: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
       }>
     >,
     z.ZodIntersection<
       z.ZodObject<{ result: z.ZodLiteral<'loading'> }>,
-      z.ZodObject<{ message: z.ZodString }>
+      z.ZodObject<{
+        message: z.ZodString
+        waiting: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+      }>
     >,
     z.ZodIntersection<
       z.ZodObject<{ result: z.ZodLiteral<'failure'> }>,
@@ -1056,17 +1069,15 @@ export const NamedHealthCheckResultKind: z.ZodUnion<
       object({ result: z.literal('starting') }),
       object({
         message: wire(z.string().nullable().optional(), z.string().nullable()),
-      }),
-    ),
-    z.intersection(
-      object({ result: z.literal('waiting') }),
-      object({
-        message: wire(z.string().nullable().optional(), z.string().nullable()),
+        waiting: wire(z.boolean().optional(), z.boolean()),
       }),
     ),
     z.intersection(
       object({ result: z.literal('loading') }),
-      object({ message: z.string() }),
+      object({
+        message: z.string(),
+        waiting: wire(z.boolean().optional(), z.boolean()),
+      }),
     ),
     z.intersection(
       object({ result: z.literal('failure') }),
@@ -2252,6 +2263,16 @@ export const CliSetDescriptionParams: z.ZodObject<{
 }).meta({
   id: 'CliSetDescriptionParams',
 })
+export const CompatibleHealthCheckResultKind: z.ZodUnion<
+  readonly [
+    typeof NamedHealthCheckResultKind,
+    typeof LegacyHealthCheckResultKind,
+  ]
+> = /* @__PURE__ */ z
+  .union([NamedHealthCheckResultKind, LegacyHealthCheckResultKind])
+  .meta({
+    id: 'CompatibleHealthCheckResultKind',
+  })
 export const ControlParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'ControlParams',
@@ -3276,14 +3297,6 @@ export const MountTarget: z.ZodCodec<
 ).meta({
   id: 'MountTarget',
 })
-export const NamedHealthCheckResult: z.ZodIntersection<
-  z.ZodObject<{ name: z.ZodString }>,
-  typeof NamedHealthCheckResultKind
-> = /* @__PURE__ */ z
-  .intersection(object({ name: z.string() }), NamedHealthCheckResultKind)
-  .meta({
-    id: 'NamedHealthCheckResult',
-  })
 export const Notification: z.ZodObject<{
   packageId: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof PackageId>>,
@@ -4438,6 +4451,21 @@ export const MountParams: z.ZodObject<{
     id: 'MountParams',
   },
 )
+export const NamedHealthCheckResult: z.ZodCodec<
+  z.ZodIntersection<
+    z.ZodObject<{ name: z.ZodString }>,
+    typeof CompatibleHealthCheckResultKind
+  >,
+  z.ZodIntersection<
+    z.ZodObject<{ name: z.ZodString }>,
+    typeof NamedHealthCheckResultKind
+  >
+> = /* @__PURE__ */ wire(
+  z.intersection(object({ name: z.string() }), CompatibleHealthCheckResultKind),
+  z.intersection(object({ name: z.string() }), NamedHealthCheckResultKind),
+).meta({
+  id: 'NamedHealthCheckResult',
+})
 export const NetworkInterfaceInfo: z.ZodCodec<
   z.ZodObject<{
     /**
@@ -4885,43 +4913,11 @@ export const SetDependenciesParams: z.ZodObject<{
 }).meta({
   id: 'SetDependenciesParams',
 })
-export const SetHealth: z.ZodIntersection<
-  z.ZodObject<{ id: typeof HealthCheckId }>,
-  typeof NamedHealthCheckResult
-> = /* @__PURE__ */ z
-  .intersection(object({ id: HealthCheckId }), NamedHealthCheckResult)
-  .meta({
-    id: 'SetHealth',
-  })
 export const SetupProgress: z.ZodObject<{
   progress: typeof FullProgress
   guid: typeof Guid
 }> = /* @__PURE__ */ object({ progress: FullProgress, guid: Guid }).meta({
   id: 'SetupProgress',
-})
-export const StatusInfo: z.ZodObject<{
-  health: z.ZodRecord<z.ZodString, typeof NamedHealthCheckResult>
-  error: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof ErrorData>>,
-    z.ZodNullable<typeof ErrorData>
-  >
-  started: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  desired: typeof DesiredStatus
-  forceStopAt: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  health: z.record(z.string(), NamedHealthCheckResult),
-  error: wire(ErrorData.nullable().optional(), ErrorData.nullable()),
-  started: wire(z.string().nullable().optional(), z.string().nullable()),
-  desired: DesiredStatus,
-  forceStopAt: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'StatusInfo',
 })
 export const Task: z.ZodObject<{
   packageId: typeof PackageId
@@ -5372,6 +5368,14 @@ export const SetBackupProgress: z.ZodObject<{ progress: typeof Progress }> =
   /* @__PURE__ */ object({ progress: Progress }).meta({
     id: 'SetBackupProgress',
   })
+export const SetHealth: z.ZodIntersection<
+  z.ZodObject<{ id: typeof HealthCheckId }>,
+  typeof NamedHealthCheckResult
+> = /* @__PURE__ */ z
+  .intersection(object({ id: HealthCheckId }), NamedHealthCheckResult)
+  .meta({
+    id: 'SetHealth',
+  })
 export const SetInitProgress: z.ZodObject<{ progress: typeof Progress }> =
   /* @__PURE__ */ object({ progress: Progress }).meta({
     id: 'SetInitProgress',
@@ -5402,6 +5406,30 @@ export const SetupStatusRes: z.ZodUnion<
   .meta({
     id: 'SetupStatusRes',
   })
+export const StatusInfo: z.ZodObject<{
+  health: z.ZodRecord<z.ZodString, typeof NamedHealthCheckResult>
+  error: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof ErrorData>>,
+    z.ZodNullable<typeof ErrorData>
+  >
+  started: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  desired: typeof DesiredStatus
+  forceStopAt: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  health: z.record(z.string(), NamedHealthCheckResult),
+  error: wire(ErrorData.nullable().optional(), ErrorData.nullable()),
+  started: wire(z.string().nullable().optional(), z.string().nullable()),
+  desired: DesiredStatus,
+  forceStopAt: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'StatusInfo',
+})
 export const TaskEntry: z.ZodObject<{
   task: typeof Task
   active: z.ZodBoolean
