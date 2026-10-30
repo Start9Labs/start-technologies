@@ -10924,33 +10924,6 @@
     }
   },
   {
-    "name": "server.trusted-keys.toggle",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$defs": {
-        "ToggleTrustedKeyParams": {
-          "type": "object",
-          "properties": {
-            "id": { "type": "string" },
-            "context": { "$ref": "#/$defs/TrustContext" },
-            "enabled": { "type": "boolean" }
-          },
-          "required": ["id", "context", "enabled"],
-          "additionalProperties": true
-        },
-        "TrustContext": { "type": "string", "enum": ["marketplace", "os"] }
-      },
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "context": { "$ref": "#/$defs/TrustContext" },
-        "enabled": { "type": "boolean" }
-      },
-      "required": ["id", "context", "enabled"],
-      "additionalProperties": true
-    }
-  },
-  {
     "name": "server.trusted-keys.update",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

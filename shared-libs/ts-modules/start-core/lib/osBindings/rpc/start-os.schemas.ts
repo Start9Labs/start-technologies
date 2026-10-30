@@ -3210,17 +3210,6 @@ export const TestSmtpParams: z.ZodObject<{
 }).meta({
   id: 'TestSmtpParams',
 })
-export const ToggleTrustedKeyParams: z.ZodObject<{
-  id: z.ZodString
-  context: typeof TrustContext
-  enabled: z.ZodBoolean
-}> = /* @__PURE__ */ object({
-  id: z.string(),
-  context: TrustContext,
-  enabled: z.boolean(),
-}).meta({
-  id: 'ToggleTrustedKeyParams',
-})
 export const UmountParams: z.ZodObject<{
   targetId: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof BackupTargetId>>,
@@ -6394,10 +6383,6 @@ export const Api = {
             },
             remove: {
               _PARAMS: /* @__PURE__ */ RemoveTrustedKeyParams,
-              _RETURN: /* @__PURE__ */ z.null(),
-            },
-            toggle: {
-              _PARAMS: /* @__PURE__ */ ToggleTrustedKeyParams,
               _RETURN: /* @__PURE__ */ z.null(),
             },
             update: {

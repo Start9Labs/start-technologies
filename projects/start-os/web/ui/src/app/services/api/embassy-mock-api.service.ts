@@ -324,17 +324,6 @@ export class MockApiService extends ApiService {
       ])
       return null
     },
-    'server.trusted-keys.toggle': async ({ id, context, enabled }) => {
-      mockPatchData.serverInfo.trustedKeys[id]![context] = enabled
-      await this.mockRevision([
-        {
-          op: PatchOp.REPLACE,
-          path: pathFromArray(['serverInfo', 'trustedKeys', id, context]),
-          value: enabled,
-        },
-      ])
-      return null
-    },
     'server.trusted-keys.remove': async ({ id }) => {
       if (!mockPatchData.serverInfo.trustedKeys[id]?.removable)
         throw new Error('Protected key')

@@ -534,9 +534,6 @@ export type SshAddParamsInput = z.input<typeof schemas.SshAddParams>
 export type StartOsRecoveryInfo = z.output<typeof schemas.StartOsRecoveryInfo>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
-export type ToggleTrustedKeyParamsInput = z.input<
-  typeof schemas.ToggleTrustedKeyParams
->
 export type UmountParamsInput = z.input<typeof schemas.UmountParams>
 export type UninstallParamsInput = z.input<typeof schemas.UninstallParams>
 export type UnsetGatewaySecureParamsInput = z.input<

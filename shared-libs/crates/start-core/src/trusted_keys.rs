@@ -209,12 +209,6 @@ pub fn api<C: Context>() -> ParentHandler<C> {
                 .no_cli(),
         )
         .subcommand(
-            "toggle",
-            from_fn_async(toggle)
-                .with_metadata("sync_db", Value::Bool(true))
-                .no_cli(),
-        )
-        .subcommand(
             "remove",
             from_fn_async(remove)
                 .with_metadata("sync_db", Value::Bool(true))
@@ -245,16 +239,6 @@ pub struct UpdateTrustedKeyParams {
 }
 
 rpc_toolkit::reflect_ts!(UpdateTrustedKeyParams);
-
-#[derive(Deserialize, Serialize, VisitFields)]
-#[serde(rename_all = "camelCase")]
-pub struct ToggleTrustedKeyParams {
-    pub id: InternedString,
-    pub context: TrustContext,
-    pub enabled: bool,
-}
-
-rpc_toolkit::reflect_ts!(ToggleTrustedKeyParams);
 
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -321,15 +305,6 @@ fn update_group(keys: &mut TrustedKeys, params: UpdateTrustedKeyParams) -> Resul
     Ok(())
 }
 
-fn toggle_group(keys: &mut TrustedKeys, params: ToggleTrustedKeyParams) -> Result<(), Error> {
-    let group = keys.get_mut(&params.id).ok_or_else(not_found)?;
-    match params.context {
-        TrustContext::Marketplace => group.marketplace = params.enabled,
-        TrustContext::Os => group.os = params.enabled,
-    }
-    Ok(())
-}
-
 pub fn remove_group(keys: &mut TrustedKeys, id: &str) -> Result<(), Error> {
     if !keys.get(id).ok_or_else(not_found)?.removable {
         return Err(Error::new(
@@ -363,18 +338,6 @@ async fn update(ctx: RpcContext, params: UpdateTrustedKeyParams) -> Result<(), E
                 .as_server_info_mut()
                 .as_trusted_keys_mut()
                 .mutate(|keys| update_group(keys, params))
-        })
-        .await
-        .result
-}
-
-async fn toggle(ctx: RpcContext, params: ToggleTrustedKeyParams) -> Result<(), Error> {
-    ctx.db
-        .mutate(|db| {
-            db.as_public_mut()
-                .as_server_info_mut()
-                .as_trusted_keys_mut()
-                .mutate(|keys| toggle_group(keys, params))
         })
         .await
         .result
@@ -562,12 +525,13 @@ mod tests {
             assert!(!saved.removable);
             assert!(remove_group(&mut keys, id).is_err());
             assert_eq!(keys[id], saved);
-            toggle_group(
+            update_group(
                 &mut keys,
-                ToggleTrustedKeyParams {
+                UpdateTrustedKeyParams {
                     id: id.into(),
-                    context: TrustContext::Os,
-                    enabled: !saved.os,
+                    name: saved.name.clone(),
+                    marketplace: saved.marketplace,
+                    os: !saved.os,
                 },
             )
             .unwrap();
