@@ -9,8 +9,8 @@ import { getOwnHost } from '@start9labs/start-core/util/GetHostInfo'
 import { GetOutboundGateway } from '@start9labs/start-core/util/GetOutboundGateway'
 import { IpAddress } from '@start9labs/start-core/util/ip'
 
-/** Result of {@link compareGateways}. */
-export type GatewayComparison = {
+/** Result of {@link getAddressGateways}. */
+export type AddressGateways = {
   /** The gateway this service's outbound connections leave through. */
   outbound: GatewayId
   /** Each address passed in, with the gateway publishing it, or `null` when no gateway publishes it. */
@@ -43,11 +43,11 @@ const matches = (published: Published, address: string) => {
  * @param hostId - The host whose bindings publish the addresses
  * @param addresses - IP literals or domains the service advertises
  */
-export async function compareGateways(
+export async function getAddressGateways(
   effects: Effects,
   hostId: HostId,
   addresses: string[],
-): Promise<GatewayComparison> {
+): Promise<AddressGateways> {
   const [outbound, host] = await Promise.all([
     new GetOutboundGateway(effects).once(),
     getOwnHost(effects, hostId).once(),

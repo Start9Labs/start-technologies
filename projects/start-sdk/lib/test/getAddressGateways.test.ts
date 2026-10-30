@@ -1,6 +1,6 @@
 import { Effects } from '@start9labs/start-core/Effects'
 import * as T from '@start9labs/start-core/types'
-import { compareGateways } from '../util/compareGateways'
+import { getAddressGateways } from '../util/getAddressGateways'
 
 const pub = (
   hostname: string,
@@ -93,7 +93,7 @@ const effects = (outbound: string, h: T.Host | null) =>
     getHostInfo: async () => h,
   }) as unknown as Effects
 
-describe('compareGateways', () => {
+describe('getAddressGateways', () => {
   it('resolves each enabled public address to its gateway', async () => {
     const h = host(
       addresses(
@@ -102,7 +102,7 @@ describe('compareGateways', () => {
       ),
     )
     expect(
-      await compareGateways(effects('eno0', h), 'turn', [
+      await getAddressGateways(effects('eno0', h), 'turn', [
         '134.199.220.102',
         '73.34.87.9',
         'TURN.example.com',
@@ -121,7 +121,7 @@ describe('compareGateways', () => {
     const h = host(addresses([tunnelV4, routerV4], ['134.199.220.102:3478']))
     expect(
       (
-        await compareGateways(effects('wg1', h), 'turn', [
+        await getAddressGateways(effects('wg1', h), 'turn', [
           '73.34.87.9',
           '203.0.113.7',
         ])
@@ -136,7 +136,7 @@ describe('compareGateways', () => {
     const h = host(addresses([tunnelV6], ['[2604:a880:4:1d0::5]:3478']))
     expect(
       (
-        await compareGateways(effects('wg1', h), 'turn', [
+        await getAddressGateways(effects('wg1', h), 'turn', [
           '2604:a880:4:1d0:0:0:0:5',
         ])
       ).addresses,
@@ -149,7 +149,7 @@ describe('compareGateways', () => {
       addresses([{ ...routerV4, port: 42000 }], ['73.34.87.9:42000']),
     )
     expect(
-      (await compareGateways(effects('wg1', h), 'turn', ['73.34.87.9']))
+      (await getAddressGateways(effects('wg1', h), 'turn', ['73.34.87.9']))
         .addresses,
     ).toEqual([{ address: '73.34.87.9', gateway: 'eno0' }])
   })
@@ -161,8 +161,11 @@ describe('compareGateways', () => {
       if (state === 'disabled') h.bindings[3478].enabled = false
       else h.bindings[3478].interfaces = {}
       expect(
-        (await compareGateways(effects('wg1', h), 'turn', ['134.199.220.102']))
-          .addresses,
+        (
+          await getAddressGateways(effects('wg1', h), 'turn', [
+            '134.199.220.102',
+          ])
+        ).addresses,
       ).toEqual([{ address: '134.199.220.102', gateway: null }])
     },
   )
@@ -177,7 +180,7 @@ describe('compareGateways', () => {
       if (state === 'disabled') h.bindingRanges[42000].enabled = false
       else h.bindingRanges[42000].interface = null
       expect(
-        (await compareGateways(effects('eno0', h), 'turn', ['73.34.87.9']))
+        (await getAddressGateways(effects('eno0', h), 'turn', ['73.34.87.9']))
           .addresses,
       ).toEqual([{ address: '73.34.87.9', gateway: null }])
     },
@@ -185,7 +188,9 @@ describe('compareGateways', () => {
 
   it('treats a missing host as publishing nothing', async () => {
     expect(
-      await compareGateways(effects('eno0', null), 'turn', ['134.199.220.102']),
+      await getAddressGateways(effects('eno0', null), 'turn', [
+        '134.199.220.102',
+      ]),
     ).toEqual({
       outbound: 'eno0',
       addresses: [{ address: '134.199.220.102', gateway: null }],

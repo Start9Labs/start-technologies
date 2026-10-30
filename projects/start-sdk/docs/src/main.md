@@ -407,7 +407,7 @@ Available on `sdk.healthCheck`:
 
 Replies to a connection leave through the gateway it arrived on, but connections a service starts leave through its outbound gateway, which the user chooses. A service that advertises a public address and then starts flows itself — a TURN relay, a mail server sending from an address its DNS records authorize — sends them from another address when the two gateways differ.
 
-`sdk.host.compareGateways(effects, hostId, addresses)` returns the service's outbound gateway and, for each address passed in, the gateway publishing it (`null` when none does). It reads both once per call, so a health check can call it on every poll without restarting the service. Pass the addresses the service actually advertises, read back from its rendered configuration, not the inputs it was rendered from:
+`sdk.host.getAddressGateways(effects, hostId, addresses)` returns the service's outbound gateway and, for each address passed in, the gateway publishing it (`null` when none does). It reads both once per call, so a health check can call it on every poll without restarting the service. Pass the addresses the service actually advertises, read back from its rendered configuration, not the inputs it was rendered from:
 
 ```typescript
 .addHealthCheck('gateway-match', {
@@ -416,7 +416,7 @@ Replies to a connection leave through the gateway it arrived on, but connections
     fn: async () => {
       const ips = await turnserverConf.read(c => c.externalIps).once()
       if (!ips?.length) return { result: 'disabled' as const }
-      const { outbound, addresses } = await sdk.host.compareGateways(
+      const { outbound, addresses } = await sdk.host.getAddressGateways(
         effects,
         turnHostId,
         ips,
