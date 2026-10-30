@@ -41,6 +41,15 @@ pub(crate) fn object_path(data: &Path, key: &Key, object: RecordKey) -> Option<P
     )
 }
 
+/// Removes a format-1 shard directory and any objects left in it.
+fn remove_shard(shard: &Path) -> std::io::Result<()> {
+    match std::fs::remove_dir(shard) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => std::fs::remove_dir_all(shard),
+        Ok(()) => Ok(()),
+    }
+}
+
 /// Best-effort removal of the format-1 object directories.
 pub(crate) fn remove_object_trees(data: &Path) {
     let shards = Mutex::new(Vec::new());
@@ -60,7 +69,7 @@ pub(crate) fn remove_object_trees(data: &Path) {
                 let Some(shard) = shards.lock().unwrap().pop() else {
                     break;
                 };
-                if let Err(error) = std::fs::remove_dir_all(&shard) {
+                if let Err(error) = remove_shard(&shard) {
                     ::log::warn!("cannot remove retired objects in {shard:?}: {error}");
                 }
             });
