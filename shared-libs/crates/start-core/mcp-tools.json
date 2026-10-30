@@ -2730,6 +2730,105 @@
     }
   },
   {
+    "name": "notification.push.key",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "notification.push.list",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "notification.push.subscribe",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "PushSubscription": {
+          "type": "object",
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "description": "HTTP(S) push resource selected by the browser, including LAN endpoints."
+            },
+            "keys": { "$ref": "#/$defs/PushKeys" }
+          },
+          "required": ["endpoint", "keys"],
+          "additionalProperties": true
+        },
+        "PushKeys": {
+          "type": "object",
+          "properties": {
+            "p256dh": {
+              "type": "string",
+              "description": "Base64url-encoded uncompressed P-256 public key."
+            },
+            "auth": {
+              "type": "string",
+              "description": "Base64url-encoded 16-byte authentication secret."
+            }
+          },
+          "required": ["p256dh", "auth"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "description": "HTTP(S) push resource selected by the browser, including LAN endpoints."
+        },
+        "keys": { "$ref": "#/$defs/PushKeys" }
+      },
+      "required": ["endpoint", "keys"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "notification.push.test",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "EndpointParams": {
+          "type": "object",
+          "properties": { "endpoint": { "type": "string" } },
+          "required": ["endpoint"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": { "endpoint": { "type": "string" } },
+      "required": ["endpoint"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "notification.push.unsubscribe",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "EndpointParams": {
+          "type": "object",
+          "properties": { "endpoint": { "type": "string" } },
+          "required": ["endpoint"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": { "endpoint": { "type": "string" } },
+      "required": ["endpoint"],
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "notification.remove",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4385,7 +4484,11 @@
           "properties": {
             "registry": { "type": "string" },
             "id": { "$ref": "#/$defs/PackageId" },
-            "version": { "$ref": "#/$defs/Version" }
+            "version": { "$ref": "#/$defs/Version" },
+            "trust": {
+              "description": "Accepts an untrusted signer without skipping signature or integrity verification.",
+              "type": "boolean"
+            }
           },
           "required": ["registry", "id", "version"],
           "additionalProperties": true
@@ -4397,7 +4500,11 @@
       "properties": {
         "registry": { "type": "string" },
         "id": { "$ref": "#/$defs/PackageId" },
-        "version": { "$ref": "#/$defs/Version" }
+        "version": { "$ref": "#/$defs/Version" },
+        "trust": {
+          "description": "Accepts an untrusted signer without skipping signature or integrity verification.",
+          "type": "boolean"
+        }
       },
       "required": ["registry", "id", "version"],
       "additionalProperties": true
@@ -4685,12 +4792,22 @@
       "$defs": {
         "SideloadParams": {
           "type": "object",
-          "properties": {},
+          "properties": {
+            "trust": {
+              "description": "Accepts an untrusted signer without skipping signature or integrity verification.",
+              "type": "boolean"
+            }
+          },
           "additionalProperties": true
         }
       },
       "type": "object",
-      "properties": {},
+      "properties": {
+        "trust": {
+          "description": "Accepts an untrusted signer without skipping signature or integrity verification.",
+          "type": "boolean"
+        }
+      },
       "additionalProperties": true
     },
     "outputSchema": {
@@ -5786,6 +5903,14 @@
             "headline": { "type": "string" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
             "sourceVersion": { "type": "string" },
+            "gitHash": {
+              "description": "Commit that produced the OS image, if recorded at publication.",
+              "anyOf": [{ "$ref": "#/$defs/GitHash" }, { "type": "null" }]
+            },
+            "security": {
+              "description": "Whether the release includes security fixes.",
+              "type": "boolean"
+            },
             "authorized": {
               "type": "array",
               "items": { "$ref": "#/$defs/Guid" }
@@ -5852,6 +5977,8 @@
             "headline",
             "releaseNotes",
             "sourceVersion",
+            "gitHash",
+            "security",
             "authorized",
             "iso",
             "squashfs",
@@ -7053,6 +7180,14 @@
             "headline": { "type": "string" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
             "sourceVersion": { "type": "string" },
+            "gitHash": {
+              "description": "Commit that produced the OS image, if recorded at publication.",
+              "anyOf": [{ "$ref": "#/$defs/GitHash" }, { "type": "null" }]
+            },
+            "security": {
+              "description": "Whether the release includes security fixes.",
+              "type": "boolean"
+            },
             "authorized": {
               "type": "array",
               "items": { "$ref": "#/$defs/Guid" }
@@ -7119,6 +7254,8 @@
             "headline",
             "releaseNotes",
             "sourceVersion",
+            "gitHash",
+            "security",
             "authorized",
             "iso",
             "squashfs",
@@ -7136,6 +7273,7 @@
             }
           ]
         },
+        "GitHash": { "type": "string" },
         "Guid": { "type": "string" },
         "Blake3Commitment": {
           "type": "object",
@@ -7180,7 +7318,14 @@
             "version": { "type": "string" },
             "headline": { "type": "string" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
-            "sourceVersion": { "type": "string" }
+            "sourceVersion": { "type": "string" },
+            "gitHash": {
+              "anyOf": [{ "$ref": "#/$defs/GitHash" }, { "type": "null" }]
+            },
+            "expectedGitHash": {
+              "anyOf": [{ "$ref": "#/$defs/GitHash" }, { "type": "null" }]
+            },
+            "security": { "type": "boolean" }
           },
           "required": ["version", "headline", "releaseNotes", "sourceVersion"],
           "additionalProperties": true
@@ -7194,7 +7339,8 @@
               "additionalProperties": { "type": "string" }
             }
           ]
-        }
+        },
+        "GitHash": { "type": "string" }
       },
       "type": "object"
     }
@@ -7256,6 +7402,14 @@
             "headline": { "type": "string" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
             "sourceVersion": { "type": "string" },
+            "gitHash": {
+              "description": "Commit that produced the OS image, if recorded at publication.",
+              "anyOf": [{ "$ref": "#/$defs/GitHash" }, { "type": "null" }]
+            },
+            "security": {
+              "description": "Whether the release includes security fixes.",
+              "type": "boolean"
+            },
             "authorized": {
               "type": "array",
               "items": { "$ref": "#/$defs/Guid" }
@@ -7322,6 +7476,8 @@
             "headline",
             "releaseNotes",
             "sourceVersion",
+            "gitHash",
+            "security",
             "authorized",
             "iso",
             "squashfs",
@@ -7339,6 +7495,7 @@
             }
           ]
         },
+        "GitHash": { "type": "string" },
         "Guid": { "type": "string" },
         "Blake3Commitment": {
           "type": "object",
@@ -10748,6 +10905,95 @@
     }
   },
   {
+    "name": "server.trusted-keys.add",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "AddTrustedKeyParams": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "publicKeys": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Ed25519 public keys in PEM or armored GPG format."
+            },
+            "context": {
+              "description": "New entries are enabled in this context and in the Marketplace.",
+              "$ref": "#/$defs/TrustContext"
+            }
+          },
+          "required": ["name", "publicKeys", "context"],
+          "additionalProperties": true
+        },
+        "TrustContext": { "type": "string", "enum": ["marketplace", "os"] }
+      },
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "publicKeys": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Ed25519 public keys in PEM or armored GPG format."
+        },
+        "context": {
+          "description": "New entries are enabled in this context and in the Marketplace.",
+          "$ref": "#/$defs/TrustContext"
+        }
+      },
+      "required": ["name", "publicKeys", "context"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "server.trusted-keys.remove",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RemoveTrustedKeyParams": {
+          "type": "object",
+          "properties": { "id": { "type": "string" } },
+          "required": ["id"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": { "id": { "type": "string" } },
+      "required": ["id"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "server.trusted-keys.update",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "UpdateTrustedKeyParams": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string" },
+            "marketplace": { "type": "boolean" },
+            "os": { "type": "boolean" }
+          },
+          "required": ["id", "name", "marketplace", "os"],
+          "additionalProperties": true,
+          "description": "Changes a keyring's name and both trust selections atomically."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "marketplace": { "type": "boolean" },
+        "os": { "type": "boolean" }
+      },
+      "required": ["id", "name", "marketplace", "os"],
+      "additionalProperties": true,
+      "description": "Changes a keyring's name and both trust selections atomically."
+    }
+  },
+  {
     "name": "server.update",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -10759,6 +11005,10 @@
             "acceptSigners": {
               "description": "Additional signer requirements checked before starting the update.",
               "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
+            },
+            "trust": {
+              "description": "Accepts an untrusted signer without skipping signature or integrity verification.",
+              "type": "boolean"
             },
             "targetVersion": { "type": ["string", "null"] },
             "progress": { "type": "boolean" }
@@ -10806,6 +11056,10 @@
         "acceptSigners": {
           "description": "Additional signer requirements checked before starting the update.",
           "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
+        },
+        "trust": {
+          "description": "Accepts an untrusted signer without skipping signature or integrity verification.",
+          "type": "boolean"
         },
         "targetVersion": { "type": ["string", "null"] },
         "progress": { "type": "boolean" }

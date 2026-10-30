@@ -1,0 +1,1 @@
+- Les sites web que vous visitez ne peuvent plus utiliser votre navigateur pour contrôler un serveur en cours de configuration ou en mode diagnostic. Pendant la configuration et le diagnostic, ouvrez le serveur via son adresse `.local` ou son adresse IP.

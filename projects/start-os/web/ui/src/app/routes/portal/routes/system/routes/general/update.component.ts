@@ -81,7 +81,7 @@ export class SystemUpdateModal {
         latest.squashfs[os.platform]?.signatures ?? {},
       )
       const trustedSigners = await firstValueFrom(
-        this.patch.watch$('serverInfo', 'trustedOsUpdateSigners'),
+        this.patch.watch$('serverInfo', 'trustedKeys'),
       )
       const trusted = trustedOsUpdateSigners(signers, trustedSigners)
       if (this.os.updateCandidates()[0]?.version !== latest.version) return

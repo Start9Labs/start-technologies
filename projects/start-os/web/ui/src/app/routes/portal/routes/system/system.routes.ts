@@ -64,6 +64,12 @@ export default [
         loadComponent: () => import('./routes/ssh/ssh.component'),
       },
       {
+        path: 'trusted-keys',
+        title: titleResolver,
+        data: { title: 'Trusted keyrings' },
+        loadComponent: () => import('./routes/trusted-keys'),
+      },
+      {
         path: 'password',
         title: titleResolver,
         loadComponent: () => import('./routes/password/password.component'),

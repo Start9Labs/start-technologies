@@ -36,6 +36,7 @@ how `startbox` dispatches to `startd`, `start-cli`, etc. The per-entrypoint logi
 - `src/s9pk/` — S9PK package format (merkle archive)
 - `src/lxc/` — LXC container management for packages
 - `src/install/`, `src/update/` — Package install and OS/package update flows
+- `src/trusted_keys.rs` — Shared signing keyrings, trust contexts, committed initial certificates in `src/trusted_keys/initial/`, and legacy OS-signer adapters; `src/sign/gpg.rs` imports signing keys and retains original public exports with self-certified identity claims
 - `src/registry/` — Package registry server and management
 - `src/tunnel/` — StartTunnel server logic
 - `src/backup/`, `src/sign/` — Backup and signing

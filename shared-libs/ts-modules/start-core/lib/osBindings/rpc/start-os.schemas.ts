@@ -1078,6 +1078,10 @@ export const RemovePassthroughParams: z.ZodObject<{
 }).meta({
   id: 'RemovePassthroughParams',
 })
+export const RemoveTrustedKeyParams: z.ZodObject<{ id: z.ZodString }> =
+  /* @__PURE__ */ object({ id: z.string() }).meta({
+    id: 'RemoveTrustedKeyParams',
+  })
 export const RemoveVersionParams: z.ZodObject<{ version: z.ZodString }> =
   /* @__PURE__ */ object({ version: z.string() }).meta({
     id: 'RemoveVersionParams',
@@ -1197,7 +1201,20 @@ export const ShutdownParams: z.ZodObject<{
 }).meta({
   id: 'ShutdownParams',
 })
-export const SideloadParams: typeof empty = /* @__PURE__ */ empty.meta({
+export const SideloadParams: z.ZodObject<{
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
+}).meta({
   id: 'SideloadParams',
 })
 
@@ -1276,6 +1293,10 @@ export const TrustCaParams: z.ZodObject<{ cert: typeof literal_0 }> =
   /* @__PURE__ */ object({ cert: literal_0 }).meta({
     id: 'TrustCaParams',
   })
+export const TrustContext: z.ZodEnum<{ marketplace: 'marketplace'; os: 'os' }> =
+  /* @__PURE__ */ z.enum(['marketplace', 'os']).meta({
+    id: 'TrustContext',
+  })
 export const TrustedCa: z.ZodObject<{
   subject: z.ZodString
   fingerprint: z.ZodString
@@ -1294,6 +1315,24 @@ export const UiParams: z.ZodObject<{
   value: z.ZodUnknown
 }> = /* @__PURE__ */ object({ pointer: z.string(), value: z.unknown() }).meta({
   id: 'UiParams',
+})
+
+/**
+ * Changes a keyring's name and both trust selections atomically.
+ */
+export const UpdateTrustedKeyParams: z.ZodObject<{
+  id: z.ZodString
+  name: z.ZodString
+  marketplace: z.ZodBoolean
+  os: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  id: z.string(),
+  name: z.string(),
+  marketplace: z.boolean(),
+  os: z.boolean(),
+}).meta({
+  id: 'UpdateTrustedKeyParams',
+  description: "Changes a keyring's name and both trust selections atomically.",
 })
 
 /**
@@ -1590,6 +1629,34 @@ export const AddPublicDomainParams: z.ZodObject<{
   internalPort: z.int(),
 }).meta({
   id: 'AddPublicDomainParams',
+})
+export const AddTrustedKeyParams: z.ZodObject<{
+  name: z.ZodString
+  /**
+   * Ed25519 public keys in PEM or armored GPG format.
+   */
+  publicKeys: z.ZodArray<z.ZodString>
+  /**
+   * New entries are enabled in this context and in the Marketplace.
+   */
+  context: typeof TrustContext
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  /**
+   * Ed25519 public keys in PEM or armored GPG format.
+   */
+  publicKeys: z.array(z.string()).meta({
+    description: 'Ed25519 public keys in PEM or armored GPG format.',
+  }),
+  /**
+   * New entries are enabled in this context and in the Marketplace.
+   */
+  context: TrustContext.meta({
+    description:
+      'New entries are enabled in this context and in the Marketplace.',
+  }),
+}).meta({
+  id: 'AddTrustedKeyParams',
 })
 export const AddTunnelParams: z.ZodObject<{
   name: z.ZodString
@@ -2299,10 +2366,21 @@ export const InstallParams: z.ZodObject<{
   registry: z.ZodString
   id: typeof PackageId
   version: typeof Version
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   registry: z.string(),
   id: PackageId,
   version: Version,
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
 }).meta({
   id: 'InstallParams',
 })
@@ -3831,6 +3909,10 @@ export const UpdateSystemParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
     z.ZodNullable<typeof AcceptSigners>
   >
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   targetVersion: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
@@ -3847,6 +3929,13 @@ export const UpdateSystemParams: z.ZodObject<{
   ).meta({
     description:
       'Additional signer requirements checked before starting the update.',
+  }),
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
   }),
   targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
   progress: wire(z.boolean().optional(), z.boolean()),
@@ -6320,6 +6409,23 @@ export const Api = {
             TrustCaParams,
           ),
           _RETURN: /* @__PURE__ */ TrustedCa,
+        },
+        'trusted-keys': {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            add: {
+              _PARAMS: /* @__PURE__ */ AddTrustedKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            remove: {
+              _PARAMS: /* @__PURE__ */ RemoveTrustedKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+            update: {
+              _PARAMS: /* @__PURE__ */ UpdateTrustedKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+            },
+          },
         },
         update: {
           _PARAMS: /* @__PURE__ */ UpdateSystemParams,

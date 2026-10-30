@@ -1,0 +1,2 @@
+- `--trust` en la instalación de paquetes y las actualizaciones del SO permite omitir explícitamente la confianza en el firmante. Desde StartOS 0.4.1 se requiere por defecto un firmante de confianza habilitado; la opción no elimina las comprobaciones de firma e integridad.
+- Las actualizaciones de diagnóstico ya no requieren un argumento de registro que no tenía efecto.

@@ -1,0 +1,16 @@
+{
+  "publishedAt": "2026-10-19T22:41:36.110836231Z",
+  "urls": [
+    "https://community-s9pks.nyc3.digitaloceanspaces.com/bitcoind/knotsprerdts:29.3:31/bitcoind_x86_64.s9pk",
+    "https://github.com/Start9-Community/bitcoin-knots-prerdts-startos/releases/download/v29.3_31-knotsprerdts/bitcoind_x86_64.s9pk"
+  ],
+  "commitment": {
+    "type": "merkle-archive",
+    "rootSighash": "L6jWc1KVN8rTpyv29cKyyPzZm8yJJSMMYz8ow0pPDT8",
+    "rootMaxsize": 574
+  },
+  "signatures": {
+    "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEASv7fB+rs6FRL+pk7KXaoXONNn26dRkwMB9LXUqmXXLM=\n-----END PUBLIC KEY-----\n": "-----BEGIN SIGNATURE-----\nMFkwFQYTaa719bHniYqFyZya47uF+/KJWwRAeh4PdcmtX99MGUNEYJSbkDRAFa3C\nT3PVvwcoRzmX1WocabP87qzDQaPoF8WNL5mP3RYs5yUHf48P/le3Fwp3DA==\n-----END SIGNATURE-----\n",
+    "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=\n-----END PUBLIC KEY-----\n": "-----BEGIN SIGNATURE-----\nMFkwFQYTaa719bHniYqFyZya47uF+/KJWwRAkXTgb+1Q9PJiuiG5u7k84VLjws65\nojFAcV22DjWBi7f5kCbGVC/ih/2TFx0w2DKQKkdDkVh3Gy91LJ+znoe8DA==\n-----END SIGNATURE-----\n"
+  }
+}
