@@ -1838,6 +1838,13 @@ backup.conversion.already-running:
   fr_FR: "Une conversion est déjà en cours pour cette sauvegarde."
   pl_PL: "Konwersja tej kopii zapasowej już trwa."
 
+backup.conversion.complete-message:
+  en_US: "Your backup on %{label} has been successfully converted to the new format."
+  de_DE: "Ihre Sicherung auf %{label} wurde erfolgreich in das neue Format konvertiert."
+  es_ES: "Su copia de seguridad en %{label} se ha convertido correctamente al nuevo formato."
+  fr_FR: "Votre sauvegarde sur %{label} a été convertie au nouveau format avec succès."
+  pl_PL: "Kopia zapasowa na %{label} została pomyślnie przekonwertowana do nowego formatu."
+
 backup.conversion.complete-title:
   en_US: "Backup conversion completed"
   de_DE: "Sicherungskonvertierung abgeschlossen"
@@ -1845,12 +1852,19 @@ backup.conversion.complete-title:
   fr_FR: "Conversion de la sauvegarde terminée"
   pl_PL: "Konwersja kopii zapasowej zakończona"
 
+backup.conversion.failed-message:
+  en_US: "Your backup on %{label} failed to convert to the new format: %{error}"
+  de_DE: "Ihre Sicherung auf %{label} konnte nicht in das neue Format konvertiert werden: %{error}"
+  es_ES: "Su copia de seguridad en %{label} no se pudo convertir al nuevo formato: %{error}"
+  fr_FR: "Votre sauvegarde sur %{label} n’a pas pu être convertie au nouveau format : %{error}"
+  pl_PL: "Nie udało się przekonwertować kopii zapasowej na %{label} do nowego formatu: %{error}"
+
 backup.conversion.failed-title:
-  en_US: "Backup conversion did not finish"
-  de_DE: "Sicherungskonvertierung nicht abgeschlossen"
-  es_ES: "La conversión de la copia de seguridad no terminó"
-  fr_FR: "La conversion de la sauvegarde ne s'est pas terminée"
-  pl_PL: "Konwersja kopii zapasowej nie została ukończona"
+  en_US: "Backup conversion failed"
+  de_DE: "Sicherungskonvertierung fehlgeschlagen"
+  es_ES: "Error en la conversión de la copia de seguridad"
+  fr_FR: "Échec de la conversion de la sauvegarde"
+  pl_PL: "Konwersja kopii zapasowej nie powiodła się"
 
 backup.conversion.incomplete-progress:
   en_US: "The conversion helper stopped without confirming completion."
@@ -1914,13 +1928,6 @@ backup.conversion.records:
   es_ES: "Convirtiendo metadatos"
   fr_FR: "Conversion des métadonnées"
   pl_PL: "Konwertowanie metadanych"
-
-backup.conversion.result:
-  en_US: "Server backup %{server} on %{target}. Check Backup Targets for conversion status and retry or resume if needed."
-  de_DE: "Serversicherung %{server} auf %{target}. Prüfen Sie den Konvertierungsstatus unter Sicherungsziele und starten oder setzen Sie die Konvertierung bei Bedarf erneut fort."
-  es_ES: "Copia del servidor %{server} en %{target}. Consulte el estado de conversión en los destinos de copia y reintente o reanude si es necesario."
-  fr_FR: "Sauvegarde du serveur %{server} sur %{target}. Consultez son état dans les cibles de sauvegarde et réessayez ou reprenez si nécessaire."
-  pl_PL: "Kopia serwera %{server} na %{target}. Sprawdź stan w celach kopii zapasowych i w razie potrzeby ponów lub wznów konwersję."
 
 backup.conversion.scanning-objects:
   en_US: "Scanning backup objects"

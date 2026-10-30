@@ -26,7 +26,7 @@ const { DialogService, ErrorService, TaskService } =
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
 const { BackupService } =
   await import('../src/app/routes/portal/routes/system/routes/backups/backup.service.ts')
-const { conversionLabel } =
+const { conversionLabel, serverBackups } =
   await import('../src/app/routes/portal/routes/system/routes/backups/conversion-state.ts')
 
 const backup = formatStatus => ({
@@ -57,6 +57,7 @@ function fixture(t, { confirm = of(true), password = of('secret') } = {}) {
     submissions = [],
     errors = [],
     prompts = [],
+    confirmations = [],
     tasks = []
   const api = {
     rpc: {
@@ -89,7 +90,10 @@ function fixture(t, { confirm = of(true), password = of('secret') } = {}) {
     {
       provide: DialogService,
       useValue: {
-        openConfirm: () => confirm,
+        openConfirm: options => {
+          confirmations.push(options)
+          return confirm
+        },
         openPrompt: options => {
           prompts.push(options)
           return password
@@ -116,46 +120,58 @@ function fixture(t, { confirm = of(true), password = of('secret') } = {}) {
     submissions,
     errors,
     prompts,
+    confirmations,
     tasks,
   }
 }
 
-test('format indicator distinguishes interruption, failure and active work across server backups', () => {
-  assert.equal(
-    conversionLabel({ a: backup('current'), b: backup('unknown') }),
-    null,
-  )
-  assert.equal(conversionLabel({ a: backup('legacy') }), 'Old format')
-  assert.equal(
-    conversionLabel({ a: backup('legacy'), b: backup('interrupted') }),
-    'Resume conversion',
-  )
-  assert.equal(
-    conversionLabel({ a: backup('legacy') }, { a: job('failed') }),
-    'Retry conversion',
-  )
-  assert.equal(
-    conversionLabel(
-      { a: backup('interrupted'), b: backup('current') },
-      { b: job('running') },
-    ),
-    'Conversion in progress',
-  )
-  assert.equal(
-    conversionLabel({ a: backup('current') }, { a: job('complete') }),
-    null,
-  )
+test('format indicator distinguishes interruption, failure and active work for this server', () => {
+  for (const [format, state, expected] of [
+    ['current', 'complete', null],
+    ['unknown', 'complete', null],
+    ['legacy', 'complete', 'Update format'],
+    ['interrupted', 'failed', 'Resume conversion'],
+    ['legacy', 'failed', 'Retry conversion'],
+    ['interrupted', 'running', 'Conversion in progress'],
+  ]) {
+    assert.equal(
+      conversionLabel({ own: backup(format) }, { own: job(state) }, 'own'),
+      expected,
+    )
+  }
 })
 
 test('format indicator ignores jobs for backups removed from the target', () => {
   assert.equal(
-    conversionLabel({ a: backup('current') }, { removed: job('running') }),
+    conversionLabel(
+      { own: backup('current') },
+      { removed: job('running') },
+      'own',
+    ),
     null,
   )
   assert.equal(
-    conversionLabel({ a: backup('legacy') }, { removed: job('failed') }),
-    'Old format',
+    conversionLabel(
+      { own: backup('legacy') },
+      { removed: job('failed') },
+      'own',
+    ),
+    'Update format',
   )
+})
+
+test('conversion indicators and dialog entries never include another server', () => {
+  const backups = { own: backup('current'), other: backup('legacy') }
+  for (const state of ['running', 'failed']) {
+    const jobs = { other: job(state) }
+    assert.equal(conversionLabel(backups, jobs, 'own'), null)
+    assert.equal(
+      conversionLabel({ own: backup('legacy') }, jobs, 'own'),
+      'Update format',
+    )
+  }
+  assert.deepEqual(serverBackups(backups, 'own'), { own: backups.own })
+  assert.deepEqual(serverBackups(backups, 'absent'), {})
 })
 
 test('legacy discovery preserves backup/restore eligibility and never starts conversion', async t => {
@@ -215,7 +231,11 @@ test('failure refreshes discovery once and exposes the interrupted format', asyn
   const refreshed = f.service.cifs()[0]
   assert.equal(refreshed.entry.startOs.own.formatStatus, 'interrupted')
   assert.equal(
-    conversionLabel(refreshed.entry.startOs, f.service.conversions().target),
+    conversionLabel(
+      refreshed.entry.startOs,
+      f.service.conversions().target,
+      'own',
+    ),
     'Resume conversion',
   )
 })
@@ -230,6 +250,69 @@ test('coalesced terminal observations refresh without requiring a visible runnin
     })
     await setImmediate()
   }
+})
+
+test('backup creation offers an update and skip; skipping starts no conversion', async t => {
+  const f = fixture(t, { confirm: of(false) })
+  assert.equal(
+    await f.service.prepareBackup('target', { own: backup('legacy') }),
+    'ready',
+  )
+  assert.equal(f.confirmations[0].data.yes, 'Update format')
+  assert.equal(f.confirmations[0].data.no, 'Skip')
+  assert.deepEqual(f.submissions, [])
+  assert.deepEqual(f.prompts, [])
+})
+
+test('choosing update starts this server conversion rather than a backup', async t => {
+  const f = fixture(t)
+  assert.equal(
+    await f.service.prepareBackup('target', {
+      own: backup('legacy'),
+      other: backup('legacy'),
+    }),
+    'conversion',
+  )
+  assert.deepEqual(f.submissions, [
+    { targetId: 'target', serverId: 'own', password: 'secret' },
+  ])
+})
+
+test('dismissing either conversion prompt cancels backup creation', async t => {
+  const f = fixture(t, { confirm: EMPTY })
+  assert.equal(
+    await f.service.prepareBackup('target', { own: backup('legacy') }),
+    'cancelled',
+  )
+  const g = fixture(t, { password: EMPTY })
+  assert.equal(
+    await g.service.prepareBackup('target', { own: backup('legacy') }),
+    'cancelled',
+  )
+  assert.deepEqual(f.submissions, [])
+  assert.deepEqual(g.submissions, [])
+})
+
+test('other-server backups do not prompt; interrupted or running own backups open conversion', async t => {
+  const f = fixture(t)
+  for (const backups of [
+    { other: backup('legacy') },
+    { own: backup('current') },
+    {},
+  ]) {
+    assert.equal(await f.service.prepareBackup('target', backups), 'ready')
+  }
+  assert.equal(
+    await f.service.prepareBackup('target', { own: backup('interrupted') }),
+    'conversion',
+  )
+  f.observations.next({ target: { own: job('running') } })
+  assert.equal(
+    await f.service.prepareBackup('target', { own: backup('legacy') }),
+    'conversion',
+  )
+  assert.deepEqual(f.confirmations, [])
+  assert.deepEqual(f.submissions, [])
 })
 
 test('conversion requires explicit confirmation and a password, scoped to one server', async t => {

@@ -74,8 +74,11 @@ const ERROR =
           <td>
             <div class="actions">
               @if (
-                target.entry.startOs
-                  | backupConversionLabel: service.conversions()[target.id];
+                type === 'create' &&
+                  (target.entry.startOs
+                    | backupConversionLabel
+                      : service.conversions()[target.id]
+                      : service.serverId());
                 as label
               ) {
                 <button

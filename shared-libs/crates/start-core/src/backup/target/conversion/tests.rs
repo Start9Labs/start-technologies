@@ -13,6 +13,34 @@ fn target(id: u32) -> BackupTargetId {
 }
 
 #[test]
+fn notifications_name_the_target_and_report_success_or_the_actual_failure() {
+    rust_i18n::set_locale("en_US");
+    let success = ConversionJob::finished(FullProgress::new(), &Ok(()));
+    let (level, title, message) = success.notification("Backup Drive");
+    assert!(matches!(level, NotificationLevel::Success));
+    assert_eq!(title, "Backup conversion completed");
+    assert_eq!(
+        message,
+        "Your backup on Backup Drive has been successfully converted to the new format."
+    );
+    let failure = ConversionJob::finished(
+        FullProgress::new(),
+        &Err(Error::new(eyre!("disk disconnected"), ErrorKind::Backup)),
+    );
+    let (level, title, message) = failure.notification("nas:/backups");
+    assert!(matches!(level, NotificationLevel::Error));
+    assert_eq!(title, "Backup conversion failed");
+    assert_eq!(
+        message,
+        format!(
+            "Your backup on nas:/backups failed to convert to the new format: {}",
+            failure.error.unwrap()
+        )
+    );
+    assert!(message.contains("disk disconnected"));
+}
+
+#[test]
 fn conversion_reservations_exclude_the_same_backup_but_not_other_backups() {
     let mut jobs = ConversionJobs::new();
     reserve(&mut jobs, target(1), "server-a".into(), FullProgress::new()).unwrap();
@@ -107,6 +135,7 @@ async fn worker_fixture(
     let conversion = PreparedConversion {
         target_id: target(1),
         server_id: "server-a".into(),
+        label: "Backup Drive".into(),
         data: temp.path().to_owned(),
         key: Zeroizing::new("test-key".into()),
         guard: TestMount {
@@ -135,7 +164,11 @@ async fn worker_publishes_result_after_cleanup_for_success_and_failures() {
         let unmounted = conversion.guard.unmounted.clone();
         let (_shutdown, receiver) = broadcast::channel(1);
         conversion
-            .run(db.clone(), FullProgressTracker::new(), receiver)
+            .run(
+                db.clone(),
+                backupfs::ConversionProgressSink::new(),
+                receiver,
+            )
             .await
             .unwrap();
         assert!(unmounted.load(Ordering::SeqCst));
@@ -143,7 +176,7 @@ async fn worker_publishes_result_after_cleanup_for_success_and_failures() {
         let job = &active["cifs-1"]["server-a"];
         assert_eq!(job.state, state, "{mode}, unmount error {unmount_error}");
         assert_eq!(job.error.is_some(), state == ConversionState::Failed);
-        assert_eq!(job.progress.phases.len(), 1);
+        assert_eq!(job.progress.phases.len(), 5);
         assert_eq!(active["cifs-1"]["server-b"].state, ConversionState::Running);
         assert_eq!(active["cifs-2"]["server-a"].state, ConversionState::Running);
         assert_eq!(
@@ -172,7 +205,7 @@ async fn live_progress(db: &TypedPatchDb<Database>) {
         while let Some(update) = updates.next().await {
             let job = update.unwrap().de().unwrap();
             if matches!(
-                job.progress.phases.first().map(|phase| &phase.progress),
+                job.progress.phases.get(1).map(|phase| &phase.progress),
                 Some(crate::progress::Progress::Progress {
                     done: 1,
                     total: Some(2),
@@ -180,6 +213,15 @@ async fn live_progress(db: &TypedPatchDb<Database>) {
                 })
             ) {
                 assert_eq!(job.state, ConversionState::Running);
+                assert_eq!(job.progress.phases.len(), 5);
+                assert!(matches!(
+                    job.progress.overall,
+                    crate::progress::Progress::Progress {
+                        done: 15,
+                        total: Some(100),
+                        ..
+                    }
+                ));
                 return;
             }
         }
@@ -204,7 +246,11 @@ async fn worker_streams_progress_and_cancels_on_shutdown() {
     let (temp, db, conversion) = worker_fixture("hold", false).await;
     let unmounted = conversion.guard.unmounted.clone();
     let (shutdown, receiver) = broadcast::channel(1);
-    let running = tokio::spawn(conversion.run(db.clone(), FullProgressTracker::new(), receiver));
+    let running = tokio::spawn(conversion.run(
+        db.clone(),
+        backupfs::ConversionProgressSink::new(),
+        receiver,
+    ));
     live_progress(&db).await;
     let pid = helper_pid(&temp);
     shutdown.send(None).unwrap();
@@ -237,7 +283,11 @@ async fn worker_streams_progress_and_cancels_on_shutdown() {
 async fn worker_progress_and_completion_are_scoped_to_one_backup() {
     let (temp, db, conversion) = worker_fixture("hold", false).await;
     let (_shutdown, receiver) = broadcast::channel(1);
-    let running = tokio::spawn(conversion.run(db.clone(), FullProgressTracker::new(), receiver));
+    let running = tokio::spawn(conversion.run(
+        db.clone(),
+        backupfs::ConversionProgressSink::new(),
+        receiver,
+    ));
     live_progress(&db).await;
     nix::sys::signal::kill(helper_pid(&temp), nix::sys::signal::Signal::SIGUSR2).unwrap();
     tokio::time::timeout(Duration::from_secs(10), running)
@@ -277,7 +327,11 @@ async fn real_helper_converts_the_frozen_backup_through_the_background_worker() 
     let unmounted = conversion.guard.unmounted.clone();
     let (_shutdown, receiver) = broadcast::channel(1);
     conversion
-        .run(db.clone(), FullProgressTracker::new(), receiver)
+        .run(
+            db.clone(),
+            backupfs::ConversionProgressSink::new(),
+            receiver,
+        )
         .await
         .unwrap();
     assert!(unmounted.load(Ordering::SeqCst));

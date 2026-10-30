@@ -22,6 +22,8 @@ const mockDescription = {
 }
 
 export namespace Mock {
+  export const ServerId = '1234-5678-9876-5432'
+
   export const ServerUpdated: T.ServerStatus = {
     backupConversions: {},
     backupProgress: null,
@@ -1378,7 +1380,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
           used: 100000000000,
           available: 900000000000,
           startOs: {
-            '1234-5678-9876-5432': {
+            [ServerId]: {
               hostname: 'server-name',
               timestamp: new Date().toISOString(),
               version: '0.4.0',
@@ -1405,7 +1407,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       mountable: false,
       available: null,
       startOs: {
-        '1234-5678-9876-5432': {
+        [ServerId]: {
           hostname: 'server-name',
           timestamp: new Date().toISOString(),
           version: '0.4.0',
@@ -1432,7 +1434,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       mountable: true,
       available: 50000000000,
       startOs: {
-        '1234-5678-9876-5432': {
+        [ServerId]: {
           hostname: 'server-name',
           timestamp: new Date().toISOString(),
           version: '0.4.0',
@@ -1460,7 +1462,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       filesystem: null,
       available: 1000000000,
       startOs: {
-        '1234-5678-9876-5432': {
+        [ServerId]: {
           hostname: 'server-name',
           timestamp: new Date().toISOString(),
           version: '0.4.0',

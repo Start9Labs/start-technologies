@@ -11,17 +11,17 @@ use crate::prelude::*;
 use crate::util::Invoke;
 
 mod progress;
+pub use progress::ProgressSink as ConversionProgressSink;
 
 pub async fn convert(
     data_dir: &Path,
     key: &str,
-    tracker: &crate::progress::FullProgressTracker,
+    sink: &mut ConversionProgressSink,
 ) -> Result<(), Error> {
     let mut password = key.as_bytes();
-    let mut sink = progress::ProgressSink::new(tracker);
     conversion_command(data_dir)
         .input(Some(&mut password))
-        .output_to(&mut sink)
+        .output_to(sink)
         .invoke(ErrorKind::Filesystem)
         .await?;
     Ok(())

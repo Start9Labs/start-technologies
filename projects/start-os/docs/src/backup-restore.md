@@ -6,9 +6,11 @@ Restore previously created backups to recover individual services or your entire
 
 Existing format-1 backups remain available for backups and restores without conversion. Conversion is optional, but once started, it must finish before that server backup can be restored. Other server backups on the same target remain independent.
 
-To resume an interrupted conversion, open **System → Restore Backup** on an initialized StartOS server, select the target's amber conversion control, and choose **Resume conversion** for the affected server backup. Enter the password used to encrypt that backup. Progress continues in the background; closing the dialog does not cancel it.
+The server selection list marks each old-format backup with a yellow **Old format** tag. Selecting the tag explains the format and where to update it; conversion is available on the **Create Backup** page of the server the backup belongs to.
 
-If initial setup cannot restore an interrupted backup, connect its target to an initialized StartOS server and resume conversion there before retrying setup recovery. The setup wizard does not automatically convert a backup. Converted backups cannot be read by older StartOS releases.
+To resume an interrupted conversion, open **System → Create Backup** on that server and select **Resume conversion** beside the target. Enter the password used to encrypt that backup. Progress continues in the background; closing the dialog does not cancel it.
+
+If initial setup cannot restore an interrupted backup, finish conversion on its original server before retrying setup recovery. The setup wizard does not automatically convert a backup. Converted backups cannot be read by older StartOS releases.
 
 ## Restoring Individual Services
 
