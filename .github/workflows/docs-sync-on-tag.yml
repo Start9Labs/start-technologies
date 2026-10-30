@@ -194,8 +194,10 @@ jobs:
             done
             if [ "$HAS_BOOK" = 1 ]; then
               git show HEAD:projects/start-docs/versions.conf > "$RUNNER_TEMP/published-versions.conf"
+              git show "$TAG:projects/start-docs/versions.conf" > "$RUNNER_TEMP/tagged-versions.conf"
               node "$RUNNER_TEMP/scripts/docs-versions.mjs" "$PROJECT" "${TAG#*/v}" \
-                "$RUNNER_TEMP/published-versions.conf" projects/start-docs/versions.conf
+                "$RUNNER_TEMP/published-versions.conf" "$RUNNER_TEMP/tagged-versions.conf" \
+                projects/start-docs/versions.conf
             fi
           fi
 
