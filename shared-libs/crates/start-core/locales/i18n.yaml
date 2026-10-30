@@ -2401,6 +2401,14 @@ net.forward.controller-thread-exited:
   fr_FR: "Le thread PortForwardController s'est terminé"
   pl_PL: "Wątek PortForwardController zakończył się"
 
+# net/port_map/client.rs
+net.port-map.mapping-not-granted:
+  en_US: "no gateway granted port mapping %{mapping}: %{reasons}"
+  de_DE: "kein Gateway hat die Portzuordnung %{mapping} gewährt: %{reasons}"
+  es_ES: "ninguna puerta de enlace concedió la asignación de puerto %{mapping}: %{reasons}"
+  fr_FR: "aucune passerelle n'a accordé la redirection de port %{mapping} : %{reasons}"
+  pl_PL: "żadna brama nie przyznała mapowania portu %{mapping}: %{reasons}"
+
 # net/gateway.rs
 net.gateway.no-devices-returned:
   en_US: "NetworkManager returned no devices. Trying again..."

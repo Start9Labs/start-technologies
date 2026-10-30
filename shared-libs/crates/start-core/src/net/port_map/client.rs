@@ -663,7 +663,8 @@ impl State {
         interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
         key: MappingKey,
     ) {
-        let attempted = self.try_apply(interfaces, &key).await;
+        let mut errors = Vec::new();
+        let attempted = self.try_apply(interfaces, &key, &mut errors).await;
         if self.active.contains_key(&key) {
             self.failures.remove(&key);
         } else if attempted {
@@ -672,6 +673,20 @@ impl State {
                 .get(&key)
                 .copied()
                 .unwrap_or((0, Instant::now()));
+            if n == 0 {
+                let (local_ip, external_port, hostname, protocol) = &key;
+                tracing::warn!(
+                    "{}",
+                    t!(
+                        "net.port-map.mapping-not-granted",
+                        mapping = format!(
+                            "{protocol:?} {local_ip}:{external_port}{}",
+                            hostname.as_ref().map_or(String::new(), |h| format!(" {h}"))
+                        ),
+                        reasons = errors.join("; ")
+                    )
+                );
+            }
             self.failures.insert(key, (n + 1, Instant::now()));
         }
     }
@@ -681,6 +696,7 @@ impl State {
         &mut self,
         interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
         key: &MappingKey,
+        errors: &mut Vec<String>,
     ) -> bool {
         let mut attempted = false;
         let Some(spec) = self.desired.get(key).cloned() else {
@@ -769,10 +785,7 @@ impl State {
                     }
                     Err(e) => {
                         report_pcp_failure(interfaces, *gw, &e);
-                        crate::dev_log!(
-                            debug,
-                            "PCP HOSTNAME map {local_ip}:{external_port} {hostname} via {gw} failed: {e}"
-                        )
+                        errors.push(format!("PCP HOSTNAME via {gw}: {e}"));
                     }
                 }
             }
@@ -816,10 +829,7 @@ impl State {
                                     (true, false)
                                 }
                                 Err(e) => {
-                                    crate::dev_log!(
-                                        debug,
-                                        "UPnP HOSTNAME map {local_v4}:{external_port} {hostname} failed: {e}"
-                                    );
+                                    errors.push(format!("UPnP HOSTNAME: {e}"));
                                     (false, true)
                                 }
                             }
@@ -902,10 +912,9 @@ impl State {
                             self.active.insert(key.clone(), Active::Pcp(m));
                             return true;
                         }
-                        crate::dev_log!(
-                            debug,
-                            "gateway {gw} granted {granted}/{range_size} PORT_SET ports for {local_ip}:{external_port}; skipping range"
-                        );
+                        errors.push(format!(
+                            "PCP PORT_SET via {gw}: granted {granted} of {range_size} ports"
+                        ));
                         let _ = m.try_drop().await;
                     }
                     Ok(m) => {
@@ -913,10 +922,7 @@ impl State {
                     }
                     Err(e) => {
                         report_pcp_failure(interfaces, *gw, &e);
-                        crate::dev_log!(
-                            debug,
-                            "PCP PORT_SET map {local_ip}:{external_port} via {gw} failed: {e}"
-                        )
+                        errors.push(format!("PCP PORT_SET via {gw}: {e}"));
                     }
                 }
             }
@@ -970,10 +976,7 @@ impl State {
                 }
                 Err(e) => {
                     report_crab_nat_failure(interfaces, *gw, &e);
-                    crate::dev_log!(
-                        debug,
-                        "PCP/NAT-PMP {protocol:?} map {local_ip}:{external_port} via {gw} failed: {e}"
-                    )
+                    errors.push(format!("PCP/NAT-PMP via {gw}: {e}"));
                 }
             }
         }
@@ -1010,10 +1013,7 @@ impl State {
                             true
                         }
                         Err(e) => {
-                            crate::dev_log!(
-                                debug,
-                                "UPnP {protocol:?} map {local_v4}:{external_port} failed: {e}"
-                            );
+                            errors.push(format!("UPnP: {e}"));
                             false
                         }
                     }
