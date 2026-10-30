@@ -288,17 +288,14 @@ export class MarketplaceService extends AbstractMarketplaceService {
   }
 
   async installPackage(
-    id: string,
-    version: string,
+    pkg: Pick<MarketplacePkg, 'id' | 'version'>,
     url: string,
   ): Promise<void> {
-    const params: T.InstallParams = {
-      id,
-      version,
+    await this.api.rpc.package.install({
+      id: pkg.id,
+      version: pkg.version,
       registry: url,
-    }
-
-    await this.api.rpc.package.install(params)
+    })
   }
 
   async connect(url: string): Promise<void> {
@@ -314,7 +311,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
       throw new Error(this.i18n.transform('Registry already added'))
     }
 
-    // validates the registry is reachable and provides a display name
     const info = await firstValueFrom(this.fetchInfo$(url))
     await this.api.rpc.db.put.ui({
       pointer: pathFromArray(['registries', url]),
@@ -334,8 +330,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
       value: filtered,
     })
 
-    // If the deleted registry was the persisted selection, clear it so the next
-    // load falls back to the default rather than the deleted one.
     const selected = this.storage.get<string>('selectedRegistry')
     if (selected && sameUrl(selected, url)) {
       this.storage.set('selectedRegistry', null)

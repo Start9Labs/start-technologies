@@ -25,7 +25,7 @@ Every device on a StartTunnel subnet gets its own WireGuard configuration. Devic
    - **Laptop or desktop**: Download the config and import it into the [WireGuard app](https://www.wireguard.com/install/).
 
 > [!NOTE]
-> The config's `Endpoint` — the address the device connects to — is the device's [outbound IP](#outbound-ip) if one is assigned (otherwise its subnet's); with neither assigned, StartTunnel uses the address you are accessing it over. The server answers on all of its addresses, so configs generated earlier keep working if you change these later.
+> The **WireGuard endpoint** in the config dialog defaults to the host in your browser's URL, independently of the [outbound IP](#outbound-ip). Edit it to an IPv4 address, IPv6 address, or DNS name reachable from the device, then click **Generate config**. The file, clipboard copy, and QR code use the same generated config. An HTTPS reverse proxy may not forward WireGuard UDP: choose the tunnel host's reachable address in that case. The configured WireGuard port is retained; the browser's HTTP port is not used. The endpoint affects only the generated config, not WAN assignments or forwarding. For CLI use, supply `device show-config --endpoint <HOST>`; see [Hosting behind NAT](#hosting-behind-nat).
 
 ## Server capabilities
 
@@ -43,6 +43,47 @@ Use a device's actions menu to **Change to Server** or **Change to Client**. Cha
 ## Outbound IP
 
 By default a device's outbound traffic leaves from its subnet's [outbound IP](/start-tunnel/subnets.html#outbound-ip). On a VPS with more than one public IPv4 address, you can override this per device with the **WAN IP** field in the device's Add/Edit dialog — choose **Subnet default** to inherit the subnet's setting (the address it resolves to is shown in parentheses), or a specific address to pin this device's egress. On a single-IP VPS there is only one choice, so leave it on **Subnet default**. To add another public IPv4 address to your VPS, see [IPv4](/start-tunnel/ipv4.html).
+
+## Hosting behind NAT
+
+If the StartTunnel host has a private local address behind an upstream NAT,
+configure its WAN assignment separately from the public WireGuard endpoint.
+For example, with host address `192.168.1.10`, upstream public address
+`203.0.113.10`, subnet `10.59.0.1/24`, and peer `10.59.0.2`, run on the
+StartTunnel host:
+
+```bash
+start-tunnel subnet 10.59.0.1/24 set-wan --wan-ip 192.168.1.10
+start-tunnel device show-config 10.59.0.1/24 10.59.0.2 --endpoint 203.0.113.10
+```
+
+To assign only this peer instead of the whole subnet, use
+`start-tunnel device set-wan 10.59.0.1/24 10.59.0.2 --wan-ip 192.168.1.10`.
+The WAN assignment controls both outbound SNAT and the local address used for
+published-port keys. Set it to the host's assigned local address, not the public
+address held by the upstream router. The endpoint override is supplied each time
+you generate a config and leaves that WAN assignment unchanged. You can also
+use the UI config dialog, which starts with the browser URL's host and lets
+you edit it before downloading or scanning the config.
+
+On the upstream router, forward the configured WireGuard UDP port to
+`192.168.1.10` on the same port. The generated config retains that WireGuard port.
+For a service on peer port `443`, create a manual forward:
+
+```bash
+start-tunnel port-forward add 443 10.59.0.2:443
+```
+
+This forward's key is `192.168.1.10:443`; use that local address when managing it,
+for example `start-tunnel port-forward remove 192.168.1.10:443`. Forward the
+corresponding service ports on the upstream router to `192.168.1.10` as well
+(StartTunnel's plain IPv4 forwards cover both TCP and UDP). Public clients connect
+to `203.0.113.10`.
+
+The operator owns the upstream NAT and firewall rules. PCP/UPnP auto-publishing
+on StartTunnel does not configure the upstream router; use manual forwards for
+this workflow. A shared or carrier-grade NAT requires control of upstream port
+mappings or a dedicated public address.
 
 ## IPv6
 

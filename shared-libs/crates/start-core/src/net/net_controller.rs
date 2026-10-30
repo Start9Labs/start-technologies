@@ -30,7 +30,9 @@ use crate::net::service_interface::{
     AddressInfo, HostnameInfo, HostnameMetadata, ServiceInterface, ServiceInterfaceType,
 };
 use crate::net::socks::SocksController;
-use crate::net::vhost::{AlpnInfo, DynVHostTarget, ProxyTarget, VHostController, VHostKey};
+use crate::net::vhost::{
+    AlpnInfo, DynVHostTarget, PlainHttpProxy, ProxyTarget, VHostController, VHostKey,
+};
 use crate::net::web_server::WebServerAcceptorSetter;
 use crate::net::{SERVICE_OUTBOUND_REJECT_RULE_PRIORITY, SERVICE_OUTBOUND_RULE_PRIORITY};
 use crate::prelude::*;
@@ -40,6 +42,10 @@ use crate::util::future::NonDetachingJoinHandle;
 use crate::util::serde::MaybeUtf8String;
 use crate::util::sync::{SyncMutex, Watch};
 use crate::{GatewayId, HOST_IP, HostId, Id, OptionExt, PackageId, ServiceInterfaceId};
+
+#[cfg(test)]
+#[path = "net_controller/http_proxy_tests.rs"]
+mod http_proxy_tests;
 
 pub struct NetController {
     pub(crate) db: TypedPatchDb<Database>,
@@ -248,15 +254,14 @@ impl NetController {
                     preferred_external_port: 80,
                     add_ssl: Some(AddSslOptions {
                         preferred_external_port: 443,
-                        add_x_forwarded_headers: false,
                         alpn: Some(AlpnInfo(vec![
                             MaybeUtf8String("h2".into()),
                             MaybeUtf8String("http/1.1".into()),
                         ])),
-                        auth: None,
                         upstream_cert_validation: Default::default(),
                     }),
                     secure: None,
+                    proxy: None,
                 },
             )
             .await?;
@@ -421,6 +426,95 @@ fn forwarded_lan_ips<'a>(
     ips
 }
 
+fn binding_proxy_target(
+    options: &BindOptions,
+    addr: SocketAddr,
+    addr_v6: Option<SocketAddrV6>,
+    connect_ssl: Option<Arc<TlsClientConfig>>,
+) -> ProxyTarget {
+    ProxyTarget {
+        public_v4: BTreeSet::new(),
+        public_v6: BTreeSet::new(),
+        public_v6_gateways: BTreeSet::new(),
+        private: BTreeSet::new(),
+        acme: None,
+        addr,
+        addr_v6,
+        proxy: options.proxy.clone(),
+        connect_ssl,
+        alpn: options.add_ssl.as_ref().and_then(|ssl| ssl.alpn.clone()),
+        passthrough: options.serves_own_tls(),
+        preserve_source_ip: !addr.ip().is_loopback() && options.proxy.is_none(),
+    }
+}
+
+fn plaintext_http_target(
+    mut target: ProxyTarget,
+    external: u16,
+    addresses: &BTreeSet<&HostnameInfo>,
+    interfaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    requirements: &ForwardRequirements,
+) -> ProxyTarget {
+    for address in addresses
+        .iter()
+        .filter(|a| !a.ssl && a.port == Some(external))
+    {
+        if address.is_internal() {
+            target
+                .private
+                .extend(address.hostname.parse::<IpAddr>().ok());
+            continue;
+        }
+        for gateway in address.metadata.gateways() {
+            let Some(info) = interfaces
+                .get(gateway)
+                .filter(|i| requirements.allows_gateway(i))
+            else {
+                continue;
+            };
+            let public = address.public && requirements.public_on(gateway);
+            match &address.metadata {
+                HostnameMetadata::PublicDomain { .. } if public => {
+                    target.public_v4.insert(gateway.clone());
+                    target.public_v6.extend(crate::net::utils::gua_ips(
+                        interfaces,
+                        &BTreeSet::from([gateway.clone()]),
+                    ));
+                }
+                HostnameMetadata::Ipv4 { .. } if public => {
+                    target.public_v4.insert(gateway.clone());
+                }
+                HostnameMetadata::Ipv6 { .. } if public => {
+                    target
+                        .public_v6
+                        .extend(address.hostname.parse::<Ipv6Addr>().ok());
+                }
+                HostnameMetadata::Ipv4 { .. } | HostnameMetadata::Ipv6 { .. } => {
+                    if let Ok(ip) = address.hostname.parse::<IpAddr>() {
+                        if requirements.private_ips.contains(&ip)
+                            || (ip.is_ipv6() && address.public)
+                        {
+                            target.private.insert(ip);
+                        }
+                    }
+                }
+                HostnameMetadata::PrivateDomain { .. } => {
+                    if let Some(ip) = &info.ip_info {
+                        target.private.extend(
+                            ip.subnets
+                                .iter()
+                                .map(|s| s.addr())
+                                .filter(|ip| requirements.private_ips.contains(ip)),
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    target
+}
+
 /// Hosts the datapath still holds that the database no longer has. Collected
 /// before the update loop so a port handed from a retired host to a surviving
 /// one in the same pass comes down before it is rebuilt.
@@ -430,13 +524,19 @@ fn retired_hosts<'a>(held: impl Iterator<Item = &'a HostId>, current: &Hosts) ->
         .collect()
 }
 
+#[derive(Debug)]
+enum ProxyHandle {
+    Tls { _owner: Arc<()> },
+    Plaintext { _server: PlainHttpProxy },
+}
+
 #[derive(Default, Debug)]
 struct HostBinds {
     /// `(internal-target, count, requirements, rc)` keyed by external start
     /// port. `count == 1` is the single-port case; `count > 1` represents a
     /// contiguous range forward.
     forwards: BTreeMap<u16, (SocketAddrV4, u16, ForwardRequirements, Arc<()>)>,
-    vhosts: BTreeMap<VHostKey, (ProxyTarget, Arc<()>)>,
+    vhosts: BTreeMap<VHostKey, (ProxyTarget, ProxyHandle)>,
     private_dns: BTreeMap<InternedString, Arc<()>>,
     /// Directly-forwarded v6: `(host GUA, external port) -> (container v6,
     /// internal port, LAN source filter)`. A GUA on a port no listener of ours
@@ -468,6 +568,7 @@ impl NetServiceData {
     async fn update(&mut self, ctrl: &NetController, id: HostId, host: Host) -> Result<(), Error> {
         let mut forwards: BTreeMap<u16, (SocketAddrV4, u16, ForwardRequirements)> = BTreeMap::new();
         let mut vhosts: BTreeMap<VHostKey, ProxyTarget> = BTreeMap::new();
+        let mut http_ports = BTreeSet::new();
         let mut private_dns: BTreeMap<InternedString, BTreeSet<GatewayId>> = BTreeMap::new();
         // Non-SSL v6 DNAT forwards to the container — net_controller's concern (no
         // vhost owns them), but the forward controller opens their upstream pinhole
@@ -520,11 +621,7 @@ impl NetServiceData {
                 .options
                 .rewrap()
                 .map(|ssl| ctrl.upstream_client_config(&ssl.upstream_cert_validation));
-            let alpn = bind
-                .options
-                .add_ssl
-                .as_ref()
-                .and_then(|ssl| ssl.alpn.clone());
+            let target = binding_proxy_target(&bind.options, addr, addr_v6, connect_ssl);
 
             // `*` vhost: every assigned_ssl_port is answered by a listener of
             // ours — terminating (add_ssl), or an SNI-agnostic passthrough when
@@ -556,7 +653,6 @@ impl NetServiceData {
                     || !server_public_v4.is_empty()
                     || !server_public_v6.is_empty()
                 {
-                    let passthrough = bind.options.add_ssl.is_none();
                     vhosts.insert(
                         (None, assigned_ssl_port, true),
                         ProxyTarget {
@@ -565,20 +661,7 @@ impl NetServiceData {
                             public_v6_gateways: BTreeSet::new(),
                             private: server_private_ips,
                             acme: None,
-                            addr,
-                            addr_v6,
-                            add_x_forwarded_headers: bind
-                                .options
-                                .add_ssl
-                                .as_ref()
-                                .map_or(false, |s| s.add_x_forwarded_headers),
-                            auth: bind.options.add_ssl.as_ref().and_then(|s| s.auth.clone()),
-                            connect_ssl: connect_ssl.clone(),
-                            alpn: alpn.clone(),
-                            passthrough,
-                            // The container handles its own TLS and the box is
-                            // its gateway, so preserve the client source IP.
-                            preserve_source_ip: passthrough,
+                            ..target.clone()
                         },
                     );
                 }
@@ -618,24 +701,11 @@ impl NetServiceData {
                                 .and_then(|a| a.public.as_ref())
                                 .and_then(|p| p.acme.clone())
                         },
-                        addr,
-                        addr_v6,
-                        add_x_forwarded_headers: bind
-                            .options
-                            .add_ssl
-                            .as_ref()
-                            .map_or(false, |s| s.add_x_forwarded_headers),
-                        auth: bind.options.add_ssl.as_ref().and_then(|s| s.auth.clone()),
-                        connect_ssl: connect_ssl.clone(),
-                        alpn: alpn.clone(),
-                        passthrough,
-                        preserve_source_ip: passthrough,
+                        ..target.clone()
                     },
                 );
             }
 
-            // Direct forward — the plaintext port, the only external port with
-            // no listener of ours in front (every TLS port is a vhost above).
             if let Some(external) = bind.net.assigned_port {
                 // Only addresses at this port drive its forward (a vhost's port has its own).
                 let fwd_public: BTreeSet<GatewayId> = enabled_addresses
@@ -664,19 +734,30 @@ impl NetServiceData {
                         .filter(|a| a.port == Some(external)),
                     &net_ifaces,
                 );
-                // StartOS answers these addresses itself, and a loopback DNAT is martian-dropped on ingress.
+                let requirements = ForwardRequirements {
+                    public_gateways: fwd_public,
+                    private_ips: fwd_private,
+                    secure: bind.options.secure.is_some(),
+                };
+                if bind.options.proxy.is_some() {
+                    http_ports.insert(external);
+                    vhosts.insert(
+                        (None, external, true),
+                        plaintext_http_target(
+                            target,
+                            external,
+                            &enabled_addresses,
+                            &net_ifaces,
+                            &requirements,
+                        ),
+                    );
+                    continue;
+                }
+                // Loopback DNAT is martian-dropped on ingress.
                 if !self.ip.is_loopback() {
                     forwards.insert(
                         external,
-                        (
-                            SocketAddrV4::new(self.ip, *port),
-                            1,
-                            ForwardRequirements {
-                                public_gateways: fwd_public,
-                                private_ips: fwd_private,
-                                secure: bind.options.secure.is_some(),
-                            },
-                        ),
+                        (SocketAddrV4::new(self.ip, *port), 1, requirements.clone()),
                     );
                 }
 
@@ -695,7 +776,7 @@ impl NetServiceData {
                         // this is the plaintext port, so we never terminate TLS here.
                         // The WAN is never secure, so an insecure exposure that
                         // requested public serves the LAN instead.
-                        let secure_exposure = bind.options.secure.is_some();
+                        let secure_exposure = requirements.secure;
                         let src_filter = if a.public && secure_exposure {
                             None
                         } else {
@@ -705,7 +786,7 @@ impl NetServiceData {
                                     .metadata
                                     .gateways()
                                     .filter_map(|gw| net_ifaces.get(gw))
-                                    .any(|info| info.secure())
+                                    .any(|info| requirements.allows_gateway(info))
                             {
                                 continue;
                             }
@@ -940,14 +1021,29 @@ impl NetServiceData {
                     } else {
                         (
                             target.clone(),
-                            ctrl.vhost.add(key.0, key.1, DynVHostTarget::new(target))?,
+                            if http_ports.contains(&key.1) {
+                                ProxyHandle::Plaintext {
+                                    _server: ctrl.vhost.plaintext_proxy(key.1, target),
+                                }
+                            } else {
+                                ProxyHandle::Tls {
+                                    _owner: ctrl.vhost.add(
+                                        key.0,
+                                        key.1,
+                                        DynVHostTarget::new(target),
+                                    )?,
+                                }
+                            },
                         )
                     },
                 );
             } else {
-                if let Some((_, rc)) = prev {
-                    drop(rc);
-                    ctrl.vhost.gc(key.0, key.1);
+                if let Some((_, handle)) = prev {
+                    let tls = matches!(handle, ProxyHandle::Tls { .. });
+                    drop(handle);
+                    if tls {
+                        ctrl.vhost.gc(key.0, key.1);
+                    }
                 }
             }
         }
@@ -1654,12 +1750,11 @@ mod tests {
             preferred_external_port: 443,
             add_ssl: add_ssl.then(|| AddSslOptions {
                 preferred_external_port: 443,
-                add_x_forwarded_headers: false,
                 alpn,
                 upstream_cert_validation: None,
-                auth: None,
             }),
             secure: secure_ssl.map(|ssl| Security { ssl }),
+            proxy: None,
         }
     }
 
@@ -1781,8 +1876,7 @@ mod tests {
                     acme: None,
                     addr: "10.0.3.2:443".parse().unwrap(),
                     addr_v6: None,
-                    add_x_forwarded_headers: false,
-                    auth: None,
+                    proxy: None,
                     connect_ssl: None,
                     alpn: None,
                     passthrough: false,
@@ -2123,8 +2217,7 @@ mod tests {
             acme: None,
             addr: "10.0.3.2:80".parse().unwrap(),
             addr_v6: None,
-            add_x_forwarded_headers: false,
-            auth: None,
+            proxy: None,
             connect_ssl: None,
             alpn: Some(AlpnInfo(vec![MaybeUtf8String(b"h2".to_vec())])),
             passthrough: false,

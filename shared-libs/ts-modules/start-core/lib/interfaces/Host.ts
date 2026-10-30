@@ -2,9 +2,12 @@ import * as z from '../z'
 import { Effects } from '../Effects'
 import { Origin } from './Origin'
 import { RangeOrigin } from './RangeOrigin'
-import { AddSslOptionsInput as AddSslOptions } from '../osBindings'
+import {
+  AddSslOptionsInput as AddSslOptions,
+  ProxyOptions,
+} from '../osBindings'
 import { Security } from '../osBindings'
-import { BindOptionsInput as BindOptions } from '../osBindings'
+import { BindOptionsInput } from '../osBindings'
 import { AlpnInfo } from '../osBindings'
 import { ProxyAuth } from '../osBindings'
 import { BasicCredential } from '../osBindings'
@@ -13,11 +16,22 @@ import { UpstreamCertValidation } from '../osBindings'
 export {
   AddSslOptions,
   Security,
-  BindOptions,
+  ProxyOptions,
   ProxyAuth,
   BasicCredential,
   UpstreamCertValidation,
 }
+
+export type BindOptions = Omit<BindOptionsInput, 'addSsl' | 'proxy'> & {
+  addSsl?: AddSslOptions | null
+  proxy?: Partial<ProxyOptions> | null
+}
+
+const defaultHttpProxy = {
+  type: 'http',
+  addXForwardedHeaders: true,
+  auth: null,
+} as const satisfies ProxyOptions
 
 export const knownProtocols = {
   http: {
@@ -25,66 +39,57 @@ export const knownProtocols = {
     defaultPort: 80,
     withSsl: 'https',
     alpn: ['http/1.1'] as AlpnInfo,
-    addXForwardedHeaders: true,
+    proxy: defaultHttpProxy,
   },
   https: {
     secure: { ssl: true },
     defaultPort: 443,
-    addXForwardedHeaders: true,
+    proxy: defaultHttpProxy,
   },
   ws: {
     secure: null,
     defaultPort: 80,
     withSsl: 'wss',
     alpn: ['http/1.1'] as AlpnInfo,
-    addXForwardedHeaders: true,
+    proxy: defaultHttpProxy,
   },
   wss: {
     secure: { ssl: true },
     defaultPort: 443,
-    addXForwardedHeaders: true,
+    proxy: defaultHttpProxy,
   },
   ssh: {
     secure: { ssl: false },
     defaultPort: 22,
-    addXForwardedHeaders: false,
+    proxy: null,
   },
   dns: {
     secure: { ssl: false },
     defaultPort: 53,
-    addXForwardedHeaders: false,
+    proxy: null,
   },
 } as const
 
 export type Scheme = string | null
 
-type KnownProtocols = typeof knownProtocols
-type ProtocolsWithSslVariants = {
-  [K in keyof KnownProtocols]: KnownProtocols[K] extends {
-    withSsl: string
-  }
-    ? K
-    : never
-}[keyof KnownProtocols]
-type NotProtocolsWithSslVariants = Exclude<
-  keyof KnownProtocols,
-  ProtocolsWithSslVariants
->
+type BindOptionsByKnownProtocol = {
+  protocol: keyof typeof knownProtocols
+  preferredExternalPort?: BindOptions['preferredExternalPort']
+  addSsl?: Partial<AddSslOptions> | null
+  proxy?: BindOptions['proxy']
+}
 
-type BindOptionsByKnownProtocol =
-  | {
-      protocol: ProtocolsWithSslVariants
-      preferredExternalPort?: number
-      addSsl?: Partial<AddSslOptions>
-    }
-  | {
-      protocol: NotProtocolsWithSslVariants
-      preferredExternalPort?: number
-      addSsl?: Partial<AddSslOptions>
-    }
 export type BindOptionsByProtocol =
   | BindOptionsByKnownProtocol
   | (BindOptions & { protocol: null })
+
+function resolveProxyOptions(
+  defaults: ProxyOptions | null,
+  override: BindOptions['proxy'],
+): ProxyOptions | null {
+  const proxy = override === undefined ? defaults : override
+  return proxy === null ? null : { ...defaultHttpProxy, ...defaults, ...proxy }
+}
 
 const hasStringProtocol = (v: unknown): v is { protocol: string } =>
   z.looseObject({ protocol: z.string() }).validate(v)
@@ -197,9 +202,7 @@ export class MultiHost {
         `numberOfPorts (${numberOfPorts}) exceeds maximum (${MAX_BIND_PORT_RANGE_SIZE})`,
       )
     }
-    // Both ranges must be in-bounds and above the reserved/privileged range.
-    // StartOS additionally rejects a few specific ports (e.g. 5353, 5432,
-    // 6010) server-side at allocation time.
+    // StartOS rejects additional reserved ports during allocation.
     for (const [name, start] of [
       ['internalStartPort', internalStartPort],
       ['externalStartPort', externalStartPort],
@@ -295,11 +298,16 @@ export class MultiHost {
     })
   }
 
-  private async bindPortForUnknown(internalPort: number, options: BindOptions) {
+  private async bindPortForUnknown(
+    internalPort: number,
+    options: Extract<BindOptionsByProtocol, { protocol: null }>,
+  ) {
+    const { protocol, ...bindOptions } = options
     const binderOptions = {
       id: this.options.id,
       internalPort,
-      ...options,
+      ...bindOptions,
+      proxy: resolveProxyOptions(null, options.proxy),
     }
     await this.options.effects.bind(binderOptions)
 
@@ -315,25 +323,17 @@ export class MultiHost {
       options.preferredExternalPort ||
       knownProtocols[options.protocol].defaultPort
     const sslProto = this.getSslProto(options)
-    const addSsl = sslProto
-      ? {
-          addXForwardedHeaders: knownProtocols[sslProto].addXForwardedHeaders,
-          preferredExternalPort: knownProtocols[sslProto].defaultPort,
-          scheme: sslProto,
-          alpn: 'alpn' in protoInfo ? protoInfo.alpn : null,
-          auth: null as ProxyAuth | null,
-          ...('addSsl' in options ? options.addSsl : null),
-        }
-      : options.addSsl
+    const addSsl =
+      options.addSsl !== null && (sslProto || options.addSsl)
         ? {
-            addXForwardedHeaders: false,
-            preferredExternalPort: 443,
-            scheme: sslProto,
-            alpn: null,
-            auth: null as ProxyAuth | null,
+            preferredExternalPort: sslProto
+              ? knownProtocols[sslProto].defaultPort
+              : 443,
+            alpn: 'alpn' in protoInfo ? protoInfo.alpn : null,
             ...options.addSsl,
           }
         : null
+    const proxy = resolveProxyOptions(protoInfo.proxy, options.proxy)
 
     const secure: Security | null = protoInfo.secure ?? null
 
@@ -343,6 +343,7 @@ export class MultiHost {
       preferredExternalPort,
       addSsl,
       secure,
+      proxy,
     })
 
     return new Origin(this, internalPort, options.protocol, sslProto)
@@ -351,16 +352,10 @@ export class MultiHost {
   private getSslProto(options: BindOptionsByKnownProtocol) {
     const proto = options.protocol
     const protoInfo = knownProtocols[proto]
-    if (inObject('noAddSsl', options) && options.noAddSsl) return null
-    if ('withSsl' in protoInfo && protoInfo.withSsl) return protoInfo.withSsl
+    if ('withSsl' in protoInfo && protoInfo.withSsl) {
+      return options.addSsl === null ? null : protoInfo.withSsl
+    }
     if (protoInfo.secure?.ssl) return proto
     return null
   }
-}
-
-function inObject<Key extends string>(
-  key: Key,
-  obj: any,
-): obj is { [K in Key]: unknown } {
-  return key in obj
 }

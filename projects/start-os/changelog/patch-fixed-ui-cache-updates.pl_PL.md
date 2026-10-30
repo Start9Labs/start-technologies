@@ -1,0 +1,2 @@
+- Interfejs oferuje działania naprawcze, gdy jego kopia w pamięci podręcznej jest uszkodzona.
+- Interfejs szybciej wykrywa własną aktualizację po aktualizacji StartOS.

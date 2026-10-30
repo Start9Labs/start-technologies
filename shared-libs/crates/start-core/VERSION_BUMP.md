@@ -15,7 +15,7 @@ StartOS versions carry an optional fourth **revision** segment — `0.4.0.1` —
 
 - **Root `package.json` is the source of truth.** Everything that needs the OS version reads it: `build/env/version.sh` (used by `check-version.sh`, `basename.sh`, `debian/build.sh`), `derive_version` in `scripts/manage-release.sh`, `.github/workflows/startos-iso.yaml`, and `build.rs`, which bakes it in as `STARTOS_VERSION` for `bins::startos_version()`.
 - **`projects/start-os/Cargo.toml` is a label**, spelling `X.Y.Z.N` as `X.Y.Z-rev.N` so the manifest acknowledges the release it belongs to. Nothing reads it for the OS version. Never treat it as a comparand: `0.4.0-rev.1` is a SemVer _prerelease_, so it sorts **below** `0.4.0` in both `semver` and `exver`. `manage-release.sh pre-check start-os` fails if the label doesn't match the version being cut.
-- **`shared-libs/crates/start-core/Cargo.toml` tracks the OS line** (`0.4.0`, `0.4.1`, `0.5.0`), not the revision. Leave it alone for a revision bump.
+- **`shared-libs/crates/start-core/Cargo.toml` tracks the OS line** (`0.4.0`, `0.4.1`, `0.5.0`), not the revision. Leave it alone for a revision bump. Product manifests determine each product's CLI and man-page versions.
 - `version::tests::current_matches_manifest` asserts `Current::default().semver()` equals `package.json`, so the two cannot silently drift.
 
 ## Changelog

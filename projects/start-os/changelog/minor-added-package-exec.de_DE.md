@@ -1,0 +1,1 @@
+- Neu in der API ist `package.exec`, auch als MCP-Werkzeug verfügbar: Es führt einen Befehl im Subcontainer eines Dienstes bis zum Ende aus und gibt Ausgabe und Exit-Code zurück, optional mit Standardeingabe und Zeitlimit.

@@ -112,7 +112,7 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
   })
   receipts.push(await uiOrigin.export([ui]))
 
-  // API — HTTPS with SSL termination
+  // API — TLS rewrap to an HTTPS container
   const apiMulti = sdk.MultiHost.of(effects, 'api')
   const apiOrigin = await apiMulti.bindPort(8080, {
     protocol: 'https',
@@ -120,8 +120,8 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
     addSsl: {
       alpn: null,
       preferredExternalPort: 8080,
-      addXForwardedHeaders: false,
     },
+    proxy: { addXForwardedHeaders: false },
   })
   const api = sdk.createInterface(effects, {
     name: i18n('REST API'),
@@ -211,17 +211,27 @@ The handler then re-runs when the new value lands, updating the interface in pla
 
 ## bindPort Options
 
-| Option                          | Type                                                  | Description                                                                                                                                                                                                                 |
-| ------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `protocol`                      | `'http'` \| `'https'` \| `null`                       | The protocol. Use `null` for raw TCP (non-HTTP).                                                                                                                                                                            |
-| `preferredExternalPort`         | `number`                                              | The port users will see in their URLs.                                                                                                                                                                                      |
-| `addSsl`                        | `object` \| `null`                                    | SSL termination options for HTTPS. Set to `null` for no SSL.                                                                                                                                                                |
-| `addSsl.alpn`                   | `string[]` \| `null`                                  | The ALPN protocols StartOS answers a client with, from those it asked for. `null`, the usual choice, answers with whatever it asked for.                                                                                    |
-| `addSsl.preferredExternalPort`  | `number`                                              | External port for SSL connections.                                                                                                                                                                                          |
-| `addSsl.addXForwardedHeaders`   | `boolean`                                             | Whether to add `X-Forwarded-*` headers.                                                                                                                                                                                     |
-| `addSsl.auth`                   | `ProxyAuth` \| `null`                                 | Optional auth gate enforced by the OS reverse proxy. See [Authenticating at the Proxy](#authenticating-at-the-proxy).                                                                                                       |
-| `addSsl.upstreamCertValidation` | `'disable'` \| `{ certificate: string }` \| _omitted_ | How the OS validates your container's TLS cert when it [rewraps SSL](#rewrapping-ssl-to-a-tls-container). Omit to validate against the StartOS root CA (default). See [Rewrapping SSL](#rewrapping-ssl-to-a-tls-container). |
-| `secure`                        | `{ ssl: boolean }` \| `null`                          | Whether the port is safe to expose on networks StartOS does not trust, and whether it speaks TLS itself. See [Choosing `secure`](#choosing-secure).                                                                         |
+| Option                          | Type                                                                       | Description                                                                                                                                                                         |
+| ------------------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `protocol`                      | `'http'` \| `'https'` \| `'ws'` \| `'wss'` \| `'ssh'` \| `'dns'` \| `null` | Protocol defaults and URL scheme. Use `null` to configure the binding explicitly.                                                                                                   |
+| `preferredExternalPort`         | `number`                                                                   | The preferred external port for the original protocol.                                                                                                                              |
+| `addSsl`                        | `object` \| `null`                                                         | TLS termination options, independent of HTTP proxying. HTTP-family protocols add TLS by default; `null` skips the wrapper.                                                          |
+| `addSsl.alpn`                   | `string[]` \| `null`                                                       | The ALPN protocols StartOS answers a client with, from those it asked for. `null` answers with whatever it asked for. Defaults to `['http/1.1']` for `http`/`ws`, otherwise `null`. |
+| `addSsl.preferredExternalPort`  | `number`                                                                   | External port for the TLS wrapper. Defaults to `443`.                                                                                                                               |
+| `addSsl.upstreamCertValidation` | `'disable'` \| `{ certificate: string }` \| _omitted_                      | How the OS validates your container's TLS cert when it [rewraps SSL](#rewrapping-ssl-to-a-tls-container). Omit to validate against the StartOS root CA.                             |
+| `proxy`                         | `object` \| `null`                                                         | Overrides HTTP proxy defaults. `null` disables proxying.                                                                                                                            |
+| `proxy.type`                    | `'http'`                                                                   | Identifies HTTP traffic. Defaults to `'http'`.                                                                                                                                      |
+| `proxy.addXForwardedHeaders`    | `boolean`                                                                  | Generate trusted forwarded headers. Defaults to `true` in `bindPort`.                                                                                                               |
+| `proxy.auth`                    | `ProxyAuth` \| `null`                                                      | Auth gate on both the original and TLS-wrapper legs. Defaults to `null`. See [Authenticating at the Proxy](#authenticating-at-the-proxy).                                           |
+| `secure`                        | `{ ssl: boolean }` \| `null`                                               | For `protocol: null`, whether the original port is safe to expose on untrusted networks and whether it speaks TLS itself. See [Choosing `secure`](#choosing-secure).                |
+
+Omitting `proxy` inherits the protocol's default: enabled for `http`, `https`, `ws`, and `wss`, otherwise `null`. Set `proxy: null` to forward traffic without HTTP handling. An explicit object enables HTTP proxying for any protocol and merges partial settings with the defaults. The service must speak HTTP on that binding; proxying does not translate other application protocols. Setting `proxy: { addXForwardedHeaders: false, auth: null }` retains HTTP parsing.
+
+HTTP proxying and TLS termination are separate: `proxy` describes HTTP handling, while `addSsl` adds a TLS wrapper to any TCP protocol. For `http`/`ws`, setting `addSsl: null` retains plaintext HTTP proxying without adding a TLS leg. When the container speaks TLS (`https`, `wss`, or `secure: { ssl: true }`), HTTP proxying requires termination through `addSsl`; disable both `proxy` and `addSsl` for TLS passthrough.
+
+Both HTTP-proxied legs connect to the container from StartOS, rather than preserving the client's TCP source address. With forwarded-header generation enabled, applications identify the client through `X-Forwarded-For`.
+
+The HTTP proxy strips client-supplied `X-Forwarded-*` values even when header generation is disabled. TLS legs generate `X-Forwarded-Proto: https`; plaintext legs strip that header and generate no replacement. Treat a missing header as plaintext rather than trusting a client-provided scheme.
 
 An `addSsl` binding on any port can carry a Let's Encrypt certificate — issuance is per name, not per port. The user's side of that is one extra requirement: Let's Encrypt validates on port `443` whatever port you bind, so StartOS asks their gateway to route `443` for the domain as well. On a gateway that cannot do it automatically they forward `443` by hand. Worth a line in your instructions for an interface on a non-standard port that users will reach from software validating against public roots — an Electrum client, say.
 
@@ -471,13 +481,13 @@ A package that already shipped a version dropping a host or a port still has the
 
 ## TLS Termination
 
-StartOS terminates TLS at the platform edge and proxies plain HTTP to your container. This has two important consequences any time your service generates URLs or makes scheme decisions:
+For an `http` or `ws` binding with `addSsl`, StartOS terminates TLS at the platform edge and proxies plain HTTP to your container. This has two important consequences when your service generates URLs for clients using that TLS wrapper:
 
-**1. Inside the container, every request arrives over HTTP.** A reverse proxy like nginx will see `$scheme == "http"`, the `X-Forwarded-Proto` header is not authoritative by default, and there is no TLS certificate to terminate. Do not configure in-container HTTPS — StartOS is already doing it.
+**1. Inside the container, requests arrive over HTTP.** A reverse proxy like nginx sees `$scheme == "http"`. With `proxy.addXForwardedHeaders` enabled, the TLS-wrapper leg supplies `X-Forwarded-Proto: https`; configure the application to trust it from StartOS. The plaintext leg supplies no such header. Do not configure in-container HTTPS for an `http`/`ws` binding.
 
 **2. The browser loaded the page over `https://`.** Any URL your service emits for the browser to consume (login redirects, API endpoints in a `config.json`, OAuth callbacks, absolute links in HTML) must use `https://`. If you emit `http://` or derive the scheme from `$scheme`, the browser will block the request as [mixed active content](https://developer.mozilla.org/en-US/docs/Web/Security/Mixed_content).
 
-**Hardcode `https://` for browser-facing URLs** rather than interpolating `$scheme` or reading the protocol from the incoming request:
+**Use the configured public origin for browser-facing URLs.** For an HTTPS-only service, use `https://` rather than the container’s `$scheme`:
 
 ```nginx
 # BAD — $scheme is always "http" inside the container
@@ -487,13 +497,13 @@ return 200 '{"api_url":"$scheme://$host/api"}';
 return 200 '{"api_url":"https://$host/api"}';
 ```
 
-This applies to any configuration file generated in `setupMain` or any runtime response that includes absolute URLs — not just nginx. When in doubt, hardcode `https://`.
+This applies to any configuration file generated in `setupMain` or any runtime response that includes absolute URLs — not just nginx. For a service supporting both HTTP and HTTPS clients, use its trusted-proxy support instead of hardcoding a scheme.
 
 ### Application protocols
 
 `addSsl.alpn` is the list of protocols StartOS will answer a client with, chosen from the ones that client asked for. Unset — the usual case — it answers with whatever the client asked for. A client left with nothing is refused; a client that asks for no protocol at all is served as it would be without ALPN.
 
-StartOS answers from that list itself, because it terminates the client's TLS and forwards plain HTTP. Your container never sees the negotiation, so the list is the only thing holding a client to a protocol your container can serve — which is why `protocol: 'http'` and `'ws'` set it to `http/1.1`.
+For an `http`/`ws` container, StartOS answers from that list itself and forwards plain HTTP. Your container never sees the negotiation, so the list is the only thing holding a client to a protocol your container can serve — which is why `protocol: 'http'` and `'ws'` set it to `http/1.1`.
 
 A container serving its own TLS does get a say; see [Rewrapping SSL to a TLS container](#rewrapping-ssl-to-a-tls-container).
 
@@ -540,7 +550,7 @@ const origin = await multi.bindPort(10009, {
 })
 ```
 
-StartOS still fronts the port with one of its TLS listeners, but that listener pipes the raw TLS stream through instead of terminating it, so nothing about the handshake is rewritten. The container sees the client's real source address rather than the proxy's — except for a client on the box itself, which appears as the bridge IP. The listener routes on the client's TLS ClientHello, so the first bytes a client sends must be one: a protocol that opens in plaintext and upgrades in-band is dropped here, and its port is `ssl: false`.
+StartOS still fronts the port with one of its TLS listeners, but that listener pipes the raw TLS stream through instead of terminating it, so nothing about the handshake is rewritten. The container sees the client's real source address when StartOS routes its replies. The listener routes on the client's TLS ClientHello, so the first bytes a client sends must be one: a protocol that opens in plaintext and upgrades in-band is dropped here, and its port is `ssl: false`.
 
 The listener routes by the name the client asks for (its TLS SNI). It answers for the names enabled on the binding — its domains and the server's `.local` — and for a client that asks for no name or an IP address. It refuses every other name before the connection reaches your container. A daemon whose certificate carries a fixed name that its clients ask for binds the port `secure: { ssl: false }` instead: StartOS forwards the TCP stream untouched, whatever the name, and the daemon's TLS still runs end to end.
 
@@ -551,16 +561,19 @@ Reach for passthrough only when the rewrap genuinely cannot serve, which is one 
 1. **The client must verify your container's own certificate.** A wallet that pins a certificate carried in a connection URI can only do so if the certificate it pins is the one actually served.
 2. **The client must see a protocol your container never selects.** A rewrap hands the client whatever your container chose, so a client that requires one — gRPC-go rejects a connection with no selected ALPN (`missing selected ALPN property`) — is served as long as your container's listener advertises it. Reach for passthrough here only when your container's listener cannot be made to advertise it. LND binds its gRPC interface as a passthrough.
 
-Otherwise prefer `addSsl`. Passthrough gives up everything the proxy does on your behalf:
+Otherwise prefer TLS termination. HTTP proxying is an independent choice, and applies on the original leg as well as the TLS wrapper:
 
-| Capability                       | `addSsl`                      | Passthrough                                 |
-| -------------------------------- | ----------------------------- | ------------------------------------------- |
-| Certificate the client sees      | The device certificate        | Your container's                            |
-| Proxy auth (`addSsl.auth`)       | Available                     | Not available — `auth` lives under `addSsl` |
-| `X-Forwarded-*` headers          | Available                     | Not applicable                              |
-| ACME on a custom domain          | StartOS obtains and renews it | Skipped — your container is the ACME client |
-| UDP on the same port             | Not applicable                | No; the port accepts TLS only               |
-| Certificate issuance and renewal | Handled by the platform       | Yours to handle                             |
+| Capability                       | HTTP proxy with TLS termination                     | Raw TCP with TLS termination   | Raw TLS passthrough                                       |
+| -------------------------------- | --------------------------------------------------- | ------------------------------ | --------------------------------------------------------- |
+| Configuration                    | HTTP-family protocol with `addSsl`                  | `protocol: null` with `addSsl` | `protocol: null`, `secure: { ssl: true }`, `addSsl: null` |
+| Certificate the client sees      | The device certificate                              | The device certificate         | Your container's                                          |
+| Proxy auth (`proxy.auth`)        | Both original and TLS-wrapper legs                  | Not applicable                 | Not applicable                                            |
+| `X-Forwarded-*` headers          | Both legs; TLS generates `X-Forwarded-Proto: https` | Not applicable                 | Not applicable                                            |
+| ACME on a custom domain          | StartOS obtains and renews it                       | StartOS obtains and renews it  | Your container is the ACME client                         |
+| UDP on the TLS port              | Not applicable                                      | Not applicable                 | Not applicable                                            |
+| Certificate issuance and renewal | Handled by the platform                             | Handled by the platform        | Yours to handle                                           |
+
+For unproxied service TLS, StartOS preserves the client source IP when it routes the container's replies, including termination and rewrapping. Server-local and bridge clients, or a failed transparent dial, use the proxy address.
 
 ### Minting the certificate
 
@@ -626,7 +639,7 @@ On a raw-TCP binding (`protocol: null`), `secure` says whether the protocol is s
 
 ## Authenticating at the Proxy
 
-For protocols that StartOS fronts with its reverse proxy (`http`, `https`, `ws`, `wss`), you can gate an interface with HTTP authentication by setting `addSsl.auth`. The OS reverse proxy validates the `Authorization` header on every incoming request _before_ forwarding it to your container. Requests that fail get `401 Unauthorized` with a `WWW-Authenticate` challenge and never reach your service. You do **not** need to build auth into the service or run a sidecar proxy — the platform enforces it at the edge.
+Gate an HTTP-proxied binding with HTTP authentication by setting `proxy.auth`. The OS reverse proxy validates the `Authorization` header on every incoming request _before_ forwarding it to your container. Requests that fail get `401 Unauthorized` with a `WWW-Authenticate` challenge and never reach your service. You do **not** need to build auth into the service or run a sidecar proxy — the platform enforces it at the edge.
 
 `auth` takes a `ProxyAuth`, which is one of two shapes:
 
@@ -634,7 +647,7 @@ For protocols that StartOS fronts with its reverse proxy (`http`, `https`, `ws`,
 // Basic — one or more username/password pairs; any match passes
 const uiOrigin = await uiMulti.bindPort(uiPort, {
   protocol: 'http',
-  addSsl: {
+  proxy: {
     auth: {
       type: 'basic',
       credentials: [{ username: 'admin', password }],
@@ -646,7 +659,7 @@ const uiOrigin = await uiMulti.bindPort(uiPort, {
 // Bearer — any of the listed tokens is accepted as `Authorization: Bearer <token>`
 const apiOrigin = await apiMulti.bindPort(apiPort, {
   protocol: 'https',
-  addSsl: {
+  proxy: {
     auth: { type: 'bearer', tokens: [apiToken], realm: null },
   },
 })
@@ -659,10 +672,10 @@ const apiOrigin = await apiMulti.bindPort(apiPort, {
 | `tokens` (bearer)     | `Array<string>`                 | Accepted bearer tokens. Any match passes.                                                                                                                            |
 | `realm`               | `string` \| `null`              | Realm advertised in the 401 `WWW-Authenticate` challenge. Defaults to `"StartOS"`. Use a stable realm across bindings that share credentials so browsers reuse them. |
 
-Setting `auth` implies HTTP-aware proxying, so it is only valid on the SSL-variant protocols above — not on raw TCP (`protocol: null`).
+The gate applies to every HTTP request on both the original and TLS-wrapper legs, including bridge and other enabled plaintext addresses, whenever HTTP proxying is enabled.
 
 > [!NOTE]
-> The `username` field on `createInterface` is unrelated to this gate — it only embeds a username in the _displayed_ URL (e.g. `https://user@host/`). The enforced credential check is `addSsl.auth`.
+> The `username` field on `createInterface` is unrelated to this gate — it only embeds a username in the _displayed_ URL (e.g. `https://user@host/`). The enforced credential check is `proxy.auth`.
 
 ### Generating and rotating credentials
 
@@ -675,7 +688,7 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
   const uiMulti = sdk.MultiHost.of(effects, 'ui-multi')
   const uiOrigin = await uiMulti.bindPort(uiPort, {
     protocol: 'http',
-    addSsl: {
+    proxy: {
       auth: { type: 'basic', credentials: [{ username: 'admin', password }], realm: null },
     },
   })

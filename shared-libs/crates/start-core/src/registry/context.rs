@@ -30,6 +30,7 @@ use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::device_info::{DEVICE_INFO_HEADER, DeviceInfo};
 use crate::registry::migrations::run_migrations;
+use crate::registry::os::security;
 use crate::registry::package::icon::{icons_dir, referenced_icons, sweep_icons};
 use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
@@ -62,6 +63,9 @@ pub struct RegistryConfig {
     #[arg(long, help = "help.arg.registry-startwrt")]
     #[serde(default)]
     pub startwrt: bool,
+    #[arg(long, help = "help.arg.registry-security-notifications")]
+    #[serde(default)]
+    pub security_notifications: bool,
 }
 impl ContextConfig for RegistryConfig {
     fn next(&mut self) -> Option<PathBuf> {
@@ -73,6 +77,7 @@ impl ContextConfig for RegistryConfig {
         self.tor_proxy = self.tor_proxy.take().or(other.tor_proxy);
         self.datadir = self.datadir.take().or(other.datadir);
         self.startwrt |= other.startwrt;
+        self.security_notifications |= other.security_notifications;
     }
 }
 
@@ -97,6 +102,7 @@ pub struct RegistryContextSeed {
     pub client: Client,
     pub shutdown: Sender<()>,
     pub metrics_db: SyncMutex<Connection>,
+    pub(crate) security_feed: Option<security::SecurityFeed>,
 }
 
 #[derive(Clone)]
@@ -161,6 +167,11 @@ impl RegistryContext {
                 ErrorKind::NotFound,
             ));
         }
+        let security_feed = if config.security_notifications {
+            Some(security::init(&db).await?)
+        } else {
+            None
+        };
         Ok(Self(Arc::new(RegistryContextSeed {
             hostnames: config.registry_hostname.clone(),
             listen: config.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN),
@@ -182,6 +193,7 @@ impl RegistryContext {
                 .with_kind(crate::ErrorKind::ParseUrl)?,
             shutdown,
             metrics_db,
+            security_feed,
         })))
     }
 }
@@ -447,5 +459,37 @@ impl SignatureAuthContext for RegistryContext {
             .await?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn security_notifications_are_opt_in_from_cli_or_config() {
+        let default = RegistryConfig::try_parse_from(["registry"]).unwrap();
+        assert!(!default.security_notifications);
+        let legacy: RegistryConfig = serde_json::from_value(serde_json::json!({
+            "registry-hostname": ["registry.test"],
+        }))
+        .unwrap();
+        assert!(!legacy.security_notifications);
+        let mut cli =
+            RegistryConfig::try_parse_from(["registry", "--security-notifications"]).unwrap();
+        cli.merge_with(legacy);
+        assert!(cli.security_notifications);
+        let file: RegistryConfig = serde_json::from_value(serde_json::json!({
+            "registry-hostname": ["registry.test"],
+            "security-notifications": true,
+        }))
+        .unwrap();
+        let mut merged = default;
+        merged.merge_with(file);
+        assert!(merged.security_notifications);
+        assert_eq!(
+            serde_json::to_value(&merged).unwrap()["security-notifications"],
+            true
+        );
     }
 }

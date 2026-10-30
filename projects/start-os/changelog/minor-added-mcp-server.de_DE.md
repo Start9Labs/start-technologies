@@ -1,0 +1,1 @@
+- Neuer MCP-Server unter `/mcp`: KI-Agenten und andere MCP-Clients können die StartOS-API über den Streamable-HTTP-Transport als Werkzeuge aufrufen und authentifizieren sich mit einem Bearer-Token aus `start-cli auth token create`.

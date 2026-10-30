@@ -97,6 +97,7 @@ export type GetOsAssetParamsInput = z.input<typeof schemas.GetOsAssetParams>
 export type GetOsVersionParamsInput = z.input<typeof schemas.GetOsVersionParams>
 export type GetUsersParamsInput = z.input<typeof schemas.GetUsersParams>
 export type GitHash = z.output<typeof schemas.GitHash>
+export type GitHashInput = z.input<typeof schemas.GitHash>
 export type Guid = z.output<typeof schemas.Guid>
 export type GuidInput = z.input<typeof schemas.Guid>
 export type HealthCheckId = z.output<typeof schemas.HealthCheckId>

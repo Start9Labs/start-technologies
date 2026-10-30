@@ -1,0 +1,3 @@
+- Przyjmuje nadpisania środowiska podkontenerów przez `JSON_ENV_*`, w tym wartości wielowierszowe i usuwanie zmiennych.
+- Zachowuje wielowierszowe wartości domyślne środowiska obrazu w `package attach`.
+- Respektuje jawne usunięcie `HOME` bez przywracania wartości domyślnej.

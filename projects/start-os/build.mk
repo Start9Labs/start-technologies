@@ -25,19 +25,20 @@ STARTOS_TARGETS := $(STARTD_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_
 # Build all StartOS OS-product artifacts (bins + web + container-runtime image).
 start-os: $(STARTOS_TARGETS)
 
-backup-fs-test: $(call ls-files, projects/start-os/backup-fs/src) projects/start-os/backup-fs/Cargo.toml
+backup-fs-test: $(call ls-files, projects/start-os/backup-fs/src) projects/start-os/backup-fs/Cargo.toml $(BACKUP_PROTOCOL_SRC) Cargo.toml Cargo.lock
 	cargo test -p startos-backup-fs --lib -- --skip mount_tests
 
 container-runtime-test: projects/start-os/container-runtime/node_modules/.package-lock.json $(call ls-files, projects/start-os/container-runtime/src) projects/start-os/container-runtime/package.json projects/start-os/container-runtime/tsconfig.json
 	cd projects/start-os/container-runtime && npm test
 
-start-os-scripts-test: projects/start-os/build/tests/dns-config-test.sh projects/start-os/build/lib/resolved.conf projects/start-os/container-runtime/deb-install.sh projects/start-os/container-runtime/update-image.sh projects/start-os/build/lib/scripts/normalize-fstab projects/start-os/build/tests/normalize-fstab-test.sh projects/start-os/build/image-recipe/raspberrypi/img/usr/lib/startos/scripts/init_resize.sh projects/start-os/build/tests/init-resize-test.sh projects/start-os/build/image-recipe/build.sh projects/start-os/build/tests/backports-pref-test.sh projects/start-os/build/lib/scripts/gather-debug-info projects/start-os/debian/postinst projects/start-os/build/tests/crash-diagnostics-test.sh projects/start-os/build/tests/btrfsmaintenance-test.sh projects/start-os/build/dpkg-deps/depends
+start-os-scripts-test: projects/start-os/build/tests/dns-config-test.sh projects/start-os/build/lib/resolved.conf projects/start-os/container-runtime/deb-install.sh projects/start-os/container-runtime/update-image.sh projects/start-os/build/lib/scripts/normalize-fstab projects/start-os/build/tests/normalize-fstab-test.sh projects/start-os/build/image-recipe/raspberrypi/img/usr/lib/startos/scripts/init_resize.sh projects/start-os/build/tests/init-resize-test.sh projects/start-os/build/image-recipe/build.sh projects/start-os/build/tests/backports-pref-test.sh projects/start-os/build/lib/scripts/gather-debug-info projects/start-os/debian/postinst projects/start-os/build/tests/crash-diagnostics-test.sh projects/start-os/build/tests/btrfsmaintenance-test.sh projects/start-os/build/dpkg-deps/depends projects/start-os/build/tests/runtime-package-upgrade-test.sh
 	./projects/start-os/build/tests/normalize-fstab-test.sh
 	./projects/start-os/build/tests/init-resize-test.sh
 	./projects/start-os/build/tests/backports-pref-test.sh
 	./projects/start-os/build/tests/crash-diagnostics-test.sh
 	./projects/start-os/build/tests/dns-config-test.sh
 	./projects/start-os/build/tests/btrfsmaintenance-test.sh
+	./projects/start-os/build/tests/runtime-package-upgrade-test.sh
 
 projects/start-os/build/lib/migration-images/.done: projects/start-os/build/save-migration-images.sh
 	ARCH=$(ARCH) ./projects/start-os/build/save-migration-images.sh projects/start-os/build/lib/migration-images
@@ -230,7 +231,7 @@ target/$(RUST_ARCH)-unknown-linux-musl/release/start-container: $(CORE_SRC) $(EN
 compiled-$(ARCH).tar: $(COMPILED_TARGETS) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE)
 	tar -cvf $@ $^
 
-target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs: $(call ls-files, projects/start-os/backup-fs) $(ENVIRONMENT_FILE)
+target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs: $(call ls-files, projects/start-os/backup-fs) $(BACKUP_PROTOCOL_SRC) Cargo.toml Cargo.lock $(ENVIRONMENT_FILE)
 	ARCH=$(ARCH) PROFILE=release ./projects/start-os/backup-fs/build-backup-fs.sh
 	touch $@
 

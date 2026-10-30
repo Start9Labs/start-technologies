@@ -52,8 +52,32 @@ export const mockPatchData: DataModel = {
     servicesView: { desktopLayout: 'list', asc: true },
   },
   serverInfo: {
-    id: 'abcdefgh',
-    trustedOsUpdateSigners: {},
+    id: Mock.ServerId,
+    trustedKeys: {
+      start9: {
+        name: 'Start9',
+        gpgExports: [],
+        publicKeys: [
+          'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=',
+          'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
+          'MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=',
+        ],
+        removable: false,
+        marketplace: true,
+        os: true,
+      },
+      'start9-alpha': {
+        name: 'Start9 Alpha',
+        gpgExports: [],
+        publicKeys: [
+          'MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=',
+          'MCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=',
+        ],
+        removable: false,
+        marketplace: false,
+        os: false,
+      },
+    },
     version,
     lastBackup: new Date(new Date().valueOf() - 604800001).toISOString(),
     network: {
@@ -167,10 +191,9 @@ export const mockPatchData: DataModel = {
                 upstreamCertValidation: null,
                 preferredExternalPort: 443,
                 alpn: ['http/1.1', 'h2'],
-                addXForwardedHeaders: false,
-                auth: null,
               },
               secure: null,
+              proxy: null,
             },
             interfaces: {},
           },
@@ -346,8 +369,8 @@ export const mockPatchData: DataModel = {
     postInitMigrationTodos: {},
     latestMigrationRevision: 0,
     statusInfo: {
-      // currentBackup: null,
       updateProgress: null,
+      backupConversions: {},
       restarting: false,
       shuttingDown: false,
       backupProgress: null,
@@ -749,10 +772,9 @@ export const mockPatchData: DataModel = {
                   upstreamCertValidation: null,
                   preferredExternalPort: 42443,
                   alpn: ['http/1.1', 'h2'],
-                  addXForwardedHeaders: false,
-                  auth: null,
                 },
                 secure: null,
+                proxy: null,
               },
               interfaces: {
                 ui: {
@@ -959,6 +981,7 @@ export const mockPatchData: DataModel = {
                 addSsl: null,
                 preferredExternalPort: 48332,
                 secure: { ssl: false },
+                proxy: null,
               },
               interfaces: {
                 rpc: {
@@ -1005,6 +1028,7 @@ export const mockPatchData: DataModel = {
                 addSsl: null,
                 preferredExternalPort: 48333,
                 secure: { ssl: false },
+                proxy: null,
               },
               interfaces: {
                 p2p: {
@@ -1134,7 +1158,12 @@ export const mockPatchData: DataModel = {
       desired: { main: 'running' },
       error: null,
       health: {
-        web: { name: 'Web Vault', result: 'loading', message: 'Starting up' },
+        web: {
+          name: 'Web Vault',
+          result: 'loading',
+          waiting: false,
+          message: 'Starting up',
+        },
       },
       started: new Date(Date.now() - 30000).toISOString(),
     }),

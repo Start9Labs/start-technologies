@@ -34,7 +34,7 @@ await rpcClient.rpc.package.start({ id: 'bitcoind' })
 
 ## Authentication
 
-Log in, log out, manage enrolled device keys, and reset the master password.
+Log in, log out, manage enrolled device keys and bearer tokens, and reset the master password.
 
 ### `start-cli auth login`
 
@@ -54,13 +54,19 @@ Retrieve the server's public key.
 
 ### `start-cli auth session list`
 
-List all enrolled device keys.
+List all enrolled device keys and bearer tokens.
 
 - `--format` — Output format
 
-### `start-cli auth session kill [IDS...]`
+### `start-cli auth session kill [--pubkey <KEY>]... [--token <ID>]...`
 
-Remove one or more enrolled device keys.
+End one or more sessions. `--pubkey` removes an enrolled device key; `--token` revokes a bearer token by the ID `auth session list` shows.
+
+### `start-cli auth token create --name <NAME>`
+
+Create a bearer token for an API client that cannot sign requests. The token is printed once and is not stored; the client sends it as `Authorization: Bearer <token>`. It appears in `auth session list` under its name and is revoked with `auth session kill --token` or after 30 days unused.
+
+An MCP client authenticates with the same token to use the server's API as tools at `https://<server-address>/mcp`, over the streamable HTTP transport.
 
 ## Server
 
@@ -76,7 +82,9 @@ Shut down the server.
 
 ### `start-cli server update`
 
-Check the configured registry for OS updates and apply if available.
+Check the supplied registry for OS updates and apply if available. See [Trusted Keyrings](trusted-keys.md) for signer requirements.
+
+- `--trust` — Explicitly accept an untrusted signer while retaining signature and integrity checks
 
 ### `start-cli server update-firmware`
 
@@ -257,6 +265,9 @@ List all installed packages.
 Install a package from the registry or sideload a local `.s9pk` file.
 
 - `-s, --sideload` — Install from local file
+- `--trust` — Explicitly accept an untrusted signer while retaining signature and integrity checks
+
+Registry installs and sideloads require a signer from an enabled [trusted keyring](trusted-keys.md) by default.
 
 ### `start-cli package start <ID>`
 

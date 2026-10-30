@@ -91,7 +91,7 @@ StartOS is the flagship, but it shares this repo with the rest of the Start9 sta
 
 ## Contributing
 
-There are multiple ways to contribute: work directly on a product in this repo, package a service for the marketplace, or help with documentation and guides. See [AGENTS.md](AGENTS.md) or visit [start9.com/contribute](https://start9.com/contribute/).
+There are multiple ways to contribute: work directly on a product in this repo, package a service for the marketplace, or help with documentation and guides. See [AGENTS.md](AGENTS.md).
 
 To report security issues, email [security@start9.com](mailto:security@start9.com). See [SECURITY.md](SECURITY.md) for what is in scope and what happens next.
 

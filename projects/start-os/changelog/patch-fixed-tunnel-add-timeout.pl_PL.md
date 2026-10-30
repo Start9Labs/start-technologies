@@ -1,0 +1,1 @@
+- Dodawanie tunelu zgłasza błąd po 30 sekundach, jeśli jego interfejs sieciowy pozostaje niedostępny, zamiast czekać bez końca.

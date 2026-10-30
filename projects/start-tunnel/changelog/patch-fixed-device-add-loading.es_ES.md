@@ -1,0 +1,1 @@
+- Los diálogos para añadir dispositivos no se abren antes de cargar los datos de subredes.

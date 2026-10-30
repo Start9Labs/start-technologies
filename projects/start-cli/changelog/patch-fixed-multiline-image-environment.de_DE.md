@@ -1,0 +1,1 @@
+- Mehrzeilige Umgebungswerte von Images bleiben in JSON-Metadaten für Pakete mit Start SDK ab 3.1.2 erhalten.

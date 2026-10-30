@@ -1,0 +1,1 @@
+- Se corrigió un problema por el que el Mercado se quedaba cargando al abrir enlaces de dependencias.
