@@ -881,4 +881,6 @@ export default {
   997: 'Pakete',
   998: 'Betriebssystem-Updates',
   999: 'Vertrauen in Signaturen für:',
+  1000: 'Ja',
+  1001: 'Nein',
 } satisfies i18n

@@ -55,6 +55,11 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
       </footer>
     </form>
   `,
+  styles: `
+    fieldset > label {
+      grid-column: 1 / -1;
+    }
+  `,
   imports: [
     ReactiveFormsModule,
     TuiButton,

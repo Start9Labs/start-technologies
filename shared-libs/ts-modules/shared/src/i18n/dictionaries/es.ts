@@ -881,4 +881,6 @@ export default {
   997: 'Paquetes',
   998: 'Actualizaciones del SO',
   999: 'Confiar en firmas para:',
+  1000: 'Sí',
+  1001: 'No',
 } satisfies i18n

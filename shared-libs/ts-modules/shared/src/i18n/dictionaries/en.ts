@@ -882,4 +882,6 @@ export const ENGLISH: Record<string, number> = {
   'Packages': 997,
   'OS Updates': 998,
   'Trust signatures for:': 999,
+  'Yes': 1000,
+  'No': 1001,
 }

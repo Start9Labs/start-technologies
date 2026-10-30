@@ -70,10 +70,10 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
                 {{ entry.value.publicKeys.length }}
               </td>
               <td [attr.data-label]="'Packages' | i18n">
-                {{ (entry.value.marketplace ? 'Enabled' : 'Disabled') | i18n }}
+                {{ (entry.value.marketplace ? 'Yes' : 'No') | i18n }}
               </td>
               <td [attr.data-label]="'OS Updates' | i18n">
-                {{ (entry.value.os ? 'Enabled' : 'Disabled') | i18n }}
+                {{ (entry.value.os ? 'Yes' : 'No') | i18n }}
               </td>
               <td>
                 <button
