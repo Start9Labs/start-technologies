@@ -405,7 +405,9 @@ Available on `sdk.healthCheck`:
 
 ### Polling Triggers
 
-By default, health checks poll every 1 s while `starting` or `failure`, and every 30 s while `success`, `loading`, `waiting`, or `disabled`. A daemon's `ready` check reporting `loading` or `waiting` before its first `success` is the exception: it backs off from 1 s, doubling to 30 s, so a daemon that `requires` it starts soon after it becomes ready. Override this with the `trigger` option on `ready`:
+Every health status accepts a `message` string that the UI displays verbatim. Empty or absent messages use the localized status label. A `starting` or `loading` result can also set `waiting: true` to show a clock instead of a spinner while waiting for an external condition; omitting it defaults to `false`. Readiness still follows `result`, not the waiting flag.
+
+By default, health checks poll every 1 s while `starting` or `failure`, and every 30 s while `success`, `loading`, `disabled`, or `starting` with `waiting: true`. A daemon's `ready` check reporting `loading` or `waiting: true` before its first `success` is the exception: it backs off from 1 s, doubling to 30 s, so a daemon that `requires` it starts soon after it becomes ready. Override this with the `trigger` option on `ready`:
 
 ```typescript
 ready: {
@@ -418,7 +420,7 @@ ready: {
 Available triggers on `sdk.trigger`:
 
 - **`cooldownTrigger(ms)`** — fixed interval between checks, regardless of status. The first check also waits `ms`.
-- **`statusTrigger(defaultMs, { success?, loading?, disabled?, starting?, waiting?, failure? })`** — per-status polling intervals in milliseconds. The first argument is the default interval for any status not explicitly listed. An interval of `Infinity` stops polling once that status is reported.
+- **`statusTrigger(defaultMs, { success?, loading?, disabled?, starting?, failure? })`** — per-status polling intervals in milliseconds. The first argument is the default interval for any status not explicitly listed. An interval of `Infinity` stops polling once that status is reported.
 - **`onceTrigger`** — one check, as soon as the health check starts. Use it for a result that cannot change until `main` restarts, such as one computed from configuration read with `.const()`: re-polling it only repeats the same result, and a failure writes a line to the service log on every poll. Pair it with `gracePeriod: 0`, or the single result is reported as `starting`.
 
 Use a slower trigger for expensive checks (RPC calls during heavy processing) to reduce load on the service:

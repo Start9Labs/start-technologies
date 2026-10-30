@@ -73,6 +73,14 @@ impl<Commitment> RegistryAsset<Commitment> {
     }
 }
 impl<Commitment: SignedCommitment> RegistryAsset<Commitment> {
+    pub fn validate_all(&self, context: &str, policy: Option<AcceptSigners>) -> Result<(), Error> {
+        self.validate(context, self.all_signers())?;
+        if let Some(policy) = policy {
+            self.validate(context, policy)?;
+        }
+        Ok(())
+    }
+
     pub fn validate(&self, context: &str, mut accept: AcceptSigners) -> Result<&Commitment, Error> {
         for (signer, signature) in &self.signatures {
             accept.process_signature(signer, &self.commitment, context, signature)?;

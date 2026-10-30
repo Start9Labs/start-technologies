@@ -11,6 +11,7 @@ use crate::net::keys::KeyStore;
 use crate::notifications::Notifications;
 use crate::prelude::*;
 use crate::ssh::SshKeys;
+use crate::update::security::SecurityNotifications;
 use crate::util::serde::{Der64, Pem};
 
 #[derive(Debug, Deserialize, Serialize, HasModel)]
@@ -27,6 +28,8 @@ pub struct Private {
     pub ssh_pubkeys: SshKeys,
     pub available_ports: AvailablePorts,
     pub notifications: Notifications,
+    #[serde(default)]
+    pub os_security_notifications: SecurityNotifications,
     #[serde(default)]
     pub push: crate::notifications::push::PushState,
     pub cifs: CifsTargets,

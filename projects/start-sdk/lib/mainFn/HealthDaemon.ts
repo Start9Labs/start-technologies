@@ -1,22 +1,19 @@
 import { HealthCheckResult } from '../health/checkFns'
-import { isInGracePeriod } from '../health/isInGracePeriod'
+import { withGracePeriod } from '../health/isInGracePeriod'
 import { daemonReadyTrigger, defaultTrigger } from '../trigger/defaultTrigger'
 import { Ready } from './Daemons'
 import { Daemon } from './Daemon'
-import { SetHealth, Effects, SDKManifest } from '@start9labs/start-core/types'
+import { Effects, SDKManifest } from '@start9labs/start-core/types'
 import { asError } from '@start9labs/start-core/util/asError'
 
 export const EXIT_SUCCESS = 'EXIT_SUCCESS' as const
 
-/**
- * Wanted a structure that deals with controlling daemons by their health status
- * States:
- * -- Waiting for dependencies to be success
- * -- Running: Daemon is running and the status is in the health
- *
- */
 export class HealthDaemon<Manifest extends SDKManifest> {
-  private _health: HealthCheckResult = { result: 'waiting', message: null }
+  private _health: HealthCheckResult = {
+    result: 'starting',
+    waiting: true,
+    message: null,
+  }
   private healthWatchers: Array<() => unknown> = []
   private running = false
   private terminated = false
@@ -43,7 +40,6 @@ export class HealthDaemon<Manifest extends SDKManifest> {
     this.dependencies.forEach(d => d.addWatcher(() => this.updateStatus()))
   }
 
-  /** Run after we want to do cleanup */
   async term(termOptions?: {
     signal?: NodeJS.Signals | undefined
     timeout?: number | undefined
@@ -59,7 +55,6 @@ export class HealthDaemon<Manifest extends SDKManifest> {
     })
   }
 
-  /** Want to add another notifier that the health might have changed */
   addWatcher(watcher: () => unknown) {
     this.healthWatchers.push(watcher)
   }
@@ -68,14 +63,7 @@ export class HealthDaemon<Manifest extends SDKManifest> {
     return Object.freeze(this._health)
   }
 
-  // updateStatus() runs fire-and-forget from dependency watchers, so several
-  // invocations can overlap. A transition both flips `running` and awaits
-  // stop()/start(); if a resume's start() ran while the preceding pause's stop()
-  // were still draining the process, start() would no-op against the not-yet
-  // cleared run loop (see Daemon.start's `if (this.loop) return`) and leave the
-  // daemon stopped while we believe it is running — until the next flap. Apply
-  // transitions on an in-order promise chain so pause always finishes before the
-  // following resume re-holds and restarts.
+  // A draining daemon ignores start(); pauses must finish before resumes.
   private changeRunning(newStatus: boolean): Promise<void> {
     const next = this.transition
       .catch(() => {})
@@ -93,10 +81,6 @@ export class HealthDaemon<Manifest extends SDKManifest> {
       console.debug(`Launching ${this.id}...`)
       this.startSession()
       this.started = performance.now()
-      // Await + catch start(): its hold() on the (possibly re-held) SubContainer
-      // can throw `already destroyed`. Surfacing that as a health failure keeps
-      // an un-awaited rejection from becoming an unhandled rejection that wedges
-      // the daemon permanently.
       try {
         await this.daemon?.start()
       } catch (e) {
@@ -108,9 +92,7 @@ export class HealthDaemon<Manifest extends SDKManifest> {
     } else {
       console.debug(`Stopping ${this.id}...`)
       await this.stopSession()
-      // A dependency-driven stop is a pause, not a teardown: stop() releases the
-      // SubContainer hold but leaves the container intact so a later start()
-      // re-holds it. Only term() (genuine teardown) destroys the SubContainer.
+      // Dependency loss pauses the daemon without destroying its SubContainer.
       await this.daemon?.stop()
     }
   }
@@ -173,6 +155,7 @@ export class HealthDaemon<Manifest extends SDKManifest> {
       this.ready.trigger ?? (this.daemon ? daemonReadyTrigger : defaultTrigger)
     )(() => ({
       lastResult: this._health.result,
+      lastWaiting: 'waiting' in this._health && this._health.waiting,
     }))
 
     const next = () =>
@@ -233,22 +216,19 @@ export class HealthDaemon<Manifest extends SDKManifest> {
     if (!display) {
       return
     }
-    let result = health.result
-    if (
-      result === 'failure' &&
-      this.started !== undefined &&
-      isInGracePeriod(this.started, this.ready.gracePeriod)
+    const displayedHealth = withGracePeriod(
+      health,
+      this.started,
+      this.ready.gracePeriod,
     )
-      result = 'starting'
-    if (result === 'failure') {
+    if (displayedHealth.result === 'failure') {
       console.error(`Health Check ${this.id} failed:`, health.message)
     }
     await this.effects.setHealth({
-      ...health,
+      ...displayedHealth,
       id: this.id,
       name: display,
-      result,
-    } as SetHealth)
+    })
   }
 
   async updateStatus() {
@@ -268,7 +248,7 @@ export class HealthDaemon<Manifest extends SDKManifest> {
         w.display ? [w.display] : [],
       )
       const message = waitingOnNames.length ? waitingOnNames.join(', ') : null
-      await this.setHealth({ result: 'waiting', message })
+      await this.setHealth({ result: 'starting', waiting: true, message })
     } else {
       await this.setHealth({ result: 'starting', message: null })
     }

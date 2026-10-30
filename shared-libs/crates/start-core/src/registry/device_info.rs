@@ -489,6 +489,67 @@ mod tests {
     }
 
     #[test]
+    fn list_and_single_package_queries_select_signers_for_the_device_asset() {
+        use crate::registry::asset::RegistryAsset;
+        use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
+
+        let mut arm: RegistryAsset<MerkleArchiveCommitment> = serde_json::from_str(include_str!(
+            "../install/fixtures/production-bitcoind-31.1-26.json"
+        ))
+        .unwrap();
+        let keyrings = crate::trusted_keys::initial_trusted_keys();
+        let alpha = arm
+            .signatures
+            .keys()
+            .find(|key| keyrings["start9-alpha"].public_keys.contains(key))
+            .unwrap()
+            .clone();
+        let mut x86 = arm.clone();
+        assert!(x86.signatures.remove(&alpha).is_some());
+        arm.signatures.retain(|key, _| key == &alpha);
+        let response = json!({"best": {"31.1:26": {
+            "osVersion": "0.4.0",
+            "s9pks": [[{"arch": ["aarch64"]}, arm], [{"arch": ["x86_64"]}, x86]],
+        }}});
+        for (arch, expected) in [("x86_64", x86), ("aarch64", arm)] {
+            let device = DeviceInfo {
+                os: OsInfo {
+                    version: "0.4.1".parse().unwrap(),
+                    compat: "*".parse().unwrap(),
+                    platform: arch.into(),
+                    language: None,
+                },
+                hardware: Some(HardwareInfo {
+                    arch: arch.into(),
+                    ram: 8_000_000_000,
+                    devices: Some(vec![]),
+                }),
+            };
+            for id in [Some("bitcoind"), None] {
+                let mut filtered = if id.is_some() {
+                    response.clone()
+                } else {
+                    json!({"bitcoind": response})
+                };
+                device
+                    .filter_for_hardware("package.get", json!({"id": id}), &mut filtered)
+                    .unwrap();
+                let package = if id.is_some() {
+                    &filtered
+                } else {
+                    &filtered["bitcoind"]
+                };
+                let assets = package["best"]["31.1:26"]["s9pks"].as_array().unwrap();
+                assert_eq!(assets.len(), 1);
+                assert_eq!(
+                    assets[0][1]["signatures"],
+                    to_value(&expected.signatures).unwrap()
+                );
+            }
+        }
+    }
+
+    #[test]
     fn pem_responses_follow_client_capability() {
         for (header, startwrt, legacy) in [
             (None, false, true),

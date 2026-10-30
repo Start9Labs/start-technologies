@@ -9,4 +9,6 @@ import { HealthStatus } from '@start9labs/start-core/types'
 export type TriggerInput = {
   /** The result of the most recent health check invocation, or `undefined` if it hasn't run yet */
   lastResult?: HealthStatus
+  /** Whether the most recent `starting` or `loading` result is waiting. */
+  lastWaiting?: boolean
 }

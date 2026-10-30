@@ -16,7 +16,7 @@
     "check:tunnel": "tsc --project projects/start-tunnel/web/tsconfig.json --noEmit --skipLibCheck",
     "check:brochure": "tsc --project projects/brochure-marketplace/tsconfig.json --noEmit --skipLibCheck",
     "check:wrt": "tsc --project projects/start-wrt/web/tsconfig.json --noEmit --skipLibCheck",
-    "check:i18n": "node --test shared-libs/ts-modules/scripts/check-i18n.test.mjs && node shared-libs/ts-modules/scripts/check-i18n.mjs",
+    "check:i18n": "node --test shared-libs/ts-modules/scripts/i18n-dictionary.test.mjs shared-libs/ts-modules/scripts/check-i18n.test.mjs && node shared-libs/ts-modules/scripts/check-i18n.mjs",
     "check:i18n:tunnel": "node projects/start-tunnel/web/scripts/check-i18n.mjs",
     "check:i18n:wrt": "node projects/start-wrt/web/scripts/check-i18n.mjs",
     "build:patch-db": "cd shared-libs/crates/patch-db/client && npm ci && npm run build",

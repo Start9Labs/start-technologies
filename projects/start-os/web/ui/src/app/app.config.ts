@@ -27,6 +27,7 @@ import { WA_WINDOW } from '@ng-web-apis/common'
 import {
   AbstractMarketplaceService,
   FilterPackagesPipe,
+  MarketplaceTrust,
 } from '@start9labs/marketplace'
 import {
   AUTH_SIGNING_HOST,
@@ -58,6 +59,7 @@ import {
 import {
   tuiInputDateOptionsProvider,
   tuiInputDateTimeOptionsProvider,
+  tuiSwitchOptionsProvider,
 } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
 import { filter, identity, merge, pairwise } from 'rxjs'
@@ -76,6 +78,7 @@ import {
 import { PluginsService } from 'src/app/services/plugins.service'
 import { StateService } from 'src/app/services/state.service'
 import { StorageService } from 'src/app/services/storage.service'
+import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
 import { UiUpdateService } from 'src/app/services/ui-update.service'
 import {
   DatetimeTransformer,
@@ -116,6 +119,7 @@ export const APP_CONFIG: ApplicationConfig = {
     UntypedFormBuilder,
     tuiNumberFormatProvider({ decimalSeparator: '.', thousandSeparator: '' }),
     tuiButtonOptionsProvider({ size: 'm' }),
+    tuiSwitchOptionsProvider({ showIcons: false }),
     tuiDropdownOptionsProvider({ appearance: 'start-os' }),
     tuiNotificationOptionsProvider({
       autoClose: appearance => (appearance === 'negative' ? 0 : 3000),
@@ -134,6 +138,7 @@ export const APP_CONFIG: ApplicationConfig = {
       useClass: PatchDB,
     },
     tuiProvide(AbstractMarketplaceService, MarketplaceService),
+    tuiProvide(MarketplaceTrust, TrustedKeysService),
     provideAppInitializer(() => {
       const i18n = inject(i18nService)
       const clientStorage = inject(ClientStorageService)
@@ -141,8 +146,7 @@ export const APP_CONFIG: ApplicationConfig = {
       const auth = inject(AuthService)
 
       inject(StorageService).migrate036()
-      // Await the (IndexedDB) key check so the guards see the right auth
-      // state on the very first navigation.
+      // Initial navigation waits for the IndexedDB key check.
       return auth.init().then(() => {
         clientStorage.init()
         router.initialNavigation()

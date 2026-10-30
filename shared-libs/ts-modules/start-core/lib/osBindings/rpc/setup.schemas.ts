@@ -1016,6 +1016,7 @@ export const Api = {
           ),
           _CHILDREN: {},
         },
+        'trusted-keys': { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         'update-signers': { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
       },
     },

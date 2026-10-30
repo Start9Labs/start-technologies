@@ -1,0 +1,2 @@
+- Zgodne aktualizacje bezpieczeństwa ogłaszane przez wybrany rejestr systemu pojawiają się w Powiadomieniach i korzystają z powiadomień push przeglądarki, jeśli są włączone. Ich odnośnik aktualizacji oprogramowania otwiera System → Ogólne.
+- Aktualizacje beta mogą zastąpić wcześniejszą kompilację o tym samym numerze wersji systemu.
