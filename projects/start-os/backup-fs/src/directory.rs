@@ -186,7 +186,7 @@ impl DirectoryContents {
             _ => 1,
         };
         let mut cache = ctrl.chunk_cache();
-        let chunks = cache.create(dir, generation, &entries);
+        let chunks = cache.create(ctrl, dir, generation, &entries)?;
         self.0 = DirEntries::Chunked {
             generation,
             chunks: chunks.count(),
@@ -267,6 +267,7 @@ impl DirectoryContents {
                     .saturating_sub(previous.as_ref().is_some_and(DirectoryEntry::is_dir) as u64);
                 *len = index.len();
                 *chunks = index.count();
+                cache.evict(ctrl, dir)?;
                 Ok(None)
             }
         }
@@ -719,6 +720,7 @@ mod tests {
         let mut b = DirectoryContents::new();
         fill(&c, first, &mut a, 0..2_000);
         fill(&c, second, &mut b, 0..2_000);
+        assert!(c.chunk_cache().entry_count() <= 3_000);
         assert_eq!(
             a.get(&c, first, &name(1_999)).unwrap().unwrap().inode,
             Inode(2_999)
@@ -731,6 +733,31 @@ mod tests {
         let c = ctrl(tmp.path());
         assert_eq!(a.snapshot(&c, first).unwrap().len(), 1_999);
         assert_eq!(b.snapshot(&c, second).unwrap().len(), 2_100);
+    }
+
+    #[test]
+    fn growing_cached_directories_evicts_older_indexes() {
+        let tmp = tempfile::TempDir::with_prefix("dirtest").unwrap();
+        let c = ctrl(tmp.path());
+        c.chunk_cache().set_limit(3_000);
+        let (first, second) = (Inode(2), Inode(3));
+        let mut a = DirectoryContents::new();
+        let mut b = DirectoryContents::new();
+        fill(&c, first, &mut a, 0..1_200);
+        fill(&c, second, &mut b, 0..1_200);
+        assert_eq!(c.chunk_cache().entry_count(), 2_400);
+
+        fill(&c, second, &mut b, 1_200..2_200);
+        assert!(c.chunk_cache().entry_count() <= 3_000);
+        c.syncfs().unwrap();
+        assert!(c.chunk_cache().entry_count() <= 3_000);
+        drop(c);
+
+        let c = ctrl(tmp.path());
+        c.chunk_cache().set_limit(3_000);
+        assert_eq!(a.snapshot(&c, first).unwrap().len(), 1_200);
+        assert_eq!(b.snapshot(&c, second).unwrap().len(), 2_200);
+        assert!(c.chunk_cache().entry_count() <= 3_000);
     }
 
     #[test]

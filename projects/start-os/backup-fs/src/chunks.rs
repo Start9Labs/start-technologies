@@ -238,12 +238,19 @@ impl ChunkCache {
     }
 
     /// Replaces the directory's chunks with a dense layout of the entries.
-    pub fn create(&mut self, dir: Inode, generation: u64, entries: &Bucket) -> &mut Chunks {
+    pub fn create(
+        &mut self,
+        ctrl: &Controller,
+        dir: Inode,
+        generation: u64,
+        entries: &Bucket,
+    ) -> BkfsResult<&mut Chunks> {
         self.clock += 1;
         let mut chunks = Chunks::pack(generation, entries);
         chunks.used = self.clock;
         self.directories.insert(dir.0, chunks);
-        self.directories.get_mut(&dir.0).unwrap()
+        self.evict(ctrl, dir)?;
+        Ok(self.directories.get_mut(&dir.0).unwrap())
     }
 
     /// Drops the directory's index and unstaged chunks, returning how many
@@ -265,8 +272,12 @@ impl ChunkCache {
         Ok(())
     }
 
-    fn evict(&mut self, ctrl: &Controller, keep: Inode) -> BkfsResult<()> {
-        let mut entries: usize = self.directories.values().map(|c| c.names.len()).sum();
+    pub(crate) fn entry_count(&self) -> usize {
+        self.directories.values().map(|chunks| chunks.names.len()).sum()
+    }
+
+    pub(crate) fn evict(&mut self, ctrl: &Controller, keep: Inode) -> BkfsResult<()> {
+        let mut entries = self.entry_count();
         while entries > self.limit {
             let Some(victim) = self
                 .directories
