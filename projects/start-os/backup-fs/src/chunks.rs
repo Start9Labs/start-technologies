@@ -273,7 +273,10 @@ impl ChunkCache {
     }
 
     pub(crate) fn entry_count(&self) -> usize {
-        self.directories.values().map(|chunks| chunks.names.len()).sum()
+        self.directories
+            .values()
+            .map(|chunks| chunks.names.len())
+            .sum()
     }
 
     pub(crate) fn evict(&mut self, ctrl: &Controller, keep: Inode) -> BkfsResult<()> {
