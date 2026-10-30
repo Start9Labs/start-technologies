@@ -37,6 +37,7 @@ Defined in `shared-libs/crates/start-core/src/registry/mod.rs`:
 
 - `POST /rpc/{*path}` — JSON-RPC, wrapped in `Cors`, `Auth` (local + signature auth), and `DeviceInfoMiddleware`.
 - `GET /ws/rpc/{*path}` — WebSocket RPC continuations, keyed by a `Guid`.
+- `GET /os/security` — public WebSocket sending a PatchDB dump of the security catalog followed by revisions.
 - `/rest/rpc/{*path}` — REST continuation channel (e.g. large asset streams), keyed by a `Guid`.
 - `GET /icons/{*path}` — a package or dependency icon from the content-addressed store, unauthenticated and immutable. Package versions refer to an icon by this path, `blake3/<hash>.<ext>`; `DeviceInfoMiddleware` inlines it as a data URL for StartOS before 0.4.0.3.
 
@@ -60,6 +61,28 @@ The public `db.subscribe` RPC accepts `{ "pointer": <JSON Pointer> }`. The point
 `/index` or any descendant; omitting it or passing `null` selects `/index`. The response contains
 an initial `{ id, value }` dump and a continuation `guid`. Connecting to `/ws/rpc/<guid>` streams
 revisions whose JSON Patch paths are relative to the selected subtree.
+
+The `/os/security` WebSocket sends a JSON PatchDB `Dump` (`id`, `value`) followed by `Revision`
+messages (`id`, `patch`). The dump and subscription are captured atomically. The root is a
+`SecurityFeedState` with the registry's optional `name` and an `updates` catalog keyed by OS version.
+Each update contains `gitHash`, `sourceVersion`, and the available SquashFS `platforms` for a release
+marked `security`. The name comes from the same index field as `registry.info`; clients use a localized
+label for unnamed registries and retain the registry URL as their delivery-history key.
+
+When enabled, `RegistryContext` owns one `PatchDb::in_memory()` mirror and one task watching the
+persistent name and OS subtrees. Both subscriptions precede the initial atomic index snapshot; later
+events also rebuild from one snapshot. Unrelated package changes do not wake the task. Native `put`
+suppresses unchanged feed state. The bounded JSON subscription API
+serializes each scoped revision once and shares its bytes across listeners. Initial dumps share a
+per-pointer cache until the database changes. A 32-slot broadcast ring bounds pending revisions;
+a subscriber that falls behind closes instead of skipping patches. The endpoint uses 2 KiB read
+buffers, 1 KiB incoming message/frame limits, bounded sends, and the shared WebSocket Ping/Pong
+heartbeat. Clients apply revisions to the initial dump and start from a fresh dump on reconnect.
+
+Security notifications are opt-in with `security-notifications: true`. Disabled registries create no
+mirror or sync task and refuse upgrades with HTTP 403; clients retry with backoff. Release metadata
+remains unchanged. The setting applies at daemon startup and does not affect promotion into another
+registry.
 
 ## Data model
 

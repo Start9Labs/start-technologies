@@ -82,7 +82,9 @@ Shut down the server.
 
 ### `start-cli server update`
 
-Check the configured registry for OS updates and apply if available.
+Check the supplied registry for OS updates and apply if available. See [Trusted Keyrings](trusted-keys.md) for signer requirements.
+
+- `--trust` — Explicitly accept an untrusted signer while retaining signature and integrity checks
 
 ### `start-cli server update-firmware`
 
@@ -263,6 +265,9 @@ List all installed packages.
 Install a package from the registry or sideload a local `.s9pk` file.
 
 - `-s, --sideload` — Install from local file
+- `--trust` — Explicitly accept an untrusted signer while retaining signature and integrity checks
+
+Registry installs and sideloads require a signer from an enabled [trusted keyring](trusted-keys.md) by default.
 
 ### `start-cli package start <ID>`
 

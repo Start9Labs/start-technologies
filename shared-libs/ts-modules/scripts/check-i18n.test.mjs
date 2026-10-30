@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -27,6 +28,10 @@ function fixture(t) {
   ])
     mkdirSync(join(modules, directory), { recursive: true })
   copyFileSync(new URL('./check-i18n.mjs', import.meta.url), script)
+  symlinkSync(
+    new URL('./i18n-dictionary.mjs', import.meta.url),
+    join(modules, 'scripts/i18n-dictionary.mjs'),
+  )
   writeFileSync(
     join(dictionaries, 'en.ts'),
     `export const ENGLISH = {

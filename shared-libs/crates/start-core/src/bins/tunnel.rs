@@ -276,7 +276,11 @@ fn export_manpage_start_tunnel() {
         env!("CARGO_MANIFEST_DIR"),
         "/../../../projects/start-tunnel/man"
     );
-    super::export_manpages(app().into_command(), dir);
+    let command = super::with_manifest_version(
+        app().into_command(),
+        std::path::Path::new(dir).parent().unwrap(),
+    );
+    super::export_manpages(command, dir);
 }
 
 #[test]

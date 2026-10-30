@@ -84,6 +84,7 @@ pub mod sound;
 pub mod ssh;
 pub mod status;
 pub mod system;
+pub mod trusted_keys;
 pub mod tunnel;
 pub mod update;
 pub mod upload;
@@ -420,6 +421,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
             "update-signers",
             update::signers::api::<C>().with_about("about.commands-os-update-signers"),
         )
+        .subcommand("trusted-keys", trusted_keys::api::<C>().no_cli())
         .subcommand(
             "update-firmware",
             from_fn_async(|_: RpcContext| async {

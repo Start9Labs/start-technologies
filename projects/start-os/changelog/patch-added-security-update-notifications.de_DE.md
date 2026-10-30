@@ -1,0 +1,2 @@
+- Kompatible Sicherheitsupdates, die Ihre ausgewählte OS-Registry ankündigt, erscheinen unter Benachrichtigungen und werden bei aktivierter Browser-Push-Funktion zugestellt. Ihr Software-Update-Link öffnet System → Allgemein.
+- Beta-Updates können einen früheren Build mit derselben OS-Version ersetzen.

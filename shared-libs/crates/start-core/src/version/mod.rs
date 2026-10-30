@@ -865,7 +865,7 @@ mod tests {
 
     #[tokio::test]
     async fn maintenance_revisions_migrate_and_roll_back_without_changing_service_data() {
-        for (from, to, revision) in [("0.4.0.3", "0.4.0.4", 0), ("0.4.0.4", "0.4.0.5", 2)] {
+        for (from, to, revision) in [("0.4.0.3", "0.4.0.4", 0), ("0.4.0.4", "0.4.0.5", 3)] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()
                 .as_version_t()
@@ -875,7 +875,7 @@ mod tests {
                 .as_version_t()
                 .unwrap();
             assert_eq!(current.previous().semver(), previous.semver());
-            let mut db = json!({ "public": { "serverInfo": {
+            let mut db = json!({ "private": {}, "public": { "serverInfo": {
                 "version": from,
                 "packageVersionCompat": ">=0.3.0 <0.5.0",
                 "postInitMigrationTodos": {},
@@ -905,6 +905,91 @@ mod tests {
             rollback_to_unchecked(&current, &previous, &mut db).unwrap();
             assert_eq!(db["public"]["serverInfo"]["version"], json!(from));
             assert_eq!(db["public"]["packageData"], packages);
+        }
+    }
+
+    #[tokio::test]
+    async fn maintenance_revisions_upgrade_to_keyrings_and_roll_back() {
+        use crate::trusted_keys::{TrustedKeys, os_signers};
+        use crate::update::signers::{TrustedOsUpdateSigners, initial_signers};
+
+        let current = Version::from_exver_version(v0_4_1::Version.semver())
+            .as_version_t()
+            .unwrap();
+        assert_eq!(current.previous().semver(), v0_4_0_5::Version.semver());
+        let legacy = initial_signers();
+        let expected = legacy.keys().cloned().collect::<Vec<_>>();
+        for from in ["0.4.0.4", "0.4.0.5"] {
+            let previous = from_value::<Version>(json!(from))
+                .unwrap()
+                .as_version_t()
+                .unwrap();
+            let stored_legacy = if from == "0.4.0.4" {
+                legacy
+                    .iter()
+                    .map(|(key, signer)| {
+                        (
+                            key.parse::<crate::sign::AnyVerifyingKey>()
+                                .unwrap()
+                                .to_string()
+                                .into(),
+                            signer.clone(),
+                        )
+                    })
+                    .collect::<TrustedOsUpdateSigners>()
+            } else {
+                legacy.clone()
+            };
+            let session_key = stored_legacy.keys().next().unwrap();
+            let canonical_session_key = session_key
+                .parse::<crate::sign::AnyVerifyingKey>()
+                .unwrap()
+                .interned_der64();
+            let session = to_value(&crate::auth::Session::default()).unwrap();
+            let mut db = json!({ "public": { "serverInfo": {
+                "version": from,
+                "packageVersionCompat": ">=0.3.0 <0.5.0",
+                "postInitMigrationTodos": {},
+                "latestMigrationRevision": if from == "0.4.0.4" { 0 } else { 2 },
+                "trustedOsUpdateSigners": stored_legacy,
+            }, "packageData": { "service": { "setting": "preserved", "outboundDns": null } } },
+            "private": { "sessionPubkeys": { session_key.to_string(): session.clone() } } });
+            let packages = db["public"]["packageData"].clone();
+            let mut expected_private = db["private"].clone();
+            if from == "0.4.0.5" {
+                expected_private["osSecurityNotifications"] = json!({});
+            }
+            let pre_ups = PreUps::load(&previous, &current).await.unwrap();
+            migrate_from_unchecked(&previous, &current, pre_ups, &mut db).unwrap();
+            assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.1"));
+            assert_eq!(
+                db["private"]["sessions"],
+                json!({
+                    "pubkeys": { canonical_session_key.to_string(): session }, "tokens": {},
+                })
+            );
+            assert!(db["private"].get("sessionPubkeys").is_none());
+            let keys: TrustedKeys =
+                from_value(db["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
+            assert_eq!(os_signers(&keys).into_keys().collect::<Vec<_>>(), expected);
+            assert!(
+                db["public"]["serverInfo"]
+                    .get("trustedOsUpdateSigners")
+                    .is_none()
+            );
+            assert_eq!(db["public"]["packageData"], packages);
+
+            rollback_to_unchecked(&current, &previous, &mut db).unwrap();
+            assert_eq!(db["public"]["serverInfo"]["version"], json!(from));
+            let restored: TrustedOsUpdateSigners =
+                from_value(db["public"]["serverInfo"]["trustedOsUpdateSigners"].clone()).unwrap();
+            assert_eq!(
+                restored.into_keys().collect::<Vec<_>>(),
+                stored_legacy.into_keys().collect::<Vec<_>>()
+            );
+            assert!(db["public"]["serverInfo"].get("trustedKeys").is_none());
+            assert_eq!(db["public"]["packageData"], packages);
+            assert_eq!(db["private"], expected_private);
         }
     }
 

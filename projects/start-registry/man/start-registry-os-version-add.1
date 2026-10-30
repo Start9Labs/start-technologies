@@ -4,10 +4,19 @@
 .SH NAME
 start\-registry\-os\-version\-add \- Add OS version
 .SH SYNOPSIS
-\fBstart\-registry os version add\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIVERSION\fR> <\fIHEADLINE\fR> <\fIRELEASE_NOTES_OR_JSON\fR> <\fISOURCE_VERSION\fR> 
+\fBstart\-registry os version add\fR [\fB\-\-git\-hash\fR] [\fB\-\-expected\-git\-hash\fR] [\fB\-\-security\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIVERSION\fR> <\fIHEADLINE\fR> <\fIRELEASE_NOTES_OR_JSON\fR> <\fISOURCE_VERSION\fR> 
 .SH DESCRIPTION
 Add OS version
 .SH OPTIONS
+.TP
+\fB\-\-git\-hash\fR \fI<GIT_HASH>\fR
+Git commit that built the OS release
+.TP
+\fB\-\-expected\-git\-hash\fR \fI<EXPECTED_GIT_HASH>\fR
+Reject the operation if the indexed OS commit has changed
+.TP
+\fB\-\-security\fR
+Mark the OS release as a security update
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

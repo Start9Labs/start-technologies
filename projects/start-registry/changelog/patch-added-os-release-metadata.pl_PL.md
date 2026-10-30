@@ -1,0 +1,2 @@
+- Metadane wydań systemu zapisują commit Git kompilacji i informację o poprawkach bezpieczeństwa oraz zachowują je podczas promocji między rejestrami.
+- Powiadomienia o aktualizacjach bezpieczeństwa systemu są domyślnie wyłączone. Operatorzy rejestru mogą je włączyć za pomocą `security-notifications: true` bez zmieniania metadanych wydania.

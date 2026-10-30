@@ -1,0 +1,1 @@
+- Publikowanie wersji systemu w rejestrze przyjmuje skrót Git kompilacji i oznaczenie aktualizacji bezpieczeństwa; promocja zachowuje oba pola. Operacje wydania mogą odrzucić obraz źródłowy zmieniony podczas przygotowywania wydania.

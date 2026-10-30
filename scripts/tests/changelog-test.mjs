@@ -1456,3 +1456,52 @@ test('consumption does not follow replacement symlink', t => {
   assert.ok(lstatSync(path).isSymbolicLink())
   assert.ok(existsSync(outside))
 })
+
+test('security metadata follows fragment ownership and includes non-highlighted changes', t => {
+  const { fragment, commit, tag, cli } = compilerFixture(t)
+  const security = (version, ref) =>
+    cli(['security', PRODUCT, version, ...(ref ? ['--ref', ref] : [])])
+      .stdout.toString()
+      .trim()
+  assert.equal(security('0.4.0'), 'false')
+  fragment('patch-security-private.md', '- Security correction.\n', false)
+  commit()
+  tag('0.4.0')
+  assert.equal(security('0.4.0', 'start-os/v0.4.0'), 'true')
+  assert.equal(security('0.4.0.1'), 'false')
+  fragment(
+    'patch-security-private.md',
+    '- Another security correction.\n',
+    false,
+  )
+  const updated = commit()
+  assert.equal(security('0.4.0.1'), 'true')
+  assert.equal(security('0.4.0.1', updated), 'true')
+  assert.equal(security('0.4.0.1', 'start-os/v0.4.0'), 'false')
+})
+
+test('StartOS RC tags leave fragments for subsequent candidates and stable release', t => {
+  const { root, fragment, commit, tag, cli, render } = compilerFixture(t)
+  fragment('patch-security-example.md', '- Security correction.\n')
+  const ref = commit()
+  tag('0.4.0-rc.1')
+  contains(render('0.4.0', ref), '- Security correction.')
+  contains(
+    cli(['notes', PRODUCT, '0.4.0', '--ref', ref]).stdout,
+    '- Security correction.',
+  )
+  assert.equal(
+    cli(['security', PRODUCT, '0.4.0', '--ref', ref]).stdout.toString(),
+    'true\n',
+  )
+  cli(['sync'])
+  assert.ok(
+    existsSync(join(root, PRODUCT, 'changelog/patch-security-example.md')),
+  )
+  tag('0.4.0')
+  cli(['sync'])
+  assert.equal(
+    existsSync(join(root, PRODUCT, 'changelog/patch-security-example.md')),
+    false,
+  )
+})

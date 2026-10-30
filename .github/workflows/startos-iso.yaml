@@ -565,6 +565,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh registry-notes start-os > "$RUNNER_TEMP/release-notes.json"
+          node scripts/changelog.mjs security projects/start-os "$VERSION" --ref "${{ github.sha }}" > "$RUNNER_TEMP/release-security"
 
       - name: Determine platforms
         id: platforms
@@ -665,7 +666,7 @@ jobs:
       # (asset/add.rs "commitment-mismatch"), so re-indexing a version that
       # already holds a build fails. Alpha deliberately rolls the same version
       # number on every master push, so the version entry has to be dropped
-      # first. Beta never republishes in place and is left alone.
+      # first. manage-release.sh pre-release replaces beta separately.
       #
       # Removing the version drops *every* platform indexed under it, so this is
       # gated to full-matrix deploys — which every master push is. A dispatch
@@ -684,7 +685,10 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           NOTES=$(jq -r '.releaseNotes' "$RUNNER_TEMP/release-notes.json")
+          SECURITY_ARGS=()
+          if [ "$(cat "$RUNNER_TEMP/release-security")" = true ]; then SECURITY_ARGS+=(--security); fi
           start-cli --registry="${{ env.REGISTRY }}" registry os version add \
+            --git-hash "${{ github.sha }}" "${SECURITY_ARGS[@]}" \
             "$VERSION" "v${VERSION}" "$NOTES" ">=0.3.5 <=${VERSION}"
 
       - name: Index assets in registry

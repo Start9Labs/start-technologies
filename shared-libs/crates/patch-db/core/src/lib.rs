@@ -20,7 +20,7 @@ pub use model::{DestructureMut, HasModel, Model, ModelExt, Pointer};
 pub use patch::{DiffPatch, Dump, Revision};
 pub use patch_db_macro::HasModel;
 pub use store::{MutateResult, PatchDb, Store, TypedPatchDb};
-pub use subscriber::{DbWatch, Subscriber, TypedDbWatch};
+pub use subscriber::{DbWatch, JsonSubscriber, Subscriber, TypedDbWatch};
 use tokio::sync::TryLockError;
 
 #[derive(Error, Debug)]
@@ -29,6 +29,8 @@ pub enum Error {
     IO(#[from] IOError),
     #[error("JSON (De)Serialization Error: {0}")]
     JSON(#[from] imbl_value::Error),
+    #[error("JSON Encoding Error: {0}")]
+    JSONEncoding(#[from] Arc<serde_json::Error>),
     #[error("CBOR (De)Serialization Error: {0}")]
     CBOR(#[from] serde_cbor::Error),
     #[error("Index Error: {0:?}")]

@@ -2624,6 +2624,13 @@ registry.os.version.signer-not-authorized:
   pl_PL: "Sygnatariusz %{signer} nie jest autoryzowany do podpisywania v%{version}"
 
 # registry/os/promote.rs
+registry.os.commit-changed:
+  en_US: "The indexed OS build changed. Restart the release using the intended build."
+  de_DE: "Der indexierte OS-Build hat sich geändert. Starten Sie die Veröffentlichung mit dem gewünschten Build erneut."
+  es_ES: "La compilación indexada del SO cambió. Reinicie la publicación con la compilación deseada."
+  fr_FR: "La compilation du système indexée a changé. Relancez la publication avec la compilation souhaitée."
+  pl_PL: "Indeksowana kompilacja systemu zmieniła się. Uruchom wydanie ponownie z wybraną kompilacją."
+
 registry.os.promote.need-from-or-to:
   en_US: "At least one of --from or --to must be specified"
   de_DE: "Mindestens --from oder --to muss angegeben werden"
@@ -2821,7 +2828,13 @@ sign.gpg-agent.no-signing-key:
   fr_FR: "Aucune clé de signature Ed25519 avec sa partie secrète dans le trousseau GnuPG ne correspond à %{key}"
   pl_PL: "Żaden klucz podpisujący Ed25519 z częścią tajną w bazie kluczy GnuPG nie pasuje do %{key}"
 
-# service/mod.rs
+sign.gpg.invalid-public-key:
+  en_US: "Use an Ed25519 public signing key in PEM or GPG format"
+  de_DE: "Verwenden Sie einen öffentlichen Ed25519-Signaturschlüssel im PEM- oder GPG-Format"
+  es_ES: "Use una clave pública de firma Ed25519 en formato PEM o GPG"
+  fr_FR: "Utilisez une clé publique de signature Ed25519 au format PEM ou GPG"
+  pl_PL: "Użyj publicznego klucza podpisującego Ed25519 w formacie PEM lub GPG"
+
 service.mod.service-actor-held-after-shutdown:
   en_US: "ServiceActor held somewhere after actor shutdown"
   de_DE: "ServiceActor wird nach dem Herunterfahren des Actors noch irgendwo gehalten"
@@ -4059,6 +4072,13 @@ help.arg.except-callbacks:
   fr_FR: "IDs de callbacks à exclure"
   pl_PL: "Identyfikatory callbacków do wykluczenia"
 
+help.arg.expected-os-git-hash:
+  en_US: "Reject the operation if the indexed OS commit has changed"
+  de_DE: "Den Vorgang ablehnen, wenn sich der indexierte OS-Commit geändert hat"
+  es_ES: "Rechazar la operación si ha cambiado el commit indexado del SO"
+  fr_FR: "Refuser l’opération si le commit du système indexé a changé"
+  pl_PL: "Odrzuć operację, jeśli zmienił się indeksowany commit systemu"
+
 help.arg.except-tasks:
   en_US: "Task IDs to exclude"
   de_DE: "Auszuschließende Aufgaben-IDs"
@@ -4374,6 +4394,20 @@ help.arg.only-tasks:
   fr_FR: "Ne supprimer que ces IDs de tâche"
   pl_PL: "Wyczyść tylko te identyfikatory zadań"
 
+help.arg.os-git-hash:
+  en_US: "Git commit that built the OS release"
+  de_DE: "Git-Commit, aus dem die OS-Version erstellt wurde"
+  es_ES: "Commit de Git que generó la versión del SO"
+  fr_FR: "Commit Git ayant produit la version du système"
+  pl_PL: "Commit Git użyty do zbudowania wydania systemu"
+
+help.arg.os-security:
+  en_US: "Mark the OS release as a security update"
+  de_DE: "Die OS-Version als Sicherheitsupdate markieren"
+  es_ES: "Marcar la versión del SO como actualización de seguridad"
+  fr_FR: "Marquer la version du système comme mise à jour de sécurité"
+  pl_PL: "Oznacz wydanie systemu jako aktualizację bezpieczeństwa"
+
 help.arg.os-version:
   en_US: "StartOS version number"
   de_DE: "StartOS-Versionsnummer"
@@ -4465,6 +4499,13 @@ help.arg.registry-name:
   es_ES: "Nombre del registro"
   fr_FR: "Nom du registre"
   pl_PL: "Nazwa rejestru"
+
+help.arg.registry-security-notifications:
+  en_US: "Enable OS security-update announcements from this registry"
+  de_DE: "Ankündigungen von OS-Sicherheitsupdates dieser Registry aktivieren"
+  es_ES: "Activar los avisos de actualizaciones de seguridad del SO de este registro"
+  fr_FR: "Activer les annonces de mises à jour de sécurité du système provenant de ce registre"
+  pl_PL: "Włącz powiadomienia o aktualizacjach bezpieczeństwa systemu z tego rejestru"
 
 help.arg.registry-startwrt:
   en_US: "Serve StartWRT clients"
@@ -4682,6 +4723,13 @@ help.arg.tor-proxy-url:
   es_ES: "URL del proxy SOCKS de Tor"
   fr_FR: "URL du proxy SOCKS Tor"
   pl_PL: "URL proxy SOCKS Tor"
+
+help.arg.trust:
+  en_US: "Install without requiring a trusted signer; signature and integrity checks remain mandatory"
+  de_DE: "Ohne vertrauenswürdigen Unterzeichner installieren; Signatur- und Integritätsprüfungen bleiben erforderlich"
+  es_ES: "Instalar sin exigir un firmante de confianza; las comprobaciones de firma e integridad siguen siendo obligatorias"
+  fr_FR: "Installer sans exiger un signataire de confiance ; les contrôles de signature et d'intégrité restent obligatoires"
+  pl_PL: "Instaluj bez wymogu zaufanego sygnatariusza; kontrole podpisu i integralności pozostają obowiązkowe"
 
 help.arg.tunnel-address:
   en_US: "Tunnel server address"
@@ -5562,11 +5610,11 @@ about.check-port-v6-reachability:
   pl_PL: "Sprawdź, czy port jest osiągalny przez IPv6 (zapora GUA)"
 
 about.check-update-startos:
-  en_US: "Check a given registry for StartOS updates and update if available"
-  de_DE: "Ein bestimmtes Registry auf StartOS-Updates prüfen und bei Verfügbarkeit aktualisieren"
-  es_ES: "Verificar un registro dado para actualizaciones de StartOS y actualizar si está disponible"
-  fr_FR: "Vérifier un registre donné pour les mises à jour StartOS et mettre à jour si disponible"
-  pl_PL: "Sprawdź dany rejestr pod kątem aktualizacji StartOS i zaktualizuj, jeśli dostępne"
+  en_US: "Check for StartOS updates and update if available"
+  de_DE: "Nach StartOS-Updates suchen und bei Verfügbarkeit aktualisieren"
+  es_ES: "Buscar actualizaciones de StartOS y actualizar si están disponibles"
+  fr_FR: "Rechercher les mises à jour StartOS et mettre à jour si disponible"
+  pl_PL: "Sprawdź dostępność aktualizacji StartOS i zaktualizuj, jeśli są dostępne"
 
 about.clear-service-task:
   en_US: "Clear a service task"
@@ -7544,6 +7592,27 @@ tunnel.web.ui-port-reserved:
   fr_FR: "Cette plage inclut le port de l'interface d'administration activée ; utilisez des noms SNI pour le partager, ou désactivez d'abord l'interface ou changez son adresse."
   pl_PL: "Ten zakres obejmuje port włączonego panelu administracyjnego; użyj nazw SNI, aby go współdzielić, albo najpierw wyłącz panel lub zmień jego adres."
 
+update.security.available-message:
+  en_US: "StartOS %{version} includes security updates and is available from %{registry}."
+  de_DE: "StartOS %{version} enthält Sicherheitsupdates und ist unter %{registry} verfügbar."
+  es_ES: "StartOS %{version} incluye actualizaciones de seguridad y está disponible en %{registry}."
+  fr_FR: "StartOS %{version} contient des mises à jour de sécurité et est disponible sur %{registry}."
+  pl_PL: "StartOS %{version} zawiera aktualizacje bezpieczeństwa i jest dostępny w %{registry}."
+
+update.security.available-title:
+  en_US: "StartOS security update available"
+  de_DE: "StartOS-Sicherheitsupdate verfügbar"
+  es_ES: "Actualización de seguridad de StartOS disponible"
+  fr_FR: "Mise à jour de sécurité de StartOS disponible"
+  pl_PL: "Dostępna aktualizacja bezpieczeństwa StartOS"
+
+update.security.selected-registry:
+  en_US: "your selected OS registry"
+  de_DE: "Ihrer ausgewählten OS-Registry"
+  es_ES: "el registro del SO seleccionado"
+  fr_FR: "le registre du système sélectionné"
+  pl_PL: "wybranym rejestrze systemu"
+
 update.signers.already-exists:
   en_US: "This public key is already a trusted OS update signer"
   de_DE: "Dieser öffentliche Schlüssel ist bereits als Update-Unterzeichner vertrauenswürdig"
@@ -7557,6 +7626,27 @@ update.signers.not-found:
   es_ES: "No se encontró el firmante de confianza de actualizaciones del sistema"
   fr_FR: "Signataire de confiance des mises à jour du système introuvable"
   pl_PL: "Nie znaleziono zaufanego sygnatariusza aktualizacji systemu"
+
+trusted-keys.invalid:
+  en_US: "Enter a name and at least one Ed25519 public key"
+  de_DE: "Geben Sie einen Namen und mindestens einen öffentlichen Ed25519-Schlüssel ein"
+  es_ES: "Introduzca un nombre y al menos una clave pública Ed25519"
+  fr_FR: "Saisissez un nom et au moins une clé publique Ed25519"
+  pl_PL: "Podaj nazwę i co najmniej jeden klucz publiczny Ed25519"
+
+trusted-keys.not-found:
+  en_US: "Trusted keyring not found"
+  de_DE: "Vertrauenswürdiger Schlüsselbund nicht gefunden"
+  es_ES: "No se encontró el llavero de confianza"
+  fr_FR: "Trousseau de confiance introuvable"
+  pl_PL: "Nie znaleziono zaufanego pęku kluczy"
+
+trusted-keys.protected:
+  en_US: "Built-in keyrings cannot be deleted; disable their trust instead"
+  de_DE: "Integrierte Schlüsselbunde können nicht gelöscht werden; deaktivieren Sie stattdessen deren Vertrauen"
+  es_ES: "Los llaveros integrados no se pueden eliminar; desactive su confianza"
+  fr_FR: "Les trousseaux intégrés ne peuvent pas être supprimés ; désactivez plutôt leur confiance"
+  pl_PL: "Nie można usunąć wbudowanych pęków kluczy; zamiast tego wyłącz zaufanie do nich"
 
 version.http-auth-downgrade-requires-tls:
   en_US: "Cannot downgrade: an HTTP authentication policy has no TLS wrapper. Add TLS to this binding before downgrading."

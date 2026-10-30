@@ -1,9 +1,11 @@
-import { T, auth } from '@start9labs/start-core'
+import { matchingTrustedKeys } from '@start9labs/marketplace'
+import { T } from '@start9labs/start-core'
 
 export function trustedOsUpdateSigners(
   signers: string[],
-  trusted: Record<string, T.TrustedOsUpdateSigner>,
+  trusted: Record<string, T.TrustedKeyring>,
 ): string[] {
-  const keys = new Set(Object.keys(trusted).map(auth.normalizeDer64))
-  return signers.filter(signer => keys.has(auth.normalizeDer64(signer)))
+  return matchingTrustedKeys(signers, trusted, 'os').flatMap(
+    group => group.publicKeys,
+  )
 }
