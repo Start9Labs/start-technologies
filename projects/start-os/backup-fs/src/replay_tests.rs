@@ -70,7 +70,6 @@ fn committed_spills_beyond_the_persisted_size_remain_holes_on_growth() {
                     idx,
                     bytes,
                     crate::compress::Codec::None,
-                    true,
                 )
                 .unwrap();
             }
@@ -99,7 +98,8 @@ fn committed_spills_beyond_the_persisted_size_remain_holes_on_growth() {
 }
 
 #[test]
-fn object_reads_reject_older_versions_other_objects_and_missing_current_files() {
+fn block_reads_reject_older_versions_other_blocks_and_missing_segments() {
+    use std::os::unix::fs::FileExt;
     let data = tempfile::tempdir().unwrap();
     let fs = BackupFS::new(options(data.path())).unwrap();
     let c = ctrl(&fs);
@@ -107,58 +107,53 @@ fn object_reads_reject_older_versions_other_objects_and_missing_current_files() 
     let mut attrs = InodeAttributes::new(inode, None, FileData::File(ContentId(inode.0)));
     attrs.attrs.size = 3 * CHUNK_SIZE;
     c.save(&attrs).unwrap();
-    blockstore::write_block(
-        &c,
-        ContentId(inode.0),
-        0,
-        b"version-one",
-        crate::compress::Codec::None,
-        true,
-    )
-    .unwrap();
-    let old_path = c.resolve_block_path(ContentId(inode.0), 0);
-    let old = std::fs::read(old_path).unwrap();
-    blockstore::write_block(
-        &c,
-        ContentId(inode.0),
-        0,
-        b"version-two",
-        crate::compress::Codec::None,
-        true,
-    )
-    .unwrap();
-    blockstore::write_block(
-        &c,
-        ContentId(inode.0),
-        1,
-        b"healthy",
-        crate::compress::Codec::None,
-        true,
-    )
-    .unwrap();
-    let current_path = c.resolve_block_path(ContentId(inode.0), 0);
-    let current = std::fs::read(&current_path).unwrap();
-    let other = std::fs::read(c.resolve_block_path(ContentId(inode.0), 1)).unwrap();
+    let write = |idx, bytes: &[u8]| {
+        blockstore::write_block(
+            &c,
+            ContentId(inode.0),
+            idx,
+            bytes,
+            crate::compress::Codec::None,
+        )
+        .unwrap()
+    };
+    let frame = |idx| {
+        let (path, loc) = c.block_frame(ContentId(inode.0), idx);
+        let mut bytes = vec![0; loc.len as usize];
+        std::fs::File::open(&path)
+            .unwrap()
+            .read_exact_at(&mut bytes, loc.offset)
+            .unwrap();
+        (path, loc, bytes)
+    };
+    write(0, b"version-one");
+    let (_, _, old) = frame(0);
+    write(0, b"version-two");
+    write(1, b"version-zzz");
+    let (path, current_loc, current) = frame(0);
+    let (_, _, other) = frame(1);
+    let segment = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
     for replacement in [&old, &other] {
-        std::fs::write(&current_path, replacement).unwrap();
+        segment
+            .write_all_at(replacement, current_loc.offset)
+            .unwrap();
+        c.drop_read_caches();
         assert!(blockstore::read_block(&c, ContentId(inode.0), 0).is_err());
         assert_eq!(
             blockstore::read_block(&c, ContentId(inode.0), 1)
                 .unwrap()
                 .unwrap(),
-            b"healthy"
+            b"version-zzz"
         );
     }
-    std::fs::remove_file(&current_path).unwrap();
-    assert!(blockstore::read_block(&c, ContentId(inode.0), 0).is_err());
     assert!(blockstore::read_block(&c, ContentId(inode.0), 2)
         .unwrap()
         .is_none());
-    std::fs::write(&current_path, &current).unwrap();
-    let mut repaired = current;
+    let mut repaired = current.clone();
     let middle = repaired.len() / 2;
     repaired[middle] ^= 1;
-    std::fs::write(&current_path, repaired).unwrap();
+    segment.write_all_at(&repaired, current_loc.offset).unwrap();
+    c.drop_read_caches();
     assert_eq!(
         blockstore::read_block(&c, ContentId(inode.0), 0)
             .unwrap()
@@ -174,6 +169,22 @@ fn object_reads_reject_older_versions_other_objects_and_missing_current_files() 
             .unwrap(),
         b"version-two"
     );
+    drop(fs);
+    let saved = std::fs::read(segment_file(data.path(), current_loc.segment)).unwrap();
+    std::fs::remove_file(segment_file(data.path(), current_loc.segment)).unwrap();
+    let fs = BackupFS::new(options(data.path())).unwrap();
+    assert_eq!(
+        blockstore::read_block(&ctrl(&fs), ContentId(inode.0), 0)
+            .unwrap_err()
+            .to_errno(),
+        libc::EIO
+    );
+    drop(fs);
+    std::fs::write(segment_file(data.path(), current_loc.segment), saved).unwrap();
+}
+
+fn segment_file(data: &Path, segment: u64) -> std::path::PathBuf {
+    crate::seglog::segment_path(&data.join("segments"), segment)
 }
 
 #[test]
@@ -222,17 +233,16 @@ fn frozen_legacy_index_cache_is_used_only_for_its_matching_segment_inventory() {
     assert_eq!(read_inode(&fs, 2), b"frozen-inline");
 }
 
-fn add_legacy_orphan(data: &Path) -> std::path::PathBuf {
+fn legacy_block(data: &Path, index: u64) -> std::path::PathBuf {
     let sb =
         crate::superblock::Superblock::load(&data.join("superblock"), "password", true).unwrap();
-    let original = crate::objects::ObjectId::block(&sb.key, 4, 0)
-        .path(data, None)
-        .unwrap();
-    let orphan = crate::objects::ObjectId::block(&sb.key, 4, 4)
-        .path(data, None)
-        .unwrap();
+    crate::legacy::object_path(data, &sb.key, crate::seglog::RecordKey::Block(4, index)).unwrap()
+}
+
+fn add_legacy_orphan(data: &Path) -> std::path::PathBuf {
+    let orphan = legacy_block(data, 4);
     std::fs::create_dir_all(orphan.parent().unwrap()).unwrap();
-    std::fs::copy(original, &orphan).unwrap();
+    std::fs::copy(legacy_block(data, 0), &orphan).unwrap();
     orphan
 }
 
@@ -245,10 +255,7 @@ fn legacy_orphans_beyond_eof_do_not_become_visible_on_growth() {
     let fs = BackupFS::new(options(data.path())).unwrap();
     assert!(!orphan.exists());
     let c = ctrl(&fs);
-    assert!(c
-        .resolve_object(crate::objects::ObjectId::block(c.key(), 4, 4))
-        .unwrap()
-        .is_none());
+    assert!(!c.block_exists(ContentId(4), 4));
     let mut contents = Contents::open(c, Inode(4)).unwrap();
     contents.resize(5 * CHUNK_SIZE).unwrap();
     contents.flush().unwrap();
@@ -286,23 +293,19 @@ fn released_format_one_upgrades_without_losing_inline_packed_block_or_attribute_
 fn interrupted_upgrade_recovers_retired_sources_without_adopting_orphans() {
     let data = tempfile::tempdir().unwrap();
     crate::legacy::fixture(data.path());
-    add_legacy_orphan(data.path());
+    let orphan = add_legacy_orphan(data.path());
     let blocker = data.path().join("segments/state.tmp");
     std::fs::create_dir(&blocker).unwrap();
     assert!(BackupFS::convert(options(data.path())).is_err());
-    assert_eq!(
-        crate::objects::Inventory::load(data.path())
-            .unwrap()
-            .legacy_ids()
-            .count(),
-        0
-    );
+    assert!(legacy_block(data.path(), 0).exists());
+    assert!(orphan.exists());
     let mut readonly = options(data.path());
     readonly.readonly = true;
     assert!(BackupFS::new(readonly).is_err());
     std::fs::remove_dir(blocker).unwrap();
     BackupFS::convert(options(data.path())).unwrap();
     let fs = BackupFS::new(options(data.path())).unwrap();
+    assert!(!data.path().join("contents").exists());
     same_bytes(&read_inode(&fs, 4), &vec![0x31; 4 * CHUNK_SIZE as usize]);
     let mut contents = Contents::open(ctrl(&fs), Inode(4)).unwrap();
     contents.resize(5 * CHUNK_SIZE).unwrap();

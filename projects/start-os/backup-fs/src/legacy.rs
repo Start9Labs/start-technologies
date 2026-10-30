@@ -1,12 +1,80 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use chacha20::Key;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::error::BkfsResult;
-use crate::objects::StorageReferences;
+use crate::references::StorageReferences;
 use crate::seglog::{self, Record, RecordKey, SegMeta};
+use crate::util::hex;
+
+const OBJECT_ROOTS: [&str; 2] = ["contents", "dirents"];
+
+/// The format-1 file holding a block or directory bucket.
+pub(crate) fn object_path(data: &Path, key: &Key, object: RecordKey) -> Option<PathBuf> {
+    let mut hash = Sha256::new();
+    hash.update(key.as_slice());
+    let root = match object {
+        RecordKey::Block(content, index) => {
+            hash.update(b"block");
+            hash.update(content.to_le_bytes());
+            hash.update(index.to_le_bytes());
+            "contents"
+        }
+        RecordKey::Bucket(directory, generation, index) => {
+            hash.update(b"dirbucket");
+            hash.update(directory.to_le_bytes());
+            hash.update(generation.to_le_bytes());
+            hash.update(index.to_le_bytes());
+            "dirents"
+        }
+        RecordKey::Inode(_) | RecordKey::Content(_) => return None,
+    };
+    let hash = hash.finalize();
+    Some(
+        data.join(root)
+            .join(hex(&hash[..2]))
+            .join(hex(&hash[2..16])),
+    )
+}
+
+/// Best-effort removal of the format-1 object directories.
+pub(crate) fn remove_object_trees(data: &Path) {
+    let shards = Mutex::new(Vec::new());
+    for root in OBJECT_ROOTS {
+        match std::fs::read_dir(data.join(root)) {
+            Ok(entries) => shards
+                .lock()
+                .unwrap()
+                .extend(entries.flatten().map(|entry| entry.path())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => ::log::warn!("cannot list retired {root} objects: {error}"),
+        }
+    }
+    std::thread::scope(|scope| {
+        for _ in 0..16 {
+            scope.spawn(|| loop {
+                let Some(shard) = shards.lock().unwrap().pop() else {
+                    break;
+                };
+                if let Err(error) = std::fs::remove_dir_all(&shard) {
+                    ::log::warn!("cannot remove retired objects in {shard:?}: {error}");
+                }
+            });
+        }
+    });
+    for root in OBJECT_ROOTS {
+        match std::fs::remove_dir(data.join(root)) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                ::log::warn!("cannot remove retired {root} directory: {error}")
+            }
+            _ => {}
+        }
+    }
+}
 
 mod log;
 pub(crate) use log::Log;

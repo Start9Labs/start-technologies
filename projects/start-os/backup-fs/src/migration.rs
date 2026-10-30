@@ -1,20 +1,40 @@
 use std::collections::HashMap;
-use std::fs::{self, File};
+use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use chacha20::Key;
+use crossbeam_channel::bounded;
 use log::warn;
 
 use crate::atomic_file::AtomicFile;
 use crate::error::{BkfsErrorKind, BkfsResult};
-use crate::objects::{Inventory, ObjectVersion};
-use crate::seglog::{self, Frames, Location, Record, SegmentWriter};
+use crate::references::StorageReferences;
+use crate::seglog::{self, Frames, Location, Record, RecordKey, SealedRecord, SegmentLog};
 use crate::serde::{data_config, decode};
 use crate::state::{Counters, State};
 use crate::superblock::Constants;
 use crate::vault::{self, AuthenticationTag, Binding, EccParams};
 use crate::{legacy, ConversionPhase, ConversionProgress};
+
+const READERS: usize = 16;
+const BATCH_BYTES: u64 = 64 << 20;
+
+#[cfg(test)]
+thread_local! {
+    /// Object-batch commits that fail with ENOSPC on this thread.
+    pub(crate) static FULL_COMMITS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+fn commit_batch(log: &mut SegmentLog) -> BkfsResult<()> {
+    #[cfg(test)]
+    if FULL_COMMITS.with(|full| full.replace(full.get().saturating_sub(1)) > 0) {
+        return Err(std::io::Error::from_raw_os_error(libc::ENOSPC).into());
+    }
+    log.sync()
+}
 
 pub(crate) struct UpgradePlain {
     pub plaintext: Vec<u8>,
@@ -44,85 +64,32 @@ pub(crate) fn open_for_upgrade(
     })
 }
 
+/// Unreadable input, reported once per attempt.
 #[derive(Default)]
 struct Unreadable {
-    objects: u64,
-    records: u64,
+    objects: AtomicU64,
+    records: AtomicU64,
 }
 
 impl Drop for Unreadable {
     fn drop(&mut self) {
-        if self.objects > 0 || self.records > 0 {
-            warn!(
-                "conversion encountered {} unreadable objects and {} unreadable records",
-                self.objects, self.records
-            );
+        let objects = *self.objects.get_mut();
+        let records = *self.records.get_mut();
+        if objects > 0 || records > 0 {
+            warn!("conversion encountered {objects} unreadable objects and {records} unreadable records");
         }
     }
 }
 
-fn upgraded_blob(
-    blob: &[u8],
-    key: &Key,
-    binding: Binding,
-    unreadable: &mut Unreadable,
-) -> BkfsResult<Option<Vec<u8>>> {
-    match open_for_upgrade(blob, key, binding) {
-        Ok(opened) if opened.current_tag.is_some() => Ok(None),
-        Ok(opened) => Ok(Some(
-            vault::seal_bound(
-                &opened.plaintext,
-                key,
-                EccParams {
-                    data: blob[5],
-                    parity: blob[6],
-                },
-                binding,
-            )
-            .bytes,
-        )),
-        Err(error) if matches!(error.kind, BkfsErrorKind::BadChecksum) => {
-            unreadable.objects += 1;
-            Ok(None)
-        }
-        Err(error) => Err(error),
-    }
-}
+type Report<'a> = &'a mut dyn FnMut(ConversionProgress) -> BkfsResult<()>;
 
-fn migrate_object(
-    source: &Path,
-    destination: &Path,
-    key: &Key,
-    binding: Binding,
-    unreadable: &mut Unreadable,
+fn progress(
+    report: &mut Report,
+    phase: ConversionPhase,
+    done: u64,
+    total: Option<u64>,
 ) -> BkfsResult<()> {
-    match fs::read(destination) {
-        Ok(bytes) if vault::open_bound(&bytes, key, binding).is_ok() => return Ok(()),
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
-    }
-    let bytes = match fs::read(source) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error.into()),
-    };
-    let upgraded = upgraded_blob(&bytes, key, binding, unreadable)?;
-    let mut file = AtomicFile::create_buffered(destination.to_owned())?;
-    file.write_all(upgraded.as_deref().unwrap_or(&bytes))?;
-    file.save_fast()
-}
-
-fn retire_sources(backing: &File, sources: &mut Vec<PathBuf>) -> BkfsResult<()> {
-    if sources.is_empty() {
-        return Ok(());
-    }
-    crate::util::sync_filesystem(backing)?;
-    for source in sources.drain(..) {
-        fs::remove_file(source)?;
-    }
-    crate::util::sync_filesystem(backing)?;
-    Ok(())
+    report(ConversionProgress { phase, done, total })
 }
 
 /// Requires the exclusive store lock and authenticated pending marker.
@@ -130,35 +97,46 @@ pub(crate) fn reseal_store(
     data: &Path,
     key: &Key,
     constants: Constants,
-    report: &mut dyn FnMut(ConversionProgress) -> BkfsResult<()>,
+    mut report: Report,
 ) -> BkfsResult<()> {
     let dir = data.join("segments");
     fs::create_dir_all(&dir)?;
-    if dir.join("state").try_exists()? {
-        report(ConversionProgress {
-            phase: ConversionPhase::Publishing,
-            done: 0,
-            total: None,
-        })?;
-        State::open(&dir, key)?;
-        return Ok(());
+    let unreadable = Unreadable::default();
+    if !dir.join("state").try_exists()? {
+        reseal_log(data, &dir, key, constants, &mut report, &unreadable)?;
     }
+    let mut batch = BATCH_BYTES;
+    loop {
+        match migrate_objects(data, key, constants, batch, &mut report, &unreadable) {
+            Err(error)
+                if batch > 1
+                    && matches!(&error.kind, BkfsErrorKind::Io(io) if io.raw_os_error() == Some(libc::ENOSPC)) =>
+            {
+                batch /= 4;
+            }
+            result => return result,
+        }
+    }
+}
+
+/// Reseals format-1 log frames in place and publishes their index.
+fn reseal_log(
+    data: &Path,
+    dir: &Path,
+    key: &Key,
+    constants: Constants,
+    report: &mut Report,
+    unreadable: &Unreadable,
+) -> BkfsResult<()> {
     let mut source = legacy::Source::load(data, key)?;
-    let mut unreadable = Unreadable::default();
     let mut locations = HashMap::new();
-    let mut stable = HashMap::new();
-    let segments = seglog::list_segments(&dir)?;
-    let total = segments
-        .iter()
-        .fold(0u64, |total, (_, size)| total.saturating_add(*size));
+    let mut sizes = HashMap::new();
+    let segments = seglog::list_segments(dir)?;
+    let total = segments.iter().map(|(_, size)| size).sum();
     let mut done = 0;
-    report(ConversionProgress {
-        phase: ConversionPhase::Records,
-        done,
-        total: Some(total),
-    })?;
+    progress(report, ConversionPhase::Records, done, Some(total))?;
     for (segment, size) in segments {
-        let path = seglog::segment_path(&dir, segment);
+        let path = seglog::segment_path(dir, segment);
         let bytes = fs::read(&path)?;
         let mut rewritten = bytes.clone();
         let mut changed = false;
@@ -176,37 +154,20 @@ pub(crate) fn reseal_store(
                     let record: Record = match decode(&opened.plaintext, data_config()) {
                         Ok(record) => record,
                         Err(_) => {
-                            unreadable.records += 1;
+                            unreadable.records.fetch_add(1, Ordering::Relaxed);
                             locations.insert((segment, frame.offset as u64), location);
                             continue;
                         }
                     };
-                    let migrated = match record {
-                        Record::Object {
-                            id,
-                            version: ObjectVersion::Version(token),
-                        } if token == vault::migration_version(key, id)? => Some(id),
-                        Record::Object { .. } => {
-                            return Err(crate::error::BkfsError::unsupported(
-                                "unexpected object record during format-1 migration",
-                            ))
-                        }
-                        _ => None,
-                    };
-                    // Migration pointers belong to the resumed output, not the source namespace.
-                    if migrated.is_some() {
-                        source.advance_sequence(frame.seq)?;
-                    } else {
-                        source.observe(
-                            &record,
-                            frame.seq,
-                            legacy::Location {
-                                segment,
-                                offset: frame.offset as u64,
-                                len: frame.len,
-                            },
-                        )?;
-                    }
+                    source.observe(
+                        &record,
+                        frame.seq,
+                        legacy::Location {
+                            segment,
+                            offset: frame.offset as u64,
+                            len: frame.len,
+                        },
+                    )?;
                     let payload = match opened.current_tag {
                         Some(tag) => {
                             location.tag = tag;
@@ -236,112 +197,227 @@ pub(crate) fn reseal_store(
                         changed = true;
                     }
                     rewritten[frame.offset..end].copy_from_slice(&encoded);
-                    if let Some(id) = migrated {
-                        stable.insert(id, location);
-                    }
                 }
                 Err(error) if matches!(error.kind, BkfsErrorKind::BadChecksum) => {
-                    unreadable.records += 1;
+                    unreadable.records.fetch_add(1, Ordering::Relaxed);
                 }
                 Err(error) => return Err(error),
             }
             locations.insert((segment, frame.offset as u64), location);
         }
+        sizes.insert(segment, rewritten.len() as u64);
         if changed {
             let mut file = AtomicFile::create_buffered(path)?;
             file.write_all(&rewritten)?;
             file.save_durable()?;
         }
-        done = done.saturating_add(size);
-        report(ConversionProgress {
-            phase: ConversionPhase::Records,
-            done,
-            total: Some(total),
-        })?;
+        done += size;
+        progress(report, ConversionPhase::Records, done, Some(total))?;
     }
     let mut roots = source.roots(&locations);
-    report(ConversionProgress {
-        phase: ConversionPhase::ScanningObjects,
-        done: 0,
-        total: None,
-    })?;
-    let inventory = Inventory::load_with_progress(data, |done| {
-        report(ConversionProgress {
-            phase: ConversionPhase::ScanningObjects,
-            done,
-            total: None,
-        })
-    })?;
-    let total = inventory.legacy_ids().count() as u64;
-    report(ConversionProgress {
-        phase: ConversionPhase::Objects,
-        done: 0,
-        total: Some(total),
-    })?;
-    let mut writer = None;
-    let backing = File::open(data)?;
-    let mut retired = Vec::new();
-    for (index, id) in inventory.legacy_ids().enumerate() {
-        let token = vault::migration_version(key, id)?;
-        let version = ObjectVersion::Version(token);
-        let original = id.path(data, None).unwrap();
-        let mut stage = || -> BkfsResult<()> {
-            migrate_object(
-                &original,
-                &id.path(data, Some(version)).unwrap(),
-                key,
-                Binding::Object { id, version: token },
-                &mut unreadable,
-            )?;
-            if !stable.contains_key(&id) {
-                let record = seglog::seal_object(key, constants.ecc(), id, version)?;
-                if writer.is_none() {
-                    writer = Some(SegmentWriter::new(&dir, constants.segment_size)?);
-                }
-                let seq = source.next_seq;
-                source.advance_sequence(seq)?;
-                let location = writer.as_mut().unwrap().append(seq, &record)?;
-                stable.insert(id, location);
-            }
-            Ok(())
-        };
-        if let Err(error) = stage() {
-            if !matches!(&error.kind, BkfsErrorKind::Io(io) if io.raw_os_error() == Some(libc::ENOSPC))
-                || retired.is_empty()
-            {
-                return Err(error);
-            }
-            retire_sources(&backing, &mut retired)?;
-            stage()?;
-        }
-        retired.push(original);
-        if retired.len() >= crate::util::sync_batch() {
-            retire_sources(&backing, &mut retired)?;
-        }
-        report(ConversionProgress {
-            phase: ConversionPhase::Objects,
-            done: index as u64 + 1,
-            total: Some(total),
-        })?;
-    }
-    retire_sources(&backing, &mut retired)?;
-    report(ConversionProgress {
-        phase: ConversionPhase::Publishing,
-        done: 0,
-        total: None,
-    })?;
-    for references in source.storage.values() {
-        references.visit_objects(key, |id| {
-            if let Some(&location) = stable.get(&id) {
-                roots.objects.entry(id).or_insert(location);
-            }
-        });
-    }
+    roots.sizes = sizes;
     let counters = Counters {
         next_seq: source.next_seq,
         max_inode: source.max_inode,
     };
-    State::create(&dir, key, constants.ecc(), &roots, counters, None)?;
-    File::open(data)?.sync_all()?;
+    State::create(dir, key, constants.ecc(), &roots, counters, None)?;
+    Ok(())
+}
+
+enum Fetched {
+    Missing,
+    Sealed(SealedRecord),
+    Unreadable(Vec<u8>),
+}
+
+fn fetch(
+    data: &Path,
+    key: &Key,
+    ecc: EccParams,
+    wanted: RecordKey,
+    unreadable: &Unreadable,
+) -> BkfsResult<(PathBuf, Fetched)> {
+    let path = legacy::object_path(data, key, wanted).expect("object key");
+    let blob = match fs::read(&path) {
+        Ok(blob) => blob,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((path, Fetched::Missing))
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let plaintext = match vault::open_legacy(&blob, key) {
+        Ok(plaintext) => plaintext,
+        Err(error) if matches!(error.kind, BkfsErrorKind::BadChecksum) => {
+            unreadable.objects.fetch_add(1, Ordering::Relaxed);
+            return Ok((path, Fetched::Unreadable(blob)));
+        }
+        Err(error) => return Err(error),
+    };
+    let sealed = match wanted {
+        RecordKey::Block(content, index) => {
+            seglog::seal_block(key, ecc, content, index, plaintext)?
+        }
+        RecordKey::Bucket(directory, generation, index) => {
+            seglog::seal_bucket(key, ecc, directory, generation, index, plaintext)?
+        }
+        _ => unreachable!("object key"),
+    };
+    Ok((path, Fetched::Sealed(sealed)))
+}
+
+/// Moves referenced format-1 object files into data segments.
+///
+/// A committed record retires its source file; a retry resumes from the
+/// committed index.
+fn migrate_objects(
+    data: &Path,
+    key: &Key,
+    constants: Constants,
+    batch: u64,
+    report: &mut Report,
+    unreadable: &Unreadable,
+) -> BkfsResult<()> {
+    let ecc = constants.ecc();
+    let mut log = SegmentLog::open_sized(
+        data.join("segments"),
+        *key,
+        constants.segment_size,
+        ecc,
+        false,
+    )?;
+    let mut wanted = Vec::new();
+    let mut retired = Vec::new();
+    let inodes: Vec<_> = log
+        .roots()
+        .index
+        .iter()
+        .map(|(&id, &loc)| (id, loc))
+        .collect();
+    let scan_total = Some(inodes.len() as u64);
+    let mut scanned = 0;
+    progress(report, ConversionPhase::ScanningObjects, 0, scan_total)?;
+    log.visit_records(
+        inodes.iter().map(|(id, loc)| (RecordKey::Inode(*id), loc)),
+        |record| {
+            if let Record::Inode { inode, attrs } = record {
+                StorageReferences::for_inode(inode, &attrs).visit(|object| {
+                    if log.roots().get(object).is_some() {
+                        retired.push(object);
+                    } else {
+                        wanted.push(object);
+                    }
+                });
+            }
+            scanned += 1;
+            if scanned % 1024 == 0 {
+                progress(
+                    report,
+                    ConversionPhase::ScanningObjects,
+                    scanned,
+                    scan_total,
+                )?;
+            }
+            Ok(())
+        },
+    )?;
+    progress(
+        report,
+        ConversionPhase::ScanningObjects,
+        scanned,
+        scan_total,
+    )?;
+    let total = Some(wanted.len() as u64);
+    let mut done = 0;
+    progress(report, ConversionPhase::Objects, done, total)?;
+    let failure = Mutex::new(None);
+    std::thread::scope(|scope| -> BkfsResult<()> {
+        let (jobs, job_queue) = bounded::<RecordKey>(READERS * 4);
+        let (results, fetched) = bounded(READERS * 4);
+        let (unlinks, unlink_queue) = bounded::<PathBuf>(READERS * 64);
+        for _ in 0..READERS {
+            let job_queue = job_queue.clone();
+            let results = results.clone();
+            scope.spawn(move || {
+                while let Ok(object) = job_queue.recv() {
+                    if results
+                        .send((object, fetch(data, key, ecc, object, unreadable)))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            });
+            let unlink_queue = unlink_queue.clone();
+            let failure = &failure;
+            scope.spawn(move || {
+                while let Ok(path) = unlink_queue.recv() {
+                    if let Err(error) = fs::remove_file(&path) {
+                        if error.kind() != std::io::ErrorKind::NotFound {
+                            failure.lock().unwrap().get_or_insert(error);
+                        }
+                    }
+                }
+            });
+        }
+        drop(results);
+        let retired_paths: Vec<_> = retired
+            .iter()
+            .filter_map(|&object| legacy::object_path(data, key, object))
+            .collect();
+        let feed = scope.spawn(move || {
+            for object in wanted {
+                if jobs.send(object).is_err() {
+                    break;
+                }
+            }
+        });
+        for path in retired_paths {
+            let _ = unlinks.send(path);
+        }
+        let mut sources = Vec::new();
+        let mut pending = 0;
+        let outcome = (|| -> BkfsResult<()> {
+            for (object, result) in fetched.iter() {
+                let (path, fetched) = result?;
+                match fetched {
+                    Fetched::Missing => {}
+                    Fetched::Sealed(record) => {
+                        pending += record.len();
+                        log.append(&record)?;
+                        sources.push(path);
+                    }
+                    Fetched::Unreadable(blob) => {
+                        pending += blob.len() as u64;
+                        log.preserve_unreadable(object, &blob)?;
+                        sources.push(path);
+                    }
+                }
+                if pending >= batch {
+                    commit_batch(&mut log)?;
+                    pending = 0;
+                    for path in sources.drain(..) {
+                        let _ = unlinks.send(path);
+                    }
+                }
+                done += 1;
+                progress(report, ConversionPhase::Objects, done, total)?;
+            }
+            commit_batch(&mut log)?;
+            for path in sources.drain(..) {
+                let _ = unlinks.send(path);
+            }
+            Ok(())
+        })();
+        drop(fetched);
+        drop(unlinks);
+        let _ = feed.join();
+        outcome
+    })?;
+    if let Some(error) = failure.into_inner().unwrap() {
+        return Err(error.into());
+    }
+    drop(log);
+    progress(report, ConversionPhase::Publishing, 0, None)?;
+    legacy::remove_object_trees(data);
     Ok(())
 }

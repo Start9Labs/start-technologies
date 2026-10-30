@@ -51,6 +51,9 @@ fn conversion_progress_stops_on_interruption_and_completes_after_durable_resumpt
         Ok(())
     });
     assert!(result.is_err());
+    assert!(first
+        .iter()
+        .any(|event| event.phase == ConversionPhase::Records));
     assert!(!first
         .iter()
         .any(|event| event.phase == ConversionPhase::Complete));
@@ -78,8 +81,8 @@ fn conversion_progress_stops_on_interruption_and_completes_after_durable_resumpt
     })
     .unwrap();
     let phases: Vec<_> = resumed.iter().map(|event| event.phase).collect();
+    assert!(!phases.contains(&ConversionPhase::Records));
     for phase in [
-        ConversionPhase::Records,
         ConversionPhase::ScanningObjects,
         ConversionPhase::Objects,
         ConversionPhase::Publishing,

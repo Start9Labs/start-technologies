@@ -39,9 +39,9 @@ impl Log {
                     Ok(record) => record,
                     Err(_) => continue,
                 };
-                if matches!(record, Record::Object { .. }) {
+                if matches!(record, Record::Block { .. } | Record::Bucket { .. }) {
                     return Err(BkfsError::unsupported(
-                        "unexpected object record in format 1",
+                        "unexpected block or bucket record in format 1",
                     ));
                 }
                 source.observe(

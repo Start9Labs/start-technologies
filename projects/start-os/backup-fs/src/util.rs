@@ -15,7 +15,7 @@ pub(crate) fn sync_batch() -> usize {
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
             .filter(|&n| n > 0)
-            .unwrap_or(256)
+            .unwrap_or(4096)
     })
 }
 

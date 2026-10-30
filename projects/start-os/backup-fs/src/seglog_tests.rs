@@ -1,3 +1,5 @@
+use std::fs::OpenOptions;
+
 use super::*;
 use crate::inode::{FileData, InodeAttributes};
 
@@ -125,10 +127,12 @@ fn a_replayed_valid_frame_is_rejected_even_after_renumbering() {
         .open(segment_path(log.directory(), loc.segment))
         .unwrap();
     file.write_all_at(&old_frame, loc.offset).unwrap();
+    log.drop_read_caches();
     assert!(log.load(Inode(7)).is_err());
     let old_payload = Frames::new(&old_frame).next().unwrap().payload;
     let renumbered = encode_frame(loc.seq, old_payload);
     file.write_all_at(&renumbered, loc.offset).unwrap();
+    log.drop_read_caches();
     assert!(log.load(Inode(7)).is_err());
     assert_eq!(inline(&log, 8), b"healthy");
     drop(log);
@@ -165,15 +169,13 @@ fn unindexed_authenticated_tail_is_ignored() {
         &attrs(b"uncommitted"),
     )
     .unwrap();
-    let writer = log.writer.as_ref().unwrap();
-    writer
-        .file
-        .as_ref()
+    let path = segment_path(log.directory(), log.roots.index[&7].segment);
+    let end = std::fs::metadata(&path).unwrap().len();
+    OpenOptions::new()
+        .write(true)
+        .open(&path)
         .unwrap()
-        .write_all_at(
-            &encode_frame(log.next_seq, &later.sealed.bytes),
-            writer.offset,
-        )
+        .write_all_at(&encode_frame(log.next_seq, &later.sealed.bytes), end)
         .unwrap();
     drop(log);
     let log = SegmentLog::open(data.path().join("segments"), key()).unwrap();
@@ -197,6 +199,7 @@ fn ecc_repairs_data_without_invalidating_its_parent_reference() {
     file.read_exact_at(&mut byte, offset).unwrap();
     byte[0] ^= 1;
     file.write_all_at(&byte, offset).unwrap();
+    log.drop_read_caches();
     assert_eq!(inline(&log, 7), b"recoverable");
 }
 
@@ -217,6 +220,7 @@ fn edited_crc_header_lengths_return_an_error_without_allocating_from_them() {
         .unwrap()
         .write_all_at(&bytes, loc.offset)
         .unwrap();
+    log.drop_read_caches();
     assert!(log.load(Inode(7)).is_err());
 }
 

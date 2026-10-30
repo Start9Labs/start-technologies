@@ -53,14 +53,15 @@ mod migration;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod mount_tests;
-mod objects;
 mod pool;
+mod references;
 mod snapshot;
 mod state;
 pub use snapshot::SnapshotInfo;
 #[cfg(test)]
 mod replay_tests;
 mod seglog;
+mod segwriter;
 mod serde;
 #[cfg(test)]
 mod snapshot_tests;
@@ -82,20 +83,6 @@ pub(crate) static SYNCFS_CALL_COUNT: std::sync::atomic::AtomicU64 =
 #[cfg(test)]
 pub(crate) static FSYNCDIR_CALL_COUNT: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
-
-pub(crate) fn open_direct(
-    path: &Path,
-    create: bool,
-) -> io::Result<aligned_io::BufferedDirectFile<File>> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut opts = File::options();
-    opts.read(true).custom_flags(libc::O_DIRECT);
-    if create {
-        opts.write(true).create(true).truncate(true);
-    }
-    aligned_io::BufferedDirectFile::new(opts.open(path)?)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-}
 
 #[cfg_attr(feature = "cli", derive(clap::Parser))]
 pub struct BackupFSOptions {
@@ -262,8 +249,8 @@ impl Filesystem for BackupFS {
     fn forget(&self, _req: &Request, _ino: INodeNo, _nlookup: u64) {}
 
     fn getattr(&self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
-        let mut h = self.handler.lock().unwrap();
-        match h.mutate_inode(Inode(ino.into()), |_, inode| Ok((&*inode).into())) {
+        let h = self.handler.lock().unwrap();
+        match h.peek_inode(Inode(ino.into()), |inode| Ok(inode.into())) {
             Ok(attr) => reply.attr(&ENTRY_TTL, &attr),
             Err(e) => reply.error(errno(e.to_errno_log())),
         }
@@ -292,6 +279,11 @@ impl Filesystem for BackupFS {
             return;
         }
         let mut h = self.handler.lock().unwrap();
+        let fh = fh.map(|fh| FileHandleId(fh.into()));
+        if size.is_some() && fh.is_some_and(|fh| !h.handle(fh).is_some_and(|handle| handle.write)) {
+            reply.error(errno(libc::EACCES));
+            return;
+        }
         let resize_handle = if size.is_some() {
             match h.fopen(Inode(ino.into()), false, true, |_, _| Ok(())) {
                 Ok(handle) => Some(handle),
@@ -303,8 +295,19 @@ impl Filesystem for BackupFS {
         } else {
             None
         };
-        let result = h
-            .setattr(
+        // Resizing compares against the size before this request applies it.
+        let resized = match (resize_handle, size) {
+            (Some(handle), Some(size)) => h
+                .handle(handle)
+                .unwrap()
+                .contents
+                .lock()
+                .unwrap()
+                .resize(size),
+            _ => Ok(()),
+        };
+        let result = resized.and_then(|()| {
+            h.setattr(
                 req,
                 Inode(ino.into()),
                 mode,
@@ -314,23 +317,13 @@ impl Filesystem for BackupFS {
                 atime,
                 mtime,
                 ctime,
-                fh.map(|fh| FileHandleId(fh.into())),
+                fh,
                 crtime,
                 chgtime,
                 bkuptime,
                 flags.map(|f| f.bits()),
             )
-            .and_then(|inode| {
-                if let Some(handle) = resize_handle {
-                    h.handle(handle)
-                        .unwrap()
-                        .contents
-                        .lock()
-                        .unwrap()
-                        .resize(size.unwrap())?;
-                }
-                Ok(inode)
-            });
+        });
         let close = resize_handle
             .map(|handle| h.fclose(handle))
             .unwrap_or(Ok(()));
@@ -543,12 +536,16 @@ impl Filesystem for BackupFS {
         // so reads and writes on the same file stay in order.
         let key = handle.inode.0;
         pool::global().submit_for(key, move || {
-            let mut contents = handle.contents.lock().unwrap();
-            let available = contents.inode.attrs.size.saturating_sub(offset) as usize;
-            let size = (size as usize).min(available);
-            let mut buf = vec![0_u8; size];
-            match contents.read_exact_at(&mut buf, offset) {
-                Ok(()) => reply.data(&buf),
+            let result = {
+                let mut contents = handle.contents.lock().unwrap();
+                let available = contents.inode.attrs.size.saturating_sub(offset) as usize;
+                let mut buf = vec![0_u8; (size as usize).min(available)];
+                contents.read_exact_at(&mut buf, offset).map(|()| buf)
+            };
+            // The kernel may release the file once it has the reply.
+            drop(handle);
+            match result {
+                Ok(buf) => reply.data(&buf),
                 Err(e) => reply.error(errno(e.to_errno_log())),
             }
         });
@@ -584,14 +581,18 @@ impl Filesystem for BackupFS {
         let buf = data.to_vec();
         let key = handle.inode.0;
         pool::global().submit_for(key, move || {
-            let mut contents = handle.contents.lock().unwrap();
-            match contents.write_at(&buf, offset) {
-                Ok(written) => {
+            let result = {
+                let mut contents = handle.contents.lock().unwrap();
+                contents.write_at(&buf, offset).inspect(|&written| {
                     if written > 0 && write_flags.contains(WriteFlags::FUSE_WRITE_KILL_SUIDGID) {
                         contents.inode.attrs.clear_suid_sgid();
                     }
-                    reply.written(written as u32);
-                }
+                })
+            };
+            // The kernel may release the file once it has the reply.
+            drop(handle);
+            match result {
+                Ok(written) => reply.written(written as u32),
                 Err(e) => reply.error(errno(e.to_errno_log())),
             }
         });
@@ -648,9 +649,13 @@ impl Filesystem for BackupFS {
         // Route by inode so fsync observes prior write jobs for the
         // same file (shard FIFO order).
         let key = handle.inode.0;
-        pool::global().submit_for(key, move || match handle.contents.lock().unwrap().fsync() {
-            Ok(()) => reply.ok(),
-            Err(e) => reply.error(errno(e.to_errno_log())),
+        pool::global().submit_for(key, move || {
+            let result = handle.contents.lock().unwrap().fsync();
+            drop(handle);
+            match result {
+                Ok(()) => reply.ok(),
+                Err(e) => reply.error(errno(e.to_errno_log())),
+            }
         });
     }
 

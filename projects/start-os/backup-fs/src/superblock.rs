@@ -115,7 +115,7 @@ pub(crate) const ENVELOPE_LEN: usize = OFF_SALT + PBKDF2_SALT_LEN;
 // filesystem creation and then frozen into the superblock. Existing stores
 // source these from the superblock, never the environment.
 const DEFAULT_INLINE_THRESHOLD: u64 = 4096;
-const DEFAULT_SEGMENT_SIZE: u64 = 8 * 1024 * 1024;
+const DEFAULT_SEGMENT_SIZE: u64 = 64 * 1024 * 1024;
 const DEFAULT_DIR_SPILL: u32 = 1024;
 const DEFAULT_DIR_MAX_BUCKET: u32 = 4096;
 
@@ -551,6 +551,7 @@ impl Superblock {
         if self.format_version < FORMAT_VERSION {
             self.format_version = FORMAT_VERSION;
             self.migration_pending = true;
+            self.constants.segment_size = self.constants.segment_size.max(DEFAULT_SEGMENT_SIZE);
             self.generation = self
                 .generation
                 .checked_add(1)
@@ -818,38 +819,35 @@ mod tests {
         }
     }
 
-    fn migrated_object(data: &Path, original: &Path, key: &Key) -> (PathBuf, vault::Binding) {
-        let id = crate::objects::ObjectId::legacy(
-            original.starts_with(data.join("dirents")),
-            original.parent().unwrap().file_name().unwrap(),
-            original.file_name().unwrap(),
-        )
-        .unwrap();
-        let version = vault::migration_version(key, id).unwrap();
-        (
-            id.path(data, Some(crate::objects::ObjectVersion::Version(version)))
-                .unwrap(),
-            vault::Binding::Object { id, version },
-        )
+    fn legacy_block(data: &Path, key: &Key, index: u64) -> PathBuf {
+        crate::legacy::object_path(data, key, crate::seglog::RecordKey::Block(4, index)).unwrap()
     }
 
-    fn migrated_plain(data: &Path, original: &Path) -> Vec<u8> {
-        let ctrl = crate::ctrl::Controller::new(options(data, true)).unwrap();
-        let (path, binding) = migrated_object(data, original, ctrl.key());
-        vault::open_bound(&std::fs::read(path).unwrap(), ctrl.key(), binding)
-            .unwrap()
-            .plaintext
+    fn read_range(data: &Path, inode: u64, offset: u64, len: usize) -> BkfsResult<Vec<u8>> {
+        let ctrl = crate::ctrl::Controller::new(options(data, true))?;
+        let mut contents = crate::contents::Contents::open(ctrl, crate::inode::Inode(inode))?;
+        let mut bytes = vec![0; len];
+        contents.read_exact_at(&mut bytes, offset)?;
+        Ok(bytes)
+    }
+
+    const CHUNK: usize = crate::blockstore::CHUNK_SIZE as usize;
+
+    fn assert_fixture_data(data: &Path) {
+        assert_eq!(
+            read_range(data, 4, 0, 4 * CHUNK).unwrap(),
+            vec![0x31; 4 * CHUNK]
+        );
+        assert_eq!(read_range(data, 3, 0, 12000).unwrap(), vec![0x42; 12000]);
+        assert_eq!(read_range(data, 2, 0, 13).unwrap(), b"frozen-inline");
     }
 
     #[test]
     fn legacy_store_upgrades_and_remounts_without_fuse() {
         let (dir, legacy) = legacy_store();
         let primary = dir.path().join("superblock");
-        let old_blob = std::fs::read(
-            dir.path()
-                .join("contents/abcd/0123456789abcdef0123456789ab"),
-        )
-        .unwrap();
+        let block = legacy_block(dir.path(), &legacy.key, 0);
+        let old_blob = std::fs::read(&block).unwrap();
         crate::BackupFS::convert(options(dir.path(), false)).unwrap();
         let mounted = crate::BackupFS::new(options(dir.path(), false)).unwrap();
         let sb = Superblock::load(&primary, "password", true).unwrap();
@@ -858,28 +856,25 @@ mod tests {
         assert_eq!(sb.generation, legacy.generation + 2);
         assert_eq!(sb.key, legacy.key);
         for name in ["contents", "dirents"] {
-            let original = dir
-                .path()
-                .join(name)
-                .join("abcd/0123456789abcdef0123456789ab");
-            assert_eq!(migrated_plain(dir.path(), &original), name.as_bytes());
+            assert!(!dir.path().join(name).exists());
         }
         assert!(vault::open(&old_blob, &sb.key).is_err());
         drop(mounted);
+        assert_fixture_data(dir.path());
         let remounted = crate::BackupFS::new(options(dir.path(), true)).unwrap();
         drop(remounted);
         let log = crate::seglog::SegmentLog::open(dir.path().join("segments"), sb.key).unwrap();
         assert!(log.contains(crate::inode::Inode(crate::FUSE_ROOT_ID)));
         assert_eq!(log.load_content(42).unwrap().unwrap(), b"packed bytes");
+        drop(log);
         // Completed stores must not reseal an injected legacy blob on reopen.
-        let block = dir
-            .path()
-            .join("contents/abcd/0123456789abcdef0123456789ab");
+        std::fs::create_dir_all(block.parent().unwrap()).unwrap();
         std::fs::write(&block, &old_blob).unwrap();
         let reopened = Superblock::open_or_create(&primary, "password", false).unwrap();
         assert!(!reopened.migration_pending);
         assert_eq!(std::fs::read(&block).unwrap(), old_blob);
         assert!(vault::open(&old_blob, &reopened.key).is_err());
+        assert_fixture_data(dir.path());
     }
 
     #[test]
@@ -887,7 +882,7 @@ mod tests {
         let (dir, legacy) = legacy_store();
         let primary = dir.path().join("superblock");
         let blocker = dir.path().join("segments/state.tmp");
-        std::fs::create_dir(&blocker).unwrap();
+        std::fs::create_dir_all(&blocker).unwrap();
         assert!(Superblock::convert(&primary, "password").is_err());
         let pending = Superblock::load(&primary, "password", true).unwrap();
         assert!(pending.migration_pending);
@@ -897,10 +892,6 @@ mod tests {
         let resumed = Superblock::convert(&primary, "password").unwrap();
         assert!(!resumed.migration_pending);
         assert_eq!(resumed.generation, legacy.generation + 2);
-        let block = dir
-            .path()
-            .join("contents/abcd/0123456789abcdef0123456789ab");
-        assert_eq!(migrated_plain(dir.path(), &block), b"contents");
         std::fs::write(
             dir.path()
                 .join("segments")
@@ -911,6 +902,21 @@ mod tests {
         let log =
             crate::seglog::SegmentLog::open(dir.path().join("segments"), resumed.key).unwrap();
         assert_eq!(log.load_content(42).unwrap().unwrap(), b"packed bytes");
+        drop(log);
+        assert_fixture_data(dir.path());
+    }
+
+    #[test]
+    fn resumed_object_moves_retire_committed_sources_without_rereading_them() {
+        let (dir, legacy) = legacy_store();
+        let primary = dir.path().join("superblock");
+        let sb = Superblock::convert(&primary, "password").unwrap();
+        let block = legacy_block(dir.path(), &legacy.key, 2);
+        std::fs::create_dir_all(block.parent().unwrap()).unwrap();
+        std::fs::write(&block, b"not a blob").unwrap();
+        crate::migration::reseal_store(dir.path(), &sb.key, sb.constants, &mut |_| Ok(())).unwrap();
+        assert!(!dir.path().join("contents").exists());
+        assert_fixture_data(dir.path());
     }
 
     fn snapshot(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
@@ -1001,64 +1007,49 @@ mod tests {
     }
 
     #[test]
-    fn unreadable_blobs_do_not_block_migration_or_healthy_data() {
+    fn upgrade_adopts_the_current_segment_size() {
         let (dir, legacy) = legacy_store();
+        assert!(legacy.constants.segment_size < DEFAULT_SEGMENT_SIZE);
         let primary = dir.path().join("superblock");
-        let bucket = dir.path().join("dirents/abcd/0123456789abcdef0123456789ab");
-        let mut damaged = std::fs::read(&bucket).unwrap();
-        damaged.truncate(damaged.len() / 2);
-        assert!(vault::is_legacy(&damaged));
-        std::fs::write(&bucket, &damaged).unwrap();
-        let mut frame = vault::seal_legacy(b"damaged frame", &legacy.key, legacy.constants.ecc());
-        frame.truncate(frame.len() / 2);
-        let segment = dir.path().join("segments/0000000000000000.seg");
-        let mut bytes = std::fs::read(&segment).unwrap();
-        bytes.extend_from_slice(&crate::seglog::encode_frame(3, &frame));
-        std::fs::write(segment, bytes).unwrap();
         let sb = Superblock::convert(&primary, "password").unwrap();
-        assert!(!sb.migration_pending);
-        assert_eq!(sb.format_version, FORMAT_VERSION);
-        assert!(!bucket.exists());
+        assert_eq!(sb.constants.segment_size, DEFAULT_SEGMENT_SIZE);
         assert_eq!(
-            std::fs::read(migrated_object(dir.path(), &bucket, &sb.key).0).unwrap(),
-            damaged
-        );
-        assert_eq!(
-            vault::open(&damaged, &sb.key).unwrap_err().to_errno(),
-            libc::EIO
-        );
-        let fs = crate::BackupFS::new(options(dir.path(), true)).unwrap();
-        drop(fs);
-        let log = crate::seglog::SegmentLog::open(dir.path().join("segments"), sb.key).unwrap();
-        assert!(log.contains(crate::inode::Inode(crate::FUSE_ROOT_ID)));
-        assert_eq!(log.load_content(42).unwrap().unwrap(), b"packed bytes");
-        assert_eq!(
-            migrated_plain(
-                dir.path(),
-                &dir.path()
-                    .join("contents/abcd/0123456789abcdef0123456789ab")
-            ),
-            b"contents"
+            Superblock::load(&primary, "password", true)
+                .unwrap()
+                .constants
+                .segment_size,
+            DEFAULT_SEGMENT_SIZE
         );
     }
 
     #[test]
-    fn failed_migration_replacement_retains_pending_flag_and_can_retry() {
+    fn full_backing_store_retries_object_moves_in_smaller_batches() {
         let (dir, _) = legacy_store();
         let primary = dir.path().join("superblock");
-        let block = dir
-            .path()
-            .join("contents/abcd/0123456789abcdef0123456789ab");
+        crate::migration::FULL_COMMITS.with(|full| full.set(2));
+        let sb = Superblock::convert(&primary, "password").unwrap();
+        assert_eq!(crate::migration::FULL_COMMITS.with(|full| full.get()), 0);
+        assert!(!sb.migration_pending);
+        assert!(!dir.path().join("contents").exists());
+        assert_fixture_data(dir.path());
+    }
+
+    #[test]
+    fn failed_migration_read_retains_pending_flag_and_can_retry() {
+        let (dir, legacy) = legacy_store();
+        let primary = dir.path().join("superblock");
+        let block = legacy_block(dir.path(), &legacy.key, 0);
         let original = std::fs::read(&block).unwrap();
-        std::fs::create_dir(block.with_extension("tmp")).unwrap();
+        std::fs::remove_file(&block).unwrap();
+        std::fs::create_dir(&block).unwrap();
         assert!(Superblock::convert(&primary, "password").is_err());
         let sb = Superblock::load(&primary, "password", true).unwrap();
         assert!(sb.migration_pending);
-        assert_eq!(std::fs::read(&block).unwrap(), original);
         assert!(Superblock::open_or_create(&primary, "password", true).is_err());
-        std::fs::remove_dir(block.with_extension("tmp")).unwrap();
+        std::fs::remove_dir(&block).unwrap();
+        std::fs::write(&block, original).unwrap();
         let sb = Superblock::convert(&primary, "password").unwrap();
         assert!(!sb.migration_pending);
-        assert_eq!(migrated_plain(dir.path(), &block), b"contents");
+        assert_fixture_data(dir.path());
     }
 }

@@ -166,22 +166,14 @@ impl DirectoryContents {
     /// Insert/replace one entry.
     ///
     /// Returns `Some((gen, buckets))` of a now-superseded bucket generation
-    /// that a reshard produced — the caller MUST make the (new-generation)
-    /// inode marker durable via `save_inode_durable` and only *then* reap
-    /// that old generation (see [`Self::reap_generation`]); reaping it
-    /// before the marker is durable would, on crash, leave the marker
-    /// pointing at deleted buckets and lose the whole directory.
-    ///
-    /// `durable` forces the affected bucket to stable storage before
-    /// returning (ordering-sensitive callers); the marker is persisted by
-    /// the caller via `save_inode`.
+    /// that a reshard produced. The caller must log the new-generation inode
+    /// marker before reaping that generation (see [`Self::reap_generation`]).
     pub fn insert(
         &mut self,
         ctrl: &Controller,
         dir: Inode,
         name: OsString,
         entry: DirectoryEntry,
-        durable: bool,
     ) -> BkfsResult<Option<(u64, u32)>> {
         ctrl.check_rw()?;
         // Spill an inline directory that is about to exceed the threshold.
@@ -214,7 +206,7 @@ impl DirectoryContents {
                 }
                 *subdirs = (*subdirs + was_dir as u64).saturating_sub(prev_dir as u64);
                 let needs_reshard = bucket.len() > ctrl.dir_max_bucket() && *buckets < MAX_BUCKETS;
-                ctrl.save_dir_bucket(dir, *gen, idx, &bucket, durable)?;
+                ctrl.save_dir_bucket(dir, *gen, idx, &bucket)?;
                 if needs_reshard {
                     return self.reshard(ctrl, dir);
                 }
@@ -223,8 +215,8 @@ impl DirectoryContents {
         }
     }
 
-    /// Reap a superseded bucket generation. Call ONLY after the new-gen
-    /// marker has been durably persisted (see [`Self::insert`]).
+    /// Reap a superseded bucket generation. Call only after logging the
+    /// new-generation marker (see [`Self::insert`]).
     pub fn reap_generation(
         ctrl: &Controller,
         dir: Inode,
@@ -243,7 +235,6 @@ impl DirectoryContents {
         ctrl: &Controller,
         dir: Inode,
         name: &OsStr,
-        durable: bool,
     ) -> BkfsResult<Option<DirectoryEntry>> {
         ctrl.check_rw()?;
         match &mut self.0 {
@@ -260,7 +251,7 @@ impl DirectoryContents {
                 if let Some(e) = &prev {
                     *len = len.saturating_sub(1);
                     *subdirs = subdirs.saturating_sub(e.is_dir() as u64);
-                    ctrl.save_dir_bucket(dir, *gen, idx, &bucket, durable)?;
+                    ctrl.save_dir_bucket(dir, *gen, idx, &bucket)?;
                 }
                 Ok(prev)
             }
@@ -392,8 +383,7 @@ impl DirectoryContents {
         }
     }
 
-    /// Distribute `entries` into `buckets` bucket files under `gen` and make
-    /// them durable (so the subsequent marker save is the atomic commit).
+    /// Distribute `entries` into `buckets` buckets under `gen`.
     fn write_generation(
         &self,
         ctrl: &Controller,
@@ -408,7 +398,7 @@ impl DirectoryContents {
             sharded[idx as usize].insert(name.clone(), entry.clone());
         }
         for (idx, bucket) in sharded.iter().enumerate() {
-            ctrl.save_dir_bucket(dir, gen, idx as u32, bucket, true)?;
+            ctrl.save_dir_bucket(dir, gen, idx as u32, bucket)?;
         }
         Ok(())
     }
@@ -445,6 +435,44 @@ mod tests {
     /// it (after the simulated durable marker) removes the old buckets while
     /// the new generation still resolves everything.
     #[test]
+    fn bucket_updates_coalesce_until_commit() {
+        let tmp = tempfile::TempDir::with_prefix("dirtest").unwrap();
+        let c = ctrl(tmp.path());
+        let dir = Inode(2);
+        let mut dc = DirectoryContents::new();
+        for i in 0..1100 {
+            dc.insert(&c, dir, OsString::from(format!("f{i:05}")), entry(i))
+                .unwrap();
+        }
+        c.syncfs().unwrap();
+        let (_, _, buckets) = dc.debug_state();
+        let committed = c.indexed_storage();
+        let before = c.appended_bytes();
+        for i in 1100..1600 {
+            dc.insert(&c, dir, OsString::from(format!("f{i:05}")), entry(i))
+                .unwrap();
+        }
+        assert_eq!(c.indexed_storage(), committed);
+        assert_eq!(
+            dc.get(&c, dir, &OsString::from("f01599"))
+                .unwrap()
+                .unwrap()
+                .inode,
+            Inode(2599)
+        );
+        c.syncfs().unwrap();
+        let rewritten = c.indexed_storage();
+        assert_eq!(rewritten.len(), buckets as usize);
+        let largest = rewritten
+            .values()
+            .map(|&(_, _, len)| len as u64)
+            .max()
+            .unwrap();
+        assert!(c.appended_bytes() - before <= buckets as u64 * largest);
+        assert_eq!(dc.snapshot(&c, dir).unwrap().len(), 1600);
+    }
+
+    #[test]
     fn spill_then_reshard_preserves_all_entries() {
         let tmp = tempfile::TempDir::with_prefix("dirtest").unwrap();
         let c = ctrl(tmp.path());
@@ -454,7 +482,7 @@ mod tests {
 
         for i in 0..n {
             let reap = dc
-                .insert(&c, dir, OsString::from(format!("f{i:05}")), entry(i), false)
+                .insert(&c, dir, OsString::from(format!("f{i:05}")), entry(i))
                 .unwrap();
             assert!(reap.is_none(), "no reshard expected during initial fill");
         }
@@ -529,11 +557,11 @@ mod tests {
         let mut dc = DirectoryContents::new();
         let n: u64 = 1500;
         for i in 0..n {
-            dc.insert(&c, dir, OsString::from(format!("f{i:05}")), entry(i), false)
+            dc.insert(&c, dir, OsString::from(format!("f{i:05}")), entry(i))
                 .unwrap();
         }
         for i in 0..500 {
-            dc.remove(&c, dir, &OsString::from(format!("f{i:05}")), false)
+            dc.remove(&c, dir, &OsString::from(format!("f{i:05}")))
                 .unwrap();
         }
         assert_eq!(dc.len(), n - 500);

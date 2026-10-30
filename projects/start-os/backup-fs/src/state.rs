@@ -18,6 +18,9 @@ use crate::vault::{self, AuthenticationTag, Binding, EccParams};
 
 const VERSION: u32 = 1;
 const ENTRIES_PER_TRANSACTION: usize = 16_384;
+/// Journal entries tolerated before an unmount checkpoint, beyond a quarter
+/// of the checkpoint's own entries.
+const JOURNAL_ENTRIES_FLOOR: u64 = 65_536;
 const JOURNAL_SEGMENT_SIZE: u64 = 8 * 1024 * 1024;
 const JOURNAL_SUFFIX: &str = ".idx";
 const ANCHOR: &str = "state";
@@ -57,6 +60,8 @@ struct Anchor {
 struct Transaction {
     previous: Option<IndexReference>,
     changes: Vec<Change>,
+    /// Segment lengths; zero marks a removed segment.
+    segments: Vec<(u64, u64)>,
 }
 
 fn journal_path(dir: &Path, id: u64) -> PathBuf {
@@ -108,6 +113,14 @@ impl Iterator for Transactions<'_> {
 struct LoadedIndex {
     roots: Roots,
     checkpoint_refs: Option<Vec<Reference>>,
+    entries: Entries,
+}
+
+/// Index entries stored in each kind of transaction of a view.
+#[derive(Clone, Copy, Default)]
+struct Entries {
+    checkpoint: u64,
+    journal: u64,
 }
 
 impl View {
@@ -127,26 +140,39 @@ impl View {
     fn materialize(self, dir: &Path, key: &Key) -> BkfsResult<LoadedIndex> {
         let mut roots = Roots::default();
         let mut seen = HashSet::new();
+        let mut sized = HashSet::new();
         let mut checkpoint_refs = Some(Vec::new());
+        let mut entries = Entries::default();
         for node in self.transactions(dir, key) {
             let (reference, transaction) = node?;
+            let count = (transaction.changes.len() + transaction.segments.len()) as u64;
             match reference {
                 IndexReference::Checkpoint(reference) => {
+                    entries.checkpoint += count;
                     if let Some(references) = &mut checkpoint_refs {
                         references.push(reference);
                     }
                 }
-                IndexReference::Journal { .. } => checkpoint_refs = None,
+                IndexReference::Journal { .. } => {
+                    entries.journal += count;
+                    checkpoint_refs = None;
+                }
             }
             for (key, location) in transaction.changes {
                 if seen.insert(key) {
                     roots.update(key, location);
                 }
             }
+            for (segment, len) in transaction.segments {
+                if sized.insert(segment) && len > 0 {
+                    roots.sizes.insert(segment, len);
+                }
+            }
         }
         Ok(LoadedIndex {
             roots,
             checkpoint_refs,
+            entries,
         })
     }
 
@@ -159,9 +185,10 @@ impl View {
         counters: Counters,
     ) -> BkfsResult<(Self, Vec<Reference>)> {
         let mut changes = roots.entries().peekable();
+        let mut segments = roots.sizes.iter().map(|(&id, &len)| (id, len)).peekable();
         let mut tip = None;
         let mut references = Vec::new();
-        while changes.peek().is_some() {
+        while changes.peek().is_some() || segments.peek().is_some() {
             let transaction = Transaction {
                 previous: tip,
                 changes: changes
@@ -169,6 +196,7 @@ impl View {
                     .take(ENTRIES_PER_TRANSACTION)
                     .map(|(key, loc)| (key, Some(loc)))
                     .collect(),
+                segments: segments.by_ref().take(ENTRIES_PER_TRANSACTION).collect(),
             };
             let reference = Reference::write(dir, key, ecc, Binding::Transaction, &transaction)?;
             references.push(reference);
@@ -182,6 +210,7 @@ struct Journal {
     file: File,
     id: u64,
     offset: u64,
+    dirty: bool,
 }
 
 impl Journal {
@@ -207,6 +236,7 @@ impl Journal {
             file,
             id,
             offset: 0,
+            dirty: false,
         })
     }
 
@@ -214,6 +244,7 @@ impl Journal {
         let len = u32::try_from(blob.bytes.len())
             .map_err(|_| BkfsError::unsupported("index transaction too large"))?;
         self.file.write_all_at(&blob.bytes, self.offset)?;
+        self.dirty = true;
         let reference = IndexReference::Journal {
             segment: self.id,
             offset: self.offset,
@@ -230,8 +261,11 @@ pub(crate) struct State {
     path: PathBuf,
     anchor: Anchor,
     pending: HashMap<RecordKey, Option<Location>>,
+    pending_sizes: HashMap<u64, u64>,
     journal: Option<Journal>,
     checkpoint_refs: Option<Vec<Reference>>,
+    entries: Entries,
+    pool: Option<File>,
     uncertain: bool,
 }
 
@@ -245,8 +279,11 @@ impl State {
             path,
             anchor,
             pending: HashMap::new(),
+            pending_sizes: HashMap::new(),
             journal: None,
             checkpoint_refs: None,
+            entries: Entries::default(),
+            pool: None,
             uncertain: false,
         })
     }
@@ -271,7 +308,14 @@ impl State {
         state.sync_backing()?;
         state.publish(key, ecc, state.anchor.clone())?;
         state.checkpoint_refs = Some(references);
+        state.entries.checkpoint = roots.entry_count();
         Ok(state)
+    }
+
+    /// Whether the journal has grown enough to replace with a checkpoint.
+    pub fn checkpoint_due(&self) -> bool {
+        self.entries.journal > 0
+            && self.entries.journal >= JOURNAL_ENTRIES_FLOOR.max(self.entries.checkpoint / 4)
     }
 
     pub fn open(dir: &Path, key: &Key) -> BkfsResult<(Self, Roots)> {
@@ -292,8 +336,11 @@ impl State {
                 path,
                 anchor,
                 pending: HashMap::new(),
+                pending_sizes: HashMap::new(),
                 journal: None,
                 checkpoint_refs: loaded.checkpoint_refs,
+                entries: loaded.entries,
+                pool: None,
                 uncertain: false,
             },
             loaded.roots,
@@ -316,7 +363,7 @@ impl State {
     }
 
     pub fn has_pending(&self) -> bool {
-        !self.pending.is_empty()
+        !self.pending.is_empty() || !self.pending_sizes.is_empty()
     }
 
     pub fn check_rw(&self) -> BkfsResult<()> {
@@ -329,6 +376,14 @@ impl State {
     pub fn record(&mut self, key: RecordKey, location: Option<Location>) -> BkfsResult<()> {
         self.check_rw()?;
         self.pending.insert(key, location);
+        self.checkpoint_refs = None;
+        Ok(())
+    }
+
+    /// Records a segment's length; zero records its removal.
+    pub fn record_size(&mut self, segment: u64, len: u64) -> BkfsResult<()> {
+        self.check_rw()?;
+        self.pending_sizes.insert(segment, len);
         self.checkpoint_refs = None;
         Ok(())
     }
@@ -346,15 +401,41 @@ impl State {
         }
         self.anchor = anchor;
         self.pending.clear();
+        self.pending_sizes.clear();
         Ok(())
     }
 
+    /// Makes index transactions and new directory entries durable.
     fn sync_backing(&mut self) -> BkfsResult<()> {
-        let result = crate::util::sync_filesystem(&self.directory);
-        if result.is_err() {
-            self.uncertain = true;
+        let mut result = match &self.journal {
+            Some(journal) if journal.dirty => journal.file.sync_data(),
+            _ => Ok(()),
+        };
+        if result.is_ok() && self.pool.is_none() {
+            match File::open(Reference::directory(&self.path)) {
+                Ok(pool) => self.pool = Some(pool),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => result = Err(error),
+            }
         }
-        Ok(result?)
+        if let (Ok(()), Some(pool)) = (&result, &self.pool) {
+            result = pool.sync_all();
+        }
+        if result.is_ok() {
+            result = self.directory.sync_all();
+        }
+        match result {
+            Ok(()) => {
+                if let Some(journal) = &mut self.journal {
+                    journal.dirty = false;
+                }
+                Ok(())
+            }
+            Err(error) => {
+                self.uncertain = true;
+                Err(error.into())
+            }
+        }
     }
 
     pub fn commit(
@@ -366,15 +447,19 @@ impl State {
     ) -> BkfsResult<()> {
         self.check_rw()?;
         let mut tip = self.anchor.index.tip;
-        let mut changes = self
-            .pending
+        let changes: Vec<_> = self.pending.iter().map(|(&key, &loc)| (key, loc)).collect();
+        let segments: Vec<_> = self
+            .pending_sizes
             .iter()
-            .map(|(&key, &loc)| (key, loc))
-            .peekable();
-        while changes.peek().is_some() {
+            .map(|(&id, &len)| (id, len))
+            .collect();
+        let mut changes = changes.into_iter().peekable();
+        let mut segments = segments.into_iter().peekable();
+        while changes.peek().is_some() || segments.peek().is_some() {
             let transaction = Transaction {
                 previous: tip,
                 changes: changes.by_ref().take(ENTRIES_PER_TRANSACTION).collect(),
+                segments: segments.by_ref().take(ENTRIES_PER_TRANSACTION).collect(),
             };
             let plain = encode(&transaction, data_config())?;
             let _: Transaction = decode(&plain, data_config())?;
@@ -383,12 +468,14 @@ impl State {
                 journal.offset > 0
                     && journal.offset + blob.bytes.len() as u64 > JOURNAL_SEGMENT_SIZE
             }) {
+                self.sync_backing()?;
                 self.journal = None;
             }
             if self.journal.is_none() {
                 self.journal = Some(Journal::create(&self.path)?);
             }
             tip = Some(self.journal.as_mut().unwrap().append(&blob)?);
+            self.entries.journal += (transaction.changes.len() + transaction.segments.len()) as u64;
         }
         // Objects, log frames and index transactions must precede their new root.
         self.sync_backing()?;
@@ -436,6 +523,10 @@ impl State {
         )?;
         self.journal = None;
         self.checkpoint_refs = Some(references);
+        self.entries = Entries {
+            checkpoint: roots.entry_count(),
+            journal: 0,
+        };
         self.collect_metadata(key, self.checkpoint_refs.as_deref().unwrap(), retained)?;
         Ok(index)
     }
@@ -503,7 +594,6 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::objects::ObjectId;
 
     fn initial(dir: &Path, key: &Key) -> State {
         State::create(
@@ -557,7 +647,7 @@ mod tests {
     }
 
     // The filter remains installed until this thread exits.
-    fn inject_syncfs_eio(fd: std::os::fd::RawFd) {
+    fn inject_fsync_eio(fd: std::os::fd::RawFd) {
         let mut filter = [
             libc::sock_filter {
                 code: (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
@@ -569,7 +659,7 @@ mod tests {
                 code: (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
                 jt: 0,
                 jf: 3,
-                k: libc::SYS_syncfs as u32,
+                k: libc::SYS_fsync as u32,
             },
             libc::sock_filter {
                 code: (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
@@ -620,7 +710,7 @@ mod tests {
             .record(RecordKey::Inode(7), Some(location(0)))
             .unwrap();
         let recovered = state.directory.try_clone().unwrap();
-        inject_syncfs_eio(state.directory.as_raw_fd());
+        inject_fsync_eio(state.directory.as_raw_fd());
         let result = state.commit(
             &key,
             EccParams::default(),
@@ -669,16 +759,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let key = Key::from([0x81; 32]);
         let mut state = initial(dir.path(), &key);
-        let object = ObjectId::block(&key, 9, 0);
+        let object = RecordKey::Block(9, 0);
         state
             .record(RecordKey::Inode(7), Some(location(0)))
             .unwrap();
         state
             .record(RecordKey::Content(7), Some(location(128)))
             .unwrap();
-        state
-            .record(RecordKey::Object(object), Some(location(256)))
-            .unwrap();
+        state.record(object, Some(location(256))).unwrap();
         commit(&mut state, &key, 3);
         state
             .record(RecordKey::Inode(7), Some(location(384)))
@@ -695,7 +783,7 @@ mod tests {
         );
         assert_eq!(roots.index.get(&7), Some(&location(384)));
         assert!(!roots.content.contains_key(&7));
-        assert_eq!(roots.objects.get(&object), Some(&location(256)));
+        assert_eq!(roots.get(object), Some(&location(256)));
     }
 
     #[test]

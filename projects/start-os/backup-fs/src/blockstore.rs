@@ -1,24 +1,21 @@
-//! Fixed-size, independently sealed content objects.
+//! Fixed-size, independently sealed content blocks.
 //!
-//! COW stores append immutable versions; snapshot roots retain prior versions.
-//! Partial writes replace one logical chunk.
+//! Format 2 keeps each block as an authenticated record in the shared data
+//! segments; format 1 keeps one stable-name file per block. A partial write
+//! replaces one logical chunk.
 
-use std::io::{self, Read, Write};
+use std::io;
 
 use rand::rand_core::UnwrapErr;
 use rand::{rng, Rng};
 
-use crate::aligned_io::BufferedDirectFile;
 use crate::ctrl::Controller;
-use crate::error::{BkfsError, BkfsResult};
+use crate::error::BkfsResult;
 use crate::inode::ContentId;
-use crate::{open_direct, vault};
 
 const FRAMED_PAYLOAD: u8 = 2;
 
-/// Logical chunk size. Each chunk maps to one sealed block file. 1 MiB
-/// balances per-file overhead (inode/dir-entry cost on the backing store)
-/// against incremental-write granularity (the unit re-sent on change).
+/// Logical chunk size: the unit rewritten by a partial write.
 pub const CHUNK_SIZE: u64 = 1 << 20;
 
 /// Number of blocks a file of `size` bytes occupies.
@@ -32,19 +29,14 @@ pub fn locate(offset: u64) -> (u64, usize) {
 }
 
 /// Read one block's logical (decrypted, error-corrected) bytes. `Ok(None)`
-/// means the block file is absent — a hole — which the caller reads as
-/// zeros. The returned buffer may be shorter than `CHUNK_SIZE` (the final
-/// block) or, with size padding enabled, longer; callers must slice it to
-/// the logically-valid length.
+/// means the block is absent — a hole — which the caller reads as zeros.
+/// The returned buffer may be shorter than `CHUNK_SIZE` (the final block) or,
+/// for a migrated padded block, longer; callers must slice it to the
+/// logically-valid length.
 pub fn read_block(ctrl: &Controller, content: ContentId, idx: u64) -> BkfsResult<Option<Vec<u8>>> {
-    let Some((path, binding)) = ctrl.resolve_object(ctrl.block_id(content, idx))? else {
+    let Some(stored) = ctrl.block_load(content, idx)? else {
         return Ok(None);
     };
-    let mut file = open_direct(&path, false).map_err(BkfsError::referenced_io)?;
-    let mut blob = Vec::new();
-    file.read_to_end(&mut blob)
-        .map_err(BkfsError::referenced_io)?;
-    let stored = vault::open_bound(&blob, ctrl.key(), binding)?.plaintext;
     let compressed = if stored.first() == Some(&FRAMED_PAYLOAD) {
         let len = stored
             .get(1..5)
@@ -70,25 +62,16 @@ fn max_block_len(ctrl: &Controller) -> usize {
     ((CHUNK_SIZE as f64) * (1.0 + pad)).ceil() as usize + 16
 }
 
-/// Compress (per `codec`), seal, and write one block whole. `durable`
-/// selects `sync_all` (the crash-safe path used on explicit syncs) versus
-/// the batched fast path (rename only; durability deferred to a later
-/// `syncfs`).
+/// Compress (per `codec`) and store one block whole. Durability follows the
+/// next commit.
 pub fn write_block(
     ctrl: &Controller,
     content: ContentId,
     idx: u64,
     plaintext: &[u8],
     codec: crate::compress::Codec,
-    durable: bool,
 ) -> BkfsResult<()> {
-    store_block(
-        ctrl,
-        content,
-        idx,
-        &encode_block(ctrl, plaintext, codec),
-        durable,
-    )
+    ctrl.block_put(content, idx, encode_block(ctrl, plaintext, codec))
 }
 
 pub fn write_final_block(
@@ -97,20 +80,19 @@ pub fn write_final_block(
     idx: u64,
     plaintext: &[u8],
     codec: crate::compress::Codec,
-    durable: bool,
 ) -> BkfsResult<()> {
     if ctrl.is_legacy() {
         let mut padded = plaintext.to_vec();
         let len = padded.len();
         padded.resize(ctrl.file_pad(len as u64) as usize, 0);
         UnwrapErr(rng()).fill_bytes(&mut padded[len..]);
-        return write_block(ctrl, content, idx, &padded, codec, durable);
+        return write_block(ctrl, content, idx, &padded, codec);
     }
     let mut stored = encode_block(ctrl, plaintext, codec);
     let len = stored.len();
     stored.resize(ctrl.file_pad(len as u64) as usize, 0);
     UnwrapErr(rng()).fill_bytes(&mut stored[len..]);
-    store_block(ctrl, content, idx, &stored, durable)
+    ctrl.block_put(content, idx, stored)
 }
 
 fn encode_block(ctrl: &Controller, plaintext: &[u8], codec: crate::compress::Codec) -> Vec<u8> {
@@ -125,25 +107,9 @@ fn encode_block(ctrl: &Controller, plaintext: &[u8], codec: crate::compress::Cod
     stored
 }
 
-fn store_block(
-    ctrl: &Controller,
-    content: ContentId,
-    idx: u64,
-    stored: &[u8],
-    durable: bool,
-) -> BkfsResult<()> {
-    ctrl.check_rw()?;
-    ctrl.write_object(ctrl.block_id(content, idx), durable, |path, binding| {
-        let blob = vault::seal_bound(stored, ctrl.key(), ctrl.ecc(), binding);
-        let mut file = BufferedDirectFile::create(path)?;
-        file.write_all(&blob.bytes)?;
-        file.save_fast()
-    })
-}
-
-/// Remove one block file, tolerating an already-absent file.
+/// Remove one block, tolerating an already-absent one.
 pub fn remove_block(ctrl: &Controller, content: ContentId, idx: u64) -> BkfsResult<()> {
-    ctrl.remove_object(ctrl.block_id(content, idx))
+    ctrl.block_remove(content, idx)
 }
 
 /// Remove every block of a file whose logical size is `size`. Used by the
