@@ -206,11 +206,12 @@ fn read_password(mut input: impl Read) -> io::Result<Zeroizing<String>> {
     Ok(password)
 }
 
-fn password_from_file(path: Option<&Path>) -> io::Result<Zeroizing<String>> {
-    match path {
-        Some(path) => read_password(std::fs::File::open(path)?),
+fn password_from_file(path: Option<&Path>) -> Zeroizing<String> {
+    let result = match path {
+        Some(path) => std::fs::File::open(path).and_then(read_password),
         None => read_password(io::stdin().lock()),
-    }
+    };
+    checked(result.map_err(Into::into))
 }
 
 fn read_options(
@@ -219,13 +220,8 @@ fn read_options(
         password_file,
     }: FilesystemOptions,
 ) -> BackupFSOptions {
-    backup_opts.password = match password_from_file(password_file.as_deref()) {
-        Ok(mut password) => std::mem::take(&mut *password),
-        Err(error) => {
-            error!("could not read backup password: {error}");
-            std::process::exit(3);
-        }
-    };
+    let mut password = password_from_file(password_file.as_deref());
+    backup_opts.password = std::mem::take(&mut *password);
     backup_opts
 }
 
@@ -324,7 +320,7 @@ fn mount(
 }
 
 fn fsck(options: FilesystemOptions) {
-    new_fs(options).fsck().unwrap()
+    checked(new_fs(options).fsck())
 }
 
 fn change_password(
@@ -333,23 +329,23 @@ fn change_password(
         new_password_file,
     }: ChangePasswordOptions,
 ) {
-    let password = password_from_file(Some(&new_password_file)).unwrap();
-    new_fs(filesystem).change_password(&password).unwrap()
+    let password = password_from_file(Some(&new_password_file));
+    checked(new_fs(filesystem).change_password(&password))
 }
 
 fn snapshots(options: SnapshotOptions) {
     match options.command {
         SnapshotCommand::Create(NamedSnapshotOptions { filesystem, name }) => {
-            new_fs(filesystem).create_snapshot(&name).unwrap();
+            checked(new_fs(filesystem).create_snapshot(&name));
         }
         SnapshotCommand::List(mut filesystem) => {
             filesystem.backup_opts.readonly = true;
-            for snapshot in new_fs(filesystem).list_snapshots().unwrap() {
+            for snapshot in checked(new_fs(filesystem).list_snapshots()) {
                 println!("{}", snapshot.name);
             }
         }
         SnapshotCommand::Delete(NamedSnapshotOptions { filesystem, name }) => {
-            new_fs(filesystem).delete_snapshot(&name).unwrap();
+            checked(new_fs(filesystem).delete_snapshot(&name));
         }
     }
 }

@@ -44,6 +44,12 @@ verify() {
 legacy_format() {
   test "$("$current" inspect "$store")" = '"legacy"'
 }
+checked_error() {
+  local result
+  if "$@" > "$work/error.log" 2>&1; then result=0; else result=$?; fi
+  test "$result" = 3
+  ! grep -q 'panicked' "$work/error.log"
+}
 node - "$expected" <<'JS'
 const fs = require('node:fs'), crypto = require('node:crypto'), path = require('node:path')
 const base = process.argv[2]
@@ -88,11 +94,12 @@ JS
 verify
 close_fs
 legacy_format
-if "$current" snapshot create "$store" unavailable --password-file "$work/password" > "$work/snapshot.log" 2>&1; then
-  printf 'snapshot unexpectedly accepted an unconverted store\n' >&2
-  exit 1
-fi
-legacy_format
+for operation in create delete; do
+  checked_error "$current" snapshot "$operation" "$store" unavailable --password-file "$work/password"
+  legacy_format
+done
+test -z "$("$current" snapshot list "$store" --password-file "$work/password")"
+checked_error "$current" change-password "$store" --password-file "$work/password" --new-password-file "$work/missing"
 
 mount_fs "$legacy" mount "$store" "$mounted" --password password --readonly -o ro
 verify

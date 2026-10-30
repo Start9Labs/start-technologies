@@ -62,7 +62,6 @@ import { BackupStatusComponent } from './status.component'
                 <button
                   backupConversion
                   [targetId]="target.id"
-                  [backups]="target.entry.startOs"
                   [label]="label"
                 ></button>
               }

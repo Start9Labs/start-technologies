@@ -23,6 +23,7 @@ pub(crate) struct Log {
 
 impl Log {
     pub fn open(dir: &Path, key: &Key) -> BkfsResult<(Self, Roots, Counters)> {
+        std::fs::create_dir_all(dir)?;
         let directory = File::open(dir)?;
         let path = PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()));
         let mut source = Source::load(&path.join(".."), key)?;

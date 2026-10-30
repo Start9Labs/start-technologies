@@ -81,7 +81,6 @@ const ERROR =
                 <button
                   backupConversion
                   [targetId]="target.id"
-                  [backups]="target.entry.startOs"
                   [label]="label"
                 ></button>
               }

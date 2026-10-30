@@ -135,12 +135,26 @@ test('format indicator distinguishes interruption, failure and active work acros
     'Retry conversion',
   )
   assert.equal(
-    conversionLabel({ a: backup('interrupted') }, { b: job('running') }),
+    conversionLabel(
+      { a: backup('interrupted'), b: backup('current') },
+      { b: job('running') },
+    ),
     'Conversion in progress',
   )
   assert.equal(
     conversionLabel({ a: backup('current') }, { a: job('complete') }),
     null,
+  )
+})
+
+test('format indicator ignores jobs for backups removed from the target', () => {
+  assert.equal(
+    conversionLabel({ a: backup('current') }, { removed: job('running') }),
+    null,
+  )
+  assert.equal(
+    conversionLabel({ a: backup('legacy') }, { removed: job('failed') }),
+    'Old format',
   )
 })
 
@@ -184,6 +198,38 @@ test('completion refreshes discovery once, not on every progress observation', a
   f.requests[0].resolve({ target: target('current') })
   await setImmediate()
   assert.equal(f.service.cifs()[0].entry.startOs.own.formatStatus, 'current')
+})
+
+test('failure refreshes discovery once and exposes the interrupted format', async t => {
+  const f = fixture(t)
+  f.service.getBackupTargets()
+  f.requests[0].resolve({ target: target('legacy') })
+  await setImmediate()
+  f.observations.next({ target: { own: job('running') } })
+  f.observations.next({ target: { own: job('failed') } })
+  assert.equal(f.requests.length, 2)
+  f.observations.next({ target: { own: job('failed') } })
+  assert.equal(f.requests.length, 2)
+  f.requests[1].resolve({ target: target('interrupted') })
+  await setImmediate()
+  const refreshed = f.service.cifs()[0]
+  assert.equal(refreshed.entry.startOs.own.formatStatus, 'interrupted')
+  assert.equal(
+    conversionLabel(refreshed.entry.startOs, f.service.conversions().target),
+    'Resume conversion',
+  )
+})
+
+test('coalesced terminal observations refresh without requiring a visible running state', async t => {
+  for (const state of ['complete', 'failed']) {
+    const f = fixture(t)
+    f.observations.next({ target: { own: job(state) } })
+    assert.equal(f.requests.length, 1)
+    f.requests[0].resolve({
+      target: target(state === 'complete' ? 'current' : 'interrupted'),
+    })
+    await setImmediate()
+  }
 })
 
 test('conversion requires explicit confirmation and a password, scoped to one server', async t => {
