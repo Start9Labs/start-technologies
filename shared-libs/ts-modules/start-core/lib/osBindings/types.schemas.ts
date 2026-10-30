@@ -1123,6 +1123,32 @@ export const NotificationLevel: z.ZodEnum<{
 })
 
 /**
+ * An OS update available for review.
+ */
+export const OsUpdateAvailable: z.ZodIntersection<
+  z.ZodObject<{
+    kind: z.ZodCodec<
+      z.ZodOptional<z.ZodLiteral<'os-update-available'>>,
+      z.ZodLiteral<'os-update-available'>
+    >
+  }>,
+  typeof empty
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      kind: wire(
+        z.literal('os-update-available').optional(),
+        z.literal('os-update-available'),
+      ),
+    }),
+    empty,
+  )
+  .meta({
+    id: 'OsUpdateAvailable',
+    description: 'An OS update available for review.',
+  })
+
+/**
  * An absent update preserves DNS intent; null servers select gateway DNS.
  */
 export const OutboundDnsUpdate: z.ZodObject<{

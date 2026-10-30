@@ -212,6 +212,16 @@ export type NotificationLevel = z.output<typeof schemas.NotificationLevel>
 export type NotificationLevelInput = z.input<typeof schemas.NotificationLevel>
 
 /**
+ * An OS update available for review.
+ */
+export type OsUpdateAvailable = z.output<typeof schemas.OsUpdateAvailable>
+
+/**
+ * An OS update available for review.
+ */
+export type OsUpdateAvailableInput = z.input<typeof schemas.OsUpdateAvailable>
+
+/**
  * An absent update preserves DNS intent; null servers select gateway DNS.
  */
 export type OutboundDnsUpdate = z.output<typeof schemas.OutboundDnsUpdate>

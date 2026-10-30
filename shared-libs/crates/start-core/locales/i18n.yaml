@@ -7559,11 +7559,11 @@ tunnel.web.ui-port-reserved:
   pl_PL: "Ten zakres obejmuje port włączonego panelu administracyjnego; użyj nazw SNI, aby go współdzielić, albo najpierw wyłącz panel lub zmień jego adres."
 
 update.security.available-message:
-  en_US: "StartOS %{version} includes security updates and is available from %{registry}. Open System → General → Software Update to review and install it."
-  de_DE: "StartOS %{version} enthält Sicherheitsupdates und ist unter %{registry} verfügbar. Unter System → Allgemein → Software-Update können Sie es prüfen und installieren."
-  es_ES: "StartOS %{version} incluye actualizaciones de seguridad y está disponible en %{registry}. Abra Sistema → General → Actualización de software para revisarlo e instalarlo."
-  fr_FR: "StartOS %{version} contient des mises à jour de sécurité et est disponible sur %{registry}. Ouvrez Système → Général → Mise à jour du logiciel pour le consulter et l’installer."
-  pl_PL: "StartOS %{version} zawiera aktualizacje bezpieczeństwa i jest dostępny w %{registry}. Otwórz System → Ogólne → Aktualizacja oprogramowania, aby je przejrzeć i zainstalować."
+  en_US: "StartOS %{version} includes security updates and is available from %{registry}."
+  de_DE: "StartOS %{version} enthält Sicherheitsupdates und ist unter %{registry} verfügbar."
+  es_ES: "StartOS %{version} incluye actualizaciones de seguridad y está disponible en %{registry}."
+  fr_FR: "StartOS %{version} contient des mises à jour de sécurité et est disponible sur %{registry}."
+  pl_PL: "StartOS %{version} zawiera aktualizacje bezpieczeństwa i jest dostępny w %{registry}."
 
 update.security.available-title:
   en_US: "StartOS security update available"

@@ -12,7 +12,7 @@ use url::Url;
 
 use crate::context::RpcContext;
 use crate::db::model::{Database, DatabaseModel};
-use crate::notifications::{NotificationLevel, notify};
+use crate::notifications::{NotificationLevel, OsUpdateAvailable, notify};
 use crate::prelude::*;
 use crate::registry::os::security::SecurityCatalog;
 use crate::s9pk::git_hash::GitHash;
@@ -192,7 +192,7 @@ fn notify_security_updates(
                 registry = registry.as_str()
             )
             .to_string(),
-            (),
+            OsUpdateAvailable {},
         )?;
         releases.insert(version.clone(), update.git_hash.clone());
     }
@@ -255,6 +255,13 @@ mod tests {
                 .unwrap(),
             1
         );
+        let notifications = db.as_private().as_notifications().de().unwrap();
+        let notification = notifications.0.values().next().unwrap();
+        assert_eq!(
+            notification.code,
+            <OsUpdateAvailable as crate::notifications::NotificationType>::CODE
+        );
+        assert_eq!(notification.data, json!({ "kind": "os-update-available" }));
         db = Model::from_value(db.as_value().clone());
         notify_security_updates(&mut db, &registry, &update, "installed-build", "x86_64").unwrap();
         assert_eq!(count(&db), 1);
