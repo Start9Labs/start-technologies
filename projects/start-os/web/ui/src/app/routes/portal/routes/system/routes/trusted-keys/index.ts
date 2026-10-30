@@ -19,6 +19,7 @@ import { defaultIfEmpty, firstValueFrom } from 'rxjs'
 import { EDIT_TRUSTED_KEY } from 'src/app/components/trusted-keys/edit'
 import { ADD_TRUSTED_KEY } from 'src/app/components/trusted-keys/form'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
+import { TRUSTED_KEYRINGS_MENU_ITEM } from 'src/app/routes/portal/routes/system/system.const'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { TitleDirective } from 'src/app/services/title.service'
 import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
@@ -58,18 +59,24 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
       </header>
       @if (trust.keys(); as keys) {
         <table
-          [appTable]="['Name', 'Public keys', 'Packages', 'OS Updates', null]"
+          [appTable]="[
+            'Name',
+            'Public keys',
+            'Service Packages',
+            'OS Updates',
+            null,
+          ]"
         >
           @for (entry of keys | keyvalue: compareKeyrings; track entry.key) {
             <tr>
               <td>
-                <tui-icon icon="@tui.key-round" />
+                <tui-icon [icon]="menuItem.icon" />
                 {{ entry.value.name }}
               </td>
               <td [attr.data-label]="'Public keys' | i18n">
                 {{ entry.value.publicKeys.length }}
               </td>
-              <td [attr.data-label]="'Packages' | i18n">
+              <td [attr.data-label]="'Service Packages' | i18n">
                 {{ (entry.value.marketplace ? 'Yes' : 'No') | i18n }}
               </td>
               <td [attr.data-label]="'OS Updates' | i18n">
@@ -155,6 +162,7 @@ export default class TrustedKeyrings {
   private readonly dialogs = inject(DialogService)
   private readonly tasks = inject(TaskService)
 
+  protected readonly menuItem = TRUSTED_KEYRINGS_MENU_ITEM
   protected readonly trust = inject(TrustedKeysService)
   protected readonly saving = signal(false)
 

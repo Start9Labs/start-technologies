@@ -875,7 +875,7 @@ export default {
   994: 'Llaveros de confianza',
   995: 'Acceso SSH',
   996: 'Editar llavero de confianza',
-  997: 'Paquetes',
+  997: 'Paquetes de servicios',
   998: 'Actualizaciones del SO',
   999: 'Confiar en firmas para:',
   1000: 'Sí',

@@ -875,7 +875,7 @@ export default {
   994: 'Trousseaux de confiance',
   995: 'Accès SSH',
   996: 'Modifier le trousseau de confiance',
-  997: 'Paquets',
+  997: 'Paquets de services',
   998: 'Mises à jour du système',
   999: 'Faire confiance aux signatures pour :',
   1000: 'Oui',

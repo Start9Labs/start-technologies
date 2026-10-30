@@ -876,7 +876,7 @@ export const ENGLISH: Record<string, number> = {
   'Trusted keyrings': 994,
   'SSH Access': 995,
   'Edit trusted keyring': 996,
-  'Packages': 997,
+  'Service Packages': 997,
   'OS Updates': 998,
   'Trust signatures for:': 999,
   'Yes': 1000,

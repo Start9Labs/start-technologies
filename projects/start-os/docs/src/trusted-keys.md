@@ -6,7 +6,7 @@ Trusted keyrings group the public keys whose signatures your server accepts for 
 
 Open **System → Trusted keyrings**, between **SSH Access** and **Change Password**. The table header links to this documentation.
 
-Each named keyring contains one or more public keys. The table shows its public-key count and whether it is trusted for **Packages** and **OS Updates**. Open a row's overflow menu and choose **Edit** to change its name or the switches under **Trust signatures for:**. The switches are independent: enabling package trust does not enable OS-update trust.
+Each named keyring contains one or more public keys. The table shows its public-key count and whether it is trusted for **Service Packages** and **OS Updates**. Open a row's overflow menu and choose **Edit** to change its name or the switches under **Trust signatures for:**. The switches are independent: enabling package trust does not enable OS-update trust.
 
 New installations include **Start9**, containing the drbonez, matthill, and Start9 signing keys, enabled in both contexts. **Start9 Alpha** contains the Alpha and community-registry build keys and starts disabled in both contexts. Start9 and Start9 Alpha stay at the top of the table. Their overflow menus hide **Delete**, and their names are disabled in the edit dialog; either trust switch can still be changed. Custom keyrings can be deleted, which removes them from both contexts. Deleted keyrings are not automatically restored.
 

@@ -875,7 +875,7 @@ export default {
   994: 'Zaufane pęki kluczy',
   995: 'Dostęp SSH',
   996: 'Edytuj zaufany pęk kluczy',
-  997: 'Pakiety',
+  997: 'Pakiety usług',
   998: 'Aktualizacje systemu',
   999: 'Ufaj podpisom dla:',
   1000: 'Tak',

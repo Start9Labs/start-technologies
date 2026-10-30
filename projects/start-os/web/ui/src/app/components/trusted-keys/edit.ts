@@ -35,7 +35,7 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
         <legend>{{ 'Trust signatures for:' | i18n }}</legend>
         <label tuiLabel>
           <input tuiSwitch type="checkbox" formControlName="marketplace" />
-          {{ 'Packages' | i18n }}
+          {{ 'Service Packages' | i18n }}
         </label>
         <label tuiLabel>
           <input tuiSwitch type="checkbox" formControlName="os" />

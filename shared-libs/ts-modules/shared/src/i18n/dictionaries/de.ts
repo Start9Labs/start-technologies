@@ -875,7 +875,7 @@ export default {
   994: 'Vertrauenswürdige Schlüsselbunde',
   995: 'SSH-Zugriff',
   996: 'Vertrauenswürdigen Schlüsselbund bearbeiten',
-  997: 'Pakete',
+  997: 'Dienstpakete',
   998: 'Betriebssystem-Updates',
   999: 'Vertrauen in Signaturen für:',
   1000: 'Ja',
