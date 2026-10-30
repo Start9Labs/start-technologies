@@ -23,6 +23,7 @@ const ENTRIES_PER_TRANSACTION: usize = 16_384;
 const JOURNAL_ENTRIES_FLOOR: u64 = 65_536;
 const JOURNAL_SEGMENT_SIZE: u64 = 8 * 1024 * 1024;
 const JOURNAL_SUFFIX: &str = ".idx";
+const JOURNAL_ALIGN: u64 = 4096;
 const ANCHOR: &str = "state";
 type Change = (RecordKey, Option<Location>);
 
@@ -240,6 +241,11 @@ impl Journal {
         })
     }
 
+    /// Starts the next append on a block no committed transaction occupies.
+    fn align(&mut self) {
+        self.offset = self.offset.next_multiple_of(JOURNAL_ALIGN);
+    }
+
     fn append(&mut self, blob: &vault::Sealed) -> BkfsResult<IndexReference> {
         let len = u32::try_from(blob.bytes.len())
             .map_err(|_| BkfsError::unsupported("index transaction too large"))?;
@@ -455,6 +461,9 @@ impl State {
             .collect();
         let mut changes = changes.into_iter().peekable();
         let mut segments = segments.into_iter().peekable();
+        if let Some(journal) = &mut self.journal {
+            journal.align();
+        }
         while changes.peek().is_some() || segments.peek().is_some() {
             let transaction = Transaction {
                 previous: tip,
@@ -1016,6 +1025,35 @@ mod tests {
             State::open(dir.path(), &key).unwrap().1.index.get(&7),
             Some(&location(9000))
         );
+    }
+
+    #[test]
+    fn a_torn_append_leaves_the_previous_commit_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = Key::from([0x88; 32]);
+        let mut state = initial(dir.path(), &key);
+        state
+            .record(RecordKey::Inode(7), Some(location(128)))
+            .unwrap();
+        commit(&mut state, &key, 1);
+        let anchor = std::fs::read(dir.path().join(ANCHOR)).unwrap();
+        state
+            .record(RecordKey::Inode(8), Some(location(256)))
+            .unwrap();
+        commit(&mut state, &key, 2);
+        let (id, offset, _) = journal(state.view().tip.unwrap());
+        drop(state);
+        std::fs::write(dir.path().join(ANCHOR), anchor).unwrap();
+        let block = offset / JOURNAL_ALIGN * JOURNAL_ALIGN;
+        OpenOptions::new()
+            .write(true)
+            .open(journal_path(dir.path(), id))
+            .unwrap()
+            .write_all_at(&[0; JOURNAL_ALIGN as usize], block)
+            .unwrap();
+        let (_, roots) = State::open(dir.path(), &key).unwrap();
+        assert_eq!(roots.index.get(&7), Some(&location(128)));
+        assert_eq!(roots.index.get(&8), None);
     }
 
     #[test]
