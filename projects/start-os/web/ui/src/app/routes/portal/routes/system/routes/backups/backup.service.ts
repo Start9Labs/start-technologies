@@ -49,9 +49,6 @@ export class BackupService {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly tasks = inject(TaskService)
   private readonly reload = new Subject<void>()
-  private readonly serverId = toSignal(this.patch.watch$('serverInfo', 'id'), {
-    initialValue: '',
-  })
   private readonly targets = toSignal(
     this.reload.pipe(
       switchMap(() =>
@@ -94,6 +91,9 @@ export class BackupService {
     )
     .subscribe(() => this.getBackupTargets())
 
+  public readonly serverId = toSignal(this.patch.watch$('serverInfo', 'id'), {
+    initialValue: '',
+  })
   public readonly conversions = toSignal(
     this.patch.watch$('serverInfo', 'statusInfo', 'backupConversions'),
     { initialValue: {} as T.ServerStatus['backupConversions'] },
@@ -147,20 +147,49 @@ export class BackupService {
     this.cifs.update(clear)
   }
 
-  async convert(targetId: string, serverId: string): Promise<void> {
+  async prepareBackup(
+    targetId: string,
+    backups: Record<string, T.StartOsRecoveryInfo>,
+  ): Promise<'ready' | 'conversion' | 'cancelled'> {
+    const backup = backups[this.serverId()]
+    const job = this.conversions()[targetId]?.[this.serverId()]
+    if (job?.state === 'running' || backup?.formatStatus === 'interrupted')
+      return 'conversion'
+    if (backup?.formatStatus !== 'legacy') return 'ready'
+
+    const update = await firstValueFrom(
+      this.dialogs.openConfirm({
+        label: 'Update backup format?',
+        data: {
+          content:
+            'This server’s backup uses an old format. Update it for stronger tamper detection and read-only snapshots, or skip to create a backup using the existing format. Conversion may take a long time, and this backup is unavailable until it finishes.',
+          yes: 'Update format',
+          no: 'Skip',
+        },
+      }),
+      { defaultValue: undefined },
+    )
+    if (update === undefined) return 'cancelled'
+    if (!update) return 'ready'
+    return (await this.convert(targetId, this.serverId()))
+      ? 'conversion'
+      : 'cancelled'
+  }
+
+  async convert(targetId: string, serverId: string): Promise<boolean> {
     const confirmed = await firstValueFrom(
       this.dialogs.openConfirm({
         label: 'Convert backup format?',
         data: {
           content:
-            'Conversion rewrites this backup and may take hours or days. Keep the target connected. This backup is unavailable until conversion finishes, and older StartOS releases cannot read it afterward. An interrupted conversion can be resumed.',
+            'Conversion rewrites this backup and may take a long time. Keep the target connected. This backup is unavailable until conversion finishes, and older StartOS releases cannot read it afterward. An interrupted conversion can be resumed.',
           yes: 'Continue',
           no: 'Cancel',
         },
       }),
       { defaultValue: false },
     )
-    if (!confirmed) return
+    if (!confirmed) return false
     const password = await firstValueFrom(
       this.dialogs.openPrompt<string>({
         label: 'Password required',
@@ -174,8 +203,8 @@ export class BackupService {
       }),
       { defaultValue: undefined },
     )
-    if (password === undefined) return
-    await this.tasks.run(
+    if (password === undefined) return false
+    return this.tasks.run(
       () =>
         this.api.rpc.backup.target.convert({ targetId, serverId, password }),
       'Starting backup conversion',
