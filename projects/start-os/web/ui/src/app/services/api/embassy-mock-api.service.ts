@@ -813,7 +813,6 @@ export class MockApiService extends ApiService {
         error: null,
       }
       backup.formatStatus = 'interrupted'
-      await this.publishConversions()
       void this.simulateConversion(params, backup)
       return null
     },
@@ -2411,17 +2410,24 @@ export class MockApiService extends ApiService {
     backup: T.StartOsRecoveryInfo,
   ): Promise<void> {
     const job = this.conversionJobs[params.targetId]![params.serverId]!
-    for (const [name, units] of [
-      ['Inspecting backup', 'steps'],
-      ['Converting metadata', 'bytes'],
-      ['Scanning backup objects', 'steps'],
-      ['Converting data objects', 'steps'],
-      ['Finalizing conversion', 'steps'],
-    ] as const) {
-      const phase: T.NamedProgress = { name, progress: false }
-      job.progress.phases.push(phase)
+    const progress = new utils.FullProgressTracker()
+    const phases = [
+      ['Inspecting backup', 'steps', 5],
+      ['Converting metadata', 'bytes', 20],
+      ['Scanning backup objects', 'steps', 10],
+      ['Converting data objects', 'steps', 60],
+      ['Finalizing conversion', 'steps', 5],
+    ] as const
+    const handles = phases.map(([name, , weight]) =>
+      progress.addPhase(name, weight),
+    )
+    for (const [index, [name, units]] of phases.entries()) {
+      const phase = handles[index]!
+      phase.setUnits(units)
+      phase.setTotal(100)
       for (const done of [0, 25, 50, 75, 100]) {
-        phase.progress = { done, total: 100, units }
+        phase.setDone(done)
+        job.progress = progress.snapshot()
         if (
           name === 'Converting data objects' &&
           done === 25 &&
@@ -2436,11 +2442,12 @@ export class MockApiService extends ApiService {
         await this.publishConversions()
         await pauseFor(700)
       }
-      phase.progress = true
+      phase.complete()
     }
     backup.formatStatus = 'current'
     job.state = 'complete'
-    job.progress.overall = true
+    progress.complete()
+    job.progress = progress.snapshot()
     await this.publishConversions()
   }
 

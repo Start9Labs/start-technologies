@@ -887,7 +887,7 @@ export default {
   1006: 'Conversión en curso',
   1007: 'Reanudar conversión',
   1008: 'Reintentar conversión',
-  1009: 'Formato antiguo',
+  1009: 'Actualizar formato',
   1010: 'Formato de copia',
   1011: 'Las copias con formato antiguo siguen disponibles para crear y restaurar copias hasta que elija convertirlas.',
   1012: 'Conversión completada',
@@ -896,4 +896,7 @@ export default {
   1015: 'Convertir copia',
   1016: 'Puede cerrar este diálogo. La conversión continúa en segundo plano.',
   1017: 'objetos',
+  1018: 'Progreso general',
+  1019: '¿Actualizar el formato de la copia?',
+  1020: 'La copia de este servidor utiliza un formato antiguo. Actualícelo para una detección de alteraciones más sólida e instantáneas de solo lectura, u omita este paso para crear una copia con el formato existente. La conversión puede tardar horas o días y esta copia no estará disponible hasta que termine.',
 } satisfies i18n

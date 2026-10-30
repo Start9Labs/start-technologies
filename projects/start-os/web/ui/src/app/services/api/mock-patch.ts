@@ -52,7 +52,7 @@ export const mockPatchData: DataModel = {
     servicesView: { desktopLayout: 'list', asc: true },
   },
   serverInfo: {
-    id: 'abcdefgh',
+    id: Mock.ServerId,
     trustedKeys: {
       start9: {
         name: 'Start9',

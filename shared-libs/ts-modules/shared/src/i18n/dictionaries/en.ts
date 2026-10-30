@@ -888,7 +888,7 @@ export const ENGLISH: Record<string, number> = {
   'Conversion in progress': 1006,
   'Resume conversion': 1007,
   'Retry conversion': 1008,
-  'Old format': 1009,
+  'Update format': 1009,
   'Backup format': 1010,
   'Old-format backups remain usable for backups and restores until you choose conversion.': 1011,
   'Conversion complete': 1012,
@@ -897,4 +897,7 @@ export const ENGLISH: Record<string, number> = {
   'Convert backup': 1015,
   'You can close this dialog. Conversion continues in the background.': 1016,
   'objects': 1017,
+  'Overall progress': 1018,
+  'Update backup format?': 1019,
+  'This server’s backup uses an old format. Update it for stronger tamper detection and read-only snapshots, or skip to create a backup using the existing format. Conversion may take hours or days, and this backup is unavailable until it finishes.': 1020,
 }

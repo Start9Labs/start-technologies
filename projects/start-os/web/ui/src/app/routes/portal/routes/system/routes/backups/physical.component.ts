@@ -56,7 +56,9 @@ import { BackupStatusComponent } from './status.component'
             <div class="controls">
               @if (
                 target.entry.startOs
-                  | backupConversionLabel: service.conversions()[target.id];
+                  | backupConversionLabel
+                    : service.conversions()[target.id]
+                    : (type === 'create' ? service.serverId() : undefined);
                 as label
               ) {
                 <button

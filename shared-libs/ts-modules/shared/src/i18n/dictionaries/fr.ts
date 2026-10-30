@@ -887,7 +887,7 @@ export default {
   1006: 'Conversion en cours',
   1007: 'Reprendre la conversion',
   1008: 'Réessayer la conversion',
-  1009: 'Ancien format',
+  1009: 'Mettre à jour le format',
   1010: 'Format de sauvegarde',
   1011: 'Les sauvegardes dans l’ancien format restent utilisables pour les sauvegardes et restaurations jusqu’à votre choix de conversion.',
   1012: 'Conversion terminée',
@@ -896,4 +896,7 @@ export default {
   1015: 'Convertir la sauvegarde',
   1016: 'Vous pouvez fermer cette boîte de dialogue. La conversion continue en arrière-plan.',
   1017: 'objets',
+  1018: 'Progression globale',
+  1019: 'Mettre à jour le format de sauvegarde ?',
+  1020: 'La sauvegarde de ce serveur utilise un ancien format. Mettez-le à jour pour une meilleure détection des altérations et des instantanés en lecture seule, ou ignorez cette étape pour créer une sauvegarde au format existant. La conversion peut prendre des heures ou des jours et cette sauvegarde reste indisponible jusqu’à la fin.',
 } satisfies i18n

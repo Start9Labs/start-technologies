@@ -887,7 +887,7 @@ export default {
   1006: 'Konwersja trwa',
   1007: 'Wznów konwersję',
   1008: 'Ponów konwersję',
-  1009: 'Stary format',
+  1009: 'Zaktualizuj format',
   1010: 'Format kopii zapasowej',
   1011: 'Kopie w starym formacie pozostają dostępne do tworzenia kopii i przywracania danych, dopóki nie wybierzesz konwersji.',
   1012: 'Konwersja zakończona',
@@ -896,4 +896,7 @@ export default {
   1015: 'Konwertuj kopię',
   1016: 'Możesz zamknąć to okno. Konwersja będzie kontynuowana w tle.',
   1017: 'obiektów',
+  1018: 'Łączny postęp',
+  1019: 'Zaktualizować format kopii zapasowej?',
+  1020: 'Kopia tego serwera używa starego formatu. Zaktualizuj go, aby uzyskać skuteczniejsze wykrywanie modyfikacji i migawki tylko do odczytu, lub pomiń ten krok, aby utworzyć kopię w istniejącym formacie. Konwersja może potrwać godziny lub dni, a kopia jest niedostępna do jej zakończenia.',
 } satisfies i18n

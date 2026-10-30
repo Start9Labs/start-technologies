@@ -887,7 +887,7 @@ export default {
   1006: 'Konvertierung läuft',
   1007: 'Konvertierung fortsetzen',
   1008: 'Konvertierung erneut versuchen',
-  1009: 'Altes Format',
+  1009: 'Format aktualisieren',
   1010: 'Sicherungsformat',
   1011: 'Sicherungen im alten Format bleiben für Sicherungen und Wiederherstellungen nutzbar, bis Sie die Konvertierung auswählen.',
   1012: 'Konvertierung abgeschlossen',
@@ -896,4 +896,7 @@ export default {
   1015: 'Sicherung konvertieren',
   1016: 'Sie können diesen Dialog schließen. Die Konvertierung läuft im Hintergrund weiter.',
   1017: 'Objekte',
+  1018: 'Gesamtfortschritt',
+  1019: 'Sicherungsformat aktualisieren?',
+  1020: 'Die Sicherung dieses Servers verwendet ein altes Format. Aktualisieren Sie es für eine stärkere Manipulationserkennung und schreibgeschützte Snapshots, oder überspringen Sie diesen Schritt, um eine Sicherung im bestehenden Format zu erstellen. Die Konvertierung kann Stunden oder Tage dauern, und diese Sicherung ist bis zum Abschluss nicht verfügbar.',
 } satisfies i18n

@@ -1,13 +1,8 @@
 import { KeyValuePipe } from '@angular/common'
 import { Component, computed, inject, input, Pipe } from '@angular/core'
+import { ActivatedRoute } from '@angular/router'
+import { DialogService, i18nPipe } from '@start9labs/shared'
 import {
-  ConvertBytesPipe,
-  DialogService,
-  i18nPipe,
-  LeafProgressPipe,
-} from '@start9labs/shared'
-import {
-  TUI_BREAKPOINT,
   TuiButton,
   tuiButtonOptionsProvider,
   TuiDialogContext,
@@ -20,10 +15,11 @@ import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 
 import { ServiceProgressPhaseComponent } from 'src/app/routes/portal/routes/services/components/progress-phase.component'
 import { BackupService } from './backup.service'
-import { conversionLabel } from './conversion-state'
+import { conversionLabel, serverBackups } from './conversion-state'
 
 interface ConversionContext {
   targetId: string
+  serverId?: string
 }
 
 @Pipe({ name: 'backupConversionLabel' })
@@ -34,9 +30,7 @@ export class ConversionLabel {
 @Component({
   selector: 'button[backupConversion]',
   template: `
-    @if (breakpoint() !== 'mobile') {
-      {{ localized() }}
-    }
+    {{ localized() }}
   `,
   hostDirectives: [TuiButton],
   host: {
@@ -46,14 +40,15 @@ export class ConversionLabel {
     '(keydown)': '$event.stopPropagation()',
     '[attr.aria-label]': 'localized()',
   },
-  providers: [tuiButtonOptionsProvider({ appearance: 'warning', size: 'xs' })],
+  providers: [tuiButtonOptionsProvider({ appearance: 'primary', size: 's' })],
 })
 export class BackupConversion {
   private readonly dialogs = inject(DialogService)
   private readonly i18n = inject(i18nPipe)
   private readonly icon = tuiIconStart(computed(() => '@tui.shield-alert'))
 
-  protected readonly breakpoint = inject(TUI_BREAKPOINT)
+  private readonly service = inject(BackupService)
+  private readonly type = inject(ActivatedRoute).snapshot.data['type']
   protected readonly localized = computed(() =>
     this.i18n.transform(this.label()),
   )
@@ -66,7 +61,11 @@ export class BackupConversion {
     this.dialogs
       .openComponent(CONVERSIONS, {
         size: 'l',
-        data: { targetId: this.targetId() },
+        data: {
+          targetId: this.targetId(),
+          serverId:
+            this.type === 'create' ? this.service.serverId() : undefined,
+        },
       })
       .subscribe()
   }
@@ -119,28 +118,11 @@ export class BackupConversion {
             </div>
           }
           @if (job) {
-            @for (phase of job.progress.phases; track phase.name) {
-              <service-progress-phase
-                [name]="phase.name"
-                [progress]="phase.progress"
-              />
-              @let leaf = phase.progress | leafProgress;
-              @if (leaf && leaf !== true) {
-                @if (leaf.units === 'bytes') {
-                  <p>
-                    {{ leaf.done | convertBytes }}
-                    @if (leaf.total !== null) {
-                      / {{ leaf.total | convertBytes }}
-                    }
-                  </p>
-                } @else if (leaf.done > 0 || leaf.total !== null) {
-                  <p>
-                    {{ leaf.done }} / {{ leaf.total ?? '?' }}
-                    {{ 'objects' | i18n }}
-                  </p>
-                }
-              }
-            }
+            <service-progress-phase
+              [name]="'Overall progress'"
+              [progress]="job.progress"
+              [showCounts]="true"
+            />
             @if (job.error) {
               <div tuiNotification appearance="negative">{{ job.error }}</div>
             }
@@ -193,22 +175,23 @@ export class BackupConversion {
     TuiNotification,
     ServiceProgressPhaseComponent,
     i18nPipe,
-    LeafProgressPipe,
-    ConvertBytesPipe,
   ],
 })
 class Conversions {
   protected readonly context =
     injectContext<TuiDialogContext<void, ConversionContext>>()
   protected readonly service = inject(BackupService)
-  protected readonly backups = computed(
-    () =>
+  protected readonly backups = computed(() =>
+    serverBackups(
       this.service.cifs().find(({ id }) => id === this.context.data.targetId)
         ?.entry.startOs ??
-      this.service.drives().find(({ id }) => id === this.context.data.targetId)
-        ?.entry.startOs ??
-      {},
+        this.service
+          .drives()
+          .find(({ id }) => id === this.context.data.targetId)?.entry.startOs ??
+        {},
+      this.context.data.serverId,
+    ),
   )
 }
 
-const CONVERSIONS = new PolymorpheusComponent(Conversions)
+export const CONVERSIONS = new PolymorpheusComponent(Conversions)
