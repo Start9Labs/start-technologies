@@ -73,7 +73,7 @@ import { createVolumes } from './util/Volume'
 import { getDataVersion, setDataVersion } from './version'
 
 /** The minimum StartOS version required by this SDK release */
-export const OSVersion = testTypeVersion('0.4.0.2')
+export const OSVersion = testTypeVersion('0.4.1')
 
 // prettier-ignore
 type AnyNeverCond<T extends any[], Then, Else> = 
@@ -849,13 +849,13 @@ export class StartSdk<Manifest extends T.SDKManifest> {
        *
        * Pass any of these to the `trigger` field on a {@link Ready} config.
        * If omitted, health checks use `defaultTrigger`, except that a daemon's
-       * `loading` or `waiting` before its first `success` backs off from 1 s,
+       * `loading` or `waiting: true` before its first `success` backs off from 1 s,
        * doubling to 30 s.
        */
       trigger: {
         /**
          * Every 1 s while `starting` or `failure`; every 30 s while `success`,
-         * `loading`, `waiting` or `disabled`.
+         * `loading`, `disabled`, or `starting` with `waiting: true`.
          */
         defaultTrigger,
         /** Fixed interval between checks. Use for a simple, constant polling rate. */

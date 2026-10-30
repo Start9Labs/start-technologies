@@ -1,0 +1,2 @@
+- Les métadonnées des versions du système enregistrent le commit Git de la construction et la présence de mises à jour de sécurité, puis conservent ces informations lors de la promotion entre registres.
+- Les annonces de mises à jour de sécurité du système sont désactivées par défaut. Les opérateurs du registre peuvent les activer avec `security-notifications: true` sans modifier les métadonnées des versions.

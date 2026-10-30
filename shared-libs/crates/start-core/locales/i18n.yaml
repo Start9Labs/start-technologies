@@ -2632,6 +2632,13 @@ registry.os.version.signer-not-authorized:
   pl_PL: "Sygnatariusz %{signer} nie jest autoryzowany do podpisywania v%{version}"
 
 # registry/os/promote.rs
+registry.os.commit-changed:
+  en_US: "The indexed OS build changed. Restart the release using the intended build."
+  de_DE: "Der indexierte OS-Build hat sich geändert. Starten Sie die Veröffentlichung mit dem gewünschten Build erneut."
+  es_ES: "La compilación indexada del SO cambió. Reinicie la publicación con la compilación deseada."
+  fr_FR: "La compilation du système indexée a changé. Relancez la publication avec la compilation souhaitée."
+  pl_PL: "Indeksowana kompilacja systemu zmieniła się. Uruchom wydanie ponownie z wybraną kompilacją."
+
 registry.os.promote.need-from-or-to:
   en_US: "At least one of --from or --to must be specified"
   de_DE: "Mindestens --from oder --to muss angegeben werden"
@@ -3419,6 +3426,54 @@ notifications.invalid-level:
   es_ES: "Nivel de notificación inválido: %{level}"
   fr_FR: "Niveau de notification invalide : %{level}"
   pl_PL: "Nieprawidłowy poziom powiadomienia: %{level}"
+notifications.push.crypto-failed:
+  en_US: "Unable to prepare encrypted push notification"
+  de_DE: "Verschlüsselte Push-Benachrichtigung konnte nicht vorbereitet werden"
+  es_ES: "No se pudo preparar la notificación push cifrada"
+  fr_FR: "Impossible de préparer la notification push chiffrée"
+  pl_PL: "Nie można przygotować zaszyfrowanego powiadomienia push"
+notifications.push.delivery-failed:
+  en_US: "Push notification delivery failed"
+  de_DE: "Push-Benachrichtigung konnte nicht zugestellt werden"
+  es_ES: "No se pudo entregar la notificación push"
+  fr_FR: "Échec de la remise de la notification push"
+  pl_PL: "Nie udało się dostarczyć powiadomienia push"
+notifications.push.invalid-endpoint:
+  en_US: "Push endpoint must be an HTTP or HTTPS URL"
+  de_DE: "Push-Endpunkt muss eine HTTP- oder HTTPS-URL sein"
+  es_ES: "El destino push debe ser una URL HTTP o HTTPS"
+  fr_FR: "Le point de terminaison push doit être une URL HTTP ou HTTPS"
+  pl_PL: "Punkt końcowy push musi być adresem URL HTTP lub HTTPS"
+notifications.push.invalid-keys:
+  en_US: "Invalid Web Push encryption keys"
+  de_DE: "Ungültige Web-Push-Verschlüsselungsschlüssel"
+  es_ES: "Claves de cifrado Web Push no válidas"
+  fr_FR: "Clés de chiffrement Web Push invalides"
+  pl_PL: "Nieprawidłowe klucze szyfrowania Web Push"
+notifications.push.not-found:
+  en_US: "Push subscription not found"
+  de_DE: "Push-Abonnement nicht gefunden"
+  es_ES: "No se encontró la suscripción push"
+  fr_FR: "Abonnement push introuvable"
+  pl_PL: "Nie znaleziono subskrypcji push"
+notifications.push.queue-failed:
+  en_US: "Unable to process push notification queue"
+  de_DE: "Warteschlange der Push-Benachrichtigungen konnte nicht verarbeitet werden"
+  es_ES: "No se pudo procesar la cola de notificaciones push"
+  fr_FR: "Impossible de traiter la file des notifications push"
+  pl_PL: "Nie można przetworzyć kolejki powiadomień push"
+notifications.push.test-body:
+  en_US: "Push notifications are working on this browser."
+  de_DE: "Push-Benachrichtigungen funktionieren in diesem Browser."
+  es_ES: "Las notificaciones push funcionan en este navegador."
+  fr_FR: "Les notifications push fonctionnent dans ce navigateur."
+  pl_PL: "Powiadomienia push działają w tej przeglądarce."
+notifications.push.test-title:
+  en_US: "StartOS test notification"
+  de_DE: "StartOS-Testbenachrichtigung"
+  es_ES: "Notificación de prueba de StartOS"
+  fr_FR: "Notification de test StartOS"
+  pl_PL: "Powiadomienie testowe StartOS"
 
 # update/mod.rs
 update.already-updated-restart-required:
@@ -3536,6 +3591,13 @@ auth.malformed-etc-shadow:
   fr_FR: "/etc/shadow mal formé"
   pl_PL: "zniekształcony /etc/shadow"
 
+auth.tokens-unsupported:
+  en_US: "Bearer tokens are not supported here"
+  de_DE: "Bearer-Token werden hier nicht unterstützt"
+  es_ES: "Los tokens de portador no se admiten aquí"
+  fr_FR: "Les jetons d'accès ne sont pas pris en charge ici"
+  pl_PL: "Tokeny okaziciela nie są tutaj obsługiwane"
+
 auth.couldnt-decode-password:
   en_US: "Couldn't decode password"
   de_DE: "Passwort konnte nicht dekodiert werden"
@@ -3577,6 +3639,27 @@ auth.local-logout-unnecessary:
   es_ES: "No es necesario cerrar sesión al usar la cookie de autenticación local."
   fr_FR: "La déconnexion est inutile lorsque le cookie d'authentification local est utilisé."
   pl_PL: "Wylogowanie nie jest potrzebne podczas korzystania z lokalnego pliku cookie uwierzytelniania."
+
+tunnel.api.endpoint-required:
+  en_US: 'WAN IP %{wan_ip} is not public; supply --endpoint <HOST> with the address the device uses to reach this tunnel server'
+  de_DE: 'Die WAN-IP %{wan_ip} ist nicht öffentlich; geben Sie mit --endpoint <HOST> die Adresse an, über die das Gerät diesen Tunnelserver erreicht'
+  es_ES: 'La IP WAN %{wan_ip} no es pública; indique con --endpoint <HOST> la dirección que usa el dispositivo para llegar a este servidor de túnel'
+  fr_FR: 'L’IP WAN %{wan_ip} n’est pas publique ; indiquez avec --endpoint <HOST> l’adresse utilisée par l’appareil pour joindre ce serveur de tunnel'
+  pl_PL: 'Adres IP WAN %{wan_ip} nie jest publiczny; podaj za pomocą --endpoint <HOST> adres, którego urządzenie używa do połączenia z tym serwerem tunelu'
+
+tunnel.api.invalid-endpoint:
+  en_US: 'Enter an IPv4 address, IPv6 address, or DNS name without a scheme, port, or path'
+  de_DE: 'Geben Sie eine IPv4-Adresse, IPv6-Adresse oder einen DNS-Namen ohne Schema, Port oder Pfad ein'
+  es_ES: 'Introduce una dirección IPv4, IPv6 o un nombre DNS sin esquema, puerto ni ruta'
+  fr_FR: 'Saisissez une adresse IPv4, IPv6 ou un nom DNS sans schéma, port ni chemin'
+  pl_PL: 'Wprowadź adres IPv4, IPv6 lub nazwę DNS bez schematu, portu ani ścieżki'
+
+util.env.invalid-json-env:
+  en_US: "JSON_ENV_* chunks must be contiguous from 0 and form a JSON object with string or null values"
+  de_DE: "JSON_ENV_*-Teile müssen lückenlos bei 0 beginnen und ein JSON-Objekt mit Zeichenfolgen oder null-Werten bilden"
+  es_ES: "Los fragmentos JSON_ENV_* deben ser consecutivos desde 0 y formar un objeto JSON con valores de cadena o null"
+  fr_FR: "Les fragments JSON_ENV_* doivent être consécutifs à partir de 0 et former un objet JSON contenant des chaînes ou des valeurs null"
+  pl_PL: "Fragmenty JSON_ENV_* muszą być ponumerowane kolejno od 0 i tworzyć obiekt JSON z wartościami tekstowymi lub null"
 
 # util/tui.rs
 util.tui.terminal-must-be-interactive:
@@ -3935,6 +4018,13 @@ help.arg.ed25519:
   fr_FR: "Utiliser Ed25519 au lieu de NIST P-256"
   pl_PL: "Użyj Ed25519 zamiast NIST P-256"
 
+help.arg.endpoint:
+  en_US: 'IPv4, IPv6, or DNS endpoint host for this WireGuard config; required when the selected WAN IP is not public'
+  de_DE: 'IPv4-, IPv6- oder DNS-Endpunkt für diese WireGuard-Konfiguration; erforderlich, wenn die gewählte WAN-IP nicht öffentlich ist'
+  es_ES: 'Host IPv4, IPv6 o DNS del endpoint para esta configuración de WireGuard; obligatorio si la IP WAN seleccionada no es pública'
+  fr_FR: 'Hôte IPv4, IPv6 ou DNS du point de terminaison pour cette configuration WireGuard ; requis si l’IP WAN sélectionnée n’est pas publique'
+  pl_PL: 'Host IPv4, IPv6 lub DNS punktu końcowego dla tej konfiguracji WireGuard; wymagany, gdy wybrany adres IP WAN nie jest publiczny'
+
 help.arg.env-file-path:
   en_US: "Path to environment file"
   de_DE: "Pfad zur Umgebungsdatei"
@@ -3976,6 +4066,13 @@ help.arg.except-callbacks:
   es_ES: "IDs de callbacks a excluir"
   fr_FR: "IDs de callbacks à exclure"
   pl_PL: "Identyfikatory callbacków do wykluczenia"
+
+help.arg.expected-os-git-hash:
+  en_US: "Reject the operation if the indexed OS commit has changed"
+  de_DE: "Den Vorgang ablehnen, wenn sich der indexierte OS-Commit geändert hat"
+  es_ES: "Rechazar la operación si ha cambiado el commit indexado del SO"
+  fr_FR: "Refuser l’opération si le commit du système indexé a changé"
+  pl_PL: "Odrzuć operację, jeśli zmienił się indeksowany commit systemu"
 
 help.arg.except-tasks:
   en_US: "Task IDs to exclude"
@@ -4292,6 +4389,20 @@ help.arg.only-tasks:
   fr_FR: "Ne supprimer que ces IDs de tâche"
   pl_PL: "Wyczyść tylko te identyfikatory zadań"
 
+help.arg.os-git-hash:
+  en_US: "Git commit that built the OS release"
+  de_DE: "Git-Commit, aus dem die OS-Version erstellt wurde"
+  es_ES: "Commit de Git que generó la versión del SO"
+  fr_FR: "Commit Git ayant produit la version du système"
+  pl_PL: "Commit Git użyty do zbudowania wydania systemu"
+
+help.arg.os-security:
+  en_US: "Mark the OS release as a security update"
+  de_DE: "Die OS-Version als Sicherheitsupdate markieren"
+  es_ES: "Marcar la versión del SO como actualización de seguridad"
+  fr_FR: "Marquer la version du système comme mise à jour de sécurité"
+  pl_PL: "Oznacz wydanie systemu jako aktualizację bezpieczeństwa"
+
 help.arg.os-version:
   en_US: "StartOS version number"
   de_DE: "StartOS-Versionsnummer"
@@ -4390,6 +4501,13 @@ help.arg.registry-product:
   es_ES: "Sistema operativo cuyas versiones sirve el registro"
   fr_FR: "Système d'exploitation dont le registre sert les versions"
   pl_PL: "System operacyjny, którego wydania udostępnia rejestr"
+
+help.arg.registry-security-notifications:
+  en_US: "Enable OS security-update announcements from this registry"
+  de_DE: "Ankündigungen von OS-Sicherheitsupdates dieser Registry aktivieren"
+  es_ES: "Activar los avisos de actualizaciones de seguridad del SO de este registro"
+  fr_FR: "Activer les annonces de mises à jour de sécurité du système provenant de ce registre"
+  pl_PL: "Włącz powiadomienia o aktualizacjach bezpieczeństwa systemu z tego rejestru"
 
 help.arg.registry-url:
   en_US: "URL of the registry"
@@ -4586,6 +4704,13 @@ help.arg.to-registry-url:
   es_ES: "URL del registro de destino para promover"
   fr_FR: "URL du registre de destination pour la promotion"
   pl_PL: "URL rejestru docelowego do promowania"
+
+help.arg.token-name:
+  en_US: "Name shown for the token in the session list"
+  de_DE: "Name des Tokens in der Sitzungsliste"
+  es_ES: "Nombre que se muestra para el token en la lista de sesiones"
+  fr_FR: "Nom affiché pour le jeton dans la liste des sessions"
+  pl_PL: "Nazwa tokenu wyświetlana na liście sesji"
 
 help.arg.tor-proxy-url:
   en_US: "Tor SOCKS proxy URL"
@@ -5078,12 +5203,19 @@ help.arg.s9pk-file-paths:
   fr_FR: "Chemins vers les fichiers de paquet s9pk"
   pl_PL: "Ścieżki do plików pakietów s9pk"
 
-help.arg.session-ids:
-  en_US: "Session identifiers"
-  de_DE: "Sitzungskennungen"
-  es_ES: "Identificadores de sesión"
-  fr_FR: "Identifiants de session"
-  pl_PL: "Identyfikatory sesji"
+help.arg.session-pubkeys:
+  en_US: "Enrolled key of a session to terminate"
+  de_DE: "Registrierter Schlüssel einer zu beendenden Sitzung"
+  es_ES: "Clave registrada de una sesión a terminar"
+  fr_FR: "Clé enregistrée d'une session à terminer"
+  pl_PL: "Zarejestrowany klucz sesji do zakończenia"
+
+help.arg.session-tokens:
+  en_US: "ID of a bearer token to revoke"
+  de_DE: "ID eines zu widerrufenden Bearer-Tokens"
+  es_ES: "ID de un token de portador a revocar"
+  fr_FR: "ID d'un jeton d'accès à révoquer"
+  pl_PL: "Identyfikator tokenu okaziciela do unieważnienia"
 
 help.arg.signer-id:
   en_US: "Signer identifier"
@@ -5556,6 +5688,13 @@ about.commands-add-sign-remove-get-assets:
   fr_FR: "Commandes pour ajouter, signer, supprimer ou obtenir des actifs du registre"
   pl_PL: "Polecenia dodania, podpisania, usunięcia lub pobrania zasobów rejestru"
 
+about.commands-auth-tokens:
+  en_US: "Create bearer tokens for API clients"
+  de_DE: "Bearer-Tokens für API-Clients erstellen"
+  es_ES: "Crear tokens de portador para clientes de la API"
+  fr_FR: "Créer des jetons porteurs pour les clients de l'API"
+  pl_PL: "Twórz tokeny okaziciela dla klientów API"
+
 about.commands-authentication:
   en_US: "Commands related to Authentication i.e. login, logout"
   de_DE: "Befehle zur Authentifizierung, z.B. Anmelden, Abmelden"
@@ -5877,6 +6016,13 @@ about.convert-s9pk-v1-to-v2:
   es_ES: "Convertir un s9pk de v1 a v2"
   fr_FR: "Convertir un s9pk de v1 à v2"
   pl_PL: "Konwertuj s9pk z v1 do v2"
+
+about.create-auth-token:
+  en_US: "Create a bearer token that authenticates as a new session"
+  de_DE: "Bearer-Token erstellen, das sich als neue Sitzung authentifiziert"
+  es_ES: "Crear un token de portador que se autentica como una nueva sesión"
+  fr_FR: "Créer un jeton porteur qui s'authentifie comme une nouvelle session"
+  pl_PL: "Utwórz token okaziciela uwierzytelniający jako nowa sesja"
 
 about.create-backup-all-packages:
   en_US: "Create a backup for all packages"
@@ -7434,6 +7580,27 @@ tunnel.web.ui-port-reserved:
   fr_FR: "Cette plage inclut le port de l'interface d'administration activée ; utilisez des noms SNI pour le partager, ou désactivez d'abord l'interface ou changez son adresse."
   pl_PL: "Ten zakres obejmuje port włączonego panelu administracyjnego; użyj nazw SNI, aby go współdzielić, albo najpierw wyłącz panel lub zmień jego adres."
 
+update.security.available-message:
+  en_US: "StartOS %{version} includes security updates and is available from %{registry}."
+  de_DE: "StartOS %{version} enthält Sicherheitsupdates und ist unter %{registry} verfügbar."
+  es_ES: "StartOS %{version} incluye actualizaciones de seguridad y está disponible en %{registry}."
+  fr_FR: "StartOS %{version} contient des mises à jour de sécurité et est disponible sur %{registry}."
+  pl_PL: "StartOS %{version} zawiera aktualizacje bezpieczeństwa i jest dostępny w %{registry}."
+
+update.security.available-title:
+  en_US: "StartOS security update available"
+  de_DE: "StartOS-Sicherheitsupdate verfügbar"
+  es_ES: "Actualización de seguridad de StartOS disponible"
+  fr_FR: "Mise à jour de sécurité de StartOS disponible"
+  pl_PL: "Dostępna aktualizacja bezpieczeństwa StartOS"
+
+update.security.selected-registry:
+  en_US: "your selected OS registry"
+  de_DE: "Ihrer ausgewählten OS-Registry"
+  es_ES: "el registro del SO seleccionado"
+  fr_FR: "le registre du système sélectionné"
+  pl_PL: "wybranym rejestrze systemu"
+
 update.signers.already-exists:
   en_US: "This public key is already a trusted OS update signer"
   de_DE: "Dieser öffentliche Schlüssel ist bereits als Update-Unterzeichner vertrauenswürdig"
@@ -7447,6 +7614,13 @@ update.signers.not-found:
   es_ES: "No se encontró el firmante de confianza de actualizaciones del sistema"
   fr_FR: "Signataire de confiance des mises à jour du système introuvable"
   pl_PL: "Nie znaleziono zaufanego sygnatariusza aktualizacji systemu"
+
+version.http-auth-downgrade-requires-tls:
+  en_US: "Cannot downgrade: an HTTP authentication policy has no TLS wrapper. Add TLS to this binding before downgrading."
+  de_DE: "Downgrade nicht möglich: Eine HTTP-Authentifizierungsrichtlinie hat keine TLS-Ummantelung. Aktivieren Sie vor dem Downgrade TLS für diese Bindung."
+  es_ES: "No se puede volver a una versión anterior: una política de autenticación HTTP no tiene una envoltura TLS. Añada TLS a este enlace antes de continuar."
+  fr_FR: "Rétrogradation impossible : une politique d'authentification HTTP ne dispose pas d'enveloppe TLS. Ajoutez TLS à cette liaison avant de rétrograder."
+  pl_PL: "Nie można obniżyć wersji: zasada uwierzytelniania HTTP nie ma osłony TLS. Dodaj TLS do tego powiązania przed obniżeniem wersji."
 
 # volume.rs
 volume.restore-conflict:

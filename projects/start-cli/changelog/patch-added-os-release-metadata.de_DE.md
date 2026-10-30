@@ -1,0 +1,1 @@
+- Die Veröffentlichung von OS-Versionen in der Registry akzeptiert den Git-Hash des Builds und eine Kennzeichnung als Sicherheitsupdate; beide bleiben bei der Promotion erhalten. Release-Vorgänge können ein Quell-Image ablehnen, das während der Release-Vorbereitung geändert wurde.

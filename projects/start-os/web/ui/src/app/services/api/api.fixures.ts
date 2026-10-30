@@ -32,6 +32,8 @@ export namespace Mock {
 
   export const RegistryOSUpdate: T.OsVersionInfoMap = {
     '0.4.1': {
+      gitHash: null,
+      security: false,
       headline: 'v0.4.1',
       releaseNotes: 'Testing some release notes',
       sourceVersion: '>=0.3.5:0 <=0.4.0-alpha.17:0',
@@ -117,6 +119,8 @@ export namespace Mock {
       img: {},
     },
     '0.4.1-alpha.5': {
+      gitHash: null,
+      security: false,
       headline: 'v0.4.1-alpha.5',
       releaseNotes: 'Some more release notes',
       sourceVersion: '>=0.3.5:0 <=0.4.0-alpha.5:0',
@@ -1264,24 +1268,34 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
   export const Sessions: T.SessionList = {
     current: 'b7b1a9cef4284f00af9e9dda6e676177',
     sessions: {
-      '9513226517c54ddd8107d6d7b9d8aed7': {
-        name: null,
-        loggedIn: '2021-07-14T20:49:17.774Z',
-        lastActive: '2021-07-14T20:49:17.774Z',
-        userAgent: 'AppleWebKit/{WebKit Rev} (KHTML, like Gecko)',
+      pubkeys: {
+        '9513226517c54ddd8107d6d7b9d8aed7': {
+          name: null,
+          loggedIn: '2021-07-14T20:49:17.774Z',
+          lastActive: '2021-07-14T20:49:17.774Z',
+          userAgent: 'AppleWebKit/{WebKit Rev} (KHTML, like Gecko)',
+        },
+        klndsfjhbwsajkdnaksj: {
+          name: null,
+          loggedIn: '2021-07-14T20:49:17.774Z',
+          lastActive: '2019-07-14T20:49:17.774Z',
+          userAgent: 'AppleWebKit/{WebKit Rev} (KHTML, like Gecko)',
+        },
+        b7b1a9cef4284f00af9e9dda6e676177: {
+          name: null,
+          loggedIn: '2021-07-14T20:49:17.774Z',
+          lastActive: '2021-06-14T20:49:17.774Z',
+          userAgent:
+            'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:47.0) Gecko/20100101 Firefox/47.0',
+        },
       },
-      klndsfjhbwsajkdnaksj: {
-        name: null,
-        loggedIn: '2021-07-14T20:49:17.774Z',
-        lastActive: '2019-07-14T20:49:17.774Z',
-        userAgent: 'AppleWebKit/{WebKit Rev} (KHTML, like Gecko)',
-      },
-      b7b1a9cef4284f00af9e9dda6e676177: {
-        name: null,
-        loggedIn: '2021-07-14T20:49:17.774Z',
-        lastActive: '2021-06-14T20:49:17.774Z',
-        userAgent:
-          'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:47.0) Gecko/20100101 Firefox/47.0',
+      tokens: {
+        Qm3xV1yZ8kH2pL0sT4wN6rB9cD5fG7jAeU2iO8qW4tY: {
+          name: 'Claude Desktop MCP',
+          loggedIn: '2021-07-14T20:49:17.774Z',
+          lastActive: '2021-07-13T20:49:17.774Z',
+          userAgent: null,
+        },
       },
     },
   }
@@ -2597,6 +2611,7 @@ PersistentKeepalive = 25`
               addSsl: null,
               preferredExternalPort: 443,
               secure: { ssl: true },
+              proxy: null,
             },
             interfaces: {
               ui: {
@@ -2643,6 +2658,7 @@ PersistentKeepalive = 25`
               addSsl: null,
               preferredExternalPort: 8332,
               secure: { ssl: false },
+              proxy: null,
             },
             interfaces: {
               rpc: {
@@ -2689,6 +2705,7 @@ PersistentKeepalive = 25`
               addSsl: null,
               preferredExternalPort: 8333,
               secure: { ssl: false },
+              proxy: null,
             },
             interfaces: {
               p2p: {

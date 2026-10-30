@@ -1,1 +1,1 @@
-- Los routers StartWRT anteriores a 1.3.1 dejan de recibir ofertas de versiones que no pueden verificar.
+- Los routers StartWRT anteriores a 1.4.0 dejan de recibir ofertas de versiones que no pueden verificar.

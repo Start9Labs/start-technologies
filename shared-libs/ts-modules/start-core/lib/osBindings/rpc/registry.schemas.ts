@@ -427,11 +427,23 @@ export const AddVersionParams: z.ZodObject<{
   headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
+  gitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  expectedGitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   version: z.string(),
   headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
+  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  expectedGitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  security: wire(z.boolean().optional(), z.boolean()),
 }).meta({
   id: 'AddVersionParams',
 })
@@ -599,6 +611,17 @@ export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
+  /**
+   * Commit that produced the OS image, if recorded at publication.
+   */
+  gitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  /**
+   * Whether the release includes security fixes.
+   */
+  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   authorized: z.ZodArray<typeof Guid>
   iso: z.ZodRecord<
     z.ZodString,
@@ -616,6 +639,19 @@ export const OsVersionInfo: z.ZodObject<{
   headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
+  /**
+   * Commit that produced the OS image, if recorded at publication.
+   */
+  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()).meta({
+    description:
+      'Commit that produced the OS image, if recorded at publication.',
+  }),
+  /**
+   * Whether the release includes security fixes.
+   */
+  security: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Whether the release includes security fixes.',
+  }),
   authorized: z.array(Guid),
   iso: z.record(z.string(), RegistryAsset(Blake3Commitment)),
   squashfs: z.record(z.string(), RegistryAsset(Blake3Commitment)),
@@ -1507,4 +1543,62 @@ export const Api = {
       },
     },
   },
+}
+/**
+ * MCP tool descriptions of a schema tree's callable methods, the catalog
+ * `rpc_toolkit::mcp::McpServer` serves. Methods without bindings are omitted;
+ * an `outputSchema` describes object results only, as MCP requires.
+ */
+export function toolCatalog(tree: unknown): object[] {
+  type JsonSchema = {
+    type?: unknown
+    allOf?: unknown
+    $ref?: unknown
+    $defs?: { [name: string]: JsonSchema }
+    [keyword: string]: unknown
+  }
+  type Node = {
+    _PARAMS: z.ZodType
+    _RETURN?: z.ZodType
+    _CHILDREN?: { [name: string]: Node }
+    _OPAQUE?: true
+  }
+  const render = (schema: z.ZodType, io: 'input' | 'output'): JsonSchema => {
+    const rendered = z.toJSONSchema(schema, {
+      io,
+      unrepresentable: 'any',
+    }) as JsonSchema
+    const ref = rendered.$ref
+    const root =
+      typeof ref === 'string' && ref.startsWith('#/$defs/')
+        ? rendered.$defs?.[ref.slice('#/$defs/'.length)]
+        : undefined
+    if (!root) return rendered
+    const { $ref, ...rest } = rendered
+    return { ...rest, ...root }
+  }
+  const isObject = (schema: JsonSchema) =>
+    schema.type === 'object' ||
+    (schema.type === undefined && Array.isArray(schema.allOf))
+  const tools: object[] = []
+  const walk = (node: Node, path: string[]) => {
+    if (path.length && node._RETURN && !node._OPAQUE) {
+      const input = render(node._PARAMS, 'input')
+      if (input.type === undefined || input.type === 'object') {
+        const output = render(node._RETURN, 'output')
+        tools.push({
+          name: path.join('.'),
+          inputSchema: { ...input, type: 'object' },
+          ...(isObject(output)
+            ? { outputSchema: { ...output, type: 'object' } }
+            : {}),
+        })
+      }
+    }
+    for (const [name, child] of Object.entries(node._CHILDREN ?? {})) {
+      walk(child, [...path, name])
+    }
+  }
+  walk(tree as Node, [])
+  return tools
 }

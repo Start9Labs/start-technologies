@@ -1,0 +1,1 @@
+- Las conexiones de servicios HTTP sin cifrar pasan por StartOS cuando el proxy HTTP está habilitado. Las aplicaciones ven StartOS como extremo TCP; las direcciones de los clientes están disponibles en `X-Forwarded-For` cuando se habilita la generación de cabeceras reenviadas.

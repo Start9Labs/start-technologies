@@ -88,8 +88,6 @@ export const ENGLISH: Record<string, number> = {
   'Installed services': 91, // as in, software services installed on this computer
   'Diagnostics for the Tor daemon on this server': 92,
   'Copy fingerprint': 93, // as in the fingerprint of a root certificate authority
-  'Waiting': 94,
-  'Waiting on': 95, // as in "awaiting"
   'Add public domain': 96,
   'Removing': 97,
   'Unsaved changes': 100,
@@ -207,7 +205,7 @@ export const ENGLISH: Record<string, number> = {
   'Satisfied': 219,
   'No dependencies': 220,
   'Not installed': 221,
-  'Incorrect version': 222,
+  'Incompatible version': 222,
   'Not running': 223,
   'Action required': 224,
   'Required health check not passing': 225,
@@ -220,7 +218,6 @@ export const ENGLISH: Record<string, number> = {
   'Soft uninstall': 232, // as in, uninstall the service but preserve its data
   'View full message': 233,
   'Service error': 234,
-  'Awaiting result': 235,
   'Starting': 236,
   'Success': 237,
   'Health Checks': 238,
@@ -852,4 +849,14 @@ export const ENGLISH: Record<string, number> = {
   'Drive formatted. It is listed under Physical Drives.': 966,
   'Must be 255 bytes or less (accented letters and symbols take more than one)': 967,
   'Must not contain control characters': 968,
+  'User interface synced. Refresh to continue.': 969,
+  'Syncing the interface with your server...': 970,
+  'Unable to sync the user interface. Retry or reset the UI cache.': 971,
+  'Syncing': 975,
+  'Reset UI cache': 973,
+  'Reset the cached interface and reload? Your login and settings will be kept.': 974,
+  'Browser push unavailable': 976,
+  'Notification settings': 977,
+  'Push': 978,
+  'Notifications are blocked. Allow them in your browser settings.': 979,
 }
