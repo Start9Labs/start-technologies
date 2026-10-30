@@ -1,1 +1,1 @@
-- Besuchte Websites können Ihren Browser nicht mehr nutzen, um einen Server zu steuern, der gerade eingerichtet wird oder sich im Diagnosemodus befindet. Öffnen Sie den Server während der Einrichtung und Diagnose über seine `.local`-Adresse oder IP-Adresse.
+- Besuchte Websites können Ihren Browser nicht mehr nutzen, um einen Server zu steuern, der gerade eingerichtet wird oder sich im Diagnosemodus befindet. Öffnen Sie den Server während der Einrichtung und Diagnose über seine `.local`-Adresse oder IP-Adresse. Vielen Dank an dritzps für die Meldung.

@@ -1,1 +1,1 @@
-- Los sitios web que visita ya no pueden usar su navegador para controlar un servidor que se está configurando o que está en modo de diagnóstico. Durante la configuración y el diagnóstico, abra el servidor mediante su dirección `.local` o su dirección IP.
+- Los sitios web que visita ya no pueden usar su navegador para controlar un servidor que se está configurando o que está en modo de diagnóstico. Durante la configuración y el diagnóstico, abra el servidor mediante su dirección `.local` o su dirección IP. Gracias a dritzps por informarlo.
