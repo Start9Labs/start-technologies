@@ -230,7 +230,7 @@ Rejected in favour of deriving them. Storing them would put every login in
                                   (startd)
   ───────────────────────────────────────────────────────────────────────
   scan QR, send public key ──────► begin session
-  session, token, server key ◄────┘
+  session, server key ◄───────────┘
   ask for Wi-Fi password
   seal bundle to factory key
   write bundle over BLE ────────────────────────────────────► open, join Wi-Fi
@@ -312,13 +312,64 @@ certificates. Its compromise already compromises every certificate StartOS
 issues; this adds impersonating the server to accessories, and no new key to
 lose.
 
+### Server advertisement
+
+StartOS advertises itself with DNS-SD so a client on the LAN can list servers
+without knowing a name. mDNS alone answers a lookup of a name the client already
+has.
+
+| Field         | Value                                                |
+| ------------- | ---------------------------------------------------- |
+| Service type  | `_startos._tcp`, domain `local`                      |
+| Instance name | the server's hostname                                |
+| SRV target    | `<hostname>.local`, the name avahi already publishes |
+| Port          | 443                                                  |
+| TXT           | `v=1`, the version of this record                    |
+
+A static file in the image, `/etc/avahi/services/startos.service`, publishes it:
+
+```xml
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">%h</name>
+  <service>
+    <type>_startos._tcp</type>
+    <port>443</port>
+    <txt-record>v=1</txt-record>
+  </service>
+</service-group>
+```
+
+avahi publishes it on every interface it runs on, as it does the `.local` name.
+It follows no per-gateway `.local` address setting, so a listed server can refuse
+the connection. The record carries no secret, server ID or version, and exposes
+only that a StartOS server has this hostname.
+
+A client:
+
+1. Browses for `_startos._tcp` and lists one row per instance, usually one
+   server. iOS requires the service type in `NSBonjourServices` and the local
+   network permission.
+2. Connects to `https://<SRV target>` and verifies the chain against the phone's
+   trust store, exactly as it does for a typed address. An advertisement is
+   unauthenticated, so it is only a candidate.
+3. On a failed verification, sends no password, and never fetches or installs a
+   certificate from that server, since a forged record would then become a
+   trusted root. It points the user to the documentation for installing the root
+   certificate.
+4. Identifies a server by its root key once connected. A hostname can change, and
+   avahi renames an instance on a conflict.
+5. Ignores unknown TXT keys, and treats a different `v` as a server it cannot use.
+6. Offers a typed address whenever the server it wants is not listed.
+
 ### Onboarding
 
 The app scans the QR code and calls, with its enrolled key:
 
 ```
 accessory.onboard.begin { key, class, model }
-  → { session, token, server, serverId, expires, id, wireFingerprint }
+  → { session, server, serverId, expires, id, wireFingerprint }
 ```
 
 `key` is the QR code's `K:` value; the setup secret stays on the phone. startd
@@ -337,9 +388,9 @@ nowhere but the accessory, and seals a **bundle** with HPKE (RFC 9180):
   bytes; the 128-bit setup secret is stretched to that length, and its
   entropy is unchanged.
 - `info = "start9 onboard v1"`, `aad` = the UTF-8 bytes of the session ID.
-- `session` and `token` are each 16 random bytes, base64url.
+- `session` is 16 random bytes, base64url.
 - Plaintext, JSON:
-  `{ "v": 1, "session", "token", "server": <server fingerprint>, "serverId",
+  `{ "v": 1, "session", "server": <server fingerprint>, "serverId",
 "wifi": { "ssid", "psk", "security" }, "expires": <Unix seconds> }`, with
   `security` one of `wpa2-psk`, `wpa3-sae` or `open` (`psk` empty).
 
@@ -392,7 +443,7 @@ StartWRT relay; Thread joining.
 1. Open the bundle. Failure (wrong key, wrong setup secret, tampering) is
    `BUNDLE_REJECTED` on `status`, and nothing else changes.
 2. Reject it if `expires` has passed or the accessory is already paired.
-3. Store `{ session, token, server }` as a pending pairing. A later valid
+3. Store `{ session, server }` as a pending pairing. A later valid
    bundle replaces it.
 4. Add the network and join. Report the address on `status`, or the failure.
 5. Advertise on mDNS (see Discovery) with `state=pending`.
@@ -433,8 +484,9 @@ When startd sees its pending accessory (`state=pending`, matching `id`):
    in a self-signed certificate; startd checks the key against the session.
    startd presents its root certificate; the accessory checks the key against
    the `server` fingerprint in its pending pairing.
-2. startd calls `pair.adopt { session, token }`. The accessory checks both
-   against its pending pairing.
+2. startd calls `pair.adopt { session }`. The accessory checks it against its
+   pending pairing. The handshake has already proved the caller holds the key the
+   bundle names, so the call carries no further secret.
 3. The accessory stores the server fingerprint durably, marks itself paired,
    stops onboarding (BLE service, its own access point), and disables its
    setup secret.
@@ -645,17 +697,17 @@ lowerCamelCase and enumerated values lowercase with hyphens, and errors carry
 | Method               | Callable by                            | Purpose                                                                                              |
 | -------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `accessory.info`     | anyone                                 | `{ v, id, class, model, name, swVersion, state, fingerprint, capabilities, credentialKinds }`, below |
-| `pair.adopt`         | the server named in the pending bundle | `{ session, token }`                                                                                 |
+| `pair.adopt`         | the server named in the pending bundle | `{ session }`                                                                                        |
 | `credential.set`     | the pinned server                      | `{ kind, username, password }`                                                                       |
 | `pair.release`       | the pinned server                      | no parameters                                                                                        |
 | capability endpoints | per capability                         | e.g. the camera's `/start9-camera/state`                                                             |
 
-| Code | Kind           | Meaning                                                        |
-| ---- | -------------- | -------------------------------------------------------------- |
-| 1001 | NOT_AUTHORIZED | The client's key is not the pinned server.                     |
-| 1002 | ALREADY_PAIRED | The accessory is paired and the method needs it unpaired.      |
-| 1003 | NOT_PENDING    | No pending pairing, or the session or token does not match it. |
-| 1005 | UNSUPPORTED    | The credential kind is not one the accessory offers.           |
+| Code | Kind           | Meaning                                                   |
+| ---- | -------------- | --------------------------------------------------------- |
+| 1001 | NOT_AUTHORIZED | The client's key is not the pinned server.                |
+| 1002 | ALREADY_PAIRED | The accessory is paired and the method needs it unpaired. |
+| 1003 | NOT_PENDING    | No pending pairing, or the session does not match it.     |
+| 1005 | UNSUPPORTED    | The credential kind is not one the accessory offers.      |
 
 Malformed parameters are JSON-RPC's own -32602, and a mechanism that fails
 while applying a request is -32603; neither carries `data.kind`.
@@ -701,12 +753,8 @@ The Start9 app adds accessories. It signs in as any RPC client does, and the
 phone must already trust the server's root CA. It needs its key only to add an
 accessory, so one unenrolled after 30 idle days is replaced by signing in again.
 
-**Finding the server.** StartOS advertises `_startos._tcp` on port 443 with a
-static avahi service file, named for the server's hostname, beside its `.local`
-name. The app browses for it and lists what it finds, usually one server, so the
-user picks instead of typing an address; typing remains for a server it cannot
-see. An advertisement is unauthenticated, and that costs nothing here: the app
-sends the password only over TLS to a root the phone trusts.
+The app finds the server through its advertisement (see Server advertisement), so
+the user picks from a list and enters only the password.
 
 - **Add accessory (app):** scan the QR code → enter the Wi-Fi network and
   password → write the bundle over BLE → progress → name → grant to services.
@@ -724,7 +772,7 @@ sends the password only over TLS to a root the phone trusts.
 - **Confidentiality.** Wi-Fi credentials go from the phone to the accessory
   inside the HPKE bundle and never reach StartOS. Logins cross the LAN inside
   mutual TLS. Neither depends on BLE link security.
-- **Replay.** A bundle is bound to a session, a token and an expiry; the
+- **Replay.** A bundle is bound to a session and an expiry; the
   accessory takes at most one pending pairing and refuses bundles once paired.
 - **Spoofing on the LAN.** Each side accepts only the key it pinned, so a
   diverted control connection fails the handshake. Unlike AGCP, no step trusts a
@@ -789,8 +837,9 @@ here:
   reCamera's BlueZ 5.58 GATT server.
 - Both apps can seal HPKE `mode_psk` with this suite, through a platform or
   third-party library, or on their own HKDF, P-256 and AES-GCM.
-- A static avahi service file publishes on the same interfaces as the server's
-  `.local` name, including when mDNS is turned off for a gateway.
+- iOS and Android list and resolve the `_startos._tcp` record from a static avahi
+  service file, and the instance name follows a hostname change once avahi
+  restarts.
 - HPKE `mode_psk` with P-256 can be implemented on the camera's Node 22.8
   `crypto` (ECDH, HKDF, AES-GCM), or a small pure-JS HPKE library runs
   acceptably there without a JIT.
@@ -815,6 +864,8 @@ here:
 - A forged advertisement carrying a paired accessory's ID leaves its registry
   address and grantee URLs unchanged.
 - The app's add flow against the simulator.
+- The app given a forged `_startos._tcp` record, whose server fails verification:
+  it sends no password and fetches no certificate.
 - A version 2 backup restored onto this code, and a version 3 backup restored
   onto a fresh install with a paired simulator.
 - On hardware: the app's Bluetooth flow on iOS and Android with a reCamera, a
