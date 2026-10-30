@@ -3,7 +3,7 @@
 Status: draft for review. Owner: unassigned. Target: a StartOS minor release
 after 0.4.1, unscheduled.
 
-StartOS adopts Start9's own IoT products: with the Start9 app carrying the
+StartOS adopts Start9's own IoT products: with the Start9 Camera app carrying the
 onboarding over Bluetooth, it brings one onto the LAN, pairs with it, and grants
 it to the services the user chooses. The Start9 Camera (a Seeed reCamera on
 Start9 firmware) is the first.
@@ -98,7 +98,7 @@ migrating from it. Its problems:
 
 ## Goals
 
-- A user adds a Start9 accessory from the Start9 app by scanning its QR code.
+- A user adds a Start9 accessory from the Start9 Camera app by scanning its QR code.
   The accessory joins the LAN and pairs with the server in one flow.
 - The server needs no radio and never receives Wi-Fi credentials. They go from
   the user's phone to the accessory, over Bluetooth LE.
@@ -120,7 +120,7 @@ migrating from it. Its problems:
 - Matter, Thread, Zigbee and Z-Wave.
 - Bluetooth on the server, and device passthrough.
 - Remote (off-LAN) access to accessories.
-- Firmware updates for accessories. The Start9 app manages them, without
+- Firmware updates for accessories. The Start9 Camera app manages them, without
   StartOS.
 - Wi-Fi management. StartOS changes no paired accessory's network.
 - Encrypted media (RTSPS). See Open questions.
@@ -227,7 +227,7 @@ pushes tracked and the backup changed.
 ### Overview
 
 ```
-  Start9 app (phone)              StartOS                        accessory
+  Start9 Camera app (phone)       StartOS                        accessory
                                   (startd)
   ───────────────────────────────────────────────────────────────────────
   scan QR, send public key ──────► begin session
@@ -317,7 +317,7 @@ accessories, and no new key to lose.
 
 ### Server code
 
-The Start9 app learns which server to trust by scanning a QR code on the StartOS
+The Start9 Camera app learns which server to trust by scanning a QR code on the StartOS
 Accessories page, or by opening the same URI as a link when the page is on the
 phone itself. The code carries no secret:
 
@@ -344,7 +344,7 @@ The app:
    against the platform's roots.
 4. Signs in with the StartOS password.
 
-The anchor belongs to the Start9 app. The phone's trust store, its browser and its
+The anchor belongs to the Start9 Camera app. The phone's trust store, its browser and its
 other apps are unchanged. A server with a new root key fails verification, and the
 user scans its new code.
 
@@ -745,7 +745,7 @@ Repeating a request with the same values is harmless, so startd retries freely.
 
 ### UI
 
-The Start9 app adds accessories. It scans the server code (see Server code) and
+The Start9 Camera app adds accessories. It scans the server code (see Server code) and
 signs in as any RPC client does. Any signed request keeps its key enrolled, so the
 app makes one each time it opens. One unenrolled after 30 idle days is replaced by
 signing in again.
@@ -755,7 +755,7 @@ signing in again.
   to leave on or turn off the grant to Frigate.
 - **Accessories page (StartOS):** paired accessories with status, name,
   fingerprint, **Used by**, owner logins and **Remove**, and the server code with a
-  pointer to the Start9 app for adding one.
+  pointer to the Start9 Camera app for adding one.
 - **Service page (StartOS):** an Accessories section listing grants and offering
   paired accessories.
 
@@ -836,7 +836,7 @@ here:
   or a top-level entry).
 - The add flow's grant toggle on the name screen, on by default, and offering only
   the service the app set up, with other services granted from the StartOS pages.
-- Adding accessories only from the Start9 app, with the Accessories page
+- Adding accessories only from the Start9 Camera app, with the Accessories page
   showing the server code and pointing to it.
 - The wording of **Forget** versus waiting for an offline accessory to be
   released, and of the "locked to this server" consequence.
@@ -900,7 +900,7 @@ here:
 2. Registry, onboarding, pairing, credentials and discovery in startd; the
    Accessories page with the server code; backup version 3.
 3. `get-accessories`, the package grant map and the SDK; grants in the UI.
-4. The Start9 app's add flow.
+4. The Start9 Camera app's add flow.
 5. A Frigate package that consumes grants.
 
 The StartOS steps land on `integration/accessories`, which merges to master once
