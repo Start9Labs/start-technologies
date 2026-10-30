@@ -4878,18 +4878,7 @@ export const Api = {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {
             restore: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
-                  empty,
-                ),
-                RestoreVolumeParams,
-              ),
+              _PARAMS: /* @__PURE__ */ RestoreVolumeParams,
               _RETURN: /* @__PURE__ */ RestoreVolumeResult,
             },
           },

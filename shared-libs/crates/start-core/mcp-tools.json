@@ -1145,24 +1145,7 @@
     "name": "backup.volume.restore",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "allOf": [
-        {
-          "type": "object",
-          "properties": {
-            "format": {
-              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
-            }
-          },
-          "additionalProperties": true
-        },
-        { "type": "object", "properties": {}, "additionalProperties": true },
-        { "$ref": "#/$defs/RestoreVolumeParams" }
-      ],
       "$defs": {
-        "IoFormat": {
-          "type": "string",
-          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
-        },
         "RestoreVolumeParams": {
           "type": "object",
           "properties": {
@@ -1183,7 +1166,18 @@
           "description": "A 32-character uppercase base32 volume identity."
         }
       },
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "password": { "type": "string" },
+        "ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SharedVolumeId" }
+        },
+        "serverId": { "type": ["string", "null"] }
+      },
+      "required": ["targetId", "password", "ids"],
+      "additionalProperties": true
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
