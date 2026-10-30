@@ -55,11 +55,11 @@ snapshot() {
 }
 
 inventory() {
-    for directory in "$store/contents" "$store/dirents"; do
-        if [[ -d "$directory" ]]; then
-            find "$directory" -type f -exec sha256sum {} +
-        fi
-    done | sort
+    find "$store/segments" -name '*.seg' -type f -exec sha256sum {} + | sort
+}
+
+segment_bytes() {
+    find "$store/segments" -name '*.seg' -type f -printf '%s\n' | awk '{ total += $1 } END { print total + 0 }'
 }
 
 mount_view "$live" --file-size-padding 0.05
@@ -128,9 +128,9 @@ if touch "$recovery/new-file"; then
 fi
 unmount_view
 
-before=$(find "$store/contents" -type f | wc -l)
-snapshot delete "$store" before-update
-after=$(find "$store/contents" -type f | wc -l)
+before=$(segment_bytes)
+BACKUPFS_COMPACT_RATIO=0.05 snapshot delete "$store" before-update
+after=$(segment_bytes)
 [[ "$after" -lt "$before" ]]
 [[ -z "$(snapshot list "$store")" ]]
 mount_view "$live" --file-size-padding 0.05

@@ -19,14 +19,12 @@ use zeroize::Zeroizing;
 
 use crate::ecc;
 use crate::error::{BkfsError, BkfsErrorKind, BkfsResult};
-use crate::objects::{ObjectId, VersionToken};
 
 /// Variant order is part of the on-disk key derivation.
 #[derive(Clone, Copy, serde::Serialize)]
 pub(crate) enum Binding {
     Superblock,
     Record,
-    Object { id: ObjectId, version: VersionToken },
     State,
     Transaction,
     Catalog,
@@ -188,15 +186,6 @@ pub(crate) fn open_bound(blob: &[u8], key: &Key, binding: Binding) -> BkfsResult
     }
     let key = binding_key(key, binding);
     open_version(blob, <&Key>::from(&*key), VERSION)
-}
-
-pub(crate) fn migration_version(key: &Key, id: ObjectId) -> BkfsResult<VersionToken> {
-    let mut label = b"backup-fs/v2/migrated-object\0".to_vec();
-    label.extend(crate::serde::encode(&id, crate::serde::data_config())?);
-    let derived = subkey(key, &label);
-    Ok(derived[..std::mem::size_of::<VersionToken>()]
-        .try_into()
-        .unwrap())
 }
 
 fn subkey(key: &Key, label: &[u8]) -> Zeroizing<[u8; 32]> {
@@ -373,28 +362,19 @@ mod tests {
     }
 
     #[test]
-    fn binding_rejects_other_objects_versions_and_metadata_roles() {
+    fn binding_rejects_other_metadata_roles() {
         let key = test_key();
-        let id = ObjectId::block(&key, 12, 0);
-        let binding = Binding::Object {
-            id,
-            version: [1; 16],
-        };
-        let sealed = seal_bound(b"immutable contents", &key, EccParams::default(), binding);
-        let opened = open_bound(&sealed.bytes, &key, binding).unwrap();
+        let sealed = seal_bound(
+            b"immutable contents",
+            &key,
+            EccParams::default(),
+            Binding::Record,
+        );
+        let opened = open_bound(&sealed.bytes, &key, Binding::Record).unwrap();
         assert_eq!(opened.plaintext, b"immutable contents");
         assert_eq!(opened.tag, sealed.tag);
         for wrong in [
-            Binding::Object {
-                id,
-                version: [2; 16],
-            },
-            Binding::Object {
-                id: ObjectId::block(&key, 12, 1),
-                version: [1; 16],
-            },
             Binding::Superblock,
-            Binding::Record,
             Binding::State,
             Binding::Transaction,
             Binding::Catalog,
@@ -403,7 +383,7 @@ mod tests {
         }
         assert!(open(&sealed.bytes, &key).is_err());
         let unbound = seal(b"immutable contents", &key, EccParams::default());
-        assert!(open_bound(&unbound, &key, binding).is_err());
+        assert!(open_bound(&unbound, &key, Binding::Record).is_err());
     }
 
     #[test]

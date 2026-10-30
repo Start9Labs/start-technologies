@@ -47,14 +47,14 @@ In **System → Create Backup** or **Restore Backup**, select the amber **Old fo
 
 Conversion runs in the background. Reopen the target's conversion control to view phase progress and byte/object counts; no overall duration estimate is provided. A failed attempt offers **Retry conversion**, or **Resume conversion** when discovery reports it interrupted. An interrupted backup remains unavailable until resumption finishes. **Resume conversion** revalidates the password and continues from durable migration state. Closing the dialog does not cancel the operation. This control is separate from **Delete old backup**, which removes the pre-V2 backup folder.
 
-Conversion upgrades encryption authentication and current-version references by rewriting encrypted data. It stages and retires content objects in batches rather than keeping a second complete copy; free space is still needed for replacement objects or segments and new index/snapshot metadata. On a large or remote backup, this can take substantially longer than an ordinary incremental backup. Conversion requires exclusive offline access. Leave the target connected until it finishes; after interruption, explicitly resume conversion before using that store again.
+Conversion upgrades encryption authentication and current-version references by rewriting encrypted data. It moves content in batches rather than keeping a second complete copy; free space is still needed for one batch of rewritten data and new index metadata. On a large or remote backup, this can take substantially longer than an ordinary incremental backup. Conversion requires exclusive offline access. Leave the target connected until it finishes; after interruption, explicitly resume conversion before using that store again.
 
 An unreadable encrypted object or log frame does not block the upgrade of healthy data. Damaged data stays unreadable; filesystem I/O failures leave the upgrade resumable.
 
 Without its saved key metadata, StartOS cannot decrypt a managed store. A retry moves such keyless encrypted data to the target's trash for reclamation before starting over. This includes failed first backups from older releases. Partially populated key metadata is rejected instead.
 
 > [!WARNING]
-> Older StartOS releases cannot read an upgraded backup. Upgraded backups reject individual object/version and log substitutions against their authenticated current references. An upgrade cannot establish the provenance of older data, prevent rollback to an entire genuine older backup view, or revoke previously copied backup data and key-wrapping metadata.
+> Older StartOS releases cannot read an upgraded backup. Upgraded backups reject substitutions of individual stored records against their authenticated current references. An upgrade cannot establish the provenance of older data, prevent rollback to an entire genuine older backup view, or revoke previously copied backup data and key-wrapping metadata.
 
 The discovery date shown before unlocking a backup is editable plaintext. After unlocking a converted backup, the date inside encrypted backup metadata belongs to the authenticated backup view. A genuine older view retains its older protected date; that date does not establish that no newer backup exists.
 
@@ -66,7 +66,7 @@ Avoid typing secret values into shell commands, where shell history can retain t
 
 ## Read-only Snapshots
 
-The low-level `startos-backup-fs` utility can retain named recovery points without duplicating unchanged file content. All upgraded stores use immutable versions of changed blocks and directory buckets; a snapshot retains a selected view while the current backup continues to update normally. Retention is manual: delete points when they are no longer needed.
+The low-level `startos-backup-fs` utility can retain named recovery points without duplicating unchanged file content. Upgraded stores never overwrite stored data in place; a snapshot retains a selected view while the current backup continues to update normally. Retention is manual: delete points when they are no longer needed.
 
 Snapshots require a new-format or explicitly converted store. The low-level conversion command is `startos-backup-fs convert /path/to/crypt --password-file /protected/filesystem-key`.
 
@@ -82,7 +82,7 @@ startos-backup-fs snapshot delete /path/to/crypt before-update --password-file /
 
 The backing directory is `StartOSBackupsV2/<server-id>/crypt` on the mounted target. Protect the credential file with owner-only permissions. A recovery mount is read-only. Snapshot names use letters, digits, `-`, `_`, or `.`, up to 128 characters; `.` and `..` are reserved.
 
-Snapshot indices are stored in bounded, shared chunks. Metadata and retained changed data require space; the catalog of snapshot descriptors has a 64 MiB limit. Deleting a point reclaims storage unused by the current backup or other retained points. Snapshots share the target's hardware and do not replace backups on separate devices.
+Snapshot indices are stored in bounded, shared chunks. Metadata and retained changed data require space; the catalog of snapshot descriptors has a 64 MiB limit. After a point is deleted, storage it alone used is reclaimed once the files holding it are mostly unused by the current backup and other retained points. Snapshots share the target's hardware and do not replace backups on separate devices.
 
 ## Best Practices
 

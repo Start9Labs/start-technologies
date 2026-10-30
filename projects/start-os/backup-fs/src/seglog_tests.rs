@@ -1,3 +1,5 @@
+use std::fs::OpenOptions;
+
 use super::*;
 use crate::inode::{FileData, InodeAttributes};
 
@@ -71,6 +73,49 @@ fn bulk_reads_use_physical_order_and_validate_each_expected_key() {
 }
 
 #[test]
+fn bulk_results_separate_corrupt_records_from_backing_io_failures() {
+    let data = tempfile::tempdir().unwrap();
+    let mut log = initial(data.path());
+    log.put(Inode(7), &attrs(b"damaged")).unwrap();
+    log.put(Inode(8), &attrs(b"healthy")).unwrap();
+    log.sync().unwrap();
+    let location = log.roots().index[&7];
+    let path = segment_path(log.directory(), location.segment);
+    OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .write_all_at(&vec![0; location.len as usize], location.offset)
+        .unwrap();
+    let mut corrupt = 0;
+    let mut healthy = Vec::new();
+    log.visit_record_results(
+        log.roots()
+            .index
+            .iter()
+            .map(|(&id, loc)| (RecordKey::Inode(id), loc)),
+        |record| {
+            match record {
+                Ok(record) => healthy.push(record.key()),
+                Err(_) => corrupt += 1,
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(corrupt, 1);
+    assert_eq!(healthy, [RecordKey::Inode(8)]);
+
+    std::fs::remove_file(path).unwrap();
+    assert!(log
+        .visit_record_results(
+            std::iter::once((RecordKey::Inode(7), &location)),
+            |_| panic!("backing I/O failure reached visitor"),
+        )
+        .is_err());
+}
+
+#[test]
 fn idle_writable_opens_do_not_create_data_segments() {
     let data = tempfile::tempdir().unwrap();
     let log = initial(data.path());
@@ -125,10 +170,12 @@ fn a_replayed_valid_frame_is_rejected_even_after_renumbering() {
         .open(segment_path(log.directory(), loc.segment))
         .unwrap();
     file.write_all_at(&old_frame, loc.offset).unwrap();
+    log.drop_read_caches();
     assert!(log.load(Inode(7)).is_err());
     let old_payload = Frames::new(&old_frame).next().unwrap().payload;
     let renumbered = encode_frame(loc.seq, old_payload);
     file.write_all_at(&renumbered, loc.offset).unwrap();
+    log.drop_read_caches();
     assert!(log.load(Inode(7)).is_err());
     assert_eq!(inline(&log, 8), b"healthy");
     drop(log);
@@ -165,15 +212,13 @@ fn unindexed_authenticated_tail_is_ignored() {
         &attrs(b"uncommitted"),
     )
     .unwrap();
-    let writer = log.writer.as_ref().unwrap();
-    writer
-        .file
-        .as_ref()
+    let path = segment_path(log.directory(), log.roots.index[&7].segment);
+    let end = std::fs::metadata(&path).unwrap().len();
+    OpenOptions::new()
+        .write(true)
+        .open(&path)
         .unwrap()
-        .write_all_at(
-            &encode_frame(log.next_seq, &later.sealed.bytes),
-            writer.offset,
-        )
+        .write_all_at(&encode_frame(log.next_seq, &later.sealed.bytes), end)
         .unwrap();
     drop(log);
     let log = SegmentLog::open(data.path().join("segments"), key()).unwrap();
@@ -197,6 +242,7 @@ fn ecc_repairs_data_without_invalidating_its_parent_reference() {
     file.read_exact_at(&mut byte, offset).unwrap();
     byte[0] ^= 1;
     file.write_all_at(&byte, offset).unwrap();
+    log.drop_read_caches();
     assert_eq!(inline(&log, 7), b"recoverable");
 }
 
@@ -217,6 +263,7 @@ fn edited_crc_header_lengths_return_an_error_without_allocating_from_them() {
         .unwrap()
         .write_all_at(&bytes, loc.offset)
         .unwrap();
+    log.drop_read_caches();
     assert!(log.load(Inode(7)).is_err());
 }
 

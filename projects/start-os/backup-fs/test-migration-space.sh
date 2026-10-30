@@ -23,5 +23,5 @@ NODE
     printf password | /tmp/startos-backup-fs snapshot create /store space-check
     printf password | /tmp/startos-backup-fs snapshot list /store | grep -Fx space-check
     test -f /store/segments/state
-    echo "PASS: upgrade reclaimed completed object batches under actual tmpfs ENOSPC"
+    echo "PASS: upgrade completed without staging space for a second copy of the legacy objects"
 '

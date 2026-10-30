@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::fs::{File, OpenOptions};
-use std::os::unix::fs::{FileExt, OpenOptionsExt};
+use std::fs::File;
+use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 
 use chacha20::Key;
@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use crate::error::{BkfsError, BkfsResult, BkfsResultExt};
 use crate::inode::{Attributes, Inode};
 use crate::metadata::Reference;
-use crate::objects::{ObjectId, ObjectVersion};
 use crate::serde::{data_config, decode, encode};
 use crate::state::{Counters, State, View};
 use crate::vault::{self, AuthenticationTag, Binding, EccParams};
@@ -57,9 +56,16 @@ pub enum Record {
     ContentTombstone {
         id: u64,
     },
-    Object {
-        id: ObjectId,
-        version: ObjectVersion,
+    Block {
+        content: u64,
+        index: u64,
+        bytes: Vec<u8>,
+    },
+    Bucket {
+        directory: u64,
+        generation: u64,
+        index: u32,
+        bytes: Vec<u8>,
     },
 }
 
@@ -68,7 +74,13 @@ impl Record {
         match self {
             Self::Inode { inode, .. } | Self::Tombstone { inode } => RecordKey::Inode(*inode),
             Self::Content { id, .. } | Self::ContentTombstone { id } => RecordKey::Content(*id),
-            Self::Object { id, .. } => RecordKey::Object(*id),
+            Self::Block { content, index, .. } => RecordKey::Block(*content, *index),
+            Self::Bucket {
+                directory,
+                generation,
+                index,
+                ..
+            } => RecordKey::Bucket(*directory, *generation, *index),
         }
     }
 
@@ -88,13 +100,29 @@ impl Record {
 pub(crate) enum RecordKey {
     Inode(u64),
     Content(u64),
-    Object(ObjectId),
+    Block(u64, u64),
+    Bucket(u64, u64, u32),
+}
+
+impl RecordKey {
+    pub(crate) fn stream(self) -> Stream {
+        match self {
+            Self::Content(_) | Self::Block(..) => Stream::Data,
+            Self::Inode(_) | Self::Bucket(..) => Stream::Metadata,
+        }
+    }
 }
 
 pub struct SealedRecord {
     key: RecordKey,
     sealed: vault::Sealed,
     tombstone: bool,
+}
+
+impl SealedRecord {
+    pub(crate) fn len(&self) -> u64 {
+        self.sealed.bytes.len() as u64
+    }
 }
 
 pub(crate) fn seal_record(
@@ -137,33 +165,67 @@ pub fn seal_tombstone(key: &Key, ecc: EccParams, inode: Inode) -> BkfsResult<Sea
         Binding::Record,
     )
 }
-pub fn seal_object(
+pub fn seal_block(
     key: &Key,
     ecc: EccParams,
-    id: ObjectId,
-    version: ObjectVersion,
+    content: u64,
+    index: u64,
+    bytes: Vec<u8>,
 ) -> BkfsResult<SealedRecord> {
-    seal_record(key, ecc, Record::Object { id, version }, Binding::Record)
+    seal_record(
+        key,
+        ecc,
+        Record::Block {
+            content,
+            index,
+            bytes,
+        },
+        Binding::Record,
+    )
+}
+pub fn seal_bucket(
+    key: &Key,
+    ecc: EccParams,
+    directory: u64,
+    generation: u64,
+    index: u32,
+    bytes: Vec<u8>,
+) -> BkfsResult<SealedRecord> {
+    seal_record(
+        key,
+        ecc,
+        Record::Bucket {
+            directory,
+            generation,
+            index,
+            bytes,
+        },
+        Binding::Record,
+    )
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Roots {
     pub index: HashMap<u64, Location>,
     pub content: HashMap<u64, Location>,
-    pub objects: HashMap<ObjectId, Location>,
-}
-
-impl Default for Roots {
-    fn default() -> Self {
-        Self {
-            index: HashMap::new(),
-            content: HashMap::new(),
-            objects: HashMap::new(),
-        }
-    }
+    pub blocks: HashMap<(u64, u64), Location>,
+    pub buckets: HashMap<(u64, u64, u32), Location>,
+    /// Committed segment lengths.
+    pub sizes: HashMap<u64, u64>,
 }
 
 impl Roots {
+    pub(crate) fn get(&self, key: RecordKey) -> Option<&Location> {
+        match key {
+            RecordKey::Inode(id) => self.index.get(&id),
+            RecordKey::Content(id) => self.content.get(&id),
+            RecordKey::Block(content, index) => self.blocks.get(&(content, index)),
+            RecordKey::Bucket(directory, generation, index) => {
+                self.buckets.get(&(directory, generation, index))
+            }
+        }
+    }
+
     pub(crate) fn update(
         &mut self,
         key: RecordKey,
@@ -182,9 +244,15 @@ impl Roots {
         match key {
             RecordKey::Inode(id) => replace(&mut self.index, id, location),
             RecordKey::Content(id) => replace(&mut self.content, id, location),
-            RecordKey::Object(id) => replace(&mut self.objects, id, location),
+            RecordKey::Block(content, index) => {
+                replace(&mut self.blocks, (content, index), location)
+            }
+            RecordKey::Bucket(directory, generation, index) => {
+                replace(&mut self.buckets, (directory, generation, index), location)
+            }
         }
     }
+
     pub(crate) fn entries(&self) -> impl Iterator<Item = (RecordKey, Location)> + '_ {
         self.index
             .iter()
@@ -195,16 +263,29 @@ impl Roots {
                     .map(|(&id, &loc)| (RecordKey::Content(id), loc)),
             )
             .chain(
-                self.objects
+                self.blocks
                     .iter()
-                    .map(|(&id, &loc)| (RecordKey::Object(id), loc)),
+                    .map(|(&(content, index), &loc)| (RecordKey::Block(content, index), loc)),
+            )
+            .chain(
+                self.buckets
+                    .iter()
+                    .map(|(&(directory, generation, index), &loc)| {
+                        (RecordKey::Bucket(directory, generation, index), loc)
+                    }),
             )
     }
-}
 
-impl Roots {
     pub fn segments(&self) -> impl Iterator<Item = u64> + '_ {
         self.entries().map(|(_, loc)| loc.segment)
+    }
+
+    pub(crate) fn entry_count(&self) -> u64 {
+        (self.index.len()
+            + self.content.len()
+            + self.blocks.len()
+            + self.buckets.len()
+            + self.sizes.len()) as u64
     }
 }
 
@@ -319,73 +400,30 @@ impl<'a> Iterator for Frames<'a> {
     }
 }
 
-pub(crate) struct SegmentWriter {
-    dir: PathBuf,
-    file: Option<File>,
-    id: u64,
-    offset: u64,
-    limit: u64,
-}
-impl SegmentWriter {
-    pub fn new(dir: &Path, limit: u64) -> BkfsResult<Self> {
-        let id = match list_segments(dir)?.last() {
-            Some(&(id, _)) => id
-                .checked_add(1)
-                .ok_or_else(|| BkfsError::unsupported("data segment id exhausted"))?,
-            None => 0,
-        };
-        Ok(Self {
-            dir: dir.to_owned(),
-            file: None,
-            id,
-            offset: 0,
-            limit,
-        })
-    }
-    fn create(dir: &Path, id: u64) -> BkfsResult<File> {
-        Ok(OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(segment_path(dir, id))?)
-    }
-    fn write_frame(&mut self, bytes: &[u8]) -> BkfsResult<(u64, u64)> {
-        if self.offset > 0 && self.offset + bytes.len() as u64 > self.limit {
-            self.id = self
-                .id
-                .checked_add(1)
-                .ok_or_else(|| BkfsError::unsupported("data segment id exhausted"))?;
-            self.file = None;
-            self.offset = 0;
+use crate::segwriter::SegmentWriter;
+pub(crate) use crate::segwriter::Stream;
+
+const OPEN_READERS: usize = 64;
+const READ_WINDOW: u64 = 1 << 20;
+const CACHED_WINDOWS: usize = 16;
+/// Frames up to this length are read through cached windows.
+const WINDOWED_FRAME: u32 = 64 << 10;
+
+/// Segment ids present in the directory, ignoring their lengths.
+pub(crate) fn segment_ids(dir: &Path) -> BkfsResult<Vec<u64>> {
+    let mut ids = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        if let Some(id) = entry?
+            .file_name()
+            .to_str()
+            .and_then(|name| name.strip_suffix(".seg"))
+            .and_then(|hex| u64::from_str_radix(hex, 16).ok())
+        {
+            ids.push(id);
         }
-        if self.file.is_none() {
-            self.file = Some(Self::create(&self.dir, self.id)?);
-        }
-        let offset = self.offset;
-        self.file.as_ref().unwrap().write_all_at(bytes, offset)?;
-        self.offset += bytes.len() as u64;
-        Ok((self.id, offset))
     }
-    pub fn append(&mut self, seq: u64, record: &SealedRecord) -> BkfsResult<Location> {
-        let bytes = encode_frame(seq, &record.sealed.bytes);
-        let (segment, offset) = self.write_frame(&bytes)?;
-        Ok(Location {
-            segment,
-            offset,
-            len: bytes.len() as u32,
-            seq,
-            payload_len: record.sealed.bytes.len() as u32,
-            tag: record.sealed.tag,
-        })
-    }
-    fn relocate(&mut self, old: Location, bytes: &[u8]) -> BkfsResult<Location> {
-        let (segment, offset) = self.write_frame(bytes)?;
-        Ok(Location {
-            segment,
-            offset,
-            ..old
-        })
-    }
+    ids.sort_unstable();
+    Ok(ids)
 }
 
 enum Persistence {
@@ -433,6 +471,12 @@ impl Persistence {
             }
         }
     }
+    fn record_size(&mut self, segment: u64, len: u64) -> BkfsResult<()> {
+        match self {
+            Self::Current(state) => state.record_size(segment, len),
+            Self::Legacy(_) => Ok(()),
+        }
+    }
 }
 
 pub struct SegmentLog {
@@ -445,6 +489,12 @@ pub struct SegmentLog {
     max_inode: u64,
     pinned: HashSet<u64>,
     seg_meta: HashMap<u64, SegMeta>,
+    readers: std::cell::RefCell<Vec<(u64, std::sync::Arc<File>)>>,
+    /// Committed segment bytes, most recently used last.
+    windows: std::cell::RefCell<Vec<(u64, u64, std::sync::Arc<Vec<u8>>)>>,
+    /// Directory buckets written since the last commit, appended by it.
+    staged_buckets: HashMap<(u64, u64, u32), Vec<u8>>,
+    appended: u64,
 }
 
 #[cfg(test)]
@@ -453,7 +503,9 @@ mod tests;
 
 impl Drop for SegmentLog {
     fn drop(&mut self) {
-        if self.writer.is_some() && self.state.has_pending() {
+        if self.writer.is_some()
+            && (self.state.has_pending() || self.has_unsynced() || !self.staged_buckets.is_empty())
+        {
             if let Err(error) = self.sync() {
                 log::error!("failed to commit backup index on close: {error}");
             }
@@ -467,7 +519,6 @@ impl SegmentLog {
         Self::open_sized(dir, key, 8 * 1024 * 1024, EccParams::default(), false)
     }
 
-    #[cfg(test)]
     pub(crate) fn open_sized(
         dir: PathBuf,
         key: Key,
@@ -494,7 +545,8 @@ impl SegmentLog {
         format: u32,
     ) -> BkfsResult<Self> {
         let (state, roots, counters) = if format == 1 {
-            let (log, roots, counters) = crate::legacy::Log::open(&dir, &key)?;
+            let (log, mut roots, counters) = crate::legacy::Log::open(&dir, &key)?;
+            roots.sizes = list_segments(&log.path)?.into_iter().collect();
             (Persistence::Legacy(log), roots, counters)
         } else {
             let (state, roots) = State::open(&dir, &key)?;
@@ -504,7 +556,15 @@ impl SegmentLog {
         let writer = if readonly {
             None
         } else {
-            Some(SegmentWriter::new(state.directory(), segment_size)?)
+            let directory = state.directory();
+            let mut next = roots.sizes.keys().max().map_or(0, |&id| id + 1);
+            for id in segment_ids(directory)? {
+                if !roots.sizes.contains_key(&id) {
+                    std::fs::remove_file(segment_path(directory, id))?;
+                }
+                next = next.max(id + 1);
+            }
+            Some(SegmentWriter::new(directory, segment_size, next))
         };
         let mut log = Self {
             key,
@@ -516,8 +576,12 @@ impl SegmentLog {
             max_inode: counters.max_inode,
             pinned: HashSet::new(),
             seg_meta: HashMap::new(),
+            readers: Default::default(),
+            windows: Default::default(),
+            staged_buckets: HashMap::new(),
+            appended: 0,
         };
-        for (id, total) in list_segments(log.directory())? {
+        for (&id, &total) in &log.roots.sizes {
             log.seg_meta.insert(id, SegMeta { total, live: 0 });
         }
         log.recompute_live();
@@ -527,9 +591,10 @@ impl SegmentLog {
         self.state.directory()
     }
     pub(crate) fn check_rw(&self) -> BkfsResult<()> {
-        if self.writer.is_none() {
+        let Some(writer) = &self.writer else {
             return BkfsResult::errno_notrace(libc::EROFS);
-        }
+        };
+        writer.check()?;
         self.state.check_rw()
     }
     pub(crate) fn note_data_write(&mut self) {
@@ -537,7 +602,6 @@ impl SegmentLog {
             log.dirty = true;
         }
     }
-
     pub(crate) fn catalog_reference(&self) -> Option<Reference> {
         self.state.catalog()
     }
@@ -585,72 +649,162 @@ impl SegmentLog {
         references: impl Iterator<Item = (RecordKey, &'a Location)>,
         mut visit: impl FnMut(Record) -> BkfsResult<()>,
     ) -> BkfsResult<()> {
+        self.visit_record_results(references, |record| visit(record?))
+    }
+
+    /// Backing I/O errors stop traversal without reaching the visitor.
+    pub(crate) fn visit_record_results<'a>(
+        &self,
+        references: impl Iterator<Item = (RecordKey, &'a Location)>,
+        mut visit: impl FnMut(BkfsResult<Record>) -> BkfsResult<()>,
+    ) -> BkfsResult<()> {
         let mut references: Vec<_> = references.collect();
         references.sort_unstable_by_key(|(_, loc)| (loc.segment, loc.offset));
         let mut reader = crate::aligned_io::RangeReader::default();
         for (key, &loc) in references {
-            let mut bytes = vec![0; loc.len as usize];
-            reader
-                .read_exact(
-                    &segment_path(self.directory(), loc.segment),
-                    loc.offset,
-                    &mut bytes,
-                )
-                .map_err(BkfsError::referenced_io)?;
-            visit(decode_frame(&self.key, loc, &bytes, self.state.binding())?.verify_key(key)?)?;
+            let bytes = match self.pending_frame(loc) {
+                Some(bytes) => bytes,
+                None => {
+                    let mut bytes = vec![0; loc.len as usize];
+                    reader
+                        .read_exact(
+                            &segment_path(self.directory(), loc.segment),
+                            loc.offset,
+                            &mut bytes,
+                        )
+                        .map_err(BkfsError::referenced_io)?;
+                    bytes
+                }
+            };
+            visit(
+                decode_frame(&self.key, loc, &bytes, self.state.binding())
+                    .and_then(|record| record.verify_key(key)),
+            )?;
         }
         Ok(())
     }
+
+    fn pending_frame(&self, loc: Location) -> Option<Vec<u8>> {
+        let frame = self.writer.as_ref()?.pending(loc.segment, loc.offset)?;
+        Some(frame.get(..loc.len as usize).unwrap_or(&frame).to_vec())
+    }
+
+    fn reader(&self, segment: u64) -> BkfsResult<std::sync::Arc<File>> {
+        let mut readers = self.readers.borrow_mut();
+        if let Some(position) = readers.iter().position(|(id, _)| *id == segment) {
+            let entry = readers.remove(position);
+            let file = entry.1.clone();
+            readers.push(entry);
+            return Ok(file);
+        }
+        let file = std::sync::Arc::new(
+            File::open(segment_path(self.directory(), segment))
+                .map_err(BkfsError::referenced_io)?,
+        );
+        if readers.len() >= OPEN_READERS {
+            readers.remove(0);
+        }
+        readers.push((segment, file.clone()));
+        Ok(file)
+    }
+
     fn read_raw_frame(&self, loc: Location) -> BkfsResult<Vec<u8>> {
+        if let Some(bytes) = self.pending_frame(loc) {
+            return Ok(bytes);
+        }
+        let end = loc.offset + loc.len as u64;
+        let committed = self.roots.sizes.get(&loc.segment).copied().unwrap_or(0);
+        if loc.len <= WINDOWED_FRAME && end <= committed {
+            return self.read_window(loc.segment, loc.offset, loc.len as usize, committed);
+        }
         let mut bytes = vec![0; loc.len as usize];
-        File::open(segment_path(self.directory(), loc.segment))
-            .map_err(BkfsError::referenced_io)?
+        self.reader(loc.segment)?
             .read_exact_at(&mut bytes, loc.offset)
             .map_err(BkfsError::referenced_io)?;
         Ok(bytes)
     }
-    pub fn load(&self, inode: Inode) -> BkfsResult<Option<Attributes>> {
+
+    /// Committed bytes served from a cached window of their segment.
+    fn read_window(
+        &self,
+        segment: u64,
+        offset: u64,
+        len: usize,
+        committed: u64,
+    ) -> BkfsResult<Vec<u8>> {
+        let mut windows = self.windows.borrow_mut();
+        let hit = windows.iter().position(|(id, base, bytes)| {
+            *id == segment && *base <= offset && offset + len as u64 <= base + bytes.len() as u64
+        });
+        let (base, bytes) = match hit {
+            Some(position) => {
+                let entry = windows.remove(position);
+                let found = (entry.1, entry.2.clone());
+                windows.push(entry);
+                found
+            }
+            None => {
+                let mut base = offset / READ_WINDOW * READ_WINDOW;
+                if offset + WINDOWED_FRAME as u64 > base + READ_WINDOW {
+                    base = offset;
+                }
+                let mut bytes = vec![0; (committed - base).min(READ_WINDOW) as usize];
+                self.reader(segment)?
+                    .read_exact_at(&mut bytes, base)
+                    .map_err(BkfsError::referenced_io)?;
+                let bytes = std::sync::Arc::new(bytes);
+                if windows.len() >= CACHED_WINDOWS {
+                    windows.remove(0);
+                }
+                windows.push((segment, base, bytes.clone()));
+                (base, bytes)
+            }
+        };
+        let start = (offset - base) as usize;
+        Ok(bytes[start..start + len].to_vec())
+    }
+
+    fn load_indexed(&self, key: RecordKey) -> BkfsResult<Option<Record>> {
         self.roots
-            .index
-            .get(&inode.0)
-            .map(
-                |&loc| match self.read_indexed(RecordKey::Inode(inode.0), loc)? {
-                    Record::Inode { attrs, .. } => Ok(attrs),
-                    _ => Err(BkfsError::unsupported("invalid inode reference")),
-                },
-            )
+            .get(key)
+            .map(|&loc| self.read_indexed(key, loc))
             .transpose()
+    }
+    pub fn load(&self, inode: Inode) -> BkfsResult<Option<Attributes>> {
+        match self.load_indexed(RecordKey::Inode(inode.0))? {
+            Some(Record::Inode { attrs, .. }) => Ok(Some(attrs)),
+            Some(_) => Err(BkfsError::unsupported("invalid inode reference")),
+            None => Ok(None),
+        }
     }
     pub fn load_content(&self, id: u64) -> BkfsResult<Option<Vec<u8>>> {
-        self.roots
-            .content
-            .get(&id)
-            .map(
-                |&loc| match self.read_indexed(RecordKey::Content(id), loc)? {
-                    Record::Content { bytes, .. } => Ok(bytes),
-                    _ => Err(BkfsError::unsupported("invalid content reference")),
-                },
-            )
-            .transpose()
+        match self.load_indexed(RecordKey::Content(id))? {
+            Some(Record::Content { bytes, .. }) => Ok(Some(bytes)),
+            Some(_) => Err(BkfsError::unsupported("invalid content reference")),
+            None => Ok(None),
+        }
     }
-    pub(crate) fn object(&self, id: ObjectId) -> BkfsResult<Option<ObjectVersion>> {
-        self.object_in(&self.roots, id)
+    pub(crate) fn load_block(&self, content: u64, index: u64) -> BkfsResult<Option<Vec<u8>>> {
+        match self.load_indexed(RecordKey::Block(content, index))? {
+            Some(Record::Block { bytes, .. }) => Ok(Some(bytes)),
+            Some(_) => Err(BkfsError::unsupported("invalid block reference")),
+            None => Ok(None),
+        }
     }
-    pub(crate) fn object_in(
+    pub(crate) fn load_bucket(
         &self,
-        roots: &Roots,
-        id: ObjectId,
-    ) -> BkfsResult<Option<ObjectVersion>> {
-        roots
-            .objects
-            .get(&id)
-            .map(
-                |&loc| match self.read_indexed(RecordKey::Object(id), loc)? {
-                    Record::Object { version, .. } => Ok(version),
-                    _ => Err(BkfsError::unsupported("invalid object reference")),
-                },
-            )
-            .transpose()
+        directory: u64,
+        generation: u64,
+        index: u32,
+    ) -> BkfsResult<Option<Vec<u8>>> {
+        if let Some(plain) = self.staged_buckets.get(&(directory, generation, index)) {
+            return Ok(Some(plain.clone()));
+        }
+        match self.load_indexed(RecordKey::Bucket(directory, generation, index))? {
+            Some(Record::Bucket { bytes, .. }) => Ok(Some(bytes)),
+            Some(_) => Err(BkfsError::unsupported("invalid directory bucket reference")),
+            None => Ok(None),
+        }
     }
     fn update(&mut self, key: RecordKey, location: Option<Location>) -> BkfsResult<()> {
         self.state.record(key, location)?;
@@ -664,25 +818,117 @@ impl SegmentLog {
         }
         Ok(())
     }
+    fn write_frame(&mut self, stream: Stream, bytes: Vec<u8>) -> BkfsResult<(u64, u64)> {
+        let len = bytes.len() as u64;
+        let (segment, offset) = self.writer.as_mut().unwrap().append(stream, bytes)?;
+        let meta = self.seg_meta.entry(segment).or_default();
+        meta.total = meta.total.max(offset + len);
+        self.appended += len;
+        Ok((segment, offset))
+    }
     pub fn append(&mut self, record: &SealedRecord) -> BkfsResult<()> {
         self.check_rw()?;
         let next = next_sequence(self.next_seq)?;
-        let loc = self
-            .writer
-            .as_mut()
-            .unwrap()
-            .append(self.next_seq, record)?;
+        let seq = self.next_seq;
+        let bytes = encode_frame(seq, &record.sealed.bytes);
+        let len = bytes.len() as u32;
+        let (segment, offset) = self.write_frame(record.key.stream(), bytes)?;
         self.next_seq = next;
-        self.seg_meta.entry(loc.segment).or_default().total += loc.len as u64;
         if let RecordKey::Inode(id) = record.key {
             self.max_inode = self.max_inode.max(id);
         }
-        self.update(record.key, (!record.tombstone).then_some(loc))
+        let location = Location {
+            segment,
+            offset,
+            len,
+            seq,
+            payload_len: record.sealed.bytes.len() as u32,
+            tag: record.sealed.tag,
+        };
+        self.update(record.key, (!record.tombstone).then_some(location))
+    }
+    /// Indexes unauthenticated bytes; reads of the key fail.
+    pub(crate) fn preserve_unreadable(&mut self, key: RecordKey, payload: &[u8]) -> BkfsResult<()> {
+        self.check_rw()?;
+        let next = next_sequence(self.next_seq)?;
+        let seq = self.next_seq;
+        let bytes = encode_frame(seq, payload);
+        let len = bytes.len() as u32;
+        let (segment, offset) = self.write_frame(key.stream(), bytes)?;
+        self.next_seq = next;
+        let location = Location {
+            segment,
+            offset,
+            len,
+            seq,
+            payload_len: payload.len() as u32,
+            tag: Default::default(),
+        };
+        self.update(key, Some(location))
+    }
+    /// Replaces a directory bucket at the next commit.
+    pub(crate) fn stage_bucket(
+        &mut self,
+        directory: u64,
+        generation: u64,
+        index: u32,
+        plain: Vec<u8>,
+    ) -> BkfsResult<()> {
+        self.check_rw()?;
+        self.staged_buckets
+            .insert((directory, generation, index), plain);
+        Ok(())
+    }
+    fn append_staged_buckets(&mut self) -> BkfsResult<()> {
+        let mut staged: Vec<_> = self.staged_buckets.drain().collect();
+        staged.sort_unstable_by_key(|(key, _)| *key);
+        for ((directory, generation, index), plain) in staged {
+            let record = seal_bucket(&self.key, self.ecc, directory, generation, index, plain)?;
+            self.append(&record)?;
+        }
+        Ok(())
+    }
+    /// Whether a removal changed the index.
+    pub(crate) fn remove(&mut self, key: RecordKey) -> BkfsResult<bool> {
+        self.check_rw()?;
+        let staged = match key {
+            RecordKey::Bucket(directory, generation, index) => self
+                .staged_buckets
+                .remove(&(directory, generation, index))
+                .is_some(),
+            _ => false,
+        };
+        if self.roots.get(key).is_none() {
+            return Ok(staged);
+        }
+        self.update(key, None)?;
+        Ok(true)
+    }
+    fn has_unsynced(&self) -> bool {
+        self.writer
+            .as_ref()
+            .is_some_and(|writer| writer.has_unsynced())
+    }
+    /// Makes appended frames durable and records their segment lengths.
+    fn flush_writes(&mut self) -> BkfsResult<()> {
+        if self.writer.is_none() {
+            return Ok(());
+        }
+        self.append_staged_buckets()?;
+        let writer = self.writer.as_mut().unwrap();
+        writer.sync()?;
+        for (segment, len) in writer.take_lengths() {
+            self.roots.sizes.insert(segment, len);
+            self.seg_meta.entry(segment).or_default().total = len;
+            self.state.record_size(segment, len)?;
+        }
+        Ok(())
     }
     pub fn sync(&mut self) -> BkfsResult<()> {
         if self.writer.is_none() {
             return Ok(());
         }
+        self.flush_writes()?;
         let counters = self.counters();
         match &mut self.state {
             Persistence::Current(state) => {
@@ -703,6 +949,7 @@ impl SegmentLog {
         pins: HashSet<u64>,
     ) -> BkfsResult<()> {
         self.check_rw()?;
+        self.flush_writes()?;
         let counters = self.counters();
         let Persistence::Current(state) = &mut self.state else {
             return Err(BkfsError::unsupported(
@@ -713,8 +960,22 @@ impl SegmentLog {
         self.pin(pins);
         Ok(())
     }
+    /// Commits, then checkpoints once the journal outgrows its policy.
+    pub fn close_session(&mut self, retained: &[View]) -> BkfsResult<()> {
+        self.sync()?;
+        let due = match &self.state {
+            Persistence::Current(state) => state.checkpoint_due(),
+            Persistence::Legacy(_) => true,
+        };
+        if due {
+            self.save_checkpoint(retained)?;
+        }
+        Ok(())
+    }
+    /// The checkpoint view; `None` for a format-1 store.
     pub fn save_checkpoint(&mut self, retained: &[View]) -> BkfsResult<Option<View>> {
         self.check_rw()?;
+        self.flush_writes()?;
         let counters = self.counters();
         match &mut self.state {
             Persistence::Current(state) => state
@@ -735,25 +996,19 @@ impl SegmentLog {
     }
     pub(crate) fn retain_storage(
         &mut self,
-        ids: &HashSet<ObjectId>,
+        storage: &HashSet<RecordKey>,
         packed: &HashSet<u64>,
     ) -> BkfsResult<()> {
         self.check_rw()?;
         let remove: Vec<_> = self
             .roots
-            .objects
-            .keys()
-            .filter(|id| !ids.contains(id))
-            .copied()
-            .map(RecordKey::Object)
-            .chain(
-                self.roots
-                    .content
-                    .keys()
-                    .filter(|id| !packed.contains(id))
-                    .copied()
-                    .map(RecordKey::Content),
-            )
+            .entries()
+            .map(|(key, _)| key)
+            .filter(|key| match key {
+                RecordKey::Inode(_) => false,
+                RecordKey::Content(id) => !packed.contains(id),
+                RecordKey::Block(..) | RecordKey::Bucket(..) => !storage.contains(key),
+            })
             .collect();
         for key in remove {
             self.update(key, None)?;
@@ -770,40 +1025,85 @@ impl SegmentLog {
             }
         }
     }
-    pub fn compact(&mut self, threshold: f64) -> BkfsResult<usize> {
+    /// Relocates live frames out of mostly-dead segments, then deletes them.
+    pub fn compact(&mut self, threshold: f64, budget: u64) -> BkfsResult<usize> {
         self.check_rw()?;
-        let active = self.writer.as_ref().unwrap().id;
-        let candidates: HashSet<_> = self
+        let active: HashSet<u64> = self.writer.as_ref().unwrap().active_segments().collect();
+        let mut ranked: Vec<_> = self
             .seg_meta
             .iter()
             .filter(|(&id, meta)| {
-                id != active
+                !active.contains(&id)
                     && !self.pinned.contains(&id)
                     && meta.total > 0
                     && meta.total.saturating_sub(meta.live) as f64 / meta.total as f64 > threshold
             })
-            .map(|(&id, _)| id)
+            .map(|(&id, meta)| (meta.live as f64 / meta.total as f64, id, meta.live))
             .collect();
-        let live: Vec<_> = self
+        ranked.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        let mut candidates = HashSet::new();
+        let mut relocated = 0;
+        for (_, id, live) in ranked {
+            if relocated > 0 && relocated + live > budget {
+                break;
+            }
+            relocated += live;
+            candidates.insert(id);
+        }
+        if candidates.is_empty() {
+            return Ok(0);
+        }
+        let mut live: Vec<_> = self
             .roots
             .entries()
             .filter(|(_, loc)| candidates.contains(&loc.segment))
             .collect();
+        live.sort_unstable_by_key(|(_, loc)| (loc.segment, loc.offset));
         for (key, old) in live {
             let bytes = self.read_raw_frame(old)?;
-            let new = self.writer.as_mut().unwrap().relocate(old, &bytes)?;
-            self.seg_meta.entry(new.segment).or_default().total += new.len as u64;
-            self.update(key, Some(new))?;
+            let (segment, offset) = self.write_frame(key.stream(), bytes)?;
+            self.update(
+                key,
+                Some(Location {
+                    segment,
+                    offset,
+                    ..old
+                }),
+            )?;
         }
         self.sync()?;
-        for id in &candidates {
-            std::fs::remove_file(segment_path(self.directory(), *id))?;
-            self.seg_meta.remove(id);
+        for &id in &candidates {
+            self.readers
+                .borrow_mut()
+                .retain(|(segment, _)| *segment != id);
+            self.windows
+                .borrow_mut()
+                .retain(|(segment, ..)| *segment != id);
+            match std::fs::remove_file(segment_path(self.directory(), id)) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(error.into())
+                }
+                _ => {}
+            }
+            self.seg_meta.remove(&id);
+            self.roots.sizes.remove(&id);
+            self.state.record_size(id, 0)?;
         }
         File::open(self.directory())?.sync_all()?;
+        self.sync()?;
         Ok(candidates.len())
     }
+    /// Bytes appended since the log was opened.
+    pub(crate) fn appended(&self) -> u64 {
+        self.appended
+    }
 
+    /// Forgets cached segment bytes after a test edits segment files.
+    #[cfg(test)]
+    pub(crate) fn drop_read_caches(&self) {
+        self.readers.borrow_mut().clear();
+        self.windows.borrow_mut().clear();
+    }
     #[cfg(test)]
     pub fn put(&mut self, inode: Inode, attrs: &Attributes) -> BkfsResult<()> {
         let record = seal_inode(&self.key, self.ecc, inode, attrs)?;

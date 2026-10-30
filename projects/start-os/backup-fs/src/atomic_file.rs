@@ -28,23 +28,6 @@ impl AtomicFile {
         })
     }
 
-    pub fn create(path: PathBuf) -> BkfsResult<Self> {
-        Self::new(
-            path,
-            OpenOptions::new()
-                .read(true)
-                .write(true)
-                .truncate(true)
-                .create(true)
-                .custom_flags(libc::O_DIRECT | libc::O_NOFOLLOW),
-        )
-    }
-
-    /// Create a plain (non-O_DIRECT) atomic file. Intended for small
-    /// metadata files — inodes are usually well under 4 KiB, and the
-    /// O_DIRECT alignment dance + per-write device round-trips are pure
-    /// overhead at that size. Content goes through the page cache and
-    /// becomes durable on the next fsync/syncfs.
     pub fn create_buffered(path: PathBuf) -> BkfsResult<Self> {
         Self::new(
             path,
@@ -74,6 +57,16 @@ impl AtomicFile {
         Ok(())
     }
 
+    /// Renames without synchronizing; a later filesystem barrier makes it durable.
+    pub fn save_fast(mut self) -> BkfsResult<()> {
+        if let Some(file) = self.file.as_mut() {
+            file.flush()?;
+        }
+        drop(self.file.take());
+        std::fs::rename(&self.tmp_path, &self.path)?;
+        Ok(())
+    }
+
     /// Synchronizes file content and the containing directory.
     pub fn save_durable(self) -> BkfsResult<()> {
         let directory = File::open(self.path.parent().unwrap())?;
@@ -84,20 +77,6 @@ impl AtomicFile {
     pub(crate) fn save_with_directory_sync(self, directory: &File) -> BkfsResult<()> {
         self.save()?;
         directory.sync_all()?;
-        Ok(())
-    }
-
-    /// Rename without sync_all. Data lives in the page cache (or was
-    /// pushed to the block layer via O_DIRECT) and is not guaranteed
-    /// durable until the caller issues a syncfs. Use this when a batch
-    /// of saves will be group-committed together — trades per-file
-    /// durability for throughput.
-    pub fn save_fast(mut self) -> BkfsResult<()> {
-        if let Some(file) = self.file.as_mut() {
-            file.flush()?;
-        }
-        drop(self.file.take());
-        std::fs::rename(&self.tmp_path, &self.path)?;
         Ok(())
     }
 }
@@ -164,12 +143,8 @@ mod tests {
         let destination = dir.path().join("destination");
         std::fs::write(&target, b"untouched").unwrap();
         std::os::unix::fs::symlink(&target, destination.with_extension("tmp")).unwrap();
-        let constructors: [fn(PathBuf) -> BkfsResult<AtomicFile>; 2] =
-            [AtomicFile::create, AtomicFile::create_buffered];
-        for create in constructors {
-            assert!(create(destination.clone()).is_err());
-            assert_eq!(std::fs::read(&target).unwrap(), b"untouched");
-        }
+        assert!(AtomicFile::create_buffered(destination.clone()).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"untouched");
     }
 }
 

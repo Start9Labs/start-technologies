@@ -16,7 +16,7 @@ pub(crate) struct Reference {
 }
 
 impl Reference {
-    /// The root publisher must sync the backing filesystem before referencing this blob.
+    /// The root publisher must sync the containing directory before referencing this blob.
     pub fn write<T: Serialize + DeserializeOwned>(
         segments: &Path,
         key: &Key,
@@ -32,7 +32,7 @@ impl Reference {
         std::fs::create_dir_all(path.parent().unwrap())?;
         let mut file = AtomicFile::create_buffered(path.clone())?;
         file.write_all(&sealed.bytes)?;
-        file.save_fast()?;
+        file.save()?;
         Ok(reference)
     }
 

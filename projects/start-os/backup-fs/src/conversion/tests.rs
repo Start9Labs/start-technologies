@@ -40,17 +40,38 @@ fn discovery_is_read_only_and_wrong_password_does_not_publish_a_pending_hint() {
 
 #[test]
 fn conversion_progress_stops_on_interruption_and_completes_after_durable_resumption() {
+    use crate::ctrl::Controller;
+    use crate::inode::{Inode, InodeAttributes};
+
     let data = tempfile::tempdir().unwrap();
     crate::legacy::fixture(data.path());
-    let mut first = Vec::new();
-    let result = BackupFS::convert_with_progress(options(data.path()), |event| {
-        first.push(event);
-        if event.phase == ConversionPhase::Objects && event.done == 1 {
-            return Err(BkfsError::unsupported("injected observer interruption"));
-        }
-        Ok(())
+    {
+        let ctrl = Controller::new(options(data.path())).unwrap();
+        let mut file: InodeAttributes = ctrl.load(Inode(4)).unwrap();
+        file.attrs.size = 1024 * crate::blockstore::CHUNK_SIZE;
+        ctrl.save(&file).unwrap();
+        ctrl.syncfs().unwrap();
+    }
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let path = data.path().to_owned();
+    std::thread::spawn(move || {
+        let mut first = Vec::new();
+        let result = BackupFS::convert_with_progress(options(&path), |event| {
+            first.push(event);
+            if event.phase == ConversionPhase::Objects && event.done == 1 {
+                return Err(BkfsError::unsupported("injected observer interruption"));
+            }
+            Ok(())
+        });
+        let _ = sender.send((result.is_err(), first));
     });
-    assert!(result.is_err());
+    let (failed, first) = receiver
+        .recv_timeout(std::time::Duration::from_secs(60))
+        .expect("an interrupted conversion returns");
+    assert!(failed);
+    assert!(first
+        .iter()
+        .any(|event| event.phase == ConversionPhase::Records));
     assert!(!first
         .iter()
         .any(|event| event.phase == ConversionPhase::Complete));
@@ -78,8 +99,8 @@ fn conversion_progress_stops_on_interruption_and_completes_after_durable_resumpt
     })
     .unwrap();
     let phases: Vec<_> = resumed.iter().map(|event| event.phase).collect();
+    assert!(!phases.contains(&ConversionPhase::Records));
     for phase in [
-        ConversionPhase::Records,
         ConversionPhase::ScanningObjects,
         ConversionPhase::Objects,
         ConversionPhase::Publishing,

@@ -20,16 +20,23 @@ fn padded_controller(data: &tempfile::TempDir, padding: Option<f64>) -> Controll
 }
 
 #[test]
-fn new_block_partial_writes_do_not_read_backing_objects_beyond_eof() {
+fn new_block_partial_writes_do_not_read_indexed_blocks_beyond_eof() {
     let data = tempfile::tempdir().unwrap();
     let ctrl = controller(&data);
     let inode = Inode(2);
     let attrs = InodeAttributes::new(inode, None, FileData::File(ContentId(2)));
-    let path = ctrl.block_path(ContentId(2), 0);
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, b"orphaned data outside the logical file").unwrap();
-    let mut contents = Contents::open_with_attrs(ctrl, attrs, false).unwrap();
+    ctrl.block_put(
+        ContentId(2),
+        0,
+        crate::compress::compress(
+            b"orphaned data outside the logical file",
+            crate::compress::Codec::None,
+        ),
+    )
+    .unwrap();
+    let mut contents = Contents::open_with_attrs(ctrl.clone(), attrs, false).unwrap();
     assert_eq!(contents.write_at(b"new", 128).unwrap(), 3);
+    assert!(!ctrl.block_exists(ContentId(2), 0));
     let mut bytes = vec![0xff; 131];
     contents.read_exact_at(&mut bytes, 0).unwrap();
     assert_eq!(&bytes[..128], &[0; 128]);
@@ -53,33 +60,19 @@ fn partial_overwrite_of_existing_block_still_preserves_untouched_bytes() {
 }
 
 #[test]
-fn cow_object_writes_publish_only_at_the_requested_commit() {
-    use std::io::Write;
+fn block_writes_publish_only_at_commit() {
     let data = tempfile::tempdir().unwrap();
     let ctrl = controller(&data);
-    for (idx, durable) in [false, true].into_iter().enumerate() {
-        let id = ctrl.block_id(ContentId(2), idx as u64);
-        ctrl.write_object(id, durable, |path, binding| {
-            let sealed = crate::vault::seal_bound(b"object", ctrl.key(), ctrl.ecc(), binding);
-            let mut output = crate::atomic_file::AtomicFile::create_buffered(path)?;
-            output.write_all(&sealed.bytes)?;
-            output.save_fast()
-        })
-        .unwrap();
-        let (path, binding) = ctrl.resolve_object(id).unwrap().unwrap();
-        assert_eq!(
-            crate::vault::open_bound(&std::fs::read(path).unwrap(), ctrl.key(), binding)
-                .unwrap()
-                .plaintext,
-            b"object"
-        );
+    let committed = || {
         let (_, roots) =
             crate::state::State::open(&data.path().join("segments"), ctrl.key()).unwrap();
-        assert_eq!(roots.objects.contains_key(&id), durable);
-        if durable {
-            assert_eq!(roots.objects.len(), 2);
-        }
-    }
+        roots.blocks.len()
+    };
+    ctrl.block_put(ContentId(2), 0, b"block".to_vec()).unwrap();
+    assert_eq!(ctrl.block_load(ContentId(2), 0).unwrap().unwrap(), b"block");
+    assert_eq!(committed(), 0);
+    ctrl.syncfs().unwrap();
+    assert_eq!(committed(), 1);
 }
 
 #[test]
@@ -93,6 +86,7 @@ fn framed_padding_stays_outside_logical_data_after_growth() {
     contents.flush().unwrap();
     let mut contents = Contents::open(ctrl.clone(), inode).unwrap();
     contents.resize(64).unwrap();
+    contents.flush().unwrap();
     let mut contents = Contents::open(ctrl, inode).unwrap();
     let mut bytes = [0xff; 64];
     contents.read_exact_at(&mut bytes, 0).unwrap();
@@ -106,13 +100,7 @@ fn legacy_padded_contents(ctrl: &Controller) -> Contents {
     let mut legacy = b"abc".to_vec();
     legacy.resize(64, 0xaa);
     let stored = crate::compress::compress(&legacy, crate::compress::Codec::None);
-    ctrl.write_object(ctrl.block_id(ContentId(2), 0), true, |path, binding| {
-        let sealed = crate::vault::seal_bound(&stored, ctrl.key(), ctrl.ecc(), binding);
-        std::fs::create_dir_all(path.parent().unwrap())?;
-        std::fs::write(path, sealed.bytes)?;
-        Ok(())
-    })
-    .unwrap();
+    ctrl.block_put(ContentId(2), 0, stored).unwrap();
     ctrl.save(&attrs).unwrap();
     Contents::open(ctrl.clone(), Inode(2)).unwrap()
 }
@@ -123,6 +111,7 @@ fn legacy_padding_is_clipped_before_resize() {
     let ctrl = padded_controller(&data, Some(0.05));
     let mut contents = legacy_padded_contents(&ctrl);
     contents.resize(64).unwrap();
+    contents.flush().unwrap();
     let mut contents = Contents::open(ctrl, Inode(2)).unwrap();
     let mut bytes = [0xff; 64];
     contents.read_exact_at(&mut bytes, 0).unwrap();

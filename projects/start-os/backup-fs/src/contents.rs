@@ -538,7 +538,7 @@ impl Contents {
             };
             let block = dirty.get(&idx).unwrap();
             let stored = &block[..valid.min(block.len())];
-            blockstore::write_block(&self.ctrl, content_id, idx, stored, self.codec, false)?;
+            blockstore::write_block(&self.ctrl, content_id, idx, stored, self.codec)?;
             let removed = dirty.remove(&idx).unwrap();
             *dirty_bytes -= removed.len();
             *disk_blocks = (*disk_blocks).max(idx + 1);
@@ -597,7 +597,7 @@ impl Contents {
         if let Body::Packed { dirty, .. } = &mut self.body {
             *dirty = true;
         }
-        self.flush()
+        self.flush_content_only()
     }
 
     pub fn flush(&mut self) -> BkfsResult<()> {
@@ -606,8 +606,8 @@ impl Contents {
         }
         self.flush_content_only()?;
         if self.changed {
-            self.ctrl.save_fast(&self.inode)?;
-            self.ctrl.tick_save()?;
+            self.ctrl.save(&self.inode)?;
+            self.ctrl.tick_save();
             self.changed = false;
         }
         // Only now (blocks written, File inode record appended after them) is
@@ -615,8 +615,8 @@ impl Contents {
         // at a higher log offset than the File record, so if it's durable the
         // record is too — the inode can't end up Packed pointing at a hole.
         if let Some(cid) = self.pending_content_tombstone.take() {
-            self.ctrl.cpack_tombstone(cid, false)?;
-            self.ctrl.tick_save()?;
+            self.ctrl.cpack_tombstone(cid)?;
+            self.ctrl.tick_save();
         }
         Ok(())
     }
@@ -666,8 +666,8 @@ impl Contents {
             }
             Plan::Packed(cid, bytes) => {
                 if let Some(b) = bytes {
-                    self.ctrl.cpack_put(cid, &b, self.codec, false)?;
-                    self.ctrl.tick_save()?;
+                    self.ctrl.cpack_put(cid, &b, self.codec)?;
+                    self.ctrl.tick_save();
                     if let Body::Packed { dirty, .. } = &mut self.body {
                         *dirty = false;
                     }
@@ -721,11 +721,9 @@ impl Contents {
                 let block = dirty.get(&idx).unwrap();
                 let bytes = &block[..block.len().min(self.valid_len(idx))];
                 if idx == last && self.ctrl.config().file_size_padding.is_some() {
-                    blockstore::write_final_block(
-                        &self.ctrl, content_id, idx, bytes, self.codec, false,
-                    )?;
+                    blockstore::write_final_block(&self.ctrl, content_id, idx, bytes, self.codec)?;
                 } else {
-                    blockstore::write_block(&self.ctrl, content_id, idx, bytes, self.codec, false)?;
+                    blockstore::write_block(&self.ctrl, content_id, idx, bytes, self.codec)?;
                 }
             }
             if let Body::Blocks {
@@ -752,6 +750,7 @@ impl Contents {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn fsync(&mut self) -> BkfsResult<()> {
         self.flush()?;
         self.ctrl.syncfs()?;
@@ -797,7 +796,7 @@ impl Contents {
         // risk; only a leftover superseded extent (from a packed→blocks
         // migration this session) still needs dropping.
         if let Some(cid) = pending {
-            ctrl.cpack_tombstone(cid, false)?;
+            ctrl.cpack_tombstone(cid)?;
         }
         Ok(())
     }
