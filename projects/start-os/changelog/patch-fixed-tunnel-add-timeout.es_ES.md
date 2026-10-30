@@ -1,0 +1,1 @@
+- Al añadir un túnel, se informa de un error tras 30 segundos si su interfaz de red sigue sin estar disponible, en lugar de esperar indefinidamente.
