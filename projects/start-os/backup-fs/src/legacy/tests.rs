@@ -28,6 +28,25 @@ fn read(fs: &BackupFS, inode: u64) -> Vec<u8> {
 }
 
 #[test]
+fn legacy_superblock_without_segments_opens_without_conversion() {
+    let source = tempfile::tempdir().unwrap();
+    super::fixture(source.path());
+    let data = tempfile::tempdir().unwrap();
+    std::fs::copy(
+        source.path().join("superblock"),
+        data.path().join("superblock"),
+    )
+    .unwrap();
+    assert!(!data.path().join("segments").exists());
+    for readonly in [false, true] {
+        let fs = BackupFS::new(options(data.path(), readonly)).unwrap();
+        assert!(ctrl(&fs).is_legacy());
+        assert!(data.path().join("segments").is_dir());
+        assert!(!data.path().join("segments/state").exists());
+    }
+}
+
+#[test]
 fn ordinary_legacy_opens_leave_superblocks_and_data_format_unchanged() {
     let data = tempfile::tempdir().unwrap();
     super::fixture(data.path());

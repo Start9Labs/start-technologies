@@ -31,6 +31,9 @@ use crate::util::io::{AtomicFile, dir_copy};
 use crate::util::serde::IoFormat;
 use crate::version::VersionT;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
@@ -196,26 +199,21 @@ pub async fn backup_all(
         .decrypt(&ctx)?;
     let password = password.decrypt(&ctx)?;
 
-    // Progress is shown from the moment the request is accepted. The
-    // "Initializing" phase covers mounting the target and opening its encrypted
-    // store — work that runs before perform_backup adds the per-package phases —
-    // so the UI shows a labeled phase instead of a bare 0% during that window.
+    // Initializing covers target mounting before per-package phases exist.
     let progress = FullProgressTracker::new();
     let mut init_phase = progress.add_phase(
         InternedString::intern(&*t!("backup.bulk.initializing")),
         None,
     );
     init_phase.start();
-    // The mutate closure runs under catch_unwind, so it can't capture the
-    // tracker (its watch channels aren't unwind-safe); seed the db with a plain
-    // snapshot instead.
+    // Watch channels cannot cross Patch-DB's catch_unwind boundary.
     let init_progress = progress.snapshot();
 
     let ((fs, package_ids, server_id), status_guard) = (
         ctx.db
             .mutate(|db| {
                 <RpcContext as LoginContext>::check_password(db, &password)?;
-                let fs = target_id.load(db)?;
+                let fs = target_id.clone().load(db)?;
                 let package_ids = if let Some(ids) = package_ids {
                     ids.into_iter().collect()
                 } else {
@@ -227,12 +225,9 @@ pub async fn backup_all(
                         .map(|(id, _)| id)
                         .collect()
                 };
-                assure_backing_up(db, &init_progress)?;
-                Ok((
-                    fs,
-                    package_ids,
-                    db.as_public().as_server_info().as_id().de()?,
-                ))
+                let server_id = db.as_public().as_server_info().as_id().de()?;
+                assure_backing_up(db, &init_progress, &target_id, &server_id)?;
+                Ok((fs, package_ids, server_id))
             })
             .await
             .result?,
@@ -315,19 +310,35 @@ pub async fn backup_all(
 }
 
 #[instrument(skip(db, initial))]
-fn assure_backing_up(db: &mut DatabaseModel, initial: &FullProgress) -> Result<(), Error> {
-    let backing_up = db
-        .as_public_mut()
-        .as_server_info_mut()
-        .as_status_info_mut()
-        .as_backup_progress_mut();
-    if backing_up.transpose_ref().is_some() {
+fn assure_backing_up(
+    db: &mut DatabaseModel,
+    initial: &FullProgress,
+    target: &BackupTargetId,
+    server: &str,
+) -> Result<(), Error> {
+    if db
+        .as_public()
+        .as_server_info()
+        .as_status_info()
+        .as_backup_progress()
+        .transpose_ref()
+        .is_some()
+    {
         return Err(Error::new(
             eyre!("{}", t!("backup.bulk.already-backing-up")),
             ErrorKind::InvalidRequest,
         ));
     }
-    backing_up.ser(&Some(initial.clone()))?;
+    super::target::conversion::ensure_available(
+        &super::target::conversion::jobs(db)?,
+        target,
+        server,
+    )?;
+    db.as_public_mut()
+        .as_server_info_mut()
+        .as_status_info_mut()
+        .as_backup_progress_mut()
+        .ser(&Some(initial.clone()))?;
     Ok(())
 }
 

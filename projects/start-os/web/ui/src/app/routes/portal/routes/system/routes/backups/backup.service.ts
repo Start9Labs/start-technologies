@@ -77,7 +77,7 @@ export class BackupService {
       hasCurrentBackup: this.hasCurrentBackup(entry),
     })),
   )
-  private readonly completed = this.patch
+  private readonly settled = this.patch
     .watch$('serverInfo', 'statusInfo', 'backupConversions')
     .pipe(
       pairwise(),
@@ -85,8 +85,8 @@ export class BackupService {
         Object.entries(current).some(([id, jobs]) =>
           Object.entries(jobs).some(
             ([server, job]) =>
-              job.state === 'complete' &&
-              previous[id]?.[server]?.state !== 'complete',
+              job.state !== 'running' &&
+              previous[id]?.[server]?.state !== job.state,
           ),
         ),
       ),

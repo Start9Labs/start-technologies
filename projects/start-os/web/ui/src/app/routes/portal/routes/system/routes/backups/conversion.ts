@@ -6,7 +6,6 @@ import {
   i18nPipe,
   LeafProgressPipe,
 } from '@start9labs/shared'
-import { T } from '@start9labs/start-core'
 import {
   TUI_BREAKPOINT,
   TuiButton,
@@ -25,7 +24,6 @@ import { conversionLabel } from './conversion-state'
 
 interface ConversionContext {
   targetId: string
-  backups: Record<string, T.StartOsRecoveryInfo>
 }
 
 @Pipe({ name: 'backupConversionLabel' })
@@ -61,8 +59,6 @@ export class BackupConversion {
   )
 
   public readonly targetId = input.required<string>()
-  public readonly backups =
-    input.required<Record<string, T.StartOsRecoveryInfo>>()
   public readonly label =
     input.required<NonNullable<ReturnType<typeof conversionLabel>>>()
 
@@ -70,7 +66,7 @@ export class BackupConversion {
     this.dialogs
       .openComponent(CONVERSIONS, {
         size: 'l',
-        data: { targetId: this.targetId(), backups: this.backups() },
+        data: { targetId: this.targetId() },
       })
       .subscribe()
   }
@@ -87,7 +83,7 @@ export class BackupConversion {
           | i18n
       }}
     </p>
-    @for (backup of context.data.backups | keyvalue; track backup.key) {
+    @for (backup of backups() | keyvalue; track backup.key) {
       @let job = service.conversions()[context.data.targetId]?.[backup.key];
       @if (
         backup.value.formatStatus === 'legacy' ||
@@ -205,6 +201,14 @@ class Conversions {
   protected readonly context =
     injectContext<TuiDialogContext<void, ConversionContext>>()
   protected readonly service = inject(BackupService)
+  protected readonly backups = computed(
+    () =>
+      this.service.cifs().find(({ id }) => id === this.context.data.targetId)
+        ?.entry.startOs ??
+      this.service.drives().find(({ id }) => id === this.context.data.targetId)
+        ?.entry.startOs ??
+      {},
+  )
 }
 
 const CONVERSIONS = new PolymorpheusComponent(Conversions)

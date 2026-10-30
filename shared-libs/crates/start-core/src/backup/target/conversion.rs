@@ -71,15 +71,14 @@ pub struct ConvertParams {
 }
 rpc_toolkit::reflect_ts!(ConvertParams);
 
-fn reserve(
-    jobs: &mut ConversionJobs,
-    target: BackupTargetId,
-    server: String,
-    progress: FullProgress,
+pub(crate) fn ensure_available(
+    jobs: &ConversionJobs,
+    target: &BackupTargetId,
+    server: &str,
 ) -> Result<(), Error> {
-    let entries = jobs.entry(target.to_string()).or_default();
-    if entries
-        .get(&server)
+    if jobs
+        .get(&target.to_string())
+        .and_then(|entries| entries.get(server))
         .is_some_and(|job| job.state == ConversionState::Running)
     {
         return Err(Error::new(
@@ -87,7 +86,17 @@ fn reserve(
             ErrorKind::InvalidRequest,
         ));
     }
-    entries.insert(
+    Ok(())
+}
+
+fn reserve(
+    jobs: &mut ConversionJobs,
+    target: BackupTargetId,
+    server: String,
+    progress: FullProgress,
+) -> Result<(), Error> {
+    ensure_available(jobs, &target, &server)?;
+    jobs.entry(target.to_string()).or_default().insert(
         server,
         ConversionJob {
             state: ConversionState::Running,
@@ -98,7 +107,7 @@ fn reserve(
     Ok(())
 }
 
-fn jobs(db: &DatabaseModel) -> Result<ConversionJobs, Error> {
+pub(crate) fn jobs(db: &DatabaseModel) -> Result<ConversionJobs, Error> {
     Ok(db
         .as_public()
         .as_server_info()
