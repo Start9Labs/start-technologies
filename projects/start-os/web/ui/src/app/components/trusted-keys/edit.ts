@@ -31,14 +31,17 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
         <input tuiInput formControlName="name" />
       </tui-textfield>
       <tui-error formControlName="name" />
-      <label>
-        <input tuiSwitch type="checkbox" formControlName="marketplace" />
-        {{ 'Packages' | i18n }}
-      </label>
-      <label>
-        <input tuiSwitch type="checkbox" formControlName="os" />
-        {{ 'OS' | i18n }}
-      </label>
+      <fieldset>
+        <legend>{{ 'Trust signatures for:' | i18n }}</legend>
+        <label tuiLabel>
+          <input tuiSwitch type="checkbox" formControlName="marketplace" />
+          {{ 'Packages' | i18n }}
+        </label>
+        <label tuiLabel>
+          <input tuiSwitch type="checkbox" formControlName="os" />
+          {{ 'OS Updates' | i18n }}
+        </label>
+      </fieldset>
       <footer>
         <button
           tuiButton

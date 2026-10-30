@@ -879,5 +879,6 @@ export default {
   995: 'Accès SSH',
   996: 'Modifier le trousseau de confiance',
   997: 'Paquets',
-  998: 'Système d’exploitation',
+  998: 'Mises à jour du système',
+  999: 'Faire confiance aux signatures pour :',
 } satisfies i18n

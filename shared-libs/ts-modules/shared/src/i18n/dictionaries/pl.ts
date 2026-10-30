@@ -879,5 +879,6 @@ export default {
   995: 'Dostęp SSH',
   996: 'Edytuj zaufany pęk kluczy',
   997: 'Pakiety',
-  998: 'System operacyjny',
+  998: 'Aktualizacje systemu',
+  999: 'Ufaj podpisom dla:',
 } satisfies i18n

@@ -879,5 +879,6 @@ export default {
   995: 'Acceso SSH',
   996: 'Editar llavero de confianza',
   997: 'Paquetes',
-  998: 'Sistema operativo',
+  998: 'Actualizaciones del SO',
+  999: 'Confiar en firmas para:',
 } satisfies i18n

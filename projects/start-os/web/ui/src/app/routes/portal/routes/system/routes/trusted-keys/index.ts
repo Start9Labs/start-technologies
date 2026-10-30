@@ -8,19 +8,17 @@ import {
   TaskService,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
-import { TuiTable } from '@taiga-ui/addon-table'
 import {
   TuiButton,
   TuiDataList,
   TuiDropdown,
+  TuiIcon,
   TuiLoader,
-  TuiScrollbar,
-  TuiTitle,
 } from '@taiga-ui/core'
-import { TuiHeader } from '@taiga-ui/layout'
 import { defaultIfEmpty, firstValueFrom } from 'rxjs'
 import { EDIT_TRUSTED_KEY } from 'src/app/components/trusted-keys/edit'
 import { ADD_TRUSTED_KEY } from 'src/app/components/trusted-keys/form'
+import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { TitleDirective } from 'src/app/services/title.service'
 import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
@@ -36,107 +34,119 @@ import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
       </div>
     </ng-container>
     <section class="g-card">
-      <header tuiHeader>
-        <h2 tuiTitle>{{ 'Trusted keyrings' | i18n }}</h2>
+      <header>
+        {{ 'Trusted keyrings' | i18n }}
         <a
           tuiIconButton
           docsLink
           path="/start-os/trusted-keys.html"
-          size="s"
+          size="xs"
           appearance="icon"
           iconStart="@tui.book-open-text"
         >
           {{ 'Documentation' | i18n }}
         </a>
-        <aside tuiAccessories>
-          <button tuiButton iconStart="@tui.plus" (click)="add()">
-            {{ 'Add' | i18n }}
-          </button>
-        </aside>
+        <button
+          tuiButton
+          size="xs"
+          [style.margin]="'0 0.5rem 0 auto'"
+          iconStart="@tui.plus"
+          (click)="add()"
+        >
+          {{ 'Add' | i18n }}
+        </button>
       </header>
       @if (trust.keys(); as keys) {
-        <tui-scrollbar>
-          <table tuiTable size="s">
-            <thead>
-              <tr>
-                <th tuiTh>{{ 'Name' | i18n }}</th>
-                <th tuiTh>{{ 'Public keys' | i18n }}</th>
-                <th tuiTh>{{ 'Packages' | i18n }}</th>
-                <th tuiTh>{{ 'OS' | i18n }}</th>
-                <th tuiTh>{{ 'Actions' | i18n }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (
-                entry of keys | keyvalue: compareKeyrings;
-                track entry.key
-              ) {
-                <tr>
-                  <td tuiTd>{{ entry.value.name }}</td>
-                  <td tuiTd>{{ entry.value.publicKeys.length }}</td>
-                  <td tuiTd>
-                    {{
-                      (entry.value.marketplace ? 'Enabled' : 'Disabled') | i18n
-                    }}
-                  </td>
-                  <td tuiTd>
-                    {{ (entry.value.os ? 'Enabled' : 'Disabled') | i18n }}
-                  </td>
-                  <td tuiTd>
-                    <button
-                      tuiIconButton
-                      tuiDropdown
-                      tuiDropdownAuto
-                      tuiDropdownAlign="end"
-                      size="s"
-                      appearance="flat-grayscale"
-                      iconStart="@tui.ellipsis-vertical"
-                      [disabled]="saving()"
-                    >
-                      {{ 'More' | i18n }} {{ entry.value.name }}
-                      <tui-data-list *tuiDropdown="let close" (click)="close()">
-                        <button
-                          tuiOption
-                          (click)="edit(entry.key, entry.value)"
-                        >
-                          {{ 'Edit' | i18n }}
-                        </button>
-                        @if (entry.value.removable) {
-                          <button tuiOption (click)="remove(entry.key)">
-                            {{ 'Delete' | i18n }}
-                          </button>
-                        }
-                      </tui-data-list>
+        <table
+          [appTable]="['Name', 'Public keys', 'Packages', 'OS Updates', null]"
+        >
+          @for (entry of keys | keyvalue: compareKeyrings; track entry.key) {
+            <tr>
+              <td>
+                <tui-icon icon="@tui.key-round" />
+                {{ entry.value.name }}
+              </td>
+              <td [attr.data-label]="'Public keys' | i18n">
+                {{ entry.value.publicKeys.length }}
+              </td>
+              <td [attr.data-label]="'Packages' | i18n">
+                {{ (entry.value.marketplace ? 'Enabled' : 'Disabled') | i18n }}
+              </td>
+              <td [attr.data-label]="'OS Updates' | i18n">
+                {{ (entry.value.os ? 'Enabled' : 'Disabled') | i18n }}
+              </td>
+              <td>
+                <button
+                  tuiIconButton
+                  tuiDropdown
+                  tuiDropdownAuto
+                  tuiDropdownAlign="end"
+                  size="s"
+                  appearance="flat-grayscale"
+                  iconStart="@tui.ellipsis-vertical"
+                  [disabled]="saving()"
+                >
+                  {{ 'More' | i18n }} {{ entry.value.name }}
+                  <tui-data-list *tuiDropdown="let close" (click)="close()">
+                    <button tuiOption (click)="edit(entry.key, entry.value)">
+                      {{ 'Edit' | i18n }}
                     </button>
-                  </td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        </tui-scrollbar>
+                    @if (entry.value.removable) {
+                      <button
+                        tuiOption
+                        class="g-negative"
+                        (click)="remove(entry.key)"
+                      >
+                        {{ 'Delete' | i18n }}
+                      </button>
+                    }
+                  </tui-data-list>
+                </button>
+              </td>
+            </tr>
+          }
+        </table>
       } @else {
         <tui-loader />
       }
     </section>
   `,
   styles: `
-    table {
-      inline-size: 100%;
+    td:first-child tui-icon {
+      margin-inline-end: 0.5rem;
+    }
+
+    td:last-child {
+      text-align: end;
+    }
+
+    :host-context(tui-root._mobile) {
+      td[data-label] {
+        grid-column: 1;
+
+        &::before {
+          content: attr(data-label) ': ';
+          color: var(--tui-text-primary);
+        }
+      }
+
+      td:last-child {
+        grid-area: 1 / 2 / 5;
+        align-content: center;
+      }
     }
   `,
   imports: [
     KeyValuePipe,
     RouterLink,
     DocsLinkDirective,
+    TableComponent,
     TitleDirective,
     TuiButton,
     TuiDataList,
     TuiDropdown,
-    TuiHeader,
+    TuiIcon,
     TuiLoader,
-    TuiScrollbar,
-    TuiTable,
-    TuiTitle,
     i18nPipe,
   ],
 })

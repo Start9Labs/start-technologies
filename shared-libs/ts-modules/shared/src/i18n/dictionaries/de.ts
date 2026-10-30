@@ -879,5 +879,6 @@ export default {
   995: 'SSH-Zugriff',
   996: 'Vertrauenswürdigen Schlüsselbund bearbeiten',
   997: 'Pakete',
-  998: 'Betriebssystem',
+  998: 'Betriebssystem-Updates',
+  999: 'Vertrauen in Signaturen für:',
 } satisfies i18n

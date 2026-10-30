@@ -69,7 +69,7 @@ boundary(
   'export const tuiMarkControlAsTouchedAndValidate = () => {}; export const tuiProvide = () => [];',
 )
 boundary('@taiga-ui/layout', ['TuiHeader', 'TuiForm'])
-boundary('@taiga-ui/addon-table', ['TuiTable'])
+boundary('@taiga-ui/addon-table', ['TuiTable', 'TuiTableDirective'])
 boundary('@taiga-ui/addon-mobile', ['TuiResponsiveDialog'])
 boundary(
   '@taiga-ui/i18n',
