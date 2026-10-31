@@ -1,0 +1,1 @@
+- Le routeur n’envoie plus de mDNS sur le WAN : son annonce `router.local` et ses recherches de noms d’appareils du LAN restent sur le LAN.
