@@ -212,10 +212,7 @@ impl From<&InodeAttributes> for fuser::FileAttr {
 
 impl<'a> Save for &'a InodeAttributes {
     fn save(self, ctrl: &Controller) -> BkfsResult<()> {
-        ctrl.log_put(self.inode, &self.attrs, true)
-    }
-    fn save_fast(self, ctrl: &Controller) -> BkfsResult<()> {
-        ctrl.log_put(self.inode, &self.attrs, false)
+        ctrl.log_put(self.inode, &self.attrs)
     }
 }
 

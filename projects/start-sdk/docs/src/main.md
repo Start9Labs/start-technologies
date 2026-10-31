@@ -319,6 +319,8 @@ Pass environment variables to a daemon or oneshot via the `env` option on `exec`
 
 The process also receives the image's environment variables and, unless the image sets one, the server's language as `LANG` when the image includes that locale; these `env` values override both. Set a variable to `undefined` to remove it, e.g. `env: { LANG: undefined }`.
 
+Environment values travel through numbered `JSON_ENV_0`, `JSON_ENV_1`, … variables rather than command-line arguments. The SDK splits large JSON payloads into UTF-8 chunks of at most 64 KiB; Linux's total exec size and individual service-variable limits still apply. Per-command values support embedded newlines; multiline image defaults require packing with start-cli 2.6.0 or later, which stores them in the image's JSON metadata. The SDK also reads legacy image environment files.
+
 ## Health Checks
 
 There are two kinds of health checks:
@@ -401,9 +403,46 @@ Available on `sdk.healthCheck`:
 - **`checkWebUrl(effects, url, { successMessage, errorMessage })`** — fetches a URL, succeeds on any HTTP response.
 - **`runHealthScript(command, subcontainer, { errorMessage })`** — runs a command in a subcontainer, succeeds on exit code 0.
 
+### Gateway Consistency
+
+Replies to a connection leave through the gateway it arrived on, but connections a service starts leave through its outbound gateway, which the user chooses. A service that advertises a public address and then starts flows itself — a TURN relay, a mail server sending from an address its DNS records authorize — sends them from another address when the two gateways differ.
+
+`sdk.host.getAddressGateways(effects, hostId, addresses)` returns the service's outbound gateway and, for each address passed in, the gateway publishing it (`null` when none does). It reads both once per call, so a health check can call it on every poll without restarting the service. Pass the addresses the service actually advertises, read back from its rendered configuration, not the inputs it was rendered from:
+
+```typescript
+.addHealthCheck('gateway-match', {
+  ready: {
+    display: i18n('Outbound Gateway'),
+    fn: async () => {
+      const ips = await turnserverConf.read(c => c.externalIps).once()
+      if (!ips?.length) return { result: 'disabled' as const }
+      const { outbound, addresses } = await sdk.host.getAddressGateways(
+        effects,
+        turnHostId,
+        ips,
+      )
+      return addresses.every(a => a.gateway === outbound)
+        ? { result: 'success' as const }
+        : {
+            result: 'failure' as const,
+            message: i18n(
+              'Relayed traffic leaves through ${outbound}, not the gateway these addresses are published on. Set the outbound gateway to match.',
+              { outbound },
+            ),
+          }
+    },
+  },
+  requires: ['coturn'],
+})
+```
+
+Which rule applies — every address on the outbound gateway, or the outbound gateway among them — and what the message says belong to the package. A failing check reports a mismatch; it does not stop traffic already flowing. A passing one establishes that both directions use one gateway, not that outbound traffic carries an advertised source address: a gateway with several public addresses, or IPv6 source selection, can still pick another.
+
 ### Polling Triggers
 
-By default, health checks poll every 1 s while `starting` or `failure`, and every 30 s while `success`, `loading`, `waiting`, or `disabled`. A daemon's `ready` check reporting `loading` or `waiting` before its first `success` is the exception: it backs off from 1 s, doubling to 30 s, so a daemon that `requires` it starts soon after it becomes ready. Override this with the `trigger` option on `ready`:
+Every health status accepts a `message` string that the UI displays verbatim. Empty or absent messages use the localized status label. A `starting` or `loading` result can also set `waiting: true` to show a clock instead of a spinner while waiting for an external condition; omitting it defaults to `false`. Readiness still follows `result`, not the waiting flag.
+
+By default, health checks poll every 1 s while `starting` or `failure`, and every 30 s while `success`, `loading`, `disabled`, or `starting` with `waiting: true`. A daemon's `ready` check reporting `loading` or `waiting: true` before its first `success` is the exception: it backs off from 1 s, doubling to 30 s, so a daemon that `requires` it starts soon after it becomes ready. Override this with the `trigger` option on `ready`:
 
 ```typescript
 ready: {
@@ -416,7 +455,7 @@ ready: {
 Available triggers on `sdk.trigger`:
 
 - **`cooldownTrigger(ms)`** — fixed interval between checks, regardless of status. The first check also waits `ms`.
-- **`statusTrigger(defaultMs, { success?, loading?, disabled?, starting?, waiting?, failure? })`** — per-status polling intervals in milliseconds. The first argument is the default interval for any status not explicitly listed. An interval of `Infinity` stops polling once that status is reported.
+- **`statusTrigger(defaultMs, { success?, loading?, disabled?, starting?, failure? })`** — per-status polling intervals in milliseconds. The first argument is the default interval for any status not explicitly listed. An interval of `Infinity` stops polling once that status is reported.
 - **`onceTrigger`** — one check, as soon as the health check starts. Use it for a result that cannot change until `main` restarts, such as one computed from configuration read with `.const()`: re-polling it only repeats the same result, and a failure writes a line to the service log on every poll. Pair it with `gracePeriod: 0`, or the single result is reported as `starting`.
 
 Use a slower trigger for expensive checks (RPC calls during heavy processing) to reduce load on the service:

@@ -1,0 +1,1 @@
+- **Los mensajes de error y éxito son legibles con el tema claro.** Antes usaban los colores del tema oscuro, demasiado tenues sobre fondo blanco.

@@ -202,6 +202,32 @@ impl DerivedAddressInfo {
             })
             .collect();
     }
+
+    /// Drops IP overrides whose available addresses belong exclusively to this gateway.
+    pub fn forget_gateway(&mut self, gateway: &GatewayId) {
+        let available = &self.available;
+        for address in available
+            .iter()
+            .filter(|a| a.metadata.is_ip() && a.metadata.gateways().any(|g| g == gateway))
+            .filter(|address| {
+                !available.iter().any(|other| {
+                    other.metadata.is_ip()
+                        && override_key(other) == override_key(address)
+                        && !other.metadata.gateways().any(|g| g == gateway)
+                })
+            })
+        {
+            if let Some(sa) = address.to_socket_addr() {
+                self.enabled.remove(&sa);
+            }
+            if let Some(gua) = address.gua() {
+                self.gua_wan.remove(&gua);
+            }
+            let key = override_key(address);
+            self.disabled.remove(&key);
+            self.lan_enabled.remove(&key);
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
@@ -527,11 +553,86 @@ rpc_toolkit::reflect_ts!(Security);
 rpc_toolkit::ts_export!(Security, namespaces = [""]);
 
 #[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", try_from = "CompatibleBindOptions")]
+#[visit(type_attributes(serde::try_from))]
 pub struct BindOptions {
     pub preferred_external_port: u16,
     pub add_ssl: Option<AddSslOptions>,
     pub secure: Option<Security>,
+    /// HTTP request policy shared by every exposed leg of this binding.
+    pub proxy: Option<ProxyOptions>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, VisitVariants)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
+pub enum ProxyOptions {
+    Http {
+        /// Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
+        /// Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+        #[serde(default)]
+        add_x_forwarded_headers: bool,
+        /// Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
+        #[serde(default)]
+        auth: Option<ProxyAuth>,
+    },
+}
+
+rpc_toolkit::reflect_ts!(ProxyOptions);
+rpc_toolkit::ts_export!(ProxyOptions, namespaces = [""]);
+
+#[derive(Deserialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+struct CompatibleBindOptions {
+    preferred_external_port: u16,
+    add_ssl: Option<LegacyProxySslOptions>,
+    secure: Option<Security>,
+    proxy: Option<ProxyOptions>,
+}
+
+rpc_toolkit::reflect_ts!(CompatibleBindOptions);
+
+#[derive(Deserialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+struct LegacyProxySslOptions {
+    #[serde(flatten)]
+    ssl: AddSslOptions,
+    #[serde(default)]
+    add_x_forwarded_headers: bool,
+    #[serde(default)]
+    auth: Option<ProxyAuth>,
+}
+
+rpc_toolkit::reflect_ts!(LegacyProxySslOptions);
+
+impl TryFrom<CompatibleBindOptions> for BindOptions {
+    type Error = &'static str;
+
+    fn try_from(options: CompatibleBindOptions) -> Result<Self, Self::Error> {
+        let mut proxy = options.proxy;
+        let add_ssl = options.add_ssl.map(|legacy| {
+            if proxy.is_none() && (legacy.add_x_forwarded_headers || legacy.auth.is_some()) {
+                proxy = Some(ProxyOptions::Http {
+                    add_x_forwarded_headers: legacy.add_x_forwarded_headers,
+                    auth: legacy.auth,
+                });
+            }
+            legacy.ssl
+        });
+        let options = Self {
+            preferred_external_port: options.preferred_external_port,
+            add_ssl,
+            secure: options.secure,
+            proxy,
+        };
+        if options.serves_own_tls() && options.proxy.is_some() {
+            return Err("HTTP proxying requires TLS termination for a TLS container");
+        }
+        Ok(options)
+    }
 }
 
 rpc_toolkit::reflect_ts!(BindOptions);
@@ -594,11 +695,6 @@ rpc_toolkit::ts_export!(UpstreamCertValidation, namespaces = [""]);
 #[serde(rename_all = "camelCase")]
 pub struct AddSslOptions {
     pub preferred_external_port: u16,
-    /// When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-    /// and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-    /// forwarding them upstream. Setting this implies HTTP-aware proxying.
-    #[serde(default)]
-    pub add_x_forwarded_headers: bool,
     /// The application protocols StartOS answers a client with, from those it
     /// asked for. Unset answers with whatever it asked for.
     #[serde(default, deserialize_with = "legacy_alpn::deserialize")]
@@ -609,15 +705,6 @@ pub struct AddSslOptions {
     /// `None` (the default) validates against the StartOS root CA.
     #[serde(default)]
     pub upstream_cert_validation: Option<UpstreamCertValidation>,
-    /// Optional reverse-proxy auth gate. When set, the OS reverse proxy
-    /// will validate the `Authorization` header on incoming HTTP requests
-    /// against this configuration before forwarding them upstream.
-    /// Unauthenticated requests get `401 Unauthorized` with an appropriate
-    /// `WWW-Authenticate` challenge. For `Basic`, the authenticated
-    /// username is forwarded to the upstream service as `X-Forwarded-User`.
-    /// Setting this implies HTTP-aware proxying.
-    #[serde(default)]
-    pub auth: Option<ProxyAuth>,
 }
 
 rpc_toolkit::reflect_ts!(AddSslOptions);
@@ -1548,12 +1635,11 @@ mod test {
             preferred_external_port: preferred,
             add_ssl: add_ssl.map(|preferred_external_port| AddSslOptions {
                 preferred_external_port,
-                add_x_forwarded_headers: false,
                 alpn: None,
                 upstream_cert_validation: None,
-                auth: None,
             }),
             secure: ssl.map(|ssl| Security { ssl }),
+            proxy: None,
         }
     }
 
@@ -1563,6 +1649,66 @@ mod test {
             "alpn": alpn,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn legacy_ssl_policy_normalizes_into_binding_http_proxy() {
+        for (headers, auth) in [
+            (true, serde_json::Value::Null),
+            (
+                false,
+                serde_json::json!({ "type": "bearer", "tokens": ["secret"] }),
+            ),
+            (
+                true,
+                serde_json::json!({ "type": "basic", "credentials": [{ "username": "alice", "password": "secret" }] }),
+            ),
+        ] {
+            let legacy = serde_json::json!({
+                "preferredExternalPort": 8080,
+                "secure": null,
+                "addSsl": { "preferredExternalPort": 8443, "addXForwardedHeaders": headers, "auth": auth },
+            });
+            let options: BindOptions = serde_json::from_value(legacy).unwrap();
+            let serialized = serde_json::to_value(&options).unwrap();
+            assert_eq!(serialized["proxy"]["type"], "http");
+            assert_eq!(serialized["proxy"]["addXForwardedHeaders"], headers);
+            assert_eq!(serialized["proxy"]["auth"]["type"], auth["type"]);
+            assert!(serialized["addSsl"].get("auth").is_none());
+            assert!(serialized["addSsl"].get("addXForwardedHeaders").is_none());
+            assert_eq!(serialized["addSsl"]["preferredExternalPort"], 8443);
+            let round_trip: BindOptions = serde_json::from_value(serialized.clone()).unwrap();
+            assert_eq!(serde_json::to_value(round_trip).unwrap(), serialized);
+        }
+    }
+
+    #[test]
+    fn http_proxy_is_independent_of_ssl_and_rejects_passthrough() {
+        let plain = serde_json::json!({
+            "preferredExternalPort": 8080,
+            "addSsl": null,
+            "secure": null,
+            "proxy": { "type": "http" },
+        });
+        let options: BindOptions = serde_json::from_value(plain.clone()).unwrap();
+        assert!(matches!(
+            options.proxy,
+            Some(ProxyOptions::Http {
+                add_x_forwarded_headers: false,
+                auth: None
+            })
+        ));
+        let mut passthrough = plain;
+        passthrough["secure"] = serde_json::json!({ "ssl": true });
+        assert!(serde_json::from_value::<BindOptions>(passthrough.clone()).is_err());
+        passthrough["addSsl"] = serde_json::json!({ "preferredExternalPort": 8443 });
+        assert!(serde_json::from_value::<BindOptions>(passthrough).is_ok());
+        let raw: BindOptions = serde_json::from_value(serde_json::json!({
+            "preferredExternalPort": 8333,
+            "addSsl": { "preferredExternalPort": 8443, "addXForwardedHeaders": false },
+        }))
+        .unwrap();
+        assert!(raw.proxy.is_none());
     }
 
     #[test]
@@ -2333,6 +2479,115 @@ mod test {
                 .disabled
                 .contains(&(InternedString::intern("example.com"), 49152))
         );
+    }
+
+    #[test]
+    fn forget_gateway_drops_only_that_gateways_overrides() {
+        let gw = |id: &str| GatewayId::from(InternedString::intern(id));
+        let ip = |host: &str, metadata: HostnameMetadata| HostnameInfo {
+            ssl: false,
+            public: true,
+            hostname: InternedString::intern(host),
+            port: Some(3478),
+            metadata,
+        };
+        let mut info = DerivedAddressInfo::default();
+        info.available.extend([
+            ip(
+                "64.23.194.12",
+                HostnameMetadata::Ipv4 { gateway: gw("wg0") },
+            ),
+            ip(
+                "2604:a880:4:1d0:0:3:145f:5",
+                HostnameMetadata::Ipv6 {
+                    gateway: gw("wg0"),
+                    scope_id: 4,
+                },
+            ),
+            ip("10.59.88.5", HostnameMetadata::Ipv4 { gateway: gw("wg0") }),
+            ip(
+                "73.34.87.9",
+                HostnameMetadata::Ipv4 {
+                    gateway: gw("eno0"),
+                },
+            ),
+            ip(
+                "demo.local",
+                HostnameMetadata::Mdns {
+                    gateways: BTreeSet::from([gw("wg0"), gw("eno0")]),
+                },
+            ),
+        ]);
+        info.enabled.extend([
+            "64.23.194.12:3478".parse::<SocketAddr>().unwrap(),
+            "[2604:a880:4:1d0:0:3:145f:5]:3478".parse().unwrap(),
+            "73.34.87.9:3478".parse().unwrap(),
+        ]);
+        info.gua_wan
+            .insert("[2604:a880:4:1d0:0:3:145f:5]:3478".parse().unwrap());
+        info.disabled
+            .insert((InternedString::intern("demo.local"), 3478));
+        info.lan_enabled
+            .insert((InternedString::intern("10.59.88.5"), 3478));
+
+        info.forget_gateway(&gw("wg0"));
+
+        assert_eq!(
+            info.enabled,
+            BTreeSet::from(["73.34.87.9:3478".parse().unwrap()])
+        );
+        assert!(info.gua_wan.is_empty());
+        assert!(info.lan_enabled.is_empty());
+        assert_eq!(
+            info.disabled,
+            BTreeSet::from([(InternedString::intern("demo.local"), 3478)])
+        );
+    }
+
+    #[test]
+    fn forget_gateway_preserves_overrides_shared_with_another_gateway() {
+        let mut info = DerivedAddressInfo::default();
+        let enabled = BTreeSet::from(["64.23.194.12:3478".parse().unwrap()]);
+        let gua_wan = BTreeSet::from(["[2001:db8::1]:3478".parse().unwrap()]);
+        let disabled = BTreeSet::from([(InternedString::intern("10.0.0.1"), 3478)]);
+        let lan_enabled = BTreeSet::from([(InternedString::intern("10.0.0.2"), 3478)]);
+        info.enabled = enabled.clone();
+        info.gua_wan = gua_wan.clone();
+        info.disabled = disabled.clone();
+        info.lan_enabled = lan_enabled.clone();
+        for gateway in ["wg0", "eno0"] {
+            let gateway = GatewayId::from(InternedString::intern(gateway));
+            for (hostname, public) in [
+                ("64.23.194.12", true),
+                ("10.0.0.1", false),
+                ("10.0.0.2", false),
+                ("2001:db8::1", true),
+            ] {
+                info.available.insert(HostnameInfo {
+                    ssl: false,
+                    public,
+                    hostname: InternedString::intern(hostname),
+                    port: Some(3478),
+                    metadata: if hostname.contains(':') {
+                        HostnameMetadata::Ipv6 {
+                            gateway: gateway.clone(),
+                            scope_id: 4,
+                        }
+                    } else {
+                        HostnameMetadata::Ipv4 {
+                            gateway: gateway.clone(),
+                        }
+                    },
+                });
+            }
+        }
+
+        info.forget_gateway(&GatewayId::from(InternedString::intern("wg0")));
+
+        assert_eq!(info.enabled, enabled);
+        assert_eq!(info.gua_wan, gua_wan);
+        assert_eq!(info.disabled, disabled);
+        assert_eq!(info.lan_enabled, lan_enabled);
     }
 
     fn range_info(external_start_port: u16, number_of_ports: u16, enabled: bool) -> RangeBindInfo {

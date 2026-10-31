@@ -19,6 +19,8 @@ Ethernet is strongly recommended. Servers are always-on, critical devices and sh
 
 If you encounter Diagnostic Mode, your best bet is stop clicking and [contact support](https://start9.com/contact).
 
+In Diagnostic Mode your server always answers over `http://`, at its usual name or IP address: type `http://server-name.local/` in full, `http://` included. Its `https://` address may not connect, and a page you already had open does not switch to Diagnostic Mode by itself.
+
 ## My server boots into StartOS instead of the USB installer
 
 A Start9 server boots from a USB installer on its own, with nothing to press and no setting to change. If yours starts StartOS as usual with the installer plugged in, the USB drive is almost always the problem:
@@ -78,7 +80,7 @@ For other hardware, see the [install guide](installing-startos.md#install) and t
 
 1. Try connecting using a different device. If this works, it means you need to clear cache on your current browser and/or restart your current device.
 
-1. Try visiting start.local. Your server may be in diagnostic mode.
+1. Try visiting `http://server-name.local/`, typed in full with `http://` in front. A server in [Diagnostic Mode](#startos-boots-into-diagnostic-mode) always answers there, even when its `https://` address does not.
 
 1. Try restarting your router.
 

@@ -274,7 +274,7 @@ export class MockApiService extends ApiService {
   }
 
   private mockSystemInfo: SystemInfoRes = {
-    version: '1.0.0',
+    version: '1.4.0',
     // Echo the bundle's own stamp so mock mode never trips stale-UI detection.
     gitHash: inject(GIT_HASH),
     language: 'en_US',
@@ -294,33 +294,29 @@ export class MockApiService extends ApiService {
 
     return [
       {
-        version: '1.0.1',
-        releaseNotes: `## Bug Fixes
+        version: '1.4.1',
+        releaseNotes: `## Fixes
 
-- Resolved issue with DHCP lease renewals
-- Fixed port forwarding rules not persisting after reboot
-- Corrected timezone display in system logs
+- Stability improvements for Wi-Fi and VPN connections
+- Translation updates
 
-## Security Updates
+## Security
 
-- Updated OpenSSL to latest version
-- Patched CVE-2024-1234 vulnerability`,
+- Updated OpenWrt packages`,
       },
       {
-        version: '1.0.2',
+        version: '1.5.0',
         releaseNotes: `## What's New
 
-- Improved Wi-Fi stability and range
-- Fixed intermittent connection drops on 5GHz band
-- Added support for WPA3 security protocol
-- Performance improvements for VPN connections`,
+- Interface refinements throughout
+- Faster startup after a reboot`,
       },
     ]
   }
 
   async systemUpdate(params: SystemUpdateReq): Promise<SystemUpdateRes> {
     await pauseFor(500)
-    return { target: '1.0.2', progress: 'mock-guid-1234' }
+    return { target: '1.5.0', progress: 'mock-guid-1234' }
   }
 
   async systemRestart(): Promise<null> {
@@ -365,42 +361,42 @@ export class MockApiService extends ApiService {
     }
     return [
       {
-        profile: 'guest',
-        label: 'Family',
+        profile: 'lan',
+        label: 'Home',
         enabled: true,
         listen_port: 51820,
-        endpoint: '100.65.227.234',
-        public_key: 'aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5zA7bC9d=',
-        server_address: '192.168.1.1',
-        peers: [],
-      },
-      {
-        profile: 'lan',
-        label: 'Matt',
-        enabled: false,
-        listen_port: 51821,
-        endpoint: 'agf5d.start9.me',
+        endpoint: 'myhost.dyndns.org',
         public_key: 'xY5zA7bC9daB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3=',
         server_address: '192.168.1.1',
         peers: [
           {
-            name: 'tablet',
-            ip: '192.168.1.2',
+            name: 'Phone',
+            ip: '192.168.1.200',
             public_key: '2JIBoK+Bxe7MJzX9zV+lFjqHxLTvehLp3piEROaNJjw=',
           },
           {
-            name: 'Smartphone',
-            ip: '192.168.1.3',
+            name: 'Laptop',
+            ip: '192.168.1.201',
             public_key: 'bZIOgRYRGTX9x0OQsN1K+R63EhT2Pgo0WzYatTmzdDU=',
           },
         ],
+      },
+      {
+        profile: 'guest',
+        label: 'Friends',
+        enabled: false,
+        listen_port: 51821,
+        endpoint: '100.65.227.234',
+        public_key: 'aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5zA7bC9d=',
+        server_address: '192.168.2.1',
+        peers: [],
       },
     ]
   }
 
   private loadIpCounter(): number {
     const stored = localStorage.getItem('mock:vpn-ip-counter')
-    return stored ? parseInt(stored, 10) : 4
+    return stored ? parseInt(stored, 10) : 202
   }
 
   private persistVpnServers(): void {
@@ -573,7 +569,7 @@ export class MockApiService extends ApiService {
   }
 
   private mockWifi: WifiConfig = {
-    ssid: 'StartOS',
+    ssid: 'Home',
     broadcastSeparately: false,
     country: null,
     radios: {
@@ -599,6 +595,15 @@ export class MockApiService extends ApiService {
         password: 'password123',
       },
       {
+        label: 'Kids',
+        profile: {
+          fullname: 'Children',
+          interface: 'kids',
+          vlan_tag: 102,
+        },
+        password: 'Dn7cXfHs4uEgAw2R',
+      },
+      {
         label: 'Guest Wi-Fi',
         profile: {
           fullname: 'Guest',
@@ -606,6 +611,15 @@ export class MockApiService extends ApiService {
           vlan_tag: 100,
         },
         password: 'guestpass456',
+      },
+      {
+        label: 'Smart Home',
+        profile: {
+          fullname: 'Smart Devices',
+          interface: 'iot',
+          vlan_tag: 101,
+        },
+        password: 'Ym9pVtKe6jQrZh3F',
       },
     ],
   }
@@ -628,15 +642,15 @@ export class MockApiService extends ApiService {
 
   private mockBlackoutWindows: ScheduleWindow[] = [
     {
-      startTime: '6:00',
-      endTime: '10:00',
-      days: [true, false, false, false, false, true, true],
+      startTime: '9:00',
+      endTime: '15:00',
+      days: [false, true, true, true, true, true, false],
     },
     {
       // Crosses midnight (end < start): renders as a head + tail per night.
-      startTime: '22:00',
+      startTime: '23:00',
       endTime: '06:00',
-      days: [false, true, true, true, true, true, false],
+      days: [true, true, true, true, true, true, true],
     },
   ]
 
@@ -711,38 +725,51 @@ export class MockApiService extends ApiService {
       interface: 'lan',
       vlan_tag: 1,
       gateway_ip: '192.168.1.1',
-      outbound: 'wan',
+      outbound: 'wg_mullvad',
       lan_access: 'ALL',
       wan_access: 'ALL',
       access_to_new_profiles: true,
       owns_lan: true,
-      dns_source: 'system',
+      dns_source: 'vpn',
       dns_override: [],
+    },
+    {
+      fullname: 'Children',
+      interface: 'kids',
+      vlan_tag: 102,
+      gateway_ip: '192.168.4.1',
+      outbound: 'wan',
+      lan_access: 'SAME_PROFILE',
+      wan_access: 'ALL',
+      access_to_new_profiles: false,
+      owns_lan: false,
+      dns_override: [
+        { address: '1.1.1.3', ssl: true },
+        { address: '1.0.0.3', ssl: false },
+      ],
+      dns_source: 'custom',
     },
     {
       fullname: 'Guest',
       interface: 'guest',
       vlan_tag: 100,
       gateway_ip: '192.168.2.1',
-      outbound: 'wan',
+      outbound: 'wg_proton',
       lan_access: 'SAME_PROFILE',
-      wan_access: { whitelist: ['1.1.1.1', '8.8.8.8', '9.9.9.9'] },
+      wan_access: { blacklist: ['192.0.2.0/24', '198.51.100.0/24'] },
       access_to_new_profiles: false,
       owns_lan: false,
-      dns_override: [
-        { address: '1.1.1.1', ssl: true },
-        { address: '8.8.8.8', ssl: false },
-      ],
-      dns_source: 'custom',
+      dns_source: 'vpn',
+      dns_override: [],
     },
     {
-      fullname: 'IoT',
+      fullname: 'Smart Devices',
       interface: 'iot',
       vlan_tag: 101,
       gateway_ip: '192.168.3.1',
       outbound: 'wan',
       lan_access: 'SAME_PROFILE',
-      wan_access: { blacklist: ['192.0.2.0/24', '198.51.100.0/24'] },
+      wan_access: { whitelist: ['1.1.1.1', '8.8.8.8', '9.9.9.9'] },
       access_to_new_profiles: false,
       owns_lan: false,
       dns_source: 'system',
@@ -1054,7 +1081,15 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  private mockSchedules: Record<string, ScheduleWindow[]> = {}
+  private mockSchedules: Record<string, ScheduleWindow[]> = {
+    kids: [
+      {
+        startTime: '21:00',
+        endTime: '07:00',
+        days: [true, true, true, true, true, true, true],
+      },
+    ],
+  }
 
   async profileScheduleGet(params: {
     interface: string
@@ -1233,7 +1268,7 @@ export class MockApiService extends ApiService {
   }
 
   /** MACs allowed to publish DNS records into the router's resolver. */
-  private dnsInjectionAllowed = new Set<string>()
+  private dnsInjectionAllowed = new Set<string>(['00:1A:2B:3C:4D:5E'])
 
   async devicesSetDnsInjection(
     params: RpcParamType<Api, 'devices.set-dns-injection'>,
@@ -1623,7 +1658,7 @@ export class MockApiService extends ApiService {
       id: 'ssh_access',
       enabled: false,
       label: 'SSH Access',
-      device_mac: 'DE:AD:BE:EF:CA:FF',
+      device_mac: 'AA:BB:CC:DD:EE:01',
       ports: '22',
       protocol: 'tcp',
       ipv4: true,
@@ -1634,8 +1669,8 @@ export class MockApiService extends ApiService {
       status: 'disabled',
       status_reason: null,
       device_name: null,
-      device_ipv4: '192.168.1.103',
-      device_ipv6: '2001:db8:abcd:1::103',
+      device_ipv4: '192.168.1.110',
+      device_ipv6: '2001:db8:abcd:1::110',
     },
   ]
 
@@ -1803,13 +1838,24 @@ export class MockApiService extends ApiService {
       {
         id: 'sni_443_nextcloud.example.com',
         kind: 'SNI',
-        device_mac: '',
-        device_name: null,
+        device_mac: mac,
+        device_name: device.name,
         internal_ip: device.ipv4,
         ports: '443',
         public_ports: '443',
         expires_secs: 2954,
         hostname: 'nextcloud.example.com',
+      },
+      {
+        id: 'sni_443_photos.example.com',
+        kind: 'SNI',
+        device_mac: mac,
+        device_name: device.name,
+        internal_ip: device.ipv4,
+        ports: '443',
+        public_ports: '443',
+        expires_secs: 2871,
+        hostname: 'photos.example.com',
       },
     ]
   }
@@ -1834,14 +1880,27 @@ export class MockApiService extends ApiService {
       id: 'wg_mullvad',
       label: 'Mullvad',
       target: 'Proton',
+      enabled: true,
+      used_by: [],
+      supports_ipv6: false,
+      mtu: 1280,
+      hostname_endpoint: false,
+      dns: ['10.64.0.1'],
+      status: 'connected',
+      last_handshake_secs: 17,
+    },
+    {
+      id: 'wg_ivpn',
+      label: 'IVPN',
+      target: 'Internet',
       // Disabled by default so the mock exercises the enabled-only filters on
       // the profile outbound picker and both chain-target pickers. Nothing
-      // targets Mullvad and no mock profile routes through it, so this is a
+      // targets IVPN and no mock profile routes through it, so this is a
       // consistent state.
       enabled: false,
       used_by: [],
       supports_ipv6: false,
-      mtu: 1280,
+      mtu: null,
       hostname_endpoint: false,
       dns: [],
       status: 'not-responding',

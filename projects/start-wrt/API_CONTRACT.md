@@ -96,19 +96,31 @@ unsigned local-token request is rejected as unnecessary.
 struct SessionList {
     /// The key that signed this request
     current: Option<String>,
+    sessions: Sessions,
+}
+
+struct Sessions {
     /// Enrolled keys by DER64 SPKI: { name, loggedIn, lastActive, userAgent }.
     /// `lastActive` is persisted at most hourly.
-    sessions: BTreeMap<String, Session>,
+    pubkeys: BTreeMap<String, Session>,
+    /// Empty on StartWRT.
+    tokens: BTreeMap<String, Session>,
 }
 ```
 
 ### `auth.session.kill`
 
+StartWRT revokes enrolled keys through `pubkeys`. The shared request also accepts
+`tokens`, but StartWRT has no bearer-token sessions.
+
 ```rust
 #[derive(Deserialize)]
 struct KillParams {
     /// DER64 or PEM-encoded keys to revoke
-    ids: Vec<AnyVerifyingKey>,
+    #[serde(default)]
+    pubkeys: Vec<AnyVerifyingKey>,
+    #[serde(default)]
+    tokens: Vec<String>,
 }
 // Response: null
 ```
@@ -944,9 +956,8 @@ struct SetDnsInjectionReq {
 }
 // Response: null
 // Backend: stores `_allow_dns_inject` on the device's DHCP host section,
-// creating one if needed, rewrites the per-profile dnsmasq instances, and
-// applies the change immediately. `allow: false` also drops the records the
-// device has published.
+// creating one if needed, and applies the change immediately. `allow: false`
+// also drops the records the device has published.
 ```
 
 ### `devices.set-router-advertisements`
@@ -1609,9 +1620,9 @@ struct PeerSetDnsInjectionArgs {
 }
 // Response: null
 // Backend: stores `_allow_dns_inject` on the peer's `wireguard_wg_<profile>`
-// section, rewrites the per-profile dnsmasq instances, and applies the change
-// immediately. A peer's signed updates are refused without it. `allow: false`
-// also drops the records the peer has published.
+// section and applies the change immediately. A peer's signed updates are
+// refused without it. `allow: false` also drops the records the peer has
+// published.
 ```
 
 ---

@@ -56,7 +56,7 @@ export function getInstalledBaseStatus(statusInfo: T.StatusInfo): BaseStatus {
     (!statusInfo.started ||
       Object.values(statusInfo.health)
         .filter(h => !!h)
-        .some(h => h.result === 'starting' || h.result === 'waiting'))
+        .some(h => h.result === 'starting'))
   ) {
     return 'starting'
   }
@@ -193,8 +193,6 @@ export const PrimaryRendering: Record<PrimaryStatus, StatusRendering> = {
   },
 }
 
-// The CSS color a primary status renders in — shared so a status reads the same
-// everywhere (the services-list status, the Address Requirements note, ...).
 export function getStatusColor(primary: PrimaryStatus): string {
   switch (primary) {
     case 'running':

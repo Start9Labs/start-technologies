@@ -10,11 +10,11 @@ Before text reaches Dux, Start9 masks what it recognizes: seed phrases, private 
 
 ## Sharing Privately
 
-Every Start9 Support customer can read your chats. For something only Start9's staff should see — an email address, a shipping address, an order number, a receipt, payment details — choose **Request a human** and say you have something private to share. The person opens the chat's private thread, the lock in its header, where you can write and attach files. Only you and Start9's staff read it; Dux and other customers never do.
+Every Start9 Support customer can read your chats. For something only Start9's staff should see — an email address, a shipping address, an order number, a receipt, payment details — choose **Request a human** and say you have something private to share. The person opens the chat's private thread, and the chat says so in a line that opens it when you choose it; the lock in the chat's header opens it too. There you can write and attach files, and reply to, react to, copy and edit posts as you do in the chat. Only you and Start9's staff read it; Dux and other customers never do.
 
 If a message you are about to send looks like it contains an email address, a card number, a phone number or a street address, the message field holds it and warns you: **Edit message** to change it, or **Send anyway** to send it as written.
 
-To delete something from the private thread, choose **Remove for good** on it. It is removed for you and for Start9, and the thread shows that it was there. A copy can remain in backups until they expire.
+To delete something from the private thread, choose **Remove for good** from its toolbar, or by long-pressing it on a phone. It is removed for you and for Start9, and the thread shows that it was there. A copy can remain in backups until they expire.
 
 ## If You Shared a Secret
 

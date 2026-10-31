@@ -73,7 +73,6 @@ on:
       - 'debian/**'
       - 'apt/**'
       - '.github/workflows/startos-iso.yaml'
-      - '.github/workflows/compile-start-cli.yaml'
       - '.github/actions/setup-build/**'
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-os/docs/**) shouldn't trigger a build.
@@ -104,7 +103,6 @@ on:
       - 'debian/**'
       - 'apt/**'
       - '.github/workflows/startos-iso.yaml'
-      - '.github/workflows/compile-start-cli.yaml'
       - '.github/actions/setup-build/**'
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-os/docs/**) shouldn't trigger a build.
@@ -199,7 +197,7 @@ jobs:
           path: compiled-${{ matrix.arch }}.tar
           retention-days: 1
 
-  # On pull requests, only build the (expensive, ~2h with emulated riscv) image
+  # On pull requests, only build the (expensive) image
   # matrix when the change actually affects image assembly — packaging, image
   # recipe, systemd units, apt, or shared build infra. Pure code/web/docs PRs are
   # already covered by `compile` (the binaries) and the Automated Tests workflow,
@@ -285,8 +283,8 @@ jobs:
               "aarch64-nonfree": "ubuntu-24.04-arm",
               "aarch64-nvidia": "ubuntu-24.04-arm",
               "raspberrypi": "ubuntu-24.04-arm",
-              "riscv64": "ubuntu-24.04-arm",
-              "riscv64-nonfree": "ubuntu-24.04-arm",
+              "riscv64": "ubuntu-24.04-riscv",
+              "riscv64-nonfree": "ubuntu-24.04-riscv",
             }')[matrix.platform],
             fromJson('{
               "x86_64": "amd64-fast",
@@ -345,6 +343,19 @@ jobs:
 
       - name: Set up docker QEMU
         uses: docker/setup-qemu-action@v4
+
+      # The RISE riscv64 runner ships no Node, and nodejs.org publishes no riscv64 builds.
+      # setup-node's mirror input requires a nodejs.org `/dist` layout, which unofficial-builds lacks.
+      - name: Install Node from unofficial-builds
+        if: ${{ env.ARCH == 'riscv64' && github.event.inputs.runner != 'fast' }}
+        run: |
+          base="https://unofficial-builds.nodejs.org/download/release/v${NODEJS_VERSION}"
+          tarball="node-v${NODEJS_VERSION}-linux-riscv64.tar.xz"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/$tarball"
+          curl -fsSL "$base/SHASUMS256.txt" | grep " $tarball\$" | sha256sum -c -
+          tar -xJf "$tarball"
+          echo "$RUNNER_TEMP/${tarball%.tar.xz}/bin" >> "$GITHUB_PATH"
 
       - uses: actions/checkout@v6
         with:
@@ -433,6 +444,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: ./.github/actions/free-disk-space
+
       - name: Fetch the 0.4.0 base squashfs (this run's image build)
         id: base
         continue-on-error: true
@@ -489,8 +502,8 @@ jobs:
           path: results/*.migration.squashfs
           retention-days: 14
 
-  publisher-cli:
-    name: Build publisher CLI
+  deploy:
+    name: Deploy
     needs: [image]
     # Explicit status check so the skipped PR-only `changes` job can't poison
     # the implicit success() through the needs chain (actions/runner#2205).
@@ -509,14 +522,6 @@ jobs:
           && contains(fromJson('["alpha", "beta"]'), github.event.inputs.deploy)
         )
       )
-    uses: ./.github/workflows/compile-start-cli.yaml
-    with:
-      triple: x86_64-unknown-linux-musl
-
-  deploy:
-    name: Deploy
-    needs: [image, publisher-cli]
-    if: ${{ !cancelled() && needs.image.result == 'success' && needs.publisher-cli.result == 'success' }}
     runs-on: ubuntu-latest
     # One lock for every deploy, not one per channel. The workflow-level group is
     # scoped by event, so a dispatch could otherwise run alongside a master-push
@@ -565,6 +570,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh registry-notes start-os > "$RUNNER_TEMP/release-notes.json"
+          node scripts/changelog.mjs security projects/start-os "$VERSION" --ref "${{ github.sha }}" > "$RUNNER_TEMP/release-security"
 
       - name: Determine platforms
         id: platforms
@@ -601,16 +607,11 @@ jobs:
           path: artifacts/
           merge-multiple: true
 
-      - name: Download publisher CLI
-        uses: actions/download-artifact@v8
-        with:
-          name: start-cli_x86_64-unknown-linux-musl
-          path: ${{ runner.temp }}/publisher-cli
-
       - name: Install start-cli
-        run: |
-          sudo install -m 755 "$RUNNER_TEMP/publisher-cli/start-cli" /usr/local/bin/start-cli
-          ./scripts/manage-release.sh check-registry-notes-cli start-os
+        uses: Start9Labs/start-technologies/.github/actions/install-start-cli@master
+
+      - name: Check start-cli registry notes support
+        run: ./scripts/manage-release.sh check-registry-notes-cli start-os
 
       - name: Configure S3
         run: |
@@ -665,7 +666,7 @@ jobs:
       # (asset/add.rs "commitment-mismatch"), so re-indexing a version that
       # already holds a build fails. Alpha deliberately rolls the same version
       # number on every master push, so the version entry has to be dropped
-      # first. Beta never republishes in place and is left alone.
+      # first. manage-release.sh pre-release replaces beta separately.
       #
       # Removing the version drops *every* platform indexed under it, so this is
       # gated to full-matrix deploys — which every master push is. A dispatch
@@ -684,7 +685,10 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           NOTES=$(jq -r '.releaseNotes' "$RUNNER_TEMP/release-notes.json")
+          SECURITY_ARGS=()
+          if [ "$(cat "$RUNNER_TEMP/release-security")" = true ]; then SECURITY_ARGS+=(--security); fi
           start-cli --registry="${{ env.REGISTRY }}" registry os version add \
+            --git-hash "${{ github.sha }}" "${SECURITY_ARGS[@]}" \
             "$VERSION" "v${VERSION}" "$NOTES" ">=0.3.5 <=${VERSION}"
 
       - name: Index assets in registry

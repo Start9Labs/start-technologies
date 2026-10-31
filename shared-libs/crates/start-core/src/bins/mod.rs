@@ -125,6 +125,13 @@ pub fn translate_cli(mut cmd: clap::Command) -> clap::Command {
     cmd
 }
 
+#[cfg(test)]
+pub(crate) fn with_manifest_version(command: clap::Command, product: &Path) -> clap::Command {
+    let manifest = std::fs::read_to_string(product.join("Cargo.toml")).unwrap();
+    let manifest: serde_toml::Table = serde_toml::from_str(&manifest).unwrap();
+    command.version(manifest["package"]["version"].as_str().unwrap().to_owned())
+}
+
 #[derive(Default)]
 pub struct MultiExecutable {
     default: Option<&'static str>,
@@ -284,9 +291,7 @@ pub(crate) fn assert_no_shadowed_args(root: clap::Command) {
         }
     }
 
-    // The root's own arguments are the CLI's config (`--host`, `--config`, …),
-    // which is parsed separately and never merged into params, so the walk
-    // starts fresh at each top-level subcommand.
+    // Root configuration is parsed separately from subcommand parameters.
     let mut found = Vec::new();
     for sub in root.get_subcommands() {
         walk(sub, sub.get_name(), &BTreeSet::new(), &mut found);
@@ -296,4 +301,20 @@ pub(crate) fn assert_no_shadowed_args(root: clap::Command) {
         "these subcommands redeclare an ancestor's argument and cannot be invoked:\n  {}",
         found.join("\n  ")
     );
+}
+
+#[cfg(test)]
+fn export_manpages(command: clap::Command, dir: &str) {
+    std::fs::create_dir_all(dir).unwrap();
+    clap_mangen::generate_to(command, dir).unwrap();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        let page = std::fs::read_to_string(&path).unwrap();
+        let page = page
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(path, format!("{page}\n")).unwrap();
+    }
 }

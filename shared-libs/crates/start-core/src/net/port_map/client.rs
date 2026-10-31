@@ -632,7 +632,7 @@ impl State {
             Some(Active::Upnp { internal_port, .. }) => {
                 let (local_ip, external_port, hostname, protocol) = key;
                 if let IpAddr::V4(local_v4) = local_ip {
-                    if let Some(gw) = self.gateway_for(local_v4).await {
+                    if let Ok(gw) = self.gateway_for(local_v4).await {
                         match &hostname {
                             Some(host) => {
                                 upnp::remove_hostname_mapping(
@@ -663,7 +663,8 @@ impl State {
         interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
         key: MappingKey,
     ) {
-        let attempted = self.try_apply(interfaces, &key).await;
+        let mut errors = Vec::new();
+        let attempted = self.try_apply(interfaces, &key, &mut errors).await;
         if self.active.contains_key(&key) {
             self.failures.remove(&key);
         } else if attempted {
@@ -672,15 +673,30 @@ impl State {
                 .get(&key)
                 .copied()
                 .unwrap_or((0, Instant::now()));
+            if n == 0 {
+                let (local_ip, external_port, hostname, protocol) = &key;
+                tracing::warn!(
+                    "{}",
+                    t!(
+                        "net.port-map.mapping-not-granted",
+                        mapping = format!(
+                            "{protocol:?} {local_ip}:{external_port}{}",
+                            hostname.as_ref().map_or(String::new(), |h| format!(" {h}"))
+                        ),
+                        reasons = errors.join("; ")
+                    )
+                );
+            }
             self.failures.insert(key, (n + 1, Instant::now()));
         }
     }
 
-    /// Returns `true` if any network I/O was attempted.
+    /// Whether a mapping was attempted or gateway discovery failed.
     async fn try_apply(
         &mut self,
         interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
         key: &MappingKey,
+        errors: &mut Vec<String>,
     ) -> bool {
         let mut attempted = false;
         let Some(spec) = self.desired.get(key).cloned() else {
@@ -761,6 +777,10 @@ impl State {
                         return true;
                     }
                     Ok(m) => {
+                        errors.push(format!(
+                            "PCP HOSTNAME via {gw}: grant did not satisfy the requested port and HOSTNAME binding (external port {})",
+                            m.external_port()
+                        ));
                         report(interfaces, *gw, |caps, now| {
                             set_verdict(&mut caps.pcp, true, now)
                                 | set_verdict(&mut caps.pcp_hostname, false, now)
@@ -769,10 +789,7 @@ impl State {
                     }
                     Err(e) => {
                         report_pcp_failure(interfaces, *gw, &e);
-                        crate::dev_log!(
-                            debug,
-                            "PCP HOSTNAME map {local_ip}:{external_port} {hostname} via {gw} failed: {e}"
-                        )
+                        errors.push(format!("PCP HOSTNAME via {gw}: {e}"));
                     }
                 }
             }
@@ -788,9 +805,8 @@ impl State {
                     );
                     return attempted;
                 }
-                attempted = true;
                 let (added, invalidate_upnp_cache) = match self.gateway_for(local_v4).await {
-                    Some(gw) => {
+                    Ok(gw) => {
                         report_local(interfaces, local_ip, true);
                         if !upnp::supports_hostname(gw) {
                             crate::dev_log!(
@@ -799,6 +815,7 @@ impl State {
                             );
                             (false, false)
                         } else {
+                            attempted = true;
                             match upnp::add_hostname_mapping(
                                 gw,
                                 external_port,
@@ -816,24 +833,23 @@ impl State {
                                     (true, false)
                                 }
                                 Err(e) => {
-                                    crate::dev_log!(
-                                        debug,
-                                        "UPnP HOSTNAME map {local_v4}:{external_port} {hostname} failed: {e}"
-                                    );
+                                    errors.push(format!("UPnP HOSTNAME: {e}"));
                                     (false, true)
                                 }
                             }
                         }
                     }
-                    None => {
+                    Err(e) => {
+                        attempted = true;
+                        errors.push(format!("UPnP HOSTNAME discovery on {local_v4}: {e}"));
                         report_local(interfaces, local_ip, false);
                         (false, true)
                     }
                 };
                 if added {
                     let external_ip = match self.gateway_for(local_v4).await {
-                        Some(gw) => upnp::external_ipv4(gw).await.ok().flatten(),
-                        None => None,
+                        Ok(gw) => upnp::external_ipv4(gw).await.ok().flatten(),
+                        Err(_) => None,
                     };
                     self.active.insert(
                         key.clone(),
@@ -902,21 +918,21 @@ impl State {
                             self.active.insert(key.clone(), Active::Pcp(m));
                             return true;
                         }
-                        crate::dev_log!(
-                            debug,
-                            "gateway {gw} granted {granted}/{range_size} PORT_SET ports for {local_ip}:{external_port}; skipping range"
-                        );
+                        errors.push(format!(
+                            "PCP PORT_SET via {gw}: granted {granted} of {range_size} ports"
+                        ));
                         let _ = m.try_drop().await;
                     }
                     Ok(m) => {
+                        errors.push(format!(
+                            "PCP PORT_SET via {gw}: granted external port {}, requested {external_port}",
+                            m.external_port()
+                        ));
                         let _ = m.try_drop().await;
                     }
                     Err(e) => {
                         report_pcp_failure(interfaces, *gw, &e);
-                        crate::dev_log!(
-                            debug,
-                            "PCP PORT_SET map {local_ip}:{external_port} via {gw} failed: {e}"
-                        )
+                        errors.push(format!("PCP PORT_SET via {gw}: {e}"));
                     }
                 }
             }
@@ -964,16 +980,16 @@ impl State {
                     self.active.insert(key.clone(), Active::Pcp(m));
                     return true;
                 }
-                // A different external port is useless for a fixed public port.
                 Ok(m) => {
+                    errors.push(format!(
+                        "PCP/NAT-PMP via {gw}: granted external port {}, requested {external_port}",
+                        m.external_port()
+                    ));
                     let _ = m.try_drop().await;
                 }
                 Err(e) => {
                     report_crab_nat_failure(interfaces, *gw, &e);
-                    crate::dev_log!(
-                        debug,
-                        "PCP/NAT-PMP {protocol:?} map {local_ip}:{external_port} via {gw} failed: {e}"
-                    )
+                    errors.push(format!("PCP/NAT-PMP via {gw}: {e}"));
                 }
             }
         }
@@ -990,7 +1006,7 @@ impl State {
             }
             attempted = true;
             let added = match self.gateway_for(local_v4).await {
-                Some(gw) => {
+                Ok(gw) => {
                     // Discovery alone proves the IGD, whatever the SOAP call says.
                     report_local(interfaces, local_ip, true);
                     match upnp::add_port(
@@ -1010,15 +1026,13 @@ impl State {
                             true
                         }
                         Err(e) => {
-                            crate::dev_log!(
-                                debug,
-                                "UPnP {protocol:?} map {local_v4}:{external_port} failed: {e}"
-                            );
+                            errors.push(format!("UPnP: {e}"));
                             false
                         }
                     }
                 }
-                None => {
+                Err(e) => {
+                    errors.push(format!("UPnP discovery on {local_v4}: {e}"));
                     report_local(interfaces, local_ip, false);
                     false
                 }
@@ -1042,7 +1056,7 @@ impl State {
         attempted
     }
 
-    async fn gateway_for(&mut self, local_ip: Ipv4Addr) -> Option<&Gateway<Tokio>> {
+    async fn gateway_for(&mut self, local_ip: Ipv4Addr) -> Result<&Gateway<Tokio>, Error> {
         let fresh = self
             .upnp_cache
             .get(&local_ip)
@@ -1055,11 +1069,15 @@ impl State {
                 Err(e) => {
                     crate::dev_log!(debug, "no UPnP gateway on {local_ip}: {e}");
                     self.upnp_cache.remove(&local_ip);
-                    return None;
+                    return Err(e);
                 }
             }
         }
-        self.upnp_cache.get(&local_ip).map(|(g, _)| g)
+        Ok(&self
+            .upnp_cache
+            .get(&local_ip)
+            .expect("discovered gateway")
+            .0)
     }
 }
 

@@ -1,0 +1,1 @@
+- El tráfico por cable entre Internet y los dispositivos alcanza la velocidad gigabit completa. El router reparte el trabajo de cada puerto Ethernet entre los núcleos del procesador y las conexiones establecidas omiten las comprobaciones por paquete del cortafuegos que ya superaron.

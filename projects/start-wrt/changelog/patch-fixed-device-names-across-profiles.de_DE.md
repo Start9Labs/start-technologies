@@ -1,0 +1,1 @@
+- Gerätenamen werden in jedem Netzwerk aufgelöst, dessen Sicherheitsprofil Zugriff erlaubt, statt nur im eigenen Netzwerk. Ein selbst vergebener Name hat Vorrang vor dem vom Gerät gemeldeten Hostnamen. Verwendet ein Gerät in einem anderen Netzwerk denselben Namen, behält das eigene Gerät des Netzwerks seinen Namen.

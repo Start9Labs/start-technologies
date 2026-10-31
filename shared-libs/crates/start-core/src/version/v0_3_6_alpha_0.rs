@@ -306,12 +306,16 @@ impl VersionT for Version {
                         onion_addr.as_str().into(),
                         Value::String(encoded_key.clone().into()),
                     );
-                    tor_migration.push_back(json!({
+                    let mut entry = json!({
                         "hostname": &onion_addr,
                         "packageId": migrated_id_str(package_id),
                         "hostId": host_id,
                         "key": &encoded_key,
-                    }));
+                    });
+                    if let Some(ports) = onion_ports(&prev_package_data, package_id, host_id) {
+                        entry["ports"] = ports;
+                    }
+                    tor_migration.push_back(entry);
                 }
                 value["keyStore"]["onion"] = onion_map;
             }
@@ -795,6 +799,26 @@ async fn previous_ssh_keys(pg: &sqlx::Pool<sqlx::Postgres>) -> Result<SshKeys, E
     Ok(ssh_keys)
 }
 
+/// The onion-to-container port pairs an interface's Tor address served on
+/// 0.3.5. `None` when the package's manifest is absent.
+fn onion_ports(package_data: &Value, package_id: &str, interface_id: &str) -> Option<Value> {
+    let interfaces = package_data[package_id]["installed"]["manifest"]["interfaces"].as_object()?;
+    Some(Value::Array(
+        interfaces
+            .get(interface_id)
+            .and_then(|i| i["tor-config"]["port-mapping"].as_object())
+            .into_iter()
+            .flatten()
+            .filter_map(|(external, internal)| {
+                Some(json!({
+                    "externalPort": external.parse::<u16>().ok()?,
+                    "internalPort": internal.as_str()?.parse::<u16>().ok()?,
+                }))
+            })
+            .collect(),
+    ))
+}
+
 /// Returns deduplicated map of `(package_id, host_id) -> expanded_key`.
 /// Server key uses `("start-os", "admin")` — the StartOS UI's service-model
 /// identity (see `PackageId::start_os` / `HostId::admin`).
@@ -903,4 +927,47 @@ fn onion_address_from_key(expanded_key: &[u8; 64]) -> String {
     raw[34] = 0x03; // version
 
     base32::encode(base32::Alphabet::Rfc4648 { padding: false }, &raw).to_ascii_lowercase()
+}
+
+#[cfg(test)]
+mod test {
+    use imbl_value::json;
+
+    use super::*;
+
+    fn package_data() -> Value {
+        json!({
+            "gitea": { "installed": { "manifest": { "interfaces": {
+                "main": {
+                    "tor-config": { "port-mapping": { "22": "22", "80": "3000" } },
+                    "lan-config": { "443": { "ssl": true, "internal": 3000 } },
+                },
+                "lan-only": { "lan-config": { "443": { "ssl": true, "internal": 8080 } } },
+            } } } },
+        })
+    }
+
+    #[test]
+    fn an_interface_hands_over_the_ports_its_onion_served() {
+        assert_eq!(
+            onion_ports(&package_data(), "gitea", "main"),
+            Some(json!([
+                { "externalPort": 22, "internalPort": 22 },
+                { "externalPort": 80, "internalPort": 3000 },
+            ])),
+        );
+    }
+
+    #[test]
+    fn an_interface_without_tor_hands_over_no_ports() {
+        assert_eq!(
+            onion_ports(&package_data(), "gitea", "lan-only"),
+            Some(json!([])),
+        );
+    }
+
+    #[test]
+    fn an_address_without_a_manifest_hands_over_nothing() {
+        assert_eq!(onion_ports(&package_data(), "start-os", "admin"), None);
+    }
 }

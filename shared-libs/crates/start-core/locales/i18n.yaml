@@ -1189,6 +1189,20 @@ disk.main.running-e2fsck:
   fr_FR: "Exécution de e2fsck avant la conversion de %{name} d'ext4 vers btrfs"
   pl_PL: "Uruchamianie e2fsck przed konwersją %{name} z ext4 na btrfs"
 
+disk.mount.backup.invalid-key-metadata:
+  en_US: "Backup key metadata is missing or incomplete."
+  de_DE: "Die Schlüsselmetadaten der Sicherung fehlen oder sind unvollständig."
+  es_ES: "Faltan los metadatos de la clave de copia de seguridad o están incompletos."
+  fr_FR: "Les métadonnées de la clé de sauvegarde sont manquantes ou incomplètes."
+  pl_PL: "Metadane klucza kopii zapasowej są nieobecne lub niekompletne."
+
+disk.mount.backup.invalid-server-id:
+  en_US: "The backup server identifier must be a single directory name."
+  de_DE: "Die Kennung des Sicherungsservers muss ein einzelner Verzeichnisname sein."
+  es_ES: "El identificador del servidor de copia debe ser un único nombre de directorio."
+  fr_FR: "L'identifiant du serveur de sauvegarde doit être un seul nom de répertoire."
+  pl_PL: "Identyfikator serwera kopii zapasowej musi być pojedynczą nazwą katalogu."
+
 disk.mount.filesystem.cifs.hostname-unresolved:
   en_US: "Failed to resolve hostname %{hostname} using %{resolver}: %{error}"
   de_DE: "Hostname %{hostname} konnte über %{resolver} nicht aufgelöst werden: %{error}"
@@ -1817,7 +1831,111 @@ backup.bulk.reclaiming-space:
   fr_FR: "Récupération de l'espace"
   pl_PL: "Odzyskiwanie miejsca"
 
-# backup/trash.rs
+backup.conversion.already-running:
+  en_US: "A conversion is already running for this backup."
+  de_DE: "Für diese Sicherung läuft bereits eine Konvertierung."
+  es_ES: "Ya hay una conversión en curso para esta copia de seguridad."
+  fr_FR: "Une conversion est déjà en cours pour cette sauvegarde."
+  pl_PL: "Konwersja tej kopii zapasowej już trwa."
+
+backup.conversion.complete-message:
+  en_US: "Your backup on %{label} has been successfully converted to the new format."
+  de_DE: "Ihre Sicherung auf %{label} wurde erfolgreich in das neue Format konvertiert."
+  es_ES: "Su copia de seguridad en %{label} se ha convertido correctamente al nuevo formato."
+  fr_FR: "Votre sauvegarde sur %{label} a été convertie au nouveau format avec succès."
+  pl_PL: "Kopia zapasowa na %{label} została pomyślnie przekonwertowana do nowego formatu."
+
+backup.conversion.complete-title:
+  en_US: "Backup conversion completed"
+  de_DE: "Sicherungskonvertierung abgeschlossen"
+  es_ES: "Conversión de la copia de seguridad completada"
+  fr_FR: "Conversion de la sauvegarde terminée"
+  pl_PL: "Konwersja kopii zapasowej zakończona"
+
+backup.conversion.failed-message:
+  en_US: "Your backup on %{label} failed to convert to the new format: %{error}"
+  de_DE: "Ihre Sicherung auf %{label} konnte nicht in das neue Format konvertiert werden: %{error}"
+  es_ES: "Su copia de seguridad en %{label} no se pudo convertir al nuevo formato: %{error}"
+  fr_FR: "Votre sauvegarde sur %{label} n’a pas pu être convertie au nouveau format : %{error}"
+  pl_PL: "Nie udało się przekonwertować kopii zapasowej na %{label} do nowego formatu: %{error}"
+
+backup.conversion.failed-title:
+  en_US: "Backup conversion failed"
+  de_DE: "Sicherungskonvertierung fehlgeschlagen"
+  es_ES: "Error en la conversión de la copia de seguridad"
+  fr_FR: "Échec de la conversion de la sauvegarde"
+  pl_PL: "Konwersja kopii zapasowej nie powiodła się"
+
+backup.conversion.incomplete-progress:
+  en_US: "The conversion helper stopped without confirming completion."
+  de_DE: "Das Konvertierungsprogramm wurde ohne Abschlussbestätigung beendet."
+  es_ES: "El programa de conversión se detuvo sin confirmar la finalización."
+  fr_FR: "Le programme de conversion s'est arrêté sans confirmer la fin."
+  pl_PL: "Program konwersji zatrzymał się bez potwierdzenia zakończenia."
+
+backup.conversion.inspecting:
+  en_US: "Inspecting backup"
+  de_DE: "Sicherung wird geprüft"
+  es_ES: "Comprobando la copia de seguridad"
+  fr_FR: "Vérification de la sauvegarde"
+  pl_PL: "Sprawdzanie kopii zapasowej"
+
+backup.conversion.interrupted:
+  en_US: "Conversion interrupted by server shutdown. Resume it when the target is available."
+  de_DE: "Die Konvertierung wurde beim Herunterfahren unterbrochen. Setzen Sie sie fort, sobald das Ziel verfügbar ist."
+  es_ES: "El apagado del servidor interrumpió la conversión. Reanúdela cuando el destino esté disponible."
+  fr_FR: "La conversion a été interrompue par l'arrêt du serveur. Reprenez-la lorsque la cible sera disponible."
+  pl_PL: "Wyłączenie serwera przerwało konwersję. Wznów ją, gdy cel będzie dostępny."
+
+backup.conversion.invalid-progress:
+  en_US: "The conversion helper returned invalid progress data."
+  de_DE: "Das Konvertierungsprogramm hat ungültige Fortschrittsdaten zurückgegeben."
+  es_ES: "El programa de conversión devolvió datos de progreso no válidos."
+  fr_FR: "Le programme de conversion a renvoyé des données de progression invalides."
+  pl_PL: "Program konwersji zwrócił nieprawidłowe dane postępu."
+
+backup.conversion.no-store:
+  en_US: "This server backup has no encrypted store to convert."
+  de_DE: "Diese Serversicherung enthält keinen verschlüsselten Speicher zur Konvertierung."
+  es_ES: "Esta copia del servidor no tiene un almacén cifrado que convertir."
+  fr_FR: "Cette sauvegarde du serveur ne contient aucun stockage chiffré à convertir."
+  pl_PL: "Ta kopia serwera nie zawiera zaszyfrowanego magazynu do konwersji."
+
+backup.conversion.objects:
+  en_US: "Converting data objects"
+  de_DE: "Datenobjekte werden konvertiert"
+  es_ES: "Convirtiendo objetos de datos"
+  fr_FR: "Conversion des objets de données"
+  pl_PL: "Konwertowanie obiektów danych"
+
+backup.conversion.progress-limit:
+  en_US: "The conversion helper exceeded the progress message limit."
+  de_DE: "Das Konvertierungsprogramm hat die Größenbegrenzung für Fortschrittsmeldungen überschritten."
+  es_ES: "El programa de conversión superó el límite de los mensajes de progreso."
+  fr_FR: "Le programme de conversion a dépassé la limite des messages de progression."
+  pl_PL: "Program konwersji przekroczył limit rozmiaru komunikatu postępu."
+
+backup.conversion.publishing:
+  en_US: "Finalizing conversion"
+  de_DE: "Konvertierung wird abgeschlossen"
+  es_ES: "Finalizando la conversión"
+  fr_FR: "Finalisation de la conversion"
+  pl_PL: "Finalizowanie konwersji"
+
+backup.conversion.records:
+  en_US: "Converting metadata"
+  de_DE: "Metadaten werden konvertiert"
+  es_ES: "Convirtiendo metadatos"
+  fr_FR: "Conversion des métadonnées"
+  pl_PL: "Konwertowanie metadanych"
+
+backup.conversion.scanning-objects:
+  en_US: "Scanning backup objects"
+  de_DE: "Sicherungsobjekte werden erfasst"
+  es_ES: "Examinando objetos de la copia de seguridad"
+  fr_FR: "Analyse des objets de sauvegarde"
+  pl_PL: "Skanowanie obiektów kopii zapasowej"
+
 backup.trash.reclaim-failed-message:
   en_US: "Deleting the old backup on %{target} did not finish: %{error}. The remaining space will be reclaimed automatically the next time this target is used for a backup."
   de_DE: "Das Löschen der alten Sicherung auf %{target} wurde nicht abgeschlossen: %{error}. Der verbleibende Speicherplatz wird automatisch freigegeben, wenn dieses Ziel das nächste Mal für eine Sicherung verwendet wird."
@@ -1859,6 +1977,13 @@ backup.restore.package-installed:
   es_ES: "No se puede restaurar %{id}: ya está instalado. Desinstálalo primero."
   fr_FR: "Impossible de restaurer %{id} : il est déjà installé. Désinstallez-le d’abord."
   pl_PL: "Nie można przywrócić %{id}: jest już zainstalowany. Najpierw go odinstaluj."
+
+backup.target.partial-mount:
+  en_US: "The base filesystem mounted successfully at %{path}."
+  de_DE: "Das Basisdateisystem wurde erfolgreich unter %{path} eingehängt."
+  es_ES: "El sistema de archivos base se montó correctamente en %{path}."
+  fr_FR: "Le système de fichiers de base a été monté avec succès sur %{path}."
+  pl_PL: "Bazowy system plików został pomyślnie zamontowany w %{path}."
 
 # backup/target/cifs.rs
 backup.target.cifs.target-not-found:
@@ -1991,6 +2116,14 @@ net.ssl.unreachable:
   fr_FR: "inaccessible"
   pl_PL: "nieosiągalny"
 
+# net/static_server.rs
+net.static-server.unrecognized-host:
+  en_US: "Open this server at its .local address or IP address."
+  de_DE: "Öffnen Sie diesen Server über seine .local-Adresse oder IP-Adresse."
+  es_ES: "Abra este servidor mediante su dirección .local o su dirección IP."
+  fr_FR: "Ouvrez ce serveur via son adresse .local ou son adresse IP."
+  pl_PL: "Otwórz ten serwer pod jego adresem .local lub adresem IP."
+
 # net/tor/arti.rs
 net.tor.invalid-ed25519-key:
   en_US: "invalid ed25519 expanded secret key"
@@ -2070,12 +2203,33 @@ net.tor.client-error:
   pl_PL: "Błąd klienta Tor: %{error}"
 
 # net/tunnel.rs
+net.tunnel.selected-default-outbound:
+  en_US: "Cannot remove gateway %{gateway}: it is the default outbound gateway. Clear or change that selection first."
+  de_DE: "Gateway %{gateway} kann nicht entfernt werden: Es ist das Standard-Gateway für ausgehenden Verkehr. Heben Sie diese Auswahl zuerst auf oder ändern Sie sie."
+  es_ES: "No se puede eliminar la puerta de enlace %{gateway}: es la puerta de enlace de salida predeterminada. Primero borre o cambie esa selección."
+  fr_FR: "Impossible de supprimer la passerelle %{gateway} : c'est la passerelle de sortie par défaut. Effacez ou modifiez d'abord cette sélection."
+  pl_PL: "Nie można usunąć bramy %{gateway}: jest domyślną bramą ruchu wychodzącego. Najpierw wyczyść lub zmień ten wybór."
+
+net.tunnel.selected-package-outbound:
+  en_US: "Cannot remove gateway %{gateway}: service %{package} uses it as its outbound gateway. Clear or change that selection first."
+  de_DE: "Gateway %{gateway} kann nicht entfernt werden: Dienst %{package} verwendet es als Gateway für ausgehenden Verkehr. Heben Sie diese Auswahl zuerst auf oder ändern Sie sie."
+  es_ES: "No se puede eliminar la puerta de enlace %{gateway}: el servicio %{package} la usa como puerta de enlace de salida. Primero borre o cambie esa selección."
+  fr_FR: "Impossible de supprimer la passerelle %{gateway} : le service %{package} l'utilise comme passerelle de sortie. Effacez ou modifiez d'abord cette sélection."
+  pl_PL: "Nie można usunąć bramy %{gateway}: usługa %{package} używa jej jako bramy ruchu wychodzącego. Najpierw wyczyść lub zmień ten wybór."
+
 net.tunnel.timeout-waiting-for-add:
   en_US: "timed out waiting for gateway %{gateway} to appear in database"
   de_DE: "Zeitüberschreitung beim Warten auf das Erscheinen von Gateway %{gateway} in der Datenbank"
   es_ES: "se agotó el tiempo esperando que la puerta de enlace %{gateway} aparezca en la base de datos"
   fr_FR: "délai d'attente dépassé pour l'apparition de la passerelle %{gateway} dans la base de données"
   pl_PL: "upłynął limit czasu oczekiwania na pojawienie się bramy %{gateway} w bazie danych"
+
+net.tunnel.timeout-waiting-for-interface:
+  en_US: "gateway %{gateway} was added, but StartOS timed out reading its network interface. Restart the server to finish setting it up"
+  de_DE: "Gateway %{gateway} wurde hinzugefügt, aber StartOS hat beim Lesen seiner Netzwerkschnittstelle eine Zeitüberschreitung erreicht. Starten Sie den Server neu, um die Einrichtung abzuschließen"
+  es_ES: "se añadió la puerta de enlace %{gateway}, pero StartOS agotó el tiempo al leer su interfaz de red. Reinicie el servidor para terminar de configurarla"
+  fr_FR: "la passerelle %{gateway} a été ajoutée, mais StartOS a dépassé le délai en lisant son interface réseau. Redémarrez le serveur pour terminer sa configuration"
+  pl_PL: "brama %{gateway} została dodana, ale StartOS przekroczył limit czasu podczas odczytu jej interfejsu sieciowego. Uruchom ponownie serwer, aby dokończyć jej konfigurację"
 
 net.tunnel.timeout-waiting-for-remove:
   en_US: "timed out waiting for gateway %{gateway} to be removed from database"
@@ -2246,6 +2400,14 @@ net.forward.controller-thread-exited:
   es_ES: "El hilo PortForwardController ha terminado"
   fr_FR: "Le thread PortForwardController s'est terminé"
   pl_PL: "Wątek PortForwardController zakończył się"
+
+# net/port_map/client.rs
+net.port-map.mapping-not-granted:
+  en_US: "no gateway granted port mapping %{mapping}: %{reasons}"
+  de_DE: "kein Gateway hat die Portzuordnung %{mapping} gewährt: %{reasons}"
+  es_ES: "ninguna puerta de enlace concedió la asignación de puerto %{mapping}: %{reasons}"
+  fr_FR: "aucune passerelle n'a accordé la redirection de port %{mapping} : %{reasons}"
+  pl_PL: "żadna brama nie przyznała mapowania portu %{mapping}: %{reasons}"
 
 # net/gateway.rs
 net.gateway.no-devices-returned:
@@ -2610,6 +2772,13 @@ registry.os.version.signer-not-authorized:
   pl_PL: "Sygnatariusz %{signer} nie jest autoryzowany do podpisywania v%{version}"
 
 # registry/os/promote.rs
+registry.os.commit-changed:
+  en_US: "The indexed OS build changed. Restart the release using the intended build."
+  de_DE: "Der indexierte OS-Build hat sich geändert. Starten Sie die Veröffentlichung mit dem gewünschten Build erneut."
+  es_ES: "La compilación indexada del SO cambió. Reinicie la publicación con la compilación deseada."
+  fr_FR: "La compilation du système indexée a changé. Relancez la publication avec la compilation souhaitée."
+  pl_PL: "Indeksowana kompilacja systemu zmieniła się. Uruchom wydanie ponownie z wybraną kompilacją."
+
 registry.os.promote.need-from-or-to:
   en_US: "At least one of --from or --to must be specified"
   de_DE: "Mindestens --from oder --to muss angegeben werden"
@@ -2807,7 +2976,13 @@ sign.gpg-agent.no-signing-key:
   fr_FR: "Aucune clé de signature Ed25519 avec sa partie secrète dans le trousseau GnuPG ne correspond à %{key}"
   pl_PL: "Żaden klucz podpisujący Ed25519 z częścią tajną w bazie kluczy GnuPG nie pasuje do %{key}"
 
-# service/mod.rs
+sign.gpg.invalid-public-key:
+  en_US: "Use an Ed25519 public signing key in PEM or GPG format"
+  de_DE: "Verwenden Sie einen öffentlichen Ed25519-Signaturschlüssel im PEM- oder GPG-Format"
+  es_ES: "Use una clave pública de firma Ed25519 en formato PEM o GPG"
+  fr_FR: "Utilisez une clé publique de signature Ed25519 au format PEM ou GPG"
+  pl_PL: "Użyj publicznego klucza podpisującego Ed25519 w formacie PEM lub GPG"
+
 service.mod.service-actor-held-after-shutdown:
   en_US: "ServiceActor held somewhere after actor shutdown"
   de_DE: "ServiceActor wird nach dem Herunterfahren des Actors noch irgendwo gehalten"
@@ -3397,6 +3572,54 @@ notifications.invalid-level:
   es_ES: "Nivel de notificación inválido: %{level}"
   fr_FR: "Niveau de notification invalide : %{level}"
   pl_PL: "Nieprawidłowy poziom powiadomienia: %{level}"
+notifications.push.crypto-failed:
+  en_US: "Unable to prepare encrypted push notification"
+  de_DE: "Verschlüsselte Push-Benachrichtigung konnte nicht vorbereitet werden"
+  es_ES: "No se pudo preparar la notificación push cifrada"
+  fr_FR: "Impossible de préparer la notification push chiffrée"
+  pl_PL: "Nie można przygotować zaszyfrowanego powiadomienia push"
+notifications.push.delivery-failed:
+  en_US: "Push notification delivery failed"
+  de_DE: "Push-Benachrichtigung konnte nicht zugestellt werden"
+  es_ES: "No se pudo entregar la notificación push"
+  fr_FR: "Échec de la remise de la notification push"
+  pl_PL: "Nie udało się dostarczyć powiadomienia push"
+notifications.push.invalid-endpoint:
+  en_US: "Push endpoint must be an HTTP or HTTPS URL"
+  de_DE: "Push-Endpunkt muss eine HTTP- oder HTTPS-URL sein"
+  es_ES: "El destino push debe ser una URL HTTP o HTTPS"
+  fr_FR: "Le point de terminaison push doit être une URL HTTP ou HTTPS"
+  pl_PL: "Punkt końcowy push musi być adresem URL HTTP lub HTTPS"
+notifications.push.invalid-keys:
+  en_US: "Invalid Web Push encryption keys"
+  de_DE: "Ungültige Web-Push-Verschlüsselungsschlüssel"
+  es_ES: "Claves de cifrado Web Push no válidas"
+  fr_FR: "Clés de chiffrement Web Push invalides"
+  pl_PL: "Nieprawidłowe klucze szyfrowania Web Push"
+notifications.push.not-found:
+  en_US: "Push subscription not found"
+  de_DE: "Push-Abonnement nicht gefunden"
+  es_ES: "No se encontró la suscripción push"
+  fr_FR: "Abonnement push introuvable"
+  pl_PL: "Nie znaleziono subskrypcji push"
+notifications.push.queue-failed:
+  en_US: "Unable to process push notification queue"
+  de_DE: "Warteschlange der Push-Benachrichtigungen konnte nicht verarbeitet werden"
+  es_ES: "No se pudo procesar la cola de notificaciones push"
+  fr_FR: "Impossible de traiter la file des notifications push"
+  pl_PL: "Nie można przetworzyć kolejki powiadomień push"
+notifications.push.test-body:
+  en_US: "Push notifications are working on this browser."
+  de_DE: "Push-Benachrichtigungen funktionieren in diesem Browser."
+  es_ES: "Las notificaciones push funcionan en este navegador."
+  fr_FR: "Les notifications push fonctionnent dans ce navigateur."
+  pl_PL: "Powiadomienia push działają w tej przeglądarce."
+notifications.push.test-title:
+  en_US: "StartOS test notification"
+  de_DE: "StartOS-Testbenachrichtigung"
+  es_ES: "Notificación de prueba de StartOS"
+  fr_FR: "Notification de test StartOS"
+  pl_PL: "Powiadomienie testowe StartOS"
 
 # update/mod.rs
 update.already-updated-restart-required:
@@ -3514,6 +3737,13 @@ auth.malformed-etc-shadow:
   fr_FR: "/etc/shadow mal formé"
   pl_PL: "zniekształcony /etc/shadow"
 
+auth.tokens-unsupported:
+  en_US: "Bearer tokens are not supported here"
+  de_DE: "Bearer-Token werden hier nicht unterstützt"
+  es_ES: "Los tokens de portador no se admiten aquí"
+  fr_FR: "Les jetons d'accès ne sont pas pris en charge ici"
+  pl_PL: "Tokeny okaziciela nie są tutaj obsługiwane"
+
 auth.couldnt-decode-password:
   en_US: "Couldn't decode password"
   de_DE: "Passwort konnte nicht dekodiert werden"
@@ -3555,6 +3785,34 @@ auth.local-logout-unnecessary:
   es_ES: "No es necesario cerrar sesión al usar la cookie de autenticación local."
   fr_FR: "La déconnexion est inutile lorsque le cookie d'authentification local est utilisé."
   pl_PL: "Wylogowanie nie jest potrzebne podczas korzystania z lokalnego pliku cookie uwierzytelniania."
+
+tunnel.api.endpoint-required:
+  en_US: 'WAN IP %{wan_ip} is not public; supply --endpoint <HOST> with the address the device uses to reach this tunnel server'
+  de_DE: 'Die WAN-IP %{wan_ip} ist nicht öffentlich; geben Sie mit --endpoint <HOST> die Adresse an, über die das Gerät diesen Tunnelserver erreicht'
+  es_ES: 'La IP WAN %{wan_ip} no es pública; indique con --endpoint <HOST> la dirección que usa el dispositivo para llegar a este servidor de túnel'
+  fr_FR: 'L’IP WAN %{wan_ip} n’est pas publique ; indiquez avec --endpoint <HOST> l’adresse utilisée par l’appareil pour joindre ce serveur de tunnel'
+  pl_PL: 'Adres IP WAN %{wan_ip} nie jest publiczny; podaj za pomocą --endpoint <HOST> adres, którego urządzenie używa do połączenia z tym serwerem tunelu'
+
+tunnel.api.invalid-endpoint:
+  en_US: 'Enter an IPv4 address, IPv6 address, or DNS name without a scheme, port, or path'
+  de_DE: 'Geben Sie eine IPv4-Adresse, IPv6-Adresse oder einen DNS-Namen ohne Schema, Port oder Pfad ein'
+  es_ES: 'Introduce una dirección IPv4, IPv6 o un nombre DNS sin esquema, puerto ni ruta'
+  fr_FR: 'Saisissez une adresse IPv4, IPv6 ou un nom DNS sans schéma, port ni chemin'
+  pl_PL: 'Wprowadź adres IPv4, IPv6 lub nazwę DNS bez schematu, portu ani ścieżki'
+
+util.crypto.invalid-backup-key:
+  en_US: "The wrapped backup key is invalid or could not be authenticated."
+  de_DE: "Der verschlüsselte Sicherungsschlüssel ist ungültig oder konnte nicht authentifiziert werden."
+  es_ES: "La clave de copia de seguridad cifrada no es válida o no se pudo autenticar."
+  fr_FR: "La clé de sauvegarde chiffrée est invalide ou n'a pas pu être authentifiée."
+  pl_PL: "Zaszyfrowany klucz kopii zapasowej jest nieprawidłowy lub nie można go uwierzytelnić."
+
+util.env.invalid-json-env:
+  en_US: "JSON_ENV_* chunks must be contiguous from 0 and form a JSON object with string or null values"
+  de_DE: "JSON_ENV_*-Teile müssen lückenlos bei 0 beginnen und ein JSON-Objekt mit Zeichenfolgen oder null-Werten bilden"
+  es_ES: "Los fragmentos JSON_ENV_* deben ser consecutivos desde 0 y formar un objeto JSON con valores de cadena o null"
+  fr_FR: "Les fragments JSON_ENV_* doivent être consécutifs à partir de 0 et former un objet JSON contenant des chaînes ou des valeurs null"
+  pl_PL: "Fragmenty JSON_ENV_* muszą być ponumerowane kolejno od 0 i tworzyć obiekt JSON z wartościami tekstowymi lub null"
 
 # util/tui.rs
 util.tui.terminal-must-be-interactive:
@@ -3913,6 +4171,13 @@ help.arg.ed25519:
   fr_FR: "Utiliser Ed25519 au lieu de NIST P-256"
   pl_PL: "Użyj Ed25519 zamiast NIST P-256"
 
+help.arg.endpoint:
+  en_US: 'IPv4, IPv6, or DNS endpoint host for this WireGuard config; required when the selected WAN IP is not public'
+  de_DE: 'IPv4-, IPv6- oder DNS-Endpunkt für diese WireGuard-Konfiguration; erforderlich, wenn die gewählte WAN-IP nicht öffentlich ist'
+  es_ES: 'Host IPv4, IPv6 o DNS del endpoint para esta configuración de WireGuard; obligatorio si la IP WAN seleccionada no es pública'
+  fr_FR: 'Hôte IPv4, IPv6 ou DNS du point de terminaison pour cette configuration WireGuard ; requis si l’IP WAN sélectionnée n’est pas publique'
+  pl_PL: 'Host IPv4, IPv6 lub DNS punktu końcowego dla tej konfiguracji WireGuard; wymagany, gdy wybrany adres IP WAN nie jest publiczny'
+
 help.arg.env-file-path:
   en_US: "Path to environment file"
   de_DE: "Pfad zur Umgebungsdatei"
@@ -3954,6 +4219,13 @@ help.arg.except-callbacks:
   es_ES: "IDs de callbacks a excluir"
   fr_FR: "IDs de callbacks à exclure"
   pl_PL: "Identyfikatory callbacków do wykluczenia"
+
+help.arg.expected-os-git-hash:
+  en_US: "Reject the operation if the indexed OS commit has changed"
+  de_DE: "Den Vorgang ablehnen, wenn sich der indexierte OS-Commit geändert hat"
+  es_ES: "Rechazar la operación si ha cambiado el commit indexado del SO"
+  fr_FR: "Refuser l’opération si le commit du système indexé a changé"
+  pl_PL: "Odrzuć operację, jeśli zmienił się indeksowany commit systemu"
 
 help.arg.except-tasks:
   en_US: "Task IDs to exclude"
@@ -4270,6 +4542,20 @@ help.arg.only-tasks:
   fr_FR: "Ne supprimer que ces IDs de tâche"
   pl_PL: "Wyczyść tylko te identyfikatory zadań"
 
+help.arg.os-git-hash:
+  en_US: "Git commit that built the OS release"
+  de_DE: "Git-Commit, aus dem die OS-Version erstellt wurde"
+  es_ES: "Commit de Git que generó la versión del SO"
+  fr_FR: "Commit Git ayant produit la version du système"
+  pl_PL: "Commit Git użyty do zbudowania wydania systemu"
+
+help.arg.os-security:
+  en_US: "Mark the OS release as a security update"
+  de_DE: "Die OS-Version als Sicherheitsupdate markieren"
+  es_ES: "Marcar la versión del SO como actualización de seguridad"
+  fr_FR: "Marquer la version du système comme mise à jour de sécurité"
+  pl_PL: "Oznacz wydanie systemu jako aktualizację bezpieczeństwa"
+
 help.arg.os-version:
   en_US: "StartOS version number"
   de_DE: "StartOS-Versionsnummer"
@@ -4361,6 +4647,13 @@ help.arg.registry-name:
   es_ES: "Nombre del registro"
   fr_FR: "Nom du registre"
   pl_PL: "Nazwa rejestru"
+
+help.arg.registry-security-notifications:
+  en_US: "Enable OS security-update announcements from this registry"
+  de_DE: "Ankündigungen von OS-Sicherheitsupdates dieser Registry aktivieren"
+  es_ES: "Activar los avisos de actualizaciones de seguridad del SO de este registro"
+  fr_FR: "Activer les annonces de mises à jour de sécurité du système provenant de ce registre"
+  pl_PL: "Włącz powiadomienia o aktualizacjach bezpieczeństwa systemu z tego rejestru"
 
 help.arg.registry-startwrt:
   en_US: "Serve StartWRT clients"
@@ -4565,12 +4858,26 @@ help.arg.to-registry-url:
   fr_FR: "URL du registre de destination pour la promotion"
   pl_PL: "URL rejestru docelowego do promowania"
 
+help.arg.token-name:
+  en_US: "Name shown for the token in the session list"
+  de_DE: "Name des Tokens in der Sitzungsliste"
+  es_ES: "Nombre que se muestra para el token en la lista de sesiones"
+  fr_FR: "Nom affiché pour le jeton dans la liste des sessions"
+  pl_PL: "Nazwa tokenu wyświetlana na liście sesji"
+
 help.arg.tor-proxy-url:
   en_US: "Tor SOCKS proxy URL"
   de_DE: "Tor-SOCKS-Proxy-URL"
   es_ES: "URL del proxy SOCKS de Tor"
   fr_FR: "URL du proxy SOCKS Tor"
   pl_PL: "URL proxy SOCKS Tor"
+
+help.arg.trust:
+  en_US: "Install without requiring a trusted signer; signature and integrity checks remain mandatory"
+  de_DE: "Ohne vertrauenswürdigen Unterzeichner installieren; Signatur- und Integritätsprüfungen bleiben erforderlich"
+  es_ES: "Instalar sin exigir un firmante de confianza; las comprobaciones de firma e integridad siguen siendo obligatorias"
+  fr_FR: "Installer sans exiger un signataire de confiance ; les contrôles de signature et d'intégrité restent obligatoires"
+  pl_PL: "Instaluj bez wymogu zaufanego sygnatariusza; kontrole podpisu i integralności pozostają obowiązkowe"
 
 help.arg.tunnel-address:
   en_US: "Tunnel server address"
@@ -5056,12 +5363,19 @@ help.arg.s9pk-file-paths:
   fr_FR: "Chemins vers les fichiers de paquet s9pk"
   pl_PL: "Ścieżki do plików pakietów s9pk"
 
-help.arg.session-ids:
-  en_US: "Session identifiers"
-  de_DE: "Sitzungskennungen"
-  es_ES: "Identificadores de sesión"
-  fr_FR: "Identifiants de session"
-  pl_PL: "Identyfikatory sesji"
+help.arg.session-pubkeys:
+  en_US: "Enrolled key of a session to terminate"
+  de_DE: "Registrierter Schlüssel einer zu beendenden Sitzung"
+  es_ES: "Clave registrada de una sesión a terminar"
+  fr_FR: "Clé enregistrée d'une session à terminer"
+  pl_PL: "Zarejestrowany klucz sesji do zakończenia"
+
+help.arg.session-tokens:
+  en_US: "ID of a bearer token to revoke"
+  de_DE: "ID eines zu widerrufenden Bearer-Tokens"
+  es_ES: "ID de un token de portador a revocar"
+  fr_FR: "ID d'un jeton d'accès à révoquer"
+  pl_PL: "Identyfikator tokenu okaziciela do unieważnienia"
 
 help.arg.signer-id:
   en_US: "Signer identifier"
@@ -5444,11 +5758,11 @@ about.check-port-v6-reachability:
   pl_PL: "Sprawdź, czy port jest osiągalny przez IPv6 (zapora GUA)"
 
 about.check-update-startos:
-  en_US: "Check a given registry for StartOS updates and update if available"
-  de_DE: "Ein bestimmtes Registry auf StartOS-Updates prüfen und bei Verfügbarkeit aktualisieren"
-  es_ES: "Verificar un registro dado para actualizaciones de StartOS y actualizar si está disponible"
-  fr_FR: "Vérifier un registre donné pour les mises à jour StartOS et mettre à jour si disponible"
-  pl_PL: "Sprawdź dany rejestr pod kątem aktualizacji StartOS i zaktualizuj, jeśli dostępne"
+  en_US: "Check for StartOS updates and update if available"
+  de_DE: "Nach StartOS-Updates suchen und bei Verfügbarkeit aktualisieren"
+  es_ES: "Buscar actualizaciones de StartOS y actualizar si están disponibles"
+  fr_FR: "Rechercher les mises à jour StartOS et mettre à jour si disponible"
+  pl_PL: "Sprawdź dostępność aktualizacji StartOS i zaktualizuj, jeśli są dostępne"
 
 about.clear-service-task:
   en_US: "Clear a service task"
@@ -5533,6 +5847,13 @@ about.commands-add-sign-remove-get-assets:
   es_ES: "Comandos para agregar, firmar, eliminar u obtener activos del registro"
   fr_FR: "Commandes pour ajouter, signer, supprimer ou obtenir des actifs du registre"
   pl_PL: "Polecenia dodania, podpisania, usunięcia lub pobrania zasobów rejestru"
+
+about.commands-auth-tokens:
+  en_US: "Create bearer tokens for API clients"
+  de_DE: "Bearer-Tokens für API-Clients erstellen"
+  es_ES: "Crear tokens de portador para clientes de la API"
+  fr_FR: "Créer des jetons porteurs pour les clients de l'API"
+  pl_PL: "Twórz tokeny okaziciela dla klientów API"
 
 about.commands-authentication:
   en_US: "Commands related to Authentication i.e. login, logout"
@@ -5855,6 +6176,13 @@ about.convert-s9pk-v1-to-v2:
   es_ES: "Convertir un s9pk de v1 a v2"
   fr_FR: "Convertir un s9pk de v1 à v2"
   pl_PL: "Konwertuj s9pk z v1 do v2"
+
+about.create-auth-token:
+  en_US: "Create a bearer token that authenticates as a new session"
+  de_DE: "Bearer-Token erstellen, das sich als neue Sitzung authentifiziert"
+  es_ES: "Crear un token de portador que se autentica como una nueva sesión"
+  fr_FR: "Créer un jeton porteur qui s'authentifie comme une nouvelle session"
+  pl_PL: "Utwórz token okaziciela uwierzytelniający jako nowa sesja"
 
 about.create-backup-all-packages:
   en_US: "Create a backup for all packages"
@@ -7412,6 +7740,27 @@ tunnel.web.ui-port-reserved:
   fr_FR: "Cette plage inclut le port de l'interface d'administration activée ; utilisez des noms SNI pour le partager, ou désactivez d'abord l'interface ou changez son adresse."
   pl_PL: "Ten zakres obejmuje port włączonego panelu administracyjnego; użyj nazw SNI, aby go współdzielić, albo najpierw wyłącz panel lub zmień jego adres."
 
+update.security.available-message:
+  en_US: "StartOS %{version} includes security updates and is available from %{registry}."
+  de_DE: "StartOS %{version} enthält Sicherheitsupdates und ist unter %{registry} verfügbar."
+  es_ES: "StartOS %{version} incluye actualizaciones de seguridad y está disponible en %{registry}."
+  fr_FR: "StartOS %{version} contient des mises à jour de sécurité et est disponible sur %{registry}."
+  pl_PL: "StartOS %{version} zawiera aktualizacje bezpieczeństwa i jest dostępny w %{registry}."
+
+update.security.available-title:
+  en_US: "StartOS security update available"
+  de_DE: "StartOS-Sicherheitsupdate verfügbar"
+  es_ES: "Actualización de seguridad de StartOS disponible"
+  fr_FR: "Mise à jour de sécurité de StartOS disponible"
+  pl_PL: "Dostępna aktualizacja bezpieczeństwa StartOS"
+
+update.security.selected-registry:
+  en_US: "your selected OS registry"
+  de_DE: "Ihrer ausgewählten OS-Registry"
+  es_ES: "el registro del SO seleccionado"
+  fr_FR: "le registre du système sélectionné"
+  pl_PL: "wybranym rejestrze systemu"
+
 update.signers.already-exists:
   en_US: "This public key is already a trusted OS update signer"
   de_DE: "Dieser öffentliche Schlüssel ist bereits als Update-Unterzeichner vertrauenswürdig"
@@ -7425,6 +7774,34 @@ update.signers.not-found:
   es_ES: "No se encontró el firmante de confianza de actualizaciones del sistema"
   fr_FR: "Signataire de confiance des mises à jour du système introuvable"
   pl_PL: "Nie znaleziono zaufanego sygnatariusza aktualizacji systemu"
+
+trusted-keys.invalid:
+  en_US: "Enter a name and at least one Ed25519 public key"
+  de_DE: "Geben Sie einen Namen und mindestens einen öffentlichen Ed25519-Schlüssel ein"
+  es_ES: "Introduzca un nombre y al menos una clave pública Ed25519"
+  fr_FR: "Saisissez un nom et au moins une clé publique Ed25519"
+  pl_PL: "Podaj nazwę i co najmniej jeden klucz publiczny Ed25519"
+
+trusted-keys.not-found:
+  en_US: "Trusted keyring not found"
+  de_DE: "Vertrauenswürdiger Schlüsselbund nicht gefunden"
+  es_ES: "No se encontró el llavero de confianza"
+  fr_FR: "Trousseau de confiance introuvable"
+  pl_PL: "Nie znaleziono zaufanego pęku kluczy"
+
+trusted-keys.protected:
+  en_US: "Built-in keyrings cannot be deleted; disable their trust instead"
+  de_DE: "Integrierte Schlüsselbunde können nicht gelöscht werden; deaktivieren Sie stattdessen deren Vertrauen"
+  es_ES: "Los llaveros integrados no se pueden eliminar; desactive su confianza"
+  fr_FR: "Les trousseaux intégrés ne peuvent pas être supprimés ; désactivez plutôt leur confiance"
+  pl_PL: "Nie można usunąć wbudowanych pęków kluczy; zamiast tego wyłącz zaufanie do nich"
+
+version.http-auth-downgrade-requires-tls:
+  en_US: "Cannot downgrade: an HTTP authentication policy has no TLS wrapper. Add TLS to this binding before downgrading."
+  de_DE: "Downgrade nicht möglich: Eine HTTP-Authentifizierungsrichtlinie hat keine TLS-Ummantelung. Aktivieren Sie vor dem Downgrade TLS für diese Bindung."
+  es_ES: "No se puede volver a una versión anterior: una política de autenticación HTTP no tiene una envoltura TLS. Añada TLS a este enlace antes de continuar."
+  fr_FR: "Rétrogradation impossible : une politique d'authentification HTTP ne dispose pas d'enveloppe TLS. Ajoutez TLS à cette liaison avant de rétrograder."
+  pl_PL: "Nie można obniżyć wersji: zasada uwierzytelniania HTTP nie ma osłony TLS. Dodaj TLS do tego powiązania przed obniżeniem wersji."
 
 # volume.rs
 volume.restore-conflict:

@@ -1,1 +1,0 @@
-- Przechowuje klucze z typami strukturalnymi bez otoczki PEM, zachowując podczas aktualizacji istniejące logowania i zaufane klucze podpisujące aktualizacje.

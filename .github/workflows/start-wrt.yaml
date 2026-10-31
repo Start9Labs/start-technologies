@@ -44,7 +44,6 @@ on:
       - 'tsconfig.lib.json'
       - 'build/**'
       - '.github/workflows/start-wrt.yaml'
-      - '.github/workflows/compile-start-cli.yaml'
       - '.github/actions/setup-build/**'
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-wrt/docs/**) shouldn't trigger a build.
@@ -74,7 +73,6 @@ on:
       - 'tsconfig.lib.json'
       - 'build/**'
       - '.github/workflows/start-wrt.yaml'
-      - '.github/workflows/compile-start-cli.yaml'
       - '.github/actions/setup-build/**'
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-wrt/docs/**) shouldn't trigger a build.
@@ -207,8 +205,8 @@ jobs:
   # registry named by the STARTWRT_ALPHA_REGISTRY repo variable. With that
   # variable unset there is no alpha channel, so master pushes skip both this and
   # the `image` job it needs.
-  publisher-cli:
-    name: Build publisher CLI
+  deploy:
+    name: Deploy
     needs: [image]
     if: >-
       ${{
@@ -218,14 +216,6 @@ jobs:
           || (github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.STARTWRT_ALPHA_REGISTRY != '')
         )
       }}
-    uses: ./.github/workflows/compile-start-cli.yaml
-    with:
-      triple: x86_64-unknown-linux-musl
-
-  deploy:
-    name: Deploy
-    needs: [image, publisher-cli]
-    if: ${{ !cancelled() && needs.image.result == 'success' && needs.publisher-cli.result == 'success' }}
     runs-on: ubuntu-latest
     # One lock for every deploy, not one per channel: the workflow-level group is
     # scoped by event, and the channels are not independent anyway — both write
@@ -282,16 +272,11 @@ jobs:
           name: startwrt-openwrt-image
           path: artifacts/
 
-      - name: Download publisher CLI
-        uses: actions/download-artifact@v8
-        with:
-          name: start-cli_x86_64-unknown-linux-musl
-          path: ${{ runner.temp }}/publisher-cli
-
       - name: Install start-cli
-        run: |
-          sudo install -m 755 "$RUNNER_TEMP/publisher-cli/start-cli" /usr/local/bin/start-cli
-          ./scripts/manage-release.sh check-registry-notes-cli start-wrt
+        uses: Start9Labs/start-technologies/.github/actions/install-start-cli@master
+
+      - name: Check start-cli registry notes support
+        run: ./scripts/manage-release.sh check-registry-notes-cli start-wrt
 
       - name: Set up developer key
         run: |
