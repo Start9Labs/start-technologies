@@ -495,7 +495,7 @@ mod tests {
         assert_eq!(migrated["public"]["serverInfo"]["trustedKeys"], saved_trust);
         assert_eq!(
             migrated["public"]["serverInfo"]["postInitMigrationTodos"],
-            json!({ "0.4.1": null, "0.4.1.1": null })
+            json!({ "0.4.1": null, "0.4.1.1": null, "0.4.2": null })
         );
         Current::default().pre_init(&db).await.unwrap();
         assert_eq!(db.dump(&ROOT).await.value, migrated);
@@ -535,7 +535,7 @@ mod tests {
             assert_eq!(migrated["private"]["sessions"], sessions);
             assert_eq!(
                 migrated["public"]["serverInfo"]["postInitMigrationTodos"],
-                json!({ "0.4.1": null, "0.4.1.1": null })
+                json!({ "0.4.1": null, "0.4.1.1": null, "0.4.2": null })
             );
             Current::default().pre_init(&db).await.unwrap();
             assert_eq!(db.dump(&ROOT).await.value, migrated);

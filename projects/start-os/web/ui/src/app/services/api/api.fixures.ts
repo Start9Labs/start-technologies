@@ -31,6 +31,7 @@ export namespace Mock {
     restarting: false,
     shuttingDown: false,
     restart: null,
+    deferredPowerAction: null,
   }
 
   export const RegistryOSUpdate: T.OsVersionInfoMap = {

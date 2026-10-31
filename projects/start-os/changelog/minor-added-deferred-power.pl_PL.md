@@ -1,0 +1,1 @@
+- **Ponowne uruchomienie lub wyłączenie podczas kopii zapasowej pozwala poczekać na jej zakończenie.** Okno pozostaje otwarte do wyboru lub zamknięcia. Pasek pokazuje oczekującą operację i pozwala ją anulować.

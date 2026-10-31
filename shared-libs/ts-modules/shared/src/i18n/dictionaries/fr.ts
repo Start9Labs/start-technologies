@@ -901,4 +901,9 @@ export default {
   1018: 'Progression globale',
   1019: 'Mettre à jour le format de sauvegarde ?',
   1020: 'La sauvegarde de ce serveur utilise un ancien format. Mettez-le à jour pour une meilleure détection des altérations et des instantanés en lecture seule, ou ignorez cette étape pour créer une sauvegarde au format existant. La conversion peut prendre beaucoup de temps et cette sauvegarde reste indisponible jusqu’à la fin.',
+  1023: 'Une sauvegarde est en cours. L’interrompre maintenant peut corrompre la sauvegarde du service en cours d’écriture.',
+  1024: 'Attendre la fin de la sauvegarde',
+  1025: 'Éteindre maintenant',
+  1026: 'Une sauvegarde est en cours. Votre serveur redémarrera une fois celle-ci terminée.',
+  1027: 'Une sauvegarde est en cours. Votre serveur s’éteindra une fois celle-ci terminée.',
 } satisfies i18n

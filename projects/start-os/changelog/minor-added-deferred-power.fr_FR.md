@@ -1,0 +1,1 @@
+- **Un redémarrage ou un arrêt pendant une sauvegarde permet d’attendre sa fin.** Le dialogue reste ouvert jusqu’au choix ou à sa fermeture. Une barre affiche l’action en attente et permet de l’annuler.

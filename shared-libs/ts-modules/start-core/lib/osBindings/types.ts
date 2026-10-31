@@ -286,6 +286,8 @@ export type Percentage = z.output<typeof schemas.Percentage>
 export type PercentageInput = z.input<typeof schemas.Percentage>
 export type PluginId = z.output<typeof schemas.PluginId>
 export type PluginIdInput = z.input<typeof schemas.PluginId>
+export type PowerAction = z.output<typeof schemas.PowerAction>
+export type PowerActionInput = z.input<typeof schemas.PowerAction>
 export type PreDownloadAlertWhen = z.output<typeof schemas.PreDownloadAlertWhen>
 export type PreDownloadAlertWhenInput = z.input<
   typeof schemas.PreDownloadAlertWhen

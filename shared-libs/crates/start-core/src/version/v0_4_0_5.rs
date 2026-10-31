@@ -162,7 +162,7 @@ mod tests {
     use crate::version::Current;
 
     #[tokio::test]
-    async fn prior_revisions_upgrade_to_keyrings_once() {
+    async fn upgrades_preserve_keys_and_only_requeue_stale_maintenance_revisions() {
         use patch_db::json_ptr::ROOT;
 
         use crate::trusted_keys::{TrustedKeys, os_signers};
@@ -173,11 +173,18 @@ mod tests {
         let account =
             crate::account::AccountInfo::new("password", std::time::SystemTime::now(), None)
                 .unwrap();
-        for (revision, key_id) in [
-            (0, key.to_string()),
-            (1, key.to_string()),
-            (1, canonical.to_string()),
-            (2, canonical.to_string()),
+        let catch_up_todos =
+            json!({ "0.4.0.5": null, "0.4.1": null, "0.4.1.1": null, "0.4.2": null });
+        for (revision, key_id, expected_todos) in [
+            (0, key.to_string(), catch_up_todos.clone()),
+            (1, key.to_string(), catch_up_todos.clone()),
+            (1, canonical.to_string(), catch_up_todos.clone()),
+            (2, canonical.to_string(), catch_up_todos),
+            (
+                3,
+                canonical.to_string(),
+                json!({ "0.4.1": null, "0.4.1.1": null, "0.4.2": null }),
+            ),
         ] {
             let mut fixture =
                 to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
@@ -186,10 +193,12 @@ mod tests {
                 .as_object_mut()
                 .unwrap()
                 .remove("trustedKeys");
-            fixture["private"]
-                .as_object_mut()
-                .unwrap()
-                .remove("osSecurityNotifications");
+            if revision < 3 {
+                fixture["private"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("osSecurityNotifications");
+            }
             fixture["public"]["serverInfo"]["latestMigrationRevision"] = json!(revision);
             fixture["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
             fixture["public"]["serverInfo"]["trustedOsUpdateSigners"] =
@@ -212,7 +221,15 @@ mod tests {
             assert_eq!(migrated["private"]["osSecurityNotifications"], json!({}));
             assert_eq!(
                 migrated["public"]["serverInfo"]["postInitMigrationTodos"],
-                json!({ "0.4.0.5": null, "0.4.1": null, "0.4.1.1": null })
+                expected_todos
+            );
+            assert_eq!(migrated["public"]["serverInfo"]["version"], json!("0.4.2"));
+            assert_eq!(migrated["private"]["sessions"]["tokens"], json!({}));
+            assert!(
+                !migrated["private"]
+                    .as_object()
+                    .unwrap()
+                    .contains_key("sessionPubkeys")
             );
             assert!(
                 migrated["private"]["sessions"]["pubkeys"]
@@ -232,6 +249,9 @@ mod tests {
             assert_eq!(db.dump(&ROOT).await.value, migrated);
             let mut completed = migrated;
             completed["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
+            let (_, token_id) = crate::middleware::auth::bearer::new_token();
+            completed["private"]["sessions"]["tokens"] =
+                json!({ token_id.to_string(): Session::default() });
             db.put(&ROOT, &completed).await.unwrap();
             Current::default().pre_init(&db).await.unwrap();
             assert_eq!(db.dump(&ROOT).await.value, completed);

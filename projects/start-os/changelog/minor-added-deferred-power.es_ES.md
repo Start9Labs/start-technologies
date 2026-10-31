@@ -1,0 +1,1 @@
+- **Reiniciar o apagar durante una copia de seguridad permite esperar a que termine.** El diálogo permanece abierto hasta elegir o cerrarlo. Una barra muestra la acción pendiente y permite cancelarla.

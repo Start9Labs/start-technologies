@@ -93,14 +93,18 @@ mod test {
 
     use super::*;
 
-    #[test]
-    fn catalog_names_methods_of_the_api() {
+    fn api_server() -> McpServer<RpcContext> {
         let http = Server::new(
             || async { Err(rpc_toolkit::yajrc::INTERNAL_ERROR) },
             crate::main_api::<RpcContext>(),
         )
         .for_http();
-        let server = server(http).unwrap();
+        server(http).unwrap()
+    }
+
+    #[test]
+    fn catalog_names_methods_of_the_api() {
+        let server = api_server();
         for withheld in [
             "auth.get-pubkey",
             "auth.login",
@@ -132,6 +136,26 @@ mod test {
             "server.time",
         ] {
             assert!(server.get_tool(exposed).is_some(), "{exposed} is withheld");
+        }
+    }
+
+    #[test]
+    fn power_tools_offer_optional_force_and_cancellation() {
+        let server = api_server();
+        assert!(server.get_tool("server.cancel-deferred-power").is_some());
+        for method in ["server.restart", "server.shutdown"] {
+            let tool = serde_json::to_value(server.get_tool(method).unwrap()).unwrap();
+            assert_eq!(
+                tool["inputSchema"]["properties"]["force"]["type"],
+                "boolean"
+            );
+            assert!(
+                !tool["inputSchema"]["required"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|field| field == "force")
+            );
         }
     }
 

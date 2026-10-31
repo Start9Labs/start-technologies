@@ -1,0 +1,1 @@
+- **Bei Neustart oder Herunterfahren während einer Sicherung kann deren Abschluss abgewartet werden.** Der Dialog bleibt bis zur Auswahl oder zum Schließen offen. Eine Leiste zeigt die vorgemerkte Aktion und erlaubt das Abbrechen.
