@@ -21,7 +21,7 @@ Keep chats on Start9's products and the technologies around them. The [Terms of 
 - **Reply to, react to or copy** a message from the toolbar that appears when you hover over it, or by long-pressing it on a phone. The same menu lets you **Edit** your own messages, or **Hide from others** to keep one from other customers.
 - **See who reacted** by hovering over a reaction, or pressing and holding it on a phone.
 - **Search** the chat from the search icon in its header.
-- **Write privately** in the chat's private thread, the lock in its header, once a person from Start9 has opened one. See [Privacy](privacy.md#sharing-privately).
+- **Write privately** in the chat's private thread once a person from Start9 has opened one: choose the line in the chat saying they opened it, or the lock in its header. See [Privacy](privacy.md#sharing-privately).
 
 While Dux works on a reply, or someone at Start9 is typing one, the chat says so. You can keep writing in the meantime; Dux answers everything you sent together.
 

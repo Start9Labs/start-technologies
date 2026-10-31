@@ -1,1 +1,0 @@
-- Karta „Zależności” usługi pokazuje zainstalowaną wersję każdej zależności. Zależność w niezgodnej wersji otwiera Sklep na zgodnej wersji.

@@ -1,0 +1,1 @@
+- Los nombres de dispositivos se resuelven desde cualquier red cuyo perfil de seguridad permita acceder a ellos, no solo desde la propia. Un nombre asignado tiene prioridad sobre el nombre de host enviado por el dispositivo. El dispositivo de la propia red conserva su nombre si otro de una red distinta usa el mismo.

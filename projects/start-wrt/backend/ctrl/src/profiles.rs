@@ -7,7 +7,7 @@ use clap::Parser;
 use rpc_toolkit::{from_fn_async_local, HandlerExt as _, ParentHandler};
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
-    DeviceType, Dhcp, DhcpHost, FirewallForwarding, FirewallRedirect, FirewallRule, FirewallTarget,
+    DeviceType, Dhcp, FirewallForwarding, FirewallRedirect, FirewallRule, FirewallTarget,
     FirewallZone, InterfaceProto, NetworkBridgeVlan, NetworkDevice, NetworkInterface, NetworkRoute,
     NetworkRoute6, NetworkRule, NetworkRule6, NetworkVlanPort, NetworkVlanPortTagging,
     ProfileDnsmasq, WifiStation, WifiVlan,
@@ -407,19 +407,6 @@ fn profile_dns(cfgs: &Configs, profile: &Profile) -> dns::ProfileDns {
     dns::profile_dns(cfgs, &profile.outbound, &profile.dns_override)
 }
 
-/// Whether any device or inbound-VPN peer may inject DNS records. Box-wide: a
-/// device's profile is a runtime fact. Separate from `ProfileDns::redirects`,
-/// which gates the `DNS-Override` redirect.
-fn has_dns_injection(cfgs: &Configs) -> bool {
-    cfgs["dhcp"].sections.iter().any(|s| {
-        s.get::<DhcpHost>()
-            .is_ok_and(|h| h._allow_dns_inject.as_deref() == Some("1"))
-    }) || cfgs["network"]
-        .sections
-        .iter()
-        .any(|s| s.ty().starts_with("wireguard_") && crate::dns_inject::peer_allows_dns_inject(s))
-}
-
 /// Rewrite DNS forwarding (dnsmasq sections) for ALL profiles.
 /// Call after any operation that changes system DNS settings.
 pub(crate) fn rewrite_all_dns_forwarding(cfgs: &mut Configs) -> Result<(), Error> {
@@ -480,6 +467,12 @@ pub async fn heal_dns_forwarding<C: CtrlContext>(ctx: C) -> Result<(), Error> {
         if dns_forwarding_snapshot(&cfgs) == before {
             return Ok(());
         }
+        let interfaces: Vec<String> = cfgs["startwrt"]
+            .sections
+            .iter()
+            .filter_map(|s| s.get::<UciProfile>().ok())
+            .map(|p| p.interface)
+            .collect();
         match dump_all(ctx.uci_root(), cfgs).await {
             Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
                 retries -= 1;
@@ -487,6 +480,9 @@ pub async fn heal_dns_forwarding<C: CtrlContext>(ctx: C) -> Result<(), Error> {
             Err(err) => return Err(err.into()),
             Ok(()) => {
                 if ctx.effectful() {
+                    for interface in &interfaces {
+                        crate::dns_inject::ensure_hosts_file(interface).await;
+                    }
                     crate::published_ports::reload_firewall_wait().await?;
                     crate::devices::reload_dnsmasq();
                 }
@@ -598,61 +594,63 @@ pub(crate) fn rewrite_dns_forwarding(cfgs: &mut Configs, profile: &Profile) -> R
         dns::ProfileDns::Isp | dns::ProfileDns::IspOutsideVpn => vec![],
     };
 
-    // Injection needs an instance even in ISP mode; with no `server` list and
+    // Every profile has its own instance: its addn-hosts file is where the
+    // names of devices it can reach are served. With no `server` list and
     // `noresolv` unset it forwards to resolv.conf.auto like the main one.
-    let inject = has_dns_injection(cfgs);
-    if !servers.is_empty() || inject {
-        let noresolv = (!servers.is_empty()).then(|| "1".to_string());
-        let mut server = servers;
-        // Firefox's DoH canary: an NXDOMAIN here turns off its default-enabled
-        // DNS-over-HTTPS on this network.
-        server.push("/use-application-dns.net/".to_string());
-        cfgs["dhcp"].append(
-            &ProfileDnsmasq {
-                noresolv,
-                server,
-                // An unscoped instance serves every profile's DHCP pool.
-                interface: vec![profile.id.interface.clone()],
-                localservice: Some("1".to_string()),
-                nonwildcard: Some("1".to_string()),
-                // Answers the router's name with this profile's own IPv4 gateway.
-                localise_queries: Some("1".to_string()),
-                listen_address: vec![profile.gateway_ip.to_string()],
-                notinterface: vec!["loopback".to_string()],
-                rebind_domain: vec![],
-                rebind_protection: Some("0".to_string()),
-                localuse: Some("0".to_string()),
-                leasefile: Some(format!("/tmp/dhcp.leases.{}", section_name)),
-                domain: Some("lan".to_string()),
-                expandhosts: Some("1".to_string()),
-                boguspriv: Some("0".to_string()),
-                local: Some("/lan/".to_string()),
-                dhcpscript: Some(crate::device_ident::FINGERPRINT_SCRIPT_PATH.to_string()),
-                addnhosts: if inject {
-                    vec![crate::dns_inject::inject_hosts_path(&profile.id.interface)]
-                } else {
-                    vec![]
-                },
-            },
-            Some(&section_name),
-        )?;
+    let isp = servers.is_empty();
+    let noresolv = (!isp).then(|| "1".to_string());
+    // A custom or VPN resolver may answer with private addresses.
+    let filter_private = Some(if isp { "1" } else { "0" }.to_string());
+    let mut server = servers;
+    // Firefox's DoH canary: an NXDOMAIN here turns off its default-enabled
+    // DNS-over-HTTPS on this network.
+    server.push("/use-application-dns.net/".to_string());
+    cfgs["dhcp"].append(
+        &ProfileDnsmasq {
+            noresolv,
+            server,
+            // An unscoped instance serves every profile's DHCP pool.
+            interface: vec![profile.id.interface.clone()],
+            localservice: Some("1".to_string()),
+            nonwildcard: Some("1".to_string()),
+            // Answers the router's name with this profile's own IPv4 gateway.
+            localise_queries: Some("1".to_string()),
+            listen_address: vec![profile.gateway_ip.to_string()],
+            notinterface: vec!["loopback".to_string()],
+            rebind_domain: vec![],
+            rebind_protection: filter_private.clone(),
+            rebind_localhost: isp.then(|| "1".to_string()),
+            authoritative: Some("1".to_string()),
+            domainneeded: Some("1".to_string()),
+            cachesize: Some("1000".to_string()),
+            ednspacket_max: Some("1232".to_string()),
+            localuse: Some("0".to_string()),
+            leasefile: Some(format!("/tmp/dhcp.leases.{}", section_name)),
+            domain: Some("lan".to_string()),
+            expandhosts: Some("1".to_string()),
+            boguspriv: filter_private,
+            local: Some("/lan/".to_string()),
+            dhcpscript: Some(crate::device_ident::FINGERPRINT_SCRIPT_PATH.to_string()),
+            addnhosts: vec![crate::dns_inject::inject_hosts_path(&profile.id.interface)],
+        },
+        Some(&section_name),
+    )?;
 
-        // Add notinterface to main dnsmasq
-        for section in &mut cfgs["dhcp"].sections {
-            if section.ty() == "dnsmasq"
-                && !section
-                    .name()
-                    .map(|n| n.starts_with("dns_"))
-                    .unwrap_or(false)
-            {
-                let arena = section.arena;
-                section.lines.push(Line::List {
-                    list: Token::from_string("notinterface".to_string(), arena),
-                    item: Token::from_string(profile.id.interface.clone(), arena),
-                    comment: uciedit::LineComment::None,
-                });
-                break;
-            }
+    // Add notinterface to main dnsmasq
+    for section in &mut cfgs["dhcp"].sections {
+        if section.ty() == "dnsmasq"
+            && !section
+                .name()
+                .map(|n| n.starts_with("dns_"))
+                .unwrap_or(false)
+        {
+            let arena = section.arena;
+            section.lines.push(Line::List {
+                list: Token::from_string("notinterface".to_string(), arena),
+                item: Token::from_string(profile.id.interface.clone(), arena),
+                comment: uciedit::LineComment::None,
+            });
+            break;
         }
     }
 
@@ -6868,14 +6866,26 @@ config zone
             .unwrap();
         assert_eq!(section.interface, vec!["lan".to_string()]);
         assert_eq!(section.noresolv.as_deref(), Some("1"));
+        assert_eq!(
+            section.addnhosts,
+            vec![crate::dns_inject::inject_hosts_path("lan")]
+        );
+        assert_eq!(section.authoritative.as_deref(), Some("1"));
         assert_eq!(section.localise_queries.as_deref(), Some("1"));
-        assert!(section.addnhosts.is_empty(), "no injection, no hosts file");
+        assert_eq!(section.cachesize.as_deref(), Some("1000"));
+        assert_eq!(
+            (
+                section.rebind_protection.as_deref(),
+                section.rebind_localhost.as_deref(),
+                section.boguspriv.as_deref()
+            ),
+            (Some("0"), None, Some("0")),
+            "a custom resolver may answer with private addresses"
+        );
     }
 
-    /// Write the ISP-mode base fixture (no system DNS, no overrides), with a
-    /// DHCP host section carrying `_allow_dns_inject` when asked — the case
-    /// where DNS injection alone must create the per-profile instances.
-    fn setup_isp_mode_configs(dir: &std::path::Path, inject: bool) {
+    /// Write the ISP-mode base fixture: no system DNS, no overrides.
+    fn setup_isp_mode_configs(dir: &std::path::Path) {
         std::fs::write(
             dir.join("startwrt"),
             "\
@@ -6906,19 +6916,9 @@ config interface 'guest'
 ",
         )
         .unwrap();
-        let host = if inject {
-            "\n\
-config host host_001a2b3c4d5e
-\toption mac '00:1A:2B:3C:4D:5E'
-\toption dns '1'
-\toption _allow_dns_inject '1'
-"
-        } else {
-            ""
-        };
         std::fs::write(
             dir.join("dhcp"),
-            format!("config dnsmasq\n\toption domainneeded '1'\n{host}"),
+            "config dnsmasq\n\toption domainneeded '1'\n",
         )
         .unwrap();
         std::fs::write(
@@ -6937,9 +6937,9 @@ config zone
     }
 
     #[tokio::test]
-    async fn dns_injection_creates_isp_mode_instances() {
+    async fn isp_mode_profiles_get_their_own_instances() {
         let dir = tempfile::tempdir().unwrap();
-        setup_isp_mode_configs(dir.path(), true);
+        setup_isp_mode_configs(dir.path());
         let arena = Arena::new();
         let mut cfgs = parse_all(
             dir.path(),
@@ -6955,7 +6955,7 @@ config zone
                 .sections
                 .iter()
                 .find(|s| s.name().as_deref() == Some(name))
-                .unwrap_or_else(|| panic!("{name} instance created by injection alone"))
+                .unwrap_or_else(|| panic!("{name} instance created in ISP mode"))
                 .get::<ProfileDnsmasq>()
                 .unwrap();
             assert_eq!(
@@ -6972,6 +6972,29 @@ config zone
             assert_eq!(
                 section.noresolv, None,
                 "falls back to resolv.conf.auto like the main instance"
+            );
+            assert_eq!(
+                (
+                    section.authoritative.as_deref(),
+                    section.domainneeded.as_deref(),
+                    section.localise_queries.as_deref(),
+                    section.cachesize.as_deref(),
+                    section.ednspacket_max.as_deref(),
+                    section.rebind_protection.as_deref(),
+                    section.rebind_localhost.as_deref(),
+                    section.boguspriv.as_deref(),
+                ),
+                (
+                    Some("1"),
+                    Some("1"),
+                    Some("1"),
+                    Some("1000"),
+                    Some("1232"),
+                    Some("1"),
+                    Some("1"),
+                    Some("1"),
+                ),
+                "the ISP's answers are filtered as the main instance filters them"
             );
         }
         // The main instance stays off the profile bridges.
@@ -6993,73 +7016,12 @@ config zone
         assert!(notinterface.contains(&"lan".to_string()));
         assert!(notinterface.contains(&"guest".to_string()));
 
-        // Injection alone must not start hijacking port-53 traffic.
+        // ISP mode never hijacks port-53 traffic.
         assert!(
             !cfgs["firewall"].sections.iter().any(|s| s
                 .get::<FirewallRedirect>()
                 .is_ok_and(|r| r.name.contains("DNS-Override"))),
-            "no DNS-Override redirect from the inject flag"
-        );
-    }
-
-    #[tokio::test]
-    async fn no_injection_means_no_isp_mode_instances() {
-        let dir = tempfile::tempdir().unwrap();
-        setup_isp_mode_configs(dir.path(), false);
-        let arena = Arena::new();
-        let mut cfgs = parse_all(
-            dir.path(),
-            &arena,
-            &["startwrt", "network", "dhcp", "firewall"],
-        )
-        .await
-        .unwrap();
-        rewrite_all_dns_forwarding(&mut cfgs).unwrap();
-        assert!(
-            !cfgs["dhcp"]
-                .sections
-                .iter()
-                .any(|s| s.name().is_some_and(|n| n.starts_with("dns_"))),
-            "ISP mode without injection keeps the single main instance"
-        );
-    }
-
-    #[tokio::test]
-    async fn permitted_vpn_peer_alone_serves_injected_records() {
-        let dir = tempfile::tempdir().unwrap();
-        setup_isp_mode_configs(dir.path(), false);
-        let mut network = std::fs::read_to_string(dir.path().join("network")).unwrap();
-        network.push_str(
-            "
-config interface 'wg_lan'
-\toption proto 'wireguard'
-
-config wireguard_wg_lan 'wg_lan_0'
-\toption public_key 'peer-pub'
-\toption _allow_dns_inject '1'
-\tlist allowed_ips '192.168.1.200/32'
-",
-        );
-        std::fs::write(dir.path().join("network"), network).unwrap();
-        let arena = Arena::new();
-        let mut cfgs = parse_all(
-            dir.path(),
-            &arena,
-            &["startwrt", "network", "dhcp", "firewall"],
-        )
-        .await
-        .unwrap();
-        rewrite_all_dns_forwarding(&mut cfgs).unwrap();
-        let section = cfgs["dhcp"]
-            .sections
-            .iter()
-            .find(|s| s.name().as_deref() == Some("dns_lan"))
-            .expect("a permitted peer needs the profile instance with no LAN device toggled")
-            .get::<ProfileDnsmasq>()
-            .unwrap();
-        assert_eq!(
-            section.addnhosts,
-            vec![crate::dns_inject::inject_hosts_path("lan")]
+            "no DNS-Override redirect in ISP mode"
         );
     }
 
@@ -8408,7 +8370,10 @@ config dhcp 'guest'
         .unwrap();
         set_config(ctx.clone(), &mut cfgs, &guest_via("wg_v4", Vec::new())).unwrap();
 
-        assert_eq!(guest_dnsmasq_servers(&cfgs), None);
+        assert_eq!(
+            guest_dnsmasq_servers(&cfgs),
+            Some(vec!["/use-application-dns.net/".to_string()])
+        );
         assert!(!guest_redirected(&cfgs));
         let guest = get_config(ctx, &cfgs, guest_via("wg_v4", Vec::new()).id).unwrap();
         assert_eq!(guest.dns_source, "system-outside-vpn");

@@ -1,1 +1,0 @@
-- Skonfigurowana polityka uwierzytelniania proxy HTTP jest egzekwowana zarówno dla nieszyfrowanych połączeń usług, jak i połączeń TLS.

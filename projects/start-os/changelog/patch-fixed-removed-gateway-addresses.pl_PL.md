@@ -1,1 +1,0 @@
-- Usunięcie bramy usuwa również wybory adresów dokonane na niej przez usługi.

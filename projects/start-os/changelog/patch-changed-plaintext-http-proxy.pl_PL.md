@@ -1,1 +1,0 @@
-- Nieszyfrowane połączenia usług przechodzą przez StartOS przy włączonym proxy HTTP. Aplikacje widzą StartOS jako drugą stronę połączenia TCP; adresy IP klientów są dostępne w `X-Forwarded-For`, gdy włączone jest generowanie nagłówków przekazywania.

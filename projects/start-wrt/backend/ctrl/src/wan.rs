@@ -2504,7 +2504,7 @@ config service 'wan'
     }
 
     #[tokio::test]
-    async fn dns_set_isp_removes_profile_dnsmasq() {
+    async fn dns_set_isp_drops_profile_resolvers() {
         let dir = tempfile::tempdir().unwrap();
         setup_network(dir.path());
         setup_startwrt(dir.path());
@@ -2535,19 +2535,23 @@ config service 'wan'
         .await
         .unwrap();
 
-        // Verify that the per-profile dnsmasq section was removed
         let arena = Arena::new();
         let cfgs = parse_all(ctx.uci_root(), &arena, &["dhcp", "network"])
             .await
             .unwrap();
-        let has_dns_lan = cfgs["dhcp"]
+        let dns_lan = cfgs["dhcp"]
             .sections
             .iter()
-            .any(|s| s.name().as_deref() == Some("dns_lan"));
-        assert!(
-            !has_dns_lan,
-            "dns_set ISP should remove per-profile dnsmasq sections"
+            .find(|s| s.name().as_deref() == Some("dns_lan"))
+            .expect("the profile keeps its own instance")
+            .get::<uciedit::openwrt::ProfileDnsmasq>()
+            .unwrap();
+        assert_eq!(
+            dns_lan.server,
+            vec!["/use-application-dns.net/".to_string()],
+            "dns_set ISP should drop the custom resolvers"
         );
+        assert_eq!(dns_lan.noresolv, None);
 
         // Verify peerdns=1 on both WAN and WAN6
         for iface_name in &[WAN_INTERFACE, WAN6_INTERFACE] {

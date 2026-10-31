@@ -1,2 +1,0 @@
-- **Dodawanie domen publicznych do interfejsów z zakresami portów.** W usługach, których interfejsy udostępniają zakres portów, można dodawać domeny publiczne z interfejsu internetowego lub CLI.
-- Włączone zakresy portów zachowują przypisanie skonfigurowanych domen podczas sprawdzania duplikatów.
