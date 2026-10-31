@@ -82,6 +82,7 @@ mod v0_4_0_beta_7;
 mod v0_4_0_beta_8;
 mod v0_4_0_beta_9;
 mod v0_4_1;
+mod v0_4_1_1;
 mod v0_4_2;
 
 pub type Current = v0_4_2::Version; // VERSION_BUMP
@@ -231,6 +232,7 @@ enum Version {
     V0_4_0_4(Wrapper<v0_4_0_4::Version>),
     V0_4_0_5(Wrapper<v0_4_0_5::Version>),
     V0_4_1(Wrapper<v0_4_1::Version>),
+    V0_4_1_1(Wrapper<v0_4_1_1::Version>),
     V0_4_2(Wrapper<v0_4_2::Version>), // VERSION_BUMP
     Other(exver::Version),
 }
@@ -316,6 +318,7 @@ impl Version {
             Self::V0_4_0_4(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_0_5(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_1(v) => DynVersion(Box::new(v.0)),
+            Self::V0_4_1_1(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_2(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP
             Self::Other(v) => {
                 return Err(Error::new(
@@ -393,6 +396,7 @@ impl Version {
             Version::V0_4_0_4(Wrapper(x)) => x.semver(),
             Version::V0_4_0_5(Wrapper(x)) => x.semver(),
             Version::V0_4_1(Wrapper(x)) => x.semver(),
+            Version::V0_4_1_1(Wrapper(x)) => x.semver(),
             Version::V0_4_2(Wrapper(x)) => x.semver(), // VERSION_BUMP
             Version::Other(x) => x.clone(),
         }

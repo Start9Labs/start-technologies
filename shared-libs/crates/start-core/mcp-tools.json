@@ -8627,6 +8627,53 @@
     }
   },
   {
+    "name": "registry.package.sign",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/RegistryUrlParams" },
+        { "$ref": "#/$defs/SignPackageParams" }
+      ],
+      "$defs": {
+        "RegistryUrlParams": {
+          "type": "object",
+          "properties": { "registry": { "type": "string" } },
+          "required": ["registry"],
+          "additionalProperties": true
+        },
+        "SignPackageParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/PackageId" },
+            "version": { "$ref": "#/$defs/Version" },
+            "commitment": { "$ref": "#/$defs/MerkleArchiveCommitment" },
+            "signature": { "$ref": "#/$defs/AnySignature" }
+          },
+          "required": ["id", "version", "commitment", "signature"],
+          "additionalProperties": true
+        },
+        "PackageId": { "type": "string" },
+        "Version": { "type": "string" },
+        "MerkleArchiveCommitment": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "const": "merkle-archive" },
+            "rootSighash": { "type": "string" },
+            "rootMaxsize": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["rootSighash", "rootMaxsize"]
+        },
+        "AnySignature": { "type": "string" }
+      },
+      "type": "object"
+    }
+  },
+  {
     "name": "registry.package.signer.add",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

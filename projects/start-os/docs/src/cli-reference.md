@@ -989,6 +989,14 @@ Remove a package mirror.
 
 - `--url <URL>` — Mirror URL to remove (required)
 
+### `start-cli registry package sign [FILE]`
+
+Add your signature to a package in the registry index.
+
+- `--no-verify` — Sign the commitments the registry lists instead of a local s9pk
+- `--id <ID>` — Package identifier (with `--no-verify`)
+- `--version <VERSION>` — Package version (with `--no-verify`)
+
 ### Registry Package Categories
 
 Organize packages into browseable categories.

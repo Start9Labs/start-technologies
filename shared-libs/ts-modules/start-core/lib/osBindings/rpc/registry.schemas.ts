@@ -767,6 +767,19 @@ export const SignAssetParams: z.ZodObject<{
 }).meta({
   id: 'SignAssetParams',
 })
+export const SignPackageParams: z.ZodObject<{
+  id: typeof PackageId
+  version: typeof Version
+  commitment: typeof MerkleArchiveCommitment
+  signature: typeof AnySignature
+}> = /* @__PURE__ */ object({
+  id: PackageId,
+  version: Version,
+  commitment: MerkleArchiveCommitment,
+  signature: AnySignature,
+}).meta({
+  id: 'SignPackageParams',
+})
 export const SignerInfo: z.ZodObject<{
   name: z.ZodString
   contact: z.ZodArray<typeof ContactInfo>
@@ -1549,6 +1562,10 @@ export const Api = {
         },
         'remove-mirror': {
           _PARAMS: /* @__PURE__ */ RemoveMirrorParams,
+          _RETURN: /* @__PURE__ */ z.null(),
+        },
+        sign: {
+          _PARAMS: /* @__PURE__ */ SignPackageParams,
           _RETURN: /* @__PURE__ */ z.null(),
         },
         signer: {

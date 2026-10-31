@@ -537,6 +537,7 @@ export type SetTrustSignersParamsInput = z.input<
 >
 export type SideloadResponse = z.output<typeof schemas.SideloadResponse>
 export type SignAssetParamsInput = z.input<typeof schemas.SignAssetParams>
+export type SignPackageParamsInput = z.input<typeof schemas.SignPackageParams>
 export type SignerInfo = z.output<typeof schemas.SignerInfo>
 export type SignerInfoInput = z.input<typeof schemas.SignerInfo>
 export type SmtpValueInput = z.input<typeof schemas.SmtpValue>

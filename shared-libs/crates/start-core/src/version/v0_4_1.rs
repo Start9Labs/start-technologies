@@ -47,7 +47,12 @@ impl VersionT for Version {
         }
         server.remove("trustedOsUpdateSigners");
         let private = db["private"].as_object_mut().or_not_found("private")?;
-        if !private.contains_key("sessions") {
+        // A database migrated straight from 0.3.x holds 0.3.6's cookie sessions here.
+        if private
+            .get("sessions")
+            .and_then(|sessions| sessions.get("pubkeys"))
+            .is_none()
+        {
             let pubkeys = private
                 .remove("sessionPubkeys")
                 .unwrap_or_else(|| json!({}));
@@ -469,10 +474,10 @@ mod tests {
         let mut fixture =
             to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
                 .unwrap();
-        fixture["public"]["serverInfo"]["version"] = json!(Version.semver());
         fixture["public"]["serverInfo"]["trustedKeys"] =
             to_value(&crate::trusted_keys::initial_trusted_keys()).unwrap();
         fixture["public"]["serverInfo"]["trustedKeys"]["start9"]["os"] = json!(false);
+        fixture["public"]["serverInfo"]["version"] = to_value(&Version.semver()).unwrap();
         fixture["public"]["serverInfo"]["latestMigrationRevision"] = json!(1);
         fixture["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
         fixture["private"]["sessions"]["tokens"] =
@@ -516,6 +521,12 @@ mod tests {
             migrated["public"]["serverInfo"]["latestMigrationRevision"],
             json!(Current::default().migration_revision())
         );
+        let todos = migrated["public"]["serverInfo"]["postInitMigrationTodos"]
+            .as_object()
+            .unwrap();
+        assert!(todos.contains_key("0.4.1"));
+        assert!(todos.contains_key("0.4.1.1"));
+        assert!(todos.contains_key(Current::default().semver().to_string().as_str()));
         Current::default().pre_init(&db).await.unwrap();
         assert_eq!(db.dump(&ROOT).await.value, migrated);
     }
@@ -536,9 +547,9 @@ mod tests {
                 to_value(&crate::db::model::Database::init(&account, false, None, None).unwrap())
                     .unwrap();
             let server = fixture["public"]["serverInfo"].as_object_mut().unwrap();
-            server.insert("version".into(), json!(Version.semver()));
             server.remove("trustedKeys");
             server.insert("trustedOsUpdateSigners".into(), to_value(&legacy).unwrap());
+            server.insert("version".into(), to_value(&Version.semver()).unwrap());
             server.insert("latestMigrationRevision".into(), json!(0));
             server.insert("postInitMigrationTodos".into(), json!({}));
             fixture["private"]["sessions"]["tokens"] =
@@ -560,6 +571,7 @@ mod tests {
                 .as_object()
                 .unwrap();
             assert!(todos.contains_key("0.4.1"));
+            assert!(todos.contains_key("0.4.1.1"));
             assert!(todos.contains_key(Current::default().semver().to_string().as_str()));
             Current::default().pre_init(&db).await.unwrap();
             assert_eq!(db.dump(&ROOT).await.value, migrated);

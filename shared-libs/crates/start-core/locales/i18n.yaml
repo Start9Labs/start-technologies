@@ -2872,6 +2872,13 @@ registry.package.remove-mirror.unauthorized:
   fr_FR: "Non autorisé"
   pl_PL: "Brak autoryzacji"
 
+registry.package.sign.commitment-not-found:
+  en_US: "%{id}@%{version} lists no s9pk with sighash %{sighash}"
+  de_DE: "%{id}@%{version} listet kein s9pk mit Sighash %{sighash}"
+  es_ES: "%{id}@%{version} no lista ningún s9pk con sighash %{sighash}"
+  fr_FR: "%{id}@%{version} ne liste aucun s9pk avec le sighash %{sighash}"
+  pl_PL: "%{id}@%{version} nie zawiera s9pk o sighash %{sighash}"
+
 # registry/package/index.rs
 registry.package.icon.invalid-name:
   en_US: "invalid package icon name: %{name}"
@@ -4506,6 +4513,13 @@ help.arg.no-verify:
   es_ES: "Omitir verificación de firma"
   fr_FR: "Ignorer la vérification de signature"
   pl_PL: "Pomiń weryfikację podpisu"
+
+help.arg.no-verify-sign:
+  en_US: "Sign the commitments the registry lists instead of a local s9pk"
+  de_DE: "Die von der Registry gelisteten Commitments statt eines lokalen s9pk signieren"
+  es_ES: "Firmar los compromisos que lista el registro en lugar de un s9pk local"
+  fr_FR: "Signer les engagements listés par le registre au lieu d'un s9pk local"
+  pl_PL: "Podpisz zobowiązania wymienione w rejestrze zamiast lokalnego s9pk"
 
 help.arg.nowait:
   en_US: "Return immediately instead of waiting for graceful shutdown to complete"
@@ -7564,6 +7578,13 @@ about.sign-file-add-registry:
   es_ES: "Firmar archivo y agregar al registro"
   fr_FR: "Signer le fichier et ajouter au registre"
   pl_PL: "Podpisz plik i dodaj do rejestru"
+
+about.sign-package-registry:
+  en_US: "Add your signature to a package in the registry index"
+  de_DE: "Eigene Signatur zu einem Paket im Registry-Index hinzufügen"
+  es_ES: "Agregar su firma a un paquete en el índice del registro"
+  fr_FR: "Ajouter votre signature à un paquet de l'index du registre"
+  pl_PL: "Dodaj swój podpis do pakietu w indeksie rejestru"
 
 about.start-service:
   en_US: "Start a service"
