@@ -1492,11 +1492,11 @@ enter_release_dir() { touch "${marker}"; }
     const source = text(join(REPO, '.github/workflows', workflow)).split(
       '\n  deploy:\n',
     )[1]
-    const install = source
-      .split('      - name: Install start-cli\n')[1]
+    const check = source
+      .split('      - name: Check start-cli registry notes support\n')[1]
       .split('\n      - name: ')[0]
     const command = `./scripts/manage-release.sh check-registry-notes-cli ${product}`
-    contains(install, command)
+    contains(check, command)
     assert.ok(source.indexOf(command) < source.indexOf(`- name: ${upload}`))
     assert.ok(
       source.indexOf(command) <
