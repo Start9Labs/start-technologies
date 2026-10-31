@@ -68,6 +68,22 @@ async fn inner_main(
         )
         .await?;
 
+        // The reboot-needed marker survives daemon restart.
+        ctx.db
+            .mutate(|db| {
+                let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
+                status.as_backup_progress_mut().ser(&None)?;
+                status.as_update_progress_mut().ser(&None)?;
+                status.as_deferred_power_action_mut().ser(&None)?;
+                status.as_shutting_down_mut().ser(&false)?;
+                status.as_restarting_mut().ser(&false)?;
+                let mut conversions = status.de()?.backup_conversions;
+                crate::backup::target::conversion::interrupt_running(&mut conversions);
+                status.as_backup_conversions_mut().ser(&conversions)
+            })
+            .await
+            .result?;
+
         server.serve_ui_for(ctx.clone());
         handle.complete();
 
@@ -105,6 +121,15 @@ async fn inner_main(
                 .map_err(|_| ())
                 .expect("send shutdown signal");
         }));
+
+        let deferred_power_ctx = rpc_ctx.clone();
+        let _deferred_power = NonDetachingJoinHandle::from(tokio::spawn(
+            crate::shutdown::run_deferred_power_actions(deferred_power_ctx),
+        ));
+        #[cfg(target_os = "linux")]
+        let _power_key = NonDetachingJoinHandle::from(tokio::spawn(
+            crate::power_key::watch_power_key(rpc_ctx.clone()),
+        ));
 
         let metrics_ctx = rpc_ctx.clone();
         let metrics_task = tokio::spawn(async move {

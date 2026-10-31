@@ -901,4 +901,9 @@ export default {
   1018: 'Łączny postęp',
   1019: 'Zaktualizować format kopii zapasowej?',
   1020: 'Kopia tego serwera używa starego formatu. Zaktualizuj go, aby uzyskać skuteczniejsze wykrywanie modyfikacji i migawki tylko do odczytu, lub pomiń ten krok, aby utworzyć kopię w istniejącym formacie. Konwersja może potrwać długo, a kopia jest niedostępna do jej zakończenia.',
+  1023: 'Trwa tworzenie kopii zapasowej. Przerwanie jej teraz może uszkodzić kopię zapasową aktualnie zapisywanej usługi.',
+  1024: 'Poczekaj na zakończenie kopii zapasowej',
+  1025: 'Wyłącz teraz',
+  1026: 'Trwa tworzenie kopii zapasowej. Serwer zostanie ponownie uruchomiony po jej zakończeniu.',
+  1027: 'Trwa tworzenie kopii zapasowej. Serwer zostanie wyłączony po jej zakończeniu.',
 } satisfies i18n

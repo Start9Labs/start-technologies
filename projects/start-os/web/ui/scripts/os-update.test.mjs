@@ -127,6 +127,7 @@ const { RefreshAlertComponent } =
   await import('src/app/components/refresh-alert.component')
 const { PatchDB } = await import('patch-db-client')
 const { OSService } = await import('src/app/services/os.service')
+const { PowerService } = await import('src/app/services/power.service')
 const { i18nService: ProductionI18nService } =
   await import('../../../../../shared-libs/ts-modules/shared/src/i18n/i18n.service.ts')
 const { LocalizePipe: ProductionLocalizePipe } =
@@ -300,6 +301,7 @@ function fixture(t, cachedVersion, providers = []) {
       },
     },
     { provide: OSService, useFactory: () => new OSService() },
+    { provide: PowerService, useFactory: () => new PowerService() },
     { provide: UiUpdateService, useFactory: () => new UiUpdateService() },
     ...providers,
   ])

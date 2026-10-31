@@ -45,6 +45,7 @@ function harness(moduleOverrides = new Map()) {
     DOCUMENT: tokens.DOCUMENT,
     Injector: tokens.Injector,
     Injectable: () => value => value,
+    InjectionToken: class {},
     Component: () => value => value,
     signal: initial => {
       const stream$ = new BehaviorSubject(initial)
@@ -91,7 +92,17 @@ function harness(moduleOverrides = new Map()) {
       if (request.endsWith('stale-ui.service'))
         return { StaleUiService: tokens.StaleUiService }
       if (request.endsWith('patch-db-source'))
-        return { PATCH_CACHE: tokens.PATCH_CACHE }
+        return {
+          ...load(
+            'projects/start-os/web/ui/src/app/services/patch-db/patch-db-source.ts',
+          ),
+          PATCH_CACHE: tokens.PATCH_CACHE,
+        }
+      if (
+        request === 'src/app/services/state.service' ||
+        request === './local-storage-bootstrap'
+      )
+        return {}
       if (request.startsWith('src/')) {
         const app = filename.slice(
           0,
@@ -381,6 +392,7 @@ test('StartOS mock registry calls reach list and single-package fixtures', async
     ]),
   )
   dependencies.set(storage, null)
+  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ id: 0 }))
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
   dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: {} }))
   const client = new (load(
@@ -409,6 +421,46 @@ test('StartOS mock registry calls reach list and single-package fixtures', async
     }),
     version,
   )
+})
+
+test('StartOS mock power deferral and cancellation wait for patch consumption', async () => {
+  const storage = Symbol('session storage')
+  const { dependencies, tokens, load } = harness(
+    new Map([
+      ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
+      ['src/app/utils/acme', {}],
+      ['./api.fixures', { Mock: {} }],
+      ['./mock-patch', { mockPatchData: {} }],
+      ['./md-sample.md', ''],
+    ]),
+  )
+  const cache = new BehaviorSubject({ id: 0 })
+  dependencies.set(storage, null)
+  dependencies.set(tokens.PATCH_CACHE, cache)
+  dependencies.set(tokens.AuthService, { isVerified$: of(true) })
+  const client = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+  ).MockApiService)()
+  client.backingUp = true
+  const revisions = []
+  client.mockWsSource$.subscribe(revision => revisions.push(revision))
+  for (const [request, action] of [
+    [() => client.rpc.server.restart({}), 'restart'],
+    [() => client.rpc.server.shutdown({}), 'shutdown'],
+    [() => client.rpc.server.cancelDeferredPower({}), null],
+  ]) {
+    let settled = false
+    const pending = request().then(value => {
+      settled = true
+      return value
+    })
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(settled, false)
+    assert.equal(client.deferredPowerAction, action)
+    assert.equal(revisions.at(-1).patch[0].value, action)
+    cache.next({ id: revisions.at(-1).id })
+    assert.equal(await pending, null)
+  }
 })
 
 test('StartOS DNS mock updates the selected gateway using live gateway state', async () => {

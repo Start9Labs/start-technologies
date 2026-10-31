@@ -1,0 +1,1 @@
+- **Ponowne uruchomienie demona StartOS czyści wskaźniki przerwanych kopii, aktualizacji, restartów i wyłączeń**, w tym oczekujące operacje zasilania. Przerwana operacja nie jest już pokazywana jako trwająca po uruchomieniu demona.

@@ -901,4 +901,9 @@ export default {
   1018: 'Progreso general',
   1019: '¿Actualizar el formato de la copia?',
   1020: 'La copia de este servidor utiliza un formato antiguo. Actualícelo para una detección de alteraciones más sólida e instantáneas de solo lectura, u omita este paso para crear una copia con el formato existente. La conversión puede tardar mucho tiempo y esta copia no estará disponible hasta que termine.',
+  1023: 'Hay una copia de seguridad en curso. Interrumpirla ahora puede dañar la copia de seguridad del servicio que se está escribiendo.',
+  1024: 'Esperar a que termine la copia de seguridad',
+  1025: 'Apagar ahora',
+  1026: 'Hay una copia de seguridad en curso. Su servidor se reiniciará cuando termine.',
+  1027: 'Hay una copia de seguridad en curso. Su servidor se apagará cuando termine.',
 } satisfies i18n

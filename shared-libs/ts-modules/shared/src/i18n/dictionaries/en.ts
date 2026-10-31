@@ -902,4 +902,9 @@ export const ENGLISH: Record<string, number> = {
   'Overall progress': 1018,
   'Update backup format?': 1019,
   'This server’s backup uses an old format. Update it for stronger tamper detection and read-only snapshots, or skip to create a backup using the existing format. Conversion may take a long time, and this backup is unavailable until it finishes.': 1020,
+  'A backup is currently running. Interrupting it now can corrupt the backup of the service being written.': 1023,
+  'Wait for backup to complete': 1024,
+  'Shut down now': 1025,
+  'A backup is running. Your server will restart when it finishes.': 1026,
+  'A backup is running. Your server will shut down when it finishes.': 1027,
 }

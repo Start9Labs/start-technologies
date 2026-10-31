@@ -131,6 +131,7 @@ impl Public {
                     shutting_down: false,
                     restarting: false,
                     restart: None,
+                    deferred_power_action: None,
                 },
                 trusted_keys: initial_trusted_keys(),
                 unread_notification_count: 0,
@@ -216,6 +217,16 @@ pub enum RestartReason {
 
 rpc_toolkit::reflect_ts!(RestartReason);
 rpc_toolkit::ts_export!(RestartReason, namespaces = [""]);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, VisitVariants)]
+#[serde(rename_all = "lowercase")]
+pub enum PowerAction {
+    Restart,
+    Shutdown,
+}
+
+rpc_toolkit::reflect_ts!(PowerAction);
+rpc_toolkit::ts_export!(PowerAction, namespaces = [""]);
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -493,6 +504,9 @@ pub struct ServerStatus {
     pub restarting: bool,
     #[serde(default)]
     pub restart: Option<RestartReason>,
+    /// A power action queued until the running backup finishes.
+    #[serde(default)]
+    pub deferred_power_action: Option<PowerAction>,
 }
 
 rpc_toolkit::reflect_ts!(ServerStatus);

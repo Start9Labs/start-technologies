@@ -69,20 +69,9 @@ Each book's `book.toml` references these under `additional-css` / `additional-js
 
 ## Versioning
 
-Each book is versioned independently via `versions.conf` in this project:
-
-```
-start-os=0.4.0.x
-start-tunnel=1.0.x
-packaging=0.4.0.x
-bitcoin-guides=1.0.x
-start-wrt=1.3.x
-support=1.0.x
-```
-
 `versions.conf` is the single source of truth — `build.sh` and the routing it writes into the tree (the redirect stubs and `404.html`) derive from it. Adding a book takes one line here (plus a `book_dir()` mapping if it lives outside this project).
 
-Build output goes to `docs/<book>/<version>/` (e.g. `docs/start-os/0.4.0.x/`). `MDBOOK_OUTPUT__HTML__SITE_URL` is set per-book at build time so mdBook generates correct search indexes and canonical URLs for the versioned path.
+Build output goes to `docs/<book>/<version>/`. `MDBOOK_OUTPUT__HTML__SITE_URL` is set per-book at build time so mdBook generates correct search indexes and canonical URLs for the versioned path.
 
 ## Build Pipeline
 
