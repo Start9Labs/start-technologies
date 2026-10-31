@@ -740,13 +740,25 @@ async fn set_preferences<C: CtrlContext>(
     }
 }
 
-#[instrument(skip_all)]
-async fn factory_reset(_ctx: ServerContext) -> Result<(), Error> {
-    if let Err(e) = tokio::process::Command::new("firstboot")
+/// Must not open the activity log: the wipe deletes its directory.
+pub(crate) async fn wipe_overlay_and_reboot() -> Result<(), Error> {
+    run_firstboot().await?;
+    tokio::process::Command::new("reboot")
+        .invoke(ErrorKind::Filesystem.into())
+        .await?;
+    Ok(())
+}
+
+async fn run_firstboot() -> Result<(), Error> {
+    tokio::process::Command::new("firstboot")
         .arg("-y")
         .invoke(ErrorKind::Filesystem.into())
-        .await
-    {
+        .await?;
+    Ok(())
+}
+
+async fn wipe_overlay() -> Result<(), Error> {
+    if let Err(e) = run_firstboot().await {
         crate::activity::log(
             "system",
             "factory-reset",
@@ -754,7 +766,7 @@ async fn factory_reset(_ctx: ServerContext) -> Result<(), Error> {
             "Failed to initiate factory reset",
             Some(&e.to_string()),
         );
-        return Err(e.into());
+        return Err(e);
     }
 
     crate::activity::log(
@@ -764,6 +776,13 @@ async fn factory_reset(_ctx: ServerContext) -> Result<(), Error> {
         "Factory reset initiated",
         None,
     );
+
+    Ok(())
+}
+
+#[instrument(skip_all)]
+async fn factory_reset(_ctx: ServerContext) -> Result<(), Error> {
+    wipe_overlay().await?;
 
     // Spawn reboot after a short delay so the HTTP response can reach the client
     tokio::spawn(async {

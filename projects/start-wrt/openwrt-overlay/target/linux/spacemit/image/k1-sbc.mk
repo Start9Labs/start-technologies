@@ -5,7 +5,7 @@
 define Device/bananapi-f3
   DEVICE_VENDOR := Banana Pi
   DEVICE_MODEL := BPI-F3
-  DEVICE_DTS_DIR := $(DTS_DIR)/spacemit
+  DEVICE_DTS_DIR := ../dts
   DEVICE_DTS := k1-x_deb1
   # The k1-x_deb1.dts root only exposes the SoC-level compatible
   # "spacemit,k1-x", so board_detect populates /tmp/sysinfo/board_name with
