@@ -118,7 +118,7 @@ Display kernel logs. Same options as `server logs`.
 
 ### `start-cli server metrics`
 
-Display server metrics (CPU, RAM, disk, temperature).
+Display server metrics: CPU, RAM, disk, and temperature in °C.
 
 - `--format` — Output format
 

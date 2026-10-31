@@ -17,7 +17,7 @@ const MAIN =
   'Lede.\n\n## Highlights\n\n- Feature.\n\n## Important\n\nFollow up.\n'
 const FRAMING = 'Lede.\n\n## Important\n\nFollow up.\n'
 const PRE_UPDATE = '## ⚠️ Before You Update\n\n> Prepare first.'
-const METADATA = '---\nuser-facing: true\n---\n\n'
+const METADATA = '---\nrelease-notes: true\n---\n\n'
 
 function releaseFixture(t) {
   const f = fixture(t)
@@ -180,7 +180,7 @@ test('sparse deploy canonical versions and notes', t => {
     )
     write(
       `projects/${project}/changelog/patch-security-internal.md`,
-      '---\nuser-facing: false\n---\n\n- Security correction.\n',
+      '---\nrelease-notes: false\n---\n\n- Security correction.\n',
     )
   }
   git('init', '-q')
@@ -266,10 +266,10 @@ test('sparse deploy canonical versions and notes', t => {
       contains(deploy, '--git-hash "${{ github.sha }}" "${SECURITY_ARGS[@]}"')
     }
     const fragmentPath = `checkout-${project}/projects/${project}/changelog/patch-fixed-feature.md`
-    write(fragmentPath, '---\nuser-facing: invalid\n---\n\n- Invalid.\n')
+    write(fragmentPath, '---\nrelease-notes: invalid\n---\n\n- Invalid.\n')
     const invalid = compile()
     assert.notEqual(invalid.status, 0)
-    contains(invalid.stderr, 'user-facing: true or false')
+    contains(invalid.stderr, 'release-notes: true or false')
     write(fragmentPath, METADATA + '- Generated feature.\n')
     env.VERSION = version
     assert.equal(script('notes', project, true, checkout).stdout, derived)
@@ -356,7 +356,7 @@ test('registry commands reject invalid highlights before writes', t => {
   const { root, write, run } = releaseFixture(t)
   write(
     'projects/start-wrt/changelog/patch-fixed-invalid.md',
-    '---\nuser-facing: invalid\n---\n\n- Invalid.\n',
+    '---\nrelease-notes: invalid\n---\n\n- Invalid.\n',
   )
   const marker = join(root, 'registry-write')
   for (const command of [
@@ -379,7 +379,7 @@ ${command}
       { encoding: 'utf8' },
     )
     assert.notEqual(result.status, 0)
-    contains(result.stderr, 'user-facing: true or false')
+    contains(result.stderr, 'release-notes: true or false')
     assert.equal(existsSync(marker), false)
   }
 })
@@ -857,7 +857,7 @@ notes-inputs:
   )
   write(
     'projects/start-os/changelog/patch-changed-internal.md',
-    '---\nuser-facing: false\n---\n\n- Internal detail.\n',
+    '---\nrelease-notes: false\n---\n\n- Internal detail.\n',
   )
   write(
     `projects/start-os/release-notes/${version}.pl_PL.md`,
@@ -935,11 +935,11 @@ cp = $(if $(filter %/release-notes.md,$(2))$(findstring /release-notes/,$(2)),$(
   const copiedBeforeFailure = text(copies)
   write(
     'projects/start-os/changelog/patch-fixed-public.md',
-    '---\nuser-facing: invalid\n---\n\n- Invalid.\n',
+    '---\nrelease-notes: invalid\n---\n\n- Invalid.\n',
   )
   const failed = install()
   assert.notEqual(failed.status, 0)
-  contains(failed.stderr, 'user-facing: true or false')
+  contains(failed.stderr, 'release-notes: true or false')
   assert.equal(text(join(stage, 'release-notes.md')), generatedOnly)
   assert.equal(text(copies), copiedBeforeFailure)
   assert.deepEqual(renderTemps(), [])
@@ -1003,7 +1003,7 @@ test('registry payload composes localized notes, warnings, fallbacks and links',
   )
   write(
     'projects/start-sdk/changelog/patch-changed-internal.md',
-    '---\nuser-facing: false\n---\n\n- Internal.\n',
+    '---\nrelease-notes: false\n---\n\n- Internal.\n',
   )
   commit()
   const snapshot = git('rev-parse', 'HEAD').trim()
@@ -1131,7 +1131,7 @@ test('registry and GitHub notes include localized Security without summary files
   )
   write(
     'projects/start-sdk/changelog/patch-security-internal.md',
-    '---\nuser-facing: false\n---\n\n- Internal security detail.\n',
+    '---\nrelease-notes: false\n---\n\n- Internal security detail.\n',
   )
   write(`projects/start-sdk/release-notes/${VERSION}.pre-update.md`, PRE_UPDATE)
   commit()
